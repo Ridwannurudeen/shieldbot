@@ -228,7 +228,7 @@ When adding verification contracts:
 
 ### Try It Live (30 seconds)
 1. Open Telegram
-2. Search: **@YourBotUsername** *(update with real username)*
+2. Search: **@shieldbot_bnb_bot** or visit https://t.me/shieldbot_bnb_bot
 3. Send: `/start`
 4. Test: `/scan 0x10ED43C718714eb63d5aA57B78B54704E256024E`
 
@@ -348,7 +348,7 @@ The contract provides:
 
 - **GitHub Repository:** https://github.com/Ridwannurudeen/shieldbot
 - **Onchain Contract:** https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795
-- **Live Bot:** @YourBotUsername *(update with actual username)*
+- **Live Bot:** @shieldbot_bnb_bot (https://t.me/shieldbot_bnb_bot)
 - **Demo Video:** [YouTube Link] *(add after recording)*
 - **Architecture Diagram:** [ARCHITECTURE.md](https://github.com/Ridwannurudeen/shieldbot/blob/main/ARCHITECTURE.md)
 - **Detection Examples:** [DETECTION_EXAMPLES.md](https://github.com/Ridwannurudeen/shieldbot/blob/main/DETECTION_EXAMPLES.md)
