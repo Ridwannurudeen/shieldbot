@@ -2,7 +2,6 @@
 .env
 venv/
 env/
-ENV/
 
 # Python
 __pycache__/
@@ -19,11 +18,16 @@ __pycache__/
 
 # Logs
 *.log
+logs/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Cache
-.cache/
-*.cache
+# Testing
+.pytest_cache/
+.coverage
+
+# Database
+*.db
+*.sqlite3

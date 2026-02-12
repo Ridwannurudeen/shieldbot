@@ -1,66 +1,317 @@
 # ShieldBot Testing Guide
 
-## Test Addresses for BSC
+## Test Addresses (BSC Mainnet)
 
-### Safe/Verified Tokens (Low Risk)
-- **USDT (BSC):** `0x55d398326f99059fF775485246999027B3197955`
-- **BUSD:** `0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56`
-- **WBNB:** `0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c`
+Use these addresses to test ShieldBot functionality:
 
-### Unverified Contracts (Should trigger warnings)
-- Test with any random contract address to see unverified warnings
+### ✅ Safe/Legitimate Contracts
 
-### Test Transaction Hashes
-- Find recent transactions on BSCScan.com
-- Copy transaction hash (0x... 66 characters)
-- Send to bot for analysis
+**PancakeSwap Router V2**
+```
+0x10ED43C718714eb63d5aA57B78B54704E256024E
+```
+- Verified contract ✅
+- Well-known DEX
+- Expected: LOW risk
 
-## Expected Behavior
+**WBNB (Wrapped BNB)**
+```
+0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c
+```
+- Verified token contract ✅
+- Native wrapper
+- Expected: SAFE token
 
-### Token Analysis (42 char address)
-Should check:
-- ✅ Contract verification status
-- ✅ Known scam database
-- ✅ Token name, symbol, supply
-- ✅ Honeypot patterns (blacklist functions)
-- ✅ Contract age
-- ✅ Tax/fee detection
+### ⚠️ High-Risk Test Cases
 
-### Transaction Analysis (66 char hash)
-Should check:
-- ✅ Contract verification (if interacting with contract)
-- ✅ Known scam addresses
-- ✅ Transaction value warnings
-- ✅ Suspicious contract names
-- ✅ Risk scoring
+**Unverified Contract**
+```
+# Find a recent unverified contract on BscScan
+https://bscscan.com/contractsVerified?filter=unverified
+```
+- Expected: MEDIUM/HIGH risk (unverified)
 
-## Risk Levels
+**New Contract (< 7 days old)**
+```
+# Check recent contracts
+https://bscscan.com/txs?sort=age
+```
+- Expected: WARNING (too new)
 
-- **🟢 Low (0-30):** Generally safe
-- **🟡 Medium (31-70):** Proceed with caution
-- **🔴 High (71-100):** Dangerous, avoid!
+### 🔴 Known Scam Addresses (Use with Caution)
 
-## Testing Checklist
+Check these aggregators for known scams:
+- [ChainAbuse](https://www.chainabuse.com/)
+- [ScamSniffer](https://scamsniffer.io/)
 
+Expected: HIGH risk with scam database matches
+
+---
+
+## Testing Workflow
+
+### 1. Basic Bot Commands
+
+```bash
+# Start bot
+./run.sh
+```
+
+In Telegram:
+1. `/start` - Should show welcome message
+2. `/help` - Should show command list
+3. `/scan 0x10ED43C718714eb63d5aA57B78B54704E256024E` - Scan PancakeSwap
+4. `/token 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c` - Check WBNB
+
+### 2. Auto-Detection
+
+Send addresses directly (no command):
+1. `0x10ED43C718714eb63d5aA57B78B54704E256024E` - Should auto-scan
+2. `0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c` - Should detect token
+
+### 3. Edge Cases
+
+**Invalid Address**
+```
+0x123
+```
+Expected: "Invalid address format" error
+
+**EOA (Not a Contract)**
+```
+0x0000000000000000000000000000000000000000
+```
+Expected: "This is an EOA, not a contract"
+
+**Non-Token Contract**
+```
+0x10ED43C718714eb63d5aA57B78B54704E256024E
+```
+Expected: Contract scan (not token check)
+
+---
+
+## Test Scenarios
+
+### Scenario 1: Legitimate Token
+**Goal:** Verify safe token detection
+
+1. Send `/token 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c`
+2. Expected results:
+   - ✅ Token name: Wrapped BNB (WBNB)
+   - ✅ Can Buy/Sell: YES
+   - ✅ Not a honeypot
+   - Safety: SAFE
+
+### Scenario 2: Unverified Contract
+**Goal:** Catch unverified contract risk
+
+1. Find unverified contract on BscScan
+2. Send `/scan <address>`
+3. Expected results:
+   - ❌ Contract not verified
+   - ⚠️ Warning in report
+   - Risk: MEDIUM or HIGH
+
+### Scenario 3: New Contract
+**Goal:** Flag very new contracts
+
+1. Find contract created < 7 days ago
+2. Send `/scan <address>`
+3. Expected results:
+   - ⚠️ Contract is only X days old
+   - Risk: includes age warning
+
+### Scenario 4: Honeypot Token
+**Goal:** Detect honeypot scams
+
+1. Find a known honeypot on honeypot.is
+2. Send `/token <address>`
+3. Expected results:
+   - 🔴 HONEYPOT DETECTED
+   - ❌ Cannot sell
+   - Safety: DANGER
+
+---
+
+## Manual Testing Checklist
+
+### Core Functionality
 - [ ] Bot starts without errors
-- [ ] /start command shows welcome message
-- [ ] /help command shows instructions
-- [ ] Token address (42 chars) triggers analysis
-- [ ] Transaction hash (66 chars) triggers analysis
-- [ ] Invalid input shows helpful error
-- [ ] Risk scores calculate correctly
-- [ ] Reports are readable and clear
+- [ ] `/start` shows welcome message
+- [ ] `/help` shows commands
+- [ ] `/scan` accepts addresses
+- [ ] `/token` accepts addresses
+- [ ] Auto-detection works for bare addresses
 
-## Known Issues
+### Scanner Module
+- [ ] Detects verified vs unverified contracts
+- [ ] Checks contract age
+- [ ] Queries scam databases
+- [ ] Calculates risk level correctly
 
-- Token sell simulation not yet implemented (coming in v2)
-- Liquidity lock detection not yet implemented
-- Tax percentage detection is basic (needs improvement)
+### Token Module
+- [ ] Gets token name/symbol/decimals
+- [ ] Checks buy/sell capability
+- [ ] Detects honeypots via API
+- [ ] Shows tax information
+- [ ] Calculates safety level
 
-## Next Tests (After Full Implementation)
+### Error Handling
+- [ ] Invalid address format handled
+- [ ] API errors caught gracefully
+- [ ] Timeout handling works
+- [ ] Rate limiting handled
 
-1. Test with real scam tokens
-2. Test with honeypot tokens
-3. Test with high-tax tokens
-4. Performance test (multiple concurrent requests)
-5. Error handling (invalid addresses, API failures)
+### UI/UX
+- [ ] Messages formatted correctly
+- [ ] Buttons work (BscScan links, etc.)
+- [ ] Emoji indicators clear
+- [ ] Response time acceptable (<5s)
+
+---
+
+## Automated Testing (TODO)
+
+Create `tests/test_scanner.py`:
+
+```python
+import pytest
+from scanner.transaction_scanner import TransactionScanner
+from scanner.token_scanner import TokenScanner
+from utils.web3_client import Web3Client
+
+@pytest.fixture
+def web3_client():
+    return Web3Client()
+
+@pytest.fixture
+def tx_scanner(web3_client):
+    return TransactionScanner(web3_client)
+
+@pytest.fixture
+def token_scanner(web3_client):
+    return TokenScanner(web3_client)
+
+def test_valid_address(web3_client):
+    assert web3_client.is_valid_address("0x10ED43C718714eb63d5aA57B78B54704E256024E")
+
+def test_invalid_address(web3_client):
+    assert not web3_client.is_valid_address("0x123")
+
+# Add more tests...
+```
+
+Run tests:
+```bash
+pip install pytest pytest-asyncio
+pytest tests/
+```
+
+---
+
+## Performance Testing
+
+### Load Test
+Use `locust` or `ab` to simulate multiple concurrent users:
+
+```bash
+pip install locust
+
+# Create locustfile.py for Telegram bot testing
+# Run load test
+locust -f locustfile.py
+```
+
+### API Rate Limiting
+Monitor BscScan API calls:
+- Free tier: 5 calls/sec
+- Track your usage
+- Add caching if needed
+
+---
+
+## Integration Testing
+
+### 1. Telegram Integration
+- [ ] Bot receives messages
+- [ ] Bot sends responses
+- [ ] Buttons trigger callbacks
+- [ ] Images/media work (if added)
+
+### 2. Web3 Integration
+- [ ] RPC connection stable
+- [ ] Contract calls succeed
+- [ ] Handles network errors
+
+### 3. API Integration
+- [ ] BscScan API works
+- [ ] Honeypot.is API works
+- [ ] Scam databases accessible
+
+---
+
+## Demo Preparation
+
+For hackathon submission:
+
+1. **Record demo video:**
+   - Show bot startup
+   - Test with safe contract
+   - Test with risky contract
+   - Test token safety check
+   - Show onchain proof (if implemented)
+
+2. **Prepare test script:**
+   ```
+   1. /start - "Welcome to ShieldBot!"
+   2. Send PancakeSwap address - Show LOW risk
+   3. /token WBNB - Show SAFE
+   4. Send unverified contract - Show risks
+   5. Show BscScan verification
+   ```
+
+3. **Screenshots needed:**
+   - Welcome message
+   - Scan results (safe)
+   - Scan results (risky)
+   - Token check (safe)
+   - Token check (honeypot)
+
+---
+
+## Known Issues / Limitations
+
+- [ ] Free honeypot.is API has rate limits
+- [ ] BscScan free tier: 5 calls/sec
+- [ ] Some scam databases may be slow
+- [ ] Liquidity lock detection not fully implemented
+- [ ] No historical scan data stored
+
+---
+
+## Pre-Deployment Checklist
+
+Before submitting to hackathon:
+
+- [ ] All tests passing
+- [ ] Bot running on VPS/server
+- [ ] Telegram bot accessible 24/7
+- [ ] GitHub repo public
+- [ ] README.md complete
+- [ ] DEPLOYMENT.md accurate
+- [ ] Demo video recorded
+- [ ] Onchain component deployed (if applicable)
+- [ ] Contract address documented
+- [ ] Submission form filled
+
+---
+
+**Next Steps:**
+1. Run through all test scenarios
+2. Fix any bugs found
+3. Record demo
+4. Deploy to production
+5. Submit to hackathon!
+
+Good luck! 🛡️
