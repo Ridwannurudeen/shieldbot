@@ -12,6 +12,20 @@ logger = logging.getLogger(__name__)
 class TokenScanner:
     """Scans tokens for safety and honeypot detection"""
     
+    # Whitelist of verified major tokens (skip honeypot API for these)
+    VERIFIED_TOKENS = {
+        '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c'.lower(),  # WBNB
+        '0x55d398326f99059fF775485246999027B3197955'.lower(),  # USDT
+        '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56'.lower(),  # BUSD
+        '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d'.lower(),  # USDC
+        '0x2170Ed0880ac9A755fd29B2688956BD959F933F8'.lower(),  # ETH
+        '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c'.lower(),  # BTCB
+        '0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82'.lower(),  # CAKE
+        '0x4338665CBB7B2485A8855A139b75D5e34AB0DB94'.lower(),  # LTC
+        '0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE'.lower(),  # XRP
+        '0x0xd80F1812e2cBBB51DdeF4BaBf331A8e0F36194E'.lower(),  # TWT (Trust Wallet Token)
+    }
+    
     def __init__(self, web3_client, ai_analyzer=None):
         self.web3 = web3_client
         self.ai_analyzer = ai_analyzer
@@ -159,6 +173,12 @@ class TokenScanner:
     async def _check_honeypot(self, address: str, result: Dict):
         """Check if token is a honeypot"""
         try:
+            # Skip honeypot check for verified major tokens
+            if address.lower() in self.VERIFIED_TOKENS:
+                result['is_honeypot'] = False
+                logger.info(f"Skipping honeypot check for verified token: {address}")
+                return
+            
             # Use external honeypot API or simulation
             honeypot_result = await self.web3.check_honeypot(address)
             
