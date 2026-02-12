@@ -4,3 +4,4 @@ requests==2.31.0
 python-dotenv==1.0.1
 aiohttp==3.9.3
 eth-utils==2.3.1
+anthropic==0.18.1

@@ -13,9 +13,10 @@ logger = logging.getLogger(__name__)
 class TransactionScanner:
     """Scans contracts for security risks"""
     
-    def __init__(self, web3_client):
+    def __init__(self, web3_client, ai_analyzer=None):
         self.web3 = web3_client
         self.scam_db = ScamDatabase()
+        self.ai_analyzer = ai_analyzer
     
     async def scan_address(self, address: str) -> Dict:
         """
@@ -60,6 +61,19 @@ class TransactionScanner:
         
         # Calculate overall risk level
         result['risk_level'] = self._calculate_risk_level(result)
+        
+        # Add AI-powered analysis if available
+        if self.ai_analyzer and self.ai_analyzer.is_available():
+            try:
+                bytecode = await self.web3.get_bytecode(address)
+                ai_analysis = await self.ai_analyzer.analyze_contract_bytecode(
+                    address, bytecode, result
+                )
+                if ai_analysis:
+                    result['ai_analysis'] = ai_analysis
+                    logger.info("AI analysis added to scan result")
+            except Exception as e:
+                logger.error(f"AI analysis failed: {e}")
         
         return result
     
