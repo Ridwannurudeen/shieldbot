@@ -12,8 +12,9 @@ logger = logging.getLogger(__name__)
 class TokenScanner:
     """Scans tokens for safety and honeypot detection"""
     
-    def __init__(self, web3_client):
+    def __init__(self, web3_client, ai_analyzer=None):
         self.web3 = web3_client
+        self.ai_analyzer = ai_analyzer
     
     async def check_token(self, address: str) -> Dict:
         """
@@ -58,6 +59,23 @@ class TokenScanner:
         
         # Calculate overall safety level
         result['safety_level'] = self._calculate_safety_level(result)
+        
+        # Add AI-powered analysis if available
+        if self.ai_analyzer and self.ai_analyzer.is_available():
+            try:
+                token_info = {
+                    'name': result.get('name'),
+                    'symbol': result.get('symbol'),
+                    'decimals': result.get('decimals')
+                }
+                ai_analysis = await self.ai_analyzer.analyze_token_safety(
+                    address, token_info, result
+                )
+                if ai_analysis:
+                    result['ai_analysis'] = ai_analysis
+                    logger.info("AI token analysis added to result")
+            except Exception as e:
+                logger.error(f"AI token analysis failed: {e}")
         
         return result
     

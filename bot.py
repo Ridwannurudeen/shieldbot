@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 from scanner.transaction_scanner import TransactionScanner
 from scanner.token_scanner import TokenScanner
 from utils.web3_client import Web3Client
+from utils.ai_analyzer import AIAnalyzer
 
 # Load environment variables
 load_dotenv()
@@ -31,10 +32,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize scanners
+# Initialize scanners and AI analyzer
 web3_client = Web3Client()
-tx_scanner = TransactionScanner(web3_client)
-token_scanner = TokenScanner(web3_client)
+ai_analyzer = AIAnalyzer()
+tx_scanner = TransactionScanner(web3_client, ai_analyzer)
+token_scanner = TokenScanner(web3_client, ai_analyzer)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -250,6 +252,10 @@ def format_scan_result(result: dict) -> str:
         for warning in result['warnings']:
             response += f"• {warning}\n"
     
+    # Add AI analysis if available
+    if result.get('ai_analysis'):
+        response += f"\n🤖 **AI Analysis:**\n{result['ai_analysis']}\n"
+    
     return response
 
 
@@ -292,6 +298,10 @@ def format_token_result(result: dict) -> str:
     if result.get('buy_tax') or result.get('sell_tax'):
         response += f"\n**Taxes:**\n"
         response += f"Buy: {result.get('buy_tax', 0)}% | Sell: {result.get('sell_tax', 0)}%\n"
+    
+    # Add AI analysis if available
+    if result.get('ai_analysis'):
+        response += f"\n🤖 **AI Analysis:**\n{result['ai_analysis']}\n"
     
     return response
 
