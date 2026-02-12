@@ -323,13 +323,36 @@ DO NOT BUY!
 
 ---
 
+## 🔗 Onchain Proof
+
+**Contract Address:** `0x867aE7449af56BB56a4978c758d7E88066E1f795`  
+**Network:** BSC Mainnet (Chain ID: 56)  
+**Verified Source:** https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795#code  
+**Event Logs:** https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795#events
+
+**Recorded Scans:**
+1. ✅ PancakeSwap Router (0x10ED...024E) - Risk: LOW
+2. ✅ WBNB Token (0xbb4C...095c) - Safety: SAFE
+
+The contract provides:
+- Immutable scan history recorded onchain
+- Public verification of security checks  
+- Transparent audit trail for community trust
+- Gas-optimized batch recording for multiple scans
+
+**Total Transactions:** 3+ (deployment + 2 recorded scans)
+
+---
+
 ## 🔗 Links
 
 - **GitHub Repository:** https://github.com/Ridwannurudeen/shieldbot
-- **Live Bot:** @YourBotUsername *(update)*
+- **Onchain Contract:** https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795
+- **Live Bot:** @YourBotUsername *(update with actual username)*
 - **Demo Video:** [YouTube Link] *(add after recording)*
 - **Architecture Diagram:** [ARCHITECTURE.md](https://github.com/Ridwannurudeen/shieldbot/blob/main/ARCHITECTURE.md)
 - **Detection Examples:** [DETECTION_EXAMPLES.md](https://github.com/Ridwannurudeen/shieldbot/blob/main/DETECTION_EXAMPLES.md)
+- **AI Build Log:** [AI_BUILD_LOG.md](https://github.com/Ridwannurudeen/shieldbot/blob/main/AI_BUILD_LOG.md)
 
 ---
 

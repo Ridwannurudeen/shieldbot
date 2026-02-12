@@ -235,6 +235,23 @@ Address Input → Validation → Type Detection → Scanner Routing
 
 ---
 
+## 🔗 Onchain Proof
+
+**✅ Contract Deployed on BSC Mainnet**
+
+- **Contract Address:** `0x867aE7449af56BB56a4978c758d7E88066E1f795`
+- **Network:** BSC Mainnet (Chain ID: 56)
+- **Verified Contract:** https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795#code
+- **Transactions:** https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795#events
+
+**Scan Records Onchain:**
+- ✅ PancakeSwap Router scan (LOW risk)
+- ✅ WBNB token scan (SAFE)
+
+This contract records all security scans onchain for transparency and immutability.
+
+---
+
 ## 🚀 Quick Start (5 Minutes)
 
 **For Judges & Testers:**
