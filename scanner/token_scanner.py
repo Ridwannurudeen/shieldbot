@@ -12,20 +12,6 @@ logger = logging.getLogger(__name__)
 class TokenScanner:
     """Scans tokens for safety and honeypot detection"""
     
-    # Whitelist of verified major tokens (skip honeypot API for these)
-    VERIFIED_TOKENS = {
-        '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c'.lower(),  # WBNB
-        '0x55d398326f99059fF775485246999027B3197955'.lower(),  # USDT
-        '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56'.lower(),  # BUSD
-        '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d'.lower(),  # USDC
-        '0x2170Ed0880ac9A755fd29B2688956BD959F933F8'.lower(),  # ETH
-        '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c'.lower(),  # BTCB
-        '0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82'.lower(),  # CAKE
-        '0x4338665CBB7B2485A8855A139b75D5e34AB0DB94'.lower(),  # LTC
-        '0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE'.lower(),  # XRP
-        '0x0xd80F1812e2cBBB51DdeF4BaBf331A8e0F36194E'.lower(),  # TWT (Trust Wallet Token)
-    }
-    
     def __init__(self, web3_client, ai_analyzer=None):
         self.web3 = web3_client
         self.ai_analyzer = ai_analyzer
@@ -64,11 +50,14 @@ class TokenScanner:
         # Get token info
         await self._get_token_info(address, result)
         
+        # Get contract verification and age info first (needed for honeypot validation)
+        await self._get_contract_metadata(address, result)
+        
         # Run safety checks
         await self._check_trading_functions(address, result)
         await self._check_ownership(address, result)
         await self._check_liquidity(address, result)
-        await self._check_honeypot(address, result)
+        await self._check_honeypot(address, result)  # Now has metadata for cross-validation
         await self._check_taxes(address, result)
         
         # Resolve any conflicts in the data
@@ -107,6 +96,22 @@ class TokenScanner:
             result['total_supply'] = token_info.get('total_supply')
         except Exception as e:
             logger.error(f"Error getting token info: {e}")
+    
+    async def _get_contract_metadata(self, address: str, result: Dict):
+        """Get contract verification and age info for cross-validation"""
+        try:
+            # Check verification
+            is_verified = await self.web3.is_verified_contract(address)
+            result['is_verified'] = is_verified
+            
+            # Get contract age
+            creation_info = await self.web3.get_contract_creation_info(address)
+            if creation_info:
+                result['contract_age_days'] = creation_info.get('age_days', 0)
+        except Exception as e:
+            logger.error(f"Error getting contract metadata: {e}")
+            result['is_verified'] = False
+            result['contract_age_days'] = 0
     
     async def _check_trading_functions(self, address: str, result: Dict):
         """Check if token can be bought and sold"""
@@ -171,27 +176,36 @@ class TokenScanner:
             result['checks']['liquidity_locked'] = None
     
     async def _check_honeypot(self, address: str, result: Dict):
-        """Check if token is a honeypot"""
+        """Check if token is a honeypot with cross-validation"""
         try:
-            # Skip honeypot check for verified major tokens
-            if address.lower() in self.VERIFIED_TOKENS:
-                result['is_honeypot'] = False
-                logger.info(f"Skipping honeypot check for verified token: {address}")
-                return
-            
             # Use external honeypot API or simulation
             honeypot_result = await self.web3.check_honeypot(address)
             
             is_honeypot = honeypot_result.get('is_honeypot', False)
-            result['is_honeypot'] = is_honeypot
             
+            # Cross-validate if honeypot is detected
             if is_honeypot:
-                result['risks'].append("🔴 HONEYPOT DETECTED - Cannot sell after buying")
-                honeypot_reason = honeypot_result.get('reason', 'Unknown')
-                result['risks'].append(f"Reason: {honeypot_reason}")
+                # Check if this might be a false positive
+                is_verified = result.get('is_verified', False)
+                contract_age_days = result.get('contract_age_days', 0)
+                
+                # If contract is verified AND old, likely false positive
+                if is_verified and contract_age_days > 30:
+                    logger.info(f"Honeypot API flagged {address} but contract is verified and {contract_age_days} days old - likely false positive")
+                    result['is_honeypot'] = False
+                    result['risks'].append("⚠️ High sell restrictions detected, but contract appears legitimate (verified + established)")
+                else:
+                    # Probably real honeypot
+                    result['is_honeypot'] = True
+                    result['risks'].append("🔴 HONEYPOT DETECTED - Cannot sell after buying")
+                    honeypot_reason = honeypot_result.get('reason', 'Unknown')
+                    result['risks'].append(f"Reason: {honeypot_reason}")
+            else:
+                result['is_honeypot'] = False
         
         except Exception as e:
             logger.error(f"Error checking honeypot: {e}")
+            result['is_honeypot'] = False  # Default to false on error
     
     async def _check_taxes(self, address: str, result: Dict):
         """Check buy and sell taxes"""
