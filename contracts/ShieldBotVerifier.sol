@@ -144,7 +144,10 @@ contract ShieldBotVerifier {
     /**
      * @dev Get latest scan for an address
      * @param _address Address to query
-     * @return ScanRecord struct
+     * @return scannedAddress The scanned contract/token address
+     * @return riskLevel Risk level (0-5)
+     * @return timestamp Unix timestamp of scan
+     * @return scanType Type of scan ("contract" or "token")
      */
     function getLatestScan(address _address) external view returns (
         address scannedAddress,
@@ -164,7 +167,7 @@ contract ShieldBotVerifier {
     /**
      * @dev Check if address has been scanned
      * @param _address Address to check
-     * @return bool True if scanned at least once
+     * @return True if address has been scanned at least once
      */
     function hasBeenScanned(address _address) external view returns (bool) {
         return latestScans[_address].timestamp != 0;
@@ -173,7 +176,7 @@ contract ShieldBotVerifier {
     /**
      * @dev Get scan statistics
      * @return total Total scans recorded
-     * @return uniqueAddresses Number of unique addresses scanned
+     * @return uniqueAddresses Number of unique addresses scanned (approximation)
      */
     function getStats() external view returns (uint256 total, uint256 uniqueAddresses) {
         // Note: uniqueAddresses is approximation (would need tracking array for exact count)
@@ -202,8 +205,8 @@ contract ShieldBotVerifier {
     
     /**
      * @dev Risk level decoder
-     * @param _level Risk level number
-     * @return string Human-readable risk level
+     * @param _level Risk level number (0-5)
+     * @return Human-readable risk level name
      */
     function getRiskLevelName(uint8 _level) external pure returns (string memory) {
         if (_level == 0) return "LOW";
