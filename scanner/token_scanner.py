@@ -57,6 +57,9 @@ class TokenScanner:
         await self._check_honeypot(address, result)
         await self._check_taxes(address, result)
         
+        # Resolve any conflicts in the data
+        self._resolve_conflicts(result)
+        
         # Calculate overall safety level
         result['safety_level'] = self._calculate_safety_level(result)
         
@@ -105,6 +108,15 @@ class TokenScanner:
             logger.error(f"Error checking trading functions: {e}")
             result['checks']['can_buy'] = None
             result['checks']['can_sell'] = None
+    
+    def _resolve_conflicts(self, result: Dict):
+        """Resolve conflicts between different checks"""
+        # If honeypot is detected, override can_sell to False
+        if result.get('is_honeypot'):
+            result['checks']['can_sell'] = False
+            # Remove any conflicting "can sell" messages
+            if "Token transfers may be restricted" not in str(result.get('risks', [])):
+                result['risks'].append("🔴 Honeypot detected - You cannot sell this token after buying")
     
     async def _check_ownership(self, address: str, result: Dict):
         """Check contract ownership status"""
