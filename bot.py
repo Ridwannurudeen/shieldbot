@@ -95,12 +95,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "⏳ This may take a few seconds...",
                 parse_mode='Markdown'
             )
-            # TODO: Call token analysis
-            await update.message.reply_text(
-                "⚠️ Token analysis coming soon!\n"
-                "🚧 Module under development.",
-                parse_mode='Markdown'
-            )
+            # Analyze token
+            result = await analyze_token(message_text, chain="BSC")
+            
+            if result.get("status") == "error":
+                await update.message.reply_text(
+                    f"❌ Error: {result.get('findings', [{}])[0].get('message', 'Unknown error')}",
+                    parse_mode='Markdown'
+                )
+            else:
+                # Format and send report
+                report = format_risk_report(result)
+                await update.message.reply_text(report, parse_mode='Markdown')
         elif len(message_text) == 66:
             # It's a transaction hash
             await update.message.reply_text(
