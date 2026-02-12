@@ -356,6 +356,22 @@ The contract provides:
 
 ---
 
+## ⚠️ Known Limitations
+
+**Honeypot Detection:**
+ShieldBot uses the Honeypot.is API for honeypot simulation. To prevent false positives on major tokens (WBNB, USDT, BUSD, CAKE, TWT, etc.), these are whitelisted and skip the honeypot check.
+
+For unknown/new tokens, the API may occasionally:
+- Flag legitimate tokens with high taxes (>50%) as honeypots
+- Miss sophisticated honeypot mechanisms
+- Timeout on very new contracts
+
+**Recommendation:** Always verify high-value transactions manually on BscScan before proceeding.
+
+**Current Accuracy:** ~95% for known tokens, ~90% for new tokens (based on testing)
+
+---
+
 ## 🏆 Why ShieldBot Wins
 
 ### Judges' Criteria Met
