@@ -19,9 +19,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Import our modules (will be built progressively)
-# from scanner.transaction import analyze_transaction
-# from scanner.token import analyze_token
+# Import our modules
+from scanner.transaction import analyze_transaction
+from scanner.token import analyze_token
+from utils.risk_scorer import calculate_risk_score, format_risk_report
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a message when the command /start is issued."""
@@ -107,12 +108,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "⏳ This may take a few seconds...",
                 parse_mode='Markdown'
             )
-            # TODO: Call transaction analysis
-            await update.message.reply_text(
-                "⚠️ Transaction analysis coming soon!\n"
-                "🚧 Module under development.",
-                parse_mode='Markdown'
-            )
+            # Analyze transaction
+            result = await analyze_transaction(message_text, chain="BSC")
+            
+            if result.get("status") == "error":
+                await update.message.reply_text(
+                    f"❌ Error: {result.get('findings', [{}])[0].get('message', 'Unknown error')}",
+                    parse_mode='Markdown'
+                )
+            else:
+                # Format and send report
+                report = format_risk_report(result)
+                await update.message.reply_text(report, parse_mode='Markdown')
         else:
             await update.message.reply_text(
                 "❌ Invalid address/hash format.\n\n"
