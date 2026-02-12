@@ -257,10 +257,12 @@ This contract records all security scans onchain for transparency and immutabili
 **For Judges & Testers:**
 
 ### Try the Live Bot
-1. Open Telegram and search for: **[Your bot username]**
+1. Open Telegram and search for: **@shieldbot_bnb_bot**
 2. Send `/start` to begin
 3. Test with a safe address: `/scan 0x10ED43C718714eb63d5aA57B78B54704E256024E`
 4. Test with a safe token: `/token 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c`
+
+**Direct Link:** https://t.me/shieldbot_bnb_bot
 
 ### Run Locally (If you want to test the code)
 
