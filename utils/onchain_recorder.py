@@ -145,9 +145,10 @@ class OnchainRecorder:
                 'chainId': 56,
             })
 
-            # Sign and send
+            # Sign and send (web3 6.x uses rawTransaction, 7.x uses raw_transaction)
             signed_tx = self.web3.eth.account.sign_transaction(tx, self.private_key)
-            tx_hash = self.web3.eth.send_raw_transaction(signed_tx.raw_transaction)
+            raw = getattr(signed_tx, 'raw_transaction', None) or signed_tx.rawTransaction
+            tx_hash = self.web3.eth.send_raw_transaction(raw)
             tx_hash_hex = tx_hash.hex()
 
             logger.info(f"On-chain scan recorded: {tx_hash_hex} for {address} ({risk_level})")
