@@ -226,8 +226,9 @@ Address Input → Validation → Type Detection → Scanner Routing
 ## 🛠️ Tech Stack
 
 - **Python 3.11+** - Core language
-- **python-telegram-bot 21.0+** - Telegram Bot API integration
-- **web3.py 7.0+** - BNB Chain blockchain interaction
+- **python-telegram-bot 20.7** - Telegram Bot API integration
+- **web3.py 6.15.1** - BNB Chain blockchain interaction
+- **anthropic 0.18.1** - Claude AI-powered risk scoring (AsyncAnthropic)
 - **aiohttp** - Async HTTP for API calls
 - **BscScan API** - Contract verification and transaction data
 - **Honeypot.is API** - Honeypot detection service
@@ -347,6 +348,8 @@ OPBNB_RPC_URL=https://opbnb-mainnet-rpc.bnbchain.org
 | `/start` | Show welcome message |
 | `/scan <address>` | Scan a contract for security risks |
 | `/token <address>` | Check if a token is safe to trade |
+| `/history <address>` | View on-chain scan history (zero gas) |
+| `/report <address> <reason>` | Report a scam address |
 | `/help` | Show command list |
 
 **Pro tip**: You can send addresses directly without commands - ShieldBot auto-detects!
@@ -366,20 +369,24 @@ See [TESTING.md](TESTING.md) for comprehensive test cases.
 
 ```
 shieldbot/
-├── bot.py                      # Main Telegram bot logic
+├── bot.py                      # Main Telegram bot (commands, cache, progress, on-chain)
 ├── scanner/
 │   ├── __init__.py
-│   ├── transaction_scanner.py  # Pre-transaction security checks
-│   └── token_scanner.py        # Token safety & honeypot detection
+│   ├── transaction_scanner.py  # Pre-tx security checks + AI scoring
+│   └── token_scanner.py        # Token safety + honeypot + AI scoring
 ├── utils/
 │   ├── __init__.py
-│   ├── web3_client.py          # BNB Chain Web3 interaction
-│   └── scam_db.py              # Scam database integration
+│   ├── web3_client.py          # BNB Chain Web3 + real liquidity lock detection
+│   ├── ai_analyzer.py          # Claude AI structured risk scoring + source analysis
+│   ├── risk_scorer.py          # Blended risk scoring engine (60% heuristic + 40% AI)
+│   ├── scam_db.py              # Scam database integration
+│   └── onchain_recorder.py     # On-chain scan recording via ShieldBotVerifier
+├── contracts/
+│   └── ShieldBotVerifier.sol   # On-chain verification contract (deployed on BSC)
+├── _deprecated/                # Legacy scanner modules (superseded)
 ├── requirements.txt            # Python dependencies
 ├── .env.example                # Environment variables template
 ├── .gitignore                  # Git ignore rules
-├── setup.sh                    # Automated setup script
-├── run.sh                      # Run script
 ├── DEPLOYMENT.md               # Production deployment guide
 ├── TESTING.md                  # Testing guide with test cases
 ├── LICENSE                     # MIT License
@@ -411,8 +418,16 @@ See [TESTING.md](TESTING.md) for comprehensive testing scenarios.
 ## 🗺️ Roadmap
 
 ### ✅ Current (v1.0) - Hackathon Version
-- ✅ Pre-Transaction Scanner (scam detection, verification, age checks)
-- ✅ Token Safety Check (honeypot detection, trading restrictions)
+- ✅ Pre-Transaction Scanner (scam detection, verification, age checks, ~18 bytecode patterns)
+- ✅ Token Safety Check (honeypot detection, trading restrictions, source code analysis)
+- ✅ AI-Powered Risk Scoring (structured JSON scoring via Claude, 60/40 blended scores)
+- ✅ AI Source Code Analysis (detects honeypot patterns, blacklists, owner control)
+- ✅ On-Chain Scan Recording (ShieldBotVerifier contract on BSC Mainnet)
+- ✅ `/history` Command (query on-chain scan records, zero gas)
+- ✅ `/report` Command (community scam reporting + local blacklist)
+- ✅ Real Liquidity Lock Detection (PancakeSwap V2 + PinkLock/Unicrypt/DxLock)
+- ✅ Scan Caching (5-min TTL, prevents API abuse)
+- ✅ Progress Indicators (live status updates during scans)
 - ✅ Telegram Bot Interface (commands, auto-detection, inline buttons)
 - ✅ BSC and opBNB support
 - ✅ BscScan integration
@@ -425,9 +440,6 @@ See [TESTING.md](TESTING.md) for comprehensive testing scenarios.
 - [ ] **Multi-Language Support**: Spanish, Chinese, Korean, etc.
 - [ ] **Web Dashboard**: Browser-based interface
 - [ ] **Advanced Contract Analysis**: Slither/Mythril integration
-- [ ] **Historical Data**: Scan history and analytics
-- [ ] **Onchain Verification**: Record scans on BNB Chain
-- [ ] **Community Reports**: User-submitted scam reports
 - [ ] **API Access**: REST API for developers
 
 ---
