@@ -455,7 +455,10 @@ def _token_buttons(address: str) -> InlineKeyboardMarkup:
 
 
 def format_scan_result(result: dict) -> str:
-    """Format scan result as a readable message with risk score"""
+    """Format scan result — use forensic report if available, else fallback"""
+    if result.get('forensic_report'):
+        return result['forensic_report']
+
     risk_emoji = {
         'high': '🔴',
         'medium': '🟡',
@@ -514,7 +517,10 @@ def format_scan_result(result: dict) -> str:
 
 
 def format_token_result(result: dict) -> str:
-    """Format token result as a readable message with risk score"""
+    """Format token result — use forensic report if available, else fallback"""
+    if result.get('forensic_report'):
+        return result['forensic_report']
+
     safety_emoji = {
         'safe': '✅',
         'warning': '⚠️',
