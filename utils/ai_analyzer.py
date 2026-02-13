@@ -536,6 +536,12 @@ Return the firewall analysis JSON now."""
             lines.append(f"Category: {decoded.get('category', 'unknown')}")
             lines.append(f"Is Approval: {decoded.get('is_approval', False)}")
             lines.append(f"Is Unlimited Approval: {decoded.get('is_unlimited_approval', False)}")
+            if decoded.get("token_symbol"):
+                lines.append(f"Token: {decoded.get('token_name', '')} ({decoded['token_symbol']})")
+            if decoded.get("formatted_amount"):
+                lines.append(f"Formatted Amount: {decoded['formatted_amount']}")
+            if decoded.get("spender_label"):
+                lines.append(f"Spender: {decoded['spender_label']}")
             if decoded.get("disguised_warning"):
                 lines.append(f"DISGUISED CALL WARNING: {decoded['disguised_warning']}")
             params = decoded.get("params", {})

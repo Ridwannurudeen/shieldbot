@@ -17,7 +17,7 @@ from scanner.transaction_scanner import TransactionScanner
 from scanner.token_scanner import TokenScanner
 from utils.web3_client import Web3Client
 from utils.ai_analyzer import AIAnalyzer
-from utils.calldata_decoder import CalldataDecoder
+from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD
 
 load_dotenv()
 
@@ -111,14 +111,16 @@ async def firewall(req: FirewallRequest):
         decoded = calldata_decoder.decode(req.data)
         whitelisted = calldata_decoder.is_whitelisted_target(to_addr)
 
+        # Resolve value
+        value_wei = _parse_value(req.value)
+        value_bnb = value_wei / 1e18
+
+        # Enrich decoded calldata with token names and formatted amounts
+        await _enrich_decoded(decoded, to_addr)
+
         # 2. If target is a whitelisted router, skip deep scan — it's trusted
         if whitelisted:
-            # Fast path for known routers (PancakeSwap, 1inch, etc.)
-            value_wei = int(req.value, 16) if req.value.startswith("0x") else int(req.value)
-            value_bnb = value_wei / 1e18 if value_wei > 0 else 0
-            sending = f"{value_bnb:.6f} BNB".rstrip("0").rstrip(".") + " BNB" if value_bnb > 0 else "Tokens (via router)"
-            if value_bnb > 0:
-                sending = f"{value_bnb:g} BNB"
+            sending = f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens (via router)"
 
             return {
                 "classification": "SAFE",
@@ -285,3 +287,94 @@ def _build_fallback_response(decoded: Dict, scan: Dict, whitelisted: Optional[st
         "verdict": f"{classification} — Risk score {risk_score}/100",
         "raw_checks": _extract_raw_checks(scan),
     }
+
+
+# Token info cache (address -> {symbol, name, decimals})
+_token_cache: Dict[str, Dict] = {}
+
+
+def _parse_value(value_str: str) -> int:
+    """Parse hex or decimal value string to int wei."""
+    if not value_str:
+        return 0
+    try:
+        if value_str.startswith("0x") or value_str.startswith("0X"):
+            return int(value_str, 16)
+        return int(value_str)
+    except (ValueError, TypeError):
+        return 0
+
+
+async def _resolve_token(address: str) -> Optional[Dict]:
+    """Resolve token symbol/name/decimals. Returns cached result if available."""
+    if not address or not web3_client.is_valid_address(address):
+        return None
+
+    addr_lower = address.lower()
+    if addr_lower in _token_cache:
+        return _token_cache[addr_lower]
+
+    try:
+        info = await web3_client.get_token_info(address)
+        if info.get("symbol"):
+            result = {
+                "symbol": info["symbol"],
+                "name": info.get("name", ""),
+                "decimals": info.get("decimals", 18),
+            }
+            _token_cache[addr_lower] = result
+            return result
+    except Exception:
+        pass
+
+    return None
+
+
+async def _enrich_decoded(decoded: Dict, to_addr: str):
+    """
+    Enrich decoded calldata with token names and formatted amounts.
+    Modifies decoded dict in-place, adding human_readable fields.
+    """
+    if not decoded or decoded.get("selector") is None:
+        return
+
+    category = decoded.get("category", "")
+    params = decoded.get("params", {})
+
+    # For approvals: resolve the token being approved (the `to` address is the token)
+    if decoded.get("is_approval"):
+        token_info = await _resolve_token(to_addr)
+        if token_info:
+            decoded["token_symbol"] = token_info["symbol"]
+            decoded["token_name"] = token_info["name"]
+
+            # Format the approval amount
+            amount = params.get("param_1")  # uint256 amount
+            if isinstance(amount, int):
+                if amount >= UNLIMITED_THRESHOLD:
+                    decoded["formatted_amount"] = f"UNLIMITED {token_info['symbol']}"
+                else:
+                    decimals = token_info.get("decimals", 18)
+                    human_amount = amount / (10 ** decimals)
+                    decoded["formatted_amount"] = f"{human_amount:,.4f} {token_info['symbol']}".rstrip("0").rstrip(".")
+                    decoded["formatted_amount"] += f" {token_info['symbol']}" if not decoded["formatted_amount"].endswith(token_info['symbol']) else ""
+
+            # Resolve the spender address
+            spender = params.get("param_0", "")
+            if spender:
+                spender_name = CalldataDecoder().is_whitelisted_target(spender)
+                if spender_name:
+                    decoded["spender_label"] = spender_name
+
+    # For transfers: resolve the token
+    elif category == "transfer":
+        token_info = await _resolve_token(to_addr)
+        if token_info:
+            decoded["token_symbol"] = token_info["symbol"]
+            decoded["token_name"] = token_info["name"]
+
+            amount = params.get("param_1")  # transfer amount
+            if isinstance(amount, int):
+                decimals = token_info.get("decimals", 18)
+                human_amount = amount / (10 ** decimals)
+                decoded["formatted_amount"] = f"{human_amount:g} {token_info['symbol']}"

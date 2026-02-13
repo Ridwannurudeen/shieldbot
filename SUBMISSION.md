@@ -10,7 +10,7 @@
 **ShieldBot - Your BNB Chain Shield**
 
 ## 📝 Tagline (One-liner)
-AI-powered Telegram bot that protects BNB Chain users from scams, honeypots, and malicious contracts in under 5 seconds.
+AI-powered security suite — Telegram bot + Chrome extension transaction firewall — that protects BNB Chain users from scams, honeypots, and malicious contracts in real time.
 
 ---
 
@@ -36,13 +36,18 @@ Users need **instant, accurate, easy-to-understand security analysis** before in
 
 ## ✨ Our Solution: ShieldBot
 
-A **Telegram bot** that anyone can use - no technical knowledge required:
+A **multi-surface security suite** that anyone can use — no technical knowledge required:
 
-1. **Send an address** to the bot
-2. **Get instant report** (3-5 seconds)
-3. **Make informed decision** with clear risk indicators
+**Telegram Bot:**
+1. Send an address → Get instant security report (3-5 seconds)
+2. Clear risk indicators: SAFE / WARNING / DANGER
 
-### Two Core Modules
+**Chrome Extension (ShieldAI Firewall):**
+1. Install extension → Visit any dApp → Initiate a transaction
+2. Firewall overlay appears with AI-powered analysis before you sign
+3. Block or Proceed with full awareness
+
+### Three Core Modules
 
 **Module 1: Pre-Transaction Scanner**
 - ✅ Scam database checking (ChainAbuse, ScamSniffer)
@@ -59,20 +64,32 @@ A **Telegram bot** that anyone can use - no technical knowledge required:
 - ✅ Liquidity lock verification
 - ✅ Safety scoring: SAFE / WARNING / DANGER
 
+**Module 3: Chrome Extension — Transaction Firewall**
+- ✅ Real-time `eth_sendTransaction` interception via JS Proxy + EIP-6963
+- ✅ Calldata decoding (approve, transfer, swap, mint, burn, etc.)
+- ✅ Unlimited approval detection — the #1 drainer attack vector
+- ✅ Whitelisted router fast-path (PancakeSwap V2/V3, 1inch)
+- ✅ AI-powered firewall verdict with danger signals and plain-English explanation
+- ✅ Token name/symbol resolution and formatted approval amounts
+- ✅ Scan history tracking in extension popup
+- ✅ Classification: SAFE / CAUTION / HIGH_RISK / BLOCK_RECOMMENDED
+
 ---
 
 ## 🏗️ Architecture
 
 ```
-User (Telegram) → ShieldBot (Python) → Multi-Source Validation
-                                              ↓
-                   ┌──────────┬───────────────┼───────────────┬──────────┐
-                   ↓          ↓               ↓               ↓          ↓
-              BNB Chain   External APIs   Scam Databases   Claude AI   On-Chain
-             (BSC/opBNB) (BscScan,HP.is) (ChainAbuse,etc) (Scoring)  (Record)
+                            ┌─── Telegram Bot ──→ Forensic Reports
+User ──→ ShieldBot Engine ──┤
+                            └─── Chrome Extension ──→ Firewall Overlay
+                                        ↓
+         ┌──────────┬─────────────┬──────┴──────┬──────────┬──────────┐
+         ↓          ↓             ↓              ↓          ↓          ↓
+    BNB Chain   External APIs  Scam DBs     Claude AI   Calldata   On-Chain
+   (BSC/opBNB) (BscScan,HP)  (ChainAbuse)  (Verdicts)  Decoder    (Record)
 ```
 
-**Key Innovation: AI + Multi-Source Validation + On-Chain Recording**
+**Key Innovation: AI + Multi-Source Validation + Real-Time Transaction Firewall**
 - 7+ data sources cross-referenced
 - AI structured risk scoring (Claude) blended with heuristic analysis
 - Real liquidity lock detection (PancakeSwap V2 + PinkLock/Unicrypt)
@@ -125,18 +142,19 @@ User (Telegram) → ShieldBot (Python) → Multi-Source Validation
 
 ### Integration Roadmap
 
-**Now (v1.0):** Standalone Telegram Bot
-- Works immediately, no setup
-- Universal access (1B+ Telegram users)
+**Now (v1.0):** Telegram Bot + Chrome Extension + REST API
+- Telegram bot: universal access (1B+ Telegram users)
+- Chrome extension: real-time transaction firewall for any dApp
+- REST API: `/api/firewall` and `/api/scan` for developers
 
 **Q2 2026 (v2.0):** Wallet Integrations
 - MetaMask Snap (in-wallet warnings)
 - TrustWallet SDK (mobile integration)
-- REST API for developers
+- Chrome Web Store publishing
 
-**Q3 2026 (v3.0):** Onchain Components
-- Verification contract on BSC
-- Transparent scan recording
+**Q3 2026 (v3.0):** Advanced AI + Multi-Chain
+- ML-based risk scoring (training on historical exploit data)
+- Multi-chain expansion (Ethereum, Polygon, Arbitrum)
 - Community reputation system
 
 ---
@@ -203,10 +221,17 @@ When adding verification contracts:
 
 ### Core Technologies
 - **Python 3.11+** - Fast, async, mature ecosystem
+- **FastAPI + Uvicorn** - Async REST API backend for Chrome extension
 - **python-telegram-bot 20.7** - Official Telegram Bot API
 - **web3.py 6.15.1** - BNB Chain blockchain interaction
-- **anthropic 0.18.1** - Claude AI (AsyncAnthropic) for structured risk scoring
+- **anthropic 0.18.1** - Claude AI (AsyncAnthropic) for risk scoring + firewall verdicts
 - **aiohttp** - Async HTTP for parallel API calls
+
+### Chrome Extension
+- **Manifest V3** - Modern Chrome extension standard
+- **JavaScript Proxy** - Intercepts `window.ethereum.request` calls
+- **EIP-6963** - Modern wallet provider discovery
+- **chrome.storage** - Settings and scan history persistence
 
 ### BNB Chain Integration
 - **BSC RPC:** Contract queries, bytecode analysis
@@ -252,24 +277,35 @@ python bot.py
 
 ```
 shieldbot/
-├── bot.py                      # Main bot (commands, cache, progress, on-chain)
+├── bot.py                      # Main Telegram bot
+├── api.py                      # FastAPI backend for Chrome extension
 ├── scanner/
 │   ├── transaction_scanner.py  # Module 1: Pre-tx checks + AI scoring
 │   └── token_scanner.py        # Module 2: Token safety + AI scoring
 ├── utils/
-│   ├── web3_client.py          # BNB Chain + real liquidity lock detection
-│   ├── ai_analyzer.py          # Claude AI structured risk scoring + source analysis
-│   ├── risk_scorer.py          # Blended scoring engine (60% heuristic + 40% AI)
+│   ├── web3_client.py          # BNB Chain + liquidity lock detection
+│   ├── ai_analyzer.py          # Claude AI risk scoring + firewall verdicts
+│   ├── risk_scorer.py          # Blended scoring (60% heuristic + 40% AI)
+│   ├── calldata_decoder.py     # Transaction calldata decoding + router whitelist
+│   ├── firewall_prompt.py      # AI firewall system prompt
 │   ├── scam_db.py              # Multi-source scam database queries
 │   └── onchain_recorder.py     # On-chain scan recording (ShieldBotVerifier)
+├── extension/                  # Chrome Extension (ShieldAI Firewall)
+│   ├── manifest.json           # Manifest V3
+│   ├── inject.js               # Ethereum proxy interception
+│   ├── content.js              # Overlay + messaging
+│   ├── background.js           # Service worker (API, history)
+│   ├── popup.html / popup.js   # Settings + scan history
+│   ├── overlay.css             # Firewall overlay styles
+│   └── icons/                  # Extension icons
 ├── contracts/
-│   └── ShieldBotVerifier.sol   # Verification contract (deployed on BSC Mainnet)
-├── requirements.txt            # Python dependencies
-├── .env.example               # Environment template
-└── LICENSE                    # MIT License
+│   └── ShieldBotVerifier.sol   # Verification contract (BSC Mainnet)
+├── shieldbot-api.service       # Systemd unit for FastAPI server
+├── requirements.txt
+└── LICENSE
 ```
 
-**Quality:** Production-ready, AI-integrated, on-chain verified
+**Quality:** Production-ready, AI-integrated, on-chain verified, browser-level protection
 
 ---
 
@@ -376,22 +412,23 @@ For unknown/new tokens, the API may occasionally:
 ### Judges' Criteria Met
 
 ✅ **Problem-Solution Fit:** Instant security scans for BNB Chain's $5.6B scam problem
-✅ **AI Integration:** Claude AI structured risk scoring, source code analysis, blended 60/40 scores
+✅ **AI Integration:** Claude AI structured risk scoring, source code analysis, real-time firewall verdicts
 ✅ **Blockchain Relevance:** On-chain scan recording, `/history` query, real liquidity lock detection
-✅ **Technical Excellence:** ~18 bytecode patterns, caching, progress indicators, async throughout
+✅ **Technical Excellence:** ~18 bytecode patterns, calldata decoding, JS Proxy interception, async throughout
 ✅ **Agent Track:** Full AI agent loop — read chain → AI analyze → score → write chain → query chain
-✅ **User Experience:** 3-second scans, zero technical knowledge needed
-✅ **Production Ready:** Live on VPS, fully functional
-✅ **Open Source:** MIT License, community-driven  
+✅ **User Experience:** 3-second scans, zero technical knowledge needed, browser-level protection
+✅ **Multi-Surface:** Telegram bot + Chrome extension + REST API — protection everywhere
+✅ **Production Ready:** Live on VPS, fully functional, tested on PancakeSwap
+✅ **Open Source:** MIT License, community-driven
 
 ### Competitive Advantages
 
-1. **Instant Access:** No wallet connection, no app install
-2. **Zero Cost:** No gas fees, free to use
-3. **Multi-Source:** Higher accuracy than single-tool solutions
-4. **Mobile First:** Telegram on every phone
-5. **Extensible:** Easy API integration for wallets/dApps
-6. **Community:** Self-improving through user feedback
+1. **Multi-Surface Protection:** Bot + browser extension + API — not just one interface
+2. **Real-Time Firewall:** Intercepts transactions before signing, not after
+3. **Zero Cost:** No gas fees, free to use
+4. **Multi-Source:** Higher accuracy than single-tool solutions (7+ data sources)
+5. **AI-Powered Verdicts:** Plain-English explanations, not just risk scores
+6. **Extensible:** REST API for developers building their own security tools
 
 ### Market Validation
 
@@ -405,22 +442,22 @@ For unknown/new tokens, the API may occasionally:
 
 ## 🔮 Future Roadmap
 
-### Phase 2 (Q2 2026) - Integrations
+### Phase 2 (Q2 2026) - Distribution
+- [ ] Chrome Web Store publishing
 - [ ] MetaMask Snap integration
 - [ ] TrustWallet SDK
-- [ ] REST API for developers
 - [ ] Web dashboard
 
 ### Phase 3 (Q3 2026) - Advanced AI
 - [ ] ML-based risk scoring (training on historical exploit data)
 - [ ] Real-time mempool analysis
-- [ ] Developer reputation scoring
+- [ ] Multi-chain extension support (Ethereum, Polygon, Arbitrum)
 - [ ] Batch on-chain recording optimization
 
 ### Phase 4 (Q4 2026) - Decentralization
 - [ ] Community reputation token
 - [ ] Decentralized scam reporting DAO
-- [ ] Multi-chain expansion (Ethereum, Polygon, Arbitrum)
+- [ ] Firefox/Brave extension ports
 
 ---
 
@@ -464,18 +501,25 @@ MIT License - Open source and free forever
 
 ## ✅ Submission Checklist
 
-- [x] Bot built and functional
+- [x] Telegram bot built and functional
+- [x] Chrome extension (ShieldAI Firewall) built and functional
+- [x] FastAPI backend deployed on VPS
 - [x] Running 24/7 on VPS
 - [x] Public GitHub repository
-- [x] Comprehensive README
+- [x] Comprehensive README with API docs
 - [x] Architecture documentation
 - [x] Detection examples
-- [x] Quick start guide
+- [x] Quick start guide (bot + extension + API)
 - [x] AI-powered structured risk scoring (Claude AsyncAnthropic)
+- [x] AI-powered transaction firewall verdicts
 - [x] On-chain scan recording (ShieldBotVerifier on BSC Mainnet)
 - [x] `/history` command (read on-chain scan data)
 - [x] `/report` command (community scam reporting)
 - [x] Real liquidity lock detection (PancakeSwap V2 + PinkLock/Unicrypt)
+- [x] Calldata decoding (approve, transfer, swap, mint, burn)
+- [x] Whitelisted router fast-path (PancakeSwap V2/V3, 1inch)
+- [x] Token name/symbol resolution + approval amount formatting
+- [x] Scan history in extension popup
 - [x] Scan caching (5-min TTL)
 - [x] Progress indicators (live status updates)
 - [ ] Demo video recorded *(your task)*
