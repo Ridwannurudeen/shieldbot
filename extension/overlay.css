@@ -1,0 +1,249 @@
+/* ShieldAI Firewall Overlay Styles */
+
+.shieldai-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  animation: shieldai-fadein 0.2s ease-out;
+}
+
+@keyframes shieldai-fadein {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes shieldai-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  50% { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); }
+}
+
+@keyframes shieldai-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Modal */
+.shieldai-modal {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 16px;
+  width: 440px;
+  max-width: 95vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 24px;
+  color: #e2e8f0;
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+}
+
+.shieldai-modal-danger {
+  border-color: #ef4444;
+  animation: shieldai-pulse 2s infinite;
+}
+
+/* Header */
+.shieldai-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.shieldai-logo {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.shieldai-header h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #f8fafc;
+  margin: 0;
+}
+
+/* Classification Badge */
+.shieldai-badge {
+  display: inline-block;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.5px;
+  margin-bottom: 16px;
+}
+
+/* Sections */
+.shieldai-section {
+  margin-bottom: 14px;
+}
+
+.shieldai-section h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.shieldai-section p {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #cbd5e1;
+  margin: 0;
+}
+
+/* Danger Signals */
+.shieldai-signals {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.shieldai-signals li {
+  font-size: 13px;
+  color: #fca5a5;
+  padding: 4px 0 4px 18px;
+  position: relative;
+}
+
+.shieldai-signals li::before {
+  content: "\26A0";
+  position: absolute;
+  left: 0;
+  font-size: 12px;
+}
+
+/* Impact Table */
+.shieldai-impact {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.shieldai-impact td {
+  padding: 5px 8px;
+  font-size: 13px;
+  border-bottom: 1px solid #1e293b;
+}
+
+.shieldai-impact td:first-child {
+  color: #94a3b8;
+  font-weight: 500;
+  width: 120px;
+  white-space: nowrap;
+}
+
+.shieldai-impact td:last-child {
+  color: #e2e8f0;
+  word-break: break-all;
+}
+
+.shieldai-mono {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 12px !important;
+}
+
+/* Verdict */
+.shieldai-verdict {
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #f8fafc;
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+/* Buttons */
+.shieldai-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.shieldai-btn {
+  flex: 1;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s ease;
+}
+
+.shieldai-btn-block {
+  background: #ef4444;
+  color: #fff;
+}
+.shieldai-btn-block:hover {
+  background: #dc2626;
+}
+
+.shieldai-btn-proceed {
+  background: transparent;
+  color: #94a3b8;
+  border: 1px solid #334155;
+}
+.shieldai-btn-proceed:hover {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+/* Loading */
+.shieldai-loading {
+  text-align: center;
+  padding: 24px 0;
+}
+
+.shieldai-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #1e293b;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  margin: 0 auto 16px;
+  animation: shieldai-spin 0.8s linear infinite;
+}
+
+.shieldai-loading p {
+  font-size: 15px;
+  color: #e2e8f0;
+  margin: 0;
+}
+
+.shieldai-subtext {
+  font-size: 12px !important;
+  color: #64748b !important;
+  margin-top: 6px !important;
+}
+
+/* Error */
+.shieldai-error {
+  font-family: monospace;
+  font-size: 12px !important;
+  color: #fca5a5 !important;
+  background: #1e293b;
+  padding: 8px;
+  border-radius: 6px;
+  margin: 8px 0 !important;
+  word-break: break-all;
+}
+
+/* Scrollbar */
+.shieldai-modal::-webkit-scrollbar {
+  width: 6px;
+}
+.shieldai-modal::-webkit-scrollbar-track {
+  background: transparent;
+}
+.shieldai-modal::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 3px;
+}
