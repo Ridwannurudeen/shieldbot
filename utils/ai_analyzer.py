@@ -279,6 +279,180 @@ Provide a clear, helpful answer in 2-3 sentences. Use simple language."""
 - Risks: {', '.join(safety_results.get('risks', [])) if safety_results.get('risks') else 'None'}
 """
 
+    async def generate_forensic_report(self, address: str, scan_data: Dict, scan_type: str) -> Optional[str]:
+        """
+        Generate a unified ShieldAI forensic report from all scan data.
+        Returns a pre-formatted Telegram-ready Markdown string, or None on failure.
+        """
+        if not self.client:
+            return None
+
+        try:
+            context = self._build_forensic_context(address, scan_data, scan_type)
+
+            system_prompt = """You are ShieldAI — an autonomous blockchain forensic intelligence agent deployed on BNB Chain.
+
+Your mission: Analyze the provided on-chain scan data and produce a structured forensic security report. You speak with authority, precision, and zero fluff.
+
+OUTPUT FORMAT — use Telegram Markdown (** for bold, ` for inline code). Follow this exact structure:
+
+🛡️ **SHIELDAI FORENSIC REPORT**
+━━━━━━━━━━━━━━━━━━━━
+
+📍 **Target:** `<address>`
+🔎 **Scan Type:** <Contract Security / Token Safety>
+⏱️ **Status:** Complete
+
+━━━━━━━━━━━━━━━━━━━━
+🚨 **THREAT ASSESSMENT**
+
+**Risk Score:** <X>/100 — <CRITICAL / HIGH / MODERATE / LOW>
+**Confidence:** <X>%
+
+<1-2 sentence threat summary based on the data>
+
+━━━━━━━━━━━━━━━━━━━━
+🔴 **CRITICAL SIGNALS**
+
+<Bullet list of the most dangerous findings. If none, write "No critical signals detected.">
+
+━━━━━━━━━━━━━━━━━━━━
+💧 **LIQUIDITY & LP ANALYSIS**
+
+<Liquidity lock status, percentage, rug pull risk. For contract scans without LP data, note "N/A — contract-level scan">
+
+━━━━━━━━━━━━━━━━━━━━
+📋 **CONTRACT GOVERNANCE**
+
+<Verification status, ownership, proxy patterns, dangerous functions, contract age>
+
+━━━━━━━━━━━━━━━━━━━━
+💰 **TRADE SIMULATION**
+
+<Buy/sell tax, honeypot status, transfer restrictions. For contract scans, note "N/A — use /token for trade analysis">
+
+━━━━━━━━━━━━━━━━━━━━
+🧠 **INVESTIGATOR'S NOTE**
+
+<2-3 sentences of expert-level contextual analysis. Connect the dots between findings. Mention what a sophisticated attacker could exploit.>
+
+━━━━━━━━━━━━━━━━━━━━
+📊 **INVESTOR SUMMARY**
+
+<1-2 sentences in plain language for non-technical users>
+
+━━━━━━━━━━━━━━━━━━━━
+⚖️ **FINAL VERDICT**
+
+<One of: 🟢 CLEARED — Low risk | 🟡 CAUTION — Moderate risk, proceed carefully | 🔴 AVOID — High risk | 🚨 CRITICAL — Do not interact>
+
+RULES:
+- Use ONLY the data provided. Do not hallucinate findings.
+- Risk score weights: scam DB match = critical, honeypot = critical, unverified + new = high, high taxes = moderate, ownership not renounced = moderate, suspicious bytecode = high
+- Keep total output under 600 words
+- No HTML tags — only Telegram Markdown"""
+
+            user_message = f"""Scan data for forensic analysis:
+
+{context}
+
+Generate the ShieldAI forensic report now."""
+
+            message = await self.client.messages.create(
+                model=self.model,
+                max_tokens=1200,
+                messages=[
+                    {"role": "user", "content": system_prompt + "\n\n" + user_message}
+                ]
+            )
+
+            report = message.content[0].text.strip()
+            logger.info(f"Forensic report generated for {address}")
+            return report
+
+        except Exception as e:
+            logger.error(f"Forensic report generation failed: {e}")
+            return None
+
+    def _build_forensic_context(self, address: str, data: Dict, scan_type: str) -> str:
+        """Build structured context string from scan data for the forensic prompt."""
+        lines = [
+            f"Address: {address}",
+            f"Scan Type: {scan_type}",
+            f"Risk Score (heuristic): {data.get('risk_score', 'N/A')}/100",
+            f"Confidence: {data.get('confidence', 'N/A')}%",
+            f"Risk Level: {data.get('risk_level', data.get('safety_level', 'unknown'))}",
+        ]
+
+        # Contract info
+        if 'is_verified' in data:
+            lines.append(f"Contract Verified: {data['is_verified']}")
+        if 'is_contract' in data:
+            lines.append(f"Is Contract: {data['is_contract']}")
+        if 'contract_age_days' in data:
+            lines.append(f"Contract Age: {data['contract_age_days']} days")
+
+        # Token info
+        if data.get('name'):
+            lines.append(f"Token Name: {data['name']}")
+        if data.get('symbol'):
+            lines.append(f"Token Symbol: {data['symbol']}")
+        if data.get('total_supply'):
+            lines.append(f"Total Supply: {data['total_supply']}")
+
+        # Honeypot & taxes
+        if 'is_honeypot' in data:
+            lines.append(f"Is Honeypot: {data['is_honeypot']}")
+        if data.get('buy_tax') is not None:
+            lines.append(f"Buy Tax: {data['buy_tax']}%")
+        if data.get('sell_tax') is not None:
+            lines.append(f"Sell Tax: {data['sell_tax']}%")
+
+        # Checks
+        checks = data.get('checks', {})
+        if checks:
+            lines.append("Security Checks:")
+            for k, v in checks.items():
+                status = "PASS" if v is True else ("FAIL" if v is False else "UNKNOWN")
+                lines.append(f"  - {k.replace('_', ' ').title()}: {status}")
+
+        # Warnings / risks
+        warnings = data.get('warnings', [])
+        if warnings:
+            lines.append("Warnings:")
+            for w in warnings:
+                lines.append(f"  - {w}")
+
+        risks = data.get('risks', [])
+        if risks:
+            lines.append("Risks:")
+            for r in risks:
+                lines.append(f"  - {r}")
+
+        # Scam DB
+        scam_matches = data.get('scam_matches', [])
+        if scam_matches:
+            lines.append(f"Scam Database Matches: {len(scam_matches)}")
+            for m in scam_matches[:5]:
+                lines.append(f"  - {m.get('type', 'unknown')}: {m.get('reason', 'N/A')}")
+        else:
+            lines.append("Scam Database Matches: 0")
+
+        # Source code patterns
+        patterns = data.get('source_code_patterns', [])
+        if patterns:
+            lines.append("Source Code Patterns Detected:")
+            for p in patterns:
+                lines.append(f"  - [{p['severity'].upper()}] {p['message']}")
+
+        # Liquidity
+        if 'liquidity_lock_percentage' in data:
+            lines.append(f"Liquidity Lock: {data['liquidity_lock_percentage']}%")
+        if 'owner' in data:
+            lines.append(f"Contract Owner: {data['owner']}")
+
+        return "\n".join(lines)
+
     def is_available(self) -> bool:
         """Check if AI analysis is available"""
         return self.client is not None

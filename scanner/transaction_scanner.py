@@ -121,15 +121,6 @@ class TransactionScanner:
             self._analyze_source_code(source_code, result)
             data_sources['source_code'] = True
 
-            # AI source analysis
-            if self.ai_analyzer and self.ai_analyzer.is_available():
-                try:
-                    source_analysis = await self.ai_analyzer.analyze_verified_source(address, source_code)
-                    if source_analysis:
-                        result['source_analysis'] = source_analysis
-                except Exception as e:
-                    logger.error(f"AI source analysis failed: {e}")
-
         # Calculate heuristic risk level (legacy)
         result['risk_level'] = self._calculate_risk_level(result)
 
@@ -137,35 +128,20 @@ class TransactionScanner:
         findings = findings_from_scan_result(result)
         heuristic_score, _, _ = calculate_risk_score(findings)
 
-        # AI-powered structured scoring
-        ai_score = None
-        data_sources['ai'] = False
-        if self.ai_analyzer and self.ai_analyzer.is_available():
-            try:
-                ai_result = await self.ai_analyzer.compute_ai_risk_score(address, result)
-                if ai_result:
-                    ai_score = ai_result.get('risk_score')
-                    result['ai_risk_score'] = ai_result
-                    data_sources['ai'] = True
-                    logger.info("AI risk scoring added to scan result")
-            except Exception as e:
-                logger.error(f"AI risk scoring failed: {e}")
-
-        # Also get narrative AI analysis
-        if self.ai_analyzer and self.ai_analyzer.is_available():
-            try:
-                bytecode = await self.web3.get_bytecode(address)
-                ai_analysis = await self.ai_analyzer.analyze_contract_bytecode(
-                    address, bytecode or "", result
-                )
-                if ai_analysis:
-                    result['ai_analysis'] = ai_analysis
-            except Exception as e:
-                logger.error(f"AI analysis failed: {e}")
-
-        # Blend scores
-        result['risk_score'] = blend_scores(heuristic_score, ai_score)
+        # Blend scores (heuristic only — AI scoring folded into forensic report)
+        result['risk_score'] = blend_scores(heuristic_score, None)
         result['confidence'] = compute_confidence(data_sources)
+
+        # Generate unified forensic report (replaces separate AI calls)
+        if self.ai_analyzer and self.ai_analyzer.is_available():
+            try:
+                report = await self.ai_analyzer.generate_forensic_report(
+                    address, result, 'contract'
+                )
+                if report:
+                    result['forensic_report'] = report
+            except Exception as e:
+                logger.error(f"Forensic report generation failed: {e}")
 
         # Override risk_level from blended score for consistency
         if result['risk_score'] >= 71:
