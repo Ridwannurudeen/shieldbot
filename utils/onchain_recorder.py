@@ -9,7 +9,13 @@ import logging
 import asyncio
 from typing import Optional
 from web3 import Web3
-from web3.middleware import ExtraDataToPOAMiddleware
+
+try:
+    from web3.middleware import ExtraDataToPOAMiddleware
+    POA_MIDDLEWARE = ExtraDataToPOAMiddleware
+except ImportError:
+    from web3.middleware import geth_poa_middleware
+    POA_MIDDLEWARE = geth_poa_middleware
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +90,7 @@ class OnchainRecorder:
 
         self.web3 = Web3(Web3.HTTPProvider(bsc_rpc))
         # BSC is a POA chain, need this middleware
-        self.web3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+        self.web3.middleware_onion.inject(POA_MIDDLEWARE, layer=0)
 
         if not self.private_key:
             logger.warning("BOT_WALLET_PRIVATE_KEY not set - on-chain recording disabled")
