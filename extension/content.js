@@ -126,6 +126,10 @@
     const label = classLabels[classification] || classification;
     const isBlock = classification === "BLOCK_RECOMMENDED";
 
+    // Display as safety score (100 - risk) so higher = better
+    const riskScore = result.risk_score || 0;
+    const safetyScore = 100 - riskScore;
+
     const overlay = document.createElement("div");
     overlay.id = "shieldai-overlay";
     overlay.className = "shieldai-overlay";
@@ -146,7 +150,7 @@
         </div>
 
         <div class="shieldai-badge" style="background:${color}">
-          ${escapeHtml(label)} &mdash; ${result.risk_score || 0}/100
+          ${escapeHtml(label)} &mdash; Safety: ${safetyScore}/100
         </div>
 
         ${
