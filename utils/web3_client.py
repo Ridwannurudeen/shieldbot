@@ -25,6 +25,15 @@ KNOWN_LOCKERS = {
 # PancakeSwap V2 Factory address on BSC
 PANCAKESWAP_V2_FACTORY = '0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73'
 WBNB_ADDRESS = '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c'
+BUSD_ADDRESS = '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56'
+USDT_ADDRESS = '0x55d398326f99059fF775485246999027B3197955'
+
+# Quote tokens to check for LP pairs (most BSC tokens pair with one of these)
+QUOTE_TOKENS = [
+    ('WBNB', WBNB_ADDRESS),
+    ('BUSD', BUSD_ADDRESS),
+    ('USDT', USDT_ADDRESS),
+]
 
 # Minimal ABIs
 FACTORY_ABI = [
@@ -258,6 +267,7 @@ class Web3Client:
         """
         Get real liquidity lock information by checking PancakeSwap V2 LP tokens
         held by known locker contracts (PinkLock, Unicrypt, DxLock, burn/dead addresses).
+        Checks pairs against multiple quote tokens (WBNB, BUSD, USDT).
         """
         try:
             checksum_addr = Web3.to_checksum_address(address)
@@ -266,14 +276,26 @@ class Web3Client:
                 abi=FACTORY_ABI
             )
 
-            # Find the LP pair for token/WBNB
-            pair_address = factory.functions.getPair(
-                checksum_addr,
-                Web3.to_checksum_address(WBNB_ADDRESS)
-            ).call()
-
             zero_address = '0x0000000000000000000000000000000000000000'
-            if pair_address == zero_address:
+            pair_address = None
+            paired_with = None
+
+            # Check pairs against all major quote tokens
+            for quote_name, quote_addr in QUOTE_TOKENS:
+                try:
+                    addr = factory.functions.getPair(
+                        checksum_addr,
+                        Web3.to_checksum_address(quote_addr)
+                    ).call()
+                    if addr != zero_address:
+                        pair_address = addr
+                        paired_with = quote_name
+                        logger.info(f"Found LP pair for {address}/{quote_name}: {addr}")
+                        break
+                except Exception:
+                    continue
+
+            if not pair_address:
                 logger.info(f"No PancakeSwap V2 pair found for {address}")
                 return {'is_locked': False, 'lock_percentage': 0, 'pair': None}
 
@@ -313,6 +335,7 @@ class Web3Client:
                 'is_locked': is_locked,
                 'lock_percentage': lock_percentage,
                 'pair': pair_address,
+                'paired_with': paired_with,
                 'lockers': locker_details
             }
 
