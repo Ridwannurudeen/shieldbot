@@ -132,9 +132,14 @@ KNOWN_SELECTORS: Dict[str, Dict] = {
 
 # Whitelisted routers on BSC — transactions to these are lower risk
 WHITELISTED_ROUTERS: Dict[str, str] = {
+    # PancakeSwap
     "0x10ED43C718714eb63d5aA57B78B54704E256024E".lower(): "PancakeSwap V2 Router",
-    "0x13f4EA83D0bd40E75C8222255bc855a974568Dd4".lower(): "PancakeSwap V3 Router",
+    "0x13f4EA83D0bd40E75C8222255bc855a974568Dd4".lower(): "PancakeSwap V3 Smart Router",
+    "0x1a0A18AC4BECDdbd6389559687d1A73d8927E416".lower(): "PancakeSwap Universal Router",
+    "0xd9C500DfF816a1Da21A48A732d3498Bf09dc9AEB".lower(): "PancakeSwap Universal Router 2",
+    # 1inch
     "0x1111111254EEB25477B68fb85Ed929f73A960582".lower(): "1inch V5 Router",
+    "0x111111125421cA6dc452d289314280a0f8842A65".lower(): "1inch V6 Router",
 }
 
 # Max uint256 — used to detect unlimited approvals
