@@ -8,6 +8,7 @@ import json
 import logging
 import anthropic
 from typing import Dict, Optional
+from utils.firewall_prompt import FIREWALL_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -450,6 +451,135 @@ Generate the ShieldAI forensic report now."""
             lines.append(f"Liquidity Lock: {data['liquidity_lock_percentage']}%")
         if 'owner' in data:
             lines.append(f"Contract Owner: {data['owner']}")
+
+        return "\n".join(lines)
+
+    async def generate_firewall_report(self, tx_data: Dict, contract_scan: Dict) -> Optional[Dict]:
+        """
+        Generate a firewall analysis report for the Chrome extension.
+        Returns structured JSON (not markdown) for the extension to render.
+
+        Args:
+            tx_data: Transaction data including decoded calldata info
+            contract_scan: Results from scanning the target contract
+
+        Returns:
+            dict matching the firewall response schema, or None on failure
+        """
+        if not self.client:
+            return None
+
+        try:
+            context = self._build_firewall_context(tx_data, contract_scan)
+
+            user_message = f"""Analyze this pending BNB Chain transaction:
+
+{context}
+
+Return the firewall analysis JSON now."""
+
+            message = await self.client.messages.create(
+                model=self.model,
+                max_tokens=800,
+                messages=[
+                    {"role": "user", "content": FIREWALL_SYSTEM_PROMPT + "\n\n" + user_message}
+                ]
+            )
+
+            raw = message.content[0].text.strip()
+            # Strip markdown code fences if present
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+                if raw.endswith("```"):
+                    raw = raw[:-3]
+                raw = raw.strip()
+
+            result = json.loads(raw)
+
+            # Validate and clamp
+            result["risk_score"] = max(0, min(100, int(result.get("risk_score", 50))))
+            valid_classifications = {"BLOCK_RECOMMENDED", "HIGH_RISK", "CAUTION", "SAFE"}
+            if result.get("classification") not in valid_classifications:
+                result["classification"] = "CAUTION"
+            if not isinstance(result.get("danger_signals"), list):
+                result["danger_signals"] = []
+
+            logger.info(
+                f"Firewall report: {result['classification']} "
+                f"(score {result['risk_score']}) for tx to {tx_data.get('to', 'unknown')}"
+            )
+            return result
+
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Firewall report parse error: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Firewall report failed: {e}")
+            return None
+
+    def _build_firewall_context(self, tx_data: Dict, contract_scan: Dict) -> str:
+        """Build context string for the firewall prompt."""
+        lines = [
+            "=== TRANSACTION DATA ===",
+            f"From: {tx_data.get('from', 'unknown')}",
+            f"To: {tx_data.get('to', 'unknown')}",
+            f"Value: {tx_data.get('value', '0')} wei",
+            f"Chain ID: {tx_data.get('chainId', 56)}",
+        ]
+
+        # Decoded calldata
+        decoded = tx_data.get("decoded_calldata", {})
+        if decoded:
+            lines.append(f"\n=== CALLDATA ANALYSIS ===")
+            lines.append(f"Function: {decoded.get('function_name', 'unknown')}")
+            lines.append(f"Signature: {decoded.get('signature', 'N/A')}")
+            lines.append(f"Category: {decoded.get('category', 'unknown')}")
+            lines.append(f"Is Approval: {decoded.get('is_approval', False)}")
+            lines.append(f"Is Unlimited Approval: {decoded.get('is_unlimited_approval', False)}")
+            if decoded.get("disguised_warning"):
+                lines.append(f"DISGUISED CALL WARNING: {decoded['disguised_warning']}")
+            params = decoded.get("params", {})
+            if params:
+                lines.append("Parameters:")
+                for k, v in params.items():
+                    lines.append(f"  {k}: {v}")
+
+        # Whitelisted router
+        router = tx_data.get("whitelisted_router")
+        if router:
+            lines.append(f"\nTarget is WHITELISTED ROUTER: {router}")
+
+        # Contract scan results
+        lines.append(f"\n=== CONTRACT SCAN ({tx_data.get('to', 'unknown')}) ===")
+        lines.append(f"Is Contract: {contract_scan.get('is_contract', 'unknown')}")
+        lines.append(f"Is Verified: {contract_scan.get('is_verified', False)}")
+        lines.append(f"Contract Age: {contract_scan.get('contract_age_days', 'unknown')} days")
+        lines.append(f"Scam DB Matches: {len(contract_scan.get('scam_matches', []))}")
+        lines.append(f"Risk Score (heuristic): {contract_scan.get('risk_score', 'N/A')}/100")
+
+        # Token-specific data
+        if contract_scan.get('is_honeypot') is not None:
+            lines.append(f"Is Honeypot: {contract_scan.get('is_honeypot', False)}")
+        if contract_scan.get('buy_tax') is not None:
+            lines.append(f"Buy Tax: {contract_scan.get('buy_tax', 0)}%")
+        if contract_scan.get('sell_tax') is not None:
+            lines.append(f"Sell Tax: {contract_scan.get('sell_tax', 0)}%")
+
+        ownership = contract_scan.get('checks', {}).get('ownership_renounced')
+        if ownership is not None:
+            lines.append(f"Ownership Renounced: {ownership}")
+
+        warnings = contract_scan.get('warnings', [])
+        if warnings:
+            lines.append("Warnings:")
+            for w in warnings[:8]:
+                lines.append(f"  - {w}")
+
+        scam_matches = contract_scan.get('scam_matches', [])
+        if scam_matches:
+            lines.append("Scam Matches:")
+            for m in scam_matches[:5]:
+                lines.append(f"  - {m.get('type', 'unknown')}: {m.get('reason', 'N/A')}")
 
         return "\n".join(lines)
 
