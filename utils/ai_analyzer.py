@@ -23,6 +23,9 @@ class AIAnalyzer:
         else:
             self.client = anthropic.AsyncAnthropic(api_key=self.api_key)
 
+        # Use model compatible with installed SDK version
+        self.model = "claude-3-sonnet-20240229"
+
     async def compute_ai_risk_score(self, address: str, scan_data: Dict) -> Optional[Dict]:
         """
         Get structured AI risk assessment with numeric score.
@@ -55,7 +58,7 @@ Return ONLY a JSON object (no markdown, no explanation) with this exact schema:
 Base your score on: verification status, contract age, scam DB matches, bytecode patterns, source code issues, ownership, and taxes."""
 
             message = await self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model=self.model,
                 max_tokens=400,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -117,7 +120,7 @@ Return ONLY a JSON object (no markdown):
 Look for: honeypot mechanisms (blacklists, trading pauses, max tx traps), hidden mint functions, proxy upgradability, owner-only sell restrictions, fee manipulation, hidden approvals, self-destruct, and delegatecall to unknown addresses."""
 
             message = await self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model=self.model,
                 max_tokens=600,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -168,7 +171,7 @@ Based on the bytecode patterns and scan results, provide:
 Keep response under 200 words, focused and actionable."""
 
             message = await self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model=self.model,
                 max_tokens=500,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -206,7 +209,7 @@ Provide:
 Keep response under 200 words, actionable for traders."""
 
             message = await self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model=self.model,
                 max_tokens=500,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -232,7 +235,7 @@ User Question: {user_question}
 Provide a clear, helpful answer in 2-3 sentences. Use simple language."""
 
             message = await self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model=self.model,
                 max_tokens=300,
                 messages=[{"role": "user", "content": prompt}]
             )

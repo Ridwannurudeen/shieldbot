@@ -326,12 +326,35 @@ class Web3Client:
             async with aiohttp.ClientSession() as session:
                 url = f"https://api.honeypot.is/v2/IsHoneypot?address={address}&chainID=56"
 
-                async with session.get(url) as resp:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     if resp.status == 200:
                         data = await resp.json()
 
-                        is_honeypot = data.get('honeypotResult', {}).get('isHoneypot', False)
-                        reason = data.get('honeypotResult', {}).get('honeypotReason', 'Unknown')
+                        honeypot_result = data.get('honeypotResult', {})
+                        simulation = data.get('simulationResult', {})
+                        is_honeypot = honeypot_result.get('isHoneypot', False)
+                        reason = honeypot_result.get('honeypotReason', 'Unknown')
+                        sim_success = data.get('simulationSuccess', True)
+
+                        # If simulation failed, don't trust the honeypot flag
+                        if not sim_success:
+                            logger.info(f"Honeypot API simulation failed for {address} - treating as inconclusive")
+                            return {
+                                'is_honeypot': False,
+                                'reason': 'Simulation failed (inconclusive)',
+                                'simulation_failed': True
+                            }
+
+                        # If buy/sell taxes are both readable and sell tax < 50%, likely not a real honeypot
+                        sell_tax = float(simulation.get('sellTax', 0))
+                        buy_tax = float(simulation.get('buyTax', 0))
+                        if is_honeypot and sell_tax < 50 and buy_tax < 50:
+                            logger.info(f"Honeypot API flagged {address} but taxes are normal (buy:{buy_tax}% sell:{sell_tax}%) - likely false positive")
+                            return {
+                                'is_honeypot': False,
+                                'reason': f'Flagged but taxes normal (buy:{buy_tax}% sell:{sell_tax}%)',
+                                'likely_false_positive': True
+                            }
 
                         return {
                             'is_honeypot': is_honeypot,
