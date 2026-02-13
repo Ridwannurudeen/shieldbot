@@ -7,8 +7,9 @@ Wants=network-online.target
 Type=simple
 User=root
 WorkingDirectory=/opt/shieldbot
+Environment="PATH=/opt/shieldbot/venv/bin"
 EnvironmentFile=/opt/shieldbot/.env
-ExecStart=/usr/local/bin/uvicorn api:app --host 0.0.0.0 --port 8000
+ExecStart=/opt/shieldbot/venv/bin/uvicorn api:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=5
 StandardOutput=journal
