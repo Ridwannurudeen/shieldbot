@@ -12,9 +12,13 @@ Built for **Good Vibes Only: OpenClaw Edition** hackathon by BNB Chain.
 
 ## 🎯 What is ShieldBot?
 
-ShieldBot is a **Telegram bot** that protects users from scams, honeypots, and risky contracts on **BNB Chain** (BSC and opBNB). Simply send a contract or token address, and ShieldBot will analyze it for security risks in seconds.
+ShieldBot is an **AI-powered security suite** that protects users from scams, honeypots, and risky contracts on **BNB Chain** (BSC and opBNB).
 
-Think of it as your **personal security guard** before you interact with any smart contract.
+**Two products, one engine:**
+- **Telegram Bot** — Send a contract or token address, get a full security report in seconds
+- **Chrome Extension (ShieldAI Firewall)** — Intercepts wallet transactions in real time and shows a firewall analysis before you sign
+
+Think of it as your **personal security guard** — whether you're checking an address or signing a swap.
 
 ### 🎥 Demo
 
@@ -46,6 +50,18 @@ Protects you from honeypot tokens and rug pulls:
 - **Tax Detection**: Shows buy/sell taxes to warn about high-fee tokens (>10%)
 - **Liquidity Lock Check**: Verifies if liquidity is locked to prevent rug pulls
 - **Safety Level Scoring**: Calculates overall safety (SAFE, WARNING, DANGER)
+
+### 🔥 Module 3: Chrome Extension — ShieldAI Transaction Firewall
+Real-time browser-level protection that intercepts transactions before you sign:
+
+- **Transaction Interception**: Hooks into MetaMask/wallets via `window.ethereum` proxy — catches every `eth_sendTransaction`
+- **Calldata Decoding**: Decodes function selectors (approve, transfer, swap, mint, etc.) and shows what the transaction actually does
+- **Approval Detection**: Flags unlimited token approvals to unverified contracts — the #1 drainer attack vector
+- **Whitelisted Router Fast-Path**: Recognizes PancakeSwap V2/V3, 1inch, and other trusted DEX routers — skips deep scan for verified routers
+- **AI Firewall Analysis**: Sends decoded calldata + contract scan to Claude for a full security verdict
+- **Safety Score**: Shows a clear Safety Score (0-100), classification badge (SAFE / CAUTION / HIGH RISK / BLOCK), and plain-English explanation
+- **Block or Proceed**: Users can block suspicious transactions or proceed with full awareness
+- **Scan History**: Keeps a local history of all analyzed transactions in the extension popup
 
 ---
 
@@ -124,15 +140,15 @@ Buy: 0% | Sell: 0%
 
 ### Integration Options
 
-**Current:** Standalone Telegram Bot
-- Works immediately, no integration needed
-- Universal access (anyone with Telegram)
+**Current:**
+- **Telegram Bot** - Works immediately, universal access (anyone with Telegram)
+- **Chrome Extension** - Real-time transaction firewall for any dApp on BNB Chain
+- **REST API** - `POST /api/firewall` and `POST /api/scan` endpoints for developers
 
 **Future Integrations:**
 1. **MetaMask Snap** - In-wallet security warnings
-2. **TrustWallet SDK** - Mobile wallet integration  
+2. **TrustWallet SDK** - Mobile wallet integration
 3. **dApp Embeds** - Add ShieldBot widget to your dApp
-4. **REST API** - For developers building security tools
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for technical integration details.
 
@@ -196,27 +212,40 @@ Current Scan → Pattern Detection → Database Update → Improved Detection
 ### System Diagram
 
 ```
-User (Telegram) → ShieldBot → [Transaction Scanner | Token Scanner]
-                                        ↓
-                    ┌───────────────────┴──────────────────┐
-                    ↓                   ↓                   ↓
-              BNB Chain          External APIs       Scam Databases
-             (BSC/opBNB)      (BscScan, Honeypot)  (ChainAbuse, etc.)
+                                ┌─── Telegram Bot ───→ Forensic Reports
+User ──→ ShieldBot Engine ──→──┤
+                                └─── Chrome Extension ──→ Firewall Overlay
+                                           ↓
+                    ┌──────────────────────┼──────────────────────┐
+                    ↓                      ↓                      ↓
+              BNB Chain            External APIs           Claude AI
+             (BSC/opBNB)       (BscScan, Honeypot)    (Firewall Verdicts)
 ```
 
 **Full architecture:** See [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ### Key Components
-1. **Telegram Bot Handler** - User interface
-2. **Transaction Scanner** - Pre-tx security checks (Module 1)
-3. **Token Scanner** - Honeypot & safety checks (Module 2)
-4. **Web3 Client** - BNB Chain interaction
-5. **Scam Database** - Multi-source validation
+1. **Telegram Bot Handler** - Chat-based security reports
+2. **FastAPI Server** - REST API for the Chrome extension firewall
+3. **Transaction Scanner** - Pre-tx security checks (Module 1)
+4. **Token Scanner** - Honeypot & safety checks (Module 2)
+5. **Calldata Decoder** - Transaction calldata analysis (approvals, swaps, transfers)
+6. **AI Analyzer** - Claude-powered risk scoring + firewall verdicts
+7. **Web3 Client** - BNB Chain interaction
+8. **Scam Database** - Multi-source validation
 
 ### Data Flow
+
+**Telegram Bot:**
 ```
-Address Input → Validation → Type Detection → Scanner Routing 
+Address Input → Validation → Type Detection → Scanner Routing
 → Multi-Source Checks → Risk Calculation → Formatted Report → User
+```
+
+**Chrome Extension:**
+```
+Wallet TX Intercept → Calldata Decode → Contract Scan → AI Analysis
+→ Firewall Verdict → Overlay (Block / Proceed) → User Decision
 ```
 
 **Response Time:** 3-5 seconds end-to-end
@@ -225,11 +254,21 @@ Address Input → Validation → Type Detection → Scanner Routing
 
 ## 🛠️ Tech Stack
 
+### Backend
 - **Python 3.11+** - Core language
+- **FastAPI + Uvicorn** - Async REST API for the Chrome extension
 - **python-telegram-bot 20.7** - Telegram Bot API integration
 - **web3.py 6.15.1** - BNB Chain blockchain interaction
 - **anthropic 0.18.1** - Claude AI-powered risk scoring (AsyncAnthropic)
 - **aiohttp** - Async HTTP for API calls
+
+### Chrome Extension
+- **Manifest V3** - Modern Chrome extension architecture
+- **Proxy-based interception** - Intercepts `window.ethereum.request` via JS Proxy
+- **EIP-6963 support** - Discovers wallets via modern provider announcement protocol
+- **chrome.storage API** - Settings, scan history persistence
+
+### Data Sources
 - **BscScan API** - Contract verification and transaction data
 - **Honeypot.is API** - Honeypot detection service
 - **ChainAbuse & ScamSniffer** - Scam database integration
@@ -286,6 +325,52 @@ python bot.py
 ```
 
 **Works immediately!** No complex setup, no blockchain deployment needed to test the core functionality.
+
+### Install the Chrome Extension
+1. Clone this repo
+2. Open `chrome://extensions` in Chrome
+3. Enable **Developer mode** (top right)
+4. Click **Load unpacked** → select the `extension/` folder
+5. Click the ShieldAI icon → verify connection shows "Connected (AI active)"
+6. Visit any dApp (e.g. PancakeSwap) and initiate a swap — the firewall overlay will appear
+
+### API Endpoints
+
+The FastAPI backend runs on the VPS alongside the Telegram bot:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/health` | GET | Health check + AI status |
+| `/api/firewall` | POST | Analyze a pending transaction (calldata, approvals, contract scan) |
+| `/api/scan` | POST | Quick contract security scan |
+
+**Firewall request:**
+```json
+{
+  "to": "0x...",
+  "from": "0x...",
+  "value": "0x0",
+  "data": "0x095ea7b3...",
+  "chainId": 56
+}
+```
+
+**Firewall response:**
+```json
+{
+  "classification": "BLOCK_RECOMMENDED",
+  "risk_score": 85,
+  "danger_signals": ["Unlimited approval to unverified contract"],
+  "transaction_impact": {
+    "sending": "0 BNB",
+    "granting_access": "UNLIMITED USDT",
+    "recipient": "0x1234... (Unknown Contract)",
+    "post_tx_state": "Spender can drain all your USDT"
+  },
+  "plain_english": "This transaction gives unlimited access to your USDT...",
+  "verdict": "BLOCK — Do not sign this transaction"
+}
+```
 
 ### Manual Setup
 
@@ -370,6 +455,7 @@ See [TESTING.md](TESTING.md) for comprehensive test cases.
 ```
 shieldbot/
 ├── bot.py                      # Main Telegram bot (commands, cache, progress, on-chain)
+├── api.py                      # FastAPI backend for Chrome extension firewall
 ├── scanner/
 │   ├── __init__.py
 │   ├── transaction_scanner.py  # Pre-tx security checks + AI scoring
@@ -377,16 +463,26 @@ shieldbot/
 ├── utils/
 │   ├── __init__.py
 │   ├── web3_client.py          # BNB Chain Web3 + real liquidity lock detection
-│   ├── ai_analyzer.py          # Claude AI structured risk scoring + source analysis
-│   ├── risk_scorer.py          # Blended risk scoring engine (60% heuristic + 40% AI)
+│   ├── ai_analyzer.py          # Claude AI risk scoring + firewall verdicts
+│   ├── risk_scorer.py          # Blended scoring engine (60% heuristic + 40% AI)
 │   ├── scam_db.py              # Scam database integration
+│   ├── calldata_decoder.py     # Transaction calldata decoding + whitelisted routers
+│   ├── firewall_prompt.py      # AI firewall system prompt
 │   └── onchain_recorder.py     # On-chain scan recording via ShieldBotVerifier
+├── extension/                  # Chrome Extension (ShieldAI Firewall)
+│   ├── manifest.json           # Manifest V3 config
+│   ├── inject.js               # Page-level ethereum proxy (Proxy-based interception)
+│   ├── content.js              # Content script (overlay, messaging)
+│   ├── background.js           # Service worker (API calls, history)
+│   ├── popup.html              # Settings + history popup
+│   ├── popup.js                # Popup logic
+│   ├── overlay.css             # Firewall overlay styles
+│   └── icons/                  # Extension icons (16/48/128px)
 ├── contracts/
 │   └── ShieldBotVerifier.sol   # On-chain verification contract (deployed on BSC)
-├── _deprecated/                # Legacy scanner modules (superseded)
+├── shieldbot-api.service       # Systemd unit for the FastAPI server
 ├── requirements.txt            # Python dependencies
 ├── .env.example                # Environment variables template
-├── .gitignore                  # Git ignore rules
 ├── DEPLOYMENT.md               # Production deployment guide
 ├── TESTING.md                  # Testing guide with test cases
 ├── LICENSE                     # MIT License
@@ -429,18 +525,23 @@ See [TESTING.md](TESTING.md) for comprehensive testing scenarios.
 - ✅ Scan Caching (5-min TTL, prevents API abuse)
 - ✅ Progress Indicators (live status updates during scans)
 - ✅ Telegram Bot Interface (commands, auto-detection, inline buttons)
+- ✅ **Chrome Extension** (real-time transaction firewall with AI verdicts)
+- ✅ **FastAPI Backend** (REST API for extension and developer access)
+- ✅ **Calldata Decoder** (approve, transfer, swap, mint detection + whitelisted routers)
+- ✅ **Token Resolution** (resolves token names, symbols, and formats approval amounts)
+- ✅ **Scan History** (tracks past firewall scans in extension popup)
 - ✅ BSC and opBNB support
 - ✅ BscScan integration
 - ✅ Honeypot.is integration
 - ✅ Multiple scam database checks
 
 ### 🚀 Future Enhancements (v2.0+)
+- [ ] **Chrome Web Store Publishing**: Public distribution
 - [ ] **User Watchlists**: Save and monitor favorite contracts
 - [ ] **Notification System**: Real-time alerts for scam warnings
 - [ ] **Multi-Language Support**: Spanish, Chinese, Korean, etc.
-- [ ] **Web Dashboard**: Browser-based interface
+- [ ] **Multi-Chain Support**: Ethereum, Polygon, Arbitrum
 - [ ] **Advanced Contract Analysis**: Slither/Mythril integration
-- [ ] **API Access**: REST API for developers
 
 ---
 

@@ -1,24 +1,35 @@
 /**
  * ShieldAI Background Service Worker
  * Receives intercepted tx data from content script, calls the VPS API,
- * and returns the firewall verdict.
+ * and returns the firewall verdict. Saves scan history.
  */
 
 const DEFAULT_API_URL = "http://38.49.212.108:8000";
+const MAX_HISTORY = 50;
 
 // Listen for messages from content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "SHIELDAI_ANALYZE") {
     handleAnalyze(message.tx)
-      .then((result) => sendResponse({ result }))
+      .then((result) => {
+        saveToHistory(message.tx, result);
+        sendResponse({ result });
+      })
       .catch((err) => sendResponse({ error: err.message || "Unknown error" }));
-    return true; // Keep the message channel open for async response
+    return true;
   }
 
   if (message.type === "SHIELDAI_HEALTH") {
     checkHealth()
       .then((status) => sendResponse({ status }))
       .catch((err) => sendResponse({ error: err.message }));
+    return true;
+  }
+
+  if (message.type === "SHIELDAI_GET_HISTORY") {
+    chrome.storage.local.get({ scanHistory: [] }, (data) => {
+      sendResponse({ history: data.scanHistory });
+    });
     return true;
   }
 });
@@ -69,4 +80,25 @@ async function checkHealth() {
   }
 
   return response.json();
+}
+
+function saveToHistory(tx, result) {
+  chrome.storage.local.get({ scanHistory: [] }, (data) => {
+    const history = data.scanHistory;
+    history.unshift({
+      timestamp: Date.now(),
+      to: tx.to || "",
+      classification: result.classification || "UNKNOWN",
+      risk_score: result.risk_score || 0,
+      verdict: result.verdict || "",
+      recipient: result.transaction_impact?.recipient || tx.to || "",
+    });
+
+    // Keep only the last N entries
+    if (history.length > MAX_HISTORY) {
+      history.length = MAX_HISTORY;
+    }
+
+    chrome.storage.local.set({ scanHistory: history });
+  });
 }
