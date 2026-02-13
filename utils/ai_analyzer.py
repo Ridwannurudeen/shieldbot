@@ -23,8 +23,8 @@ class AIAnalyzer:
         else:
             self.client = anthropic.AsyncAnthropic(api_key=self.api_key)
 
-        # Use model compatible with installed SDK version
-        self.model = "claude-3-sonnet-20240229"
+        # Use model available on this API key
+        self.model = "claude-3-haiku-20240307"
 
     async def compute_ai_risk_score(self, address: str, scan_data: Dict) -> Optional[Dict]:
         """
