@@ -35,24 +35,31 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  // Check API connection
+  // Check API connection — call API directly from popup (no background worker needed)
   async function checkConnection(apiUrl) {
     statusDot.className = "status-dot yellow";
     statusText.textContent = "Checking connection...";
 
     try {
-      const response = await chrome.runtime.sendMessage({
-        type: "SHIELDAI_HEALTH",
-      });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
 
-      if (response.error) {
+      const response = await fetch(`${apiUrl}/api/health`, {
+        method: "GET",
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) {
         statusDot.className = "status-dot red";
-        statusText.textContent = "Disconnected";
-      } else {
-        statusDot.className = "status-dot green";
-        const aiStatus = response.status?.ai_available ? " (AI active)" : " (AI offline)";
-        statusText.textContent = "Connected" + aiStatus;
+        statusText.textContent = "Disconnected (HTTP " + response.status + ")";
+        return;
       }
+
+      const data = await response.json();
+      statusDot.className = "status-dot green";
+      const aiStatus = data.ai_available ? " (AI active)" : " (AI offline)";
+      statusText.textContent = "Connected" + aiStatus;
     } catch (err) {
       statusDot.className = "status-dot red";
       statusText.textContent = "Disconnected";
