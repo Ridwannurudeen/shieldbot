@@ -66,17 +66,18 @@ A **Telegram bot** that anyone can use - no technical knowledge required:
 ```
 User (Telegram) → ShieldBot (Python) → Multi-Source Validation
                                               ↓
-                        ┌─────────────────────┼─────────────────────┐
-                        ↓                     ↓                     ↓
-                   BNB Chain            External APIs        Scam Databases
-                  (BSC/opBNB)      (BscScan, Honeypot)   (ChainAbuse, etc.)
+                   ┌──────────┬───────────────┼───────────────┬──────────┐
+                   ↓          ↓               ↓               ↓          ↓
+              BNB Chain   External APIs   Scam Databases   Claude AI   On-Chain
+             (BSC/opBNB) (BscScan,HP.is) (ChainAbuse,etc) (Scoring)  (Record)
 ```
 
-**Key Innovation: Multi-Source Validation**
-- 6+ data sources cross-referenced
-- No single point of failure
-- Higher accuracy than any single tool
-- Off-chain analysis = zero gas costs
+**Key Innovation: AI + Multi-Source Validation + On-Chain Recording**
+- 7+ data sources cross-referenced
+- AI structured risk scoring (Claude) blended with heuristic analysis
+- Real liquidity lock detection (PancakeSwap V2 + PinkLock/Unicrypt)
+- On-chain scan recording for transparency (ShieldBotVerifier on BSC)
+- `/history` proves full agent loop: read blockchain → analyze → write blockchain
 
 **Full details:** [ARCHITECTURE.md](https://github.com/Ridwannurudeen/shieldbot/blob/main/ARCHITECTURE.md)
 
@@ -163,38 +164,38 @@ When adding verification contracts:
 
 ---
 
-## 🧠 AI Agent Loop (Adaptive Learning)
+## 🧠 AI Agent Loop (Read → Analyze → Score → Write On-Chain)
 
-### How ShieldBot Learns & Adapts
+### How AI Integration Works
 
-**Current Implementation:**
-- Pattern database updated with each scan
-- Community reports feed into blacklist
-- Risk thresholds tuned based on outcomes
+**Current Implementation — Full AI Agent Loop:**
 
-**Adaptive Learning Flow:**
 ```
-1. Scan new contract
-2. Detect suspicious pattern
-3. Track similar contracts
-4. If 80% become scams within 48h
-   → Update pattern database automatically
-5. Future similar contracts flagged proactively
+1. READ: Fetch contract bytecode, verification status, source code from BNB Chain
+2. ANALYZE: Claude AI (AsyncAnthropic) analyzes data → structured JSON risk score
+3. SCORE: Blend 60% heuristic + 40% AI score → final risk score + confidence %
+4. WRITE: Record scan result on-chain via ShieldBotVerifier contract
+5. QUERY: /history reads on-chain records back (view function, zero gas)
 ```
 
-**Example in Action:**
-- Day 1: ShieldBot scans contract with unusual bytecode
-- Day 2: 10 similar contracts appear, all become honeypots
-- Day 3: ShieldBot auto-updates detection rules
-- Day 4: New similar contract → Instantly flagged as HIGH risk
+**AI-Powered Features:**
+- `compute_ai_risk_score()` — returns structured JSON: `{risk_score, confidence, risk_level, key_findings[], recommendation}`
+- `analyze_verified_source()` — AI scans Solidity source for honeypot patterns, blacklists, owner control, hidden mints
+- Blended scoring: 60% heuristic (bytecode patterns, scam DB, age) + 40% AI (Claude analysis)
+- Confidence metric: weighted by how many data sources responded (BscScan, honeypot API, scam DB, AI, source code)
 
-**Future Enhancement (v2.0):**
-- Machine learning model trained on exploit patterns
-- Real-time threat intelligence from blockchain mempool
-- Predictive risk scoring based on developer reputation
-- Community-driven pattern submissions
+**On-Chain Agent Loop:**
+- Every scan writes to `ShieldBotVerifier` contract (`0x867aE...1f795`) on BSC Mainnet
+- `/history <address>` queries on-chain data back — demonstrates full read+write agent loop
+- `/report <address>` records community reports on-chain + adds to local blacklist
 
-**Result:** ShieldBot gets smarter with every scan, protecting the entire community.
+**Community-Driven Adaptation:**
+- `/report` feeds community intelligence into blacklist
+- Reported addresses flagged as HIGH risk in future scans
+- ~18 bytecode pattern signatures detect mint, pause, blacklist, proxy, self-destruct
+- Source code analysis detects `onlyOwner`, `blacklist`, `setFee`, `setMaxTx`, `delegatecall`
+
+**Result:** ShieldBot combines heuristic analysis, AI intelligence, and on-chain transparency in a complete agent loop.
 
 ---
 
@@ -202,8 +203,9 @@ When adding verification contracts:
 
 ### Core Technologies
 - **Python 3.11+** - Fast, async, mature ecosystem
-- **python-telegram-bot 21.0** - Official Telegram Bot API
-- **web3.py 7.0** - BNB Chain blockchain interaction
+- **python-telegram-bot 20.7** - Official Telegram Bot API
+- **web3.py 6.15.1** - BNB Chain blockchain interaction
+- **anthropic 0.18.1** - Claude AI (AsyncAnthropic) for structured risk scoring
 - **aiohttp** - Async HTTP for parallel API calls
 
 ### BNB Chain Integration
@@ -250,27 +252,24 @@ python bot.py
 
 ```
 shieldbot/
-├── bot.py                      # Main bot logic (10KB)
+├── bot.py                      # Main bot (commands, cache, progress, on-chain)
 ├── scanner/
-│   ├── transaction_scanner.py  # Module 1: Pre-tx checks (6KB)
-│   └── token_scanner.py        # Module 2: Token safety (7KB)
+│   ├── transaction_scanner.py  # Module 1: Pre-tx checks + AI scoring
+│   └── token_scanner.py        # Module 2: Token safety + AI scoring
 ├── utils/
-│   ├── web3_client.py          # BNB Chain integration (11KB)
-│   └── scam_db.py              # Scam database queries (4KB)
-├── docs/
-│   ├── README.md               # Project overview
-│   ├── ARCHITECTURE.md         # System design + diagrams
-│   ├── DETECTION_EXAMPLES.md   # Before/after comparisons
-│   ├── DEPLOYMENT.md           # Production setup guide
-│   ├── TESTING.md              # Test cases + scenarios
-│   └── QUICK_START.md          # VPS deployment steps
+│   ├── web3_client.py          # BNB Chain + real liquidity lock detection
+│   ├── ai_analyzer.py          # Claude AI structured risk scoring + source analysis
+│   ├── risk_scorer.py          # Blended scoring engine (60% heuristic + 40% AI)
+│   ├── scam_db.py              # Multi-source scam database queries
+│   └── onchain_recorder.py     # On-chain scan recording (ShieldBotVerifier)
+├── contracts/
+│   └── ShieldBotVerifier.sol   # Verification contract (deployed on BSC Mainnet)
 ├── requirements.txt            # Python dependencies
 ├── .env.example               # Environment template
 └── LICENSE                    # MIT License
 ```
 
-**Total:** ~60KB code, ~50KB documentation  
-**Quality:** Production-ready, fully tested, well-documented
+**Quality:** Production-ready, AI-integrated, on-chain verified
 
 ---
 
@@ -376,14 +375,13 @@ For unknown/new tokens, the API may occasionally:
 
 ### Judges' Criteria Met
 
-✅ **Innovation:** First Telegram-native security bot for BNB Chain  
-✅ **Technical Excellence:** Multi-source validation, adaptive learning  
-✅ **User Experience:** 3-second scans, zero technical knowledge needed  
-✅ **BNB Chain Focus:** Native BSC/opBNB integration  
-✅ **Agent Track:** AI-powered analysis + onchain data  
-✅ **Real Impact:** Prevents billions in potential scam losses  
-✅ **Production Ready:** Live on VPS, fully functional  
-✅ **Well Documented:** 5 comprehensive docs + architecture diagrams  
+✅ **Problem-Solution Fit:** Instant security scans for BNB Chain's $5.6B scam problem
+✅ **AI Integration:** Claude AI structured risk scoring, source code analysis, blended 60/40 scores
+✅ **Blockchain Relevance:** On-chain scan recording, `/history` query, real liquidity lock detection
+✅ **Technical Excellence:** ~18 bytecode patterns, caching, progress indicators, async throughout
+✅ **Agent Track:** Full AI agent loop — read chain → AI analyze → score → write chain → query chain
+✅ **User Experience:** 3-second scans, zero technical knowledge needed
+✅ **Production Ready:** Live on VPS, fully functional
 ✅ **Open Source:** MIT License, community-driven  
 
 ### Competitive Advantages
@@ -413,17 +411,16 @@ For unknown/new tokens, the API may occasionally:
 - [ ] REST API for developers
 - [ ] Web dashboard
 
-### Phase 3 (Q3 2026) - AI Enhancement
-- [ ] ML-based risk scoring
-- [ ] Predictive threat detection
+### Phase 3 (Q3 2026) - Advanced AI
+- [ ] ML-based risk scoring (training on historical exploit data)
 - [ ] Real-time mempool analysis
 - [ ] Developer reputation scoring
+- [ ] Batch on-chain recording optimization
 
 ### Phase 4 (Q4 2026) - Decentralization
-- [ ] Onchain verification contract
 - [ ] Community reputation token
-- [ ] Decentralized scam reporting
-- [ ] DAO governance
+- [ ] Decentralized scam reporting DAO
+- [ ] Multi-chain expansion (Ethereum, Polygon, Arbitrum)
 
 ---
 
@@ -474,9 +471,14 @@ MIT License - Open source and free forever
 - [x] Architecture documentation
 - [x] Detection examples
 - [x] Quick start guide
+- [x] AI-powered structured risk scoring (Claude AsyncAnthropic)
+- [x] On-chain scan recording (ShieldBotVerifier on BSC Mainnet)
+- [x] `/history` command (read on-chain scan data)
+- [x] `/report` command (community scam reporting)
+- [x] Real liquidity lock detection (PancakeSwap V2 + PinkLock/Unicrypt)
+- [x] Scan caching (5-min TTL)
+- [x] Progress indicators (live status updates)
 - [ ] Demo video recorded *(your task)*
-- [ ] Screenshots taken *(your task)*
-- [ ] Onchain contract deployed *(optional)*
 - [ ] Submission form filled *(your task)*
 
 ---

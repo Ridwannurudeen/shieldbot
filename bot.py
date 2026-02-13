@@ -2,10 +2,13 @@
 """
 ShieldBot - Your BNB Chain Shield
 Telegram bot for pre-transaction scanning and token safety checks
+Features: AI risk scoring, on-chain recording, caching, progress indicators
 """
 
 import os
+import time
 import logging
+from datetime import datetime, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -21,6 +24,8 @@ from scanner.transaction_scanner import TransactionScanner
 from scanner.token_scanner import TokenScanner
 from utils.web3_client import Web3Client
 from utils.ai_analyzer import AIAnalyzer
+from utils.onchain_recorder import OnchainRecorder
+from utils.scam_db import ScamDatabase
 
 # Load environment variables
 load_dotenv()
@@ -32,11 +37,33 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize scanners and AI analyzer
+# Initialize components
 web3_client = Web3Client()
 ai_analyzer = AIAnalyzer()
 tx_scanner = TransactionScanner(web3_client, ai_analyzer)
 token_scanner = TokenScanner(web3_client, ai_analyzer)
+onchain_recorder = OnchainRecorder()
+scam_db = ScamDatabase()
+
+# In-memory scan cache (address -> {result, timestamp})
+_scan_cache = {}
+CACHE_TTL = 300  # 5 minutes
+
+
+def _get_cached(address: str, scan_type: str):
+    """Return cached result if fresh, else None."""
+    key = f"{scan_type}:{address.lower()}"
+    entry = _scan_cache.get(key)
+    if entry and (time.time() - entry['timestamp']) < CACHE_TTL:
+        logger.info(f"Cache hit for {key}")
+        return entry['result']
+    return None
+
+
+def _set_cache(address: str, scan_type: str, result: dict):
+    """Store result in cache."""
+    key = f"{scan_type}:{address.lower()}"
+    _scan_cache[key] = {'result': result, 'timestamp': time.time()}
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -44,37 +71,42 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = """
 🛡️ **Welcome to ShieldBot!**
 
-Your BNB Chain security assistant. I can help you:
+Your AI-powered BNB Chain security assistant. I can help you:
 
 **📡 Pre-Transaction Scan**
 Send me a contract address or transaction data, and I'll check:
 • Scam database matches
 • Contract verification status
-• Security risks
-• Recent similar scams
+• AI-powered risk scoring
+• Bytecode & source code analysis
 
 **🔍 Token Safety Check**
 Send me a token address, and I'll analyze:
 • Honeypot detection
 • Contract ownership
-• Trading restrictions
-• Liquidity locks
+• Trading restrictions & taxes
+• Liquidity lock verification
+
+**📜 On-Chain History**
+All scans are recorded on BNB Chain for transparency.
 
 **How to use:**
-Just send a BNB Chain address (contract or token) and I'll analyze it!
+Just send a BNB Chain address and I'll analyze it!
 
-You can also use:
+Commands:
 /scan <address> - Scan a contract
 /token <address> - Check token safety
+/history <address> - View on-chain scan history
+/report <address> <reason> - Report a scam
 /help - Show this message
 """
-    
+
     keyboard = [
-        [InlineKeyboardButton("📖 Learn More", url="https://github.com/Ridwannurudeen/shieldbot")],
+        [InlineKeyboardButton("📖 GitHub", url="https://github.com/Ridwannurudeen/shieldbot")],
         [InlineKeyboardButton("🔗 BNB Chain", url="https://www.bnbchain.org/")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     await update.message.reply_text(welcome_text, parse_mode='Markdown', reply_markup=reply_markup)
 
 
@@ -86,12 +118,15 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **/start** - Show welcome message
 **/scan <address>** - Scan a contract for security risks
 **/token <address>** - Check if a token is safe to trade
+**/history <address>** - View on-chain scan history
+**/report <address> <reason>** - Report a scam address
 **/help** - Show this help message
 
 **Quick Tips:**
 • Send any BNB Chain address and I'll auto-detect what to scan
 • Addresses starting with 0x are valid
 • I support both BSC and opBNB networks
+• All scans include AI-powered risk scoring
 
 Stay safe! 🛡️
 """
@@ -107,7 +142,7 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         return
-    
+
     address = context.args[0]
     await scan_contract(update, address)
 
@@ -121,25 +156,122 @@ async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         return
-    
+
     address = context.args[0]
     await check_token(update, address)
+
+
+async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /history command - query on-chain scan records"""
+    if not context.args:
+        await update.message.reply_text(
+            "❌ Please provide an address.\n\n"
+            "Usage: `/history <address>`",
+            parse_mode='Markdown'
+        )
+        return
+
+    address = context.args[0]
+
+    if not web3_client.is_valid_address(address):
+        await update.message.reply_text("❌ Invalid address format.")
+        return
+
+    status_msg = await update.message.reply_text("📜 Querying on-chain scan history...")
+
+    try:
+        scan_data = await onchain_recorder.get_latest_scan(address)
+
+        if not scan_data:
+            await status_msg.edit_text(
+                f"📜 **On-Chain History**\n\n"
+                f"**Address:** `{address}`\n\n"
+                f"No on-chain scan records found for this address.\n"
+                f"Use `/scan` or `/token` to scan it first!",
+                parse_mode='Markdown'
+            )
+            return
+
+        # Format timestamp
+        ts = scan_data.get('timestamp', 0)
+        scan_time = datetime.fromtimestamp(ts, tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC') if ts > 0 else 'Unknown'
+
+        risk_emoji = {'LOW': '🟢', 'MEDIUM': '🟡', 'HIGH': '🔴', 'SAFE': '✅', 'WARNING': '⚠️', 'DANGER': '🔴'}
+        risk = scan_data.get('risk_level', 'UNKNOWN')
+        emoji = risk_emoji.get(risk, '⚪')
+
+        response = f"""📜 **On-Chain Scan History**
+
+**Address:** `{address}`
+**Last Scan:** {scan_time}
+**Risk Level:** {emoji} {risk}
+**Scan Type:** {scan_data.get('scan_type', 'unknown')}
+**Total Scans:** {scan_data.get('scan_count', 0)}
+
+🔗 [View on BscScan](https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795#events)
+"""
+
+        await status_msg.edit_text(response, parse_mode='Markdown', disable_web_page_preview=True)
+
+    except Exception as e:
+        logger.error(f"Error in /history: {e}")
+        await status_msg.edit_text(f"❌ Error querying history: {str(e)}")
+
+
+async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /report command - community scam reporting"""
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "❌ Please provide an address and reason.\n\n"
+            "Usage: `/report <address> <reason>`\n"
+            "Example: `/report 0x1234...5678 honeypot scam`",
+            parse_mode='Markdown'
+        )
+        return
+
+    address = context.args[0]
+    reason = ' '.join(context.args[1:])
+
+    if not web3_client.is_valid_address(address):
+        await update.message.reply_text("❌ Invalid address format.")
+        return
+
+    # Add to local blacklist
+    scam_db.add_to_blacklist(address)
+
+    response = f"""✅ **Scam Report Submitted**
+
+**Address:** `{address}`
+**Reason:** {reason}
+**Reporter:** User {update.effective_user.id}
+
+This address has been added to our local blacklist.
+Future scans will flag it as a known scam.
+"""
+
+    # Optionally record on-chain
+    if onchain_recorder.is_available():
+        tx_hash = await onchain_recorder.record_scan(address, 'high', 'report')
+        if tx_hash:
+            response += f"\n🔗 [Recorded on-chain](https://bscscan.com/tx/{tx_hash})"
+
+    await update.message.reply_text(response, parse_mode='Markdown', disable_web_page_preview=True)
 
 
 async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Auto-detect and handle addresses sent in messages"""
     message_text = update.message.text.strip()
-    
+
     # Check if it looks like an Ethereum address
     if message_text.startswith('0x') and len(message_text) == 42:
         # Show scanning message
         status_msg = await update.message.reply_text("🔍 Analyzing address...")
-        
+
         # Check if it's a token contract
         is_token = await web3_client.is_token_contract(message_text)
-        
+
         if is_token:
-            await status_msg.edit_text("🔍 Detected token contract - running safety checks...")
+            await status_msg.edit_text("🔍 Detected token contract — running safety checks...")
             await check_token(update, message_text)
         else:
             await status_msg.edit_text("🔍 Running security scan...")
@@ -151,23 +283,69 @@ async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def scan_contract(update: Update, address: str):
-    """Scan a contract for security risks"""
+    """Scan a contract for security risks with progress indicators"""
     try:
+        # Check cache first
+        cached = _get_cached(address, 'contract')
+        if cached:
+            response = format_scan_result(cached)
+            keyboard = _scan_buttons(address)
+            await update.message.reply_text(response, parse_mode='Markdown', reply_markup=keyboard, disable_web_page_preview=True)
+            return
+
+        # Progress indicator
+        progress_msg = await update.message.reply_text(
+            "🛡️ **Scanning contract...**\n\n"
+            "⏳ Checking scam databases...",
+            parse_mode='Markdown'
+        )
+
         # Run the scan
         result = await tx_scanner.scan_address(address)
-        
+
+        # Update progress
+        try:
+            await progress_msg.edit_text(
+                "🛡️ **Scanning contract...**\n\n"
+                "✅ Scam databases checked\n"
+                "✅ Contract verification checked\n"
+                "✅ Bytecode analysis complete\n"
+                "✅ AI risk scoring complete\n\n"
+                "📊 Generating report...",
+                parse_mode='Markdown'
+            )
+        except Exception:
+            pass  # edit may fail if message hasn't changed enough
+
+        # Cache the result
+        _set_cache(address, 'contract', result)
+
         # Format the response
         response = format_scan_result(result)
-        
-        # Add action buttons
-        keyboard = [
-            [InlineKeyboardButton("🔍 View on BscScan", url=f"https://bscscan.com/address/{address}")],
-            [InlineKeyboardButton("💰 Check Token Safety", callback_data=f"token_{address}")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(response, parse_mode='Markdown', reply_markup=reply_markup)
-    
+        keyboard = _scan_buttons(address)
+
+        # Record on-chain (fire-and-forget)
+        onchain_line = ""
+        if onchain_recorder.is_available():
+            tx_hash = await onchain_recorder.record_scan(
+                address, result.get('risk_level', 'medium'), 'contract'
+            )
+            if tx_hash:
+                onchain_line = f"\n🔗 [Recorded on-chain](https://bscscan.com/tx/{tx_hash})\n"
+
+        # Delete progress message and send final result
+        try:
+            await progress_msg.delete()
+        except Exception:
+            pass
+
+        await update.message.reply_text(
+            response + onchain_line,
+            parse_mode='Markdown',
+            reply_markup=keyboard,
+            disable_web_page_preview=True
+        )
+
     except Exception as e:
         logger.error(f"Error scanning contract: {e}")
         await update.message.reply_text(
@@ -177,23 +355,68 @@ async def scan_contract(update: Update, address: str):
 
 
 async def check_token(update: Update, address: str):
-    """Check token safety"""
+    """Check token safety with progress indicators"""
     try:
+        # Check cache first
+        cached = _get_cached(address, 'token')
+        if cached:
+            response = format_token_result(cached)
+            keyboard = _token_buttons(address)
+            await update.message.reply_text(response, parse_mode='Markdown', reply_markup=keyboard, disable_web_page_preview=True)
+            return
+
+        # Progress indicator
+        progress_msg = await update.message.reply_text(
+            "💰 **Checking token safety...**\n\n"
+            "⏳ Fetching token info...",
+            parse_mode='Markdown'
+        )
+
         # Run token safety checks
         result = await token_scanner.check_token(address)
-        
+
+        # Update progress
+        try:
+            await progress_msg.edit_text(
+                "💰 **Checking token safety...**\n\n"
+                "✅ Token info fetched\n"
+                "✅ Honeypot check complete\n"
+                "✅ Ownership analyzed\n"
+                "✅ Liquidity lock verified\n"
+                "✅ AI risk scoring complete\n\n"
+                "📊 Generating report...",
+                parse_mode='Markdown'
+            )
+        except Exception:
+            pass
+
+        # Cache the result
+        _set_cache(address, 'token', result)
+
         # Format the response
         response = format_token_result(result)
-        
-        # Add action buttons
-        keyboard = [
-            [InlineKeyboardButton("🔍 View on BscScan", url=f"https://bscscan.com/token/{address}")],
-            [InlineKeyboardButton("📊 View on DexScreener", url=f"https://dexscreener.com/bsc/{address}")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(response, parse_mode='Markdown', reply_markup=reply_markup)
-    
+        keyboard = _token_buttons(address)
+
+        # Record on-chain
+        onchain_line = ""
+        if onchain_recorder.is_available():
+            risk_for_chain = result.get('safety_level', 'warning')
+            tx_hash = await onchain_recorder.record_scan(address, risk_for_chain, 'token')
+            if tx_hash:
+                onchain_line = f"\n🔗 [Recorded on-chain](https://bscscan.com/tx/{tx_hash})\n"
+
+        try:
+            await progress_msg.delete()
+        except Exception:
+            pass
+
+        await update.message.reply_text(
+            response + onchain_line,
+            parse_mode='Markdown',
+            reply_markup=keyboard,
+            disable_web_page_preview=True
+        )
+
     except Exception as e:
         logger.error(f"Error checking token: {e}")
         await update.message.reply_text(
@@ -206,103 +429,147 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle button callbacks"""
     query = update.callback_query
     await query.answer()
-    
+
     if query.data.startswith('token_'):
         address = query.data.replace('token_', '')
         await query.message.reply_text(f"🔍 Running token safety check for `{address}`...", parse_mode='Markdown')
         await check_token(query, address)
 
 
+def _scan_buttons(address: str) -> InlineKeyboardMarkup:
+    """Generate action buttons for scan results."""
+    keyboard = [
+        [InlineKeyboardButton("🔍 View on BscScan", url=f"https://bscscan.com/address/{address}")],
+        [InlineKeyboardButton("💰 Check Token Safety", callback_data=f"token_{address}")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _token_buttons(address: str) -> InlineKeyboardMarkup:
+    """Generate action buttons for token results."""
+    keyboard = [
+        [InlineKeyboardButton("🔍 View on BscScan", url=f"https://bscscan.com/token/{address}")],
+        [InlineKeyboardButton("📊 View on DexScreener", url=f"https://dexscreener.com/bsc/{address}")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
 def format_scan_result(result: dict) -> str:
-    """Format scan result as a readable message"""
+    """Format scan result as a readable message with risk score"""
     risk_emoji = {
         'high': '🔴',
         'medium': '🟡',
         'low': '🟢',
         'none': '✅'
     }
-    
+
     risk_level = result.get('risk_level', 'unknown')
     emoji = risk_emoji.get(risk_level, '⚪')
-    
+
     response = f"""
 🛡️ **Security Scan Report**
 
 **Address:** `{result['address']}`
 **Risk Level:** {emoji} {risk_level.upper()}
+**Risk Score:** {result.get('risk_score', 'N/A')}/100 (Confidence: {result.get('confidence', 'N/A')}%)
 
 **Verification Status:**
 {'✅' if result['is_verified'] else '❌'} Contract {'verified' if result['is_verified'] else 'not verified'} on BscScan
 
 **Security Checks:**
 """
-    
+
     for check, status in result.get('checks', {}).items():
         status_icon = '✅' if status else '❌'
         check_name = check.replace('_', ' ').title()
         response += f"{status_icon} {check_name}\n"
-    
+
     if result.get('scam_matches'):
         response += f"\n⚠️ **Warning:** Found {len(result['scam_matches'])} scam database match(es)\n"
-        for match in result['scam_matches'][:3]:  # Show first 3
+        for match in result['scam_matches'][:3]:
             response += f"• {match['type']}: {match['reason']}\n"
-    
+
     if result.get('warnings'):
         response += "\n**Warnings:**\n"
-        for warning in result['warnings']:
+        for warning in result['warnings'][:5]:
             response += f"• {warning}\n"
-    
-    # Add AI analysis if available
+
+    # AI structured risk score
+    ai_risk = result.get('ai_risk_score')
+    if ai_risk:
+        response += f"\n🤖 **AI Risk Assessment:**\n"
+        response += f"Score: {ai_risk.get('risk_score', 'N/A')}/100 | Level: {ai_risk.get('risk_level', 'N/A')}\n"
+        findings = ai_risk.get('key_findings', [])
+        for f in findings[:3]:
+            response += f"• {f}\n"
+        rec = ai_risk.get('recommendation', '')
+        if rec:
+            response += f"💡 {rec}\n"
+
+    # Narrative AI analysis
     if result.get('ai_analysis'):
-        response += f"\n🤖 **AI Analysis:**\n{result['ai_analysis']}\n"
-    
+        response += f"\n🧠 **AI Analysis:**\n{result['ai_analysis'][:500]}\n"
+
     return response
 
 
 def format_token_result(result: dict) -> str:
-    """Format token result as a readable message"""
+    """Format token result as a readable message with risk score"""
     safety_emoji = {
         'safe': '✅',
         'warning': '⚠️',
         'danger': '🔴',
         'unknown': '⚪'
     }
-    
+
     safety_level = result.get('safety_level', 'unknown')
     emoji = safety_emoji.get(safety_level, '⚪')
-    
+
     response = f"""
 💰 **Token Safety Report**
 
 **Token:** {result.get('name', 'Unknown')} ({result.get('symbol', 'N/A')})
 **Address:** `{result['address']}`
 **Safety:** {emoji} {safety_level.upper()}
+**Risk Score:** {result.get('risk_score', 'N/A')}/100 (Confidence: {result.get('confidence', 'N/A')}%)
 
 **Honeypot Check:**
 {'✅ Not a honeypot' if not result.get('is_honeypot') else '🔴 HONEYPOT DETECTED'}
 
 **Contract Analysis:**
 """
-    
+
     checks = result.get('checks', {})
     response += f"{'✅' if checks.get('can_buy') else '❌'} Can Buy\n"
     response += f"{'✅' if checks.get('can_sell') else '❌'} Can Sell\n"
     response += f"{'✅' if checks.get('ownership_renounced') else '❌'} Ownership Renounced\n"
     response += f"{'✅' if checks.get('liquidity_locked') else '❌'} Liquidity Locked\n"
-    
+
     if result.get('risks'):
         response += "\n**Risks Detected:**\n"
-        for risk in result['risks']:
+        for risk in result['risks'][:6]:
             response += f"• {risk}\n"
-    
+
     if result.get('buy_tax') or result.get('sell_tax'):
         response += f"\n**Taxes:**\n"
         response += f"Buy: {result.get('buy_tax', 0)}% | Sell: {result.get('sell_tax', 0)}%\n"
-    
-    # Add AI analysis if available
+
+    # AI structured risk score
+    ai_risk = result.get('ai_risk_score')
+    if ai_risk:
+        response += f"\n🤖 **AI Risk Assessment:**\n"
+        response += f"Score: {ai_risk.get('risk_score', 'N/A')}/100 | Level: {ai_risk.get('risk_level', 'N/A')}\n"
+        findings = ai_risk.get('key_findings', [])
+        for f in findings[:3]:
+            response += f"• {f}\n"
+        rec = ai_risk.get('recommendation', '')
+        if rec:
+            response += f"💡 {rec}\n"
+
+    # Narrative AI analysis
     if result.get('ai_analysis'):
-        response += f"\n🤖 **AI Analysis:**\n{result['ai_analysis']}\n"
-    
+        response += f"\n🧠 **AI Analysis:**\n{result['ai_analysis'][:500]}\n"
+
     return response
 
 
@@ -313,28 +580,30 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Start the bot"""
-    # Get bot token from environment
     token = os.getenv('TELEGRAM_BOT_TOKEN')
     if not token:
         logger.error("TELEGRAM_BOT_TOKEN not found in environment variables!")
         return
-    
-    # Create application
+
     application = Application.builder().token(token).build()
-    
+
     # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("scan", scan_command))
     application.add_handler(CommandHandler("token", token_command))
+    application.add_handler(CommandHandler("history", history_command))
+    application.add_handler(CommandHandler("report", report_command))
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_address))
-    
+
     # Add error handler
     application.add_error_handler(error_handler)
-    
+
     # Start the bot
     logger.info("🛡️ ShieldBot starting...")
+    logger.info(f"AI Analysis: {'enabled' if ai_analyzer.is_available() else 'disabled'}")
+    logger.info(f"On-chain Recording: {'enabled' if onchain_recorder.is_available() else 'disabled'}")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
