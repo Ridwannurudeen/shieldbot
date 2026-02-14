@@ -8,6 +8,7 @@ import logging
 import aiohttp
 from typing import Dict, Optional, Tuple, Union
 from web3 import Web3
+from web3.middleware import ExtraDataToPOAMiddleware
 from web3.exceptions import BadFunctionCallOutput
 from datetime import datetime, timezone
 
@@ -75,7 +76,9 @@ class Web3Client:
         opbnb_rpc = os.getenv('OPBNB_RPC_URL', 'https://opbnb-mainnet-rpc.bnbchain.org')
 
         self.bsc_web3 = Web3(Web3.HTTPProvider(bsc_rpc))
+        self.bsc_web3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
         self.opbnb_web3 = Web3(Web3.HTTPProvider(opbnb_rpc))
+        self.opbnb_web3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
         self.web3 = self.bsc_web3
 
         self.bscscan_api_key = os.getenv('BSCSCAN_API_KEY', '')
