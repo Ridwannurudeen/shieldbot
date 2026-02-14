@@ -45,11 +45,17 @@ class GreenfieldService:
             return
 
         try:
-            from greenfield_python_sdk.config import NetworkConfiguration, NetworkMainnet
+            from greenfield_python_sdk.config import NetworkConfiguration
             from greenfield_python_sdk.key_manager import KeyManager
             from greenfield_python_sdk.greenfield_client import GreenfieldClient
 
-            network_config = NetworkConfiguration(**NetworkMainnet().model_dump())
+            # Construct config directly to avoid pydantic-settings reading .env
+            # (which causes extra_forbidden errors with our GREENFIELD_* vars)
+            network_config = NetworkConfiguration(
+                host="https://greenfield-chain.bnbchain.org",
+                port=443,
+                chain_id=1017,
+            )
             key_manager = KeyManager(private_key=self._private_key)
 
             self._client = GreenfieldClient(
