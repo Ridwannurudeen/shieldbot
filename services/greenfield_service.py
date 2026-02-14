@@ -71,6 +71,14 @@ class GreenfieldService:
             await self._client.__aenter__()
             await self._client.async_init()
 
+            # Strip :443 from SP endpoints — the SDK includes it but the SP auth
+            # signature verification expects URLs without the default HTTPS port
+            sp_eps = self._client.storage_client.object.client.sp_endpoints
+            for addr in sp_eps:
+                ep = sp_eps[addr].get("endpoint", "")
+                if ep.endswith(":443"):
+                    sp_eps[addr]["endpoint"] = ep[:-4]
+
             logger.info(f"Greenfield storage enabled (address: {key_manager.address})")
             self.enabled = True
 
