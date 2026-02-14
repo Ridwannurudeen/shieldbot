@@ -326,9 +326,21 @@ async def scan_contract(update: Update, address: str):
                 contract_data, honeypot_data, dex_data, ethos_data
             )
 
+            # Generate AI forensic analysis
+            ai_analysis = None
+            if ai_analyzer and ai_analyzer.is_available():
+                scan_data = {
+                    'contract': contract_data,
+                    'honeypot': honeypot_data,
+                    'dex': dex_data,
+                    'ethos': ethos_data,
+                    'risk': risk_output,
+                }
+                ai_analysis = await ai_analyzer.generate_forensic_report(address, scan_data, 'contract')
+
             response = format_full_report(
                 risk_output, contract_data, dex_data, ethos_data,
-                honeypot_data=honeypot_data, address=address,
+                honeypot_data=honeypot_data, address=address, ai_analysis=ai_analysis,
             )
             risk_level = risk_output.get('risk_level', 'medium').lower()
 
@@ -407,9 +419,21 @@ async def check_token(update: Update, address: str):
                 contract_data, honeypot_data, dex_data, ethos_data
             )
 
+            # Generate AI forensic analysis
+            ai_analysis = None
+            if ai_analyzer and ai_analyzer.is_available():
+                scan_data = {
+                    'contract': contract_data,
+                    'honeypot': honeypot_data,
+                    'dex': dex_data,
+                    'ethos': ethos_data,
+                    'risk': risk_output,
+                }
+                ai_analysis = await ai_analyzer.generate_forensic_report(address, scan_data, 'token')
+
             response = format_full_report(
                 risk_output, contract_data, dex_data, ethos_data,
-                honeypot_data=honeypot_data, address=address,
+                honeypot_data=honeypot_data, address=address, ai_analysis=ai_analysis,
             )
             risk_level = risk_output.get('risk_level', 'medium').lower()
 
