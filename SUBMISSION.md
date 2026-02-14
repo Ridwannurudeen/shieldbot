@@ -312,7 +312,7 @@ shieldbot/
 ## 🎥 Demo
 
 ### Video Demo
-*(Upload your demo video and add link here)*
+*Demo video pending — will be added before submission deadline.*
 
 ### Screenshots
 
@@ -384,7 +384,7 @@ The contract provides:
 - **GitHub Repository:** https://github.com/Ridwannurudeen/shieldbot
 - **Onchain Contract:** https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795
 - **Live Bot:** @shieldbot_bnb_bot (https://t.me/shieldbot_bnb_bot)
-- **Demo Video:** [YouTube Link] *(add after recording)*
+- **Demo Video:** *Pending — will be added before deadline*
 - **Architecture Diagram:** [ARCHITECTURE.md](https://github.com/Ridwannurudeen/shieldbot/blob/main/ARCHITECTURE.md)
 - **Detection Examples:** [DETECTION_EXAMPLES.md](https://github.com/Ridwannurudeen/shieldbot/blob/main/DETECTION_EXAMPLES.md)
 - **AI Build Log:** [AI_BUILD_LOG.md](https://github.com/Ridwannurudeen/shieldbot/blob/main/AI_BUILD_LOG.md)

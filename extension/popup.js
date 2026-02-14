@@ -42,12 +42,39 @@ document.addEventListener("DOMContentLoaded", () => {
     const apiUrl = apiUrlInput.value.trim().replace(/\/+$/, "");
     const enabled = enabledToggle.checked;
 
+    // Enforce HTTPS for non-local URLs
+    if (!isSecureUrl(apiUrl)) {
+      savedMsg.textContent = "Error: Use HTTPS for non-local URLs";
+      savedMsg.style.color = "#ef4444";
+      savedMsg.classList.add("show");
+      setTimeout(() => {
+        savedMsg.classList.remove("show");
+        savedMsg.textContent = "Saved!";
+        savedMsg.style.color = "";
+      }, 3000);
+      return;
+    }
+
     chrome.storage.local.set({ apiUrl, enabled }, () => {
+      savedMsg.textContent = "Saved!";
+      savedMsg.style.color = "";
       savedMsg.classList.add("show");
       setTimeout(() => savedMsg.classList.remove("show"), 2000);
       checkConnection(apiUrl);
     });
   });
+
+  function isSecureUrl(url) {
+    try {
+      const u = new URL(url);
+      if (u.protocol === "https:") return true;
+      // Allow HTTP only for localhost / 127.0.0.1 (dev)
+      if (u.protocol === "http:" && (u.hostname === "localhost" || u.hostname === "127.0.0.1")) return true;
+      return false;
+    } catch {
+      return false;
+    }
+  }
 
   // --- Connection Check ---
   async function checkConnection(apiUrl) {

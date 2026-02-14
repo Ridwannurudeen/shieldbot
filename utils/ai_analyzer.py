@@ -24,8 +24,8 @@ class AIAnalyzer:
         else:
             self.client = anthropic.AsyncAnthropic(api_key=self.api_key)
 
-        # Use model available on this API key
-        self.model = "claude-3-haiku-20240307"
+        self.model = os.getenv('ANTHROPIC_MODEL', 'claude-3-haiku-20240307')
+        logger.info(f"AI model: {self.model}")
 
     async def compute_ai_risk_score(self, address: str, scan_data: Dict) -> Optional[Dict]:
         """
