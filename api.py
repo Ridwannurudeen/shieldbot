@@ -283,46 +283,78 @@ async def test_page():
       logEl.scrollTop = logEl.scrollHeight;
     }
 
-    // Set up mock wallet provider if no real wallet exists
-    if (!window.ethereum) {
-      log('No wallet detected — installing mock provider');
-      window.ethereum = {
-        isMetaMask: true,
-        chainId: '0x38',
-        selectedAddress: MOCK_SENDER,
-        request: async function(args) {
-          log('Mock wallet received: ' + args.method);
-          if (args.method === 'eth_sendTransaction') {
-            return '0x' + Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
-          }
-          if (args.method === 'eth_chainId') return '0x38';
-          if (args.method === 'eth_accounts') return [MOCK_SENDER];
-          if (args.method === 'eth_requestAccounts') return [MOCK_SENDER];
-          return null;
-        },
-      };
-      // Announce via EIP-6963
-      window.dispatchEvent(new CustomEvent('eip6963:announceProvider', {
-        detail: { info: { name: 'MockWallet' }, provider: window.ethereum }
-      }));
-    } else {
-      log('Real wallet detected: ' + (window.ethereum.isMetaMask ? 'MetaMask' : 'Unknown'));
+    // Detect extension by checking for injected elements and flags
+    function detectExtension() {
+      // v1 flags
+      if (window.__shieldai_injected) return 'v1';
+      if (window.ethereum && window.ethereum.__shieldai_proxied) return 'v1';
+      // v2 flags
+      if (window.__shieldbot_injected) return 'v2';
+      if (window.ethereum && window.ethereum.__shieldbot_proxied) return 'v2';
+      // Check for extension-injected link/script elements
+      const links = document.querySelectorAll('link[href*="chrome-extension"]');
+      if (links.length > 0) return 'v1';
+      const scripts = document.querySelectorAll('script[src*="chrome-extension"]');
+      if (scripts.length > 0) return 'v1';
+      return null;
     }
 
-    // Check if ShieldBot extension is active
+    // Delay mock provider setup to let inject.js install its watcher first
     setTimeout(() => {
+      if (!window.ethereum) {
+        log('No wallet detected — installing mock provider');
+        window.ethereum = {
+          isMetaMask: true,
+          chainId: '0x38',
+          selectedAddress: MOCK_SENDER,
+          request: async function(args) {
+            log('Mock wallet received: ' + args.method);
+            if (args.method === 'eth_sendTransaction') {
+              return '0x' + Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
+            }
+            if (args.method === 'eth_chainId') return '0x38';
+            if (args.method === 'eth_accounts') return [MOCK_SENDER];
+            if (args.method === 'eth_requestAccounts') return [MOCK_SENDER];
+            return null;
+          },
+        };
+        // Announce via EIP-6963
+        window.dispatchEvent(new CustomEvent('eip6963:announceProvider', {
+          detail: { info: { name: 'MockWallet' }, provider: window.ethereum }
+        }));
+      } else {
+        log('Real wallet detected: ' + (window.ethereum.isMetaMask ? 'MetaMask' : 'Unknown'));
+      }
+    }, 200);
+
+    // Poll for extension detection (inject.js loads async)
+    let pollCount = 0;
+    const pollMax = 25; // 5 seconds total
+    const pollInterval = setInterval(() => {
+      pollCount++;
       const dot = document.getElementById('statusDot');
       const text = document.getElementById('statusText');
-      if (window.ethereum && window.ethereum.__shieldai_proxied) {
+      const version = detectExtension();
+
+      if (version) {
+        clearInterval(pollInterval);
         dot.className = 'dot dot-green';
-        text.textContent = 'ShieldBot extension active — firewall is intercepting transactions';
-        log('ShieldBot extension detected and active!');
-      } else {
-        dot.className = 'dot dot-red';
-        text.textContent = 'ShieldBot extension NOT detected — load it in chrome://extensions';
-        log('ShieldBot extension not found. Load it from chrome://extensions (Developer mode > Load unpacked)', 'log-error');
+        text.textContent = 'ShieldBot extension active (' + version + ') — firewall is intercepting transactions';
+        log('Extension detected: ' + version + ' | __shieldai_injected=' + !!window.__shieldai_injected + ' | proxied=' + !!(window.ethereum && window.ethereum.__shieldai_proxied));
+        return;
       }
-    }, 1000);
+
+      if (pollCount >= pollMax) {
+        clearInterval(pollInterval);
+        dot.className = 'dot dot-red';
+        text.textContent = 'Extension NOT detected';
+        log('Extension not found after ' + (pollMax * 200) + 'ms', 'log-error');
+        log('Debug: __shieldai_injected=' + !!window.__shieldai_injected + ', __shieldbot_injected=' + !!window.__shieldbot_injected, 'log-error');
+        log('Debug: ethereum exists=' + !!window.ethereum + ', proxied(v1)=' + !!(window.ethereum && window.ethereum.__shieldai_proxied) + ', proxied(v2)=' + !!(window.ethereum && window.ethereum.__shieldbot_proxied), 'log-error');
+        log('Debug: extension elements=' + document.querySelectorAll('[href*="chrome-extension"],[src*="chrome-extension"]').length, 'log-error');
+        log('Make sure extension is loaded in chrome://extensions from: shieldbot/extension/', 'log-warn');
+      }
+    }, 200);
 
     async function sendTx(to, value, btn) {
       const originalText = btn.textContent;
@@ -344,8 +376,8 @@ async def test_page():
         });
         log('Transaction allowed! Hash: ' + result, 'log-info');
       } catch (err) {
-        if (err.message.includes('ShieldBot') || err.message.includes('blocked')) {
-          log('BLOCKED by ShieldBot: ' + err.message, 'log-block');
+        if (err.message.includes('Shield') || err.message.includes('blocked') || err.message.includes('Firewall')) {
+          log('BLOCKED: ' + err.message, 'log-block');
         } else if (err.message.includes('canceled')) {
           log('Canceled by user: ' + err.message, 'log-warn');
         } else {
