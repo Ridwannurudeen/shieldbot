@@ -284,8 +284,11 @@ async def firewall(req: FirewallRequest):
 
             if simulation_result:
                 if not simulation_result.get("success") and simulation_result.get("revert_reason"):
-                    classification = "BLOCK_RECOMMENDED"
                     danger_signals.insert(0, f"Simulation reverted: {simulation_result['revert_reason']}")
+                    # Only escalate to BLOCK if risk is already elevated (>= 30)
+                    # Low-risk reverts are just bad tx params, not malicious
+                    if alert["rug_probability"] >= 30:
+                        classification = "BLOCK_RECOMMENDED"
                 for w in simulation_result.get("warnings", []):
                     if w not in danger_signals:
                         danger_signals.append(w)
