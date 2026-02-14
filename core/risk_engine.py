@@ -70,6 +70,15 @@ class RiskEngine:
         if dex_data.get('wash_trade_flag'):
             market += 25
             critical_flags.append('Possible wash trading')
+
+        # Volume/FDV anomaly - dead or manipulated token
+        fdv = dex_data.get('fdv', 0)
+        volume_24h = dex_data.get('volume_24h', 0)
+        if fdv > 1_000_000 and volume_24h < 1000:
+            market += 20
+            volume_ratio = (volume_24h / fdv * 100) if fdv > 0 else 0
+            critical_flags.append(f'Dead/Low activity (${fdv:,.0f} FDV, ${volume_24h:,.0f} volume, {volume_ratio:.4f}%)')
+
         market = min(market, 100)
 
         # --- Behavioral score (0-100) ---
