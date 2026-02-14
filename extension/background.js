@@ -4,7 +4,7 @@
  * and returns the firewall verdict. Saves scan history.
  */
 
-const DEFAULT_API_URL = "https://38.49.212.108:8000";
+const DEFAULT_API_URL = "http://38.49.212.108:8000";
 const MAX_HISTORY = 50;
 
 // Listen for messages from content scripts
@@ -34,11 +34,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-function isSecureUrl(url) {
+function isAllowedUrl(url) {
   try {
     const u = new URL(url);
     if (u.protocol === "https:") return true;
-    if (u.protocol === "http:" && (u.hostname === "localhost" || u.hostname === "127.0.0.1")) return true;
+    // Allow HTTP for localhost and the known VPS IP
+    if (u.protocol === "http:") {
+      const allowed = ["localhost", "127.0.0.1", "38.49.212.108"];
+      return allowed.includes(u.hostname);
+    }
     return false;
   } catch {
     return false;
@@ -49,8 +53,8 @@ async function getApiUrl() {
   return new Promise((resolve) => {
     chrome.storage.local.get({ apiUrl: DEFAULT_API_URL }, (data) => {
       const url = data.apiUrl || DEFAULT_API_URL;
-      // Block insecure non-local URLs
-      resolve(isSecureUrl(url) ? url : DEFAULT_API_URL);
+      // Block disallowed URLs
+      resolve(isAllowedUrl(url) ? url : DEFAULT_API_URL);
     });
   });
 }
