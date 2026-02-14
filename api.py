@@ -460,7 +460,7 @@ async def firewall(req: FirewallRequest):
         value_bnb = value_wei / 1e18
 
         # Enrich decoded calldata with token names and formatted amounts
-        await _enrich_decoded(decoded, to_addr)
+        await _enrich_decoded(decoded, to_addr, chain_id=req.chainId)
 
         # 2. If target is a whitelisted router, skip deep scan — it's trusted
         if whitelisted:
@@ -607,7 +607,7 @@ async def firewall(req: FirewallRequest):
         is_token = False
         contract_scan = {}
         try:
-            is_token = await web3_client.is_token_contract(to_addr)
+            is_token = await web3_client.is_token_contract(to_addr, chain_id=req.chainId)
         except Exception:
             pass
 
@@ -757,7 +757,7 @@ def _parse_value(value_str: str) -> int:
         return 0
 
 
-async def _resolve_token(address: str) -> Optional[Dict]:
+async def _resolve_token(address: str, chain_id: int = 56) -> Optional[Dict]:
     """Resolve token symbol/name/decimals. Returns cached result if available."""
     if not address or not web3_client.is_valid_address(address):
         return None
@@ -767,7 +767,7 @@ async def _resolve_token(address: str) -> Optional[Dict]:
         return _token_cache[addr_lower]
 
     try:
-        info = await web3_client.get_token_info(address)
+        info = await web3_client.get_token_info(address, chain_id=chain_id)
         if info.get("symbol"):
             result = {
                 "symbol": info["symbol"],
@@ -782,7 +782,7 @@ async def _resolve_token(address: str) -> Optional[Dict]:
     return None
 
 
-async def _enrich_decoded(decoded: Dict, to_addr: str):
+async def _enrich_decoded(decoded: Dict, to_addr: str, chain_id: int = 56):
     """
     Enrich decoded calldata with token names and formatted amounts.
     Modifies decoded dict in-place, adding human_readable fields.
@@ -795,7 +795,7 @@ async def _enrich_decoded(decoded: Dict, to_addr: str):
 
     # For approvals: resolve the token being approved (the `to` address is the token)
     if decoded.get("is_approval"):
-        token_info = await _resolve_token(to_addr)
+        token_info = await _resolve_token(to_addr, chain_id=chain_id)
         if token_info:
             decoded["token_symbol"] = token_info["symbol"]
             decoded["token_name"] = token_info["name"]
@@ -820,7 +820,7 @@ async def _enrich_decoded(decoded: Dict, to_addr: str):
 
     # For transfers: resolve the token
     elif category == "transfer":
-        token_info = await _resolve_token(to_addr)
+        token_info = await _resolve_token(to_addr, chain_id=chain_id)
         if token_info:
             decoded["token_symbol"] = token_info["symbol"]
             decoded["token_name"] = token_info["name"]
