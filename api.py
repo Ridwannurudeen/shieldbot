@@ -313,7 +313,7 @@ async def test_page():
     setTimeout(() => {
       const dot = document.getElementById('statusDot');
       const text = document.getElementById('statusText');
-      if (window.ethereum && window.ethereum.__shieldbot_proxied) {
+      if (window.ethereum && window.ethereum.__shieldai_proxied) {
         dot.className = 'dot dot-green';
         text.textContent = 'ShieldBot extension active — firewall is intercepting transactions';
         log('ShieldBot extension detected and active!');
