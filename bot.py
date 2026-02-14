@@ -7,6 +7,7 @@ Features: AI risk scoring, on-chain recording, caching, progress indicators
 
 import os
 import time
+import asyncio
 import logging
 from datetime import datetime, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -27,6 +28,9 @@ from utils.ai_analyzer import AIAnalyzer
 from utils.onchain_recorder import OnchainRecorder
 from utils.scam_db import ScamDatabase
 
+from services import DexService, EthosService, HoneypotService, ContractService
+from core import RiskEngine, format_full_report
+
 # Load environment variables
 load_dotenv()
 
@@ -44,6 +48,13 @@ tx_scanner = TransactionScanner(web3_client, ai_analyzer)
 token_scanner = TokenScanner(web3_client, ai_analyzer)
 onchain_recorder = OnchainRecorder()
 scam_db = ScamDatabase()
+
+# New composite intelligence services
+dex_service = DexService()
+ethos_service = EthosService()
+honeypot_service = HoneypotService(web3_client)
+contract_service = ContractService(web3_client, scam_db)
+risk_engine = RiskEngine()
 
 # In-memory scan cache (address -> {result, timestamp})
 _scan_cache = {}
@@ -283,7 +294,7 @@ async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def scan_contract(update: Update, address: str):
-    """Scan a contract for security risks with progress indicators"""
+    """Scan a contract for security risks with composite intelligence pipeline"""
     try:
         # Check cache first
         cached = _get_cached(address, 'contract')
@@ -295,45 +306,54 @@ async def scan_contract(update: Update, address: str):
 
         # Progress indicator
         progress_msg = await update.message.reply_text(
-            "🛡️ **Scanning contract...**\n\n"
-            "⏳ Checking scam databases...",
+            "\U0001F6E1\uFE0F **Scanning contract...**\n\n"
+            "\u23F3 Gathering intelligence from multiple sources...",
             parse_mode='Markdown'
         )
 
-        # Run the scan
-        result = await tx_scanner.scan_address(address)
-
-        # Update progress
+        # Try new composite pipeline first
+        response = None
+        risk_level = 'medium'
         try:
-            await progress_msg.edit_text(
-                "🛡️ **Scanning contract...**\n\n"
-                "✅ Scam databases checked\n"
-                "✅ Contract verification checked\n"
-                "✅ Bytecode analysis complete\n"
-                "✅ AI risk scoring complete\n\n"
-                "📊 Generating report...",
-                parse_mode='Markdown'
+            contract_data, honeypot_data, dex_data, ethos_data = await asyncio.gather(
+                contract_service.fetch_contract_data(address),
+                honeypot_service.fetch_honeypot_data(address),
+                dex_service.fetch_token_market_data(address),
+                ethos_service.fetch_wallet_reputation(address),
             )
-        except Exception:
-            pass  # edit may fail if message hasn't changed enough
 
-        # Cache the result
-        _set_cache(address, 'contract', result)
+            risk_output = risk_engine.compute_composite_risk(
+                contract_data, honeypot_data, dex_data, ethos_data
+            )
 
-        # Format the response
-        response = format_scan_result(result)
+            response = format_full_report(
+                risk_output, contract_data, dex_data, ethos_data,
+                honeypot_data=honeypot_data, address=address,
+            )
+            risk_level = risk_output.get('risk_level', 'medium').lower()
+
+            # Cache the composite result
+            _set_cache(address, 'contract', {'composite_report': response, 'risk_level': risk_level})
+
+        except Exception as e:
+            logger.warning(f"Composite pipeline failed for {address}, falling back: {e}")
+
+        # Fallback to legacy scanner
+        if not response:
+            result = await tx_scanner.scan_address(address)
+            _set_cache(address, 'contract', result)
+            response = format_scan_result(result)
+            risk_level = result.get('risk_level', 'medium')
+
         keyboard = _scan_buttons(address)
 
         # Record on-chain (fire-and-forget)
         onchain_line = ""
         if onchain_recorder.is_available():
-            tx_hash = await onchain_recorder.record_scan(
-                address, result.get('risk_level', 'medium'), 'contract'
-            )
+            tx_hash = await onchain_recorder.record_scan(address, risk_level, 'contract')
             if tx_hash:
-                onchain_line = f"\n🔗 [Recorded on-chain](https://bscscan.com/tx/{tx_hash})\n"
+                onchain_line = f"\n\U0001F517 [Recorded on-chain](https://bscscan.com/tx/{tx_hash})\n"
 
-        # Delete progress message and send final result
         try:
             await progress_msg.delete()
         except Exception:
@@ -349,13 +369,13 @@ async def scan_contract(update: Update, address: str):
     except Exception as e:
         logger.error(f"Error scanning contract: {e}")
         await update.message.reply_text(
-            f"❌ Error scanning contract: {str(e)}\n\n"
+            f"\u274C Error scanning contract: {str(e)}\n\n"
             "Please check the address and try again."
         )
 
 
 async def check_token(update: Update, address: str):
-    """Check token safety with progress indicators"""
+    """Check token safety with composite intelligence pipeline"""
     try:
         # Check cache first
         cached = _get_cached(address, 'token')
@@ -367,43 +387,52 @@ async def check_token(update: Update, address: str):
 
         # Progress indicator
         progress_msg = await update.message.reply_text(
-            "💰 **Checking token safety...**\n\n"
-            "⏳ Fetching token info...",
+            "\U0001F4B0 **Checking token safety...**\n\n"
+            "\u23F3 Gathering intelligence from multiple sources...",
             parse_mode='Markdown'
         )
 
-        # Run token safety checks
-        result = await token_scanner.check_token(address)
-
-        # Update progress
+        # Try new composite pipeline first
+        response = None
+        risk_level = 'warning'
         try:
-            await progress_msg.edit_text(
-                "💰 **Checking token safety...**\n\n"
-                "✅ Token info fetched\n"
-                "✅ Honeypot check complete\n"
-                "✅ Ownership analyzed\n"
-                "✅ Liquidity lock verified\n"
-                "✅ AI risk scoring complete\n\n"
-                "📊 Generating report...",
-                parse_mode='Markdown'
+            contract_data, honeypot_data, dex_data, ethos_data = await asyncio.gather(
+                contract_service.fetch_contract_data(address),
+                honeypot_service.fetch_honeypot_data(address),
+                dex_service.fetch_token_market_data(address),
+                ethos_service.fetch_wallet_reputation(address),
             )
-        except Exception:
-            pass
 
-        # Cache the result
-        _set_cache(address, 'token', result)
+            risk_output = risk_engine.compute_composite_risk(
+                contract_data, honeypot_data, dex_data, ethos_data
+            )
 
-        # Format the response
-        response = format_token_result(result)
+            response = format_full_report(
+                risk_output, contract_data, dex_data, ethos_data,
+                honeypot_data=honeypot_data, address=address,
+            )
+            risk_level = risk_output.get('risk_level', 'medium').lower()
+
+            _set_cache(address, 'token', {'composite_report': response, 'risk_level': risk_level})
+
+        except Exception as e:
+            logger.warning(f"Composite pipeline failed for {address}, falling back: {e}")
+
+        # Fallback to legacy scanner
+        if not response:
+            result = await token_scanner.check_token(address)
+            _set_cache(address, 'token', result)
+            response = format_token_result(result)
+            risk_level = result.get('safety_level', 'warning')
+
         keyboard = _token_buttons(address)
 
         # Record on-chain
         onchain_line = ""
         if onchain_recorder.is_available():
-            risk_for_chain = result.get('safety_level', 'warning')
-            tx_hash = await onchain_recorder.record_scan(address, risk_for_chain, 'token')
+            tx_hash = await onchain_recorder.record_scan(address, risk_level, 'token')
             if tx_hash:
-                onchain_line = f"\n🔗 [Recorded on-chain](https://bscscan.com/tx/{tx_hash})\n"
+                onchain_line = f"\n\U0001F517 [Recorded on-chain](https://bscscan.com/tx/{tx_hash})\n"
 
         try:
             await progress_msg.delete()
@@ -420,7 +449,7 @@ async def check_token(update: Update, address: str):
     except Exception as e:
         logger.error(f"Error checking token: {e}")
         await update.message.reply_text(
-            f"❌ Error checking token: {str(e)}\n\n"
+            f"\u274C Error checking token: {str(e)}\n\n"
             "Please check the address and try again."
         )
 
@@ -455,7 +484,9 @@ def _token_buttons(address: str) -> InlineKeyboardMarkup:
 
 
 def format_scan_result(result: dict) -> str:
-    """Format scan result — use forensic report if available, else fallback"""
+    """Format scan result — use composite report, forensic report, or fallback"""
+    if result.get('composite_report'):
+        return result['composite_report']
     if result.get('forensic_report'):
         return result['forensic_report']
 
@@ -517,7 +548,9 @@ def format_scan_result(result: dict) -> str:
 
 
 def format_token_result(result: dict) -> str:
-    """Format token result — use forensic report if available, else fallback"""
+    """Format token result — use composite report, forensic report, or fallback"""
+    if result.get('composite_report'):
+        return result['composite_report']
     if result.get('forensic_report'):
         return result['forensic_report']
 
