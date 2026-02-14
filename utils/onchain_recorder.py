@@ -158,23 +158,27 @@ class OnchainRecorder:
             logger.error(f"On-chain recording failed: {e}")
             return None
 
-    async def record_scan_fire_and_forget(self, address: str, risk_level: str, scan_type: str) -> Optional[str]:
+    async def record_scan_fire_and_forget(self, address: str, risk_level: str, scan_type: str) -> None:
         """
         Non-blocking wrapper around record_scan.
-        Schedules the recording as a background task.
-        Returns immediately with None (tx hash not available until task completes).
+        Schedules the recording as a background task and returns immediately.
         """
         if not self.is_available():
             return None
+        asyncio.create_task(self._safe_record(address, risk_level, scan_type))
+        return None
 
+    async def _safe_record(self, address: str, risk_level: str, scan_type: str):
+        """Background task that records a scan with timeout and error handling."""
         try:
-            # Run in background - don't await
-            loop = asyncio.get_event_loop()
-            result = await self.record_scan(address, risk_level, scan_type)
-            return result
+            await asyncio.wait_for(
+                self.record_scan(address, risk_level, scan_type),
+                timeout=15.0
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"On-chain recording timed out for {address}")
         except Exception as e:
             logger.error(f"Fire-and-forget recording failed: {e}")
-            return None
 
     async def get_latest_scan(self, address: str) -> Optional[dict]:
         """

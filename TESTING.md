@@ -171,41 +171,23 @@ Expected: Contract scan (not token check)
 
 ---
 
-## Automated Testing (TODO)
+## Automated Testing
 
-Create `tests/test_scanner.py`:
+Tests live in `tests/` and use **pytest** with mocked network calls (no RPC or API keys needed).
 
-```python
-import pytest
-from scanner.transaction_scanner import TransactionScanner
-from scanner.token_scanner import TokenScanner
-from utils.web3_client import Web3Client
+### Test Modules
 
-@pytest.fixture
-def web3_client():
-    return Web3Client()
+| File | Covers |
+|------|--------|
+| `tests/test_risk_scorer.py` | `calculate_risk_score`, `blend_scores`, `compute_confidence`, `score_level_from_int` |
+| `tests/test_ownership.py` | Tri-state ownership propagation (None/True/False) through risk engine |
+| `tests/test_calldata.py` | Calldata decoding, router whitelist, unknown selector fallback |
 
-@pytest.fixture
-def tx_scanner(web3_client):
-    return TransactionScanner(web3_client)
+### Running Tests
 
-@pytest.fixture
-def token_scanner(web3_client):
-    return TokenScanner(web3_client)
-
-def test_valid_address(web3_client):
-    assert web3_client.is_valid_address("0x10ED43C718714eb63d5aA57B78B54704E256024E")
-
-def test_invalid_address(web3_client):
-    assert not web3_client.is_valid_address("0x123")
-
-# Add more tests...
-```
-
-Run tests:
 ```bash
 pip install pytest pytest-asyncio
-pytest tests/
+pytest tests/ -v
 ```
 
 ---

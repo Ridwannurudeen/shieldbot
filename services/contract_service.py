@@ -33,7 +33,7 @@ class ContractService:
             'is_verified': False,
             'contract_age_days': None,
             'scam_matches': [],
-            'ownership_renounced': False,
+            'ownership_renounced': None,
             'has_proxy': False,
             'has_mint': False,
             'has_pause': False,
@@ -67,7 +67,7 @@ class ContractService:
             # Ownership (RPC call, not BscScan)
             ownership = await self.web3_client.get_ownership_info(address)
             if ownership:
-                results['ownership_renounced'] = ownership.get('is_renounced', False)
+                results['ownership_renounced'] = ownership.get('is_renounced')
 
             # Bytecode pattern scan (RPC call)
             bytecode_warnings = []

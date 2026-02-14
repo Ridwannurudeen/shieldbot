@@ -3,7 +3,7 @@
  * Manages settings, displays connection status, and shows scan history.
  */
 
-const DEFAULT_API_URL = "http://38.49.212.108:8000";
+const DEFAULT_API_URL = "https://38.49.212.108:8000";
 
 document.addEventListener("DOMContentLoaded", () => {
   const apiUrlInput = document.getElementById("apiUrl");

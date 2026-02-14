@@ -8,8 +8,9 @@
     "storage"
   ],
   "host_permissions": [
-    "http://*/*",
-    "https://*/*"
+    "https://38.49.212.108:8000/*",
+    "http://38.49.212.108:8000/*",
+    "http://localhost:8000/*"
   ],
   "background": {
     "service_worker": "background.js"

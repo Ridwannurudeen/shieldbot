@@ -8,7 +8,10 @@ import logging
 import aiohttp
 from typing import Dict, Optional, Tuple, Union
 from web3 import Web3
-from web3.middleware import geth_poa_middleware
+try:
+    from web3.middleware import ExtraDataToPOAMiddleware as geth_poa_middleware
+except ImportError:
+    from web3.middleware import geth_poa_middleware
 from web3.exceptions import BadFunctionCallOutput
 from datetime import datetime, timezone
 
@@ -79,7 +82,6 @@ class Web3Client:
         self.bsc_web3.middleware_onion.inject(geth_poa_middleware, layer=0)
         self.opbnb_web3 = Web3(Web3.HTTPProvider(opbnb_rpc))
         self.opbnb_web3.middleware_onion.inject(geth_poa_middleware, layer=0)
-        self.web3 = self.bsc_web3
 
         self.bscscan_api_key = os.getenv('BSCSCAN_API_KEY', '')
         self.bscscan_api_url = 'https://api.etherscan.io/v2/api'
@@ -111,6 +113,12 @@ class Web3Client:
 
         logger.info("Web3Client initialized")
 
+    def get_web3(self, chain_id: int = 56):
+        """Return the appropriate Web3 instance for the given chain ID."""
+        if chain_id == 204:
+            return self.opbnb_web3
+        return self.bsc_web3
+
     def is_valid_address(self, address: str) -> bool:
         """Check if address is valid"""
         return Web3.is_address(address)
@@ -119,19 +127,21 @@ class Web3Client:
         """Convert address to checksum format"""
         return Web3.to_checksum_address(address)
 
-    async def is_contract(self, address: str) -> bool:
+    async def is_contract(self, address: str, chain_id: int = 56) -> bool:
         """Check if address is a contract"""
         try:
-            code = self.web3.eth.get_code(Web3.to_checksum_address(address))
+            w3 = self.get_web3(chain_id)
+            code = w3.eth.get_code(Web3.to_checksum_address(address))
             return len(code) > 0
         except Exception as e:
             logger.error(f"Error checking if contract: {e}")
             return False
 
-    async def is_token_contract(self, address: str) -> bool:
+    async def is_token_contract(self, address: str, chain_id: int = 56) -> bool:
         """Check if address is a token contract (has ERC20 functions)"""
         try:
-            contract = self.web3.eth.contract(
+            w3 = self.get_web3(chain_id)
+            contract = w3.eth.contract(
                 address=Web3.to_checksum_address(address),
                 abi=self.erc20_abi
             )
@@ -140,10 +150,11 @@ class Web3Client:
         except Exception:
             return False
 
-    async def get_bytecode(self, address: str) -> Optional[str]:
+    async def get_bytecode(self, address: str, chain_id: int = 56) -> Optional[str]:
         """Get contract bytecode"""
         try:
-            code = self.web3.eth.get_code(Web3.to_checksum_address(address))
+            w3 = self.get_web3(chain_id)
+            code = w3.eth.get_code(Web3.to_checksum_address(address))
             return code.hex()
         except Exception as e:
             logger.error(f"Error getting bytecode: {e}")
@@ -196,8 +207,8 @@ class Web3Client:
                         result = data['result'][0]
                         tx_hash = result.get('txHash')
 
-                        tx = self.web3.eth.get_transaction(tx_hash)
-                        block = self.web3.eth.get_block(tx['blockNumber'])
+                        tx = self.bsc_web3.eth.get_transaction(tx_hash)
+                        block = self.bsc_web3.eth.get_block(tx['blockNumber'])
 
                         creation_time = datetime.fromtimestamp(block['timestamp'], tz=timezone.utc)
                         age_days = (datetime.now(timezone.utc) - creation_time).days
@@ -214,10 +225,11 @@ class Web3Client:
             logger.error(f"Error getting creation info: {e}")
             return None
 
-    async def get_token_info(self, address: str) -> Dict:
+    async def get_token_info(self, address: str, chain_id: int = 56) -> Dict:
         """Get token information (name, symbol, decimals, supply)"""
         try:
-            contract = self.web3.eth.contract(
+            w3 = self.get_web3(chain_id)
+            contract = w3.eth.contract(
                 address=Web3.to_checksum_address(address),
                 abi=self.erc20_abi
             )
@@ -237,10 +249,11 @@ class Web3Client:
             logger.error(f"Error getting token info: {e}")
             return {}
 
-    async def can_transfer_token(self, address: str) -> bool:
+    async def can_transfer_token(self, address: str, chain_id: int = 56) -> bool:
         """Check if token transfers work (simplified check)"""
         try:
-            contract = self.web3.eth.contract(
+            w3 = self.get_web3(chain_id)
+            contract = w3.eth.contract(
                 address=Web3.to_checksum_address(address),
                 abi=self.erc20_abi
             )
@@ -249,10 +262,11 @@ class Web3Client:
         except Exception:
             return False
 
-    async def get_ownership_info(self, address: str) -> Dict:
+    async def get_ownership_info(self, address: str, chain_id: int = 56) -> Dict:
         """Get contract ownership information"""
         try:
-            contract = self.web3.eth.contract(
+            w3 = self.get_web3(chain_id)
+            contract = w3.eth.contract(
                 address=Web3.to_checksum_address(address),
                 abi=self.erc20_abi
             )
@@ -267,9 +281,9 @@ class Web3Client:
             }
         except Exception as e:
             logger.error(f"Error getting ownership info: {e}")
-            return {'owner': None, 'is_renounced': False}
+            return {'owner': None, 'is_renounced': None}
 
-    async def get_liquidity_info(self, address: str) -> Dict:
+    async def get_liquidity_info(self, address: str, chain_id: int = 56) -> Dict:
         """
         Get real liquidity lock information by checking PancakeSwap V2 LP tokens
         held by known locker contracts (PinkLock, Unicrypt, DxLock, burn/dead addresses).
@@ -277,7 +291,8 @@ class Web3Client:
         """
         try:
             checksum_addr = Web3.to_checksum_address(address)
-            factory = self.web3.eth.contract(
+            w3 = self.get_web3(chain_id)
+            factory = w3.eth.contract(
                 address=Web3.to_checksum_address(PANCAKESWAP_V2_FACTORY),
                 abi=FACTORY_ABI
             )
@@ -306,7 +321,7 @@ class Web3Client:
                 return {'is_locked': False, 'lock_percentage': 0, 'pair': None}
 
             # Get total LP supply and check balances of known lockers
-            pair_contract = self.web3.eth.contract(
+            pair_contract = w3.eth.contract(
                 address=Web3.to_checksum_address(pair_address),
                 abi=PAIR_ABI
             )
