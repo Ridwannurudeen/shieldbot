@@ -79,7 +79,8 @@ class Web3Client:
         self.web3 = self.bsc_web3
 
         self.bscscan_api_key = os.getenv('BSCSCAN_API_KEY', '')
-        self.bscscan_api_url = 'https://api.bscscan.com/api'
+        self.bscscan_api_url = 'https://api.etherscan.io/v2/api'
+        self.bscscan_chainid = 56
 
         # ERC20 ABI (minimal)
         self.erc20_abi = [
@@ -153,6 +154,7 @@ class Web3Client:
         try:
             async with aiohttp.ClientSession() as session:
                 params = {
+                    'chainid': self.bscscan_chainid,
                     'module': 'contract',
                     'action': 'getsourcecode',
                     'address': address,
@@ -177,6 +179,7 @@ class Web3Client:
         try:
             async with aiohttp.ClientSession() as session:
                 params = {
+                    'chainid': self.bscscan_chainid,
                     'module': 'contract',
                     'action': 'getcontractcreation',
                     'contractaddresses': address,
