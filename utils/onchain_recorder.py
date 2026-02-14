@@ -140,7 +140,7 @@ class OnchainRecorder:
             ).build_transaction({
                 'from': self.account.address,
                 'nonce': nonce,
-                'gas': 100000,
+                'gas': 250000,
                 'gasPrice': gas_price,
                 'chainId': 56,
             })
