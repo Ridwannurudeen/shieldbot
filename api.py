@@ -12,7 +12,7 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
@@ -143,7 +143,7 @@ app.add_middleware(
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
     # Skip rate limiting for health checks
-    if request.url.path == "/api/health":
+    if request.url.path in ("/api/health", "/test"):
         return await call_next(request)
 
     client_ip = request.headers.get("x-forwarded-for", request.client.host)
@@ -188,6 +188,177 @@ async def health():
         "greenfield_enabled": greenfield_service.is_enabled() if greenfield_service else False,
         "tenderly_enabled": tenderly_simulator.is_enabled() if tenderly_simulator else False,
     }
+
+
+@app.get("/test", response_class=HTMLResponse)
+async def test_page():
+    """Test page for the Chrome extension — simulates wallet transactions."""
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ShieldBot Extension Test</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0a0a; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 40px 20px; }
+    .container { max-width: 640px; margin: 0 auto; }
+    h1 { color: #00ff88; margin-bottom: 8px; font-size: 28px; }
+    .subtitle { color: #888; margin-bottom: 32px; }
+    .card { background: #1a1a1a; border: 1px solid #333; border-radius: 12px; padding: 24px; margin-bottom: 16px; }
+    .card h3 { color: #fff; margin-bottom: 12px; }
+    .card p { color: #aaa; font-size: 14px; margin-bottom: 16px; line-height: 1.5; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+    .badge-danger { background: #ff444433; color: #ff4444; border: 1px solid #ff444466; }
+    .badge-safe { background: #00ff8833; color: #00ff88; border: 1px solid #00ff8866; }
+    .badge-warn { background: #ffaa0033; color: #ffaa00; border: 1px solid #ffaa0066; }
+    .addr { font-family: monospace; font-size: 12px; color: #888; word-break: break-all; background: #111; padding: 4px 8px; border-radius: 4px; display: block; margin-bottom: 12px; }
+    button { padding: 12px 24px; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; width: 100%; transition: opacity 0.2s; }
+    button:hover { opacity: 0.85; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-danger { background: #ff4444; color: white; }
+    .btn-safe { background: #00ff88; color: black; }
+    .btn-warn { background: #ffaa00; color: black; }
+    #log { background: #111; border: 1px solid #333; border-radius: 8px; padding: 16px; margin-top: 24px; font-family: monospace; font-size: 13px; max-height: 300px; overflow-y: auto; white-space: pre-wrap; }
+    .log-entry { margin-bottom: 4px; }
+    .log-info { color: #00ff88; }
+    .log-warn { color: #ffaa00; }
+    .log-error { color: #ff4444; }
+    .log-block { color: #ff4444; font-weight: bold; }
+    .status { display: flex; align-items: center; gap: 8px; margin-bottom: 24px; padding: 12px 16px; background: #1a1a1a; border-radius: 8px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dot-green { background: #00ff88; box-shadow: 0 0 6px #00ff88; }
+    .dot-red { background: #ff4444; }
+    .dot-yellow { background: #ffaa00; animation: pulse 1s infinite; }
+    @keyframes pulse { 50% { opacity: 0.5; } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>ShieldBot Extension Test</h1>
+    <p class="subtitle">Simulate wallet transactions to test the extension's firewall</p>
+
+    <div class="status" id="status">
+      <div class="dot dot-yellow" id="statusDot"></div>
+      <span id="statusText">Checking extension...</span>
+    </div>
+
+    <div class="card">
+      <h3>Honeypot Token <span class="badge badge-danger">BLOCK_RECOMMENDED</span></h3>
+      <p>Confirmed honeypot with 100% sell tax. Extension should show a <strong style="color:#ff4444">red BLOCK modal</strong> and prevent the transaction.</p>
+      <code class="addr">0xdbda907a02750f79cbf0414f7112eabe5091c286</code>
+      <button class="btn-danger" onclick="sendTx('0xdbda907a02750f79cbf0414f7112eabe5091c286', '0x2386F26FC10000', this)">
+        Send 0.01 BNB to Honeypot
+      </button>
+    </div>
+
+    <div class="card">
+      <h3>PancakeSwap Router <span class="badge badge-safe">SAFE</span></h3>
+      <p>Whitelisted DEX router. Extension should <strong style="color:#00ff88">allow silently</strong> without any modal.</p>
+      <code class="addr">0x10ED43C718714eb63d5aA57B78B54704E256024E</code>
+      <button class="btn-safe" onclick="sendTx('0x10ED43C718714eb63d5aA57B78B54704E256024E', '0x2386F26FC10000', this)">
+        Swap on PancakeSwap
+      </button>
+    </div>
+
+    <div class="card">
+      <h3>Unverified Contract <span class="badge badge-warn">CAUTION</span></h3>
+      <p>Random unverified address. Extension should show an <strong style="color:#ffaa00">orange warning modal</strong>.</p>
+      <code class="addr">0x3ee505ba316879d246760e89f0a29a4403afa498</code>
+      <button class="btn-warn" onclick="sendTx('0x3ee505ba316879d246760e89f0a29a4403afa498', '0x2386F26FC10000', this)">
+        Send to Unverified Contract
+      </button>
+    </div>
+
+    <div id="log"><span class="log-info">Waiting for test...</span></div>
+  </div>
+
+  <script>
+    const MOCK_SENDER = '0x742d35Cc6634C0532925a3b844Bc9e7595f42bE1';
+    const logEl = document.getElementById('log');
+
+    function log(msg, cls = 'log-info') {
+      const ts = new Date().toLocaleTimeString();
+      logEl.innerHTML += '\\n<span class="' + cls + '">[' + ts + '] ' + msg + '</span>';
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    // Set up mock wallet provider if no real wallet exists
+    if (!window.ethereum) {
+      log('No wallet detected — installing mock provider');
+      window.ethereum = {
+        isMetaMask: true,
+        chainId: '0x38',
+        selectedAddress: MOCK_SENDER,
+        request: async function(args) {
+          log('Mock wallet received: ' + args.method);
+          if (args.method === 'eth_sendTransaction') {
+            return '0x' + Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
+          }
+          if (args.method === 'eth_chainId') return '0x38';
+          if (args.method === 'eth_accounts') return [MOCK_SENDER];
+          if (args.method === 'eth_requestAccounts') return [MOCK_SENDER];
+          return null;
+        },
+      };
+      // Announce via EIP-6963
+      window.dispatchEvent(new CustomEvent('eip6963:announceProvider', {
+        detail: { info: { name: 'MockWallet' }, provider: window.ethereum }
+      }));
+    } else {
+      log('Real wallet detected: ' + (window.ethereum.isMetaMask ? 'MetaMask' : 'Unknown'));
+    }
+
+    // Check if ShieldBot extension is active
+    setTimeout(() => {
+      const dot = document.getElementById('statusDot');
+      const text = document.getElementById('statusText');
+      if (window.ethereum && window.ethereum.__shieldbot_proxied) {
+        dot.className = 'dot dot-green';
+        text.textContent = 'ShieldBot extension active — firewall is intercepting transactions';
+        log('ShieldBot extension detected and active!');
+      } else {
+        dot.className = 'dot dot-red';
+        text.textContent = 'ShieldBot extension NOT detected — load it in chrome://extensions';
+        log('ShieldBot extension not found. Load it from chrome://extensions (Developer mode > Load unpacked)', 'log-error');
+      }
+    }, 1000);
+
+    async function sendTx(to, value, btn) {
+      const originalText = btn.textContent;
+      btn.textContent = 'Analyzing...';
+      btn.disabled = true;
+
+      log('Sending eth_sendTransaction to ' + to.substring(0, 10) + '...', 'log-warn');
+
+      try {
+        const result = await window.ethereum.request({
+          method: 'eth_sendTransaction',
+          params: [{
+            from: MOCK_SENDER,
+            to: to,
+            value: value,
+            data: '0x',
+            chainId: 56,
+          }],
+        });
+        log('Transaction allowed! Hash: ' + result, 'log-info');
+      } catch (err) {
+        if (err.message.includes('ShieldBot') || err.message.includes('blocked')) {
+          log('BLOCKED by ShieldBot: ' + err.message, 'log-block');
+        } else if (err.message.includes('canceled')) {
+          log('Canceled by user: ' + err.message, 'log-warn');
+        } else {
+          log('Error: ' + err.message, 'log-error');
+        }
+      } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>"""
 
 
 @app.post("/api/firewall")
