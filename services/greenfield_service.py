@@ -49,12 +49,13 @@ class GreenfieldService:
             from greenfield_python_sdk.key_manager import KeyManager
             from greenfield_python_sdk.greenfield_client import GreenfieldClient
 
-            # Construct config directly to avoid pydantic-settings reading .env
-            # (which causes extra_forbidden errors with our GREENFIELD_* vars)
+            # Construct config directly, suppressing .env loading to avoid
+            # extra_forbidden errors from our GREENFIELD_* env vars
             network_config = NetworkConfiguration(
                 host="https://greenfield-chain.bnbchain.org",
                 port=443,
                 chain_id=1017,
+                _env_file=None,
             )
             key_manager = KeyManager(private_key=self._private_key)
 
