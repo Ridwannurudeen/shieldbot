@@ -51,15 +51,17 @@ class ContractService:
 
             # Contract age
             creation_info = await self.web3_client.get_contract_creation_info(address)
-            results['contract_age_days'] = creation_info.get('age_days')
+            if creation_info:
+                results['contract_age_days'] = creation_info.get('age_days')
 
             # Scam DB
             scam_matches = await self.scam_db.check_address(address)
-            results['scam_matches'] = scam_matches
+            results['scam_matches'] = scam_matches or []
 
             # Ownership
             ownership = await self.web3_client.get_ownership_info(address)
-            results['ownership_renounced'] = ownership.get('is_renounced', False)
+            if ownership:
+                results['ownership_renounced'] = ownership.get('is_renounced', False)
 
             # Bytecode pattern scan
             bytecode_warnings = []
