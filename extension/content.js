@@ -69,7 +69,7 @@
   function getSettings() {
     return new Promise((resolve) => {
       chrome.storage.local.get(
-        { enabled: true, apiUrl: "https://38.49.212.108:8000" },
+        { enabled: true, apiUrl: "http://38.49.212.108:8000" },
         resolve
       );
     });

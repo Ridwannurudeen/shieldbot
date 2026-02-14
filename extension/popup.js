@@ -3,7 +3,7 @@
  * Manages settings, displays connection status, and shows scan history.
  */
 
-const DEFAULT_API_URL = "https://38.49.212.108:8000";
+const DEFAULT_API_URL = "http://38.49.212.108:8000";
 
 document.addEventListener("DOMContentLoaded", () => {
   const apiUrlInput = document.getElementById("apiUrl");
@@ -43,8 +43,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const enabled = enabledToggle.checked;
 
     // Enforce HTTPS for non-local URLs
-    if (!isSecureUrl(apiUrl)) {
-      savedMsg.textContent = "Error: Use HTTPS for non-local URLs";
+    if (!isAllowedUrl(apiUrl)) {
+      savedMsg.textContent = "Error: Use HTTPS or an allowed HTTP host";
       savedMsg.style.color = "#ef4444";
       savedMsg.classList.add("show");
       setTimeout(() => {
@@ -64,12 +64,15 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  function isSecureUrl(url) {
+  function isAllowedUrl(url) {
     try {
       const u = new URL(url);
       if (u.protocol === "https:") return true;
-      // Allow HTTP only for localhost / 127.0.0.1 (dev)
-      if (u.protocol === "http:" && (u.hostname === "localhost" || u.hostname === "127.0.0.1")) return true;
+      // Allow HTTP for localhost and the known VPS IP
+      if (u.protocol === "http:") {
+        const allowed = ["localhost", "127.0.0.1", "38.49.212.108"];
+        return allowed.includes(u.hostname);
+      }
       return false;
     } catch {
       return false;
