@@ -24,7 +24,7 @@ from utils.ai_analyzer import AIAnalyzer
 from utils.scam_db import ScamDatabase
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD
 
-from services import DexService, EthosService, HoneypotService, ContractService
+from services import DexService, EthosService, HoneypotService, ContractService, GreenfieldService, TenderlySimulator
 from core import RiskEngine, format_extension_alert
 
 load_dotenv()
@@ -92,12 +92,15 @@ ethos_service: Optional[EthosService] = None
 honeypot_service: Optional[HoneypotService] = None
 contract_service: Optional[ContractService] = None
 risk_engine: Optional[RiskEngine] = None
+greenfield_service: Optional[GreenfieldService] = None
+tenderly_simulator: Optional[TenderlySimulator] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global web3_client, ai_analyzer, tx_scanner, token_scanner, calldata_decoder
     global scam_db, dex_service, ethos_service, honeypot_service, contract_service, risk_engine
+    global greenfield_service, tenderly_simulator
     web3_client = Web3Client()
     ai_analyzer = AIAnalyzer()
     tx_scanner = TransactionScanner(web3_client, ai_analyzer)
@@ -109,9 +112,15 @@ async def lifespan(app: FastAPI):
     honeypot_service = HoneypotService(web3_client)
     contract_service = ContractService(web3_client, scam_db)
     risk_engine = RiskEngine()
+    greenfield_service = GreenfieldService()
+    tenderly_simulator = TenderlySimulator()
     logger.info("ShieldAI Firewall API started")
     logger.info(f"AI Analysis: {'enabled' if ai_analyzer.is_available() else 'disabled'}")
+    logger.info(f"Greenfield storage: {'enabled' if greenfield_service.is_enabled() else 'disabled'}")
+    logger.info(f"Tenderly simulation: {'enabled' if tenderly_simulator.is_enabled() else 'disabled'}")
     yield
+    await greenfield_service.close()
+    await tenderly_simulator.close()
     logger.info("ShieldAI Firewall API shutting down")
 
 
@@ -175,6 +184,8 @@ async def health():
         "status": "ok",
         "service": "shieldai-firewall",
         "ai_available": ai_analyzer.is_available() if ai_analyzer else False,
+        "greenfield_enabled": greenfield_service.is_enabled() if greenfield_service else False,
+        "tenderly_enabled": tenderly_simulator.is_enabled() if tenderly_simulator else False,
     }
 
 
@@ -234,12 +245,32 @@ async def firewall(req: FirewallRequest):
 
         # 3. Try composite intelligence pipeline
         try:
-            contract_data, honeypot_data, dex_data, ethos_data = await asyncio.gather(
+            # Build gather tasks — simulation runs in parallel if enabled
+            gather_tasks = [
                 contract_service.fetch_contract_data(to_addr),
                 honeypot_service.fetch_honeypot_data(to_addr),
                 dex_service.fetch_token_market_data(to_addr),
                 ethos_service.fetch_wallet_reputation(from_addr),
-            )
+            ]
+            run_simulation = tenderly_simulator and tenderly_simulator.is_enabled()
+            if run_simulation:
+                gather_tasks.append(
+                    tenderly_simulator.simulate_transaction(
+                        to_address=to_addr,
+                        from_address=from_addr,
+                        value=req.value,
+                        data=req.data,
+                        chain_id=req.chainId,
+                    )
+                )
+
+            results = await asyncio.gather(*gather_tasks)
+
+            contract_data = results[0]
+            honeypot_data = results[1]
+            dex_data = results[2]
+            ethos_data = results[3]
+            simulation_result = results[4] if run_simulation else None
 
             risk_output = risk_engine.compute_composite_risk(
                 contract_data, honeypot_data, dex_data, ethos_data
@@ -247,11 +278,35 @@ async def firewall(req: FirewallRequest):
 
             alert = format_extension_alert(risk_output)
 
-            # Map to existing extension response format
-            return {
-                "classification": alert["risk_classification"],
-                "risk_score": alert["rug_probability"],
-                "danger_signals": alert["top_flags"],
+            # Simulation overrides
+            danger_signals = list(alert["top_flags"])
+            classification = alert["risk_classification"]
+
+            if simulation_result:
+                if not simulation_result.get("success") and simulation_result.get("revert_reason"):
+                    classification = "BLOCK_RECOMMENDED"
+                    danger_signals.insert(0, f"Simulation reverted: {simulation_result['revert_reason']}")
+                for w in simulation_result.get("warnings", []):
+                    if w not in danger_signals:
+                        danger_signals.append(w)
+
+            risk_score = alert["rug_probability"]
+
+            # Shield score breakdown
+            shield_score = {
+                "overall": risk_score,
+                "category_scores": risk_output.get("category_scores", {}),
+                "risk_level": risk_output.get("risk_level", "UNKNOWN"),
+                "threat_type": risk_output.get("risk_archetype", "unknown"),
+                "critical_flags": risk_output.get("critical_flags", []),
+                "confidence": alert["confidence"],
+            }
+
+            # Build response
+            response = {
+                "classification": classification,
+                "risk_score": risk_score,
+                "danger_signals": danger_signals,
                 "transaction_impact": {
                     "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens",
                     "granting_access": "UNLIMITED" if decoded.get("is_unlimited_approval") else "None",
@@ -260,16 +315,38 @@ async def firewall(req: FirewallRequest):
                 },
                 "analysis": f"Composite risk analysis — archetype: {alert['risk_archetype']}, confidence: {alert['confidence']}%",
                 "plain_english": alert["recommended_action"],
-                "verdict": f"{alert['risk_classification']} — Rug probability {alert['rug_probability']}%",
+                "verdict": f"{classification} — Rug probability {risk_score}%",
                 "raw_checks": {
                     "is_verified": contract_data.get("is_verified", False),
                     "scam_matches": len(contract_data.get("scam_matches", [])),
                     "contract_age_days": contract_data.get("contract_age_days"),
                     "is_honeypot": honeypot_data.get("is_honeypot", False),
                     "ownership_renounced": contract_data.get("ownership_renounced", False),
-                    "risk_score_heuristic": alert["rug_probability"],
+                    "risk_score_heuristic": risk_score,
                 },
+                "shield_score": shield_score,
+                "simulation": simulation_result,
+                "greenfield_url": None,
             }
+
+            # Greenfield upload for risky transactions (risk >= 50)
+            if greenfield_service and greenfield_service.is_enabled() and risk_score >= 50:
+                try:
+                    gf_url = await greenfield_service.upload_report(
+                        target_address=to_addr,
+                        risk_score=risk_score,
+                        category_scores=risk_output.get("category_scores", {}),
+                        full_analysis={
+                            "classification": response.get("classification"),
+                            "danger_signals": response.get("danger_signals"),
+                            "raw_checks": response.get("raw_checks"),
+                        },
+                    )
+                    response["greenfield_url"] = gf_url
+                except Exception as e:
+                    logger.error(f"Greenfield upload failed: {e}")
+
+            return response
 
         except Exception as e:
             logger.warning(f"Composite pipeline failed for {to_addr}, falling back: {e}")
