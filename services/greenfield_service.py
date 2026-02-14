@@ -57,7 +57,11 @@ class GreenfieldService:
                 chain_id=1017,
                 _env_file=None,
             )
-            key_manager = KeyManager(private_key=self._private_key)
+            # Strip 0x prefix if present — SDK expects raw hex
+            pk = self._private_key
+            if pk.startswith("0x") or pk.startswith("0X"):
+                pk = pk[2:]
+            key_manager = KeyManager(private_key=pk)
 
             self._client = GreenfieldClient(
                 network_configuration=network_config,
