@@ -9,7 +9,7 @@ class HoneypotService:
     def __init__(self, web3_client):
         self.web3_client = web3_client
 
-    async def fetch_honeypot_data(self, address: str) -> dict:
+    async def fetch_honeypot_data(self, address: str, chain_id: int = 56) -> dict:
         defaults = {
             'is_honeypot': False,
             'honeypot_reason': None,
@@ -18,6 +18,11 @@ class HoneypotService:
             'can_buy': True,
             'can_sell': True,
         }
+
+        if chain_id != 56:
+            # Honeypot.is API only supports BSC (chainID=56)
+            logger.info("Honeypot check skipped for chain_id=%d (BSC only)", chain_id)
+            return defaults
 
         try:
             honeypot_result = await self.web3_client.check_honeypot(address)

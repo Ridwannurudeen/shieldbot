@@ -158,6 +158,8 @@ pip install -r requirements.txt
 
 cp .env.example .env
 # Edit .env with your API keys
+# Set CORS_ALLOW_ORIGINS for production (comma-separated, include chrome-extension:// ID)
+# Set ANTHROPIC_MODEL to override the default AI model
 
 # Run Telegram bot
 python bot.py

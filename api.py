@@ -131,11 +131,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS: configurable via CORS_ALLOW_ORIGINS env (comma-separated)
+# Default: localhost dev origins only. Set in .env for production.
+_default_origins = [
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://localhost:3000",
+]
+_cors_origins = os.getenv("CORS_ALLOW_ORIGINS", "").strip()
+cors_origins = [o.strip() for o in _cors_origins.split(",") if o.strip()] if _cors_origins else _default_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Chrome extension uses chrome-extension:// origin
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -175,6 +185,7 @@ class FirewallRequest(BaseModel):
 
 class ScanRequest(BaseModel):
     address: str
+    chainId: int = 56
 
 
 # --- Endpoints ---
@@ -483,8 +494,8 @@ async def firewall(req: FirewallRequest):
         try:
             # Build gather tasks — simulation runs in parallel if enabled
             gather_tasks = [
-                contract_service.fetch_contract_data(to_addr),
-                honeypot_service.fetch_honeypot_data(to_addr),
+                contract_service.fetch_contract_data(to_addr, chain_id=req.chainId),
+                honeypot_service.fetch_honeypot_data(to_addr, chain_id=req.chainId),
                 dex_service.fetch_token_market_data(to_addr),
                 ethos_service.fetch_wallet_reputation(from_addr),
             ]
@@ -566,6 +577,8 @@ async def firewall(req: FirewallRequest):
                 "shield_score": shield_score,
                 "simulation": simulation_result,
                 "greenfield_url": None,
+                "chain_id": req.chainId,
+                "network": "opBNB" if req.chainId == 204 else "BSC",
             }
 
             # Greenfield upload for risky transactions (risk >= 50)
@@ -599,9 +612,9 @@ async def firewall(req: FirewallRequest):
             pass
 
         if is_token:
-            contract_scan = await token_scanner.check_token(to_addr)
+            contract_scan = await token_scanner.check_token(to_addr, chain_id=req.chainId)
         else:
-            contract_scan = await tx_scanner.scan_address(to_addr)
+            contract_scan = await tx_scanner.scan_address(to_addr, chain_id=req.chainId)
 
         contract_scan.pop("forensic_report", None)
         contract_scan.pop("source_code", None)
@@ -642,7 +655,7 @@ async def scan(req: ScanRequest):
             raise HTTPException(status_code=400, detail="Invalid address")
 
         address = web3_client.to_checksum_address(address)
-        result = await tx_scanner.scan_address(address)
+        result = await tx_scanner.scan_address(address, chain_id=req.chainId)
 
         # Strip large fields
         result.pop("source_code", None)

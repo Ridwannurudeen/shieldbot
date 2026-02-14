@@ -34,10 +34,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+function isSecureUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol === "https:") return true;
+    if (u.protocol === "http:" && (u.hostname === "localhost" || u.hostname === "127.0.0.1")) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 async function getApiUrl() {
   return new Promise((resolve) => {
     chrome.storage.local.get({ apiUrl: DEFAULT_API_URL }, (data) => {
-      resolve(data.apiUrl || DEFAULT_API_URL);
+      const url = data.apiUrl || DEFAULT_API_URL;
+      // Block insecure non-local URLs
+      resolve(isSecureUrl(url) ? url : DEFAULT_API_URL);
     });
   });
 }

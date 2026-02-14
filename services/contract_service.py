@@ -27,7 +27,7 @@ class ContractService:
         self.web3_client = web3_client
         self.scam_db = scam_db
 
-    async def fetch_contract_data(self, address: str) -> dict:
+    async def fetch_contract_data(self, address: str, chain_id: int = 56) -> dict:
         defaults = {
             'is_contract': False,
             'is_verified': False,
@@ -43,7 +43,7 @@ class ContractService:
         }
 
         try:
-            is_contract = await self.web3_client.is_contract(address)
+            is_contract = await self.web3_client.is_contract(address, chain_id=chain_id)
             if not is_contract:
                 return defaults
 
@@ -65,7 +65,7 @@ class ContractService:
             results['scam_matches'] = scam_matches or []
 
             # Ownership (RPC call, not BscScan)
-            ownership = await self.web3_client.get_ownership_info(address)
+            ownership = await self.web3_client.get_ownership_info(address, chain_id=chain_id)
             if ownership:
                 results['ownership_renounced'] = ownership.get('is_renounced')
 
@@ -77,7 +77,7 @@ class ContractService:
             has_blacklist = False
 
             try:
-                bytecode = await self.web3_client.get_bytecode(address)
+                bytecode = await self.web3_client.get_bytecode(address, chain_id=chain_id)
                 if bytecode:
                     bytecode_hex = bytecode.hex() if isinstance(bytecode, bytes) else str(bytecode)
                     for sig, pattern_name in BYTECODE_PATTERNS.items():

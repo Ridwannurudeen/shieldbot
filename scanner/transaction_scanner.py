@@ -68,14 +68,14 @@ class TransactionScanner:
         self.scam_db = ScamDatabase()
         self.ai_analyzer = ai_analyzer
 
-    async def scan_address(self, address: str) -> Dict:
+    async def scan_address(self, address: str, chain_id: int = 56) -> Dict:
         """
         Scan a contract address for security risks.
 
         Returns:
             dict: Scan results with risk_score, confidence, risk_level, checks, warnings
         """
-        logger.info(f"Scanning address: {address}")
+        logger.info(f"Scanning address: {address} (chain_id={chain_id})")
 
         if not self.web3.is_valid_address(address):
             raise ValueError("Invalid address format")
@@ -96,10 +96,12 @@ class TransactionScanner:
             'warnings': [],
             'scam_matches': [],
             'scan_type': 'contract',
+            'chain_id': chain_id,
+            'network': 'opBNB' if chain_id == 204 else 'BSC',
         }
 
         # Check if it's a contract
-        result['is_contract'] = await self.web3.is_contract(address)
+        result['is_contract'] = await self.web3.is_contract(address, chain_id=chain_id)
 
         if not result['is_contract']:
             result['risk_level'] = 'low'
@@ -108,11 +110,11 @@ class TransactionScanner:
             result['warnings'].append("This is an EOA (externally owned account), not a contract")
             return result
 
-        # Run all security checks
+        # Run all security checks (BscScan API only covers BSC; bytecode uses chain_id)
         data_sources['bscscan'] = await self._check_verification(address, result)
         data_sources['scam_db'] = await self._check_scam_database(address, result)
         data_sources['contract_age'] = await self._check_contract_age(address, result)
-        data_sources['bytecode'] = await self._check_similar_scams(address, result)
+        data_sources['bytecode'] = await self._check_similar_scams(address, result, chain_id)
 
         # Source code analysis if verified
         source_code = result.get('source_code')
@@ -133,14 +135,16 @@ class TransactionScanner:
         if self.ai_analyzer and self.ai_analyzer.is_available():
             try:
                 ai_result = await self.ai_analyzer.compute_ai_risk_score(address, result)
-                data_sources['ai'] = True
             except Exception as e:
                 logger.error(f"AI risk scoring failed: {e}")
-                data_sources['ai'] = False
+
+        # Only mark AI as successful if we got a valid dict with risk_score
+        ai_score = None
+        if isinstance(ai_result, dict) and 'risk_score' in ai_result:
+            ai_score = ai_result['risk_score']
+            data_sources['ai'] = True
         else:
             data_sources['ai'] = False
-
-        ai_score = ai_result.get('risk_score') if ai_result else None
 
         # Blend scores (heuristic + AI when available)
         result['risk_score'] = blend_scores(heuristic_score, ai_score)
@@ -233,10 +237,10 @@ class TransactionScanner:
             result['checks']['not_too_new'] = None
             return False
 
-    async def _check_similar_scams(self, address: str, result: Dict) -> bool:
+    async def _check_similar_scams(self, address: str, result: Dict, chain_id: int = 56) -> bool:
         """Check for suspicious bytecode patterns. Returns True if check succeeded."""
         try:
-            bytecode = await self.web3.get_bytecode(address)
+            bytecode = await self.web3.get_bytecode(address, chain_id=chain_id)
 
             if bytecode:
                 patterns = self._detect_suspicious_patterns(bytecode)

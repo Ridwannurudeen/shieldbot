@@ -39,14 +39,14 @@ class TokenScanner:
         self.web3 = web3_client
         self.ai_analyzer = ai_analyzer
 
-    async def check_token(self, address: str) -> Dict:
+    async def check_token(self, address: str, chain_id: int = 56) -> Dict:
         """
         Check token safety with numeric risk scoring.
 
         Returns:
             dict: Safety results with risk_score, confidence, safety_level, checks, risks
         """
-        logger.info(f"Checking token: {address}")
+        logger.info(f"Checking token: {address} (chain_id={chain_id})")
 
         if not self.web3.is_valid_address(address):
             raise ValueError("Invalid address format")
@@ -70,20 +70,22 @@ class TokenScanner:
             'buy_tax': None,
             'sell_tax': None,
             'scan_type': 'token',
+            'chain_id': chain_id,
+            'network': 'opBNB' if chain_id == 204 else 'BSC',
         }
 
         # Get token info
-        await self._get_token_info(address, result)
+        await self._get_token_info(address, result, chain_id)
 
-        # Get contract verification and age info (needed for honeypot cross-validation)
+        # Get contract verification and age info (BscScan — BSC only)
         data_sources['bscscan'] = await self._get_contract_metadata(address, result)
 
         # Run safety checks
-        await self._check_trading_functions(address, result)
-        await self._check_ownership(address, result)
-        data_sources['honeypot_api'] = await self._check_liquidity(address, result)
-        await self._check_honeypot(address, result)
-        data_sources['honeypot_api'] = await self._check_taxes(address, result) or data_sources.get('honeypot_api', False)
+        await self._check_trading_functions(address, result, chain_id)
+        await self._check_ownership(address, result, chain_id)
+        data_sources['honeypot_api'] = await self._check_liquidity(address, result, chain_id)
+        await self._check_honeypot(address, result, chain_id)
+        data_sources['honeypot_api'] = await self._check_taxes(address, result, chain_id) or data_sources.get('honeypot_api', False)
 
         # Source code analysis if verified
         source_code = result.get('source_code')
@@ -107,14 +109,16 @@ class TokenScanner:
         if self.ai_analyzer and self.ai_analyzer.is_available():
             try:
                 ai_result = await self.ai_analyzer.compute_ai_risk_score(address, result)
-                data_sources['ai'] = True
             except Exception as e:
                 logger.error(f"AI risk scoring failed: {e}")
-                data_sources['ai'] = False
+
+        # Only mark AI as successful if we got a valid dict with risk_score
+        ai_score = None
+        if isinstance(ai_result, dict) and 'risk_score' in ai_result:
+            ai_score = ai_result['risk_score']
+            data_sources['ai'] = True
         else:
             data_sources['ai'] = False
-
-        ai_score = ai_result.get('risk_score') if ai_result else None
 
         # Blend scores (heuristic + AI when available)
         result['risk_score'] = blend_scores(heuristic_score, ai_score)
@@ -138,10 +142,10 @@ class TokenScanner:
 
         return result
 
-    async def _get_token_info(self, address: str, result: Dict):
+    async def _get_token_info(self, address: str, result: Dict, chain_id: int = 56):
         """Get basic token information"""
         try:
-            token_info = await self.web3.get_token_info(address)
+            token_info = await self.web3.get_token_info(address, chain_id=chain_id)
             result['name'] = token_info.get('name')
             result['symbol'] = token_info.get('symbol')
             result['decimals'] = token_info.get('decimals')
@@ -175,10 +179,10 @@ class TokenScanner:
             result['contract_age_days'] = 0
             return False
 
-    async def _check_trading_functions(self, address: str, result: Dict):
+    async def _check_trading_functions(self, address: str, result: Dict, chain_id: int = 56):
         """Check if token can be bought and sold"""
         try:
-            can_transfer = await self.web3.can_transfer_token(address)
+            can_transfer = await self.web3.can_transfer_token(address, chain_id=chain_id)
             result['checks']['can_buy'] = can_transfer
             result['checks']['can_sell'] = can_transfer
 
@@ -196,10 +200,10 @@ class TokenScanner:
             if "Token transfers may be restricted" not in str(result.get('risks', [])):
                 result['risks'].append("Honeypot detected - You cannot sell this token after buying")
 
-    async def _check_ownership(self, address: str, result: Dict):
+    async def _check_ownership(self, address: str, result: Dict, chain_id: int = 56):
         """Check contract ownership status"""
         try:
-            ownership_info = await self.web3.get_ownership_info(address)
+            ownership_info = await self.web3.get_ownership_info(address, chain_id=chain_id)
             is_renounced = ownership_info.get('is_renounced')
             owner = ownership_info.get('owner')
 
@@ -212,10 +216,10 @@ class TokenScanner:
             logger.error(f"Error checking ownership: {e}")
             result['checks']['ownership_renounced'] = None
 
-    async def _check_liquidity(self, address: str, result: Dict) -> bool:
+    async def _check_liquidity(self, address: str, result: Dict, chain_id: int = 56) -> bool:
         """Check liquidity lock status. Returns True if check succeeded."""
         try:
-            liquidity_info = await self.web3.get_liquidity_info(address)
+            liquidity_info = await self.web3.get_liquidity_info(address, chain_id=chain_id)
 
             is_locked = liquidity_info.get('is_locked', False)
             lock_percentage = liquidity_info.get('lock_percentage', 0)
@@ -234,8 +238,12 @@ class TokenScanner:
             result['checks']['liquidity_locked'] = None
             return False
 
-    async def _check_honeypot(self, address: str, result: Dict):
+    async def _check_honeypot(self, address: str, result: Dict, chain_id: int = 56):
         """Check if token is a honeypot with cross-validation"""
+        if chain_id != 56:
+            # Honeypot.is API only supports BSC — skip for other chains
+            result['is_honeypot'] = False
+            return
         try:
             honeypot_result = await self.web3.check_honeypot(address)
             is_honeypot = honeypot_result.get('is_honeypot', False)
@@ -260,8 +268,11 @@ class TokenScanner:
             logger.error(f"Error checking honeypot: {e}")
             result['is_honeypot'] = False
 
-    async def _check_taxes(self, address: str, result: Dict) -> bool:
+    async def _check_taxes(self, address: str, result: Dict, chain_id: int = 56) -> bool:
         """Check buy and sell taxes. Returns True if check succeeded."""
+        if chain_id != 56:
+            # Honeypot.is tax API only supports BSC
+            return False
         try:
             tax_info = await self.web3.get_tax_info(address)
 
