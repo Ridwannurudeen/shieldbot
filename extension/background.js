@@ -68,7 +68,7 @@ async function handleAnalyze(tx) {
     from: tx.from || "",
     value: tx.value || "0x0",
     data: tx.data || "0x",
-    chainId: tx.chainId || 56,
+    chainId: typeof tx.chainId === "string" ? parseInt(tx.chainId, 16) || 56 : (tx.chainId || 56),
   };
 
   const response = await fetch(endpoint, {
