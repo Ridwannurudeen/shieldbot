@@ -17,7 +17,7 @@ from eth_account.messages import encode_defunct
 
 logger = logging.getLogger(__name__)
 
-GREENFIELD_REST_API = "https://gnfd-testnet-sp1.bnbchain.org"
+GREENFIELD_REST_API = "https://gnfd-sp1.bnbchain.org"
 
 
 def _generate_report_id(target_address: str, timestamp: int) -> str:
@@ -153,7 +153,7 @@ class GreenfieldService:
                 logger.error(f"Greenfield put_object failed: {upload_response.status_code}")
                 return None
 
-            return f"https://gnfd-testnet-sp1.bnbchain.org/view/{self.bucket_name}/{object_name}"
+            return f"https://gnfd-sp1.bnbchain.org/view/{self.bucket_name}/{object_name}"
 
         except Exception as e:
             logger.error(f"Greenfield object creation failed: {e}")
