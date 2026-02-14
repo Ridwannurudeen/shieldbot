@@ -8,6 +8,7 @@ def format_full_report(
     ethos_data: dict,
     honeypot_data: dict = None,
     address: str = '',
+    ai_analysis: str = None,
 ) -> str:
     rug_prob = risk_output.get('rug_probability', 0)
     risk_level = risk_output.get('risk_level', 'UNKNOWN')
@@ -128,6 +129,12 @@ def format_full_report(
         reason = honeypot_data.get('honeypot_reason')
         if reason and reason not in ('Unknown', 'None', ''):
             lines.append(f'  Reason: {reason}')
+        lines.append('')
+
+    # AI Analysis
+    if ai_analysis:
+        lines.append('*\U0001F9E0 AI Analysis:*')
+        lines.append(ai_analysis)
         lines.append('')
 
     # Final verdict
