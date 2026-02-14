@@ -1,23 +1,21 @@
 """
 BNB Greenfield Storage Service
 Uploads forensic reports as immutable JSON objects when risk score >= 50.
-Uses httpx for async HTTP and EIP-191 signing for authentication.
+Uses the official greenfield-python-sdk for on-chain object creation.
 """
 import asyncio
 import hashlib
+import io
 import json
 import logging
 import os
 import time
 from typing import Optional, Dict, Any
 
-import httpx
-from eth_account import Account
-from eth_account.messages import encode_defunct
-
 logger = logging.getLogger(__name__)
 
-GREENFIELD_REST_API = "https://gnfd-sp1.bnbchain.org"
+# Public view URL base for Greenfield mainnet
+GREENFIELD_VIEW_BASE = "https://greenfield-sp.bnbchain.org/view"
 
 
 def _generate_report_id(target_address: str, timestamp: int) -> str:
@@ -27,33 +25,59 @@ def _generate_report_id(target_address: str, timestamp: int) -> str:
 
 
 class GreenfieldService:
-    """Async BNB Greenfield storage client using REST API."""
+    """Async BNB Greenfield storage client using the official Python SDK."""
 
     def __init__(self):
-        self.client = httpx.AsyncClient(timeout=30.0)
         self.bucket_name = os.getenv("GREENFIELD_BUCKET_NAME", "shieldbot-reports")
-        private_key = os.getenv("GREENFIELD_PRIVATE_KEY", "")
-        self.address = os.getenv("GREENFIELD_ADDRESS", "")
+        self._private_key = os.getenv("GREENFIELD_PRIVATE_KEY", "")
+        self._client = None  # GreenfieldClient, initialized async
+        self.enabled = False
 
-        if not private_key or private_key.startswith("your_"):
+        if not self._private_key or self._private_key.startswith("your_"):
             logger.warning("GREENFIELD_PRIVATE_KEY not configured - Greenfield storage disabled")
-            self.account = None
-            self.enabled = False
         else:
-            try:
-                self.account = Account.from_key(private_key)
-                self.enabled = True
-                logger.info("Greenfield storage enabled")
-            except Exception as e:
-                logger.error(f"Invalid GREENFIELD_PRIVATE_KEY: {e}")
-                self.account = None
-                self.enabled = False
+            # Mark as potentially enabled — full init happens in async_init
+            self.enabled = True
+
+    async def async_init(self):
+        """Initialize the Greenfield SDK client. Must be called after construction."""
+        if not self.enabled:
+            return
+
+        try:
+            from greenfield_python_sdk.config import NetworkConfiguration, NetworkMainnet
+            from greenfield_python_sdk.key_manager import KeyManager
+            from greenfield_python_sdk.greenfield_client import GreenfieldClient
+
+            network_config = NetworkConfiguration(**NetworkMainnet().model_dump())
+            key_manager = KeyManager(private_key=self._private_key)
+
+            self._client = GreenfieldClient(
+                network_configuration=network_config,
+                key_manager=key_manager,
+            )
+            # Enter the async context to initialize blockchain + storage clients
+            await self._client.__aenter__()
+            await self._client.async_init()
+
+            logger.info(f"Greenfield storage enabled (address: {key_manager.address})")
+            self.enabled = True
+
+        except Exception as e:
+            logger.error(f"Greenfield SDK initialization failed: {e}")
+            self._client = None
+            self.enabled = False
 
     async def close(self):
-        await self.client.aclose()
+        if self._client:
+            try:
+                await self._client.__aexit__(None, None, None)
+            except Exception:
+                pass
+            self._client = None
 
     def is_enabled(self) -> bool:
-        return self.enabled
+        return self.enabled and self._client is not None
 
     async def upload_report(
         self,
@@ -64,12 +88,15 @@ class GreenfieldService:
         tx_hash: Optional[str] = None,
     ) -> Optional[str]:
         """
-        Upload forensic report to Greenfield as JSON object.
+        Upload forensic report to Greenfield as a public JSON object.
         Returns public URL on success, None on failure.
         Retries once on transient failure.
         """
-        if not self.enabled:
+        if not self.is_enabled():
             return None
+
+        from greenfield_python_sdk.models.object import CreateObjectOptions, PutObjectOptions
+        from greenfield_python_sdk.protos.greenfield.storage import VisibilityType
 
         for attempt in range(2):
             try:
@@ -87,14 +114,39 @@ class GreenfieldService:
                     "timestamp": timestamp,
                 }
 
-                report_bytes = json.dumps(report_data, indent=2).encode("utf-8")
-                url = await self._create_object(object_name, report_bytes)
+                report_json = json.dumps(report_data, indent=2)
+                report_bytes = report_json.encode("utf-8")
+                reader = io.BytesIO(report_bytes)
 
-                if url:
-                    logger.info(f"Report uploaded to Greenfield: {url}")
-                    return url
+                # Step 1: Create the object on-chain (gets SP approval, broadcasts tx)
+                create_opts = CreateObjectOptions(
+                    visibility=VisibilityType.VISIBILITY_TYPE_PUBLIC_READ,
+                    content_type="application/json",
+                )
+                await self._client.object.create_object(
+                    bucket_name=self.bucket_name,
+                    object_name=object_name,
+                    reader=reader,
+                    opts=create_opts,
+                )
 
-                logger.error(f"Failed to create Greenfield object for {report_id}")
+                # Wait for chain confirmation
+                await asyncio.sleep(3)
+
+                # Step 2: Upload the actual data to the storage provider
+                reader.seek(0)
+                put_opts = PutObjectOptions()
+                await self._client.object.put_object(
+                    bucket_name=self.bucket_name,
+                    object_name=object_name,
+                    object_size=len(report_bytes),
+                    reader=reader,
+                    opts=put_opts,
+                )
+
+                public_url = f"{GREENFIELD_VIEW_BASE}/{self.bucket_name}/{object_name}"
+                logger.info(f"Report uploaded to Greenfield: {public_url}")
+                return public_url
 
             except Exception as e:
                 logger.error(f"Greenfield upload attempt {attempt + 1} failed: {e}")
@@ -103,66 +155,3 @@ class GreenfieldService:
                 await asyncio.sleep(2.0)
 
         return None
-
-    async def _create_object(self, object_name: str, content: bytes) -> Optional[str]:
-        """Create object on Greenfield using REST API with signed request."""
-        try:
-            # Step 1: Create object metadata
-            url = f"{GREENFIELD_REST_API}/greenfield/storage/create_object"
-
-            create_payload = {
-                "bucket_name": self.bucket_name,
-                "object_name": object_name,
-                "payload_size": len(content),
-                "visibility": "VISIBILITY_TYPE_PUBLIC_READ",
-                "content_type": "application/json",
-                "redundancy_type": "REDUNDANCY_EC_TYPE",
-            }
-
-            signature = self._sign_request(create_payload)
-
-            headers = {
-                "Authorization": f"GNFD1-ECDSA,Signature={signature}",
-                "X-Gnfd-User-Address": self.address,
-                "Content-Type": "application/json",
-            }
-
-            response = await self.client.post(url, json=create_payload, headers=headers)
-
-            if response.status_code not in [200, 201]:
-                logger.error(f"Greenfield create_object failed: {response.status_code} {response.text}")
-                return None
-
-            # Step 2: Upload object data
-            upload_url = f"{GREENFIELD_REST_API}/greenfield/storage/put_object"
-
-            upload_headers = {
-                "Authorization": f"GNFD1-ECDSA,Signature={signature}",
-                "X-Gnfd-User-Address": self.address,
-                "Content-Type": "application/json",
-            }
-
-            upload_response = await self.client.put(
-                upload_url,
-                content=content,
-                headers=upload_headers,
-                params={"bucket_name": self.bucket_name, "object_name": object_name},
-            )
-
-            if upload_response.status_code not in [200, 201]:
-                logger.error(f"Greenfield put_object failed: {upload_response.status_code}")
-                return None
-
-            return f"https://gnfd-sp1.bnbchain.org/view/{self.bucket_name}/{object_name}"
-
-        except Exception as e:
-            logger.error(f"Greenfield object creation failed: {e}")
-            return None
-
-    def _sign_request(self, payload: Dict) -> str:
-        """Sign Greenfield API request using EIP-191 signature."""
-        message_str = json.dumps(payload, sort_keys=True)
-        message_hash = hashlib.sha256(message_str.encode()).digest()
-        signable_message = encode_defunct(message_hash)
-        signed_message = self.account.sign_message(signable_message)
-        return signed_message.signature.hex()
