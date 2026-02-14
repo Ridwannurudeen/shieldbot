@@ -38,13 +38,18 @@ class DexService:
             if not pairs:
                 return defaults
 
-            # Use the highest-liquidity pair
+            # Use the highest-liquidity pair for price/liquidity/FDV metrics
             pair = max(pairs, key=lambda p: float(p.get('liquidity', {}).get('usd', 0) or 0))
 
             liquidity_usd = float(pair.get('liquidity', {}).get('usd', 0) or 0)
-            volume_24h = float(pair.get('volume', {}).get('h24', 0) or 0)
             price_change_24h = float(pair.get('priceChange', {}).get('h24', 0) or 0)
             fdv = float(pair.get('fdv', 0) or 0)
+
+            # Aggregate volume across ALL pairs for accurate total trading activity
+            volume_24h = sum(
+                float(p.get('volume', {}).get('h24', 0) or 0)
+                for p in pairs
+            )
 
             pair_created = pair.get('pairCreatedAt')
             if pair_created:
