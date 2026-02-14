@@ -291,67 +291,24 @@ Provide a clear, helpful answer in 2-3 sentences. Use simple language."""
         try:
             context = self._build_forensic_context(address, scan_data, scan_type)
 
-            system_prompt = """You are ShieldAI — an autonomous blockchain forensic intelligence agent deployed on BNB Chain.
+            system_prompt = """You are ShieldAI — a blockchain security analyst on BNB Chain. Provide a concise forensic report.
 
-Your mission: Analyze the provided on-chain scan data and produce a structured forensic security report. You speak with authority, precision, and zero fluff.
+OUTPUT FORMAT (Telegram Markdown: ** for bold, ` for code):
 
-OUTPUT FORMAT — use Telegram Markdown (** for bold, ` for inline code). Follow this exact structure:
+**Risk Score:** <X>/100 — <CRITICAL/HIGH/MODERATE/LOW>
 
-🛡️ **SHIELDAI FORENSIC REPORT**
-━━━━━━━━━━━━━━━━━━━━
+**Key Findings:**
+• <2-4 bullet points of most important findings>
+• <Focus on critical issues: scam matches, honeypot, unverified, high taxes, ownership>
 
-📍 **Target:** `<address>`
-🔎 **Scan Type:** <Contract Security / Token Safety>
-⏱️ **Status:** Complete
-
-━━━━━━━━━━━━━━━━━━━━
-🚨 **THREAT ASSESSMENT**
-
-**Risk Score:** <X>/100 — <CRITICAL / HIGH / MODERATE / LOW>
-**Confidence:** <X>%
-
-<1-2 sentence threat summary based on the data>
-
-━━━━━━━━━━━━━━━━━━━━
-🔴 **CRITICAL SIGNALS**
-
-<Bullet list of the most dangerous findings. If none, write "No critical signals detected.">
-
-━━━━━━━━━━━━━━━━━━━━
-💧 **LIQUIDITY & LP ANALYSIS**
-
-<Liquidity lock status, percentage, rug pull risk. For contract scans without LP data, note "N/A — contract-level scan">
-
-━━━━━━━━━━━━━━━━━━━━
-📋 **CONTRACT GOVERNANCE**
-
-<Verification status, ownership, proxy patterns, dangerous functions, contract age>
-
-━━━━━━━━━━━━━━━━━━━━
-💰 **TRADE SIMULATION**
-
-<Buy/sell tax, honeypot status, transfer restrictions. For contract scans, note "N/A — use /token for trade analysis">
-
-━━━━━━━━━━━━━━━━━━━━
-🧠 **INVESTIGATOR'S NOTE**
-
-<2-3 sentences of expert-level contextual analysis. Connect the dots between findings. Mention what a sophisticated attacker could exploit.>
-
-━━━━━━━━━━━━━━━━━━━━
-📊 **INVESTOR SUMMARY**
-
-<1-2 sentences in plain language for non-technical users>
-
-━━━━━━━━━━━━━━━━━━━━
-⚖️ **FINAL VERDICT**
-
-<One of: 🟢 CLEARED — Low risk | 🟡 CAUTION — Moderate risk, proceed carefully | 🔴 AVOID — High risk | 🚨 CRITICAL — Do not interact>
+**Verdict:** <🟢 SAFE | 🟡 CAUTION | 🔴 AVOID | 🚨 CRITICAL>
+<1 sentence recommendation>
 
 RULES:
-- Use ONLY the data provided. Do not hallucinate findings.
-- Risk score weights: scam DB match = critical, honeypot = critical, unverified + new = high, high taxes = moderate, ownership not renounced = moderate, suspicious bytecode = high
-- Keep total output under 600 words
-- No HTML tags — only Telegram Markdown"""
+- Use ONLY provided data. No hallucinations.
+- Scam DB match/honeypot = CRITICAL, unverified+new = HIGH, high taxes/no renounce = MODERATE
+- Keep under 200 words total
+- Be direct and actionable"""
 
             user_message = f"""Scan data for forensic analysis:
 
@@ -377,64 +334,60 @@ Generate the ShieldAI forensic report now."""
 
     def _build_forensic_context(self, address: str, data: Dict, scan_type: str) -> str:
         """Build structured context string from scan data for the forensic prompt."""
+        # Extract nested data from composite pipeline
+        contract_data = data.get('contract', {})
+        honeypot_data = data.get('honeypot', {})
+        dex_data = data.get('dex', {})
+        ethos_data = data.get('ethos', {})
+        risk_output = data.get('risk', {})
+
         lines = [
             f"Address: {address}",
             f"Scan Type: {scan_type}",
-            f"Risk Score (heuristic): {data.get('risk_score', 'N/A')}/100",
-            f"Confidence: {data.get('confidence', 'N/A')}%",
-            f"Risk Level: {data.get('risk_level', data.get('safety_level', 'unknown'))}",
+            f"Rug Probability: {risk_output.get('rug_probability', 0)}%",
+            f"Risk Level: {risk_output.get('risk_level', 'UNKNOWN')}",
+            f"Confidence: {risk_output.get('confidence_level', 0)}%",
+            f"Risk Archetype: {risk_output.get('risk_archetype', 'unknown')}",
         ]
 
         # Contract info
-        if 'is_verified' in data:
-            lines.append(f"Contract Verified: {data['is_verified']}")
-        if 'is_contract' in data:
-            lines.append(f"Is Contract: {data['is_contract']}")
-        if 'contract_age_days' in data:
-            lines.append(f"Contract Age: {data['contract_age_days']} days")
-
-        # Token info
-        if data.get('name'):
-            lines.append(f"Token Name: {data['name']}")
-        if data.get('symbol'):
-            lines.append(f"Token Symbol: {data['symbol']}")
-        if data.get('total_supply'):
-            lines.append(f"Total Supply: {data['total_supply']}")
+        if contract_data:
+            lines.append(f"Contract Verified: {contract_data.get('is_verified', False)}")
+            lines.append(f"Contract Age: {contract_data.get('contract_age_days', 'unknown')} days")
+            lines.append(f"Ownership Renounced: {contract_data.get('ownership_renounced', False)}")
 
         # Honeypot & taxes
-        if 'is_honeypot' in data:
-            lines.append(f"Is Honeypot: {data['is_honeypot']}")
-        if data.get('buy_tax') is not None:
-            lines.append(f"Buy Tax: {data['buy_tax']}%")
-        if data.get('sell_tax') is not None:
-            lines.append(f"Sell Tax: {data['sell_tax']}%")
+        if honeypot_data:
+            lines.append(f"Is Honeypot: {honeypot_data.get('is_honeypot', False)}")
+            lines.append(f"Buy Tax: {honeypot_data.get('buy_tax', 0)}%")
+            lines.append(f"Sell Tax: {honeypot_data.get('sell_tax', 0)}%")
+            lines.append(f"Can Buy: {honeypot_data.get('can_buy', True)}")
+            lines.append(f"Can Sell: {honeypot_data.get('can_sell', True)}")
 
-        # Checks
-        checks = data.get('checks', {})
-        if checks:
-            lines.append("Security Checks:")
-            for k, v in checks.items():
-                status = "PASS" if v is True else ("FAIL" if v is False else "UNKNOWN")
-                lines.append(f"  - {k.replace('_', ' ').title()}: {status}")
+        # DEX / Market data
+        if dex_data:
+            lines.append(f"Liquidity: ${dex_data.get('liquidity_usd', 0):,.0f}")
+            lines.append(f"24h Volume: ${dex_data.get('volume_24h', 0):,.0f}")
+            lines.append(f"Price Change 24h: {dex_data.get('price_change_24h', 0):+.1f}%")
+            lines.append(f"FDV: ${dex_data.get('fdv', 0):,.0f}")
 
-        # Warnings / risks
-        warnings = data.get('warnings', [])
-        if warnings:
-            lines.append("Warnings:")
-            for w in warnings:
-                lines.append(f"  - {w}")
+        # Ethos reputation
+        if ethos_data:
+            lines.append(f"Wallet Reputation: {ethos_data.get('reputation_score', 50)}/100")
+            lines.append(f"Trust Level: {ethos_data.get('trust_level', 'unknown')}")
 
-        risks = data.get('risks', [])
-        if risks:
-            lines.append("Risks:")
-            for r in risks:
-                lines.append(f"  - {r}")
+        # Critical flags
+        flags = risk_output.get('critical_flags', [])
+        if flags:
+            lines.append("Critical Flags:")
+            for f in flags:
+                lines.append(f"  - {f}")
 
         # Scam DB
-        scam_matches = data.get('scam_matches', [])
+        scam_matches = contract_data.get('scam_matches', [])
         if scam_matches:
-            lines.append(f"Scam Database Matches: {len(scam_matches)}")
-            for m in scam_matches[:5]:
+            lines.append(f"⚠️ SCAM DATABASE MATCHES: {len(scam_matches)}")
+            for m in scam_matches[:3]:
                 lines.append(f"  - {m.get('type', 'unknown')}: {m.get('reason', 'N/A')}")
         else:
             lines.append("Scam Database Matches: 0")
