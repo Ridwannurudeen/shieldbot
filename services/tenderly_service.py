@@ -104,6 +104,13 @@ class TenderlySimulator:
             except (ValueError, TypeError):
                 value_int = 0
 
+            # State override: give sender 1000 BNB so simulation never fails on insufficient funds
+            state_objects = {
+                from_address.lower(): {
+                    "balance": hex(1000 * 10**18),
+                }
+            }
+
             payload = {
                 "network_id": str(chain_id),
                 "from": from_address.lower(),
@@ -114,6 +121,7 @@ class TenderlySimulator:
                 "gas_price": 0,
                 "save": False,
                 "simulation_type": "quick",
+                "state_objects": state_objects,
             }
 
             response = await self.client.post(url, json=payload, headers=headers)
