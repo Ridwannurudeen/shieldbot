@@ -5,10 +5,13 @@ Runs alongside bot.py on the VPS
 """
 
 import os
+import time
 import logging
+from collections import defaultdict
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
@@ -26,6 +29,51 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+
+
+# --- Rate Limiter ---
+
+class RateLimiter:
+    """In-memory sliding window rate limiter per IP."""
+
+    def __init__(self, requests_per_minute: int = 30, burst: int = 10):
+        self.rpm = requests_per_minute
+        self.burst = burst
+        self.window = 60.0  # seconds
+        self._hits: Dict[str, list] = defaultdict(list)
+
+    def is_allowed(self, key: str) -> bool:
+        now = time.monotonic()
+        hits = self._hits[key]
+
+        # Prune expired entries
+        cutoff = now - self.window
+        while hits and hits[0] < cutoff:
+            hits.pop(0)
+
+        if len(hits) >= self.rpm:
+            return False
+
+        # Burst check: no more than `burst` requests in 5 seconds
+        burst_cutoff = now - 5.0
+        recent = sum(1 for t in hits if t >= burst_cutoff)
+        if recent >= self.burst:
+            return False
+
+        hits.append(now)
+        return True
+
+    def cleanup(self):
+        """Remove stale IPs (call periodically if needed)."""
+        now = time.monotonic()
+        cutoff = now - self.window * 2
+        stale = [k for k, v in self._hits.items() if not v or v[-1] < cutoff]
+        for k in stale:
+            del self._hits[k]
+
+
+rate_limiter = RateLimiter(requests_per_minute=30, burst=10)
+
 
 # Shared instances (initialized on startup)
 web3_client: Optional[Web3Client] = None
@@ -62,6 +110,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    # Skip rate limiting for health checks
+    if request.url.path == "/api/health":
+        return await call_next(request)
+
+    client_ip = request.headers.get("x-forwarded-for", request.client.host)
+    if "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+
+    if not rate_limiter.is_allowed(client_ip):
+        logger.warning(f"Rate limit exceeded for {client_ip}")
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Too many requests. Please wait before trying again."},
+        )
+
+    return await call_next(request)
 
 
 # --- Request / Response Models ---
