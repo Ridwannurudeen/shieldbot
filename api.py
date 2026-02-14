@@ -6,6 +6,7 @@ Runs alongside bot.py on the VPS
 
 import os
 import time
+import asyncio
 import logging
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -20,7 +21,11 @@ from scanner.transaction_scanner import TransactionScanner
 from scanner.token_scanner import TokenScanner
 from utils.web3_client import Web3Client
 from utils.ai_analyzer import AIAnalyzer
+from utils.scam_db import ScamDatabase
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD
+
+from services import DexService, EthosService, HoneypotService, ContractService
+from core import RiskEngine, format_extension_alert
 
 load_dotenv()
 
@@ -81,16 +86,29 @@ ai_analyzer: Optional[AIAnalyzer] = None
 tx_scanner: Optional[TransactionScanner] = None
 token_scanner: Optional[TokenScanner] = None
 calldata_decoder: Optional[CalldataDecoder] = None
+scam_db: Optional[ScamDatabase] = None
+dex_service: Optional[DexService] = None
+ethos_service: Optional[EthosService] = None
+honeypot_service: Optional[HoneypotService] = None
+contract_service: Optional[ContractService] = None
+risk_engine: Optional[RiskEngine] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global web3_client, ai_analyzer, tx_scanner, token_scanner, calldata_decoder
+    global scam_db, dex_service, ethos_service, honeypot_service, contract_service, risk_engine
     web3_client = Web3Client()
     ai_analyzer = AIAnalyzer()
     tx_scanner = TransactionScanner(web3_client, ai_analyzer)
     token_scanner = TokenScanner(web3_client, ai_analyzer)
     calldata_decoder = CalldataDecoder()
+    scam_db = ScamDatabase()
+    dex_service = DexService()
+    ethos_service = EthosService()
+    honeypot_service = HoneypotService(web3_client)
+    contract_service = ContractService(web3_client, scam_db)
+    risk_engine = RiskEngine()
     logger.info("ShieldAI Firewall API started")
     logger.info(f"AI Analysis: {'enabled' if ai_analyzer.is_available() else 'disabled'}")
     yield
@@ -214,7 +232,49 @@ async def firewall(req: FirewallRequest):
                 },
             }
 
-        # 3. Scan the target contract (non-whitelisted)
+        # 3. Try composite intelligence pipeline
+        try:
+            contract_data, honeypot_data, dex_data, ethos_data = await asyncio.gather(
+                contract_service.fetch_contract_data(to_addr),
+                honeypot_service.fetch_honeypot_data(to_addr),
+                dex_service.fetch_token_market_data(to_addr),
+                ethos_service.fetch_wallet_reputation(from_addr),
+            )
+
+            risk_output = risk_engine.compute_composite_risk(
+                contract_data, honeypot_data, dex_data, ethos_data
+            )
+
+            alert = format_extension_alert(risk_output)
+
+            # Map to existing extension response format
+            return {
+                "classification": alert["risk_classification"],
+                "risk_score": alert["rug_probability"],
+                "danger_signals": alert["top_flags"],
+                "transaction_impact": {
+                    "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens",
+                    "granting_access": "UNLIMITED" if decoded.get("is_unlimited_approval") else "None",
+                    "recipient": f"{to_addr[:10]}...",
+                    "post_tx_state": f"Risk archetype: {alert['risk_archetype']}",
+                },
+                "analysis": f"Composite risk analysis — archetype: {alert['risk_archetype']}, confidence: {alert['confidence']}%",
+                "plain_english": alert["recommended_action"],
+                "verdict": f"{alert['risk_classification']} — Rug probability {alert['rug_probability']}%",
+                "raw_checks": {
+                    "is_verified": contract_data.get("is_verified", False),
+                    "scam_matches": len(contract_data.get("scam_matches", [])),
+                    "contract_age_days": contract_data.get("contract_age_days"),
+                    "is_honeypot": honeypot_data.get("is_honeypot", False),
+                    "ownership_renounced": contract_data.get("ownership_renounced", False),
+                    "risk_score_heuristic": alert["rug_probability"],
+                },
+            }
+
+        except Exception as e:
+            logger.warning(f"Composite pipeline failed for {to_addr}, falling back: {e}")
+
+        # 4. Fallback: legacy scanner + AI firewall
         is_token = False
         contract_scan = {}
         try:
@@ -227,11 +287,9 @@ async def firewall(req: FirewallRequest):
         else:
             contract_scan = await tx_scanner.scan_address(to_addr)
 
-        # Remove the forensic_report key (Telegram-formatted, not needed here)
         contract_scan.pop("forensic_report", None)
         contract_scan.pop("source_code", None)
 
-        # 4. Build tx data context for AI
         tx_data = {
             "to": to_addr,
             "from": from_addr,
@@ -242,17 +300,14 @@ async def firewall(req: FirewallRequest):
             "whitelisted_router": whitelisted,
         }
 
-        # 5. Generate AI firewall report
         firewall_result = None
         if ai_analyzer and ai_analyzer.is_available():
             firewall_result = await ai_analyzer.generate_firewall_report(tx_data, contract_scan)
 
         if firewall_result:
-            # Attach raw checks for the extension
             firewall_result["raw_checks"] = _extract_raw_checks(contract_scan)
             return firewall_result
         else:
-            # Fallback: build response from heuristic data
             return _build_fallback_response(decoded, contract_scan, whitelisted)
 
     except HTTPException:
