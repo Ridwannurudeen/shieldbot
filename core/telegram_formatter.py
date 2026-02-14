@@ -125,8 +125,9 @@ def format_full_report(
         can_buy = '\u2705' if honeypot_data.get('can_buy') else '\u274C'
         can_sell = '\u2705' if honeypot_data.get('can_sell') else '\u274C'
         lines.append(f'  Can Buy: {can_buy}  |  Can Sell: {can_sell}')
-        if honeypot_data.get('honeypot_reason'):
-            lines.append(f'  Reason: {honeypot_data["honeypot_reason"]}')
+        reason = honeypot_data.get('honeypot_reason')
+        if reason and reason not in ('Unknown', 'None', ''):
+            lines.append(f'  Reason: {reason}')
         lines.append('')
 
     # Final verdict

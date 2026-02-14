@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,9 @@ BYTECODE_PATTERNS = {
     '1694505e': 'selfdestruct',
     '83197ef0': 'delegatecall',
 }
+
+# Small delay between BscScan API calls to avoid free-tier rate limit (5/sec)
+BSCSCAN_DELAY = 0.25
 
 
 class ContractService:
@@ -45,25 +49,27 @@ class ContractService:
 
             results = {'is_contract': True}
 
-            # Verification + source code
+            # Verification + source code (BscScan call #1)
             verified, source_code = await self.web3_client.is_verified_contract(address)
             results['is_verified'] = verified
 
-            # Contract age
+            await asyncio.sleep(BSCSCAN_DELAY)
+
+            # Contract age (BscScan call #2)
             creation_info = await self.web3_client.get_contract_creation_info(address)
             if creation_info:
                 results['contract_age_days'] = creation_info.get('age_days')
 
-            # Scam DB
+            # Scam DB (external APIs, not BscScan — no delay needed)
             scam_matches = await self.scam_db.check_address(address)
             results['scam_matches'] = scam_matches or []
 
-            # Ownership
+            # Ownership (RPC call, not BscScan)
             ownership = await self.web3_client.get_ownership_info(address)
             if ownership:
                 results['ownership_renounced'] = ownership.get('is_renounced', False)
 
-            # Bytecode pattern scan
+            # Bytecode pattern scan (RPC call)
             bytecode_warnings = []
             has_proxy = False
             has_mint = False
