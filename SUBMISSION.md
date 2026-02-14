@@ -1,7 +1,7 @@
 # ShieldBot - Hackathon Submission
 
 **Good Vibes Only: OpenClaw Edition**  
-**Track:** Agent (AI Agent × Onchain Actions)  
+**Track:** Builders
 **Deadline:** Feb 19, 2026, 3:00 PM UTC
 
 ---
@@ -65,7 +65,7 @@ A **multi-surface security suite** that anyone can use — no technical knowledg
 - ✅ Safety scoring: SAFE / WARNING / DANGER
 
 **Module 3: Chrome Extension — Transaction Firewall**
-- ✅ Real-time `eth_sendTransaction` interception via JS Proxy + EIP-6963
+- ✅ Real-time `eth_sendTransaction` interception via direct request wrapping + EIP-6963
 - ✅ Calldata decoding (approve, transfer, swap, mint, burn, etc.)
 - ✅ Unlimited approval detection — the #1 drainer attack vector
 - ✅ Whitelisted router fast-path (PancakeSwap V2/V3, 1inch)
@@ -229,7 +229,7 @@ When adding verification contracts:
 
 ### Chrome Extension
 - **Manifest V3** - Modern Chrome extension standard
-- **JavaScript Proxy** - Intercepts `window.ethereum.request` calls
+- **Direct request wrapping** - Intercepts `window.ethereum.request` calls
 - **EIP-6963** - Modern wallet provider discovery
 - **chrome.storage** - Settings and scan history persistence
 
@@ -415,7 +415,7 @@ For unknown/new tokens, the API may occasionally:
 ✅ **AI Integration:** Claude AI structured risk scoring, source code analysis, real-time firewall verdicts
 ✅ **Blockchain Relevance:** On-chain scan recording, `/history` query, real liquidity lock detection
 ✅ **Technical Excellence:** ~18 bytecode patterns, calldata decoding, JS Proxy interception, async throughout
-✅ **Agent Track:** Full AI agent loop — read chain → AI analyze → score → write chain → query chain
+✅ **Builders Track:** Full AI agent loop — read chain → AI analyze → score → write chain → query chain
 ✅ **User Experience:** 3-second scans, zero technical knowledge needed, browser-level protection
 ✅ **Multi-Surface:** Telegram bot + Chrome extension + REST API — protection everywhere
 ✅ **Production Ready:** Live on VPS, fully functional, tested on PancakeSwap
@@ -525,9 +525,11 @@ MIT License - Open source and free forever
 - [ ] Demo video recorded *(your task)*
 - [ ] Submission form filled *(your task)*
 
+**Blocking items:** Demo video and submission form still TODO before deadline.
+
 ---
 
 **ShieldBot: Protecting BNB Chain users, one scan at a time.** 🛡️
 
 *Submission Date: Feb 12, 2026*  
-*Status: Ready for judging*
+*Status: Pre-submission — demo + form pending*

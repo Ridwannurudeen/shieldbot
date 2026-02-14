@@ -28,6 +28,7 @@ SOURCE_CODE_PATTERNS = [
     {"pattern": "setTax", "severity": "high", "message": "Owner can change tax rates"},
     {"pattern": "selfdestruct", "severity": "critical", "message": "Self-destruct in source code"},
     {"pattern": "delegatecall", "severity": "high", "message": "Delegatecall in source code"},
+    {"pattern": "renounceOwnership", "severity": "info", "message": "Can renounce ownership (positive)"},
 ]
 
 
@@ -101,8 +102,22 @@ class TokenScanner:
         findings = findings_from_scan_result(result)
         heuristic_score, _, _ = calculate_risk_score(findings)
 
-        # Blend scores (heuristic only — AI scoring folded into forensic report)
-        result['risk_score'] = blend_scores(heuristic_score, None)
+        # Compute AI risk score if available
+        ai_result = None
+        if self.ai_analyzer and self.ai_analyzer.is_available():
+            try:
+                ai_result = await self.ai_analyzer.compute_ai_risk_score(address, result)
+                data_sources['ai'] = True
+            except Exception as e:
+                logger.error(f"AI risk scoring failed: {e}")
+                data_sources['ai'] = False
+        else:
+            data_sources['ai'] = False
+
+        ai_score = ai_result.get('risk_score') if ai_result else None
+
+        # Blend scores (heuristic + AI when available)
+        result['risk_score'] = blend_scores(heuristic_score, ai_score)
 
         # Set data source tracking
         data_sources['bytecode'] = True
@@ -185,7 +200,7 @@ class TokenScanner:
         """Check contract ownership status"""
         try:
             ownership_info = await self.web3.get_ownership_info(address)
-            is_renounced = ownership_info.get('is_renounced', False)
+            is_renounced = ownership_info.get('is_renounced')
             owner = ownership_info.get('owner')
 
             result['checks']['ownership_renounced'] = is_renounced
@@ -304,7 +319,7 @@ class TokenScanner:
             return 'danger'
 
         warning_count = 0
-        if not checks.get('ownership_renounced'):
+        if checks.get('ownership_renounced') is False:
             warning_count += 1
         if not checks.get('liquidity_locked'):
             warning_count += 1

@@ -128,8 +128,22 @@ class TransactionScanner:
         findings = findings_from_scan_result(result)
         heuristic_score, _, _ = calculate_risk_score(findings)
 
-        # Blend scores (heuristic only — AI scoring folded into forensic report)
-        result['risk_score'] = blend_scores(heuristic_score, None)
+        # Compute AI risk score if available
+        ai_result = None
+        if self.ai_analyzer and self.ai_analyzer.is_available():
+            try:
+                ai_result = await self.ai_analyzer.compute_ai_risk_score(address, result)
+                data_sources['ai'] = True
+            except Exception as e:
+                logger.error(f"AI risk scoring failed: {e}")
+                data_sources['ai'] = False
+        else:
+            data_sources['ai'] = False
+
+        ai_score = ai_result.get('risk_score') if ai_result else None
+
+        # Blend scores (heuristic + AI when available)
+        result['risk_score'] = blend_scores(heuristic_score, ai_score)
         result['confidence'] = compute_confidence(data_sources)
 
         # Generate unified forensic report (replaces separate AI calls)

@@ -4,7 +4,7 @@
  * and returns the firewall verdict. Saves scan history.
  */
 
-const DEFAULT_API_URL = "http://38.49.212.108:8000";
+const DEFAULT_API_URL = "https://38.49.212.108:8000";
 const MAX_HISTORY = 50;
 
 // Listen for messages from content scripts

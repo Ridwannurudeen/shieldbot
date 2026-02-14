@@ -52,7 +52,7 @@ class RiskEngine:
         if contract_data.get('scam_matches'):
             structural += 30
             critical_flags.append(f'Scam DB match ({len(contract_data["scam_matches"])} sources)')
-        if not contract_data.get('ownership_renounced'):
+        if contract_data.get('ownership_renounced') is False:
             structural += 5
         structural = min(structural, 100)
 
@@ -127,7 +127,7 @@ class RiskEngine:
         ownership_renounced = contract_data.get('ownership_renounced', False)
 
         # mint + proxy + ownership not renounced → likely rug
-        if has_mint and has_proxy and not ownership_renounced:
+        if has_mint and has_proxy and ownership_renounced is False:
             composite = max(composite, 85)
 
         # honeypot confirmed → floor at 80
