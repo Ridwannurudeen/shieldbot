@@ -113,6 +113,7 @@ async def lifespan(app: FastAPI):
     contract_service = ContractService(web3_client, scam_db)
     risk_engine = RiskEngine()
     greenfield_service = GreenfieldService()
+    await greenfield_service.async_init()
     tenderly_simulator = TenderlySimulator()
     logger.info("ShieldAI Firewall API started")
     logger.info(f"AI Analysis: {'enabled' if ai_analyzer.is_available() else 'disabled'}")
