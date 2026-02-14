@@ -299,9 +299,25 @@ async def test_page():
       return null;
     }
 
-    // Delay mock provider setup to let inject.js install its watcher first
-    setTimeout(() => {
-      if (!window.ethereum) {
+    // Get the actual wallet account (or use mock if no wallet)
+    let activeAccount = MOCK_SENDER;
+
+    async function initWallet() {
+      if (window.ethereum) {
+        log('Real wallet detected: ' + (window.ethereum.isMetaMask ? 'MetaMask' : 'Unknown'));
+        try {
+          const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+          if (accounts && accounts.length > 0) {
+            activeAccount = accounts[0];
+            log('Connected account: ' + activeAccount);
+          } else {
+            log('No accounts connected — click Connect Wallet below', 'log-warn');
+          }
+        } catch (e) {
+          log('Could not get accounts: ' + e.message, 'log-warn');
+        }
+      } else {
+        // No wallet — install mock provider
         log('No wallet detected — installing mock provider');
         window.ethereum = {
           isMetaMask: true,
@@ -318,14 +334,13 @@ async def test_page():
             return null;
           },
         };
-        // Announce via EIP-6963
         window.dispatchEvent(new CustomEvent('eip6963:announceProvider', {
           detail: { info: { name: 'MockWallet' }, provider: window.ethereum }
         }));
-      } else {
-        log('Real wallet detected: ' + (window.ethereum.isMetaMask ? 'MetaMask' : 'Unknown'));
       }
-    }, 200);
+    }
+
+    setTimeout(initWallet, 200);
 
     // Poll for extension detection (inject.js loads async)
     let pollCount = 0;
@@ -356,30 +371,47 @@ async def test_page():
       }
     }, 200);
 
+    async function connectWallet() {
+      if (!window.ethereum) { log('No wallet found', 'log-error'); return; }
+      try {
+        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+        if (accounts && accounts.length > 0) {
+          activeAccount = accounts[0];
+          log('Connected: ' + activeAccount);
+        }
+      } catch (e) {
+        log('Connect failed: ' + e.message, 'log-error');
+      }
+    }
+
     async function sendTx(to, value, btn) {
+      if (activeAccount === MOCK_SENDER && window.ethereum && window.ethereum.isMetaMask) {
+        log('Connecting wallet first...', 'log-warn');
+        await connectWallet();
+      }
+
       const originalText = btn.textContent;
       btn.textContent = 'Analyzing...';
       btn.disabled = true;
 
-      log('Sending eth_sendTransaction to ' + to.substring(0, 10) + '...', 'log-warn');
+      log('Sending eth_sendTransaction from ' + activeAccount.substring(0, 10) + '... to ' + to.substring(0, 10) + '...', 'log-warn');
 
       try {
         const result = await window.ethereum.request({
           method: 'eth_sendTransaction',
           params: [{
-            from: MOCK_SENDER,
+            from: activeAccount,
             to: to,
             value: value,
             data: '0x',
-            chainId: 56,
           }],
         });
         log('Transaction allowed! Hash: ' + result, 'log-info');
       } catch (err) {
         if (err.message.includes('Shield') || err.message.includes('blocked') || err.message.includes('Firewall')) {
           log('BLOCKED: ' + err.message, 'log-block');
-        } else if (err.message.includes('canceled')) {
-          log('Canceled by user: ' + err.message, 'log-warn');
+        } else if (err.message.includes('canceled') || err.message.includes('denied') || err.message.includes('rejected')) {
+          log('User rejected: ' + err.message, 'log-warn');
         } else {
           log('Error: ' + err.message, 'log-error');
         }
