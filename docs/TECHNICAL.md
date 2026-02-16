@@ -357,7 +357,7 @@ shieldbot/
 
 **Easiest evaluation methods:**
 1. **Live Telegram Bot** (no setup): [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)
-2. **Demo Video** (3 minutes): [Watch on Loom](https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c)
+2. **Demo Video** (3 minutes): [Watch on YouTube](https://youtu.be/a-PbFsZz0Ds)
 3. **Local API** (BscScan key only): Follow setup below
 
 ---
@@ -483,7 +483,7 @@ python bot.py
 
 ### 🎥 Video Walkthrough
 
-**Watch the complete 3-minute demo:** [View on Loom](https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c)
+**Watch the complete 3-minute demo:** [View on YouTube](https://youtu.be/a-PbFsZz0Ds)
 
 The video shows:
 - Chrome extension intercepting and blocking honeypot transactions

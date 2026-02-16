@@ -5,7 +5,7 @@
 ### Video Demonstration
 
 **3-Minute Walkthrough (Loom):**
-- **URL:** https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c
+- **URL:** https://youtu.be/a-PbFsZz0Ds
 - **Duration:** 3:00 minutes
 - **Content:**
   - Chrome extension blocking honeypot transactions (BLOCK verdict)

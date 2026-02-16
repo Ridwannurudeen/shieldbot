@@ -57,7 +57,7 @@
   "frontendUrl": "http://localhost:8000/test",
   "backendApi": "http://localhost:8000/api",
   "telegramBot": "@shieldbot_bnb_bot",
-  "demoVideo": "https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c",
+  "demoVideo": "https://youtu.be/a-PbFsZz0Ds",
   "repository": "https://github.com/Ridwannurudeen/shieldbot",
   "notes": "ShieldBot operates primarily off-chain for real-time performance (<2s response). BNB Greenfield provides decentralized storage without smart contract overhead. On-chain verification contract (ShieldBotVerifier.sol) is optional transparency enhancement, not required for core functionality. All blockchain interactions are read-only via RPC (no gas costs for users)."
 }
