@@ -9,6 +9,7 @@ def format_full_report(
     honeypot_data: dict = None,
     address: str = '',
     ai_analysis: str = None,
+    token_info: dict = None,
 ) -> str:
     rug_prob = risk_output.get('rug_probability', 0)
     risk_level = risk_output.get('risk_level', 'UNKNOWN')
@@ -33,8 +34,12 @@ def format_full_report(
     lines.append(f'{verdict_icon} *ShieldBot Intelligence Report*')
     lines.append('')
 
-    # Target
-    lines.append(f'*Target:* `{address}`')
+    # Target (with token name and symbol if available)
+    if token_info and token_info.get('name') and token_info.get('symbol'):
+        lines.append(f'*Token:* {token_info["name"]} ({token_info["symbol"]})')
+        lines.append(f'*Address:* `{address}`')
+    else:
+        lines.append(f'*Target:* `{address}`')
     lines.append(f'*Risk Archetype:* {archetype.replace("_", " ").title()}')
     lines.append(f'*Rug Probability:* {rug_prob}%  |  *Risk Level:* {risk_level}')
     lines.append(f'*Confidence:* {confidence}%')
