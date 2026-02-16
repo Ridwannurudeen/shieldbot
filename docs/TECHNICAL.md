@@ -682,7 +682,7 @@ curl http://localhost:8000/api/health
 pip install pytest pytest-asyncio
 
 # Run tests
-pytest test/
+pytest tests/
 ```
 
 ### Manual Testing Checklist

@@ -224,6 +224,80 @@ ShieldBot is purpose-built for BNB Chain because:
 
 ---
 
+## 4. Limitations & Future Work
+
+### Current Limitations
+
+**Technical Constraints:**
+- **Off-Chain Analysis Required**: Real-time performance (<2s) necessitates off-chain computation. Full on-chain verification would be too slow and expensive for per-transaction analysis.
+- **API Dependency**: Core functionality requires external API availability (GoPlus, Honeypot.is, DexScreener, etc.). Graceful fallbacks exist, but total API failure would reduce effectiveness.
+- **Browser Extension Only**: Currently supports Chrome/Brave via Manifest V3. Firefox and mobile wallet integration pending.
+- **BSC/opBNB Focus**: Multi-chain support limited to BNB ecosystem. Ethereum, Polygon, and other chains not yet supported.
+
+**Security & Risk:**
+- **False Negatives Possible**: Sophisticated scams using novel techniques may evade detection. Composite scoring reduces but does not eliminate this risk.
+- **Whitelisted Router Trust**: PancakeSwap and major DEX routers are fast-tracked. Compromise of these routers (unlikely but possible) would bypass ShieldBot.
+- **API Key Management**: Users must secure their own API keys for optional features (Tenderly, Greenfield uploads). No centralized key management.
+- **Test Coverage**: Core features tested (API, risk scoring, calldata, ownership), but E2E extension testing requires manual verification.
+
+**User Experience:**
+- **Setup Friction**: Local deployment requires Python 3.11+, multiple API keys, and extension sideloading. Not yet one-click install.
+- **Rate Limiting**: BscScan free tier limits to 5 req/sec. High-volume users may experience delays.
+- **No Mobile Support**: Chrome extension architecture incompatible with mobile. Mobile wallet SDK integration required.
+
+**Data & Scalability:**
+- **BNB Greenfield Costs**: Storage costs scale with usage. Currently sustainable for high-risk reports only (score ≥50).
+- **No Historical Analysis**: Each scan is point-in-time. No trending or pattern detection across multiple scans of same contract.
+- **Centralized Bot Hosting**: Telegram bot runs on single VPS. No redundancy or load balancing yet.
+
+### Short-Term Future Work (Next 3-6 Months)
+
+**Immediate Priorities (Q2 2026):**
+- Deploy ShieldBotVerifier.sol to BSC Mainnet for optional on-chain scan recording
+- Add Firefox extension support (Manifest V3 compatible)
+- Implement caching layer for common contract queries (reduce API calls)
+- Add batch scanning API endpoint (analyze multiple addresses in one call)
+- Create browser extension store listings (Chrome Web Store, Firefox Add-ons)
+
+**User Experience Improvements:**
+- One-click installer script (auto-configures .env with default settings)
+- Hosted API endpoint (users don't need to run local server)
+- Mobile wallet SDK for Trust Wallet and SafePal integration
+- Desktop notifications for high-risk transaction attempts
+
+**Security Enhancements:**
+- ML-based anomaly detection trained on BNB Greenfield historical reports
+- Cross-reference multiple honeypot detection APIs (reduce false negatives)
+- Real-time smart contract upgrade monitoring (detect proxy changes)
+- Community reporting system with reputation staking
+
+**Scalability & Reliability:**
+- Redis caching for frequent contract lookups
+- Load balancer for Telegram bot (multi-instance deployment)
+- Failover RPC endpoints (automatic BSC node switching on failure)
+- Prometheus metrics and Grafana dashboards for monitoring
+
+**Aligned with Existing Roadmap:**
+- Phase 2 (Q2 2026): Extension marketplace deployment, mobile SDK, historical analysis
+- Phase 3 (Q3 2026): On-chain verification contract, DAO governance, decentralized oracle
+- Phase 4 (Q4 2026): Multi-chain support (Ethereum, Polygon, Arbitrum)
+
+### Known Issues & Mitigations
+
+**Issue:** BscScan API occasionally returns 429 (rate limit exceeded)
+**Mitigation:** Implemented 0.25s delay between calls + exponential backoff retry logic
+
+**Issue:** Extension occasionally fails to intercept transactions on page reload
+**Mitigation:** inject.js runs at document_start to ensure provider wrapping before dApp loads
+
+**Issue:** Greenfield uploads fail if wallet has insufficient BNB for gas
+**Mitigation:** Graceful fallback - report still generated and returned to user, just not stored on-chain
+
+**Issue:** Telegram bot response time >5s for first scan after idle period (cold start)
+**Mitigation:** Keep-alive ping every 10 minutes to maintain API connection pool
+
+---
+
 ## Roadmap
 
 ### Phase 1: Core Security Engine (Completed ✅)
