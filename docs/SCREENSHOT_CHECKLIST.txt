@@ -1,0 +1,59 @@
+╔═══════════════════════════════════════════════════════════════╗
+║           SHIELDBOT SCREENSHOT CAPTURE CHECKLIST              ║
+╚═══════════════════════════════════════════════════════════════╝
+
+SETUP:
+[ ] ShieldBot API running (uvicorn api:app --port 8000)
+[ ] Chrome extension enabled
+[ ] Telegram open to @shieldbot_bnb_bot
+[ ] Created docs/images/ folder
+
+SCREENSHOT #1: Extension BLOCK (HIGHEST PRIORITY)
+[ ] Opened http://localhost:8000/test
+[ ] Clicked "Test BLOCK Verdict"
+[ ] Captured full red modal
+[ ] Saved as: docs/images/extension_block.png
+[ ] File size < 500KB
+[ ] Image is clear and readable
+
+SCREENSHOT #2: Telegram Token Scan (HIGH PRIORITY)
+[ ] Sent: /token 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c
+[ ] Bot responded with "Token: Wrapped BNB (WBNB)"
+[ ] Captured entire response
+[ ] Saved as: docs/images/telegram_token_scan.png
+[ ] File size < 500KB
+[ ] Image is clear and readable
+
+SCREENSHOT #3: Greenfield Report (MEDIUM PRIORITY)
+[ ] Opened Greenfield URL in browser
+[ ] JSON report loaded successfully
+[ ] Captured browser window with JSON
+[ ] Saved as: docs/images/greenfield_report.png
+[ ] File size < 500KB
+[ ] Image is clear and readable
+
+POST-CAPTURE:
+[ ] All 3 PNG files in docs/images/
+[ ] Images compressed (tinypng.com)
+[ ] Ready to tell Claude "screenshots done"
+
+═══════════════════════════════════════════════════════════════
+
+WHEN DONE:
+Tell Claude: "screenshots done" or "ready"
+
+Claude will then:
+✓ Update README.md with images
+✓ Update docs/PROJECT.md with images
+✓ Update docs/TECHNICAL.md with images
+✓ Update .gitignore to allow images
+✓ Commit and push all changes
+
+═══════════════════════════════════════════════════════════════
+
+NEED HELP?
+- Extension not working: Check chrome://extensions
+- Telegram bot slow: Use @shieldbot_bnb_bot (live bot)
+- Greenfield URL: Use example from bsc.address file
+
+═══════════════════════════════════════════════════════════════

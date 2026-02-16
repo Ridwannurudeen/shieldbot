@@ -37,4 +37,13 @@ demo/
 *.mp4
 *.avi
 *.mov
+
+# PDF files (except documentation)
 *.pdf
+!docs/**/*.pdf
+
+# Documentation images are ALLOWED
+!docs/images/
+!docs/images/*.png
+!docs/images/*.jpg
+!docs/images/*.gif

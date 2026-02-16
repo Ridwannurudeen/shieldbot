@@ -63,6 +63,96 @@ See the Chrome extension blocking honeypots, the Telegram bot scanning tokens wi
 
 ## Features
 
+### 🎬 Visual Demonstration
+
+**Chrome Extension - Real-Time Transaction Blocking:**
+
+> **🔴 BLOCK Verdict (High Risk)**
+>
+> When ShieldBot detects a honeypot or rug pull, it displays a full-screen red modal that completely blocks the transaction:
+> - **Risk Score:** 85/100 - HIGH RISK
+> - **Critical Flags:** Honeypot confirmed (cannot sell after buying), 99% sell tax, ownership not renounced, low liquidity ($2,000)
+> - **Action:** Transaction is hard-blocked - user cannot proceed even if they want to
+> - **Result:** Loss prevented before funds are at risk
+>
+> See it in action: [3-min demo video](https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c) at 0:30
+
+> **🟡 WARN Verdict (Medium Risk)**
+>
+> For medium-risk contracts, ShieldBot shows an orange warning overlay:
+> - **Risk Score:** 45/100 - MEDIUM RISK
+> - **Warnings:** Contract not verified, low liquidity, pair age <24 hours, no Tenderly simulation
+> - **User Choice:** Two buttons: "Proceed Anyway" or "Cancel Transaction"
+> - **Result:** Informed decision with full transparency
+>
+> See it in action: [3-min demo video](https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c) at 1:00
+
+> **🟢 ALLOW Verdict (Safe)**
+>
+> For verified safe contracts (PancakeSwap, 1inch, etc.):
+> - **No overlay appears** - completely silent passthrough
+> - **Transaction flows directly to wallet** - zero friction
+> - **MetaMask signature request appears immediately**
+> - **Result:** Safe transactions are not interrupted
+>
+> See it in action: [3-min demo video](https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c) at 1:30
+
+**Telegram Bot - Token Intelligence with Names:**
+
+> **🤖 Live Bot Analysis**
+>
+> The Telegram bot now displays token names and symbols (not just addresses):
+> ```
+> 🟢 ShieldBot Intelligence Report
+>
+> Token: Wrapped BNB (WBNB)
+> Address: 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c
+> Risk Archetype: Low Risk
+> Rug Probability: 5% | Risk Level: LOW
+> Confidence: 95%
+>
+> ✓ Category Scores:
+>   • Structural: 10/100
+>   • Market: 5/100
+>   • Behavioral: 0/100
+>   • Honeypot: 0/100
+> ```
+>
+> **Try it yourself:** [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)
+> Send: `/token 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c`
+
+**BNB Greenfield - Immutable Forensic Reports:**
+
+> **🌐 On-Chain Evidence Storage**
+>
+> High-risk transactions (score ≥50) are recorded as immutable JSON objects on BNB Greenfield:
+> ```json
+> {
+>   "report_id": "3a4039ef0349eb5f",
+>   "timestamp": "2026-02-16T03:45:12Z",
+>   "contract_address": "0x...",
+>   "risk_score": 85,
+>   "risk_level": "HIGH",
+>   "critical_flags": [
+>     "Honeypot confirmed",
+>     "99% sell tax",
+>     "Ownership not renounced"
+>   ],
+>   "category_scores": {
+>     "structural": 90,
+>     "market": 75,
+>     "behavioral": 45,
+>     "honeypot": 95
+>   }
+> }
+> ```
+>
+> **Public URL:** `https://greenfield-sp.bnbchain.org/view/shieldbot-reports/reports/<id>.json`
+> **Verifiable:** Anyone can access and verify the forensic analysis
+> **Immutable:** Cannot be altered or deleted once stored
+
+---
+
 ### Real-Time Transaction Firewall (Chrome Extension)
 
 The extension intercepts `eth_sendTransaction` and `eth_signTransaction` before they reach the wallet. Each transaction is analyzed via the ShieldBot API. The result determines the action:
