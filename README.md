@@ -10,6 +10,14 @@ ShieldBot is an autonomous transaction firewall for BNB Chain. It intercepts Web
 
 ---
 
+## 🎥 Demo Video
+
+**Watch ShieldBot in action** (3-minute demo): [**View on Loom**](https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c)
+
+See the Chrome extension blocking honeypots, the Telegram bot scanning tokens with names/symbols, and BNB Greenfield forensic reports in real-time.
+
+---
+
 ## How It Works
 
 1. **Intercept** -- The Chrome extension wraps the wallet provider's `request()` method in the page context (`world: MAIN`). When `eth_sendTransaction` or `eth_signTransaction` is called, the transaction is intercepted before reaching the wallet.
@@ -136,6 +144,10 @@ Visit `http://<host>:8000/test` to test the Chrome extension with pre-configured
 ---
 
 ## Quick Start
+
+### Watch the Demo First
+
+**3-Minute Video Walkthrough:** [View on Loom](https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c)
 
 ### Try the Live Bot
 

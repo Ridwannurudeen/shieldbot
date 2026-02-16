@@ -458,6 +458,16 @@ python bot.py
 
 ## Demo Guide
 
+### 🎥 Video Walkthrough
+
+**Watch the complete 3-minute demo:** [View on Loom](https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c)
+
+The video shows:
+- Chrome extension intercepting and blocking honeypot transactions
+- Telegram bot displaying token names and symbols
+- Real-time risk analysis with composite ShieldScore
+- BNB Greenfield forensic report storage
+
 ### Live Telegram Bot Demo
 
 **Bot**: [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)
