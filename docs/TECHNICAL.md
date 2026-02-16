@@ -339,6 +339,29 @@ shieldbot/
 
 ## Setup & Installation
 
+### ⚠️ Important Note for Judges/Evaluators
+
+**You don't need all API keys to evaluate ShieldBot!**
+
+**Minimum setup to test core features:**
+1. **Only BSCSCAN_API_KEY is required** (free at [bscscan.com/myapikey](https://bscscan.com/myapikey))
+2. Run: `uvicorn api:app --host 0.0.0.0 --port 8000`
+3. Visit: `http://localhost:8000/test`
+4. All risk analysis features work with just BscScan API
+
+**Features that require optional API keys:**
+- **Telegram Bot**: Requires TELEGRAM_BOT_TOKEN → **Alternative: Use live bot [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)**
+- **BNB Greenfield**: Requires GREENFIELD_PRIVATE_KEY → Optional, only for report uploads
+- **Tenderly Simulation**: Requires TENDERLY_API_KEY → Optional, core features work without it
+- **AI Analysis**: Requires ANTHROPIC_API_KEY → Optional enhancement
+
+**Easiest evaluation methods:**
+1. **Live Telegram Bot** (no setup): [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)
+2. **Demo Video** (3 minutes): [Watch on Loom](https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c)
+3. **Local API** (BscScan key only): Follow setup below
+
+---
+
 ### Prerequisites
 
 - **Python 3.11+** ([download](https://www.python.org/downloads/))

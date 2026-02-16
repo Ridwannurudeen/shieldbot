@@ -31,3 +31,10 @@ Thumbs.db
 # Database
 *.db
 *.sqlite3
+
+# Demo materials (videos, presentations)
+demo/
+*.mp4
+*.avi
+*.mov
+*.pdf
