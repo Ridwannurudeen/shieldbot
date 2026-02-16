@@ -3,79 +3,33 @@
 ## System Architecture
 
 ```mermaid
-graph TB
-    subgraph "User Interfaces"
-        A[Chrome Extension]
-        B[Telegram Bot]
-        C[Web dApps]
-    end
+flowchart TB
+    A[Chrome Extension] --> D[FastAPI Backend]
+    B[Telegram Bot] --> D
+    C[Web dApps] --> A
 
-    subgraph "Delivery Layer"
-        D[FastAPI Backend Port 8000]
-    end
+    D --> E[Risk Engine]
+    D --> F[AI Analyzer]
+    D --> G[Calldata Decoder]
+    D --> H[Tenderly Simulator]
 
-    subgraph "Intelligence Engine"
-        E[RiskEngine Composite Scoring]
-        F[AI Analyzer Claude API]
-        G[Calldata Decoder]
-        H[Tenderly Simulator]
-    end
+    E --> I1[Contract Service]
+    E --> I2[Honeypot Service]
+    E --> I3[Dex Service]
+    E --> I4[Ethos Service]
+    H --> I5[Tenderly Service]
+    D --> I6[Greenfield Service]
 
-    subgraph "Data Services Layer"
-        I1[ContractService GoPlus BscScan]
-        I2[HoneypotService Honeypot.is]
-        I3[DexService DexScreener]
-        I4[EthosService Ethos Network]
-        I5[TenderlyService Simulation]
-        I6[GreenfieldService BNB Greenfield]
-    end
+    I1 --> K1[GoPlus API]
+    I1 --> K6[BscScan API]
+    I2 --> K2[Honeypot API]
+    I3 --> K3[DexScreener API]
+    I4 --> K4[Ethos API]
+    I5 --> K5[Tenderly API]
+    I6 --> J3[BNB Greenfield]
 
-    subgraph "Blockchain Layer"
-        J1[BSC Mainnet Chain ID 56]
-        J2[opBNB Mainnet Chain ID 204]
-        J3[BNB Greenfield Storage]
-    end
-
-    subgraph "External APIs"
-        K1[GoPlus API]
-        K2[Honeypot.is API]
-        K3[DexScreener API]
-        K4[Ethos Network API]
-        K5[Tenderly API]
-        K6[BscScan API]
-    end
-
-    A -->|Transaction Intercept| D
-    B -->|Commands| D
-    C -->|Web3 Calls| A
-
-    D --> E
-    D --> F
-    D --> G
-    D --> H
-
-    E --> I1
-    E --> I2
-    E --> I3
-    E --> I4
-    H --> I5
-    D --> I6
-
-    I1 --> K1
-    I1 --> K6
-    I2 --> K2
-    I3 --> K3
-    I4 --> K4
-    I5 --> K5
-    I6 --> J3
-
-    I1 --> J1
-    I1 --> J2
-
-    K1 -.->|Contract Intelligence| J1
-    K2 -.->|Honeypot Simulation| J1
-    K3 -.->|Market Data| J1
-    K6 -.->|Verification Data| J1
+    I1 --> J1[BSC Mainnet]
+    I1 --> J2[opBNB L2]
 
     style A fill:#e3f2fd
     style B fill:#e3f2fd
@@ -84,15 +38,6 @@ graph TB
     style F fill:#f3e5f5
     style G fill:#f3e5f5
     style H fill:#f3e5f5
-    style I1 fill:#e8f5e9
-    style I2 fill:#e8f5e9
-    style I3 fill:#e8f5e9
-    style I4 fill:#e8f5e9
-    style I5 fill:#e8f5e9
-    style I6 fill:#e8f5e9
-    style J1 fill:#fff9c4
-    style J2 fill:#fff9c4
-    style J3 fill:#fff9c4
 ```
 
 ## Transaction Flow
@@ -146,194 +91,107 @@ sequenceDiagram
 ## Data Flow (Composite Risk Scoring)
 
 ```mermaid
-graph LR
-    subgraph "Input Data"
-        A1[Contract Data]
-        A2[Honeypot Data]
-        A3[Market Data]
-        A4[Ethos Data]
-    end
+flowchart LR
+    A1[Contract Data] --> B1[Structural 40%]
+    A2[Honeypot Data] --> B4[Honeypot 15%]
+    A3[Market Data] --> B2[Market 25%]
+    A4[Ethos Data] --> B3[Behavioral 20%]
 
-    subgraph "Category Scoring"
-        B1[Structural Score 40%]
-        B2[Market Score 25%]
-        B3[Behavioral Score 20%]
-        B4[Honeypot Score 15%]
-    end
-
-    subgraph "Risk Engine"
-        C[Weighted Sum]
-        D[Escalation Rules]
-        E[Reduction Rules]
-    end
-
-    subgraph "Output"
-        F[ShieldScore 0-100]
-        G[Risk Level HIGH MED LOW]
-        H[Critical Flags]
-    end
-
-    A1 --> B1
-    A3 --> B2
-    A4 --> B3
-    A2 --> B4
-
-    B1 --> C
+    B1 --> C[Weighted Sum]
     B2 --> C
     B3 --> C
     B4 --> C
 
-    C --> D
-    D --> E
-    E --> F
-    F --> G
-    F --> H
+    C --> D[Escalation Rules]
+    D --> E[Reduction Rules]
+    E --> F[ShieldScore]
+    F --> G[Risk Level]
+    F --> H[Critical Flags]
 
     style C fill:#f3e5f5
-    style D fill:#ffebee
-    style E fill:#e8f5e9
     style F fill:#fff9c4
-    style G fill:#fff9c4
-    style H fill:#ffebee
 ```
 
 ## Chrome Extension Architecture
 
 ```mermaid
-graph TB
-    subgraph "Web Page Context"
-        A[dApp Website PancakeSwap]
-        B[window.ethereum Provider]
-    end
-
-    subgraph "Extension MAIN World"
-        C[inject.js Provider Wrapper]
-    end
-
-    subgraph "Extension ISOLATED World"
-        D[content.js Overlay Renderer]
-    end
-
-    subgraph "Extension Service Worker"
-        E[background.js API Communication]
-    end
-
-    subgraph "Extension UI"
-        F[popup.html Settings History]
-    end
-
-    A -->|User Action| B
-    B -->|Request Intercepted| C
-    C -->|window.postMessage| D
-    D -->|chrome.runtime.sendMessage| E
-    E -->|HTTP Request| G[ShieldBot API]
-    G -->|Response| E
-    E -->|chrome.tabs.sendMessage| D
-    D -->|Inject Modal| A
-
-    F -.->|Settings| E
+flowchart TB
+    A[dApp Website] --> B[window.ethereum]
+    B --> C[inject.js]
+    C --> D[content.js]
+    D --> E[background.js]
+    E --> G[ShieldBot API]
+    G --> E
+    E --> D
+    D --> A
+    F[popup.html] --> E
 
     style C fill:#e3f2fd
     style D fill:#fff3e0
     style E fill:#f3e5f5
-    style F fill:#e8f5e9
 ```
 
 ## BNB Chain Integration Points
 
 ```mermaid
-graph TB
-    subgraph "ShieldBot Backend"
-        A[Web3Client]
-        B[GreenfieldService]
-    end
+flowchart TB
+    A[Web3Client] --> C[Contract Bytecode]
+    A --> D[Token Metadata]
+    A --> E[Ownership Info]
+    A --> F[PancakeSwap V2]
+    A --> G[opBNB Scanning]
+    A --> J[Contract Verification]
+    A --> K[Source Code]
 
-    subgraph "BSC Mainnet"
-        C[Contract Bytecode eth_getCode]
-        D[Token Metadata name symbol decimals]
-        E[Ownership Info owner]
-        F[PancakeSwap V2 getPair balanceOf]
-    end
-
-    subgraph "opBNB L2"
-        G[Contract Scanning Chain ID 204]
-    end
-
-    subgraph "BNB Greenfield"
-        H[Bucket shieldbot-reports]
-        I[Forensic Reports JSON Objects]
-    end
-
-    subgraph "BscScan API"
-        J[Contract Verification]
-        K[Source Code]
-        L[Creation Info]
-    end
-
-    A --> C
-    A --> D
-    A --> E
-    A --> F
-    A --> G
-    A --> J
-    A --> K
-    A --> L
-
-    B --> H
-    H --> I
+    B[GreenfieldService] --> H[Bucket Reports]
+    H --> I[Forensic JSON]
 
     style C fill:#fff9c4
-    style D fill:#fff9c4
-    style E fill:#fff9c4
-    style F fill:#fff9c4
-    style G fill:#fff9c4
     style H fill:#e8f5e9
-    style I fill:#e8f5e9
 ```
 
 ## Risk Scoring Algorithm
 
 ```mermaid
-graph TD
-    A[Start Analyze Contract] --> B{Is Contract?}
-    B -->|No| C[Score 0 SAFE]
-    B -->|Yes| D[Fetch Data from 6 Sources]
+flowchart TD
+    A[Start] --> B{Is Contract?}
+    B -->|No| C[Score 0]
+    B -->|Yes| D[Fetch Data]
 
-    D --> E[Calculate Structural Score Verification Ownership Bytecode]
-    D --> F[Calculate Market Score Liquidity Volume Age]
-    D --> G[Calculate Behavioral Score Reputation Scam Flags]
-    D --> H[Calculate Honeypot Score Buy Sell Simulation]
+    D --> E[Structural]
+    D --> F[Market]
+    D --> G[Behavioral]
+    D --> H[Honeypot]
 
-    E --> I[Weighted Sum 40% 25% 20% 15%]
+    E --> I[Weighted Sum]
     F --> I
     G --> I
     H --> I
 
-    I --> J{Honeypot Confirmed?}
-    J -->|Yes| K[Floor Score = 80]
-    J -->|No| L{Rug Pull Pattern?}
+    I --> J{Honeypot?}
+    J -->|Yes| K[Floor 80]
+    J -->|No| L{Rug Pattern?}
 
-    L -->|Yes| M[Floor Score = 85]
-    L -->|No| N{Owner Renounced?}
+    L -->|Yes| M[Floor 85]
+    L -->|No| N{Renounced?}
 
-    N -->|Yes + High Liq| O[Reduce Score -20]
+    N -->|Yes| O[Reduce 20]
     N -->|No| P[Keep Score]
 
-    K --> Q[Final ShieldScore]
+    K --> Q[Final Score]
     M --> Q
     O --> Q
     P --> Q
 
     Q --> R{Score >= 71?}
-    R -->|Yes| S[BLOCK Red Modal]
+    R -->|Yes| S[BLOCK]
     R -->|No| T{Score >= 31?}
-    T -->|Yes| U[WARN Orange Overlay]
-    T -->|No| V[ALLOW Silent Pass]
+    T -->|Yes| U[WARN]
+    T -->|No| V[ALLOW]
 
     style S fill:#ffebee
     style U fill:#fff3e0
     style V fill:#e8f5e9
-    style Q fill:#f3e5f5
 ```
 
 ---
