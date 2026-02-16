@@ -1,0 +1,136 @@
+# ShieldBot - BNB Chain Contract Addresses
+
+## Smart Contracts
+
+### ShieldBotVerifier (On-Chain Scan Recording)
+**Status**: Planned for deployment
+**Network**: BSC Mainnet (Chain ID: 56)
+**Contract**: `contracts/ShieldBotVerifier.sol`
+**Purpose**: Records security scan results on-chain for transparency and historical verification
+
+**Deployment Pending** - Will be deployed post-hackathon for production use
+
+**Planned Address**: TBD
+**BSCScan**: TBD
+**Deployment Block**: TBD
+
+---
+
+## Off-Chain Components (No Contract Deployment Required)
+
+### Chrome Extension
+- **Type**: Client-side browser extension
+- **Network**: Interacts with BSC Mainnet (56) and opBNB (204)
+- **No contract deployment needed**
+
+### Telegram Bot
+- **Bot**: [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)
+- **Type**: Off-chain service
+- **Network**: Reads from BSC Mainnet via RPC
+- **No contract deployment needed**
+
+### FastAPI Backend
+- **Type**: REST API service
+- **Network**: Queries BSC Mainnet and opBNB via RPC
+- **No contract deployment needed**
+
+---
+
+## BNB Chain Integration Points
+
+### 1. BNB Greenfield (Decentralized Storage)
+**Bucket**: `shieldbot-reports`
+**Network**: BNB Greenfield Mainnet
+**Purpose**: Immutable storage of forensic reports for high-risk transactions
+**SDK**: `greenfield-python-sdk`
+**Report Format**: JSON objects stored at `https://greenfield-sp.bnbchain.org/view/shieldbot-reports/reports/<id>.json`
+
+**Status**: ✅ Live and operational
+
+### 2. BSC Mainnet RPC
+**Network**: Binance Smart Chain (BSC)
+**Chain ID**: 56
+**RPC**: https://bsc-dataseed1.binance.org/
+**Purpose**: Contract verification, bytecode analysis, transaction simulation
+**APIs Used**: BscScan API, Web3 RPC calls
+
+**Status**: ✅ Live and operational
+
+### 3. opBNB Mainnet RPC
+**Network**: opBNB (Layer 2)
+**Chain ID**: 204
+**RPC**: https://opbnb-mainnet-rpc.bnbchain.org
+**Purpose**: Multi-chain contract scanning support
+
+**Status**: ✅ Live and operational
+
+---
+
+## External Data Sources (No Contracts)
+
+1. **GoPlus Security API** - Contract intelligence and scam detection
+2. **Honeypot.is API** - Honeypot simulation and tax detection
+3. **DexScreener API** - Market data and liquidity metrics
+4. **Ethos Network API** - Wallet reputation scoring
+5. **Tenderly API** - Transaction simulation
+
+---
+
+## Future On-Chain Components (Roadmap)
+
+### Phase 2: ShieldBotVerifier Deployment
+- **Network**: BSC Mainnet (56)
+- **Purpose**: On-chain scan history recording
+- **Features**: Batch scan recording, public verification
+- **Timeline**: Q2 2026
+
+### Phase 3: Decentralized Oracle
+- **Network**: opBNB (204) for low gas costs
+- **Purpose**: Decentralized data aggregation
+- **Features**: Multi-source oracle, consensus mechanism
+- **Timeline**: Q3 2026
+
+### Phase 4: DAO Governance Contract
+- **Network**: BSC Mainnet (56)
+- **Purpose**: Community governance of risk thresholds
+- **Features**: Voting, proposal system, treasury
+- **Timeline**: Q4 2026
+
+---
+
+## How to Verify ShieldBot Integration
+
+### 1. Greenfield Reports
+Visit any report URL (example):
+```
+https://greenfield-sp.bnbchain.org/view/shieldbot-reports/reports/<report_id>.json
+```
+
+### 2. BSC RPC Calls
+ShieldBot makes the following on-chain queries:
+- `eth_getCode` - Contract bytecode retrieval
+- `eth_call` - Token name, symbol, decimals, totalSupply
+- Contract verification status via BscScan API
+- Transaction history via BscScan API
+
+### 3. Live Bot Testing
+Test the live Telegram bot:
+```
+@shieldbot_bnb_bot
+/scan 0x10ED43C718714eb63d5aA57B78B54704E256024E
+```
+
+---
+
+## Notes
+
+- **ShieldBot operates primarily off-chain** for real-time performance (<2s response time)
+- **On-chain components** (ShieldBotVerifier) are optional for transparency, not required for core functionality
+- **BNB Greenfield** provides decentralized storage without requiring smart contract deployment
+- **All blockchain interactions are read-only** via RPC (no gas costs for users)
+
+---
+
+**Last Updated**: February 2026
+**Project**: https://github.com/Ridwannurudeen/shieldbot
+**Contact**: [@Ggudman](https://t.me/Ggudman)
