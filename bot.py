@@ -314,11 +314,12 @@ async def scan_contract(update: Update, address: str):
         response = None
         risk_level = 'medium'
         try:
-            contract_data, honeypot_data, dex_data, ethos_data = await asyncio.gather(
+            contract_data, honeypot_data, dex_data, ethos_data, token_info = await asyncio.gather(
                 contract_service.fetch_contract_data(address),
                 honeypot_service.fetch_honeypot_data(address),
                 dex_service.fetch_token_market_data(address),
                 ethos_service.fetch_wallet_reputation(address),
+                web3_client.get_token_info(address),
             )
 
             risk_output = risk_engine.compute_composite_risk(
@@ -340,6 +341,7 @@ async def scan_contract(update: Update, address: str):
             response = format_full_report(
                 risk_output, contract_data, dex_data, ethos_data,
                 honeypot_data=honeypot_data, address=address, ai_analysis=ai_analysis,
+                token_info=token_info,
             )
             risk_level = risk_output.get('risk_level', 'medium').lower()
 
@@ -406,11 +408,12 @@ async def check_token(update: Update, address: str):
         response = None
         risk_level = 'warning'
         try:
-            contract_data, honeypot_data, dex_data, ethos_data = await asyncio.gather(
+            contract_data, honeypot_data, dex_data, ethos_data, token_info = await asyncio.gather(
                 contract_service.fetch_contract_data(address),
                 honeypot_service.fetch_honeypot_data(address),
                 dex_service.fetch_token_market_data(address),
                 ethos_service.fetch_wallet_reputation(address),
+                web3_client.get_token_info(address),
             )
 
             risk_output = risk_engine.compute_composite_risk(
@@ -432,6 +435,7 @@ async def check_token(update: Update, address: str):
             response = format_full_report(
                 risk_output, contract_data, dex_data, ethos_data,
                 honeypot_data=honeypot_data, address=address, ai_analysis=ai_analysis,
+                token_info=token_info,
             )
             risk_level = risk_output.get('risk_level', 'medium').lower()
 
