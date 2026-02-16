@@ -57,6 +57,8 @@ See the Chrome extension blocking honeypots, the Telegram bot scanning tokens wi
 +-------------------------------------------------------------+
 ```
 
+**📊 Visual Diagrams:** See [Architecture Diagrams](docs/ARCHITECTURE_DIAGRAM.md) for interactive flowcharts, sequence diagrams, and data flow visualizations.
+
 ---
 
 ## Features
@@ -288,43 +290,69 @@ Interactive test page for Chrome extension E2E testing.
 
 ## Project Structure
 
+**Architecture Pattern:** Clean architecture with separation of concerns across distinct layers
+
 ```
 shieldbot/
-+-- bot.py                       # Telegram bot (commands, cache, on-chain recording)
-+-- api.py                       # FastAPI backend (firewall, scan, test page)
-+-- scanner/
-|   +-- transaction_scanner.py   # Pre-tx security checks + AI scoring
-|   +-- token_scanner.py         # Token safety + honeypot + AI scoring
-+-- core/
-|   +-- risk_engine.py           # Composite weighted risk scoring (4 categories)
-|   +-- extension_formatter.py   # Chrome extension response formatting
-|   +-- telegram_formatter.py    # Telegram message formatting
-+-- services/
-|   +-- contract_service.py      # GoPlus + BscScan contract intelligence
-|   +-- honeypot_service.py      # Honeypot.is simulation
-|   +-- dex_service.py           # DexScreener market data + anomaly detection
-|   +-- ethos_service.py         # Ethos Network reputation scoring
-|   +-- tenderly_service.py      # Tenderly transaction simulation
-|   +-- greenfield_service.py    # BNB Greenfield report storage (SDK)
-+-- utils/
-|   +-- ai_analyzer.py           # Claude AI risk analysis + forensic verdicts
-|   +-- calldata_decoder.py      # Transaction calldata decoding + router whitelist
-|   +-- risk_scorer.py           # Blended scoring (heuristic + AI)
-|   +-- web3_client.py           # BNB Chain Web3 + liquidity lock detection
-|   +-- scam_db.py               # Multi-source scam database
-|   +-- firewall_prompt.py       # AI firewall system prompt
-|   +-- onchain_recorder.py      # On-chain scan recording
-+-- extension/                   # Chrome Extension (Manifest V3)
-|   +-- manifest.json            # Permissions, content scripts
-|   +-- inject.js                # Provider wrapping (world: MAIN, direct request)
-|   +-- content.js               # Content script (overlay, messaging bridge)
-|   +-- background.js            # Service worker (API calls, modal injection)
-|   +-- popup.html / popup.js    # Extension popup (settings, scan history)
-|   +-- overlay.css              # Firewall overlay styles
-+-- contracts/
-|   +-- ShieldBotVerifier.sol    # On-chain verification contract (BSC Mainnet)
-+-- requirements.txt
-+-- .env.example
+├── README.md                    # Project overview
+├── requirements.txt             # Python dependencies
+├── .env.example                 # Environment template
+├── LICENSE                      # MIT License
+│
+├── docs/                        # 📚 Documentation
+│   ├── PROJECT.md               # Problem, solution, impact, roadmap
+│   ├── TECHNICAL.md             # Architecture, setup, demo guide
+│   ├── ARCHITECTURE_DIAGRAM.md  # Visual system diagrams
+│   ├── SCREENSHOTS.md           # Screenshot capture guide
+│   ├── ARCHITECTURE.md          # Detailed architecture notes
+│   ├── DEPLOYMENT.md            # Production deployment guide
+│   └── TESTING.md               # Test strategy and coverage
+│
+├── tests/                       # 🧪 Test Suite
+│   ├── test_api.py              # API endpoint tests
+│   ├── test_risk_scorer.py      # Risk scoring validation
+│   ├── test_calldata.py         # Calldata decoder tests
+│   └── test_ownership.py        # Ownership detection tests
+│
+├── bot.py                       # 🤖 Entry Points
+├── api.py                       # 🌐 FastAPI backend
+│
+├── scanner/                     # 🔍 Scanner Layer
+│   ├── transaction_scanner.py   # Pre-tx security checks
+│   └── token_scanner.py         # Token safety analysis
+│
+├── core/                        # ⚙️ Core Engine
+│   ├── risk_engine.py           # Composite risk scoring
+│   ├── extension_formatter.py   # Chrome extension responses
+│   └── telegram_formatter.py    # Telegram message formatting
+│
+├── services/                    # 📡 Data Services Layer
+│   ├── contract_service.py      # GoPlus + BscScan intelligence
+│   ├── honeypot_service.py      # Honeypot.is simulation
+│   ├── dex_service.py           # DexScreener market data
+│   ├── ethos_service.py         # Ethos Network reputation
+│   ├── tenderly_service.py      # Tenderly simulation
+│   └── greenfield_service.py    # BNB Greenfield storage
+│
+├── utils/                       # 🛠️ Utilities Layer
+│   ├── ai_analyzer.py           # Claude AI forensics
+│   ├── calldata_decoder.py      # Transaction decoder
+│   ├── risk_scorer.py           # Scoring logic
+│   ├── web3_client.py           # BNB Chain Web3
+│   ├── scam_db.py               # Scam database
+│   ├── firewall_prompt.py       # AI prompts
+│   └── onchain_recorder.py      # On-chain recording
+│
+├── extension/                   # 🧩 Chrome Extension
+│   ├── manifest.json            # Configuration
+│   ├── inject.js                # Provider wrapper
+│   ├── content.js               # Content script
+│   ├── background.js            # Service worker
+│   ├── popup.html/js            # Extension UI
+│   └── overlay.css              # Styles
+│
+└── contracts/                   # 📜 Smart Contracts
+    └── ShieldBotVerifier.sol    # On-chain verification
 ```
 
 ---
@@ -345,6 +373,43 @@ shieldbot/
 | Reputation | Ethos Network API |
 | Telegram | python-telegram-bot 20.7 |
 | Extension | Manifest V3, EIP-6963, Chrome Scripting API |
+
+---
+
+## Testing
+
+ShieldBot includes a comprehensive test suite covering API endpoints, risk scoring, calldata decoding, and ownership detection.
+
+### Run Tests
+
+```bash
+# Install test dependencies
+pip install pytest pytest-asyncio pytest-cov
+
+# Run all tests
+pytest tests/ -v
+
+# Run with coverage report
+pytest tests/ --cov=. --cov-report=html --cov-report=term
+
+# View coverage in browser
+open htmlcov/index.html  # Mac/Linux
+start htmlcov/index.html  # Windows
+```
+
+### Test Coverage
+
+Current test coverage:
+- **API Endpoints:** ✅ Core firewall and scan endpoints
+- **Risk Scoring:** ✅ Composite score calculation and escalation rules
+- **Calldata Decoding:** ✅ Function signature detection and router whitelisting
+- **Ownership Detection:** ✅ Contract owner and renouncement checks
+
+**Test Files:**
+- `tests/test_api.py` - FastAPI endpoint testing
+- `tests/test_risk_scorer.py` - Risk engine validation
+- `tests/test_calldata.py` - Transaction decoder tests
+- `tests/test_ownership.py` - Ownership verification tests
 
 ---
 
