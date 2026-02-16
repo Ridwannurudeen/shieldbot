@@ -11,29 +11,29 @@ graph TB
     end
 
     subgraph "Delivery Layer"
-        D[FastAPI Backend<br/>Port 8000]
+        D[FastAPI Backend Port 8000]
     end
 
     subgraph "Intelligence Engine"
-        E[RiskEngine<br/>Composite Scoring]
-        F[AI Analyzer<br/>Claude API]
+        E[RiskEngine Composite Scoring]
+        F[AI Analyzer Claude API]
         G[Calldata Decoder]
         H[Tenderly Simulator]
     end
 
     subgraph "Data Services Layer"
-        I1[ContractService<br/>GoPlus + BscScan]
-        I2[HoneypotService<br/>Honeypot.is]
-        I3[DexService<br/>DexScreener]
-        I4[EthosService<br/>Ethos Network]
-        I5[TenderlyService<br/>Simulation]
-        I6[GreenfieldService<br/>BNB Greenfield]
+        I1[ContractService GoPlus BscScan]
+        I2[HoneypotService Honeypot.is]
+        I3[DexService DexScreener]
+        I4[EthosService Ethos Network]
+        I5[TenderlyService Simulation]
+        I6[GreenfieldService BNB Greenfield]
     end
 
     subgraph "Blockchain Layer"
-        J1[BSC Mainnet<br/>Chain ID: 56]
-        J2[opBNB Mainnet<br/>Chain ID: 204]
-        J3[BNB Greenfield<br/>Storage]
+        J1[BSC Mainnet Chain ID 56]
+        J2[opBNB Mainnet Chain ID 204]
+        J3[BNB Greenfield Storage]
     end
 
     subgraph "External APIs"
@@ -45,7 +45,7 @@ graph TB
         K6[BscScan API]
     end
 
-    A -->|Transaction<br/>Intercept| D
+    A -->|Transaction Intercept| D
     B -->|Commands| D
     C -->|Web3 Calls| A
 
@@ -72,10 +72,10 @@ graph TB
     I1 --> J1
     I1 --> J2
 
-    K1 -.->|Contract<br/>Intelligence| J1
-    K2 -.->|Honeypot<br/>Simulation| J1
-    K3 -.->|Market<br/>Data| J1
-    K6 -.->|Verification<br/>Data| J1
+    K1 -.->|Contract Intelligence| J1
+    K2 -.->|Honeypot Simulation| J1
+    K3 -.->|Market Data| J1
+    K6 -.->|Verification Data| J1
 
     style A fill:#e3f2fd
     style B fill:#e3f2fd
@@ -155,10 +155,10 @@ graph LR
     end
 
     subgraph "Category Scoring"
-        B1[Structural Score<br/>40% weight]
-        B2[Market Score<br/>25% weight]
-        B3[Behavioral Score<br/>20% weight]
-        B4[Honeypot Score<br/>15% weight]
+        B1[Structural Score 40%]
+        B2[Market Score 25%]
+        B3[Behavioral Score 20%]
+        B4[Honeypot Score 15%]
     end
 
     subgraph "Risk Engine"
@@ -168,8 +168,8 @@ graph LR
     end
 
     subgraph "Output"
-        F[ShieldScore<br/>0-100]
-        G[Risk Level<br/>HIGH/MED/LOW]
+        F[ShieldScore 0-100]
+        G[Risk Level HIGH MED LOW]
         H[Critical Flags]
     end
 
@@ -202,24 +202,24 @@ graph LR
 ```mermaid
 graph TB
     subgraph "Web Page Context"
-        A[dApp Website<br/>e.g., PancakeSwap]
-        B[window.ethereum<br/>Provider]
+        A[dApp Website PancakeSwap]
+        B[window.ethereum Provider]
     end
 
-    subgraph "Extension - MAIN World"
-        C[inject.js<br/>Provider Wrapper]
+    subgraph "Extension MAIN World"
+        C[inject.js Provider Wrapper]
     end
 
-    subgraph "Extension - ISOLATED World"
-        D[content.js<br/>Overlay Renderer]
+    subgraph "Extension ISOLATED World"
+        D[content.js Overlay Renderer]
     end
 
-    subgraph "Extension - Service Worker"
-        E[background.js<br/>API Communication]
+    subgraph "Extension Service Worker"
+        E[background.js API Communication]
     end
 
     subgraph "Extension UI"
-        F[popup.html<br/>Settings & History]
+        F[popup.html Settings History]
     end
 
     A -->|User Action| B
@@ -249,19 +249,19 @@ graph TB
     end
 
     subgraph "BSC Mainnet"
-        C[Contract Bytecode<br/>eth_getCode]
-        D[Token Metadata<br/>name, symbol, decimals]
-        E[Ownership Info<br/>owner()]
-        F[PancakeSwap V2<br/>getPair, balanceOf]
+        C[Contract Bytecode eth_getCode]
+        D[Token Metadata name symbol decimals]
+        E[Ownership Info owner]
+        F[PancakeSwap V2 getPair balanceOf]
     end
 
     subgraph "opBNB L2"
-        G[Contract Scanning<br/>Chain ID: 204]
+        G[Contract Scanning Chain ID 204]
     end
 
     subgraph "BNB Greenfield"
-        H[Bucket: shieldbot-reports]
-        I[Forensic Reports<br/>JSON Objects]
+        H[Bucket shieldbot-reports]
+        I[Forensic Reports JSON Objects]
     end
 
     subgraph "BscScan API"
@@ -295,26 +295,26 @@ graph TB
 
 ```mermaid
 graph TD
-    A[Start: Analyze Contract] --> B{Is Contract?}
-    B -->|No| C[Score: 0<br/>SAFE]
+    A[Start Analyze Contract] --> B{Is Contract?}
+    B -->|No| C[Score 0 SAFE]
     B -->|Yes| D[Fetch Data from 6 Sources]
 
-    D --> E[Calculate Structural Score<br/>Verification, Ownership, Bytecode]
-    D --> F[Calculate Market Score<br/>Liquidity, Volume, Age]
-    D --> G[Calculate Behavioral Score<br/>Reputation, Scam Flags]
-    D --> H[Calculate Honeypot Score<br/>Buy/Sell Simulation]
+    D --> E[Calculate Structural Score Verification Ownership Bytecode]
+    D --> F[Calculate Market Score Liquidity Volume Age]
+    D --> G[Calculate Behavioral Score Reputation Scam Flags]
+    D --> H[Calculate Honeypot Score Buy Sell Simulation]
 
-    E --> I[Weighted Sum<br/>40% + 25% + 20% + 15%]
+    E --> I[Weighted Sum 40% 25% 20% 15%]
     F --> I
     G --> I
     H --> I
 
-    I --> J{Honeypot<br/>Confirmed?}
+    I --> J{Honeypot Confirmed?}
     J -->|Yes| K[Floor Score = 80]
-    J -->|No| L{Rug Pull<br/>Pattern?}
+    J -->|No| L{Rug Pull Pattern?}
 
     L -->|Yes| M[Floor Score = 85]
-    L -->|No| N{Owner<br/>Renounced?}
+    L -->|No| N{Owner Renounced?}
 
     N -->|Yes + High Liq| O[Reduce Score -20]
     N -->|No| P[Keep Score]
@@ -325,10 +325,10 @@ graph TD
     P --> Q
 
     Q --> R{Score >= 71?}
-    R -->|Yes| S[BLOCK<br/>Red Modal]
+    R -->|Yes| S[BLOCK Red Modal]
     R -->|No| T{Score >= 31?}
-    T -->|Yes| U[WARN<br/>Orange Overlay]
-    T -->|No| V[ALLOW<br/>Silent Pass]
+    T -->|Yes| U[WARN Orange Overlay]
+    T -->|No| V[ALLOW Silent Pass]
 
     style S fill:#ffebee
     style U fill:#fff3e0
