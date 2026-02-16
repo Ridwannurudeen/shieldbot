@@ -491,6 +491,95 @@ The video shows:
 - Real-time risk analysis with composite ShieldScore
 - BNB Greenfield forensic report storage
 
+### Expected Output Examples
+
+**Extension BLOCK Verdict:**
+```
+╔═══════════════════════════════════════════════════════════╗
+║              🔴 TRANSACTION BLOCKED                        ║
+║                                                            ║
+║  Risk Score: 85/100 - HIGH RISK                           ║
+║                                                            ║
+║  ⚠️ Critical Flags:                                       ║
+║  ✗ Honeypot confirmed - cannot sell after buying          ║
+║  ✗ Sell tax: 99%                                          ║
+║  ✗ Ownership not renounced                                ║
+║  ✗ Low liquidity: $2,000                                  ║
+║  ✗ Contract not verified                                  ║
+║                                                            ║
+║  Contract: 0x1234...5678                                   ║
+║                                                            ║
+║  This transaction has been blocked for your protection.   ║
+║  ShieldBot detected multiple high-risk indicators.        ║
+╚═══════════════════════════════════════════════════════════╝
+```
+
+**Telegram Bot Response (with Token Names):**
+```
+🟢 ShieldBot Intelligence Report
+
+Token: Wrapped BNB (WBNB)
+Address: 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c
+Risk Archetype: Low Risk
+Rug Probability: 5% | Risk Level: LOW
+Confidence: 95%
+
+✓ Category Scores:
+  • Structural: 10/100 (LOW)
+  • Market: 5/100 (LOW)
+  • Behavioral: 0/100 (SAFE)
+  • Honeypot: 0/100 (SAFE)
+
+✓ No Critical Flags
+
+Contract Details:
+  • Verified: ✓ Yes (BscScan)
+  • Age: 1825 days (5.0 years)
+  • Ownership: Renounced
+  • Liquidity: $523,450,000
+
+Market Metrics:
+  • Liquidity: $523.45M
+  • 24h Volume: $145.2M
+  • Pair Age: 1825 days
+```
+
+**BNB Greenfield Forensic Report:**
+```json
+{
+  "report_id": "3a4039ef0349eb5f",
+  "timestamp": "2026-02-16T03:45:12.234Z",
+  "contract_address": "0x1234567890abcdef1234567890abcdef12345678",
+  "chain_id": 56,
+  "risk_score": 85,
+  "risk_level": "HIGH",
+  "rug_probability": 87.5,
+  "confidence_level": 75,
+  "risk_archetype": "honeypot",
+  "critical_flags": [
+    "Honeypot confirmed - cannot sell after buying",
+    "Sell tax 99%",
+    "Ownership not renounced",
+    "Low liquidity ($2,000)",
+    "Contract not verified"
+  ],
+  "category_scores": {
+    "structural": 90,
+    "market": 75,
+    "behavioral": 45,
+    "honeypot": 95
+  },
+  "data_sources": {
+    "goplus": { "is_honeypot": true, "honeypot_score": 95 },
+    "honeypot_is": { "can_buy": true, "can_sell": false, "sell_tax": 99 },
+    "dexscreener": { "liquidity_usd": 2000, "pair_age_hours": 12 },
+    "ethos": { "reputation_score": 45, "scam_flags": true },
+    "tenderly": { "simulation_success": false }
+  },
+  "public_url": "https://greenfield-sp.bnbchain.org/view/shieldbot-reports/reports/3a4039ef0349eb5f.json"
+}
+```
+
 ### Live Telegram Bot Demo
 
 **Bot**: [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)

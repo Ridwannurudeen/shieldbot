@@ -87,6 +87,45 @@ For risky transactions: Upload forensic report to BNB Greenfield
 Transaction proceeds/rejected based on verdict + user choice
 ```
 
+### Visual Proof of Concept
+
+**Extension BLOCK in Action:**
+
+ShieldBot's most powerful feature is its ability to hard-block dangerous transactions. When analyzing a honeypot token with 99% sell tax, the extension displays a full-screen red modal showing:
+- Risk Score: 85/100 (HIGH RISK)
+- Critical flags explaining WHY it's dangerous (honeypot confirmed, cannot sell after buying, extreme sell tax)
+- The transaction is completely blocked - users cannot proceed even if they choose to
+
+**Result:** The user's funds are protected BEFORE the transaction executes. This is fundamentally different from post-mortem block explorers or warnings that users can ignore.
+
+**Telegram Bot Intelligence:**
+
+The Telegram bot provides instant security analysis with token identification:
+```
+🟢 ShieldBot Intelligence Report
+
+Token: Wrapped BNB (WBNB)
+Address: 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c
+Risk Level: LOW (5/100)
+
+✓ Contract verified on BscScan
+✓ Ownership renounced
+✓ High liquidity: $500M+
+✓ 5+ years old, 50M+ transactions
+```
+
+Users can scan any address in seconds without technical knowledge. The bot is live at [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot) for judges to test.
+
+**BNB Greenfield Immutable Storage:**
+
+High-risk transaction reports are stored on BNB Greenfield as public, immutable JSON objects. This creates a permanent, community-verifiable database of dangerous contracts on BNB Chain. Each report includes:
+- Complete risk analysis with category breakdowns
+- Timestamp and contract address
+- All critical flags and danger signals
+- Public URL accessible to anyone
+
+**Watch the full demo:** [3-minute video walkthrough](https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c)
+
 ### Key Innovations
 
 1. **Real-Time Transaction Interception**
