@@ -12,7 +12,7 @@ ShieldBot is an autonomous transaction firewall for BNB Chain. It intercepts Web
 
 ## 🎥 Demo Video
 
-**Watch ShieldBot in action** (3-minute demo): [**View on Loom**](https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c)
+**Watch ShieldBot in action** (3-minute demo): [**View on YouTube**](https://youtu.be/a-PbFsZz0Ds)
 
 See the Chrome extension blocking honeypots, the Telegram bot scanning tokens with names/symbols, and BNB Greenfield forensic reports in real-time.
 
@@ -75,7 +75,7 @@ See the Chrome extension blocking honeypots, the Telegram bot scanning tokens wi
 > - **Action:** Transaction is hard-blocked - user cannot proceed even if they want to
 > - **Result:** Loss prevented before funds are at risk
 >
-> See it in action: [3-min demo video](https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c) at 0:30
+> See it in action: [3-min demo video](https://youtu.be/a-PbFsZz0Ds) at 0:30
 
 > **🟡 WARN Verdict (Medium Risk)**
 >
@@ -85,7 +85,7 @@ See the Chrome extension blocking honeypots, the Telegram bot scanning tokens wi
 > - **User Choice:** Two buttons: "Proceed Anyway" or "Cancel Transaction"
 > - **Result:** Informed decision with full transparency
 >
-> See it in action: [3-min demo video](https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c) at 1:00
+> See it in action: [3-min demo video](https://youtu.be/a-PbFsZz0Ds) at 1:00
 
 > **🟢 ALLOW Verdict (Safe)**
 >
@@ -95,7 +95,7 @@ See the Chrome extension blocking honeypots, the Telegram bot scanning tokens wi
 > - **MetaMask signature request appears immediately**
 > - **Result:** Safe transactions are not interrupted
 >
-> See it in action: [3-min demo video](https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c) at 1:30
+> See it in action: [3-min demo video](https://youtu.be/a-PbFsZz0Ds) at 1:30
 
 **Telegram Bot - Token Intelligence with Names:**
 
@@ -239,7 +239,7 @@ Visit `http://<host>:8000/test` to test the Chrome extension with pre-configured
 
 ### Watch the Demo First
 
-**3-Minute Video Walkthrough:** [View on Loom](https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c)
+**3-Minute Video Walkthrough:** [View on YouTube](https://youtu.be/a-PbFsZz0Ds)
 
 ### Try the Live Bot
 

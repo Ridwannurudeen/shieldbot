@@ -2,7 +2,7 @@
 
 ## 🎥 Demo Video
 
-**Watch the 3-minute walkthrough:** [View on Loom](https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c)
+**Watch the 3-minute walkthrough:** [View on YouTube](https://youtu.be/a-PbFsZz0Ds)
 
 See ShieldBot blocking honeypots in real-time, the Telegram bot displaying token names, and BNB Greenfield forensic reports in action.
 
@@ -124,7 +124,7 @@ High-risk transaction reports are stored on BNB Greenfield as public, immutable 
 - All critical flags and danger signals
 - Public URL accessible to anyone
 
-**Watch the full demo:** [3-minute video walkthrough](https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c)
+**Watch the full demo:** [3-minute video walkthrough](https://youtu.be/a-PbFsZz0Ds)
 
 ### Key Innovations
 
