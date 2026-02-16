@@ -1,5 +1,13 @@
 # ShieldBot - Project Overview
 
+## 🎥 Demo Video
+
+**Watch the 3-minute walkthrough:** [View on Loom](https://www.loom.com/share/6769a5e1ab744286b48380175fa6c50c)
+
+See ShieldBot blocking honeypots in real-time, the Telegram bot displaying token names, and BNB Greenfield forensic reports in action.
+
+---
+
 ## Problem Statement
 
 **The DeFi security crisis on BNB Chain is costing users billions.**
