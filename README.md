@@ -8,6 +8,8 @@ ShieldBot is an autonomous transaction firewall for BNB Chain. It intercepts Web
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![BNB Chain](https://img.shields.io/badge/BNB-Chain-yellow)](https://www.bnbchain.org/)
 
+**[V2 Roadmap](ROADMAP.md)** — ShieldBot is evolving into a cross-chain security intelligence network. See what's coming.
+
 ---
 
 ## 🎥 Demo Video
