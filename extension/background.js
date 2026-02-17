@@ -82,9 +82,17 @@ async function handleAnalyze(tx) {
     chainId: typeof tx.chainId === "string" ? parseInt(tx.chainId, 16) || 56 : (tx.chainId || 56),
   };
 
+  // Get policy mode setting
+  const settings = await new Promise((resolve) => {
+    chrome.storage.local.get({ policyMode: "BALANCED" }, resolve);
+  });
+
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "X-Policy-Mode": settings.policyMode,
+    },
     body: JSON.stringify(body),
   });
 

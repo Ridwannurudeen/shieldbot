@@ -19,20 +19,10 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-from dotenv import load_dotenv
 
-from scanner.transaction_scanner import TransactionScanner
-from scanner.token_scanner import TokenScanner
-from utils.web3_client import Web3Client
-from utils.ai_analyzer import AIAnalyzer
-from utils.onchain_recorder import OnchainRecorder
-from utils.scam_db import ScamDatabase
-
-from services import DexService, EthosService, HoneypotService, ContractService
-from core import RiskEngine, format_full_report
-
-# Load environment variables
-load_dotenv()
+from core.config import Settings
+from core.container import ServiceContainer
+from core.telegram_formatter import format_full_report
 
 # Configure logging
 logging.basicConfig(
@@ -41,20 +31,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize components
-web3_client = Web3Client()
-ai_analyzer = AIAnalyzer()
-tx_scanner = TransactionScanner(web3_client, ai_analyzer)
-token_scanner = TokenScanner(web3_client, ai_analyzer)
-onchain_recorder = OnchainRecorder()
-scam_db = ScamDatabase()
+# Initialize container
+settings = Settings()
+container = ServiceContainer(settings)
 
-# New composite intelligence services
-dex_service = DexService()
-ethos_service = EthosService()
-honeypot_service = HoneypotService(web3_client)
-contract_service = ContractService(web3_client, scam_db)
-risk_engine = RiskEngine()
+# Convenience accessors
+web3_client = container.web3_client
+ai_analyzer = container.ai_analyzer
+tx_scanner = container.tx_scanner
+token_scanner = container.token_scanner
+onchain_recorder = container.onchain_recorder
+scam_db = container.scam_db
+dex_service = container.dex_service
+ethos_service = container.ethos_service
+honeypot_service = container.honeypot_service
+contract_service = container.contract_service
+risk_engine = container.risk_engine
 
 # In-memory scan cache (address -> {result, timestamp})
 _scan_cache = {}
@@ -314,17 +306,22 @@ async def scan_contract(update: Update, address: str):
         response = None
         risk_level = 'medium'
         try:
-            contract_data, honeypot_data, dex_data, ethos_data, token_info = await asyncio.gather(
-                contract_service.fetch_contract_data(address),
-                honeypot_service.fetch_honeypot_data(address),
-                dex_service.fetch_token_market_data(address),
-                ethos_service.fetch_wallet_reputation(address),
+            from core.analyzer import AnalysisContext
+
+            ctx = AnalysisContext(address=address, chain_id=56)
+            analyzer_results, token_info = await asyncio.gather(
+                container.registry.run_all(ctx),
                 web3_client.get_token_info(address),
             )
 
-            risk_output = risk_engine.compute_composite_risk(
-                contract_data, honeypot_data, dex_data, ethos_data
-            )
+            risk_output = risk_engine.compute_from_results(analyzer_results)
+
+            # Extract service data for report formatting
+            by_name = {r.name: r for r in analyzer_results}
+            contract_data = by_name["structural"].data if "structural" in by_name else {}
+            honeypot_data = by_name["honeypot"].data if "honeypot" in by_name else {}
+            dex_data = by_name["market"].data if "market" in by_name else {}
+            ethos_data = by_name["behavioral"].data if "behavioral" in by_name else {}
 
             # Generate AI forensic analysis
             ai_analysis = None
@@ -347,6 +344,10 @@ async def scan_contract(update: Update, address: str):
 
             # Cache the composite result
             _set_cache(address, 'contract', {'composite_report': response, 'risk_level': risk_level})
+
+            # Enqueue deployer/funder indexing (fire-and-forget)
+            if hasattr(container, 'indexer') and container.indexer:
+                container.indexer.enqueue(address, 56)
 
         except Exception as e:
             logger.warning(f"Composite pipeline failed for {address}, falling back: {e}")
@@ -408,17 +409,21 @@ async def check_token(update: Update, address: str):
         response = None
         risk_level = 'warning'
         try:
-            contract_data, honeypot_data, dex_data, ethos_data, token_info = await asyncio.gather(
-                contract_service.fetch_contract_data(address),
-                honeypot_service.fetch_honeypot_data(address),
-                dex_service.fetch_token_market_data(address),
-                ethos_service.fetch_wallet_reputation(address),
+            from core.analyzer import AnalysisContext
+
+            ctx = AnalysisContext(address=address, chain_id=56)
+            analyzer_results, token_info = await asyncio.gather(
+                container.registry.run_all(ctx),
                 web3_client.get_token_info(address),
             )
 
-            risk_output = risk_engine.compute_composite_risk(
-                contract_data, honeypot_data, dex_data, ethos_data
-            )
+            risk_output = risk_engine.compute_from_results(analyzer_results)
+
+            by_name = {r.name: r for r in analyzer_results}
+            contract_data = by_name["structural"].data if "structural" in by_name else {}
+            honeypot_data = by_name["honeypot"].data if "honeypot" in by_name else {}
+            dex_data = by_name["market"].data if "market" in by_name else {}
+            ethos_data = by_name["behavioral"].data if "behavioral" in by_name else {}
 
             # Generate AI forensic analysis
             ai_analysis = None
@@ -440,6 +445,10 @@ async def check_token(update: Update, address: str):
             risk_level = risk_output.get('risk_level', 'medium').lower()
 
             _set_cache(address, 'token', {'composite_report': response, 'risk_level': risk_level})
+
+            # Enqueue deployer/funder indexing (fire-and-forget)
+            if hasattr(container, 'indexer') and container.indexer:
+                container.indexer.enqueue(address, 56)
 
         except Exception as e:
             logger.warning(f"Composite pipeline failed for {address}, falling back: {e}")

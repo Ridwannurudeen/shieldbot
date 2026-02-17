@@ -1,6 +1,21 @@
 import logging
+from typing import List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.analyzer import AnalyzerResult
 
 logger = logging.getLogger(__name__)
+
+class _EmptyResult:
+    """Sentinel for missing analyzer results."""
+    name = ""
+    weight = 0.0
+    score = 0.0
+    flags = []
+    data = {}
+    error = None
+
+_EMPTY_RESULT = _EmptyResult()
 
 RISK_ARCHETYPES = {
     'honeypot': 'Honeypot',
@@ -183,6 +198,82 @@ class RiskEngine:
                 'behavioral': round(behavioral, 1),
                 'honeypot': round(honeypot_score, 1),
             },
+        }
+
+    def compute_from_results(self, results: List["AnalyzerResult"]) -> dict:
+        """
+        Compute composite risk from a list of AnalyzerResult objects.
+        Produces identical output shape to compute_composite_risk().
+        """
+        # Build lookup by analyzer name
+        by_name = {r.name: r for r in results}
+
+        # Extract underlying service data from each result
+        contract_data = by_name.get("structural", _EMPTY_RESULT).data
+        honeypot_data = by_name.get("honeypot", _EMPTY_RESULT).data
+        dex_data = by_name.get("market", _EMPTY_RESULT).data
+        ethos_data = by_name.get("behavioral", _EMPTY_RESULT).data
+
+        # Collect category scores and flags from analyzer results
+        category_scores = {}
+        critical_flags = []
+        for r in results:
+            category_scores[r.name] = round(r.score, 1)
+            critical_flags.extend(r.flags)
+
+        # Weighted composite from analyzer scores
+        composite = sum(r.score * r.weight for r in results)
+
+        # --- Escalation overrides (same as compute_composite_risk) ---
+        has_mint = contract_data.get('has_mint', False)
+        has_proxy = contract_data.get('has_proxy', False)
+        ownership_renounced = contract_data.get('ownership_renounced', False)
+
+        if has_mint and has_proxy and ownership_renounced is False:
+            composite = max(composite, 85)
+
+        if honeypot_data.get('is_honeypot'):
+            composite = max(composite, 80)
+
+        if ethos_data.get('severe_reputation_flag'):
+            pair_age = dex_data.get('pair_age_hours')
+            if pair_age is not None and pair_age < 24:
+                composite = min(composite + 15, 100)
+
+        liquidity_info = dex_data.get('liquidity_usd', 0)
+        if ownership_renounced and liquidity_info > 100_000:
+            composite = max(composite - 20, 0)
+
+        rug_probability = round(min(max(composite, 0), 100), 1)
+
+        if rug_probability >= 71:
+            risk_level = 'HIGH'
+        elif rug_probability >= 31:
+            risk_level = 'MEDIUM'
+        else:
+            risk_level = 'LOW'
+
+        archetype = self._determine_archetype(
+            contract_data, honeypot_data, dex_data, rug_probability
+        )
+
+        confidence = self._compute_confidence(contract_data, honeypot_data, dex_data, ethos_data)
+
+        # Deduplicate flags
+        seen = set()
+        unique_flags = []
+        for f in critical_flags:
+            if f not in seen:
+                seen.add(f)
+                unique_flags.append(f)
+
+        return {
+            'rug_probability': rug_probability,
+            'risk_level': risk_level,
+            'risk_archetype': archetype,
+            'critical_flags': unique_flags,
+            'confidence_level': confidence,
+            'category_scores': category_scores,
         }
 
     def _determine_archetype(self, contract_data, honeypot_data, dex_data, rug_prob):

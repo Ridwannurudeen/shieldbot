@@ -30,10 +30,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // --- Settings ---
   chrome.storage.local.get(
-    { apiUrl: DEFAULT_API_URL, enabled: true },
+    { apiUrl: DEFAULT_API_URL, enabled: true, policyMode: "BALANCED" },
     (data) => {
       apiUrlInput.value = data.apiUrl;
       enabledToggle.checked = data.enabled;
+      // Set policy mode radio
+      const radio = document.querySelector(`input[name="policyMode"][value="${data.policyMode}"]`);
+      if (radio) radio.checked = true;
       checkConnection(data.apiUrl);
     }
   );
@@ -61,8 +64,11 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    // Get policy mode
+    const policyMode = document.querySelector('input[name="policyMode"]:checked')?.value || "BALANCED";
+
     // Save settings - permission will be requested when first API call is made
-    chrome.storage.local.set({ apiUrl, enabled }, () => {
+    chrome.storage.local.set({ apiUrl, enabled, policyMode }, () => {
       savedMsg.textContent = "Saved!";
       savedMsg.style.color = "";
       savedMsg.classList.add("show");
