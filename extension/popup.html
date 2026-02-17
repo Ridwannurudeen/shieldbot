@@ -208,6 +208,35 @@
     .history-list::-webkit-scrollbar { width: 4px; }
     .history-list::-webkit-scrollbar-track { background: transparent; }
     .history-list::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+
+    /* Policy mode radio */
+    .policy-option {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 8px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    .policy-option:has(input:checked) {
+      border-color: #3b82f6;
+      background: #1e293b;
+    }
+    .policy-option input { display: none; }
+    .policy-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #e2e8f0;
+    }
+    .policy-desc {
+      font-size: 10px;
+      color: #64748b;
+      margin-top: 2px;
+    }
   </style>
 </head>
 <body>
@@ -251,6 +280,22 @@
         <input type="checkbox" id="enabled" checked>
         <span class="slider"></span>
       </label>
+    </div>
+
+    <div class="field" style="margin-top: 8px;">
+      <label>Policy Mode</label>
+      <div style="display: flex; gap: 8px;">
+        <label class="policy-option">
+          <input type="radio" name="policyMode" value="BALANCED" checked>
+          <span class="policy-label">Balanced</span>
+          <span class="policy-desc">Warn on partial data</span>
+        </label>
+        <label class="policy-option">
+          <input type="radio" name="policyMode" value="STRICT">
+          <span class="policy-label">Strict</span>
+          <span class="policy-desc">Block on any failure</span>
+        </label>
+      </div>
     </div>
 
     <button class="btn btn-save" id="saveBtn">Save Settings</button>

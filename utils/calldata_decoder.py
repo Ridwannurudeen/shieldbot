@@ -237,14 +237,23 @@ class CalldataDecoder:
                 "raw": calldata,
             }
 
-    def is_whitelisted_target(self, to_address: str) -> Optional[str]:
+    def is_whitelisted_target(self, to_address: str, chain_id: int = 56) -> Optional[str]:
         """
         Check if the target address is a whitelisted router.
+
+        Args:
+            to_address: Target contract address.
+            chain_id: Chain ID to check against. Currently only BSC (56) has
+                      a router list; other chains return None.
 
         Returns:
             Router name if whitelisted, None otherwise.
         """
         if not to_address:
+            return None
+        # For now, all whitelisted routers are BSC. Future adapters will
+        # register their own routers via chain_adapter.get_whitelisted_routers().
+        if chain_id != 56:
             return None
         return WHITELISTED_ROUTERS.get(to_address.lower())
 

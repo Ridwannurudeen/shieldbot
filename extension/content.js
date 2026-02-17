@@ -165,6 +165,15 @@
           ${escapeHtml(label)} &mdash; Safety: ${safetyScore}/100
         </div>
 
+        ${result.partial ? `
+          <div class="shieldai-section" style="background:#78350f;border-radius:6px;padding:8px 12px;margin-bottom:8px;">
+            <p style="color:#fbbf24;font-size:12px;margin:0;">
+              <strong>Partial Analysis</strong> — ${escapeHtml((result.failed_sources || []).join(', '))} unavailable.
+              ${result.policy_mode === 'STRICT' ? 'Strict mode: blocking recommended.' : 'Results may be incomplete.'}
+            </p>
+          </div>
+        ` : ''}
+
         ${
           signalsHtml
             ? `<div class="shieldai-section">

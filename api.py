@@ -4,7 +4,6 @@ FastAPI backend for the Chrome extension transaction firewall
 Runs alongside bot.py on the VPS
 """
 
-import os
 import time
 import asyncio
 import logging
@@ -15,19 +14,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
-from dotenv import load_dotenv
 
-from scanner.transaction_scanner import TransactionScanner
-from scanner.token_scanner import TokenScanner
-from utils.web3_client import Web3Client
-from utils.ai_analyzer import AIAnalyzer
-from utils.scam_db import ScamDatabase
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD
-
-from services import DexService, EthosService, HoneypotService, ContractService, GreenfieldService, TenderlySimulator
-from core import RiskEngine, format_extension_alert
-
-load_dotenv()
+from core.config import Settings
+from core.container import ServiceContainer
+from core.extension_formatter import format_extension_alert
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -80,48 +71,55 @@ class RateLimiter:
 rate_limiter = RateLimiter(requests_per_minute=30, burst=10)
 
 
-# Shared instances (initialized on startup)
-web3_client: Optional[Web3Client] = None
-ai_analyzer: Optional[AIAnalyzer] = None
-tx_scanner: Optional[TransactionScanner] = None
-token_scanner: Optional[TokenScanner] = None
-calldata_decoder: Optional[CalldataDecoder] = None
-scam_db: Optional[ScamDatabase] = None
-dex_service: Optional[DexService] = None
-ethos_service: Optional[EthosService] = None
-honeypot_service: Optional[HoneypotService] = None
-contract_service: Optional[ContractService] = None
-risk_engine: Optional[RiskEngine] = None
-greenfield_service: Optional[GreenfieldService] = None
-tenderly_simulator: Optional[TenderlySimulator] = None
+# Service container (initialized on startup)
+container: Optional[ServiceContainer] = None
+
+# Convenience accessors — set after container startup
+web3_client = None
+ai_analyzer = None
+tx_scanner = None
+token_scanner = None
+calldata_decoder = None
+scam_db = None
+dex_service = None
+ethos_service = None
+honeypot_service = None
+contract_service = None
+risk_engine = None
+greenfield_service = None
+tenderly_simulator = None
+
+
+def _bind_globals(c: ServiceContainer):
+    """Bind module-level names to container services for backward compat."""
+    global web3_client, ai_analyzer, tx_scanner, token_scanner, calldata_decoder
+    global scam_db, dex_service, ethos_service, honeypot_service, contract_service
+    global risk_engine, greenfield_service, tenderly_simulator
+    web3_client = c.web3_client
+    ai_analyzer = c.ai_analyzer
+    tx_scanner = c.tx_scanner
+    token_scanner = c.token_scanner
+    calldata_decoder = c.calldata_decoder
+    scam_db = c.scam_db
+    dex_service = c.dex_service
+    ethos_service = c.ethos_service
+    honeypot_service = c.honeypot_service
+    contract_service = c.contract_service
+    risk_engine = c.risk_engine
+    greenfield_service = c.greenfield_service
+    tenderly_simulator = c.tenderly_simulator
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global web3_client, ai_analyzer, tx_scanner, token_scanner, calldata_decoder
-    global scam_db, dex_service, ethos_service, honeypot_service, contract_service, risk_engine
-    global greenfield_service, tenderly_simulator
-    web3_client = Web3Client()
-    ai_analyzer = AIAnalyzer()
-    tx_scanner = TransactionScanner(web3_client, ai_analyzer)
-    token_scanner = TokenScanner(web3_client, ai_analyzer)
-    calldata_decoder = CalldataDecoder()
-    scam_db = ScamDatabase()
-    dex_service = DexService()
-    ethos_service = EthosService()
-    honeypot_service = HoneypotService(web3_client)
-    contract_service = ContractService(web3_client, scam_db)
-    risk_engine = RiskEngine()
-    greenfield_service = GreenfieldService()
-    await greenfield_service.async_init()
-    tenderly_simulator = TenderlySimulator()
+    global container
+    settings = Settings()
+    container = ServiceContainer(settings)
+    _bind_globals(container)
+    await container.startup()
     logger.info("ShieldAI Firewall API started")
-    logger.info(f"AI Analysis: {'enabled' if ai_analyzer.is_available() else 'disabled'}")
-    logger.info(f"Greenfield storage: {'enabled' if greenfield_service.is_enabled() else 'disabled'}")
-    logger.info(f"Tenderly simulation: {'enabled' if tenderly_simulator.is_enabled() else 'disabled'}")
     yield
-    await greenfield_service.close()
-    await tenderly_simulator.close()
+    await container.shutdown()
     logger.info("ShieldAI Firewall API shutting down")
 
 
@@ -132,18 +130,11 @@ app = FastAPI(
 )
 
 # CORS: configurable via CORS_ALLOW_ORIGINS env (comma-separated)
-# Default: localhost dev origins only. Set in .env for production.
-_default_origins = [
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-    "http://localhost:3000",
-]
-_cors_origins = os.getenv("CORS_ALLOW_ORIGINS", "").strip()
-cors_origins = [o.strip() for o in _cors_origins.split(",") if o.strip()] if _cors_origins else _default_origins
-
+# Parsed at startup from Settings; fallback to localhost dev origins.
+_boot_settings = Settings()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
+    allow_origins=_boot_settings.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
@@ -156,6 +147,30 @@ async def rate_limit_middleware(request: Request, call_next):
     if request.url.path in ("/api/health", "/test"):
         return await call_next(request)
 
+    # Check for API key authentication
+    api_key = request.headers.get("x-api-key")
+    if api_key and container and container.auth_manager:
+        key_info = await container.auth_manager.validate_key(api_key)
+        if not key_info:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid API key"},
+            )
+        if not await container.auth_manager.check_rate_limit(key_info):
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "API key rate limit exceeded"},
+            )
+        # Record usage (fire-and-forget)
+        try:
+            await container.auth_manager.record_usage(key_info["key_id"], request.url.path)
+        except Exception:
+            pass
+        # Store key info for downstream use
+        request.state.api_key_info = key_info
+        return await call_next(request)
+
+    # Fallback: IP-based rate limiting (extension/unauthenticated)
     client_ip = request.headers.get("x-forwarded-for", request.client.host)
     if "," in client_ip:
         client_ip = client_ip.split(",")[0].strip()
@@ -186,6 +201,15 @@ class FirewallRequest(BaseModel):
 class ScanRequest(BaseModel):
     address: str
     chainId: int = 56
+
+
+class OutcomeRequest(BaseModel):
+    address: str
+    chainId: int = 56
+    risk_score_at_scan: Optional[float] = None
+    user_decision: str  # "proceed", "block", "ignore"
+    outcome: Optional[str] = None  # "safe", "scam", "unknown"
+    tx_hash: Optional[str] = None
 
 
 # --- Endpoints ---
@@ -490,40 +514,68 @@ async def firewall(req: FirewallRequest):
                 },
             }
 
-        # 3. Try composite intelligence pipeline
+        # 3. Try composite intelligence pipeline (registry-based)
         try:
-            # Build gather tasks — simulation runs in parallel if enabled
-            gather_tasks = [
-                contract_service.fetch_contract_data(to_addr, chain_id=req.chainId),
-                honeypot_service.fetch_honeypot_data(to_addr, chain_id=req.chainId),
-                dex_service.fetch_token_market_data(to_addr),
-                ethos_service.fetch_wallet_reputation(from_addr),
-            ]
-            run_simulation = tenderly_simulator and tenderly_simulator.is_enabled()
-            if run_simulation:
-                gather_tasks.append(
-                    tenderly_simulator.simulate_transaction(
-                        to_address=to_addr,
-                        from_address=from_addr,
-                        value=req.value,
-                        data=req.data,
-                        chain_id=req.chainId,
-                    )
-                )
+            from core.analyzer import AnalysisContext
 
-            results = await asyncio.gather(*gather_tasks)
-
-            contract_data = results[0]
-            honeypot_data = results[1]
-            dex_data = results[2]
-            ethos_data = results[3]
-            simulation_result = results[4] if run_simulation else None
-
-            risk_output = risk_engine.compute_composite_risk(
-                contract_data, honeypot_data, dex_data, ethos_data
+            ctx = AnalysisContext(
+                address=to_addr, chain_id=req.chainId, from_address=from_addr,
             )
 
+            # Run analyzers + optional Tenderly simulation in parallel
+            run_simulation = tenderly_simulator and tenderly_simulator.is_enabled()
+            if run_simulation and container and container.registry:
+                sim_task = tenderly_simulator.simulate_transaction(
+                    to_address=to_addr, from_address=from_addr,
+                    value=req.value, data=req.data, chain_id=req.chainId,
+                )
+                analyzer_results, simulation_result = await asyncio.gather(
+                    container.registry.run_all(ctx), sim_task,
+                )
+            elif container and container.registry:
+                analyzer_results = await container.registry.run_all(ctx)
+                simulation_result = None
+            else:
+                # Fallback: no container (e.g. tests), use old 4-service gather
+                gather_tasks = [
+                    contract_service.fetch_contract_data(to_addr, chain_id=req.chainId),
+                    honeypot_service.fetch_honeypot_data(to_addr, chain_id=req.chainId),
+                    dex_service.fetch_token_market_data(to_addr),
+                    ethos_service.fetch_wallet_reputation(from_addr),
+                ]
+                results = await asyncio.gather(*gather_tasks)
+                risk_output = risk_engine.compute_composite_risk(
+                    results[0], results[1], results[2], results[3],
+                )
+                analyzer_results = None
+                simulation_result = None
+
+            # Compute risk from analyzer results
+            if analyzer_results is not None:
+                risk_output = risk_engine.compute_from_results(analyzer_results)
+
+                # Apply policy mode (handles partial failures)
+                if container and container.policy_engine:
+                    risk_output = container.policy_engine.apply(analyzer_results, risk_output)
+
+                # Extract service data from analyzer results for backward compat
+                by_name = {r.name: r for r in analyzer_results}
+                contract_data = by_name["structural"].data if "structural" in by_name else {}
+                honeypot_data = by_name["honeypot"].data if "honeypot" in by_name else {}
+                dex_data = by_name["market"].data if "market" in by_name else {}
+                ethos_data = by_name["behavioral"].data if "behavioral" in by_name else {}
+            else:
+                contract_data = {}
+                honeypot_data = {}
+                dex_data = {}
+                ethos_data = {}
+
             alert = format_extension_alert(risk_output)
+
+            # Policy override may force BLOCK
+            policy_override = risk_output.get('policy_override')
+            if policy_override:
+                alert['risk_classification'] = policy_override
 
             # Simulation overrides
             danger_signals = list(alert["top_flags"])
@@ -579,7 +631,30 @@ async def firewall(req: FirewallRequest):
                 "greenfield_url": None,
                 "chain_id": req.chainId,
                 "network": "opBNB" if req.chainId == 204 else "BSC",
+                "partial": risk_output.get("partial", False),
+                "failed_sources": risk_output.get("failed_sources", []),
+                "policy_mode": risk_output.get("policy_mode", "BALANCED"),
             }
+
+            # Persist contract score to DB
+            if container and container.db:
+                try:
+                    await container.db.upsert_contract_score(
+                        address=to_addr,
+                        chain_id=req.chainId,
+                        risk_score=risk_score,
+                        risk_level=risk_output.get("risk_level", "UNKNOWN"),
+                        archetype=risk_output.get("risk_archetype"),
+                        category_scores=risk_output.get("category_scores"),
+                        flags=risk_output.get("critical_flags"),
+                        confidence=alert.get("confidence"),
+                    )
+                except Exception as e:
+                    logger.error(f"DB upsert failed: {e}")
+
+            # Enqueue deployer indexing (fire-and-forget)
+            if container and container.indexer:
+                container.indexer.enqueue(to_addr, req.chainId)
 
             # Greenfield upload for risky transactions (risk >= 50)
             if greenfield_service and greenfield_service.is_enabled() and risk_score >= 50:
@@ -668,6 +743,37 @@ async def scan(req: ScanRequest):
     except Exception as e:
         logger.error(f"Scan error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/outcome")
+async def report_outcome(req: OutcomeRequest):
+    """Record a user decision/outcome for a scanned contract (extension reports back)."""
+    try:
+        if container and container.db:
+            await container.db.record_outcome(
+                address=req.address,
+                chain_id=req.chainId,
+                risk_score_at_scan=req.risk_score_at_scan,
+                user_decision=req.user_decision,
+                outcome=req.outcome,
+                tx_hash=req.tx_hash,
+            )
+        return {"status": "recorded"}
+    except Exception as e:
+        logger.error(f"Outcome recording error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/usage")
+async def get_usage(request: Request):
+    """Get API usage stats for the authenticated key."""
+    key_info = getattr(request.state, "api_key_info", None)
+    if not key_info:
+        raise HTTPException(status_code=401, detail="API key required")
+    if not container or not container.auth_manager:
+        raise HTTPException(status_code=503, detail="Auth not available")
+    usage = await container.auth_manager.get_usage(key_info["key_id"])
+    return {"key_id": key_info["key_id"], "tier": key_info["tier"], "usage": usage}
 
 
 # --- Helpers ---
