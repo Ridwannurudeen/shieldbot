@@ -4,7 +4,7 @@
  * and returns the firewall verdict. Saves scan history.
  */
 
-const DEFAULT_API_URL = "http://38.49.212.108:8000";
+const DEFAULT_API_URL = "";
 const MAX_HISTORY = 50;
 
 // Listen for messages from content scripts
@@ -38,9 +38,9 @@ function isAllowedUrl(url) {
   try {
     const u = new URL(url);
     if (u.protocol === "https:") return true;
-    // Allow HTTP for localhost and the known VPS IP
+    // Allow HTTP only for localhost (development mode)
     if (u.protocol === "http:") {
-      const allowed = ["localhost", "127.0.0.1", "38.49.212.108"];
+      const allowed = ["localhost", "127.0.0.1"];
       return allowed.includes(u.hostname);
     }
     return false;
@@ -50,17 +50,28 @@ function isAllowedUrl(url) {
 }
 
 async function getApiUrl() {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     chrome.storage.local.get({ apiUrl: DEFAULT_API_URL }, (data) => {
       const url = data.apiUrl || DEFAULT_API_URL;
       // Block disallowed URLs
-      resolve(isAllowedUrl(url) ? url : DEFAULT_API_URL);
+      if (!url || !isAllowedUrl(url)) {
+        reject(new Error("Invalid or missing API URL. Please configure a valid HTTPS endpoint in extension settings."));
+        return;
+      }
+      resolve(url);
     });
   });
 }
 
 async function handleAnalyze(tx) {
   const apiUrl = await getApiUrl();
+
+  // Ensure we have permission for this origin
+  const hasPermission = await ensureHostPermission(apiUrl);
+  if (!hasPermission) {
+    throw new Error("Permission required: Open extension popup and reconnect to grant access to your API server.");
+  }
+
   const endpoint = `${apiUrl}/api/firewall`;
 
   const body = {
@@ -87,6 +98,13 @@ async function handleAnalyze(tx) {
 
 async function checkHealth() {
   const apiUrl = await getApiUrl();
+
+  // Ensure we have permission for this origin
+  const hasPermission = await ensureHostPermission(apiUrl);
+  if (!hasPermission) {
+    throw new Error("Permission required: Reconnect via extension popup to grant access.");
+  }
+
   const response = await fetch(`${apiUrl}/api/health`, {
     method: "GET",
     signal: AbortSignal.timeout(5000),
@@ -97,6 +115,29 @@ async function checkHealth() {
   }
 
   return response.json();
+}
+
+async function ensureHostPermission(url) {
+  try {
+    const u = new URL(url);
+    const origin = `${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}/*`;
+
+    // Check if we already have permission
+    const hasPermission = await chrome.permissions.contains({
+      origins: [origin]
+    });
+
+    if (hasPermission) {
+      return true;
+    }
+
+    // Permission not granted - fail with clear instructions
+    // User must grant permission via extension popup or chrome://extensions
+    return false;
+  } catch (err) {
+    console.error("Permission check error:", err);
+    return false;
+  }
 }
 
 function saveToHistory(tx, result) {

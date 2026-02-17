@@ -3,7 +3,7 @@
  * Manages settings, displays connection status, and shows scan history.
  */
 
-const DEFAULT_API_URL = "http://38.49.212.108:8000";
+const DEFAULT_API_URL = "";
 
 document.addEventListener("DOMContentLoaded", () => {
   const apiUrlInput = document.getElementById("apiUrl");
@@ -43,18 +43,25 @@ document.addEventListener("DOMContentLoaded", () => {
     const enabled = enabledToggle.checked;
 
     // Enforce HTTPS for non-local URLs
-    if (!isAllowedUrl(apiUrl)) {
-      savedMsg.textContent = "Error: Use HTTPS or an allowed HTTP host";
-      savedMsg.style.color = "#ef4444";
-      savedMsg.classList.add("show");
-      setTimeout(() => {
-        savedMsg.classList.remove("show");
-        savedMsg.textContent = "Saved!";
-        savedMsg.style.color = "";
-      }, 3000);
+    if (!apiUrl) {
+      showError("Error: API URL cannot be empty");
       return;
     }
 
+    if (!isAllowedUrl(apiUrl)) {
+      showError("Error: Use HTTPS or localhost for development");
+      return;
+    }
+
+    // Validate URL format
+    try {
+      new URL(apiUrl);
+    } catch (err) {
+      showError("Invalid URL format");
+      return;
+    }
+
+    // Save settings - permission will be requested when first API call is made
     chrome.storage.local.set({ apiUrl, enabled }, () => {
       savedMsg.textContent = "Saved!";
       savedMsg.style.color = "";
@@ -64,13 +71,24 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  function showError(message) {
+    savedMsg.textContent = message;
+    savedMsg.style.color = "#ef4444";
+    savedMsg.classList.add("show");
+    setTimeout(() => {
+      savedMsg.classList.remove("show");
+      savedMsg.textContent = "Saved!";
+      savedMsg.style.color = "";
+    }, 3000);
+  }
+
   function isAllowedUrl(url) {
     try {
       const u = new URL(url);
       if (u.protocol === "https:") return true;
-      // Allow HTTP for localhost and the known VPS IP
+      // Allow HTTP only for localhost (development mode)
       if (u.protocol === "http:") {
-        const allowed = ["localhost", "127.0.0.1", "38.49.212.108"];
+        const allowed = ["localhost", "127.0.0.1"];
         return allowed.includes(u.hostname);
       }
       return false;
@@ -81,10 +99,37 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // --- Connection Check ---
   async function checkConnection(apiUrl) {
+    if (!apiUrl) {
+      statusDot.className = "status-dot red";
+      statusText.textContent = "No API endpoint configured";
+      return;
+    }
+
     statusDot.className = "status-dot yellow";
     statusText.textContent = "Checking connection...";
 
     try {
+      // Check/request permission for this origin
+      const u = new URL(apiUrl);
+      const origin = `${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}/*`;
+
+      const hasPermission = await chrome.permissions.contains({
+        origins: [origin]
+      });
+
+      if (!hasPermission) {
+        // Try to request permission
+        const granted = await chrome.permissions.request({
+          origins: [origin]
+        });
+
+        if (!granted) {
+          statusDot.className = "status-dot red";
+          statusText.textContent = "Permission denied - click 'Save Settings' again and allow access";
+          return;
+        }
+      }
+
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5000);
 
@@ -96,7 +141,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (!response.ok) {
         statusDot.className = "status-dot red";
-        statusText.textContent = "Disconnected (HTTP " + response.status + ")";
+        statusText.textContent = "Connection failed (HTTP " + response.status + ")";
         return;
       }
 
@@ -106,7 +151,13 @@ document.addEventListener("DOMContentLoaded", () => {
       statusText.textContent = "Connected" + aiStatus;
     } catch (err) {
       statusDot.className = "status-dot red";
-      statusText.textContent = "Disconnected";
+      if (err.name === "AbortError") {
+        statusText.textContent = "Connection timeout - check API endpoint";
+      } else if (err.message && err.message.includes("permissions")) {
+        statusText.textContent = "Permission denied - check extension permissions";
+      } else {
+        statusText.textContent = "Cannot reach API - check endpoint and network";
+      }
     }
   }
 
