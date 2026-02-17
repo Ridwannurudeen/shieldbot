@@ -503,6 +503,80 @@ Current test coverage:
 
 ---
 
+## Chrome Web Store Compliance
+
+ShieldAI Transaction Firewall is production-ready for Chrome Web Store submission with strict adherence to security, privacy, and least-privilege principles.
+
+### Security Practices
+
+**HTTPS Enforcement:**
+- All API communication requires HTTPS (localhost HTTP allowed for development only)
+- No hardcoded HTTP endpoints or raw IP addresses in production code
+- Extension validates API URLs and rejects insecure protocols
+
+**Least-Privilege Permissions:**
+- **`activeTab`**: Inject transaction interceptor into Web3 application pages
+- **`storage`**: Store settings and scan history locally (chrome.storage.local)
+- **No `host_permissions`**: Extension does not request broad network access
+- **Content scripts limited to `https://*/*`**: Runs only on HTTPS websites
+
+**No Remote Code Execution:**
+- No `eval()`, `new Function()`, or dynamic script loading
+- All code is static and included in the extension package
+- No external JavaScript resources loaded at runtime
+
+### Privacy Guarantees
+
+**What We Collect:**
+- Transaction metadata only (recipient, sender, value, encoded data, chain ID)
+- Local scan history (maximum 50 transactions, stored in browser only)
+- User settings (API endpoint URL, firewall on/off state)
+
+**What We DO NOT Collect:**
+- Private keys, seed phrases, or wallet passwords
+- Personally identifiable information (PII)
+- Browsing history outside of transaction analysis
+- User credentials or authentication data
+
+**Data Storage:**
+- All data stored **locally** in browser (chrome.storage.local)
+- No data transmitted to extension developer
+- Users must configure their own API endpoint (no default server)
+
+**Data Transmission:**
+- Transaction metadata sent only to user-configured API endpoint via HTTPS
+- Extension developer does not operate backend servers
+- No third-party analytics, tracking, or advertising
+
+### Compliance Documentation
+
+**Full Documentation:**
+- **Privacy Policy:** [PRIVACY_POLICY.md](PRIVACY_POLICY.md)
+- **Chrome Web Store Disclosure:** [docs/CHROME_WEB_STORE_DISCLOSURE.md](docs/CHROME_WEB_STORE_DISCLOSURE.md)
+
+**Open Source Verification:**
+- Entire codebase is open source for transparency and auditability
+- Users can review all code to verify privacy claims
+- No hidden tracking or data collection
+
+### Installation for Chrome Web Store
+
+The extension in the `extension/` folder is production-ready:
+
+1. All permissions minimized to only what's necessary
+2. HTTPS-only transport enforced (except localhost dev mode)
+3. Clear error messages when API URL is invalid or missing
+4. Comprehensive privacy policy and compliance documentation
+5. No hardcoded credentials or insecure defaults
+
+**To submit to Chrome Web Store:**
+1. Zip the `extension/` folder
+2. Upload to Chrome Web Store Developer Dashboard
+3. Use disclosure text from `docs/CHROME_WEB_STORE_DISCLOSURE.md`
+4. Link privacy policy: `https://github.com/Ridwannurudeen/shieldbot/blob/main/PRIVACY_POLICY.md`
+
+---
+
 ## Hackathon
 
 Built for **Good Vibes Only: OpenClaw Edition** - **Builders Track**

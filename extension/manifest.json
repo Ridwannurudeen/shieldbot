@@ -4,21 +4,19 @@
   "version": "1.0.0",
   "description": "Real-time BNB Chain transaction security analysis. Intercepts wallet transactions and shows risk assessment before signing.",
   "permissions": [
-    "activeTab",
     "storage"
   ],
-  "host_permissions": [
-    "http://38.49.212.108:8000/*",
-    "https://38.49.212.108:8000/*",
-    "http://localhost:8000/*",
-    "http://127.0.0.1:8000/*"
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": ["https://*/*"],
       "js": ["content.js"],
       "run_at": "document_start",
       "all_frames": true
@@ -31,7 +29,7 @@
   "web_accessible_resources": [
     {
       "resources": ["inject.js", "overlay.css"],
-      "matches": ["<all_urls>"]
+      "matches": ["https://*/*"]
     }
   ],
   "icons": {

@@ -47,6 +47,15 @@
     showLoadingOverlay();
 
     try {
+      // Check if API URL is configured
+      if (!settings.apiUrl) {
+        showErrorOverlay(
+          requestId,
+          "ShieldAI Setup Required: Click the extension icon in your toolbar, enter your API server URL, and grant permission when prompted. Then try this transaction again."
+        );
+        return;
+      }
+
       // Send to background for API analysis
       const response = await chrome.runtime.sendMessage({
         type: "SHIELDAI_ANALYZE",
@@ -61,7 +70,10 @@
         showAnalysisOverlay(requestId, response.result);
       }
     } catch (err) {
-      showErrorOverlay(requestId, err.message || "Extension communication error");
+      showErrorOverlay(
+        requestId,
+        err.message || "Extension communication error. Check extension settings."
+      );
     }
   });
 
@@ -69,7 +81,7 @@
   function getSettings() {
     return new Promise((resolve) => {
       chrome.storage.local.get(
-        { enabled: true, apiUrl: "http://38.49.212.108:8000" },
+        { enabled: true, apiUrl: "" },
         resolve
       );
     });
