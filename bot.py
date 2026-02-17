@@ -653,7 +653,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Start the bot"""
-    token = os.getenv('TELEGRAM_BOT_TOKEN')
+    token = settings.telegram_bot_token
     if not token:
         logger.error("TELEGRAM_BOT_TOKEN not found in environment variables!")
         return
