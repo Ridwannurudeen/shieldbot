@@ -24,9 +24,13 @@ class PolicyEngine:
         self,
         results: List[AnalyzerResult],
         risk_output: Dict,
+        mode_override: Optional[str] = None,
     ) -> Dict:
         """
         Apply policy rules. May override classification based on failures.
+
+        Args:
+            mode_override: Per-request policy mode (e.g. from X-Policy-Mode header).
 
         Returns modified risk_output dict with added fields:
           - partial: bool (whether some analyzers failed)
@@ -34,6 +38,13 @@ class PolicyEngine:
           - policy_mode: current mode string
           - policy_override: str or None (if policy changed the result)
         """
+        active_mode = self.mode
+        if mode_override:
+            try:
+                active_mode = PolicyMode(mode_override.upper())
+            except ValueError:
+                pass
+
         failed = [r for r in results if r.error is not None]
         failed_names = [r.name for r in failed]
         is_partial = len(failed) > 0
@@ -41,13 +52,13 @@ class PolicyEngine:
         output = dict(risk_output)
         output['partial'] = is_partial
         output['failed_sources'] = failed_names
-        output['policy_mode'] = self.mode.value
+        output['policy_mode'] = active_mode.value
         output['policy_override'] = None
 
         if not is_partial:
             return output
 
-        if self.mode == PolicyMode.STRICT:
+        if active_mode == PolicyMode.STRICT:
             # Any failure → BLOCK
             logger.warning(f"STRICT policy: analyzers failed ({failed_names}), overriding to BLOCK")
             output['risk_level'] = 'HIGH'
