@@ -461,7 +461,7 @@ async def test_page():
 
 
 @app.post("/api/firewall")
-async def firewall(req: FirewallRequest):
+async def firewall(req: FirewallRequest, request: Request):
     """
     Main firewall endpoint — intercepts a pending transaction,
     analyzes calldata + target contract, and returns a security verdict.
@@ -556,7 +556,10 @@ async def firewall(req: FirewallRequest):
 
                 # Apply policy mode (handles partial failures)
                 if container and container.policy_engine:
-                    risk_output = container.policy_engine.apply(analyzer_results, risk_output)
+                    req_policy = request.headers.get("X-Policy-Mode")
+                    risk_output = container.policy_engine.apply(
+                        analyzer_results, risk_output, mode_override=req_policy,
+                    )
 
                 # Extract service data from analyzer results for backward compat
                 by_name = {r.name: r for r in analyzer_results}
