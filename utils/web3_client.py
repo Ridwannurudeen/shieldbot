@@ -18,14 +18,18 @@ logger = logging.getLogger(__name__)
 
 
 class Web3Client:
-    """Web3 client routing to chain-specific adapters (BSC and opBNB)."""
+    """Web3 client routing to chain-specific adapters."""
 
     def __init__(self):
-        bsc_rpc = os.getenv('BSC_RPC_URL', 'https://bsc-dataseed1.binance.org/')
         opbnb_rpc = os.getenv('OPBNB_RPC_URL', 'https://opbnb-mainnet-rpc.bnbchain.org')
 
         # Primary adapter: BSC
         self._bsc_adapter = BscAdapter()
+
+        # Adapter registry: chain_id -> adapter instance
+        self._adapters: Dict[int, object] = {
+            56: self._bsc_adapter,
+        }
 
         # opBNB still uses raw Web3 (no adapter yet — future PR)
         self.opbnb_web3 = Web3(Web3.HTTPProvider(opbnb_rpc))
@@ -48,17 +52,27 @@ class Web3Client:
              "outputs": [{"name": "", "type": "address"}], "type": "function"},
         ]
 
-        logger.info("Web3Client initialized (BSC adapter + opBNB fallback)")
+        logger.info(f"Web3Client initialized (adapters: {list(self._adapters.keys())})")
+
+    def register_adapter(self, adapter):
+        """Register a chain adapter by its chain_id."""
+        self._adapters[adapter.chain_id] = adapter
+        logger.info(f"Registered adapter: {adapter.chain_name} (chain_id={adapter.chain_id})")
 
     def _get_adapter(self, chain_id: int):
         """Return adapter for chain_id, or None for unsupported chains."""
-        if chain_id == 56:
-            return self._bsc_adapter
-        return None
+        return self._adapters.get(chain_id)
+
+    def get_supported_chain_ids(self):
+        """Return list of chain IDs with registered adapters."""
+        return list(self._adapters.keys())
 
     def get_web3(self, chain_id: int = 56):
         if chain_id == 204:
             return self.opbnb_web3
+        adapter = self._get_adapter(chain_id)
+        if adapter:
+            return adapter.w3
         return self.bsc_web3
 
     def is_valid_address(self, address: str) -> bool:
@@ -103,11 +117,17 @@ class Web3Client:
             logger.error(f"Error getting bytecode: {e}")
             return None
 
-    async def is_verified_contract(self, address: str) -> Union[bool, Tuple[bool, Optional[str]]]:
-        return await self._bsc_adapter.is_verified_contract(address)
+    async def is_verified_contract(self, address: str, chain_id: int = 56) -> Union[bool, Tuple[bool, Optional[str]]]:
+        adapter = self._get_adapter(chain_id)
+        if adapter:
+            return await adapter.is_verified_contract(address)
+        return (False, None)
 
-    async def get_contract_creation_info(self, address: str) -> Optional[Dict]:
-        return await self._bsc_adapter.get_contract_creation_info(address)
+    async def get_contract_creation_info(self, address: str, chain_id: int = 56) -> Optional[Dict]:
+        adapter = self._get_adapter(chain_id)
+        if adapter:
+            return await adapter.get_contract_creation_info(address)
+        return None
 
     async def get_token_info(self, address: str, chain_id: int = 56) -> Dict:
         adapter = self._get_adapter(chain_id)
@@ -165,8 +185,14 @@ class Web3Client:
             return await adapter.get_liquidity_info(address)
         return {'is_locked': False, 'lock_percentage': 0}
 
-    async def check_honeypot(self, address: str) -> Dict:
-        return await self._bsc_adapter.check_honeypot(address)
+    async def check_honeypot(self, address: str, chain_id: int = 56) -> Dict:
+        adapter = self._get_adapter(chain_id)
+        if adapter:
+            return await adapter.check_honeypot(address)
+        return {'is_honeypot': False, 'reason': 'No adapter for chain'}
 
-    async def get_tax_info(self, address: str) -> Dict:
-        return await self._bsc_adapter.get_tax_info(address)
+    async def get_tax_info(self, address: str, chain_id: int = 56) -> Dict:
+        adapter = self._get_adapter(chain_id)
+        if adapter:
+            return await adapter.get_tax_info(address)
+        return {'buy_tax': 0, 'sell_tax': 0}

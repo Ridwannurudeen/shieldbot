@@ -35,6 +35,10 @@ WEIGHT_HONEYPOT = 0.15
 class RiskEngine:
     """Composite weighted risk scoring across all data sources."""
 
+    def __init__(self, calibration=None):
+        """Initialize with optional CalibrationConfig for data-driven thresholds."""
+        self._calibration = calibration
+
     def compute_composite_risk(
         self,
         contract_data: dict,
@@ -162,10 +166,13 @@ class RiskEngine:
 
         rug_probability = round(min(max(composite, 0), 100), 1)
 
-        # --- Risk level ---
-        if rug_probability >= 71:
+        # --- Risk level (uses calibration thresholds when available) ---
+        high_t = self._calibration.high_threshold if self._calibration else 71
+        med_t = self._calibration.medium_threshold if self._calibration else 31
+
+        if rug_probability >= high_t:
             risk_level = 'HIGH'
-        elif rug_probability >= 31:
+        elif rug_probability >= med_t:
             risk_level = 'MEDIUM'
         else:
             risk_level = 'LOW'
@@ -204,6 +211,9 @@ class RiskEngine:
         """
         Compute composite risk from a list of AnalyzerResult objects.
         Produces identical output shape to compute_composite_risk().
+
+        Expects pre-normalized weights (summing to 1.0).  The registry's
+        run_all() handles normalization before results reach this method.
         """
         # Build lookup by analyzer name
         by_name = {r.name: r for r in results}
@@ -246,9 +256,12 @@ class RiskEngine:
 
         rug_probability = round(min(max(composite, 0), 100), 1)
 
-        if rug_probability >= 71:
+        high_t = self._calibration.high_threshold if self._calibration else 71
+        med_t = self._calibration.medium_threshold if self._calibration else 31
+
+        if rug_probability >= high_t:
             risk_level = 'HIGH'
-        elif rug_probability >= 31:
+        elif rug_probability >= med_t:
             risk_level = 'MEDIUM'
         else:
             risk_level = 'LOW'
@@ -258,6 +271,9 @@ class RiskEngine:
         )
 
         confidence = self._compute_confidence(contract_data, honeypot_data, dex_data, ethos_data)
+        # Apply calibration confidence boost if available
+        if self._calibration and self._calibration.confidence_boost:
+            confidence = min(100, confidence + self._calibration.confidence_boost)
 
         # Deduplicate flags
         seen = set()

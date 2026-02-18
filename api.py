@@ -19,6 +19,8 @@ from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD
 from core.config import Settings
 from core.container import ServiceContainer
 from core.extension_formatter import format_extension_alert
+from rpc.router import rpc_router
+from rpc.proxy import RPCProxy
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -117,6 +119,13 @@ async def lifespan(app: FastAPI):
     container = ServiceContainer(settings)
     _bind_globals(container)
     await container.startup()
+
+    # Initialize RPC proxy if enabled
+    if settings.rpc_proxy_enabled:
+        rpc_proxy = RPCProxy(container)
+        app.state.rpc_proxy = rpc_proxy
+        logger.info("RPC Proxy enabled")
+
     logger.info("ShieldAI Firewall API started")
     yield
     await container.shutdown()
@@ -128,6 +137,9 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Mount RPC proxy router
+app.include_router(rpc_router)
 
 # CORS: configurable via CORS_ALLOW_ORIGINS env (comma-separated)
 # Parsed at startup from Settings; fallback to localhost dev origins.
@@ -193,6 +205,8 @@ class FirewallRequest(BaseModel):
     value: str = "0"
     data: str = "0x"
     chainId: int = 56
+    typedData: Optional[Dict] = None
+    signMethod: Optional[str] = None
 
     class Config:
         populate_by_name = True
@@ -210,6 +224,17 @@ class OutcomeRequest(BaseModel):
     user_decision: str  # "proceed", "block", "ignore"
     outcome: Optional[str] = None  # "safe", "scam", "unknown"
     tx_hash: Optional[str] = None
+
+
+class CommunityReportRequest(BaseModel):
+    address: str
+    chainId: int = 56
+    report_type: str  # "false_positive", "false_negative", "scam"
+    reason: Optional[str] = None
+
+
+# Report rate limiter: 5 reports/min per IP
+_report_limiter = RateLimiter(requests_per_minute=5, burst=3)
 
 
 # --- Endpoints ---
@@ -477,7 +502,9 @@ async def firewall(req: FirewallRequest, request: Request):
 
         # 1. Decode calldata
         decoded = calldata_decoder.decode(req.data)
-        whitelisted = calldata_decoder.is_whitelisted_target(to_addr)
+        # Use chain-specific adapter for router lookup when available
+        _adapter = container.web3_client._get_adapter(req.chainId) if container else None
+        whitelisted = calldata_decoder.is_whitelisted_target(to_addr, chain_id=req.chainId, adapter=_adapter)
 
         # Resolve value
         value_wei = _parse_value(req.value)
@@ -520,6 +547,12 @@ async def firewall(req: FirewallRequest, request: Request):
 
             ctx = AnalysisContext(
                 address=to_addr, chain_id=req.chainId, from_address=from_addr,
+                extra={
+                    'calldata': req.data,
+                    'value': req.value,
+                    'typed_data': req.typedData,
+                    'sign_method': req.signMethod,
+                },
             )
 
             # Run analyzers + optional Tenderly simulation in parallel
@@ -633,7 +666,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 "simulation": simulation_result,
                 "greenfield_url": None,
                 "chain_id": req.chainId,
-                "network": "opBNB" if req.chainId == 204 else "BSC",
+                "network": _chain_id_to_name(req.chainId),
                 "partial": risk_output.get("partial", False),
                 "failed_sources": risk_output.get("failed_sources", []),
                 "policy_mode": risk_output.get("policy_mode", "BALANCED"),
@@ -767,6 +800,41 @@ async def report_outcome(req: OutcomeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/report")
+async def community_report(req: CommunityReportRequest, request: Request):
+    """Record a community report (false positive, false negative, or scam)."""
+    # Rate limit per IP
+    client_ip = request.headers.get("x-forwarded-for", request.client.host)
+    if "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+    if not _report_limiter.is_allowed(f"report:{client_ip}"):
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Report rate limit exceeded (5/min)."},
+        )
+
+    valid_types = {"false_positive", "false_negative", "scam"}
+    if req.report_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"report_type must be one of {valid_types}")
+
+    if not web3_client or not web3_client.is_valid_address(req.address):
+        raise HTTPException(status_code=400, detail="Invalid address")
+
+    try:
+        if container and container.db:
+            await container.db.record_community_report(
+                address=req.address,
+                chain_id=req.chainId,
+                report_type=req.report_type,
+                reporter_id=client_ip,
+                reason=req.reason,
+            )
+        return {"status": "recorded", "address": req.address, "report_type": req.report_type}
+    except Exception as e:
+        logger.error(f"Community report error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/usage")
 async def get_usage(request: Request):
     """Get API usage stats for the authenticated key."""
@@ -780,6 +848,14 @@ async def get_usage(request: Request):
 
 
 # --- Helpers ---
+
+_CHAIN_NAMES = {56: "BSC", 204: "opBNB", 1: "Ethereum", 8453: "Base"}
+
+
+def _chain_id_to_name(chain_id: int) -> str:
+    """Map chain_id to a human-readable network name."""
+    return _CHAIN_NAMES.get(chain_id, f"Chain {chain_id}")
+
 
 def _extract_raw_checks(scan: Dict) -> Dict:
     """Extract key raw check values for the extension."""

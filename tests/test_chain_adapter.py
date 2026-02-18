@@ -7,19 +7,15 @@ from adapters.bsc import BscAdapter, WHITELISTED_ROUTERS, KNOWN_LOCKERS
 
 class TestBscAdapterProperties:
     def test_chain_id(self):
-        with patch("adapters.bsc.Web3"):
-            adapter = BscAdapter.__new__(BscAdapter)
-            adapter.w3 = MagicMock()
-            assert adapter.chain_id == 56
+        adapter = BscAdapter(rpc_url="https://bsc-dataseed1.binance.org/")
+        assert adapter.chain_id == 56
 
     def test_chain_name(self):
-        adapter = BscAdapter.__new__(BscAdapter)
-        adapter.w3 = MagicMock()
+        adapter = BscAdapter(rpc_url="https://bsc-dataseed1.binance.org/")
         assert adapter.chain_name == "BSC"
 
     def test_whitelisted_routers(self):
-        adapter = BscAdapter.__new__(BscAdapter)
-        adapter.w3 = MagicMock()
+        adapter = BscAdapter(rpc_url="https://bsc-dataseed1.binance.org/")
         routers = adapter.get_whitelisted_routers()
         assert "0x10ed43c718714eb63d5aa57b78b54704e256024e" in routers
         assert routers["0x10ed43c718714eb63d5aa57b78b54704e256024e"] == "PancakeSwap V2 Router"

@@ -82,6 +82,14 @@ async function handleAnalyze(tx) {
     chainId: typeof tx.chainId === "string" ? parseInt(tx.chainId, 16) || 56 : (tx.chainId || 56),
   };
 
+  // Include typed data for signature analysis (EIP-712, Permit2, etc.)
+  if (tx._typedData || tx.typedData) {
+    body.typedData = tx._typedData || tx.typedData;
+  }
+  if (tx._signMethod || tx.signMethod) {
+    body.signMethod = tx._signMethod || tx.signMethod;
+  }
+
   // Get policy mode setting
   const settings = await new Promise((resolve) => {
     chrome.storage.local.get({ policyMode: "BALANCED" }, resolve);

@@ -105,6 +105,20 @@ class Database:
                 ON deployers(deployer_address);
             CREATE INDEX IF NOT EXISTS idx_funder_address
                 ON funder_links(funder_address);
+
+            CREATE TABLE IF NOT EXISTS community_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                address TEXT NOT NULL,
+                chain_id INTEGER NOT NULL DEFAULT 56,
+                report_type TEXT NOT NULL,
+                reporter_id TEXT,
+                reason TEXT,
+                risk_score_at_report REAL,
+                created_at REAL NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_community_reports_address
+                ON community_reports(address, chain_id);
         """)
         await self._db.commit()
 
@@ -196,6 +210,71 @@ class Database:
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (address.lower(), chain_id, risk_score_at_scan, user_decision, outcome, tx_hash, now))
         await self._db.commit()
+
+    # --- Community Reports ---
+
+    async def record_community_report(
+        self,
+        address: str,
+        chain_id: int = 56,
+        report_type: str = "false_positive",
+        reporter_id: str = None,
+        reason: str = None,
+        risk_score_at_report: float = None,
+    ):
+        """Record a community report (false positive/negative)."""
+        now = time.time()
+        await self._db.execute("""
+            INSERT INTO community_reports
+                (address, chain_id, report_type, reporter_id, reason, risk_score_at_report, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (address.lower(), chain_id, report_type, reporter_id, reason, risk_score_at_report, now))
+        await self._db.commit()
+
+    async def get_reports(self, address: str, chain_id: int = 56, limit: int = 50) -> List[Dict]:
+        """Get community reports for an address."""
+        cursor = await self._db.execute("""
+            SELECT report_type, reporter_id, reason, risk_score_at_report, created_at
+            FROM community_reports
+            WHERE address = ? AND chain_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (address.lower(), chain_id, limit))
+        rows = await cursor.fetchall()
+        return [
+            {
+                'report_type': r[0],
+                'reporter_id': r[1],
+                'reason': r[2],
+                'risk_score_at_report': r[3],
+                'created_at': r[4],
+            }
+            for r in rows
+        ]
+
+    async def get_all_reports(self, limit: int = 200) -> List[Dict]:
+        """Get all community reports."""
+        cursor = await self._db.execute("""
+            SELECT address, chain_id, report_type, reporter_id, reason, risk_score_at_report, created_at
+            FROM community_reports
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (limit,))
+        rows = await cursor.fetchall()
+        return [
+            {
+                'address': r[0],
+                'chain_id': r[1],
+                'report_type': r[2],
+                'reporter_id': r[3],
+                'reason': r[4],
+                'risk_score_at_report': r[5],
+                'created_at': r[6],
+            }
+            for r in rows
+        ]
+
+    # --- Outcome Events ---
 
     async def get_outcomes(self, address: str, chain_id: int = 56, limit: int = 50) -> List[Dict]:
         """Get outcome events for an address."""
