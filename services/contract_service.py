@@ -49,14 +49,14 @@ class ContractService:
 
             results = {'is_contract': True}
 
-            # Verification + source code (BscScan call #1)
-            verified, source_code = await self.web3_client.is_verified_contract(address)
+            # Verification + source code
+            verified, source_code = await self.web3_client.is_verified_contract(address, chain_id=chain_id)
             results['is_verified'] = verified
 
             await asyncio.sleep(BSCSCAN_DELAY)
 
-            # Contract age (BscScan call #2)
-            creation_info = await self.web3_client.get_contract_creation_info(address)
+            # Contract age
+            creation_info = await self.web3_client.get_contract_creation_info(address, chain_id=chain_id)
             if creation_info:
                 results['contract_age_days'] = creation_info.get('age_days')
 
