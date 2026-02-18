@@ -154,11 +154,13 @@ class RiskEngine:
             composite = max(composite, 80)
 
         # honeypot confirmed → floor at 80
-        # Skip for high-liquidity tokens with low taxes (likely false positive)
+        # Skip for high-liquidity verified tokens with low taxes (likely false positive)
+        # but always escalate if adapter flagged as low_tax_honeypot (unverified)
         liquidity_info = dex_data.get('liquidity_usd', 0)
         if honeypot_data.get('is_honeypot'):
             sell_tax = honeypot_data.get('sell_tax', 0)
-            if not (liquidity_info > 500_000 and sell_tax < 5):
+            is_false_positive_candidate = liquidity_info > 500_000 and sell_tax < 5
+            if not is_false_positive_candidate or honeypot_data.get('low_tax_honeypot'):
                 composite = max(composite, 80)
 
         # severe reputation + new pair → escalate
@@ -167,8 +169,8 @@ class RiskEngine:
             if pair_age is not None and pair_age < 24:
                 composite = min(composite + 15, 100)
 
-        # positive signals → reduce
-        if ownership_renounced and liquidity_info > 100_000:
+        # positive signals → reduce (but not if honeypot confirmed)
+        if ownership_renounced and liquidity_info > 100_000 and not honeypot_data.get('is_honeypot'):
             composite = max(composite - 20, 0)
 
         rug_probability = round(min(max(composite, 0), 100), 1)
@@ -262,10 +264,13 @@ class RiskEngine:
         if not contract_data.get('is_contract') and honeypot_data.get('simulation_failed'):
             composite = max(composite, 80)
 
-        # Skip honeypot escalation for high-liquidity tokens with low taxes
+        # Honeypot escalation — floor at 80 if confirmed
+        # Skip for high-liquidity verified tokens with low taxes (likely false positive)
+        # but always escalate if adapter explicitly flagged as low_tax_honeypot (unverified)
         if honeypot_data.get('is_honeypot'):
             sell_tax = honeypot_data.get('sell_tax', 0)
-            if not (liquidity > 500_000 and sell_tax < 5):
+            is_false_positive_candidate = liquidity > 500_000 and sell_tax < 5
+            if not is_false_positive_candidate or honeypot_data.get('low_tax_honeypot'):
                 composite = max(composite, 80)
 
         if ethos_data.get('severe_reputation_flag'):
@@ -273,8 +278,10 @@ class RiskEngine:
             if pair_age is not None and pair_age < 24:
                 composite = min(composite + 15, 100)
 
+        # Positive signals — reduce score for renounced ownership with high liquidity
+        # but not if honeypot was confirmed
         liquidity_info = dex_data.get('liquidity_usd', 0)
-        if ownership_renounced and liquidity_info > 100_000:
+        if ownership_renounced and liquidity_info > 100_000 and not honeypot_data.get('is_honeypot'):
             composite = max(composite - 20, 0)
 
         rug_probability = round(min(max(composite, 0), 100), 1)
