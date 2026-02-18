@@ -212,11 +212,13 @@ class EvmAdapter(ChainAdapter):
 
                         sell_tax = float(simulation.get('sellTax', 0))
                         buy_tax = float(simulation.get('buyTax', 0))
-                        if is_honeypot and sell_tax < 50 and buy_tax < 50:
+                        if is_honeypot and sell_tax < 5 and buy_tax < 5:
+                            # Low taxes but flagged — likely transfer restrictions
+                            # or hidden blocklist. Keep the flag, lower confidence.
                             return {
-                                'is_honeypot': False,
-                                'reason': f'Flagged but taxes normal (buy:{buy_tax}% sell:{sell_tax}%)',
-                                'likely_false_positive': True,
+                                'is_honeypot': True,
+                                'reason': f'{reason} (taxes low: buy:{buy_tax}% sell:{sell_tax}%)',
+                                'low_tax_honeypot': True,
                             }
 
                         return {'is_honeypot': is_honeypot, 'reason': reason}
