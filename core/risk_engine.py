@@ -149,6 +149,10 @@ class RiskEngine:
         if has_mint and has_proxy and ownership_renounced is False:
             composite = max(composite, 85)
 
+        # No contract bytecode + honeypot simulation failed → destroyed scam token
+        if not contract_data.get('is_contract') and honeypot_data.get('simulation_failed'):
+            composite = max(composite, 80)
+
         # honeypot confirmed → floor at 80
         # Skip for high-liquidity tokens with low taxes (likely false positive)
         liquidity_info = dex_data.get('liquidity_usd', 0)
@@ -253,6 +257,10 @@ class RiskEngine:
         liquidity = dex_data.get('liquidity_usd', 0)
         if not is_verified and (has_mint or has_blacklist) and ownership_renounced is False and liquidity < 100_000:
             composite = max(composite, 55)
+
+        # No contract bytecode + honeypot simulation failed → destroyed scam token
+        if not contract_data.get('is_contract') and honeypot_data.get('simulation_failed'):
+            composite = max(composite, 80)
 
         # Skip honeypot escalation for high-liquidity tokens with low taxes
         if honeypot_data.get('is_honeypot'):
