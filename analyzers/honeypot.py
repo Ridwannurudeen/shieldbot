@@ -35,8 +35,8 @@ class HoneypotAnalyzer(Analyzer):
             score += 80
             flags.append('Honeypot detected')
         if d.get('simulation_failed') and not d.get('is_honeypot'):
-            score += 15
-            flags.append('Honeypot simulation failed (inconclusive)')
+            score += 40
+            flags.append('Honeypot simulation failed — treat as suspicious')
         if not d.get('can_sell'):
             score += 60
             flags.append('Cannot sell token')

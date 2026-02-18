@@ -5,9 +5,11 @@ Runs alongside bot.py on the VPS
 """
 
 import os
+import hmac
 import time
 import asyncio
 import logging
+import random
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
@@ -184,9 +186,17 @@ async def rate_limit_middleware(request: Request, call_next):
         return await call_next(request)
 
     # Fallback: IP-based rate limiting (extension/unauthenticated)
-    client_ip = request.headers.get("x-forwarded-for", request.client.host)
-    if "," in client_ip:
-        client_ip = client_ip.split(",")[0].strip()
+    # Use rightmost IP from X-Forwarded-For (set by trusted reverse proxy),
+    # not leftmost (client-controlled and spoofable).
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        client_ip = forwarded.split(",")[-1].strip()
+    else:
+        client_ip = request.client.host
+
+    # Probabilistic cleanup of stale rate-limiter entries (1% of requests)
+    if random.random() < 0.01:
+        rate_limiter.cleanup()
 
     if not rate_limiter.is_allowed(client_ip):
         logger.warning(f"Rate limit exceeded for {client_ip}")
@@ -546,7 +556,12 @@ async def firewall(req: FirewallRequest, request: Request):
         if container and container.db:
             cached = await container.db.get_contract_score(to_addr, req.chainId, max_age_seconds=300)
             if cached:
-                return _build_cached_response(cached, decoded, value_bnb, req.chainId)
+                policy_mode = container.settings.policy_mode if container else "BALANCED"
+                req_policy = request.headers.get("X-Policy-Mode")
+                return _build_cached_response(
+                    cached, decoded, value_bnb, req.chainId,
+                    to_addr=to_addr, policy_mode=req_policy or policy_mode,
+                )
 
         # 3. Try composite intelligence pipeline (registry-based)
         try:
@@ -810,10 +825,12 @@ async def report_outcome(req: OutcomeRequest):
 @app.post("/api/report")
 async def community_report(req: CommunityReportRequest, request: Request):
     """Record a community report (false positive, false negative, or scam)."""
-    # Rate limit per IP
-    client_ip = request.headers.get("x-forwarded-for", request.client.host)
-    if "," in client_ip:
-        client_ip = client_ip.split(",")[0].strip()
+    # Rate limit per IP (rightmost = proxy-set, not spoofable)
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        client_ip = forwarded.split(",")[-1].strip()
+    else:
+        client_ip = request.client.host
     if not _report_limiter.is_allowed(f"report:{client_ip}"):
         return JSONResponse(
             status_code=429,
@@ -869,8 +886,10 @@ async def campaign_graph(address: str, chain_id: int = 56):
 async def create_api_key(request: Request):
     """Create a new API key. Requires ADMIN_SECRET header."""
     admin_secret = request.headers.get("x-admin-secret")
-    expected = os.getenv("ADMIN_SECRET", "") or (container.settings.admin_secret if container else "")
-    if not admin_secret or not expected or admin_secret != expected:
+    expected = container.settings.admin_secret if container else ""
+    if not expected:
+        raise HTTPException(status_code=503, detail="Admin not configured")
+    if not admin_secret or not hmac.compare_digest(admin_secret, expected):
         raise HTTPException(status_code=403, detail="Forbidden")
     if not container or not container.auth_manager:
         raise HTTPException(status_code=503, detail="Auth not available")
@@ -894,7 +913,10 @@ def _chain_id_to_name(chain_id: int) -> str:
     return _CHAIN_NAMES.get(chain_id, f"Chain {chain_id}")
 
 
-def _build_cached_response(cached: Dict, decoded: Dict, value_bnb: float, chain_id: int = 56) -> Dict:
+def _build_cached_response(
+    cached: Dict, decoded: Dict, value_bnb: float, chain_id: int = 56,
+    to_addr: str = "", policy_mode: str = "BALANCED",
+) -> Dict:
     """Build a firewall response from a cached DB row."""
     risk_score = cached['risk_score']
     risk_level = cached.get('risk_level', 'UNKNOWN')
@@ -917,7 +939,7 @@ def _build_cached_response(cached: Dict, decoded: Dict, value_bnb: float, chain_
         "transaction_impact": {
             "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens",
             "granting_access": "UNLIMITED" if decoded.get("is_unlimited_approval") else "None",
-            "recipient": "cached",
+            "recipient": f"{to_addr[:10]}..." if to_addr else "Unknown",
             "post_tx_state": f"Risk archetype: {archetype}",
         },
         "analysis": f"Cached result (scanned {cached.get('scan_count', 1)} times)",
@@ -941,7 +963,7 @@ def _build_cached_response(cached: Dict, decoded: Dict, value_bnb: float, chain_
         "network": _chain_id_to_name(chain_id),
         "partial": False,
         "failed_sources": [],
-        "policy_mode": "BALANCED",
+        "policy_mode": policy_mode,
     }
 
 
@@ -1014,8 +1036,10 @@ def _build_fallback_response(decoded: Dict, scan: Dict, whitelisted: Optional[st
     }
 
 
-# Token info cache (address -> {symbol, name, decimals})
-_token_cache: Dict[str, Dict] = {}
+# Token info cache: "address:chain_id" -> (data, timestamp)
+_token_cache: Dict[str, tuple] = {}
+_TOKEN_CACHE_TTL = 3600  # 1 hour
+_TOKEN_CACHE_MAX = 5000  # max entries before eviction
 
 
 def _parse_value(value_str: str) -> int:
@@ -1035,9 +1059,10 @@ async def _resolve_token(address: str, chain_id: int = 56) -> Optional[Dict]:
     if not address or not web3_client.is_valid_address(address):
         return None
 
-    addr_lower = address.lower()
-    if addr_lower in _token_cache:
-        return _token_cache[addr_lower]
+    cache_key = f"{address.lower()}:{chain_id}"
+    cached = _token_cache.get(cache_key)
+    if cached and (time.time() - cached[1]) < _TOKEN_CACHE_TTL:
+        return cached[0]
 
     try:
         info = await web3_client.get_token_info(address, chain_id=chain_id)
@@ -1047,7 +1072,11 @@ async def _resolve_token(address: str, chain_id: int = 56) -> Optional[Dict]:
                 "name": info.get("name", ""),
                 "decimals": info.get("decimals", 18),
             }
-            _token_cache[addr_lower] = result
+            # Evict oldest entries if cache is full
+            if len(_token_cache) >= _TOKEN_CACHE_MAX:
+                oldest_key = min(_token_cache, key=lambda k: _token_cache[k][1])
+                del _token_cache[oldest_key]
+            _token_cache[cache_key] = (result, time.time())
             return result
     except Exception:
         pass
@@ -1087,7 +1116,7 @@ async def _enrich_decoded(decoded: Dict, to_addr: str, chain_id: int = 56):
             # Resolve the spender address
             spender = params.get("param_0", "")
             if spender:
-                spender_name = CalldataDecoder().is_whitelisted_target(spender)
+                spender_name = calldata_decoder.is_whitelisted_target(spender)
                 if spender_name:
                     decoded["spender_label"] = spender_name
 
