@@ -170,13 +170,16 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text(
             "❌ Please provide an address to scan.\n\n"
-            "Usage: `/scan <address>`",
+            "Usage: `/scan <address>`\n"
+            "Tip: Use chain prefixes like `/scan eth:0x...` or `/scan base:0x...`",
             parse_mode='Markdown'
         )
         return
 
-    address = context.args[0]
-    await scan_contract(update, address)
+    raw = context.args[0]
+    prefix_chain_id, address = parse_chain_prefix(raw)
+    chain_id = prefix_chain_id or _get_user_chain_id(context)
+    await scan_contract(update, address, chain_id=chain_id)
 
 
 async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -184,13 +187,16 @@ async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text(
             "❌ Please provide a token address.\n\n"
-            "Usage: `/token <address>`",
+            "Usage: `/token <address>`\n"
+            "Tip: Use chain prefixes like `/token eth:0x...` or `/token base:0x...`",
             parse_mode='Markdown'
         )
         return
 
-    address = context.args[0]
-    await check_token(update, address)
+    raw = context.args[0]
+    prefix_chain_id, address = parse_chain_prefix(raw)
+    chain_id = prefix_chain_id or _get_user_chain_id(context)
+    await check_token(update, address, chain_id=chain_id)
 
 
 async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -1,6 +1,6 @@
 {
-  "version": "1.0",
-  "description": "ShieldBot benchmark dataset v1 — manually labeled BSC addresses",
+  "version": "1.1",
+  "description": "ShieldBot benchmark dataset v1.1 — multi-chain labeled addresses (BSC, ETH, Base)",
   "entries": [
     {
       "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
@@ -52,13 +52,6 @@
       "description": "1inch V5 Router"
     },
     {
-      "address": "0x7083609fCE4d1d8Dc0C979AAb8c869Ea2C873402",
-      "chain_id": 56,
-      "label": "safe",
-      "category": "legitimate",
-      "description": "DOT — Binance-Peg Polkadot"
-    },
-    {
       "address": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
       "chain_id": 56,
       "label": "safe",
@@ -66,11 +59,88 @@
       "description": "USDC — Binance-Peg USD Coin"
     },
     {
-      "address": "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE",
+      "address": "0xbA2aE424d960c26247Dd6c32edC70B295c744C43",
       "chain_id": 56,
       "label": "safe",
       "category": "legitimate",
-      "description": "XRP — Binance-Peg XRP"
+      "description": "DOGE — Binance-Peg Dogecoin"
+    },
+    {
+      "address": "0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3",
+      "chain_id": 56,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "DAI — Binance-Peg Dai"
+    },
+    {
+      "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "chain_id": 1,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "USDC — USD Coin on Ethereum"
+    },
+    {
+      "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+      "chain_id": 1,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "WETH — Wrapped Ether on Ethereum"
+    },
+    {
+      "address": "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
+      "chain_id": 1,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "UNI — Uniswap Token on Ethereum"
+    },
+    {
+      "address": "0x514910771AF9Ca656af840dff83E8264EcF986CA",
+      "chain_id": 1,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "LINK — Chainlink Token on Ethereum"
+    },
+    {
+      "address": "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+      "chain_id": 1,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "DAI — Dai Stablecoin on Ethereum"
+    },
+    {
+      "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "chain_id": 8453,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "USDC — USD Coin on Base"
+    },
+    {
+      "address": "0x4200000000000000000000000000000000000006",
+      "chain_id": 8453,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "WETH — Wrapped Ether on Base"
+    },
+    {
+      "address": "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA",
+      "chain_id": 8453,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "USDbC — USD Base Coin on Base"
+    },
+    {
+      "address": "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22",
+      "chain_id": 8453,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "cbETH — Coinbase Wrapped Staked ETH on Base"
+    },
+    {
+      "address": "0x940181a94A35A4569E4529A3CDfB74e38FD98631",
+      "chain_id": 8453,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "AERO — Aerodrome Finance on Base"
     },
     {
       "address": "0xdbda907a02750f79cbf0414f7112eabe5091c286",
@@ -141,41 +211,6 @@
       "label": "malicious",
       "category": "honeypot",
       "description": "Honeypot with blacklist function"
-    },
-    {
-      "address": "0xbA2aE424d960c26247Dd6c32edC70B295c744C43",
-      "chain_id": 56,
-      "label": "safe",
-      "category": "legitimate",
-      "description": "DOGE — Binance-Peg Dogecoin"
-    },
-    {
-      "address": "0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47",
-      "chain_id": 56,
-      "label": "safe",
-      "category": "legitimate",
-      "description": "ADA — Binance-Peg Cardano"
-    },
-    {
-      "address": "0x14016E85a25aeb13065688cAFB43044C2ef86784",
-      "chain_id": 56,
-      "label": "safe",
-      "category": "legitimate",
-      "description": "TUSD — TrueUSD"
-    },
-    {
-      "address": "0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3",
-      "chain_id": 56,
-      "label": "safe",
-      "category": "legitimate",
-      "description": "DAI — Binance-Peg Dai"
-    },
-    {
-      "address": "0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD",
-      "chain_id": 56,
-      "label": "safe",
-      "category": "legitimate",
-      "description": "LINK — Binance-Peg ChainLink"
     }
   ]
 }

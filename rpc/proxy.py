@@ -1,14 +1,16 @@
-"""RPC Proxy — intercepts eth_sendTransaction, runs firewall, forwards or blocks."""
+"""RPC Proxy — intercepts eth_sendTransaction and eth_sendRawTransaction, runs firewall, forwards or blocks."""
 
 import logging
 from typing import Any, Dict, Optional
 
 import aiohttp
+import rlp
+from eth_account import Account
 
 logger = logging.getLogger(__name__)
 
 # Methods that should be intercepted for security analysis
-INTERCEPTED_METHODS = {"eth_sendTransaction"}
+INTERCEPTED_METHODS = {"eth_sendTransaction", "eth_sendRawTransaction"}
 
 
 class RPCProxy:
@@ -46,13 +48,24 @@ class RPCProxy:
         if method not in INTERCEPTED_METHODS:
             return await self._forward(upstream_rpc, payload)
 
-        # eth_sendTransaction: run firewall analysis
+        # Extract tx fields depending on method
         try:
-            tx_params = params[0] if params else {}
-            to_addr = tx_params.get("to", "")
-            from_addr = tx_params.get("from", "")
-            value = tx_params.get("value", "0x0")
-            data = tx_params.get("data", "0x")
+            if method == "eth_sendRawTransaction":
+                raw_hex = params[0] if params else ""
+                tx_fields = self._decode_raw_tx(raw_hex)
+                if tx_fields is None:
+                    # Decode failed — forward without analysis (fail-open)
+                    return await self._forward(upstream_rpc, payload)
+                to_addr = tx_fields.get("to", "") or ""
+                from_addr = tx_fields.get("from", "")
+                value = tx_fields.get("value", "0x0")
+                data = tx_fields.get("data", "0x")
+            else:
+                tx_params = params[0] if params else {}
+                to_addr = tx_params.get("to", "")
+                from_addr = tx_params.get("from", "")
+                value = tx_params.get("value", "0x0")
+                data = tx_params.get("data", "0x")
 
             if not to_addr:
                 # Contract creation — forward without analysis
@@ -106,6 +119,55 @@ class RPCProxy:
         import asyncio
         tasks = [self.handle_request(chain_id, p) for p in payloads]
         return await asyncio.gather(*tasks)
+
+    @staticmethod
+    def _decode_raw_tx(raw_hex: str) -> Optional[Dict[str, Any]]:
+        """Decode an RLP-encoded signed transaction into its fields.
+
+        Handles legacy (type 0), EIP-2930 (type 1), and EIP-1559 (type 2) txs.
+        Returns a dict with to, from, value, data — or None on failure.
+        """
+        try:
+            raw = bytes.fromhex(raw_hex.replace("0x", ""))
+
+            # Determine tx type from first byte
+            if raw[0] < 0x80:
+                # Typed transaction (EIP-2718): first byte is the type
+                tx_type = raw[0]
+                decoded = rlp.decode(raw[1:])
+            else:
+                # Legacy transaction
+                tx_type = 0
+                decoded = rlp.decode(raw)
+
+            if tx_type == 0:
+                # Legacy: [nonce, gasPrice, gas, to, value, data, v, r, s]
+                to_bytes, value_bytes, data_bytes = decoded[3], decoded[4], decoded[5]
+            elif tx_type == 1:
+                # EIP-2930: [chainId, nonce, gasPrice, gas, to, value, data, accessList, v, r, s]
+                to_bytes, value_bytes, data_bytes = decoded[4], decoded[5], decoded[6]
+            elif tx_type == 2:
+                # EIP-1559: [chainId, nonce, maxPriorityFee, maxFee, gas, to, value, data, accessList, v, r, s]
+                to_bytes, value_bytes, data_bytes = decoded[5], decoded[6], decoded[7]
+            else:
+                logger.warning(f"Unknown tx type {tx_type}")
+                return None
+
+            to_addr = ("0x" + to_bytes.hex()) if to_bytes else None
+            value_int = int.from_bytes(value_bytes, "big") if value_bytes else 0
+
+            # Recover sender
+            from_addr = Account.recover_transaction(raw_hex)
+
+            return {
+                "to": to_addr,
+                "from": from_addr,
+                "value": hex(value_int),
+                "data": ("0x" + data_bytes.hex()) if data_bytes else "0x",
+            }
+        except Exception as e:
+            logger.warning(f"Failed to decode raw transaction: {e}")
+            return None
 
     async def _forward(self, upstream_rpc: str, payload: Dict) -> Dict:
         """Forward a JSON-RPC request to the upstream RPC."""
