@@ -213,8 +213,18 @@ class EvmAdapter(ChainAdapter):
                         sell_tax = float(simulation.get('sellTax', 0))
                         buy_tax = float(simulation.get('buyTax', 0))
                         if is_honeypot and sell_tax < 5 and buy_tax < 5:
-                            # Low taxes but flagged — likely transfer restrictions
-                            # or hidden blocklist. Keep the flag, lower confidence.
+                            # Low taxes but flagged — check if verified.
+                            # Verified contracts with 0% taxes are almost
+                            # always honeypot.is false positives (e.g.
+                            # Binance-pegged tokens like LINK, DOGE, XVS).
+                            verified = await self.is_verified_contract(address)
+                            if verified:
+                                return {
+                                    'is_honeypot': False,
+                                    'reason': f'Flagged but verified with normal taxes (buy:{buy_tax}% sell:{sell_tax}%)',
+                                    'likely_false_positive': True,
+                                }
+                            # Unverified + flagged = trust the flag
                             return {
                                 'is_honeypot': True,
                                 'reason': f'{reason} (taxes low: buy:{buy_tax}% sell:{sell_tax}%)',
