@@ -3,11 +3,14 @@ Scam Database Checker
 Checks addresses against known scam databases and blocklists
 """
 
+import re
 import logging
 import aiohttp
 from typing import List, Dict
 
 logger = logging.getLogger(__name__)
+
+_ETH_ADDR_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
 
 
 class ScamDatabase:
@@ -30,6 +33,10 @@ class ScamDatabase:
         Returns:
             list: List of matches with type and reason
         """
+        if not _ETH_ADDR_RE.match(address):
+            logger.warning(f"Invalid address format passed to check_address: {address[:20]}")
+            return []
+
         matches = []
 
         # Check local blacklist

@@ -332,7 +332,7 @@ class Database:
             'address': addr,
             'deployer': deployer,
             'funder': funder,
-            'funder_value_wei': funder_value,
+            'funder_value_wei': str(funder_value),
             'contracts_deployed': deployed_contracts,
             'total_deployed': len(deployed_contracts),
         }

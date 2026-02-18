@@ -3,6 +3,7 @@
 import hashlib
 import secrets
 import time
+import uuid
 import logging
 from typing import Dict, Optional
 
@@ -42,15 +43,17 @@ class AuthManager:
 
         raw_key = generate_api_key()
         key_hash = hash_key(raw_key)
+        key_id = str(uuid.uuid4())
         limits = TIER_LIMITS[tier]
 
-        await self.db._db.execute("""
-            INSERT INTO api_keys (key_id, key_hash, owner, tier, rpm_limit, daily_limit, is_active, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, 1, ?)
-        """, (raw_key[:12], key_hash, owner, tier, limits["rpm"], limits["daily"], time.time()))
-        await self.db._db.commit()
+        async with self.db._db.execute("BEGIN IMMEDIATE"):
+            await self.db._db.execute("""
+                INSERT INTO api_keys (key_id, key_hash, owner, tier, rpm_limit, daily_limit, is_active, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+            """, (key_id, key_hash, owner, tier, limits["rpm"], limits["daily"], time.time()))
+            await self.db._db.commit()
 
-        return {"key": raw_key, "key_id": raw_key[:12], "owner": owner, "tier": tier}
+        return {"key": raw_key, "key_id": key_id, "owner": owner, "tier": tier}
 
     async def validate_key(self, raw_key: str) -> Optional[Dict]:
         """Validate an API key. Returns key info dict or None."""
