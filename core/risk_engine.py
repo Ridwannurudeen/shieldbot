@@ -246,7 +246,9 @@ class RiskEngine:
             composite = max(composite, 85)
 
         # Unverified contract with dangerous bytecode patterns — likely scam
-        if not is_verified and (has_mint or has_blacklist) and ownership_renounced is False:
+        # Only escalate for low-liquidity tokens; high-liquidity tokens are likely legit
+        liquidity = dex_data.get('liquidity_usd', 0)
+        if not is_verified and (has_mint or has_blacklist) and ownership_renounced is False and liquidity < 100_000:
             composite = max(composite, 55)
 
         if honeypot_data.get('is_honeypot'):
