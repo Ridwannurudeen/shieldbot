@@ -45,13 +45,17 @@ class ServiceContainer:
         self.onchain_recorder = OnchainRecorder()
 
         # Register multichain adapters
+        # Etherscan v2 API accepts any chain's key across all chains,
+        # so fall back to bscscan_api_key when chain-specific key is empty.
+        eth_api_key = settings.etherscan_api_key or settings.bscscan_api_key
+        base_api_key = settings.basescan_api_key or settings.bscscan_api_key
         self.eth_adapter = EthAdapter(
             rpc_url=settings.eth_rpc_url,
-            etherscan_api_key=settings.etherscan_api_key,
+            etherscan_api_key=eth_api_key,
         )
         self.base_adapter = BaseChainAdapter(
             rpc_url=settings.base_rpc_url,
-            basescan_api_key=settings.basescan_api_key,
+            basescan_api_key=base_api_key,
         )
         self.web3_client.register_adapter(self.eth_adapter)
         self.web3_client.register_adapter(self.base_adapter)
