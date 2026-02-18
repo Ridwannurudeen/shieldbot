@@ -112,7 +112,7 @@ class TransactionScanner:
 
         # Run all security checks (BscScan API only covers BSC; bytecode uses chain_id)
         data_sources['bscscan'] = await self._check_verification(address, result)
-        data_sources['scam_db'] = await self._check_scam_database(address, result)
+        data_sources['scam_db'] = await self._check_scam_database(address, result, chain_id=chain_id)
         data_sources['contract_age'] = await self._check_contract_age(address, result)
         data_sources['bytecode'] = await self._check_similar_scams(address, result, chain_id)
 
@@ -197,10 +197,10 @@ class TransactionScanner:
             result['checks']['verified_source'] = False
             return False
 
-    async def _check_scam_database(self, address: str, result: Dict) -> bool:
+    async def _check_scam_database(self, address: str, result: Dict, chain_id: int = 56) -> bool:
         """Check against known scam databases. Returns True if check succeeded."""
         try:
-            matches = await self.scam_db.check_address(address)
+            matches = await self.scam_db.check_address(address, chain_id=chain_id)
 
             if matches:
                 result['scam_matches'] = matches

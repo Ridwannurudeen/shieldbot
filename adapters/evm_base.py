@@ -1,6 +1,7 @@
 """Shared EVM adapter base class — config-driven extraction for EVM-compatible chains."""
 
 import logging
+import time
 import aiohttp
 from typing import Dict, List, Optional, Tuple
 from web3 import Web3
@@ -93,9 +94,35 @@ class EvmAdapter(ChainAdapter):
     def chain_name(self) -> str:
         return self._chain_name
 
+    def _call_with_retry(self, fn, *args, retries=3, base_delay=1.0):
+        """Wrap a synchronous web3 call with retry logic for 429/5xx errors.
+
+        Note: Uses time.sleep (blocking) because web3.py's synchronous calls
+        already block the event loop. The async adapter methods that call this
+        are themselves wrappers around blocking web3 I/O.
+        """
+        last_exc = None
+        for attempt in range(retries):
+            try:
+                return fn(*args)
+            except Exception as e:
+                last_exc = e
+                err_str = str(e)
+                if '429' in err_str or '502' in err_str or '503' in err_str:
+                    if attempt < retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning(
+                            f"[{self._chain_name}] RPC rate-limited (attempt {attempt + 1}/{retries}), "
+                            f"retrying in {delay}s: {err_str[:80]}"
+                        )
+                        time.sleep(delay)
+                        continue
+                raise
+        raise last_exc
+
     async def is_contract(self, address: str) -> bool:
         try:
-            code = self.w3.eth.get_code(Web3.to_checksum_address(address))
+            code = self._call_with_retry(self.w3.eth.get_code, Web3.to_checksum_address(address))
             return len(code) > 0
         except Exception as e:
             logger.error(f"[{self._chain_name}] Error checking if contract: {e}")
@@ -103,7 +130,7 @@ class EvmAdapter(ChainAdapter):
 
     async def get_bytecode(self, address: str) -> Optional[str]:
         try:
-            code = self.w3.eth.get_code(Web3.to_checksum_address(address))
+            code = self._call_with_retry(self.w3.eth.get_code, Web3.to_checksum_address(address))
             return code.hex()
         except Exception as e:
             logger.error(f"[{self._chain_name}] Error getting bytecode: {e}")
@@ -145,8 +172,8 @@ class EvmAdapter(ChainAdapter):
                     if data['status'] == '1' and data['result']:
                         result = data['result'][0]
                         tx_hash = result.get('txHash')
-                        tx = self.w3.eth.get_transaction(tx_hash)
-                        block = self.w3.eth.get_block(tx['blockNumber'])
+                        tx = self._call_with_retry(self.w3.eth.get_transaction, tx_hash)
+                        block = self._call_with_retry(self.w3.eth.get_block, tx['blockNumber'])
                         creation_time = datetime.fromtimestamp(block['timestamp'], tz=timezone.utc)
                         age_days = (datetime.now(timezone.utc) - creation_time).days
                         return {
@@ -165,10 +192,10 @@ class EvmAdapter(ChainAdapter):
             contract = self.w3.eth.contract(
                 address=Web3.to_checksum_address(address), abi=ERC20_ABI,
             )
-            name = contract.functions.name().call()
-            symbol = contract.functions.symbol().call()
-            decimals = contract.functions.decimals().call()
-            total_supply = contract.functions.totalSupply().call()
+            name = self._call_with_retry(contract.functions.name().call)
+            symbol = self._call_with_retry(contract.functions.symbol().call)
+            decimals = self._call_with_retry(contract.functions.decimals().call)
+            total_supply = self._call_with_retry(contract.functions.totalSupply().call)
             return {
                 'name': name, 'symbol': symbol,
                 'decimals': decimals, 'total_supply': total_supply / (10 ** decimals),
@@ -182,7 +209,7 @@ class EvmAdapter(ChainAdapter):
             contract = self.w3.eth.contract(
                 address=Web3.to_checksum_address(address), abi=ERC20_ABI,
             )
-            owner = contract.functions.owner().call()
+            owner = self._call_with_retry(contract.functions.owner().call)
             zero_address = '0x0000000000000000000000000000000000000000'
             is_renounced = owner.lower() == zero_address.lower()
             return {'owner': owner, 'is_renounced': is_renounced}
@@ -269,9 +296,11 @@ class EvmAdapter(ChainAdapter):
 
             for quote_name, quote_addr in self._quote_tokens:
                 try:
-                    addr = factory.functions.getPair(
-                        checksum_addr, Web3.to_checksum_address(quote_addr),
-                    ).call()
+                    addr = self._call_with_retry(
+                        factory.functions.getPair(
+                            checksum_addr, Web3.to_checksum_address(quote_addr),
+                        ).call,
+                    )
                     if addr != zero_address:
                         pair_address = addr
                         paired_with = quote_name
@@ -285,7 +314,7 @@ class EvmAdapter(ChainAdapter):
             pair_contract = self.w3.eth.contract(
                 address=Web3.to_checksum_address(pair_address), abi=PAIR_ABI,
             )
-            total_supply = pair_contract.functions.totalSupply().call()
+            total_supply = self._call_with_retry(pair_contract.functions.totalSupply().call)
             if total_supply == 0:
                 return {'is_locked': False, 'lock_percentage': 0, 'pair': pair_address}
 
@@ -293,9 +322,11 @@ class EvmAdapter(ChainAdapter):
             locker_details = []
             for locker_addr, locker_name in self._known_lockers.items():
                 try:
-                    balance = pair_contract.functions.balanceOf(
-                        Web3.to_checksum_address(locker_addr),
-                    ).call()
+                    balance = self._call_with_retry(
+                        pair_contract.functions.balanceOf(
+                            Web3.to_checksum_address(locker_addr),
+                        ).call,
+                    )
                     if balance > 0:
                         pct = (balance / total_supply) * 100
                         locked_amount += balance

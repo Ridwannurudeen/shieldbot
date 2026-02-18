@@ -276,6 +276,67 @@ class Database:
 
     # --- Outcome Events ---
 
+    async def get_campaign_graph(self, address: str, chain_id: int = None) -> Dict:
+        """Get deployer/funder links for an address (as contract or as deployer)."""
+        addr = address.lower()
+
+        # Find contracts deployed by this address
+        if chain_id:
+            cursor = await self._db.execute(
+                "SELECT contract_address, deploy_tx_hash FROM deployers WHERE deployer_address = ? AND chain_id = ?",
+                (addr, chain_id),
+            )
+        else:
+            cursor = await self._db.execute(
+                "SELECT contract_address, deploy_tx_hash FROM deployers WHERE deployer_address = ?",
+                (addr,),
+            )
+        deployed_contracts = [
+            {'contract': r[0], 'tx_hash': r[1]} for r in await cursor.fetchall()
+        ]
+
+        # Find deployer of this address (if it's a contract)
+        if chain_id:
+            cursor = await self._db.execute(
+                "SELECT deployer_address, deploy_tx_hash FROM deployers WHERE contract_address = ? AND chain_id = ?",
+                (addr, chain_id),
+            )
+        else:
+            cursor = await self._db.execute(
+                "SELECT deployer_address, deploy_tx_hash FROM deployers WHERE contract_address = ?",
+                (addr,),
+            )
+        deployer_row = await cursor.fetchone()
+        deployer = deployer_row[0] if deployer_row else None
+
+        # Find funder of the deployer
+        funder = None
+        funder_value = 0
+        lookup_deployer = deployer or addr
+        if chain_id:
+            cursor = await self._db.execute(
+                "SELECT funder_address, funding_value_wei FROM funder_links WHERE deployer_address = ? AND chain_id = ?",
+                (lookup_deployer, chain_id),
+            )
+        else:
+            cursor = await self._db.execute(
+                "SELECT funder_address, funding_value_wei FROM funder_links WHERE deployer_address = ?",
+                (lookup_deployer,),
+            )
+        funder_row = await cursor.fetchone()
+        if funder_row:
+            funder = funder_row[0]
+            funder_value = funder_row[1]
+
+        return {
+            'address': addr,
+            'deployer': deployer,
+            'funder': funder,
+            'funder_value_wei': funder_value,
+            'contracts_deployed': deployed_contracts,
+            'total_deployed': len(deployed_contracts),
+        }
+
     async def get_outcomes(self, address: str, chain_id: int = 56, limit: int = 50) -> List[Dict]:
         """Get outcome events for an address."""
         cursor = await self._db.execute("""

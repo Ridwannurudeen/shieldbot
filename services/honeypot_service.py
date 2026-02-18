@@ -13,6 +13,7 @@ class HoneypotService:
         defaults = {
             'is_honeypot': False,
             'honeypot_reason': None,
+            'simulation_failed': False,
             'buy_tax': 0,
             'sell_tax': 0,
             'can_buy': True,
@@ -25,12 +26,14 @@ class HoneypotService:
 
             is_honeypot = honeypot_result.get('is_honeypot', False)
             honeypot_reason = honeypot_result.get('reason')
+            simulation_failed = honeypot_result.get('simulation_failed', False)
             buy_tax = tax_result.get('buy_tax', 0)
             sell_tax = tax_result.get('sell_tax', 0)
 
             return {
                 'is_honeypot': is_honeypot,
                 'honeypot_reason': honeypot_reason,
+                'simulation_failed': simulation_failed,
                 'buy_tax': buy_tax,
                 'sell_tax': sell_tax,
                 'can_buy': buy_tax < 100,

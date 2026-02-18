@@ -26,10 +26,14 @@ class Settings(BaseSettings):
     opbnb_rpc_url: str = "https://opbnb-mainnet-rpc.bnbchain.org"
     eth_rpc_url: str = "https://eth.llamarpc.com"
     base_rpc_url: str = "https://mainnet.base.org"
+    arbitrum_rpc_url: str = "https://arb1.arbitrum.io/rpc"
+    polygon_rpc_url: str = "https://polygon-rpc.com"
 
     # Etherscan API keys (per chain — all use Etherscan v2 API)
     etherscan_api_key: str = ""
     basescan_api_key: str = ""
+    arbiscan_api_key: str = ""
+    polygonscan_api_key: str = ""
 
     # Tenderly
     tenderly_api_key: str = ""
@@ -58,6 +62,9 @@ class Settings(BaseSettings):
 
     # Calibration
     calibration_config_path: str = "core/calibration_config.json"
+
+    # Admin
+    admin_secret: str = ""
 
     # RPC Proxy
     rpc_proxy_enabled: bool = True
