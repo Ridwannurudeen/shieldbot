@@ -74,6 +74,11 @@ class RPCProxy:
             risk_level = risk_output.get("risk_level", "LOW")
             risk_score = risk_output.get("rug_probability", 0)
 
+            logger.info(
+                f"RPC Proxy analyzed tx to {to_addr} — "
+                f"risk={risk_score}, level={risk_level}, chain={chain_id}"
+            )
+
             if risk_level == "HIGH":
                 logger.warning(
                     f"RPC Proxy BLOCKED tx to {to_addr} "
