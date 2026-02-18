@@ -19,14 +19,9 @@ class HoneypotService:
             'can_sell': True,
         }
 
-        if chain_id != 56:
-            # Honeypot.is API only supports BSC (chainID=56)
-            logger.info("Honeypot check skipped for chain_id=%d (BSC only)", chain_id)
-            return defaults
-
         try:
-            honeypot_result = await self.web3_client.check_honeypot(address)
-            tax_result = await self.web3_client.get_tax_info(address)
+            honeypot_result = await self.web3_client.check_honeypot(address, chain_id=chain_id)
+            tax_result = await self.web3_client.get_tax_info(address, chain_id=chain_id)
 
             is_honeypot = honeypot_result.get('is_honeypot', False)
             honeypot_reason = honeypot_result.get('reason')
