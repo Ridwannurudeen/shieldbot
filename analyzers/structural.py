@@ -31,7 +31,10 @@ class StructuralAnalyzer(Analyzer):
     def _compute(self, d: dict) -> tuple:
         score = 0
         flags = []
-        if not d.get('is_verified'):
+        if d.get('is_contract') is False:
+            score += 50
+            flags.append('No contract bytecode at address (destroyed or EOA)')
+        elif not d.get('is_verified'):
             score += 25
             flags.append('Contract not verified')
         age = d.get('contract_age_days')
