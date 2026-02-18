@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     # RPC endpoints
     bsc_rpc_url: str = "https://bsc-dataseed.binance.org/"
     opbnb_rpc_url: str = "https://opbnb-mainnet-rpc.bnbchain.org"
+    eth_rpc_url: str = "https://eth.llamarpc.com"
+    base_rpc_url: str = "https://mainnet.base.org"
+
+    # Etherscan API keys (per chain — all use Etherscan v2 API)
+    etherscan_api_key: str = ""
+    basescan_api_key: str = ""
 
     # Tenderly
     tenderly_api_key: str = ""
@@ -49,6 +55,12 @@ class Settings(BaseSettings):
 
     # Database
     database_path: str = "shieldbot.db"
+
+    # Calibration
+    calibration_config_path: str = "core/calibration_config.json"
+
+    # RPC Proxy
+    rpc_proxy_enabled: bool = True
 
     model_config = {
         "env_file": ".env",

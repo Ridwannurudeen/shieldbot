@@ -1,0 +1,6 @@
+{
+  "high_threshold": 71.0,
+  "medium_threshold": 31.0,
+  "weight_overrides": {},
+  "confidence_boost": 0.0
+}

@@ -13,6 +13,10 @@
   const INTERCEPTED_METHODS = new Set([
     "eth_sendTransaction",
     "eth_signTransaction",
+    "eth_signTypedData_v4",
+    "eth_signTypedData_v3",
+    "personal_sign",
+    "eth_sign",
   ]);
 
   /**
@@ -34,8 +38,37 @@
 
       console.log("[ShieldAI] Intercepted:", args.method, txParams);
 
+      // For typed data methods, extract typed data for signature analysis
+      let interceptData = txParams;
+      const typedDataMethods = new Set([
+        "eth_signTypedData_v4",
+        "eth_signTypedData_v3",
+      ]);
+
+      if (typedDataMethods.has(args.method)) {
+        // params[0] is address, params[1] is the typed data JSON string
+        const rawTypedData = args.params?.[1];
+        let parsedTypedData = null;
+        try {
+          parsedTypedData =
+            typeof rawTypedData === "string"
+              ? JSON.parse(rawTypedData)
+              : rawTypedData;
+        } catch (e) {
+          console.warn("[ShieldAI] Failed to parse typed data:", e);
+        }
+        interceptData = {
+          from: txParams,
+          to: "",
+          value: "0x0",
+          data: "0x",
+          typedData: parsedTypedData,
+          signMethod: args.method,
+        };
+      }
+
       // Ask content script to analyze via background
-      const verdict = await requestAnalysis(args.method, txParams);
+      const verdict = await requestAnalysis(args.method, interceptData);
 
       if (verdict.action === "block") {
         throw new Error("Transaction blocked by ShieldAI Firewall");

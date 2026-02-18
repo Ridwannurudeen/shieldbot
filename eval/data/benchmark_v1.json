@@ -1,0 +1,181 @@
+{
+  "version": "1.0",
+  "description": "ShieldBot benchmark dataset v1 — manually labeled BSC addresses",
+  "entries": [
+    {
+      "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+      "chain_id": 56,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "WBNB — Wrapped BNB"
+    },
+    {
+      "address": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+      "chain_id": 56,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "CAKE — PancakeSwap Token"
+    },
+    {
+      "address": "0x55d398326f99059fF775485246999027B3197955",
+      "chain_id": 56,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "BSC-USD (USDT on BSC)"
+    },
+    {
+      "address": "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56",
+      "chain_id": 56,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "BUSD — Binance USD"
+    },
+    {
+      "address": "0x2170Ed0880ac9A755fd29B2688956BD959F933F8",
+      "chain_id": 56,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "ETH — Binance-Peg Ethereum"
+    },
+    {
+      "address": "0x10ED43C718714eb63d5aA57B78B54704E256024E",
+      "chain_id": 56,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "PancakeSwap V2 Router"
+    },
+    {
+      "address": "0x1111111254EEB25477B68fb85Ed929f73A960582",
+      "chain_id": 56,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "1inch V5 Router"
+    },
+    {
+      "address": "0x7083609fCE4d1d8Dc0C979AAb8c869Ea2C873402",
+      "chain_id": 56,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "DOT — Binance-Peg Polkadot"
+    },
+    {
+      "address": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+      "chain_id": 56,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "USDC — Binance-Peg USD Coin"
+    },
+    {
+      "address": "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE",
+      "chain_id": 56,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "XRP — Binance-Peg XRP"
+    },
+    {
+      "address": "0xdbda907a02750f79cbf0414f7112eabe5091c286",
+      "chain_id": 56,
+      "label": "malicious",
+      "category": "honeypot",
+      "description": "Known honeypot — 100% sell tax"
+    },
+    {
+      "address": "0x0df62d2cd80591798721ddc93001afe868c367ff",
+      "chain_id": 56,
+      "label": "malicious",
+      "category": "honeypot",
+      "description": "Known honeypot — cannot sell"
+    },
+    {
+      "address": "0x5B1BaEC64aF2dB98B4c68C0D7865345249931948",
+      "chain_id": 56,
+      "label": "malicious",
+      "category": "rug_pull",
+      "description": "Known rug pull — liquidity removed"
+    },
+    {
+      "address": "0xa83575490D7df4E2F47b7D38FDdb5AFeE7161761",
+      "chain_id": 56,
+      "label": "malicious",
+      "category": "honeypot",
+      "description": "Known honeypot with mint function"
+    },
+    {
+      "address": "0x31b00eee1322662dB5a2c4C1780ba2773Bc64eb7",
+      "chain_id": 56,
+      "label": "malicious",
+      "category": "rug_pull",
+      "description": "Known rug — proxy + unrenounced ownership"
+    },
+    {
+      "address": "0xBC6675DE91e3DA8eAc51293b1a823b27eE069088",
+      "chain_id": 56,
+      "label": "malicious",
+      "category": "honeypot",
+      "description": "Honeypot with hidden transfer restrictions"
+    },
+    {
+      "address": "0x0a3A21356793B49154Fd3BbE91CBc2A16c0457f5",
+      "chain_id": 56,
+      "label": "malicious",
+      "category": "rug_pull",
+      "description": "Rug pull — unverified contract, new pair"
+    },
+    {
+      "address": "0x8076C74C5e3F5852037F31Ff0093Eeb8c8ADd8D3",
+      "chain_id": 56,
+      "label": "malicious",
+      "category": "honeypot",
+      "description": "Known honeypot — extreme sell tax"
+    },
+    {
+      "address": "0x3ee505ba316879d246760e89f0a29a4403afa498",
+      "chain_id": 56,
+      "label": "malicious",
+      "category": "high_risk_contract",
+      "description": "Unverified high-risk contract"
+    },
+    {
+      "address": "0x4338665CBB7B2485A8855A139b75D5e34AB0DB94",
+      "chain_id": 56,
+      "label": "malicious",
+      "category": "honeypot",
+      "description": "Honeypot with blacklist function"
+    },
+    {
+      "address": "0xbA2aE424d960c26247Dd6c32edC70B295c744C43",
+      "chain_id": 56,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "DOGE — Binance-Peg Dogecoin"
+    },
+    {
+      "address": "0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47",
+      "chain_id": 56,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "ADA — Binance-Peg Cardano"
+    },
+    {
+      "address": "0x14016E85a25aeb13065688cAFB43044C2ef86784",
+      "chain_id": 56,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "TUSD — TrueUSD"
+    },
+    {
+      "address": "0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3",
+      "chain_id": 56,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "DAI — Binance-Peg Dai"
+    },
+    {
+      "address": "0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD",
+      "chain_id": 56,
+      "label": "safe",
+      "category": "legitimate",
+      "description": "LINK — Binance-Peg ChainLink"
+    }
+  ]
+}

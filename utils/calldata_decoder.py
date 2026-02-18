@@ -128,6 +128,35 @@ KNOWN_SELECTORS: Dict[str, Dict] = {
         "category": "claim",
         "risk": "medium",
     },
+    # Permit patterns (EIP-2612, Permit2, DAI-style)
+    "d505accf": {
+        "name": "permit",
+        "signature": "permit(address,address,uint256,uint256,uint8,bytes32,bytes32)",
+        "params": ["address", "address", "uint256", "uint256", "uint256"],
+        "category": "approval",
+        "risk": "high",
+    },
+    "2b67b570": {
+        "name": "permit (Permit2)",
+        "signature": "permit(address,((address,uint160,uint48,uint48),address,uint256))",
+        "params": ["address"],
+        "category": "approval",
+        "risk": "high",
+    },
+    "30f28b7a": {
+        "name": "permit (Permit2 batch)",
+        "signature": "permit(address,((address,uint160,uint48,uint48)[],address,uint256))",
+        "params": ["address"],
+        "category": "approval",
+        "risk": "high",
+    },
+    "8fcbaf0c": {
+        "name": "permit (DAI-style)",
+        "signature": "permit(address,address,uint256,uint256,bool,uint8,bytes32,bytes32)",
+        "params": ["address", "address", "uint256", "uint256", "bool"],
+        "category": "approval",
+        "risk": "high",
+    },
 }
 
 # Whitelisted routers on BSC — transactions to these are lower risk
@@ -237,25 +266,34 @@ class CalldataDecoder:
                 "raw": calldata,
             }
 
-    def is_whitelisted_target(self, to_address: str, chain_id: int = 56) -> Optional[str]:
+    def is_whitelisted_target(self, to_address: str, chain_id: int = 56, adapter=None) -> Optional[str]:
         """
         Check if the target address is a whitelisted router.
 
         Args:
             to_address: Target contract address.
-            chain_id: Chain ID to check against. Currently only BSC (56) has
-                      a router list; other chains return None.
+            chain_id: Chain ID to check against.
+            adapter: Optional chain adapter with get_whitelisted_routers().
+                     If provided, uses the adapter's router list for that chain.
 
         Returns:
             Router name if whitelisted, None otherwise.
         """
         if not to_address:
             return None
-        # For now, all whitelisted routers are BSC. Future adapters will
-        # register their own routers via chain_adapter.get_whitelisted_routers().
-        if chain_id != 56:
-            return None
-        return WHITELISTED_ROUTERS.get(to_address.lower())
+
+        addr_lower = to_address.lower()
+
+        # Use chain adapter's router list if available
+        if adapter is not None:
+            routers = adapter.get_whitelisted_routers()
+            return routers.get(addr_lower)
+
+        # Fallback: BSC hardcoded routers (backward compat)
+        if chain_id == 56:
+            return WHITELISTED_ROUTERS.get(addr_lower)
+
+        return None
 
     def _decode_params(self, param_types: list, params_hex: str) -> Dict:
         """Decode ABI-encoded parameters (simplified — handles address and uint256)."""

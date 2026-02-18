@@ -23,6 +23,10 @@ from telegram.ext import (
 from core.config import Settings
 from core.container import ServiceContainer
 from core.telegram_formatter import format_full_report
+from utils.chain_info import (
+    get_chain_name, get_explorer_url, get_dexscreener_slug,
+    parse_chain_prefix, CHAIN_INFO,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -51,6 +55,11 @@ risk_engine = container.risk_engine
 # In-memory scan cache (address -> {result, timestamp})
 _scan_cache = {}
 CACHE_TTL = 300  # 5 minutes
+
+
+def _get_user_chain_id(context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get the user's selected chain_id, default BSC (56)."""
+    return context.user_data.get('chain_id', 56)
 
 
 def _get_cached(address: str, scan_type: str):
@@ -121,19 +130,39 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **/start** - Show welcome message
 **/scan <address>** - Scan a contract for security risks
 **/token <address>** - Check if a token is safe to trade
+**/chain** - Select active chain (BSC, Ethereum, Base)
 **/history <address>** - View on-chain scan history
 **/report <address> <reason>** - Report a scam address
 **/help** - Show this help message
 
 **Quick Tips:**
-• Send any BNB Chain address and I'll auto-detect what to scan
-• Addresses starting with 0x are valid
-• I support both BSC and opBNB networks
-• All scans include AI-powered risk scoring
+• Send any address and I'll auto-detect what to scan
+• Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`
+• Or use /chain to switch your default chain
+• Supported: BSC, Ethereum, Base, opBNB
 
 Stay safe! 🛡️
 """
     await update.message.reply_text(help_text, parse_mode='Markdown')
+
+
+async def chain_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /chain command — select active chain."""
+    keyboard = []
+    for cid, info in CHAIN_INFO.items():
+        current = _get_user_chain_id(context)
+        marker = " (current)" if cid == current else ""
+        keyboard.append([InlineKeyboardButton(
+            f"{info['name']}{marker}",
+            callback_data=f"chain_{cid}",
+        )])
+
+    await update.message.reply_text(
+        "Select the chain to scan on:\n\n"
+        "You can also use chain prefixes like `eth:0x...` or `base:0x...`",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
 
 
 async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -264,40 +293,54 @@ async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Auto-detect and handle addresses sent in messages"""
     message_text = update.message.text.strip()
 
+    # Parse optional chain prefix (e.g. "eth:0x..." or "base:0x...")
+    prefix_chain_id, address = parse_chain_prefix(message_text)
+    if prefix_chain_id:
+        context.user_data['chain_id'] = prefix_chain_id
+
+    user_chain_id = _get_user_chain_id(context)
+    chain_name = get_chain_name(user_chain_id)
+
     # Check if it looks like an Ethereum address
-    if message_text.startswith('0x') and len(message_text) == 42:
+    if address.startswith('0x') and len(address) == 42:
         # Show scanning message
-        status_msg = await update.message.reply_text("🔍 Analyzing address...")
+        status_msg = await update.message.reply_text(
+            f"🔍 Analyzing address on {chain_name}..."
+        )
 
         # Check if it's a token contract
-        is_token = await web3_client.is_token_contract(message_text)
+        is_token = await web3_client.is_token_contract(address, chain_id=user_chain_id)
 
         if is_token:
-            await status_msg.edit_text("🔍 Detected token contract — running safety checks...")
-            await check_token(update, message_text)
+            await status_msg.edit_text(f"🔍 Detected token on {chain_name} — running safety checks...")
+            await check_token(update, address, chain_id=user_chain_id)
         else:
-            await status_msg.edit_text("🔍 Running security scan...")
-            await scan_contract(update, message_text)
+            await status_msg.edit_text(f"🔍 Running security scan on {chain_name}...")
+            await scan_contract(update, address, chain_id=user_chain_id)
     else:
         await update.message.reply_text(
-            "❌ Invalid address format. Please send a valid BNB Chain address (0x...)."
+            "❌ Invalid address format. Send a valid address (0x...).\n\n"
+            "Tip: Use chain prefixes like `eth:0x...` or `base:0x...`",
+            parse_mode='Markdown',
         )
 
 
-async def scan_contract(update: Update, address: str):
+async def scan_contract(update: Update, address: str, chain_id: int = 56):
     """Scan a contract for security risks with composite intelligence pipeline"""
     try:
         # Check cache first
-        cached = _get_cached(address, 'contract')
+        cache_key = f"{chain_id}:{address}"
+        cached = _get_cached(cache_key, 'contract')
         if cached:
             response = format_scan_result(cached)
-            keyboard = _scan_buttons(address)
+            keyboard = _scan_buttons(address, chain_id)
             await update.message.reply_text(response, parse_mode='Markdown', reply_markup=keyboard, disable_web_page_preview=True)
             return
 
         # Progress indicator
+        chain_name = get_chain_name(chain_id)
         progress_msg = await update.message.reply_text(
-            "\U0001F6E1\uFE0F **Scanning contract...**\n\n"
+            f"\U0001F6E1\uFE0F **Scanning contract on {chain_name}...**\n\n"
             "\u23F3 Gathering intelligence from multiple sources...",
             parse_mode='Markdown'
         )
@@ -308,10 +351,10 @@ async def scan_contract(update: Update, address: str):
         try:
             from core.analyzer import AnalysisContext
 
-            ctx = AnalysisContext(address=address, chain_id=56)
+            ctx = AnalysisContext(address=address, chain_id=chain_id)
             analyzer_results, token_info = await asyncio.gather(
                 container.registry.run_all(ctx),
-                web3_client.get_token_info(address),
+                web3_client.get_token_info(address, chain_id=chain_id),
             )
 
             risk_output = risk_engine.compute_from_results(analyzer_results)
@@ -343,23 +386,23 @@ async def scan_contract(update: Update, address: str):
             risk_level = risk_output.get('risk_level', 'medium').lower()
 
             # Cache the composite result
-            _set_cache(address, 'contract', {'composite_report': response, 'risk_level': risk_level})
+            _set_cache(cache_key, 'contract', {'composite_report': response, 'risk_level': risk_level})
 
             # Enqueue deployer/funder indexing (fire-and-forget)
             if hasattr(container, 'indexer') and container.indexer:
-                container.indexer.enqueue(address, 56)
+                container.indexer.enqueue(address, chain_id)
 
         except Exception as e:
             logger.warning(f"Composite pipeline failed for {address}, falling back: {e}")
 
         # Fallback to legacy scanner
         if not response:
-            result = await tx_scanner.scan_address(address)
-            _set_cache(address, 'contract', result)
+            result = await tx_scanner.scan_address(address, chain_id=chain_id)
+            _set_cache(cache_key, 'contract', result)
             response = format_scan_result(result)
             risk_level = result.get('risk_level', 'medium')
 
-        keyboard = _scan_buttons(address)
+        keyboard = _scan_buttons(address, chain_id)
 
         # Record on-chain (fire-and-forget — non-blocking)
         onchain_line = ""
@@ -387,20 +430,22 @@ async def scan_contract(update: Update, address: str):
         )
 
 
-async def check_token(update: Update, address: str):
+async def check_token(update: Update, address: str, chain_id: int = 56):
     """Check token safety with composite intelligence pipeline"""
     try:
         # Check cache first
-        cached = _get_cached(address, 'token')
+        cache_key = f"{chain_id}:{address}"
+        cached = _get_cached(cache_key, 'token')
         if cached:
             response = format_token_result(cached)
-            keyboard = _token_buttons(address)
+            keyboard = _token_buttons(address, chain_id)
             await update.message.reply_text(response, parse_mode='Markdown', reply_markup=keyboard, disable_web_page_preview=True)
             return
 
         # Progress indicator
+        chain_name = get_chain_name(chain_id)
         progress_msg = await update.message.reply_text(
-            "\U0001F4B0 **Checking token safety...**\n\n"
+            f"\U0001F4B0 **Checking token safety on {chain_name}...**\n\n"
             "\u23F3 Gathering intelligence from multiple sources...",
             parse_mode='Markdown'
         )
@@ -411,10 +456,10 @@ async def check_token(update: Update, address: str):
         try:
             from core.analyzer import AnalysisContext
 
-            ctx = AnalysisContext(address=address, chain_id=56)
+            ctx = AnalysisContext(address=address, chain_id=chain_id)
             analyzer_results, token_info = await asyncio.gather(
                 container.registry.run_all(ctx),
-                web3_client.get_token_info(address),
+                web3_client.get_token_info(address, chain_id=chain_id),
             )
 
             risk_output = risk_engine.compute_from_results(analyzer_results)
@@ -444,23 +489,23 @@ async def check_token(update: Update, address: str):
             )
             risk_level = risk_output.get('risk_level', 'medium').lower()
 
-            _set_cache(address, 'token', {'composite_report': response, 'risk_level': risk_level})
+            _set_cache(cache_key, 'token', {'composite_report': response, 'risk_level': risk_level})
 
             # Enqueue deployer/funder indexing (fire-and-forget)
             if hasattr(container, 'indexer') and container.indexer:
-                container.indexer.enqueue(address, 56)
+                container.indexer.enqueue(address, chain_id)
 
         except Exception as e:
             logger.warning(f"Composite pipeline failed for {address}, falling back: {e}")
 
         # Fallback to legacy scanner
         if not response:
-            result = await token_scanner.check_token(address)
-            _set_cache(address, 'token', result)
+            result = await token_scanner.check_token(address, chain_id=chain_id)
+            _set_cache(cache_key, 'token', result)
             response = format_token_result(result)
             risk_level = result.get('safety_level', 'warning')
 
-        keyboard = _token_buttons(address)
+        keyboard = _token_buttons(address, chain_id)
 
         # Record on-chain (fire-and-forget — non-blocking)
         onchain_line = ""
@@ -493,26 +538,41 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    if query.data.startswith('token_'):
+    if query.data.startswith('chain_'):
+        chain_id = int(query.data.replace('chain_', ''))
+        context.user_data['chain_id'] = chain_id
+        chain_name = get_chain_name(chain_id)
+        await query.edit_message_text(
+            f"Switched to **{chain_name}** (chain_id={chain_id}).\n"
+            f"All scans will now target {chain_name}.",
+            parse_mode='Markdown',
+        )
+    elif query.data.startswith('token_'):
         address = query.data.replace('token_', '')
+        user_chain_id = _get_user_chain_id(context)
         await query.message.reply_text(f"🔍 Running token safety check for `{address}`...", parse_mode='Markdown')
-        await check_token(query, address)
+        await check_token(query, address, chain_id=user_chain_id)
 
 
-def _scan_buttons(address: str) -> InlineKeyboardMarkup:
+def _scan_buttons(address: str, chain_id: int = 56) -> InlineKeyboardMarkup:
     """Generate action buttons for scan results."""
+    explorer = get_explorer_url(chain_id)
+    chain_name = get_chain_name(chain_id)
     keyboard = [
-        [InlineKeyboardButton("🔍 View on BscScan", url=f"https://bscscan.com/address/{address}")],
+        [InlineKeyboardButton(f"🔍 View on {chain_name} Explorer", url=f"{explorer}/address/{address}")],
         [InlineKeyboardButton("💰 Check Token Safety", callback_data=f"token_{address}")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
-def _token_buttons(address: str) -> InlineKeyboardMarkup:
+def _token_buttons(address: str, chain_id: int = 56) -> InlineKeyboardMarkup:
     """Generate action buttons for token results."""
+    explorer = get_explorer_url(chain_id)
+    dex_slug = get_dexscreener_slug(chain_id)
+    chain_name = get_chain_name(chain_id)
     keyboard = [
-        [InlineKeyboardButton("🔍 View on BscScan", url=f"https://bscscan.com/token/{address}")],
-        [InlineKeyboardButton("📊 View on DexScreener", url=f"https://dexscreener.com/bsc/{address}")]
+        [InlineKeyboardButton(f"🔍 View on {chain_name} Explorer", url=f"{explorer}/token/{address}")],
+        [InlineKeyboardButton("📊 View on DexScreener", url=f"https://dexscreener.com/{dex_slug}/{address}")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -665,6 +725,7 @@ def main():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("scan", scan_command))
     application.add_handler(CommandHandler("token", token_command))
+    application.add_handler(CommandHandler("chain", chain_command))
     application.add_handler(CommandHandler("history", history_command))
     application.add_handler(CommandHandler("report", report_command))
     application.add_handler(CallbackQueryHandler(button_callback))

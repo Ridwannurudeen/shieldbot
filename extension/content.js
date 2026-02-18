@@ -31,6 +31,9 @@
     }
 
     const { requestId, tx, method } = event.data;
+    // Carry typed data and sign method through to background
+    if (tx.typedData) tx._typedData = tx.typedData;
+    if (tx.signMethod) tx._signMethod = tx.signMethod;
 
     // Check if extension is enabled
     const settings = await getSettings();

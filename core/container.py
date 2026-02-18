@@ -15,12 +15,18 @@ from services import (
     ContractService, GreenfieldService, TenderlySimulator,
 )
 from core.risk_engine import RiskEngine
+from core.calibration import load_calibration
 from core.database import Database
 from core.registry import AnalyzerRegistry
 from core.policy import PolicyEngine
 from core.auth import AuthManager
 from core.indexer import DeployerIndexer
-from analyzers import StructuralAnalyzer, MarketAnalyzer, BehavioralAnalyzer, HoneypotAnalyzer
+from analyzers import (
+    StructuralAnalyzer, MarketAnalyzer, BehavioralAnalyzer,
+    HoneypotAnalyzer, IntentMismatchAnalyzer, SignaturePermitAnalyzer,
+)
+from adapters.eth import EthAdapter
+from adapters.base_chain import BaseChainAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +44,18 @@ class ServiceContainer:
         self.calldata_decoder = CalldataDecoder()
         self.onchain_recorder = OnchainRecorder()
 
+        # Register multichain adapters
+        self.eth_adapter = EthAdapter(
+            rpc_url=settings.eth_rpc_url,
+            etherscan_api_key=settings.etherscan_api_key,
+        )
+        self.base_adapter = BaseChainAdapter(
+            rpc_url=settings.base_rpc_url,
+            basescan_api_key=settings.basescan_api_key,
+        )
+        self.web3_client.register_adapter(self.eth_adapter)
+        self.web3_client.register_adapter(self.base_adapter)
+
         # Scanners (legacy fallback)
         self.tx_scanner = TransactionScanner(self.web3_client, self.ai_analyzer)
         self.token_scanner = TokenScanner(self.web3_client, self.ai_analyzer)
@@ -49,12 +67,15 @@ class ServiceContainer:
         self.contract_service = ContractService(self.web3_client, self.scam_db)
 
         # Risk engine + analyzer registry
-        self.risk_engine = RiskEngine()
+        self.calibration = load_calibration(settings.calibration_config_path)
+        self.risk_engine = RiskEngine(calibration=self.calibration)
         self.registry = AnalyzerRegistry()
         self.registry.register(StructuralAnalyzer(self.contract_service))
         self.registry.register(MarketAnalyzer(self.dex_service))
         self.registry.register(BehavioralAnalyzer(self.ethos_service))
         self.registry.register(HoneypotAnalyzer(self.honeypot_service))
+        self.registry.register(IntentMismatchAnalyzer())
+        self.registry.register(SignaturePermitAnalyzer())
 
         # Policy engine
         self.policy_engine = PolicyEngine(settings.policy_mode)
