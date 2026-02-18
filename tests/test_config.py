@@ -24,8 +24,9 @@ class TestSettings:
         s = Settings(_env_file=None)
         origins = s.cors_origins
         assert "http://localhost:8000" in origins
-        assert len(origins) == 4
+        assert len(origins) == 5
         assert "https://shieldbotsecurity.online" in origins
+        assert "https://api.shieldbotsecurity.online" in origins
 
     def test_cors_origins_custom(self, monkeypatch):
         monkeypatch.setenv("CORS_ALLOW_ORIGINS", "https://example.com, https://foo.bar")
