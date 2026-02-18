@@ -154,13 +154,14 @@ class RiskEngine:
             composite = max(composite, 80)
 
         # honeypot confirmed → floor at 80
-        # Skip for high-liquidity verified tokens with low taxes (likely false positive)
-        # but always escalate if adapter flagged as low_tax_honeypot (unverified)
+        # Skip for high-liquidity tokens with low taxes (likely false positive)
+        # but escalate low_tax_honeypot for non-proxy contracts (proxy = likely Binance-pegged)
         liquidity_info = dex_data.get('liquidity_usd', 0)
         if honeypot_data.get('is_honeypot'):
             sell_tax = honeypot_data.get('sell_tax', 0)
             is_false_positive_candidate = liquidity_info > 500_000 and sell_tax < 5
-            if not is_false_positive_candidate or honeypot_data.get('low_tax_honeypot'):
+            is_proxy = contract_data.get('has_proxy', False)
+            if not is_false_positive_candidate or (honeypot_data.get('low_tax_honeypot') and not is_proxy):
                 composite = max(composite, 80)
 
         # severe reputation + new pair → escalate
@@ -265,12 +266,13 @@ class RiskEngine:
             composite = max(composite, 80)
 
         # Honeypot escalation — floor at 80 if confirmed
-        # Skip for high-liquidity verified tokens with low taxes (likely false positive)
-        # but always escalate if adapter explicitly flagged as low_tax_honeypot (unverified)
+        # Skip for high-liquidity tokens with low taxes (likely false positive)
+        # but escalate low_tax_honeypot for non-proxy contracts (proxy = likely Binance-pegged)
         if honeypot_data.get('is_honeypot'):
             sell_tax = honeypot_data.get('sell_tax', 0)
             is_false_positive_candidate = liquidity > 500_000 and sell_tax < 5
-            if not is_false_positive_candidate or honeypot_data.get('low_tax_honeypot'):
+            is_proxy = contract_data.get('has_proxy', False)
+            if not is_false_positive_candidate or (honeypot_data.get('low_tax_honeypot') and not is_proxy):
                 composite = max(composite, 80)
 
         if ethos_data.get('severe_reputation_flag'):
