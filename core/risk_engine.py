@@ -150,8 +150,12 @@ class RiskEngine:
             composite = max(composite, 85)
 
         # honeypot confirmed → floor at 80
+        # Skip for high-liquidity tokens with low taxes (likely false positive)
+        liquidity_info = dex_data.get('liquidity_usd', 0)
         if honeypot_data.get('is_honeypot'):
-            composite = max(composite, 80)
+            sell_tax = honeypot_data.get('sell_tax', 0)
+            if not (liquidity_info > 500_000 and sell_tax < 5):
+                composite = max(composite, 80)
 
         # severe reputation + new pair → escalate
         if ethos_data.get('severe_reputation_flag'):
@@ -160,7 +164,6 @@ class RiskEngine:
                 composite = min(composite + 15, 100)
 
         # positive signals → reduce
-        liquidity_info = dex_data.get('liquidity_usd', 0)
         if ownership_renounced and liquidity_info > 100_000:
             composite = max(composite - 20, 0)
 
@@ -251,8 +254,11 @@ class RiskEngine:
         if not is_verified and (has_mint or has_blacklist) and ownership_renounced is False and liquidity < 100_000:
             composite = max(composite, 55)
 
+        # Skip honeypot escalation for high-liquidity tokens with low taxes
         if honeypot_data.get('is_honeypot'):
-            composite = max(composite, 80)
+            sell_tax = honeypot_data.get('sell_tax', 0)
+            if not (liquidity > 500_000 and sell_tax < 5):
+                composite = max(composite, 80)
 
         if ethos_data.get('severe_reputation_flag'):
             pair_age = dex_data.get('pair_age_hours')
