@@ -75,6 +75,7 @@ class Settings(BaseSettings):
             "http://localhost:8000",
             "http://127.0.0.1:8000",
             "http://localhost:3000",
+            "https://shieldbotsecurity.online",
         ]
         raw = self.cors_allow_origins.strip()
         if not raw:

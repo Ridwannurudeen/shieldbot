@@ -69,6 +69,7 @@ def run_benchmark(
             result.errors += 1
             result.details.append({
                 'address': entry.address,
+                'chain_id': entry.chain_id,
                 'label': entry.label,
                 'score': None,
                 'predicted': None,
@@ -91,6 +92,7 @@ def run_benchmark(
 
         result.details.append({
             'address': entry.address,
+            'chain_id': entry.chain_id,
             'label': entry.label,
             'category': entry.category,
             'score': score,

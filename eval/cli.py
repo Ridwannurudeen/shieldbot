@@ -63,7 +63,8 @@ def main():
     for d in result.details:
         status = "OK" if d.get('correct') else ("ERR" if d.get('error') else "MISS")
         score = f"{d['score']:.1f}" if d['score'] is not None else "N/A"
-        print(f"  [{status}] {d['address'][:16]}... label={d['label']} score={score} pred={d.get('predicted', 'N/A')}")
+        chain = d.get('chain_id', 56)
+        print(f"  [{status}] chain={chain} {d['address'][:16]}... label={d['label']} score={score} pred={d.get('predicted', 'N/A')}")
 
     return 0 if result.f1 > 0 else 1
 

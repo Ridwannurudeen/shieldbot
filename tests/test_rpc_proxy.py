@@ -2,6 +2,8 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from eth_account import Account
+from web3 import Web3
 from rpc.proxy import RPCProxy
 
 
@@ -117,6 +119,63 @@ async def test_contract_creation_forwarded(proxy):
     result = await proxy.handle_request(56, {
         "jsonrpc": "2.0", "id": 1, "method": "eth_sendTransaction",
         "params": [{"from": "0x" + "b" * 40, "data": "0x608060405234"}],
+    })
+
+    assert "error" not in result
+    proxy._forward.assert_called_once()
+
+
+# -- Helper to build a signed raw tx hex for testing --
+def _build_raw_tx(to: str, value: int = 0, data: bytes = b"") -> str:
+    """Sign a dummy transaction and return the raw hex."""
+    # Deterministic throwaway key (never used on mainnet)
+    key = "0x" + "ab" * 32
+    tx = {
+        "to": Web3.to_checksum_address(to),
+        "value": value,
+        "gas": 21000,
+        "gasPrice": 5_000_000_000,
+        "nonce": 0,
+        "chainId": 56,
+        "data": data,
+    }
+    signed = Account.sign_transaction(tx, key)
+    return signed.raw_transaction.hex()
+
+
+@pytest.mark.asyncio
+async def test_raw_tx_honeypot_blocked(proxy, mock_container):
+    """eth_sendRawTransaction to a HIGH-risk address should be blocked."""
+    mock_container.risk_engine.compute_from_results.return_value = {
+        'rug_probability': 95, 'risk_level': 'HIGH',
+    }
+
+    to_addr = "0x" + "dd" * 20
+    raw_hex = _build_raw_tx(to_addr, value=10**18)
+
+    result = await proxy.handle_request(56, {
+        "jsonrpc": "2.0", "id": 1, "method": "eth_sendRawTransaction",
+        "params": [raw_hex],
+    })
+
+    assert "error" in result
+    assert "blocked" in result["error"]["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_raw_tx_safe_forwarded(proxy, mock_container):
+    """eth_sendRawTransaction to a LOW-risk address should be forwarded."""
+    proxy._forward = AsyncMock(return_value={"jsonrpc": "2.0", "id": 1, "result": "0xtxhash"})
+    mock_container.risk_engine.compute_from_results.return_value = {
+        'rug_probability': 5, 'risk_level': 'LOW',
+    }
+
+    to_addr = "0x" + "aa" * 20
+    raw_hex = _build_raw_tx(to_addr, value=10**17)
+
+    result = await proxy.handle_request(56, {
+        "jsonrpc": "2.0", "id": 1, "method": "eth_sendRawTransaction",
+        "params": [raw_hex],
     })
 
     assert "error" not in result
