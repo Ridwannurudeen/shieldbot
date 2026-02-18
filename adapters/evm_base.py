@@ -257,6 +257,12 @@ class EvmAdapter(ChainAdapter):
                             }
 
                         return {'is_honeypot': is_honeypot, 'reason': reason}
+                    if resp.status == 404:
+                        return {
+                            'is_honeypot': False,
+                            'reason': 'Token not found on honeypot.is',
+                            'simulation_failed': True,
+                        }
             return {'is_honeypot': False, 'reason': 'Unable to check'}
         except Exception as e:
             logger.error(f"[{self._chain_name}] Error checking honeypot: {e}")
