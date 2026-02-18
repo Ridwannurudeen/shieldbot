@@ -1,6 +1,6 @@
 {
-  "version": "1.1",
-  "description": "ShieldBot benchmark dataset v1.1 — multi-chain labeled addresses (BSC, ETH, Base)",
+  "version": "1.2",
+  "description": "ShieldBot benchmark dataset v1.2 — multi-chain labeled addresses (BSC, ETH, Base). Fresh honeypots verified via honeypot.is on 2026-02-18.",
   "entries": [
     {
       "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
@@ -147,70 +147,98 @@
       "chain_id": 56,
       "label": "malicious",
       "category": "honeypot",
-      "description": "Known honeypot — 100% sell tax"
+      "description": "Confirmed honeypot — 100% sell tax"
     },
     {
-      "address": "0x0df62d2cd80591798721ddc93001afe868c367ff",
+      "address": "0xCA411ea317107E14A8831c20C4500ee1cc666666",
       "chain_id": 56,
       "label": "malicious",
       "category": "honeypot",
-      "description": "Known honeypot — cannot sell"
+      "description": "Fake 'angel investment' — honeypot.is confirmed"
     },
     {
-      "address": "0x5B1BaEC64aF2dB98B4c68C0D7865345249931948",
-      "chain_id": 56,
-      "label": "malicious",
-      "category": "rug_pull",
-      "description": "Known rug pull — liquidity removed"
-    },
-    {
-      "address": "0xa83575490D7df4E2F47b7D38FDdb5AFeE7161761",
+      "address": "0x25d887Ce7a35172C62FeBFD67a1856F20FaEbB00",
       "chain_id": 56,
       "label": "malicious",
       "category": "honeypot",
-      "description": "Known honeypot with mint function"
+      "description": "Fake 'Pepe' — honeypot.is confirmed"
     },
     {
-      "address": "0x31b00eee1322662dB5a2c4C1780ba2773Bc64eb7",
-      "chain_id": 56,
-      "label": "malicious",
-      "category": "rug_pull",
-      "description": "Known rug — proxy + unrenounced ownership"
-    },
-    {
-      "address": "0xBC6675DE91e3DA8eAc51293b1a823b27eE069088",
+      "address": "0x2D060Ef4d6BF7f9e5edDe373Ab735513c0e4F944",
       "chain_id": 56,
       "label": "malicious",
       "category": "honeypot",
-      "description": "Honeypot with hidden transfer restrictions"
+      "description": "Fake 'AITECH' — honeypot.is confirmed"
     },
     {
-      "address": "0x0a3A21356793B49154Fd3BbE91CBc2A16c0457f5",
-      "chain_id": 56,
-      "label": "malicious",
-      "category": "rug_pull",
-      "description": "Rug pull — unverified contract, new pair"
-    },
-    {
-      "address": "0x8076C74C5e3F5852037F31Ff0093Eeb8c8ADd8D3",
+      "address": "0xcd1679f117E81DEfc4f0009311DDc23fC1AE4a5E",
       "chain_id": 56,
       "label": "malicious",
       "category": "honeypot",
-      "description": "Known honeypot — extreme sell tax"
+      "description": "Fake 'MAIGA Token' — honeypot.is confirmed"
     },
     {
-      "address": "0x3ee505ba316879d246760e89f0a29a4403afa498",
-      "chain_id": 56,
-      "label": "malicious",
-      "category": "high_risk_contract",
-      "description": "Unverified high-risk contract"
-    },
-    {
-      "address": "0x4338665CBB7B2485A8855A139b75D5e34AB0DB94",
+      "address": "0xaBd834A7823567673e1Ac07635d5D9857b34A8d3",
       "chain_id": 56,
       "label": "malicious",
       "category": "honeypot",
-      "description": "Honeypot with blacklist function"
+      "description": "Fake 'AIFlow Token' — honeypot.is confirmed"
+    },
+    {
+      "address": "0x9840652DC04fb9db2C43853633f0F62BE6f00f98",
+      "chain_id": 56,
+      "label": "malicious",
+      "category": "honeypot",
+      "description": "Fake 'ChainGPT' — honeypot.is confirmed"
+    },
+    {
+      "address": "0x7bd6FaBD64813c48545C9c0e312A0099d9be2540",
+      "chain_id": 56,
+      "label": "malicious",
+      "category": "honeypot",
+      "description": "Fake 'Dogelon Mars' — honeypot.is confirmed"
+    },
+    {
+      "address": "0x44051Acc6aE608063076506c9b614018D21e40B3",
+      "chain_id": 56,
+      "label": "malicious",
+      "category": "honeypot",
+      "description": "'Free Money Radio' — honeypot.is confirmed"
+    },
+    {
+      "address": "0xe6DF05CE8C8301223373CF5B969AFCb1498c5528",
+      "chain_id": 56,
+      "label": "malicious",
+      "category": "honeypot",
+      "description": "Fake 'BNB48 Club Token' — honeypot.is confirmed"
+    },
+    {
+      "address": "0x6d106c0b8d2f47c5465bdbd58d1be253762cbbc1",
+      "chain_id": 56,
+      "label": "malicious",
+      "category": "honeypot",
+      "description": "Fake 'DeFi' token — honeypot.is confirmed"
+    },
+    {
+      "address": "0x9f7f4ddbcac23db5280d4aab83a28c5c3eff535e",
+      "chain_id": 56,
+      "label": "malicious",
+      "category": "honeypot",
+      "description": "Fake 'Outter Finance' — honeypot.is confirmed, 6% sell tax"
+    },
+    {
+      "address": "0x635d44f246156ed1080cb470877256c847673f19",
+      "chain_id": 56,
+      "label": "malicious",
+      "category": "honeypot",
+      "description": "Fake 'WhiteBridge' — honeypot.is confirmed"
+    },
+    {
+      "address": "0xb08504d245713ca9692c8fa605e76a0a11ed4955",
+      "chain_id": 56,
+      "label": "malicious",
+      "category": "honeypot",
+      "description": "Fake 'Vitruveo VTRU' — honeypot.is confirmed"
     }
   ]
 }
