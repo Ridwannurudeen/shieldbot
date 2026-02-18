@@ -27,6 +27,8 @@ from analyzers import (
 )
 from adapters.eth import EthAdapter
 from adapters.base_chain import BaseChainAdapter
+from adapters.arbitrum import ArbitrumAdapter
+from adapters.polygon import PolygonAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +61,19 @@ class ServiceContainer:
         )
         self.web3_client.register_adapter(self.eth_adapter)
         self.web3_client.register_adapter(self.base_adapter)
+
+        arb_api_key = settings.arbiscan_api_key or settings.bscscan_api_key
+        poly_api_key = settings.polygonscan_api_key or settings.bscscan_api_key
+        self.arb_adapter = ArbitrumAdapter(
+            rpc_url=settings.arbitrum_rpc_url,
+            arbiscan_api_key=arb_api_key,
+        )
+        self.polygon_adapter = PolygonAdapter(
+            rpc_url=settings.polygon_rpc_url,
+            polygonscan_api_key=poly_api_key,
+        )
+        self.web3_client.register_adapter(self.arb_adapter)
+        self.web3_client.register_adapter(self.polygon_adapter)
 
         # Scanners (legacy fallback)
         self.tx_scanner = TransactionScanner(self.web3_client, self.ai_analyzer)

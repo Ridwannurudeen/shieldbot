@@ -61,7 +61,7 @@ class ContractService:
                 results['contract_age_days'] = creation_info.get('age_days')
 
             # Scam DB (external APIs, not BscScan — no delay needed)
-            scam_matches = await self.scam_db.check_address(address)
+            scam_matches = await self.scam_db.check_address(address, chain_id=chain_id)
             results['scam_matches'] = scam_matches or []
 
             # Ownership (RPC call, not BscScan)

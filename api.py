@@ -4,6 +4,7 @@ FastAPI backend for the Chrome extension transaction firewall
 Runs alongside bot.py on the VPS
 """
 
+import os
 import time
 import asyncio
 import logging
@@ -541,6 +542,12 @@ async def firewall(req: FirewallRequest, request: Request):
                 },
             }
 
+        # 2b. Check cache for recent result
+        if container and container.db:
+            cached = await container.db.get_contract_score(to_addr, req.chainId, max_age_seconds=300)
+            if cached:
+                return _build_cached_response(cached, decoded, value_bnb, req.chainId)
+
         # 3. Try composite intelligence pipeline (registry-based)
         try:
             from core.analyzer import AnalysisContext
@@ -847,14 +854,95 @@ async def get_usage(request: Request):
     return {"key_id": key_info["key_id"], "tier": key_info["tier"], "usage": usage}
 
 
+@app.get("/api/campaign/{address}")
+async def campaign_graph(address: str, chain_id: int = 56):
+    """Get deployer/funder campaign graph for an address."""
+    if not container or not container.db:
+        raise HTTPException(status_code=503, detail="Database not available")
+    if not web3_client or not web3_client.is_valid_address(address):
+        raise HTTPException(status_code=400, detail="Invalid address")
+    graph = await container.db.get_campaign_graph(address, chain_id)
+    return graph
+
+
+@app.post("/api/keys")
+async def create_api_key(request: Request):
+    """Create a new API key. Requires ADMIN_SECRET header."""
+    admin_secret = request.headers.get("x-admin-secret")
+    expected = os.getenv("ADMIN_SECRET", "") or (container.settings.admin_secret if container else "")
+    if not admin_secret or not expected or admin_secret != expected:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not container or not container.auth_manager:
+        raise HTTPException(status_code=503, detail="Auth not available")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    owner = body.get("owner", "anonymous")
+    tier = body.get("tier", "free")
+    result = await container.auth_manager.create_key(owner, tier)
+    return result
+
+
 # --- Helpers ---
 
-_CHAIN_NAMES = {56: "BSC", 204: "opBNB", 1: "Ethereum", 8453: "Base"}
+_CHAIN_NAMES = {56: "BSC", 204: "opBNB", 1: "Ethereum", 8453: "Base", 42161: "Arbitrum", 137: "Polygon"}
 
 
 def _chain_id_to_name(chain_id: int) -> str:
     """Map chain_id to a human-readable network name."""
     return _CHAIN_NAMES.get(chain_id, f"Chain {chain_id}")
+
+
+def _build_cached_response(cached: Dict, decoded: Dict, value_bnb: float, chain_id: int = 56) -> Dict:
+    """Build a firewall response from a cached DB row."""
+    risk_score = cached['risk_score']
+    risk_level = cached.get('risk_level', 'UNKNOWN')
+    flags = cached.get('flags', [])
+    archetype = cached.get('archetype', 'unknown')
+
+    if risk_score >= 80:
+        classification = "BLOCK_RECOMMENDED"
+    elif risk_score >= 60:
+        classification = "HIGH_RISK"
+    elif risk_score >= 30:
+        classification = "CAUTION"
+    else:
+        classification = "SAFE"
+
+    return {
+        "classification": classification,
+        "risk_score": risk_score,
+        "danger_signals": flags,
+        "transaction_impact": {
+            "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens",
+            "granting_access": "UNLIMITED" if decoded.get("is_unlimited_approval") else "None",
+            "recipient": "cached",
+            "post_tx_state": f"Risk archetype: {archetype}",
+        },
+        "analysis": f"Cached result (scanned {cached.get('scan_count', 1)} times)",
+        "plain_english": f"Previously analyzed — risk level: {risk_level}",
+        "verdict": f"{classification} — Rug probability {risk_score}% (cached)",
+        "raw_checks": {
+            "risk_score_heuristic": risk_score,
+        },
+        "shield_score": {
+            "overall": risk_score,
+            "category_scores": cached.get('category_scores', {}),
+            "risk_level": risk_level,
+            "threat_type": archetype,
+            "critical_flags": flags,
+            "confidence": cached.get('confidence', 0),
+        },
+        "simulation": None,
+        "greenfield_url": None,
+        "cached": True,
+        "chain_id": chain_id,
+        "network": _chain_id_to_name(chain_id),
+        "partial": False,
+        "failed_sources": [],
+        "policy_mode": "BALANCED",
+    }
 
 
 def _extract_raw_checks(scan: Dict) -> Dict:
