@@ -239,8 +239,15 @@ class RiskEngine:
         has_proxy = contract_data.get('has_proxy', False)
         ownership_renounced = contract_data.get('ownership_renounced', False)
 
+        is_verified = contract_data.get('is_verified', True)
+        has_blacklist = contract_data.get('has_blacklist', False)
+
         if has_mint and has_proxy and ownership_renounced is False:
             composite = max(composite, 85)
+
+        # Unverified contract with dangerous bytecode patterns — likely scam
+        if not is_verified and (has_mint or has_blacklist) and ownership_renounced is False:
+            composite = max(composite, 55)
 
         if honeypot_data.get('is_honeypot'):
             composite = max(composite, 80)
