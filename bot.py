@@ -543,9 +543,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['chain_id'] = chain_id
         chain_name = get_chain_name(chain_id)
         await query.edit_message_text(
-            f"Switched to **{chain_name}** (chain_id={chain_id}).\n"
+            f"Switched to {chain_name} (chain_id={chain_id}).\n"
             f"All scans will now target {chain_name}.",
-            parse_mode='Markdown',
         )
     elif query.data.startswith('token_'):
         address = query.data.replace('token_', '')
