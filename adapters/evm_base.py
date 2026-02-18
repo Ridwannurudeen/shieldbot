@@ -217,7 +217,7 @@ class EvmAdapter(ChainAdapter):
                             # Verified contracts with 0% taxes are almost
                             # always honeypot.is false positives (e.g.
                             # Binance-pegged tokens like LINK, DOGE, XVS).
-                            verified = await self.is_verified_contract(address)
+                            verified, _ = await self.is_verified_contract(address)
                             if verified:
                                 return {
                                     'is_honeypot': False,
