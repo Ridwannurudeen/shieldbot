@@ -45,6 +45,15 @@ async def score_entries(entries, container):
 
             mark = "!" if (entry.label == 'malicious') != (score >= 50) else " "
             print(f"  {mark}{tag} chain={chain_id} {addr[:16]}... score={score:.1f} level={level} label={entry.label}")
+            if mark == "!":
+                cats = risk_output.get('category_scores', {})
+                flags = risk_output.get('critical_flags', [])
+                print(f"    DETAIL: categories={cats}")
+                print(f"    DETAIL: flags={flags}")
+                for r in results:
+                    print(f"    DETAIL: {r.name}: score={r.score} w={r.weight:.3f} flags={r.flags} err={r.error}")
+                    if r.data:
+                        print(f"    DETAIL:   data={r.data}")
 
         except Exception as e:
             logger.error(f"{tag} Error scoring {addr}: {e}")
