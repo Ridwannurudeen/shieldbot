@@ -78,12 +78,28 @@ def _set_cache(address: str, scan_type: str, result: dict):
     _scan_cache[key] = {'result': result, 'timestamp': time.time()}
 
 
+async def post_init(application):
+    """Register bot command menu so pressing / in Telegram shows commands."""
+    await application.bot.set_my_commands([
+        ("start", "Welcome message & quick start"),
+        ("scan", "Scan a contract for risks"),
+        ("token", "Check if a token is safe"),
+        ("chain", "Switch active chain"),
+        ("rescue", "Scan wallet for risky approvals"),
+        ("threats", "Live mempool threat alerts"),
+        ("campaign", "Check if address is part of scam campaign"),
+        ("history", "View on-chain scan history"),
+        ("report", "Report a scam address"),
+        ("help", "Show all commands"),
+    ])
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send welcome message with instructions"""
     welcome_text = """
 🛡️ **Welcome to ShieldBot!**
 
-Your AI-powered BNB Chain security assistant. I can help you:
+Your AI-powered multi-chain security assistant. I can help you:
 
 **📡 Pre-Transaction Scan**
 Send me a contract address or transaction data, and I'll check:
@@ -99,18 +115,28 @@ Send me a token address, and I'll analyze:
 • Trading restrictions & taxes
 • Liquidity lock verification
 
+**🚨 Advanced Security**
+• Rescue mode — find risky token approvals in your wallet
+• Mempool threats — live sandwich & frontrun detection
+• Campaign radar — link addresses to coordinated scam campaigns
+
 **📜 On-Chain History**
 All scans are recorded on BNB Chain for transparency.
 
 **How to use:**
-Just send a BNB Chain address and I'll analyze it!
+Send any address and I'll auto-detect what to scan!
+Use chain prefixes: `eth:0x...`, `base:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`
 
 Commands:
-/scan <address> - Scan a contract
-/token <address> - Check token safety
-/history <address> - View on-chain scan history
-/report <address> <reason> - Report a scam
-/help - Show this message
+/scan — Scan a contract
+/token — Check token safety
+/chain — Switch active chain
+/rescue — Scan wallet for risky approvals
+/threats — Live mempool threat alerts
+/campaign — Check scam campaign links
+/history — View on-chain scan history
+/report — Report a scam address
+/help — Show all commands
 """
 
     keyboard = [
@@ -127,19 +153,22 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = """
 🛡️ **ShieldBot Commands**
 
-**/start** - Show welcome message
+**/start** - Welcome message & quick start
 **/scan <address>** - Scan a contract for security risks
 **/token <address>** - Check if a token is safe to trade
-**/chain** - Select active chain (BSC, Ethereum, Base)
+**/chain** - Switch active chain
+**/rescue <wallet>** - Scan wallet for risky token approvals
+**/threats** - Live mempool threat alerts
+**/campaign <address>** - Check if address is part of a scam campaign
 **/history <address>** - View on-chain scan history
 **/report <address> <reason>** - Report a scam address
 **/help** - Show this help message
 
 **Quick Tips:**
 • Send any address and I'll auto-detect what to scan
-• Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`
+• Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`
 • Or use /chain to switch your default chain
-• Supported: BSC, Ethereum, Base, opBNB
+• Supported: BSC, Ethereum, Base, Arbitrum, Polygon, Optimism, opBNB
 
 Stay safe! 🛡️
 """
@@ -293,6 +322,245 @@ Future scans will flag it as a known scam.
         response += "\n🔗 On-chain recording scheduled — [view contract](https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795#events)"
 
     await update.message.reply_text(response, parse_mode='Markdown', disable_web_page_preview=True)
+
+
+async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /rescue command — scan wallet for risky token approvals."""
+    if not context.args:
+        await update.message.reply_text(
+            "❌ Please provide a wallet address.\n\n"
+            "Usage: `/rescue <wallet_address>`\n"
+            "Scans for risky token approvals on your current chain.",
+            parse_mode='Markdown',
+        )
+        return
+
+    raw = context.args[0]
+    prefix_chain_id, address = parse_chain_prefix(raw)
+    chain_id = prefix_chain_id or _get_user_chain_id(context)
+
+    if not web3_client.is_valid_address(address):
+        await update.message.reply_text("❌ Invalid address format.")
+        return
+
+    chain_name = get_chain_name(chain_id)
+    status_msg = await update.message.reply_text(
+        f"🚨 **Scanning approvals on {chain_name}...**\n\n"
+        "⏳ Checking token allowances for risky spenders...",
+        parse_mode='Markdown',
+    )
+
+    try:
+        # Pick the best API key for the target chain
+        api_key = settings.bscscan_api_key
+        if chain_id == 1:
+            api_key = settings.etherscan_api_key or api_key
+
+        result = await container.rescue_service.scan_approvals(
+            address, chain_id=chain_id, etherscan_api_key=api_key,
+        )
+
+        total = result.get('total_approvals', 0)
+        high = result.get('high_risk', 0)
+        medium = result.get('medium_risk', 0)
+        safe = total - high - medium
+
+        response = f"🚨 **Rescue Mode — Approval Scan**\n\n"
+        response += f"**Wallet:** `{address}`\n"
+        response += f"**Chain:** {chain_name}\n"
+        response += f"**Total Approvals:** {total}\n"
+        response += f"🔴 High Risk: {high} | 🟡 Medium: {medium} | 🟢 Safe: {safe}\n"
+
+        # Show risky approvals
+        approvals = result.get('approvals', [])
+        risky = [a for a in approvals if a.get('risk_level') in ('HIGH', 'MEDIUM')]
+        if risky:
+            response += "\n**Risky Approvals:**\n"
+            for a in risky[:10]:
+                risk_icon = '🔴' if a['risk_level'] == 'HIGH' else '🟡'
+                symbol = a.get('token_symbol', '???')
+                spender_label = a.get('spender_label') or a.get('spender', '')[:10] + '...'
+                response += f"{risk_icon} {symbol} → {spender_label}"
+                if a.get('risk_reason'):
+                    response += f" — {a['risk_reason']}"
+                response += "\n"
+
+        # Show alerts
+        alerts = result.get('alerts', [])
+        if alerts:
+            response += "\n**Alerts:**\n"
+            for alert in alerts[:5]:
+                response += f"⚠️ **{alert.get('title', 'Alert')}**\n"
+                response += f"  {alert.get('description', '')}\n"
+                if alert.get('what_you_can_do'):
+                    response += f"  💡 {alert['what_you_can_do']}\n"
+
+        # Revoke instructions
+        revoke_txs = result.get('revoke_txs', [])
+        if revoke_txs:
+            response += f"\n**Revoke Instructions:**\n"
+            response += f"Found {len(revoke_txs)} approval(s) to revoke.\n"
+            response += "Use [Revoke.cash](https://revoke.cash/) or submit the revoke transactions from your wallet.\n"
+        elif total > 0 and high == 0 and medium == 0:
+            response += "\n✅ All approvals look safe — no action needed.\n"
+
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+        await update.message.reply_text(
+            response, parse_mode='Markdown', disable_web_page_preview=True,
+        )
+
+    except Exception as e:
+        logger.error(f"Error in /rescue: {e}")
+        await status_msg.edit_text(f"❌ Error scanning approvals: {str(e)}")
+
+
+async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /threats command — show live mempool threat alerts."""
+    # Optional chain filter
+    chain_id = None
+    if context.args:
+        try:
+            chain_id = int(context.args[0])
+        except ValueError:
+            prefix_chain_id, _ = parse_chain_prefix(context.args[0] + ":0x")
+            chain_id = prefix_chain_id
+
+    try:
+        alerts = container.mempool_monitor.get_alerts(chain_id=chain_id, limit=10)
+        stats = container.mempool_monitor.get_stats()
+
+        response = "🔍 **Mempool Threat Monitor**\n\n"
+
+        # Stats summary
+        response += "**Stats:**\n"
+        response += f"• Pending txs seen: {stats.get('total_pending_seen', 0):,}\n"
+        response += f"• Sandwiches detected: {stats.get('sandwiches_detected', 0)}\n"
+        response += f"• Frontruns detected: {stats.get('frontruns_detected', 0)}\n"
+        response += f"• Suspicious approvals: {stats.get('suspicious_approvals', 0)}\n"
+        monitored = stats.get('monitored_chains', [])
+        if monitored:
+            chain_names = [get_chain_name(c) for c in monitored]
+            response += f"• Monitoring: {', '.join(chain_names)}\n"
+
+        # Recent alerts
+        if alerts:
+            response += f"\n**Recent Alerts ({len(alerts)}):**\n"
+            for alert in alerts:
+                sev = alert.get('severity', 'MEDIUM')
+                sev_icon = '🔴' if sev == 'HIGH' else '🟡'
+                atype = alert.get('alert_type', 'unknown').replace('_', ' ').title()
+                chain_name = get_chain_name(alert.get('chain_id', 56))
+                response += f"\n{sev_icon} **{atype}** ({chain_name})\n"
+                response += f"  {alert.get('description', 'No details')}\n"
+                if alert.get('attacker_addr'):
+                    response += f"  Attacker: `{alert['attacker_addr'][:16]}...`\n"
+        else:
+            filter_text = f" on {get_chain_name(chain_id)}" if chain_id else ""
+            response += f"\n✅ No recent threats detected{filter_text}.\n"
+
+        await update.message.reply_text(
+            response, parse_mode='Markdown', disable_web_page_preview=True,
+        )
+
+    except Exception as e:
+        logger.error(f"Error in /threats: {e}")
+        await update.message.reply_text(f"❌ Error fetching threats: {str(e)}")
+
+
+async def campaign_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /campaign command — check if address is part of a scam campaign."""
+    if not context.args:
+        await update.message.reply_text(
+            "❌ Please provide an address to investigate.\n\n"
+            "Usage: `/campaign <address>`\n"
+            "Checks deployer, funder, and cross-chain links.",
+            parse_mode='Markdown',
+        )
+        return
+
+    address = context.args[0]
+    if not web3_client.is_valid_address(address):
+        await update.message.reply_text("❌ Invalid address format.")
+        return
+
+    status_msg = await update.message.reply_text(
+        "🕵️ **Investigating campaign links...**\n\n"
+        "⏳ Tracing deployer, funder, and cross-chain connections...",
+        parse_mode='Markdown',
+    )
+
+    try:
+        graph = await container.campaign_service.get_entity_graph(address)
+        campaign = graph.get('campaign', {})
+
+        is_campaign = campaign.get('is_campaign', False)
+        severity = campaign.get('severity', 'NONE')
+        sev_icon = {'CRITICAL': '🔴', 'HIGH': '🔴', 'MEDIUM': '🟡', 'LOW': '🟢'}.get(severity, '⚪')
+
+        response = "🕵️ **Campaign Radar**\n\n"
+        response += f"**Address:** `{address}`\n"
+        response += f"**Campaign Detected:** {'Yes' if is_campaign else 'No'}\n"
+        response += f"**Severity:** {sev_icon} {severity}\n"
+
+        # Deployer / funder from graph
+        deployer = graph.get('deployer')
+        funder = graph.get('funder')
+        if deployer:
+            response += f"**Deployer:** `{deployer}`\n"
+        if funder:
+            response += f"**Funder:** `{funder}`\n"
+
+        # Indicators
+        indicators = campaign.get('indicators', [])
+        if indicators:
+            response += "\n**Indicators:**\n"
+            for ind in indicators[:8]:
+                response += f"• {ind}\n"
+
+        # Cross-chain contracts
+        xchain = graph.get('cross_chain_contracts', [])
+        if xchain:
+            chains_involved = campaign.get('chains_involved', [])
+            chain_names = [get_chain_name(c) for c in chains_involved] if chains_involved else []
+            response += f"\n**Cross-Chain Contracts:** {len(xchain)}"
+            if chain_names:
+                response += f" ({', '.join(chain_names)})"
+            response += "\n"
+            for c in xchain[:5]:
+                c_chain = get_chain_name(c.get('chain_id', 56))
+                risk = c.get('risk_level', '?')
+                response += f"  • `{c['contract'][:16]}...` on {c_chain} — {risk}\n"
+            if len(xchain) > 5:
+                response += f"  ... and {len(xchain) - 5} more\n"
+
+        # Funder cluster
+        cluster = graph.get('funder_cluster', [])
+        if cluster:
+            response += f"\n**Funder Cluster:** {len(cluster)} deployer(s) share the same funder\n"
+            total_contracts = campaign.get('total_contracts', 0)
+            high_risk = campaign.get('high_risk_contracts', 0)
+            if total_contracts:
+                response += f"  Total contracts: {total_contracts} (🔴 {high_risk} high risk)\n"
+
+        if not is_campaign and not xchain and not cluster:
+            response += "\n✅ No campaign links found — address appears isolated.\n"
+
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+        await update.message.reply_text(
+            response, parse_mode='Markdown', disable_web_page_preview=True,
+        )
+
+    except Exception as e:
+        logger.error(f"Error in /campaign: {e}")
+        await status_msg.edit_text(f"❌ Error investigating campaign: {str(e)}")
 
 
 async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -723,7 +991,7 @@ def main():
         logger.error("TELEGRAM_BOT_TOKEN not found in environment variables!")
         return
 
-    application = Application.builder().token(token).build()
+    application = Application.builder().token(token).post_init(post_init).build()
 
     # Add handlers
     application.add_handler(CommandHandler("start", start))
@@ -731,6 +999,9 @@ def main():
     application.add_handler(CommandHandler("scan", scan_command))
     application.add_handler(CommandHandler("token", token_command))
     application.add_handler(CommandHandler("chain", chain_command))
+    application.add_handler(CommandHandler("rescue", rescue_command))
+    application.add_handler(CommandHandler("threats", threats_command))
+    application.add_handler(CommandHandler("campaign", campaign_command))
     application.add_handler(CommandHandler("history", history_command))
     application.add_handler(CommandHandler("report", report_command))
     application.add_handler(CallbackQueryHandler(button_callback))
