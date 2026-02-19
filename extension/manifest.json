@@ -6,6 +6,9 @@
   "permissions": [
     "storage"
   ],
+  "host_permissions": [
+    "https://api.shieldbotsecurity.online/*"
+  ],
   "optional_host_permissions": [
     "https://*/*",
     "http://localhost/*",

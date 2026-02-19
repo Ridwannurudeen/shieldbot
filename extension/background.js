@@ -4,7 +4,7 @@
  * and returns the firewall verdict. Saves scan history.
  */
 
-const DEFAULT_API_URL = "";
+const DEFAULT_API_URL = "https://api.shieldbotsecurity.online";
 const MAX_HISTORY = 50;
 
 // Listen for messages from content scripts
@@ -102,6 +102,7 @@ async function handleAnalyze(tx) {
       "X-Policy-Mode": settings.policyMode,
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30000),
   });
 
   if (!response.ok) {
