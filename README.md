@@ -10,7 +10,7 @@ BNB Chain is the primary chain and the core of ShieldBot. To provide stronger pr
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![BNB Chain](https://img.shields.io/badge/BNB-Chain-yellow)](https://www.bnbchain.org/)
 
-**[Full Roadmap](ROADMAP.md)** | **[Live Dashboard](https://shieldbotsecurity.online/dashboard)** | **[Demo Video](https://youtu.be/a-PbFsZz0Ds)**
+**[Full Roadmap](ROADMAP.md)** | **[Live Dashboard](https://api.shieldbotsecurity.online/dashboard)** | **[Demo Video](https://youtu.be/a-PbFsZz0Ds)**
 
 ---
 
@@ -486,4 +486,4 @@ Built for **Good Vibes Only: OpenClaw Edition** — **Builders Track** (BNB Chai
 
 ---
 
-**Live:** https://shieldbotsecurity.online | **Repo:** https://github.com/Ridwannurudeen/shieldbot
+**Live:** https://api.shieldbotsecurity.online | **Repo:** https://github.com/Ridwannurudeen/shieldbot
