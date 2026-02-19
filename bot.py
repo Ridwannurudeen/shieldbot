@@ -79,7 +79,8 @@ def _set_cache(address: str, scan_type: str, result: dict):
 
 
 async def post_init(application):
-    """Register bot command menu so pressing / in Telegram shows commands."""
+    """Initialize services and register bot command menu."""
+    await container.startup()
     await application.bot.set_my_commands([
         ("start", "Welcome message & quick start"),
         ("scan", "Scan a contract for risks"),
@@ -92,6 +93,11 @@ async def post_init(application):
         ("report", "Report a scam address"),
         ("help", "Show all commands"),
     ])
+
+
+async def post_shutdown(application):
+    """Clean up services on bot shutdown."""
+    await container.shutdown()
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -991,7 +997,13 @@ def main():
         logger.error("TELEGRAM_BOT_TOKEN not found in environment variables!")
         return
 
-    application = Application.builder().token(token).post_init(post_init).build()
+    application = (
+        Application.builder()
+        .token(token)
+        .post_init(post_init)
+        .post_shutdown(post_shutdown)
+        .build()
+    )
 
     # Add handlers
     application.add_handler(CommandHandler("start", start))
