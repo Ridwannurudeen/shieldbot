@@ -1,12 +1,12 @@
 /* ShieldAI Firewall Overlay Styles */
 
 .shieldai-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 2147483647;
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2147483647 !important;
   background: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(4px);
-  display: flex;
+  display: flex !important;
   align-items: center;
   justify-content: center;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -43,7 +43,7 @@
 
 .shieldai-modal-danger {
   border-color: #ef4444;
-  animation: shieldai-pulse 2s infinite;
+  animation: shieldai-fadein 0.2s ease-out, shieldai-pulse 2s 0.2s infinite;
 }
 
 /* Header */

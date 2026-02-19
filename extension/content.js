@@ -31,9 +31,6 @@
     }
 
     const { requestId, tx, method } = event.data;
-    // Carry typed data and sign method through to background
-    if (tx.typedData) tx._typedData = tx.typedData;
-    if (tx.signMethod) tx._signMethod = tx.signMethod;
 
     // Check if extension is enabled
     const settings = await getSettings();
@@ -116,7 +113,7 @@
         </div>
       </div>
     `;
-    document.body.appendChild(overlay);
+    (document.body || document.documentElement).appendChild(overlay);
   }
 
   function showAnalysisOverlay(requestId, result) {
@@ -216,7 +213,7 @@
       </div>
     `;
 
-    document.body.appendChild(overlay);
+    (document.body || document.documentElement).appendChild(overlay);
 
     // Button handlers
     document.getElementById("shieldai-block").addEventListener("click", () => {
@@ -269,7 +266,7 @@
       </div>
     `;
 
-    document.body.appendChild(overlay);
+    (document.body || document.documentElement).appendChild(overlay);
 
     document.getElementById("shieldai-block").addEventListener("click", () => {
       removeOverlay();
