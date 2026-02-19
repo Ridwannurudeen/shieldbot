@@ -134,8 +134,10 @@ class ServiceContainer:
         await self.db.initialize()
         await self.indexer.start()
         await self.greenfield_service.async_init()
-        # Start mempool monitor on BSC and ETH (chains with txpool support)
-        await self.mempool_monitor.start(chain_ids=[56, 1])
+        # Start mempool monitor on all supported chains
+        await self.mempool_monitor.start(
+            chain_ids=self.web3_client.get_supported_chain_ids()
+        )
         logger.info("ServiceContainer started")
         logger.info(f"AI Analysis: {'enabled' if self.ai_analyzer.is_available() else 'disabled'}")
         logger.info(f"Greenfield storage: {'enabled' if self.greenfield_service.is_enabled() else 'disabled'}")
