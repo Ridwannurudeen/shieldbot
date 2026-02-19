@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShieldBot Threat Dashboard</title>
+    <style>
+        :root {
+            --bg: #0a0e17;
+            --surface: #111827;
+            --border: #1f2937;
+            --text: #e5e7eb;
+            --text-dim: #9ca3af;
+            --accent: #3b82f6;
+            --danger: #ef4444;
+            --warn: #f59e0b;
+            --safe: #10b981;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        .header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header h1 { font-size: 20px; font-weight: 600; }
+        .header .logo { color: var(--accent); }
+        .header .live-badge {
+            background: var(--danger);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        .stats-bar {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            padding: 16px 24px;
+        }
+        .stat-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+        }
+        .stat-card .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+        .stat-card .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+        .stat-card .value.danger { color: var(--danger); }
+        .stat-card .value.warn { color: var(--warn); }
+        .stat-card .value.safe { color: var(--safe); }
+        .content { padding: 0 24px 24px; }
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin: 24px 0 12px;
+        }
+        .chain-filter {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        .chain-btn {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text-dim);
+            padding: 6px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.15s;
+        }
+        .chain-btn:hover, .chain-btn.active {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: rgba(59, 130, 246, 0.1);
+        }
+        .threat-list { display: flex; flex-direction: column; gap: 8px; }
+        .threat-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 14px 16px;
+            display: grid;
+            grid-template-columns: 80px 1fr 100px 140px;
+            align-items: center;
+            gap: 12px;
+            transition: border-color 0.15s;
+        }
+        .threat-card:hover { border-color: var(--accent); }
+        .threat-card .severity {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 4px 8px;
+            border-radius: 4px;
+            text-align: center;
+            text-transform: uppercase;
+        }
+        .severity.HIGH { background: rgba(239, 68, 68, 0.15); color: var(--danger); }
+        .severity.MEDIUM { background: rgba(245, 158, 11, 0.15); color: var(--warn); }
+        .severity.LOW { background: rgba(16, 185, 129, 0.15); color: var(--safe); }
+        .threat-card .type { font-size: 13px; font-weight: 500; }
+        .threat-card .detail { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+        .threat-card .address {
+            font-family: monospace;
+            font-size: 12px;
+            color: var(--accent);
+            text-decoration: none;
+        }
+        .threat-card .time { font-size: 12px; color: var(--text-dim); text-align: right; }
+        .chain-badge {
+            display: inline-block;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: var(--border);
+            color: var(--text-dim);
+            margin-left: 6px;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 48px;
+            color: var(--text-dim);
+            font-size: 14px;
+        }
+        .campaigns-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 12px;
+        }
+        .campaign-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+        }
+        .campaign-card .deployer { font-family: monospace; font-size: 13px; color: var(--accent); }
+        .campaign-card .meta { font-size: 12px; color: var(--text-dim); margin-top: 8px; }
+        .campaign-card .risk-bar {
+            margin-top: 8px;
+            height: 4px;
+            background: var(--border);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .campaign-card .risk-bar .fill {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 0.3s;
+        }
+        .risk-bar .fill.danger { background: var(--danger); }
+        .risk-bar .fill.warn { background: var(--warn); }
+        .risk-bar .fill.safe { background: var(--safe); }
+        @media (max-width: 768px) {
+            .threat-card { grid-template-columns: 70px 1fr; }
+            .threat-card .address, .threat-card .time { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1><span class="logo">Shield</span>Bot Threat Dashboard</h1>
+        <span class="live-badge" id="live-badge">LIVE</span>
+    </div>
+
+    <div class="stats-bar" id="stats"></div>
+
+    <div class="content">
+        <div class="section-title">Chain Filter</div>
+        <div class="chain-filter" id="chain-filter">
+            <button class="chain-btn active" data-chain="">All Chains</button>
+            <button class="chain-btn" data-chain="56">BSC</button>
+            <button class="chain-btn" data-chain="1">Ethereum</button>
+            <button class="chain-btn" data-chain="8453">Base</button>
+            <button class="chain-btn" data-chain="42161">Arbitrum</button>
+            <button class="chain-btn" data-chain="137">Polygon</button>
+            <button class="chain-btn" data-chain="10">Optimism</button>
+            <button class="chain-btn" data-chain="204">opBNB</button>
+        </div>
+
+        <div class="section-title">Live Threat Feed</div>
+        <div class="threat-list" id="threat-list">
+            <div class="empty-state">Loading threats...</div>
+        </div>
+
+        <div class="section-title">Top Campaigns</div>
+        <div class="campaigns-grid" id="campaigns"></div>
+    </div>
+
+    <script>
+        const API = window.location.origin;
+        const CHAIN_NAMES = {56:'BSC',1:'ETH',8453:'Base',42161:'Arb',137:'Poly',10:'OP',204:'opBNB'};
+        const EXPLORERS = {56:'https://bscscan.com',1:'https://etherscan.io',8453:'https://basescan.org',42161:'https://arbiscan.io',137:'https://polygonscan.com',10:'https://optimistic.etherscan.io',204:'https://opbnbscan.com'};
+
+        let selectedChain = '';
+        let threats = [];
+        let mempoolStats = {};
+
+        // Chain filter buttons
+        document.getElementById('chain-filter').addEventListener('click', e => {
+            const btn = e.target.closest('.chain-btn');
+            if (!btn) return;
+            document.querySelectorAll('.chain-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            selectedChain = btn.dataset.chain;
+            renderThreats();
+        });
+
+        function timeAgo(ts) {
+            const diff = Date.now() / 1000 - ts;
+            if (diff < 60) return `${Math.floor(diff)}s ago`;
+            if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+            if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+            return `${Math.floor(diff / 86400)}d ago`;
+        }
+
+        function renderStats() {
+            const high = threats.filter(t => (t.risk_level || t.severity) === 'HIGH').length;
+            const sandwiches = mempoolStats.sandwiches_detected || 0;
+            const approvals = mempoolStats.suspicious_approvals || 0;
+            const chains = new Set(threats.map(t => t.chain_id)).size;
+
+            document.getElementById('stats').innerHTML = `
+                <div class="stat-card"><div class="label">High Risk Threats</div><div class="value danger">${high}</div></div>
+                <div class="stat-card"><div class="label">Sandwich Attacks</div><div class="value warn">${sandwiches}</div></div>
+                <div class="stat-card"><div class="label">Suspicious Approvals</div><div class="value warn">${approvals}</div></div>
+                <div class="stat-card"><div class="label">Active Chains</div><div class="value safe">${chains}</div></div>
+                <div class="stat-card"><div class="label">Total Threats</div><div class="value">${threats.length}</div></div>
+            `;
+        }
+
+        function renderThreats() {
+            const list = document.getElementById('threat-list');
+            let filtered = threats;
+            if (selectedChain) {
+                filtered = threats.filter(t => String(t.chain_id) === selectedChain);
+            }
+
+            if (!filtered.length) {
+                list.innerHTML = '<div class="empty-state">No threats detected yet. The feed updates automatically.</div>';
+                return;
+            }
+
+            list.innerHTML = filtered.slice(0, 100).map(t => {
+                const severity = t.risk_level || t.severity || 'MEDIUM';
+                const type = t.type || t.alert_type || 'unknown';
+                const addr = t.address || t.target_token || '';
+                const chain = CHAIN_NAMES[t.chain_id] || `Chain ${t.chain_id}`;
+                const explorer = EXPLORERS[t.chain_id] || '';
+                const ts = t.detected_at || t.created_at || 0;
+                const flags = (t.flags || []).slice(0, 2).join(', ') || t.description || '';
+
+                return `<div class="threat-card">
+                    <span class="severity ${severity}">${severity}</span>
+                    <div>
+                        <div class="type">${type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                            <span class="chain-badge">${chain}</span>
+                        </div>
+                        <div class="detail">${flags}</div>
+                    </div>
+                    <a class="address" href="${explorer}/address/${addr}" target="_blank" rel="noopener">
+                        ${addr ? addr.slice(0, 6) + '...' + addr.slice(-4) : '-'}
+                    </a>
+                    <div class="time">${ts ? timeAgo(ts) : '-'}</div>
+                </div>`;
+            }).join('');
+        }
+
+        function renderCampaigns(campaigns) {
+            const el = document.getElementById('campaigns');
+            if (!campaigns.length) {
+                el.innerHTML = '<div class="empty-state">No campaigns detected yet.</div>';
+                return;
+            }
+            el.innerHTML = campaigns.map(c => {
+                const highRisk = (c.risk_profile || {}).HIGH || 0;
+                const total = c.contract_count || 1;
+                const pct = Math.min(100, (highRisk / total) * 100);
+                const barClass = pct > 50 ? 'danger' : pct > 20 ? 'warn' : 'safe';
+                return `<div class="campaign-card">
+                    <div class="deployer">${c.deployer.slice(0, 10)}...${c.deployer.slice(-6)}</div>
+                    <div class="meta">
+                        ${c.contract_count} contracts across ${c.chain_count} chain(s)
+                        ${c.funder ? ' | Funder: ' + c.funder.slice(0, 10) + '...' : ''}
+                    </div>
+                    <div class="risk-bar"><div class="fill ${barClass}" style="width:${pct}%"></div></div>
+                    <div class="meta">${highRisk} HIGH risk / ${total} total</div>
+                </div>`;
+            }).join('');
+        }
+
+        async function fetchData() {
+            try {
+                const [feedRes, statsRes, campRes] = await Promise.allSettled([
+                    fetch(`${API}/api/threats/feed?limit=100`).then(r => r.json()),
+                    fetch(`${API}/api/mempool/stats`).then(r => r.json()),
+                    fetch(`${API}/api/campaigns/top?limit=10`).then(r => r.json()),
+                ]);
+
+                if (feedRes.status === 'fulfilled') {
+                    threats = feedRes.value.threats || [];
+                }
+                if (statsRes.status === 'fulfilled') {
+                    mempoolStats = statsRes.value || {};
+                }
+
+                renderStats();
+                renderThreats();
+
+                if (campRes.status === 'fulfilled') {
+                    renderCampaigns(campRes.value.campaigns || []);
+                }
+            } catch (e) {
+                console.error('Fetch error:', e);
+            }
+        }
+
+        // Initial load + auto-refresh every 15 seconds
+        fetchData();
+        setInterval(fetchData, 15000);
+    </script>
+</body>
+</html>

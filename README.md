@@ -1,221 +1,167 @@
-# ShieldBot - Autonomous Transaction Firewall for BNB Chain
+# ShieldBot — Autonomous Transaction Firewall for BNB Chain
 
-**Good Vibes Only: OpenClaw Edition - Builders Track**
+**Good Vibes Only: OpenClaw Edition — Builders Track**
 
-ShieldBot is an autonomous transaction firewall for BNB Chain. It intercepts Web3 transactions in real-time via a Chrome extension, analyzes them using composite intelligence from multiple sources (GoPlus, Honeypot.is, DexScreener, Ethos Network, Tenderly), computes a weighted ShieldScore, and blocks honeypots, rug pulls, and malicious contracts before they execute. High-risk forensic reports are stored immutably on BNB Greenfield.
+ShieldBot is an autonomous transaction firewall built for BNB Chain. It intercepts Web3 transactions in real-time, analyzes them through a multi-source intelligence pipeline with 6 pluggable analyzers, computes a weighted ShieldScore, and blocks honeypots, rug pulls, and malicious contracts before they execute. High-risk forensic reports are stored immutably on BNB Greenfield.
+
+BNB Chain is the primary chain and the core of ShieldBot. To provide stronger protection for BNB users, ShieldBot also monitors 6 additional EVM chains — because scam campaigns frequently originate on Ethereum or L2s before migrating to BSC. Cross-chain intelligence means threats are caught earlier.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![BNB Chain](https://img.shields.io/badge/BNB-Chain-yellow)](https://www.bnbchain.org/)
 
-**[V2 Roadmap](ROADMAP.md)** — ShieldBot is evolving into a cross-chain security intelligence network. See what's coming.
+**[Full Roadmap](ROADMAP.md)** | **[Live Dashboard](https://shieldbotsecurity.online/dashboard)** | **[Demo Video](https://youtu.be/a-PbFsZz0Ds)**
 
 ---
 
-## 🎥 Demo Video
+## Supported Chains
 
-**Watch ShieldBot in action** (3-minute demo): [**View on YouTube**](https://youtu.be/a-PbFsZz0Ds)
-
-See the Chrome extension blocking honeypots, the Telegram bot scanning tokens with names/symbols, and BNB Greenfield forensic reports in real-time.
+| Chain | ID | Role | Status |
+|-------|-----|------|--------|
+| **BNB Smart Chain** | **56** | **Primary** | **Live** |
+| **opBNB** | **204** | **BNB L2** | **Live** |
+| Ethereum | 1 | Cross-chain intel | Live |
+| Base | 8453 | Cross-chain intel | Live |
+| Arbitrum One | 42161 | Cross-chain intel | Live |
+| Polygon PoS | 137 | Cross-chain intel | Live |
+| Optimism | 10 | Cross-chain intel | Live |
 
 ---
 
 ## How It Works
 
-1. **Intercept** -- The Chrome extension wraps the wallet provider's `request()` method in the page context (`world: MAIN`). When `eth_sendTransaction` or `eth_signTransaction` is called, the transaction is intercepted before reaching the wallet.
+1. **Intercept** — The Chrome extension wraps the wallet provider's `request()` method in `world: MAIN`. When `eth_sendTransaction` or `eth_signTransaction` is called, the transaction is intercepted before reaching the wallet. The RPC proxy provides the same protection for any wallet (including mobile) without an extension.
 
-2. **Analyze** -- The intercepted transaction is sent to the ShieldBot API, which runs five analyses in parallel: contract intelligence (GoPlus), honeypot detection, DEX market data (DexScreener), wallet reputation (Ethos Network), and transaction simulation (Tenderly).
+2. **Analyze** — The intercepted transaction runs through 6 pluggable analyzers in parallel: Structural (contract verification, bytecode patterns), Market (DEX liquidity, wash trading), Behavioral (wallet reputation), Honeypot (simulation), Intent Mismatch (disguised selectors, unlimited approvals), and Signature/Permit (EIP-2612, Permit2, Seaport).
 
-3. **Score** -- The RiskEngine computes a weighted composite score from the parallel results. Escalation rules override the base score for confirmed honeypots and rug pull patterns.
+3. **Score** — The RiskEngine computes a weighted composite ShieldScore. Escalation rules override the base score for confirmed honeypots, rug pull patterns, and destroyed contracts.
 
-4. **Verdict** -- Based on the composite score and simulation result, the API returns BLOCK, WARN, or ALLOW. The extension renders a full-screen modal for blocks, a warning overlay with proceed/cancel for warnings, or passes through silently for safe transactions.
+4. **Verdict** — Based on the composite score: BLOCK (>= 71), WARN (31-70), or ALLOW (< 31). The extension renders a full-screen modal for blocks, a warning overlay for medium risk, or passes through silently.
 
-5. **Record** -- For transactions scoring >= 50, a forensic report is uploaded to BNB Greenfield as an immutable JSON object with a public URL.
+5. **Record** — High-risk transactions are recorded to BNB Greenfield as immutable forensic reports. The deployer/funder indexer runs in the background to build campaign graphs.
 
 ---
 
 ## Architecture
 
 ```
-+-------------------------------------------------------------+
-|  DELIVERY                                                    |
-|  - Chrome Extension (Manifest V3, MetaMask + EIP-6963)       |
-|  - FastAPI REST API (/api/firewall, /api/scan, /test)        |
-|  - Telegram Bot (/scan, /token, /history, /report)           |
-+-------------------------------------------------------------+
-|  INTELLIGENCE ENGINE                                         |
-|  - RiskEngine (composite weighted scoring)                   |
-|  - AI Analyzer (Claude-powered forensic analysis)            |
-|  - Calldata Decoder (approve, swap, transfer detection)      |
-|  - Transaction Simulator (Tenderly pre-execution)            |
-+-------------------------------------------------------------+
-|  DATA SERVICES                                               |
-|  - ContractService (GoPlus + BscScan + scam databases)       |
-|  - HoneypotService (honeypot.is simulation)                  |
-|  - DexService (DexScreener market data + volume anomalies)   |
-|  - EthosService (wallet reputation scoring)                  |
-|  - TenderlySimulator (pre-execution simulation)              |
-|  - GreenfieldService (on-chain forensic report storage)      |
-+-------------------------------------------------------------+
++-------------------------------------------------------------------------+
+|  DELIVERY                                                                |
+|  - Chrome Extension (Manifest V3, MetaMask + EIP-6963)                   |
+|  - RPC Proxy (/rpc/{chain_id} — works with any wallet including mobile)  |
+|  - Telegram Bot (/scan, /token, /history, /report, chain selector)       |
+|  - REST API (/api/firewall, /api/scan, /api/rescue, /api/threats/feed)   |
+|  - SDK (shieldbot-sdk — TypeScript, npm-publishable)                     |
+|  - Threat Dashboard (/dashboard — real-time web UI)                      |
++-------------------------------------------------------------------------+
+|  INTELLIGENCE ENGINE                                                     |
+|  - Analyzer Registry (pluggable pipeline, weight normalization)          |
+|  - RiskEngine (composite weighted scoring + escalation rules)            |
+|  - Campaign Graph Radar (cross-chain entity correlation)                 |
+|  - Mempool Monitor (sandwich detection, frontrun detection)              |
+|  - Rescue Mode (approval scanning, one-click revoke)                     |
+|  - PolicyEngine (STRICT / BALANCED modes)                                |
+|  - Calibration (data-driven threshold tuning from outcome events)        |
++-------------------------------------------------------------------------+
+|  ANALYZERS (6 pluggable plugins)                                         |
+|  - Structural: verification, age, bytecode (mint, proxy, blacklist)      |
+|  - Market: liquidity, volatility, wash trading, volume/FDV anomaly       |
+|  - Behavioral: Ethos wallet reputation, scam flags                       |
+|  - Honeypot: honeypot.is simulation, buy/sell tax                        |
+|  - IntentMismatch: disguised selectors, unlimited approvals              |
+|  - SignaturePermit: EIP-2612, Permit2, Seaport zero-price detection      |
++-------------------------------------------------------------------------+
+|  DATA SERVICES                                                           |
+|  - ContractService (GoPlus + Etherscan v2 + scam databases)              |
+|  - HoneypotService (honeypot.is simulation)                              |
+|  - DexService (DexScreener market data + volume anomalies)               |
+|  - EthosService (wallet reputation scoring)                              |
+|  - TenderlySimulator (pre-execution simulation)                          |
+|  - GreenfieldService (BNB Greenfield immutable report storage)           |
++-------------------------------------------------------------------------+
+|  INFRASTRUCTURE                                                          |
+|  - ChainAdapter (abstract base + 7 EVM adapters)                         |
+|  - SQLite WAL (contract_scores, outcome_events, deployers, funder_links) |
+|  - API Auth (sb_ keys, SHA-256 hashed, tiered rate limits)               |
+|  - DeployerIndexer (background async queue worker)                       |
+|  - Evaluation Pipeline (benchmark CLI: precision/recall/F1)              |
++-------------------------------------------------------------------------+
 ```
-
-**📊 Visual Diagrams:** See [Architecture Diagrams](docs/ARCHITECTURE_DIAGRAM.md) for interactive flowcharts, sequence diagrams, and data flow visualizations.
 
 ---
 
 ## Features
 
-### 🎬 Visual Demonstration
+### Transaction Firewall (Chrome Extension + RPC Proxy)
 
-**Chrome Extension - Real-Time Transaction Blocking:**
+The extension intercepts transactions before they reach the wallet. The RPC proxy provides the same protection for any wallet — users configure `https://api.shieldbotsecurity.online/rpc/56` as their BSC RPC in MetaMask.
 
-> **🔴 BLOCK Verdict (High Risk)**
->
-> When ShieldBot detects a honeypot or rug pull, it displays a full-screen red modal that completely blocks the transaction:
-> - **Risk Score:** 85/100 - HIGH RISK
-> - **Critical Flags:** Honeypot confirmed (cannot sell after buying), 99% sell tax, ownership not renounced, low liquidity ($2,000)
-> - **Action:** Transaction is hard-blocked - user cannot proceed even if they want to
-> - **Result:** Loss prevented before funds are at risk
->
-> See it in action: [3-min demo video](https://youtu.be/a-PbFsZz0Ds) at 0:30
-
-> **🟡 WARN Verdict (Medium Risk)**
->
-> For medium-risk contracts, ShieldBot shows an orange warning overlay:
-> - **Risk Score:** 45/100 - MEDIUM RISK
-> - **Warnings:** Contract not verified, low liquidity, pair age <24 hours, no Tenderly simulation
-> - **User Choice:** Two buttons: "Proceed Anyway" or "Cancel Transaction"
-> - **Result:** Informed decision with full transparency
->
-> See it in action: [3-min demo video](https://youtu.be/a-PbFsZz0Ds) at 1:00
-
-> **🟢 ALLOW Verdict (Safe)**
->
-> For verified safe contracts (PancakeSwap, 1inch, etc.):
-> - **No overlay appears** - completely silent passthrough
-> - **Transaction flows directly to wallet** - zero friction
-> - **MetaMask signature request appears immediately**
-> - **Result:** Safe transactions are not interrupted
->
-> See it in action: [3-min demo video](https://youtu.be/a-PbFsZz0Ds) at 1:30
-
-**Telegram Bot - Token Intelligence with Names:**
-
-> **🤖 Live Bot Analysis**
->
-> The Telegram bot now displays token names and symbols (not just addresses):
-> ```
-> 🟢 ShieldBot Intelligence Report
->
-> Token: Wrapped BNB (WBNB)
-> Address: 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c
-> Risk Archetype: Low Risk
-> Rug Probability: 5% | Risk Level: LOW
-> Confidence: 95%
->
-> ✓ Category Scores:
->   • Structural: 10/100
->   • Market: 5/100
->   • Behavioral: 0/100
->   • Honeypot: 0/100
-> ```
->
-> **Try it yourself:** [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)
-> Send: `/token 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c`
-
-**BNB Greenfield - Immutable Forensic Reports:**
-
-> **🌐 On-Chain Evidence Storage**
->
-> High-risk transactions (score ≥50) are recorded as immutable JSON objects on BNB Greenfield:
-> ```json
-> {
->   "report_id": "3a4039ef0349eb5f",
->   "timestamp": "2026-02-16T03:45:12Z",
->   "contract_address": "0x...",
->   "risk_score": 85,
->   "risk_level": "HIGH",
->   "critical_flags": [
->     "Honeypot confirmed",
->     "99% sell tax",
->     "Ownership not renounced"
->   ],
->   "category_scores": {
->     "structural": 90,
->     "market": 75,
->     "behavioral": 45,
->     "honeypot": 95
->   }
-> }
-> ```
->
-> **Public URL:** `https://greenfield-sp.bnbchain.org/view/shieldbot-reports/reports/<id>.json`
-> **Verifiable:** Anyone can access and verify the forensic analysis
-> **Immutable:** Cannot be altered or deleted once stored
-
----
-
-### Real-Time Transaction Firewall (Chrome Extension)
-
-The extension intercepts `eth_sendTransaction` and `eth_signTransaction` before they reach the wallet. Each transaction is analyzed via the ShieldBot API. The result determines the action:
-
-- **BLOCK**: Critical risk -- transaction is rejected with a full-screen red modal
-- **WARN**: High/medium risk -- user sees an orange warning overlay with risk details and can proceed or cancel
-- **ALLOW**: Low risk -- transaction passes through silently (whitelisted routers like PancakeSwap fast-path)
-
-The extension uses **direct request wrapping** via `inject.js` running in `world: MAIN`. It wraps the provider's `request()` method directly (both `window.ethereum` and EIP-6963 providers), making it compatible with MetaMask, Rabby, and other modern wallets without proxy interference.
+- **BLOCK**: Critical risk — full-screen red modal, transaction rejected
+- **WARN**: Medium risk — orange warning overlay with risk details, proceed/cancel
+- **ALLOW**: Low risk — silent passthrough (whitelisted routers fast-path)
 
 ### Composite Risk Scoring (ShieldScore)
 
-A weighted 0-100 risk score computed from four categories:
+Weighted 0-100 risk score from 6 analyzer categories:
 
 ```
 Composite = (Structural x 0.40) + (Market x 0.25) + (Behavioral x 0.20) + (Honeypot x 0.15)
+            + IntentMismatch bonus + SignaturePermit bonus
 
 Escalation Rules:
-  - Honeypot confirmed          -> floor at 80
-  - Rug pull pattern (mint +    -> floor at 85
-    proxy + owner not renounced)
-  - Severe reputation + new     -> +15 escalation
-    pair (<24h)
-  - Renounced + high liquidity  -> -20 reduction
+  - Honeypot confirmed                  -> floor at 80
+  - mint + proxy + owner not renounced  -> floor at 85
+  - Destroyed contract + sim failed     -> floor at 80
+  - Severe reputation + new pair <24h   -> +15
+  - Renounced + high liquidity + safe   -> -20
 ```
 
-| Level  | Score | Action |
-|--------|-------|--------|
-| HIGH   | 71+   | Auto-block |
-| MEDIUM | 31-70 | Warning overlay |
-| LOW    | 0-30  | Allow |
+### Mempool Monitoring
 
-### Tenderly Transaction Simulation
+Real-time detection of:
+- **Sandwich attacks** — frontrun + backrun patterns around victim swaps
+- **Frontrunning** — higher-gas competing transactions
+- **Suspicious approvals** — unlimited/large approvals in pending transactions
 
-Before a transaction executes, ShieldBot simulates it via Tenderly's API to predict:
+### Rescue Mode
 
-- **Success/revert status** -- catches transactions that would fail on-chain
-- **Asset deltas** -- shows token balance changes before signing
-- **Gas estimation** -- flags excessive gas usage
-- **Subcall analysis** -- detects failed internal calls and reentrancy patterns
+- **Tier 1 (Alerts)** — Scans wallet approvals, explains risks in plain language (`what_it_means`, `what_you_can_do`)
+- **Tier 2 (Revoke)** — Pre-built `approve(spender, 0)` transactions for one-click approval cleanup
 
-### BNB Greenfield On-Chain Reports
+### Campaign Graph Radar
 
-When a transaction scores >= 50, ShieldBot uploads a forensic report to BNB Greenfield as an immutable JSON object:
+Cross-chain entity correlation linking deployers, funders, and contracts across all 7 chains:
+- Funder clustering (same wallet funding multiple deployers)
+- High-risk contract ratio detection
+- Multi-chain scam campaign identification
 
-- Tamper-proof evidence of risk analysis
-- Public URL for each report (e.g., `https://greenfield-sp.bnbchain.org/view/shieldbot-reports/reports/<id>.json`)
-- Full analysis data: composite score breakdown, contract flags, market metrics, simulation results
+### Threat Intelligence Feed
 
-### Multi-Source Intelligence
+REST API for real-time threat data:
+- `GET /api/threats/feed` — high-risk contracts + mempool alerts
+- `GET /api/campaigns/top` — most prolific scam deployers
+- Filter by chain, time range, severity
 
-| Source | Purpose |
-|--------|---------|
-| GoPlus | Contract verification, scam flags, bytecode analysis |
-| Honeypot.is | Honeypot simulation, buy/sell tax detection |
-| DexScreener | Liquidity depth, pair age, volume anomalies, FDV/volume ratio |
-| Ethos Network | Wallet reputation scoring, scam flag aggregation |
-| Tenderly | Pre-execution transaction simulation |
-| BNB Greenfield | Immutable forensic report storage |
-| BscScan | Contract verification, deployment age, transaction history |
-| ChainAbuse / ScamSniffer | Scam database cross-referencing |
+### SDK (shieldbot-sdk)
+
+TypeScript SDK for wallet/dApp integration:
+
+```typescript
+import { ShieldBot } from 'shieldbot-sdk';
+const shield = new ShieldBot({ apiKey: 'sb_...' });
+
+const result = await shield.scan('0x...', { chainId: 56 });
+const rescue = await shield.rescue('0xMyWallet', 56);
+const threats = await shield.getThreats({ chainId: 1, limit: 20 });
+```
+
+### Threat Dashboard
+
+Real-time web dashboard at `/dashboard` showing:
+- Live threat feed with chain filtering
+- Mempool attack statistics
+- Top scam campaigns
+- Auto-refreshing every 15 seconds
 
 ### Telegram Bot
 
@@ -228,29 +174,21 @@ When a transaction scores >= 50, ShieldBot uploads a forensic report to BNB Gree
 /help               - Command list
 ```
 
-### Test Page
+Supports chain selection (BSC, ETH, Base, Arbitrum, Polygon, Optimism, opBNB).
 
-Visit `http://<host>:8000/test` to test the Chrome extension with pre-configured transactions:
-- Honeypot token (should trigger BLOCK)
-- PancakeSwap router (should ALLOW silently)
-- Unverified contract (should trigger WARN)
+**Try it:** [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)
+
+### BNB Greenfield On-Chain Reports
+
+High-risk transactions (score >= 50) are stored as immutable JSON objects on BNB Greenfield — tamper-proof forensic evidence with public URLs.
 
 ---
 
 ## Quick Start
 
-### Watch the Demo First
+### Demo Video
 
-**3-Minute Video Walkthrough:** [View on YouTube](https://youtu.be/a-PbFsZz0Ds)
-
-### Try the Live Bot
-
-1. Open Telegram and search for: **@shieldbot_bnb_bot**
-2. Send `/start` to begin
-3. Test: `/scan 0x10ED43C718714eb63d5aA57B78B54704E256024E` (PancakeSwap -- safe)
-4. Test: `/token 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c` (WBNB -- safe)
-
-**Direct Link:** https://t.me/shieldbot_bnb_bot
+**3-Minute Walkthrough:** [View on YouTube](https://youtu.be/a-PbFsZz0Ds)
 
 ### Run Locally
 
@@ -264,14 +202,12 @@ pip install -r requirements.txt
 
 cp .env.example .env
 # Edit .env with your API keys
-# Set CORS_ALLOW_ORIGINS for production (comma-separated, include chrome-extension:// ID)
-# Set ANTHROPIC_MODEL to override the default AI model
 
-# Run Telegram bot
-python bot.py
-
-# Run FastAPI backend (separate terminal)
+# Run FastAPI backend
 uvicorn api:app --host 0.0.0.0 --port 8000
+
+# Run Telegram bot (separate terminal)
+python bot.py
 ```
 
 ### Install Chrome Extension
@@ -279,172 +215,205 @@ uvicorn api:app --host 0.0.0.0 --port 8000
 1. Open `chrome://extensions` in Chrome
 2. Enable **Developer mode** (top right)
 3. Click **Load unpacked** -> select the `extension/` folder
-4. Visit the test page (`http://<host>:8000/test`) to verify the extension is active
-5. Visit any dApp (e.g., PancakeSwap) and initiate a swap -- the firewall overlay will appear
+4. Visit the test page (`http://localhost:8000/test`) to verify
+
+### Use the RPC Proxy (No Extension Needed)
+
+Add this as a custom RPC in MetaMask or any wallet:
+- BSC: `https://api.shieldbotsecurity.online/rpc/56`
+- Ethereum: `https://api.shieldbotsecurity.online/rpc/1`
+- Base: `https://api.shieldbotsecurity.online/rpc/8453`
+- Arbitrum: `https://api.shieldbotsecurity.online/rpc/42161`
+- Polygon: `https://api.shieldbotsecurity.online/rpc/137`
+- Optimism: `https://api.shieldbotsecurity.online/rpc/10`
+- opBNB: `https://api.shieldbotsecurity.online/rpc/204`
 
 ### Configuration
-
-Edit `.env`:
 
 ```env
 # Required
 TELEGRAM_BOT_TOKEN=your_bot_token
 BSCSCAN_API_KEY=your_bscscan_key
 
-# Tenderly Simulation
+# RPC endpoints (defaults provided)
+BSC_RPC_URL=https://bsc-dataseed.binance.org/
+ETH_RPC_URL=https://eth.llamarpc.com
+BASE_RPC_URL=https://mainnet.base.org
+ARBITRUM_RPC_URL=https://arb1.arbitrum.io/rpc
+POLYGON_RPC_URL=https://polygon-rpc.com
+OPTIMISM_RPC_URL=https://mainnet.optimism.io
+OPBNB_RPC_URL=https://opbnb-mainnet-rpc.bnbchain.org
+
+# Optional Etherscan keys (fall back to BSCSCAN_API_KEY via Etherscan v2)
+ETHERSCAN_API_KEY=
+BASESCAN_API_KEY=
+ARBISCAN_API_KEY=
+POLYGONSCAN_API_KEY=
+OPBNBSCAN_API_KEY=
+OPTIMISM_API_KEY=
+
+# Simulation + Storage
 TENDERLY_API_KEY=your_tenderly_key
 TENDERLY_PROJECT_ID=your_tenderly_project_id
-
-# BNB Greenfield (on-chain forensic reports)
 GREENFIELD_PRIVATE_KEY=your_greenfield_private_key
 
 # AI Analysis
 ANTHROPIC_API_KEY=your_anthropic_key
 
-# Optional
-BSC_RPC_URL=https://bsc-dataseed1.binance.org/
-OPBNB_RPC_URL=https://opbnb-mainnet-rpc.bnbchain.org
+# Policy mode (STRICT or BALANCED)
+POLICY_MODE=BALANCED
+
+# Admin (for API key management)
+ADMIN_SECRET=your_admin_secret
 ```
 
 ---
 
-## API
+## API Reference
 
-### POST `/api/firewall`
+### Core Endpoints
 
-Main endpoint called by the Chrome extension before transaction submission.
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/firewall` | Transaction firewall analysis (Chrome extension) |
+| POST | `/api/scan` | Contract/token security scan |
+| GET | `/api/health` | Service status |
+| GET | `/test` | Chrome extension test page |
 
-```bash
-curl -X POST http://localhost:8000/api/firewall \
-  -H "Content-Type: application/json" \
-  -d '{
-    "to": "0xSuspiciousContract...",
-    "from": "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD61",
-    "value": "0x2386F26FC10000",
-    "data": "0x095ea7b3...",
-    "chainId": 56
-  }'
-```
+### Mempool Monitoring
 
-**Response:**
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/mempool/alerts` | Recent mempool alerts (sandwich, frontrun) |
+| GET | `/api/mempool/stats` | Monitoring statistics |
 
-```json
-{
-  "classification": "HIGH_RISK",
-  "risk_score": 72,
-  "danger_signals": [
-    "Contract not verified",
-    "Mint function detected",
-    "Proxy/upgradeable contract",
-    "Low liquidity (<$10k)"
-  ],
-  "shield_score": {
-    "rug_probability": 72.5,
-    "risk_level": "HIGH",
-    "risk_archetype": "rug_pull",
-    "category_scores": {
-      "structural": 85.0,
-      "market": 55.0,
-      "behavioral": 30.0,
-      "honeypot": 0.0
-    },
-    "confidence_level": 75
-  },
-  "simulation": {
-    "success": true,
-    "gas_used": 125000,
-    "asset_deltas": [],
-    "warnings": ["Asset outflow detected"]
-  },
-  "greenfield_url": "https://greenfield-sp.bnbchain.org/view/shieldbot-reports/reports/3a4039ef0349eb5f.json",
-  "transaction_impact": {
-    "sending": "0.01 BNB",
-    "granting_access": "None",
-    "recipient": "0xSusp... (Unverified Contract)"
-  },
-  "verdict": "HIGH RISK - Proceed with extreme caution"
-}
-```
+### Rescue Mode
 
-### POST `/api/scan`
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/rescue/{wallet}` | Scan approvals + generate revoke txs |
 
-Quick contract security scan.
+### Campaign Intelligence
 
-### GET `/api/health`
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/campaign/{address}` | Cross-chain entity graph |
+| GET | `/api/campaigns/top` | Most prolific scam deployers |
 
-Returns service status for AI, Greenfield, and Tenderly modules.
+### Threat Feed
 
-### GET `/test`
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/threats/feed` | Real-time threat intelligence |
+| GET | `/api/threats/subscribe` | Subscription info |
 
-Interactive test page for Chrome extension E2E testing.
+### User Reporting
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/outcome` | Record user decision/outcome |
+| POST | `/api/report` | Community false positive/negative report |
+| GET | `/api/usage` | API key usage stats |
+
+### RPC Proxy
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/rpc/{chain_id}` | JSON-RPC proxy with firewall |
+
+### Dashboard
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/dashboard` | Public threat dashboard |
 
 ---
 
 ## Project Structure
 
-**Architecture Pattern:** Clean architecture with separation of concerns across distinct layers
-
 ```
 shieldbot/
-├── README.md                    # Project overview
-├── requirements.txt             # Python dependencies
-├── .env.example                 # Environment template
-├── LICENSE                      # MIT License
+├── api.py                      # FastAPI backend — all REST endpoints
+├── bot.py                      # Telegram bot — multi-command scanner
+├── ROADMAP.md                  # V2 roadmap (3 phases)
 │
-├── docs/                        # 📚 Documentation
-│   ├── PROJECT.md               # Problem, solution, impact, roadmap
-│   ├── TECHNICAL.md             # Architecture, setup, demo guide
-│   ├── ARCHITECTURE_DIAGRAM.md  # Visual system diagrams
-│   ├── SCREENSHOTS.md           # Screenshot capture guide
-│   ├── ARCHITECTURE.md          # Detailed architecture notes
-│   ├── DEPLOYMENT.md            # Production deployment guide
-│   └── TESTING.md               # Test strategy and coverage
+├── core/                       # Core engine
+│   ├── analyzer.py             # Analyzer ABC + AnalysisContext + AnalyzerResult
+│   ├── registry.py             # Pluggable analyzer registry
+│   ├── risk_engine.py          # Composite weighted scoring + escalation
+│   ├── policy.py               # PolicyEngine (STRICT/BALANCED)
+│   ├── database.py             # Async SQLite with WAL mode
+│   ├── auth.py                 # API key management (tiered rate limits)
+│   ├── calibration.py          # Data-driven threshold calibration
+│   ├── indexer.py              # Background DeployerIndexer
+│   ├── config.py               # Pydantic Settings from .env
+│   └── container.py            # ServiceContainer (dependency injection)
 │
-├── tests/                       # 🧪 Test Suite
-│   ├── test_api.py              # API endpoint tests
-│   ├── test_risk_scorer.py      # Risk scoring validation
-│   ├── test_calldata.py         # Calldata decoder tests
-│   └── test_ownership.py        # Ownership detection tests
+├── analyzers/                  # 6 pluggable analyzer plugins
+│   ├── structural.py           # Contract verification, age, bytecode
+│   ├── market.py               # DEX liquidity, volatility, wash trading
+│   ├── behavioral.py           # Wallet reputation (Ethos)
+│   ├── honeypot.py             # Honeypot.is simulation
+│   ├── intent.py               # Intent mismatch (disguised selectors)
+│   └── signature.py            # EIP-2612, Permit2, Seaport analysis
 │
-├── bot.py                       # 🤖 Entry Points
-├── api.py                       # 🌐 FastAPI backend
+├── adapters/                   # Chain-specific adapters (7 chains)
+│   ├── evm_base.py             # Shared EVM adapter base class
+│   ├── bsc.py                  # BSC (56)
+│   ├── eth.py                  # Ethereum (1)
+│   ├── base_chain.py           # Base (8453)
+│   ├── arbitrum.py             # Arbitrum (42161)
+│   ├── polygon.py              # Polygon (137)
+│   ├── optimism.py             # Optimism (10)
+│   └── opbnb.py                # opBNB (204)
 │
-├── scanner/                     # 🔍 Scanner Layer
-│   ├── transaction_scanner.py   # Pre-tx security checks
-│   └── token_scanner.py         # Token safety analysis
+├── services/                   # Intelligence + feature services
+│   ├── contract_service.py     # GoPlus + Etherscan + scam DB
+│   ├── honeypot_service.py     # Honeypot.is
+│   ├── dex_service.py          # DexScreener
+│   ├── ethos_service.py        # Ethos Network reputation
+│   ├── tenderly_service.py     # Tenderly simulation
+│   ├── greenfield_service.py   # BNB Greenfield storage
+│   ├── mempool_service.py      # Mempool monitoring (sandwich/frontrun)
+│   ├── rescue_service.py       # Rescue Mode (approvals + revoke)
+│   └── campaign_service.py     # Campaign Graph Radar (cross-chain)
 │
-├── core/                        # ⚙️ Core Engine
-│   ├── risk_engine.py           # Composite risk scoring
-│   ├── extension_formatter.py   # Chrome extension responses
-│   └── telegram_formatter.py    # Telegram message formatting
+├── rpc/                        # JSON-RPC Proxy
+│   ├── proxy.py                # Intercepts eth_sendTransaction/Raw
+│   └── router.py               # FastAPI router for /rpc/{chain_id}
 │
-├── services/                    # 📡 Data Services Layer
-│   ├── contract_service.py      # GoPlus + BscScan intelligence
-│   ├── honeypot_service.py      # Honeypot.is simulation
-│   ├── dex_service.py           # DexScreener market data
-│   ├── ethos_service.py         # Ethos Network reputation
-│   ├── tenderly_service.py      # Tenderly simulation
-│   └── greenfield_service.py    # BNB Greenfield storage
+├── sdk/                        # TypeScript SDK (shieldbot-sdk)
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── src/index.ts            # Full typed client
 │
-├── utils/                       # 🛠️ Utilities Layer
-│   ├── ai_analyzer.py           # Claude AI forensics
-│   ├── calldata_decoder.py      # Transaction decoder
-│   ├── risk_scorer.py           # Scoring logic
-│   ├── web3_client.py           # BNB Chain Web3
-│   ├── scam_db.py               # Scam database
-│   ├── firewall_prompt.py       # AI prompts
-│   └── onchain_recorder.py      # On-chain recording
+├── dashboard/                  # Public threat dashboard
+│   └── index.html              # Real-time single-page app
 │
-├── extension/                   # 🧩 Chrome Extension
-│   ├── manifest.json            # Configuration
-│   ├── inject.js                # Provider wrapper
-│   ├── content.js               # Content script
-│   ├── background.js            # Service worker
-│   ├── popup.html/js            # Extension UI
-│   └── overlay.css              # Styles
+├── extension/                  # Chrome Extension (Manifest V3)
+│   ├── manifest.json
+│   ├── inject.js               # Provider wrapper (world: MAIN)
+│   ├── content.js / background.js / popup.html/js
+│   └── overlay.css
 │
-└── contracts/                   # 📜 Smart Contracts
-    └── ShieldBotVerifier.sol    # On-chain verification
+├── eval/                       # Evaluation pipeline
+│   ├── live_scorer.py          # Live benchmark against real pipeline
+│   ├── benchmark.py            # Precision/recall/F1
+│   └── data/benchmark_v1.json
+│
+├── utils/                      # Utilities
+│   ├── ai_analyzer.py          # AI forensic analysis
+│   ├── calldata_decoder.py     # Function selector decode
+│   ├── web3_client.py          # Multi-chain Web3 router
+│   ├── chain_info.py           # Chain metadata (7 chains)
+│   ├── scam_db.py              # Scam address database
+│   └── onchain_recorder.py     # On-chain recording
+│
+├── tests/                      # Test suite (25+ files)
+├── docs/                       # Documentation
+├── deploy/                     # nginx/caddy/certbot setup
+├── contracts/                  # ShieldBotVerifier.sol
+└── scripts/                    # Key management, PDF builders
 ```
 
 ---
@@ -454,144 +423,58 @@ shieldbot/
 | Component | Technology |
 |-----------|-----------|
 | Backend | Python 3.11+, FastAPI, uvicorn |
-| Async HTTP | httpx, aiohttp |
-| Web3 | web3.py 6.15, eth-utils |
-| AI Analysis | Anthropic Claude API (AsyncAnthropic) |
-| Transaction Simulation | Tenderly API |
-| On-Chain Storage | BNB Greenfield (greenfield-python-sdk) |
-| Contract Intelligence | GoPlus, BscScan, ChainAbuse, ScamSniffer |
+| Async HTTP | aiohttp |
+| Web3 | web3.py 6.15+, eth-account, rlp |
+| Database | SQLite with WAL mode (aiosqlite) |
+| AI Analysis | Anthropic Claude API |
+| Simulation | Tenderly API |
+| On-Chain Storage | BNB Greenfield |
+| Contract Intel | GoPlus, Etherscan v2 API, scam databases |
 | Honeypot Detection | Honeypot.is API |
 | Market Data | DexScreener API |
 | Reputation | Ethos Network API |
 | Telegram | python-telegram-bot 20.7 |
-| Extension | Manifest V3, EIP-6963, Chrome Scripting API |
+| Extension | Manifest V3, EIP-6963 |
+| SDK | TypeScript, tsup (CJS + ESM) |
+| Settings | Pydantic Settings |
 
 ---
 
 ## Testing
 
-ShieldBot includes a comprehensive test suite covering API endpoints, risk scoring, calldata decoding, and ownership detection.
-
-### Run Tests
-
 ```bash
-# Install test dependencies
 pip install pytest pytest-asyncio pytest-cov
 
 # Run all tests
 pytest tests/ -v
 
-# Run with coverage report
-pytest tests/ --cov=. --cov-report=html --cov-report=term
-
-# View coverage in browser
-open htmlcov/index.html  # Mac/Linux
-start htmlcov/index.html  # Windows
+# Run evaluation benchmark
+python eval/live_scorer.py
 ```
-
-### Test Coverage
-
-Current test coverage:
-- **API Endpoints:** ✅ Core firewall and scan endpoints
-- **Risk Scoring:** ✅ Composite score calculation and escalation rules
-- **Calldata Decoding:** ✅ Function signature detection and router whitelisting
-- **Ownership Detection:** ✅ Contract owner and renouncement checks
-
-**Test Files:**
-- `tests/test_api.py` - FastAPI endpoint testing
-- `tests/test_risk_scorer.py` - Risk engine validation
-- `tests/test_calldata.py` - Transaction decoder tests
-- `tests/test_ownership.py` - Ownership verification tests
-
----
-
-## Chrome Web Store Compliance
-
-ShieldAI Transaction Firewall is production-ready for Chrome Web Store submission with strict adherence to security, privacy, and least-privilege principles.
-
-### Security Practices
-
-**HTTPS Enforcement:**
-- All API communication requires HTTPS (localhost HTTP allowed for development only)
-- No hardcoded HTTP endpoints or raw IP addresses in production code
-- Extension validates API URLs and rejects insecure protocols
-
-**Least-Privilege Permissions:**
-- **`activeTab`**: Inject transaction interceptor into Web3 application pages
-- **`storage`**: Store settings and scan history locally (chrome.storage.local)
-- **No `host_permissions`**: Extension does not request broad network access
-- **Content scripts limited to `https://*/*`**: Runs only on HTTPS websites
-
-**No Remote Code Execution:**
-- No `eval()`, `new Function()`, or dynamic script loading
-- All code is static and included in the extension package
-- No external JavaScript resources loaded at runtime
-
-### Privacy Guarantees
-
-**What We Collect:**
-- Transaction metadata only (recipient, sender, value, encoded data, chain ID)
-- Local scan history (maximum 50 transactions, stored in browser only)
-- User settings (API endpoint URL, firewall on/off state)
-
-**What We DO NOT Collect:**
-- Private keys, seed phrases, or wallet passwords
-- Personally identifiable information (PII)
-- Browsing history outside of transaction analysis
-- User credentials or authentication data
-
-**Data Storage:**
-- All data stored **locally** in browser (chrome.storage.local)
-- No data transmitted to extension developer
-- Users must configure their own API endpoint (no default server)
-
-**Data Transmission:**
-- Transaction metadata sent only to user-configured API endpoint via HTTPS
-- Extension developer does not operate backend servers
-- No third-party analytics, tracking, or advertising
-
-### Compliance Documentation
-
-**Full Documentation:**
-- **Privacy Policy:** [PRIVACY_POLICY.md](PRIVACY_POLICY.md)
-- **Chrome Web Store Disclosure:** [docs/CHROME_WEB_STORE_DISCLOSURE.md](docs/CHROME_WEB_STORE_DISCLOSURE.md)
-
-**Open Source Verification:**
-- Entire codebase is open source for transparency and auditability
-- Users can review all code to verify privacy claims
-- No hidden tracking or data collection
-
-### Installation for Chrome Web Store
-
-The extension in the `extension/` folder is production-ready:
-
-1. All permissions minimized to only what's necessary
-2. HTTPS-only transport enforced (except localhost dev mode)
-3. Clear error messages when API URL is invalid or missing
-4. Comprehensive privacy policy and compliance documentation
-5. No hardcoded credentials or insecure defaults
-
-**To submit to Chrome Web Store:**
-1. Zip the `extension/` folder
-2. Upload to Chrome Web Store Developer Dashboard
-3. Use disclosure text from `docs/CHROME_WEB_STORE_DISCLOSURE.md`
-4. Link privacy policy: `https://github.com/Ridwannurudeen/shieldbot/blob/main/PRIVACY_POLICY.md`
 
 ---
 
 ## Hackathon
 
-Built for **Good Vibes Only: OpenClaw Edition** - **Builders Track**
+Built for **Good Vibes Only: OpenClaw Edition** — **Builders Track** (BNB Chain).
 
 **Key Differentiators:**
 - Real-time transaction firewall with MetaMask-compatible direct provider wrapping
 - Composite ShieldScore from 6+ data sources with weighted category scoring
 - Tenderly pre-execution simulation with asset delta prediction
 - BNB Greenfield immutable forensic reports for high-risk transactions
-- AI-powered forensic analysis via Claude (contextual risk explanations, not just flags)
-- Interactive test page for end-to-end extension verification
-- Fully async architecture (httpx, aiohttp, no blocking I/O)
-- Telegram bot + Chrome extension + REST API -- three delivery channels, one engine
+- AI-powered forensic analysis (contextual risk explanations, not just flags)
+- Mempool monitoring for sandwich attacks and frontrunning on BSC
+- Rescue Mode — scan approvals and one-click revoke dangerous ones
+- Campaign Graph Radar — detect coordinated scam campaigns across chains
+- Cross-chain intelligence feeds back into BSC protection (scams migrate between chains)
+- RPC proxy — zero-friction protection for any wallet, including mobile
+- 7 EVM chains, 6 pluggable analyzers, 5 delivery channels (extension, RPC proxy, Telegram, API, SDK)
+
+**Development Phases:**
+- **Phase 1** (Foundation): ChainAdapter interface, pluggable analyzer registry, policy modes, API auth, contract reputation DB, deployer indexer, outcome tracking
+- **Phase 2** (Detection + Distribution): Intent mismatch analyzer, signature/permit analyzer, confidence calibration, evaluation pipeline, community reporting, Ethereum/Base adapters, RPC proxy, Telegram scan-by-address
+- **Phase 3** (Moat Features + Growth): Campaign Graph Radar, mempool monitoring, Rescue Mode, Arbitrum/Polygon/Optimism/opBNB adapters, SDK, threat dashboard, threat feed API
 
 ---
 
@@ -603,4 +486,4 @@ Built for **Good Vibes Only: OpenClaw Edition** - **Builders Track**
 
 ---
 
-**Repo**: https://github.com/Ridwannurudeen/shieldbot
+**Live:** https://shieldbotsecurity.online | **Repo:** https://github.com/Ridwannurudeen/shieldbot

@@ -21,8 +21,6 @@ class Web3Client:
     """Web3 client routing to chain-specific adapters."""
 
     def __init__(self):
-        opbnb_rpc = os.getenv('OPBNB_RPC_URL', 'https://opbnb-mainnet-rpc.bnbchain.org')
-
         # Primary adapter: BSC
         self._bsc_adapter = BscAdapter()
 
@@ -30,10 +28,6 @@ class Web3Client:
         self._adapters: Dict[int, object] = {
             56: self._bsc_adapter,
         }
-
-        # opBNB still uses raw Web3 (no adapter yet — future PR)
-        self.opbnb_web3 = Web3(Web3.HTTPProvider(opbnb_rpc))
-        self.opbnb_web3.middleware_onion.inject(geth_poa_middleware, layer=0)
 
         # Legacy compat aliases
         self.bsc_web3 = self._bsc_adapter.w3
@@ -68,8 +62,6 @@ class Web3Client:
         return list(self._adapters.keys())
 
     def get_web3(self, chain_id: int = 56):
-        if chain_id == 204:
-            return self.opbnb_web3
         adapter = self._get_adapter(chain_id)
         if adapter:
             return adapter.w3

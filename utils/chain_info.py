@@ -27,6 +27,24 @@ CHAIN_INFO: Dict[int, Dict[str, str]] = {
         'dexscreener_slug': 'base',
         'native_symbol': 'ETH',
     },
+    42161: {
+        'name': 'Arbitrum',
+        'explorer_url': 'https://arbiscan.io',
+        'dexscreener_slug': 'arbitrum',
+        'native_symbol': 'ETH',
+    },
+    137: {
+        'name': 'Polygon',
+        'explorer_url': 'https://polygonscan.com',
+        'dexscreener_slug': 'polygon',
+        'native_symbol': 'MATIC',
+    },
+    10: {
+        'name': 'Optimism',
+        'explorer_url': 'https://optimistic.etherscan.io',
+        'dexscreener_slug': 'optimism',
+        'native_symbol': 'ETH',
+    },
 }
 
 # Chain prefix aliases for parsing "eth:0x..." or "base:0x..."
@@ -37,6 +55,12 @@ CHAIN_PREFIXES: Dict[str, int] = {
     'ethereum': 1,
     'base': 8453,
     'opbnb': 204,
+    'arb': 42161,
+    'arbitrum': 42161,
+    'poly': 137,
+    'polygon': 137,
+    'op': 10,
+    'optimism': 10,
 }
 
 

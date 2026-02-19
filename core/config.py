@@ -28,12 +28,15 @@ class Settings(BaseSettings):
     base_rpc_url: str = "https://mainnet.base.org"
     arbitrum_rpc_url: str = "https://arb1.arbitrum.io/rpc"
     polygon_rpc_url: str = "https://polygon-rpc.com"
+    optimism_rpc_url: str = "https://mainnet.optimism.io"
 
     # Etherscan API keys (per chain — all use Etherscan v2 API)
     etherscan_api_key: str = ""
     basescan_api_key: str = ""
     arbiscan_api_key: str = ""
     polygonscan_api_key: str = ""
+    opbnbscan_api_key: str = ""
+    optimism_api_key: str = ""
 
     # Tenderly
     tenderly_api_key: str = ""

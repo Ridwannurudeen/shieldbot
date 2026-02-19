@@ -14,7 +14,8 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 
@@ -258,7 +259,16 @@ async def health():
         "ai_available": ai_analyzer.is_available() if ai_analyzer else False,
         "greenfield_enabled": greenfield_service.is_enabled() if greenfield_service else False,
         "tenderly_enabled": tenderly_simulator.is_enabled() if tenderly_simulator else False,
+        "supported_chains": list(_CHAIN_NAMES.keys()) if '_CHAIN_NAMES' in dir() else [56, 1, 8453, 42161, 137, 10, 204],
     }
+
+
+@app.get("/dashboard")
+async def threat_dashboard():
+    """Public real-time threat intelligence dashboard."""
+    import os
+    dashboard_path = os.path.join(os.path.dirname(__file__), "dashboard", "index.html")
+    return FileResponse(dashboard_path, media_type="text/html")
 
 
 @app.get("/test", response_class=HTMLResponse)
@@ -872,14 +882,27 @@ async def get_usage(request: Request):
 
 
 @app.get("/api/campaign/{address}")
-async def campaign_graph(address: str, chain_id: int = 56):
-    """Get deployer/funder campaign graph for an address."""
-    if not container or not container.db:
-        raise HTTPException(status_code=503, detail="Database not available")
+async def campaign_graph(address: str, chain_id: int = None):
+    """Get cross-chain deployer/funder campaign graph for an address.
+
+    Enhanced with campaign detection: cross-chain correlation, funder clustering,
+    and coordinated scam campaign indicators.
+    """
+    if not container or not container.campaign_service:
+        raise HTTPException(status_code=503, detail="Campaign service not available")
     if not web3_client or not web3_client.is_valid_address(address):
         raise HTTPException(status_code=400, detail="Invalid address")
-    graph = await container.db.get_campaign_graph(address, chain_id)
+    graph = await container.campaign_service.get_entity_graph(address)
     return graph
+
+
+@app.get("/api/campaigns/top")
+async def top_campaigns(limit: int = 20):
+    """Get the most prolific deployers/funders (likely campaign operators)."""
+    if not container or not container.campaign_service:
+        raise HTTPException(status_code=503, detail="Campaign service not available")
+    campaigns = await container.campaign_service.get_top_campaigns(limit=limit)
+    return {"campaigns": campaigns, "count": len(campaigns)}
 
 
 @app.post("/api/keys")
@@ -903,9 +926,139 @@ async def create_api_key(request: Request):
     return result
 
 
+# --- Mempool Monitoring ---
+
+@app.get("/api/mempool/alerts")
+async def mempool_alerts(request: Request, chain_id: int = None, limit: int = 50):
+    """Get recent mempool alerts (sandwich attacks, frontrunning, suspicious approvals)."""
+    if not container or not container.mempool_monitor:
+        raise HTTPException(status_code=503, detail="Mempool monitor not available")
+    alerts = container.mempool_monitor.get_alerts(chain_id=chain_id, limit=limit)
+    return {"alerts": alerts, "count": len(alerts)}
+
+
+@app.get("/api/mempool/stats")
+async def mempool_stats(request: Request):
+    """Get mempool monitoring statistics."""
+    if not container or not container.mempool_monitor:
+        raise HTTPException(status_code=503, detail="Mempool monitor not available")
+    return container.mempool_monitor.get_stats()
+
+
+# --- Rescue Mode ---
+
+@app.get("/api/rescue/{wallet_address}")
+async def rescue_scan(wallet_address: str, chain_id: int = 56):
+    """Scan a wallet's active token approvals and assess risk (Rescue Mode).
+
+    Returns risky approvals, Tier 1 alerts with explanations, and
+    Tier 2 pre-built revoke transactions for one-click cleanup.
+    """
+    if not container or not container.rescue_service:
+        raise HTTPException(status_code=503, detail="Rescue service not available")
+
+    if not web3_client.is_valid_address(wallet_address):
+        raise HTTPException(status_code=400, detail="Invalid wallet address")
+
+    api_key = container.settings.bscscan_api_key
+    result = await container.rescue_service.scan_approvals(
+        wallet_address, chain_id=chain_id, etherscan_api_key=api_key,
+    )
+    return result
+
+
+# --- Threat Feed API ---
+
+@app.get("/api/threats/feed")
+async def threat_feed(
+    chain_id: int = None, limit: int = 50, since: float = None,
+):
+    """Real-time threat intelligence feed.
+
+    Returns recent high-risk detections and mempool alerts.
+    Query params:
+    - chain_id: filter by chain (optional)
+    - limit: max results (default 50)
+    - since: unix timestamp to fetch threats after (optional)
+    """
+    if not container:
+        raise HTTPException(status_code=503, detail="Service not available")
+
+    threats = []
+
+    # Recent high-risk contract scans from DB
+    try:
+        cursor = await container.db._db.execute("""
+            SELECT address, chain_id, risk_score, risk_level, archetype, flags,
+                   last_scanned_at
+            FROM contract_scores
+            WHERE risk_level = 'HIGH'
+            {}
+            ORDER BY last_scanned_at DESC
+            LIMIT ?
+        """.format(
+            f"AND chain_id = {int(chain_id)}" if chain_id else ""
+        ), (limit,))
+        rows = await cursor.fetchall()
+
+        import json as _json
+        for row in rows:
+            scanned_at = row[6]
+            if since and scanned_at < since:
+                continue
+            threats.append({
+                'type': 'high_risk_contract',
+                'address': row[0],
+                'chain_id': row[1],
+                'risk_score': row[2],
+                'risk_level': row[3],
+                'archetype': row[4],
+                'flags': _json.loads(row[5]) if row[5] else [],
+                'detected_at': scanned_at,
+            })
+    except Exception as e:
+        logger.error(f"Threat feed DB error: {e}")
+
+    # Mempool alerts
+    mempool_alerts = container.mempool_monitor.get_alerts(chain_id=chain_id, limit=limit)
+    for alert in mempool_alerts:
+        if since and alert.get('created_at', 0) < since:
+            continue
+        threats.append({
+            'type': f"mempool_{alert['alert_type']}",
+            **alert,
+        })
+
+    # Sort all by time, most recent first
+    threats.sort(key=lambda t: t.get('detected_at') or t.get('created_at', 0), reverse=True)
+
+    return {
+        'threats': threats[:limit],
+        'count': len(threats[:limit]),
+        'chain_id': chain_id,
+    }
+
+
+@app.get("/api/threats/subscribe")
+async def threat_subscribe_info():
+    """Information about threat feed subscription options."""
+    return {
+        'endpoints': {
+            'rest_polling': '/api/threats/feed?since=<unix_timestamp>',
+            'websocket': '/ws/threats (coming soon)',
+        },
+        'supported_chains': list(_CHAIN_NAMES.keys()),
+        'alert_types': [
+            'high_risk_contract',
+            'mempool_sandwich_attack',
+            'mempool_suspicious_approval',
+        ],
+    }
+
+
 # --- Helpers ---
 
-_CHAIN_NAMES = {56: "BSC", 204: "opBNB", 1: "Ethereum", 8453: "Base", 42161: "Arbitrum", 137: "Polygon"}
+_CHAIN_NAMES = {56: "BSC", 204: "opBNB", 1: "Ethereum", 8453: "Base", 42161: "Arbitrum", 137: "Polygon", 10: "Optimism"}
 
 
 def _chain_id_to_name(chain_id: int) -> str:
