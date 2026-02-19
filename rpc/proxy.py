@@ -77,8 +77,14 @@ class RPCProxy:
 
             # Detect token vs non-token for accurate risk assessment
             is_token = True
+            is_verified = False
             try:
                 is_token = await self._container.web3_client.is_token_contract(to_addr, chain_id=chain_id)
+            except Exception:
+                pass
+            try:
+                verified_result = await self._container.web3_client.is_verified_contract(to_addr, chain_id=chain_id)
+                is_verified = verified_result[0] if isinstance(verified_result, tuple) else bool(verified_result)
             except Exception:
                 pass
 
@@ -90,7 +96,7 @@ class RPCProxy:
                 chain_id=chain_id,
                 from_address=from_addr,
                 is_token=is_token,
-                extra={'calldata': data, 'value': value},
+                extra={'calldata': data, 'value': value, 'is_verified': is_verified},
             )
 
             analyzer_results = await self._container.registry.run_all(ctx)

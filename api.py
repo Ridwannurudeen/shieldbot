@@ -580,8 +580,14 @@ async def firewall(req: FirewallRequest, request: Request):
             # bridges, governance) should not be penalized by token-specific
             # checks (honeypot simulation, DEX liquidity, etc.)
             is_token = True
+            is_verified = False
             try:
                 is_token = await web3_client.is_token_contract(to_addr, chain_id=req.chainId)
+            except Exception:
+                pass
+            try:
+                verified_result = await web3_client.is_verified_contract(to_addr, chain_id=req.chainId)
+                is_verified = verified_result[0] if isinstance(verified_result, tuple) else bool(verified_result)
             except Exception:
                 pass
 
@@ -593,6 +599,7 @@ async def firewall(req: FirewallRequest, request: Request):
                     'value': req.value,
                     'typed_data': req.typedData,
                     'sign_method': req.signMethod,
+                    'is_verified': is_verified,
                 },
             )
 
