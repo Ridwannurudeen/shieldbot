@@ -253,7 +253,7 @@ ShieldBot is purpose-built for BNB Chain because:
 ### Short-Term Future Work (Next 3-6 Months)
 
 **Immediate Priorities (Q2 2026):**
-- Deploy ShieldBotVerifier.sol to BSC Mainnet for optional on-chain scan recording
+- Deploy ShieldBotVerifier.sol to opBNB Mainnet to complement the live BSC verifier
 - Add Firefox extension support (Manifest V3 compatible)
 - Implement caching layer for common contract queries (reduce API calls)
 - Add batch scanning API endpoint (analyze multiple addresses in one call)

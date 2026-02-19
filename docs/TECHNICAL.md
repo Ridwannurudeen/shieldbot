@@ -332,7 +332,7 @@ shieldbot/
 │   └── overlay.css             # Firewall modal styles
 │
 └── contracts/
-    └── ShieldBotVerifier.sol   # On-chain verification contract (future)
+    └── ShieldBotVerifier.sol   # On-chain verification contract (deployed on BSC Mainnet)
 ```
 
 ---
