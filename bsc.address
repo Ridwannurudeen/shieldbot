@@ -6,9 +6,11 @@
   "contracts": [
     {
       "name": "ShieldBotVerifier",
-      "address": null,
-      "explorerLink": null,
-      "description": "On-chain scan recording contract. Status: Code complete (contracts/ShieldBotVerifier.sol), deployment scheduled post-hackathon Q2 2026. Core ShieldBot functionality operates off-chain for <2s response time requirements."
+      "address": "0x867aE7449af56BB56a4978c758d7E88066E1f795",
+      "explorerLink": "https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795#code",
+      "description": "On-chain scan recording contract. Status: Deployed and source-verified on BSC Mainnet (Feb-12-2026). Core ShieldBot functionality still operates primarily off-chain for <2s response time requirements.",
+      "deploymentTxHash": "0x021fb404910c2621497bcda167ffcc70e8ece846d1ade8066ab5ad87f13b6bbd",
+      "deploymentTxLink": "https://bscscan.com/tx/0x021fb404910c2621497bcda167ffcc70e8ece846d1ade8066ab5ad87f13b6bbd"
     }
   ],
   "bnbGreenfield": {

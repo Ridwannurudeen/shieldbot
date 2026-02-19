@@ -240,8 +240,10 @@ tail -f logs/shieldbot.log
 - [ ] Bot running and tested
 - [ ] Public GitHub repo with code
 - [ ] README.md with demo instructions
-- [ ] Verification contract deployed on BSC/opBNB
-- [ ] Contract address and tx hash documented
+- [x] Verification contract deployed on BSC (opBNB pending)
+- [x] Contract source verified on BscScan
+- [x] Contract address documented: https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795#code
+- [x] Deployment tx documented: https://bscscan.com/tx/0x021fb404910c2621497bcda167ffcc70e8ece846d1ade8066ab5ad87f13b6bbd
 - [ ] Demo video/screenshots prepared
 - [ ] Submission on DoraHacks platform
 
