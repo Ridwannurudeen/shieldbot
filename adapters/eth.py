@@ -39,7 +39,7 @@ class EthAdapter(EvmAdapter):
     """Ethereum Mainnet adapter — chain_id=1."""
 
     def __init__(self, rpc_url: str = None, etherscan_api_key: str = None):
-        rpc = rpc_url or os.getenv('ETH_RPC_URL', 'https://eth.llamarpc.com')
+        rpc = rpc_url or os.getenv('ETH_RPC_URL', 'https://ethereum-rpc.publicnode.com')
         api_key = etherscan_api_key or os.getenv('ETHERSCAN_API_KEY', '')
 
         super().__init__(

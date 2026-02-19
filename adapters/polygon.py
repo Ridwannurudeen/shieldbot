@@ -33,7 +33,7 @@ class PolygonAdapter(EvmAdapter):
     """Polygon PoS adapter — chain_id=137."""
 
     def __init__(self, rpc_url: str = None, polygonscan_api_key: str = None):
-        rpc = rpc_url or os.getenv('POLYGON_RPC_URL', 'https://polygon-rpc.com')
+        rpc = rpc_url or os.getenv('POLYGON_RPC_URL', 'https://polygon-bor-rpc.publicnode.com')
         api_key = polygonscan_api_key or os.getenv('POLYGONSCAN_API_KEY', '')
 
         super().__init__(

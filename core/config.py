@@ -24,10 +24,10 @@ class Settings(BaseSettings):
     # RPC endpoints
     bsc_rpc_url: str = "https://bsc-dataseed.binance.org/"
     opbnb_rpc_url: str = "https://opbnb-mainnet-rpc.bnbchain.org"
-    eth_rpc_url: str = "https://eth.llamarpc.com"
+    eth_rpc_url: str = "https://ethereum-rpc.publicnode.com"
     base_rpc_url: str = "https://mainnet.base.org"
     arbitrum_rpc_url: str = "https://arb1.arbitrum.io/rpc"
-    polygon_rpc_url: str = "https://polygon-rpc.com"
+    polygon_rpc_url: str = "https://polygon-bor-rpc.publicnode.com"
     optimism_rpc_url: str = "https://mainnet.optimism.io"
 
     # Etherscan API keys (per chain — all use Etherscan v2 API)
