@@ -19,7 +19,7 @@ ShieldBot follows a **3-tier architecture**:
 │                      INTELLIGENCE ENGINE                         │
 ├─────────────────────────────────────────────────────────────────┤
 │  • RiskEngine: Composite weighted scoring (4 categories)         │
-│  • AI Analyzer: Claude-powered forensic analysis                 │
+│  • AI Analyzer: LLM-powered forensic analysis                    │
 │  • Calldata Decoder: Function signature + router detection       │
 │  • Tenderly Simulator: Pre-execution transaction simulation      │
 └─────────────────────────────────────────────────────────────────┘
@@ -222,11 +222,11 @@ contract_data, honeypot_data, dex_data, ethos_data, token_info = await asyncio.g
 
 ---
 
-### 4. AI Analyzer (Claude-Powered)
+### 4. AI Analyzer (LLM-Powered)
 
 **File**: `utils/ai_analyzer.py`
 
-Uses **Anthropic Claude API** for contextual risk analysis:
+Uses an **LLM API** for contextual risk analysis:
 
 ```python
 # Input: Composite risk data from all services
@@ -274,7 +274,7 @@ a coordinated scam launch.
 | **Async HTTP** | aiohttp, httpx | Latest | Non-blocking API calls |
 | **Web3** | web3.py | 6.15+ | Blockchain interaction |
 | **Telegram** | python-telegram-bot | 20.7 | Bot framework |
-| **AI** | Anthropic Claude | Latest | Forensic analysis |
+| **AI** | LLM API | Latest | Forensic analysis |
 | **Simulation** | Tenderly API | V1 | Transaction simulation |
 | **Storage** | BNB Greenfield SDK | Latest | On-chain reports |
 | **Extension** | Chrome Manifest V3 | Latest | Browser integration |
@@ -314,7 +314,7 @@ shieldbot/
 │   └── greenfield_service.py   # BNB Greenfield storage
 │
 ├── utils/
-│   ├── ai_analyzer.py          # Claude AI forensic analysis
+│   ├── ai_analyzer.py          # AI forensic analysis
 │   ├── calldata_decoder.py     # Transaction decoder + whitelist
 │   ├── risk_scorer.py          # Blended scoring logic
 │   ├── web3_client.py          # Web3 + liquidity lock detection
@@ -353,7 +353,7 @@ shieldbot/
 - **Telegram Bot**: Requires TELEGRAM_BOT_TOKEN → **Alternative: Use live bot [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)**
 - **BNB Greenfield**: Requires GREENFIELD_PRIVATE_KEY → Optional, only for report uploads
 - **Tenderly Simulation**: Requires TENDERLY_API_KEY → Optional, core features work without it
-- **AI Analysis**: Requires ANTHROPIC_API_KEY → Optional enhancement
+- **AI Analysis**: Requires AI_API_KEY → Optional enhancement
 
 **Easiest evaluation methods:**
 1. **Live Telegram Bot** (no setup): [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)
@@ -402,7 +402,7 @@ python-telegram-bot==20.7
 web3==6.15.1
 aiohttp==3.9.1
 httpx==0.26.0
-anthropic==0.23.1
+anthropic==0.18.1
 greenfield-python-sdk==0.2.1
 python-dotenv==1.0.0
 ```
@@ -428,7 +428,7 @@ OPBNB_RPC_URL=https://opbnb-mainnet-rpc.bnbchain.org
 TENDERLY_API_KEY=your_tenderly_key
 TENDERLY_PROJECT_ID=your_tenderly_project_id
 GREENFIELD_PRIVATE_KEY=your_greenfield_private_key
-ANTHROPIC_API_KEY=your_anthropic_key
+AI_API_KEY=your_ai_api_key
 
 # OPTIONAL: Extension CORS
 CORS_ALLOW_ORIGINS=chrome-extension://YOUR_EXTENSION_ID,http://localhost:8000
@@ -441,7 +441,7 @@ CORS_ALLOW_ORIGINS=chrome-extension://YOUR_EXTENSION_ID,http://localhost:8000
 | BscScan | https://bscscan.com/myapikey | ✅ 5 req/sec |
 | Telegram Bot | https://t.me/BotFather | ✅ Unlimited |
 | Tenderly | https://dashboard.tenderly.co/ | ✅ 100 sim/month |
-| Anthropic Claude | https://console.anthropic.com/ | ✅ $5 free credit |
+| AI API | https://console.anthropic.com/ | ✅ $5 free credit |
 | Greenfield | https://greenfield.bnbchain.org/ | ✅ Pay-as-you-go |
 
 ### 5. Run Services

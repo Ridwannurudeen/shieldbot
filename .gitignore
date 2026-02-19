@@ -1,5 +1,7 @@
 # Environment
 .env
+.env.*
+!.env.example
 venv/
 env/
 
@@ -38,9 +40,15 @@ demo/
 *.avi
 *.mov
 
-# PDF files (except documentation)
+# PDF files
 *.pdf
-!docs/**/*.pdf
+
+# Build scripts (local tooling)
+scripts/build_*.py
+
+# Local working docs (investor decks, roadmaps)
+docs/ShieldBot_Explained*
+docs/ShieldBot_Investor*
 
 # Documentation images are ALLOWED
 !docs/images/
