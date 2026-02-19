@@ -136,7 +136,7 @@ class EvmAdapter(ChainAdapter):
 
     async def is_verified_contract(self, address: str) -> Tuple[bool, Optional[str]]:
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
                 params = {
                     'chainid': self._chain_id,
                     'module': 'contract',
@@ -157,7 +157,7 @@ class EvmAdapter(ChainAdapter):
 
     async def get_contract_creation_info(self, address: str) -> Optional[Dict]:
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
                 params = {
                     'chainid': self._chain_id,
                     'module': 'contract',

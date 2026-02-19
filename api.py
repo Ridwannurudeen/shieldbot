@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, Dict, Any
 
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD
@@ -212,6 +212,8 @@ async def rate_limit_middleware(request: Request, call_next):
 # --- Request / Response Models ---
 
 class FirewallRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     to: str
     sender: str = Field(alias="from")
     value: str = "0"
@@ -219,9 +221,6 @@ class FirewallRequest(BaseModel):
     chainId: int = 56
     typedData: Optional[Dict] = None
     signMethod: Optional[str] = None
-
-    class Config:
-        populate_by_name = True
 
 
 class ScanRequest(BaseModel):

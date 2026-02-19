@@ -54,8 +54,12 @@ class RPCProxy:
                 raw_hex = params[0] if params else ""
                 tx_fields = self._decode_raw_tx(raw_hex)
                 if tx_fields is None:
-                    # Decode failed — forward without analysis (fail-open)
-                    return await self._forward(upstream_rpc, payload)
+                    # Decode failed — block transaction (fail-closed)
+                    logger.warning(f"RPC Proxy: failed to decode raw tx, blocking (fail-closed)")
+                    return self._error_response(
+                        rpc_id, -32003,
+                        "Transaction blocked: unable to decode for security analysis",
+                    )
                 to_addr = tx_fields.get("to", "") or ""
                 from_addr = tx_fields.get("from", "")
                 value = tx_fields.get("value", "0x0")
@@ -71,6 +75,13 @@ class RPCProxy:
                 # Contract creation — forward without analysis
                 return await self._forward(upstream_rpc, payload)
 
+            # Detect token vs non-token for accurate risk assessment
+            is_token = True
+            try:
+                is_token = await self._container.web3_client.is_token_contract(to_addr, chain_id=chain_id)
+            except Exception:
+                pass
+
             # Run the analyzer pipeline
             from core.analyzer import AnalysisContext
 
@@ -78,11 +89,12 @@ class RPCProxy:
                 address=to_addr,
                 chain_id=chain_id,
                 from_address=from_addr,
+                is_token=is_token,
                 extra={'calldata': data, 'value': value},
             )
 
             analyzer_results = await self._container.registry.run_all(ctx)
-            risk_output = self._container.risk_engine.compute_from_results(analyzer_results)
+            risk_output = self._container.risk_engine.compute_from_results(analyzer_results, is_token=is_token)
 
             risk_level = risk_output.get("risk_level", "LOW")
             risk_score = risk_output.get("rug_probability", 0)
@@ -111,8 +123,11 @@ class RPCProxy:
 
         except Exception as e:
             logger.error(f"RPC Proxy analysis error: {e}")
-            # On analysis failure, forward the transaction (fail-open)
-            return await self._forward(upstream_rpc, payload)
+            # On analysis failure, block the transaction (fail-closed)
+            return self._error_response(
+                rpc_id, -32003,
+                "Transaction blocked: security analysis failed — please retry",
+            )
 
     async def handle_batch(self, chain_id: int, payloads: list) -> list:
         """Handle a batch of JSON-RPC requests."""

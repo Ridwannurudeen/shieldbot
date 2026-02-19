@@ -6,6 +6,7 @@ Integrates risk_scorer for numeric scoring and AI analysis
 
 import logging
 from typing import Dict, List, Optional
+from utils.chain_info import get_chain_name
 from utils.risk_scorer import (
     findings_from_scan_result, calculate_risk_score,
     blend_scores, compute_confidence
@@ -71,14 +72,14 @@ class TokenScanner:
             'sell_tax': None,
             'scan_type': 'token',
             'chain_id': chain_id,
-            'network': 'opBNB' if chain_id == 204 else 'BSC',
+            'network': get_chain_name(chain_id),
         }
 
         # Get token info
         await self._get_token_info(address, result, chain_id)
 
         # Get contract verification and age info (BscScan — BSC only)
-        data_sources['bscscan'] = await self._get_contract_metadata(address, result)
+        data_sources['bscscan'] = await self._get_contract_metadata(address, result, chain_id=chain_id)
 
         # Run safety checks
         await self._check_trading_functions(address, result, chain_id)
@@ -153,10 +154,10 @@ class TokenScanner:
         except Exception as e:
             logger.error(f"Error getting token info: {e}")
 
-    async def _get_contract_metadata(self, address: str, result: Dict) -> bool:
+    async def _get_contract_metadata(self, address: str, result: Dict, chain_id: int = 56) -> bool:
         """Get contract verification and age info for cross-validation. Returns True if succeeded."""
         try:
-            verification = await self.web3.is_verified_contract(address)
+            verification = await self.web3.is_verified_contract(address, chain_id=chain_id)
 
             if isinstance(verification, tuple):
                 is_verified, source_code = verification
@@ -168,7 +169,7 @@ class TokenScanner:
             if source_code:
                 result['source_code'] = source_code
 
-            creation_info = await self.web3.get_contract_creation_info(address)
+            creation_info = await self.web3.get_contract_creation_info(address, chain_id=chain_id)
             if creation_info:
                 result['contract_age_days'] = creation_info.get('age_days', 0)
 
