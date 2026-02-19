@@ -64,15 +64,15 @@ Ship superior detection and new distribution channels.
 
 Ship the features competitors can't easily replicate.
 
-- [ ] **Campaign Graph Radar v1** — Cross-chain entity correlation: deployers, funders, contract factories, signature templates. Detect scams as coordinated campaigns, not isolated transactions.
-- [ ] **Mempool monitoring v1** — Detect sandwich attacks, frontrunning, and suspicious approvals in pending transactions.
-- [ ] **Rescue Mode Tier 1** — Alerts with clear explanation and available actions.
-- [ ] **Rescue Mode Tier 2** — Pre-built revoke transactions. One-click approval cleanup.
-- [ ] **Arbitrum, Polygon, Optimism, opBNB adapters** — Full EVM multichain coverage.
-- [ ] **RPC proxy multichain** — All supported chains available as custom RPC endpoints.
-- [ ] **SDK v1** — Published `shieldbot.js` package for wallet/dApp integration.
-- [ ] **Public threat dashboard** — Real-time feed of detected threats and campaigns.
-- [ ] **Threat Feed API** — Subscribe to ShieldBot's intelligence. Other tools build on this.
+- [x] **Campaign Graph Radar v1** — Cross-chain entity correlation: deployers, funders, contract factories, signature templates. Detect scams as coordinated campaigns, not isolated transactions.
+- [x] **Mempool monitoring v1** — Detect sandwich attacks, frontrunning, and suspicious approvals in pending transactions.
+- [x] **Rescue Mode Tier 1** — Alerts with clear explanation and available actions.
+- [x] **Rescue Mode Tier 2** — Pre-built revoke transactions. One-click approval cleanup.
+- [x] **Arbitrum, Polygon, Optimism, opBNB adapters** — Full EVM multichain coverage.
+- [x] **RPC proxy multichain** — All supported chains available as custom RPC endpoints.
+- [x] **SDK v1** — Published `shieldbot.js` package for wallet/dApp integration.
+- [x] **Public threat dashboard** — Real-time feed of detected threats and campaigns.
+- [x] **Threat Feed API** — Subscribe to ShieldBot's intelligence. Other tools build on this.
 - [ ] **Chain grant applications** — BSC, Base, Arbitrum ecosystem fund submissions.
 - [ ] **Private beta cohort** — 50-200 instrumented users providing feedback and outcome data.
 

@@ -13,6 +13,7 @@ from scanner.token_scanner import TokenScanner
 from services import (
     DexService, EthosService, HoneypotService,
     ContractService, GreenfieldService, TenderlySimulator,
+    MempoolMonitor, RescueService, CampaignService,
 )
 from core.risk_engine import RiskEngine
 from core.calibration import load_calibration
@@ -29,6 +30,8 @@ from adapters.eth import EthAdapter
 from adapters.base_chain import BaseChainAdapter
 from adapters.arbitrum import ArbitrumAdapter
 from adapters.polygon import PolygonAdapter
+from adapters.opbnb import OpBNBAdapter
+from adapters.optimism import OptimismAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +78,19 @@ class ServiceContainer:
         self.web3_client.register_adapter(self.arb_adapter)
         self.web3_client.register_adapter(self.polygon_adapter)
 
+        opbnb_api_key = settings.opbnbscan_api_key or settings.bscscan_api_key
+        optimism_api_key = settings.optimism_api_key or settings.bscscan_api_key
+        self.opbnb_adapter = OpBNBAdapter(
+            rpc_url=settings.opbnb_rpc_url,
+            opbnbscan_api_key=opbnb_api_key,
+        )
+        self.optimism_adapter = OptimismAdapter(
+            rpc_url=settings.optimism_rpc_url,
+            optimism_api_key=optimism_api_key,
+        )
+        self.web3_client.register_adapter(self.opbnb_adapter)
+        self.web3_client.register_adapter(self.optimism_adapter)
+
         # Scanners (legacy fallback)
         self.tx_scanner = TransactionScanner(self.web3_client, self.ai_analyzer)
         self.token_scanner = TokenScanner(self.web3_client, self.ai_analyzer)
@@ -104,6 +120,11 @@ class ServiceContainer:
         self.auth_manager = AuthManager(self.db)
         self.indexer = DeployerIndexer(self.web3_client, self.db)
 
+        # Mempool monitor + Rescue mode + Campaign detection
+        self.mempool_monitor = MempoolMonitor(self.web3_client, self.db)
+        self.rescue_service = RescueService(self.web3_client, self.db)
+        self.campaign_service = CampaignService(self.web3_client, self.db)
+
         # Optional services (need async init)
         self.greenfield_service = GreenfieldService()
         self.tenderly_simulator = TenderlySimulator()
@@ -113,6 +134,8 @@ class ServiceContainer:
         await self.db.initialize()
         await self.indexer.start()
         await self.greenfield_service.async_init()
+        # Start mempool monitor on BSC and ETH (chains with txpool support)
+        await self.mempool_monitor.start(chain_ids=[56, 1])
         logger.info("ServiceContainer started")
         logger.info(f"AI Analysis: {'enabled' if self.ai_analyzer.is_available() else 'disabled'}")
         logger.info(f"Greenfield storage: {'enabled' if self.greenfield_service.is_enabled() else 'disabled'}")
@@ -120,6 +143,7 @@ class ServiceContainer:
 
     async def shutdown(self):
         """Clean up resources."""
+        await self.mempool_monitor.stop()
         await self.indexer.stop()
         await self.db.close()
         await self.greenfield_service.close()
