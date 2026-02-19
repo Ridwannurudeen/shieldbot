@@ -78,15 +78,14 @@ class IntentMismatchAnalyzer(Analyzer):
                 score += 30
                 flags.append('Native value sent with approval call (unusual)')
 
-        # 4. Unknown selector — lower penalty for verified/non-token contracts
+        # 4. Unknown selector — skip entirely for verified/non-token contracts
         if decoded.get('category') == 'unknown':
             is_verified = ctx.extra.get('is_verified')
             if not ctx.is_token or is_verified:
                 # Verified contracts and non-token contracts (marketplaces,
                 # bridges, governance) commonly have selectors outside our
-                # known list — this is normal, not suspicious.
-                score += 5
-                flags.append(f'Unrecognized function selector 0x{selector} (verified contract)')
+                # known list — this is normal, not suspicious.  No penalty.
+                pass
             else:
                 score += 20
                 flags.append(f'Unknown function selector 0x{selector}')
