@@ -43,10 +43,16 @@ export interface ScanResult {
   classification: string;
   risk_score: number;
   danger_signals: string[];
-  shield_score: RiskScore;
-  chain_id: number;
-  network: string;
-  cached: boolean;
+  shield_score?: RiskScore;
+  raw_checks?: Record<string, unknown>;
+  chain_id?: number;
+  network?: string;
+  cached?: boolean;
+  simulation?: Record<string, unknown> | null;
+  greenfield_url?: string | null;
+  partial?: boolean;
+  failed_sources?: string[];
+  policy_mode?: string;
 }
 
 export interface FirewallResult extends ScanResult {
@@ -56,6 +62,8 @@ export interface FirewallResult extends ScanResult {
     recipient: string;
     post_tx_state: string;
   };
+  analysis?: string;
+  plain_english?: string;
   verdict: string;
 }
 
@@ -175,7 +183,7 @@ export class ShieldBot {
     const chainId = options.chainId || 56;
     return this._post<ScanResult>('/api/scan', {
       address,
-      chain_id: chainId,
+      chainId,
     });
   }
 
@@ -188,7 +196,7 @@ export class ShieldBot {
       from: options.from || '',
       data: options.data || '0x',
       value: options.value || '0x0',
-      chain_id: options.chainId || 56,
+      chainId: options.chainId || 56,
     });
   }
 

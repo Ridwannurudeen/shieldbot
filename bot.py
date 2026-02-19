@@ -6,19 +6,25 @@ Features: AI risk scoring, on-chain recording, caching, progress indicators
 """
 
 import os
+import sys
 import time
 import asyncio
 import logging
 from datetime import datetime, timezone
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-    filters,
-)
+
+try:
+    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram.ext import (
+        Application,
+        CommandHandler,
+        MessageHandler,
+        CallbackQueryHandler,
+        ContextTypes,
+        filters,
+    )
+except ImportError:
+    print("ERROR: python-telegram-bot is not installed. Run: pip install python-telegram-bot==20.7")
+    sys.exit(1)
 
 from core.config import Settings
 from core.container import ServiceContainer

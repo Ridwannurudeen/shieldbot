@@ -7,6 +7,7 @@ Integrates risk_scorer for numeric scoring and AI analysis
 import logging
 from typing import Dict, List, Optional
 from utils.scam_db import ScamDatabase
+from utils.chain_info import get_chain_name
 from utils.risk_scorer import (
     findings_from_scan_result, calculate_risk_score,
     blend_scores, compute_confidence
@@ -97,7 +98,7 @@ class TransactionScanner:
             'scam_matches': [],
             'scan_type': 'contract',
             'chain_id': chain_id,
-            'network': 'opBNB' if chain_id == 204 else 'BSC',
+            'network': get_chain_name(chain_id),
         }
 
         # Check if it's a contract
@@ -111,9 +112,9 @@ class TransactionScanner:
             return result
 
         # Run all security checks (BscScan API only covers BSC; bytecode uses chain_id)
-        data_sources['bscscan'] = await self._check_verification(address, result)
+        data_sources['bscscan'] = await self._check_verification(address, result, chain_id=chain_id)
         data_sources['scam_db'] = await self._check_scam_database(address, result, chain_id=chain_id)
-        data_sources['contract_age'] = await self._check_contract_age(address, result)
+        data_sources['contract_age'] = await self._check_contract_age(address, result, chain_id=chain_id)
         data_sources['bytecode'] = await self._check_similar_scams(address, result, chain_id)
 
         # Source code analysis if verified
@@ -171,10 +172,10 @@ class TransactionScanner:
 
         return result
 
-    async def _check_verification(self, address: str, result: Dict) -> bool:
+    async def _check_verification(self, address: str, result: Dict, chain_id: int = 56) -> bool:
         """Check if contract is verified on BscScan. Returns True if check succeeded."""
         try:
-            verification = await self.web3.is_verified_contract(address)
+            verification = await self.web3.is_verified_contract(address, chain_id=chain_id)
 
             if isinstance(verification, tuple):
                 is_verified, source_code = verification
@@ -215,10 +216,10 @@ class TransactionScanner:
             result['checks']['scam_database_clean'] = None
             return False
 
-    async def _check_contract_age(self, address: str, result: Dict) -> bool:
+    async def _check_contract_age(self, address: str, result: Dict, chain_id: int = 56) -> bool:
         """Check contract creation time. Returns True if check succeeded."""
         try:
-            creation_info = await self.web3.get_contract_creation_info(address)
+            creation_info = await self.web3.get_contract_creation_info(address, chain_id=chain_id)
 
             if creation_info:
                 age_days = creation_info.get('age_days', 0)

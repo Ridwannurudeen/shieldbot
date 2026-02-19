@@ -63,7 +63,7 @@ class DeployerIndexer:
     async def _index_contract(self, address: str, chain_id: int):
         """Fetch deployer and funder info for a contract."""
         try:
-            creation_info = await self._web3.get_contract_creation_info(address)
+            creation_info = await self._web3.get_contract_creation_info(address, chain_id=chain_id)
             if not creation_info:
                 return
 
@@ -106,7 +106,8 @@ class DeployerIndexer:
         try:
             import aiohttp
             # Use Etherscan API to get first normal tx
-            api_key = self._web3._bsc_adapter.bscscan_api_key if hasattr(self._web3, '_bsc_adapter') else ''
+            adapter = self._web3._get_adapter(chain_id) if hasattr(self._web3, '_get_adapter') else None
+            api_key = adapter.etherscan_api_key if adapter else ''
             params = {
                 'chainid': chain_id,
                 'module': 'account',

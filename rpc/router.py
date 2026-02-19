@@ -39,9 +39,11 @@ async def rpc_endpoint(chain_id: int, request: Request):
       https://api.example.com/rpc/8453 (Base)
     """
     # Rate limiting
-    client_ip = request.headers.get("x-forwarded-for", request.client.host)
-    if "," in client_ip:
-        client_ip = client_ip.split(",")[0].strip()
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        client_ip = forwarded.split(",")[-1].strip()
+    else:
+        client_ip = request.client.host
 
     if not _rpc_rate_check(client_ip):
         return JSONResponse(
