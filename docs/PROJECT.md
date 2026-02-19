@@ -232,7 +232,7 @@ ShieldBot is purpose-built for BNB Chain because:
 - **Off-Chain Analysis Required**: Real-time performance (<2s) necessitates off-chain computation. Full on-chain verification would be too slow and expensive for per-transaction analysis.
 - **API Dependency**: Core functionality requires external API availability (GoPlus, Honeypot.is, DexScreener, etc.). Graceful fallbacks exist, but total API failure would reduce effectiveness.
 - **Browser Extension Only**: Currently supports Chrome/Brave via Manifest V3. Firefox and mobile wallet integration pending.
-- **BSC/opBNB Focus**: Multi-chain support limited to BNB ecosystem. Ethereum, Polygon, and other chains not yet supported.
+- **EVM-Only**: Supports 7 EVM chains (BSC, Ethereum, Base, Arbitrum, Polygon, Optimism, opBNB). Non-EVM chains (Solana, etc.) not yet supported.
 
 **Security & Risk:**
 - **False Negatives Possible**: Sophisticated scams using novel techniques may evade detection. Composite scoring reduces but does not eliminate this risk.
@@ -322,9 +322,9 @@ ShieldBot is purpose-built for BNB Chain because:
 - [ ] Incentive mechanism for data source providers
 - [ ] Open API marketplace (wallets/dApps can integrate)
 
-### Phase 4: Cross-Chain (Q4 2026)
-- [ ] Ethereum mainnet support
-- [ ] Polygon, Arbitrum, Optimism support
+### Phase 4: Expansion (Q4 2026)
+- [x] Ethereum, Base, Arbitrum, Polygon, Optimism support (shipped)
+- [ ] Non-EVM chain support (Solana, Sui)
 - [ ] Unified cross-chain scam database
 - [ ] Chain-agnostic ShieldScore standard
 

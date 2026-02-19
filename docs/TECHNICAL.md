@@ -394,17 +394,18 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-**Key Dependencies**:
+**Key Dependencies** (see `requirements.txt` for exact pins):
 ```
-fastapi==0.109.0
-uvicorn==0.27.0
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
 python-telegram-bot==20.7
 web3==6.15.1
-aiohttp==3.9.1
-httpx==0.26.0
+aiohttp==3.9.3
+httpx~=0.25.2
 anthropic==0.18.1
-greenfield-python-sdk==0.2.1
-python-dotenv==1.0.0
+pydantic-settings>=2.0
+python-dotenv==1.0.1
+websockets>=13.0
 ```
 
 ### 4. Configure Environment Variables
@@ -675,15 +676,27 @@ curl http://localhost:8000/api/health
 
 ## Testing
 
-### Unit Tests (Future Implementation)
+### Unit Tests
 
 ```bash
-# Install pytest
-pip install pytest pytest-asyncio
-
-# Run tests
+# Run all tests
 pytest tests/
+
+# Run with coverage
+pytest tests/ --cov=. --cov-report=term-missing
 ```
+
+**Test suite** (24 test modules):
+- `test_api.py` — Firewall & scan API endpoints
+- `test_calldata.py` — Calldata decoder, selector detection, approval parsing
+- `test_risk_scorer.py` — Heuristic scoring, blending, confidence
+- `test_intent_analyzer.py` — Intent mismatch detection
+- `test_rpc_proxy.py` — RPC proxy intercept, fail-closed behavior
+- `test_ownership.py` — Ownership renouncement checks
+- `test_multichain_routing.py` — Chain adapter routing
+- `test_policy.py` — Policy engine modes (STRICT/BALANCED/PERMISSIVE)
+- `test_calibration.py` — Data-driven threshold calibration
+- And 15 more covering auth, DB, indexer, container, config, etc.
 
 ### Manual Testing Checklist
 
