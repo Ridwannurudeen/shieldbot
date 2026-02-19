@@ -259,7 +259,7 @@ class CalldataDecoder:
                 "function_name": f"Unknown (0x{selector})",
                 "signature": None,
                 "category": "unknown",
-                "risk": "high",
+                "risk": "medium",
                 "params": self._extract_raw_params(params_hex),
                 "is_approval": False,
                 "is_unlimited_approval": False,

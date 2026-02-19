@@ -577,8 +577,18 @@ async def firewall(req: FirewallRequest, request: Request):
         try:
             from core.analyzer import AnalysisContext
 
+            # Detect if target is a token contract — non-tokens (marketplaces,
+            # bridges, governance) should not be penalized by token-specific
+            # checks (honeypot simulation, DEX liquidity, etc.)
+            is_token = True
+            try:
+                is_token = await web3_client.is_token_contract(to_addr, chain_id=req.chainId)
+            except Exception:
+                pass
+
             ctx = AnalysisContext(
                 address=to_addr, chain_id=req.chainId, from_address=from_addr,
+                is_token=is_token,
                 extra={
                     'calldata': req.data,
                     'value': req.value,
@@ -617,7 +627,7 @@ async def firewall(req: FirewallRequest, request: Request):
 
             # Compute risk from analyzer results
             if analyzer_results is not None:
-                risk_output = risk_engine.compute_from_results(analyzer_results)
+                risk_output = risk_engine.compute_from_results(analyzer_results, is_token=is_token)
 
                 # Apply policy mode (handles partial failures)
                 if container and container.policy_engine:

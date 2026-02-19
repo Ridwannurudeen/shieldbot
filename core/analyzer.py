@@ -11,6 +11,7 @@ class AnalysisContext:
     address: str
     chain_id: int = 56
     from_address: Optional[str] = None
+    is_token: bool = True
     extra: Dict[str, Any] = field(default_factory=dict)
 
 
