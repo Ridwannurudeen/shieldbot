@@ -1,16 +1,22 @@
-# ShieldBot — Autonomous Transaction Firewall for BNB Chain
+<div align="center">
+
+# ShieldBot
+
+### Autonomous Transaction Firewall for BNB Chain
 
 **Good Vibes Only: OpenClaw Edition — Builders Track**
 
-ShieldBot is an autonomous transaction firewall built for BNB Chain. It intercepts Web3 transactions in real-time, analyzes them through a multi-source intelligence pipeline with 6 pluggable analyzers, computes a weighted ShieldScore, and blocks honeypots, rug pulls, and malicious contracts before they execute. High-risk forensic reports are stored immutably on BNB Greenfield.
+ShieldBot intercepts Web3 transactions in real-time, analyzes them through a multi-source intelligence pipeline with 6 pluggable analyzers, computes a weighted ShieldScore, and blocks honeypots, rug pulls, and malicious contracts before they execute. High-risk forensic reports are stored immutably on BNB Greenfield.
 
-BNB Chain is the primary chain and the core of ShieldBot. To provide stronger protection for BNB users, ShieldBot also monitors 6 additional EVM chains — because scam campaigns frequently originate on Ethereum or L2s before migrating to BSC. Cross-chain intelligence means threats are caught earlier.
+BNB Chain is the primary chain. To provide stronger protection, ShieldBot monitors 6 additional EVM chains — because scam campaigns frequently originate on Ethereum or L2s before migrating to BSC. Cross-chain intelligence means threats are caught earlier.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![BNB Chain](https://img.shields.io/badge/BNB-Chain-yellow)](https://www.bnbchain.org/)
 
-**[Full Roadmap](ROADMAP.md)** | **[Live Dashboard](https://api.shieldbotsecurity.online/dashboard)** | **[Demo Video](https://youtu.be/a-PbFsZz0Ds)**
+**[Full Roadmap](ROADMAP.md)** | **[Live Dashboard](https://api.shieldbotsecurity.online/dashboard)** | **[Demo Video](https://youtu.be/a-PbFsZz0Ds)** | **[Telegram Bot](https://t.me/shieldbot_bnb_bot)**
+
+</div>
 
 ---
 
@@ -90,97 +96,166 @@ BNB Chain is the primary chain and the core of ShieldBot. To provide stronger pr
 
 ---
 
-## Features
+## Core Features
 
-### Transaction Firewall (Chrome Extension + RPC Proxy)
+<table>
+<tr>
+<td width="50%" valign="top">
 
-The extension intercepts transactions before they reach the wallet. The RPC proxy provides the same protection for any wallet — users configure `https://api.shieldbotsecurity.online/rpc/56` as their BSC RPC in MetaMask.
+### Transaction Firewall
+**Chrome Extension + RPC Proxy**
 
-- **BLOCK**: Critical risk — full-screen red modal, transaction rejected
-- **WARN**: Medium risk — orange warning overlay with risk details, proceed/cancel
-- **ALLOW**: Low risk — silent passthrough (whitelisted routers fast-path)
+Intercepts transactions before they reach your wallet. Works with MetaMask, any EIP-6963 wallet, or any wallet via RPC proxy — including mobile.
 
-### Composite Risk Scoring (ShieldScore)
+| Verdict | Score | Action |
+|---------|-------|--------|
+| **BLOCK** | >= 71 | Full-screen red modal, tx rejected |
+| **WARN** | 31-70 | Orange overlay, proceed or cancel |
+| **ALLOW** | < 31 | Silent passthrough |
 
-Weighted 0-100 risk score from 6 analyzer categories:
+</td>
+<td width="50%" valign="top">
+
+### Composite ShieldScore
+**Weighted 0-100 Risk Score from 6 Analyzers**
 
 ```
-Composite = (Structural x 0.40) + (Market x 0.25) + (Behavioral x 0.20) + (Honeypot x 0.15)
-            + IntentMismatch bonus + SignaturePermit bonus
-
-Escalation Rules:
-  - Honeypot confirmed                  -> floor at 80
-  - mint + proxy + owner not renounced  -> floor at 85
-  - Destroyed contract + sim failed     -> floor at 80
-  - Severe reputation + new pair <24h   -> +15
-  - Renounced + high liquidity + safe   -> -20
+Structural  x 0.40  (verification, bytecode)
+Market      x 0.25  (liquidity, wash trading)
+Behavioral  x 0.20  (wallet reputation)
+Honeypot    x 0.15  (simulation, taxes)
++ IntentMismatch bonus
++ SignaturePermit bonus
 ```
+
+Escalation rules override scores for confirmed honeypots, rug patterns, and destroyed contracts.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
 ### Mempool Monitoring
+**Real-Time Threat Detection**
 
-Real-time detection of:
-- **Sandwich attacks** — frontrun + backrun patterns around victim swaps
+Monitors pending transactions across all 7 chains:
+- **Sandwich attacks** — frontrun + backrun around victim swaps
 - **Frontrunning** — higher-gas competing transactions
-- **Suspicious approvals** — unlimited/large approvals in pending transactions
+- **Suspicious approvals** — unlimited allowances in the mempool
+
+Access via `/threats` in Telegram, `/api/mempool/alerts` in REST, or the live dashboard.
+
+</td>
+<td width="50%" valign="top">
 
 ### Rescue Mode
+**Wallet Approval Scanner + One-Click Revoke**
 
-- **Tier 1 (Alerts)** — Scans wallet approvals, explains risks in plain language (`what_it_means`, `what_you_can_do`)
-- **Tier 2 (Revoke)** — Pre-built `approve(spender, 0)` transactions for one-click approval cleanup
+Scans all token approvals in a wallet and flags dangerous ones:
+- **Tier 1 — Alerts**: Plain-language risk explanations (`what_it_means`, `what_you_can_do`)
+- **Tier 2 — Revoke**: Pre-built `approve(spender, 0)` transactions for instant cleanup
+
+Access via `/rescue <wallet>` in Telegram or `GET /api/rescue/{wallet}`.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
 ### Campaign Graph Radar
+**Cross-Chain Scam Campaign Detection**
 
-Cross-chain entity correlation linking deployers, funders, and contracts across all 7 chains:
+Links deployers, funders, and contracts across all 7 chains:
 - Funder clustering (same wallet funding multiple deployers)
 - High-risk contract ratio detection
-- Multi-chain scam campaign identification
+- Multi-chain scam campaign identification with severity scoring
+
+Access via `/campaign <address>` in Telegram or `GET /api/campaign/{address}`.
+
+</td>
+<td width="50%" valign="top">
 
 ### Threat Intelligence Feed
+**REST API for Real-Time Threat Data**
 
-REST API for real-time threat data:
-- `GET /api/threats/feed` — high-risk contracts + mempool alerts
-- `GET /api/campaigns/top` — most prolific scam deployers
-- Filter by chain, time range, severity
+```
+GET /api/threats/feed      High-risk contracts + mempool alerts
+GET /api/campaigns/top     Most prolific scam deployers
+```
 
-### SDK (shieldbot-sdk)
+Filter by chain, time range, and severity. Powers the live dashboard and third-party integrations.
 
-TypeScript SDK for wallet/dApp integration:
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### Telegram Bot
+**10 Commands — Full Security Suite**
+
+```
+/scan <address>     Contract security scan
+/token <address>    Token safety check
+/rescue <wallet>    Risky approval scanner
+/threats            Live mempool threats
+/campaign <address> Scam campaign links
+/chain              Switch active chain
+/history <address>  On-chain scan records
+/report <address>   Report a scam
+/start              Welcome & quick start
+/help               All commands
+```
+
+Supports: **BSC, Ethereum, Base, Arbitrum, Polygon, Optimism, opBNB**
+Chain prefixes: `eth:0x...` `base:0x...` `arb:0x...` `poly:0x...` `op:0x...`
+
+**Try it:** [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)
+
+</td>
+<td width="50%" valign="top">
+
+### 5 Delivery Channels
+**Protection Everywhere You Transact**
+
+| Channel | Description |
+|---------|-------------|
+| **Chrome Extension** | Manifest V3, MetaMask + EIP-6963 |
+| **RPC Proxy** | Any wallet, including mobile |
+| **Telegram Bot** | 10-command security suite |
+| **REST API** | Firewall, scan, rescue, threats |
+| **TypeScript SDK** | npm-ready, typed client |
 
 ```typescript
 import { ShieldBot } from 'shieldbot-sdk';
 const shield = new ShieldBot({ apiKey: 'sb_...' });
-
 const result = await shield.scan('0x...', { chainId: 56 });
-const rescue = await shield.rescue('0xMyWallet', 56);
-const threats = await shield.getThreats({ chainId: 1, limit: 20 });
 ```
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
 ### Threat Dashboard
+**Real-Time Web UI**
 
-Real-time web dashboard at `/dashboard` showing:
-- Live threat feed with chain filtering
+Live dashboard at `/dashboard` with:
+- Threat feed with chain filtering
 - Mempool attack statistics
 - Top scam campaigns
-- Auto-refreshing every 15 seconds
+- Auto-refresh every 15 seconds
 
-### Telegram Bot
+</td>
+<td width="50%" valign="top">
 
-```
-/start              - Welcome message
-/scan <address>     - Security scan for any contract
-/token <address>    - Token safety check (honeypot, taxes, liquidity)
-/history <address>  - View on-chain scan records
-/report <address>   - Report a scam address
-/help               - Command list
-```
+### BNB Greenfield Storage
+**Immutable On-Chain Forensic Reports**
 
-Supports chain selection (BSC, ETH, Base, Arbitrum, Polygon, Optimism, opBNB).
+High-risk transactions (score >= 50) are stored as immutable JSON objects on BNB Greenfield — tamper-proof forensic evidence with permanent public URLs.
 
-**Try it:** [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)
-
-### BNB Greenfield On-Chain Reports
-
-High-risk transactions (score >= 50) are stored as immutable JSON objects on BNB Greenfield — tamper-proof forensic evidence with public URLs.
+</td>
+</tr>
+</table>
 
 ---
 
@@ -459,17 +534,19 @@ python eval/live_scorer.py
 Built for **Good Vibes Only: OpenClaw Edition** — **Builders Track** (BNB Chain).
 
 **Key Differentiators:**
-- Real-time transaction firewall with MetaMask-compatible direct provider wrapping
-- Composite ShieldScore from 6+ data sources with weighted category scoring
-- Tenderly pre-execution simulation with asset delta prediction
-- BNB Greenfield immutable forensic reports for high-risk transactions
-- AI-powered forensic analysis (contextual risk explanations, not just flags)
-- Mempool monitoring for sandwich attacks and frontrunning on BSC
-- Rescue Mode — scan approvals and one-click revoke dangerous ones
-- Campaign Graph Radar — detect coordinated scam campaigns across chains
-- Cross-chain intelligence feeds back into BSC protection (scams migrate between chains)
-- RPC proxy — zero-friction protection for any wallet, including mobile
-- 7 EVM chains, 6 pluggable analyzers, 5 delivery channels (extension, RPC proxy, Telegram, API, SDK)
+
+| # | Differentiator |
+|---|----------------|
+| 1 | **Transaction Firewall** — real-time interception via Chrome extension + RPC proxy (any wallet, including mobile) |
+| 2 | **Composite ShieldScore** — weighted 0-100 score from 6 pluggable analyzers with escalation rules |
+| 3 | **Mempool Monitoring** — sandwich attack, frontrun, and suspicious approval detection across 7 chains |
+| 4 | **Rescue Mode** — scan wallet approvals, plain-language risk alerts, pre-built revoke transactions |
+| 5 | **Campaign Graph Radar** — cross-chain deployer/funder correlation to detect coordinated scam campaigns |
+| 6 | **BNB Greenfield** — immutable on-chain forensic reports for high-risk transactions |
+| 7 | **Tenderly Simulation** — pre-execution simulation with asset delta prediction |
+| 8 | **AI Forensic Analysis** — contextual risk explanations, not just flags |
+| 9 | **7 EVM Chains** — cross-chain intelligence feeds back into BSC protection |
+| 10 | **5 Delivery Channels** — Chrome extension, RPC proxy, Telegram bot (10 commands), REST API, TypeScript SDK |
 
 **Development Phases:**
 - **Phase 1** (Foundation): ChainAdapter interface, pluggable analyzer registry, policy modes, API auth, contract reputation DB, deployer indexer, outcome tracking
