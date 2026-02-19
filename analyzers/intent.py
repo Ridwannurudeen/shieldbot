@@ -78,12 +78,18 @@ class IntentMismatchAnalyzer(Analyzer):
                 score += 30
                 flags.append('Native value sent with approval call (unusual)')
 
-        # 4. Unknown selector on unverified contract
+        # 4. Unknown selector — lower penalty for verified/non-token contracts
         if decoded.get('category') == 'unknown':
-            # If we have contract verification data from other analyzers,
-            # the intent score should be higher for unverified contracts
-            score += 20
-            flags.append(f'Unknown function selector 0x{selector}')
+            is_verified = ctx.extra.get('is_verified')
+            if not ctx.is_token or is_verified:
+                # Verified contracts and non-token contracts (marketplaces,
+                # bridges, governance) commonly have selectors outside our
+                # known list — this is normal, not suspicious.
+                score += 5
+                flags.append(f'Unrecognized function selector 0x{selector} (verified contract)')
+            else:
+                score += 20
+                flags.append(f'Unknown function selector 0x{selector}')
 
         # 5. Approval to EOA — check via extra data if available
         if decoded.get('is_approval'):

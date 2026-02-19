@@ -21,6 +21,15 @@ class HoneypotAnalyzer(Analyzer):
         return 0.15
 
     async def analyze(self, ctx: AnalysisContext) -> AnalyzerResult:
+        # Honeypot simulation is only meaningful for ERC-20 tokens.
+        # Non-token contracts (marketplaces, bridges, governance) will always
+        # fail simulation or return nonsensical data — skip entirely.
+        if not ctx.is_token:
+            return AnalyzerResult(
+                name=self.name, weight=self.weight,
+                score=0, flags=[], data={'skipped': True, 'reason': 'non-token contract'},
+            )
+
         data = await self._service.fetch_honeypot_data(ctx.address, chain_id=ctx.chain_id)
         score, flags = self._compute(data)
         return AnalyzerResult(

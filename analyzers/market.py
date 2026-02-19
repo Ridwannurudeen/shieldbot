@@ -21,6 +21,15 @@ class MarketAnalyzer(Analyzer):
         return 0.25
 
     async def analyze(self, ctx: AnalysisContext) -> AnalyzerResult:
+        # DEX market data is only meaningful for ERC-20 tokens.
+        # Non-token contracts (marketplaces, bridges, governance) have no
+        # trading pairs — zero liquidity is expected, not suspicious.
+        if not ctx.is_token:
+            return AnalyzerResult(
+                name=self.name, weight=self.weight,
+                score=0, flags=[], data={'skipped': True, 'reason': 'non-token contract'},
+            )
+
         data = await self._service.fetch_token_market_data(ctx.address)
         score, flags = self._compute(data)
         return AnalyzerResult(

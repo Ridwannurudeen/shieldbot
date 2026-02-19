@@ -45,6 +45,7 @@ class RiskEngine:
         honeypot_data: dict,
         dex_data: dict,
         ethos_data: dict,
+        is_token: bool = True,
     ) -> dict:
         critical_flags = []
 
@@ -140,39 +141,33 @@ class RiskEngine:
             + honeypot_score * WEIGHT_HONEYPOT
         )
 
-        # --- Escalation overrides ---
+        # --- Escalation overrides (token-specific) ---
         has_mint = contract_data.get('has_mint', False)
         has_proxy = contract_data.get('has_proxy', False)
         ownership_renounced = contract_data.get('ownership_renounced', False)
-
-        # mint + proxy + ownership not renounced → likely rug
-        if has_mint and has_proxy and ownership_renounced is False:
-            composite = max(composite, 85)
-
-        # No contract bytecode + honeypot simulation failed → destroyed scam token
-        if not contract_data.get('is_contract') and honeypot_data.get('simulation_failed'):
-            composite = max(composite, 80)
-
-        # honeypot confirmed → floor at 80
-        # Skip for high-liquidity tokens with low taxes (likely false positive)
-        # but escalate low_tax_honeypot for non-proxy contracts (proxy = likely Binance-pegged)
         liquidity_info = dex_data.get('liquidity_usd', 0)
-        if honeypot_data.get('is_honeypot'):
-            sell_tax = honeypot_data.get('sell_tax', 0)
-            is_false_positive_candidate = liquidity_info > 500_000 and sell_tax < 5
-            is_proxy = contract_data.get('has_proxy', False)
-            if not is_false_positive_candidate or (honeypot_data.get('low_tax_honeypot') and not is_proxy):
+
+        if is_token:
+            if has_mint and has_proxy and ownership_renounced is False:
+                composite = max(composite, 85)
+
+            if not contract_data.get('is_contract') and honeypot_data.get('simulation_failed'):
                 composite = max(composite, 80)
 
-        # severe reputation + new pair → escalate
-        if ethos_data.get('severe_reputation_flag'):
-            pair_age = dex_data.get('pair_age_hours')
-            if pair_age is not None and pair_age < 24:
-                composite = min(composite + 15, 100)
+            if honeypot_data.get('is_honeypot'):
+                sell_tax = honeypot_data.get('sell_tax', 0)
+                is_false_positive_candidate = liquidity_info > 500_000 and sell_tax < 5
+                is_proxy = contract_data.get('has_proxy', False)
+                if not is_false_positive_candidate or (honeypot_data.get('low_tax_honeypot') and not is_proxy):
+                    composite = max(composite, 80)
 
-        # positive signals → reduce (but not if honeypot confirmed)
-        if ownership_renounced and liquidity_info > 100_000 and not honeypot_data.get('is_honeypot'):
-            composite = max(composite - 20, 0)
+            if ethos_data.get('severe_reputation_flag'):
+                pair_age = dex_data.get('pair_age_hours')
+                if pair_age is not None and pair_age < 24:
+                    composite = min(composite + 15, 100)
+
+            if ownership_renounced and liquidity_info > 100_000 and not honeypot_data.get('is_honeypot'):
+                composite = max(composite - 20, 0)
 
         rug_probability = round(min(max(composite, 0), 100), 1)
 
@@ -189,7 +184,8 @@ class RiskEngine:
 
         # --- Risk archetype ---
         archetype = self._determine_archetype(
-            contract_data, honeypot_data, dex_data, rug_probability
+            contract_data, honeypot_data, dex_data, rug_probability,
+            is_token=is_token,
         )
 
         # --- Confidence ---
@@ -217,10 +213,16 @@ class RiskEngine:
             },
         }
 
-    def compute_from_results(self, results: List["AnalyzerResult"]) -> dict:
+    def compute_from_results(self, results: List["AnalyzerResult"], is_token: bool = True) -> dict:
         """
         Compute composite risk from a list of AnalyzerResult objects.
         Produces identical output shape to compute_composite_risk().
+
+        Args:
+            results: List of AnalyzerResult from the registry pipeline.
+            is_token: Whether the target contract is an ERC-20 token.
+                      Non-token contracts (marketplaces, bridges, governance)
+                      skip token-specific escalation rules.
 
         Expects pre-normalized weights (summing to 1.0).  The registry's
         run_all() handles normalization before results reach this method.
@@ -244,7 +246,11 @@ class RiskEngine:
         # Weighted composite from analyzer scores
         composite = sum(r.score * r.weight for r in results)
 
-        # --- Escalation overrides (same as compute_composite_risk) ---
+        # --- Escalation overrides ---
+        # Token-specific escalation rules only apply to ERC-20 tokens.
+        # Non-token contracts (marketplaces, bridges, governance) commonly
+        # have proxy patterns, mint-like bytecode, and unrenounced ownership
+        # as normal operational patterns — not rug indicators.
         has_mint = contract_data.get('has_mint', False)
         has_proxy = contract_data.get('has_proxy', False)
         ownership_renounced = contract_data.get('ownership_renounced', False)
@@ -252,39 +258,42 @@ class RiskEngine:
         is_verified = contract_data.get('is_verified', True)
         has_blacklist = contract_data.get('has_blacklist', False)
 
-        if has_mint and has_proxy and ownership_renounced is False:
-            composite = max(composite, 85)
+        if is_token:
+            if has_mint and has_proxy and ownership_renounced is False:
+                composite = max(composite, 85)
 
-        # Unverified contract with dangerous bytecode patterns — likely scam
-        # Only escalate for low-liquidity tokens; high-liquidity tokens are likely legit
-        liquidity = dex_data.get('liquidity_usd', 0)
-        if not is_verified and (has_mint or has_blacklist) and ownership_renounced is False and liquidity < 100_000:
-            composite = max(composite, 55)
+            # Unverified contract with dangerous bytecode patterns — likely scam
+            liquidity = dex_data.get('liquidity_usd', 0)
+            if not is_verified and (has_mint or has_blacklist) and ownership_renounced is False and liquidity < 100_000:
+                composite = max(composite, 55)
 
-        # No contract bytecode + honeypot simulation failed → destroyed scam token
-        if not contract_data.get('is_contract') and honeypot_data.get('simulation_failed'):
-            composite = max(composite, 80)
-
-        # Honeypot escalation — floor at 80 if confirmed
-        # Skip for high-liquidity tokens with low taxes (likely false positive)
-        # but escalate low_tax_honeypot for non-proxy contracts (proxy = likely Binance-pegged)
-        if honeypot_data.get('is_honeypot'):
-            sell_tax = honeypot_data.get('sell_tax', 0)
-            is_false_positive_candidate = liquidity > 500_000 and sell_tax < 5
-            is_proxy = contract_data.get('has_proxy', False)
-            if not is_false_positive_candidate or (honeypot_data.get('low_tax_honeypot') and not is_proxy):
+            # No contract bytecode + honeypot simulation failed → destroyed scam token
+            if not contract_data.get('is_contract') and honeypot_data.get('simulation_failed'):
                 composite = max(composite, 80)
 
-        if ethos_data.get('severe_reputation_flag'):
-            pair_age = dex_data.get('pair_age_hours')
-            if pair_age is not None and pair_age < 24:
-                composite = min(composite + 15, 100)
+            # Honeypot escalation — floor at 80 if confirmed
+            if honeypot_data.get('is_honeypot'):
+                sell_tax = honeypot_data.get('sell_tax', 0)
+                is_false_positive_candidate = liquidity > 500_000 and sell_tax < 5
+                is_proxy = contract_data.get('has_proxy', False)
+                if not is_false_positive_candidate or (honeypot_data.get('low_tax_honeypot') and not is_proxy):
+                    composite = max(composite, 80)
 
-        # Positive signals — reduce score for renounced ownership with high liquidity
-        # but not if honeypot was confirmed
-        liquidity_info = dex_data.get('liquidity_usd', 0)
-        if ownership_renounced and liquidity_info > 100_000 and not honeypot_data.get('is_honeypot'):
-            composite = max(composite - 20, 0)
+            if ethos_data.get('severe_reputation_flag'):
+                pair_age = dex_data.get('pair_age_hours')
+                if pair_age is not None and pair_age < 24:
+                    composite = min(composite + 15, 100)
+
+            # Positive signals — reduce score for renounced ownership with high liquidity
+            liquidity_info = dex_data.get('liquidity_usd', 0)
+            if ownership_renounced and liquidity_info > 100_000 and not honeypot_data.get('is_honeypot'):
+                composite = max(composite - 20, 0)
+        else:
+            # Non-token: only escalate for verified scam matches or behavioral flags
+            if contract_data.get('scam_matches'):
+                composite = max(composite, 70)
+            if ethos_data.get('severe_reputation_flag') and ethos_data.get('scam_flags'):
+                composite = min(composite + 10, 100)
 
         rug_probability = round(min(max(composite, 0), 100), 1)
 
@@ -299,7 +308,8 @@ class RiskEngine:
             risk_level = 'LOW'
 
         archetype = self._determine_archetype(
-            contract_data, honeypot_data, dex_data, rug_probability
+            contract_data, honeypot_data, dex_data, rug_probability,
+            is_token=is_token,
         )
 
         confidence = self._compute_confidence(contract_data, honeypot_data, dex_data, ethos_data)
@@ -324,14 +334,18 @@ class RiskEngine:
             'category_scores': category_scores,
         }
 
-    def _determine_archetype(self, contract_data, honeypot_data, dex_data, rug_prob):
-        if honeypot_data.get('is_honeypot') or not honeypot_data.get('can_sell', True):
-            return 'honeypot'
-        if dex_data.get('wash_trade_flag'):
-            return 'wash_traded'
-        if (contract_data.get('has_mint') and contract_data.get('has_proxy')
-                and not contract_data.get('ownership_renounced')):
-            return 'rug_pull'
+    def _determine_archetype(self, contract_data, honeypot_data, dex_data, rug_prob, is_token=True):
+        # Token-specific archetypes only apply to ERC-20 tokens.
+        # Non-token contracts should never be labelled honeypot/rug_pull
+        # based on token-oriented heuristics.
+        if is_token:
+            if honeypot_data.get('is_honeypot') or not honeypot_data.get('can_sell', True):
+                return 'honeypot'
+            if dex_data.get('wash_trade_flag'):
+                return 'wash_traded'
+            if (contract_data.get('has_mint') and contract_data.get('has_proxy')
+                    and not contract_data.get('ownership_renounced')):
+                return 'rug_pull'
         if rug_prob >= 71:
             return 'high_risk_contract'
         return 'legitimate'
