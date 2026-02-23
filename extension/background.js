@@ -4,7 +4,7 @@
  * and returns the firewall verdict. Saves scan history.
  */
 
-const DEFAULT_API_URL = "https://api.shieldbotsecurity.online";
+const DEFAULT_API_URL = "";
 const MAX_HISTORY = 50;
 
 // Listen for messages from content scripts
@@ -177,3 +177,4 @@ function saveToHistory(tx, result) {
     chrome.storage.local.set({ scanHistory: history });
   });
 }
+

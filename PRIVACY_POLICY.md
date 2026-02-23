@@ -1,7 +1,7 @@
 # Privacy Policy for ShieldAI Transaction Firewall
 
 **Effective Date:** February 16, 2026
-**Last Updated:** February 16, 2026
+**Last Updated:** February 22, 2026
 
 ## Overview
 
@@ -105,15 +105,17 @@ The extension enforces HTTPS for all API endpoints (except `localhost` for devel
 
 ### Least-Privilege Permissions
 
-The extension requests only the minimum permissions required:
+The extension requests only the permissions required for transaction security analysis:
 
-- **`activeTab`**: Allows the extension to interact with the current tab when you click the extension icon
 - **`storage`**: Stores settings and scan history locally in your browser
+- **`permissions`**: Allows requesting user-approved API origin access at runtime via `chrome.permissions.request()`
+
+The extension also includes content script access on HTTPS websites so it can detect Web3 transaction requests across dApps hosted on different domains.
 
 The extension does **NOT** request:
-- Access to all websites by default
-- Permission to read your browsing history
-- Access to sensitive browser APIs
+- Browsing history access
+- Tabs API access
+- Access to sensitive browser APIs unrelated to its core security function
 
 ## Your Rights
 
@@ -157,3 +159,4 @@ This extension complies with:
 ---
 
 **By installing and using ShieldAI Transaction Firewall, you acknowledge that you have read and understood this privacy policy.**
+

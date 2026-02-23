@@ -1,13 +1,11 @@
 {
   "manifest_version": 3,
   "name": "ShieldAI Transaction Firewall",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Real-time BNB Chain transaction security analysis. Intercepts wallet transactions and shows risk assessment before signing.",
   "permissions": [
-    "storage"
-  ],
-  "host_permissions": [
-    "https://api.shieldbotsecurity.online/*"
+    "storage",
+    "permissions"
   ],
   "optional_host_permissions": [
     "https://*/*",
@@ -19,8 +17,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://*/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_start",
       "all_frames": true
     }
@@ -31,8 +33,13 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["inject.js", "overlay.css"],
-      "matches": ["https://*/*"]
+      "resources": [
+        "inject.js",
+        "overlay.css"
+      ],
+      "matches": [
+        "https://*/*"
+      ]
     }
   ],
   "icons": {

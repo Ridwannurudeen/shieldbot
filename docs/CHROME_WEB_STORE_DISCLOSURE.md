@@ -97,7 +97,7 @@ API COMMUNICATION:
 Transaction metadata is sent to a user-configured API endpoint for security analysis. The extension does not include a default API server - users must configure their own server or use a trusted third-party service. Communication with the API uses HTTPS encryption (localhost HTTP allowed for development only).
 
 THIRD-PARTY SERVICES:
-The extension itself does not use any third-party analytics, tracking, or advertising services. However, the user-configured API endpoint may use external services for threat intelligence and contract verification. Users are responsible for reviewing the privacy policy of any API service they configure.
+The extension itself does not use any third-party analytics, tracking, or advertising services. However, the user-configured API endpoint may use external services for threat intelligence and contract verification. Users are responsible for reviewing the privacy policy of any API service they configure. The extension ships without a default API endpoint.
 ```
 
 ---
@@ -132,7 +132,7 @@ DATA RETENTION:
 
 SECURITY MEASURES:
 - HTTPS enforcement for API communication (except localhost development)
-- Least-privilege permissions (only activeTab and storage)
+- Least-privilege API permissions (only storage and permissions API)
 - No remote code execution or dynamic script loading
 - Open source codebase for transparency and auditability
 ```
@@ -145,8 +145,8 @@ SECURITY MEASURES:
 
 **Answer:**
 
-### `activeTab`
-**Justification:** Required to inject the transaction interceptor script into Web3 application pages. This allows the extension to detect when users initiate blockchain transactions and display the security analysis overlay.
+### `permissions`
+**Justification:** Required to request and verify user-approved API origin access at runtime using `chrome.permissions.request()` and `chrome.permissions.contains()`.
 
 ### `storage`
 **Justification:** Required to store user settings (API endpoint URL, firewall enabled/disabled state) and local scan history. All data is stored locally in the user's browser using chrome.storage.local.
@@ -250,4 +250,4 @@ Before submitting to Chrome Web Store, ensure:
 
 ---
 
-**Last Updated:** February 16, 2026
+**Last Updated:** February 22, 2026

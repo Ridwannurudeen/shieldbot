@@ -3,7 +3,7 @@
  * Manages settings, displays connection status, and shows scan history.
  */
 
-const DEFAULT_API_URL = "https://api.shieldbotsecurity.online";
+const DEFAULT_API_URL = "";
 
 document.addEventListener("DOMContentLoaded", () => {
   const apiUrlInput = document.getElementById("apiUrl");
@@ -235,3 +235,4 @@ document.addEventListener("DOMContentLoaded", () => {
     return div.innerHTML;
   }
 });
+
