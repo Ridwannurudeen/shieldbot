@@ -163,7 +163,7 @@ app.add_middleware(
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
     # Skip rate limiting for health checks
-    if request.url.path in ("/", "/api/health", "/test"):
+    if request.url.path in ("/", "/api/health", "/test", "/webhook/uptime"):
         return await call_next(request)
 
     # Check for API key authentication
@@ -285,6 +285,33 @@ async def beta_signup(req: BetaSignupRequest):
         status_code=409,
         content={"detail": "This email is already signed up."},
     )
+
+
+@app.post("/webhook/uptime")
+async def uptime_webhook(request: Request):
+    """UptimeRobot webhook — forwards status alerts to Telegram."""
+    import httpx
+    data = await request.form()
+    alert_type = data.get("alertType", "")        # 1 = down, 2 = up
+    monitor_name = data.get("monitorFriendlyName", "ShieldBot API")
+    monitor_url  = data.get("monitorURL", "")
+    details      = data.get("alertDetails", "")
+
+    if alert_type == "1":
+        msg = f"🚨 *ShieldBot DOWN*\n`{monitor_name}` is unreachable.\nURL: `{monitor_url}`\n{details}"
+    elif alert_type == "2":
+        msg = f"✅ *ShieldBot Recovered*\n`{monitor_name}` is back online.\nURL: `{monitor_url}`"
+    else:
+        return {"ok": True}
+
+    bot_token = "8385839520:AAEJSBSBRZu0MFDyebvY6q5aEsLBGs6FIQ8"
+    chat_id   = "1132584533"
+    async with httpx.AsyncClient() as client:
+        await client.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
+        )
+    return {"ok": True}
 
 
 @app.get("/api/health")
