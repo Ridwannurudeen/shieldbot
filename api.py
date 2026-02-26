@@ -133,6 +133,9 @@ async def lifespan(app: FastAPI):
     logger.info("ShieldAI Firewall API started")
     yield
     await container.shutdown()
+    rpc_proxy = getattr(app.state, "rpc_proxy", None)
+    if rpc_proxy:
+        await rpc_proxy.close()
     logger.info("ShieldAI Firewall API shutting down")
 
 

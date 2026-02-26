@@ -84,7 +84,7 @@ class TestUnknownSelector:
         assert result["selector"] == "deadbeef"
         assert result["function_name"].startswith("Unknown")
         assert result["category"] == "unknown"
-        assert result["risk"] == "high"
+        assert result["risk"] == "medium"  # unknown but decodable; truncated unknown returns "high"
         # Should have raw word params
         assert "word_0" in result["params"]
 

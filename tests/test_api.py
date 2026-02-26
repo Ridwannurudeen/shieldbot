@@ -93,12 +93,9 @@ class TestHealthEndpoint:
         data = resp.json()
         assert data["status"] == "ok"
         assert data["service"] == "shieldai-firewall"
-        assert "ai_available" in data
-
-    def test_health_ai_unavailable(self, client):
-        resp = client.get("/api/health")
-        data = resp.json()
-        assert data["ai_available"] is False
+        assert "supported_chains" in data
+        # ai_available intentionally omitted (security: no internal state leakage)
+        assert "ai_available" not in data
 
 
 class TestFirewallFallback:
