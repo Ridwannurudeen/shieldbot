@@ -979,6 +979,21 @@ async def create_api_key(request: Request):
     return result
 
 
+@app.get("/api/admin/signups")
+async def admin_signups(request: Request):
+    """List all beta signups. Requires ADMIN_SECRET header."""
+    admin_secret = request.headers.get("x-admin-secret")
+    expected = container.settings.admin_secret if container else ""
+    if not expected:
+        raise HTTPException(status_code=503, detail="Admin not configured")
+    if not admin_secret or not hmac.compare_digest(admin_secret, expected):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not container or not container.db:
+        raise HTTPException(status_code=503, detail="Database not available")
+    signups = await container.db.get_beta_signups()
+    return {"signups": signups, "count": len(signups)}
+
+
 # --- Mempool Monitoring ---
 
 @app.get("/api/mempool/alerts")
