@@ -145,6 +145,9 @@ app = FastAPI(
 # Mount RPC proxy router
 app.include_router(rpc_router)
 
+# Serve Vite-built landing page assets (hashed JS/CSS bundles)
+app.mount("/assets", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "landing", "assets")), name="landing-assets")
+
 # CORS: configurable via CORS_ALLOW_ORIGINS env (comma-separated)
 # Parsed at startup from Settings; fallback to localhost dev origins.
 _boot_settings = Settings()
@@ -160,7 +163,7 @@ app.add_middleware(
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
     # Skip rate limiting for health checks
-    if request.url.path in ("/api/health", "/test"):
+    if request.url.path in ("/", "/api/health", "/test"):
         return await call_next(request)
 
     # Check for API key authentication
@@ -249,6 +252,40 @@ _report_limiter = RateLimiter(requests_per_minute=5, burst=3)
 
 
 # --- Endpoints ---
+
+@app.get("/", include_in_schema=False)
+async def landing_page():
+    """Marketing landing page."""
+    landing_path = os.path.join(os.path.dirname(__file__), "landing", "index.html")
+    return FileResponse(landing_path, media_type="text/html")
+
+
+class BetaSignupRequest(BaseModel):
+    email: str
+
+
+@app.post("/api/beta-signup")
+async def beta_signup(req: BetaSignupRequest):
+    """Collect beta signup emails."""
+    import re
+    email = req.email.strip().lower()
+    if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+        raise HTTPException(status_code=400, detail="Invalid email address")
+    if not container or not container.db:
+        raise HTTPException(status_code=503, detail="Database not available")
+    is_new = await container.db.add_beta_signup(email)
+    if is_new:
+        if container.email_service and container.email_service.is_enabled():
+            try:
+                await container.email_service.send_beta_welcome(email)
+            except Exception as e:
+                logger.error(f"Beta welcome email failed: {e}")
+        return {"message": "You're on the list! We'll be in touch."}
+    return JSONResponse(
+        status_code=409,
+        content={"detail": "This email is already signed up."},
+    )
+
 
 @app.get("/api/health")
 async def health():

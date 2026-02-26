@@ -7,9 +7,10 @@ from .tenderly_service import TenderlySimulator
 from .mempool_service import MempoolMonitor
 from .rescue_service import RescueService
 from .campaign_service import CampaignService
+from .email_service import EmailService
 
 __all__ = [
     'DexService', 'EthosService', 'HoneypotService', 'ContractService',
     'GreenfieldService', 'TenderlySimulator', 'MempoolMonitor', 'RescueService',
-    'CampaignService',
+    'CampaignService', 'EmailService',
 ]

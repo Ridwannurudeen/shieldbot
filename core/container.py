@@ -14,6 +14,7 @@ from services import (
     DexService, EthosService, HoneypotService,
     ContractService, GreenfieldService, TenderlySimulator,
     MempoolMonitor, RescueService, CampaignService,
+    EmailService,
 )
 from core.risk_engine import RiskEngine
 from core.calibration import load_calibration
@@ -125,6 +126,12 @@ class ServiceContainer:
         self.rescue_service = RescueService(self.web3_client, self.db)
         self.campaign_service = CampaignService(self.web3_client, self.db)
 
+        # Email service (Resend)
+        self.email_service = EmailService(
+            api_key=settings.resend_api_key,
+            from_email=settings.resend_from_email,
+        )
+
         # Optional services (need async init)
         self.greenfield_service = GreenfieldService()
         self.tenderly_simulator = TenderlySimulator()
@@ -142,6 +149,7 @@ class ServiceContainer:
         logger.info(f"AI Analysis: {'enabled' if self.ai_analyzer.is_available() else 'disabled'}")
         logger.info(f"Greenfield storage: {'enabled' if self.greenfield_service.is_enabled() else 'disabled'}")
         logger.info(f"Tenderly simulation: {'enabled' if self.tenderly_simulator.is_enabled() else 'disabled'}")
+        logger.info(f"Email service: {'enabled' if self.email_service.is_enabled() else 'disabled'}")
 
     async def shutdown(self):
         """Clean up resources."""

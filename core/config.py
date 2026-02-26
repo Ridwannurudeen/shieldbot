@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     # Calibration
     calibration_config_path: str = "core/calibration_config.json"
 
+    # Resend (beta welcome emails)
+    resend_api_key: str = ""
+    resend_from_email: str = "ShieldBot <noreply@shieldbotsecurity.online>"
+
     # Admin
     admin_secret: str = ""
 

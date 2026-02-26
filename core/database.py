@@ -119,6 +119,12 @@ class Database:
 
             CREATE INDEX IF NOT EXISTS idx_community_reports_address
                 ON community_reports(address, chain_id);
+
+            CREATE TABLE IF NOT EXISTS beta_signups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT UNIQUE NOT NULL,
+                signed_up_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
         """)
         await self._db.commit()
 
@@ -336,6 +342,31 @@ class Database:
             'contracts_deployed': deployed_contracts,
             'total_deployed': len(deployed_contracts),
         }
+
+    # --- Beta Signups ---
+
+    async def add_beta_signup(self, email: str) -> bool:
+        """Add a beta signup email. Returns True if new, False if duplicate."""
+        try:
+            await self._db.execute(
+                "INSERT INTO beta_signups (email) VALUES (?)",
+                (email.lower().strip(),),
+            )
+            await self._db.commit()
+            return True
+        except aiosqlite.IntegrityError:
+            return False
+
+    async def get_beta_signups(self) -> List[Dict]:
+        """Return all beta signup entries."""
+        cursor = await self._db.execute(
+            "SELECT id, email, signed_up_at FROM beta_signups ORDER BY id DESC"
+        )
+        rows = await cursor.fetchall()
+        return [
+            {"id": r[0], "email": r[1], "signed_up_at": r[2]}
+            for r in rows
+        ]
 
     async def get_outcomes(self, address: str, chain_id: int = 56, limit: int = 50) -> List[Dict]:
         """Get outcome events for an address."""

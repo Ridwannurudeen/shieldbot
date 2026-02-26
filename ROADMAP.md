@@ -78,12 +78,16 @@ Leverage hackathon win momentum to build real user base and revenue.
 - [ ] **Arbitrum Foundation grant** — Arbitrum adapter is live, apply for STIP/ecosystem grant.
 
 ### User Acquisition
+- [ ] **Landing page** — Marketing site at shieldbotsecurity.online with product explainer, demo, and beta signup form.
+- [ ] **Beta waitlist** — Email/wallet collection for early access before Chrome Web Store approval.
 - [ ] **Private beta cohort** — 50-200 instrumented users providing feedback and outcome data.
 - [ ] **Community launch** — Announce on X/Twitter, BNB community channels, crypto security groups.
 - [ ] **Chrome Web Store SEO** — Optimize listing, screenshots, and description for organic installs.
+- [ ] **Extension onboarding flow** — First-time user tutorial and guided first scan.
 
 ### Production Hardening
 - [ ] **Monitoring and alerting** — Uptime checks, error rate alerts, latency dashboards.
+- [ ] **Internal analytics dashboard** — Track scan volume, block rate, user retention, and chain distribution.
 - [ ] **Database backup strategy** — Automated SQLite backups on VPS.
 - [ ] **Rate limiting tuning** — Adjust limits based on real traffic patterns.
 - [ ] **CI/CD pipeline** — Automated tests and deployment on push.
