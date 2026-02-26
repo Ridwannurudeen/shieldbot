@@ -312,14 +312,12 @@ async def beta_signup(req: BetaSignupRequest, request: Request):
 
 
 @app.post("/webhook/uptime")
-async def uptime_webhook(request: Request):
+async def uptime_webhook(request: Request, secret: str = ""):
     """UptimeRobot webhook — forwards status alerts to Telegram.
 
-    Authentication: set X-Webhook-Secret header in UptimeRobot to WEBHOOK_SECRET.
-    Secrets in query params leak into logs; headers do not.
+    Authentication: pass WEBHOOK_SECRET as ?secret= query param in UptimeRobot.
     """
     import httpx
-    secret = request.headers.get("x-webhook-secret", "")
     expected_secret = container.settings.webhook_secret if container else ""
     if not expected_secret or not hmac.compare_digest(secret, expected_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
