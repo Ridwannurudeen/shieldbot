@@ -88,7 +88,7 @@ def _build_beta_welcome_html(email: str) -> str:
               <table width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;">
                 <tr>
                   <td align="center" style="padding:6px 0;">
-                    <a href="https://t.me/ShieldBotSecurityBot" style="display:inline-block;background-color:#00ff88;color:#0a0e1a;text-decoration:none;font-weight:700;font-size:14px;padding:12px 28px;border-radius:8px;">
+                    <a href="https://t.me/shieldbot_bnb_bot" style="display:inline-block;background-color:#00ff88;color:#0a0e1a;text-decoration:none;font-weight:700;font-size:14px;padding:12px 28px;border-radius:8px;">
                       Try the Telegram Bot
                     </a>
                   </td>
@@ -97,9 +97,9 @@ def _build_beta_welcome_html(email: str) -> str:
               <table width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 0;">
                 <tr>
                   <td align="center">
-                    <a href="https://github.com/Shield-Bot" style="color:#00ff88;text-decoration:none;font-size:14px;margin:0 12px;">GitHub</a>
+                    <a href="https://github.com/Ridwannurudeen/shieldbot" style="color:#00ff88;text-decoration:none;font-size:14px;margin:0 12px;">GitHub</a>
                     &nbsp;&middot;&nbsp;
-                    <a href="https://x.com/ShieldBotAI" style="color:#00ff88;text-decoration:none;font-size:14px;margin:0 12px;">Twitter / X</a>
+                    <a href="https://twitter.com/Ggudman1" style="color:#00ff88;text-decoration:none;font-size:14px;margin:0 12px;">Twitter / X</a>
                   </td>
                 </tr>
               </table>
