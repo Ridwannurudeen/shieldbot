@@ -47,6 +47,8 @@ class EmailService:
 
 def _build_beta_welcome_html(email: str) -> str:
     """Branded HTML email matching the landing page aesthetic."""
+    import html as _html
+    safe_email = _html.escape(email)
     return f"""\
 <!DOCTYPE html>
 <html>
@@ -81,7 +83,7 @@ def _build_beta_welcome_html(email: str) -> str:
                 real-time transaction firewall for Web3 &mdash; and you'll be among the first to use it.
               </p>
               <p style="margin:0 0 20px;color:#9ca3af;font-size:15px;line-height:1.7;">
-                We'll notify you at <strong style="color:#00ff88;">{email}</strong> as soon as
+                We'll notify you at <strong style="color:#00ff88;">{safe_email}</strong> as soon as
                 beta access is ready. In the meantime, here's how to stay connected:
               </p>
               <!-- CTA Buttons -->

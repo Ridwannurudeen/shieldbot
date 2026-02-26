@@ -23,6 +23,18 @@ class RPCProxy:
 
     def __init__(self, container):
         self._container = container
+        self._session: aiohttp.ClientSession = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Return a shared aiohttp session, creating it if needed."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def close(self):
+        """Close the shared session."""
+        if self._session and not self._session.closed:
+            await self._session.close()
 
     def get_upstream_rpc(self, chain_id: int) -> Optional[str]:
         """Get the upstream RPC URL for a chain."""
@@ -193,13 +205,13 @@ class RPCProxy:
     async def _forward(self, upstream_rpc: str, payload: Dict) -> Dict:
         """Forward a JSON-RPC request to the upstream RPC."""
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    upstream_rpc,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=30),
-                ) as resp:
-                    return await resp.json()
+            session = await self._get_session()
+            async with session.post(
+                upstream_rpc,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                return await resp.json()
         except Exception as e:
             logger.error(f"RPC forward error: {e}")
             return self._error_response(
