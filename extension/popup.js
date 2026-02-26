@@ -151,10 +151,9 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
-      const data = await response.json();
+      await response.json();
       statusDot.className = "status-dot green";
-      const aiStatus = data.ai_available ? " (AI active)" : " (AI offline)";
-      statusText.textContent = "Connected" + aiStatus;
+      statusText.textContent = "Connected";
     } catch (err) {
       statusDot.className = "status-dot red";
       if (err.name === "AbortError") {

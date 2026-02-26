@@ -6,9 +6,21 @@
 (function () {
   "use strict";
 
-  // Inject the page-level script
+  // Generate a per-session channel token BEFORE inject.js loads.
+  // This token is kept in the isolated content-script world and passed to
+  // inject.js via its script URL — page scripts cannot read it after
+  // document_start because the <script> element is removed immediately onload.
+  // Every verdict message must include this token; forge attempts without it
+  // are silently ignored by inject.js.
+  const _CHANNEL_TOKEN = crypto.randomUUID
+    ? crypto.randomUUID()
+    : Array.from(crypto.getRandomValues(new Uint8Array(16)))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+
+  // Inject the page-level script, embedding the channel token in the URL
   const script = document.createElement("script");
-  script.src = chrome.runtime.getURL("inject.js");
+  script.src = chrome.runtime.getURL("inject.js") + "?ct=" + _CHANNEL_TOKEN;
   script.onload = function () {
     this.remove();
   };
@@ -37,7 +49,7 @@
     if (!settings.enabled) {
       // Extension disabled — auto-proceed
       window.postMessage(
-        { type: "SHIELDAI_TX_VERDICT", requestId, action: "proceed" },
+        { type: "SHIELDAI_TX_VERDICT", requestId, action: "proceed", _ct: _CHANNEL_TOKEN },
         "*"
       );
       return;
@@ -219,7 +231,7 @@
     document.getElementById("shieldai-block").addEventListener("click", () => {
       removeOverlay();
       window.postMessage(
-        { type: "SHIELDAI_TX_VERDICT", requestId, action: "block" },
+        { type: "SHIELDAI_TX_VERDICT", requestId, action: "block", _ct: _CHANNEL_TOKEN },
         "*"
       );
     });
@@ -229,7 +241,7 @@
       .addEventListener("click", () => {
         removeOverlay();
         window.postMessage(
-          { type: "SHIELDAI_TX_VERDICT", requestId, action: "proceed" },
+          { type: "SHIELDAI_TX_VERDICT", requestId, action: "proceed", _ct: _CHANNEL_TOKEN },
           "*"
         );
       });
@@ -271,7 +283,7 @@
     document.getElementById("shieldai-block").addEventListener("click", () => {
       removeOverlay();
       window.postMessage(
-        { type: "SHIELDAI_TX_VERDICT", requestId, action: "block" },
+        { type: "SHIELDAI_TX_VERDICT", requestId, action: "block", _ct: _CHANNEL_TOKEN },
         "*"
       );
     });
@@ -281,7 +293,7 @@
       .addEventListener("click", () => {
         removeOverlay();
         window.postMessage(
-          { type: "SHIELDAI_TX_VERDICT", requestId, action: "proceed" },
+          { type: "SHIELDAI_TX_VERDICT", requestId, action: "proceed", _ct: _CHANNEL_TOKEN },
           "*"
         );
       });

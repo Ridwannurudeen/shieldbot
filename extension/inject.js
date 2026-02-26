@@ -10,6 +10,18 @@
   if (window.__shieldai_injected) return;
   window.__shieldai_injected = true;
 
+  // Read the per-session channel token injected via the script URL by content.js.
+  // Verdicts without this token are rejected — page scripts cannot forge it
+  // because the <script> element is removed immediately after load.
+  const _CHANNEL_TOKEN = (() => {
+    try {
+      const src = document.currentScript && document.currentScript.src;
+      return src ? new URL(src).searchParams.get("ct") || "" : "";
+    } catch (_) {
+      return "";
+    }
+  })();
+
   const INTERCEPTED_METHODS = new Set([
     "eth_sendTransaction",
     "eth_signTransaction",
@@ -125,8 +137,13 @@
    */
   function requestAnalysis(method, txParams) {
     return new Promise((resolve) => {
-      const requestId =
-        "shieldai_" + Date.now() + "_" + Math.random().toString(36).slice(2);
+      // Use cryptographically random ID (replaces Math.random)
+      const requestId = crypto.randomUUID
+        ? crypto.randomUUID()
+        : "shieldai_" +
+          Array.from(crypto.getRandomValues(new Uint8Array(16)))
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("");
 
       function handleVerdict(event) {
         if (
@@ -135,6 +152,11 @@
           event.data.type !== "SHIELDAI_TX_VERDICT" ||
           event.data.requestId !== requestId
         ) {
+          return;
+        }
+        // Reject verdicts that don't carry the channel token established at
+        // document_start — this prevents page scripts from forging verdicts.
+        if (_CHANNEL_TOKEN && event.data._ct !== _CHANNEL_TOKEN) {
           return;
         }
         window.removeEventListener("message", handleVerdict);

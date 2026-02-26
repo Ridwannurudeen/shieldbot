@@ -15,6 +15,32 @@ _rpc_hits: dict = defaultdict(list)
 _RPC_RPM = 100
 _RPC_WINDOW = 60.0
 
+# Allowlist of permitted JSON-RPC methods.
+# Only safe, read-heavy methods + send/signTransaction (intercepted by firewall).
+# All other methods are rejected to prevent proxy abuse.
+_ALLOWED_METHODS = {
+    "eth_chainId",
+    "eth_blockNumber",
+    "eth_gasPrice",
+    "eth_maxPriorityFeePerGas",
+    "eth_getBalance",
+    "eth_getCode",
+    "eth_getStorageAt",
+    "eth_getTransactionCount",
+    "eth_getBlockByNumber",
+    "eth_getBlockByHash",
+    "eth_getTransactionByHash",
+    "eth_getTransactionReceipt",
+    "eth_getLogs",
+    "eth_call",
+    "eth_estimateGas",
+    "eth_sendRawTransaction",
+    "eth_sendTransaction",
+    "net_version",
+    "net_listening",
+    "web3_clientVersion",
+}
+
 
 def _rpc_rate_check(client_ip: str) -> bool:
     """Check RPC rate limit for a client IP."""
@@ -103,6 +129,15 @@ async def rpc_endpoint(chain_id: int, request: Request):
                 status_code=400,
                 content={"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Batch size exceeds maximum of 20"}},
             )
+        # Validate all methods in batch
+        for item in body:
+            if isinstance(item, dict) and item.get("method") not in _ALLOWED_METHODS:
+                return JSONResponse(
+                    status_code=400,
+                    content={"jsonrpc": "2.0", "id": item.get("id"), "error": {
+                        "code": -32601, "message": f"Method not allowed: {item.get('method')}",
+                    }},
+                )
         results = await proxy.handle_batch(chain_id, body)
         return JSONResponse(content=results)
 
@@ -110,6 +145,16 @@ async def rpc_endpoint(chain_id: int, request: Request):
     if not isinstance(body, dict):
         return JSONResponse(
             content={"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid request"}},
+        )
+
+    # Validate method against allowlist
+    method = body.get("method", "")
+    if method not in _ALLOWED_METHODS:
+        return JSONResponse(
+            status_code=400,
+            content={"jsonrpc": "2.0", "id": body.get("id"), "error": {
+                "code": -32601, "message": f"Method not allowed: {method}",
+            }},
         )
 
     result = await proxy.handle_request(chain_id, body)

@@ -1,8 +1,8 @@
 python-telegram-bot==20.7
 web3==6.15.1
-requests==2.31.0
+requests>=2.32.4
 python-dotenv==1.0.1
-aiohttp==3.9.3
+aiohttp>=3.10.11
 eth-utils==2.3.1
 anthropic==0.18.1
 fastapi>=0.109.0
