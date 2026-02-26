@@ -10,6 +10,8 @@ class Settings(BaseSettings):
 
     # Telegram
     telegram_bot_token: str = ""
+    telegram_alert_chat_id: str = ""
+    webhook_secret: str = ""  # shared secret for /webhook/uptime verification
 
     # BSC / Etherscan
     bscscan_api_key: str = ""

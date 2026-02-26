@@ -98,6 +98,11 @@ async def rpc_endpoint(chain_id: int, request: Request):
             return JSONResponse(
                 content={"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Empty batch"}},
             )
+        if len(body) > 20:
+            return JSONResponse(
+                status_code=400,
+                content={"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Batch size exceeds maximum of 20"}},
+            )
         results = await proxy.handle_batch(chain_id, body)
         return JSONResponse(content=results)
 

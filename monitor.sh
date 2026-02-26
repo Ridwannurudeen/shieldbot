@@ -1,11 +1,21 @@
 #!/bin/bash
 
-BOT_TOKEN="8385839520:AAEJSBSBRZu0MFDyebvY6q5aEsLBGs6FIQ8"
-CHAT_ID="1132584533"
+# Load secrets from .env (never hardcode tokens in scripts)
+ENV_FILE="/opt/shieldbot/.env"
+if [ -f "$ENV_FILE" ]; then
+  export $(grep -E '^(TELEGRAM_BOT_TOKEN|TELEGRAM_ALERT_CHAT_ID)=' "$ENV_FILE" | xargs)
+fi
+
+BOT_TOKEN="${TELEGRAM_BOT_TOKEN}"
+CHAT_ID="${TELEGRAM_ALERT_CHAT_ID}"
 SERVICE="shieldbot"
-API_URL="https://api.shieldbotsecurity.online/health"
+API_URL="https://api.shieldbotsecurity.online/api/health"
 
 send_alert() {
+  if [ -z "$BOT_TOKEN" ] || [ -z "$CHAT_ID" ]; then
+    echo "Telegram not configured — skipping alert"
+    return
+  fi
   curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
     -d chat_id="$CHAT_ID" \
     -d parse_mode="Markdown" \

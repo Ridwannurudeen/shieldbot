@@ -161,6 +161,18 @@ app.add_middleware(
 
 
 @app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+
+@app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
     # Skip rate limiting for health checks
     if request.url.path in ("/", "/api/health", "/test", "/webhook/uptime"):
@@ -250,6 +262,9 @@ class CommunityReportRequest(BaseModel):
 # Report rate limiter: 5 reports/min per IP
 _report_limiter = RateLimiter(requests_per_minute=5, burst=3)
 
+# Beta-signup rate limiter: 3 signups/min per IP
+_signup_limiter = RateLimiter(requests_per_minute=3, burst=2)
+
 
 # --- Endpoints ---
 
@@ -265,8 +280,14 @@ class BetaSignupRequest(BaseModel):
 
 
 @app.post("/api/beta-signup")
-async def beta_signup(req: BetaSignupRequest):
+async def beta_signup(req: BetaSignupRequest, request: Request):
     """Collect beta signup emails."""
+    # Rate limit per IP
+    forwarded = request.headers.get("x-forwarded-for")
+    client_ip = forwarded.split(",")[-1].strip() if forwarded else request.client.host
+    if not _signup_limiter.is_allowed(f"signup:{client_ip}"):
+        return JSONResponse(status_code=429, content={"detail": "Too many requests. Please try again later."})
+
     import re
     email = req.email.strip().lower()
     if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
@@ -288,11 +309,16 @@ async def beta_signup(req: BetaSignupRequest):
 
 
 @app.post("/webhook/uptime")
-async def uptime_webhook(request: Request):
+async def uptime_webhook(request: Request, secret: str = ""):
     """UptimeRobot webhook — forwards status alerts to Telegram."""
     import httpx
+    # Verify shared secret (pass as ?secret=... query param in UptimeRobot webhook URL)
+    expected_secret = container.settings.webhook_secret if container else ""
+    if not expected_secret or not hmac.compare_digest(secret, expected_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     data = await request.form()
-    alert_type = data.get("alertType", "")        # 1 = down, 2 = up
+    alert_type   = data.get("alertType", "")
     monitor_name = data.get("monitorFriendlyName", "ShieldBot API")
     monitor_url  = data.get("monitorURL", "")
     details      = data.get("alertDetails", "")
@@ -304,8 +330,12 @@ async def uptime_webhook(request: Request):
     else:
         return {"ok": True}
 
-    bot_token = "8385839520:AAEJSBSBRZu0MFDyebvY6q5aEsLBGs6FIQ8"
-    chat_id   = "1132584533"
+    bot_token = container.settings.telegram_bot_token if container else ""
+    chat_id   = container.settings.telegram_alert_chat_id if container else ""
+    if not bot_token or not chat_id:
+        logger.warning("Telegram alert not sent — TELEGRAM_BOT_TOKEN or TELEGRAM_ALERT_CHAT_ID not configured")
+        return {"ok": True}
+
     async with httpx.AsyncClient() as client:
         await client.post(
             f"https://api.telegram.org/bot{bot_token}/sendMessage",
@@ -319,10 +349,7 @@ async def health():
     return {
         "status": "ok",
         "service": "shieldai-firewall",
-        "ai_available": ai_analyzer.is_available() if ai_analyzer else False,
-        "greenfield_enabled": greenfield_service.is_enabled() if greenfield_service else False,
-        "tenderly_enabled": tenderly_simulator.is_enabled() if tenderly_simulator else False,
-        "supported_chains": list(_CHAIN_NAMES.keys()) if '_CHAIN_NAMES' in dir() else [56, 1, 8453, 42161, 137, 10, 204],
+        "supported_chains": [56, 1, 8453, 42161, 137, 10, 204],
     }
 
 
@@ -866,7 +893,7 @@ async def firewall(req: FirewallRequest, request: Request):
         raise
     except Exception as e:
         logger.error(f"Firewall error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/api/scan")
@@ -890,7 +917,7 @@ async def scan(req: ScanRequest):
         raise
     except Exception as e:
         logger.error(f"Scan error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/api/outcome")
@@ -909,7 +936,7 @@ async def report_outcome(req: OutcomeRequest):
         return {"status": "recorded"}
     except Exception as e:
         logger.error(f"Outcome recording error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/api/report")
@@ -946,7 +973,7 @@ async def community_report(req: CommunityReportRequest, request: Request):
         return {"status": "recorded", "address": req.address, "report_type": req.report_type}
     except Exception as e:
         logger.error(f"Community report error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/usage")
@@ -981,6 +1008,7 @@ async def top_campaigns(limit: int = 20):
     """Get the most prolific deployers/funders (likely campaign operators)."""
     if not container or not container.campaign_service:
         raise HTTPException(status_code=503, detail="Campaign service not available")
+    limit = max(1, min(limit, 100))
     campaigns = await container.campaign_service.get_top_campaigns(limit=limit)
     return {"campaigns": campaigns, "count": len(campaigns)}
 
@@ -1028,6 +1056,7 @@ async def mempool_alerts(request: Request, chain_id: int = None, limit: int = 50
     """Get recent mempool alerts (sandwich attacks, frontrunning, suspicious approvals)."""
     if not container or not container.mempool_monitor:
         raise HTTPException(status_code=503, detail="Mempool monitor not available")
+    limit = max(1, min(limit, 200))
     alerts = container.mempool_monitor.get_alerts(chain_id=chain_id, limit=limit)
     return {"alerts": alerts, "count": len(alerts)}
 
@@ -1073,27 +1102,35 @@ async def threat_feed(
     Returns recent high-risk detections and mempool alerts.
     Query params:
     - chain_id: filter by chain (optional)
-    - limit: max results (default 50)
+    - limit: max results (default 50, max 200)
     - since: unix timestamp to fetch threats after (optional)
     """
     if not container:
         raise HTTPException(status_code=503, detail="Service not available")
 
+    limit = max(1, min(limit, 200))  # cap between 1 and 200
     threats = []
 
     # Recent high-risk contract scans from DB
     try:
-        cursor = await container.db._db.execute("""
-            SELECT address, chain_id, risk_score, risk_level, archetype, flags,
-                   last_scanned_at
-            FROM contract_scores
-            WHERE risk_level = 'HIGH'
-            {}
-            ORDER BY last_scanned_at DESC
-            LIMIT ?
-        """.format(
-            f"AND chain_id = {int(chain_id)}" if chain_id else ""
-        ), (limit,))
+        if chain_id is not None:
+            cursor = await container.db._db.execute("""
+                SELECT address, chain_id, risk_score, risk_level, archetype, flags,
+                       last_scanned_at
+                FROM contract_scores
+                WHERE risk_level = 'HIGH' AND chain_id = ?
+                ORDER BY last_scanned_at DESC
+                LIMIT ?
+            """, (int(chain_id), limit))
+        else:
+            cursor = await container.db._db.execute("""
+                SELECT address, chain_id, risk_score, risk_level, archetype, flags,
+                       last_scanned_at
+                FROM contract_scores
+                WHERE risk_level = 'HIGH'
+                ORDER BY last_scanned_at DESC
+                LIMIT ?
+            """, (limit,))
         rows = await cursor.fetchall()
 
         import json as _json

@@ -21,10 +21,24 @@ class ScamDatabase:
         self.chainabuse_api = "https://www.chainabuse.com/api/address/"
         self.goplus_api = "https://api.gopluslabs.io/api/v1/token_security/"
 
+        # Shared session (created lazily, reused across requests)
+        self._session: aiohttp.ClientSession = None
+
         # Local blacklist (can be expanded)
         self.known_scams = set([
             # Add known scam addresses here
         ])
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Return a shared aiohttp session, creating it if needed."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def close(self):
+        """Close the shared session."""
+        if self._session and not self._session.closed:
+            await self._session.close()
 
     async def check_address(self, address: str, chain_id: int = 56) -> List[Dict]:
         """
@@ -62,32 +76,28 @@ class ScamDatabase:
     async def _check_chainabuse(self, address: str) -> List[Dict]:
         """Check ChainAbuse database"""
         try:
-            async with aiohttp.ClientSession() as session:
-                url = f"{self.chainabuse_api}{address}"
-                
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        
-                        if data and len(data) > 0:
-                            return [{
-                                'type': 'ChainAbuse',
-                                'reason': data[0].get('description', 'Reported scam'),
-                                'source': 'chainabuse.com'
-                            }]
-            
+            session = await self._get_session()
+            url = f"{self.chainabuse_api}{address}"
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data and len(data) > 0:
+                        return [{
+                            'type': 'ChainAbuse',
+                            'reason': data[0].get('description', 'Reported scam'),
+                            'source': 'chainabuse.com'
+                        }]
             return []
         except Exception as e:
             logger.error(f"Error checking ChainAbuse: {e}")
             return []
-    
+
     async def _check_goplus(self, address: str, chain_id: int = 56) -> List[Dict]:
         """Check GoPlus Security API for token risk indicators."""
         try:
-            async with aiohttp.ClientSession() as session:
-                url = f"{self.goplus_api}{chain_id}?contract_addresses={address.lower()}"
-
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+            session = await self._get_session()
+            url = f"{self.goplus_api}{chain_id}?contract_addresses={address.lower()}"
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         result = data.get('result', {}).get(address.lower(), {})
@@ -112,7 +122,6 @@ class ScamDatabase:
                                 'reason': '; '.join(flags),
                                 'source': 'gopluslabs.io',
                             }]
-
             return []
         except Exception as e:
             logger.error(f"Error checking GoPlus: {e}")
