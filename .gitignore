@@ -43,6 +43,9 @@ demo/
 # PDF files
 *.pdf
 
+# Landing page source (build output is in landing/)
+landing-src/
+
 # Build scripts (local tooling)
 scripts/build_*.py
 
