@@ -67,9 +67,11 @@ class PhishingService:
                         return defaults
                     data = await resp.json()
 
-            is_phishing = (
-                str(data.get("result", {}).get("is_phishing_site", "0")) == "1"
-            )
+            result_data = data.get("result", {})
+            # GoPlus returns "phishing_site": 1 (integer) or "is_phishing_site": "1" (string)
+            # Handle both field names and both types defensively.
+            raw = result_data.get("phishing_site", result_data.get("is_phishing_site", 0))
+            is_phishing = int(raw) == 1
 
             result = {
                 "is_phishing": is_phishing,
