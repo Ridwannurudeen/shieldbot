@@ -7,6 +7,11 @@
 const DEFAULT_API_URL = "";
 const MAX_HISTORY = 50;
 
+// In-memory phishing cache: domain -> {result, expiresAt}
+// Avoids repeated API calls when navigating across pages on the same site.
+const _phishingCache = new Map();
+const PHISHING_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
 // Listen for messages from content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "SHIELDAI_ANALYZE") {
@@ -16,6 +21,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ result });
       })
       .catch((err) => sendResponse({ error: err.message || "Unknown error" }));
+    return true;
+  }
+
+  if (message.type === "SHIELDAI_CHECK_PHISHING") {
+    checkPhishing(message.url)
+      .then((result) => sendResponse({ result }))
+      .catch(() => sendResponse({ result: { is_phishing: false } }));
     return true;
   }
 
@@ -33,6 +45,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 });
+
+async function checkPhishing(url) {
+  try {
+    const { hostname } = new URL(url);
+    const cacheKey = hostname.toLowerCase();
+
+    // Check extension-side cache
+    const cached = _phishingCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.result;
+    }
+
+    // Get configured API URL — if not set, skip silently
+    let apiUrl;
+    try {
+      apiUrl = await getApiUrl();
+    } catch {
+      return { is_phishing: false };
+    }
+
+    const response = await fetch(
+      `${apiUrl}/api/phishing?url=${encodeURIComponent(url)}`,
+      {
+        method: "GET",
+        signal: AbortSignal.timeout(5000),
+      }
+    );
+
+    if (!response.ok) {
+      return { is_phishing: false };
+    }
+
+    const result = await response.json();
+    _phishingCache.set(cacheKey, { result, expiresAt: Date.now() + PHISHING_CACHE_TTL_MS });
+    return result;
+  } catch {
+    return { is_phishing: false };
+  }
+}
 
 function isAllowedUrl(url) {
   try {

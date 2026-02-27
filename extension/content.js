@@ -304,4 +304,65 @@
     div.textContent = str;
     return div.innerHTML;
   }
+
+  // --- Phishing Site Check ---
+  // Runs asynchronously on every page load. Does not block the page.
+
+  async function runPhishingCheck() {
+    try {
+      const settings = await getSettings();
+      if (!settings.enabled || !settings.apiUrl) return;
+
+      const response = await chrome.runtime.sendMessage({
+        type: "SHIELDAI_CHECK_PHISHING",
+        url: window.location.href,
+      });
+
+      if (response?.result?.is_phishing) {
+        showPhishingBanner(window.location.hostname);
+      }
+    } catch {
+      // Best-effort — never crash the page
+    }
+  }
+
+  function showPhishingBanner(domain) {
+    if (document.getElementById("shieldai-phishing-banner")) return;
+
+    const banner = document.createElement("div");
+    banner.id = "shieldai-phishing-banner";
+    banner.className = "shieldai-phishing-banner";
+    banner.innerHTML = `
+      <div class="shieldai-phishing-content">
+        <span class="shieldai-phishing-icon">&#9888;</span>
+        <div class="shieldai-phishing-text">
+          <strong>ShieldBot Warning:</strong>
+          <span>${escapeHtml(domain)}</span> has been flagged as a phishing site.
+          Your wallet and funds may be at risk.
+        </div>
+        <div class="shieldai-phishing-actions">
+          <button class="shieldai-phishing-btn-leave" id="shieldai-leave">Leave Page</button>
+          <button class="shieldai-phishing-btn-dismiss" id="shieldai-dismiss">I know the risk</button>
+        </div>
+      </div>
+    `;
+
+    // Prepend to <html> — safe at document_start before <body> exists
+    document.documentElement.insertBefore(
+      banner,
+      document.documentElement.firstChild
+    );
+
+    document.getElementById("shieldai-leave").addEventListener("click", () => {
+      window.history.length > 1 ? window.history.back() : window.close();
+    });
+
+    document
+      .getElementById("shieldai-dismiss")
+      .addEventListener("click", () => {
+        banner.remove();
+      });
+  }
+
+  runPhishingCheck();
 })();

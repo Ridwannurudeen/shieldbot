@@ -14,7 +14,7 @@ from services import (
     DexService, EthosService, HoneypotService,
     ContractService, GreenfieldService, TenderlySimulator,
     MempoolMonitor, RescueService, CampaignService,
-    EmailService,
+    EmailService, PhishingService,
 )
 from core.risk_engine import RiskEngine
 from core.calibration import load_calibration
@@ -125,6 +125,9 @@ class ServiceContainer:
         self.mempool_monitor = MempoolMonitor(self.web3_client, self.db)
         self.rescue_service = RescueService(self.web3_client, self.db)
         self.campaign_service = CampaignService(self.web3_client, self.db)
+
+        # Phishing site detection
+        self.phishing_service = PhishingService()
 
         # Email service (Resend)
         self.email_service = EmailService(

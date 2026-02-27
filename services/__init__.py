@@ -8,9 +8,10 @@ from .mempool_service import MempoolMonitor
 from .rescue_service import RescueService
 from .campaign_service import CampaignService
 from .email_service import EmailService
+from .phishing_service import PhishingService
 
 __all__ = [
     'DexService', 'EthosService', 'HoneypotService', 'ContractService',
     'GreenfieldService', 'TenderlySimulator', 'MempoolMonitor', 'RescueService',
-    'CampaignService', 'EmailService',
+    'CampaignService', 'EmailService', 'PhishingService',
 ]

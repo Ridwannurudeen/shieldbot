@@ -349,6 +349,21 @@ async def uptime_webhook(request: Request, secret: str = ""):
     return {"ok": True}
 
 
+@app.get("/api/phishing")
+async def check_phishing(url: str, request: Request):
+    """Check if a URL is a known phishing site.
+
+    Called by the Chrome extension content script on every page load.
+    Results are cached server-side for 1 hour per domain.
+    No API key required — rate-limited by IP via the existing middleware.
+    """
+    if not container or not container.phishing_service:
+        raise HTTPException(status_code=503, detail="Service unavailable")
+
+    result = await container.phishing_service.check_url(url)
+    return result
+
+
 @app.get("/api/health")
 async def health():
     return {
