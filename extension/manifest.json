@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "ShieldAI Transaction Firewall",
   "version": "1.0.3",
-  "description": "Real-time BNB Chain transaction security. Intercepts wallet transactions, shows risk assessment before signing, and warns on known phishing sites.",
+  "description": "Real-time BNB Chain transaction firewall. Detects honeypots, rug pulls, and phishing sites before you sign.",
   "permissions": [
     "storage",
     "permissions"
