@@ -368,6 +368,110 @@ class Database:
             for r in rows
         ]
 
+    async def get_platform_stats(self) -> Dict:
+        """Aggregate platform metrics for reporting and grant applications."""
+        now = time.time()
+        windows = {
+            "last_24h": now - 86400,
+            "last_7d":  now - 7 * 86400,
+            "last_30d": now - 30 * 86400,
+        }
+
+        # --- All-time aggregates ---
+        cur = await self._db.execute(
+            "SELECT COUNT(*), COALESCE(SUM(scan_count), 0) FROM contract_scores"
+        )
+        row = await cur.fetchone()
+        unique_contracts = row[0] or 0
+        total_scan_events = int(row[1] or 0)
+
+        cur = await self._db.execute(
+            "SELECT COUNT(*) FROM contract_scores WHERE risk_score >= 71"
+        )
+        threats_detected = (await cur.fetchone())[0] or 0
+
+        cur = await self._db.execute(
+            "SELECT COUNT(*) FROM outcome_events WHERE user_decision = 'block'"
+        )
+        total_blocks = (await cur.fetchone())[0] or 0
+
+        cur = await self._db.execute(
+            "SELECT COUNT(*) FROM outcome_events WHERE user_decision = 'proceed'"
+        )
+        total_proceeds = (await cur.fetchone())[0] or 0
+
+        cur = await self._db.execute(
+            "SELECT COUNT(*) FROM deployers"
+        )
+        deployers_indexed = (await cur.fetchone())[0] or 0
+
+        cur = await self._db.execute(
+            "SELECT COUNT(*) FROM community_reports"
+        )
+        community_reports = (await cur.fetchone())[0] or 0
+
+        cur = await self._db.execute(
+            "SELECT COUNT(*) FROM beta_signups"
+        )
+        beta_signups = (await cur.fetchone())[0] or 0
+
+        # Risk level breakdown
+        cur = await self._db.execute(
+            "SELECT risk_level, COUNT(*) FROM contract_scores GROUP BY risk_level"
+        )
+        by_risk_level = {row[0]: row[1] for row in await cur.fetchall()}
+
+        # By chain
+        cur = await self._db.execute(
+            "SELECT chain_id, COUNT(*), COALESCE(SUM(scan_count), 0) FROM contract_scores GROUP BY chain_id"
+        )
+        by_chain = {
+            str(row[0]): {"contracts": row[1], "scans": int(row[2])}
+            for row in await cur.fetchall()
+        }
+
+        # --- Time-windowed aggregates ---
+        windowed = {}
+        for label, cutoff in windows.items():
+            cur = await self._db.execute(
+                "SELECT COUNT(*) FROM contract_scores WHERE last_scanned_at > ?", (cutoff,)
+            )
+            scans = (await cur.fetchone())[0] or 0
+
+            cur = await self._db.execute(
+                "SELECT COUNT(*) FROM contract_scores WHERE last_scanned_at > ? AND risk_score >= 71",
+                (cutoff,)
+            )
+            threats = (await cur.fetchone())[0] or 0
+
+            cur = await self._db.execute(
+                "SELECT COUNT(*) FROM outcome_events WHERE created_at > ? AND user_decision = 'block'",
+                (cutoff,)
+            )
+            blocks = (await cur.fetchone())[0] or 0
+
+            windowed[label] = {
+                "scans": scans,
+                "threats_detected": threats,
+                "transactions_blocked": blocks,
+            }
+
+        return {
+            "all_time": {
+                "unique_contracts_scanned": unique_contracts,
+                "total_scan_events": total_scan_events,
+                "threats_detected": threats_detected,
+                "transactions_blocked": total_blocks,
+                "transactions_proceeded_past_warning": total_proceeds,
+                "deployers_indexed": deployers_indexed,
+                "community_reports": community_reports,
+                "beta_signups": beta_signups,
+                "by_risk_level": by_risk_level,
+                "by_chain": by_chain,
+            },
+            **windowed,
+        }
+
     async def get_outcomes(self, address: str, chain_id: int = 56, limit: int = 50) -> List[Dict]:
         """Get outcome events for an address."""
         cursor = await self._db.execute("""

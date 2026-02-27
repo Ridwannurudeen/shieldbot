@@ -1088,6 +1088,45 @@ async def create_api_key(request: Request):
     return result
 
 
+@app.get("/api/admin/stats")
+async def admin_stats(request: Request):
+    """Platform metrics — scans, threats, blocks, chain breakdown, mempool.
+
+    Requires X-Admin-Secret header. Use this endpoint to document metrics
+    for grant applications, AvengerDAO membership, and weekly snapshots.
+    """
+    admin_secret = request.headers.get("x-admin-secret")
+    expected = container.settings.admin_secret if container else ""
+    if not expected:
+        raise HTTPException(status_code=503, detail="Admin not configured")
+    if not admin_secret or not hmac.compare_digest(admin_secret, expected):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not container or not container.db:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    import datetime
+    db_stats = await container.db.get_platform_stats()
+
+    # Mempool stats (in-memory counters)
+    mempool = {}
+    if container.mempool_monitor:
+        mempool = container.mempool_monitor.get_stats()
+
+    # Phishing cache size (server-side, in-memory)
+    phishing_cache_size = 0
+    if container.phishing_service:
+        phishing_cache_size = len(container.phishing_service._cache)
+
+    return {
+        "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
+        **db_stats,
+        "mempool": mempool,
+        "phishing": {
+            "domains_cached": phishing_cache_size,
+        },
+    }
+
+
 @app.get("/api/admin/signups")
 async def admin_signups(request: Request):
     """List all beta signups. Requires ADMIN_SECRET header."""
