@@ -381,6 +381,40 @@ async def threat_dashboard():
     return FileResponse(dashboard_path, media_type="text/html")
 
 
+@app.get("/test-phishing", response_class=HTMLResponse)
+async def test_phishing_page():
+    """Stable test page for the phishing banner.
+
+    The PhishingService always flags test-phishing.shieldbotsecurity.online,
+    so loading this page with the extension installed will reliably trigger
+    the red warning banner — no dependency on live phishing sites.
+    """
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ShieldBot Phishing Banner Test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0;
+           display: flex; align-items: center; justify-content: center;
+           min-height: 100vh; margin: 0; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+            padding: 32px; max-width: 480px; text-align: center; }
+    h1 { color: #ef4444; margin: 0 0 12px; }
+    p  { color: #94a3b8; line-height: 1.6; margin: 0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>&#9888; Phishing Test Page</h1>
+    <p>This page is intentionally flagged by ShieldBot for testing purposes.<br><br>
+       If the extension is installed and enabled, you should see a red warning
+       banner at the top of this page.</p>
+  </div>
+</body>
+</html>"""
+
+
 @app.get("/test", response_class=HTMLResponse)
 async def test_page():
     """Test page for the Chrome extension — simulates wallet transactions."""

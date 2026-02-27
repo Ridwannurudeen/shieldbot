@@ -39,9 +39,23 @@ class PhishingService:
         }
 
         try:
-            domain = urlparse(url).netloc.lower()
+            parsed = urlparse(url)
+            domain = parsed.netloc.lower()
             if not domain:
                 return defaults
+
+            # Stable test trigger — ?_shieldbot_phishing_test=1 on any URL
+            # always returns is_phishing: true so the extension banner can be
+            # tested without depending on live phishing sites (taken down quickly).
+            # Nothing is cached, so the host domain is never flagged.
+            from urllib.parse import parse_qs
+            if "_shieldbot_phishing_test" in parse_qs(parsed.query):
+                return {
+                    "is_phishing": True,
+                    "confidence": "high",
+                    "source": "test",
+                    "cached": False,
+                }
 
             # Strip port for cache key
             cache_key = domain.split(":")[0]
