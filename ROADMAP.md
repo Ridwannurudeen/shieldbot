@@ -10,7 +10,33 @@ ShieldBot is evolving from a BNB Chain transaction scanner into a **cross-chain 
 
 **V1:** Transaction scanner for BNB Chain.
 **V2 (current):** Cross-chain security intelligence network for wallets, traders, and applications.
-**V3 (next):** Non-EVM expansion, consumer monetization, and B2B partnerships.
+**V3 (next):** Non-EVM expansion, consumer monetization, B2B partnerships, and full feature parity with — and beyond — every competitor.
+
+---
+
+## Market Landscape (February 2026)
+
+The standalone crypto security extension market has undergone rapid consolidation. Three of the largest tools are gone:
+
+| Tool | Status | Notes |
+|------|--------|-------|
+| Blowfish | Acquired by Phantom (Nov 2024) | External API shut down; wallets must find alternatives |
+| WalletGuard | Acquired by MetaMask (Jul 2024), sunset Mar 2025 | ML-based phishing detection and soft-locking lost |
+| Pocket Universe | Acquired by Kerberus (Aug 2025) | 200K+ user base in transition; roadmap uncertain |
+| Stelo | Shut down Oct 2023 | a16z-backed; failed to monetize |
+
+**ShieldBot is now the only active, dedicated real-time transaction firewall extension for BNB Chain.** This window is the primary growth opportunity.
+
+Active competitors and their coverage gaps:
+
+| Tool | BNB Real-time Firewall | Telegram Bot | RPC Proxy | Campaign Graph | Mempool Monitor |
+|------|----------------------|--------------|-----------|----------------|-----------------|
+| Fire | ❌ No BNB support | ❌ | ❌ | ❌ | ❌ |
+| Revoke.cash | ❌ Approvals only | ❌ | ❌ | ❌ | ❌ |
+| De.Fi Shield | ❌ Web-only, no interception | ❌ | ❌ | ❌ | ❌ |
+| GoPlus | ❌ API only, not consumer-facing | ❌ | ❌ | ❌ | ❌ |
+| Token Sniffer | ❌ Static scanner only | ❌ | ❌ | ❌ | ❌ |
+| **ShieldBot** | ✅ | ✅ 10 commands | ✅ 7 chains | ✅ | ✅ |
 
 ---
 
@@ -24,6 +50,7 @@ ShieldBot is evolving from a BNB Chain transaction scanner into a **cross-chain 
 | Telegram | 10-command security suite with multi-chain support | Live |
 | Threat Dashboard | Public real-time feed of detected threats and campaigns | Live |
 | API | B2B threat intelligence API with key auth and usage metering | Live |
+| Firefox Extension | Port of Chrome extension for Firefox users | Planned |
 
 ---
 
@@ -64,26 +91,26 @@ ShieldBot is evolving from a BNB Chain transaction scanner into a **cross-chain 
 - [x] **SDK v1** — Published `shieldbot-sdk` TypeScript package.
 - [x] **Public threat dashboard** — Real-time feed of detected threats and campaigns.
 - [x] **Threat Feed API** — Subscribe to ShieldBot's intelligence.
-- [x] **Chrome Web Store submission** — Extension v1.0.1 published.
+- [x] **Chrome Web Store submission** — Extension v1.0.2 submitted, under review.
 
 ---
 
-## Phase 4: Post-Hackathon — Growth and Monetization
+## Phase 4: Gap Closing + Market Capture
 
-Leverage hackathon win momentum to build real user base and revenue.
+Three major competitors are gone or in transition. This phase captures their users and closes the feature gaps that remain.
 
-### Grants and Funding
-- [ ] **BNB Chain MVB / Kickstart grant** — Apply with hackathon win as proof of traction.
-- [ ] **Base Ecosystem Fund** — Base adapter is live, apply for ecosystem grant.
-- [ ] **Arbitrum Foundation grant** — Arbitrum adapter is live, apply for STIP/ecosystem grant.
-
-### User Acquisition
-- [ ] **Landing page** — Marketing site at shieldbotsecurity.online with product explainer, demo, and beta signup form.
-- [ ] **Beta waitlist** — Email/wallet collection for early access before Chrome Web Store approval.
-- [ ] **Private beta cohort** — 50-200 instrumented users providing feedback and outcome data.
-- [ ] **Community launch** — Announce on X/Twitter, BNB community channels, crypto security groups.
-- [ ] **Chrome Web Store SEO** — Optimize listing, screenshots, and description for organic installs.
+### Capture the Vacuum
+- [ ] **Landing page** — Marketing site at shieldbotsecurity.online. Position directly as the BNB Chain security extension the market needs now that Pocket Universe/WalletGuard are gone.
+- [ ] **Chrome Web Store SEO** — Optimize listing title, description, and screenshots for: "BNB Chain security", "BSC transaction protection", "honeypot detector".
+- [ ] **Community launch** — Announce on X/Twitter, BNB community channels, crypto security groups targeting users migrating from defunct tools.
+- [ ] **AvengerDAO membership** — Apply to BNB Chain's official community security coalition. Membership = ecosystem credibility, DappBay visibility, and referral from BNB Chain itself. GoPlus and HashDit are members.
 - [ ] **Extension onboarding flow** — First-time user tutorial and guided first scan.
+- [ ] **Beta waitlist** — Email/wallet collection for early access to new features.
+
+### Close the Detection Gaps
+- [ ] **Phishing / URL blocker** — Content script that checks the active URL against the GoPlus Phishing Site Detection API and known phishing blocklists (Chainabuse, PhishTank) before a transaction is signed. Warn users on known phishing domains. Matches capability of Fire and Pocket Universe.
+- [ ] **Bytecode fingerprinting for unverified contracts** — ~70% of BSC scam tokens are unverified; GoPlus and Etherscan cannot read their source code. Integrate the Token Sniffer API as a fallback for unverified contracts. Include Token Sniffer's Smell Test score in the ShieldScore composite when source is unavailable.
+- [ ] **Deployer cluster auto-blocking** — When Campaign Graph Radar identifies a known bad deployer cluster, automatically flag all future tokens from that cluster in real-time — not just individually scanned contracts. Block entire scam networks, not just individual tokens.
 
 ### Production Hardening
 - [ ] **Monitoring and alerting** — Uptime checks, error rate alerts, latency dashboards.
@@ -92,19 +119,37 @@ Leverage hackathon win momentum to build real user base and revenue.
 - [ ] **Rate limiting tuning** — Adjust limits based on real traffic patterns.
 - [ ] **CI/CD pipeline** — Automated tests and deployment on push.
 
+### Grants and Funding
+- [ ] **BNB Chain MVB / Kickstart grant** — Apply with hackathon win + live product + market position as proof of traction.
+- [ ] **Base Ecosystem Fund** — Base adapter is live; apply for ecosystem grant.
+- [ ] **Arbitrum Foundation grant** — Arbitrum adapter is live; apply for STIP/ecosystem grant.
+
 ### Monetization
-- [ ] **Consumer Pro tier** — $9-15/month for unlimited scans, all chains, priority analysis.
-- [ ] **B2B API partnerships** — Onboard first wallet/dApp integrating ShieldBot API.
+- [ ] **Consumer Pro tier** — $9-15/month for unlimited scans, all chains, priority analysis, post-deploy alerts.
+- [ ] **B2B API partnerships** — Onboard first BSC wallet or DEX integrating ShieldBot API. Target: PancakeSwap, Biswap. GoPlus holds this position; approach as a BNB-native alternative.
 - [ ] **Insurance protocol partnerships** — Revenue share on premium reductions for protected wallets.
 
 ---
 
-## Phase 5: V3 — Expansion
+## Phase 5: V3 — Moat Extension + Expansion
 
+Features that go beyond every active competitor and establish ShieldBot as the definitive standard.
+
+### New Detection Capabilities
+- [ ] **Post-deployment contract monitoring** — Background watcher that periodically re-scans high-traffic BSC tokens for state changes: ownership transfers, tax rate changes, blacklist additions, new mint functions. Push Telegram alerts to users who previously scanned the token. No competitor does this.
+- [ ] **Asset soft-locking** — Let users designate specific tokens or NFTs as "protected". Any transaction involving a protected asset triggers an elevated confirmation step. WalletGuard (now defunct) pioneered this; no active tool offers it.
+- [ ] **ML-based phishing detection** — Move beyond blocklists to behavioral pattern detection: homoglyph URLs, newly registered domains, impersonation patterns. WalletGuard (now MetaMask) had this; it is the most advanced phishing protection in the industry and is no longer available independently.
+
+### Platform Expansion
+- [ ] **Firefox extension** — Port the Manifest V3 extension to Firefox. Revoke.cash and Fire support Firefox; Chrome-only limits the addressable market. MV3 Firefox compatibility is available since 2023.
 - [ ] **Solana support** — New chain architecture, different transaction model.
-- [ ] **TON support** — Telegram-native chain, natural fit with existing Telegram bot.
-- [ ] **Autonomous rescue execution (Tier 3)** — Auto-revoke dangerous approvals with user consent.
+- [ ] **TON support** — Telegram-native chain, natural fit for the existing Telegram bot.
 - [ ] **Mobile native app** — Dedicated mobile experience beyond RPC proxy.
+
+### Ecosystem Integrations
+- [ ] **BSC trading bot integrations** — Maestro, Banana Gun, and UniBot serve millions of BSC retail traders through Telegram. Integrate ShieldBot's `/token` scan into their pre-trade flow. ShieldBot already has the Telegram bot infrastructure; this is a partnership + API integration.
+- [ ] **DEX security widgets** — Embeddable ShieldBot token safety badge for PancakeSwap, Biswap, and other BSC DEXs. Display the ShieldScore directly in the swap UI.
+- [ ] **Autonomous rescue execution (Tier 3)** — Auto-revoke dangerous approvals with user consent. Extend Rescue Mode from advisory to action.
 - [ ] **On-chain reputation token** — Tokenized security scores for DeFi composability.
 
 ---
@@ -133,8 +178,9 @@ Leverage hackathon win momentum to build real user base and revenue.
 |------|---------|--------------|
 | Primary | B2B API | $0.001-0.005 per scan, volume discounts |
 | Funding | Chain grants | $25-100K per chain ecosystem grant |
+| Partnership | DEX / trading bot integrations | Revenue share or flat integration fee |
 | Partnership | Insurance protocols | Revenue share on premium reductions |
-| Secondary | Consumer Pro | $9-15/month for unlimited scans, all chains, rescue mode |
+| Secondary | Consumer Pro | $9-15/month for unlimited scans, all chains, rescue mode, post-deploy alerts |
 
 ---
 
