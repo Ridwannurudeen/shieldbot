@@ -3,11 +3,142 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ShieldBot — On-Chain Transaction Firewall</title>
-    <meta name="description" content="ShieldBot intercepts, analyzes, and scores every on-chain transaction before you sign. Real-time protection across 7 chains." />
+
+    <!-- Primary SEO -->
+    <title>ShieldBot — Real-Time Web3 Transaction Security Firewall</title>
+    <meta name="description" content="ShieldBot intercepts, analyzes, and scores every on-chain transaction before you sign. Real-time rug pull detection, phishing blocking, and smart contract auditing across BNB Chain, Ethereum, Base, and more." />
+    <meta name="keywords" content="web3 security, crypto security, transaction firewall, rug pull detector, phishing blocker, smart contract audit, BNB Chain security, DeFi protection, blockchain security, crypto wallet protection" />
+    <meta name="author" content="ShieldBot" />
+    <link rel="canonical" href="https://shieldbotsecurity.online/" />
+
+    <!-- Google Search Console Verification -->
+    <meta name="google-site-verification" content="QgYaLaOe2BC4tQlD-F27KdLEDqyWbfiq0m_2kExt6wc" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://shieldbotsecurity.online/" />
+    <meta property="og:title" content="ShieldBot — Real-Time Web3 Transaction Security Firewall" />
+    <meta property="og:description" content="Stop rug pulls, phishing attacks, and malicious contracts before you sign. AI-powered real-time protection across 7 chains." />
+    <meta property="og:image" content="https://shieldbotsecurity.online/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:site_name" content="ShieldBot" />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@shieldbot_" />
+    <meta name="twitter:creator" content="@shieldbot_" />
+    <meta name="twitter:title" content="ShieldBot — Real-Time Web3 Transaction Security Firewall" />
+    <meta name="twitter:description" content="Stop rug pulls, phishing attacks, and malicious contracts before you sign. AI-powered real-time protection across 7 chains." />
+    <meta name="twitter:image" content="https://shieldbotsecurity.online/og-image.png" />
+
+    <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>" />
-    <script type="module" crossorigin src="/assets/index-CxkP8ViV.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DZROYcvR.css">
+
+    <!-- FAQ JSON-LD (rich results in Google) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What is ShieldBot?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "ShieldBot is a real-time Web3 transaction security firewall. It intercepts every on-chain transaction before you sign it, runs an AI-powered risk analysis, and alerts you to threats like rug pulls, honeypots, phishing sites, and malicious smart contracts — across 7 blockchains."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How does ShieldBot detect rug pulls and scams?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "ShieldBot combines multiple detection layers: it scans smart contract bytecode for known exploit patterns, checks token liquidity and ownership concentration, queries real-time mempool data for suspicious activity, cross-references phishing databases, and uses Claude AI to analyze contract logic. A risk score from 0–100 is returned before you confirm any transaction."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Which blockchains does ShieldBot support?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "ShieldBot currently supports BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, and Solana — with more chains being added. All 7 chains are monitored in real time through the browser extension and Telegram bot."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is ShieldBot free to use?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. The ShieldBot Chrome extension and Telegram bot are both free. There are no subscription fees to get real-time transaction warnings, phishing protection, and risk scoring."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does ShieldBot store my private keys or wallet data?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. ShieldBot never asks for, stores, or transmits your private keys or seed phrases. It only analyzes transaction data (contract addresses, token metadata, on-chain activity) that is already publicly visible on the blockchain."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What happens when ShieldBot detects a threat?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "If a high-risk transaction is detected, ShieldBot displays an immediate warning before you sign — showing the risk score, threat type, and a plain-English explanation of what was found. For phishing sites, a red banner appears on the page. You always retain full control and can choose to proceed or cancel."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How is ShieldBot different from other crypto security tools?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Most security tools check transactions after the fact or only scan static token lists. ShieldBot works in real time — it intercepts transactions before signing, combines on-chain mempool data with AI contract analysis, and covers 7 chains in a single tool. It also includes a Telegram bot for users who don't use a browser extension."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How do I install ShieldBot?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Install the ShieldBot extension from the Chrome Web Store (currently under review — sign up for the beta to get early access). The Telegram bot is available now at t.me/shieldbot_bnb_bot — send any contract address or token to get an instant risk analysis."
+          }
+        }
+      ]
+    }
+    </script>
+
+    <!-- SoftwareApplication JSON-LD -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "ShieldBot",
+      "applicationCategory": "SecurityApplication",
+      "operatingSystem": "Chrome",
+      "url": "https://shieldbotsecurity.online",
+      "description": "Real-time Web3 transaction security firewall. Detects rug pulls, phishing, and malicious smart contracts before you sign.",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "author": {
+        "@type": "Person",
+        "name": "Ridwan Nurudeen",
+        "url": "https://github.com/Ridwannurudeen"
+      },
+      "sameAs": [
+        "https://github.com/Ridwannurudeen/shieldbot",
+        "https://x.com/shieldbot_",
+        "https://t.me/shieldbot_bnb_bot"
+      ]
+    }
+    </script>
+    <script type="module" crossorigin src="/assets/index-DTNCr8kh.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-C8L-dArD.css">
   </head>
   <body>
     <div id="root"></div>
