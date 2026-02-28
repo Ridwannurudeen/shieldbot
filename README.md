@@ -546,7 +546,7 @@ python eval/live_scorer.py
 
 ## Hackathon
 
-Built for **Good Vibes Only: OpenClaw Edition** — **Builders Track** (BNB Chain).
+**3rd Place Winner** — **Good Vibes Only: OpenClaw Edition**, Builders Track (BNB Chain).
 
 **Key Differentiators:**
 
@@ -574,7 +574,7 @@ Built for **Good Vibes Only: OpenClaw Edition** — **Builders Track** (BNB Chai
 
 - **Telegram**: [@Ggudman](https://t.me/Ggudman)
 - **GitHub**: [Ridwannurudeen](https://github.com/Ridwannurudeen)
-- **Twitter**: [@Ggudman1](https://twitter.com/Ggudman1)
+- **Twitter**: [@shieldbot_](https://twitter.com/shieldbot_)
 
 ---
 

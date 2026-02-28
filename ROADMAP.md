@@ -2,7 +2,7 @@
 
 ShieldBot is evolving from a BNB Chain transaction scanner into a **cross-chain security intelligence network**. Every user makes every other user safer.
 
-**Hackathon Winner — Good Vibes Only: OpenClaw Edition (Builders Track, BNB Chain)**
+**3rd Place — Good Vibes Only: OpenClaw Edition (Builders Track, BNB Chain)**
 
 ---
 
@@ -14,7 +14,7 @@ ShieldBot is evolving from a BNB Chain transaction scanner into a **cross-chain 
 
 ---
 
-## Market Landscape (February 2026)
+## Market Landscape (March 2026)
 
 The standalone crypto security extension market has undergone rapid consolidation. Three of the largest tools are gone:
 
@@ -102,11 +102,11 @@ Three major competitors are gone or in transition. This phase captures their use
 
 ### Capture the Vacuum
 - [x] **Landing page** — Live at [shieldbotsecurity.online](https://shieldbotsecurity.online). Positioned as the BNB Chain security extension filling the gap left by the consolidation of Pocket Universe and WalletGuard.
-- [ ] **Chrome Web Store SEO** — Optimize listing title, description, and screenshots for: "BNB Chain security", "BSC transaction protection", "honeypot detector".
+- [x] **Chrome Web Store SEO** — Optimize listing title, description, and screenshots for: "BNB Chain security", "BSC transaction protection", "honeypot detector".
 - [ ] **Community launch** — Announce on X/Twitter, BNB community channels, crypto security groups targeting users migrating from defunct tools.
 - [ ] **AvengerDAO membership** — Apply to BNB Chain's official community security coalition. Membership = ecosystem credibility, DappBay visibility, and referral from BNB Chain itself. GoPlus and HashDit are members.
 - [ ] **Extension onboarding flow** — First-time user tutorial and guided first scan.
-- [ ] **Beta waitlist** — Email/wallet collection for early access to new features.
+- [x] **Beta waitlist** — Email/wallet collection for early access to new features. Live at shieldbotsecurity.online.
 
 ### Close the Detection Gaps
 - [x] **Phishing / URL blocker** — Content script checks active URL against GoPlus Phishing Site Detection API on every page load. Red banner on hit. 1hr cache. Live in v1.0.3.
@@ -195,4 +195,4 @@ ShieldBot is open source. If you want to contribute:
 
 ---
 
-*Last updated: February 2026*
+*Last updated: March 2026*
