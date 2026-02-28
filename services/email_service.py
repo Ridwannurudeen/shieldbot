@@ -101,7 +101,7 @@ def _build_beta_welcome_html(email: str) -> str:
                   <td align="center">
                     <a href="https://github.com/Ridwannurudeen/shieldbot" style="color:#00ff88;text-decoration:none;font-size:14px;margin:0 12px;">GitHub</a>
                     &nbsp;&middot;&nbsp;
-                    <a href="https://twitter.com/Ggudman1" style="color:#00ff88;text-decoration:none;font-size:14px;margin:0 12px;">Twitter / X</a>
+                    <a href="https://x.com/shieldbot_" style="color:#00ff88;text-decoration:none;font-size:14px;margin:0 12px;">Twitter / X</a>
                   </td>
                 </tr>
               </table>
