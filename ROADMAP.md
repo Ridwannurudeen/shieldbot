@@ -91,7 +91,7 @@ Active competitors and their coverage gaps:
 - [x] **SDK v1** — Published `shieldbot-sdk` TypeScript package.
 - [x] **Public threat dashboard** — Real-time feed of detected threats and campaigns.
 - [x] **Threat Feed API** — Subscribe to ShieldBot's intelligence.
-- [x] **Chrome Web Store submission** — Extension v1.0.2 submitted, under review.
+- [x] **Chrome Web Store submission** — Extension v1.0.3 submitted, under review.
 
 ---
 
@@ -108,7 +108,7 @@ Three major competitors are gone or in transition. This phase captures their use
 - [ ] **Beta waitlist** — Email/wallet collection for early access to new features.
 
 ### Close the Detection Gaps
-- [ ] **Phishing / URL blocker** — Content script that checks the active URL against the GoPlus Phishing Site Detection API and known phishing blocklists (Chainabuse, PhishTank) before a transaction is signed. Warn users on known phishing domains. Matches capability of Fire and Pocket Universe.
+- [x] **Phishing / URL blocker** — Content script checks active URL against GoPlus Phishing Site Detection API on every page load. Red banner on hit. 1hr cache. Live in v1.0.3.
 - [ ] **Bytecode fingerprinting for unverified contracts** — ~70% of BSC scam tokens are unverified; GoPlus and Etherscan cannot read their source code. Integrate the Token Sniffer API as a fallback for unverified contracts. Include Token Sniffer's Smell Test score in the ShieldScore composite when source is unavailable.
 - [ ] **Deployer cluster auto-blocking** — When Campaign Graph Radar identifies a known bad deployer cluster, automatically flag all future tokens from that cluster in real-time — not just individually scanned contracts. Block entire scam networks, not just individual tokens.
 

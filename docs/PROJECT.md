@@ -181,7 +181,8 @@ High-risk transaction reports are stored on BNB Greenfield as public, immutable 
 
 ### Current Traction
 - Live Telegram bot: [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)
-- Chrome extension deployed and tested
+- Chrome extension v1.0.3 submitted to Chrome Web Store — under review
+- Phishing blocker live (GoPlus API, 1hr cache, red banner on hit)
 - BNB Greenfield integration live (testnet)
 - Multi-source intelligence pipeline operational
 

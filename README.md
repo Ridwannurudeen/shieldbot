@@ -254,6 +254,21 @@ Live dashboard at `/dashboard` with:
 High-risk transactions (score >= 50) are stored as immutable JSON objects on BNB Greenfield — tamper-proof forensic evidence with permanent public URLs.
 
 </td>
+<td width="50%" valign="top">
+
+### Phishing Blocker
+**URL Safety Check on Every Page Load**
+
+Checks the active tab's URL against the GoPlus Phishing Site Detection API before any transaction is signed. Displays a red warning banner on phishing hits. 1-hour in-memory cache per domain keeps page loads fast.
+
+| Result | Action |
+|--------|--------|
+| Known phishing | Red banner shown |
+| Safe | Silent passthrough |
+
+Live in v1.0.3.
+
+</td>
 </tr>
 </table>
 
