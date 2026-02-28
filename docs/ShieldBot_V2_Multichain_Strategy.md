@@ -2,7 +2,7 @@
 
 ## Why V2
 
-ShieldBot V1 is a BNB transaction scanner. The market has well-funded players doing the same thing (GoPlus, Blockaid, De.Fi, Pocket Universe). Competing on features alone is a losing game.
+ShieldBot V1 is a BNB transaction scanner. The market has well-funded players doing the same thing (GoPlus, Blockaid, De.Fi). Competing on features alone is a losing game.
 
 ShieldBot V2 must become a **security intelligence network** — a system where every user makes every other user safer, distributed through the channels users already use, and monetized through B2B infrastructure sales.
 
@@ -475,9 +475,9 @@ Three parallel tracks running simultaneously. Not sequential blocks.
 |------------|-------------|----------------------|
 | GoPlus | Token and contract scanning API | ShieldBot adds campaign-level detection, intent analysis, and rescue actions. GoPlus is data-only, no user-facing protection. |
 | Blockaid | Transaction simulation for wallets | ShieldBot adds cross-chain campaign correlation and is open source. Blockaid is closed, enterprise-only. |
-| Pocket Universe | Browser extension tx simulation | ShieldBot adds RPC proxy (mobile), multi-chain campaign graph, and B2B API. Pocket Universe is extension-only. |
+| Pocket Universe | Browser extension tx simulation | Acquired by Kerberus (Aug 2025); 200K+ user base in transition. ShieldBot fills the gap with RPC proxy, multi-chain campaign graph, and B2B API. |
 | De.Fi | Portfolio scanner and revoke tool | ShieldBot adds real-time pre-sign interception and campaign detection. De.Fi is post-facto scanning. |
-| Wallet Guard | Browser extension warnings | ShieldBot adds campaign intelligence, rescue mode, and infrastructure API. Wallet Guard is alerts-only. |
+| Wallet Guard | Browser extension warnings | Acquired by MetaMask (Jul 2024), sunset Mar 2025. ShieldBot fills the gap with campaign intelligence, rescue mode, and infrastructure API. |
 
 ShieldBot wins by combining what competitors offer separately:
 1. Cross-chain detection (not just one chain).

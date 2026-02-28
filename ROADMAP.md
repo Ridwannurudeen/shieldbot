@@ -92,6 +92,7 @@ Active competitors and their coverage gaps:
 - [x] **Public threat dashboard** — Real-time feed of detected threats and campaigns.
 - [x] **Threat Feed API** — Subscribe to ShieldBot's intelligence.
 - [x] **Chrome Web Store submission** — Extension v1.0.3 submitted, under review.
+- [x] **Landing page** — Live at [shieldbotsecurity.online](https://shieldbotsecurity.online).
 
 ---
 
@@ -100,7 +101,7 @@ Active competitors and their coverage gaps:
 Three major competitors are gone or in transition. This phase captures their users and closes the feature gaps that remain.
 
 ### Capture the Vacuum
-- [ ] **Landing page** — Marketing site at shieldbotsecurity.online. Position directly as the BNB Chain security extension the market needs now that Pocket Universe/WalletGuard are gone.
+- [x] **Landing page** — Live at [shieldbotsecurity.online](https://shieldbotsecurity.online). Positioned as the BNB Chain security extension filling the gap left by the consolidation of Pocket Universe and WalletGuard.
 - [ ] **Chrome Web Store SEO** — Optimize listing title, description, and screenshots for: "BNB Chain security", "BSC transaction protection", "honeypot detector".
 - [ ] **Community launch** — Announce on X/Twitter, BNB community channels, crypto security groups targeting users migrating from defunct tools.
 - [ ] **AvengerDAO membership** — Apply to BNB Chain's official community security coalition. Membership = ecosystem credibility, DappBay visibility, and referral from BNB Chain itself. GoPlus and HashDit are members.

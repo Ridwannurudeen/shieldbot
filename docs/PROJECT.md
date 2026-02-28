@@ -2,7 +2,7 @@
 
 ## 🎥 Demo Video
 
-**Watch the 3-minute walkthrough:** [View on YouTube](https://youtu.be/a-PbFsZz0Ds)
+**Watch the demo walkthrough:** [View on YouTube](https://youtu.be/NN95rom10R8)
 
 See ShieldBot blocking honeypots in real-time, the Telegram bot displaying token names, and BNB Greenfield forensic reports in action.
 

@@ -14,7 +14,7 @@ BNB Chain is the primary chain. To provide stronger protection, ShieldBot monito
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![BNB Chain](https://img.shields.io/badge/BNB-Chain-yellow)](https://www.bnbchain.org/)
 
-**[Full Roadmap](ROADMAP.md)** | **[Live Dashboard](https://api.shieldbotsecurity.online/dashboard)** | **[Demo Video](https://youtu.be/a-PbFsZz0Ds)** | **[Telegram Bot](https://t.me/shieldbot_bnb_bot)**
+**[Full Roadmap](ROADMAP.md)** | **[Landing Page](https://shieldbotsecurity.online)** | **[Live Dashboard](https://api.shieldbotsecurity.online/dashboard)** | **[Demo Video](https://youtu.be/NN95rom10R8)** | **[Telegram Bot](https://t.me/shieldbot_bnb_bot)**
 
 </div>
 
@@ -278,7 +278,7 @@ Live in v1.0.3.
 
 ### Demo Video
 
-**3-Minute Walkthrough:** [View on YouTube](https://youtu.be/a-PbFsZz0Ds)
+**Demo Walkthrough:** [View on YouTube](https://youtu.be/NN95rom10R8)
 
 ### Run Locally
 
