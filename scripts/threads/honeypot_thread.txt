@@ -1,0 +1,69 @@
+You bought the token at $0.0001.
+
+Watched it 10x in four hours.
+
+Tried to sell. Nothing happened. Tried again. Same result.
+
+Your $500 is gone. The chart still shows green.
+
+You just hit a honeypot. This is exactly how they built it.
+
+---
+
+A honeypot token looks like every other token.
+
+It has a name, a logo, a Telegram group with thousands of members, and a chart that only goes up.
+
+The one thing it does not have is a way for you to sell.
+
+The developer can sell. You cannot. That is the entire mechanism. Nothing more complicated than that.
+
+---
+
+The technical reality is almost embarrassingly simple.
+
+The sell function has a require statement that checks if your wallet is whitelisted before allowing the transaction. Only the deployer passes that check.
+
+You bought a token the contract would never let you exit. That restriction was written in the bytecode before the token was even launched. It was there the whole time.
+
+---
+
+The deployment pattern is identical every time.
+
+Deploy the contract. Buy a small position to seed the chart. Seed Telegram and crypto groups with "gem alert" posts. Wait for retail to buy in. Dump the whitelisted supply into the liquidity pool. Delete the Telegram. Move on.
+
+Start to finish, under six hours. A new token launches tomorrow with a different name.
+
+---
+
+What makes this particularly damaging is that the evidence is always on-chain.
+
+The sell restriction sits in the bytecode. Unverified contracts hide the source code from BscScan, but the bytecode is still readable. Static analysis tools flag it in seconds.
+
+The information to protect yourself exists. The gap is that nobody runs it before they buy.
+
+---
+
+Before you touch any token on BNB Chain, check five things.
+
+Is the contract unverified? Is the deployer wallet less than a week old? Is there no liquidity lock? Is the sell tax above 10%? Was the Telegram group created the same day as the token?
+
+Three of those being true is a serious warning. All five means you are looking at a honeypot, not a gem.
+
+---
+
+ShieldBot runs this analysis automatically before your transaction goes through.
+
+Bytecode fingerprinting, deployer history, sell simulation, tax detection. It caught this exact pattern 47 times on BNB Chain last week. The verdict appears before you sign anything.
+
+---
+
+Honeypots do not work because people are stupid.
+
+They work because the moment you think you found a 10x, your judgment shifts. Greed is the vulnerability, not ignorance. Every serious trader has almost fallen for one.
+
+The fix is removing human judgment from that specific moment entirely.
+
+shieldbotsecurity.online
+Telegram: @ShieldBotSecurityBot
+cc: @BNBCHAIN

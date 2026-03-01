@@ -49,6 +49,14 @@ landing-src/
 # Build scripts (local tooling)
 scripts/build_*.py
 
+# X poster local files
+scripts/chrome_profile/
+scripts/x_session.json
+
+# Screenshots and zips
+*.png
+*.zip
+
 # Local working docs (investor decks, roadmaps)
 docs/ShieldBot_Explained*
 docs/ShieldBot_Investor*

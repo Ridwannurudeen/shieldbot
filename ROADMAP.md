@@ -16,22 +16,25 @@ ShieldBot is evolving from a BNB Chain transaction scanner into a **cross-chain 
 
 ## Market Landscape (March 2026)
 
-The standalone crypto security extension market has undergone rapid consolidation. Three of the largest tools are gone:
+The standalone crypto security extension market has undergone rapid consolidation through acquisitions:
 
 | Tool | Status | Notes |
 |------|--------|-------|
-| Blowfish | Acquired by Phantom (Nov 2024) | External API shut down; wallets must find alternatives |
-| WalletGuard | Acquired by MetaMask (Jul 2024), sunset Mar 2025 | ML-based phishing detection and soft-locking lost |
-| Pocket Universe | Acquired by Kerberus (Aug 2025) | 200K+ user base in transition; roadmap uncertain |
+| Blowfish | Acquired by Phantom (Nov 2024) | External API shut down; capabilities integrated into Phantom exclusively |
+| WalletGuard | Acquired by Consensys/MetaMask (Jul 2024), sunset Mar 2025 | ML-based phishing detection and soft-locking no longer available independently |
+| Fire | Acquired by Kerberus (Sep 2024) | Integrated into Kerberus Sentinel3; 50K users absorbed |
+| Pocket Universe | Acquired by Kerberus (Aug 2025) | 200K+ users absorbed into Kerberus; actively developed under new ownership |
 | Stelo | Shut down Oct 2023 | a16z-backed; failed to monetize |
 
-**ShieldBot is now the only active, dedicated real-time transaction firewall extension for BNB Chain.** This window is the primary growth opportunity.
+**Kerberus (Sentinel3)** is now the dominant consolidator — having absorbed both Fire and Pocket Universe, giving them 250K+ users. However, Kerberus focuses on Ethereum and Solana and has **no BNB Chain real-time firewall**.
+
+**ShieldBot is the only active, dedicated real-time transaction firewall extension for BNB Chain.** This is the primary growth opportunity.
 
 Active competitors and their coverage gaps:
 
 | Tool | BNB Real-time Firewall | Telegram Bot | RPC Proxy | Campaign Graph | Mempool Monitor |
 |------|----------------------|--------------|-----------|----------------|-----------------|
-| Fire | ❌ No BNB support | ❌ | ❌ | ❌ | ❌ |
+| Kerberus Sentinel3 | ❌ No BNB support | ❌ | ❌ | ❌ | ❌ |
 | Revoke.cash | ❌ Approvals only | ❌ | ❌ | ❌ | ❌ |
 | De.Fi Shield | ❌ Web-only, no interception | ❌ | ❌ | ❌ | ❌ |
 | GoPlus | ❌ API only, not consumer-facing | ❌ | ❌ | ❌ | ❌ |
@@ -105,7 +108,7 @@ This phase captures users and closes the feature gaps that remain.
 - [x] **Chrome Web Store SEO** — Optimize listing title, description, and screenshots for: "BNB Chain security", "BSC transaction protection", "honeypot detector".
 - [ ] **Community launch** — Announce on X/Twitter, BNB community channels, crypto security groups targeting users migrating from defunct tools.
 - [ ] **AvengerDAO membership** — Apply to BNB Chain's official community security coalition. Membership = ecosystem credibility, DappBay visibility, and referral from BNB Chain itself. GoPlus and HashDit are members.
-- [ ] **Extension onboarding flow** — First-time user tutorial and guided first scan.
+- [x] **Extension onboarding flow** — First-time user tutorial and guided first scan. Welcome tab on install, auto-fills API URL, Connect & Protect flow. Live in v1.0.5.
 - [x] **Beta waitlist** — Email/wallet collection for early access to new features. Live at shieldbotsecurity.online.
 
 ### Close the Detection Gaps
