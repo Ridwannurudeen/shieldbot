@@ -145,26 +145,17 @@ class TenderlySimulator:
         asset_deltas = []
         wallet = from_address.lower()
         tx = result.get("transaction", {})
-
-        raw_changes = tx.get("asset_changes") or []
         tx_info = tx.get("transaction_info", {})
-        balance_diff = tx.get("balance_diff") or []
-        logger.info(f"Tenderly asset_changes={len(raw_changes)} balance_diff={len(balance_diff)} tx_info_keys={list(tx_info.keys())}")
-        ti_changes = tx_info.get("asset_changes") or []
-        ti_balance_diff = tx_info.get("balance_diff") or []
-        logger.info(f"Tenderly transaction_info: asset_changes={len(ti_changes)} balance_diff={len(ti_balance_diff)}")
-        if ti_changes:
-            logger.info(f"transaction_info asset_changes sample: {ti_changes[:2]}")
 
-        # Primary: structured asset_changes from full simulation
-        for change in raw_changes:
+        # Primary: asset_changes lives inside transaction_info (full simulation)
+        for change in (tx_info.get("asset_changes") or []):
             frm = (change.get("from") or "").lower()
             to = (change.get("to") or "").lower()
             if frm != wallet and to != wallet:
                 continue
 
             info = change.get("asset_info") or change.get("token_info") or {}
-            symbol = info.get("symbol") or info.get("ticker") or "?"
+            symbol = (info.get("symbol") or info.get("ticker") or "?").upper()
             try:
                 decimals = int(info.get("decimals") or 18)
             except (ValueError, TypeError):
@@ -197,12 +188,12 @@ class TenderlySimulator:
             return asset_deltas
 
         # Fallback: native token balance_diff for simple ETH/BNB sends.
-        # Tenderly balance_diff format: [{address, original: "0xHEX", dirty: "0xHEX"}]
+        # balance_diff also lives inside transaction_info
         def _parse_hex(v: Any) -> int:
             s = str(v or "0")
             return int(s, 16) if s.startswith(("0x", "0X")) else int(s)
 
-        for change in tx.get("balance_diff", []):
+        for change in (tx_info.get("balance_diff") or []):
             if (change.get("address") or "").lower() != wallet:
                 continue
             try:
@@ -233,11 +224,12 @@ class TenderlySimulator:
             if delta.get("direction") == "out":
                 warnings.append(f"Asset outflow detected: {delta['token_symbol']}")
 
-        state_changes = result.get("transaction", {}).get("state_diff") or []
+        tx_info = result.get("transaction", {}).get("transaction_info", {})
+        state_changes = tx_info.get("state_diff") or []
         if len(state_changes) > 50:
             warnings.append("Excessive state changes (possible reentrancy)")
 
-        calls = result.get("transaction", {}).get("calls") or []
+        calls = tx_info.get("call_trace", {}).get("calls") or []
         for call in calls:
             if not call.get("status", True):
                 warnings.append(f"Subcall failed to {call.get('to', 'unknown')}")
