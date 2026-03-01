@@ -147,12 +147,14 @@ class TenderlySimulator:
         tx = result.get("transaction", {})
 
         raw_changes = tx.get("asset_changes") or []
+        tx_info = tx.get("transaction_info", {})
         balance_diff = tx.get("balance_diff") or []
-        logger.info(f"Tenderly asset_changes={len(raw_changes)} balance_diff={len(balance_diff)} wallet={wallet} tx_status={tx.get('status')} tx_keys={list(tx.keys())}")
-        if raw_changes:
-            logger.info(f"Tenderly asset_changes sample: {raw_changes[:2]}")
-        if balance_diff:
-            logger.info(f"Tenderly balance_diff: {balance_diff[:3]}")
+        logger.info(f"Tenderly asset_changes={len(raw_changes)} balance_diff={len(balance_diff)} tx_info_keys={list(tx_info.keys())}")
+        ti_changes = tx_info.get("asset_changes") or []
+        ti_balance_diff = tx_info.get("balance_diff") or []
+        logger.info(f"Tenderly transaction_info: asset_changes={len(ti_changes)} balance_diff={len(ti_balance_diff)}")
+        if ti_changes:
+            logger.info(f"transaction_info asset_changes sample: {ti_changes[:2]}")
 
         # Primary: structured asset_changes from full simulation
         for change in raw_changes:
