@@ -146,8 +146,13 @@ class TenderlySimulator:
         wallet = from_address.lower()
         tx = result.get("transaction", {})
 
+        raw_changes = tx.get("asset_changes") or []
+        logger.info(f"Tenderly asset_changes count={len(raw_changes)} wallet={wallet} tx_status={tx.get('status')}")
+        if raw_changes:
+            logger.info(f"Tenderly asset_changes sample: {raw_changes[:2]}")
+
         # Primary: structured asset_changes from full simulation
-        for change in tx.get("asset_changes", []):
+        for change in raw_changes:
             frm = (change.get("from") or "").lower()
             to = (change.get("to") or "").lower()
             if frm != wallet and to != wallet:
