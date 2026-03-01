@@ -1148,6 +1148,29 @@ async def admin_stats(request: Request):
     }
 
 
+@app.get("/api/stats")
+async def public_stats():
+    """Public platform statistics — safe to display on the dashboard."""
+    db_stats = {}
+    if container and container.db:
+        db_stats = await container.db.get_platform_stats()
+
+    mempool = {}
+    if container and container.mempool_monitor:
+        mempool = container.mempool_monitor.get_stats()
+
+    at = db_stats.get("all_time", {})
+    return {
+        "transactions_monitored": mempool.get("total_pending_seen", 0),
+        "contracts_scanned":      at.get("unique_contracts_scanned", 0),
+        "threats_detected":       at.get("threats_detected", 0),
+        "transactions_blocked":   at.get("transactions_blocked", 0),
+        "sandwiches_caught":      mempool.get("sandwiches_detected", 0),
+        "suspicious_approvals":   mempool.get("suspicious_approvals", 0),
+        "chains_protected":       len(mempool.get("monitored_chains", [])),
+    }
+
+
 @app.get("/api/admin/signups")
 async def admin_signups(request: Request):
     """List all beta signups. Requires ADMIN_SECRET header."""

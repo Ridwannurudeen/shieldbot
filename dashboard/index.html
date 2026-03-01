@@ -705,11 +705,68 @@
       );
     }
 
+    // ─── Platform Stats Bar ────────────────────────────────────────────────────
+    const STAT_ITEMS = [
+      { key:'transactions_monitored', label:'Transactions Monitored', color:'#3B82F6' },
+      { key:'contracts_scanned',      label:'Contracts Scanned',      color:'#10B981' },
+      { key:'threats_detected',       label:'Threats Detected',       color:'#EF4444' },
+      { key:'transactions_blocked',   label:'Transactions Blocked',   color:'#F59E0B' },
+      { key:'sandwiches_caught',      label:'Sandwich Attacks Caught',color:'#8B5CF6' },
+      { key:'suspicious_approvals',   label:'Suspicious Approvals',   color:'#F97316' },
+      { key:'chains_protected',       label:'Chains Protected',       color:'#06B6D4' },
+    ];
+
+    function useCountUp(target, duration = 1200) {
+      const [display, setDisplay] = useState(0);
+      useEffect(() => {
+        if (!target) return;
+        const start = Date.now();
+        const from = 0;
+        const tick = () => {
+          const elapsed = Date.now() - start;
+          const progress = Math.min(elapsed / duration, 1);
+          const eased = 1 - Math.pow(1 - progress, 3);
+          setDisplay(Math.round(from + (target - from) * eased));
+          if (progress < 1) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }, [target]);
+      return display;
+    }
+
+    function StatCard({ label, value, color, loading }) {
+      const display = useCountUp(loading ? 0 : value);
+      return (
+        <div className="glass rounded-xl p-4 fade-up flex flex-col gap-1 text-center"
+             style={{ border:'1px solid #1E293B', minWidth:0 }}>
+          {loading
+            ? <div className="skeleton mx-auto" style={{ height:28, width:72 }} />
+            : <div className="text-2xl font-bold leading-none" style={{ color }}>
+                {display.toLocaleString()}
+              </div>
+          }
+          <div className="text-xs font-medium mt-1" style={{ color:'#64748B' }}>{label}</div>
+        </div>
+      );
+    }
+
+    function PlatformStatsBar({ stats, loading }) {
+      return (
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+          {STAT_ITEMS.map(s => (
+            <StatCard key={s.key} label={s.label} value={stats[s.key] || 0}
+                      color={s.color} loading={loading} />
+          ))}
+        </div>
+      );
+    }
+
     // ─── App ──────────────────────────────────────────────────────────────────
     function App() {
       const [threats,   setThreats]   = useState([]);
       const [mempool,   setMempool]   = useState({});
       const [campaigns, setCampaigns] = useState([]);
+      const [stats,     setStats]     = useState({});
       const [loading,   setLoading]   = useState(true);
       const [error,     setError]     = useState(null);
       const [updated,   setUpdated]   = useState(null);
@@ -717,10 +774,11 @@
 
       const fetchData = useCallback(async () => {
         try {
-          const [f, s, c] = await Promise.allSettled([
+          const [f, s, c, p] = await Promise.allSettled([
             fetch(`${API}/api/threats/feed?limit=100`).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
             fetch(`${API}/api/mempool/stats`).then(r => r.json()),
             fetch(`${API}/api/campaigns/top?limit=10`).then(r => r.json()),
+            fetch(`${API}/api/stats`).then(r => r.json()),
           ]);
 
           if (f.status === 'fulfilled') { setThreats(f.value.threats || []); setError(null); }
@@ -728,6 +786,7 @@
 
           if (s.status === 'fulfilled') setMempool(s.value || {});
           if (c.status === 'fulfilled') setCampaigns(c.value.campaigns || []);
+          if (p.status === 'fulfilled') setStats(p.value || {});
 
           setUpdated(Date.now());
         } catch (e) {
@@ -751,6 +810,10 @@
           <Header lastUpdated={updated} />
 
           <main className="px-4 md:px-8 py-6 space-y-8 mx-auto" style={{ maxWidth:1600 }}>
+
+            <Section title="Platform Statistics">
+              <PlatformStatsBar stats={stats} loading={loading} />
+            </Section>
 
             <Section title="Performance Overview">
               <KPITilesRow threats={threats} mempool={mempool} loading={loading} />
