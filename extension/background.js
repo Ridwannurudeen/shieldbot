@@ -7,6 +7,14 @@
 const DEFAULT_API_URL = "";
 const MAX_HISTORY = 50;
 
+// On fresh install: pre-fill API URL and open welcome tab
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === "install") {
+    chrome.storage.local.set({ apiUrl: "https://api.shieldbotsecurity.online" });
+    chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
+  }
+});
+
 // In-memory phishing cache: domain -> {result, expiresAt}
 // Avoids repeated API calls when navigating across pages on the same site.
 const _phishingCache = new Map();

@@ -110,7 +110,7 @@ This phase captures users and closes the feature gaps that remain.
 
 ### Close the Detection Gaps
 - [x] **Phishing / URL blocker** — Content script checks active URL against GoPlus Phishing Site Detection API on every page load. Red banner on hit. 1hr cache. Live in v1.0.3.
-- [ ] **Bytecode fingerprinting for unverified contracts** — ~70% of BSC scam tokens are unverified; GoPlus and Etherscan cannot read their source code. Integrate the Token Sniffer API as a fallback for unverified contracts. Include Token Sniffer's Smell Test score in the ShieldScore composite when source is unavailable.
+- [x] **Bytecode fingerprinting for unverified contracts** — Token Sniffer API integrated. Data-driven unverified penalty (10/25/40 risk based on Smell Test score). Gracefully disabled without API key. Live in v1.0.4.
 - [ ] **Deployer cluster auto-blocking** — When Campaign Graph Radar identifies a known bad deployer cluster, automatically flag all future tokens from that cluster in real-time — not just individually scanned contracts. Block entire scam networks, not just individual tokens.
 
 ### Production Hardening
@@ -133,7 +133,7 @@ This phase captures users and closes the feature gaps that remain.
 ### UX & Localization
 - [ ] **Human-readable transaction decoder** — Structured plain-English breakdown of what a transaction actually does, displayed before the risk score. Surfaces existing calldata decoding (`calldata_decoder.py`) as a visual summary: function called, amounts sent/received, spender address, approval type. Reduces false-positive friction — users trust a clear breakdown more than a score alone.
 - [ ] **Wallet security health score** — One-command scan of a full wallet that returns a security grade (0–100), open dangerous approvals count, risky tokens held, and a prioritized action list. Packages existing Rescue Mode and scan endpoints into a shareable summary. Organic growth driver: users share their score.
-- [ ] **Asset delta preview** — Surface the Tenderly pre-execution simulation output directly in the extension overlay: "You will send 0.5 BNB → receive 450 USDT". Tenderly integration already exists; this is a UI layer that makes simulation results immediately visible to the user before they confirm.
+- [x] **Asset delta preview** — Tenderly full simulation output surfaced in extension overlay. Green = tokens in, red = tokens out, dollar value when available. "SIMULATED" badge. Gracefully hidden when Tenderly not configured. Live in v1.0.4.
 - [ ] **Multi-language support** — Extension UI and Telegram bot responses in Mandarin, Korean, Vietnamese, and Portuguese. BNB Chain's largest user bases are in Asia and Brazil. No other security tool targets these communities in their native language.
 
 ---

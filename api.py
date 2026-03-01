@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD
 from core.config import Settings
@@ -704,7 +704,7 @@ async def firewall(req: FirewallRequest, request: Request):
                     "risk_score_heuristic": 5,
                     "whitelisted_router": whitelisted,
                 },
-                "asset_delta": [],
+                "asset_delta": _build_asset_delta_fallback(decoded, value_bnb),
             }
 
         # 2b. Check cache for recent result
@@ -858,10 +858,11 @@ async def firewall(req: FirewallRequest, request: Request):
                 },
                 "shield_score": shield_score,
                 "simulation": simulation_result,
-                "asset_delta": [
-                    d["display"]
-                    for d in (simulation_result or {}).get("asset_deltas", [])
-                ],
+                "asset_delta": (
+                    [d["display"] for d in simulation_result["asset_deltas"]]
+                    if simulation_result and simulation_result.get("asset_deltas")
+                    else _build_asset_delta_fallback(decoded, value_bnb)
+                ),
                 "greenfield_url": None,
                 "chain_id": req.chainId,
                 "network": _chain_id_to_name(req.chainId),
@@ -1297,6 +1298,19 @@ def _chain_id_to_name(chain_id: int) -> str:
     return _CHAIN_NAMES.get(chain_id, f"Chain {chain_id}")
 
 
+def _build_asset_delta_fallback(decoded: Dict, value_bnb: float) -> List:
+    """Construct basic asset_delta from calldata when simulation is unavailable."""
+    deltas = []
+    if value_bnb > 0:
+        deltas.append(f"-{value_bnb:g} BNB")
+    if decoded.get("is_approval"):
+        if decoded.get("is_unlimited_approval"):
+            deltas.append("Approval: unlimited token spend")
+        else:
+            deltas.append("Approval: limited token spend")
+    return deltas
+
+
 def _build_cached_response(
     cached: Dict, decoded: Dict, value_bnb: float, chain_id: int = 56,
     to_addr: str = "", policy_mode: str = "BALANCED",
@@ -1341,7 +1355,7 @@ def _build_cached_response(
             "confidence": cached.get('confidence', 0),
         },
         "simulation": None,
-        "asset_delta": [],
+        "asset_delta": _build_asset_delta_fallback(decoded, value_bnb),
         "greenfield_url": None,
         "cached": True,
         "chain_id": chain_id,

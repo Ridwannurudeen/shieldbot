@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Welcome to ShieldBot</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0f172a;
+      color: #f1f5f9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 16px;
+      padding: 48px 40px;
+      max-width: 560px;
+      width: 100%;
+      text-align: center;
+    }
+
+    .logo {
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 24px;
+    }
+
+    h1 {
+      font-size: 26px;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      font-size: 15px;
+      color: #94a3b8;
+      margin-bottom: 40px;
+      line-height: 1.5;
+    }
+
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-bottom: 40px;
+      text-align: left;
+    }
+
+    .step {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 16px;
+    }
+
+    .step-icon {
+      font-size: 22px;
+      line-height: 1;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .step-body {}
+
+    .step-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #f1f5f9;
+      margin-bottom: 3px;
+    }
+
+    .step-desc {
+      font-size: 13px;
+      color: #64748b;
+      line-height: 1.4;
+    }
+
+    #connectBtn {
+      display: block;
+      width: 100%;
+      padding: 14px;
+      background: #3b82f6;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+    }
+
+    #connectBtn:hover:not(:disabled) { background: #2563eb; }
+    #connectBtn:disabled { opacity: 0.7; cursor: not-allowed; }
+
+    #statusMsg {
+      margin-top: 10px;
+      font-size: 13px;
+      color: #64748b;
+      min-height: 20px;
+    }
+
+    #closeLink {
+      display: none;
+      margin-top: 12px;
+      font-size: 13px;
+      color: #64748b;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+
+    #closeLink:hover { color: #94a3b8; }
+
+    .version {
+      margin-top: 32px;
+      font-size: 11px;
+      color: #334155;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <img src="icons/shield128.png" alt="ShieldBot" class="logo" />
+
+    <h1>Welcome to ShieldBot</h1>
+    <p class="subtitle">
+      Real-time transaction protection for BNB Chain and 6 more EVM networks.<br>
+      One click and you're covered.
+    </p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-icon">🔍</div>
+        <div class="step-body">
+          <div class="step-title">Analyze</div>
+          <div class="step-desc">Every transaction you sign is scanned for honeypots, rug pulls, and drainer contracts before you confirm.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-icon">🧪</div>
+        <div class="step-body">
+          <div class="step-title">Simulate</div>
+          <div class="step-desc">See exactly which tokens leave and enter your wallet — simulated on-chain before you touch the confirm button.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-icon">🛡</div>
+        <div class="step-body">
+          <div class="step-title">Block</div>
+          <div class="step-desc">High-risk transactions are stopped in their tracks. Phishing sites are flagged the moment you land on them.</div>
+        </div>
+      </div>
+    </div>
+
+    <button id="connectBtn">Connect &amp; Protect</button>
+    <div id="statusMsg"></div>
+    <div id="closeLink">Close this tab</div>
+
+    <div class="version">ShieldBot v1.0.5</div>
+  </div>
+
+  <script src="welcome.js"></script>
+</body>
+</html>
