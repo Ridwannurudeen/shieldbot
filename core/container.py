@@ -102,6 +102,9 @@ class ServiceContainer:
         self.honeypot_service = HoneypotService(self.web3_client)
         self.contract_service = ContractService(self.web3_client, self.scam_db)
 
+        # Bytecode fingerprinting for unverified contracts (must init before registry)
+        self.token_sniffer = TokenSnifferService(api_key=settings.token_sniffer_api_key)
+
         # Risk engine + analyzer registry
         self.calibration = load_calibration(settings.calibration_config_path)
         self.risk_engine = RiskEngine(calibration=self.calibration)
@@ -128,9 +131,6 @@ class ServiceContainer:
 
         # Phishing site detection
         self.phishing_service = PhishingService()
-
-        # Bytecode fingerprinting for unverified contracts
-        self.token_sniffer = TokenSnifferService(api_key=settings.token_sniffer_api_key)
 
         # Email service (Resend)
         self.email_service = EmailService(
