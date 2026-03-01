@@ -98,10 +98,10 @@ Active competitors and their coverage gaps:
 
 ## Phase 4: Gap Closing + Market Capture
 
-Three major competitors are gone or in transition. This phase captures their users and closes the feature gaps that remain.
+This phase captures users and closes the feature gaps that remain.
 
 ### Capture the Vacuum
-- [x] **Landing page** — Live at [shieldbotsecurity.online](https://shieldbotsecurity.online). Positioned as the BNB Chain security extension filling the gap left by the consolidation of Pocket Universe and WalletGuard.
+- [x] **Landing page** — Live at [shieldbotsecurity.online](https://shieldbotsecurity.online). Positioned as the dedicated BNB Chain security extension for real-time transaction protection.
 - [x] **Chrome Web Store SEO** — Optimize listing title, description, and screenshots for: "BNB Chain security", "BSC transaction protection", "honeypot detector".
 - [ ] **Community launch** — Announce on X/Twitter, BNB community channels, crypto security groups targeting users migrating from defunct tools.
 - [ ] **AvengerDAO membership** — Apply to BNB Chain's official community security coalition. Membership = ecosystem credibility, DappBay visibility, and referral from BNB Chain itself. GoPlus and HashDit are members.
@@ -129,6 +129,12 @@ Three major competitors are gone or in transition. This phase captures their use
 - [ ] **Consumer Pro tier** — $9-15/month for unlimited scans, all chains, priority analysis, post-deploy alerts.
 - [ ] **B2B API partnerships** — Onboard first BSC wallet or DEX integrating ShieldBot API. Target: PancakeSwap, Biswap. GoPlus holds this position; approach as a BNB-native alternative.
 - [ ] **Insurance protocol partnerships** — Revenue share on premium reductions for protected wallets.
+
+### UX & Localization
+- [ ] **Human-readable transaction decoder** — Structured plain-English breakdown of what a transaction actually does, displayed before the risk score. Surfaces existing calldata decoding (`calldata_decoder.py`) as a visual summary: function called, amounts sent/received, spender address, approval type. Reduces false-positive friction — users trust a clear breakdown more than a score alone.
+- [ ] **Wallet security health score** — One-command scan of a full wallet that returns a security grade (0–100), open dangerous approvals count, risky tokens held, and a prioritized action list. Packages existing Rescue Mode and scan endpoints into a shareable summary. Organic growth driver: users share their score.
+- [ ] **Asset delta preview** — Surface the Tenderly pre-execution simulation output directly in the extension overlay: "You will send 0.5 BNB → receive 450 USDT". Tenderly integration already exists; this is a UI layer that makes simulation results immediately visible to the user before they confirm.
+- [ ] **Multi-language support** — Extension UI and Telegram bot responses in Mandarin, Korean, Vietnamese, and Portuguese. BNB Chain's largest user bases are in Asia and Brazil. No other security tool targets these communities in their native language.
 
 ---
 
