@@ -117,7 +117,7 @@ This phase captures users and closes the feature gaps that remain.
 - [ ] **Deployer cluster auto-blocking** — When Campaign Graph Radar identifies a known bad deployer cluster, automatically flag all future tokens from that cluster in real-time — not just individually scanned contracts. Block entire scam networks, not just individual tokens.
 
 ### Production Hardening
-- [ ] **Monitoring and alerting** — Uptime checks, error rate alerts, latency dashboards.
+- [x] **Monitoring and alerting** — Uptime checks every 5 minutes (monitor.sh + watchdog.sh), auto-restart on failure, Telegram alerts, daily 8am summary. Live on VPS.
 - [ ] **Internal analytics dashboard** — Track scan volume, block rate, user retention, and chain distribution.
 - [ ] **Database backup strategy** — Automated SQLite backups on VPS.
 - [ ] **Rate limiting tuning** — Adjust limits based on real traffic patterns.
