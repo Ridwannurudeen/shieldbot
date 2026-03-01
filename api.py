@@ -682,6 +682,20 @@ async def firewall(req: FirewallRequest, request: Request):
         if whitelisted:
             sending = f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens (via router)"
 
+            # Run simulation for real asset deltas even on trusted routers
+            sim_result = None
+            if tenderly_simulator and tenderly_simulator.is_enabled():
+                sim_result = await tenderly_simulator.simulate_transaction(
+                    to_address=to_addr, from_address=from_addr,
+                    value=req.value, data=req.data, chain_id=req.chainId,
+                )
+
+            asset_delta = (
+                [d["display"] for d in sim_result["asset_deltas"]]
+                if sim_result and sim_result.get("asset_deltas")
+                else _build_asset_delta_fallback(decoded, value_bnb)
+            )
+
             return {
                 "classification": "SAFE",
                 "risk_score": 5,
@@ -704,7 +718,7 @@ async def firewall(req: FirewallRequest, request: Request):
                     "risk_score_heuristic": 5,
                     "whitelisted_router": whitelisted,
                 },
-                "asset_delta": _build_asset_delta_fallback(decoded, value_bnb),
+                "asset_delta": asset_delta,
             }
 
         # 2b. Check cache for recent result
