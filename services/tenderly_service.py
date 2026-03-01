@@ -120,7 +120,7 @@ class TenderlySimulator:
                 "gas": 8000000,
                 "gas_price": 0,
                 "save": False,
-                "simulation_type": "quick",
+                "simulation_type": "full",
                 "state_objects": state_objects,
             }
 
@@ -137,26 +137,81 @@ class TenderlySimulator:
             return None
 
     def _parse_asset_changes(self, result: dict, from_address: str) -> List[Dict[str, Any]]:
-        """Parse asset balance changes from simulation result."""
+        """Parse asset balance changes from simulation result.
+
+        Uses transaction.asset_changes (full simulation) with balance_diff as
+        fallback for native-only transactions.
+        """
         asset_deltas = []
+        wallet = from_address.lower()
+        tx = result.get("transaction", {})
 
-        balance_changes = result.get("transaction", {}).get("balance_diff", [])
-
-        for change in balance_changes:
-            address = change.get("address", "").lower()
-
-            if address != from_address.lower():
+        # Primary: structured asset_changes from full simulation
+        for change in tx.get("asset_changes", []):
+            frm = (change.get("from") or "").lower()
+            to = (change.get("to") or "").lower()
+            if frm != wallet and to != wallet:
                 continue
 
-            if "dirty" in change:
-                for token_addr, delta in change["dirty"].items():
-                    balance_change = delta.get("balance")
-                    if balance_change:
-                        asset_deltas.append({
-                            "token_address": token_addr.lower(),
-                            "token_symbol": "UNKNOWN",
-                            "balance_change": str(balance_change),
-                        })
+            info = change.get("asset_info") or change.get("token_info") or {}
+            symbol = info.get("symbol") or info.get("ticker") or "?"
+            try:
+                decimals = int(info.get("decimals") or 18)
+            except (ValueError, TypeError):
+                decimals = 18
+            try:
+                raw = int(change.get("raw_amount") or change.get("amount") or 0)
+            except (ValueError, TypeError):
+                raw = 0
+            amount = raw / (10 ** decimals)
+            dollar = change.get("dollar_value") or ""
+
+            direction = "out" if frm == wallet else "in"
+            sign = "-" if direction == "out" else "+"
+            display = f"{sign}{amount:,.4f} {symbol}"
+            if dollar:
+                try:
+                    display += f" (≈${float(dollar):,.2f})"
+                except (ValueError, TypeError):
+                    pass
+
+            asset_deltas.append({
+                "token_symbol": symbol,
+                "display": display,
+                "direction": direction,
+                "amount": amount,
+                "dollar_value": dollar,
+            })
+
+        if asset_deltas:
+            return asset_deltas
+
+        # Fallback: native token balance_diff for simple ETH/BNB sends.
+        # Tenderly balance_diff format: [{address, original: "0xHEX", dirty: "0xHEX"}]
+        def _parse_hex(v: Any) -> int:
+            s = str(v or "0")
+            return int(s, 16) if s.startswith(("0x", "0X")) else int(s)
+
+        for change in tx.get("balance_diff", []):
+            if (change.get("address") or "").lower() != wallet:
+                continue
+            try:
+                balance_change = _parse_hex(change.get("dirty")) - _parse_hex(change.get("original"))
+            except (ValueError, TypeError):
+                continue
+            if balance_change == 0:
+                continue
+            amount = abs(balance_change) / 10**18
+            direction = "out" if balance_change < 0 else "in"
+            sign = "-" if direction == "out" else "+"
+            display = f"{sign}{amount:,.4f} BNB"
+            asset_deltas.append({
+                "token_symbol": "BNB",
+                "display": display,
+                "direction": direction,
+                "amount": amount,
+                "dollar_value": "",
+            })
 
         return asset_deltas
 
@@ -165,18 +220,14 @@ class TenderlySimulator:
         warnings = []
 
         for delta in asset_deltas:
-            try:
-                change = int(delta["balance_change"])
-                if change < 0:
-                    warnings.append(f"Asset outflow detected: {delta['token_symbol']}")
-            except (ValueError, TypeError):
-                pass
+            if delta.get("direction") == "out":
+                warnings.append(f"Asset outflow detected: {delta['token_symbol']}")
 
-        state_changes = result.get("transaction", {}).get("state_diff", [])
+        state_changes = result.get("transaction", {}).get("state_diff") or []
         if len(state_changes) > 50:
             warnings.append("Excessive state changes (possible reentrancy)")
 
-        calls = result.get("transaction", {}).get("calls", [])
+        calls = result.get("transaction", {}).get("calls") or []
         for call in calls:
             if not call.get("status", True):
                 warnings.append(f"Subcall failed to {call.get('to', 'unknown')}")

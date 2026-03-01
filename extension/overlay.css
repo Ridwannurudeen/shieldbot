@@ -327,3 +327,14 @@
   background: #991b1b !important;
   color: #fff !important;
 }
+
+/* Asset Delta (simulated token in/out) */
+.shieldai-delta-list { list-style: none; padding: 0; margin: 4px 0 0; }
+.shieldai-delta-list li { padding: 4px 0; font-size: 14px; font-weight: 600; }
+.shieldai-delta-in  { color: #22c55e; }
+.shieldai-delta-out { color: #ef4444; }
+.shieldai-sim-badge {
+  font-size: 10px; font-weight: 500; text-transform: uppercase;
+  background: #1e293b; color: #64748b; border-radius: 4px;
+  padding: 1px 5px; margin-left: 6px; vertical-align: middle;
+}

@@ -141,7 +141,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="ShieldAI Firewall API",
-    version="1.0.0",
+    version="1.0.4",
     lifespan=lifespan,
 )
 
@@ -704,6 +704,7 @@ async def firewall(req: FirewallRequest, request: Request):
                     "risk_score_heuristic": 5,
                     "whitelisted_router": whitelisted,
                 },
+                "asset_delta": [],
             }
 
         # 2b. Check cache for recent result
@@ -857,6 +858,10 @@ async def firewall(req: FirewallRequest, request: Request):
                 },
                 "shield_score": shield_score,
                 "simulation": simulation_result,
+                "asset_delta": [
+                    d["display"]
+                    for d in (simulation_result or {}).get("asset_deltas", [])
+                ],
                 "greenfield_url": None,
                 "chain_id": req.chainId,
                 "network": _chain_id_to_name(req.chainId),
@@ -939,6 +944,7 @@ async def firewall(req: FirewallRequest, request: Request):
 
         if firewall_result:
             firewall_result["raw_checks"] = _extract_raw_checks(contract_scan)
+            firewall_result.setdefault("asset_delta", [])
             return firewall_result
         else:
             return _build_fallback_response(decoded, contract_scan, whitelisted)
@@ -1335,6 +1341,7 @@ def _build_cached_response(
             "confidence": cached.get('confidence', 0),
         },
         "simulation": None,
+        "asset_delta": [],
         "greenfield_url": None,
         "cached": True,
         "chain_id": chain_id,
@@ -1411,6 +1418,7 @@ def _build_fallback_response(decoded: Dict, scan: Dict, whitelisted: Optional[st
         "plain_english": "Could not generate AI analysis. Review the danger signals above carefully.",
         "verdict": f"{classification} — Risk score {risk_score}/100",
         "raw_checks": _extract_raw_checks(scan),
+        "asset_delta": [],
     }
 
 

@@ -166,6 +166,20 @@
     // Transaction impact HTML
     const impact = result.transaction_impact || {};
 
+    // Asset delta HTML (simulated token in/out)
+    const assetDelta = result.asset_delta || [];
+    const deltaHtml = assetDelta.length
+      ? `<div class="shieldai-section">
+           <h3>Asset Delta <span class="shieldai-sim-badge">SIMULATED</span></h3>
+           <ul class="shieldai-delta-list">
+             ${assetDelta.map((d) => {
+               const isOut = d.startsWith("-");
+               return `<li class="${isOut ? "shieldai-delta-out" : "shieldai-delta-in"}">${escapeHtml(d)}</li>`;
+             }).join("")}
+           </ul>
+         </div>`
+      : "";
+
     overlay.innerHTML = `
       <div class="shieldai-modal ${isBlock ? "shieldai-modal-danger" : ""}">
         <div class="shieldai-header">
@@ -204,6 +218,8 @@
             <tr><td>After TX</td><td>${escapeHtml(impact.post_tx_state || "N/A")}</td></tr>
           </table>
         </div>
+
+        ${deltaHtml}
 
         <div class="shieldai-section">
           <h3>Analysis</h3>
