@@ -119,7 +119,7 @@ This phase captures users and closes the feature gaps that remain.
 ### Production Hardening
 - [x] **Monitoring and alerting** — Uptime checks every 5 minutes (monitor.sh + watchdog.sh), auto-restart on failure, Telegram alerts, daily 8am summary. Live on VPS.
 - [ ] **Internal analytics dashboard** — Track scan volume, block rate, user retention, and chain distribution.
-- [ ] **Database backup strategy** — Automated SQLite backups on VPS.
+- [x] **Database backup strategy** — Daily automated SQLite backups at 2am. 7-day rolling local retention + off-site copy sent to Telegram. Failure alerts via Telegram.
 - [ ] **Rate limiting tuning** — Adjust limits based on real traffic patterns.
 - [ ] **CI/CD pipeline** — Automated tests and deployment on push.
 
