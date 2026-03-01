@@ -14,7 +14,7 @@ from services import (
     DexService, EthosService, HoneypotService,
     ContractService, GreenfieldService, TenderlySimulator,
     MempoolMonitor, RescueService, CampaignService,
-    EmailService, PhishingService,
+    EmailService, PhishingService, TokenSnifferService,
 )
 from core.risk_engine import RiskEngine
 from core.calibration import load_calibration
@@ -106,7 +106,7 @@ class ServiceContainer:
         self.calibration = load_calibration(settings.calibration_config_path)
         self.risk_engine = RiskEngine(calibration=self.calibration)
         self.registry = AnalyzerRegistry()
-        self.registry.register(StructuralAnalyzer(self.contract_service))
+        self.registry.register(StructuralAnalyzer(self.contract_service, self.token_sniffer))
         self.registry.register(MarketAnalyzer(self.dex_service))
         self.registry.register(BehavioralAnalyzer(self.ethos_service))
         self.registry.register(HoneypotAnalyzer(self.honeypot_service))
@@ -128,6 +128,9 @@ class ServiceContainer:
 
         # Phishing site detection
         self.phishing_service = PhishingService()
+
+        # Bytecode fingerprinting for unverified contracts
+        self.token_sniffer = TokenSnifferService(api_key=settings.token_sniffer_api_key)
 
         # Email service (Resend)
         self.email_service = EmailService(
@@ -153,6 +156,7 @@ class ServiceContainer:
         logger.info(f"Greenfield storage: {'enabled' if self.greenfield_service.is_enabled() else 'disabled'}")
         logger.info(f"Tenderly simulation: {'enabled' if self.tenderly_simulator.is_enabled() else 'disabled'}")
         logger.info(f"Email service: {'enabled' if self.email_service.is_enabled() else 'disabled'}")
+        logger.info(f"Token Sniffer: {'enabled' if self.token_sniffer.is_enabled() else 'disabled (set TOKEN_SNIFFER_API_KEY to enable)'}")
 
     async def shutdown(self):
         """Clean up resources."""
@@ -161,4 +165,5 @@ class ServiceContainer:
         await self.db.close()
         await self.greenfield_service.close()
         await self.tenderly_simulator.close()
+        await self.token_sniffer.close()
         logger.info("ServiceContainer shut down")
