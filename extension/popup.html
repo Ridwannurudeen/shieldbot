@@ -209,6 +209,96 @@
     .history-list::-webkit-scrollbar-track { background: transparent; }
     .history-list::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
 
+    /* Health Tab */
+    .health-score-row {
+      text-align: center;
+      padding: 12px 0 8px;
+    }
+    .health-score-num {
+      font-size: 52px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .health-score-label {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 4px;
+    }
+    .health-stats {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .health-stat {
+      flex: 1;
+      background: #1e293b;
+      border-radius: 6px;
+      padding: 8px 4px;
+      text-align: center;
+    }
+    .health-stat-num {
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .health-stat-label {
+      font-size: 10px;
+      color: #64748b;
+      margin-top: 2px;
+    }
+    .health-approvals {
+      max-height: 140px;
+      overflow-y: auto;
+    }
+    .health-approval-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      background: #1e293b;
+      border-radius: 6px;
+      margin-bottom: 4px;
+    }
+    .health-risk-badge {
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 5px;
+      border-radius: 3px;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .risk-high { background: #ef4444; }
+    .risk-medium { background: #f97316; }
+    .risk-low { background: #22c55e; }
+    .health-token { flex: 1; min-width: 0; }
+    .health-token-name {
+      font-size: 12px;
+      color: #e2e8f0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .health-token-reason {
+      font-size: 10px;
+      color: #475569;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .health-allowance {
+      font-size: 11px;
+      color: #94a3b8;
+      flex-shrink: 0;
+    }
+    .health-approvals::-webkit-scrollbar { width: 4px; }
+    .health-approvals::-webkit-scrollbar-track { background: transparent; }
+    .health-approvals::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+    .health-empty {
+      text-align: center;
+      padding: 16px 0;
+      color: #475569;
+      font-size: 12px;
+    }
+
     /* Policy mode radio */
     .policy-option {
       flex: 1;
@@ -243,7 +333,7 @@
   <div class="header">
     <div class="logo">&#128737;</div>
     <h1>ShieldAI Firewall</h1>
-    <span class="version">v1.0.5</span>
+    <span class="version">v1.0.6</span>
   </div>
 
   <div class="status-row">
@@ -254,6 +344,7 @@
   <div class="tabs">
     <div class="tab active" data-tab="settings">Settings</div>
     <div class="tab" data-tab="history">History</div>
+    <div class="tab" data-tab="health">Health</div>
   </div>
 
   <!-- Settings Tab -->
@@ -301,6 +392,27 @@
   <div class="tab-content" id="tab-history">
     <div class="history-list" id="historyList">
       <div class="history-empty">No scans yet</div>
+    </div>
+  </div>
+
+  <!-- Health Tab -->
+  <div class="tab-content" id="tab-health">
+    <div class="field">
+      <label>Your Wallet Address</label>
+      <input type="text" id="healthAddress" placeholder="0x...">
+    </div>
+    <button class="btn btn-save" id="healthScanBtn">Scan Approvals</button>
+    <div id="healthError" style="display:none; color:#ef4444; font-size:12px; margin-top:6px;"></div>
+    <div id="healthLoading" style="display:none; text-align:center; padding:20px 0; color:#64748b; font-size:13px;">
+      Scanning approvals...
+    </div>
+    <div id="healthResult" style="display:none; margin-top:10px;">
+      <div class="health-score-row">
+        <div id="healthScoreNum" class="health-score-num">--</div>
+        <div class="health-score-label">Wallet Health Score</div>
+      </div>
+      <div id="healthStats" class="health-stats"></div>
+      <div id="healthApprovals" class="health-approvals"></div>
     </div>
   </div>
 

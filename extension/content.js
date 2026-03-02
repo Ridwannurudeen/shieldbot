@@ -200,6 +200,13 @@
           </div>
         ` : ''}
 
+        ${result.decoded_action ? `
+          <div class="shieldai-section shieldai-action-section">
+            <h3>Transaction Type</h3>
+            <div class="shieldai-action-label">${escapeHtml(result.decoded_action)}</div>
+          </div>
+        ` : ""}
+
         ${
           signalsHtml
             ? `<div class="shieldai-section">

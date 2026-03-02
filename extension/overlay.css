@@ -328,6 +328,17 @@
   color: #fff !important;
 }
 
+/* Transaction Type label */
+.shieldai-action-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: #f1f5f9;
+  background: #1e293b;
+  border-radius: 6px;
+  padding: 8px 12px;
+  display: inline-block;
+}
+
 /* Asset Delta (simulated token in/out) */
 .shieldai-delta-list { list-style: none; padding: 0; margin: 4px 0 0; }
 .shieldai-delta-list li { padding: 4px 0; font-size: 14px; font-weight: 600; }

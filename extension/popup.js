@@ -233,5 +233,122 @@ document.addEventListener("DOMContentLoaded", () => {
     div.textContent = str;
     return div.innerHTML;
   }
+
+  // --- Health Tab ---
+  const healthScanBtn = document.getElementById("healthScanBtn");
+  const healthAddress = document.getElementById("healthAddress");
+  const healthResult = document.getElementById("healthResult");
+  const healthLoading = document.getElementById("healthLoading");
+  const healthError = document.getElementById("healthError");
+
+  // Load cached wallet address
+  chrome.storage.local.get({ healthWallet: "" }, (data) => {
+    if (data.healthWallet) healthAddress.value = data.healthWallet;
+  });
+
+  healthScanBtn.addEventListener("click", () => {
+    const addr = healthAddress.value.trim();
+    if (!addr || !addr.startsWith("0x") || addr.length < 40) {
+      healthError.style.display = "block";
+      healthError.textContent = "Enter a valid wallet address (0x...)";
+      return;
+    }
+    healthError.style.display = "none";
+    chrome.storage.local.set({ healthWallet: addr });
+    scanHealth(addr);
+  });
+
+  async function scanHealth(addr) {
+    const { apiUrl } = await new Promise((resolve) =>
+      chrome.storage.local.get({ apiUrl: DEFAULT_API_URL }, resolve)
+    );
+
+    healthResult.style.display = "none";
+    healthLoading.style.display = "block";
+    healthError.style.display = "none";
+
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      const resp = await fetch(`${apiUrl}/api/rescue/${addr}?chain_id=56`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      healthLoading.style.display = "none";
+
+      if (!resp.ok) throw new Error(`API error ${resp.status}`);
+
+      const data = await resp.json();
+      renderHealth(data);
+    } catch (err) {
+      healthLoading.style.display = "none";
+      healthError.style.display = "block";
+      healthError.textContent =
+        err.name === "AbortError"
+          ? "Request timed out. Check connection."
+          : err.message || "Scan failed. Check connection.";
+    }
+  }
+
+  function renderHealth(data) {
+    const highRisk = data.high_risk || 0;
+    const mediumRisk = data.medium_risk || 0;
+    const total = data.total_approvals || 0;
+
+    // Score: 100 - (high * 20) - (medium * 5), floor at 0
+    const score = Math.max(0, 100 - highRisk * 20 - mediumRisk * 5);
+
+    const scoreNum = document.getElementById("healthScoreNum");
+    const statsEl = document.getElementById("healthStats");
+    const approvalsEl = document.getElementById("healthApprovals");
+
+    let scoreColor = "#22c55e";
+    if (score < 50) scoreColor = "#ef4444";
+    else if (score < 80) scoreColor = "#f97316";
+
+    scoreNum.textContent = score;
+    scoreNum.style.color = scoreColor;
+
+    statsEl.innerHTML = `
+      <div class="health-stat">
+        <div class="health-stat-num" style="color:#ef4444">${highRisk}</div>
+        <div class="health-stat-label">High Risk</div>
+      </div>
+      <div class="health-stat">
+        <div class="health-stat-num" style="color:#f97316">${mediumRisk}</div>
+        <div class="health-stat-label">Medium Risk</div>
+      </div>
+      <div class="health-stat">
+        <div class="health-stat-num" style="color:#94a3b8">${total}</div>
+        <div class="health-stat-label">Total</div>
+      </div>
+    `;
+
+    const approvals = data.approvals || [];
+    const riskClass = { HIGH: "risk-high", MEDIUM: "risk-medium", LOW: "risk-low" };
+
+    if (approvals.length === 0) {
+      approvalsEl.innerHTML =
+        '<div class="health-empty">No active approvals found</div>';
+    } else {
+      approvalsEl.innerHTML = approvals
+        .slice(0, 12)
+        .map(
+          (a) => `
+          <div class="health-approval-item">
+            <span class="health-risk-badge ${riskClass[a.risk_level] || "risk-low"}">${escapeHtml(a.risk_level)}</span>
+            <div class="health-token">
+              <div class="health-token-name">${escapeHtml(a.token_symbol || a.token_address.slice(0, 10) + "...")}</div>
+              <div class="health-token-reason">${escapeHtml(a.risk_reason || "")}</div>
+            </div>
+            <div class="health-allowance">${escapeHtml(a.allowance || "")}</div>
+          </div>
+        `
+        )
+        .join("");
+    }
+
+    healthResult.style.display = "block";
+  }
 });
 

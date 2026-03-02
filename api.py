@@ -871,6 +871,7 @@ async def firewall(req: FirewallRequest, request: Request):
             response = {
                 "classification": classification,
                 "risk_score": risk_score,
+                "decoded_action": _format_decoded_action(decoded),
                 "danger_signals": danger_signals,
                 "transaction_impact": {
                     "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens",
@@ -1351,6 +1352,55 @@ def _chain_id_to_name(chain_id: int) -> str:
     return _CHAIN_NAMES.get(chain_id, f"Chain {chain_id}")
 
 
+def _format_decoded_action(decoded: Dict) -> str:
+    """Convert decoded calldata into a plain English action label for the overlay."""
+    func = decoded.get("function_name", "")
+    category = decoded.get("category", "")
+    params = decoded.get("params", {})
+
+    if not func or func == "Native Transfer":
+        return "Native BNB Transfer"
+
+    if category == "approval":
+        spender = params.get("param_0", "")
+        sp = str(spender)
+        spender_short = f"{sp[:8]}..." if len(sp) > 10 else sp
+        if decoded.get("is_unlimited_approval"):
+            return f"UNLIMITED Approval to {spender_short}"
+        if "permit" in func.lower():
+            return f"Gas-less Permit to {spender_short}"
+        return f"Token Approval to {spender_short}"
+
+    if category == "transfer":
+        if func == "transfer":
+            recipient = params.get("param_0", "")
+        elif func == "transferFrom":
+            recipient = params.get("param_1", "")
+        else:
+            recipient = params.get("param_0", "")
+        r = str(recipient)
+        recipient_short = f"{r[:8]}..." if len(r) > 10 else r
+        return f"Token Transfer to {recipient_short}"
+
+    if category == "swap":
+        return "DEX Token Swap"
+
+    if category == "liquidity":
+        return "Add Liquidity" if "add" in func.lower() else "Remove Liquidity"
+
+    if category == "supply":
+        return "Mint Tokens" if func == "mint" else "Burn Tokens"
+
+    if category == "claim":
+        return "Claim Reward / Airdrop"
+
+    if func.startswith("Unknown"):
+        selector = decoded.get("selector", "")
+        return f"Unknown Function (0x{selector})"
+
+    return func
+
+
 def _build_asset_delta_fallback(decoded: Dict, value_bnb: float) -> List:
     """Construct basic asset_delta from calldata when simulation is unavailable."""
     deltas = []
@@ -1386,6 +1436,7 @@ def _build_cached_response(
     return {
         "classification": classification,
         "risk_score": risk_score,
+        "decoded_action": _format_decoded_action(decoded),
         "danger_signals": flags,
         "transaction_impact": {
             "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens",
@@ -1472,6 +1523,7 @@ def _build_fallback_response(decoded: Dict, scan: Dict, whitelisted: Optional[st
     return {
         "classification": classification,
         "risk_score": min(100, risk_score),
+        "decoded_action": _format_decoded_action(decoded),
         "danger_signals": danger_signals,
         "transaction_impact": {
             "sending": "Unknown (AI unavailable)",
@@ -1532,6 +1584,7 @@ async def _analyze_router_swap(
         return {
             "classification": "CAUTION",
             "risk_score": 35,
+            "decoded_action": _format_decoded_action(decoded),
             "danger_signals": [
                 f"Swap via trusted router ({whitelisted}) but token path could not be decoded — token safety unverified",
             ],
@@ -1679,6 +1732,7 @@ async def _analyze_router_swap(
     return {
         "classification": classification,
         "risk_score": risk_score,
+        "decoded_action": _format_decoded_action(decoded),
         "danger_signals": danger_signals,
         "transaction_impact": {
             "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens (via router)",
