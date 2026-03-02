@@ -9,7 +9,7 @@ anthropic==0.79.0
 fastapi==0.129.0
 uvicorn[standard]==0.40.0
 websockets==15.0.1
-httpx==0.28.1
+httpx~=0.25.2
 pydantic-settings==2.13.0
 aiosqlite==0.22.1
 resend==2.23.0
