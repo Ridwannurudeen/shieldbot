@@ -157,7 +157,7 @@ class RescueService:
                     bn_data = await resp.json()
                 latest = int(bn_data["result"], 16)
 
-            CHUNK_SIZE = 50_000
+            CHUNK_SIZE = 49_999   # NodeReal limit is 50000 blocks exclusive
             MAX_BLOCKS = 2_000_000
             from_start = max(0, latest - MAX_BLOCKS)
             chunks = [
@@ -273,11 +273,11 @@ class RescueService:
             ) as resp:
                 data = await resp.json()
             if "error" in data:
-                logger.debug(f"eth_getLogs {from_b}-{to_b}: {data['error']}")
+                logger.warning(f"eth_getLogs {from_b}-{to_b}: {data['error']}")
                 return []
             return data.get("result", [])
         except Exception as e:
-            logger.debug(f"Log chunk {from_b}-{to_b} failed: {e}")
+            logger.warning(f"Log chunk {from_b}-{to_b} failed: {e}")
             return []
 
     def _assess_approval_risk(
