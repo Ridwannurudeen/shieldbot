@@ -14,7 +14,7 @@ document.getElementById("connectBtn").addEventListener("click", async () => {
     if (!granted) throw new Error("Permission denied");
 
     statusMsg.textContent = "Checking connection\u2026";
-    const { apiUrl } = await chrome.storage.local.get({ apiUrl: "" });
+    const { apiUrl } = await chrome.storage.local.get({ apiUrl: "https://api.shieldbotsecurity.online" });
     const res = await fetch(`${apiUrl}/api/health`, {
       signal: AbortSignal.timeout(8000)
     });

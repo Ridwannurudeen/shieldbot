@@ -4,7 +4,7 @@
  * and returns the firewall verdict. Saves scan history.
  */
 
-const DEFAULT_API_URL = "";
+const DEFAULT_API_URL = "https://api.shieldbotsecurity.online";
 const MAX_HISTORY = 50;
 
 // On fresh install: pre-fill API URL and open welcome tab
