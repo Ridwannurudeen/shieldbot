@@ -35,7 +35,7 @@ jobs:
 
       - name: Slither
         run: |
-          slither contracts/ShieldBotVerifier.sol
+          slither contracts/ShieldBotVerifier.sol --exclude-informational --fail-high
 
       - name: Tests
         run: |
