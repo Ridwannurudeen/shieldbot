@@ -154,10 +154,37 @@ app.mount("/assets", StaticFiles(directory=os.path.join(os.path.dirname(__file__
 # CORS: configurable via CORS_ALLOW_ORIGINS env (comma-separated)
 # Parsed at startup from Settings; fallback to localhost dev origins.
 _boot_settings = Settings()
+_cors_origins = _boot_settings.cors_origins
+_allow_credentials = True
+if "*" in (_boot_settings.cors_allow_origins or "") and not _boot_settings.cors_allow_all:
+    logger.warning("CORS_ALLOW_ORIGINS includes '*' but CORS_ALLOW_ALL is false; using safe default origins.")
+if len(_cors_origins) == 1 and _cors_origins[0] == "*":
+    # Never allow credentials with wildcard origins.
+    _allow_credentials = False
+    logger.warning("CORS_ALLOW_ALL enabled; credentials disabled for safety.")
+
+# Trusted proxy IPs (X-Forwarded-For only honored from these)
+TRUSTED_PROXIES = set(_boot_settings.trusted_proxies)
+
+
+def _get_trusted_proxies() -> set:
+    if container and container.settings:
+        return set(container.settings.trusted_proxies)
+    return TRUSTED_PROXIES
+
+
+def _get_client_ip(request: Request) -> str:
+    """Resolve client IP, trusting X-Forwarded-For only from known proxies."""
+    client_ip = request.client.host if request.client else ""
+    forwarded = request.headers.get("x-forwarded-for")
+    trusted = _get_trusted_proxies()
+    if forwarded and client_ip in trusted:
+        return forwarded.split(",")[-1].strip()
+    return client_ip
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_boot_settings.cors_origins,
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_allow_credentials,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
@@ -205,13 +232,7 @@ async def rate_limit_middleware(request: Request, call_next):
         return await call_next(request)
 
     # Fallback: IP-based rate limiting (extension/unauthenticated)
-    # Use rightmost IP from X-Forwarded-For (set by trusted reverse proxy),
-    # not leftmost (client-controlled and spoofable).
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        client_ip = forwarded.split(",")[-1].strip()
-    else:
-        client_ip = request.client.host
+    client_ip = _get_client_ip(request)
 
     # Probabilistic cleanup of stale rate-limiter entries (1% of requests)
     if random.random() < 0.01:
@@ -286,8 +307,7 @@ class BetaSignupRequest(BaseModel):
 async def beta_signup(req: BetaSignupRequest, request: Request):
     """Collect beta signup emails."""
     # Rate limit per IP
-    forwarded = request.headers.get("x-forwarded-for")
-    client_ip = forwarded.split(",")[-1].strip() if forwarded else request.client.host
+    client_ip = _get_client_ip(request)
     if not _signup_limiter.is_allowed(f"signup:{client_ip}"):
         return JSONResponse(status_code=429, content={"detail": "Too many requests. Please try again later."})
 
@@ -315,14 +335,42 @@ async def beta_signup(req: BetaSignupRequest, request: Request):
 async def uptime_webhook(request: Request, secret: str = ""):
     """UptimeRobot webhook — forwards status alerts to Telegram.
 
-    Authentication: pass WEBHOOK_SECRET as ?secret= query param in UptimeRobot.
+    Authentication: prefer X-Webhook-Secret header (WEBHOOK_SECRET).
+    Optional legacy support for ?secret= query param if WEBHOOK_ALLOW_QUERY_SECRET=true.
     """
     import httpx
     expected_secret = container.settings.webhook_secret if container else ""
-    if not expected_secret or not hmac.compare_digest(secret, expected_secret):
+    header_secret = request.headers.get("x-webhook-secret", "")
+    provided = ""
+    used_query = False
+    if header_secret:
+        provided = header_secret
+    elif secret:
+        allow_query = container.settings.webhook_allow_query_secret if container else False
+        if allow_query:
+            provided = secret
+            used_query = True
+        else:
+            raise HTTPException(status_code=403, detail="Forbidden")
+    if not expected_secret or not provided or not hmac.compare_digest(provided, expected_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
+    if used_query:
+        logger.warning("Deprecated webhook query secret used. Prefer X-Webhook-Secret header.")
 
-    data = await request.form()
+    try:
+        data = await request.form()
+    except AssertionError:
+        # python-multipart not installed; fall back to urlencoded parsing
+        from urllib.parse import parse_qs
+        raw = (await request.body()).decode(errors="ignore")
+        parsed = parse_qs(raw, keep_blank_values=True)
+        data = {k: v[0] for k, v in parsed.items()}
+    except Exception:
+        # Final fallback: attempt JSON
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
     alert_type   = data.get("alertType", "")
     monitor_name = data.get("monitorFriendlyName", "ShieldBot API")
     monitor_url  = data.get("monitorURL", "")
@@ -678,48 +726,19 @@ async def firewall(req: FirewallRequest, request: Request):
         # Enrich decoded calldata with token names and formatted amounts
         await _enrich_decoded(decoded, to_addr, chain_id=req.chainId)
 
-        # 2. If target is a whitelisted router, skip deep scan — it's trusted
+        # 2. If target is a whitelisted router, analyze the swap path tokens instead of bypassing
         if whitelisted:
-            sending = f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens (via router)"
-
-            # Run simulation for real asset deltas even on trusted routers
-            sim_result = None
-            if tenderly_simulator and tenderly_simulator.is_enabled():
-                sim_result = await tenderly_simulator.simulate_transaction(
-                    to_address=to_addr, from_address=from_addr,
-                    value=req.value, data=req.data, chain_id=req.chainId,
-                )
-
-            asset_delta = (
-                [d["display"] for d in sim_result["asset_deltas"]]
-                if sim_result and sim_result.get("asset_deltas")
-                else _build_asset_delta_fallback(decoded, value_bnb)
+            router_response = await _analyze_router_swap(
+                req=req,
+                to_addr=to_addr,
+                from_addr=from_addr,
+                decoded=decoded,
+                whitelisted=whitelisted,
+                value_bnb=value_bnb,
+                policy_override=request.headers.get("X-Policy-Mode"),
             )
-
-            return {
-                "classification": "SAFE",
-                "risk_score": 5,
-                "danger_signals": [],
-                "transaction_impact": {
-                    "sending": sending,
-                    "granting_access": "None",
-                    "recipient": f"{whitelisted} ({to_addr[:10]}...)",
-                    "post_tx_state": f"Standard {decoded.get('category', 'swap')} on {whitelisted}",
-                },
-                "analysis": f"Transaction targets {whitelisted}, a trusted and widely-used DEX router on BNB Chain. No deep scan required.",
-                "plain_english": f"This is a normal {decoded.get('category', 'transaction')} on {whitelisted}. This router is trusted and safe to use.",
-                "verdict": f"SAFE — {whitelisted} is a verified, trusted router",
-                "raw_checks": {
-                    "is_verified": True,
-                    "scam_matches": 0,
-                    "contract_age_days": 999,
-                    "is_honeypot": False,
-                    "ownership_renounced": True,
-                    "risk_score_heuristic": 5,
-                    "whitelisted_router": whitelisted,
-                },
-                "asset_delta": asset_delta,
-            }
+            if router_response:
+                return router_response
 
         # 2b. Check cache for recent result
         if container and container.db:
@@ -869,6 +888,7 @@ async def firewall(req: FirewallRequest, request: Request):
                     "is_honeypot": honeypot_data.get("is_honeypot", False),
                     "ownership_renounced": contract_data.get("ownership_renounced", False),
                     "risk_score_heuristic": risk_score,
+                    "whitelisted_router": whitelisted,
                 },
                 "shield_score": shield_score,
                 "simulation": simulation_result,
@@ -1018,11 +1038,7 @@ async def report_outcome(req: OutcomeRequest):
 async def community_report(req: CommunityReportRequest, request: Request):
     """Record a community report (false positive, false negative, or scam)."""
     # Rate limit per IP (rightmost = proxy-set, not spoofable)
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        client_ip = forwarded.split(",")[-1].strip()
-    else:
-        client_ip = request.client.host
+    client_ip = _get_client_ip(request)
     if not _report_limiter.is_allowed(f"report:{client_ip}"):
         return JSONResponse(
             status_code=429,
@@ -1470,6 +1486,232 @@ def _build_fallback_response(decoded: Dict, scan: Dict, whitelisted: Optional[st
         "verdict": f"{classification} — Risk score {risk_score}/100",
         "raw_checks": _extract_raw_checks(scan),
         "asset_delta": [],
+    }
+
+
+def _extract_swap_path(decoded: Dict) -> List[str]:
+    """Extract address[] swap path from decoded calldata if present."""
+    if not decoded:
+        return []
+    params = decoded.get("params", {})
+    for v in params.values():
+        if isinstance(v, list) and v and all(isinstance(x, str) and x.startswith("0x") for x in v):
+            return v
+    return []
+
+
+def _select_router_tokens(path: List[str]) -> List[str]:
+    """Select representative token addresses from a swap path (first + last)."""
+    if not path:
+        return []
+    if len(path) == 1:
+        return [path[0]]
+    return [path[0], path[-1]]
+
+
+async def _analyze_router_swap(
+    req: FirewallRequest,
+    to_addr: str,
+    from_addr: str,
+    decoded: Dict,
+    whitelisted: str,
+    value_bnb: float,
+    policy_override: Optional[str] = None,
+) -> Optional[Dict]:
+    """Analyze swap path tokens when interacting with a trusted router."""
+    if not container or not container.registry or not risk_engine:
+        return None
+
+    path = _extract_swap_path(decoded)
+    if not path:
+        # Cannot decode the swap path (e.g. Uniswap V3 / aggregator calldata).
+        # Returning None here would cause the main pipeline to analyse the
+        # whitelisted router itself — which always scores safe — giving a false
+        # SAFE result while the token in the path is never checked.
+        # Return CAUTION so the user is warned that token safety is unverified.
+        return {
+            "classification": "CAUTION",
+            "risk_score": 35,
+            "danger_signals": [
+                f"Swap via trusted router ({whitelisted}) but token path could not be decoded — token safety unverified",
+            ],
+            "transaction_impact": {
+                "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens (via router)",
+                "granting_access": "UNLIMITED" if decoded.get("is_unlimited_approval") else "None",
+                "recipient": f"{whitelisted} ({to_addr[:10]}...)",
+                "post_tx_state": f"Swap via {whitelisted} — token path not decoded",
+            },
+            "analysis": (
+                f"Trusted router ({whitelisted}) detected but the swap path tokens could not be "
+                "decoded from the calldata. Token safety cannot be verified."
+            ),
+            "plain_english": (
+                "This transaction goes to a trusted DEX router, but the specific tokens in the swap "
+                "path couldn't be identified. Verify the tokens manually before proceeding."
+            ),
+            "verdict": "CAUTION — Token path unverifiable",
+            "raw_checks": {
+                "is_verified": False,
+                "scam_matches": 0,
+                "contract_age_days": None,
+                "is_honeypot": False,
+                "ownership_renounced": False,
+                "risk_score_heuristic": 35,
+                "whitelisted_router": whitelisted,
+                "tokens_analyzed": [],
+            },
+            "shield_score": {
+                "overall": 35,
+                "category_scores": {},
+                "risk_level": "CAUTION",
+                "threat_type": "unknown",
+                "critical_flags": [],
+                "confidence": 30,
+            },
+            "simulation": None,
+            "asset_delta": _build_asset_delta_fallback(decoded, value_bnb),
+            "greenfield_url": None,
+            "chain_id": req.chainId,
+            "network": _chain_id_to_name(req.chainId),
+            "partial": True,
+            "failed_sources": ["token_path_decoding"],
+            "policy_mode": "BALANCED",
+        }
+
+    candidates = _select_router_tokens(path)
+    if not candidates:
+        return None
+
+    # Optional simulation (still useful for asset deltas)
+    sim_result = None
+    if tenderly_simulator and tenderly_simulator.is_enabled():
+        sim_result = await tenderly_simulator.simulate_transaction(
+            to_address=to_addr, from_address=from_addr,
+            value=req.value, data=req.data, chain_id=req.chainId,
+        )
+
+    best = None
+    token_summaries = []
+
+    for token in candidates:
+        if not web3_client.is_valid_address(token):
+            continue
+        token_addr = web3_client.to_checksum_address(token)
+
+        is_verified = False
+        try:
+            verified_result = await web3_client.is_verified_contract(token_addr, chain_id=req.chainId)
+            is_verified = verified_result[0] if isinstance(verified_result, tuple) else bool(verified_result)
+        except Exception:
+            pass
+
+        from core.analyzer import AnalysisContext
+
+        ctx = AnalysisContext(
+            address=token_addr,
+            chain_id=req.chainId,
+            from_address=from_addr,
+            is_token=True,
+            extra={
+                'calldata': req.data,
+                'value': req.value,
+                'typed_data': req.typedData,
+                'sign_method': req.signMethod,
+                'is_verified': is_verified,
+                'router': to_addr,
+                'whitelisted_router': whitelisted,
+            },
+        )
+
+        analyzer_results = await container.registry.run_all(ctx)
+        risk_output = risk_engine.compute_from_results(analyzer_results, is_token=True)
+
+        # Apply policy mode (handles partial failures)
+        if container.policy_engine:
+            risk_output = container.policy_engine.apply(
+                analyzer_results, risk_output, mode_override=policy_override,
+            )
+
+        token_summaries.append({
+            "address": token_addr,
+            "risk_score": risk_output.get("rug_probability", 0),
+            "risk_level": risk_output.get("risk_level", "UNKNOWN"),
+        })
+
+        if not best or risk_output.get("rug_probability", 0) > best["risk_output"].get("rug_probability", 0):
+            best = {"address": token_addr, "risk_output": risk_output, "results": analyzer_results}
+
+    if not best:
+        return None
+
+    risk_output = best["risk_output"]
+    alert = format_extension_alert(risk_output)
+
+    # Simulation overrides
+    danger_signals = list(alert["top_flags"])
+    classification = alert["risk_classification"]
+
+    if sim_result:
+        if not sim_result.get("success") and sim_result.get("revert_reason"):
+            danger_signals.insert(0, f"Simulation reverted: {sim_result['revert_reason']}")
+            if alert["rug_probability"] >= 30:
+                classification = "BLOCK_RECOMMENDED"
+        for w in sim_result.get("warnings", []):
+            if w not in danger_signals:
+                danger_signals.append(w)
+
+    risk_score = alert["rug_probability"]
+
+    # Extract service data for raw checks
+    by_name = {r.name: r for r in best["results"]}
+    contract_data = (by_name["structural"].data or {}) if "structural" in by_name else {}
+    honeypot_data = (by_name["honeypot"].data or {}) if "honeypot" in by_name else {}
+
+    shield_score = {
+        "overall": risk_score,
+        "category_scores": risk_output.get("category_scores", {}),
+        "risk_level": risk_output.get("risk_level", "UNKNOWN"),
+        "threat_type": risk_output.get("risk_archetype", "unknown"),
+        "critical_flags": risk_output.get("critical_flags", []),
+        "confidence": alert["confidence"],
+    }
+
+    return {
+        "classification": classification,
+        "risk_score": risk_score,
+        "danger_signals": danger_signals,
+        "transaction_impact": {
+            "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens (via router)",
+            "granting_access": "UNLIMITED" if decoded.get("is_unlimited_approval") else "None",
+            "recipient": f"{whitelisted} ({to_addr[:10]}...)",
+            "post_tx_state": f"Swap via {whitelisted} — analyzed {best['address'][:10]}...",
+        },
+        "analysis": f"Trusted router detected ({whitelisted}), analyzed swap path tokens.",
+        "plain_english": alert["recommended_action"],
+        "verdict": f"{classification} — Rug probability {risk_score}%",
+        "raw_checks": {
+            "is_verified": contract_data.get("is_verified", False),
+            "scam_matches": len(contract_data.get("scam_matches", [])),
+            "contract_age_days": contract_data.get("contract_age_days"),
+            "is_honeypot": honeypot_data.get("is_honeypot", False),
+            "ownership_renounced": contract_data.get("ownership_renounced", False),
+            "risk_score_heuristic": risk_score,
+            "whitelisted_router": whitelisted,
+            "tokens_analyzed": token_summaries,
+        },
+        "shield_score": shield_score,
+        "simulation": sim_result,
+        "asset_delta": (
+            [d["display"] for d in sim_result["asset_deltas"]]
+            if sim_result and sim_result.get("asset_deltas")
+            else _build_asset_delta_fallback(decoded, value_bnb)
+        ),
+        "greenfield_url": None,
+        "chain_id": req.chainId,
+        "network": _chain_id_to_name(req.chainId),
+        "partial": risk_output.get("partial", False),
+        "failed_sources": risk_output.get("failed_sources", []),
+        "policy_mode": risk_output.get("policy_mode", "BALANCED"),
     }
 
 

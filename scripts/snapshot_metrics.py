@@ -10,23 +10,38 @@ Usage:
 import json
 import os
 import sys
-import urllib.request
-import urllib.error
+from urllib.parse import urlparse
+import httpx
 from datetime import datetime, timezone
 from pathlib import Path
 
 API_URL = os.environ.get("SHIELDBOT_API_URL", "http://127.0.0.1:8000")
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
+API_HOST_ALLOWLIST = {
+    h.strip() for h in os.environ.get(
+        "SHIELDBOT_API_HOST_ALLOWLIST",
+        "127.0.0.1,localhost"
+    ).split(",") if h.strip()
+}
 LOG_FILE = Path(__file__).parent.parent / "metrics" / "log.md"
 
 
+def _validate_api_url(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("API_URL must be http or https")
+    host = parsed.hostname or ""
+    if host not in API_HOST_ALLOWLIST:
+        raise ValueError(f"API_URL host not allowed: {host}")
+
+
 def fetch_stats() -> dict:
-    req = urllib.request.Request(
-        f"{API_URL}/api/admin/stats",
-        headers={"x-admin-secret": ADMIN_SECRET},
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read())
+    _validate_api_url(API_URL)
+    headers = {"x-admin-secret": ADMIN_SECRET}
+    with httpx.Client(timeout=10.0) as client:
+        resp = client.get(f"{API_URL}/api/admin/stats", headers=headers)
+        resp.raise_for_status()
+        return resp.json()
 
 
 def format_snapshot(data: dict, timestamp: str) -> str:
@@ -96,7 +111,7 @@ def main():
 
     try:
         data = fetch_stats()
-    except urllib.error.URLError as e:
+    except (httpx.RequestError, httpx.HTTPStatusError, ValueError) as e:
         print(f"ERROR: Could not reach API — {e}", file=sys.stderr)
         sys.exit(1)
 

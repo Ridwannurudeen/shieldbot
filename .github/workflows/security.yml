@@ -1,0 +1,42 @@
+name: Security Scans
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install bandit slither-analyzer solc-select
+
+      - name: Install solc
+        run: |
+          solc-select install 0.8.24
+          solc-select use 0.8.24
+
+      - name: Bandit
+        run: |
+          bandit -r . -l medium -i medium --exclude ./tests,./eval,./demo
+
+      - name: Slither
+        run: |
+          slither contracts/ShieldBotVerifier.sol
+
+      - name: Tests
+        run: |
+          pytest tests/ -x --tb=short -q

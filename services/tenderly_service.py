@@ -5,6 +5,7 @@ Gracefully disables if no API key is configured.
 """
 import logging
 import os
+import time
 from typing import Optional, Dict, Any, List
 
 import httpx
@@ -22,6 +23,10 @@ class TenderlySimulator:
         self.project_id = os.getenv("TENDERLY_PROJECT_ID", "")
         self.client = httpx.AsyncClient(timeout=15.0)
         self.enabled = bool(self.api_key and self.project_id)
+        self._fail_count = 0
+        self._circuit_open_until = 0.0
+        self._max_failures = int(os.getenv("TENDERLY_CB_MAX_FAILURES", "3"))
+        self._cooldown_seconds = int(os.getenv("TENDERLY_CB_COOLDOWN", "60"))
 
         if not self.enabled:
             logger.warning("Transaction simulation disabled (no Tenderly API key)")
@@ -49,6 +54,9 @@ class TenderlySimulator:
         """
         if not self.enabled:
             return None
+        if time.time() < self._circuit_open_until:
+            logger.warning("Tenderly circuit open — skipping simulation")
+            return None
 
         try:
             result = await self._tenderly_simulate(
@@ -56,6 +64,7 @@ class TenderlySimulator:
             )
 
             if not result:
+                self._register_failure()
                 return None
 
             tx_info = result.get("transaction", {})
@@ -66,6 +75,7 @@ class TenderlySimulator:
             asset_deltas = self._parse_asset_changes(result, from_address)
             warnings = self._generate_warnings(result, asset_deltas)
 
+            self._register_success()
             return {
                 "success": success,
                 "revert_reason": revert_reason,
@@ -76,6 +86,7 @@ class TenderlySimulator:
 
         except Exception as e:
             logger.error(f"Transaction simulation failed: {e}")
+            self._register_failure()
             return None
 
     async def _tenderly_simulate(
@@ -135,6 +146,20 @@ class TenderlySimulator:
         except Exception as e:
             logger.error(f"Tenderly API error: {e}")
             return None
+
+    def _register_failure(self):
+        self._fail_count += 1
+        if self._fail_count >= self._max_failures:
+            self._circuit_open_until = time.time() + self._cooldown_seconds
+            logger.warning(
+                "Tenderly circuit opened for %ss after %s failures",
+                self._cooldown_seconds,
+                self._fail_count,
+            )
+            self._fail_count = 0
+
+    def _register_success(self):
+        self._fail_count = 0
 
     def _parse_asset_changes(self, result: dict, from_address: str) -> List[Dict[str, Any]]:
         """Parse asset balance changes from simulation result.

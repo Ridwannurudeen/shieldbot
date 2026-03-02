@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.24;
 
 /**
  * @title ShieldBotVerifier
@@ -30,15 +30,17 @@ contract ShieldBotVerifier {
     );
     
     event VerifierUpdated(address indexed oldVerifier, address indexed newVerifier);
+    event OwnershipTransferred(address indexed oldOwner, address indexed newOwner);
     
     // State variables
     address public owner;
     address public verifier;        // Bot address authorized to record scans
     uint256 public totalScans;
-    
+    uint256 public uniqueAddressCount;  // Count of distinct addresses ever scanned
+
     // Mapping: address => latest scan record
     mapping(address => ScanRecord) public latestScans;
-    
+
     // Mapping: address => all scan count
     mapping(address => uint256) public scanCount;
     
@@ -86,6 +88,9 @@ contract ShieldBotVerifier {
         
         // Update mappings
         latestScans[_scannedAddress] = scan;
+        if (scanCount[_scannedAddress] == 0) {
+            uniqueAddressCount++;
+        }
         scanCount[_scannedAddress]++;
         totalScans++;
         
@@ -110,8 +115,9 @@ contract ShieldBotVerifier {
         uint8[] calldata _riskLevels,
         string[] calldata _scanTypes
     ) external onlyVerifier {
+        require(_addresses.length > 0, "Empty batch");
         require(
-            _addresses.length == _riskLevels.length && 
+            _addresses.length == _riskLevels.length &&
             _addresses.length == _scanTypes.length,
             "Array length mismatch"
         );
@@ -128,9 +134,11 @@ contract ShieldBotVerifier {
             });
             
             latestScans[_addresses[i]] = scan;
+            if (scanCount[_addresses[i]] == 0) {
+                uniqueAddressCount++;
+            }
             scanCount[_addresses[i]]++;
-            totalScans++;
-            
+
             emit ScanRecorded(
                 _addresses[i],
                 _riskLevels[i],
@@ -139,6 +147,8 @@ contract ShieldBotVerifier {
                 msg.sender
             );
         }
+
+        totalScans += _addresses.length;
     }
     
     /**
@@ -155,6 +165,7 @@ contract ShieldBotVerifier {
         uint256 timestamp,
         string memory scanType
     ) {
+        require(scanCount[_address] > 0, "Address not scanned");
         ScanRecord memory scan = latestScans[_address];
         return (
             scan.scannedAddress,
@@ -170,7 +181,7 @@ contract ShieldBotVerifier {
      * @return True if address has been scanned at least once
      */
     function hasBeenScanned(address _address) external view returns (bool) {
-        return latestScans[_address].timestamp != 0;
+        return scanCount[_address] > 0;
     }
     
     /**
@@ -179,8 +190,7 @@ contract ShieldBotVerifier {
      * @return uniqueAddresses Number of unique addresses scanned (approximation)
      */
     function getStats() external view returns (uint256 total, uint256 uniqueAddresses) {
-        // Note: uniqueAddresses is approximation (would need tracking array for exact count)
-        return (totalScans, totalScans); // Simplified for MVP
+        return (totalScans, uniqueAddressCount);
     }
     
     /**
@@ -200,7 +210,9 @@ contract ShieldBotVerifier {
      */
     function transferOwnership(address _newOwner) external onlyOwner {
         require(_newOwner != address(0), "Invalid address");
+        address oldOwner = owner;
         owner = _newOwner;
+        emit OwnershipTransferred(oldOwner, _newOwner);
     }
     
     /**
@@ -209,12 +221,12 @@ contract ShieldBotVerifier {
      * @return Human-readable risk level name
      */
     function getRiskLevelName(uint8 _level) external pure returns (string memory) {
+        require(_level <= 5, "Invalid risk level");
         if (_level == 0) return "LOW";
         if (_level == 1) return "MEDIUM";
         if (_level == 2) return "HIGH";
         if (_level == 3) return "SAFE";
         if (_level == 4) return "WARNING";
-        if (_level == 5) return "DANGER";
-        return "UNKNOWN";
+        return "DANGER";
     }
 }

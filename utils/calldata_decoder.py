@@ -234,8 +234,8 @@ class CalldataDecoder:
                 if amount is not None and amount >= UNLIMITED_THRESHOLD:
                     is_unlimited = True
 
-            # Check for disguised calls
-            disguised = self._check_disguised(selector, known)
+            # Check for suspicious parameter patterns
+            disguised = self._check_disguised(selector, decoded_params)
 
             result = {
                 "selector": selector,
@@ -296,28 +296,55 @@ class CalldataDecoder:
         return None
 
     def _decode_params(self, param_types: list, params_hex: str) -> Dict:
-        """Decode ABI-encoded parameters (simplified — handles address and uint256)."""
-        decoded = {}
-        offset = 0
+        """Decode ABI-encoded parameters (simplified — handles address, uint256, bool, address[])."""
+        decoded: Dict[str, object] = {}
+
+        if not params_hex:
+            return decoded
+
+        # Split calldata into 32-byte words
+        words = [params_hex[i:i + 64] for i in range(0, len(params_hex), 64)]
 
         for i, ptype in enumerate(param_types):
-            chunk = params_hex[offset:offset + 64]
-            if len(chunk) < 64:
+            if i >= len(words):
                 break
 
+            word = words[i]
+
             if ptype == "address":
-                decoded[f"param_{i}"] = "0x" + chunk[24:]
+                decoded[f"param_{i}"] = "0x" + word[24:]
             elif ptype == "uint256":
                 try:
-                    decoded[f"param_{i}"] = int(chunk, 16)
+                    decoded[f"param_{i}"] = int(word, 16)
                 except ValueError:
-                    decoded[f"param_{i}"] = chunk
+                    decoded[f"param_{i}"] = word
             elif ptype == "bool":
-                decoded[f"param_{i}"] = int(chunk, 16) != 0
+                try:
+                    decoded[f"param_{i}"] = int(word, 16) != 0
+                except ValueError:
+                    decoded[f"param_{i}"] = False
+            elif ptype == "address[]":
+                # Dynamic array: word is offset (bytes) from start of params
+                try:
+                    offset_bytes = int(word, 16)
+                    if offset_bytes % 32 != 0:
+                        raise ValueError("Invalid address[] offset")
+                    start = offset_bytes // 32
+                    if start >= len(words):
+                        raise ValueError("Offset out of range")
+                    length = int(words[start], 16)
+                    addrs = []
+                    for j in range(length):
+                        idx = start + 1 + j
+                        if idx >= len(words):
+                            break
+                        addr_word = words[idx]
+                        addrs.append("0x" + addr_word[24:])
+                    decoded[f"param_{i}"] = addrs
+                except Exception:
+                    decoded[f"param_{i}"] = []
             else:
-                decoded[f"param_{i}"] = chunk
-
-            offset += 64
+                decoded[f"param_{i}"] = word
 
         return decoded
 
@@ -330,21 +357,39 @@ class CalldataDecoder:
                 params[f"word_{i // 64}"] = chunk
         return params
 
-    def _check_disguised(self, selector: str, known: Dict) -> Optional[str]:
+    def _check_disguised(self, selector: str, decoded_params: Dict) -> Optional[str]:
         """
-        Detect if a function name seems benign but the selector matches
-        a dangerous operation. Returns warning string or None.
-        """
-        # Known disguised patterns: a function named claimReward / claimAirdrop
-        # but with a selector that actually matches transferFrom or approve
-        dangerous_selectors = {"23b872dd", "095ea7b3", "a22cb465"}
-        benign_names = {"claim", "claimReward", "claimAirdrop", "getReward", "withdraw"}
+        Detect suspicious parameter patterns within known dangerous functions.
 
-        if selector in dangerous_selectors and known["name"] in benign_names:
-            return (
-                f"Function named '{known['name']}' has selector 0x{selector} "
-                f"which matches '{KNOWN_SELECTORS[selector]['signature']}' — possible disguised call"
-            )
+        Note: selector-to-name disguising is not detectable from calldata alone
+        (the 4-byte selector IS the identity). Instead, we flag suspicious
+        parameter values that indicate malicious intent.
+        """
+        # transferFrom where from == to — self-drain pattern used in phishing
+        if selector == "23b872dd":
+            frm = decoded_params.get("param_0", "")
+            to = decoded_params.get("param_1", "")
+            if frm and to and isinstance(frm, str) and isinstance(to, str):
+                if frm.lower() == to.lower():
+                    return "transferFrom with identical from/to addresses — possible self-drain pattern"
+
+        # approve/increaseAllowance to zero address — invalid and suspicious
+        if selector in ("095ea7b3", "39509351"):
+            spender = decoded_params.get("param_0", "")
+            if isinstance(spender, str) and spender.lower() in (
+                "0x0000000000000000000000000000000000000000",
+                "0x",
+            ):
+                return "Approval to zero address — likely invalid or malicious transaction"
+
+        # setApprovalForAll with operator == zero address
+        if selector == "a22cb465":
+            operator = decoded_params.get("param_0", "")
+            if isinstance(operator, str) and operator.lower() == (
+                "0x0000000000000000000000000000000000000000"
+            ):
+                return "setApprovalForAll to zero address — invalid transaction"
+
         return None
 
 

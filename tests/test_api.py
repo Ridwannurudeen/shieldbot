@@ -2,6 +2,7 @@
 
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
+from types import SimpleNamespace
 
 
 @pytest.fixture
@@ -68,6 +69,7 @@ def client():
     mock_risk_engine = MagicMock()
 
     import api as api_module
+    api_module.container = None  # reset any state leaked from previous tests
     api_module.web3_client = mock_web3
     api_module.ai_analyzer = mock_ai
     api_module.tx_scanner = mock_tx_scanner
@@ -128,3 +130,54 @@ class TestFirewallFallback:
         assert resp.status_code == 400
         # Restore
         api_module.web3_client.is_valid_address.return_value = True
+
+
+class TestWebhookAuth:
+    def test_webhook_accepts_header_secret(self, client, monkeypatch):
+        import api as api_module
+        api_module.container = SimpleNamespace(
+            settings=SimpleNamespace(
+                webhook_secret="testsecret",
+                webhook_allow_query_secret=False,
+                telegram_bot_token="",
+                telegram_alert_chat_id="",
+            )
+        )
+        resp = client.post(
+            "/webhook/uptime",
+            data={"alertType": "1"},
+            headers={"x-webhook-secret": "testsecret"},
+        )
+        assert resp.status_code == 200
+
+    def test_webhook_rejects_query_secret_by_default(self, client, monkeypatch):
+        import api as api_module
+        api_module.container = SimpleNamespace(
+            settings=SimpleNamespace(
+                webhook_secret="testsecret",
+                webhook_allow_query_secret=False,
+                telegram_bot_token="",
+                telegram_alert_chat_id="",
+            )
+        )
+        resp = client.post(
+            "/webhook/uptime?secret=testsecret",
+            data={"alertType": "1"},
+        )
+        assert resp.status_code == 403
+
+    def test_webhook_allows_query_secret_when_enabled(self, client, monkeypatch):
+        import api as api_module
+        api_module.container = SimpleNamespace(
+            settings=SimpleNamespace(
+                webhook_secret="testsecret",
+                webhook_allow_query_secret=True,
+                telegram_bot_token="",
+                telegram_alert_chat_id="",
+            )
+        )
+        resp = client.post(
+            "/webhook/uptime?secret=testsecret",
+            data={"alertType": "1"},
+        )
+        assert resp.status_code == 200

@@ -34,6 +34,23 @@ class TestSettings:
         origins = s.cors_origins
         assert origins == ["https://example.com", "https://foo.bar"]
 
+    def test_cors_wildcard_requires_allow_all(self, monkeypatch):
+        monkeypatch.setenv("CORS_ALLOW_ORIGINS", "*")
+        monkeypatch.setenv("CORS_ALLOW_ALL", "false")
+        s = Settings(_env_file=None)
+        assert "*" not in s.cors_origins
+
+    def test_cors_wildcard_allow_all(self, monkeypatch):
+        monkeypatch.setenv("CORS_ALLOW_ORIGINS", "*")
+        monkeypatch.setenv("CORS_ALLOW_ALL", "true")
+        s = Settings(_env_file=None)
+        assert s.cors_origins == ["*"]
+
+    def test_trusted_proxy_ips(self, monkeypatch):
+        monkeypatch.setenv("TRUSTED_PROXY_IPS", "10.0.0.1, 10.0.0.2")
+        s = Settings(_env_file=None)
+        assert s.trusted_proxies == ["10.0.0.1", "10.0.0.2"]
+
     def test_env_override(self, monkeypatch):
         monkeypatch.setenv("RISK_THRESHOLD", "80")
         monkeypatch.setenv("POLICY_MODE", "STRICT")

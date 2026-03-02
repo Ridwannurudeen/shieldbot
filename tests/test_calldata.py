@@ -1,6 +1,7 @@
 """Tests for utils/calldata_decoder.py — selector decoding, router whitelist, raw fallback."""
 
 import pytest
+from eth_abi import encode
 from utils.calldata_decoder import CalldataDecoder, WHITELISTED_ROUTERS
 
 
@@ -51,6 +52,22 @@ class TestKnownSelectors:
         assert result["function_name"] == "swapExactETHForTokens"
         assert result["category"] == "swap"
         assert result["risk"] == "low"
+
+    def test_swap_exact_tokens_for_tokens_path_decoding(self, decoder):
+        addr1 = "0x1111111111111111111111111111111111111111"
+        addr2 = "0x2222222222222222222222222222222222222222"
+        recipient = "0x3333333333333333333333333333333333333333"
+
+        payload = encode(
+            ["uint256", "uint256", "address[]", "address", "uint256"],
+            [1, 1, [addr1, addr2], recipient, 123],
+        ).hex()
+        calldata = "0x38ed1739" + payload
+        result = decoder.decode(calldata)
+
+        assert result["function_name"] == "swapExactTokensForTokens"
+        assert result["category"] == "swap"
+        assert result["params"]["param_2"] == [addr1.lower(), addr2.lower()]
 
 
 class TestWhitelistedRouters:

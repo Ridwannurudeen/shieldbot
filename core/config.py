@@ -54,6 +54,10 @@ class Settings(BaseSettings):
 
     # CORS
     cors_allow_origins: str = ""
+    cors_allow_all: bool = False
+
+    # Proxy trust (comma-separated IPs of trusted reverse proxies)
+    trusted_proxy_ips: str = ""
 
     # Bot settings
     risk_threshold: int = 70
@@ -78,6 +82,9 @@ class Settings(BaseSettings):
     # Admin
     admin_secret: str = ""
 
+    # Webhook security
+    webhook_allow_query_secret: bool = False
+
     # RPC Proxy
     rpc_proxy_enabled: bool = True
 
@@ -100,4 +107,18 @@ class Settings(BaseSettings):
         raw = self.cors_allow_origins.strip()
         if not raw:
             return default_origins
-        return [o.strip() for o in raw.split(",") if o.strip()]
+        parts = [o.strip() for o in raw.split(",") if o.strip()]
+        if any(p == "*" for p in parts):
+            # Only allow wildcard if explicitly enabled.
+            if self.cors_allow_all:
+                return ["*"]
+            return default_origins
+        return parts
+
+    @property
+    def trusted_proxies(self) -> List[str]:
+        """Parse trusted proxy IPs from comma-separated string."""
+        raw = self.trusted_proxy_ips.strip()
+        if not raw:
+            return []
+        return [ip.strip() for ip in raw.split(",") if ip.strip()]

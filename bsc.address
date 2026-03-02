@@ -6,11 +6,11 @@
   "contracts": [
     {
       "name": "ShieldBotVerifier",
-      "address": "0x867aE7449af56BB56a4978c758d7E88066E1f795",
-      "explorerLink": "https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795#code",
-      "description": "On-chain scan recording contract. Status: Deployed and source-verified on BSC Mainnet (Feb-12-2026). Core ShieldBot functionality still operates primarily off-chain for <2s response time requirements.",
-      "deploymentTxHash": "0x021fb404910c2621497bcda167ffcc70e8ece846d1ade8066ab5ad87f13b6bbd",
-      "deploymentTxLink": "https://bscscan.com/tx/0x021fb404910c2621497bcda167ffcc70e8ece846d1ade8066ab5ad87f13b6bbd"
+      "address": "0x0AD4E23f5762CEd4D3278Da958e109F2A09337B2",
+      "explorerLink": "https://bscscan.com/address/0x0AD4E23f5762CEd4D3278Da958e109F2A09337B2#code",
+      "description": "On-chain scan recording contract. Status: Deployed on BSC Mainnet. Source verification pending on BscScan.",
+      "deploymentTxHash": "80774cf3c125bfc9ca719cd05a80793b9be8b403f27ec9a6b4bd1633aad9d00d",
+      "deploymentTxLink": "https://bscscan.com/tx/80774cf3c125bfc9ca719cd05a80793b9be8b403f27ec9a6b4bd1633aad9d00d"
     }
   ],
   "bnbGreenfield": {
