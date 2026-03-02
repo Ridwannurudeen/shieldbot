@@ -22,6 +22,8 @@ APPROVAL_TOPIC = Web3.keccak(text="Approval(address,address,uint256)").hex()
 APPROVAL_FOR_ALL_TOPIC = Web3.keccak(text="ApprovalForAll(address,address,bool)").hex()
 
 UNLIMITED_THRESHOLD = 2**128
+# Approvals above this (but below UNLIMITED_THRESHOLD) are considered "large"
+HIGH_APPROVAL = 10**24  # ~1 million tokens at 18 decimals
 
 # Known safe spenders (major DEX routers) — approvals to these are lower risk
 KNOWN_SAFE_SPENDERS = {
