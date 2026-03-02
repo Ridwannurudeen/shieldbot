@@ -126,7 +126,7 @@ class ServiceContainer:
 
         # Mempool monitor + Rescue mode + Campaign detection
         self.mempool_monitor = MempoolMonitor(self.web3_client, self.db)
-        self.rescue_service = RescueService(self.web3_client, self.db)
+        self.rescue_service = RescueService(self.web3_client, self.db, logs_rpc=settings.logs_rpc_url)
         self.campaign_service = CampaignService(self.web3_client, self.db)
 
         # Phishing site detection
