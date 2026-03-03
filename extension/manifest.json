@@ -5,9 +5,7 @@
   "description": "Real-time BNB Chain transaction firewall. Detects honeypots, rug pulls, and phishing sites before you sign.",
   "permissions": [
     "storage",
-    "permissions",
-    "tabs",
-    "scripting"
+    "permissions"
   ],
   "host_permissions": [
     "https://*/*"
