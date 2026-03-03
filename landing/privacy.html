@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — ShieldAI Transaction Firewall</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #020617;
+      color: #cbd5e1;
+      line-height: 1.7;
+      padding: 0 16px;
+    }
+    a { color: #FACC15; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .nav {
+      max-width: 760px; margin: 0 auto;
+      padding: 20px 0;
+      display: flex; align-items: center; gap: 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      margin-bottom: 48px;
+    }
+    .nav-logo { font-size: 22px; }
+    .nav-name { font-size: 15px; font-weight: 700; color: #f8fafc; }
+    .nav-back { margin-left: auto; font-size: 13px; color: #475569; }
+    .nav-back:hover { color: #FACC15; text-decoration: none; }
+
+    .wrap { max-width: 760px; margin: 0 auto; padding-bottom: 80px; }
+
+    .hero { margin-bottom: 40px; }
+    .hero h1 {
+      font-size: 32px; font-weight: 800; color: #f8fafc;
+      letter-spacing: -0.02em; margin-bottom: 10px;
+    }
+    .hero-meta { font-size: 13px; color: #334155; }
+
+    h2 {
+      font-size: 16px; font-weight: 700; color: #f8fafc;
+      margin: 36px 0 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    p { margin-bottom: 12px; font-size: 14px; color: #94a3b8; }
+    ul { margin: 8px 0 14px 20px; }
+    li { font-size: 14px; color: #94a3b8; margin-bottom: 6px; }
+    li strong { color: #cbd5e1; }
+
+    .callout {
+      background: rgba(250,204,21,0.06);
+      border: 1px solid rgba(250,204,21,0.15);
+      border-left: 3px solid #FACC15;
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin: 20px 0;
+      font-size: 13px; color: #94a3b8;
+    }
+
+    .footer {
+      max-width: 760px; margin: 48px auto 0;
+      padding-top: 24px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      font-size: 12px; color: #1e293b;
+      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    }
+  </style>
+</head>
+<body>
+
+  <nav class="nav">
+    <span class="nav-logo">&#128737;</span>
+    <span class="nav-name">ShieldAI Firewall</span>
+    <a href="/" class="nav-back">&#8592; Back to home</a>
+  </nav>
+
+  <div class="wrap">
+
+    <div class="hero">
+      <h1>Privacy Policy</h1>
+      <div class="hero-meta">Last updated: March 2026 &nbsp;&middot;&nbsp; ShieldBot Security</div>
+    </div>
+
+    <div class="callout">
+      ShieldAI is a security tool. We collect only what is strictly necessary to analyse transactions in real time. We do not sell data, build profiles, or track users across the web.
+    </div>
+
+    <h2>1. Who We Are</h2>
+    <p>ShieldAI Transaction Firewall is a Chrome browser extension developed by ShieldBot Security. The extension analyses blockchain transactions before they are signed to protect users from scams, phishing sites, and malicious contracts.</p>
+    <p>For questions about this policy, contact us at: <a href="mailto:support@shieldbotsecurity.online">support@shieldbotsecurity.online</a></p>
+
+    <h2>2. What Data the Extension Collects</h2>
+    <p>When you interact with a Web3 DApp and your wallet triggers a transaction, the extension sends the following transaction parameters to our risk analysis API:</p>
+    <ul>
+      <li><strong>to</strong> — the recipient contract or wallet address</li>
+      <li><strong>from</strong> — your wallet address</li>
+      <li><strong>value</strong> — the amount of native token (e.g. BNB) being sent</li>
+      <li><strong>data</strong> — the encoded calldata (function call and arguments)</li>
+      <li><strong>chainId</strong> — the blockchain network identifier</li>
+      <li><strong>typedData</strong> — EIP-712 structured data, if applicable (e.g. Permit2 signatures)</li>
+    </ul>
+    <p>This data is the minimum required to perform a meaningful security analysis. No other data is collected.</p>
+
+    <h2>3. What Data Is Stored Locally</h2>
+    <p>The extension stores the following data in your browser's local storage (<code>chrome.storage.local</code>), which never leaves your device unless described otherwise:</p>
+    <ul>
+      <li>Your API endpoint setting (default: api.shieldbotsecurity.online)</li>
+      <li>Firewall enabled/disabled state</li>
+      <li>Policy mode (Balanced or Strict)</li>
+      <li>The last 50 transaction scan results for the history view</li>
+      <li>The wallet address you enter in the Wallet Health scanner</li>
+    </ul>
+
+    <h2>4. How We Use Transaction Data</h2>
+    <p>Transaction data sent to our API is used exclusively to:</p>
+    <ul>
+      <li>Compute a risk score and classification (SAFE, CAUTION, HIGH RISK, BLOCK)</li>
+      <li>Return a verdict to the extension before you sign the transaction</li>
+      <li>Improve detection accuracy through aggregated, anonymised analysis</li>
+    </ul>
+    <p>Transaction data is <strong>not</strong> linked to any personal identity, browser profile, or IP address in our systems. We do not store wallet addresses as user identifiers.</p>
+
+    <h2>5. Phishing Detection</h2>
+    <p>When you visit a website, the extension sends the page URL to our API to check it against phishing and threat intelligence databases. This check is cached for one hour to minimise requests. The URL is used only for the reputation check and is not stored or logged on our servers.</p>
+
+    <h2>6. Data Sharing</h2>
+    <p>We do not sell, rent, or share your data with third parties for advertising or marketing purposes. To perform security analysis, we query the following external services:</p>
+    <ul>
+      <li><strong>GoPlus Security</strong> — phishing URL and token risk data</li>
+      <li><strong>Tenderly</strong> — transaction simulation for asset delta preview</li>
+      <li><strong>Token Sniffer</strong> — bytecode fingerprinting for unverified contracts</li>
+    </ul>
+    <p>These services receive only the minimum data necessary for their function (e.g. a contract address or URL). They are governed by their own privacy policies.</p>
+
+    <h2>7. Data Retention</h2>
+    <p>Transaction data submitted for analysis is retained on our servers for a maximum of 30 days for debugging and accuracy monitoring, after which it is deleted. Aggregated, non-identifiable statistics may be retained indefinitely.</p>
+    <p>Locally stored data (history, settings) remains on your device until you uninstall the extension or clear it manually.</p>
+
+    <h2>8. Security</h2>
+    <p>All data transmitted between the extension and our API is encrypted in transit using HTTPS/TLS. Our API servers are access-controlled and not publicly writable.</p>
+
+    <h2>9. Children's Privacy</h2>
+    <p>ShieldAI is not directed at children under 13 years of age. We do not knowingly collect personal information from children.</p>
+
+    <h2>10. Changes to This Policy</h2>
+    <p>We may update this policy as the product evolves. The "Last updated" date at the top of this page will reflect any changes. Continued use of the extension after changes constitutes acceptance of the updated policy.</p>
+
+    <h2>11. Contact</h2>
+    <p>If you have questions, concerns, or requests related to your data, contact us at:<br>
+    <a href="mailto:support@shieldbotsecurity.online">support@shieldbotsecurity.online</a></p>
+
+  </div>
+
+  <div class="footer">
+    <span>&#169; 2026 ShieldBot Security. All rights reserved.</span>
+    <span>ShieldAI Transaction Firewall</span>
+  </div>
+
+</body>
+</html>
