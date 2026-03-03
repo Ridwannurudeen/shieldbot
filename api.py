@@ -872,6 +872,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 "classification": classification,
                 "risk_score": risk_score,
                 "decoded_action": _format_decoded_action(decoded),
+                "calldata_details": _build_calldata_details(decoded),
                 "danger_signals": danger_signals,
                 "transaction_impact": {
                     "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens",
@@ -1363,13 +1364,12 @@ def _format_decoded_action(decoded: Dict) -> str:
 
     if category == "approval":
         spender = params.get("param_0", "")
-        sp = str(spender)
-        spender_short = f"{sp[:8]}..." if len(sp) > 10 else sp
+        spender_label = decoded.get("spender_label") or _short_addr(str(spender))
         if decoded.get("is_unlimited_approval"):
-            return f"UNLIMITED Approval to {spender_short}"
+            return f"UNLIMITED Approval to {spender_label}"
         if "permit" in func.lower():
-            return f"Gas-less Permit to {spender_short}"
-        return f"Token Approval to {spender_short}"
+            return f"Gas-less Permit to {spender_label}"
+        return f"Token Approval to {spender_label}"
 
     if category == "transfer":
         if func == "transfer":
@@ -1399,6 +1399,79 @@ def _format_decoded_action(decoded: Dict) -> str:
         return f"Unknown Function (0x{selector})"
 
     return func
+
+
+def _short_addr(addr: str) -> str:
+    """Shorten an address to '0x1234...abcd' format."""
+    if not addr or not isinstance(addr, str):
+        return str(addr)
+    if len(addr) > 12:
+        return f"{addr[:6]}...{addr[-4:]}"
+    return addr
+
+
+def _build_calldata_details(decoded: Dict) -> Dict:
+    """Build structured calldata breakdown for the extension overlay."""
+    func = decoded.get("function_name", "Unknown")
+    category = decoded.get("category", "unknown")
+    params = decoded.get("params", {})
+    fields = []
+
+    if category == "approval":
+        spender = params.get("param_0", "")
+        spender_label = decoded.get("spender_label") or _short_addr(str(spender))
+        amount = params.get("param_1")
+        is_unlimited = decoded.get("is_unlimited_approval", False)
+        fields = [
+            {"label": "Function", "value": func},
+            {"label": "Spender", "value": spender_label},
+            {"label": "Amount", "value": "Unlimited", "danger": True} if is_unlimited else
+            {"label": "Amount", "value": str(amount) if amount is not None else "Unknown"},
+        ]
+    elif category == "transfer":
+        if func == "transferFrom":
+            frm = params.get("param_0", "")
+            to = params.get("param_1", "")
+            amount = params.get("param_2")
+            fields = [
+                {"label": "Function", "value": func},
+                {"label": "From", "value": _short_addr(str(frm))},
+                {"label": "To", "value": _short_addr(str(to))},
+                {"label": "Amount", "value": str(amount) if amount is not None else "Unknown"},
+            ]
+        else:
+            to = params.get("param_0", "")
+            amount = params.get("param_1")
+            fields = [
+                {"label": "Function", "value": func},
+                {"label": "To", "value": _short_addr(str(to))},
+                {"label": "Amount", "value": str(amount) if amount is not None else "Unknown"},
+            ]
+    elif category == "swap":
+        # Find the address[] path param
+        path = None
+        for v in params.values():
+            if isinstance(v, list) and len(v) >= 2 and all(isinstance(x, str) for x in v):
+                path = v
+                break
+        fields = [{"label": "Function", "value": func}]
+        if path:
+            path_str = " → ".join(_short_addr(a) for a in path)
+            fields.append({"label": "Token Path", "value": path_str})
+    elif category == "claim":
+        fields = [
+            {"label": "Function", "value": func},
+            {"label": "Type", "value": "Claim Rewards / Airdrop"},
+        ]
+    elif category == "supply":
+        fields = [
+            {"label": "Function", "value": func},
+            {"label": "Type", "value": "Mint" if func == "mint" else "Burn"},
+        ]
+    else:
+        fields = [{"label": "Function", "value": func}]
+
+    return {"category": category, "fields": fields}
 
 
 def _build_asset_delta_fallback(decoded: Dict, value_bnb: float) -> List:
@@ -1437,6 +1510,7 @@ def _build_cached_response(
         "classification": classification,
         "risk_score": risk_score,
         "decoded_action": _format_decoded_action(decoded),
+        "calldata_details": _build_calldata_details(decoded),
         "danger_signals": flags,
         "transaction_impact": {
             "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens",
@@ -1524,6 +1598,7 @@ def _build_fallback_response(decoded: Dict, scan: Dict, whitelisted: Optional[st
         "classification": classification,
         "risk_score": min(100, risk_score),
         "decoded_action": _format_decoded_action(decoded),
+        "calldata_details": _build_calldata_details(decoded),
         "danger_signals": danger_signals,
         "transaction_impact": {
             "sending": "Unknown (AI unavailable)",
@@ -1541,10 +1616,23 @@ def _build_fallback_response(decoded: Dict, scan: Dict, whitelisted: Optional[st
     }
 
 
-def _extract_swap_path(decoded: Dict) -> List[str]:
-    """Extract address[] swap path from decoded calldata if present."""
+def _extract_swap_path(decoded: Dict, raw_calldata: str = "") -> List[str]:
+    """Extract token swap path from decoded calldata.
+
+    For Universal Router (execute selector 3593564c), delegates to the dedicated
+    parser that walks the nested commands/inputs ABI structure.
+    For standard V2 routers, scans decoded params for an address[].
+    """
     if not decoded:
         return []
+
+    # Universal Router: path is buried inside inputs[i] bytes — needs dedicated decode
+    if decoded.get("selector") == "3593564c" and raw_calldata and calldata_decoder:
+        path = calldata_decoder.decode_universal_router_path(raw_calldata)
+        if path:
+            return path
+
+    # Standard V2 routers: path is a top-level address[] param
     params = decoded.get("params", {})
     for v in params.values():
         if isinstance(v, list) and v and all(isinstance(x, str) and x.startswith("0x") for x in v):
@@ -1574,7 +1662,7 @@ async def _analyze_router_swap(
     if not container or not container.registry or not risk_engine:
         return None
 
-    path = _extract_swap_path(decoded)
+    path = _extract_swap_path(decoded, req.data)
     if not path:
         # Cannot decode the swap path (e.g. Uniswap V3 / aggregator calldata).
         # Returning None here would cause the main pipeline to analyse the
@@ -1585,6 +1673,7 @@ async def _analyze_router_swap(
             "classification": "CAUTION",
             "risk_score": 35,
             "decoded_action": _format_decoded_action(decoded),
+            "calldata_details": _build_calldata_details(decoded),
             "danger_signals": [
                 f"Swap via trusted router ({whitelisted}) but token path could not be decoded — token safety unverified",
             ],
@@ -1733,6 +1822,7 @@ async def _analyze_router_swap(
         "classification": classification,
         "risk_score": risk_score,
         "decoded_action": _format_decoded_action(decoded),
+        "calldata_details": _build_calldata_details(decoded),
         "danger_signals": danger_signals,
         "transaction_impact": {
             "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens (via router)",

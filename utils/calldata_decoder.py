@@ -4,7 +4,7 @@ Decodes function selectors and parameters from raw transaction calldata
 """
 
 import logging
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +128,15 @@ KNOWN_SELECTORS: Dict[str, Dict] = {
         "category": "claim",
         "risk": "medium",
     },
+    # Universal Router (PancakeSwap / Uniswap)
+    "3593564c": {
+        "name": "execute",
+        "signature": "execute(bytes,bytes[],uint256)",
+        "params": ["bytes", "bytes[]", "uint256"],
+        "category": "swap",
+        "risk": "low",
+    },
+
     # Permit patterns (EIP-2612, Permit2, DAI-style)
     "d505accf": {
         "name": "permit",
@@ -294,6 +303,164 @@ class CalldataDecoder:
             return WHITELISTED_ROUTERS.get(addr_lower)
 
         return None
+
+    def decode_universal_router_path(self, calldata: str) -> List[str]:
+        """
+        Decode the token swap path from a Universal Router execute(bytes,bytes[],uint256) call.
+
+        The Universal Router encodes swap instructions as:
+          commands: packed bytes where each byte is a command type
+          inputs:   bytes[] where inputs[i] is the ABI-encoded params for commands[i]
+
+        V2 commands (0x08 / 0x09) encode the path as address[].
+        V3 commands (0x00 / 0x01) encode the path as packed bytes (token+fee+token...).
+
+        Returns a list of token addresses in swap order, or [] on failure.
+        """
+        try:
+            data = calldata[2:] if calldata.startswith("0x") else calldata
+            if len(data) < 8 or data[:8].lower() != "3593564c":
+                return []
+
+            params = data[8:]
+            words = [params[i:i + 64] for i in range(0, len(params), 64)]
+            if len(words) < 3:
+                return []
+
+            # words[0] = byte offset from params start → commands length word
+            # words[1] = byte offset from params start → inputs count word
+            # words[2] = deadline
+            ptr_cmds = int(words[0], 16) // 32
+            ptr_inputs = int(words[1], 16) // 32
+
+            if ptr_cmds >= len(words) or ptr_inputs >= len(words):
+                return []
+
+            # --- Decode commands bytes ---
+            cmds_len = int(words[ptr_cmds], 16)
+            if cmds_len == 0:
+                return []
+            cmds_words = (cmds_len + 31) // 32
+            cmds_hex = "".join(words[ptr_cmds + 1: ptr_cmds + 1 + cmds_words])
+            if len(cmds_hex) < cmds_len * 2:
+                return []
+            commands = bytes.fromhex(cmds_hex[:cmds_len * 2])
+
+            # Find the first V2 or V3 swap command.
+            # Top 2 bits are flags (FLAG_ALLOW_REVERT etc.) — mask them off.
+            V2_CMDS = {0x08, 0x09}  # V2_SWAP_EXACT_IN, V2_SWAP_EXACT_OUT
+            V3_CMDS = {0x00, 0x01}  # V3_SWAP_EXACT_IN, V3_SWAP_EXACT_OUT
+
+            swap_idx = None
+            is_v3 = False
+            for i, byte in enumerate(commands):
+                cmd = byte & 0x3f
+                if cmd in V2_CMDS:
+                    swap_idx = i
+                    break
+                if cmd in V3_CMDS:
+                    swap_idx = i
+                    is_v3 = True
+                    break
+
+            if swap_idx is None:
+                return []
+
+            # --- Decode inputs[] at ptr_inputs ---
+            # ABI bytes[] encoding: [count][offset_0 ... offset_n][elem_0_len][elem_0_data]...
+            # All offsets are in bytes relative to the count word (ptr_inputs).
+            inputs_count = int(words[ptr_inputs], 16)
+            if swap_idx >= inputs_count:
+                return []
+
+            offset_word_idx = ptr_inputs + 1 + swap_idx
+            if offset_word_idx >= len(words):
+                return []
+
+            elem_offset_bytes = int(words[offset_word_idx], 16)
+            # Offsets in bytes[] are relative to the first offset word (ptr_inputs+1),
+            # not the count word (ptr_inputs).
+            elem_word_idx = (ptr_inputs + 1) + elem_offset_bytes // 32
+            if elem_word_idx >= len(words):
+                return []
+
+            elem_len = int(words[elem_word_idx], 16)
+            if elem_len == 0:
+                return []
+
+            elem_words = (elem_len + 31) // 32
+            elem_hex = "".join(words[elem_word_idx + 1: elem_word_idx + 1 + elem_words])
+            elem_hex = elem_hex[:elem_len * 2]
+
+            if is_v3:
+                return self._decode_v3_ur_input(elem_hex)
+            else:
+                return self._decode_v2_ur_input(elem_hex)
+
+        except Exception:
+            return []
+
+    def _decode_v2_ur_input(self, input_hex: str) -> List[str]:
+        """
+        Decode address[] path from V2_SWAP_EXACT_IN/OUT input:
+          abi.encode(address recipient, uint256 amountIn, uint256 amountOutMin,
+                     address[] path, bool payerIsUser)
+        """
+        try:
+            iw = [input_hex[i:i + 64] for i in range(0, len(input_hex), 64)]
+            if len(iw) < 5:
+                return []
+            # iw[3] = byte offset to address[] from start of iw
+            path_word = int(iw[3], 16) // 32
+            if path_word >= len(iw):
+                return []
+            path_len = int(iw[path_word], 16)
+            addrs = []
+            for j in range(path_len):
+                idx = path_word + 1 + j
+                if idx >= len(iw):
+                    break
+                addrs.append("0x" + iw[idx][24:])
+            return addrs
+        except Exception:
+            return []
+
+    def _decode_v3_ur_input(self, input_hex: str) -> List[str]:
+        """
+        Decode packed bytes path from V3_SWAP_EXACT_IN/OUT input:
+          abi.encode(address recipient, uint256 amountIn, uint256 amountOutMin,
+                     bytes path, bool payerIsUser)
+        V3 path packing: tokenIn(20B) + fee(3B) + tokenMid*(20B+3B) + tokenOut(20B)
+        """
+        try:
+            iw = [input_hex[i:i + 64] for i in range(0, len(input_hex), 64)]
+            if len(iw) < 5:
+                return []
+            # iw[3] = byte offset to bytes path from start of iw
+            path_word = int(iw[3], 16) // 32
+            if path_word >= len(iw):
+                return []
+            path_len_bytes = int(iw[path_word], 16)
+            path_words = (path_len_bytes + 31) // 32
+            path_hex = "".join(iw[path_word + 1: path_word + 1 + path_words])
+            path_hex = path_hex[:path_len_bytes * 2]
+
+            # Minimum single-hop path: 20 + 3 + 20 = 43 bytes = 86 hex chars
+            if len(path_hex) < 86:
+                return []
+
+            addrs = []
+            pos = 0
+            while pos + 40 <= len(path_hex):
+                addrs.append("0x" + path_hex[pos:pos + 40])
+                pos += 40
+                if pos + 6 <= len(path_hex):
+                    pos += 6  # skip 3-byte fee tier
+                else:
+                    break
+            return addrs if len(addrs) >= 2 else []
+        except Exception:
+            return []
 
     def _decode_params(self, param_types: list, params_hex: str) -> Dict:
         """Decode ABI-encoded parameters (simplified — handles address, uint256, bool, address[])."""

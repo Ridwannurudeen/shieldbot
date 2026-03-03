@@ -42,6 +42,10 @@
 
   const SIGN_METHODS = new Set(["personal_sign", "eth_sign"]);
 
+  // Stores the original (un-wrapped) provider.request — used by the revoke handler
+  // so revoke TXs bypass ShieldAI analysis and go straight to the wallet.
+  let _lastOriginalRequest = null;
+
   /**
    * Wrap a provider's request method to intercept transactions.
    * Uses Object.defineProperty for compatibility with MetaMask v11+
@@ -51,6 +55,7 @@
     if (!provider || !provider.request || provider.__shieldai_proxied) return;
 
     const originalRequest = provider.request.bind(provider);
+    _lastOriginalRequest = originalRequest;
 
     const wrappedRequest = async function (args) {
       if (!args || !INTERCEPTED_METHODS.has(args.method)) {
@@ -242,6 +247,7 @@
       setTimeout(() => clearInterval(poll), 30000);
     }
   }
+
 
   // --- Hook EIP-6963 providers (Rabby, modern MetaMask, etc.) ---
 

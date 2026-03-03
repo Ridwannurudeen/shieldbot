@@ -339,6 +339,40 @@
   display: inline-block;
 }
 
+/* Signature Request */
+.shieldai-sig-note {
+  background: #1e293b;
+  border-radius: 6px;
+  padding: 8px 12px !important;
+}
+.shieldai-sig-note p {
+  color: #94a3b8 !important;
+  font-size: 12px !important;
+}
+.shieldai-sig-message {
+  background: #1e293b;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #e2e8f0;
+  line-height: 1.5;
+  word-break: break-word;
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.shieldai-sig-binary {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  color: #64748b;
+}
+
+/* Decoded Calldata */
+.shieldai-calldata-danger {
+  color: #ef4444;
+  font-weight: 700;
+}
+
 /* Asset Delta (simulated token in/out) */
 .shieldai-delta-list { list-style: none; padding: 0; margin: 4px 0 0; }
 .shieldai-delta-list li { padding: 4px 0; font-size: 14px; font-weight: 600; }

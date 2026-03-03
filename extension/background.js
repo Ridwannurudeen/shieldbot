@@ -52,7 +52,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return true;
   }
+
 });
+
 
 async function checkPhishing(url) {
   try {

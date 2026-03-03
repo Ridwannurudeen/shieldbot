@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <style>
+    /* ================================================================
+       BASE
+    ================================================================ */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       width: 360px;
@@ -11,412 +14,688 @@
       color: #e2e8f0;
       padding: 16px;
     }
-    .header {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 16px;
-    }
-    .header .logo { font-size: 28px; }
-    .header h1 {
-      font-size: 16px;
-      font-weight: 600;
-      color: #f8fafc;
-    }
-    .header .version {
-      font-size: 11px;
-      color: #64748b;
-      margin-left: auto;
-    }
 
-    .status-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 12px;
-      background: #1e293b;
-      border-radius: 8px;
-      margin-bottom: 12px;
-    }
-    .status-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
+    /* ================================================================
+       COMPACT POPUP
+    ================================================================ */
+    .header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+    .header .logo { font-size: 28px; }
+    .header h1 { font-size: 16px; font-weight: 600; color: #f8fafc; }
+    .header .version { font-size: 11px; color: #64748b; margin-left: auto; }
+
+    .status-row { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: #1e293b; border-radius: 8px; margin-bottom: 12px; }
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
     .status-dot.green { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
     .status-dot.red { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
     .status-dot.yellow { background: #eab308; }
     .status-text { font-size: 13px; color: #94a3b8; }
 
     .field { margin-bottom: 12px; }
-    .field label {
-      display: block;
-      font-size: 12px;
-      font-weight: 500;
-      color: #94a3b8;
-      margin-bottom: 4px;
-    }
-    .field input {
-      width: 100%;
-      padding: 8px 10px;
-      background: #1e293b;
-      border: 1px solid #334155;
-      border-radius: 6px;
-      color: #f8fafc;
-      font-size: 13px;
-      outline: none;
-    }
+    .field label { display: block; font-size: 12px; font-weight: 500; color: #94a3b8; margin-bottom: 4px; }
+    .field input { width: 100%; padding: 8px 10px; background: #1e293b; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-size: 13px; outline: none; }
     .field input:focus { border-color: #3b82f6; }
 
-    .toggle-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 10px 0;
-    }
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; }
     .toggle-label { font-size: 13px; color: #cbd5e1; }
-    .toggle {
-      position: relative;
-      width: 44px;
-      height: 24px;
-    }
+    .toggle { position: relative; width: 44px; height: 24px; }
     .toggle input { opacity: 0; width: 0; height: 0; }
-    .toggle .slider {
-      position: absolute;
-      inset: 0;
-      background: #334155;
-      border-radius: 12px;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    .toggle .slider::before {
-      content: "";
-      position: absolute;
-      width: 18px;
-      height: 18px;
-      left: 3px;
-      top: 3px;
-      background: #f8fafc;
-      border-radius: 50%;
-      transition: transform 0.2s;
-    }
+    .toggle .slider { position: absolute; inset: 0; background: #334155; border-radius: 12px; cursor: pointer; transition: background 0.2s; }
+    .toggle .slider::before { content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; background: #f8fafc; border-radius: 50%; transition: transform 0.2s; }
     .toggle input:checked + .slider { background: #3b82f6; }
     .toggle input:checked + .slider::before { transform: translateX(20px); }
 
-    .btn {
-      width: 100%;
-      padding: 8px;
-      border: none;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      margin-top: 8px;
-    }
+    .btn { width: 100%; padding: 8px; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; margin-top: 8px; }
     .btn-save { background: #3b82f6; color: #fff; }
     .btn-save:hover { background: #2563eb; }
-    .saved-msg {
-      text-align: center;
-      font-size: 12px;
-      color: #22c55e;
-      margin-top: 6px;
-      opacity: 0;
-      transition: opacity 0.3s;
-    }
+    .saved-msg { text-align: center; font-size: 12px; color: #22c55e; margin-top: 6px; opacity: 0; transition: opacity 0.3s; }
     .saved-msg.show { opacity: 1; }
 
-    /* Tabs */
-    .tabs {
-      display: flex;
-      gap: 0;
-      margin-bottom: 12px;
-      border-bottom: 1px solid #1e293b;
-    }
-    .tab {
-      flex: 1;
-      padding: 8px 0;
-      text-align: center;
-      font-size: 13px;
-      font-weight: 500;
-      color: #64748b;
-      cursor: pointer;
-      border-bottom: 2px solid transparent;
-      transition: all 0.2s;
-    }
-    .tab.active {
-      color: #3b82f6;
-      border-bottom-color: #3b82f6;
-    }
+    .tabs { display: flex; margin-bottom: 12px; border-bottom: 1px solid #1e293b; }
+    .tab { flex: 1; padding: 8px 0; text-align: center; font-size: 13px; font-weight: 500; color: #64748b; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; }
+    .tab.active { color: #3b82f6; border-bottom-color: #3b82f6; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
 
-    /* History */
-    .history-list {
-      max-height: 260px;
-      overflow-y: auto;
-    }
-    .history-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 8px 10px;
-      background: #1e293b;
-      border-radius: 6px;
-      margin-bottom: 6px;
-    }
-    .history-badge {
-      font-size: 10px;
-      font-weight: 700;
-      padding: 2px 6px;
-      border-radius: 4px;
-      color: #fff;
-      white-space: nowrap;
-      flex-shrink: 0;
-    }
+    .history-list { max-height: 260px; overflow-y: auto; }
+    .history-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: #1e293b; border-radius: 6px; margin-bottom: 6px; }
+    .history-badge { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; color: #fff; white-space: nowrap; flex-shrink: 0; }
     .badge-safe { background: #22c55e; }
     .badge-caution { background: #eab308; color: #000; }
     .badge-high { background: #f97316; }
     .badge-block { background: #ef4444; }
-    .history-info {
-      flex: 1;
-      min-width: 0;
-    }
-    .history-recipient {
-      font-size: 12px;
-      color: #cbd5e1;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .history-time {
-      font-size: 10px;
-      color: #475569;
-    }
-    .history-score {
-      font-size: 12px;
-      font-weight: 600;
-      color: #94a3b8;
-      flex-shrink: 0;
-    }
-    .history-empty {
-      text-align: center;
-      padding: 24px 0;
-      color: #475569;
-      font-size: 13px;
-    }
+    .history-info { flex: 1; min-width: 0; }
+    .history-recipient { font-size: 12px; color: #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .history-time { font-size: 10px; color: #475569; }
+    .history-score { font-size: 12px; font-weight: 600; color: #94a3b8; flex-shrink: 0; }
+    .history-empty { text-align: center; padding: 24px 0; color: #475569; font-size: 13px; }
     .history-list::-webkit-scrollbar { width: 4px; }
-    .history-list::-webkit-scrollbar-track { background: transparent; }
     .history-list::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
 
-    /* Health Tab */
-    .health-score-row {
-      text-align: center;
-      padding: 12px 0 8px;
-    }
-    .health-score-num {
-      font-size: 52px;
-      font-weight: 700;
-      line-height: 1;
-    }
-    .health-score-label {
-      font-size: 11px;
-      color: #64748b;
-      margin-top: 4px;
-    }
-    .health-stats {
-      display: flex;
-      gap: 6px;
-      margin-bottom: 10px;
-    }
-    .health-stat {
-      flex: 1;
-      background: #1e293b;
-      border-radius: 6px;
-      padding: 8px 4px;
-      text-align: center;
-    }
-    .health-stat-num {
-      font-size: 18px;
-      font-weight: 700;
-    }
-    .health-stat-label {
-      font-size: 10px;
-      color: #64748b;
-      margin-top: 2px;
-    }
-    .health-approvals {
-      max-height: 140px;
-      overflow-y: auto;
-    }
-    .health-approval-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 8px;
-      background: #1e293b;
-      border-radius: 6px;
-      margin-bottom: 4px;
-    }
-    .health-risk-badge {
-      font-size: 9px;
-      font-weight: 700;
-      padding: 2px 5px;
-      border-radius: 3px;
-      color: #fff;
-      flex-shrink: 0;
-    }
+    .health-score-row { text-align: center; padding: 12px 0 8px; }
+    .health-score-num { font-size: 52px; font-weight: 700; line-height: 1; }
+    .health-score-label { font-size: 11px; color: #64748b; margin-top: 4px; }
+    .health-stats { display: flex; gap: 6px; margin-bottom: 10px; }
+    .health-stat { flex: 1; background: #1e293b; border-radius: 6px; padding: 8px 4px; text-align: center; }
+    .health-stat-num { font-size: 18px; font-weight: 700; }
+    .health-stat-label { font-size: 10px; color: #64748b; margin-top: 2px; }
+    .health-approvals { max-height: 140px; overflow-y: auto; }
+    .health-approval-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: #1e293b; border-radius: 6px; margin-bottom: 4px; }
+    .health-risk-badge { font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 3px; color: #fff; flex-shrink: 0; }
     .risk-high { background: #ef4444; }
     .risk-medium { background: #f97316; }
     .risk-low { background: #22c55e; }
     .health-token { flex: 1; min-width: 0; }
-    .health-token-name {
-      font-size: 12px;
-      color: #e2e8f0;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+    .health-token-name { font-size: 12px; color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .health-token-reason { font-size: 10px; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .health-allowance { font-size: 11px; color: #94a3b8; flex-shrink: 0; }
+    .health-usd-risk { font-size: 12px; font-weight: 700; color: #ef4444; flex-shrink: 0; }
+    .health-approvals::-webkit-scrollbar { width: 4px; }
+    .health-approvals::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+    .health-empty { text-align: center; padding: 16px 0; color: #475569; font-size: 12px; }
+
+    .policy-option { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 8px; background: #1e293b; border: 1px solid #334155; border-radius: 6px; cursor: pointer; transition: border-color 0.2s; }
+    .policy-option:has(input:checked) { border-color: #3b82f6; }
+    .policy-option input { display: none; }
+    .policy-label { font-size: 13px; font-weight: 600; color: #e2e8f0; }
+    .policy-desc { font-size: 10px; color: #64748b; margin-top: 2px; }
+
+    .expand-btn { margin-left: auto; background: none; border: 1px solid #334155; border-radius: 5px; color: #64748b; cursor: pointer; padding: 3px 6px; font-size: 14px; line-height: 1; transition: all 0.15s; }
+    .expand-btn:hover { border-color: #3b82f6; color: #3b82f6; }
+
+    /* ================================================================
+       DASHBOARD — body.expanded
+    ================================================================ */
+    body.expanded {
+      width: 100%; min-height: 100vh;
+      background: #020617; padding: 0; overflow-x: hidden;
     }
-    .health-token-reason {
-      font-size: 10px;
-      color: #475569;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .health-allowance {
-      font-size: 11px;
-      color: #94a3b8;
+    body.expanded > .header,
+    body.expanded > .status-row,
+    body.expanded > .tabs,
+    body.expanded > .tab-content { display: none !important; }
+    #dashboard { display: none; }
+    body.expanded #dashboard { display: flex; flex-direction: column; min-height: 100vh; }
+
+    /* --- Header --- */
+    .dh {
+      display: flex; align-items: center; gap: 10px;
+      padding: 13px 26px;
+      background: rgba(255,255,255,0.018);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
       flex-shrink: 0;
     }
-    .health-approvals::-webkit-scrollbar { width: 4px; }
-    .health-approvals::-webkit-scrollbar-track { background: transparent; }
-    .health-approvals::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
-    .health-empty {
-      text-align: center;
-      padding: 16px 0;
-      color: #475569;
-      font-size: 12px;
+    .dh-logo { font-size: 20px; line-height: 1; }
+    .dh-title { font-size: 14px; font-weight: 800; color: #f8fafc; letter-spacing: -0.01em; }
+    .dh-pill {
+      font-size: 9px; font-weight: 800; letter-spacing: 0.12em;
+      padding: 2px 8px; border-radius: 20px;
+      background: rgba(250,204,21,0.1); color: #FACC15;
+      border: 1px solid rgba(250,204,21,0.22);
+    }
+    .dh-sep { flex: 1; }
+    .dh-chains {
+      font-size: 10px; font-weight: 600; color: #475569;
+      padding: 3px 9px; border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.07);
+      margin-right: 4px;
+    }
+    .dh-chains span { color: #22C55E; }
+    .dh-conn {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 11px; color: #64748b;
+      padding: 4px 10px; border-radius: 20px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .dh-version { font-size: 10px; color: #1e293b; margin-left: 8px; }
+
+    /* --- Grid --- */
+    .db {
+      display: grid;
+      grid-template-columns: 250px 1fr 250px;
+      gap: 14px;
+      padding: 18px 22px 22px;
+      flex: 1; align-items: start;
+    }
+    .dc { display: flex; flex-direction: column; gap: 12px; }
+
+    /* --- Cards --- */
+    .dk {
+      background: rgba(10, 18, 38, 0.85);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 12px; padding: 15px;
+      position: relative; overflow: hidden;
+    }
+    .dk::before {
+      content: ''; position: absolute;
+      top: 0; left: 20px; right: 20px; height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+    }
+    .dk-title {
+      font-size: 9px; font-weight: 800;
+      color: #FACC15; text-transform: uppercase; letter-spacing: 0.14em;
+      margin-bottom: 13px;
+      display: flex; align-items: center; gap: 7px;
+    }
+    .dk-title::before {
+      content: ''; width: 2px; height: 10px;
+      background: #FACC15; border-radius: 2px; flex-shrink: 0;
     }
 
-    /* Policy mode radio */
-    .policy-option {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 8px;
-      background: #1e293b;
-      border: 1px solid #334155;
-      border-radius: 6px;
-      cursor: pointer;
-      transition: border-color 0.2s;
+    /* ================================================================
+       LEFT — FEED
+    ================================================================ */
+    .feed-list { display: flex; flex-direction: column; gap: 5px; max-height: 280px; overflow-y: auto; }
+    .feed-list::-webkit-scrollbar { width: 3px; }
+    .feed-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 2px; }
+
+    .feed-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 9px 7px 11px;
+      background: rgba(255,255,255,0.025);
+      border: 1px solid rgba(255,255,255,0.04);
+      border-left: 3px solid var(--fc, #334155);
+      border-radius: 7px;
+      animation: slideL 0.28s ease both;
     }
-    .policy-option:has(input:checked) {
-      border-color: #3b82f6;
-      background: #1e293b;
+    @keyframes slideL { from { transform: translateX(-8px); opacity: 0; } to { transform: none; opacity: 1; } }
+    .feed-item:nth-child(1) { animation-delay: .04s; }
+    .feed-item:nth-child(2) { animation-delay: .08s; }
+    .feed-item:nth-child(3) { animation-delay: .12s; }
+    .feed-item:nth-child(4) { animation-delay: .16s; }
+    .feed-item:nth-child(5) { animation-delay: .20s; }
+    .feed-item:nth-child(6) { animation-delay: .24s; }
+    .feed-item:nth-child(7) { animation-delay: .28s; }
+    .feed-item:nth-child(8) { animation-delay: .32s; }
+
+    .feed-badge { font-size: 8px; font-weight: 800; padding: 2px 5px; border-radius: 3px; color: #fff; flex-shrink: 0; letter-spacing: 0.04em; }
+    .feed-info { flex: 1; min-width: 0; }
+    .feed-addr { font-size: 10px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: 'SF Mono', 'Fira Code', monospace; }
+    .feed-time { font-size: 9px; color: #334155; margin-top: 1px; }
+    .feed-score { font-size: 11px; font-weight: 800; flex-shrink: 0; }
+
+    .feed-empty {
+      display: flex; flex-direction: column; align-items: center;
+      padding: 24px 0; gap: 8px;
     }
-    .policy-option input { display: none; }
-    .policy-label {
-      font-size: 13px;
-      font-weight: 600;
-      color: #e2e8f0;
+    .feed-scanning { display: flex; gap: 5px; align-items: center; }
+    .scan-dot {
+      width: 5px; height: 5px; border-radius: 50%; background: #22C55E;
+      animation: scanPulse 1.4s ease-in-out infinite;
     }
-    .policy-desc {
-      font-size: 10px;
-      color: #64748b;
-      margin-top: 2px;
+    .scan-dot:nth-child(2) { animation-delay: .18s; }
+    .scan-dot:nth-child(3) { animation-delay: .36s; }
+    @keyframes scanPulse { 0%,80%,100% { transform: scale(0.7); opacity: 0.2; } 40% { transform: scale(1.2); opacity: 1; } }
+    .feed-empty-lbl { font-size: 11px; color: #1e293b; }
+
+    /* ================================================================
+       LEFT — WALLET HEALTH
+    ================================================================ */
+    .wh-input {
+      width: 100%; padding: 7px 10px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 7px; color: #f8fafc;
+      font-size: 11px; outline: none;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      margin-bottom: 7px; letter-spacing: 0.01em;
     }
+    .wh-input:focus { border-color: rgba(34,197,94,0.4); }
+    .wh-btn {
+      width: 100%; padding: 7px;
+      background: rgba(34,197,94,0.08);
+      border: 1px solid rgba(34,197,94,0.2);
+      border-radius: 7px; color: #22C55E;
+      font-size: 11px; font-weight: 700;
+      cursor: pointer; transition: all 0.15s; letter-spacing: 0.04em;
+    }
+    .wh-btn:hover { background: rgba(34,197,94,0.18); border-color: rgba(34,197,94,0.4); }
+    .wh-hint { font-size: 9px; color: #1e293b; text-align: center; margin-top: 4px; }
+    .wh-error { font-size: 11px; color: #ef4444; margin-top: 5px; display: none; }
+    .wh-loading { text-align: center; padding: 14px 0; color: #334155; font-size: 11px; display: none; }
+    .wh-result { margin-top: 10px; display: none; }
+    .wh-scorerow { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+    .wh-scorenum { font-size: 36px; font-weight: 800; line-height: 1; }
+    .wh-scorelbl { font-size: 9px; color: #475569; text-transform: uppercase; letter-spacing: 0.07em; }
+    .wh-stats { display: flex; gap: 5px; margin-bottom: 8px; }
+    .wh-stat { flex: 1; background: rgba(255,255,255,0.03); border-radius: 6px; padding: 6px 4px; text-align: center; }
+    .wh-statnum { font-size: 15px; font-weight: 800; }
+    .wh-statlbl { font-size: 8px; color: #334155; margin-top: 1px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .wh-approvals { max-height: 160px; overflow-y: auto; margin-top: 2px; }
+    .wh-approvals::-webkit-scrollbar { width: 3px; }
+    .wh-approvals::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.05); border-radius: 2px; }
+    .wh-appr { display: flex; align-items: center; gap: 6px; padding: 5px 7px; background: rgba(255,255,255,0.02); border-radius: 5px; margin-bottom: 3px; }
+    .wh-appr-badge { font-size: 7px; font-weight: 800; padding: 1px 4px; border-radius: 3px; color: #fff; flex-shrink: 0; letter-spacing: 0.04em; }
+    .wh-appr-tok { flex: 1; min-width: 0; }
+    .wh-appr-name { font-size: 11px; color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .wh-appr-spender { font-size: 9px; color: #334155; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .wh-appr-usd { font-size: 11px; font-weight: 700; color: #ef4444; flex-shrink: 0; }
+    .wh-empty { text-align: center; padding: 12px 0; color: #1e293b; font-size: 11px; }
+
+    /* ================================================================
+       CENTER — STATS + GAUGE
+    ================================================================ */
+    .ctr-stats {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+      margin-bottom: 14px;
+    }
+    .ctr-chip {
+      padding: 8px 6px; text-align: center;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 8px;
+    }
+    .ctr-chip-num { font-size: 22px; font-weight: 800; color: #f8fafc; line-height: 1; }
+    .ctr-chip-num.c-danger { color: #EF4444; }
+    .ctr-chip-num.c-safe   { color: #22C55E; }
+    .ctr-chip-lbl { font-size: 8px; color: #334155; text-transform: uppercase; letter-spacing: 0.1em; margin-top: 3px; }
+
+    /* Divider */
+    .ctr-div { height: 1px; background: rgba(255,255,255,0.04); margin: 0 -15px 14px; }
+
+    /* Gauge */
+    .gauge-wrap { display: flex; justify-content: center; margin-bottom: 10px; }
+    .gauge-svg { overflow: visible; }
+    .gauge-track {
+      fill: none; stroke: rgba(255,255,255,0.06); stroke-width: 13; stroke-linecap: round;
+      stroke-dasharray: 293 146;
+      transform: rotate(150deg); transform-origin: 100px 100px;
+    }
+    .gauge-arc {
+      fill: none; stroke: #22C55E; stroke-width: 13; stroke-linecap: round;
+      stroke-dasharray: 0 440;
+      transform: rotate(150deg); transform-origin: 100px 100px;
+      transition: stroke-dasharray 1.1s cubic-bezier(.4,0,.2,1), stroke .4s;
+    }
+    @keyframes guardGlow {
+      0%,100% { filter: drop-shadow(0 0 6px rgba(34,197,94,.25)); }
+      50%      { filter: drop-shadow(0 0 14px rgba(34,197,94,.55)); }
+    }
+    .gauge-arc.glow { animation: guardGlow 2.8s ease-in-out infinite; }
+    .gauge-num { font-size: 36px; font-weight: 800; fill: #f8fafc; text-anchor: middle; font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
+    .gauge-sub { font-size: 9.5px; fill: #334155; text-anchor: middle; font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; letter-spacing: 0.1em; text-transform: uppercase; }
+
+    /* Classification */
+    .cls-row { display: flex; justify-content: center; margin-bottom: 6px; }
+    .cls-badge {
+      font-size: 11px; font-weight: 800; letter-spacing: 0.08em;
+      padding: 4px 16px; border-radius: 20px;
+    }
+    .cls-protected { background: rgba(34,197,94,.1);   color: #22C55E; border: 1px solid rgba(34,197,94,.22); }
+    .cls-safe      { background: rgba(34,197,94,.1);   color: #22C55E; border: 1px solid rgba(34,197,94,.22); }
+    .cls-caution   { background: rgba(234,179,8,.1);   color: #EAB308; border: 1px solid rgba(234,179,8,.22); }
+    .cls-high      { background: rgba(249,115,22,.1);  color: #F97316; border: 1px solid rgba(249,115,22,.22); }
+    .cls-block     { background: rgba(239,68,68,.1);   color: #EF4444; border: 1px solid rgba(239,68,68,.22); }
+    .cls-idle      { background: rgba(71,85,105,.1);   color: #475569; border: 1px solid rgba(71,85,105,.15); }
+
+    .ctr-meta { font-size: 10px; color: #334155; text-align: center; margin-bottom: 12px; font-family: 'SF Mono','Fira Code',monospace; }
+
+    /* Protected checklist (idle state) */
+    .ctr-idle { padding: 2px 0 4px; }
+    .ctr-check { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+    .ctr-check-icon { font-size: 12px; flex-shrink: 0; }
+    .ctr-check-text { font-size: 11px; color: #475569; }
+
+    /* Verdict (active scan state) */
+    .ctr-verdict {
+      font-size: 12px; color: #94a3b8; line-height: 1.65;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-left: 2px solid rgba(255,255,255,0.12);
+      border-radius: 8px; padding: 10px 12px;
+    }
+
+    /* ================================================================
+       RIGHT — SECURITY ROADMAP
+    ================================================================ */
+    .rm-section { margin-bottom: 10px; }
+    .rm-section-title {
+      font-size: 8px; font-weight: 800; letter-spacing: 0.14em;
+      text-transform: uppercase; color: #334155;
+      padding: 4px 0 7px; border-bottom: 1px solid rgba(255,255,255,0.04);
+      margin-bottom: 6px;
+    }
+    .rm-item {
+      display: flex; align-items: center; gap: 9px;
+      padding: 6px 0;
+    }
+    .rm-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .rmd-live    { background: #22C55E; box-shadow: 0 0 8px rgba(34,197,94,.5); }
+    @keyframes buildPulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+    .rmd-build   { background: #FACC15; animation: buildPulse 1.6s ease-in-out infinite; }
+    .rmd-planned { background: #1e293b; border: 1px solid #334155; }
+    .rm-info { flex: 1; }
+    .rm-name { font-size: 12px; color: #cbd5e1; font-weight: 500; }
+    .rm-sub  { font-size: 9px; color: #334155; margin-top: 1px; }
+    .rm-tag  { font-size: 8px; font-weight: 800; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.05em; }
+    .rmt-live    { background: rgba(34,197,94,.1);   color: #22C55E; }
+    .rmt-build   { background: rgba(250,204,21,.1);  color: #FACC15; }
+    .rmt-planned { background: rgba(71,85,105,.1);   color: #475569; }
+
+    /* ================================================================
+       RIGHT — SETTINGS
+    ================================================================ */
+    .s-field { margin-bottom: 10px; }
+    .s-label { display: block; font-size: 9px; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px; }
+    .s-input {
+      width: 100%; padding: 7px 10px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 7px; color: #f8fafc; font-size: 12px; outline: none;
+    }
+    .s-input:focus { border-color: rgba(250,204,21,.4); }
+    .s-toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; margin-bottom: 6px; }
+    .s-toggle-lbl { font-size: 12px; color: #cbd5e1; }
+    .s-policy-row { display: flex; gap: 6px; margin-bottom: 10px; }
+    .s-policy-opt {
+      flex: 1; display: flex; flex-direction: column; align-items: center;
+      padding: 7px 5px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 7px; cursor: pointer; transition: all .15s;
+    }
+    .s-policy-opt:has(input:checked) { border-color: rgba(250,204,21,.45); background: rgba(250,204,21,.03); }
+    .s-policy-opt input { display: none; }
+    .s-policy-name { font-size: 12px; font-weight: 700; color: #e2e8f0; }
+    .s-policy-desc { font-size: 9px; color: #334155; margin-top: 2px; }
+    .s-save {
+      width: 100%; padding: 8px; border: none; border-radius: 8px;
+      font-size: 12px; font-weight: 800; cursor: pointer; letter-spacing: 0.04em;
+      background: linear-gradient(135deg, #FACC15 0%, #F59E0B 100%);
+      color: #0a0f1a; transition: filter .15s;
+    }
+    .s-save:hover { filter: brightness(1.1); }
+    .s-saved { text-align: center; font-size: 11px; color: #22C55E; margin-top: 5px; opacity: 0; transition: opacity .3s; }
+    .s-saved.show { opacity: 1; }
   </style>
 </head>
 <body>
+
+  <!-- ===============================================================
+       COMPACT POPUP
+  =============================================================== -->
   <div class="header">
     <div class="logo">&#128737;</div>
     <h1>ShieldAI Firewall</h1>
-    <span class="version">v1.0.6</span>
+    <span class="version">v1.0.8</span>
+    <button class="expand-btn" id="expandBtn" title="Open full page">&#10530;</button>
   </div>
-
   <div class="status-row">
     <div class="status-dot yellow" id="statusDot"></div>
     <span class="status-text" id="statusText">Checking connection...</span>
   </div>
-
   <div class="tabs">
     <div class="tab active" data-tab="settings">Settings</div>
     <div class="tab" data-tab="history">History</div>
     <div class="tab" data-tab="health">Health</div>
   </div>
 
-  <!-- Settings Tab -->
   <div class="tab-content active" id="tab-settings">
-    <div style="background: #1e293b; padding: 10px; border-radius: 6px; margin-bottom: 12px; border-left: 3px solid #3b82f6;">
-      <div style="font-size: 11px; color: #94a3b8; line-height: 1.4;">
-        Enter your API URL above and click Save Settings.
-      </div>
+    <div style="background:#1e293b;padding:10px;border-radius:6px;margin-bottom:12px;border-left:3px solid #22c55e;">
+      <div style="font-size:11px;color:#94a3b8;line-height:1.4;">ShieldAI is ready — no setup needed. Pre-configured to our hosted server.</div>
     </div>
-
     <div class="field">
       <label>API Endpoint</label>
-      <input type="text" id="apiUrl" placeholder="https://api.example.com:8000">
+      <input type="text" id="apiUrl" placeholder="https://api.shieldbotsecurity.online">
     </div>
-
     <div class="toggle-row">
       <span class="toggle-label">Enable Firewall</span>
-      <label class="toggle">
-        <input type="checkbox" id="enabled" checked>
-        <span class="slider"></span>
-      </label>
+      <label class="toggle"><input type="checkbox" id="enabled" checked><span class="slider"></span></label>
     </div>
-
-    <div class="field" style="margin-top: 8px;">
+    <div class="field" style="margin-top:8px;">
       <label>Policy Mode</label>
-      <div style="display: flex; gap: 8px;">
-        <label class="policy-option">
-          <input type="radio" name="policyMode" value="BALANCED" checked>
-          <span class="policy-label">Balanced</span>
-          <span class="policy-desc">Warn on partial data</span>
-        </label>
-        <label class="policy-option">
-          <input type="radio" name="policyMode" value="STRICT">
-          <span class="policy-label">Strict</span>
-          <span class="policy-desc">Block on any failure</span>
-        </label>
+      <div style="display:flex;gap:8px;">
+        <label class="policy-option"><input type="radio" name="policyMode" value="BALANCED" checked><span class="policy-label">Balanced</span><span class="policy-desc">Warn on partial data</span></label>
+        <label class="policy-option"><input type="radio" name="policyMode" value="STRICT"><span class="policy-label">Strict</span><span class="policy-desc">Block on any failure</span></label>
       </div>
     </div>
-
     <button class="btn btn-save" id="saveBtn">Save Settings</button>
     <div class="saved-msg" id="savedMsg">Settings saved</div>
   </div>
 
-  <!-- History Tab -->
   <div class="tab-content" id="tab-history">
-    <div class="history-list" id="historyList">
-      <div class="history-empty">No scans yet</div>
-    </div>
+    <div class="history-list" id="historyList"><div class="history-empty">No scans yet</div></div>
   </div>
 
-  <!-- Health Tab -->
   <div class="tab-content" id="tab-health">
-    <div class="field">
-      <label>Your Wallet Address</label>
-      <input type="text" id="healthAddress" placeholder="0x...">
-    </div>
+    <div class="field"><label>Your Wallet Address</label><input type="text" id="healthAddress" placeholder="0x..."></div>
     <button class="btn btn-save" id="healthScanBtn">Scan Approvals</button>
-    <div id="healthError" style="display:none; color:#ef4444; font-size:12px; margin-top:6px;"></div>
-    <div id="healthLoading" style="display:none; text-align:center; padding:20px 0; color:#64748b; font-size:13px;">
-      Scanning approvals...
-    </div>
-    <div id="healthResult" style="display:none; margin-top:10px;">
-      <div class="health-score-row">
-        <div id="healthScoreNum" class="health-score-num">--</div>
-        <div class="health-score-label">Wallet Health Score</div>
-      </div>
+    <div style="font-size:11px;color:#475569;text-align:center;margin-top:4px;">BNB Chain (BSC) · Full history scan</div>
+    <div id="healthError" style="display:none;color:#ef4444;font-size:12px;margin-top:6px;"></div>
+    <div id="healthLoading" style="display:none;text-align:center;padding:20px 0;color:#64748b;font-size:13px;">Scanning full approval history...<br><span style="font-size:11px;color:#334155;">This may take 20–40 seconds</span></div>
+    <div id="healthResult" style="display:none;margin-top:10px;">
+      <div class="health-score-row"><div id="healthScoreNum" class="health-score-num">--</div><div class="health-score-label">Wallet Health Score</div></div>
       <div id="healthStats" class="health-stats"></div>
       <div id="healthApprovals" class="health-approvals"></div>
     </div>
   </div>
 
+  <!-- ===============================================================
+       COMMAND CENTER DASHBOARD
+  =============================================================== -->
+  <div id="dashboard">
+
+    <!-- Header -->
+    <div class="dh">
+      <div class="dh-logo">&#128737;</div>
+      <span class="dh-title">ShieldAI Firewall</span>
+      <span class="dh-pill">COMMAND CENTER</span>
+      <div class="dh-sep"></div>
+      <span class="dh-chains"><span>7</span> Chains Protected</span>
+      <div class="dh-conn">
+        <div class="status-dot yellow" id="dash-statusDot"></div>
+        <span id="dash-statusText">Checking...</span>
+      </div>
+      <span class="dh-version">v1.0.8</span>
+    </div>
+
+    <!-- 3-column grid -->
+    <div class="db">
+
+      <!-- LEFT -->
+      <div class="dc">
+
+        <!-- Feed -->
+        <div class="dk">
+          <div class="dk-title">Live Threat Feed</div>
+          <div class="feed-list" id="dash-feed">
+            <div class="feed-empty">
+              <div class="feed-scanning">
+                <div class="scan-dot"></div>
+                <div class="scan-dot"></div>
+                <div class="scan-dot"></div>
+              </div>
+              <div class="feed-empty-lbl">Monitoring transactions...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Wallet Health -->
+        <div class="dk">
+          <div class="dk-title">Wallet Health</div>
+          <input type="text" class="wh-input" id="dash-healthAddr" placeholder="0x... paste wallet address">
+          <button class="wh-btn" id="dash-healthScanBtn">&#128269; Scan Approvals</button>
+          <div class="wh-hint">BNB Chain · Full approval history</div>
+          <div class="wh-error" id="dash-healthError"></div>
+          <div class="wh-loading" id="dash-healthLoading">&#9203; Scanning... (20–40s)</div>
+          <div class="wh-result" id="dash-healthResult">
+            <div class="wh-scorerow">
+              <div class="wh-scorenum" id="dash-healthScoreNum" style="color:#22c55e">--</div>
+              <div>
+                <div class="wh-scorelbl">Health</div>
+                <div class="wh-scorelbl">Score</div>
+              </div>
+              <div id="dash-healthStats" class="wh-stats" style="flex:1;margin-left:8px;align-self:center;"></div>
+            </div>
+            <div class="wh-approvals" id="dash-healthApprovals"></div>
+          </div>
+        </div>
+
+      </div><!-- /left -->
+
+      <!-- CENTER -->
+      <div class="dc">
+        <div class="dk">
+          <div class="dk-title">Shield Analysis</div>
+
+          <!-- Stats chips -->
+          <div class="ctr-stats">
+            <div class="ctr-chip">
+              <div class="ctr-chip-num" id="dash-stat-total">0</div>
+              <div class="ctr-chip-lbl">Scans</div>
+            </div>
+            <div class="ctr-chip">
+              <div class="ctr-chip-num c-danger" id="dash-stat-blocked">0</div>
+              <div class="ctr-chip-lbl">Blocked</div>
+            </div>
+            <div class="ctr-chip">
+              <div class="ctr-chip-num c-safe" id="dash-stat-safe">100%</div>
+              <div class="ctr-chip-lbl">Safe Rate</div>
+            </div>
+          </div>
+
+          <div class="ctr-div"></div>
+
+          <!-- Arc gauge -->
+          <div class="gauge-wrap">
+            <svg class="gauge-svg" viewBox="0 0 200 200" width="158" height="158">
+              <circle class="gauge-track" cx="100" cy="100" r="70"/>
+              <circle class="gauge-arc glow" id="dash-gauge-arc" cx="100" cy="100" r="70"/>
+              <text class="gauge-num" id="dash-gauge-num" x="100" y="107">100</text>
+              <text class="gauge-sub" x="100" y="126">SHIELD SCORE</text>
+            </svg>
+          </div>
+
+          <!-- Classification -->
+          <div class="cls-row">
+            <span class="cls-badge cls-protected" id="dash-cls-badge">PROTECTED</span>
+          </div>
+
+          <!-- Scan meta -->
+          <div class="ctr-meta" id="dash-ctr-meta">Firewall active &middot; all transactions monitored</div>
+
+          <!-- Protected checklist (default/idle) -->
+          <div id="dash-protected-list" class="ctr-idle">
+            <div class="ctr-check"><span class="ctr-check-icon">&#10003;</span><span class="ctr-check-text">Transaction firewall intercepting all wallet calls</span></div>
+            <div class="ctr-check"><span class="ctr-check-icon">&#10003;</span><span class="ctr-check-text">Phishing guard scanning visited URLs</span></div>
+            <div class="ctr-check"><span class="ctr-check-icon">&#10003;</span><span class="ctr-check-text">EIP-712 signature analysis enabled</span></div>
+            <div class="ctr-check"><span class="ctr-check-icon">&#10003;</span><span class="ctr-check-text">7 chains monitored in real time</span></div>
+          </div>
+
+          <!-- Verdict (shown after scan) -->
+          <div id="dash-verdict-wrap" style="display:none;">
+            <div class="ctr-verdict" id="dash-verdict"></div>
+          </div>
+
+        </div>
+      </div><!-- /center -->
+
+      <!-- RIGHT -->
+      <div class="dc">
+
+        <!-- Security Roadmap -->
+        <div class="dk">
+          <div class="dk-title">Security Layers</div>
+
+          <!-- LIVE -->
+          <div class="rm-section">
+            <div class="rm-section-title">&#9679; Live Now</div>
+            <div class="rm-item">
+              <div class="rm-dot rmd-live"></div>
+              <div class="rm-info">
+                <div class="rm-name">Transaction Firewall</div>
+                <div class="rm-sub">Pre-sign risk analysis on every tx</div>
+              </div>
+              <span class="rm-tag rmt-live">LIVE</span>
+            </div>
+            <div class="rm-item">
+              <div class="rm-dot rmd-live"></div>
+              <div class="rm-info">
+                <div class="rm-name">Phishing Guard</div>
+                <div class="rm-sub">URL reputation · GoPlus intelligence</div>
+              </div>
+              <span class="rm-tag rmt-live">LIVE</span>
+            </div>
+          </div>
+
+          <!-- BUILDING — Phase 3 active -->
+          <div class="rm-section">
+            <div class="rm-section-title">&#9650; Phase 3 &mdash; Building</div>
+            <div class="rm-item">
+              <div class="rm-dot rmd-build"></div>
+              <div class="rm-info">
+                <div class="rm-name">Deployer Cluster Block</div>
+                <div class="rm-sub">Auto-block linked malicious deployers</div>
+              </div>
+              <span class="rm-tag rmt-build">BUILDING</span>
+            </div>
+            <div class="rm-item">
+              <div class="rm-dot rmd-build"></div>
+              <div class="rm-info">
+                <div class="rm-name">Contract Monitoring</div>
+                <div class="rm-sub">Post-deploy alerts on watched contracts</div>
+              </div>
+              <span class="rm-tag rmt-build">BUILDING</span>
+            </div>
+          </div>
+
+          <!-- PHASE 4 -->
+          <div class="rm-section" style="margin-bottom:0;">
+            <div class="rm-section-title">&#9711; Phase 4 &mdash; Planned</div>
+            <div class="rm-item">
+              <div class="rm-dot rmd-planned"></div>
+              <div class="rm-info">
+                <div class="rm-name">Threat Feed Subscriptions</div>
+                <div class="rm-sub">Live intelligence feed access</div>
+              </div>
+              <span class="rm-tag rmt-planned">PLANNED</span>
+            </div>
+            <div class="rm-item">
+              <div class="rm-dot rmd-planned"></div>
+              <div class="rm-info">
+                <div class="rm-name">Asset Soft-Locking</div>
+                <div class="rm-sub">Freeze assets pending review</div>
+              </div>
+              <span class="rm-tag rmt-planned">PLANNED</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Configuration -->
+        <div class="dk">
+          <div class="dk-title">Configuration</div>
+          <div class="s-field">
+            <span class="s-label">API Endpoint</span>
+            <input type="text" class="s-input" id="dash-apiUrl" placeholder="https://api.shieldbotsecurity.online">
+          </div>
+          <div class="s-toggle-row">
+            <span class="s-toggle-lbl">Enable Firewall</span>
+            <label class="toggle"><input type="checkbox" id="dash-enabled" checked><span class="slider"></span></label>
+          </div>
+          <div class="s-field">
+            <span class="s-label">Policy Mode</span>
+            <div class="s-policy-row">
+              <label class="s-policy-opt">
+                <input type="radio" name="dashPolicy" value="BALANCED" checked>
+                <span class="s-policy-name">Balanced</span>
+                <span class="s-policy-desc">Warn on partial data</span>
+              </label>
+              <label class="s-policy-opt">
+                <input type="radio" name="dashPolicy" value="STRICT">
+                <span class="s-policy-name">Strict</span>
+                <span class="s-policy-desc">Block on any failure</span>
+              </label>
+            </div>
+          </div>
+          <button class="s-save" id="dash-saveBtn">Save Settings</button>
+          <div class="s-saved" id="dash-savedMsg">Settings saved!</div>
+        </div>
+
+      </div><!-- /right -->
+
+    </div><!-- .db -->
+  </div><!-- #dashboard -->
+
   <script src="popup.js"></script>
 </body>
 </html>
-
