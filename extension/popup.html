@@ -35,6 +35,10 @@
     .field input { width: 100%; padding: 8px 10px; background: #1e293b; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-size: 13px; outline: none; }
     .field input:focus { border-color: #3b82f6; }
 
+    #langSelect option, #dash-langSelect option { background: #1e293b; color: #f8fafc; }
+    #langSelect option:checked, #dash-langSelect option:checked { background: #3b82f6; color: #ffffff; }
+    #langSelect option:hover, #dash-langSelect option:hover { background: #2563eb; color: #ffffff; }
+
     .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; }
     .toggle-label { font-size: 13px; color: #cbd5e1; }
     .toggle { position: relative; width: 44px; height: 24px; }
@@ -705,11 +709,16 @@
           </div>
           <button class="s-save" id="dash-saveBtn" data-i18n="btnSaveSettings">Save Settings</button>
           <div class="s-saved" id="dash-savedMsg" data-i18n="msgSavedDash">Settings saved!</div>
-          <div style="text-align:center;margin-top:10px;">
+          <div style="text-align:center;margin-top:10px;display:flex;flex-direction:column;gap:6px;align-items:center;">
             <a href="https://shieldbotsecurity.online/privacy.html" target="_blank"
                style="font-size:10px;color:#334155;text-decoration:none;letter-spacing:0.04em;"
-               onmouseover="this.style.color='#FACC15'" onmouseout="this.style.color='#334155'">
+               onmouseover="this.style.color='#FACC15'" onmouseout="this.style.color='#334155'" data-i18n="dashPrivacyPolicy">
               Privacy Policy
+            </a>
+            <a href="mailto:support@shieldbotsecurity.online"
+               style="font-size:10px;color:#334155;text-decoration:none;letter-spacing:0.04em;"
+               onmouseover="this.style.color='#FACC15'" onmouseout="this.style.color='#334155'">
+              <span data-i18n="dashSupport">Support</span>: support@shieldbotsecurity.online
             </a>
           </div>
         </div>
