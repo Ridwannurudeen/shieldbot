@@ -61,6 +61,7 @@
   "dashSoftLockingSub": "冻结待审核资产",
   "dashConfiguration": "配置",
   "dashPrivacyPolicy": "隐私政策",
+  "dashSupport": "联系支持",
   "statusChecking": "正在检查连接...",
   "statusConnected": "已连接",
   "statusNoApi": "未配置 API 端点",

@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 280" width="440" height="280">
+  <defs>
+    <radialGradient id="bgGlow" cx="70%" cy="50%" r="55%">
+      <stop offset="0%" stop-color="#FACC1514"/>
+      <stop offset="100%" stop-color="#02061700"/>
+    </radialGradient>
+    <radialGradient id="shieldGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FACC1530"/>
+      <stop offset="100%" stop-color="#FACC1500"/>
+    </radialGradient>
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="textGlow">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <!-- Arc clip for gauge -->
+    <clipPath id="gaugeClip">
+      <rect x="270" y="60" width="140" height="140"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect width="440" height="280" fill="#020617"/>
+  <!-- Subtle dot grid -->
+  <pattern id="dots" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
+    <circle cx="10" cy="10" r="0.8" fill="#ffffff08"/>
+  </pattern>
+  <rect width="440" height="280" fill="url(#dots)"/>
+  <!-- Radial glow behind gauge -->
+  <rect width="440" height="280" fill="url(#bgGlow)"/>
+
+  <!-- Left: Branding block -->
+  <!-- Logo mark: shield shape -->
+  <g transform="translate(40, 52)">
+    <path d="M18 0 L36 8 L36 22 C36 31 28 38 18 42 C8 38 0 31 0 22 L0 8 Z"
+          fill="#FACC1518" stroke="#FACC1560" stroke-width="1.2"/>
+    <path d="M18 10 L28 15 L28 23 C28 28.5 23.5 33 18 35 C12.5 33 8 28.5 8 23 L8 15 Z"
+          fill="#FACC1530"/>
+    <!-- checkmark inside shield -->
+    <polyline points="12,23 16,27 24,19" fill="none" stroke="#FACC15" stroke-width="2.2"
+              stroke-linecap="round" stroke-linejoin="round" filter="url(#softGlow)"/>
+  </g>
+
+  <!-- Product name -->
+  <text x="84" y="68" font-family="'Segoe UI', system-ui, sans-serif"
+        font-size="22" font-weight="800" letter-spacing="-0.5" fill="#f8fafc">Shield</text>
+  <text x="140" y="68" font-family="'Segoe UI', system-ui, sans-serif"
+        font-size="22" font-weight="800" letter-spacing="-0.5" fill="#FACC15"
+        filter="url(#textGlow)">AI</text>
+
+  <!-- Version badge -->
+  <rect x="168" y="53" width="36" height="16" rx="8" fill="#FACC1518" stroke="#FACC1540" stroke-width="0.8"/>
+  <text x="186" y="64.5" font-family="'Segoe UI', system-ui, sans-serif"
+        font-size="9" font-weight="600" fill="#FACC15" text-anchor="middle">v1.0.8</text>
+
+  <!-- Tagline -->
+  <text x="40" y="96" font-family="'Segoe UI', system-ui, sans-serif"
+        font-size="13" fill="#94a3b8" letter-spacing="0.1">Web3 Phishing &amp; Transaction Firewall</text>
+
+  <!-- Divider -->
+  <line x1="40" y1="112" x2="230" y2="112" stroke="#ffffff0d" stroke-width="1"/>
+
+  <!-- Feature rows -->
+  <g font-family="'Segoe UI', system-ui, sans-serif" font-size="11.5" fill="#cbd5e1">
+    <!-- Row 1 -->
+    <circle cx="48" cy="130" r="2.5" fill="#FACC15"/>
+    <text x="60" y="134">Blocks transactions before wallet signs</text>
+    <!-- Row 2 -->
+    <circle cx="48" cy="152" r="2.5" fill="#FACC15"/>
+    <text x="60" y="156">Honeypot &amp; rug pull detection</text>
+    <!-- Row 3 -->
+    <circle cx="48" cy="174" r="2.5" fill="#FACC15"/>
+    <text x="60" y="178">Pre-sign asset delta simulation</text>
+    <!-- Row 4 -->
+    <circle cx="48" cy="196" r="2.5" fill="#FACC15"/>
+    <text x="60" y="200">Real-time phishing site firewall</text>
+    <!-- Row 5 -->
+    <circle cx="48" cy="218" r="2.5" fill="#FACC15"/>
+    <text x="60" y="222">EIP-712 permit &amp; approval analysis</text>
+  </g>
+
+  <!-- Right: Gauge panel -->
+  <!-- Card background -->
+  <rect x="268" y="48" width="148" height="148" rx="16"
+        fill="#ffffff06" stroke="#ffffff10" stroke-width="1"/>
+
+  <!-- Gauge glow -->
+  <circle cx="342" cy="118" r="52" fill="url(#shieldGlow)"/>
+
+  <!-- Gauge track (grey arc, 240 degrees) -->
+  <!-- Using circle with stroke-dasharray trick. r=42, circumference=263.9 -->
+  <!-- 240/360 * 263.9 = 175.9 visible, rest hidden. Rotate -210deg (starts bottom-left) -->
+  <circle cx="342" cy="118" r="42"
+          fill="none" stroke="#ffffff0f" stroke-width="8"
+          stroke-dasharray="175.9 263.9"
+          stroke-linecap="round"
+          transform="rotate(150 342 118)"/>
+
+  <!-- Gauge fill (100% = full 240 arc = 175.9) -->
+  <circle cx="342" cy="118" r="42"
+          fill="none" stroke="#FACC15" stroke-width="8"
+          stroke-dasharray="175.9 263.9"
+          stroke-linecap="round"
+          filter="url(#softGlow)"
+          transform="rotate(150 342 118)"/>
+
+  <!-- Center score -->
+  <text x="342" y="111" font-family="'Segoe UI', system-ui, sans-serif"
+        font-size="26" font-weight="800" fill="#f8fafc" text-anchor="middle">100</text>
+  <text x="342" y="127" font-family="'Segoe UI', system-ui, sans-serif"
+        font-size="8.5" font-weight="600" fill="#FACC15" text-anchor="middle"
+        letter-spacing="1.5">PROTECTED</text>
+
+  <!-- Gauge label -->
+  <text x="342" y="178" font-family="'Segoe UI', system-ui, sans-serif"
+        font-size="9.5" fill="#475569" text-anchor="middle">ShieldScore</text>
+
+  <!-- BNB Chain badge — bottom right -->
+  <rect x="268" y="208" width="148" height="26" rx="8"
+        fill="#FACC1510" stroke="#FACC1530" stroke-width="0.8"/>
+  <text x="342" y="225" font-family="'Segoe UI', system-ui, sans-serif"
+        font-size="10" font-weight="600" fill="#FACC15" text-anchor="middle"
+        letter-spacing="0.5">BNB CHAIN ECOSYSTEM</text>
+
+  <!-- Bottom strip -->
+  <rect x="0" y="256" width="440" height="24" fill="#ffffff04"/>
+  <text x="40" y="271" font-family="'Segoe UI', system-ui, sans-serif"
+        font-size="10" fill="#334155">shieldbotsecurity.online</text>
+  <text x="400" y="271" font-family="'Segoe UI', system-ui, sans-serif"
+        font-size="10" fill="#334155" text-anchor="end">Manifest V3</text>
+</svg>

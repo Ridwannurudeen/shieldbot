@@ -61,6 +61,7 @@
   "dashSoftLockingSub": "Đóng băng tài sản chờ xem xét",
   "dashConfiguration": "Cấu hình",
   "dashPrivacyPolicy": "Chính sách bảo mật",
+  "dashSupport": "Hỗ trợ",
   "statusChecking": "Đang kiểm tra kết nối...",
   "statusConnected": "Đã kết nối",
   "statusNoApi": "Chưa cấu hình điểm cuối API",

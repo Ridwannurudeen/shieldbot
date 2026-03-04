@@ -61,6 +61,7 @@
   "dashSoftLockingSub": "Freeze assets pending review",
   "dashConfiguration": "Configuration",
   "dashPrivacyPolicy": "Privacy Policy",
+  "dashSupport": "Support",
   "statusChecking": "Checking connection...",
   "statusConnected": "Connected",
   "statusNoApi": "No API endpoint configured",

@@ -144,7 +144,7 @@ ShieldAI is open source software. You can review the code to verify our privacy 
 
 If you have questions or concerns about this privacy policy or ShieldAI's data practices, please contact:
 
-**Email:** ridwannurudeen@gmail.com
+**Email:** support@shieldbotsecurity.online
 **GitHub Issues:** https://github.com/Ridwannurudeen/shieldbot/issues
 
 ## Compliance
@@ -159,4 +159,3 @@ This extension complies with:
 ---
 
 **By installing and using ShieldAI Transaction Firewall, you acknowledge that you have read and understood this privacy policy.**
-

@@ -153,7 +153,7 @@ See full privacy policy: [PRIVACY_POLICY.md](PRIVACY_POLICY.md)
 ## 🆘 Still Need Help?
 
 - **GitHub Issues:** https://github.com/Ridwannurudeen/shieldbot/issues
-- **Email:** ridwannurudeen@gmail.com
+- **Email:** support@shieldbotsecurity.online
 - **Twitter:** [@Ggudman1](https://twitter.com/Ggudman1)
 
 ---
