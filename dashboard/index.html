@@ -697,6 +697,11 @@
                onMouseOut={e => e.currentTarget.style.color='#475569'}>
               ← Home
             </a>
+            <a href="mailto:support@shieldbotsecurity.online" style={{ color:'#475569', fontSize:'0.75rem', textDecoration:'none' }}
+               onMouseOver={e => e.currentTarget.style.color='#94A3B8'}
+               onMouseOut={e => e.currentTarget.style.color='#475569'}>
+              Support
+            </a>
             <div className="text-xs font-mono" style={{ color:'#334155', fontFamily:'JetBrains Mono,monospace' }}>
               {lastUpdated ? `↻ ${timeAgo(lastUpdated / 1000)}` : 'Connecting…'}
             </div>
