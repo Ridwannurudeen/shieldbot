@@ -894,11 +894,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 },
                 "shield_score": shield_score,
                 "simulation": simulation_result,
-                "asset_delta": (
-                    [d["display"] for d in simulation_result["asset_deltas"]]
-                    if simulation_result and simulation_result.get("asset_deltas")
-                    else _build_asset_delta_fallback(decoded, value_bnb)
-                ),
+                "asset_delta": _build_asset_delta(simulation_result, decoded, value_bnb),
                 "greenfield_url": None,
                 "chain_id": req.chainId,
                 "network": _chain_id_to_name(req.chainId),
@@ -1485,6 +1481,24 @@ def _build_asset_delta_fallback(decoded: Dict, value_bnb: float) -> List:
         else:
             deltas.append("Approval: limited token spend")
     return deltas
+
+
+def _build_asset_delta(simulation_result: Optional[Dict], decoded: Dict, value_bnb: float) -> List:
+    """Build asset_delta list for the extension response.
+
+    Uses simulation deltas when available and simulation succeeded.
+    When simulation reverted (e.g. bridge/cross-chain tx), falls back to a
+    human-readable notice instead of the misleading native balance_diff.
+    """
+    if simulation_result:
+        if simulation_result.get("success") and simulation_result.get("asset_deltas"):
+            return [d["display"] for d in simulation_result["asset_deltas"]]
+        if not simulation_result.get("success"):
+            # Simulation reverted — common for bridge/cross-chain transactions.
+            # Do not show native BNB delta (msg.value relay fee) as if it were
+            # the full picture. Show a clear notice instead.
+            return ["Unable to simulate — cross-chain or complex transaction. Verify manually."]
+    return _build_asset_delta_fallback(decoded, value_bnb)
 
 
 def _build_cached_response(

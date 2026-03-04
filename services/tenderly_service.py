@@ -72,7 +72,7 @@ class TenderlySimulator:
             revert_reason = tx_info.get("error_message")
             gas_used = tx_info.get("gas_used", 0)
 
-            asset_deltas = self._parse_asset_changes(result, from_address)
+            asset_deltas = self._parse_asset_changes(result, from_address, success)
             warnings = self._generate_warnings(result, asset_deltas)
 
             self._register_success()
@@ -161,7 +161,7 @@ class TenderlySimulator:
     def _register_success(self):
         self._fail_count = 0
 
-    def _parse_asset_changes(self, result: dict, from_address: str) -> List[Dict[str, Any]]:
+    def _parse_asset_changes(self, result: dict, from_address: str, simulation_success: bool = True) -> List[Dict[str, Any]]:
         """Parse asset balance changes from simulation result.
 
         Uses transaction.asset_changes (full simulation) with balance_diff as
@@ -213,6 +213,12 @@ class TenderlySimulator:
             return asset_deltas
 
         # Fallback: native token balance_diff for simple ETH/BNB sends.
+        # Only use when simulation succeeded — a reverted simulation's balance_diff
+        # reflects msg.value passed in (e.g. bridge relay fee) which is misleading
+        # when the actual token transfer (ERC-20) could not be resolved.
+        if not simulation_success:
+            return []
+
         # balance_diff also lives inside transaction_info
         def _parse_hex(v: Any) -> int:
             s = str(v or "0")
