@@ -6,6 +6,9 @@
   <title>About ShieldAI — Web3 Transaction Firewall & Crypto Security Extension</title>
   <meta name="description" content="ShieldAI intercepts malicious crypto transactions before your wallet signs them. Learn how honeypot detection, wallet drainer protection, transaction simulation, and phishing blocking work.">
   <link rel="canonical" href="https://shieldbotsecurity.online/about.html">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon.png">
+  <link rel="shortcut icon" href="/favicon.png">
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -98,7 +101,7 @@
         "name": "What is ShieldScore?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "ShieldScore is a 0-100 risk rating assigned to every transaction before signing. 0-39 is SAFE, 40-69 is CAUTION, 70-89 is HIGH RISK, and 90-100 triggers an automatic BLOCK. The score combines contract bytecode fingerprinting, deployer wallet history, Tenderly pre-execution simulation, and GoPlus Security threat intelligence."
+          "text": "ShieldScore is a 0-100 risk rating assigned to every transaction before signing. In the current classifier, 0-30 is SAFE, 31-49 is CAUTION, 50-70 is HIGH RISK, and 71-100 is BLOCK RECOMMENDED. The score combines contract bytecode fingerprinting, deployer wallet history, Tenderly pre-execution simulation, and GoPlus Security threat intelligence."
         }
       },
       {
@@ -158,10 +161,10 @@
     <p>Every transaction receives a ShieldScore before you sign it:</p>
     <table class="score-table">
       <tr><th>Score</th><th>Verdict</th><th>Action</th></tr>
-      <tr><td>0 – 39</td><td><span class="badge safe">SAFE</span></td><td>Transaction proceeds with asset delta preview</td></tr>
-      <tr><td>40 – 69</td><td><span class="badge caution">CAUTION</span></td><td>Warning shown — you choose to proceed or cancel</td></tr>
-      <tr><td>70 – 89</td><td><span class="badge high">HIGH RISK</span></td><td>Strong warning with threat details</td></tr>
-      <tr><td>90 – 100</td><td><span class="badge block">BLOCK</span></td><td>Transaction automatically blocked</td></tr>
+      <tr><td>0 – 30</td><td><span class="badge safe">SAFE</span></td><td>Transaction proceeds with asset delta preview</td></tr>
+      <tr><td>31 – 49</td><td><span class="badge caution">CAUTION</span></td><td>Warning shown — you choose to proceed or cancel</td></tr>
+      <tr><td>50 – 70</td><td><span class="badge high">HIGH RISK</span></td><td>Strong warning with threat details</td></tr>
+      <tr><td>71 – 100</td><td><span class="badge block">BLOCK RECOMMENDED</span></td><td>Highest-risk verdict — blocking is strongly recommended</td></tr>
     </table>
 
     <!-- BLOCK 3: Wallet drainers -->
