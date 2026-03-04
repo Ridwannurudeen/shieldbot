@@ -425,32 +425,40 @@
     <span class="status-text" id="statusText">Checking connection...</span>
   </div>
   <div class="tabs">
-    <div class="tab active" data-tab="settings">Settings</div>
-    <div class="tab" data-tab="history">History</div>
-    <div class="tab" data-tab="health">Health</div>
+    <div class="tab active" data-tab="settings" data-i18n="tabSettings">Settings</div>
+    <div class="tab" data-tab="history" data-i18n="tabHistory">History</div>
+    <div class="tab" data-tab="health" data-i18n="tabHealth">Health</div>
   </div>
 
   <div class="tab-content active" id="tab-settings">
     <div style="background:#1e293b;padding:10px;border-radius:6px;margin-bottom:12px;border-left:3px solid #22c55e;">
-      <div style="font-size:11px;color:#94a3b8;line-height:1.4;">ShieldAI is ready — no setup needed. Pre-configured to our hosted server.</div>
+      <div style="font-size:11px;color:#94a3b8;line-height:1.4;" data-i18n="readyBanner">ShieldAI is ready — no setup needed. Pre-configured to our hosted server.</div>
     </div>
     <div class="field">
-      <label>API Endpoint</label>
+      <label data-i18n="labelApiEndpoint">API Endpoint</label>
       <input type="text" id="apiUrl" placeholder="https://api.shieldbotsecurity.online">
     </div>
     <div class="toggle-row">
-      <span class="toggle-label">Enable Firewall</span>
+      <span class="toggle-label" data-i18n="labelEnableFirewall">Enable Firewall</span>
       <label class="toggle"><input type="checkbox" id="enabled" checked><span class="slider"></span></label>
     </div>
     <div class="field" style="margin-top:8px;">
-      <label>Policy Mode</label>
+      <label data-i18n="labelPolicyMode">Policy Mode</label>
       <div style="display:flex;gap:8px;">
-        <label class="policy-option"><input type="radio" name="policyMode" value="BALANCED" checked><span class="policy-label">Balanced</span><span class="policy-desc">Warn on partial data</span></label>
-        <label class="policy-option"><input type="radio" name="policyMode" value="STRICT"><span class="policy-label">Strict</span><span class="policy-desc">Block on any failure</span></label>
+        <label class="policy-option"><input type="radio" name="policyMode" value="BALANCED" checked><span class="policy-label" data-i18n="policyBalanced">Balanced</span><span class="policy-desc" data-i18n="policyBalancedDesc">Warn on partial data</span></label>
+        <label class="policy-option"><input type="radio" name="policyMode" value="STRICT"><span class="policy-label" data-i18n="policyStrict">Strict</span><span class="policy-desc" data-i18n="policyStrictDesc">Block on any failure</span></label>
       </div>
     </div>
-    <button class="btn btn-save" id="saveBtn">Save Settings</button>
-    <div class="saved-msg" id="savedMsg">Settings saved</div>
+    <div class="field" style="margin-top:8px;">
+      <label data-i18n="labelLanguage">Language</label>
+      <select id="langSelect" style="width:100%;padding:8px 10px;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#f8fafc;font-size:13px;outline:none;">
+        <option value="en">English</option>
+        <option value="zh">中文</option>
+        <option value="vi">Tiếng Việt</option>
+      </select>
+    </div>
+    <button class="btn btn-save" id="saveBtn" data-i18n="btnSaveSettings">Save Settings</button>
+    <div class="saved-msg" id="savedMsg" data-i18n="msgSaved">Settings saved</div>
   </div>
 
   <div class="tab-content" id="tab-history">
@@ -458,9 +466,9 @@
   </div>
 
   <div class="tab-content" id="tab-health">
-    <div class="field"><label>Your Wallet Address</label><input type="text" id="healthAddress" placeholder="0x..."></div>
-    <button class="btn btn-save" id="healthScanBtn">Scan Approvals</button>
-    <div style="font-size:11px;color:#475569;text-align:center;margin-top:4px;">BNB Chain (BSC) · Full history scan</div>
+    <div class="field"><label data-i18n="labelYourWallet">Your Wallet Address</label><input type="text" id="healthAddress" placeholder="0x..."></div>
+    <button class="btn btn-save" id="healthScanBtn" data-i18n="btnScanApprovals">Scan Approvals</button>
+    <div style="font-size:11px;color:#475569;text-align:center;margin-top:4px;" data-i18n="healthScanSubtext">BNB Chain (BSC) · Full history scan</div>
     <div id="healthError" style="display:none;color:#ef4444;font-size:12px;margin-top:6px;"></div>
     <div id="healthLoading" style="display:none;text-align:center;padding:20px 0;color:#64748b;font-size:13px;">Scanning full approval history...<br><span style="font-size:11px;color:#334155;">This may take 20–40 seconds</span></div>
     <div id="healthResult" style="display:none;margin-top:10px;">
@@ -497,7 +505,7 @@
 
         <!-- Feed -->
         <div class="dk">
-          <div class="dk-title">Live Threat Feed</div>
+          <div class="dk-title" data-i18n="dashLiveFeed">Live Threat Feed</div>
           <div class="feed-list" id="dash-feed">
             <div class="feed-empty">
               <div class="feed-scanning">
@@ -505,17 +513,17 @@
                 <div class="scan-dot"></div>
                 <div class="scan-dot"></div>
               </div>
-              <div class="feed-empty-lbl">Monitoring transactions...</div>
+              <div class="feed-empty-lbl" data-i18n="dashMonitoring">Monitoring transactions...</div>
             </div>
           </div>
         </div>
 
         <!-- Wallet Health -->
         <div class="dk">
-          <div class="dk-title">Wallet Health</div>
+          <div class="dk-title" data-i18n="dashWalletHealth">Wallet Health</div>
           <input type="text" class="wh-input" id="dash-healthAddr" placeholder="0x... paste wallet address">
           <button class="wh-btn" id="dash-healthScanBtn">&#128269; Scan Approvals</button>
-          <div class="wh-hint">BNB Chain · Full approval history</div>
+          <div class="wh-hint" data-i18n="dashBnbHint">BNB Chain · Full approval history</div>
           <div class="wh-error" id="dash-healthError"></div>
           <div class="wh-loading" id="dash-healthLoading">&#9203; Scanning... (20–40s)</div>
           <div class="wh-result" id="dash-healthResult">
@@ -536,21 +544,21 @@
       <!-- CENTER -->
       <div class="dc">
         <div class="dk">
-          <div class="dk-title">Shield Analysis</div>
+          <div class="dk-title" data-i18n="dashShieldAnalysis">Shield Analysis</div>
 
           <!-- Stats chips -->
           <div class="ctr-stats">
             <div class="ctr-chip">
               <div class="ctr-chip-num" id="dash-stat-total">0</div>
-              <div class="ctr-chip-lbl">Scans</div>
+              <div class="ctr-chip-lbl" data-i18n="statScans">Scans</div>
             </div>
             <div class="ctr-chip">
               <div class="ctr-chip-num c-danger" id="dash-stat-blocked">0</div>
-              <div class="ctr-chip-lbl">Blocked</div>
+              <div class="ctr-chip-lbl" data-i18n="statBlocked">Blocked</div>
             </div>
             <div class="ctr-chip">
               <div class="ctr-chip-num c-safe" id="dash-stat-safe">100%</div>
-              <div class="ctr-chip-lbl">Safe Rate</div>
+              <div class="ctr-chip-lbl" data-i18n="statSafeRate">Safe Rate</div>
             </div>
           </div>
 
@@ -572,14 +580,14 @@
           </div>
 
           <!-- Scan meta -->
-          <div class="ctr-meta" id="dash-ctr-meta">Firewall active &middot; all transactions monitored</div>
+          <div class="ctr-meta" id="dash-ctr-meta" data-i18n="dashFirewallActive">Firewall active · all transactions monitored</div>
 
           <!-- Protected checklist (default/idle) -->
           <div id="dash-protected-list" class="ctr-idle">
-            <div class="ctr-check"><span class="ctr-check-icon">&#10003;</span><span class="ctr-check-text">Transaction firewall intercepting all wallet calls</span></div>
-            <div class="ctr-check"><span class="ctr-check-icon">&#10003;</span><span class="ctr-check-text">Phishing guard scanning visited URLs</span></div>
-            <div class="ctr-check"><span class="ctr-check-icon">&#10003;</span><span class="ctr-check-text">EIP-712 signature analysis enabled</span></div>
-            <div class="ctr-check"><span class="ctr-check-icon">&#10003;</span><span class="ctr-check-text">7 chains monitored in real time</span></div>
+            <div class="ctr-check"><span class="ctr-check-icon">&#10003;</span><span class="ctr-check-text" data-i18n="dashCheckTxFirewall">Transaction firewall intercepting all wallet calls</span></div>
+            <div class="ctr-check"><span class="ctr-check-icon">&#10003;</span><span class="ctr-check-text" data-i18n="dashCheckPhishing">Phishing guard scanning visited URLs</span></div>
+            <div class="ctr-check"><span class="ctr-check-icon">&#10003;</span><span class="ctr-check-text" data-i18n="dashCheckEIP712">EIP-712 signature analysis enabled</span></div>
+            <div class="ctr-check"><span class="ctr-check-icon">&#10003;</span><span class="ctr-check-text" data-i18n="dashCheck7Chains">7 chains monitored in real time</span></div>
           </div>
 
           <!-- Verdict (shown after scan) -->
@@ -595,24 +603,24 @@
 
         <!-- Security Roadmap -->
         <div class="dk">
-          <div class="dk-title">Security Layers</div>
+          <div class="dk-title" data-i18n="dashSecurityLayers">Security Layers</div>
 
           <!-- LIVE -->
           <div class="rm-section">
-            <div class="rm-section-title">&#9679; Live Now</div>
+            <div class="rm-section-title">&#9679; <span data-i18n="dashLiveNow">Live Now</span></div>
             <div class="rm-item">
               <div class="rm-dot rmd-live"></div>
               <div class="rm-info">
-                <div class="rm-name">Transaction Firewall</div>
-                <div class="rm-sub">Pre-sign risk analysis on every tx</div>
+                <div class="rm-name" data-i18n="dashTxFirewall">Transaction Firewall</div>
+                <div class="rm-sub" data-i18n="dashTxFirewallSub">Pre-sign risk analysis on every tx</div>
               </div>
               <span class="rm-tag rmt-live">LIVE</span>
             </div>
             <div class="rm-item">
               <div class="rm-dot rmd-live"></div>
               <div class="rm-info">
-                <div class="rm-name">Phishing Guard</div>
-                <div class="rm-sub">URL reputation · GoPlus intelligence</div>
+                <div class="rm-name" data-i18n="dashPhishingGuard">Phishing Guard</div>
+                <div class="rm-sub" data-i18n="dashPhishingGuardSub">URL reputation · GoPlus intelligence</div>
               </div>
               <span class="rm-tag rmt-live">LIVE</span>
             </div>
@@ -620,20 +628,20 @@
 
           <!-- BUILDING — Phase 3 active -->
           <div class="rm-section">
-            <div class="rm-section-title">&#9650; Phase 3 &mdash; Building</div>
+            <div class="rm-section-title">&#9650; <span data-i18n="dashPhase3">Phase 3 — Building</span></div>
             <div class="rm-item">
               <div class="rm-dot rmd-build"></div>
               <div class="rm-info">
-                <div class="rm-name">Deployer Cluster Block</div>
-                <div class="rm-sub">Auto-block linked malicious deployers</div>
+                <div class="rm-name" data-i18n="dashDeployerBlock">Deployer Cluster Block</div>
+                <div class="rm-sub" data-i18n="dashDeployerBlockSub">Auto-block linked malicious deployers</div>
               </div>
               <span class="rm-tag rmt-build">BUILDING</span>
             </div>
             <div class="rm-item">
               <div class="rm-dot rmd-build"></div>
               <div class="rm-info">
-                <div class="rm-name">Contract Monitoring</div>
-                <div class="rm-sub">Post-deploy alerts on watched contracts</div>
+                <div class="rm-name" data-i18n="dashContractMonitor">Contract Monitoring</div>
+                <div class="rm-sub" data-i18n="dashContractMonitorSub">Post-deploy alerts on watched contracts</div>
               </div>
               <span class="rm-tag rmt-build">BUILDING</span>
             </div>
@@ -641,20 +649,20 @@
 
           <!-- PHASE 4 -->
           <div class="rm-section" style="margin-bottom:0;">
-            <div class="rm-section-title">&#9711; Phase 4 &mdash; Planned</div>
+            <div class="rm-section-title">&#9711; <span data-i18n="dashPhase4">Phase 4 — Planned</span></div>
             <div class="rm-item">
               <div class="rm-dot rmd-planned"></div>
               <div class="rm-info">
-                <div class="rm-name">Threat Feed Subscriptions</div>
-                <div class="rm-sub">Live intelligence feed access</div>
+                <div class="rm-name" data-i18n="dashThreatFeed">Threat Feed Subscriptions</div>
+                <div class="rm-sub" data-i18n="dashThreatFeedSub">Live intelligence feed access</div>
               </div>
               <span class="rm-tag rmt-planned">PLANNED</span>
             </div>
             <div class="rm-item">
               <div class="rm-dot rmd-planned"></div>
               <div class="rm-info">
-                <div class="rm-name">Asset Soft-Locking</div>
-                <div class="rm-sub">Freeze assets pending review</div>
+                <div class="rm-name" data-i18n="dashSoftLocking">Asset Soft-Locking</div>
+                <div class="rm-sub" data-i18n="dashSoftLockingSub">Freeze assets pending review</div>
               </div>
               <span class="rm-tag rmt-planned">PLANNED</span>
             </div>
@@ -663,32 +671,40 @@
 
         <!-- Configuration -->
         <div class="dk">
-          <div class="dk-title">Configuration</div>
+          <div class="dk-title" data-i18n="dashConfiguration">Configuration</div>
           <div class="s-field">
-            <span class="s-label">API Endpoint</span>
+            <span class="s-label" data-i18n="labelApiEndpoint">API Endpoint</span>
             <input type="text" class="s-input" id="dash-apiUrl" placeholder="https://api.shieldbotsecurity.online">
           </div>
           <div class="s-toggle-row">
-            <span class="s-toggle-lbl">Enable Firewall</span>
+            <span class="s-toggle-lbl" data-i18n="labelEnableFirewall">Enable Firewall</span>
             <label class="toggle"><input type="checkbox" id="dash-enabled" checked><span class="slider"></span></label>
           </div>
           <div class="s-field">
-            <span class="s-label">Policy Mode</span>
+            <span class="s-label" data-i18n="labelPolicyMode">Policy Mode</span>
             <div class="s-policy-row">
               <label class="s-policy-opt">
                 <input type="radio" name="dashPolicy" value="BALANCED" checked>
-                <span class="s-policy-name">Balanced</span>
-                <span class="s-policy-desc">Warn on partial data</span>
+                <span class="s-policy-name" data-i18n="policyBalanced">Balanced</span>
+                <span class="s-policy-desc" data-i18n="policyBalancedDesc">Warn on partial data</span>
               </label>
               <label class="s-policy-opt">
                 <input type="radio" name="dashPolicy" value="STRICT">
-                <span class="s-policy-name">Strict</span>
-                <span class="s-policy-desc">Block on any failure</span>
+                <span class="s-policy-name" data-i18n="policyStrict">Strict</span>
+                <span class="s-policy-desc" data-i18n="policyStrictDesc">Block on any failure</span>
               </label>
             </div>
           </div>
-          <button class="s-save" id="dash-saveBtn">Save Settings</button>
-          <div class="s-saved" id="dash-savedMsg">Settings saved!</div>
+          <div class="s-field">
+            <span class="s-label" data-i18n="labelLanguage">Language</span>
+            <select id="dash-langSelect" class="s-input">
+              <option value="en">English</option>
+              <option value="zh">中文</option>
+              <option value="vi">Tiếng Việt</option>
+            </select>
+          </div>
+          <button class="s-save" id="dash-saveBtn" data-i18n="btnSaveSettings">Save Settings</button>
+          <div class="s-saved" id="dash-savedMsg" data-i18n="msgSavedDash">Settings saved!</div>
           <div style="text-align:center;margin-top:10px;">
             <a href="https://shieldbotsecurity.online/privacy.html" target="_blank"
                style="font-size:10px;color:#334155;text-decoration:none;letter-spacing:0.04em;"
@@ -703,6 +719,7 @@
     </div><!-- .db -->
   </div><!-- #dashboard -->
 
+  <script src="i18n.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

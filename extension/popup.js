@@ -53,14 +53,18 @@ function showMsg(el, text, isError) {
   el.textContent = text;
   el.style.color = isError ? "#ef4444" : "";
   el.classList.add("show");
-  setTimeout(() => { el.classList.remove("show"); el.textContent = isError ? "" : "Saved!"; el.style.color = ""; }, isError ? 3000 : 2000);
+  setTimeout(() => { el.classList.remove("show"); el.textContent = isError ? "" : t("msgSaved"); el.style.color = ""; }, isError ? 3000 : 2000);
 }
 
 // ============================================================
 // ENTRY POINT
 // ============================================================
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
+  if (typeof initI18n === "function") {
+    await initI18n();
+    applyTranslations();
+  }
   if (_isFullPage) {
     document.body.classList.add("expanded");
     const btn = document.getElementById("expandBtn");
@@ -110,15 +114,27 @@ function initCompact() {
   saveBtn.addEventListener("click", () => {
     const apiUrl = apiUrlInput.value.trim().replace(/\/+$/, "");
     const enabled = enabledToggle.checked;
-    if (!apiUrl)             { showMsg(savedMsg, "API URL cannot be empty", true); return; }
-    if (!isAllowedUrl(apiUrl)) { showMsg(savedMsg, "Use HTTPS or localhost", true); return; }
-    try { new URL(apiUrl); } catch { showMsg(savedMsg, "Invalid URL format", true); return; }
+    if (!apiUrl)             { showMsg(savedMsg, t("msgErrEmptyUrl"), true); return; }
+    if (!isAllowedUrl(apiUrl)) { showMsg(savedMsg, t("msgErrHttps"), true); return; }
+    try { new URL(apiUrl); } catch { showMsg(savedMsg, t("msgErrInvalidUrl"), true); return; }
     const policyMode = document.querySelector('input[name="policyMode"]:checked')?.value || "BALANCED";
     chrome.storage.local.set({ apiUrl, enabled, policyMode }, () => {
-      showMsg(savedMsg, "Saved!", false);
+      showMsg(savedMsg, t("msgSaved"), false);
       checkConnection(apiUrl, statusDot, statusText);
     });
   });
+
+  // Language selector
+  const langSel = document.getElementById("langSelect");
+  if (langSel) {
+    langSel.value = getCurrentLang ? getCurrentLang() : "en";
+    langSel.addEventListener("change", async () => {
+      if (typeof setLanguage === "function") {
+        await setLanguage(langSel.value);
+        applyTranslations();
+      }
+    });
+  }
 
   // Health tab
   const healthScanBtn = document.getElementById("healthScanBtn");
@@ -133,7 +149,7 @@ function initCompact() {
     const errEl = document.getElementById("healthError");
     if (!addr || !addr.startsWith("0x") || addr.length < 40) {
       errEl.style.display = "block";
-      errEl.textContent = "Enter a valid wallet address (0x...)";
+      errEl.textContent = t("msgErrInvalidWallet");
       return;
     }
     errEl.style.display = "none";
@@ -156,28 +172,28 @@ function initCompact() {
 // ============================================================
 
 async function checkConnection(apiUrl, dotEl, textEl) {
-  if (!apiUrl) { dotEl.className = "status-dot red"; textEl.textContent = "No API endpoint configured"; return; }
+  if (!apiUrl) { dotEl.className = "status-dot red"; textEl.textContent = t("statusNoApi"); return; }
   dotEl.className = "status-dot yellow";
-  textEl.textContent = "Checking connection...";
+  textEl.textContent = t("statusChecking");
   try {
     const u = new URL(apiUrl);
     const origin = `${u.protocol}//${u.hostname}${u.port ? ":" + u.port : ""}/*`;
     const hasPerm = await chrome.permissions.contains({ origins: [origin] });
     if (!hasPerm) {
       const granted = await chrome.permissions.request({ origins: [origin] });
-      if (!granted) { dotEl.className = "status-dot red"; textEl.textContent = "Permission denied — save settings and allow access"; return; }
+      if (!granted) { dotEl.className = "status-dot red"; textEl.textContent = t("statusPermDenied"); return; }
     }
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), 5000);
     const resp = await fetch(`${apiUrl}/api/health`, { signal: ctrl.signal });
     clearTimeout(to);
-    if (!resp.ok) { dotEl.className = "status-dot red"; textEl.textContent = `Connection failed (${resp.status})`; return; }
+    if (!resp.ok) { dotEl.className = "status-dot red"; textEl.textContent = t("statusConnFailed", { status: resp.status }); return; }
     await resp.json();
     dotEl.className = "status-dot green";
-    textEl.textContent = "Connected";
+    textEl.textContent = t("statusConnected");
   } catch (err) {
     dotEl.className = "status-dot red";
-    textEl.textContent = err.name === "AbortError" ? "Connection timeout" : "Cannot reach API";
+    textEl.textContent = err.name === "AbortError" ? t("statusTimeout") : t("statusCannotReach");
   }
 }
 
@@ -197,14 +213,14 @@ function loadAndRenderHistory(listEl) {
 
 function renderCompactHistory(history, listEl) {
   if (!history || !history.length) {
-    listEl.innerHTML = '<div class="history-empty">No scans yet. Transactions will appear here after analysis.</div>';
+    listEl.innerHTML = `<div class="history-empty">${t("historyEmpty")}</div>`;
     return;
   }
   const MAP = {
-    SAFE:              { cls: "badge-safe",    label: "SAFE" },
-    CAUTION:           { cls: "badge-caution", label: "CAUTION" },
-    HIGH_RISK:         { cls: "badge-high",    label: "HIGH" },
-    BLOCK_RECOMMENDED: { cls: "badge-block",   label: "BLOCK" },
+    SAFE:              { cls: "badge-safe",    label: t("classSafe") },
+    CAUTION:           { cls: "badge-caution", label: t("classCaution") },
+    HIGH_RISK:         { cls: "badge-high",    label: t("classHighRisk") },
+    BLOCK_RECOMMENDED: { cls: "badge-block",   label: t("classBlock") },
   };
   listEl.innerHTML = history.map((item) => {
     const b = MAP[item.classification] || { cls: "badge-caution", label: item.classification };
@@ -240,7 +256,7 @@ async function runHealthScan(addr, ctx) {
   } catch (err) {
     ctx.loadingEl.style.display = "none";
     ctx.errorEl.style.display   = "block";
-    ctx.errorEl.textContent = err.name === "AbortError" ? "Request timed out." : err.message || "Scan failed.";
+    ctx.errorEl.textContent = err.name === "AbortError" ? t("healthScanTimeout") : (err.message || t("healthScanFailed"));
   }
 }
 
@@ -258,14 +274,14 @@ function renderHealthData(data, ctx) {
 
   if (ctx.compact) {
     ctx.statsEl.innerHTML = `
-      <div class="health-stat"><div class="health-stat-num" style="color:#ef4444">${highRisk}</div><div class="health-stat-label">High Risk</div></div>
-      <div class="health-stat"><div class="health-stat-num" style="color:#f97316">${mediumRisk}</div><div class="health-stat-label">Medium</div></div>
-      <div class="health-stat"><div class="health-stat-num" style="color:${usdColor};font-size:14px">${fmtUsd(totalUsd) || "$0"}</div><div class="health-stat-label">At Risk</div></div>`;
+      <div class="health-stat"><div class="health-stat-num" style="color:#ef4444">${highRisk}</div><div class="health-stat-label">${t("healthHighRisk")}</div></div>
+      <div class="health-stat"><div class="health-stat-num" style="color:#f97316">${mediumRisk}</div><div class="health-stat-label">${t("healthMedium")}</div></div>
+      <div class="health-stat"><div class="health-stat-num" style="color:${usdColor};font-size:14px">${fmtUsd(totalUsd) || "$0"}</div><div class="health-stat-label">${t("healthAtRisk")}</div></div>`;
   } else {
     ctx.statsEl.innerHTML = `
-      <div class="wh-stat"><div class="wh-statnum" style="color:#ef4444">${highRisk}</div><div class="wh-statlbl">High</div></div>
-      <div class="wh-stat"><div class="wh-statnum" style="color:#f97316">${mediumRisk}</div><div class="wh-statlbl">Med</div></div>
-      <div class="wh-stat"><div class="wh-statnum" style="color:${usdColor};font-size:11px">${fmtUsd(totalUsd) || "$0"}</div><div class="wh-statlbl">At Risk</div></div>`;
+      <div class="wh-stat"><div class="wh-statnum" style="color:#ef4444">${highRisk}</div><div class="wh-statlbl">${t("healthHighRisk")}</div></div>
+      <div class="wh-stat"><div class="wh-statnum" style="color:#f97316">${mediumRisk}</div><div class="wh-statlbl">${t("healthMedium")}</div></div>
+      <div class="wh-stat"><div class="wh-statnum" style="color:${usdColor};font-size:11px">${fmtUsd(totalUsd) || "$0"}</div><div class="wh-statlbl">${t("healthAtRisk")}</div></div>`;
   }
 
   const approvals  = data.approvals || [];
@@ -273,8 +289,8 @@ function renderHealthData(data, ctx) {
 
   if (!approvals.length) {
     ctx.approvalsEl.innerHTML = ctx.compact
-      ? '<div class="health-empty">No active approvals found. Wallet is clean.</div>'
-      : '<div class="wh-empty">No active approvals — wallet is clean.</div>';
+      ? `<div class="health-empty">${t("healthNoApprovals")}</div>`
+      : `<div class="wh-empty">${t("healthNoApprovalsDash")}</div>`;
   } else if (ctx.compact) {
     ctx.approvalsEl.innerHTML = approvals.slice(0, 12).map((a) => {
       const spd = a.spender_label && a.spender_label !== "Unknown Contract" ? escapeHtml(a.spender_label) : escapeHtml(shortAddr(a.spender || ""));
@@ -329,15 +345,27 @@ function initDashboard() {
   dashSaveBtn.addEventListener("click", () => {
     const apiUrl = dashApiUrl.value.trim().replace(/\/+$/, "");
     const enabled = dashEnabled.checked;
-    if (!apiUrl)               { showDashMsg(dashSavedMsg, "API URL cannot be empty", true); return; }
-    if (!isAllowedUrl(apiUrl)) { showDashMsg(dashSavedMsg, "Use HTTPS or localhost", true); return; }
-    try { new URL(apiUrl); } catch { showDashMsg(dashSavedMsg, "Invalid URL format", true); return; }
+    if (!apiUrl)               { showDashMsg(dashSavedMsg, t("msgErrEmptyUrl"), true); return; }
+    if (!isAllowedUrl(apiUrl)) { showDashMsg(dashSavedMsg, t("msgErrHttps"), true); return; }
+    try { new URL(apiUrl); } catch { showDashMsg(dashSavedMsg, t("msgErrInvalidUrl"), true); return; }
     const policyMode = document.querySelector('input[name="dashPolicy"]:checked')?.value || "BALANCED";
     chrome.storage.local.set({ apiUrl, enabled, policyMode }, () => {
-      showDashMsg(dashSavedMsg, "Settings saved!", false);
+      showDashMsg(dashSavedMsg, t("msgSavedDash"), false);
       checkConnection(apiUrl, dashDot, dashText);
     });
   });
+
+  // Language selector
+  const dashLangSel = document.getElementById("dash-langSelect");
+  if (dashLangSel) {
+    dashLangSel.value = getCurrentLang ? getCurrentLang() : "en";
+    dashLangSel.addEventListener("change", async () => {
+      if (typeof setLanguage === "function") {
+        await setLanguage(dashLangSel.value);
+        applyTranslations();
+      }
+    });
+  }
 
   // Load history → feed + center + stats
   chrome.runtime.sendMessage({ type: "SHIELDAI_GET_HISTORY" }, (response) => {
@@ -361,7 +389,7 @@ function initDashboard() {
     const addr = whAddr.value.trim();
     if (!addr || !addr.startsWith("0x") || addr.length < 40) {
       whError.style.display = "block";
-      whError.textContent = "Enter a valid wallet address (0x...)";
+      whError.textContent = t("msgErrInvalidWallet");
       return;
     }
     whError.style.display = "none";
@@ -383,7 +411,7 @@ function showDashMsg(el, text, isError) {
   el.textContent = text;
   el.style.color = isError ? "#ef4444" : "#22C55E";
   el.classList.add("show");
-  setTimeout(() => { el.classList.remove("show"); el.textContent = "Settings saved!"; el.style.color = "#22C55E"; }, isError ? 3000 : 2000);
+  setTimeout(() => { el.classList.remove("show"); el.textContent = t("msgSavedDash"); el.style.color = "#22C55E"; }, isError ? 3000 : 2000);
 }
 
 function applyHistory(history) {
@@ -405,16 +433,23 @@ function renderDashFeed(history) {
   if (!history || !history.length) {
     feedEl.innerHTML = `<div class="feed-empty">
       <div class="feed-scanning"><div class="scan-dot"></div><div class="scan-dot"></div><div class="scan-dot"></div></div>
-      <div class="feed-empty-lbl">Monitoring transactions...</div>
+      <div class="feed-empty-lbl">${t("dashMonitoring")}</div>
     </div>`;
     return;
   }
+  const FEED_LABELS = {
+    SAFE:              t("classSafe"),
+    CAUTION:           t("classCaution"),
+    HIGH_RISK:         t("classHighRisk"),
+    BLOCK_RECOMMENDED: t("classBlock"),
+  };
   feedEl.innerHTML = history.slice(0, 8).map((item) => {
-    const b = FEED_MAP[item.classification] || { cls: "badge-caution", label: item.classification, color: "#EAB308", border: "#EAB308" };
+    const b = FEED_MAP[item.classification] || { cls: "badge-caution", color: "#EAB308", border: "#EAB308" };
+    const lbl = FEED_LABELS[item.classification] || item.classification;
     const safety = 100 - (item.risk_score || 0);
     const addr = escapeHtml(shortAddr(item.recipient || item.to || "Unknown"));
     return `<div class="feed-item" style="--fc:${b.border}">
-      <span class="feed-badge ${b.cls}">${b.label}</span>
+      <span class="feed-badge ${b.cls}">${lbl}</span>
       <div class="feed-info">
         <div class="feed-addr">${addr}</div>
         <div class="feed-time">${formatTime(item.timestamp)}</div>
@@ -451,7 +486,7 @@ function renderDashCenter(lastScan) {
     setGauge(gaugeArc, gaugeNum, 100, true);
     clsBadge.textContent = "PROTECTED";
     clsBadge.className   = "cls-badge cls-protected";
-    metaEl.textContent   = "Firewall active \u00b7 all transactions monitored";
+    metaEl.textContent   = t("dashFirewallActive");
     protectedList.style.display = "block";
     verdictWrap.style.display   = "none";
     return;
@@ -461,10 +496,10 @@ function renderDashCenter(lastScan) {
   setGauge(gaugeArc, gaugeNum, safety, false);
 
   const CLS = {
-    SAFE:              { cls: "cls-safe",    label: "SAFE" },
-    CAUTION:           { cls: "cls-caution", label: "CAUTION" },
-    HIGH_RISK:         { cls: "cls-high",    label: "HIGH RISK" },
-    BLOCK_RECOMMENDED: { cls: "cls-block",   label: "BLOCK RECOMMENDED" },
+    SAFE:              { cls: "cls-safe",    label: t("classSafe") },
+    CAUTION:           { cls: "cls-caution", label: t("classCaution") },
+    HIGH_RISK:         { cls: "cls-high",    label: t("classHighRisk") },
+    BLOCK_RECOMMENDED: { cls: "cls-block",   label: t("classBlock") },
   };
   const b = CLS[lastScan.classification] || { cls: "cls-caution", label: lastScan.classification };
   clsBadge.textContent = b.label;
@@ -475,7 +510,7 @@ function renderDashCenter(lastScan) {
 
   protectedList.style.display = "none";
   verdictWrap.style.display   = "block";
-  verdictEl.textContent = lastScan.verdict || "No analysis text available for this transaction.";
+  verdictEl.textContent = lastScan.verdict || t("overlayNoAnalysis");
 }
 
 function setGauge(arcEl, numEl, score, glow) {

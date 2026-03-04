@@ -134,43 +134,43 @@
   <div class="card">
     <img src="icons/shield128.png" alt="ShieldBot" class="logo" />
 
-    <h1>Welcome to ShieldBot</h1>
-    <p class="subtitle">
-      Real-time transaction protection for BNB Chain and 6 more EVM networks.<br>
-      One click and you're covered.
+    <h1 data-i18n="welcomeTitle">Welcome to ShieldBot</h1>
+    <p class="subtitle" data-i18n="welcomeSubtitle">
+      Real-time transaction protection for BNB Chain and 6 more EVM networks. One click and you're covered.
     </p>
 
     <div class="steps">
       <div class="step">
         <div class="step-icon">🔍</div>
         <div class="step-body">
-          <div class="step-title">Analyze</div>
-          <div class="step-desc">Every transaction you sign is scanned for honeypots, rug pulls, and drainer contracts before you confirm.</div>
+          <div class="step-title" data-i18n="step1Title">Analyze</div>
+          <div class="step-desc" data-i18n="step1Desc">Every transaction you sign is scanned for honeypots, rug pulls, and drainer contracts before you confirm.</div>
         </div>
       </div>
       <div class="step">
         <div class="step-icon">🧪</div>
         <div class="step-body">
-          <div class="step-title">Simulate</div>
-          <div class="step-desc">See exactly which tokens leave and enter your wallet — simulated on-chain before you touch the confirm button.</div>
+          <div class="step-title" data-i18n="step2Title">Simulate</div>
+          <div class="step-desc" data-i18n="step2Desc">See exactly which tokens leave and enter your wallet — simulated on-chain before you touch the confirm button.</div>
         </div>
       </div>
       <div class="step">
         <div class="step-icon">🛡</div>
         <div class="step-body">
-          <div class="step-title">Block</div>
-          <div class="step-desc">High-risk transactions are stopped in their tracks. Phishing sites are flagged the moment you land on them.</div>
+          <div class="step-title" data-i18n="step3Title">Block</div>
+          <div class="step-desc" data-i18n="step3Desc">High-risk transactions are stopped in their tracks. Phishing sites are flagged the moment you land on them.</div>
         </div>
       </div>
     </div>
 
-    <button id="connectBtn">Connect &amp; Protect</button>
+    <button id="connectBtn" data-i18n="welcomeConnectBtn">Connect &amp; Protect</button>
     <div id="statusMsg"></div>
-    <div id="closeLink">Close this tab</div>
+    <div id="closeLink" data-i18n="welcomeClose">Close this tab</div>
 
     <div class="version">ShieldBot v1.0.5</div>
   </div>
 
+  <script src="i18n.js"></script>
   <script src="welcome.js"></script>
 </body>
 </html>

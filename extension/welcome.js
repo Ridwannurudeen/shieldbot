@@ -1,38 +1,43 @@
-document.getElementById("connectBtn").addEventListener("click", async () => {
+window.addEventListener("DOMContentLoaded", async () => {
+  await initI18n();
+  applyTranslations();
+
   const btn = document.getElementById("connectBtn");
   const statusMsg = document.getElementById("statusMsg");
   const closeLink = document.getElementById("closeLink");
 
-  btn.textContent = "Connecting\u2026";
-  btn.disabled = true;
-  statusMsg.textContent = "Requesting permissions\u2026";
+  btn.addEventListener("click", async () => {
+    btn.textContent = t("welcomeConnecting");
+    btn.disabled = true;
+    statusMsg.textContent = t("welcomeRequestingPerms");
 
-  try {
-    const granted = await chrome.permissions.request({
-      origins: ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"]
-    });
-    if (!granted) throw new Error("Permission denied");
+    try {
+      const granted = await chrome.permissions.request({
+        origins: ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"]
+      });
+      if (!granted) throw new Error(t("welcomePermDenied"));
 
-    statusMsg.textContent = "Checking connection\u2026";
-    const { apiUrl } = await chrome.storage.local.get({ apiUrl: "https://api.shieldbotsecurity.online" });
-    const res = await fetch(`${apiUrl}/api/health`, {
-      signal: AbortSignal.timeout(8000)
-    });
-    if (!res.ok) throw new Error(`Health check returned ${res.status}`);
+      statusMsg.textContent = t("welcomeCheckingConn");
+      const { apiUrl } = await chrome.storage.local.get({ apiUrl: "https://api.shieldbotsecurity.online" });
+      const res = await fetch(`${apiUrl}/api/health`, {
+        signal: AbortSignal.timeout(8000)
+      });
+      if (!res.ok) throw new Error(t("welcomeHealthFailed", { status: res.status }));
 
-    btn.textContent = "You\u2019re protected \u2713";
-    btn.style.background = "#16a34a";
-    statusMsg.textContent = "ShieldBot is active. Your transactions are now protected.";
-    closeLink.style.display = "block";
-  } catch (err) {
-    const msg = err.message || "Unknown error";
-    btn.textContent = "Connection failed \u2014 try again";
-    btn.style.background = "#dc2626";
-    btn.disabled = false;
-    statusMsg.textContent = msg;
-  }
-});
+      btn.textContent = t("welcomeProtected");
+      btn.style.background = "#16a34a";
+      statusMsg.textContent = t("welcomeActiveMsg");
+      closeLink.style.display = "block";
+    } catch (err) {
+      const msg = err.message || t("welcomePermDenied");
+      btn.textContent = t("welcomeConnFailed");
+      btn.style.background = "#dc2626";
+      btn.disabled = false;
+      statusMsg.textContent = msg;
+    }
+  });
 
-document.getElementById("closeLink").addEventListener("click", () => {
-  window.close();
+  closeLink.addEventListener("click", () => {
+    window.close();
+  });
 });

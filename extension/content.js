@@ -12,6 +12,31 @@
   // document_start because the <script> element is removed immediately onload.
   // Every verdict message must include this token; forge attempts without it
   // are silently ignored by inject.js.
+  // --- i18n mini-loader (content script context, no ES module import) ---
+  let _ct18n = {};
+  async function _loadContentLang() {
+    try {
+      const { language } = await new Promise((r) =>
+        chrome.storage.local.get({ language: "en" }, r)
+      );
+      const lang = ["en", "zh", "vi"].includes(language) ? language : "en";
+      const url = chrome.runtime.getURL(`_locales/${lang}/messages.json`);
+      const resp = await fetch(url);
+      _ct18n = await resp.json();
+    } catch (_) {
+      _ct18n = {};
+    }
+  }
+  function _t(key, repl) {
+    let s = _ct18n[key] !== undefined ? _ct18n[key] : key;
+    if (repl) {
+      Object.entries(repl).forEach(([k, v]) => {
+        s = s.replace(`{${k}}`, v);
+      });
+    }
+    return s;
+  }
+
   const _CHANNEL_TOKEN = crypto.randomUUID
     ? crypto.randomUUID()
     : Array.from(crypto.getRandomValues(new Uint8Array(16)))
@@ -117,7 +142,8 @@
     if (existing) existing.remove();
   }
 
-  function showLoadingOverlay() {
+  async function showLoadingOverlay() {
+    await _loadContentLang();
     removeOverlay();
 
     const overlay = document.createElement("div");
@@ -127,12 +153,12 @@
       <div class="shieldai-modal">
         <div class="shieldai-header">
           <div class="shieldai-logo">&#128737;</div>
-          <h2>ShieldAI Firewall</h2>
+          <h2>${_t("overlayTitle")}</h2>
         </div>
         <div class="shieldai-loading">
           <div class="shieldai-spinner"></div>
-          <p>Analyzing transaction...</p>
-          <p class="shieldai-subtext">Checking contract, decoding calldata, scanning for threats</p>
+          <p>${_t("overlayAnalyzing")}</p>
+          <p class="shieldai-subtext">${_t("overlaySubtext")}</p>
         </div>
       </div>
     `;
@@ -160,7 +186,8 @@
   // --- Signature Request Overlay ---
   // Shown instead of the firewall overlay for personal_sign / eth_signTypedData etc.
 
-  function showSignatureOverlay(requestId, tx) {
+  async function showSignatureOverlay(requestId, tx) {
+    await _loadContentLang();
     removeOverlay();
 
     const signMethod = tx.signMethod || "personal_sign";
@@ -203,12 +230,12 @@
       bodyHtml = `
         ${domainRows.length ? `
           <div class="shieldai-section">
-            <h3>Domain</h3>
+            <h3>${_t("overlayDomain")}</h3>
             <table class="shieldai-impact">${domainRows.join("")}</table>
           </div>` : ""}
         <div class="shieldai-section">
-          <h3>Type: ${escapeHtml(primaryType)}</h3>
-          <table class="shieldai-impact">${msgRows || "<tr><td colspan='2'>No fields</td></tr>"}</table>
+          <h3>${_t("overlayType") || "Type:"} ${escapeHtml(primaryType)}</h3>
+          <table class="shieldai-impact">${msgRows || `<tr><td colspan='2'>${_t("overlayNoFields")}</td></tr>`}</table>
         </div>
       `;
     } else if (isPersonal) {
@@ -220,7 +247,7 @@
 
       bodyHtml = `
         <div class="shieldai-section">
-          <h3>Message</h3>
+          <h3>${_t("overlayMessage")}</h3>
           <div class="shieldai-sig-message ${isBinary ? "shieldai-sig-binary" : ""}">${escapeHtml(display)}</div>
         </div>
       `;
@@ -228,10 +255,8 @@
 
     // Risk classification
     const color = isPermitLike ? "#f97316" : "#eab308";
-    const label = isPermitLike ? "APPROVAL SIGNATURE" : "SIGNATURE REQUEST";
-    const note = isPermitLike
-      ? "This signature grants token spending rights — no gas needed. Only sign for protocols you fully trust."
-      : "Signing this message costs no gas, but malicious sites can use signatures to drain wallets or impersonate you.";
+    const label = isPermitLike ? _t("overlayApprovalSig") : _t("overlaySigRequest");
+    const note = isPermitLike ? _t("overlayApprovalNote") : _t("overlaySigNote");
 
     const overlay = document.createElement("div");
     overlay.id = "shieldai-overlay";
@@ -240,7 +265,7 @@
       <div class="shieldai-modal">
         <div class="shieldai-header">
           <div class="shieldai-logo">&#128737;</div>
-          <h2>ShieldAI Firewall</h2>
+          <h2>${_t("overlayTitle")}</h2>
         </div>
 
         <div class="shieldai-badge" style="background:${color}">${label}</div>
@@ -252,8 +277,8 @@
         ${bodyHtml}
 
         <div class="shieldai-actions">
-          <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">Reject</button>
-          <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">Sign Anyway</button>
+          <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">${_t("overlayBtnReject")}</button>
+          <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">${_t("overlayBtnSignAnyway")}</button>
         </div>
       </div>
     `;
@@ -276,7 +301,8 @@
     });
   }
 
-  function showAnalysisOverlay(requestId, result) {
+  async function showAnalysisOverlay(requestId, result) {
+    await _loadContentLang();
     removeOverlay();
 
     const classColors = {
@@ -287,10 +313,10 @@
     };
 
     const classLabels = {
-      BLOCK_RECOMMENDED: "BLOCK RECOMMENDED",
-      HIGH_RISK: "HIGH RISK",
-      CAUTION: "CAUTION",
-      SAFE: "SAFE",
+      BLOCK_RECOMMENDED: _t("classBlock"),
+      HIGH_RISK: _t("classHighRisk"),
+      CAUTION: _t("classCaution"),
+      SAFE: _t("classSafe"),
     };
 
     const classification = result.classification || "CAUTION";
@@ -318,7 +344,7 @@
     const assetDelta = result.asset_delta || [];
     const deltaHtml = assetDelta.length
       ? `<div class="shieldai-section">
-           <h3>Asset Delta <span class="shieldai-sim-badge">SIMULATED</span></h3>
+           <h3>${_t("overlayAssetDelta")} <span class="shieldai-sim-badge">${_t("overlaySimulated")}</span></h3>
            <ul class="shieldai-delta-list">
              ${assetDelta.map((d) => {
                const isOut = d.startsWith("-");
@@ -332,25 +358,25 @@
       <div class="shieldai-modal ${isBlock ? "shieldai-modal-danger" : ""}">
         <div class="shieldai-header">
           <div class="shieldai-logo">&#128737;</div>
-          <h2>ShieldAI Firewall</h2>
+          <h2>${_t("overlayTitle")}</h2>
         </div>
 
         <div class="shieldai-badge" style="background:${color}">
-          ${escapeHtml(label)} &mdash; Safety: ${safetyScore}/100
+          ${escapeHtml(label)} &mdash; ${_t("overlaySafety")} ${safetyScore}/100
         </div>
 
         ${result.partial ? `
           <div class="shieldai-section" style="background:#78350f;border-radius:6px;padding:8px 12px;margin-bottom:8px;">
             <p style="color:#fbbf24;font-size:12px;margin:0;">
-              <strong>Partial Analysis</strong> — ${escapeHtml((result.failed_sources || []).join(', '))} unavailable.
-              ${result.policy_mode === 'STRICT' ? 'Strict mode: blocking recommended.' : 'Results may be incomplete.'}
+              <strong>${_t("overlayPartialAnalysis")}</strong> — ${escapeHtml((result.failed_sources || []).join(', '))} ${_t("overlayResultsIncomplete")}
+              ${result.policy_mode === 'STRICT' ? _t("overlayStrictBlock") : ''}
             </p>
           </div>
         ` : ''}
 
         ${result.calldata_details && result.calldata_details.fields && result.calldata_details.fields.length ? `
           <div class="shieldai-section">
-            <h3>Decoded Calldata</h3>
+            <h3>${_t("overlayDecodedCalldata")}</h3>
             <table class="shieldai-impact shieldai-calldata">
               ${result.calldata_details.fields.map((f) =>
                 `<tr>
@@ -362,7 +388,7 @@
           </div>
         ` : result.decoded_action ? `
           <div class="shieldai-section shieldai-action-section">
-            <h3>Transaction Type</h3>
+            <h3>${_t("overlayTxType")}</h3>
             <div class="shieldai-action-label">${escapeHtml(result.decoded_action)}</div>
           </div>
         ` : ""}
@@ -370,27 +396,27 @@
         ${
           signalsHtml
             ? `<div class="shieldai-section">
-                <h3>Danger Signals</h3>
+                <h3>${_t("overlayDangerSignals")}</h3>
                 <ul class="shieldai-signals">${signalsHtml}</ul>
                </div>`
             : ""
         }
 
         <div class="shieldai-section">
-          <h3>Transaction Impact</h3>
+          <h3>${_t("overlayTxImpact")}</h3>
           <table class="shieldai-impact">
-            <tr><td>Sending</td><td>${escapeHtml(impact.sending || "N/A")}</td></tr>
-            <tr><td>Granting Access</td><td>${escapeHtml(impact.granting_access || "None")}</td></tr>
-            <tr><td>Recipient</td><td class="shieldai-mono">${escapeHtml(impact.recipient || "N/A")}</td></tr>
-            <tr><td>After TX</td><td>${escapeHtml(impact.post_tx_state || "N/A")}</td></tr>
+            <tr><td>${_t("overlaySending")}</td><td>${escapeHtml(impact.sending || "N/A")}</td></tr>
+            <tr><td>${_t("overlayGrantingAccess")}</td><td>${escapeHtml(impact.granting_access || "None")}</td></tr>
+            <tr><td>${_t("overlayRecipient")}</td><td class="shieldai-mono">${escapeHtml(impact.recipient || "N/A")}</td></tr>
+            <tr><td>${_t("overlayAfterTx")}</td><td>${escapeHtml(impact.post_tx_state || "N/A")}</td></tr>
           </table>
         </div>
 
         ${deltaHtml}
 
         <div class="shieldai-section">
-          <h3>Analysis</h3>
-          <p>${escapeHtml(result.plain_english || result.analysis || "No analysis available")}</p>
+          <h3>${_t("overlayAnalysis")}</h3>
+          <p>${escapeHtml(result.plain_english || result.analysis || _t("overlayNoAnalysis"))}</p>
         </div>
 
         <div class="shieldai-verdict">
@@ -399,10 +425,10 @@
 
         <div class="shieldai-actions">
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">
-            Block Transaction
+            ${_t("overlayBtnBlock")}
           </button>
           <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">
-            Proceed Anyway
+            ${_t("overlayBtnProceed")}
           </button>
         </div>
       </div>
@@ -430,7 +456,8 @@
       });
   }
 
-  function showErrorOverlay(requestId, errorMsg) {
+  async function showErrorOverlay(requestId, errorMsg) {
+    await _loadContentLang();
     removeOverlay();
 
     const overlay = document.createElement("div");
@@ -440,22 +467,22 @@
       <div class="shieldai-modal">
         <div class="shieldai-header">
           <div class="shieldai-logo">&#128737;</div>
-          <h2>ShieldAI Firewall</h2>
+          <h2>${_t("overlayTitle")}</h2>
         </div>
         <div class="shieldai-badge" style="background:#f97316">
-          ANALYSIS UNAVAILABLE
+          ${_t("overlayAnalysisUnavail")}
         </div>
         <div class="shieldai-section">
-          <p>Could not reach the ShieldAI API:</p>
+          <p>${_t("overlayCannotReach")}</p>
           <p class="shieldai-error">${escapeHtml(errorMsg)}</p>
-          <p>Proceed at your own risk.</p>
+          <p>${_t("overlayProceedRisk")}</p>
         </div>
         <div class="shieldai-actions">
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">
-            Block Transaction
+            ${_t("overlayBtnBlock")}
           </button>
           <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">
-            Proceed Anyway
+            ${_t("overlayBtnProceed")}
           </button>
         </div>
       </div>
@@ -502,15 +529,16 @@
       });
 
       if (response?.result?.is_phishing) {
-        showPhishingBanner(window.location.hostname);
+        await showPhishingBanner(window.location.hostname);
       }
     } catch {
       // Best-effort — never crash the page
     }
   }
 
-  function showPhishingBanner(domain) {
+  async function showPhishingBanner(domain) {
     if (document.getElementById("shieldai-phishing-banner")) return;
+    await _loadContentLang();
 
     const banner = document.createElement("div");
     banner.id = "shieldai-phishing-banner";
@@ -519,13 +547,12 @@
       <div class="shieldai-phishing-content">
         <span class="shieldai-phishing-icon">&#9888;</span>
         <div class="shieldai-phishing-text">
-          <strong>ShieldBot Warning:</strong>
-          <span>${escapeHtml(domain)}</span> has been flagged as a phishing site.
-          Your wallet and funds may be at risk.
+          <strong>${_t("phishingWarning")}</strong>
+          <span>${escapeHtml(domain)}</span> ${_t("phishingFlagged")}
         </div>
         <div class="shieldai-phishing-actions">
-          <button class="shieldai-phishing-btn-leave" id="shieldai-leave">Leave Page</button>
-          <button class="shieldai-phishing-btn-dismiss" id="shieldai-dismiss">I know the risk</button>
+          <button class="shieldai-phishing-btn-leave" id="shieldai-leave">${_t("phishingLeavePage")}</button>
+          <button class="shieldai-phishing-btn-dismiss" id="shieldai-dismiss">${_t("phishingKnowRisk")}</button>
         </div>
       </div>
     `;
