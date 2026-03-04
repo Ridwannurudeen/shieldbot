@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>About ShieldAI — Web3 Transaction Firewall & Crypto Security Extension</title>
+  <meta name="description" content="ShieldAI intercepts malicious crypto transactions before your wallet signs them. Learn how honeypot detection, wallet drainer protection, transaction simulation, and phishing blocking work.">
+  <link rel="canonical" href="https://shieldbotsecurity.online/about.html">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #020617;
+      color: #cbd5e1;
+      line-height: 1.7;
+      padding: 0 16px;
+    }
+    a { color: #FACC15; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .nav {
+      max-width: 800px; margin: 0 auto;
+      padding: 20px 0;
+      display: flex; align-items: center; gap: 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      margin-bottom: 48px;
+    }
+    .nav-name { font-size: 15px; font-weight: 700; color: #f8fafc; }
+    .nav-back { margin-left: auto; font-size: 13px; color: #475569; }
+    .nav-back:hover { color: #FACC15; text-decoration: none; }
+    .wrap { max-width: 800px; margin: 0 auto; padding-bottom: 80px; }
+    .hero { margin-bottom: 48px; }
+    .hero h1 { font-size: 36px; font-weight: 800; color: #f8fafc; letter-spacing: -0.02em; margin-bottom: 12px; }
+    .hero p { font-size: 16px; color: #94a3b8; max-width: 600px; }
+    h2 { font-size: 20px; font-weight: 700; color: #f8fafc; margin: 48px 0 12px; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+    h3 { font-size: 15px; font-weight: 700; color: #e2e8f0; margin: 24px 0 8px; }
+    p { margin-bottom: 14px; font-size: 14px; color: #94a3b8; }
+    ul { margin: 8px 0 16px 20px; }
+    li { font-size: 14px; color: #94a3b8; margin-bottom: 8px; }
+    li strong { color: #cbd5e1; }
+    .callout {
+      background: rgba(250,204,21,0.06);
+      border: 1px solid rgba(250,204,21,0.15);
+      border-left: 3px solid #FACC15;
+      border-radius: 8px;
+      padding: 16px 18px;
+      margin: 24px 0;
+      font-size: 14px; color: #94a3b8;
+    }
+    .score-table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    .score-table th { text-align: left; font-size: 12px; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+    .score-table td { font-size: 13px; color: #94a3b8; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .safe { background: rgba(34,197,94,0.15); color: #22c55e; }
+    .caution { background: rgba(234,179,8,0.15); color: #eab308; }
+    .high { background: rgba(249,115,22,0.15); color: #f97316; }
+    .block { background: rgba(239,68,68,0.15); color: #ef4444; }
+    .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+    .compare-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 18px; }
+    .compare-card.shield { border-color: rgba(250,204,21,0.2); }
+    .compare-card h4 { font-size: 13px; font-weight: 700; color: #f8fafc; margin-bottom: 12px; }
+    .compare-card ul { margin-left: 16px; }
+    .compare-card li { font-size: 13px; margin-bottom: 6px; }
+    .footer { max-width: 800px; margin: 48px auto 0; padding-top: 24px; border-top: 1px solid rgba(255,255,255,0.06); font-size: 12px; color: #1e293b; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+    @media (max-width: 600px) { .compare-grid { grid-template-columns: 1fr; } .hero h1 { font-size: 26px; } }
+  </style>
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "What is ShieldAI Transaction Firewall?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "ShieldAI is a Chrome browser extension that acts as a transaction firewall for Web3 wallets. It intercepts blockchain transactions at the browser level before the user's wallet receives the signature request, and scores them for risk using bytecode analysis, deployer history, and pre-execution simulation. If a transaction is flagged as high risk, ShieldAI blocks it and displays a plain-English explanation of the threat."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How does ShieldAI detect honeypot tokens?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "A honeypot token allows users to buy but contains hidden code that blocks sell transactions. ShieldAI detects honeypots by fingerprinting the contract's compiled bytecode against known honeypot patterns, even for unverified contracts. The check runs before you sign, so ShieldAI flags a honeypot before any funds are spent."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What is a wallet drainer and how does ShieldAI stop it?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "A wallet drainer exploits ERC-20 approval functions or EIP-712 permit signatures to transfer all tokens from a wallet in one transaction. ShieldAI intercepts at eth_sendTransaction and simulates the asset delta via Tenderly before your wallet signs. If the simulation shows your full balance leaving your wallet, the transaction is blocked."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What is ShieldScore?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "ShieldScore is a 0-100 risk rating assigned to every transaction before signing. 0-39 is SAFE, 40-69 is CAUTION, 70-89 is HIGH RISK, and 90-100 triggers an automatic BLOCK. The score combines contract bytecode fingerprinting, deployer wallet history, Tenderly pre-execution simulation, and GoPlus Security threat intelligence."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How does transaction simulation work in ShieldAI?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "When you initiate a transaction, ShieldAI sends it to Tenderly for simulation on a forked chain state before your wallet signs. Tenderly executes the transaction in a sandbox and returns the exact tokens and amounts that would leave or enter your wallet. ShieldAI displays this asset delta so you can verify the outcome before signing."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Does ShieldAI work with MetaMask?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. ShieldAI hooks into window.ethereum at page load, compatible with MetaMask, Trust Wallet, Binance Web3 Wallet, and any EIP-6963 wallet. The hook runs before any DApp code, intercepting all transaction requests regardless of which wallet is connected."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How is ShieldAI different from browser phishing warnings?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Browser phishing warnings operate at the URL layer and cannot inspect transaction data or smart contract code. ShieldAI operates at the transaction layer, intercepting eth_sendTransaction, analyzing contract bytecode for honeypot and rug patterns, simulating exact asset loss, and scoring the deployer wallet's history. Browser warnings tell you a site looks suspicious. ShieldAI tells you the specific transaction will drain your wallet and shows you how much you would lose if you signed."
+        }
+      }
+    ]
+  }
+  </script>
+</head>
+<body>
+
+  <nav class="nav">
+    <span style="font-size:22px;">&#128737;</span>
+    <span class="nav-name">ShieldAI Transaction Firewall</span>
+    <a href="/" class="nav-back">&#8592; Back to home</a>
+  </nav>
+
+  <div class="wrap">
+
+    <div class="hero">
+      <h1>How ShieldAI Protects Your Wallet</h1>
+      <p>ShieldAI intercepts malicious blockchain transactions before your wallet signs them — combining bytecode analysis, transaction simulation, and real-time threat intelligence into a single risk score.</p>
+    </div>
+
+    <div class="callout">
+      ShieldAI operates at the transaction layer, not the URL layer. It intercepts <code>eth_sendTransaction</code> in the browser's page context before your wallet ever receives the signature request.
+    </div>
+
+    <!-- BLOCK 1: What it is -->
+    <h2>What ShieldAI Does</h2>
+    <p>ShieldAI is a Chrome browser extension that acts as a transaction firewall for Web3 wallets. Every time you initiate a transaction on a DApp — a swap, a token purchase, an NFT mint — ShieldAI intercepts it before your wallet receives the signature request.</p>
+    <p>The transaction is scored for risk using four data sources in parallel: contract bytecode fingerprinting, deployer wallet history, Tenderly pre-execution simulation, and GoPlus Security threat intelligence. The result is a ShieldScore (0–100) with a plain-English explanation of any threats found.</p>
+
+    <!-- BLOCK 2: ShieldScore -->
+    <h2>ShieldScore — How Risk Is Rated</h2>
+    <p>Every transaction receives a ShieldScore before you sign it:</p>
+    <table class="score-table">
+      <tr><th>Score</th><th>Verdict</th><th>Action</th></tr>
+      <tr><td>0 – 39</td><td><span class="badge safe">SAFE</span></td><td>Transaction proceeds with asset delta preview</td></tr>
+      <tr><td>40 – 69</td><td><span class="badge caution">CAUTION</span></td><td>Warning shown — you choose to proceed or cancel</td></tr>
+      <tr><td>70 – 89</td><td><span class="badge high">HIGH RISK</span></td><td>Strong warning with threat details</td></tr>
+      <tr><td>90 – 100</td><td><span class="badge block">BLOCK</span></td><td>Transaction automatically blocked</td></tr>
+    </table>
+
+    <!-- BLOCK 3: Wallet drainers -->
+    <h2>Wallet Drainer Protection</h2>
+    <p>A wallet drainer is a malicious smart contract that exploits ERC-20 approval functions or EIP-712 permit signatures to transfer all tokens from a wallet in a single transaction. Standard browser phishing warnings cannot detect these because they operate at the URL layer — the attack happens at the transaction layer.</p>
+    <p>ShieldAI stops wallet drainers by:</p>
+    <ul>
+      <li>Intercepting at <code>eth_sendTransaction</code> before your wallet sees the request</li>
+      <li>Simulating the transaction via Tenderly to show exact asset loss before signing</li>
+      <li>Analyzing EIP-712 permit and Permit2 signature requests for approval exploits</li>
+      <li>Flagging contracts whose deployer wallet has previously drained similar pools</li>
+    </ul>
+
+    <!-- BLOCK 4: Honeypot detection -->
+    <h2>Honeypot Detection</h2>
+    <p>A honeypot token allows users to buy but contains hidden code that blocks all sell transactions. The token appears to have liquidity and price action, but holders can never exit.</p>
+    <p>ShieldAI detects honeypots by fingerprinting the contract's compiled bytecode against a database of known honeypot patterns — even for unverified contracts that have not been published or audited on a block explorer. The bytecode check runs before you sign any transaction involving the contract.</p>
+
+    <!-- BLOCK 5: Transaction simulation -->
+    <h2>Pre-Sign Transaction Simulation</h2>
+    <p>When you initiate a transaction, ShieldAI sends it to Tenderly for simulation on a forked chain state. Tenderly executes the transaction in a sandbox environment and returns the exact tokens and amounts that would leave or enter your wallet.</p>
+    <p>ShieldAI displays this asset delta before the wallet signature dialog appears. For example: <em>"You will send 2.5 BNB and receive 10,000 TOKEN."</em> If the simulation shows unexpected asset loss, the transaction is flagged HIGH RISK or BLOCK.</p>
+
+    <!-- BLOCK 6: Comparison -->
+    <h2>ShieldAI vs. Browser Phishing Warnings</h2>
+    <div class="compare-grid">
+      <div class="compare-card">
+        <h4>Browser built-in warnings</h4>
+        <ul>
+          <li>Operate at the URL / domain layer</li>
+          <li>Cannot inspect transaction data</li>
+          <li>Do not analyze smart contract code</li>
+          <li>Cannot simulate asset loss before signing</li>
+          <li>Miss all on-chain attacks on legitimate sites</li>
+        </ul>
+      </div>
+      <div class="compare-card shield">
+        <h4>ShieldAI Transaction Firewall</h4>
+        <ul>
+          <li>Intercepts at <code>eth_sendTransaction</code></li>
+          <li>Analyzes contract bytecode for honeypot/rug patterns</li>
+          <li>Simulates exact asset delta via Tenderly before signing</li>
+          <li>Scores deployer wallet history across all past deployments</li>
+          <li>Blocks malicious permit2 and approval signature requests</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- BLOCK 7: Privacy / Trust -->
+    <h2>What Data ShieldAI Collects</h2>
+    <p>ShieldAI collects the minimum data required to perform a security scan: the transaction's recipient address, sender address, value, calldata, chainId, and any EIP-712 typed data. This data is sent to the ShieldAI API over HTTPS for risk analysis.</p>
+    <ul>
+      <li>Transaction data is <strong>not linked</strong> to any browser profile, IP address, or personal identity</li>
+      <li>Scan history (last 50 results) is stored locally in <code>chrome.storage.local</code> — never uploaded</li>
+      <li>No <code>tabs</code>, <code>scripting</code>, or <code>webRequest</code> permissions used</li>
+      <li>Transaction data retained on servers for a maximum of 30 days, then deleted</li>
+    </ul>
+    <p>Full privacy policy: <a href="/privacy.html">shieldbotsecurity.online/privacy.html</a></p>
+
+    <!-- BLOCK 8: Compatibility -->
+    <h2>Wallet & Chain Compatibility</h2>
+    <p>ShieldAI hooks into the browser's <code>window.ethereum</code> provider at page load, compatible with:</p>
+    <ul>
+      <li>MetaMask, Trust Wallet, Binance Web3 Wallet</li>
+      <li>Any EIP-6963 compatible wallet extension</li>
+    </ul>
+    <p>Chains supported: BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, Optimism.</p>
+    <p>The hook is injected into the page's MAIN world before any DApp code runs — contracts cannot detect or remove it from within a transaction.</p>
+
+  </div>
+
+  <div class="footer">
+    <span>&#169; 2026 ShieldBot Security. All rights reserved.</span>
+    <a href="/">shieldbotsecurity.online</a>
+  </div>
+
+</body>
+</html>

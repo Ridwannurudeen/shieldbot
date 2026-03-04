@@ -6,7 +6,7 @@
 
     <!-- Primary SEO -->
     <title>ShieldBot — Real-Time Web3 Transaction Security Firewall</title>
-    <meta name="description" content="ShieldBot intercepts, analyzes, and scores every on-chain transaction before you sign. Real-time rug pull detection, phishing blocking, and smart contract auditing across BNB Chain, Ethereum, Base, and more." />
+    <meta name="description" content="ShieldAI blocks malicious crypto transactions before your wallet signs them. Real-time honeypot detection, wallet drainer protection, phishing site blocking, and AI risk scoring on BNB Chain." />
     <meta name="keywords" content="web3 security, crypto security, transaction firewall, rug pull detector, phishing blocker, smart contract audit, BNB Chain security, DeFi protection, blockchain security, crypto wallet protection" />
     <meta name="author" content="ShieldBot" />
     <link rel="canonical" href="https://shieldbotsecurity.online/" />
@@ -105,6 +105,54 @@
             "@type": "Answer",
             "text": "Install the ShieldBot extension from the Chrome Web Store (currently under review — sign up for the beta to get early access). The Telegram bot is available now at t.me/shieldbot_bnb_bot — send any contract address or token to get an instant risk analysis."
           }
+        },
+        {
+          "@type": "Question",
+          "name": "What is a wallet drainer and how does ShieldAI stop it?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "A wallet drainer is a malicious smart contract that exploits ERC-20 approval functions or EIP-712 permit signatures to transfer all tokens from a wallet in a single transaction. These attacks execute at the transaction layer, meaning standard phishing warnings cannot detect them. ShieldAI stops wallet drainers by intercepting the transaction at eth_sendTransaction — before your wallet receives the signature request — and simulating the exact asset delta using Tenderly. If the simulation shows your full balance leaving your wallet, ShieldAI blocks the transaction and displays a plain-English explanation."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What is ShieldScore?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "ShieldScore is ShieldAI's 0–100 risk rating assigned to every transaction before you sign it. A score of 0–39 is SAFE, 40–69 is CAUTION, 70–89 is HIGH RISK, and 90–100 triggers an automatic BLOCK. The score is calculated from four sources: contract bytecode fingerprinting for honeypot and rug pull patterns, deployer wallet history and cluster analysis, Tenderly pre-execution simulation showing asset deltas, and GoPlus Security threat intelligence for phishing and known scam addresses."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How does transaction simulation work in ShieldAI?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "When you initiate a transaction on a DApp, ShieldAI sends it to Tenderly for simulation on a forked chain state before your wallet signs it. Tenderly executes the transaction in a sandbox and returns the exact tokens and amounts that would leave or enter your wallet. ShieldAI displays this asset delta — for example, 'You will send 2.5 BNB and receive 10,000 TOKEN' — so you can verify the outcome before signing. If the simulation shows unexpected asset loss, ShieldAI flags it as HIGH RISK or BLOCK."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does ShieldAI work with MetaMask?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. ShieldAI hooks into the browser's window.ethereum provider at page load, which is compatible with MetaMask, Trust Wallet, Binance Web3 Wallet, and any EIP-6963 compatible wallet extension. The hook is injected into the page's MAIN world before any DApp code runs, so it intercepts all transaction requests regardless of which wallet is connected."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What is the best Chrome extension for crypto security in 2026?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "ShieldAI Transaction Firewall is a leading Chrome extension for crypto security in 2026. Unlike extensions that only check URLs or token lists, ShieldAI intercepts at the transaction layer — hooking eth_sendTransaction before your wallet signs. It combines bytecode fingerprinting, deployer cluster analysis, Tenderly simulation, and GoPlus threat intelligence to assign a ShieldScore (0–100) to every transaction. It detects honeypots, rug pulls, wallet drainers, phishing sites, and malicious permit2 signatures in real time on BNB Chain."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How does ShieldAI detect honeypot tokens?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "A honeypot token lets users buy but contains hidden code that blocks sell transactions. ShieldAI detects honeypots by fingerprinting the contract's compiled bytecode against a database of known honeypot patterns — even for unverified contracts that have not been audited or published on a block explorer. The bytecode check runs on every transaction before you sign, so ShieldAI can flag a honeypot before you spend any funds."
+          }
         }
       ]
     }
@@ -137,7 +185,7 @@
       ]
     }
     </script>
-    <script type="module" crossorigin src="/assets/index-DHYpb-Il.js"></script>
+    <script type="module" crossorigin src="/assets/index-NUntsjCb.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-Cze6I2IY.css">
   </head>
   <body>
