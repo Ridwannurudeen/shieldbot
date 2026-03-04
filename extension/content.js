@@ -20,7 +20,7 @@
         chrome.storage.local.get({ language: "en" }, r)
       );
       const lang = ["en", "zh", "vi"].includes(language) ? language : "en";
-      const url = chrome.runtime.getURL(`_locales/${lang}/messages.json`);
+      const url = chrome.runtime.getURL(`locales/${lang}/messages.json`);
       const resp = await fetch(url);
       _ct18n = await resp.json();
     } catch (_) {

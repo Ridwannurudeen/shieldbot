@@ -16,14 +16,14 @@
   }
 
   async function _loadBundle(lang) {
-    const url = chrome.runtime.getURL(`_locales/${lang}/messages.json`);
+    const url = chrome.runtime.getURL(`locales/${lang}/messages.json`);
     try {
       const resp = await fetch(url);
       _tr = await resp.json();
     } catch (_) {
       if (lang !== DEFAULT) {
         try {
-          const fallback = chrome.runtime.getURL(`_locales/${DEFAULT}/messages.json`);
+          const fallback = chrome.runtime.getURL(`locales/${DEFAULT}/messages.json`);
           const resp = await fetch(fallback);
           _tr = await resp.json();
         } catch (__) {
