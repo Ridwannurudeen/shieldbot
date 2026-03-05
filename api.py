@@ -751,6 +751,11 @@ async def firewall(req: FirewallRequest, request: Request):
                     to_addr=to_addr, policy_mode=req_policy or policy_mode,
                 )
 
+        # 2c. Fast deployer history lookup (uses already-indexed data — non-blocking DB query)
+        _deployer_ctx = None
+        if container and container.db:
+            _deployer_ctx = await _get_deployer_campaign_context(to_addr, req.chainId, container)
+
         # 3. Try composite intelligence pipeline (registry-based)
         try:
             from core.analyzer import AnalysisContext
@@ -844,6 +849,10 @@ async def firewall(req: FirewallRequest, request: Request):
             danger_signals = list(alert["top_flags"])
             classification = alert["risk_classification"]
 
+            # Campaign risk boost — inject serial-scammer signal
+            if _deployer_ctx and _deployer_ctx.get("danger_signal"):
+                danger_signals.insert(0, _deployer_ctx["danger_signal"])
+
             if simulation_result:
                 if not simulation_result.get("success") and simulation_result.get("revert_reason"):
                     danger_signals.insert(0, f"Simulation reverted: {simulation_result['revert_reason']}")
@@ -856,6 +865,15 @@ async def firewall(req: FirewallRequest, request: Request):
                         danger_signals.append(w)
 
             risk_score = alert["rug_probability"]
+
+            # Apply campaign risk boost from deployer history
+            if _deployer_ctx and _deployer_ctx.get("risk_boost", 0) > 0:
+                boosted = min(95, risk_score + _deployer_ctx["risk_boost"])
+                if boosted > risk_score:
+                    risk_score = boosted
+                    alert["rug_probability"] = risk_score
+                    if risk_score >= 71:
+                        classification = "BLOCK_RECOMMENDED"
 
             # Shield score breakdown
             shield_score = {
@@ -901,6 +919,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 "partial": risk_output.get("partial", False),
                 "failed_sources": risk_output.get("failed_sources", []),
                 "policy_mode": risk_output.get("policy_mode", "BALANCED"),
+                "campaign_context": _deployer_ctx,
             }
 
             # Persist contract score to DB
@@ -1200,6 +1219,63 @@ async def admin_signups(request: Request):
     return {"signups": signups, "count": len(signups)}
 
 
+# --- Watched Deployers (admin) ---
+
+def _require_admin(request: Request):
+    """Raise 403 if X-Admin-Secret header is missing or wrong."""
+    admin_secret = request.headers.get("x-admin-secret")
+    expected = container.settings.admin_secret if container else ""
+    if not expected:
+        raise HTTPException(status_code=503, detail="Admin not configured")
+    if not admin_secret or not hmac.compare_digest(admin_secret, expected):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not container or not container.db:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+
+class WatchDeployerRequest(BaseModel):
+    address: str
+    chain_id: int = 0
+    reason: str = "MANUAL"
+    severity: str = "HIGH"
+
+
+@app.post("/api/admin/watch/deployer")
+async def watch_deployer_add(req: WatchDeployerRequest, request: Request):
+    """Add a deployer address to the watch list. Requires X-Admin-Secret."""
+    _require_admin(request)
+    if not web3_client.is_valid_address(req.address):
+        raise HTTPException(status_code=400, detail="Invalid address")
+    await container.db.add_watched_deployer(
+        req.address, req.chain_id, req.reason, req.severity,
+    )
+    return {"ok": True, "address": req.address.lower(), "chain_id": req.chain_id}
+
+
+@app.delete("/api/admin/watch/deployer/{address}")
+async def watch_deployer_remove(address: str, request: Request, chain_id: int = 0):
+    """Remove a deployer from the watch list. Requires X-Admin-Secret."""
+    _require_admin(request)
+    await container.db.remove_watched_deployer(address, chain_id)
+    return {"ok": True, "address": address.lower(), "chain_id": chain_id}
+
+
+@app.get("/api/admin/watch/deployers")
+async def watch_deployer_list(request: Request):
+    """List all watched deployers. Requires X-Admin-Secret."""
+    _require_admin(request)
+    deployers = await container.db.get_watched_deployers()
+    return {"deployers": deployers, "count": len(deployers)}
+
+
+@app.get("/api/admin/watch/alerts")
+async def watch_alerts_list(request: Request, limit: int = 50):
+    """List recent deployment alerts from watched deployers. Requires X-Admin-Secret."""
+    _require_admin(request)
+    alerts = await container.db.get_deployment_alerts(limit=limit)
+    return {"alerts": alerts, "count": len(alerts)}
+
+
 # --- Mempool Monitoring ---
 
 @app.get("/api/mempool/alerts")
@@ -1347,6 +1423,53 @@ _CHAIN_NAMES = {56: "BSC", 204: "opBNB", 1: "Ethereum", 8453: "Base", 42161: "Ar
 def _chain_id_to_name(chain_id: int) -> str:
     """Map chain_id to a human-readable network name."""
     return _CHAIN_NAMES.get(chain_id, f"Chain {chain_id}")
+
+
+# Campaign risk boost thresholds
+_SERIAL_SCAMMER_THRESHOLD = 2   # HIGH-risk contracts to trigger campaign boost
+_CAMPAIGN_BOOST_LOW  = 15       # boost for 2–3 HIGH-risk prior contracts
+_CAMPAIGN_BOOST_HIGH = 25       # boost for 4+ HIGH-risk prior contracts
+
+
+async def _get_deployer_campaign_context(contract_addr: str, chain_id: int, container) -> Optional[Dict]:
+    """Check if contract_addr was deployed by a known serial scammer.
+
+    Queries the already-indexed deployers + contract_scores tables for a fast in-DB lookup.
+    Returns a campaign context dict, or None if the deployer has a clean (or unknown) history.
+    Side effect: auto-adds serial scammers to the watched_deployers list.
+    """
+    try:
+        summary = await container.db.get_deployer_risk_summary(contract_addr, chain_id)
+        if not summary or summary["high_risk_contracts"] < _SERIAL_SCAMMER_THRESHOLD:
+            return None
+
+        n = summary["high_risk_contracts"]
+        boost = _CAMPAIGN_BOOST_HIGH if n >= 4 else _CAMPAIGN_BOOST_LOW
+        label = "serial scammer" if n >= 4 else "repeat scammer"
+        signal = f"Deployer has {n} HIGH RISK contracts on record ({label} pattern)"
+
+        # Auto-add to watch list if not already there
+        try:
+            existing = await container.db.is_watched_deployer(summary["deployer_address"])
+            if not existing:
+                await container.db.add_watched_deployer(
+                    summary["deployer_address"], 0, "SERIAL_SCAMMER", "HIGH",
+                    summary["total_contracts"], n,
+                )
+        except Exception:
+            pass
+
+        return {
+            "deployer_address": summary["deployer_address"],
+            "total_contracts": summary["total_contracts"],
+            "high_risk_contracts": n,
+            "is_serial_scammer": True,
+            "danger_signal": signal,
+            "risk_boost": boost,
+        }
+    except Exception as e:
+        logger.debug(f"Campaign context lookup failed for {contract_addr}: {e}")
+        return None
 
 
 def _format_decoded_action(decoded: Dict) -> str:

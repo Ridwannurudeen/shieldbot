@@ -125,6 +125,32 @@ class Database:
                 email TEXT UNIQUE NOT NULL,
                 signed_up_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS watched_deployers (
+                deployer_address TEXT NOT NULL,
+                chain_id INTEGER NOT NULL DEFAULT 0,
+                watch_reason TEXT NOT NULL,
+                risk_severity TEXT NOT NULL DEFAULT 'HIGH',
+                contract_count INTEGER DEFAULT 0,
+                high_risk_count INTEGER DEFAULT 0,
+                alert_count INTEGER NOT NULL DEFAULT 0,
+                last_alert_at REAL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY (deployer_address, chain_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS deployment_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                deployer_address TEXT NOT NULL,
+                chain_id INTEGER NOT NULL,
+                new_contract_address TEXT NOT NULL,
+                watch_reason TEXT,
+                telegram_sent INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_deployment_alerts_deployer
+                ON deployment_alerts(deployer_address, created_at);
         """)
         await self._db.commit()
 
@@ -489,6 +515,173 @@ class Database:
                 'outcome': r[2],
                 'tx_hash': r[3],
                 'created_at': r[4],
+            }
+            for r in rows
+        ]
+
+    # --- Deployer Risk Summary ---
+
+    async def get_deployer_risk_summary(self, contract_address: str, chain_id: int) -> Optional[Dict]:
+        """Look up who deployed contract_address, then count their HIGH-risk contracts.
+
+        Returns dict with deployer_address, total_contracts, high_risk_contracts or None
+        if the contract's deployer is not yet indexed.
+        """
+        cursor = await self._db.execute(
+            "SELECT deployer_address FROM deployers WHERE contract_address = ? AND chain_id = ?",
+            (contract_address.lower(), chain_id),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        deployer = row[0]
+
+        cursor = await self._db.execute("""
+            SELECT
+                COUNT(DISTINCT d.contract_address),
+                COALESCE(SUM(CASE WHEN cs.risk_level = 'HIGH' THEN 1 ELSE 0 END), 0)
+            FROM deployers d
+            LEFT JOIN contract_scores cs
+                ON cs.address = d.contract_address AND cs.chain_id = d.chain_id
+            WHERE d.deployer_address = ?
+        """, (deployer,))
+        stats = await cursor.fetchone()
+        return {
+            "deployer_address": deployer,
+            "total_contracts": stats[0] or 0,
+            "high_risk_contracts": int(stats[1] or 0),
+        }
+
+    # --- Watched Deployers ---
+
+    async def add_watched_deployer(
+        self,
+        address: str,
+        chain_id: int = 0,
+        reason: str = "MANUAL",
+        severity: str = "HIGH",
+        contract_count: int = 0,
+        high_risk_count: int = 0,
+    ):
+        """Add or update a deployer in the watch list."""
+        now = time.time()
+        await self._db.execute("""
+            INSERT INTO watched_deployers
+                (deployer_address, chain_id, watch_reason, risk_severity,
+                 contract_count, high_risk_count, alert_count, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+            ON CONFLICT(deployer_address, chain_id) DO UPDATE SET
+                watch_reason = excluded.watch_reason,
+                risk_severity = excluded.risk_severity,
+                contract_count = excluded.contract_count,
+                high_risk_count = excluded.high_risk_count
+        """, (address.lower(), chain_id, reason, severity, contract_count, high_risk_count, now))
+        await self._db.commit()
+
+    async def remove_watched_deployer(self, address: str, chain_id: int = 0):
+        """Remove a deployer from the watch list."""
+        await self._db.execute(
+            "DELETE FROM watched_deployers WHERE deployer_address = ? AND chain_id = ?",
+            (address.lower(), chain_id),
+        )
+        await self._db.commit()
+
+    async def get_watched_deployers(self) -> List[Dict]:
+        """Return all watched deployers."""
+        cursor = await self._db.execute("""
+            SELECT deployer_address, chain_id, watch_reason, risk_severity,
+                   contract_count, high_risk_count, alert_count, last_alert_at, created_at
+            FROM watched_deployers
+            ORDER BY created_at DESC
+        """)
+        rows = await cursor.fetchall()
+        return [
+            {
+                "deployer_address": r[0],
+                "chain_id": r[1],
+                "watch_reason": r[2],
+                "risk_severity": r[3],
+                "contract_count": r[4],
+                "high_risk_count": r[5],
+                "alert_count": r[6],
+                "last_alert_at": r[7],
+                "created_at": r[8],
+            }
+            for r in rows
+        ]
+
+    async def is_watched_deployer(self, address: str, chain_id: int = 0) -> Optional[Dict]:
+        """Return the watch record for a deployer, or None if not watched.
+
+        Checks both the exact chain_id and chain_id=0 (all-chains wildcard).
+        """
+        cursor = await self._db.execute("""
+            SELECT deployer_address, chain_id, watch_reason, risk_severity,
+                   contract_count, high_risk_count, alert_count, last_alert_at, created_at
+            FROM watched_deployers
+            WHERE deployer_address = ? AND (chain_id = ? OR chain_id = 0)
+            ORDER BY chain_id DESC
+            LIMIT 1
+        """, (address.lower(), chain_id))
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "deployer_address": row[0],
+            "chain_id": row[1],
+            "watch_reason": row[2],
+            "risk_severity": row[3],
+            "contract_count": row[4],
+            "high_risk_count": row[5],
+            "alert_count": row[6],
+            "last_alert_at": row[7],
+            "created_at": row[8],
+        }
+
+    # --- Deployment Alerts ---
+
+    async def log_deployment_alert(
+        self,
+        deployer: str,
+        chain_id: int,
+        contract_address: str,
+        reason: str = None,
+        telegram_sent: int = 0,
+    ) -> int:
+        """Log an alert for a watched deployer deploying a new contract. Returns the new row id."""
+        now = time.time()
+        cursor = await self._db.execute("""
+            INSERT INTO deployment_alerts
+                (deployer_address, chain_id, new_contract_address, watch_reason, telegram_sent, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (deployer.lower(), chain_id, contract_address.lower(), reason, telegram_sent, now))
+        await self._db.execute("""
+            UPDATE watched_deployers
+            SET alert_count = alert_count + 1, last_alert_at = ?
+            WHERE deployer_address = ? AND (chain_id = ? OR chain_id = 0)
+        """, (now, deployer.lower(), chain_id))
+        await self._db.commit()
+        return cursor.lastrowid
+
+    async def get_deployment_alerts(self, limit: int = 50) -> List[Dict]:
+        """Return recent deployment alerts, newest first."""
+        cursor = await self._db.execute("""
+            SELECT id, deployer_address, chain_id, new_contract_address,
+                   watch_reason, telegram_sent, created_at
+            FROM deployment_alerts
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (limit,))
+        rows = await cursor.fetchall()
+        return [
+            {
+                "id": r[0],
+                "deployer_address": r[1],
+                "chain_id": r[2],
+                "new_contract_address": r[3],
+                "watch_reason": r[4],
+                "telegram_sent": bool(r[5]),
+                "created_at": r[6],
             }
             for r in rows
         ]

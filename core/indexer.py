@@ -14,9 +14,10 @@ class DeployerIndexer:
     Non-blocking: enqueue() returns immediately, worker processes in background.
     """
 
-    def __init__(self, web3_client, db):
+    def __init__(self, web3_client, db, settings=None):
         self._web3 = web3_client
         self._db = db
+        self._settings = settings
         self._queue: asyncio.Queue = asyncio.Queue()
         self._task: Optional[asyncio.Task] = None
         self._running = False
@@ -98,8 +99,59 @@ class DeployerIndexer:
             await self._db._db.commit()
             logger.info(f"Indexed deployer for {address}: {deployer}")
 
+            # Check if this deployer is watched — send alert if so
+            try:
+                watch_record = await self._db.is_watched_deployer(deployer.lower(), chain_id)
+                if watch_record:
+                    alert_id = await self._db.log_deployment_alert(
+                        deployer.lower(), chain_id, address.lower(),
+                        watch_record.get("watch_reason"), telegram_sent=0,
+                    )
+                    sent = await self._send_watch_alert(deployer, chain_id, address, watch_record)
+                    if sent and alert_id:
+                        await self._db._db.execute(
+                            "UPDATE deployment_alerts SET telegram_sent=1 WHERE id=?", (alert_id,)
+                        )
+                        await self._db._db.commit()
+            except Exception as e:
+                logger.error(f"Watch-deployer check failed for {deployer}: {e}")
+
         except Exception as e:
             logger.error(f"Error indexing {address}: {e}")
+
+    async def _send_watch_alert(self, deployer: str, chain_id: int, new_contract: str, watch_record: dict) -> bool:
+        """Send a Telegram notification when a watched deployer creates a new contract."""
+        if not self._settings:
+            return False
+        bot_token = getattr(self._settings, "telegram_bot_token", "")
+        chat_id = getattr(self._settings, "telegram_alert_chat_id", "")
+        if not bot_token or not chat_id:
+            logger.warning("Watch alert not sent — Telegram not configured")
+            return False
+
+        chain_names = {56: "BNB Chain", 1: "Ethereum", 8453: "Base", 42161: "Arbitrum",
+                       137: "Polygon", 10: "Optimism", 204: "opBNB"}
+        chain_name = chain_names.get(chain_id, f"Chain {chain_id}")
+        reason = watch_record.get("watch_reason", "MANUAL")
+        severity = watch_record.get("risk_severity", "HIGH")
+        msg = (
+            f"\U0001f6a8 *Watched Deployer Alert*\n"
+            f"Deployer `{deployer[:10]}...{deployer[-6:]}` deployed a new contract on {chain_name}.\n"
+            f"Contract: `{new_contract}`\n"
+            f"Watch reason: {reason} | Severity: {severity}"
+        )
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                    json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as resp:
+                    return resp.status == 200
+        except Exception as e:
+            logger.error(f"Telegram watch alert failed: {e}")
+            return False
 
     async def _fetch_funder(self, deployer_address: str, chain_id: int) -> Optional[dict]:
         """Fetch the first funding transaction to a deployer address."""

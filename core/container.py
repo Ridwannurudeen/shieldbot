@@ -122,7 +122,7 @@ class ServiceContainer:
         # Database + Auth + Indexer
         self.db = Database(settings.database_path)
         self.auth_manager = AuthManager(self.db)
-        self.indexer = DeployerIndexer(self.web3_client, self.db)
+        self.indexer = DeployerIndexer(self.web3_client, self.db, settings=settings)
 
         # Mempool monitor + Rescue mode + Campaign detection
         self.mempool_monitor = MempoolMonitor(self.web3_client, self.db)
