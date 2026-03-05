@@ -34,9 +34,11 @@
     <meta name="twitter:image" content="https://shieldbotsecurity.online/og-image.png" />
 
     <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="128x128" href="/favicon.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon.png" />
-    <link rel="shortcut icon" href="/favicon.png" />
+    <link rel="shortcut icon" href="/favicon.ico" />
 
     <!-- FAQ JSON-LD (rich results in Google) -->
     <script type="application/ld+json">
@@ -57,7 +59,7 @@
           "name": "How does ShieldBot detect rug pulls and scams?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "ShieldBot combines multiple detection layers: it scans smart contract bytecode for known exploit patterns, checks token liquidity and ownership concentration, queries real-time mempool data for suspicious activity, cross-references phishing databases, and uses Claude AI to analyze contract logic. A risk score from 0–100 is returned before you confirm any transaction."
+            "text": "ShieldBot combines multiple detection layers: it scans smart contract bytecode for known exploit patterns, checks token liquidity and ownership concentration, queries real-time mempool data for suspicious activity, cross-references phishing databases, and uses Claude AI to analyze contract logic. A ShieldScore safety rating from 0–100 is returned before you confirm any transaction — 90–100 is SAFE, 0–39 is BLOCK RECOMMENDED."
           }
         },
         {
@@ -121,7 +123,7 @@
           "name": "What is ShieldScore?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "ShieldScore is ShieldAI's 0–100 risk rating assigned to every transaction before you sign it. A score of 0–39 is SAFE, 40–69 is CAUTION, 70–89 is HIGH RISK, and 90–100 triggers an automatic BLOCK. The score is calculated from four sources: contract bytecode fingerprinting for honeypot and rug pull patterns, deployer wallet history and cluster analysis, Tenderly pre-execution simulation showing asset deltas, and GoPlus Security threat intelligence for phishing and known scam addresses."
+            "text": "ShieldScore is ShieldAI's 0–100 safety rating assigned to every transaction before you sign it. Higher means safer. A score of 90–100 is SAFE, 70–89 is CAUTION, 40–69 is HIGH RISK, and 0–39 triggers an automatic BLOCK RECOMMENDED. The score is calculated from four sources: contract bytecode fingerprinting for honeypot and rug pull patterns, deployer wallet history and cluster analysis, Tenderly pre-execution simulation showing asset deltas, and GoPlus Security threat intelligence for phishing and known scam addresses."
           }
         },
         {
@@ -194,7 +196,7 @@
     window.CAMPAIGN_TYPE = 'user-testing';
   </script>
   <script src="https://platform.joinable.ai/rrweb-recorder.js"></script>
-    <script type="module" crossorigin src="/assets/index-DuWlldAd.js"></script>
+    <script type="module" crossorigin src="/assets/index-DygKgiVm.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-B5YB4JCx.css">
   </head>
   <body>
