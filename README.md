@@ -4,7 +4,7 @@
 
 ### Autonomous Transaction Firewall for BNB Chain
 
-**Good Vibes Only: OpenClaw Edition — Builders Track**
+**Real-Time Web3 Transaction Security Firewall**
 
 ShieldBot intercepts Web3 transactions in real-time, analyzes them through a multi-source intelligence pipeline with 6 pluggable analyzers, computes a weighted ShieldScore, and blocks honeypots, rug pulls, and malicious contracts before they execute. High-risk forensic reports are stored immutably on BNB Greenfield.
 
@@ -13,8 +13,10 @@ BNB Chain is the primary chain. To provide stronger protection, ShieldBot monito
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![BNB Chain](https://img.shields.io/badge/BNB-Chain-yellow)](https://www.bnbchain.org/)
+[![Chrome Web Store](https://img.shields.io/badge/Chrome-Extension-green)](https://chromewebstore.google.com/)
+[![Version](https://img.shields.io/badge/version-1.0.9-blue)]()
 
-**[Full Roadmap](ROADMAP.md)** | **[Landing Page](https://shieldbotsecurity.online)** | **[Live Dashboard](https://api.shieldbotsecurity.online/dashboard)** | **[Demo Video](https://youtu.be/NN95rom10R8)** | **[Telegram Bot](https://t.me/shieldbot_bnb_bot)**
+**[Landing Page](https://shieldbotsecurity.online)** | **[Chrome Extension](https://chromewebstore.google.com/)** | **[Live Dashboard](https://api.shieldbotsecurity.online/dashboard)** | **[Demo Video](https://youtu.be/NN95rom10R8)** | **[Telegram Bot](https://t.me/shieldbot_bnb_bot)**
 
 </div>
 
@@ -68,6 +70,8 @@ BNB Chain is the primary chain. To provide stronger protection, ShieldBot monito
 |  - Rescue Mode (approval scanning, one-click revoke)                     |
 |  - PolicyEngine (STRICT / BALANCED modes)                                |
 |  - Calibration (data-driven threshold tuning from outcome events)        |
+|  - Deployer Cluster Auto-Block (serial scammer detection)                |
+|  - Token Gate ($SHIELDBOT holder verification for premium alerts)        |
 +-------------------------------------------------------------------------+
 |  ANALYZERS (6 pluggable plugins)                                         |
 |  - Structural: verification, age, bytecode (mint, proxy, blacklist)      |
@@ -84,6 +88,8 @@ BNB Chain is the primary chain. To provide stronger protection, ShieldBot monito
 |  - EthosService (wallet reputation scoring)                              |
 |  - TenderlySimulator (pre-execution simulation)                          |
 |  - GreenfieldService (BNB Greenfield immutable report storage)           |
+|  - PhishingService (GoPlus phishing site detection, domain cache)        |
+|  - TokenGateService (on-chain balanceOf verification)                    |
 +-------------------------------------------------------------------------+
 |  INFRASTRUCTURE                                                          |
 |  - ChainAdapter (abstract base + 7 EVM adapters)                         |
@@ -266,7 +272,25 @@ Checks the active tab's URL against the GoPlus Phishing Site Detection API befor
 | Known phishing | Red banner shown |
 | Safe | Silent passthrough |
 
-Live in v1.0.3.
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### Deployer Cluster Auto-Block
+**Serial Scammer Detection**
+
+Automatically detects deployers with 2+ prior HIGH-risk contracts and applies a risk boost (+15/+25) to their new deployments. Watched deployers trigger real-time Telegram alerts on new contract creation.
+
+</td>
+<td width="50%" valign="top">
+
+### Token-Gated Alert Feed
+**Premium Feature for $SHIELDBOT Holders**
+
+Deployer alerts from watched addresses are available to verified $SHIELDBOT token holders via the extension's Feed tab. On-chain `balanceOf` verification with optional wallet signature authentication.
+
+**Token:** `0x4904c02efa081cb7685346968bac854cdf4e7777` (BNB Chain)
 
 </td>
 </tr>
@@ -302,6 +326,9 @@ python bot.py
 
 ### Install Chrome Extension
 
+**From Chrome Web Store** (recommended): Search "ShieldAI Transaction Firewall" or install from the [Chrome Web Store](https://chromewebstore.google.com/).
+
+**From source** (development):
 1. Open `chrome://extensions` in Chrome
 2. Enable **Developer mode** (top right)
 3. Click **Load unpacked** -> select the `extension/` folder
@@ -368,6 +395,7 @@ ADMIN_SECRET=your_admin_secret
 | POST | `/api/firewall` | Transaction firewall analysis (Chrome extension) |
 | POST | `/api/scan` | Contract/token security scan |
 | GET | `/api/health` | Service status |
+| GET | `/api/phishing` | URL phishing check (GoPlus) |
 | GET | `/test` | Chrome extension test page |
 
 ### Mempool Monitoring
@@ -396,6 +424,16 @@ ADMIN_SECRET=your_admin_secret
 |--------|------|-------------|
 | GET | `/api/threats/feed` | Real-time threat intelligence |
 | GET | `/api/threats/subscribe` | Subscription info |
+
+### Deployer Watch (Token-Gated)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/watch/nonce` | Get nonce for wallet signature verification |
+| GET | `/api/watch/alerts` | Deployer alerts (requires $SHIELDBOT token) |
+| POST | `/api/admin/watch/deployer` | Add watched deployer (admin) |
+| DELETE | `/api/admin/watch/deployer` | Remove watched deployer (admin) |
+| GET | `/api/admin/watch/alerts` | All deployer alerts (admin) |
 
 ### User Reporting
 
@@ -466,7 +504,9 @@ shieldbot/
 │   ├── greenfield_service.py   # BNB Greenfield storage
 │   ├── mempool_service.py      # Mempool monitoring (sandwich/frontrun)
 │   ├── rescue_service.py       # Rescue Mode (approvals + revoke)
-│   └── campaign_service.py     # Campaign Graph Radar (cross-chain)
+│   ├── campaign_service.py     # Campaign Graph Radar (cross-chain)
+│   ├── phishing_service.py     # GoPlus phishing site detection
+│   └── token_gate_service.py   # $SHIELDBOT token holder verification
 │
 ├── rpc/                        # JSON-RPC Proxy
 │   ├── proxy.py                # Intercepts eth_sendTransaction/Raw
@@ -481,10 +521,15 @@ shieldbot/
 │   └── index.html              # Real-time single-page app
 │
 ├── extension/                  # Chrome Extension (Manifest V3)
-│   ├── manifest.json
+│   ├── manifest.json           # MV3 config, permissions, content scripts
 │   ├── inject.js               # Provider wrapper (world: MAIN)
-│   ├── content.js / background.js / popup.html/js
-│   └── overlay.css
+│   ├── content.js              # Content script (document_start)
+│   ├── background.js           # Service worker
+│   ├── popup.html / popup.js   # Extension popup (Scan/Feed/Settings)
+│   ├── welcome.html / welcome.js # Onboarding page
+│   ├── overlay.css             # Transaction verdict overlay styles
+│   ├── i18n.js                 # Internationalization (EN/ZH/VI)
+│   └── locales/                # Translation files (en, zh, vi)
 │
 ├── eval/                       # Evaluation pipeline
 │   ├── live_scorer.py          # Live benchmark against real pipeline
@@ -499,7 +544,7 @@ shieldbot/
 │   ├── scam_db.py              # Scam address database
 │   └── onchain_recorder.py     # On-chain recording
 │
-├── tests/                      # Test suite (25+ files)
+├── tests/                      # Test suite (194 tests, 25+ files)
 ├── docs/                       # Documentation
 ├── deploy/                     # nginx/caddy/certbot setup
 ├── contracts/                  # ShieldBotVerifier.sol
@@ -535,7 +580,7 @@ shieldbot/
 ```bash
 pip install pytest pytest-asyncio pytest-cov
 
-# Run all tests
+# Run all tests (194 tests)
 pytest tests/ -v
 
 # Run evaluation benchmark
@@ -544,9 +589,23 @@ python eval/live_scorer.py
 
 ---
 
-## Hackathon
+## Security
 
-**3rd Place Winner** — **Good Vibes Only: OpenClaw Edition**, Builders Track (BNB Chain).
+ShieldBot follows a defense-in-depth approach:
+
+- **Fail-closed pipeline** — analyzer failures score 50 (cautious neutral), not 0 (safe)
+- **Channel token authentication** — content script to inject script communication uses a one-time postMessage handshake; Performance API resource timings are cleared to prevent token leakage
+- **Blacklist safeguards** — community `/report` requires 3 independent reporters, per-user rate limiting (5/day), and whitelisted routers (PancakeSwap, 1inch) are protected from poisoning
+- **RPC proxy error sanitization** — upstream errors are logged server-side but never exposed to clients
+- **Token gate verification** — deployer alerts require on-chain `balanceOf` check with optional wallet signature (nonce + `personal_sign`)
+- **Rate limiting** — per-IP sliding window on all public endpoints
+- **Parameterized queries** — all SQLite operations use parameterized statements
+
+---
+
+## Recognition
+
+**3rd Place Winner** — Good Vibes Only: OpenClaw Edition, Builders Track (BNB Chain).
 
 **Key Differentiators:**
 
@@ -566,7 +625,7 @@ python eval/live_scorer.py
 **Development Phases:**
 - **Phase 1** (Foundation): ChainAdapter interface, pluggable analyzer registry, policy modes, API auth, contract reputation DB, deployer indexer, outcome tracking
 - **Phase 2** (Detection + Distribution): Intent mismatch analyzer, signature/permit analyzer, confidence calibration, evaluation pipeline, community reporting, Ethereum/Base adapters, RPC proxy, Telegram scan-by-address
-- **Phase 3** (Moat Features + Growth): Campaign Graph Radar, mempool monitoring, Rescue Mode, Arbitrum/Polygon/Optimism/opBNB adapters, SDK, threat dashboard, threat feed API
+- **Phase 3** (Moat Features + Growth): Campaign Graph Radar, mempool monitoring, Rescue Mode, Arbitrum/Polygon/Optimism/opBNB adapters, SDK, threat dashboard, threat feed API, deployer cluster auto-block, phishing blocker, token-gated alert feed, i18n (EN/ZH/VI), Chrome Web Store v1.0.9, security audit + hardening
 
 ---
 
