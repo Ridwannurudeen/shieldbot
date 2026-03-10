@@ -42,7 +42,8 @@ def test_nonce_endpoint(client):
     assert data["nonce"] in data["message"]
 
 
-def test_holder_gets_alerts(client):
+def test_holder_gets_alerts_with_signature(client):
+    """Full auth path: nonce + signature + balanceOf."""
     import api as api_module
 
     sample_alerts = [
@@ -71,16 +72,33 @@ def test_holder_gets_alerts(client):
     api_module.container.db.get_deployment_alerts.assert_awaited_once_with(limit=50)
 
 
+def test_holder_gets_alerts_without_signature(client):
+    """Extension path: wallet-only (no signature), balanceOf gate still applies."""
+    import api as api_module
+
+    sample_alerts = [{"id": 1}]
+    api_module.token_gate_service.has_shieldbot_token = AsyncMock(return_value=True)
+    api_module.container.db.get_deployment_alerts = AsyncMock(return_value=sample_alerts)
+
+    response = client.get(
+        "/api/watch/alerts",
+        params={"wallet": WALLET},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"alerts": sample_alerts, "count": 1}
+    api_module.token_gate_service.has_shieldbot_token.assert_awaited_once_with(WALLET)
+
+
 def test_non_holder_gets_403(client):
     import api as api_module
 
     api_module.token_gate_service.has_shieldbot_token = AsyncMock(return_value=False)
 
-    with patch.object(api_module, "_verify_wallet_signature", return_value=True):
-        response = client.get(
-            "/api/watch/alerts",
-            params={"wallet": WALLET, "signature": FAKE_SIG, "nonce": FAKE_NONCE},
-        )
+    response = client.get(
+        "/api/watch/alerts",
+        params={"wallet": WALLET},
+    )
 
     assert response.status_code == 403
     assert response.json() == {
@@ -109,16 +127,8 @@ def test_invalid_address_returns_422(client):
 
     response = client.get(
         "/api/watch/alerts",
-        params={"wallet": "not-an-address", "signature": FAKE_SIG, "nonce": FAKE_NONCE},
+        params={"wallet": "not-an-address"},
     )
 
     assert response.status_code == 422
     api_module.token_gate_service.has_shieldbot_token.assert_not_awaited()
-
-
-def test_missing_signature_returns_422(client):
-    response = client.get(
-        "/api/watch/alerts",
-        params={"wallet": WALLET},
-    )
-    assert response.status_code == 422

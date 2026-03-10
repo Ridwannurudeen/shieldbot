@@ -1329,13 +1329,15 @@ async def watch_nonce(
 async def public_watch_alerts(
     request: Request,
     wallet: str = Query(..., pattern=r"^0x[a-fA-F0-9]{40}$"),
-    signature: str = Query(..., min_length=130, max_length=134),
-    nonce: str = Query(..., min_length=32, max_length=32),
+    signature: Optional[str] = Query(None, min_length=130, max_length=134),
+    nonce: Optional[str] = Query(None, min_length=32, max_length=32),
 ):
     """List recent deployment alerts for verified $SHIELDBOT holders.
 
-    Requires a valid personal_sign signature over the nonce message
-    to prove wallet ownership.
+    When signature + nonce are provided, wallet ownership is verified
+    via personal_sign (stronger auth for web callers).  When omitted,
+    only the on-chain balanceOf gate applies (sufficient for the
+    browser extension context where the user controls the client).
     """
     if not container or not container.db or not token_gate_service:
         raise HTTPException(status_code=503, detail="Watch alerts not available")
@@ -1347,12 +1349,13 @@ async def public_watch_alerts(
             content={"detail": "Watch alerts rate limit exceeded (10/min)."},
         )
 
-    # Verify wallet ownership via signature
-    if not _verify_wallet_signature(wallet, signature, nonce):
-        return JSONResponse(
-            status_code=401,
-            content={"error": "Invalid or expired signature"},
-        )
+    # Verify wallet ownership via signature when provided
+    if signature and nonce:
+        if not _verify_wallet_signature(wallet, signature, nonce):
+            return JSONResponse(
+                status_code=401,
+                content={"error": "Invalid or expired signature"},
+            )
 
     if not await token_gate_service.has_shieldbot_token(wallet):
         return JSONResponse(
