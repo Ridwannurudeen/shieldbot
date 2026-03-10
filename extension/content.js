@@ -183,6 +183,88 @@
     return addr.slice(0, 6) + "..." + addr.slice(-4);
   }
 
+  function isAddressLikeSegment(value) {
+    return /^0x[a-fA-F0-9]{40}$/.test(value) || /^0x[a-fA-F0-9]{4,}\.\.\.[a-fA-F0-9]{4}$/.test(value);
+  }
+
+  function isAddressParam(label, value) {
+    const labelText = String(label || "").toLowerCase();
+    const valueText = String(value || "").trim();
+    if (!valueText) return false;
+
+    if (
+      ["address", "spender", "recipient", "owner", "from", "to", "router", "contract", "path"].some((term) =>
+        labelText.includes(term)
+      )
+    ) {
+      return true;
+    }
+
+    if (isAddressLikeSegment(valueText)) {
+      return true;
+    }
+
+    if (valueText.includes("→")) {
+      return valueText.split("→").every((part) => isAddressLikeSegment(part.trim()));
+    }
+
+    return false;
+  }
+
+  function buildCalldataSection(calldataDetails) {
+    const fields = Array.isArray(calldataDetails?.fields) ? calldataDetails.fields : [];
+    if (!fields.length) {
+      return "";
+    }
+
+    const functionField = fields.find((field) => String(field?.label || "").toLowerCase() === "function");
+    const functionName = functionField?.value ? String(functionField.value) : "";
+    const params = fields.filter((field) => String(field?.label || "").toLowerCase() !== "function");
+    const paramsHtml = params.length
+      ? params
+          .map((field) => {
+            const value = field?.value == null ? "Unknown" : String(field.value);
+            const valueClasses = [
+              "shieldai-calldata-param-value",
+              field?.danger ? "shieldai-calldata-danger" : "",
+              isAddressParam(field?.label, value) ? "shieldai-calldata-address" : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
+
+            return `
+              <div class="shieldai-calldata-param">
+                <div class="shieldai-calldata-param-name">${escapeHtml(field?.label || "Parameter")}</div>
+                <div class="${valueClasses}">${escapeHtml(value)}</div>
+              </div>
+            `;
+          })
+          .join("")
+      : `<div class="shieldai-calldata-param">
+           <div class="shieldai-calldata-param-name">${_t("overlayNoFields")}</div>
+           <div class="shieldai-calldata-param-value">-</div>
+         </div>`;
+
+    return `
+      <div class="shieldai-section shieldai-calldata-section">
+        <button
+          type="button"
+          class="shieldai-calldata-toggle"
+          id="shieldai-calldata-toggle"
+          aria-expanded="true"
+          aria-controls="shieldai-calldata-body"
+        >
+          <span class="shieldai-calldata-toggle-label">${_t("overlayDecodedCalldata")}</span>
+          <span class="shieldai-calldata-chevron" aria-hidden="true">▾</span>
+        </button>
+        <div class="shieldai-calldata-body" id="shieldai-calldata-body">
+          ${functionName ? `<div class="shieldai-calldata-fn">${escapeHtml(functionName)}</div>` : ""}
+          ${paramsHtml}
+        </div>
+      </div>
+    `;
+  }
+
   // --- Signature Request Overlay ---
   // Shown instead of the firewall overlay for personal_sign / eth_signTypedData etc.
 
@@ -353,6 +435,7 @@
            </ul>
          </div>`
       : "";
+    const calldataHtml = buildCalldataSection(result.calldata_details);
 
     overlay.innerHTML = `
       <div class="shieldai-modal ${isBlock ? "shieldai-modal-danger" : ""}">
@@ -374,24 +457,12 @@
           </div>
         ` : ''}
 
-        ${result.calldata_details && result.calldata_details.fields && result.calldata_details.fields.length ? `
-          <div class="shieldai-section">
-            <h3>${_t("overlayDecodedCalldata")}</h3>
-            <table class="shieldai-impact shieldai-calldata">
-              ${result.calldata_details.fields.map((f) =>
-                `<tr>
-                  <td>${escapeHtml(f.label)}</td>
-                  <td class="${f.danger ? 'shieldai-calldata-danger' : ''}">${escapeHtml(String(f.value))}</td>
-                </tr>`
-              ).join("")}
-            </table>
-          </div>
-        ` : result.decoded_action ? `
+        ${calldataHtml || (result.decoded_action ? `
           <div class="shieldai-section shieldai-action-section">
             <h3>${_t("overlayTxType")}</h3>
             <div class="shieldai-action-label">${escapeHtml(result.decoded_action)}</div>
           </div>
-        ` : ""}
+        ` : "")}
 
         ${
           signalsHtml
@@ -435,6 +506,19 @@
     `;
 
     (document.body || document.documentElement).appendChild(overlay);
+
+    const calldataToggle = document.getElementById("shieldai-calldata-toggle");
+    if (calldataToggle) {
+      calldataToggle.addEventListener("click", () => {
+        const body = document.getElementById("shieldai-calldata-body");
+        const isExpanded = calldataToggle.getAttribute("aria-expanded") !== "false";
+        const nextExpanded = !isExpanded;
+        calldataToggle.setAttribute("aria-expanded", String(nextExpanded));
+        if (body) {
+          body.hidden = !nextExpanded;
+        }
+      });
+    }
 
     // Button handlers
     document.getElementById("shieldai-block").addEventListener("click", () => {

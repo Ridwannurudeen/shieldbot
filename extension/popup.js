@@ -100,6 +100,7 @@ function initCompact() {
       tab.classList.add("active");
       document.getElementById("tab-" + tab.dataset.tab).classList.add("active");
       if (tab.dataset.tab === "history") loadAndRenderHistory(historyList);
+      if (tab.dataset.tab === "feed") initFeedTab();
     });
   });
 
@@ -532,4 +533,119 @@ function setGauge(arcEl, numEl, score, glow) {
   } else {
     arcEl.classList.remove("glow");
   }
+}
+
+// ============================================================
+// FEED TAB — $SHIELDBOT holder deployer alerts
+// ============================================================
+
+let _feedBtnInit = false;
+
+function initFeedTab() {
+  const feedAddr   = document.getElementById("feedAddress");
+  const feedBtn    = document.getElementById("feedLoadBtn");
+  const feedErr    = document.getElementById("feedError");
+  const feedLoad   = document.getElementById("feedLoading");
+  const feedLocked = document.getElementById("feedLocked");
+  const feedList   = document.getElementById("feedList");
+
+  if (!feedAddr || !feedBtn) return;
+
+  // Add button listener only once — prevents stacking on repeated tab clicks
+  if (!_feedBtnInit) {
+    _feedBtnInit = true;
+    feedBtn.addEventListener("click", () => {
+      const addr = feedAddr.value.trim();
+      feedErr.style.display = "none";
+      if (!addr || !/^0x[a-fA-F0-9]{40}$/i.test(addr)) {
+        feedErr.textContent = t("msgErrInvalidWallet");
+        feedErr.style.display = "block";
+        return;
+      }
+      chrome.storage.local.set({ feedWallet: addr });
+      loadDeployerFeed(addr, { feedErr, feedLoad, feedLocked, feedList });
+    });
+  }
+
+  // Auto-load from saved wallet each time tab is opened
+  chrome.storage.local.get({ healthWallet: "", feedWallet: "" }, (d) => {
+    const saved = d.feedWallet || d.healthWallet;
+    if (saved) {
+      feedAddr.value = saved;
+      loadDeployerFeed(saved, { feedErr, feedLoad, feedLocked, feedList });
+    }
+  });
+}
+
+async function loadDeployerFeed(wallet, { feedErr, feedLoad, feedLocked, feedList }) {
+  feedErr.style.display    = "none";
+  feedLocked.style.display = "none";
+  feedList.innerHTML       = "";
+  feedLoad.style.display   = "block";
+
+  try {
+    const { apiUrl } = await new Promise((r) =>
+      chrome.storage.local.get({ apiUrl: DEFAULT_API_URL }, r)
+    );
+
+    const ctrl = new AbortController();
+    const to   = setTimeout(() => ctrl.abort(), 10000);
+    const resp = await fetch(
+      `${apiUrl}/api/watch/alerts?wallet=${encodeURIComponent(wallet)}`,
+      { signal: ctrl.signal }
+    );
+    clearTimeout(to);
+    feedLoad.style.display = "none";
+
+    if (resp.status === 403) {
+      feedLocked.style.display = "block";
+      return;
+    }
+
+    if (!resp.ok) {
+      feedErr.textContent = `API error ${resp.status}`;
+      feedErr.style.display = "block";
+      return;
+    }
+
+    const data   = await resp.json();
+    const alerts = data.alerts || [];
+    renderDeployerAlerts(alerts, feedList);
+  } catch (err) {
+    feedLoad.style.display = "none";
+    feedErr.textContent = err.name === "AbortError"
+      ? t("statusTimeout")
+      : (err.message || t("statusCannotReach"));
+    feedErr.style.display = "block";
+  }
+}
+
+function renderDeployerAlerts(alerts, listEl) {
+  if (!alerts.length) {
+    listEl.innerHTML = `<div class="feed-empty-msg">${t("feedNoAlerts") || "No deployer alerts yet"}</div>`;
+    return;
+  }
+
+  const CHAIN_NAMES = { 56: "BSC", 1: "ETH", 137: "Polygon", 42161: "Arbitrum", 8453: "Base", 10: "Optimism", 204: "opBNB" };
+
+  listEl.innerHTML = alerts.map((a) => {
+    const chain    = CHAIN_NAMES[a.chain_id] || `Chain ${a.chain_id}`;
+    const deployer = a.deployer_address ? shortAddr(a.deployer_address) : "Unknown";
+    const contract = a.new_contract_address ? shortAddr(a.new_contract_address) : "Unknown";
+    const reason   = a.watch_reason || "";
+    const time     = a.created_at ? formatTime(a.created_at * 1000) : "";
+
+    return `<div class="deployer-item">
+      <div class="deployer-item-info">
+        <div class="deployer-addr" title="${escapeHtml(a.deployer_address || "")}">
+          Deployer: ${escapeHtml(deployer)}
+        </div>
+        <div class="deployer-contract" title="${escapeHtml(a.new_contract_address || "")}">
+          Contract: ${escapeHtml(contract)} &middot; ${escapeHtml(chain)}
+        </div>
+        ${reason ? `<div class="deployer-reason">${escapeHtml(reason)}</div>` : ""}
+      </div>
+      <div class="deployer-time">${escapeHtml(time)}</div>
+    </div>`;
+  }).join("");
 }

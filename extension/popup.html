@@ -97,6 +97,22 @@
     .health-approvals::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
     .health-empty { text-align: center; padding: 16px 0; color: #475569; font-size: 12px; }
 
+    /* Feed tab — deployer alerts */
+    .deployer-list { max-height: 240px; overflow-y: auto; }
+    .deployer-list::-webkit-scrollbar { width: 4px; }
+    .deployer-list::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+    .deployer-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; background: #1e293b; border-radius: 6px; margin-bottom: 6px; border-left: 3px solid #ef4444; }
+    .deployer-item-info { flex: 1; min-width: 0; }
+    .deployer-addr { font-size: 11px; color: #e2e8f0; font-family: 'SF Mono', 'Fira Code', monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .deployer-contract { font-size: 10px; color: #64748b; font-family: 'SF Mono', 'Fira Code', monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+    .deployer-reason { font-size: 10px; color: #f97316; margin-top: 2px; }
+    .deployer-time { font-size: 10px; color: #475569; flex-shrink: 0; }
+    .feed-locked { text-align: center; padding: 28px 16px; }
+    .feed-locked-icon { font-size: 28px; margin-bottom: 8px; color: #334155; }
+    .feed-locked-title { font-size: 13px; color: #94a3b8; margin-bottom: 6px; font-weight: 600; }
+    .feed-locked-ca { font-size: 9px; color: #475569; font-family: 'SF Mono', 'Fira Code', monospace; word-break: break-all; line-height: 1.5; }
+    .feed-empty-msg { text-align: center; padding: 24px 0; color: #475569; font-size: 13px; }
+
     .policy-option { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 8px; background: #1e293b; border: 1px solid #334155; border-radius: 6px; cursor: pointer; transition: border-color 0.2s; }
     .policy-option:has(input:checked) { border-color: #3b82f6; }
     .policy-option input { display: none; }
@@ -421,7 +437,7 @@
   <div class="header">
     <div class="logo">&#128737;</div>
     <h1>ShieldAI Firewall</h1>
-    <span class="version">v1.0.8</span>
+    <span class="version">v1.0.9</span>
     <button class="expand-btn" id="expandBtn" title="Open full page">&#10530;</button>
   </div>
   <div class="status-row">
@@ -432,6 +448,7 @@
     <div class="tab active" data-tab="settings" data-i18n="tabSettings">Settings</div>
     <div class="tab" data-tab="history" data-i18n="tabHistory">History</div>
     <div class="tab" data-tab="health" data-i18n="tabHealth">Health</div>
+    <div class="tab" data-tab="feed" data-i18n="tabFeed">Feed</div>
   </div>
 
   <div class="tab-content active" id="tab-settings">
@@ -482,6 +499,25 @@
     </div>
   </div>
 
+  <div class="tab-content" id="tab-feed">
+    <div class="field">
+      <label data-i18n="labelFeedWallet">Your Wallet Address</label>
+      <input type="text" id="feedAddress" placeholder="0x...">
+    </div>
+    <button class="btn btn-save" id="feedLoadBtn" data-i18n="btnCheckFeed">Check Feed</button>
+    <div style="font-size:11px;color:#475569;text-align:center;margin-top:4px;" data-i18n="feedSubtext">Hold $SHIELDBOT · Deployer alerts · BNB Chain</div>
+    <div id="feedError" style="display:none;color:#ef4444;font-size:12px;margin-top:6px;"></div>
+    <div id="feedLoading" style="display:none;text-align:center;padding:20px 0;color:#64748b;font-size:13px;" data-i18n="feedVerifying">Verifying token holding...</div>
+    <div id="feedLocked" style="display:none;">
+      <div class="feed-locked">
+        <div class="feed-locked-icon">&#128274;</div>
+        <div class="feed-locked-title" data-i18n="feedLockedTitle">Hold $SHIELDBOT to unlock</div>
+        <div class="feed-locked-ca">0x4904c02efa081cb7685346968bac854cdf4e7777</div>
+      </div>
+    </div>
+    <div id="feedList" class="deployer-list" style="margin-top:8px;"></div>
+  </div>
+
   <!-- ===============================================================
        COMMAND CENTER DASHBOARD
   =============================================================== -->
@@ -498,7 +534,7 @@
         <div class="status-dot yellow" id="dash-statusDot"></div>
         <span id="dash-statusText">Checking...</span>
       </div>
-      <span class="dh-version">v1.0.8</span>
+      <span class="dh-version">v1.0.9</span>
     </div>
 
     <!-- 3-column grid -->
@@ -630,24 +666,24 @@
             </div>
           </div>
 
-          <!-- BUILDING — Phase 3 active -->
+          <!-- LIVE — Phase 3 complete -->
           <div class="rm-section">
-            <div class="rm-section-title">&#9650; <span data-i18n="dashPhase3">Phase 3 — Building</span></div>
+            <div class="rm-section-title">&#9679; <span data-i18n="dashPhase3">Phase 3 — Live</span></div>
             <div class="rm-item">
-              <div class="rm-dot rmd-build"></div>
+              <div class="rm-dot rmd-live"></div>
               <div class="rm-info">
                 <div class="rm-name" data-i18n="dashDeployerBlock">Deployer Cluster Block</div>
                 <div class="rm-sub" data-i18n="dashDeployerBlockSub">Auto-block linked malicious deployers</div>
               </div>
-              <span class="rm-tag rmt-build">BUILDING</span>
+              <span class="rm-tag rmt-live">LIVE</span>
             </div>
             <div class="rm-item">
-              <div class="rm-dot rmd-build"></div>
+              <div class="rm-dot rmd-live"></div>
               <div class="rm-info">
-                <div class="rm-name" data-i18n="dashContractMonitor">Contract Monitoring</div>
-                <div class="rm-sub" data-i18n="dashContractMonitorSub">Post-deploy alerts on watched contracts</div>
+                <div class="rm-name" data-i18n="dashThreatFeed">Holder Alert Feed</div>
+                <div class="rm-sub" data-i18n="dashThreatFeedSub">$SHIELDBOT holders · live deployer alerts</div>
               </div>
-              <span class="rm-tag rmt-build">BUILDING</span>
+              <span class="rm-tag rmt-live">LIVE</span>
             </div>
           </div>
 
@@ -657,8 +693,8 @@
             <div class="rm-item">
               <div class="rm-dot rmd-planned"></div>
               <div class="rm-info">
-                <div class="rm-name" data-i18n="dashThreatFeed">Threat Feed Subscriptions</div>
-                <div class="rm-sub" data-i18n="dashThreatFeedSub">Live intelligence feed access</div>
+                <div class="rm-name" data-i18n="dashContractMonitor">Asset Soft-Locking</div>
+                <div class="rm-sub" data-i18n="dashContractMonitorSub">Freeze assets pending review</div>
               </div>
               <span class="rm-tag rmt-planned">PLANNED</span>
             </div>

@@ -368,6 +368,86 @@
 }
 
 /* Decoded Calldata */
+.shieldai-calldata-section {
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  background: #111827;
+  overflow: hidden;
+}
+
+.shieldai-calldata-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.shieldai-calldata-toggle-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0;
+}
+
+.shieldai-calldata-chevron {
+  color: #94a3b8;
+  font-size: 13px;
+  transition: transform 0.15s ease;
+}
+
+.shieldai-calldata-toggle[aria-expanded="false"] .shieldai-calldata-chevron {
+  transform: rotate(-90deg);
+}
+
+.shieldai-calldata-body {
+  padding: 0 14px 14px;
+}
+
+.shieldai-calldata-fn {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f8fafc;
+  margin-bottom: 10px;
+}
+
+.shieldai-calldata-param {
+  display: grid;
+  grid-template-columns: minmax(88px, 120px) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 7px 0;
+  border-top: 1px solid #1e293b;
+}
+
+.shieldai-calldata-param:first-of-type {
+  border-top: 0;
+}
+
+.shieldai-calldata-param-name {
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.shieldai-calldata-param-value {
+  color: #f8fafc;
+  font-size: 13px;
+  word-break: break-word;
+}
+
+.shieldai-calldata-address {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 12px;
+}
+
 .shieldai-calldata-danger {
   color: #ef4444;
   font-weight: 700;

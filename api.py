@@ -12,7 +12,7 @@ import logging
 import random
 from collections import defaultdict
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -94,13 +94,16 @@ contract_service = None
 risk_engine = None
 greenfield_service = None
 tenderly_simulator = None
+token_gate_service = None
+
+SHIELDBOT_TOKEN_ADDRESS = "0x4904c02efa081cb7685346968bac854cdf4e7777"
 
 
 def _bind_globals(c: ServiceContainer):
     """Bind module-level names to container services for backward compat."""
     global web3_client, ai_analyzer, tx_scanner, token_scanner, calldata_decoder
     global scam_db, dex_service, ethos_service, honeypot_service, contract_service
-    global risk_engine, greenfield_service, tenderly_simulator
+    global risk_engine, greenfield_service, tenderly_simulator, token_gate_service
     web3_client = c.web3_client
     ai_analyzer = c.ai_analyzer
     tx_scanner = c.tx_scanner
@@ -114,6 +117,7 @@ def _bind_globals(c: ServiceContainer):
     risk_engine = c.risk_engine
     greenfield_service = c.greenfield_service
     tenderly_simulator = c.tenderly_simulator
+    token_gate_service = c.token_gate_service
 
 
 @asynccontextmanager
@@ -288,6 +292,9 @@ _report_limiter = RateLimiter(requests_per_minute=5, burst=3)
 
 # Beta-signup rate limiter: 3 signups/min per IP
 _signup_limiter = RateLimiter(requests_per_minute=3, burst=2)
+
+# Public watch alerts: 10 requests/min per IP
+_watch_alerts_limiter = RateLimiter(requests_per_minute=10, burst=5)
 
 
 # --- Endpoints ---
@@ -1273,6 +1280,35 @@ async def watch_alerts_list(request: Request, limit: int = 50):
     """List recent deployment alerts from watched deployers. Requires X-Admin-Secret."""
     _require_admin(request)
     alerts = await container.db.get_deployment_alerts(limit=limit)
+    return {"alerts": alerts, "count": len(alerts)}
+
+
+@app.get("/api/watch/alerts")
+async def public_watch_alerts(
+    request: Request,
+    wallet: str = Query(..., pattern=r"^0x[a-fA-F0-9]{40}$"),
+):
+    """List recent deployment alerts for verified $SHIELDBOT holders."""
+    if not container or not container.db or not token_gate_service:
+        raise HTTPException(status_code=503, detail="Watch alerts not available")
+
+    client_ip = _get_client_ip(request)
+    if not _watch_alerts_limiter.is_allowed(f"watch-alerts:{client_ip}"):
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Watch alerts rate limit exceeded (10/min)."},
+        )
+
+    if not await token_gate_service.has_shieldbot_token(wallet):
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": "Token holding required",
+                "token": SHIELDBOT_TOKEN_ADDRESS,
+            },
+        )
+
+    alerts = await container.db.get_deployment_alerts(limit=50)
     return {"alerts": alerts, "count": len(alerts)}
 
 

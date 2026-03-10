@@ -101,7 +101,7 @@
         "name": "What is ShieldScore?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "ShieldScore is a 0-100 safety rating assigned to every transaction before signing. Higher means safer. 90-100 is SAFE, 70-89 is CAUTION, 40-69 is HIGH RISK, and 0-39 is BLOCK RECOMMENDED. The score combines contract bytecode fingerprinting, deployer wallet history, Tenderly pre-execution simulation, and GoPlus Security threat intelligence."
+          "text": "ShieldScore is a 0-100 risk rating assigned to every transaction before signing. In the current classifier, 0-30 is SAFE, 31-49 is CAUTION, 50-70 is HIGH RISK, and 71-100 is BLOCK RECOMMENDED. The score combines contract bytecode fingerprinting, deployer wallet history, Tenderly pre-execution simulation, and GoPlus Security threat intelligence."
         }
       },
       {
@@ -157,14 +157,14 @@
     <p>The transaction is scored for risk using four data sources in parallel: contract bytecode fingerprinting, deployer wallet history, Tenderly pre-execution simulation, and GoPlus Security threat intelligence. The result is a ShieldScore (0–100) with a plain-English explanation of any threats found.</p>
 
     <!-- BLOCK 2: ShieldScore -->
-    <h2>ShieldScore — How Safety Is Rated</h2>
+    <h2>ShieldScore — How Risk Is Rated</h2>
     <p>Every transaction receives a ShieldScore before you sign it:</p>
     <table class="score-table">
       <tr><th>Score</th><th>Verdict</th><th>Action</th></tr>
-      <tr><td>90 – 100</td><td><span class="badge safe">SAFE</span></td><td>Transaction proceeds with asset delta preview</td></tr>
-      <tr><td>70 – 89</td><td><span class="badge caution">CAUTION</span></td><td>Warning shown — you choose to proceed or cancel</td></tr>
-      <tr><td>40 – 69</td><td><span class="badge high">HIGH RISK</span></td><td>Strong warning with threat details</td></tr>
-      <tr><td>0 – 39</td><td><span class="badge block">BLOCK RECOMMENDED</span></td><td>Highest-risk verdict — blocking is strongly recommended</td></tr>
+      <tr><td>0 – 30</td><td><span class="badge safe">SAFE</span></td><td>Transaction proceeds with asset delta preview</td></tr>
+      <tr><td>31 – 49</td><td><span class="badge caution">CAUTION</span></td><td>Warning shown — you choose to proceed or cancel</td></tr>
+      <tr><td>50 – 70</td><td><span class="badge high">HIGH RISK</span></td><td>Strong warning with threat details</td></tr>
+      <tr><td>71 – 100</td><td><span class="badge block">BLOCK RECOMMENDED</span></td><td>Highest-risk verdict — blocking is strongly recommended</td></tr>
     </table>
 
     <!-- BLOCK 3: Wallet drainers -->
