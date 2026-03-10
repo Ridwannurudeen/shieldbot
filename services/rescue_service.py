@@ -124,9 +124,8 @@ class RescueAlert:
 class RescueService:
     """Rescue Mode service — scans approvals and generates revoke transactions."""
 
-    # NodeReal free-tier public endpoint — supports eth_getLogs up to 50k block range.
-    # Override with LOGS_RPC_URL env var to use your own archive node.
-    _DEFAULT_LOGS_RPC = "https://bsc-mainnet.nodereal.io/v1/64a9df0874fb4a93b9d0a3849de012d3"
+    # Override with LOGS_RPC_URL env var to set the archive node endpoint.
+    _DEFAULT_LOGS_RPC = ""
     _DEXSCREENER_API = "https://api.dexscreener.com/latest/dex/tokens"
 
     def __init__(self, web3_client, db=None, logs_rpc: str = ""):

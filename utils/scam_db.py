@@ -4,6 +4,7 @@ Checks addresses against known scam databases and blocklists
 """
 
 import re
+import time
 import logging
 import aiohttp
 from typing import List, Dict
@@ -11,6 +12,32 @@ from typing import List, Dict
 logger = logging.getLogger(__name__)
 
 _ETH_ADDR_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
+
+# Addresses that must never be blacklisted (routers, WBNB, stables, etc.)
+_PROTECTED_ADDRESSES: set[str] = set()
+
+# Minimum independent reporters before an address is actually blacklisted
+_REPORT_THRESHOLD = 3
+
+# Max reports a single user can submit per day
+_USER_REPORT_LIMIT = 5
+_USER_REPORT_WINDOW = 86400  # 24 hours
+
+
+def load_protected_addresses():
+    """Import whitelisted routers / known-good addresses at startup."""
+    try:
+        from adapters.bsc import WHITELISTED_ROUTERS, WBNB_ADDRESS, BUSD_ADDRESS, USDT_ADDRESS
+        for addr in WHITELISTED_ROUTERS:
+            _PROTECTED_ADDRESSES.add(addr.lower())
+        for addr in (WBNB_ADDRESS, BUSD_ADDRESS, USDT_ADDRESS):
+            _PROTECTED_ADDRESSES.add(addr.lower())
+    except ImportError:
+        pass
+
+
+# Run once on module load
+load_protected_addresses()
 
 
 class ScamDatabase:
@@ -28,6 +55,12 @@ class ScamDatabase:
         self.known_scams = set([
             # Add known scam addresses here
         ])
+
+        # Pending reports: address -> set of (reporter_id, timestamp)
+        self._pending_reports: dict[str, set[tuple[str, float]]] = {}
+
+        # Per-user rate limiting: reporter_id -> list of timestamps
+        self._user_report_times: dict[str, list[float]] = {}
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Return a shared aiohttp session, creating it if needed."""
@@ -127,11 +160,79 @@ class ScamDatabase:
             logger.error(f"Error checking GoPlus: {e}")
             return []
     
+    def report_address(self, address: str, reporter_id: str) -> dict:
+        """Community report with rate-limiting, whitelist protection, and multi-report threshold.
+
+        Returns:
+            {"accepted": bool, "reason": str, "blacklisted": bool, "reports": int, "needed": int}
+        """
+        addr = address.lower()
+        now = time.time()
+
+        # 1. Protect whitelisted addresses
+        if addr in _PROTECTED_ADDRESSES:
+            logger.warning("Rejected report for protected address %s from %s", address, reporter_id)
+            return {
+                "accepted": False,
+                "reason": "This address is a known legitimate contract and cannot be reported.",
+                "blacklisted": False, "reports": 0, "needed": _REPORT_THRESHOLD,
+            }
+
+        # 2. Per-user rate limiting
+        uid = str(reporter_id)
+        times = self._user_report_times.get(uid, [])
+        times = [t for t in times if now - t < _USER_REPORT_WINDOW]
+        if len(times) >= _USER_REPORT_LIMIT:
+            return {
+                "accepted": False,
+                "reason": f"Rate limit reached — max {_USER_REPORT_LIMIT} reports per 24 h.",
+                "blacklisted": False, "reports": 0, "needed": _REPORT_THRESHOLD,
+            }
+        times.append(now)
+        self._user_report_times[uid] = times
+
+        # 3. Already blacklisted
+        if addr in self.known_scams:
+            return {
+                "accepted": True, "reason": "Already blacklisted.",
+                "blacklisted": True, "reports": _REPORT_THRESHOLD, "needed": _REPORT_THRESHOLD,
+            }
+
+        # 4. Add to pending reports (deduplicate by reporter)
+        pending = self._pending_reports.setdefault(addr, set())
+        # Remove any prior report from this user
+        pending = {(rid, ts) for rid, ts in pending if rid != uid}
+        pending.add((uid, now))
+        self._pending_reports[addr] = pending
+
+        unique_reporters = len({rid for rid, _ in pending})
+
+        # 5. Threshold check
+        if unique_reporters >= _REPORT_THRESHOLD:
+            self.add_to_blacklist(address)
+            self._pending_reports.pop(addr, None)
+            logger.info("Address %s blacklisted after %d independent reports", address, unique_reporters)
+            return {
+                "accepted": True, "reason": "Threshold met — address blacklisted.",
+                "blacklisted": True, "reports": unique_reporters, "needed": _REPORT_THRESHOLD,
+            }
+
+        logger.info("Report accepted for %s (%d/%d) from %s", address, unique_reporters, _REPORT_THRESHOLD, uid)
+        return {
+            "accepted": True,
+            "reason": f"Report recorded ({unique_reporters}/{_REPORT_THRESHOLD} needed to blacklist).",
+            "blacklisted": False, "reports": unique_reporters, "needed": _REPORT_THRESHOLD,
+        }
+
     def add_to_blacklist(self, address: str):
-        """Add address to local blacklist"""
-        self.known_scams.add(address.lower())
+        """Add address to local blacklist (skips protected addresses)."""
+        addr = address.lower()
+        if addr in _PROTECTED_ADDRESSES:
+            logger.warning("Refused to blacklist protected address %s", address)
+            return
+        self.known_scams.add(addr)
         logger.info(f"Added {address} to blacklist")
-    
+
     def remove_from_blacklist(self, address: str):
         """Remove address from local blacklist"""
         self.known_scams.discard(address.lower())

@@ -213,10 +213,10 @@ class RPCProxy:
             ) as resp:
                 return await resp.json()
         except Exception as e:
-            logger.error(f"RPC forward error: {e}")
+            logger.error(f"RPC forward error to {upstream_rpc}: {e}")
             return self._error_response(
                 payload.get("id", 1), -32000,
-                f"Upstream RPC error: {str(e)}"
+                "Upstream RPC temporarily unavailable"
             )
 
     @staticmethod

@@ -236,6 +236,9 @@ class RiskEngine:
         dex_data = by_name.get("market", _EMPTY_RESULT).data
         ethos_data = by_name.get("behavioral", _EMPTY_RESULT).data
 
+        # Track failed analyzers for confidence adjustment
+        failed_analyzers = [r.name for r in results if r.error]
+
         # Collect category scores and flags from analyzer results
         category_scores = {}
         critical_flags = []
@@ -313,6 +316,9 @@ class RiskEngine:
         )
 
         confidence = self._compute_confidence(contract_data, honeypot_data, dex_data, ethos_data)
+        # Penalize confidence when analyzers failed (data incomplete)
+        if failed_analyzers:
+            confidence = max(0, confidence - 15 * len(failed_analyzers))
         # Apply calibration confidence boost if available
         if self._calibration and self._calibration.confidence_boost:
             confidence = min(100, confidence + self._calibration.confidence_boost)

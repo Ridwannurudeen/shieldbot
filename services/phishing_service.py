@@ -44,12 +44,11 @@ class PhishingService:
             if not domain:
                 return defaults
 
-            # Stable test trigger — ?_shieldbot_phishing_test=1 on any URL
-            # always returns is_phishing: true so the extension banner can be
-            # tested without depending on live phishing sites (taken down quickly).
-            # Nothing is cached, so the host domain is never flagged.
+            # Test trigger — only active when SHIELDBOT_TEST_MODE=1 env var is set.
+            # Prevents griefing attacks via shared URLs with the test parameter.
+            import os
             from urllib.parse import parse_qs
-            if "_shieldbot_phishing_test" in parse_qs(parsed.query):
+            if os.getenv("SHIELDBOT_TEST_MODE") and "_shieldbot_phishing_test" in parse_qs(parsed.query):
                 return {
                     "is_phishing": True,
                     "confidence": "high",

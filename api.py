@@ -98,6 +98,38 @@ token_gate_service = None
 
 SHIELDBOT_TOKEN_ADDRESS = "0x4904c02efa081cb7685346968bac854cdf4e7777"
 
+# Nonce store for token-gate signature verification: wallet -> (nonce, expires_at)
+import secrets
+from eth_account.messages import encode_defunct
+from web3 import Web3 as _Web3
+
+_nonce_store: Dict[str, tuple[str, float]] = {}
+_NONCE_TTL = 300  # 5 minutes
+
+
+def _issue_nonce(wallet: str) -> str:
+    """Issue a random nonce for wallet signature verification."""
+    nonce = secrets.token_hex(16)
+    _nonce_store[wallet.lower()] = (nonce, time.time() + _NONCE_TTL)
+    return nonce
+
+
+def _verify_wallet_signature(wallet: str, signature: str, nonce: str) -> bool:
+    """Verify that `signature` was produced by `wallet` over the expected message."""
+    key = wallet.lower()
+    stored = _nonce_store.get(key)
+    if not stored or stored[0] != nonce or time.time() > stored[1]:
+        return False
+    # Consume nonce (one-time use)
+    _nonce_store.pop(key, None)
+    message_text = f"ShieldBot alert access: {nonce}"
+    try:
+        message = encode_defunct(text=message_text)
+        recovered = _Web3().eth.account.recover_message(message, signature=signature)
+        return recovered.lower() == key
+    except Exception:
+        return False
+
 
 def _bind_globals(c: ServiceContainer):
     """Bind module-level names to container services for backward compat."""
@@ -1283,12 +1315,28 @@ async def watch_alerts_list(request: Request, limit: int = 50):
     return {"alerts": alerts, "count": len(alerts)}
 
 
+@app.get("/api/watch/nonce")
+async def watch_nonce(
+    wallet: str = Query(..., pattern=r"^0x[a-fA-F0-9]{40}$"),
+):
+    """Issue a one-time nonce for wallet signature verification."""
+    nonce = _issue_nonce(wallet)
+    message = f"ShieldBot alert access: {nonce}"
+    return {"nonce": nonce, "message": message}
+
+
 @app.get("/api/watch/alerts")
 async def public_watch_alerts(
     request: Request,
     wallet: str = Query(..., pattern=r"^0x[a-fA-F0-9]{40}$"),
+    signature: str = Query(..., min_length=130, max_length=134),
+    nonce: str = Query(..., min_length=32, max_length=32),
 ):
-    """List recent deployment alerts for verified $SHIELDBOT holders."""
+    """List recent deployment alerts for verified $SHIELDBOT holders.
+
+    Requires a valid personal_sign signature over the nonce message
+    to prove wallet ownership.
+    """
     if not container or not container.db or not token_gate_service:
         raise HTTPException(status_code=503, detail="Watch alerts not available")
 
@@ -1297,6 +1345,13 @@ async def public_watch_alerts(
         return JSONResponse(
             status_code=429,
             content={"detail": "Watch alerts rate limit exceeded (10/min)."},
+        )
+
+    # Verify wallet ownership via signature
+    if not _verify_wallet_signature(wallet, signature, nonce):
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Invalid or expired signature"},
         )
 
     if not await token_gate_service.has_shieldbot_token(wallet):

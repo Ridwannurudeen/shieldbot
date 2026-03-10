@@ -315,10 +315,15 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Invalid address format.")
         return
 
-    # Add to local blacklist
-    scam_db.add_to_blacklist(address)
+    # Community report with safeguards
+    result = scam_db.report_address(address, str(update.effective_user.id))
 
-    response = f"""✅ **Scam Report Submitted**
+    if not result["accepted"]:
+        await update.message.reply_text(f"❌ {result['reason']}")
+        return
+
+    if result["blacklisted"]:
+        response = f"""✅ **Scam Report — Address Blacklisted**
 
 **Address:** `{address}`
 **Reason:** {reason}
@@ -327,11 +332,19 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 This address has been added to our local blacklist.
 Future scans will flag it as a known scam.
 """
+        # Record on-chain (fire-and-forget — non-blocking)
+        if onchain_recorder.is_available():
+            await onchain_recorder.record_scan_fire_and_forget(address, 'high', 'report')
+            response += "\n🔗 On-chain recording scheduled — [view contract](https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795#events)"
+    else:
+        response = f"""📝 **Report Recorded**
 
-    # Record on-chain (fire-and-forget — non-blocking)
-    if onchain_recorder.is_available():
-        await onchain_recorder.record_scan_fire_and_forget(address, 'high', 'report')
-        response += "\n🔗 On-chain recording scheduled — [view contract](https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795#events)"
+**Address:** `{address}`
+**Reason:** {reason}
+**Progress:** {result['reports']}/{result['needed']} independent reports needed to blacklist.
+
+Thank you — more reports from different users are needed before this address is blacklisted.
+"""
 
     await update.message.reply_text(response, parse_mode='Markdown', disable_web_page_preview=True)
 

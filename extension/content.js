@@ -43,10 +43,15 @@
         .map((b) => b.toString(16).padStart(2, "0"))
         .join("");
 
-  // Inject the page-level script, embedding the channel token in the URL
+  // Inject the page-level script — token is NOT in the URL to prevent
+  // extraction via performance.getEntriesByType("resource").
   const script = document.createElement("script");
-  script.src = chrome.runtime.getURL("inject.js") + "?ct=" + _CHANNEL_TOKEN;
+  script.src = chrome.runtime.getURL("inject.js");
   script.onload = function () {
+    // Send the channel token via one-time postMessage handshake.
+    // At document_start, no page scripts have loaded yet, so this
+    // message cannot be intercepted by malicious page code.
+    window.postMessage({ type: "__SHIELDAI_INIT__", _ct: _CHANNEL_TOKEN }, "*");
     this.remove();
   };
   (document.head || document.documentElement).appendChild(script);

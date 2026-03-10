@@ -10,17 +10,29 @@
   if (window.__shieldai_injected) return;
   window.__shieldai_injected = true;
 
-  // Read the per-session channel token injected via the script URL by content.js.
-  // Verdicts without this token are rejected — page scripts cannot forge it
-  // because the <script> element is removed immediately after load.
-  const _CHANNEL_TOKEN = (() => {
-    try {
-      const src = document.currentScript && document.currentScript.src;
-      return src ? new URL(src).searchParams.get("ct") || "" : "";
-    } catch (_) {
-      return "";
+  // Clear resource timing entries so extension URLs are not leaked
+  // to page scripts via performance.getEntriesByType("resource").
+  try { performance.clearResourceTimings(); } catch (_) {}
+
+  // Channel token for verdict authentication — starts null (reject all
+  // verdicts until init handshake from content.js completes).
+  let _CHANNEL_TOKEN = null;
+
+  // Receive the token from content.js via a one-time postMessage handshake.
+  // content.js runs at document_start (before any page scripts) and sends
+  // the init message immediately on inject.js load, so page scripts cannot
+  // register a listener in time to intercept it.
+  window.addEventListener("message", function _initHandler(event) {
+    if (
+      event.source !== window ||
+      !event.data ||
+      event.data.type !== "__SHIELDAI_INIT__"
+    ) {
+      return;
     }
-  })();
+    _CHANNEL_TOKEN = event.data._ct || "";
+    window.removeEventListener("message", _initHandler);
+  });
 
   const INTERCEPTED_METHODS = new Set([
     "eth_sendTransaction",
@@ -159,9 +171,9 @@
         ) {
           return;
         }
-        // Reject verdicts that don't carry the channel token established at
-        // document_start — this prevents page scripts from forging verdicts.
-        if (_CHANNEL_TOKEN && event.data._ct !== _CHANNEL_TOKEN) {
+        // Reject verdicts without a valid channel token — prevents page
+        // scripts from forging verdicts.  null = init not yet received.
+        if (_CHANNEL_TOKEN === null || event.data._ct !== _CHANNEL_TOKEN) {
           return;
         }
         window.removeEventListener("message", handleVerdict);

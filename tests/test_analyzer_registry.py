@@ -43,7 +43,8 @@ class TestAnalyzerRegistry:
         results = await registry.run_all(ctx)
         assert len(results) == 1
         assert results[0].error == "boom"
-        assert results[0].score == 0
+        assert results[0].score == 50  # fail-closed: cautious neutral, not 0 (safe)
+        assert "failing analysis unavailable" in results[0].flags
 
     @pytest.mark.asyncio
     async def test_multiple_analyzers(self):
