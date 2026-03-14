@@ -11,7 +11,7 @@ import json
 import logging
 from typing import Optional
 
-from agent.prompts import NARRATIVE_TEMPLATE
+from agent.prompts import HAIKU_MODEL, NARRATIVE_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ class Sentinel:
                 try:
                     prompt = NARRATIVE_TEMPLATE.format(data=json.dumps(alert_data, default=str))
                     message = await self.ai.client.messages.create(
-                        model="claude-3-haiku-20240307",
+                        model=HAIKU_MODEL,
                         max_tokens=200,
                         messages=[{"role": "user", "content": prompt}],
                     )

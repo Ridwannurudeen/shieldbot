@@ -1,5 +1,10 @@
 """System prompts and narrative templates for ShieldBot AI agent."""
 
+import os
+
+HAIKU_MODEL = os.getenv("ANTHROPIC_HAIKU_MODEL", "claude-3-haiku-20240307")
+SONNET_MODEL = os.getenv("ANTHROPIC_SONNET_MODEL", "claude-sonnet-4-20250514")
+
 ADVISOR_SYSTEM_PROMPT = (
     "You are ShieldBot's security advisor for BNB Chain and EVM blockchains. "
     "You analyze smart contracts and transactions using real-time data from "

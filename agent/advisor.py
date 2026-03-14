@@ -6,11 +6,10 @@ and streams responses through Claude for natural-language security analysis.
 
 import json
 import logging
-import os
 import re
 from typing import Dict, List, Tuple
 
-from agent.prompts import ADVISOR_SYSTEM_PROMPT, EXPLAIN_SCAN_TEMPLATE
+from agent.prompts import ADVISOR_SYSTEM_PROMPT, EXPLAIN_SCAN_TEMPLATE, HAIKU_MODEL, SONNET_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +28,8 @@ class Advisor:
         self.tools = tools
         self.db = db
         self.ai = ai_analyzer
-        self.sonnet_model = os.getenv(
-            "ANTHROPIC_SONNET_MODEL", "claude-sonnet-4-20250514"
-        )
-        self.haiku_model = os.getenv(
-            "ANTHROPIC_HAIKU_MODEL", "claude-3-haiku-20240307"
-        )
+        self.sonnet_model = SONNET_MODEL
+        self.haiku_model = HAIKU_MODEL
 
     # ------------------------------------------------------------------
     # 1. Intent routing (sync, no LLM)

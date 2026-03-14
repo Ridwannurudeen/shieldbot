@@ -1408,7 +1408,7 @@ async def agent_chat(req: ChatRequest, request: Request):
         raise HTTPException(503, "Agent not available")
 
     client_ip = request.client.host if request.client else "unknown"
-    if not chat_limiter.is_allowed(req.user_id):
+    if not chat_limiter.is_allowed(client_ip):
         raise HTTPException(429, "Rate limit exceeded")
 
     try:

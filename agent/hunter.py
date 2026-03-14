@@ -16,7 +16,7 @@ import json
 import logging
 import time
 
-from agent.prompts import NARRATIVE_TEMPLATE
+from agent.prompts import HAIKU_MODEL, NARRATIVE_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +98,12 @@ class Hunter:
             flagged += await self._scan_new_pairs(investigation_id)
         except Exception:
             logger.exception("Hunter: _scan_new_pairs failed")
+
+        # Housekeeping: prune stale chat history (>24h)
+        try:
+            await self.db.prune_old_chats()
+        except Exception:
+            logger.exception("Hunter: chat pruning failed")
 
         logger.info(
             "Hunter sweep %s complete: %d flagged", investigation_id, len(flagged)
@@ -199,7 +205,7 @@ class Hunter:
                     data=json.dumps(evidence, default=str)
                 )
                 message = await self.ai.client.messages.create(
-                    model="claude-3-haiku-20240307",
+                    model=HAIKU_MODEL,
                     max_tokens=200,
                     messages=[{"role": "user", "content": prompt}],
                 )
