@@ -990,6 +990,20 @@ async def firewall(req: FirewallRequest, request: Request):
                 except Exception as e:
                     logger.error(f"DB upsert failed: {e}")
 
+            # Sentinel feedback loop: auto-watch deployers of blocked contracts
+            if container and hasattr(container, 'sentinel') and classification == "BLOCK_RECOMMENDED":
+                try:
+                    deployer_info = await container.db.get_deployer_risk_summary(to_addr, req.chainId)
+                    deployer_addr = deployer_info["deployer_address"] if deployer_info else None
+                    asyncio.create_task(container.sentinel.on_scan_blocked(
+                        address=to_addr,
+                        deployer=deployer_addr,
+                        chain_id=req.chainId,
+                        risk_score=risk_score,
+                    ))
+                except Exception as e:
+                    logger.error(f"Sentinel feedback failed: {e}")
+
             # Enqueue deployer indexing (fire-and-forget)
             if container and container.indexer:
                 container.indexer.enqueue(to_addr, req.chainId)

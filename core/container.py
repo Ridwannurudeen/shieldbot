@@ -142,9 +142,15 @@ class ServiceContainer:
         # Agent services
         from agent.tools import AgentTools
         from agent.advisor import Advisor
+        from agent.sentinel import Sentinel
 
         self.agent_tools = AgentTools(self)
         self.advisor = Advisor(
+            tools=self.agent_tools,
+            db=self.db,
+            ai_analyzer=self.ai_analyzer,
+        )
+        self.sentinel = Sentinel(
             tools=self.agent_tools,
             db=self.db,
             ai_analyzer=self.ai_analyzer,
