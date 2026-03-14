@@ -5,8 +5,12 @@
   "description": "Real-time BNB Chain transaction firewall. Detects honeypots, rug pulls, and phishing sites before you sign.",
   "permissions": [
     "storage",
-    "permissions"
+    "permissions",
+    "sidePanel"
   ],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
   "host_permissions": [
     "https://*/*"
   ],
@@ -39,6 +43,8 @@
         "overlay.css",
         "welcome.html",
         "i18n.js",
+        "sidepanel.html",
+        "sidepanel.js",
         "locales/en/messages.json",
         "locales/zh/messages.json",
         "locales/vi/messages.json"

@@ -138,5 +138,6 @@
   "classHighRisk": "高风险",
   "classCaution": "注意",
   "classSafe": "安全",
-  "overlayBtnWhy": "为什么有风险？"
+  "overlayBtnWhy": "为什么有风险？",
+  "askShieldBotAI": "询问ShieldBot AI"
 }

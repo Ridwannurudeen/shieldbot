@@ -138,5 +138,6 @@
   "classHighRisk": "RỦI RO CAO",
   "classCaution": "THẬN TRỌNG",
   "classSafe": "AN TOÀN",
-  "overlayBtnWhy": "Tại sao điều này rủi ro?"
+  "overlayBtnWhy": "Tại sao điều này rủi ro?",
+  "askShieldBotAI": "Hỏi ShieldBot AI"
 }

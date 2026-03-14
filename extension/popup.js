@@ -166,6 +166,12 @@ function initCompact() {
       compact: true,
     });
   });
+
+  // Ask ShieldBot AI — open side panel
+  document.getElementById("askBtn")?.addEventListener("click", async () => {
+    await chrome.sidePanel.open({ windowId: (await chrome.windows.getCurrent()).id });
+    window.close();
+  });
 }
 
 // ============================================================

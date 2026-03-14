@@ -138,5 +138,6 @@
   "classHighRisk": "HIGH RISK",
   "classCaution": "CAUTION",
   "classSafe": "SAFE",
-  "overlayBtnWhy": "Why is this risky?"
+  "overlayBtnWhy": "Why is this risky?",
+  "askShieldBotAI": "Ask ShieldBot AI"
 }
