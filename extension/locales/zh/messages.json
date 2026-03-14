@@ -137,5 +137,6 @@
   "classBlock": "建议拦截",
   "classHighRisk": "高风险",
   "classCaution": "注意",
-  "classSafe": "安全"
+  "classSafe": "安全",
+  "overlayBtnWhy": "为什么有风险？"
 }

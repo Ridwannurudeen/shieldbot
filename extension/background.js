@@ -53,6 +53,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "SHIELDAI_EXPLAIN") {
+    (async () => {
+      try {
+        const apiUrl = await getApiUrl();
+        const response = await fetch(`${apiUrl}/api/agent/explain`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scan_result: message.scanResult }),
+          signal: AbortSignal.timeout(30000),
+        });
+        if (!response.ok) {
+          sendResponse({ explanation: "Unable to generate explanation." });
+          return;
+        }
+        const data = await response.json();
+        sendResponse({ explanation: data.explanation || "No explanation available." });
+      } catch (err) {
+        sendResponse({ explanation: "Unable to generate explanation." });
+      }
+    })();
+    return true;
+  }
+
 });
 
 
