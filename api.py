@@ -75,6 +75,7 @@ class RateLimiter:
 
 
 rate_limiter = RateLimiter(requests_per_minute=30, burst=10)
+chat_limiter = RateLimiter(requests_per_minute=50, burst=10)
 
 
 # Service container (initialized on startup)
@@ -95,6 +96,7 @@ risk_engine = None
 greenfield_service = None
 tenderly_simulator = None
 token_gate_service = None
+advisor = None
 
 SHIELDBOT_TOKEN_ADDRESS = "0x4904c02efa081cb7685346968bac854cdf4e7777"
 
@@ -136,6 +138,7 @@ def _bind_globals(c: ServiceContainer):
     global web3_client, ai_analyzer, tx_scanner, token_scanner, calldata_decoder
     global scam_db, dex_service, ethos_service, honeypot_service, contract_service
     global risk_engine, greenfield_service, tenderly_simulator, token_gate_service
+    global advisor
     web3_client = c.web3_client
     ai_analyzer = c.ai_analyzer
     tx_scanner = c.tx_scanner
@@ -150,6 +153,7 @@ def _bind_globals(c: ServiceContainer):
     greenfield_service = c.greenfield_service
     tenderly_simulator = c.tenderly_simulator
     token_gate_service = c.token_gate_service
+    advisor = c.advisor
 
 
 @asynccontextmanager
@@ -317,6 +321,15 @@ class CommunityReportRequest(BaseModel):
     chainId: int = 56
     report_type: str  # "false_positive", "false_negative", "scam"
     reason: Optional[str] = None
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+    user_id: str = Field(..., min_length=1, max_length=100)
+
+
+class ExplainRequest(BaseModel):
+    scan_result: Dict[str, Any]
 
 
 # Report rate limiter: 5 reports/min per IP
@@ -1368,6 +1381,42 @@ async def public_watch_alerts(
 
     alerts = await container.db.get_deployment_alerts(limit=50)
     return {"alerts": alerts, "count": len(alerts)}
+
+
+# --- Agent Chat ---
+
+@app.post("/api/agent/chat")
+async def agent_chat(req: ChatRequest, request: Request):
+    if not container or not hasattr(container, 'advisor'):
+        raise HTTPException(503, "Agent not available")
+
+    client_ip = request.client.host if request.client else "unknown"
+    if not chat_limiter.is_allowed(req.user_id):
+        raise HTTPException(429, "Rate limit exceeded")
+
+    try:
+        response = await container.advisor.chat(req.user_id, req.message)
+        return {"response": response, "user_id": req.user_id}
+    except Exception as e:
+        logger.error(f"Agent chat error: {e}")
+        raise HTTPException(500, "Agent error")
+
+
+@app.post("/api/agent/explain")
+async def agent_explain(req: ExplainRequest, request: Request):
+    if not container or not hasattr(container, 'advisor'):
+        raise HTTPException(503, "Agent not available")
+
+    client_ip = request.client.host if request.client else "unknown"
+    if not rate_limiter.is_allowed(client_ip):
+        raise HTTPException(429, "Rate limit exceeded")
+
+    try:
+        explanation = await container.advisor.explain_scan(req.scan_result)
+        return {"explanation": explanation}
+    except Exception as e:
+        logger.error(f"Agent explain error: {e}")
+        raise HTTPException(500, "Agent error")
 
 
 # --- Mempool Monitoring ---

@@ -139,6 +139,17 @@ class ServiceContainer:
             from_email=settings.resend_from_email,
         )
 
+        # Agent services
+        from agent.tools import AgentTools
+        from agent.advisor import Advisor
+
+        self.agent_tools = AgentTools(self)
+        self.advisor = Advisor(
+            tools=self.agent_tools,
+            db=self.db,
+            ai_analyzer=self.ai_analyzer,
+        )
+
         # Optional services (need async init)
         self.greenfield_service = GreenfieldService()
         self.tenderly_simulator = TenderlySimulator()
