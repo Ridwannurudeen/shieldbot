@@ -187,6 +187,7 @@ class ServiceContainer:
 
     async def shutdown(self):
         """Clean up resources."""
+        await self.hunter.stop()
         await self.mempool_monitor.stop()
         await self.indexer.stop()
         await self.db.close()

@@ -810,14 +810,24 @@ class Database:
         role: str,
         message: str,
         tools_used=None,
+        max_per_user: int = 50,
     ):
-        """Insert a chat message for a user."""
+        """Insert a chat message for a user, capping at max_per_user messages."""
         now = time.time()
         tools_json = json.dumps(tools_used) if isinstance(tools_used, (list, dict)) else tools_used
         await self._db.execute("""
             INSERT INTO chat_history (user_id, role, message, tools_used, created_at)
             VALUES (?, ?, ?, ?, ?)
         """, (user_id, role, message, tools_json, now))
+        # Evict oldest messages beyond the per-user cap
+        await self._db.execute("""
+            DELETE FROM chat_history WHERE id IN (
+                SELECT id FROM chat_history
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+                LIMIT -1 OFFSET ?
+            )
+        """, (user_id, max_per_user))
         await self._db.commit()
 
     async def get_chat_history(self, user_id: str, limit: int = 10) -> List[Dict]:

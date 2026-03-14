@@ -38,6 +38,9 @@ class Hunter:
 
     async def start(self, interval_seconds: int = 1800):
         """Start the background sweep loop (default: every 30 min)."""
+        if self._running or (self._task and not self._task.done()):
+            logger.warning("Hunter already running, ignoring duplicate start")
+            return
         self._running = True
         self._task = asyncio.create_task(self._loop(interval_seconds))
         logger.info("Hunter started (interval=%ds)", interval_seconds)
@@ -123,7 +126,8 @@ class Hunter:
         """
         flagged = []
         deployers = await self.db.get_watched_deployers()
-        for d in deployers:
+        # Cap at 200 deployers per sweep to prevent resource exhaustion
+        for d in deployers[:200]:
             try:
                 # Future: query BSCScan for recent contract creations by this deployer
                 # and scan any that aren't already tracked.

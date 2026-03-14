@@ -90,14 +90,15 @@ class Advisor:
         history = await self.db.get_chat_history(user_id, limit=10)
         context = await self._gather_context(intent, data)
 
-        # Build the user content — inject context when available
+        # Build the user content — inject context when available.
+        # Wrap user input in delimiters to mitigate prompt injection.
         if context:
             user_content = (
                 f"[ShieldBot Data]: {json.dumps(context, default=str)}\n\n"
-                f"User question: {message}"
+                f"<user_message>{message}</user_message>"
             )
         else:
-            user_content = message
+            user_content = f"<user_message>{message}</user_message>"
 
         # Build messages list from history + new message
         messages: List[Dict] = []

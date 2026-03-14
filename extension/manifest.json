@@ -43,8 +43,6 @@
         "overlay.css",
         "welcome.html",
         "i18n.js",
-        "sidepanel.html",
-        "sidepanel.js",
         "locales/en/messages.json",
         "locales/zh/messages.json",
         "locales/vi/messages.json"

@@ -48,6 +48,7 @@ def test_chat_empty_message(client):
 
 def test_chat_calls_advisor(client):
     import api as api_module
+    import hashlib
 
     advisor = api_module.container.advisor
 
@@ -56,7 +57,10 @@ def test_chat_calls_advisor(client):
         json={"message": "Check 0xdead", "user_id": "user42"},
     )
 
-    advisor.chat.assert_awaited_once_with("user42", "Check 0xdead")
+    # user_id is bound to client IP: sha256("testclient:user42")[:24]
+    # TestClient uses "testclient" as the client host
+    bound_id = hashlib.sha256("testclient:user42".encode()).hexdigest()[:24]
+    advisor.chat.assert_awaited_once_with(bound_id, "Check 0xdead")
 
 
 def test_explain_success(client):

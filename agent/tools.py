@@ -6,11 +6,21 @@ delegated to the underlying services in core/ and services/.
 """
 
 import logging
+import re
 from typing import Dict, List, Optional
 
 from core.analyzer import AnalysisContext
 
 logger = logging.getLogger(__name__)
+
+_ADDRESS_RE = re.compile(r'^0x[a-fA-F0-9]{40}$')
+
+
+def _validate_address(addr: str) -> str:
+    """Validate and normalize an Ethereum address."""
+    if not _ADDRESS_RE.match(addr):
+        raise ValueError(f"Invalid address: {addr}")
+    return addr.lower()
 
 
 class AgentTools:
@@ -21,20 +31,24 @@ class AgentTools:
 
     async def scan_contract(self, address: str, chain_id: int = 56) -> Dict:
         """Run all analyzers on a contract and return composite risk score."""
+        address = _validate_address(address)
         ctx = AnalysisContext(address=address, chain_id=chain_id)
         results = await self._container.registry.run_all(ctx)
         return self._container.risk_engine.compute_from_results(results)
 
     async def check_deployer(self, address: str, chain_id: int = 56) -> Optional[Dict]:
         """Look up deployer risk summary for a contract address."""
+        address = _validate_address(address)
         return await self._container.db.get_deployer_risk_summary(address, chain_id)
 
     async def check_honeypot(self, address: str) -> Dict:
         """Run honeypot simulation on a token address."""
+        address = _validate_address(address)
         return await self._container.honeypot_service.fetch_honeypot_data(address)
 
     async def get_market_data(self, address: str) -> Dict:
         """Fetch DexScreener market data for a token address."""
+        address = _validate_address(address)
         return await self._container.dex_service.fetch_token_market_data(address)
 
     async def query_campaign(self, address: str, chain_id: int = None) -> Dict:
@@ -55,6 +69,7 @@ class AgentTools:
         self, address: str, reason: str, chain_id: int = 0
     ) -> None:
         """Add a deployer to the watch list."""
+        address = _validate_address(address)
         await self._container.db.add_watched_deployer(address, chain_id, reason)
 
     async def get_cached_score(self, address: str, chain_id: int = 56) -> Optional[Dict]:

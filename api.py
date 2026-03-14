@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, Dict, Any, List
 
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD
@@ -111,6 +111,13 @@ _NONCE_TTL = 300  # 5 minutes
 
 def _issue_nonce(wallet: str) -> str:
     """Issue a random nonce for wallet signature verification."""
+    # Probabilistic cleanup of expired nonces to prevent memory leak
+    import random
+    if random.random() < 0.05:
+        now = time.time()
+        expired = [k for k, (_, exp) in _nonce_store.items() if now > exp]
+        for k in expired:
+            del _nonce_store[k]
     nonce = secrets.token_hex(16)
     _nonce_store[wallet.lower()] = (nonce, time.time() + _NONCE_TTL)
     return nonce
@@ -333,6 +340,17 @@ class ChatRequest(BaseModel):
 
 class ExplainRequest(BaseModel):
     scan_result: Dict[str, Any]
+
+    @field_validator("scan_result")
+    @classmethod
+    def validate_scan_result(cls, v):
+        # Only allow known fields to prevent prompt injection via extra keys
+        allowed = {
+            "risk_score", "risk_level", "classification", "danger_signals",
+            "decoded_action", "flags", "critical_flags", "contract_verified",
+            "honeypot", "sell_tax", "buy_tax", "is_honeypot",
+        }
+        return {k: v[k] for k in v if k in allowed}
 
 
 # Report rate limiter: 5 reports/min per IP
@@ -1407,12 +1425,16 @@ async def agent_chat(req: ChatRequest, request: Request):
     if not container or not hasattr(container, 'advisor'):
         raise HTTPException(503, "Agent not available")
 
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _get_client_ip(request)
     if not chat_limiter.is_allowed(client_ip):
         raise HTTPException(429, "Rate limit exceeded")
 
+    # Bind user_id to client IP so users cannot read/poison each other's history
+    import hashlib
+    bound_user_id = hashlib.sha256(f"{client_ip}:{req.user_id}".encode()).hexdigest()[:24]
+
     try:
-        response = await container.advisor.chat(req.user_id, req.message)
+        response = await container.advisor.chat(bound_user_id, req.message)
         return {"response": response, "user_id": req.user_id}
     except Exception as e:
         logger.error(f"Agent chat error: {e}")
@@ -1424,8 +1446,8 @@ async def agent_explain(req: ExplainRequest, request: Request):
     if not container or not hasattr(container, 'advisor'):
         raise HTTPException(503, "Agent not available")
 
-    client_ip = request.client.host if request.client else "unknown"
-    if not rate_limiter.is_allowed(client_ip):
+    client_ip = _get_client_ip(request)
+    if not chat_limiter.is_allowed(client_ip):
         raise HTTPException(429, "Rate limit exceeded")
 
     try:

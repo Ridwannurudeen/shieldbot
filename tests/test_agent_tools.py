@@ -31,12 +31,12 @@ def mock_container():
 
     db = MagicMock()
     db.get_deployer_risk_summary = AsyncMock(return_value={
-        "deployer_address": "0xdead",
+        "deployer_address": "0x3333333333333333333333333333333333333333",
         "total_contracts": 5,
         "high_risk_contracts": 3,
     })
     db.get_campaign_graph = AsyncMock(return_value={
-        "deployer": "0xdead",
+        "deployer": "0x3333333333333333333333333333333333333333",
         "contracts": [],
         "funder": "0xbeef",
     })
@@ -82,13 +82,13 @@ def tools(mock_container):
 
 @pytest.mark.asyncio
 async def test_scan_contract(tools, mock_container):
-    result = await tools.scan_contract("0xabc123")
+    result = await tools.scan_contract("0x1111111111111111111111111111111111111111")
 
     # Registry should be called with an AnalysisContext
     mock_container.registry.run_all.assert_awaited_once()
     ctx_arg = mock_container.registry.run_all.call_args[0][0]
     assert isinstance(ctx_arg, AnalysisContext)
-    assert ctx_arg.address == "0xabc123"
+    assert ctx_arg.address == "0x1111111111111111111111111111111111111111"
     assert ctx_arg.chain_id == 56
 
     # Risk engine should be called with the registry results
@@ -99,7 +99,7 @@ async def test_scan_contract(tools, mock_container):
 
 @pytest.mark.asyncio
 async def test_scan_contract_custom_chain(tools, mock_container):
-    await tools.scan_contract("0xabc123", chain_id=1)
+    await tools.scan_contract("0x1111111111111111111111111111111111111111", chain_id=1)
     ctx_arg = mock_container.registry.run_all.call_args[0][0]
     assert ctx_arg.chain_id == 1
 
@@ -108,8 +108,8 @@ async def test_scan_contract_custom_chain(tools, mock_container):
 
 @pytest.mark.asyncio
 async def test_check_deployer(tools, mock_container):
-    result = await tools.check_deployer("0xabc123")
-    mock_container.db.get_deployer_risk_summary.assert_awaited_once_with("0xabc123", 56)
+    result = await tools.check_deployer("0x1111111111111111111111111111111111111111")
+    mock_container.db.get_deployer_risk_summary.assert_awaited_once_with("0x1111111111111111111111111111111111111111", 56)
     assert result["high_risk_contracts"] == 3
 
 
@@ -117,8 +117,8 @@ async def test_check_deployer(tools, mock_container):
 
 @pytest.mark.asyncio
 async def test_check_honeypot(tools, mock_container):
-    result = await tools.check_honeypot("0xabc123")
-    mock_container.honeypot_service.fetch_honeypot_data.assert_awaited_once_with("0xabc123")
+    result = await tools.check_honeypot("0x1111111111111111111111111111111111111111")
+    mock_container.honeypot_service.fetch_honeypot_data.assert_awaited_once_with("0x1111111111111111111111111111111111111111")
     assert result["is_honeypot"] is False
 
 
@@ -126,8 +126,8 @@ async def test_check_honeypot(tools, mock_container):
 
 @pytest.mark.asyncio
 async def test_get_market_data(tools, mock_container):
-    result = await tools.get_market_data("0xabc123")
-    mock_container.dex_service.fetch_token_market_data.assert_awaited_once_with("0xabc123")
+    result = await tools.get_market_data("0x1111111111111111111111111111111111111111")
+    mock_container.dex_service.fetch_token_market_data.assert_awaited_once_with("0x1111111111111111111111111111111111111111")
     assert result["liquidity_usd"] == 50000
 
 
@@ -135,8 +135,8 @@ async def test_get_market_data(tools, mock_container):
 
 @pytest.mark.asyncio
 async def test_query_campaign(tools, mock_container):
-    result = await tools.query_campaign("0xabc123", chain_id=56)
-    mock_container.db.get_campaign_graph.assert_awaited_once_with("0xabc123", 56)
+    result = await tools.query_campaign("0x1111111111111111111111111111111111111111", chain_id=56)
+    mock_container.db.get_campaign_graph.assert_awaited_once_with("0x1111111111111111111111111111111111111111", 56)
     assert result["funder"] == "0xbeef"
 
 
@@ -144,8 +144,8 @@ async def test_query_campaign(tools, mock_container):
 
 @pytest.mark.asyncio
 async def test_get_funder_links(tools, mock_container):
-    result = await tools.get_funder_links("0xdead")
-    mock_container.db.get_campaign_graph.assert_awaited_once_with("0xdead", None)
+    result = await tools.get_funder_links("0x3333333333333333333333333333333333333333")
+    mock_container.db.get_campaign_graph.assert_awaited_once_with("0x3333333333333333333333333333333333333333", None)
     assert "funder" in result
 
 
@@ -163,14 +163,14 @@ async def test_get_agent_findings(tools, mock_container):
 
 @pytest.mark.asyncio
 async def test_auto_watch_deployer(tools, mock_container):
-    await tools.auto_watch_deployer("0xbad", reason="serial rugger", chain_id=56)
-    mock_container.db.add_watched_deployer.assert_awaited_once_with("0xbad", 56, "serial rugger")
+    await tools.auto_watch_deployer("0x2222222222222222222222222222222222222222", reason="serial rugger", chain_id=56)
+    mock_container.db.add_watched_deployer.assert_awaited_once_with("0x2222222222222222222222222222222222222222", 56, "serial rugger")
 
 
 # --- get_cached_score ---
 
 @pytest.mark.asyncio
 async def test_get_cached_score(tools, mock_container):
-    result = await tools.get_cached_score("0xabc123")
-    mock_container.db.get_contract_score.assert_awaited_once_with("0xabc123", 56)
+    result = await tools.get_cached_score("0x1111111111111111111111111111111111111111")
+    mock_container.db.get_contract_score.assert_awaited_once_with("0x1111111111111111111111111111111111111111", 56)
     assert result["risk_level"] == "LOW"
