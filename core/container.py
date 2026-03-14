@@ -156,6 +156,15 @@ class ServiceContainer:
             ai_analyzer=self.ai_analyzer,
         )
 
+        from agent.hunter import Hunter
+
+        self.hunter = Hunter(
+            tools=self.agent_tools,
+            db=self.db,
+            ai_analyzer=self.ai_analyzer,
+            sentinel=self.sentinel,
+        )
+
         # Optional services (need async init)
         self.greenfield_service = GreenfieldService()
         self.tenderly_simulator = TenderlySimulator()
