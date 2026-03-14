@@ -73,6 +73,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   } else {
     initCompact();
   }
+
+  // Ask ShieldBot AI — works in both compact popup and dashboard
+  const askBtn = document.getElementById("askBtn");
+  if (askBtn) {
+    askBtn.onclick = async function () {
+      try {
+        const w = await chrome.windows.getCurrent();
+        await chrome.sidePanel.open({ windowId: w.id });
+      } catch (err) {
+        console.error("sidePanel.open failed:", err);
+      }
+    };
+  }
 });
 
 // ============================================================
@@ -167,11 +180,6 @@ function initCompact() {
     });
   });
 
-  // Ask ShieldBot AI — open side panel
-  document.getElementById("askBtn")?.addEventListener("click", async () => {
-    await chrome.sidePanel.open({ windowId: (await chrome.windows.getCurrent()).id });
-    window.close();
-  });
 }
 
 // ============================================================
