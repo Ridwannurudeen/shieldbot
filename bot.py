@@ -588,8 +588,29 @@ async def campaign_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text(f"❌ Error investigating campaign: {str(e)}")
 
 
+async def _handle_advisor_chat(update: Update, message: str):
+    """Route free-text messages to the AI advisor."""
+    if not hasattr(container, 'advisor') or container.advisor is None:
+        await update.message.reply_text(
+            "AI advisor is not available at the moment."
+        )
+        return
+
+    user_id = f"tg-{update.effective_user.id}"
+    typing_msg = await update.message.reply_text("\U0001f914 Thinking...")
+
+    try:
+        response = await container.advisor.chat(user_id, message)
+        await typing_msg.edit_text(response)
+    except Exception as e:
+        logger.error(f"Advisor chat error: {e}")
+        await typing_msg.edit_text(
+            "Sorry, I couldn't process that request. Try again or send a contract address to scan."
+        )
+
+
 async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Auto-detect and handle addresses sent in messages"""
+    """Auto-detect addresses or route free text to AI advisor."""
     message_text = update.message.text.strip()
 
     # Parse optional chain prefix (e.g. "eth:0x..." or "base:0x...")
@@ -617,11 +638,8 @@ async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await status_msg.edit_text(f"🔍 Running security scan on {chain_name}...")
             await scan_contract(update, address, chain_id=user_chain_id)
     else:
-        await update.message.reply_text(
-            "❌ Invalid address format. Send a valid address (0x...).\n\n"
-            "Tip: Use chain prefixes like `eth:0x...` or `base:0x...`",
-            parse_mode='Markdown',
-        )
+        # Route free text to AI advisor
+        await _handle_advisor_chat(update, message_text)
 
 
 async def scan_contract(update: Update, address: str, chain_id: int = 56):

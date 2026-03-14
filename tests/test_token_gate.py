@@ -29,6 +29,8 @@ def client():
         requests_per_minute=10,
         burst=5,
     )
+    # Reset shared rate limiters to avoid cross-test interference
+    api_module.rate_limiter = api_module.RateLimiter(requests_per_minute=30, burst=10)
 
     return TestClient(api_module.app, raise_server_exceptions=False)
 

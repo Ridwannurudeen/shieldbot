@@ -151,6 +151,51 @@ class Database:
 
             CREATE INDEX IF NOT EXISTS idx_deployment_alerts_deployer
                 ON deployment_alerts(deployer_address, created_at);
+
+            CREATE TABLE IF NOT EXISTS agent_findings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                finding_type TEXT NOT NULL,
+                investigation_id TEXT,
+                address TEXT,
+                deployer TEXT,
+                chain_id INTEGER NOT NULL DEFAULT 56,
+                risk_score INTEGER,
+                narrative TEXT,
+                evidence TEXT,
+                action_taken TEXT,
+                created_at REAL NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_agent_findings_type
+                ON agent_findings(finding_type, created_at);
+            CREATE INDEX IF NOT EXISTS idx_agent_findings_address
+                ON agent_findings(address);
+
+            CREATE TABLE IF NOT EXISTS chat_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                message TEXT NOT NULL,
+                tools_used TEXT,
+                created_at REAL NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_chat_history_user
+                ON chat_history(user_id, created_at);
+
+            CREATE TABLE IF NOT EXISTS tracked_pairs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pair_address TEXT UNIQUE NOT NULL,
+                token_address TEXT,
+                deployer TEXT,
+                liquidity_usd REAL,
+                first_seen REAL NOT NULL,
+                last_checked REAL,
+                status TEXT NOT NULL DEFAULT 'watching'
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_tracked_pairs_status
+                ON tracked_pairs(status);
         """)
         await self._db.commit()
 
@@ -685,3 +730,212 @@ class Database:
             }
             for r in rows
         ]
+
+    # --- Agent Findings ---
+
+    async def insert_agent_finding(
+        self,
+        finding_type: str,
+        address: str = None,
+        deployer: str = None,
+        chain_id: int = 56,
+        risk_score: int = None,
+        narrative: str = None,
+        evidence=None,
+        action_taken: str = None,
+        investigation_id: str = None,
+    ):
+        """Insert a threat finding discovered by the AI agent."""
+        now = time.time()
+        evidence_json = json.dumps(evidence) if isinstance(evidence, (dict, list)) else evidence
+        await self._db.execute("""
+            INSERT INTO agent_findings
+                (finding_type, investigation_id, address, deployer, chain_id,
+                 risk_score, narrative, evidence, action_taken, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (finding_type, investigation_id, address, deployer, chain_id,
+              risk_score, narrative, evidence_json, action_taken, now))
+        await self._db.commit()
+
+    async def get_agent_findings(
+        self, limit: int = 50, finding_type: str = None
+    ) -> List[Dict]:
+        """Get agent findings, optionally filtered by type, newest first."""
+        if finding_type:
+            cursor = await self._db.execute("""
+                SELECT id, finding_type, investigation_id, address, deployer,
+                       chain_id, risk_score, narrative, evidence, action_taken, created_at
+                FROM agent_findings
+                WHERE finding_type = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, (finding_type, limit))
+        else:
+            cursor = await self._db.execute("""
+                SELECT id, finding_type, investigation_id, address, deployer,
+                       chain_id, risk_score, narrative, evidence, action_taken, created_at
+                FROM agent_findings
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, (limit,))
+        rows = await cursor.fetchall()
+        results = []
+        for r in rows:
+            evidence_val = r[8]
+            if evidence_val:
+                try:
+                    evidence_val = json.loads(evidence_val)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            results.append({
+                "id": r[0],
+                "finding_type": r[1],
+                "investigation_id": r[2],
+                "address": r[3],
+                "deployer": r[4],
+                "chain_id": r[5],
+                "risk_score": r[6],
+                "narrative": r[7],
+                "evidence": evidence_val,
+                "action_taken": r[9],
+                "created_at": r[10],
+            })
+        return results
+
+    # --- Chat History ---
+
+    async def insert_chat_message(
+        self,
+        user_id: str,
+        role: str,
+        message: str,
+        tools_used=None,
+        max_per_user: int = 50,
+    ):
+        """Insert a chat message for a user, capping at max_per_user messages."""
+        now = time.time()
+        tools_json = json.dumps(tools_used) if isinstance(tools_used, (list, dict)) else tools_used
+        await self._db.execute("""
+            INSERT INTO chat_history (user_id, role, message, tools_used, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (user_id, role, message, tools_json, now))
+        # Evict oldest messages beyond the per-user cap
+        await self._db.execute("""
+            DELETE FROM chat_history WHERE id IN (
+                SELECT id FROM chat_history
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+                LIMIT -1 OFFSET ?
+            )
+        """, (user_id, max_per_user))
+        await self._db.commit()
+
+    async def get_chat_history(self, user_id: str, limit: int = 10) -> List[Dict]:
+        """Get the last N messages for a user, ordered oldest-first (for LLM context)."""
+        cursor = await self._db.execute("""
+            SELECT id, role, message, tools_used, created_at
+            FROM chat_history
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (user_id, limit))
+        rows = await cursor.fetchall()
+        # Reverse so oldest is first (LLM context order)
+        rows = list(reversed(rows))
+        results = []
+        for r in rows:
+            tools_val = r[3]
+            if tools_val:
+                try:
+                    tools_val = json.loads(tools_val)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            results.append({
+                "id": r[0],
+                "user_id": user_id,
+                "role": r[1],
+                "message": r[2],
+                "tools_used": tools_val,
+                "created_at": r[4],
+            })
+        return results
+
+    async def prune_old_chats(self, max_age_seconds: int = 86400) -> int:
+        """Delete chat messages older than max_age_seconds. Returns count deleted."""
+        cutoff = time.time() - max_age_seconds
+        cursor = await self._db.execute(
+            "DELETE FROM chat_history WHERE created_at < ?", (cutoff,)
+        )
+        await self._db.commit()
+        return cursor.rowcount
+
+    # --- Tracked Pairs ---
+
+    async def upsert_tracked_pair(
+        self,
+        pair_address: str,
+        token_address: str = None,
+        deployer: str = None,
+        liquidity_usd: float = None,
+        status: str = "watching",
+    ):
+        """Insert or update a tracked PancakeSwap pair."""
+        now = time.time()
+        await self._db.execute("""
+            INSERT INTO tracked_pairs
+                (pair_address, token_address, deployer, liquidity_usd, first_seen, last_checked, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(pair_address) DO UPDATE SET
+                token_address = COALESCE(excluded.token_address, tracked_pairs.token_address),
+                deployer = COALESCE(excluded.deployer, tracked_pairs.deployer),
+                liquidity_usd = COALESCE(excluded.liquidity_usd, tracked_pairs.liquidity_usd),
+                last_checked = excluded.last_checked,
+                status = excluded.status
+        """, (pair_address, token_address, deployer, liquidity_usd, now, now, status))
+        await self._db.commit()
+
+    async def get_tracked_pairs(
+        self, status: str = None, limit: int = 100
+    ) -> List[Dict]:
+        """Get tracked pairs, optionally filtered by status."""
+        if status:
+            cursor = await self._db.execute("""
+                SELECT id, pair_address, token_address, deployer, liquidity_usd,
+                       first_seen, last_checked, status
+                FROM tracked_pairs
+                WHERE status = ?
+                ORDER BY first_seen DESC
+                LIMIT ?
+            """, (status, limit))
+        else:
+            cursor = await self._db.execute("""
+                SELECT id, pair_address, token_address, deployer, liquidity_usd,
+                       first_seen, last_checked, status
+                FROM tracked_pairs
+                ORDER BY first_seen DESC
+                LIMIT ?
+            """, (limit,))
+        rows = await cursor.fetchall()
+        return [
+            {
+                "id": r[0],
+                "pair_address": r[1],
+                "token_address": r[2],
+                "deployer": r[3],
+                "liquidity_usd": r[4],
+                "first_seen": r[5],
+                "last_checked": r[6],
+                "status": r[7],
+            }
+            for r in rows
+        ]
+
+    async def update_tracked_pair_status(self, pair_address: str, status: str):
+        """Update a tracked pair's status and last_checked timestamp."""
+        now = time.time()
+        await self._db.execute("""
+            UPDATE tracked_pairs
+            SET status = ?, last_checked = ?
+            WHERE pair_address = ?
+        """, (status, now, pair_address))
+        await self._db.commit()

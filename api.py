@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, Dict, Any, List
 
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD
@@ -75,6 +75,7 @@ class RateLimiter:
 
 
 rate_limiter = RateLimiter(requests_per_minute=30, burst=10)
+chat_limiter = RateLimiter(requests_per_minute=50, burst=10)
 
 
 # Service container (initialized on startup)
@@ -95,6 +96,7 @@ risk_engine = None
 greenfield_service = None
 tenderly_simulator = None
 token_gate_service = None
+advisor = None
 
 SHIELDBOT_TOKEN_ADDRESS = "0x4904c02efa081cb7685346968bac854cdf4e7777"
 
@@ -109,6 +111,13 @@ _NONCE_TTL = 300  # 5 minutes
 
 def _issue_nonce(wallet: str) -> str:
     """Issue a random nonce for wallet signature verification."""
+    # Probabilistic cleanup of expired nonces to prevent memory leak
+    import random
+    if random.random() < 0.05:
+        now = time.time()
+        expired = [k for k, (_, exp) in _nonce_store.items() if now > exp]
+        for k in expired:
+            del _nonce_store[k]
     nonce = secrets.token_hex(16)
     _nonce_store[wallet.lower()] = (nonce, time.time() + _NONCE_TTL)
     return nonce
@@ -136,6 +145,7 @@ def _bind_globals(c: ServiceContainer):
     global web3_client, ai_analyzer, tx_scanner, token_scanner, calldata_decoder
     global scam_db, dex_service, ethos_service, honeypot_service, contract_service
     global risk_engine, greenfield_service, tenderly_simulator, token_gate_service
+    global advisor
     web3_client = c.web3_client
     ai_analyzer = c.ai_analyzer
     tx_scanner = c.tx_scanner
@@ -150,6 +160,7 @@ def _bind_globals(c: ServiceContainer):
     greenfield_service = c.greenfield_service
     tenderly_simulator = c.tenderly_simulator
     token_gate_service = c.token_gate_service
+    advisor = c.advisor
 
 
 @asynccontextmanager
@@ -166,8 +177,11 @@ async def lifespan(app: FastAPI):
         app.state.rpc_proxy = rpc_proxy
         logger.info("RPC Proxy enabled")
 
+    await container.hunter.start()
+
     logger.info("ShieldAI Firewall API started")
     yield
+    await container.hunter.stop()
     await container.shutdown()
     rpc_proxy = getattr(app.state, "rpc_proxy", None)
     if rpc_proxy:
@@ -177,7 +191,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="ShieldAI Firewall API",
-    version="1.0.4",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -317,6 +331,26 @@ class CommunityReportRequest(BaseModel):
     chainId: int = 56
     report_type: str  # "false_positive", "false_negative", "scam"
     reason: Optional[str] = None
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+    user_id: str = Field(..., min_length=1, max_length=100)
+
+
+class ExplainRequest(BaseModel):
+    scan_result: Dict[str, Any]
+
+    @field_validator("scan_result")
+    @classmethod
+    def validate_scan_result(cls, v):
+        # Only allow known fields to prevent prompt injection via extra keys
+        allowed = {
+            "risk_score", "risk_level", "classification", "danger_signals",
+            "decoded_action", "flags", "critical_flags", "contract_verified",
+            "honeypot", "sell_tax", "buy_tax", "is_honeypot",
+        }
+        return {k: v[k] for k in v if k in allowed}
 
 
 # Report rate limiter: 5 reports/min per IP
@@ -977,6 +1011,20 @@ async def firewall(req: FirewallRequest, request: Request):
                 except Exception as e:
                     logger.error(f"DB upsert failed: {e}")
 
+            # Sentinel feedback loop: auto-watch deployers of blocked contracts
+            if container and hasattr(container, 'sentinel') and classification == "BLOCK_RECOMMENDED":
+                try:
+                    deployer_info = await container.db.get_deployer_risk_summary(to_addr, req.chainId)
+                    deployer_addr = deployer_info["deployer_address"] if deployer_info else None
+                    asyncio.create_task(container.sentinel.on_scan_blocked(
+                        address=to_addr,
+                        deployer=deployer_addr,
+                        chain_id=req.chainId,
+                        risk_score=risk_score,
+                    ))
+                except Exception as e:
+                    logger.error(f"Sentinel feedback failed: {e}")
+
             # Enqueue deployer indexing (fire-and-forget)
             if container and container.indexer:
                 container.indexer.enqueue(to_addr, req.chainId)
@@ -1368,6 +1416,46 @@ async def public_watch_alerts(
 
     alerts = await container.db.get_deployment_alerts(limit=50)
     return {"alerts": alerts, "count": len(alerts)}
+
+
+# --- Agent Chat ---
+
+@app.post("/api/agent/chat")
+async def agent_chat(req: ChatRequest, request: Request):
+    if not container or not hasattr(container, 'advisor'):
+        raise HTTPException(503, "Agent not available")
+
+    client_ip = _get_client_ip(request)
+    if not chat_limiter.is_allowed(client_ip):
+        raise HTTPException(429, "Rate limit exceeded")
+
+    # Bind user_id to client IP so users cannot read/poison each other's history
+    import hashlib
+    bound_user_id = hashlib.sha256(f"{client_ip}:{req.user_id}".encode()).hexdigest()[:24]
+
+    try:
+        response = await container.advisor.chat(bound_user_id, req.message)
+        return {"response": response, "user_id": req.user_id}
+    except Exception as e:
+        logger.error(f"Agent chat error: {e}")
+        raise HTTPException(500, "Agent error")
+
+
+@app.post("/api/agent/explain")
+async def agent_explain(req: ExplainRequest, request: Request):
+    if not container or not hasattr(container, 'advisor'):
+        raise HTTPException(503, "Agent not available")
+
+    client_ip = _get_client_ip(request)
+    if not chat_limiter.is_allowed(client_ip):
+        raise HTTPException(429, "Rate limit exceeded")
+
+    try:
+        explanation = await container.advisor.explain_scan(req.scan_result)
+        return {"explanation": explanation}
+    except Exception as e:
+        logger.error(f"Agent explain error: {e}")
+        raise HTTPException(500, "Agent error")
 
 
 # --- Mempool Monitoring ---

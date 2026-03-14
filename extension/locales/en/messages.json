@@ -137,5 +137,7 @@
   "classBlock": "BLOCK RECOMMENDED",
   "classHighRisk": "HIGH RISK",
   "classCaution": "CAUTION",
-  "classSafe": "SAFE"
+  "classSafe": "SAFE",
+  "overlayBtnWhy": "Why is this risky?",
+  "askShieldBotAI": "Ask ShieldBot AI"
 }

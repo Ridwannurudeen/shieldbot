@@ -507,6 +507,16 @@
             ${_t("overlayBtnProceed")}
           </button>
         </div>
+
+        <div class="shieldai-explain-row">
+          <button class="shieldai-btn shieldai-btn-explain" id="shieldai-explain">
+            ${_t("overlayBtnWhy") || "Why is this risky?"}
+          </button>
+        </div>
+        <div class="shieldai-explain-response" id="shieldai-explain-response" style="display:none;">
+          <p class="shieldai-explain-loading" id="shieldai-explain-loading">Analyzing...</p>
+          <p class="shieldai-explain-text" id="shieldai-explain-text"></p>
+        </div>
       </div>
     `;
 
@@ -543,6 +553,33 @@
           "*"
         );
       });
+
+    // "Why is this risky?" handler
+    document.getElementById("shieldai-explain").addEventListener("click", () => {
+      const btn = document.getElementById("shieldai-explain");
+      const responseDiv = document.getElementById("shieldai-explain-response");
+      const loadingEl = document.getElementById("shieldai-explain-loading");
+      const textEl = document.getElementById("shieldai-explain-text");
+
+      btn.disabled = true;
+      btn.textContent = "Analyzing...";
+      responseDiv.style.display = "block";
+      loadingEl.style.display = "block";
+      textEl.style.display = "none";
+
+      chrome.runtime.sendMessage(
+        { type: "SHIELDAI_EXPLAIN", scanResult: result },
+        (resp) => {
+          loadingEl.style.display = "none";
+          textEl.style.display = "block";
+          if (resp && resp.explanation) {
+            textEl.textContent = resp.explanation;
+          } else {
+            textEl.textContent = "Unable to generate explanation.";
+          }
+        }
+      );
+    });
   }
 
   async function showErrorOverlay(requestId, errorMsg) {
