@@ -31,7 +31,7 @@ def db():
 @pytest.fixture
 def ai():
     a = MagicMock()
-    a.client = None  # disabled by default
+    a.is_available = MagicMock(return_value=False)
     return a
 
 
@@ -262,11 +262,8 @@ async def test_log_finding_stores_in_db(hunter, db):
 @pytest.mark.asyncio
 async def test_log_finding_with_ai_narrative(hunter, db, ai):
     """When AI is available, _log_finding should generate a narrative."""
-    # Set up AI mock to be available
-    mock_message = MagicMock()
-    mock_message.content = [MagicMock(text="  This contract is dangerous.  ")]
-    ai.client = MagicMock()
-    ai.client.messages.create = AsyncMock(return_value=mock_message)
+    ai.is_available = MagicMock(return_value=True)
+    ai.chat = AsyncMock(return_value="  This contract is dangerous.  ")
 
     await hunter._log_finding(
         investigation_id="sweep-2",
@@ -285,8 +282,8 @@ async def test_log_finding_with_ai_narrative(hunter, db, ai):
 @pytest.mark.asyncio
 async def test_log_finding_ai_failure_still_stores(hunter, db, ai):
     """If AI narrative fails, the finding should still be stored without narrative."""
-    ai.client = MagicMock()
-    ai.client.messages.create = AsyncMock(side_effect=RuntimeError("API down"))
+    ai.is_available = MagicMock(return_value=True)
+    ai.chat = AsyncMock(side_effect=RuntimeError("API down"))
 
     await hunter._log_finding(
         investigation_id="sweep-3",

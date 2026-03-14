@@ -78,15 +78,15 @@ class Sentinel:
             narrative = None
 
             # Generate a short threat narrative via Haiku if AI is available
-            if self.ai and getattr(self.ai, "client", None) is not None:
+            if self.ai and self.ai.is_available():
                 try:
                     prompt = NARRATIVE_TEMPLATE.format(data=json.dumps(alert_data, default=str))
-                    message = await self.ai.client.messages.create(
+                    narrative = await self.ai.chat(
                         model=HAIKU_MODEL,
-                        max_tokens=200,
                         messages=[{"role": "user", "content": prompt}],
+                        max_tokens=200,
                     )
-                    narrative = message.content[0].text.strip()
+                    narrative = narrative.strip()
                 except Exception:
                     logger.warning("Sentinel: AI narrative generation failed", exc_info=True)
 

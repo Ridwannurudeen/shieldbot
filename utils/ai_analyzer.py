@@ -7,25 +7,96 @@ import os
 import json
 import logging
 import anthropic
-from typing import Dict, Optional
+from typing import Dict, List, Optional
+
+try:
+    import openai as _openai_mod
+except ImportError:
+    _openai_mod = None
+
 from utils.firewall_prompt import FIREWALL_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
+# Model mapping: Anthropic model -> OpenAI equivalent
+_OPENAI_FALLBACK_MODELS = {
+    "claude-3-haiku-20240307": "gpt-4o-mini",
+    "claude-sonnet-4-20250514": "gpt-4o",
+}
+
 
 class AIAnalyzer:
-    """Claude AI-powered contract analysis with structured scoring"""
+    """Claude AI-powered contract analysis with structured scoring.
+
+    Supports OpenAI as a fallback when ANTHROPIC_API_KEY is not set
+    but OPENAI_API_KEY is available.
+    """
 
     def __init__(self):
         self.api_key = os.getenv('ANTHROPIC_API_KEY')
         if not self.api_key:
-            logger.warning("ANTHROPIC_API_KEY not set - AI analysis disabled")
+            logger.warning("ANTHROPIC_API_KEY not set - Anthropic AI disabled")
             self.client = None
         else:
             self.client = anthropic.AsyncAnthropic(api_key=self.api_key)
 
+        # OpenAI fallback
+        self._openai_client = None
+        openai_key = os.getenv('OPENAI_API_KEY')
+        if openai_key and _openai_mod:
+            self._openai_client = _openai_mod.AsyncOpenAI(api_key=openai_key)
+            logger.info("OpenAI fallback enabled")
+
+        if not self.client and not self._openai_client:
+            logger.warning("No AI keys set - AI analysis fully disabled")
+
         self.model = os.getenv('ANTHROPIC_MODEL', 'claude-3-haiku-20240307')
         logger.info(f"AI model: {self.model}")
+
+    async def chat(
+        self,
+        model: str,
+        messages: List[Dict],
+        system: str = None,
+        max_tokens: int = 500,
+    ) -> str:
+        """Unified chat method — tries Anthropic first, falls back to OpenAI.
+
+        Args:
+            model: Anthropic model name (auto-mapped for OpenAI fallback).
+            messages: List of {role, content} dicts.
+            system: Optional system prompt.
+            max_tokens: Max response tokens.
+
+        Returns:
+            Response text string.
+
+        Raises:
+            RuntimeError: If no AI provider is available.
+        """
+        # Try Anthropic first
+        if self.client:
+            kwargs = dict(model=model, max_tokens=max_tokens, messages=messages)
+            if system:
+                kwargs["system"] = system
+            response = await self.client.messages.create(**kwargs)
+            return response.content[0].text
+
+        # Fallback to OpenAI
+        if self._openai_client:
+            oai_model = _OPENAI_FALLBACK_MODELS.get(model, "gpt-4o-mini")
+            oai_messages = []
+            if system:
+                oai_messages.append({"role": "system", "content": system})
+            oai_messages.extend(messages)
+            response = await self._openai_client.chat.completions.create(
+                model=oai_model,
+                max_tokens=max_tokens,
+                messages=oai_messages,
+            )
+            return response.choices[0].message.content
+
+        raise RuntimeError("No AI provider available")
 
     async def compute_ai_risk_score(self, address: str, scan_data: Dict) -> Optional[Dict]:
         """
@@ -543,5 +614,5 @@ Return the firewall analysis JSON now."""
         return "\n".join(lines)
 
     def is_available(self) -> bool:
-        """Check if AI analysis is available"""
-        return self.client is not None
+        """Check if AI analysis is available (Anthropic or OpenAI)."""
+        return self.client is not None or self._openai_client is not None

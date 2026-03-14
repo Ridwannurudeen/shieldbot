@@ -19,7 +19,7 @@ def sentinel():
     db.insert_agent_finding = AsyncMock()
 
     ai = MagicMock()
-    ai.client = None  # disabled for most tests
+    ai.is_available = MagicMock(return_value=False)
 
     return Sentinel(tools=tools, db=db, ai_analyzer=ai)
 

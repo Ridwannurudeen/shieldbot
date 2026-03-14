@@ -43,14 +43,15 @@ def mock_db():
 @pytest.fixture
 def mock_ai():
     ai = MagicMock()
-    ai.client = MagicMock()  # not None — AI is available
+    ai.is_available = MagicMock(return_value=True)
+    ai.chat = AsyncMock(return_value="AI response placeholder")
     return ai
 
 
 @pytest.fixture
 def mock_ai_disabled():
     ai = MagicMock()
-    ai.client = None  # AI disabled
+    ai.is_available = MagicMock(return_value=False)
     return ai
 
 
@@ -160,9 +161,7 @@ async def test_gather_context_general(advisor, mock_tools):
 @pytest.mark.asyncio
 async def test_chat_saves_history(advisor, mock_db, mock_ai):
     """chat() saves user message and assistant response to DB."""
-    mock_response = MagicMock()
-    mock_response.content = [MagicMock(text="This contract looks risky.")]
-    mock_ai.client.messages.create = AsyncMock(return_value=mock_response)
+    mock_ai.chat = AsyncMock(return_value="This contract looks risky.")
 
     response = await advisor.chat("user123", "How does ShieldBot work?")
 
@@ -181,18 +180,16 @@ async def test_chat_saves_history(advisor, mock_db, mock_ai):
 @pytest.mark.asyncio
 async def test_chat_with_contract_context(advisor, mock_db, mock_ai):
     """chat() injects contract context into the user message."""
-    mock_response = MagicMock()
-    mock_response.content = [MagicMock(text="High risk contract detected.")]
-    mock_ai.client.messages.create = AsyncMock(return_value=mock_response)
+    mock_ai.chat = AsyncMock(return_value="High risk contract detected.")
 
     response = await advisor.chat(
         "user456", "Check 0x4904c02efa081cb7685346968bac854cdf4e7777"
     )
 
     assert response == "High risk contract detected."
-    # Verify the API was called with context in the message
-    create_call = mock_ai.client.messages.create.call_args
-    messages = create_call.kwargs["messages"]
+    # Verify the AI was called with context in the message
+    chat_call = mock_ai.chat.call_args
+    messages = chat_call.kwargs["messages"]
     last_msg = messages[-1]["content"]
     assert "[ShieldBot Data]" in last_msg
     assert "rug_probability" in last_msg
@@ -205,14 +202,12 @@ async def test_chat_includes_history(advisor, mock_db, mock_ai):
         {"role": "user", "message": "Hello"},
         {"role": "assistant", "message": "Hi there!"},
     ])
-    mock_response = MagicMock()
-    mock_response.content = [MagicMock(text="Sure, what would you like to know?")]
-    mock_ai.client.messages.create = AsyncMock(return_value=mock_response)
+    mock_ai.chat = AsyncMock(return_value="Sure, what would you like to know?")
 
     await advisor.chat("user789", "Tell me more")
 
-    create_call = mock_ai.client.messages.create.call_args
-    messages = create_call.kwargs["messages"]
+    chat_call = mock_ai.chat.call_args
+    messages = chat_call.kwargs["messages"]
     # History + new message = 3 messages
     assert len(messages) == 3
     assert messages[0]["role"] == "user"
@@ -238,17 +233,15 @@ async def test_chat_without_ai(advisor_no_ai, mock_db):
 @pytest.mark.asyncio
 async def test_explain_scan(advisor, mock_ai):
     """explain_scan() calls Haiku with the formatted template."""
-    mock_response = MagicMock()
-    mock_response.content = [MagicMock(text="This contract has high risk.")]
-    mock_ai.client.messages.create = AsyncMock(return_value=mock_response)
+    mock_ai.chat = AsyncMock(return_value="This contract has high risk.")
 
     scan = {"risk_score": 85, "risk_level": "HIGH", "flags": ["Honeypot"]}
     result = await advisor.explain_scan(scan)
 
     assert result == "This contract has high risk."
-    create_call = mock_ai.client.messages.create.call_args
-    assert create_call.kwargs["max_tokens"] == 300
-    msg_content = create_call.kwargs["messages"][0]["content"]
+    chat_call = mock_ai.chat.call_args
+    assert chat_call.kwargs["max_tokens"] == 300
+    msg_content = chat_call.kwargs["messages"][0]["content"]
     assert "risk_score" in msg_content
 
 

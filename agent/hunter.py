@@ -203,17 +203,17 @@ class Hunter:
     ):
         """Store a finding and optionally generate AI narrative."""
         narrative = None
-        if self.ai and getattr(self.ai, "client", None) is not None:
+        if self.ai and self.ai.is_available():
             try:
                 prompt = NARRATIVE_TEMPLATE.format(
                     data=json.dumps(evidence, default=str)
                 )
-                message = await self.ai.client.messages.create(
+                narrative = await self.ai.chat(
                     model=HAIKU_MODEL,
-                    max_tokens=200,
                     messages=[{"role": "user", "content": prompt}],
+                    max_tokens=200,
                 )
-                narrative = message.content[0].text.strip()
+                narrative = narrative.strip()
             except Exception:
                 logger.warning("Hunter: AI narrative failed", exc_info=True)
 

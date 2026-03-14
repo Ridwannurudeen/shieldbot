@@ -109,21 +109,20 @@ class Advisor:
             })
         messages.append({"role": "user", "content": user_content})
 
-        # Call Claude or return fallback
-        if self.ai.client is None:
+        # Call AI or return fallback
+        if not self.ai.is_available():
             response_text = (
                 "AI analysis is currently unavailable. "
                 "Please try again later or check your API key configuration."
             )
         else:
             try:
-                response = await self.ai.client.messages.create(
+                response_text = await self.ai.chat(
                     model=self.sonnet_model,
-                    max_tokens=500,
-                    system=ADVISOR_SYSTEM_PROMPT,
                     messages=messages,
+                    system=ADVISOR_SYSTEM_PROMPT,
+                    max_tokens=500,
                 )
-                response_text = response.content[0].text
             except Exception as e:
                 logger.error(f"Advisor chat failed: {e}")
                 response_text = (
@@ -146,7 +145,7 @@ class Advisor:
 
         Uses Haiku for speed. Falls back to rule-based if AI is disabled.
         """
-        if self.ai.client is None:
+        if not self.ai.is_available():
             return self._rule_based_explanation(scan_result)
 
         prompt = EXPLAIN_SCAN_TEMPLATE.format(
@@ -154,12 +153,11 @@ class Advisor:
         )
 
         try:
-            response = await self.ai.client.messages.create(
+            return await self.ai.chat(
                 model=self.haiku_model,
-                max_tokens=300,
                 messages=[{"role": "user", "content": prompt}],
+                max_tokens=300,
             )
-            return response.content[0].text
         except Exception as e:
             logger.error(f"Advisor explain_scan failed: {e}")
             return self._rule_based_explanation(scan_result)

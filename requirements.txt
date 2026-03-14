@@ -5,6 +5,7 @@ python-dotenv==1.2.1
 aiohttp==3.13.3
 eth-utils==2.3.1
 anthropic==0.79.0
+openai>=1.0.0
 fastapi==0.129.0
 uvicorn[standard]==0.40.0
 websockets==15.0.1
