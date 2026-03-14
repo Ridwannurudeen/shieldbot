@@ -14,7 +14,7 @@ BNB Chain is the primary chain. To provide stronger protection, ShieldBot monito
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![BNB Chain](https://img.shields.io/badge/BNB-Chain-yellow)](https://www.bnbchain.org/)
 [![Chrome Web Store](https://img.shields.io/badge/Chrome-Extension-green)](https://chromewebstore.google.com/)
-[![Version](https://img.shields.io/badge/version-1.0.9-blue)]()
+[![Version](https://img.shields.io/badge/version-2.0.0-blue)]()
 
 **[Landing Page](https://shieldbotsecurity.online)** | **[Chrome Extension](https://chromewebstore.google.com/)** | **[Live Dashboard](https://api.shieldbotsecurity.online/dashboard)** | **[Demo Video](https://youtu.be/NN95rom10R8)** | **[Telegram Bot](https://t.me/shieldbot_bnb_bot)**
 
@@ -72,6 +72,7 @@ BNB Chain is the primary chain. To provide stronger protection, ShieldBot monito
 |  - Calibration (data-driven threshold tuning from outcome events)        |
 |  - Deployer Cluster Auto-Block (serial scammer detection)                |
 |  - Token Gate ($SHIELDBOT holder verification for premium alerts)        |
+|  - AI Agent (Hunter sweeps, Sentinel auto-watch, Advisor chat)           |
 +-------------------------------------------------------------------------+
 |  ANALYZERS (6 pluggable plugins)                                         |
 |  - Structural: verification, age, bytecode (mint, proxy, blacklist)      |
@@ -212,6 +213,8 @@ Filter by chain, time range, and severity. Powers the live dashboard and third-p
 /help               All commands
 ```
 
+Free-text messages are routed to the AI Advisor for conversational security guidance.
+
 Supports: **BSC, Ethereum, Base, Arbitrum, Polygon, Optimism, opBNB**
 Chain prefixes: `eth:0x...` `base:0x...` `arb:0x...` `poly:0x...` `op:0x...`
 
@@ -291,6 +294,34 @@ Automatically detects deployers with 2+ prior HIGH-risk contracts and applies a 
 Deployer alerts from watched addresses are available to verified $SHIELDBOT token holders via the extension's Feed tab. On-chain `balanceOf` verification with optional wallet signature authentication.
 
 **Token:** `0x4904c02efa081cb7685346968bac854cdf4e7777` (BNB Chain)
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### AI Agent
+**Hunter + Sentinel + Advisor**
+
+Three autonomous agents that work together:
+- **Hunter** — 30-minute sweeps across monitored chains, surfacing new threats automatically
+- **Sentinel** — auto-watch feedback loop that tracks flagged deployers and alerts on new activity
+- **Advisor** — intent-routed chat via Side Panel or Telegram with contextual security guidance
+
+Access via the Chrome Side Panel ("Ask ShieldBot" button) or free-text messages in Telegram.
+
+</td>
+<td width="50%" valign="top">
+
+### Chrome Side Panel Chat
+**Conversational Security Assistance**
+
+Ask ShieldBot anything directly from your browser:
+- "Is this token safe?" — triggers a live scan
+- "Why was this blocked?" — explains the verdict with analyzer breakdown
+- Natural language routing to the right agent (Hunter, Sentinel, or Advisor)
+
+Powered by Anthropic Claude with OpenAI fallback for resilience.
 
 </td>
 </tr>
@@ -435,6 +466,13 @@ ADMIN_SECRET=your_admin_secret
 | DELETE | `/api/admin/watch/deployer` | Remove watched deployer (admin) |
 | GET | `/api/admin/watch/alerts` | All deployer alerts (admin) |
 
+### AI Agent
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/agent/chat` | Conversational AI security advisor |
+| POST | `/api/agent/explain` | Explain a transaction verdict or scan result |
+
 ### User Reporting
 
 | Method | Path | Description |
@@ -476,6 +514,14 @@ shieldbot/
 │   ├── indexer.py              # Background DeployerIndexer
 │   ├── config.py               # Pydantic Settings from .env
 │   └── container.py            # ServiceContainer (dependency injection)
+│
+├── agent/                      # AI Agent system
+│   ├── __init__.py             # Agent orchestrator + registry
+│   ├── advisor.py              # Advisor agent (intent routing + chat)
+│   ├── hunter.py               # Hunter agent (scheduled threat sweeps)
+│   ├── sentinel.py             # Sentinel agent (auto-watch feedback loop)
+│   ├── prompts.py              # System prompts for AI agents
+│   └── tools.py                # Agent tool definitions (scan, explain, watch)
 │
 ├── analyzers/                  # 6 pluggable analyzer plugins
 │   ├── structural.py           # Contract verification, age, bytecode
@@ -526,6 +572,8 @@ shieldbot/
 │   ├── content.js              # Content script (document_start)
 │   ├── background.js           # Service worker
 │   ├── popup.html / popup.js   # Extension popup (Scan/Feed/Settings)
+│   ├── sidepanel.html          # Side Panel chat UI
+│   ├── sidepanel.js            # Side Panel logic (Advisor chat)
 │   ├── welcome.html / welcome.js # Onboarding page
 │   ├── overlay.css             # Transaction verdict overlay styles
 │   ├── i18n.js                 # Internationalization (EN/ZH/VI)
@@ -544,7 +592,7 @@ shieldbot/
 │   ├── scam_db.py              # Scam address database
 │   └── onchain_recorder.py     # On-chain recording
 │
-├── tests/                      # Test suite (194 tests, 25+ files)
+├── tests/                      # Test suite (257 tests, 34 files)
 ├── docs/                       # Documentation
 ├── deploy/                     # nginx/caddy/certbot setup
 ├── contracts/                  # ShieldBotVerifier.sol
@@ -562,6 +610,7 @@ shieldbot/
 | Web3 | web3.py 6.15+, eth-account, rlp |
 | Database | SQLite with WAL mode (aiosqlite) |
 | AI Analysis | Anthropic Claude API |
+| AI Fallback | OpenAI API (provider resilience) |
 | Simulation | Tenderly API |
 | On-Chain Storage | BNB Greenfield |
 | Contract Intel | GoPlus, Etherscan v2 API, scam databases |
@@ -580,7 +629,7 @@ shieldbot/
 ```bash
 pip install pytest pytest-asyncio pytest-cov
 
-# Run all tests (194 tests)
+# Run all tests (257 tests)
 pytest tests/ -v
 
 # Run evaluation benchmark
@@ -625,7 +674,8 @@ ShieldBot follows a defense-in-depth approach:
 **Development Phases:**
 - **Phase 1** (Foundation): ChainAdapter interface, pluggable analyzer registry, policy modes, API auth, contract reputation DB, deployer indexer, outcome tracking
 - **Phase 2** (Detection + Distribution): Intent mismatch analyzer, signature/permit analyzer, confidence calibration, evaluation pipeline, community reporting, Ethereum/Base adapters, RPC proxy, Telegram scan-by-address
-- **Phase 3** (Moat Features + Growth): Campaign Graph Radar, mempool monitoring, Rescue Mode, Arbitrum/Polygon/Optimism/opBNB adapters, SDK, threat dashboard, threat feed API, deployer cluster auto-block, phishing blocker, token-gated alert feed, i18n (EN/ZH/VI), Chrome Web Store v1.0.9, security audit + hardening
+- **Phase 3** (Moat Features + Growth): Campaign Graph Radar, mempool monitoring, Rescue Mode, Arbitrum/Polygon/Optimism/opBNB adapters, SDK, threat dashboard, threat feed API, deployer cluster auto-block, phishing blocker, token-gated alert feed, i18n (EN/ZH/VI), Chrome Web Store v1.0.9, security audit + hardening ✓
+- **Phase 4** (AI Agent + Ecosystem): AI Agent system (Hunter scheduled sweeps, Sentinel auto-watch loop, Advisor intent-routed chat), Chrome Side Panel UI, Telegram free-text routing, OpenAI fallback provider, v2.0.0
 
 ---
 
