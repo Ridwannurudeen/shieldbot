@@ -118,7 +118,7 @@ async def test_check_deployer(tools, mock_container):
 @pytest.mark.asyncio
 async def test_check_honeypot(tools, mock_container):
     result = await tools.check_honeypot("0x1111111111111111111111111111111111111111")
-    mock_container.honeypot_service.fetch_honeypot_data.assert_awaited_once_with("0x1111111111111111111111111111111111111111")
+    mock_container.honeypot_service.fetch_honeypot_data.assert_awaited_once_with("0x1111111111111111111111111111111111111111", chain_id=56)
     assert result["is_honeypot"] is False
 
 
@@ -127,7 +127,7 @@ async def test_check_honeypot(tools, mock_container):
 @pytest.mark.asyncio
 async def test_get_market_data(tools, mock_container):
     result = await tools.get_market_data("0x1111111111111111111111111111111111111111")
-    mock_container.dex_service.fetch_token_market_data.assert_awaited_once_with("0x1111111111111111111111111111111111111111")
+    mock_container.dex_service.fetch_token_market_data.assert_awaited_once_with("0x1111111111111111111111111111111111111111", chain_id=56)
     assert result["liquidity_usd"] == 50000
 
 

@@ -41,28 +41,31 @@ class AgentTools:
         address = _validate_address(address)
         return await self._container.db.get_deployer_risk_summary(address, chain_id)
 
-    async def check_honeypot(self, address: str) -> Dict:
+    async def check_honeypot(self, address: str, chain_id: int = 56) -> Dict:
         """Run honeypot simulation on a token address."""
         address = _validate_address(address)
-        return await self._container.honeypot_service.fetch_honeypot_data(address)
+        return await self._container.honeypot_service.fetch_honeypot_data(address, chain_id=chain_id)
 
-    async def get_market_data(self, address: str) -> Dict:
+    async def get_market_data(self, address: str, chain_id: int = 56) -> Dict:
         """Fetch DexScreener market data for a token address."""
         address = _validate_address(address)
-        return await self._container.dex_service.fetch_token_market_data(address)
+        return await self._container.dex_service.fetch_token_market_data(address, chain_id=chain_id)
 
     async def query_campaign(self, address: str, chain_id: int = None) -> Dict:
         """Get deployer/funder campaign graph for an address."""
+        address = _validate_address(address)
         return await self._container.db.get_campaign_graph(address, chain_id)
 
     async def get_funder_links(self, deployer: str, chain_id: int = None) -> Dict:
         """Get funder links for a deployer address via campaign graph."""
+        deployer = _validate_address(deployer)
         return await self._container.db.get_campaign_graph(deployer, chain_id)
 
     async def get_agent_findings(
         self, limit: int = 10, finding_type: str = None
     ) -> List[Dict]:
         """Retrieve recent agent findings, optionally filtered by type."""
+        limit = max(1, min(limit, 100))
         return await self._container.db.get_agent_findings(limit, finding_type)
 
     async def auto_watch_deployer(
@@ -74,4 +77,5 @@ class AgentTools:
 
     async def get_cached_score(self, address: str, chain_id: int = 56) -> Optional[Dict]:
         """Return cached contract risk score if available."""
+        address = _validate_address(address)
         return await self._container.db.get_contract_score(address, chain_id)

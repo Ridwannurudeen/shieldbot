@@ -19,6 +19,7 @@ chrome.runtime.onInstalled.addListener((details) => {
 // Avoids repeated API calls when navigating across pages on the same site.
 const _phishingCache = new Map();
 const PHISHING_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const MAX_PHISHING_CACHE = 500;
 
 // Listen for messages from content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -77,9 +78,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "SHIELDAI_OPEN_SIDEPANEL") {
-    chrome.sidePanel.open({ windowId: sender.tab.windowId })
+    const windowId = sender.tab?.windowId;
+    if (!windowId) {
+      sendResponse({ error: "No window context available" });
+      return true;
+    }
+    chrome.sidePanel.open({ windowId })
       .then(() => sendResponse({ ok: true }))
       .catch((err) => sendResponse({ error: err.message }));
+    return true;
+  }
+
+  if (message.type === "SHIELDAI_GET_ACTIVE_TAB") {
+    // Only allow extension pages (sidepanel/popup), not content scripts
+    if (sender.tab) {
+      sendResponse({ url: null });
+      return true;
+    }
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs && tabs[0]) {
+        sendResponse({ url: tabs[0].url, title: tabs[0].title });
+      } else {
+        sendResponse({ url: null });
+      }
+    });
     return true;
   }
 
@@ -118,6 +140,11 @@ async function checkPhishing(url) {
     }
 
     const result = await response.json();
+    // Evict oldest entry if cache is full
+    if (_phishingCache.size >= MAX_PHISHING_CACHE) {
+      const firstKey = _phishingCache.keys().next().value;
+      _phishingCache.delete(firstKey);
+    }
     _phishingCache.set(cacheKey, { result, expiresAt: Date.now() + PHISHING_CACHE_TTL_MS });
     return result;
   } catch {

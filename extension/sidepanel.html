@@ -23,7 +23,20 @@
       flex-shrink: 0;
     }
     .header .logo { font-size: 22px; }
-    .header h1 { font-size: 14px; font-weight: 600; color: #f8fafc; }
+    .header h1 { font-size: 14px; font-weight: 600; color: #f8fafc; flex: 1; }
+    .header-actions { display: flex; gap: 6px; }
+    .header-actions button {
+      padding: 4px 10px;
+      background: transparent;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      color: #94a3b8;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    #clearBtn:hover { border-color: #ef4444; color: #ef4444; }
+    #exportBtn:hover { border-color: #3b82f6; color: #3b82f6; }
 
     #messages {
       flex: 1;
@@ -43,13 +56,13 @@
       font-size: 13px;
       line-height: 1.5;
       word-wrap: break-word;
-      white-space: pre-wrap;
     }
     .chat-bubble.user {
       align-self: flex-end;
       background: #3b82f6;
       color: #ffffff;
       border-bottom-right-radius: 4px;
+      white-space: pre-wrap;
     }
     .chat-bubble.assistant {
       align-self: flex-start;
@@ -57,20 +70,59 @@
       color: #e2e8f0;
       border-bottom-left-radius: 4px;
     }
+    .chat-bubble.error {
+      border: 1px solid #ef4444;
+    }
 
-    #typing {
-      display: none;
+    /* Bubble wrapper for copy button */
+    .bubble-wrapper {
+      align-self: flex-start;
+      max-width: 85%;
+      position: relative;
+    }
+    .bubble-wrapper .chat-bubble { max-width: 100%; }
+    .copy-btn {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      padding: 2px 8px;
+      background: #1e293b;
+      border: 1px solid #475569;
+      border-radius: 4px;
+      color: #94a3b8;
+      font-size: 10px;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .bubble-wrapper:hover .copy-btn { opacity: 1; }
+    .copy-btn:hover { color: #f8fafc; border-color: #3b82f6; }
+
+    /* Retry button */
+    .retry-btn {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 3px 10px;
+      background: transparent;
+      border: 1px solid #ef4444;
+      border-radius: 4px;
+      color: #ef4444;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .retry-btn:hover { background: #ef4444; color: #fff; }
+
+    /* Inline typing bubble */
+    .chat-bubble.typing {
+      align-self: flex-start;
+      background: #334155;
+      display: flex;
       align-items: center;
       gap: 6px;
-      padding: 0 16px 8px;
-      font-size: 12px;
-      color: #64748b;
-      flex-shrink: 0;
+      padding: 10px 14px;
     }
-    .typing-dots {
-      display: flex;
-      gap: 3px;
-    }
+    .typing-dots { display: flex; gap: 3px; }
     .typing-dot {
       width: 5px;
       height: 5px;
@@ -80,11 +132,129 @@
     }
     .typing-dot:nth-child(2) { animation-delay: 0.2s; }
     .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+    .typing-label { font-size: 12px; color: #64748b; }
     @keyframes typingPulse {
       0%, 80%, 100% { transform: scale(0.6); opacity: 0.3; }
       40% { transform: scale(1); opacity: 1; }
     }
 
+    /* Suggested prompts */
+    .suggested-prompts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 16px;
+      justify-content: center;
+    }
+    .prompt-chip {
+      padding: 8px 14px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 20px;
+      color: #94a3b8;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .prompt-chip:hover { border-color: #3b82f6; color: #f8fafc; }
+
+    /* Markdown styles */
+    .chat-bubble.assistant p { margin-bottom: 6px; }
+    .chat-bubble.assistant p:last-child { margin-bottom: 0; }
+    .md-codeblock {
+      display: block;
+      background: #1e293b;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 12px;
+      overflow-x: auto;
+      margin: 6px 0;
+      white-space: pre-wrap;
+      color: #a5f3fc;
+    }
+    .md-code {
+      background: #1e293b;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 12px;
+      color: #a5f3fc;
+    }
+    .md-list {
+      padding-left: 18px;
+      margin: 4px 0;
+    }
+    .md-list li { margin-bottom: 2px; }
+    .md-link {
+      color: #60a5fa;
+      text-decoration: underline;
+    }
+    .chat-bubble.assistant strong { color: #f8fafc; }
+    .chat-bubble.assistant em { color: #cbd5e1; }
+
+    /* Risk card */
+    .risk-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 6px;
+      align-self: flex-start;
+      max-width: 85%;
+    }
+    .risk-card-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .risk-score-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .risk-score-badge.high { background: #ef4444; }
+    .risk-score-badge.medium { background: #f59e0b; }
+    .risk-score-badge.low { background: #22c55e; }
+    .risk-card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #f8fafc;
+    }
+    .risk-card-subtitle {
+      font-size: 11px;
+      color: #94a3b8;
+      margin-top: 1px;
+    }
+    .risk-flag {
+      display: inline-block;
+      padding: 2px 8px;
+      background: rgba(239,68,68,0.15);
+      border: 1px solid rgba(239,68,68,0.3);
+      border-radius: 4px;
+      color: #fca5a5;
+      font-size: 11px;
+      margin: 2px 2px 2px 0;
+    }
+    .risk-card-meta {
+      margin-top: 8px;
+      font-size: 11px;
+      color: #64748b;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .risk-card-meta span { color: #94a3b8; }
+
+    /* Chain selector */
     .input-area {
       display: flex;
       gap: 8px;
@@ -92,7 +262,20 @@
       background: #1e293b;
       border-top: 1px solid #334155;
       flex-shrink: 0;
+      align-items: flex-end;
     }
+    #chainSelect {
+      padding: 8px 6px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      color: #94a3b8;
+      font-size: 11px;
+      cursor: pointer;
+      outline: none;
+      flex-shrink: 0;
+    }
+    #chainSelect:focus { border-color: #3b82f6; }
     #chatInput {
       flex: 1;
       padding: 10px 12px;
@@ -128,20 +311,24 @@
   <div class="header">
     <div class="logo">&#128737;</div>
     <h1>ShieldBot AI</h1>
+    <div class="header-actions">
+      <button id="exportBtn">Export</button>
+      <button id="clearBtn">Clear</button>
+    </div>
   </div>
 
   <div id="messages"></div>
 
-  <div id="typing">
-    <div class="typing-dots">
-      <div class="typing-dot"></div>
-      <div class="typing-dot"></div>
-      <div class="typing-dot"></div>
-    </div>
-    <span>ShieldBot is thinking...</span>
-  </div>
-
   <div class="input-area">
+    <select id="chainSelect">
+      <option value="56">BSC</option>
+      <option value="1">ETH</option>
+      <option value="8453">Base</option>
+      <option value="42161">Arb</option>
+      <option value="137">Poly</option>
+      <option value="204">opBNB</option>
+      <option value="10">OP</option>
+    </select>
     <input type="text" id="chatInput" placeholder="Ask about a token, contract, or threat...">
     <button id="sendBtn">Send</button>
   </div>

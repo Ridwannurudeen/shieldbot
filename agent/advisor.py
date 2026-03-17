@@ -4,10 +4,11 @@ Routes user messages to the appropriate tool pipeline, gathers context,
 and streams responses through Claude for natural-language security analysis.
 """
 
+import asyncio
 import json
 import logging
 import re
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from agent.prompts import ADVISOR_SYSTEM_PROMPT, EXPLAIN_SCAN_TEMPLATE, HAIKU_MODEL, SONNET_MODEL
 
@@ -56,18 +57,40 @@ class Advisor:
     # 2. Context gathering (async, calls tools)
     # ------------------------------------------------------------------
 
-    async def _gather_context(self, intent: str, data: dict):
+    async def _gather_context(self, intent: str, data: dict, chain_id: int = 56):
         """Gather tool-sourced context based on the routed intent.
 
         Returns a dict or list depending on intent.
         """
         if intent == "CONTRACT_CHECK":
-            scan = await self.tools.scan_contract(data["address"])
-            deployer = await self.tools.check_deployer(data["address"])
-            return {"scan": scan, "deployer": deployer}
+            addr = data["address"]
+            scan, deployer, honeypot, market = await asyncio.gather(
+                self.tools.scan_contract(addr, chain_id=chain_id),
+                self.tools.check_deployer(addr, chain_id=chain_id),
+                self.tools.check_honeypot(addr, chain_id=chain_id),
+                self.tools.get_market_data(addr, chain_id=chain_id),
+                return_exceptions=True,
+            )
+            if isinstance(scan, Exception):
+                logger.warning("scan_contract failed: %s", scan)
+                scan = {}
+            if isinstance(deployer, Exception):
+                logger.warning("check_deployer failed: %s", deployer)
+                deployer = {}
+            if isinstance(honeypot, Exception):
+                logger.warning("check_honeypot failed: %s", honeypot)
+                honeypot = {}
+            if isinstance(market, Exception):
+                logger.warning("get_market_data failed: %s", market)
+                market = {}
+            return {"scan": scan, "deployer": deployer, "honeypot": honeypot, "market": market}
 
         if intent == "THREAT_FEED":
-            return await self.tools.get_agent_findings(limit=10)
+            try:
+                return await self.tools.get_agent_findings(limit=10)
+            except Exception as e:
+                logger.warning("get_agent_findings failed: %s", e)
+                return []
 
         return {}
 
@@ -75,7 +98,7 @@ class Advisor:
     # 3. Chat (async, calls Claude)
     # ------------------------------------------------------------------
 
-    async def chat(self, user_id: str, message: str) -> str:
+    async def chat(self, user_id: str, message: str, chain_id: int = 56) -> Dict[str, Any]:
         """Process a user chat message end-to-end.
 
         1. Route the message to an intent
@@ -84,17 +107,19 @@ class Advisor:
         4. Build messages list for Claude
         5. Call Claude Sonnet
         6. Save user + assistant messages
-        7. Return response text
+        7. Return {"text": str, "scan_data": optional dict}
         """
         intent, data = self.route(message)
         history = await self.db.get_chat_history(user_id, limit=10)
-        context = await self._gather_context(intent, data)
+        context = await self._gather_context(intent, data, chain_id=chain_id)
 
         # Build the user content — inject context when available.
-        # Wrap user input in delimiters to mitigate prompt injection.
+        # Wrap in XML delimiters to mitigate prompt injection via API data.
         if context:
             user_content = (
-                f"[ShieldBot Data]: {json.dumps(context, default=str)}\n\n"
+                "<tool_results>\n"
+                f"{json.dumps(context, default=str)}\n"
+                "</tool_results>\n\n"
                 f"<user_message>{message}</user_message>"
             )
         else:
@@ -117,14 +142,22 @@ class Advisor:
             )
         else:
             try:
-                response_text = await self.ai.chat(
-                    model=self.sonnet_model,
-                    messages=messages,
-                    system=ADVISOR_SYSTEM_PROMPT,
-                    max_tokens=500,
+                response_text = await asyncio.wait_for(
+                    self.ai.chat(
+                        model=self.sonnet_model,
+                        messages=messages,
+                        system=ADVISOR_SYSTEM_PROMPT,
+                        max_tokens=500,
+                    ),
+                    timeout=30.0,
+                )
+            except asyncio.TimeoutError:
+                logger.error("Advisor chat timed out after 30s")
+                response_text = (
+                    "The request timed out. Please try again."
                 )
             except Exception as e:
-                logger.error(f"Advisor chat failed: {e}")
+                logger.error("Advisor chat failed: %s", e)
                 response_text = (
                     "I encountered an error processing your request. "
                     "Please try again."
@@ -134,7 +167,24 @@ class Advisor:
         await self.db.insert_chat_message(user_id, "user", message)
         await self.db.insert_chat_message(user_id, "assistant", response_text)
 
-        return response_text
+        result: Dict[str, Any] = {"text": response_text}
+
+        # Attach structured scan data for CONTRACT_CHECK intents
+        if intent == "CONTRACT_CHECK" and isinstance(context, dict):
+            scan = context.get("scan", {})
+            if scan:
+                result["scan_data"] = {
+                    "address": data.get("address", ""),
+                    "risk_score": scan.get("risk_score", scan.get("rug_probability")),
+                    "risk_level": scan.get("risk_level"),
+                    "archetype": scan.get("risk_archetype"),
+                    "flags": scan.get("critical_flags", scan.get("flags", [])),
+                    "confidence": scan.get("confidence"),
+                    "honeypot": context.get("honeypot", {}),
+                    "market": context.get("market", {}),
+                }
+
+        return result
 
     # ------------------------------------------------------------------
     # 4. Explain scan (async, calls Haiku)
@@ -159,7 +209,7 @@ class Advisor:
                 max_tokens=300,
             )
         except Exception as e:
-            logger.error(f"Advisor explain_scan failed: {e}")
+            logger.error("Advisor explain_scan failed: %s", e)
             return self._rule_based_explanation(scan_result)
 
     # ------------------------------------------------------------------

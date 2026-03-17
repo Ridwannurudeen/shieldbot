@@ -336,6 +336,7 @@ class CommunityReportRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000)
     user_id: str = Field(..., min_length=1, max_length=100)
+    chain_id: int = Field(default=56, ge=1)
 
 
 class ExplainRequest(BaseModel):
@@ -1434,8 +1435,15 @@ async def agent_chat(req: ChatRequest, request: Request):
     bound_user_id = hashlib.sha256(f"{client_ip}:{req.user_id}".encode()).hexdigest()[:24]
 
     try:
-        response = await container.advisor.chat(bound_user_id, req.message)
-        return {"response": response, "user_id": req.user_id}
+        result = await container.advisor.chat(bound_user_id, req.message, chain_id=req.chain_id)
+        # Advisor returns dict with "text" and optional "scan_data"
+        if isinstance(result, dict):
+            resp = {"response": result["text"], "user_id": req.user_id}
+            if result.get("scan_data"):
+                resp["scan_data"] = result["scan_data"]
+            return resp
+        # Backward compat: plain string return
+        return {"response": result, "user_id": req.user_id}
     except Exception as e:
         logger.error(f"Agent chat error: {e}")
         raise HTTPException(500, "Agent error")
