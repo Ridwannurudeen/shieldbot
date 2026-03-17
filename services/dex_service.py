@@ -11,6 +11,9 @@ class DexService:
 
     async def fetch_token_market_data(self, address: str) -> dict:
         defaults = {
+            'token_name': None,
+            'token_symbol': None,
+            'price_usd': None,
             'liquidity_usd': 0,
             'volume_24h': 0,
             'price_change_24h': 0,
@@ -41,6 +44,13 @@ class DexService:
             # Use the highest-liquidity pair for price/liquidity/FDV metrics
             pair = max(pairs, key=lambda p: float(p.get('liquidity', {}).get('usd', 0) or 0))
 
+            base_token = pair.get('baseToken') or {}
+            token_name = base_token.get('name')
+            token_symbol = base_token.get('symbol')
+            price_usd = pair.get('priceUsd')
+            if price_usd is not None:
+                price_usd = float(price_usd)
+
             liquidity_usd = float(pair.get('liquidity', {}).get('usd', 0) or 0)
             price_change_24h = float(pair.get('priceChange', {}).get('h24', 0) or 0)
             fdv = float(pair.get('fdv', 0) or 0)
@@ -69,6 +79,9 @@ class DexService:
             )
 
             return {
+                'token_name': token_name,
+                'token_symbol': token_symbol,
+                'price_usd': price_usd,
                 'liquidity_usd': liquidity_usd,
                 'volume_24h': volume_24h,
                 'price_change_24h': price_change_24h,
