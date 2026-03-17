@@ -161,7 +161,7 @@ function initCompact() {
   healthScanBtn.addEventListener("click", () => {
     const addr = healthAddress.value.trim();
     const errEl = document.getElementById("healthError");
-    if (!addr || !addr.startsWith("0x") || addr.length < 40) {
+    if (!addr || !/^0x[a-fA-F0-9]{40}$/i.test(addr)) {
       errEl.style.display = "block";
       errEl.textContent = t("msgErrInvalidWallet");
       return;
@@ -402,7 +402,7 @@ function initDashboard() {
 
   whScanBtn.addEventListener("click", () => {
     const addr = whAddr.value.trim();
-    if (!addr || !addr.startsWith("0x") || addr.length < 40) {
+    if (!addr || !/^0x[a-fA-F0-9]{40}$/i.test(addr)) {
       whError.style.display = "block";
       whError.textContent = t("msgErrInvalidWallet");
       return;

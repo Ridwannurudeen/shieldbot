@@ -261,7 +261,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     sendBtn.disabled = true;
 
     try {
-      const { apiUrl } = await chrome.storage.local.get({ apiUrl: DEFAULT_API_URL });
+      const stored = await chrome.storage.local.get({ apiUrl: DEFAULT_API_URL });
+      const apiUrl = stored.apiUrl || DEFAULT_API_URL;
+      try { const u = new URL(apiUrl); if (u.protocol !== "https:" && !["localhost","127.0.0.1"].includes(u.hostname)) throw 0; } catch { throw new Error("Invalid API URL. Check extension settings."); }
       const chainId = parseInt(chainSelect.value) || 56;
       const resp = await fetch(`${apiUrl}/api/agent/chat`, {
         method: "POST",
