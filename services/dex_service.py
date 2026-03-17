@@ -9,7 +9,7 @@ DEX_API_URL = "https://api.dexscreener.com/latest/dex/tokens/{address}"
 class DexService:
     """Fetches token market data from DexScreener API."""
 
-    async def fetch_token_market_data(self, address: str) -> dict:
+    async def fetch_token_market_data(self, address: str, chain_id: int = 56) -> dict:
         defaults = {
             'token_name': None,
             'token_symbol': None,
