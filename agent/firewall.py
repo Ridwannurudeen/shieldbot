@@ -252,6 +252,7 @@ def create_agent_firewall_router(container) -> APIRouter:
     async def get_history(agent_id: str, request: Request, limit: int = 50):
         """Get an agent's firewall check history."""
         await _require_api_key(request)
+        limit = max(1, min(limit, 1000))
         return await container.db.get_agent_firewall_history(
             agent_id, limit=limit,
         )

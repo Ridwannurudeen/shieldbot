@@ -168,6 +168,29 @@ def test_agent_register(client, mock_container):
     mock_container.db.upsert_agent_policy.assert_called_once()
 
 
+def test_agent_firewall_cached_verdict(client, mock_container):
+    """Transaction with cached verdict skips analyzer pipeline."""
+    mock_container.cache.get_verdict = AsyncMock(return_value={
+        "score": 45, "flags": ["suspicious"],
+    })
+    resp = client.post("/api/agent/firewall", json={
+        "agent_id": "agent:1",
+        "transaction": {
+            "from": "0xAgent",
+            "to": "0xTarget",
+            "value": "0",
+            "chain_id": 56,
+        },
+    }, headers={"X-API-Key": "sb_testkey"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["cached"] is True
+    assert body["score"] == 45
+    assert body["flags"] == ["suspicious"]
+    # Verify analyzer pipeline was NOT called
+    mock_container.registry.run_all.assert_not_called()
+
+
 def test_agent_history(client, mock_container):
     """Get agent firewall history."""
     mock_container.db.get_agent_firewall_history = AsyncMock(return_value=[
