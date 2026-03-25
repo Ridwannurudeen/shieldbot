@@ -196,6 +196,37 @@ class Database:
 
             CREATE INDEX IF NOT EXISTS idx_tracked_pairs_status
                 ON tracked_pairs(status);
+
+            CREATE TABLE IF NOT EXISTS agent_policies (
+                agent_id TEXT PRIMARY KEY,
+                owner_address TEXT NOT NULL,
+                owner_telegram TEXT,
+                owner_webhook TEXT,
+                tier TEXT NOT NULL DEFAULT 'free',
+                policy TEXT NOT NULL DEFAULT '{}',
+                daily_spend_used_usd REAL DEFAULT 0,
+                daily_spend_reset_at REAL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS agent_firewall_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT NOT NULL,
+                chain_id INTEGER NOT NULL,
+                tx_to TEXT,
+                tx_value TEXT,
+                verdict TEXT NOT NULL,
+                score REAL,
+                flags TEXT,
+                evidence TEXT,
+                policy_result TEXT,
+                latency_ms REAL,
+                created_at REAL NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_agent_fw_history
+                ON agent_firewall_history(agent_id, created_at DESC);
         """)
         await self._db.commit()
 
@@ -939,3 +970,152 @@ class Database:
             WHERE pair_address = ?
         """, (status, now, pair_address))
         await self._db.commit()
+
+    # --- Agent Policies ---
+
+    async def upsert_agent_policy(
+        self,
+        agent_id: str,
+        owner_address: str,
+        owner_telegram: str = None,
+        owner_webhook: str = None,
+        tier: str = "free",
+        policy: dict = None,
+    ):
+        """Insert or update an agent's firewall policy."""
+        now = time.time()
+        policy_json = json.dumps(policy or {})
+        await self._db.execute("""
+            INSERT INTO agent_policies
+                (agent_id, owner_address, owner_telegram, owner_webhook,
+                 tier, policy, daily_spend_used_usd, daily_spend_reset_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+            ON CONFLICT(agent_id) DO UPDATE SET
+                owner_address = excluded.owner_address,
+                owner_telegram = COALESCE(excluded.owner_telegram, agent_policies.owner_telegram),
+                owner_webhook = COALESCE(excluded.owner_webhook, agent_policies.owner_webhook),
+                tier = excluded.tier,
+                policy = excluded.policy,
+                updated_at = excluded.updated_at
+        """, (agent_id, owner_address.lower(), owner_telegram, owner_webhook,
+              tier, policy_json, now, now, now))
+        await self._db.commit()
+
+    async def get_agent_policy(self, agent_id: str) -> Optional[Dict]:
+        """Get an agent's policy. Returns None if not registered."""
+        cursor = await self._db.execute("""
+            SELECT agent_id, owner_address, owner_telegram, owner_webhook,
+                   tier, policy, daily_spend_used_usd, daily_spend_reset_at,
+                   created_at, updated_at
+            FROM agent_policies WHERE agent_id = ?
+        """, (agent_id,))
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "agent_id": row[0],
+            "owner_address": row[1],
+            "owner_telegram": row[2],
+            "owner_webhook": row[3],
+            "tier": row[4],
+            "policy": json.loads(row[5]) if row[5] else {},
+            "daily_spend_used_usd": row[6] or 0,
+            "daily_spend_reset_at": row[7],
+            "created_at": row[8],
+            "updated_at": row[9],
+        }
+
+    async def record_agent_spend(self, agent_id: str, amount_usd: float):
+        """Increment an agent's daily spend. Resets if a new day."""
+        now = time.time()
+        cursor = await self._db.execute(
+            "SELECT daily_spend_reset_at FROM agent_policies WHERE agent_id = ?",
+            (agent_id,),
+        )
+        row = await cursor.fetchone()
+        if row and row[0] and (now - row[0]) >= 86400:
+            # New day — reset
+            await self._db.execute("""
+                UPDATE agent_policies
+                SET daily_spend_used_usd = ?, daily_spend_reset_at = ?
+                WHERE agent_id = ?
+            """, (amount_usd, now, agent_id))
+        else:
+            await self._db.execute("""
+                UPDATE agent_policies
+                SET daily_spend_used_usd = daily_spend_used_usd + ?
+                WHERE agent_id = ?
+            """, (amount_usd, agent_id))
+            if row and not row[0]:
+                await self._db.execute("""
+                    UPDATE agent_policies SET daily_spend_reset_at = ? WHERE agent_id = ?
+                """, (now, agent_id))
+        await self._db.commit()
+
+    async def get_agent_daily_spend(self, agent_id: str) -> float:
+        """Get current daily spend for an agent."""
+        cursor = await self._db.execute(
+            "SELECT daily_spend_used_usd, daily_spend_reset_at FROM agent_policies WHERE agent_id = ?",
+            (agent_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return 0.0
+        # Check if reset needed
+        if row[1] and (time.time() - row[1]) >= 86400:
+            return 0.0
+        return row[0] or 0.0
+
+    # --- Agent Firewall History ---
+
+    async def record_agent_firewall_event(
+        self,
+        agent_id: str,
+        chain_id: int,
+        tx_to: str = None,
+        tx_value: str = None,
+        verdict: str = "ALLOW",
+        score: float = None,
+        flags: list = None,
+        evidence: str = None,
+        policy_result: dict = None,
+        latency_ms: float = None,
+    ):
+        """Record an agent firewall check result."""
+        now = time.time()
+        flags_json = json.dumps(flags) if flags else None
+        policy_json = json.dumps(policy_result) if policy_result else None
+        await self._db.execute("""
+            INSERT INTO agent_firewall_history
+                (agent_id, chain_id, tx_to, tx_value, verdict, score,
+                 flags, evidence, policy_result, latency_ms, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (agent_id, chain_id, tx_to, tx_value, verdict, score,
+              flags_json, evidence, policy_json, latency_ms, now))
+        await self._db.commit()
+
+    async def get_agent_firewall_history(
+        self, agent_id: str, limit: int = 50
+    ) -> List[Dict]:
+        """Get firewall history for an agent, newest first."""
+        cursor = await self._db.execute("""
+            SELECT id, chain_id, tx_to, tx_value, verdict, score,
+                   flags, evidence, policy_result, latency_ms, created_at
+            FROM agent_firewall_history
+            WHERE agent_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (agent_id, limit))
+        rows = await cursor.fetchall()
+        results = []
+        for r in rows:
+            flags_val = json.loads(r[6]) if r[6] else []
+            policy_val = json.loads(r[8]) if r[8] else None
+            results.append({
+                "id": r[0], "chain_id": r[1], "tx_to": r[2],
+                "tx_value": r[3], "verdict": r[4], "score": r[5],
+                "flags": flags_val, "evidence": r[7],
+                "policy_result": policy_val, "latency_ms": r[9],
+                "created_at": r[10],
+            })
+        return results
