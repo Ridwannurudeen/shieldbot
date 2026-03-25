@@ -33,6 +33,7 @@ from adapters.arbitrum import ArbitrumAdapter
 from adapters.polygon import PolygonAdapter
 from adapters.opbnb import OpBNBAdapter
 from adapters.optimism import OptimismAdapter
+from services.cache import CacheService
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +170,12 @@ class ServiceContainer:
         self.greenfield_service = GreenfieldService()
         self.tenderly_simulator = TenderlySimulator()
 
+        # Redis cache (verdict caching + rate limiting)
+        self.cache = CacheService(
+            redis_url=settings.redis_url,
+            ttl=settings.cache_duration,
+        )
+
     async def startup(self):
         """Initialize async-dependent services."""
         await self.db.initialize()
@@ -178,6 +185,7 @@ class ServiceContainer:
         await self.mempool_monitor.start(
             chain_ids=self.web3_client.get_supported_chain_ids()
         )
+        await self.cache.connect()
         logger.info("ServiceContainer started")
         logger.info(f"AI Analysis: {'enabled' if self.ai_analyzer.is_available() else 'disabled'}")
         logger.info(f"Greenfield storage: {'enabled' if self.greenfield_service.is_enabled() else 'disabled'}")
@@ -194,4 +202,5 @@ class ServiceContainer:
         await self.greenfield_service.close()
         await self.tenderly_simulator.close()
         await self.token_sniffer.close()
+        await self.cache.close()
         logger.info("ServiceContainer shut down")

@@ -177,6 +177,11 @@ async def lifespan(app: FastAPI):
         app.state.rpc_proxy = rpc_proxy
         logger.info("RPC Proxy enabled")
 
+    # Mount agent firewall routes (V3)
+    from agent.firewall import create_agent_firewall_router
+    agent_router = create_agent_firewall_router(container)
+    app.include_router(agent_router, prefix="/api/agent")
+
     await container.hunter.start()
 
     logger.info("ShieldAI Firewall API started")
