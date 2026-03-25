@@ -63,6 +63,15 @@ def create_agent_firewall_router(container) -> APIRouter:
             raise HTTPException(status_code=429, detail="Rate limit exceeded")
         return key_info
 
+    async def _check_agent_authorization(key_info: Dict, agent_policy: Dict, agent_id: str):
+        """Verify that the API key is authorized to act on the given agent."""
+        registered_key = agent_policy.get("registered_by_key")
+        if registered_key and registered_key != key_info.get("key_id"):
+            raise HTTPException(
+                status_code=403,
+                detail=f"API key not authorized for agent {agent_id}",
+            )
+
     @router.post("/firewall")
     async def agent_firewall(req: AgentFirewallRequest, request: Request):
         """Check a transaction against the agent's policy and risk scoring."""
@@ -76,6 +85,8 @@ def create_agent_firewall_router(container) -> APIRouter:
                 status_code=404,
                 detail=f"Agent {req.agent_id} not registered. Call /api/agent/register first.",
             )
+
+        await _check_agent_authorization(key_info, agent_policy, req.agent_id)
 
         tx = req.transaction
         to_addr = tx.to.lower()
@@ -104,6 +115,11 @@ def create_agent_firewall_router(container) -> APIRouter:
                 policy_result=policy_result.checks,
                 latency_ms=latency,
             )
+
+            # Track spending if allowed (Fix: cached path was missing this)
+            if verdict == "ALLOW" and tx_value_usd > 0:
+                await container.db.record_agent_spend(req.agent_id, tx_value_usd)
+
             return {
                 "verdict": verdict,
                 "score": cached["score"],
@@ -128,19 +144,29 @@ def create_agent_firewall_router(container) -> APIRouter:
             flags = db_cached.get("flags", [])
         else:
             # 3. Run analyzer pipeline
-            is_token = await container.web3_client.is_token_contract(
-                to_addr, chain_id,
-            )
-            ctx = AnalysisContext(
-                address=to_addr,
-                chain_id=chain_id,
-                from_address=tx.sender,
-                is_token=is_token,
-            )
-            results = await container.registry.run_all(ctx)
-            risk_output = container.risk_engine.compute_from_results(
-                results, is_token,
-            )
+            try:
+                is_token = await container.web3_client.is_token_contract(
+                    to_addr, chain_id,
+                )
+                ctx = AnalysisContext(
+                    address=to_addr,
+                    chain_id=chain_id,
+                    from_address=tx.sender,
+                    is_token=is_token,
+                )
+                results = await container.registry.run_all(ctx)
+                risk_output = container.risk_engine.compute_from_results(
+                    results, is_token,
+                )
+            except Exception as exc:
+                logger.error(
+                    "Analyzer pipeline failed for %s on chain %s: %s",
+                    to_addr, chain_id, exc, exc_info=True,
+                )
+                raise HTTPException(
+                    status_code=503,
+                    detail="Analysis pipeline temporarily unavailable",
+                )
             risk_score = risk_output.get("risk_score") or risk_output.get("rug_probability", 50)
             flags = risk_output.get("flags") or risk_output.get("critical_flags", [])
 
@@ -212,6 +238,7 @@ def create_agent_firewall_router(container) -> APIRouter:
             owner_webhook=req.owner_webhook,
             tier=key_info.get("tier", "free"),
             policy=req.policy or {},
+            registered_by_key=key_info.get("key_id"),
         )
         return {
             "agent_id": req.agent_id,
@@ -229,6 +256,7 @@ def create_agent_firewall_router(container) -> APIRouter:
                 status_code=404,
                 detail=f"Agent {req.agent_id} not registered",
             )
+        await _check_agent_authorization(key_info, existing, req.agent_id)
         await container.db.upsert_agent_policy(
             agent_id=req.agent_id,
             owner_address=existing["owner_address"],
@@ -240,19 +268,27 @@ def create_agent_firewall_router(container) -> APIRouter:
     @router.get("/policy")
     async def get_policy(agent_id: str, request: Request):
         """Get an agent's current policy."""
-        await _require_api_key(request)
+        key_info = await _require_api_key(request)
         policy = await container.db.get_agent_policy(agent_id)
         if not policy:
             raise HTTPException(
                 status_code=404,
                 detail=f"Agent {agent_id} not registered",
             )
+        await _check_agent_authorization(key_info, policy, agent_id)
         return policy
 
     @router.get("/history")
     async def get_history(agent_id: str, request: Request, limit: int = 50):
         """Get an agent's firewall check history."""
-        await _require_api_key(request)
+        key_info = await _require_api_key(request)
+        agent_policy = await container.db.get_agent_policy(agent_id)
+        if not agent_policy:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Agent {agent_id} not registered",
+            )
+        await _check_agent_authorization(key_info, agent_policy, agent_id)
         limit = max(1, min(limit, 1000))
         return await container.db.get_agent_firewall_history(
             agent_id, limit=limit,

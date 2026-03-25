@@ -27,6 +27,7 @@ def mock_container():
             "always_allow": [],
             "always_block": [],
         },
+        "registered_by_key": "k1",
         "daily_spend_used_usd": 0,
     })
     c.db.get_agent_daily_spend = AsyncMock(return_value=0)
