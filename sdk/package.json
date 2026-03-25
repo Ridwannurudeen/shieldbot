@@ -1,7 +1,7 @@
 {
-  "name": "shieldbot-sdk",
-  "version": "1.0.0",
-  "description": "ShieldBot Web3 security SDK — transaction firewall, token scanning, and threat intelligence for wallets and dApps",
+  "name": "@shieldbot/sdk",
+  "version": "3.0.0",
+  "description": "ShieldBot V3 SDK — agent transaction firewall, threat intelligence, reputation scoring, and prompt injection detection",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",

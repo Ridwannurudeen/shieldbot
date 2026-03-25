@@ -182,6 +182,26 @@ async def lifespan(app: FastAPI):
     agent_router = create_agent_firewall_router(container)
     app.include_router(agent_router, prefix="/api/agent")
 
+    # Mount MCP server routes (V3.1)
+    from mcp_server.server import create_mcp_router
+    mcp_router_v3 = create_mcp_router(container)
+    app.include_router(mcp_router_v3, prefix="/mcp")
+
+    # Mount threat graph routes (V3.5)
+    from services.threat_graph_router import create_threat_graph_router
+    graph_router = create_threat_graph_router(container)
+    app.include_router(graph_router, prefix="/api/graph")
+
+    # Mount reputation routes (V3.3)
+    from services.reputation_router import create_reputation_router
+    rep_router = create_reputation_router(container)
+    app.include_router(rep_router, prefix="/api/reputation")
+
+    # Mount guardian routes (V3.2)
+    from services.guardian_router import create_guardian_router
+    guard_router = create_guardian_router(container)
+    app.include_router(guard_router, prefix="/api/guardian")
+
     await container.hunter.start()
 
     logger.info("ShieldAI Firewall API started")
@@ -196,7 +216,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="ShieldAI Firewall API",
-    version="2.0.0",
+    version="3.0.0",
     lifespan=lifespan,
 )
 
@@ -1122,6 +1142,30 @@ async def scan(req: ScanRequest):
         raise
     except Exception as e:
         logger.error(f"Scan error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/api/scan/injection")
+async def scan_injection(request: Request):
+    """Scan text content for prompt injection attempts targeting AI agents."""
+    try:
+        body = await request.json()
+        content = body.get("content", "")[:50000]  # 50KB max to prevent CPU DoS
+        depth = body.get("depth", "fast")
+
+        if depth not in ("fast", "thorough"):
+            raise HTTPException(status_code=400, detail="depth must be 'fast' or 'thorough'")
+
+        if not container or not container.injection_scanner:
+            raise HTTPException(status_code=503, detail="Injection scanner not available")
+
+        result = await container.injection_scanner.scan(content, depth=depth)
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Injection scan error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

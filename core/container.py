@@ -34,6 +34,12 @@ from adapters.polygon import PolygonAdapter
 from adapters.opbnb import OpBNBAdapter
 from adapters.optimism import OptimismAdapter
 from services.cache import CacheService
+from services.injection_scanner import InjectionScanner
+from services.threat_graph import ThreatGraphService
+from services.reputation import ReputationService
+from services.guardian import GuardianService
+from services.anomaly_detector import AnomalyDetector
+from services.tier_service import TierService
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +181,24 @@ class ServiceContainer:
             redis_url=settings.redis_url,
             ttl=settings.cache_duration,
         )
+
+        # Prompt injection scanner (AI agent protection)
+        self.injection_scanner = InjectionScanner(ai_analyzer=self.ai_analyzer)
+
+        # Threat intelligence graph
+        self.threat_graph = ThreatGraphService(self.db)
+
+        # Reputation service (composite trust scoring)
+        self.reputation_service = ReputationService(self.db, self.cache, self.web3_client)
+
+        # Portfolio guardian (wallet health monitoring)
+        self.guardian_service = GuardianService(self.db, self.web3_client, self.cache)
+
+        # Anomaly detection (agent behavioral baselines)
+        self.anomaly_detector = AnomalyDetector(self.db)
+
+        # Premium tier management (token gating)
+        self.tier_service = TierService(rpc_url=settings.bsc_rpc_url)
 
     async def startup(self):
         """Initialize async-dependent services."""

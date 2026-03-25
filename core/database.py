@@ -228,6 +228,81 @@ class Database:
 
             CREATE INDEX IF NOT EXISTS idx_agent_fw_history
                 ON agent_firewall_history(agent_id, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS threat_graph_edges (
+                source_address TEXT NOT NULL,
+                target_address TEXT NOT NULL,
+                chain_id INTEGER NOT NULL,
+                relationship TEXT NOT NULL,
+                evidence TEXT,
+                confidence REAL DEFAULT 0.5,
+                first_seen REAL NOT NULL,
+                last_seen REAL NOT NULL,
+                PRIMARY KEY (source_address, target_address, chain_id, relationship)
+            );
+            CREATE INDEX IF NOT EXISTS idx_graph_source
+                ON threat_graph_edges(source_address, chain_id);
+            CREATE INDEX IF NOT EXISTS idx_graph_target
+                ON threat_graph_edges(target_address, chain_id);
+
+            CREATE TABLE IF NOT EXISTS threat_graph_clusters (
+                cluster_id TEXT NOT NULL,
+                address TEXT NOT NULL,
+                chain_id INTEGER NOT NULL,
+                role TEXT,
+                confidence REAL DEFAULT 0.5,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (cluster_id, address, chain_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_cluster_address
+                ON threat_graph_clusters(address, chain_id);
+
+            CREATE TABLE IF NOT EXISTS guardian_wallets (
+                wallet_address TEXT NOT NULL,
+                chain_id INTEGER NOT NULL,
+                owner_id TEXT NOT NULL,
+                is_agent_wallet INTEGER DEFAULT 0,
+                health_score REAL DEFAULT 100,
+                last_scan_at REAL,
+                last_event_at REAL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY (wallet_address, chain_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_guardian_wallets_owner
+                ON guardian_wallets(owner_id);
+
+            CREATE TABLE IF NOT EXISTS guardian_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                wallet_address TEXT NOT NULL,
+                chain_id INTEGER NOT NULL,
+                alert_type TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                title TEXT NOT NULL,
+                details TEXT,
+                acknowledged INTEGER DEFAULT 0,
+                created_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_guardian_alerts_wallet
+                ON guardian_alerts(wallet_address, chain_id, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS anomaly_baselines (
+                agent_id TEXT PRIMARY KEY,
+                baseline_data TEXT NOT NULL,
+                baseline_started_at REAL,
+                baseline_ready INTEGER DEFAULT 0,
+                last_updated REAL
+            );
+
+            CREATE TABLE IF NOT EXISTS reputation_cache (
+                agent_id TEXT NOT NULL,
+                registry TEXT NOT NULL,
+                trust_score REAL,
+                total_jobs INTEGER DEFAULT 0,
+                disputed_jobs INTEGER DEFAULT 0,
+                raw_data TEXT,
+                last_fetched REAL,
+                PRIMARY KEY (agent_id, registry)
+            );
         """)
         await self._db.commit()
 
@@ -1136,4 +1211,422 @@ class Database:
                 "policy_result": policy_val, "latency_ms": r[9],
                 "created_at": r[10],
             })
+        return results
+
+    # --- Threat Graph ---
+
+    async def add_threat_graph_edge(
+        self,
+        source: str,
+        target: str,
+        chain_id: int,
+        relationship: str,
+        evidence: Dict = None,
+        confidence: float = 0.5,
+    ):
+        """Insert or update a threat graph edge."""
+        now = time.time()
+        evidence_json = json.dumps(evidence) if evidence else None
+        await self._db.execute("""
+            INSERT INTO threat_graph_edges
+                (source_address, target_address, chain_id, relationship,
+                 evidence, confidence, first_seen, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source_address, target_address, chain_id, relationship) DO UPDATE SET
+                evidence = COALESCE(excluded.evidence, threat_graph_edges.evidence),
+                confidence = MAX(threat_graph_edges.confidence, excluded.confidence),
+                last_seen = excluded.last_seen
+        """, (source.lower(), target.lower(), chain_id, relationship,
+              evidence_json, confidence, now, now))
+        await self._db.commit()
+
+    async def get_edges_from(self, address: str, chain_id: int) -> List[Dict]:
+        """Get all outgoing edges from an address."""
+        cursor = await self._db.execute("""
+            SELECT source_address, target_address, chain_id, relationship,
+                   evidence, confidence, first_seen, last_seen
+            FROM threat_graph_edges
+            WHERE source_address = ? AND chain_id = ?
+        """, (address.lower(), chain_id))
+        rows = await cursor.fetchall()
+        results = []
+        for r in rows:
+            ev = r[4]
+            if ev:
+                try:
+                    ev = json.loads(ev)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            results.append({
+                "source_address": r[0],
+                "target_address": r[1],
+                "chain_id": r[2],
+                "relationship": r[3],
+                "evidence": ev,
+                "confidence": r[5],
+                "first_seen": r[6],
+                "last_seen": r[7],
+            })
+        return results
+
+    async def get_edges_to(self, address: str, chain_id: int) -> List[Dict]:
+        """Get all incoming edges to an address."""
+        cursor = await self._db.execute("""
+            SELECT source_address, target_address, chain_id, relationship,
+                   evidence, confidence, first_seen, last_seen
+            FROM threat_graph_edges
+            WHERE target_address = ? AND chain_id = ?
+        """, (address.lower(), chain_id))
+        rows = await cursor.fetchall()
+        results = []
+        for r in rows:
+            ev = r[4]
+            if ev:
+                try:
+                    ev = json.loads(ev)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            results.append({
+                "source_address": r[0],
+                "target_address": r[1],
+                "chain_id": r[2],
+                "relationship": r[3],
+                "evidence": ev,
+                "confidence": r[5],
+                "first_seen": r[6],
+                "last_seen": r[7],
+            })
+        return results
+
+    async def get_cluster_for_address(
+        self, address: str, chain_id: int
+    ) -> Optional[Dict]:
+        """Get cluster membership for an address, or None."""
+        cursor = await self._db.execute("""
+            SELECT cluster_id, address, chain_id, role, confidence, updated_at
+            FROM threat_graph_clusters
+            WHERE address = ? AND chain_id = ?
+            LIMIT 1
+        """, (address.lower(), chain_id))
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "cluster_id": row[0],
+            "address": row[1],
+            "chain_id": row[2],
+            "role": row[3],
+            "confidence": row[4],
+            "updated_at": row[5],
+        }
+
+    async def get_cluster_members(self, cluster_id: str) -> List[Dict]:
+        """Get all members of a cluster."""
+        cursor = await self._db.execute("""
+            SELECT cluster_id, address, chain_id, role, confidence, updated_at
+            FROM threat_graph_clusters
+            WHERE cluster_id = ?
+        """, (cluster_id,))
+        rows = await cursor.fetchall()
+        return [
+            {
+                "cluster_id": r[0],
+                "address": r[1],
+                "chain_id": r[2],
+                "role": r[3],
+                "confidence": r[4],
+                "updated_at": r[5],
+            }
+            for r in rows
+        ]
+
+    async def upsert_cluster_member(
+        self,
+        cluster_id: str,
+        address: str,
+        chain_id: int,
+        role: str = "member",
+        confidence: float = 0.5,
+    ):
+        """Insert or update a cluster member."""
+        now = time.time()
+        await self._db.execute("""
+            INSERT INTO threat_graph_clusters
+                (cluster_id, address, chain_id, role, confidence, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(cluster_id, address, chain_id) DO UPDATE SET
+                role = excluded.role,
+                confidence = excluded.confidence,
+                updated_at = excluded.updated_at
+        """, (cluster_id, address.lower(), chain_id, role, confidence, now))
+        await self._db.commit()
+
+    async def get_graph_stats(self) -> Dict:
+        """Get aggregate threat graph statistics."""
+        cur = await self._db.execute(
+            "SELECT COUNT(*) FROM threat_graph_edges"
+        )
+        total_edges = (await cur.fetchone())[0] or 0
+
+        cur = await self._db.execute(
+            "SELECT COUNT(DISTINCT cluster_id) FROM threat_graph_clusters"
+        )
+        total_clusters = (await cur.fetchone())[0] or 0
+
+        cur = await self._db.execute("""
+            SELECT COUNT(*) FROM (
+                SELECT source_address AS addr FROM threat_graph_edges
+                UNION
+                SELECT target_address AS addr FROM threat_graph_edges
+            )
+        """)
+        total_addresses = (await cur.fetchone())[0] or 0
+
+        return {
+            "total_edges": total_edges,
+            "total_clusters": total_clusters,
+            "total_addresses": total_addresses,
+        }
+
+    async def get_top_clusters(self, limit: int = 10) -> List[Dict]:
+        """Get the most active clusters by member count."""
+        cursor = await self._db.execute("""
+            SELECT cluster_id, COUNT(*) as member_count
+            FROM threat_graph_clusters
+            GROUP BY cluster_id
+            ORDER BY member_count DESC
+            LIMIT ?
+        """, (limit,))
+        rows = await cursor.fetchall()
+        return [
+            {"cluster_id": r[0], "member_count": r[1]}
+            for r in rows
+        ]
+
+    # --- Guardian Wallets ---
+
+    async def register_guardian_wallet(
+        self, wallet_address: str, chain_id: int, owner_id: str, is_agent: bool = False
+    ) -> Dict:
+        """Register a wallet for guardian monitoring."""
+        now = time.time()
+        wallet_address = wallet_address.lower()
+        await self._db.execute("""
+            INSERT INTO guardian_wallets (wallet_address, chain_id, owner_id, is_agent_wallet, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(wallet_address, chain_id) DO UPDATE SET
+                owner_id = excluded.owner_id,
+                is_agent_wallet = excluded.is_agent_wallet
+        """, (wallet_address, chain_id, owner_id, int(is_agent), now))
+        await self._db.commit()
+        return {"wallet_address": wallet_address, "chain_id": chain_id, "owner_id": owner_id, "created_at": now}
+
+    async def get_guardian_wallets(self, owner_id: str) -> List[Dict]:
+        """List monitored wallets for an owner."""
+        cursor = await self._db.execute(
+            "SELECT wallet_address, chain_id, is_agent_wallet, health_score, last_scan_at, created_at "
+            "FROM guardian_wallets WHERE owner_id = ? ORDER BY created_at DESC",
+            (owner_id,),
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "wallet_address": r[0], "chain_id": r[1], "is_agent_wallet": bool(r[2]),
+                "health_score": r[3], "last_scan_at": r[4], "created_at": r[5],
+            }
+            for r in rows
+        ]
+
+    async def get_guardian_wallet(self, wallet_address: str, chain_id: int) -> Optional[Dict]:
+        """Get a single guardian wallet."""
+        cursor = await self._db.execute(
+            "SELECT wallet_address, chain_id, owner_id, is_agent_wallet, health_score, last_scan_at, created_at "
+            "FROM guardian_wallets WHERE wallet_address = ? AND chain_id = ?",
+            (wallet_address.lower(), chain_id),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "wallet_address": row[0], "chain_id": row[1], "owner_id": row[2],
+            "is_agent_wallet": bool(row[3]), "health_score": row[4],
+            "last_scan_at": row[5], "created_at": row[6],
+        }
+
+    async def update_guardian_health(self, wallet_address: str, chain_id: int, health_score: float):
+        """Update wallet health score."""
+        now = time.time()
+        await self._db.execute(
+            "UPDATE guardian_wallets SET health_score = ?, last_scan_at = ? WHERE wallet_address = ? AND chain_id = ?",
+            (health_score, now, wallet_address.lower(), chain_id),
+        )
+        await self._db.commit()
+
+    async def create_guardian_alert(
+        self, wallet_address: str, chain_id: int, alert_type: str,
+        severity: str, title: str, details: Dict = None,
+    ) -> int:
+        """Create a guardian alert. Returns alert ID."""
+        now = time.time()
+        details_json = json.dumps(details) if details else None
+        cursor = await self._db.execute(
+            "INSERT INTO guardian_alerts (wallet_address, chain_id, alert_type, severity, title, details, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (wallet_address.lower(), chain_id, alert_type, severity, title, details_json, now),
+        )
+        await self._db.commit()
+        return cursor.lastrowid
+
+    async def get_guardian_alerts(self, wallet_address: str = None, limit: int = 50) -> List[Dict]:
+        """Get recent guardian alerts."""
+        if wallet_address:
+            cursor = await self._db.execute(
+                "SELECT id, wallet_address, chain_id, alert_type, severity, title, details, acknowledged, created_at "
+                "FROM guardian_alerts WHERE wallet_address = ? ORDER BY created_at DESC LIMIT ?",
+                (wallet_address.lower(), limit),
+            )
+        else:
+            cursor = await self._db.execute(
+                "SELECT id, wallet_address, chain_id, alert_type, severity, title, details, acknowledged, created_at "
+                "FROM guardian_alerts ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            )
+        rows = await cursor.fetchall()
+        results = []
+        for r in rows:
+            details = None
+            if r[6]:
+                try:
+                    details = json.loads(r[6])
+                except (json.JSONDecodeError, TypeError):
+                    details = r[6]
+            results.append({
+                "id": r[0], "wallet_address": r[1], "chain_id": r[2], "alert_type": r[3],
+                "severity": r[4], "title": r[5], "details": details,
+                "acknowledged": bool(r[7]), "created_at": r[8],
+            })
+        return results
+
+    async def acknowledge_guardian_alert(self, alert_id: int) -> bool:
+        """Mark alert as acknowledged. Returns True if found."""
+        cursor = await self._db.execute(
+            "UPDATE guardian_alerts SET acknowledged = 1 WHERE id = ?", (alert_id,)
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    # --- Anomaly Baselines ---
+
+    async def upsert_anomaly_baseline(self, agent_id: str, baseline_data: str, is_ready: bool):
+        """Insert or update anomaly baseline."""
+        now = time.time()
+        await self._db.execute("""
+            INSERT INTO anomaly_baselines (agent_id, baseline_data, baseline_started_at, baseline_ready, last_updated)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(agent_id) DO UPDATE SET
+                baseline_data = excluded.baseline_data,
+                baseline_ready = excluded.baseline_ready,
+                last_updated = excluded.last_updated
+        """, (agent_id, baseline_data, now, int(is_ready), now))
+        await self._db.commit()
+
+    async def get_anomaly_baseline(self, agent_id: str) -> Optional[Dict]:
+        """Get anomaly baseline for an agent."""
+        cursor = await self._db.execute(
+            "SELECT agent_id, baseline_data, baseline_started_at, baseline_ready, last_updated "
+            "FROM anomaly_baselines WHERE agent_id = ?",
+            (agent_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "agent_id": row[0], "baseline_data": row[1],
+            "baseline_started_at": row[2], "baseline_ready": bool(row[3]),
+            "last_updated": row[4],
+        }
+
+    async def get_all_ready_baselines(self) -> List[Dict]:
+        """Get all agents with ready baselines."""
+        cursor = await self._db.execute(
+            "SELECT agent_id, baseline_data, baseline_started_at, last_updated "
+            "FROM anomaly_baselines WHERE baseline_ready = 1"
+        )
+        rows = await cursor.fetchall()
+        return [
+            {"agent_id": r[0], "baseline_data": r[1], "baseline_started_at": r[2], "last_updated": r[3]}
+            for r in rows
+        ]
+
+    # --- Reputation Cache ---
+
+    async def upsert_reputation_cache(self, agent_id: str, data: Dict):
+        """Store composite reputation score."""
+        now = time.time()
+        raw_json = json.dumps(data)
+        composite = data.get("composite_score", 0)
+        await self._db.execute("""
+            INSERT INTO reputation_cache (agent_id, registry, trust_score, raw_data, last_fetched)
+            VALUES (?, 'composite', ?, ?, ?)
+            ON CONFLICT(agent_id, registry) DO UPDATE SET
+                trust_score = excluded.trust_score,
+                raw_data = excluded.raw_data,
+                last_fetched = excluded.last_fetched
+        """, (agent_id, composite, raw_json, now))
+        await self._db.commit()
+
+    async def get_reputation_cache(self, agent_id: str) -> Optional[Dict]:
+        """Get cached composite reputation score."""
+        cursor = await self._db.execute(
+            "SELECT raw_data, last_fetched FROM reputation_cache WHERE agent_id = ? AND registry = 'composite'",
+            (agent_id,),
+        )
+        row = await cursor.fetchone()
+        if not row or not row[0]:
+            return None
+        try:
+            data = json.loads(row[0])
+            data["last_fetched"] = row[1]
+            return data
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    async def get_reputation_cache_by_registry(self, agent_id: str, registry: str) -> Optional[Dict]:
+        """Get cached score for a specific registry."""
+        cursor = await self._db.execute(
+            "SELECT trust_score, raw_data, last_fetched FROM reputation_cache WHERE agent_id = ? AND registry = ?",
+            (agent_id, registry),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        return {"trust_score": row[0], "raw_data": row[1], "last_fetched": row[2]}
+
+    async def invalidate_reputation_cache(self, agent_id: str):
+        """Invalidate reputation cache by setting last_fetched to 0."""
+        await self._db.execute(
+            "UPDATE reputation_cache SET last_fetched = 0 WHERE agent_id = ?", (agent_id,)
+        )
+        await self._db.commit()
+
+    async def get_reputation_leaderboard(self, limit: int = 50) -> List[Dict]:
+        """Get top agents by composite trust score."""
+        cursor = await self._db.execute(
+            "SELECT agent_id, trust_score, raw_data FROM reputation_cache "
+            "WHERE registry = 'composite' AND trust_score IS NOT NULL "
+            "ORDER BY trust_score DESC LIMIT ?",
+            (limit,),
+        )
+        rows = await cursor.fetchall()
+        results = []
+        for r in rows:
+            entry = {"agent_id": r[0], "composite_score": r[1]}
+            if r[2]:
+                try:
+                    data = json.loads(r[2])
+                    entry["breakdown"] = data.get("breakdown", {})
+                    entry["verified"] = data.get("verified", False)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            results.append(entry)
         return results
