@@ -11,6 +11,15 @@ from shieldbot.models import Verdict
 
 logger = logging.getLogger(__name__)
 
+
+class ShieldBotError(Exception):
+    """Raised for non-transient API errors (4xx) that the caller must handle."""
+
+    def __init__(self, status_code: int, message: str):
+        self.status_code = status_code
+        self.message = message
+        super().__init__(f"ShieldBot API error {status_code}: {message}")
+
 DEFAULT_BASE_URL = "https://api.shieldbotsecurity.online"
 
 
@@ -64,6 +73,17 @@ class ShieldBot:
         if len(self._cache) > self._cache_size:
             self._cache.popitem(last=False)
 
+    def _fail_verdict(self, cache_key: str, to_addr: str) -> Verdict:
+        """Return a fail-mode verdict (cached/open/closed) for transient errors."""
+        if self._fail_mode == "cached":
+            cached = self._get_cached(cache_key)
+            if cached is not None:
+                logger.info(f"Using cached verdict for {to_addr} (API unavailable)")
+                return cached
+        if self._fail_mode in ("open", "cached"):
+            return Verdict(verdict="ALLOW", score=0, flags=["api_unavailable"])
+        return Verdict(verdict="BLOCK", score=100, flags=["api_unavailable"])
+
     async def check(self, transaction: Dict) -> Verdict:
         """Check a transaction against the agent firewall.
 
@@ -82,45 +102,39 @@ class ShieldBot:
         if cached is not None:
             return cached
 
-        # Call API
+        # Make the HTTP request — catch only network/timeout errors
         try:
             http = self._get_http()
             resp = await http.post("/api/agent/firewall", json={
                 "agent_id": self.agent_id,
                 "transaction": transaction,
             })
-            if resp.status_code == 200:
-                data = resp.json()
-                verdict = Verdict(
-                    verdict=data["verdict"],
-                    score=data["score"],
-                    flags=data.get("flags", []),
-                    evidence=data.get("evidence"),
-                    policy_check=data.get("policy_check"),
-                    cached=data.get("cached", False),
-                    latency_ms=data.get("latency_ms", 0),
-                )
-                self._set_cached(cache_key, verdict)
-                return verdict
-            else:
-                logger.warning(f"ShieldBot API returned {resp.status_code}: {resp.text}")
-                raise httpx.HTTPStatusError(
-                    f"API error: {resp.status_code}",
-                    request=resp.request, response=resp,
-                )
-        except Exception as e:
-            # Fail-cached mode
-            if self._fail_mode == "cached":
-                cached = self._get_cached(cache_key)
-                if cached is not None:
-                    logger.info(f"Using cached verdict for {to_addr} (API unavailable)")
-                    return cached
-            logger.error(f"ShieldBot API error: {e}")
-            # Fail-open or fail-closed based on config
-            if self._fail_mode in ("open", "cached"):
-                return Verdict(verdict="ALLOW", score=0, flags=["api_unavailable"])
-            else:
-                return Verdict(verdict="BLOCK", score=100, flags=["api_unavailable"])
+        except (httpx.RequestError, httpx.TimeoutException) as e:
+            logger.error(f"ShieldBot network error: {e}")
+            return self._fail_verdict(cache_key, to_addr)
+
+        # 200 OK — parse and cache the verdict
+        if resp.status_code == 200:
+            data = resp.json()
+            verdict = Verdict(
+                verdict=data["verdict"],
+                score=data["score"],
+                flags=data.get("flags", []),
+                evidence=data.get("evidence"),
+                policy_check=data.get("policy_check"),
+                cached=data.get("cached", False),
+                latency_ms=data.get("latency_ms", 0),
+            )
+            self._set_cached(cache_key, verdict)
+            return verdict
+
+        # 4xx client errors — non-transient, caller must handle
+        if 400 <= resp.status_code < 500:
+            raise ShieldBotError(resp.status_code, resp.text)
+
+        # 5xx server errors — transient, use fail-mode
+        logger.warning(f"ShieldBot API returned {resp.status_code}: {resp.text}")
+        return self._fail_verdict(cache_key, to_addr)
 
     async def close(self):
         """Close the HTTP client."""

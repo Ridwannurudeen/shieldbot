@@ -2,8 +2,9 @@
 
 import pytest
 import json
+import httpx
 from unittest.mock import AsyncMock, patch, MagicMock
-from shieldbot.client import ShieldBot
+from shieldbot.client import ShieldBot, ShieldBotError
 from shieldbot.models import Verdict
 
 
@@ -78,3 +79,69 @@ def test_verdict_properties():
                  policy_check={}, cached=False, latency_ms=380)
     assert v2.allowed is False
     assert v2.blocked is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code,label", [
+    (401, "unauthorized"),
+    (403, "forbidden"),
+    (404, "not found"),
+    (429, "rate limited"),
+])
+async def test_4xx_raises_shieldbot_error(sb, status_code, label):
+    """4xx errors raise ShieldBotError instead of returning a fail-mode verdict."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = status_code
+    mock_resp.text = label
+    with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp):
+        with pytest.raises(ShieldBotError) as exc_info:
+            await sb.check({"from": "0xA", "to": "0xB", "chain_id": 56})
+    assert exc_info.value.status_code == status_code
+    assert label in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_500_uses_fail_mode(sb):
+    """5xx server errors use fail-mode (ALLOW for default cached/open) instead of raising."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 500
+    mock_resp.text = "Internal Server Error"
+    with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp):
+        verdict = await sb.check({"from": "0xA", "to": "0xB", "chain_id": 56})
+    assert isinstance(verdict, Verdict)
+    assert verdict.verdict == "ALLOW"
+    assert "api_unavailable" in verdict.flags
+
+
+@pytest.mark.asyncio
+async def test_500_fail_closed():
+    """5xx with fail_mode='closed' returns BLOCK verdict."""
+    client = ShieldBot(api_key="sb_test", agent_id="agent:1",
+                       base_url="http://localhost:8000", fail_mode="closed")
+    mock_resp = MagicMock()
+    mock_resp.status_code = 502
+    mock_resp.text = "Bad Gateway"
+    with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp):
+        verdict = await client.check({"from": "0xA", "to": "0xB", "chain_id": 56})
+    assert verdict.verdict == "BLOCK"
+    assert "api_unavailable" in verdict.flags
+
+
+@pytest.mark.asyncio
+async def test_network_error_uses_fail_mode(sb):
+    """Network errors (connection refused, DNS failure) use fail-mode."""
+    with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock,
+               side_effect=httpx.ConnectError("Connection refused")):
+        verdict = await sb.check({"from": "0xA", "to": "0xB", "chain_id": 56})
+    assert isinstance(verdict, Verdict)
+    assert verdict.verdict == "ALLOW"
+    assert "api_unavailable" in verdict.flags
+
+
+@pytest.mark.asyncio
+async def test_shieldbot_error_exported():
+    """ShieldBotError is importable from the top-level package."""
+    from shieldbot import ShieldBotError as SBE
+    err = SBE(401, "bad key")
+    assert err.status_code == 401
+    assert "bad key" in str(err)
