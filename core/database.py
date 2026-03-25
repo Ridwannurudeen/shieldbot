@@ -1012,13 +1012,17 @@ class Database:
         row = await cursor.fetchone()
         if not row:
             return None
+        try:
+            policy = json.loads(row[5]) if row[5] else {}
+        except (json.JSONDecodeError, TypeError):
+            policy = {}
         return {
             "agent_id": row[0],
             "owner_address": row[1],
             "owner_telegram": row[2],
             "owner_webhook": row[3],
             "tier": row[4],
-            "policy": json.loads(row[5]) if row[5] else {},
+            "policy": policy,
             "daily_spend_used_usd": row[6] or 0,
             "daily_spend_reset_at": row[7],
             "created_at": row[8],
@@ -1043,13 +1047,10 @@ class Database:
         else:
             await self._db.execute("""
                 UPDATE agent_policies
-                SET daily_spend_used_usd = daily_spend_used_usd + ?
+                SET daily_spend_used_usd = daily_spend_used_usd + ?,
+                    daily_spend_reset_at = COALESCE(daily_spend_reset_at, ?)
                 WHERE agent_id = ?
-            """, (amount_usd, agent_id))
-            if row and not row[0]:
-                await self._db.execute("""
-                    UPDATE agent_policies SET daily_spend_reset_at = ? WHERE agent_id = ?
-                """, (now, agent_id))
+            """, (amount_usd, now, agent_id))
         await self._db.commit()
 
     async def get_agent_daily_spend(self, agent_id: str) -> float:
@@ -1109,8 +1110,14 @@ class Database:
         rows = await cursor.fetchall()
         results = []
         for r in rows:
-            flags_val = json.loads(r[6]) if r[6] else []
-            policy_val = json.loads(r[8]) if r[8] else None
+            try:
+                flags_val = json.loads(r[6]) if r[6] else []
+            except (json.JSONDecodeError, TypeError):
+                flags_val = []
+            try:
+                policy_val = json.loads(r[8]) if r[8] else None
+            except (json.JSONDecodeError, TypeError):
+                policy_val = None
             results.append({
                 "id": r[0], "chain_id": r[1], "tx_to": r[2],
                 "tx_value": r[3], "verdict": r[4], "score": r[5],
