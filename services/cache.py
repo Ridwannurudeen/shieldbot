@@ -87,23 +87,22 @@ class CacheService:
     async def check_rate_limit(
         self, key: str, limit: int, window: int = 60
     ) -> bool:
-        """Increment a counter and return True if under the limit.
+        """Atomically increment a counter and return True if under the limit.
 
-        Uses a simple INCR + EXPIRE pattern. Returns True (allowed)
-        when Redis is unavailable (fail-open).
+        Uses an atomic INCR-first pattern to avoid TOCTOU races.
+        INCR creates the key starting at 1 if it doesn't exist.
+        Returns True (allowed) when Redis is unavailable (fail-open).
         """
         if not self._available:
             return True
         try:
             rate_key = f"rate:{key}"
-            current = await self._redis.get(rate_key)
-            if current is not None and int(current) >= limit:
-                return False
             pipe = self._redis.pipeline()
             pipe.incr(rate_key)
             pipe.expire(rate_key, window)
-            await pipe.execute()
-            return True
+            results = await pipe.execute()
+            current = results[0]  # INCR returns the new value
+            return current <= limit
         except Exception as exc:
             logger.debug("Rate limit check failed for %s: %s", key, exc)
             return True

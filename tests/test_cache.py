@@ -101,11 +101,9 @@ async def test_cache_disabled_returns_none():
 
 @pytest.mark.asyncio
 async def test_rate_limit_check(cache_service, mock_redis):
-    """Pre-checks counter via GET, then increments via pipeline when under limit."""
-    mock_redis.get.return_value = None  # no existing counter
-
+    """Atomic INCR returns value under limit — request allowed."""
     pipe = MagicMock()
-    pipe.execute = AsyncMock(return_value=[1, True])
+    pipe.execute = AsyncMock(return_value=[1, True])  # INCR=1, EXPIRE=True
     mock_redis.pipeline = MagicMock(return_value=pipe)
 
     allowed = await cache_service.check_rate_limit(
@@ -113,7 +111,6 @@ async def test_rate_limit_check(cache_service, mock_redis):
     )
 
     assert allowed is True
-    mock_redis.get.assert_awaited_with("rate:agent:0xabc")
     pipe.incr.assert_called_once_with("rate:agent:0xabc")
     pipe.expire.assert_called_once_with("rate:agent:0xabc", 60)
     pipe.execute.assert_awaited_once()
@@ -121,14 +118,16 @@ async def test_rate_limit_check(cache_service, mock_redis):
 
 @pytest.mark.asyncio
 async def test_rate_limit_exceeded(cache_service, mock_redis):
-    """Returns False when the pre-check GET shows counter at or above limit."""
-    mock_redis.get.return_value = b"10"  # at limit
+    """Atomic INCR returns value above limit — request rejected."""
+    pipe = MagicMock()
+    pipe.execute = AsyncMock(return_value=[11, True])  # INCR=11 > limit=10
+    mock_redis.pipeline = MagicMock(return_value=pipe)
 
     allowed = await cache_service.check_rate_limit(
         key="agent:0xabc", limit=10, window=60
     )
 
     assert allowed is False
-    mock_redis.get.assert_awaited_with("rate:agent:0xabc")
-    # Pipeline should NOT be called when pre-check rejects
-    mock_redis.pipeline.assert_not_called()
+    pipe.incr.assert_called_once_with("rate:agent:0xabc")
+    pipe.expire.assert_called_once_with("rate:agent:0xabc", 60)
+    pipe.execute.assert_awaited_once()
