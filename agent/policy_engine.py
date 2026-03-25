@@ -1,5 +1,6 @@
 """Threshold-based policy engine for agent transaction firewall."""
 
+import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -53,6 +54,14 @@ class AgentPolicyEngine:
         simulated_slippage: float = None,
     ) -> PolicyVerdict:
         """Evaluate a transaction against an agent's policy."""
+        # Treat NaN or negative risk scores as maximum risk
+        if math.isnan(risk_score) or risk_score < 0:
+            return PolicyVerdict(
+                verdict="BLOCK",
+                checks={"risk_score_validation": f"fail — invalid score ({risk_score})"},
+                failed_checks=["risk_score_validation"],
+            )
+
         checks = {}
         failed = []
         target_lower = target_address.lower()

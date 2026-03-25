@@ -204,6 +204,7 @@ class Database:
                 owner_webhook TEXT,
                 tier TEXT NOT NULL DEFAULT 'free',
                 policy TEXT NOT NULL DEFAULT '{}',
+                registered_by_key TEXT,
                 daily_spend_used_usd REAL DEFAULT 0,
                 daily_spend_reset_at REAL,
                 created_at REAL NOT NULL,
@@ -229,6 +230,15 @@ class Database:
                 ON agent_firewall_history(agent_id, created_at DESC);
         """)
         await self._db.commit()
+
+        # Migrate: add registered_by_key column for existing DBs
+        try:
+            await self._db.execute(
+                "ALTER TABLE agent_policies ADD COLUMN registered_by_key TEXT"
+            )
+            await self._db.commit()
+        except Exception:
+            pass  # Column already exists
 
     # --- Contract Scores ---
 
@@ -981,6 +991,7 @@ class Database:
         owner_webhook: str = None,
         tier: str = "free",
         policy: dict = None,
+        registered_by_key: str = None,
     ):
         """Insert or update an agent's firewall policy."""
         now = time.time()
@@ -988,25 +999,27 @@ class Database:
         await self._db.execute("""
             INSERT INTO agent_policies
                 (agent_id, owner_address, owner_telegram, owner_webhook,
-                 tier, policy, daily_spend_used_usd, daily_spend_reset_at, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+                 tier, policy, registered_by_key, daily_spend_used_usd,
+                 daily_spend_reset_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
             ON CONFLICT(agent_id) DO UPDATE SET
                 owner_address = excluded.owner_address,
                 owner_telegram = COALESCE(excluded.owner_telegram, agent_policies.owner_telegram),
                 owner_webhook = COALESCE(excluded.owner_webhook, agent_policies.owner_webhook),
                 tier = excluded.tier,
                 policy = excluded.policy,
+                registered_by_key = COALESCE(agent_policies.registered_by_key, excluded.registered_by_key),
                 updated_at = excluded.updated_at
         """, (agent_id, owner_address.lower(), owner_telegram, owner_webhook,
-              tier, policy_json, now, now, now))
+              tier, policy_json, registered_by_key, now, now, now))
         await self._db.commit()
 
     async def get_agent_policy(self, agent_id: str) -> Optional[Dict]:
         """Get an agent's policy. Returns None if not registered."""
         cursor = await self._db.execute("""
             SELECT agent_id, owner_address, owner_telegram, owner_webhook,
-                   tier, policy, daily_spend_used_usd, daily_spend_reset_at,
-                   created_at, updated_at
+                   tier, policy, registered_by_key, daily_spend_used_usd,
+                   daily_spend_reset_at, created_at, updated_at
             FROM agent_policies WHERE agent_id = ?
         """, (agent_id,))
         row = await cursor.fetchone()
@@ -1023,34 +1036,32 @@ class Database:
             "owner_webhook": row[3],
             "tier": row[4],
             "policy": policy,
-            "daily_spend_used_usd": row[6] or 0,
-            "daily_spend_reset_at": row[7],
-            "created_at": row[8],
-            "updated_at": row[9],
+            "registered_by_key": row[6],
+            "daily_spend_used_usd": row[7] or 0,
+            "daily_spend_reset_at": row[8],
+            "created_at": row[9],
+            "updated_at": row[10],
         }
 
     async def record_agent_spend(self, agent_id: str, amount_usd: float):
-        """Increment an agent's daily spend. Resets if a new day."""
+        """Increment an agent's daily spend atomically. Resets if a new day."""
         now = time.time()
-        cursor = await self._db.execute(
-            "SELECT daily_spend_reset_at FROM agent_policies WHERE agent_id = ?",
-            (agent_id,),
-        )
-        row = await cursor.fetchone()
-        if row and row[0] and (now - row[0]) >= 86400:
-            # New day — reset
-            await self._db.execute("""
-                UPDATE agent_policies
-                SET daily_spend_used_usd = ?, daily_spend_reset_at = ?
-                WHERE agent_id = ?
-            """, (amount_usd, now, agent_id))
-        else:
-            await self._db.execute("""
-                UPDATE agent_policies
-                SET daily_spend_used_usd = daily_spend_used_usd + ?,
-                    daily_spend_reset_at = COALESCE(daily_spend_reset_at, ?)
-                WHERE agent_id = ?
-            """, (amount_usd, now, agent_id))
+        await self._db.execute("""
+            UPDATE agent_policies SET
+                daily_spend_used_usd = CASE
+                    WHEN daily_spend_reset_at IS NOT NULL
+                         AND (? - daily_spend_reset_at) >= 86400
+                    THEN ?
+                    ELSE daily_spend_used_usd + ?
+                END,
+                daily_spend_reset_at = CASE
+                    WHEN daily_spend_reset_at IS NULL
+                         OR (? - daily_spend_reset_at) >= 86400
+                    THEN ?
+                    ELSE daily_spend_reset_at
+                END
+            WHERE agent_id = ?
+        """, (now, amount_usd, amount_usd, now, now, agent_id))
         await self._db.commit()
 
     async def get_agent_daily_spend(self, agent_id: str) -> float:
