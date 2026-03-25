@@ -143,3 +143,29 @@ def test_empty_policy_defaults(engine):
     )
     # Default thresholds: allow < 25, block > 70, so 50 = WARN
     assert result.verdict == "WARN"
+
+
+def test_boundary_exact_allow_threshold(engine, default_policy):
+    """Score exactly at auto_allow_below (25) falls to WARN (exclusive boundary)."""
+    result = engine.evaluate(
+        policy=default_policy,
+        risk_score=25,
+        target_address="0xsafe",
+        tx_value_usd=100,
+        daily_spend_usd=0,
+    )
+    assert result.verdict == "WARN"
+    assert result.needs_owner_approval is True
+
+
+def test_boundary_exact_block_threshold(engine, default_policy):
+    """Score exactly at auto_block_above (70) falls to WARN (exclusive boundary)."""
+    result = engine.evaluate(
+        policy=default_policy,
+        risk_score=70,
+        target_address="0xsafe",
+        tx_value_usd=100,
+        daily_spend_usd=0,
+    )
+    assert result.verdict == "WARN"
+    assert result.needs_owner_approval is True
