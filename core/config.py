@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     # Database
     database_path: str = "shieldbot.db"
 
+    # Redis
+    redis_url: str = "redis://localhost:6379/0"
+
     # Calibration
     calibration_config_path: str = "core/calibration_config.json"
 
