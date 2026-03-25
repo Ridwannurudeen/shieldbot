@@ -141,17 +141,18 @@ def create_agent_firewall_router(container) -> APIRouter:
             risk_output = container.risk_engine.compute_from_results(
                 results, is_token,
             )
-            risk_score = risk_output["risk_score"]
-            flags = risk_output.get("flags", [])
+            risk_score = risk_output.get("risk_score") or risk_output.get("rug_probability", 50)
+            flags = risk_output.get("flags") or risk_output.get("critical_flags", [])
 
             # Cache in DB
             await container.db.upsert_contract_score(
                 address=to_addr, chain_id=chain_id,
                 risk_score=risk_score,
                 risk_level=risk_output.get("risk_level", "UNKNOWN"),
+                archetype=risk_output.get("risk_archetype"),
                 category_scores=risk_output.get("category_scores"),
                 flags=flags,
-                confidence=risk_output.get("confidence"),
+                confidence=risk_output.get("confidence") or risk_output.get("confidence_level"),
             )
 
         # Cache in Redis for next hit
