@@ -27,6 +27,7 @@ class CacheService:
             self._redis = aioredis.from_url(
                 self._redis_url,
                 decode_responses=False,
+                socket_connect_timeout=3,
             )
             await self._redis.ping()
             self._available = True
@@ -55,7 +56,7 @@ class CacheService:
         if not self._available:
             return None
         try:
-            key = f"verdict:{address}:{chain_id}"
+            key = f"verdict:{address.lower()}:{chain_id}"
             raw = await self._redis.get(key)
             if raw is None:
                 return None
@@ -75,7 +76,7 @@ class CacheService:
         if not self._available:
             return
         try:
-            key = f"verdict:{address}:{chain_id}"
+            key = f"verdict:{address.lower()}:{chain_id}"
             value = json.dumps(verdict)
             await self._redis.set(key, value, ex=ttl or self._ttl)
         except Exception as exc:
@@ -94,10 +95,15 @@ class CacheService:
         if not self._available:
             return True
         try:
-            full_key = f"ratelimit:{key}"
-            count = await self._redis.incr(full_key)
-            await self._redis.expire(full_key, window)
-            return count <= limit
+            rate_key = f"rate:{key}"
+            current = await self._redis.get(rate_key)
+            if current is not None and int(current) >= limit:
+                return False
+            pipe = self._redis.pipeline()
+            pipe.incr(rate_key)
+            pipe.expire(rate_key, window)
+            await pipe.execute()
+            return True
         except Exception as exc:
             logger.debug("Rate limit check failed for %s: %s", key, exc)
             return True
