@@ -89,6 +89,50 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "SHIELDAI_GET_GUARDIAN_ALERTS") {
+    (async () => {
+      try {
+        const apiUrl = await getApiUrl();
+        const response = await fetch(`${apiUrl}/api/guardian/alerts`, {
+          method: "GET",
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!response.ok) {
+          sendResponse({ error: `HTTP ${response.status}` });
+          return;
+        }
+        const data = await response.json();
+        sendResponse({ alerts: data });
+      } catch (err) {
+        sendResponse({ error: err.message || "Failed to fetch alerts" });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === "SHIELDAI_SCAN_INJECTION") {
+    (async () => {
+      try {
+        const apiUrl = await getApiUrl();
+        const response = await fetch(`${apiUrl}/api/scan/injection`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(message.payload || {}),
+          signal: AbortSignal.timeout(30000),
+        });
+        if (!response.ok) {
+          sendResponse({ error: `HTTP ${response.status}` });
+          return;
+        }
+        const data = await response.json();
+        sendResponse({ result: data });
+      } catch (err) {
+        sendResponse({ error: err.message || "Injection scan failed" });
+      }
+    })();
+    return true;
+  }
+
   if (message.type === "SHIELDAI_GET_ACTIVE_TAB") {
     // Only allow extension pages (sidepanel/popup), not content scripts
     if (sender.tab) {

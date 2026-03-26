@@ -2,6 +2,7 @@
 
 import logging
 from fastapi import APIRouter, Request, HTTPException
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -53,5 +54,41 @@ def create_threat_graph_router(container) -> APIRouter:
         await _require_api_key(request)
         min_connections = max(1, min_connections)  # Enforce lower bound
         return await graph.search(min_connections, min_flagged_ratio)
+
+    @router.post("/seed")
+    async def seed_graph(request: Request, min_risk_score: int = 50, limit: int = 500):
+        """Seed the threat graph from existing scored contracts. Requires admin secret."""
+        admin_secret = request.headers.get("X-Admin-Secret", "")
+        if not admin_secret:
+            raise HTTPException(status_code=401, detail="Missing X-Admin-Secret header")
+        expected = getattr(container.settings, "webhook_secret", "")
+        if not expected or admin_secret != expected:
+            raise HTTPException(status_code=403, detail="Invalid admin secret")
+
+        # Get all scored contracts above threshold
+        scored = await container.db.get_all_scored_contracts(
+            min_risk_score=min_risk_score, limit=limit,
+        )
+        seeded = 0
+        for contract in scored:
+            try:
+                await graph.enrich_from_scan(
+                    address=contract["address"],
+                    chain_id=contract["chain_id"],
+                    scan_result=contract,
+                )
+                seeded += 1
+            except Exception as exc:
+                logger.warning("Seed enrichment failed for %s: %s", contract["address"], exc)
+
+        # Rebuild clusters and refresh hot cache
+        await graph.analyze_clusters()
+        await graph.refresh_hot_cache()
+
+        return {
+            "seeded": seeded,
+            "total_candidates": len(scored),
+            "stats": await graph.get_stats(),
+        }
 
     return router

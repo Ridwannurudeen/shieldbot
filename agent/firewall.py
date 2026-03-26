@@ -1,5 +1,6 @@
 """Agent Transaction Firewall API — hot plane endpoints."""
 
+import asyncio
 import time
 import logging
 from typing import Dict, List, Optional
@@ -139,11 +140,13 @@ def create_agent_firewall_router(container) -> APIRouter:
             to_addr, chain_id, max_age_seconds=300,
         )
 
+        simulation_result = None
+
         if db_cached:
             risk_score = db_cached["risk_score"]
             flags = db_cached.get("flags", [])
         else:
-            # 3. Run analyzer pipeline
+            # 3. Run analyzer pipeline + optional Tenderly simulation
             try:
                 is_token = await container.web3_client.is_token_contract(
                     to_addr, chain_id,
@@ -154,7 +157,29 @@ def create_agent_firewall_router(container) -> APIRouter:
                     from_address=tx.sender,
                     is_token=is_token,
                 )
-                results = await container.registry.run_all(ctx)
+
+                if container.tenderly_simulator.is_enabled():
+                    # Run analyzers + Tenderly in parallel
+                    analyzer_task = container.registry.run_all(ctx)
+                    sim_task = container.tenderly_simulator.simulate_transaction(
+                        from_address=tx.sender,
+                        to_address=to_addr,
+                        data=tx.data,
+                        value=tx.value,
+                        chain_id=chain_id,
+                    )
+                    results, sim_raw = await asyncio.gather(
+                        analyzer_task, sim_task, return_exceptions=True,
+                    )
+                    if isinstance(results, Exception):
+                        raise results
+                    if isinstance(sim_raw, Exception):
+                        logger.warning("Tenderly simulation failed: %s", sim_raw)
+                        sim_raw = None
+                    simulation_result = sim_raw
+                else:
+                    results = await container.registry.run_all(ctx)
+
                 risk_output = container.risk_engine.compute_from_results(
                     results, is_token,
                 )
@@ -170,6 +195,29 @@ def create_agent_firewall_router(container) -> APIRouter:
             risk_score = risk_output.get("risk_score") or risk_output.get("rug_probability", 50)
             flags = risk_output.get("flags") or risk_output.get("critical_flags", [])
 
+            # Tenderly risk augmentation
+            if simulation_result:
+                sim_flags = []
+                if not simulation_result.get("success", True):
+                    risk_score = max(risk_score, 70)
+                    sim_flags.append("simulation_revert")
+                asset_changes = simulation_result.get("asset_changes") or []
+                has_outflow = any(
+                    c.get("type") == "transfer" and c.get("from", "").lower() == tx.sender.lower()
+                    for c in asset_changes
+                )
+                has_inflow = any(
+                    c.get("type") == "transfer" and c.get("to", "").lower() == tx.sender.lower()
+                    for c in asset_changes
+                )
+                if has_outflow and not has_inflow:
+                    sim_flags.append("net_asset_outflow")
+                warnings = simulation_result.get("warnings") or []
+                if any("reentrancy" in str(w).lower() for w in warnings):
+                    risk_score = max(risk_score, 80)
+                    sim_flags.append("reentrancy_warning")
+                flags = list(flags) + sim_flags
+
             # Cache in DB
             await container.db.upsert_contract_score(
                 address=to_addr, chain_id=chain_id,
@@ -180,6 +228,14 @@ def create_agent_firewall_router(container) -> APIRouter:
                 flags=flags,
                 confidence=risk_output.get("confidence") or risk_output.get("confidence_level"),
             )
+
+            # Auto-enrich threat graph (fire-and-forget)
+            if hasattr(container, "threat_graph"):
+                asyncio.create_task(
+                    container.threat_graph.enrich_from_scan(
+                        to_addr, chain_id, risk_output,
+                    )
+                )
 
         # Cache in Redis for next hit
         await container.cache.set_verdict(to_addr, chain_id, {
@@ -223,6 +279,12 @@ def create_agent_firewall_router(container) -> APIRouter:
                 "failed": policy_result.failed_checks,
                 "needs_owner_approval": policy_result.needs_owner_approval,
             },
+            "simulation": {
+                "success": simulation_result.get("success"),
+                "asset_deltas": simulation_result.get("asset_changes"),
+                "warnings": simulation_result.get("warnings"),
+                "gas_used": simulation_result.get("gas_used"),
+            } if simulation_result else None,
             "cached": False,
             "latency_ms": round(latency, 1),
         }

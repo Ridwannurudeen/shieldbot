@@ -1037,6 +1037,14 @@ async def firewall(req: FirewallRequest, request: Request):
                 except Exception as e:
                     logger.error(f"DB upsert failed: {e}")
 
+            # Auto-enrich threat graph (fire-and-forget)
+            if container and hasattr(container, 'threat_graph'):
+                asyncio.create_task(
+                    container.threat_graph.enrich_from_scan(
+                        to_addr, req.chainId, risk_output,
+                    )
+                )
+
             # Sentinel feedback loop: auto-watch deployers of blocked contracts
             if container and hasattr(container, 'sentinel') and classification == "BLOCK_RECOMMENDED":
                 try:

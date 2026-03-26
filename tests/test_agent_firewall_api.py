@@ -74,6 +74,9 @@ def mock_container():
         "is_approval": False, "is_unlimited_approval": False,
     })
 
+    c.threat_graph = MagicMock()
+    c.threat_graph.enrich_from_scan = AsyncMock()
+
     return c
 
 
@@ -201,3 +204,81 @@ def test_agent_history(client, mock_container):
                       headers={"X-API-Key": "sb_testkey"})
     assert resp.status_code == 200
     assert len(resp.json()) == 1
+
+
+# --- Tenderly simulation tests (Item 4) ---
+
+
+def _make_firewall_request():
+    return {
+        "agent_id": "agent:1",
+        "transaction": {
+            "from": "0xAgentWallet",
+            "to": "0xTarget",
+            "data": "0x38ed1739",
+            "value": "0",
+            "chain_id": 56,
+        },
+    }
+
+
+def test_agent_firewall_tenderly_enabled_parallel(client, mock_container):
+    """Tenderly enabled: simulation runs in parallel, result in response."""
+    mock_container.tenderly_simulator.is_enabled.return_value = True
+    mock_container.tenderly_simulator.simulate_transaction = AsyncMock(return_value={
+        "success": True, "asset_changes": [], "warnings": [], "gas_used": 21000,
+    })
+    resp = client.post("/api/agent/firewall",
+                       json=_make_firewall_request(),
+                       headers={"X-API-Key": "sb_testkey"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["simulation"] is not None
+    assert body["simulation"]["success"] is True
+    assert body["simulation"]["gas_used"] == 21000
+
+
+def test_agent_firewall_tenderly_revert_floors_risk(client, mock_container):
+    """Tenderly revert floors risk_score at 70."""
+    mock_container.tenderly_simulator.is_enabled.return_value = True
+    mock_container.risk_engine.compute_from_results.return_value = {
+        "risk_score": 30, "risk_level": "LOW", "flags": [],
+        "category_scores": {}, "confidence": 0.8,
+    }
+    mock_container.tenderly_simulator.simulate_transaction = AsyncMock(return_value={
+        "success": False, "revert_reason": "execution reverted",
+        "asset_changes": [], "warnings": [], "gas_used": 0,
+    })
+    resp = client.post("/api/agent/firewall",
+                       json=_make_firewall_request(),
+                       headers={"X-API-Key": "sb_testkey"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["score"] >= 70
+    assert "simulation_revert" in body["flags"]
+
+
+def test_agent_firewall_tenderly_failure_nonfatal(client, mock_container):
+    """Tenderly API failure is non-fatal — analysis proceeds without simulation."""
+    mock_container.tenderly_simulator.is_enabled.return_value = True
+    mock_container.tenderly_simulator.simulate_transaction = AsyncMock(
+        side_effect=Exception("Tenderly API down"),
+    )
+    resp = client.post("/api/agent/firewall",
+                       json=_make_firewall_request(),
+                       headers={"X-API-Key": "sb_testkey"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["simulation"] is None
+    assert body["verdict"] in ("ALLOW", "WARN", "BLOCK")
+
+
+def test_agent_firewall_tenderly_disabled_no_simulation(client, mock_container):
+    """Tenderly disabled: no simulation key in response."""
+    mock_container.tenderly_simulator.is_enabled.return_value = False
+    resp = client.post("/api/agent/firewall",
+                       json=_make_firewall_request(),
+                       headers={"X-API-Key": "sb_testkey"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body.get("simulation") is None

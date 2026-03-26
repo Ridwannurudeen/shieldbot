@@ -396,6 +396,163 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // -------------------------------------------------------------------
+  // Tab switching
+  // -------------------------------------------------------------------
+  const tabBtns = document.querySelectorAll(".tab-btn");
+  const panels = document.querySelectorAll(".panel");
+
+  function switchTab(tabName) {
+    tabBtns.forEach(b => b.classList.toggle("active", b.dataset.tab === tabName));
+    panels.forEach(p => p.classList.toggle("active", p.id === tabName + "Panel"));
+    localStorage.setItem("shieldbot_active_tab", tabName);
+    if (tabName === "guardian") loadGuardianAlerts();
+  }
+
+  tabBtns.forEach(btn => {
+    btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+  });
+
+  // Restore last active tab
+  const savedTab = localStorage.getItem("shieldbot_active_tab");
+  if (savedTab && ["chat", "guardian", "scanner"].includes(savedTab)) {
+    switchTab(savedTab);
+  }
+
+  // -------------------------------------------------------------------
+  // Guardian: load alerts
+  // -------------------------------------------------------------------
+  const guardianAlertsEl = document.getElementById("guardianAlerts");
+
+  async function loadGuardianAlerts() {
+    guardianAlertsEl.innerHTML = '<div class="placeholder-msg">Loading alerts...</div>';
+    try {
+      const stored = await chrome.storage.local.get({ apiUrl: DEFAULT_API_URL });
+      const apiUrl = stored.apiUrl || DEFAULT_API_URL;
+      if (!apiUrl) {
+        guardianAlertsEl.innerHTML = '<div class="placeholder-msg">Set your API URL in extension settings to see alerts.</div>';
+        return;
+      }
+      const resp = await fetch(`${apiUrl}/api/guardian/alerts`, {
+        method: "GET",
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const alerts = await resp.json();
+      renderGuardianAlerts(Array.isArray(alerts) ? alerts : []);
+    } catch (err) {
+      guardianAlertsEl.innerHTML = `<div class="placeholder-msg">Could not load alerts: ${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function renderGuardianAlerts(alerts) {
+    guardianAlertsEl.innerHTML = "";
+    if (alerts.length === 0) {
+      guardianAlertsEl.innerHTML = '<div class="placeholder-msg">No alerts. Your wallets are looking good.</div>';
+      return;
+    }
+    alerts.forEach(alert => {
+      const severity = String(alert.severity || "info").toLowerCase();
+      const wallet = alert.wallet_address || "";
+      const shortWallet = wallet.length >= 10 ? `${wallet.slice(0, 6)}...${wallet.slice(-4)}` : wallet;
+      const card = document.createElement("div");
+      card.className = "alert-card";
+      card.innerHTML = `
+        <div class="alert-card-header">
+          <span class="severity-badge ${escapeHtml(severity)}">${escapeHtml(severity)}</span>
+          <span class="alert-card-title">${escapeHtml(alert.title || "Alert")}</span>
+        </div>
+        ${shortWallet ? `<div class="alert-card-wallet">${escapeHtml(shortWallet)}</div>` : ""}
+        <button class="ack-btn" data-alert-id="${Number(alert.id) || 0}">Acknowledge</button>
+      `;
+      card.querySelector(".ack-btn").addEventListener("click", async (e) => {
+        const alertId = e.target.dataset.alertId;
+        try {
+          const stored = await chrome.storage.local.get({ apiUrl: DEFAULT_API_URL });
+          const apiUrl = stored.apiUrl || DEFAULT_API_URL;
+          await fetch(`${apiUrl}/api/guardian/alerts/${alertId}/acknowledge`, {
+            method: "POST",
+            signal: AbortSignal.timeout(10000),
+          });
+          card.remove();
+          if (!guardianAlertsEl.querySelector(".alert-card")) {
+            guardianAlertsEl.innerHTML = '<div class="placeholder-msg">No alerts. Your wallets are looking good.</div>';
+          }
+        } catch { /* silent fail */ }
+      });
+      guardianAlertsEl.appendChild(card);
+    });
+  }
+
+  document.getElementById("refreshAlertsBtn").addEventListener("click", loadGuardianAlerts);
+
+  // -------------------------------------------------------------------
+  // Scanner: injection detection
+  // -------------------------------------------------------------------
+  const injectionInput = document.getElementById("injectionInput");
+  const scanInjectionBtn = document.getElementById("scanInjectionBtn");
+  const scannerResults = document.getElementById("scannerResults");
+
+  scanInjectionBtn.addEventListener("click", scanInjection);
+  injectionInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.ctrlKey) {
+      e.preventDefault();
+      scanInjection();
+    }
+  });
+
+  async function scanInjection() {
+    const text = injectionInput.value.trim();
+    if (!text) return;
+    scanInjectionBtn.disabled = true;
+    scanInjectionBtn.textContent = "Scanning...";
+    try {
+      const stored = await chrome.storage.local.get({ apiUrl: DEFAULT_API_URL });
+      const apiUrl = stored.apiUrl || DEFAULT_API_URL;
+      const resp = await fetch(`${apiUrl}/api/scan/injection`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, depth: "thorough" }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      renderInjectionResult(data);
+    } catch (err) {
+      scannerResults.innerHTML = `<div class="placeholder-msg">Scan failed: ${escapeHtml(err.message)}</div>`;
+    } finally {
+      scanInjectionBtn.disabled = false;
+      scanInjectionBtn.textContent = "Scan for Injection";
+    }
+  }
+
+  function renderInjectionResult(data) {
+    const score = Number(data.risk_score) || 0;
+    let level = "safe";
+    let label = "Safe";
+    if (score >= 70) { level = "danger"; label = "Injection Detected"; }
+    else if (score >= 30) { level = "warning"; label = "Suspicious"; }
+
+    const patterns = Array.isArray(data.matched_patterns) ? data.matched_patterns : [];
+    const patternTags = patterns.map(p =>
+      `<li class="pattern-tag">${escapeHtml(p)}</li>`
+    ).join("");
+
+    const card = document.createElement("div");
+    card.className = "scan-result-card";
+    card.innerHTML = `
+      <div class="scan-result-header">
+        <div class="scan-score-badge ${level}">${score}</div>
+        <div>
+          <div class="scan-result-label">${escapeHtml(label)}</div>
+          <div class="scan-result-sublabel">Confidence: ${Number(data.confidence || 0).toFixed(1)}%</div>
+        </div>
+      </div>
+      ${patternTags ? `<ul class="pattern-list">${patternTags}</ul>` : '<ul class="pattern-list"><li class="pattern-tag safe">No patterns matched</li></ul>'}
+    `;
+    scannerResults.prepend(card);
+  }
+
+  // -------------------------------------------------------------------
   // Event listeners
   // -------------------------------------------------------------------
   document.getElementById("clearBtn").addEventListener("click", () => {

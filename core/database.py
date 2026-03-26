@@ -384,6 +384,33 @@ class Database:
             'cached': True,
         }
 
+    async def get_all_scored_contracts(
+        self, min_risk_score: int = 50, limit: int = 500
+    ) -> List[Dict]:
+        """Get all scored contracts above a risk threshold for graph seeding."""
+        cursor = await self._db.execute("""
+            SELECT address, chain_id, risk_score, risk_level, archetype,
+                   category_scores, flags, confidence
+            FROM contract_scores
+            WHERE risk_score >= ?
+            ORDER BY risk_score DESC
+            LIMIT ?
+        """, (min_risk_score, limit))
+        rows = await cursor.fetchall()
+        results = []
+        for row in rows:
+            results.append({
+                "address": row[0],
+                "chain_id": row[1],
+                "risk_score": row[2],
+                "risk_level": row[3],
+                "archetype": row[4],
+                "category_scores": json.loads(row[5]) if row[5] else {},
+                "flags": json.loads(row[6]) if row[6] else [],
+                "confidence": row[7],
+            })
+        return results
+
     # --- Outcome Events ---
 
     async def record_outcome(

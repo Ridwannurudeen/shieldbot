@@ -192,7 +192,7 @@ class ServiceContainer:
         self.reputation_service = ReputationService(self.db, self.cache, self.web3_client)
 
         # Portfolio guardian (wallet health monitoring)
-        self.guardian_service = GuardianService(self.db, self.web3_client, self.cache)
+        self.guardian_service = GuardianService(self.db, self.web3_client, self.cache, settings=settings)
 
         # Anomaly detection (agent behavioral baselines)
         self.anomaly_detector = AnomalyDetector(self.db)

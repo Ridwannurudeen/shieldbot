@@ -304,6 +304,246 @@
     }
     #sendBtn:hover { background: #2563eb; }
     #sendBtn:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
+
+    /* Tab bar */
+    .tab-bar {
+      display: flex;
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+      flex-shrink: 0;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 10px 0;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: #64748b;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      text-align: center;
+    }
+    .tab-btn:hover { color: #94a3b8; }
+    .tab-btn.active {
+      color: #3b82f6;
+      border-bottom-color: #3b82f6;
+    }
+
+    /* Panel containers */
+    .panel { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+    .panel.active { display: flex; }
+
+    /* Guardian panel */
+    #guardianAlerts {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    #guardianAlerts::-webkit-scrollbar { width: 4px; }
+    #guardianAlerts::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+
+    .guardian-toolbar {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+      background: #1e293b;
+      border-top: 1px solid #334155;
+      flex-shrink: 0;
+    }
+    #refreshAlertsBtn {
+      flex: 1;
+      padding: 10px 16px;
+      background: #3b82f6;
+      border: none;
+      border-radius: 8px;
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    #refreshAlertsBtn:hover { background: #2563eb; }
+    #refreshAlertsBtn:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
+
+    .alert-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 12px;
+    }
+    .alert-card-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .severity-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .severity-badge.critical { background: #ef4444; }
+    .severity-badge.high { background: #f59e0b; }
+    .severity-badge.medium { background: #eab308; }
+    .severity-badge.low { background: #22c55e; }
+    .severity-badge.info { background: #3b82f6; }
+    .alert-card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #f8fafc;
+    }
+    .alert-card-wallet {
+      font-size: 11px;
+      color: #94a3b8;
+      margin-bottom: 8px;
+    }
+    .alert-card-time {
+      font-size: 10px;
+      color: #64748b;
+    }
+    .ack-btn {
+      padding: 4px 12px;
+      background: transparent;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      color: #94a3b8;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+      float: right;
+    }
+    .ack-btn:hover { border-color: #3b82f6; color: #3b82f6; }
+
+    .placeholder-msg {
+      text-align: center;
+      color: #64748b;
+      font-size: 13px;
+      padding: 40px 16px;
+    }
+    .placeholder-msg a {
+      color: #3b82f6;
+      text-decoration: underline;
+      cursor: pointer;
+    }
+
+    /* Scanner panel */
+    #scannerPanel .scanner-input-area {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    #injectionInput {
+      width: 100%;
+      min-height: 100px;
+      padding: 10px 12px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      color: #f8fafc;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      resize: vertical;
+    }
+    #injectionInput:focus { border-color: #3b82f6; }
+    #injectionInput::placeholder { color: #475569; }
+    #scanInjectionBtn {
+      padding: 10px 16px;
+      background: #3b82f6;
+      border: none;
+      border-radius: 8px;
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+      align-self: flex-end;
+    }
+    #scanInjectionBtn:hover { background: #2563eb; }
+    #scanInjectionBtn:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
+
+    #scannerResults {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 16px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    #scannerResults::-webkit-scrollbar { width: 4px; }
+    #scannerResults::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+
+    .scan-result-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 12px;
+    }
+    .scan-result-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .scan-score-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .scan-score-badge.safe { background: #22c55e; }
+    .scan-score-badge.warning { background: #eab308; }
+    .scan-score-badge.danger { background: #ef4444; }
+    .scan-result-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #f8fafc;
+    }
+    .scan-result-sublabel {
+      font-size: 11px;
+      color: #94a3b8;
+      margin-top: 1px;
+    }
+    .pattern-list {
+      list-style: none;
+      padding: 0;
+      margin: 8px 0 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .pattern-tag {
+      display: inline-block;
+      padding: 2px 8px;
+      background: rgba(239,68,68,0.15);
+      border: 1px solid rgba(239,68,68,0.3);
+      border-radius: 4px;
+      color: #fca5a5;
+      font-size: 11px;
+    }
+    .pattern-tag.safe {
+      background: rgba(34,197,94,0.15);
+      border-color: rgba(34,197,94,0.3);
+      color: #86efac;
+    }
   </style>
 </head>
 <body>
@@ -317,20 +557,45 @@
     </div>
   </div>
 
-  <div id="messages"></div>
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="chat">Chat</button>
+    <button class="tab-btn" data-tab="guardian">Guardian</button>
+    <button class="tab-btn" data-tab="scanner">Scanner</button>
+  </div>
 
-  <div class="input-area">
-    <select id="chainSelect">
-      <option value="56">BSC</option>
-      <option value="1">ETH</option>
-      <option value="8453">Base</option>
-      <option value="42161">Arb</option>
-      <option value="137">Poly</option>
-      <option value="204">opBNB</option>
-      <option value="10">OP</option>
-    </select>
-    <input type="text" id="chatInput" placeholder="Ask about a token, contract, or threat...">
-    <button id="sendBtn">Send</button>
+  <!-- Chat Panel -->
+  <div id="chatPanel" class="panel active">
+    <div id="messages"></div>
+    <div class="input-area">
+      <select id="chainSelect">
+        <option value="56">BSC</option>
+        <option value="1">ETH</option>
+        <option value="8453">Base</option>
+        <option value="42161">Arb</option>
+        <option value="137">Poly</option>
+        <option value="204">opBNB</option>
+        <option value="10">OP</option>
+      </select>
+      <input type="text" id="chatInput" placeholder="Ask about a token, contract, or threat...">
+      <button id="sendBtn">Send</button>
+    </div>
+  </div>
+
+  <!-- Guardian Panel -->
+  <div id="guardianPanel" class="panel">
+    <div id="guardianAlerts"></div>
+    <div class="guardian-toolbar">
+      <button id="refreshAlertsBtn">Refresh Alerts</button>
+    </div>
+  </div>
+
+  <!-- Scanner Panel -->
+  <div id="scannerPanel" class="panel">
+    <div class="scanner-input-area">
+      <textarea id="injectionInput" placeholder="Paste agent prompt, message, or tool input to scan for injection attacks..."></textarea>
+      <button id="scanInjectionBtn">Scan for Injection</button>
+    </div>
+    <div id="scannerResults"></div>
   </div>
 
   <script src="sidepanel.js"></script>
