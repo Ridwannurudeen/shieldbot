@@ -5,14 +5,12 @@ import logging
 from typing import Dict, List, Optional
 
 import aiohttp
-from Crypto.Hash import keccak as _keccak
+from eth_utils.crypto import keccak
 
 logger = logging.getLogger(__name__)
 
 # ERC20 Approval(address indexed owner, address indexed spender, uint256 value)
-_k = _keccak.new(digest_bits=256)
-_k.update(b"Approval(address,address,uint256)")
-_APPROVAL_TOPIC = "0x" + _k.hexdigest()
+_APPROVAL_TOPIC = "0x" + keccak(b"Approval(address,address,uint256)").hex()
 
 # Threshold above which an approval is considered "unlimited"
 _UNLIMITED_THRESHOLD = 2 ** 200
