@@ -1,29 +1,14 @@
-"""Portfolio Guardian — wallet health monitoring, approval management, and alerts."""
+"""Portfolio Guardian — wallet health monitoring, approval management, and alerts.
 
-import asyncio
+Delegates on-chain approval scanning to RescueService (full-chain scan,
+on-chain verification, price enrichment) instead of rolling its own RPC queries.
+"""
+
 import time
 import logging
 from typing import Dict, List, Optional
 
-import aiohttp
-from web3 import Web3
-from eth_utils.crypto import keccak
-
 logger = logging.getLogger(__name__)
-
-# ERC20 Approval(address indexed owner, address indexed spender, uint256 value)
-_APPROVAL_TOPIC = "0x" + keccak(b"Approval(address,address,uint256)").hex()
-
-# Threshold above which an approval is considered "unlimited"
-_UNLIMITED_THRESHOLD = 2 ** 200
-
-# RPC pagination: 50K blocks per chunk, scan last ~180 days (~5.2M blocks on BSC)
-_RPC_CHUNK = 50_000
-_RPC_MAX_BLOCKS = 5_200_000
-_RPC_CONCURRENCY = 10
-
-# balanceOf(address) selector
-_BALANCE_OF_SELECTOR = "0x70a08231"
 
 
 class GuardianService:
@@ -37,11 +22,12 @@ class GuardianService:
         "deployer_risk": 0.10,
     }
 
-    def __init__(self, db, web3_client=None, cache=None, settings=None):
+    def __init__(self, db, web3_client=None, cache=None, settings=None, rescue_service=None):
         self._db = db
         self._web3 = web3_client
         self._cache = cache
         self._settings = settings
+        self._rescue = rescue_service
 
     async def register_wallet(
         self, wallet_address: str, chain_id: int, owner_id: str, is_agent: bool = False
@@ -105,18 +91,12 @@ class GuardianService:
             )
             components["approval_staleness"] = max(0, 100 - stale_count * 15)
 
-        # 4. Concentration risk (15% weight) — uses approval tokens
+        # 4. Concentration risk (15% weight) — uses USD values from rescue data
         if approvals_unavailable:
             components["concentration_risk"] = self._NO_DATA_SCORE
         else:
-            concentration = await self._check_concentration_from_tokens(
-                wallet_address, token_addrs, chain_id,
-            )
-            if concentration is None:
-                components["concentration_risk"] = self._NO_DATA_SCORE
-                warnings.append("Could not check concentration risk")
-            else:
-                components["concentration_risk"] = 100 - concentration
+            concentration = self._check_concentration_from_approvals(approvals)
+            components["concentration_risk"] = 100 - concentration
 
         # 5. Deployer risk (10% weight) — uses approval tokens
         if approvals_unavailable:
@@ -150,6 +130,11 @@ class GuardianService:
         # Update DB
         await self._db.update_guardian_health(wallet_address, chain_id, round(composite, 1))
 
+        # Aggregate USD value at risk
+        total_value_at_risk = sum(
+            a.get("value_at_risk_usd") or 0 for a in approvals
+        )
+
         result = {
             "wallet_address": wallet_address,
             "chain_id": chain_id,
@@ -159,6 +144,7 @@ class GuardianService:
             "total_approvals": len(approvals),
             "dangerous_approvals": dangerous_count,
             "stale_approvals": stale_count,
+            "total_value_at_risk_usd": round(total_value_at_risk, 2),
             "scanned_at": time.time(),
         }
         if warnings:
@@ -208,197 +194,69 @@ class GuardianService:
             wallet_address, chain_id, alert_type, severity, title, details
         )
 
-    # --- RPC helpers ---
-
-    def _get_rpc_url(self, chain_id: int) -> Optional[str]:
-        """Get the RPC URL for log queries on this chain."""
-        if not self._settings:
-            return None
-        # Prefer dedicated logs RPC (archive node) for BSC
-        if chain_id == 56:
-            logs_rpc = getattr(self._settings, "logs_rpc_url", "")
-            if logs_rpc:
-                return logs_rpc
-        mapping = {
-            56: "bsc_rpc_url",
-            1: "eth_rpc_url",
-            8453: "base_rpc_url",
-            42161: "arbitrum_rpc_url",
-            137: "polygon_rpc_url",
-            204: "opbnb_rpc_url",
-            10: "optimism_rpc_url",
-        }
-        attr = mapping.get(chain_id, "bsc_rpc_url")
-        return getattr(self._settings, attr, "") or None
-
-    async def _rpc_get_logs(
-        self, rpc_url: str, from_block: int, to_block: int, topics: List[str],
-    ) -> Optional[List[Dict]]:
-        """Single eth_getLogs RPC call. Returns None on failure."""
-        payload = {
-            "jsonrpc": "2.0",
-            "method": "eth_getLogs",
-            "params": [{
-                "fromBlock": hex(from_block),
-                "toBlock": hex(to_block),
-                "topics": topics,
-            }],
-            "id": 1,
-        }
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    rpc_url,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=15),
-                ) as resp:
-                    if resp.status != 200:
-                        return None
-                    data = await resp.json()
-                    if "error" in data:
-                        return None
-                    result = data.get("result", [])
-                    return result if isinstance(result, list) else None
-        except Exception as exc:
-            logger.debug("RPC getLogs failed (%d-%d): %s", from_block, to_block, exc)
-            return None
-
-    async def _rpc_block_number(self, rpc_url: str) -> Optional[int]:
-        """Get latest block number via RPC."""
-        payload = {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    rpc_url, json=payload, timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status != 200:
-                        return None
-                    data = await resp.json()
-                    return int(data["result"], 16)
-        except Exception:
-            return None
-
-    async def _rpc_balance_of(self, rpc_url: str, token: str, wallet: str) -> Optional[int]:
-        """Call balanceOf(wallet) on an ERC20 token via RPC."""
-        wallet_padded = wallet.lower().replace("0x", "").zfill(64)
-        calldata = f"{_BALANCE_OF_SELECTOR}{wallet_padded}"
-        payload = {
-            "jsonrpc": "2.0",
-            "method": "eth_call",
-            "params": [{"to": Web3.to_checksum_address(token), "data": calldata}, "latest"],
-            "id": 1,
-        }
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    rpc_url, json=payload, timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status != 200:
-                        return None
-                    data = await resp.json()
-                    if "error" in data:
-                        return 0
-                    raw = data.get("result", "0x0")
-                    return int(raw, 16) if raw and raw != "0x" else 0
-        except Exception:
-            return 0
-
-    # --- On-chain data methods ---
+    # --- Approval data via rescue_service ---
 
     async def _get_approval_data(self, wallet_address: str, chain_id: int) -> Optional[List[Dict]]:
-        """Get ERC20 approval data via paginated eth_getLogs RPC.
+        """Get ERC20 approval data via rescue_service (full-chain scan + on-chain verification).
+
         Returns None if data could not be fetched, [] if wallet has no approvals.
         """
-        rpc_url = self._get_rpc_url(chain_id)
-        if not rpc_url:
+        if not self._rescue:
             return None
         try:
-            latest = await self._rpc_block_number(rpc_url)
-            if latest is None:
-                return None
+            scan_result = await self._rescue.scan_approvals(wallet_address, chain_id)
+            raw_approvals = scan_result.get("approvals", [])
 
-            # Pad wallet to 32 bytes for topic1 filter
-            padded = "0x" + wallet_address.lower().replace("0x", "").zfill(64)
-            topics = [_APPROVAL_TOPIC, padded]
-
-            from_block = max(0, latest - _RPC_MAX_BLOCKS)
-            all_logs = []
-            sem = asyncio.Semaphore(_RPC_CONCURRENCY)
-
-            async def fetch_chunk(start: int, end: int):
-                async with sem:
-                    return await self._rpc_get_logs(rpc_url, start, end, topics)
-
-            # Build chunk ranges
-            tasks = []
-            b = from_block
-            while b <= latest:
-                end = min(b + _RPC_CHUNK - 1, latest)
-                tasks.append(fetch_chunk(b, end))
-                b = end + 1
-
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for r in results:
-                if isinstance(r, list):
-                    all_logs.extend(r)
-
-            # Parse logs into approvals
             approvals = []
-            now = time.time()
-            for log in all_logs:
-                topics_list = log.get("topics", [])
-                if len(topics_list) < 3:
-                    continue
-                token_address = log.get("address", "").lower()
-                spender = "0x" + topics_list[2][-40:].lower()
-                raw_amount = log.get("data", "0x0")
-                try:
-                    amount = int(raw_amount, 16) if raw_amount else 0
-                except (ValueError, TypeError):
-                    amount = 0
-                is_unlimited = amount > _UNLIMITED_THRESHOLD
+            for a in raw_approvals:
+                # Map rescue risk levels (uppercase) to guardian levels (lowercase)
+                risk_level = self._map_risk_level(a.get("risk_level", "LOW"))
 
-                # Block timestamp — RPC logs use hex timeStamp or blockNumber
-                block_ts = 0
-                ts_raw = log.get("timeStamp") or log.get("timestamp")
-                if ts_raw:
-                    try:
-                        block_ts = int(ts_raw, 16) if isinstance(ts_raw, str) else int(ts_raw)
-                    except (ValueError, TypeError):
-                        pass
-                days_since = (now - block_ts) / 86400 if block_ts > 0 else 0
-
-                # Cross-reference spender risk (24h TTL — Guardian is historical)
-                risk_level = "low"
+                # Overlay DB contract score — may upgrade risk
+                spender = a.get("spender", "")
                 try:
-                    score_data = await self._db.get_contract_score(spender, chain_id, max_age_seconds=86400)
+                    score_data = await self._db.get_contract_score(
+                        spender, chain_id, max_age_seconds=86400,
+                    )
                     if score_data:
                         rs = score_data.get("risk_score", 0)
                         if rs >= 70:
                             risk_level = "critical"
-                        elif rs >= 50:
+                        elif rs >= 50 and risk_level not in ("critical",):
                             risk_level = "high"
-                        elif rs >= 30:
-                            risk_level = "medium"
                 except Exception:
                     pass
 
+                is_unlimited = a.get("allowance") == "Unlimited"
+
                 approvals.append({
-                    "token_address": token_address,
+                    "token_address": a.get("token_address", ""),
                     "spender": spender,
-                    "amount": str(amount),
+                    "spender_label": a.get("spender_label", ""),
+                    "token_name": a.get("token_name", ""),
+                    "token_symbol": a.get("token_symbol", ""),
+                    "allowance": a.get("allowance", "0"),
                     "is_unlimited": is_unlimited,
                     "risk_level": risk_level,
-                    "days_since_interaction": round(days_since, 1),
+                    "risk_reason": a.get("risk_reason", ""),
+                    "value_at_risk_usd": a.get("value_at_risk_usd"),
+                    "days_since_interaction": 0,
                 })
 
             # Sort by risk severity
             risk_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-            approvals.sort(key=lambda a: risk_order.get(a["risk_level"], 4))
+            approvals.sort(key=lambda x: risk_order.get(x["risk_level"], 4))
             return approvals
         except Exception as exc:
-            logger.debug("_get_approval_data failed: %s", exc)
+            logger.error("_get_approval_data via rescue failed: %s", exc, exc_info=True)
             return None
+
+    @staticmethod
+    def _map_risk_level(rescue_level: str) -> str:
+        """Map rescue service risk levels (uppercase) to guardian levels (lowercase)."""
+        return {"HIGH": "high", "MEDIUM": "medium", "LOW": "low"}.get(rescue_level, "low")
+
+    # --- Health sub-checks ---
 
     async def _check_flagged_exposure_from_tokens(
         self, token_addrs: List[str], chain_id: int,
@@ -420,30 +278,29 @@ class GuardianService:
             logger.debug("_check_flagged_exposure failed: %s", exc)
             return None
 
-    async def _check_concentration_from_tokens(
-        self, wallet_address: str, token_addrs: List[str], chain_id: int,
-    ) -> Optional[float]:
-        """Risk points from portfolio concentration via HHI (0-100)."""
-        if not token_addrs:
+    @staticmethod
+    def _check_concentration_from_approvals(approvals: List[Dict]) -> float:
+        """Risk points from portfolio concentration using USD values (0-100).
+
+        Uses value_at_risk_usd from rescue data per unique token to compute HHI.
+        """
+        if not approvals:
             return 0.0
-        rpc_url = self._get_rpc_url(chain_id)
-        if not rpc_url:
-            return None
-        try:
-            # Fetch balances concurrently
-            tasks = [self._rpc_balance_of(rpc_url, t, wallet_address) for t in token_addrs[:20]]
-            balances_raw = await asyncio.gather(*tasks, return_exceptions=True)
-            balances = [b for b in balances_raw if isinstance(b, int) and b > 0]
-            if not balances:
-                return 0.0
-            total = sum(balances)
-            if total == 0:
-                return 0.0
-            hhi = sum((b / total) ** 2 for b in balances)
-            return min(100.0, hhi * 100)
-        except Exception as exc:
-            logger.debug("_check_concentration failed: %s", exc)
-            return None
+        # Aggregate max USD value per token (multiple approvals for same token)
+        token_values: Dict[str, float] = {}
+        for a in approvals:
+            token = a.get("token_address", "")
+            usd = a.get("value_at_risk_usd") or 0
+            if token and usd > 0:
+                token_values[token] = max(token_values.get(token, 0), usd)
+        if not token_values:
+            return 0.0
+        values = list(token_values.values())
+        total = sum(values)
+        if total == 0:
+            return 0.0
+        hhi = sum((v / total) ** 2 for v in values)
+        return min(100.0, hhi * 100)
 
     async def _check_deployer_risk_from_tokens(
         self, token_addrs: List[str], chain_id: int,

@@ -23,28 +23,34 @@ def mock_db():
 
 
 @pytest.fixture
+def mock_rescue():
+    """Mock rescue_service with a default empty scan result."""
+    rescue = MagicMock()
+    rescue.scan_approvals = AsyncMock(return_value={
+        "wallet": "0xabc",
+        "chain_id": 56,
+        "total_approvals": 0,
+        "high_risk": 0,
+        "medium_risk": 0,
+        "total_value_at_risk_usd": 0,
+        "approvals": [],
+        "alerts": [],
+        "revoke_txs": [],
+        "scanned_at": time.time(),
+    })
+    return rescue
+
+
+@pytest.fixture
 def guardian(mock_db):
+    """Guardian without rescue_service — data unavailable path."""
     return GuardianService(db=mock_db)
 
 
 @pytest.fixture
-def mock_settings():
-    s = MagicMock()
-    s.bsc_rpc_url = "https://bsc-dataseed.binance.org/"
-    s.logs_rpc_url = "https://bsc-rpc.example.com"
-    s.eth_rpc_url = "https://eth-rpc.example.com"
-    s.base_rpc_url = ""
-    s.arbitrum_rpc_url = ""
-    s.polygon_rpc_url = ""
-    s.opbnb_rpc_url = ""
-    s.optimism_rpc_url = ""
-    s.bscscan_api_key = ""
-    return s
-
-
-@pytest.fixture
-def guardian_with_settings(mock_db, mock_settings):
-    return GuardianService(db=mock_db, settings=mock_settings)
+def guardian_with_rescue(mock_db, mock_rescue):
+    """Guardian with rescue_service — full data path."""
+    return GuardianService(db=mock_db, rescue_service=mock_rescue)
 
 
 # --- Basic operations ---
@@ -69,7 +75,7 @@ async def test_get_wallets(guardian, mock_db):
 
 @pytest.mark.asyncio
 async def test_health_no_data_returns_unknown(guardian):
-    """No RPC/settings = data unavailable, level should be 'unknown'."""
+    """No rescue_service = data unavailable, level should be 'unknown'."""
     result = await guardian.get_health("0xabc", 56)
     assert result["health_score"] == 50.0
     assert result["level"] == "unknown"
@@ -157,148 +163,202 @@ async def test_get_alerts(guardian, mock_db):
     assert len(alerts) == 1
 
 
-# --- RPC-based on-chain reads ---
+# --- Rescue-service-backed approval data ---
 
 
 @pytest.mark.asyncio
-async def test_approval_data_no_settings_returns_none(mock_db):
-    """Guardian without settings returns None (data unavailable)."""
+async def test_approval_data_no_rescue_returns_none(mock_db):
+    """Guardian without rescue_service returns None (data unavailable)."""
     g = GuardianService(db=mock_db)
     result = await g._get_approval_data("0xabc", 56)
     assert result is None
 
 
 @pytest.mark.asyncio
-async def test_approval_data_via_rpc(guardian_with_settings):
-    """Mock RPC getLogs and verify parsed approvals."""
-    fake_log = {
-        "address": "0xtokenaddress1234567890abcdef1234567890ab",
-        "topics": [
-            "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925",
-            "0x000000000000000000000000abc0000000000000000000000000000000000000",
-            "0x000000000000000000000000def0000000000000000000000000000000000000",
+async def test_approval_data_via_rescue(guardian_with_rescue, mock_rescue):
+    """Rescue service results are mapped to guardian format."""
+    mock_rescue.scan_approvals.return_value = {
+        "approvals": [
+            {
+                "token_address": "0xtoken1",
+                "token_name": "TestToken",
+                "token_symbol": "TT",
+                "spender": "0xspender1",
+                "spender_label": "Unknown Contract",
+                "allowance": "Unlimited",
+                "risk_level": "HIGH",
+                "risk_reason": "Unlimited approval to unknown contract",
+                "chain_id": 56,
+                "value_at_risk_usd": 1.50,
+                "has_revoke_tx": True,
+            },
         ],
-        "data": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-        "timeStamp": hex(int(time.time()) - 86400),
     }
+    guardian_with_rescue._db.get_contract_score = AsyncMock(return_value=None)
 
-    guardian_with_settings._rpc_block_number = AsyncMock(return_value=100)
-    guardian_with_settings._rpc_get_logs = AsyncMock(return_value=[fake_log])
-    guardian_with_settings._db.get_contract_score = AsyncMock(return_value=None)
-
-    result = await guardian_with_settings._get_approval_data("0xabc", 56)
+    result = await guardian_with_rescue._get_approval_data("0xabc", 56)
     assert result is not None
     assert len(result) == 1
     assert result[0]["is_unlimited"] is True
-    assert result[0]["risk_level"] == "low"
-    assert "spender" in result[0]
+    assert result[0]["risk_level"] == "high"  # mapped from HIGH
+    assert result[0]["spender"] == "0xspender1"
+    assert result[0]["value_at_risk_usd"] == 1.50
 
 
 @pytest.mark.asyncio
-async def test_approval_data_with_risky_spender(guardian_with_settings):
-    """Spender with high risk score gets flagged."""
-    fake_log = {
-        "address": "0xtokenaddress1234567890abcdef1234567890ab",
-        "topics": [
-            "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925",
-            "0x000000000000000000000000abc0000000000000000000000000000000000000",
-            "0x000000000000000000000000def0000000000000000000000000000000000000",
+async def test_approval_data_db_score_upgrades_risk(guardian_with_rescue, mock_rescue):
+    """DB contract score can upgrade risk from 'high' to 'critical'."""
+    mock_rescue.scan_approvals.return_value = {
+        "approvals": [
+            {
+                "token_address": "0xtoken1",
+                "spender": "0xbadspender",
+                "spender_label": "Unknown",
+                "allowance": "Unlimited",
+                "risk_level": "HIGH",
+                "risk_reason": "test",
+                "chain_id": 56,
+                "value_at_risk_usd": None,
+                "has_revoke_tx": True,
+            },
         ],
-        "data": "0x" + "f" * 64,
-        "timeStamp": hex(int(time.time()) - 3600),
     }
 
-    guardian_with_settings._rpc_block_number = AsyncMock(return_value=100)
-    guardian_with_settings._rpc_get_logs = AsyncMock(return_value=[fake_log])
-
     async def mock_score(addr, chain_id, **kwargs):
-        if "def0" in addr:
+        if "badspender" in addr:
             return {"risk_score": 85, "risk_level": "HIGH"}
         return None
-    guardian_with_settings._db.get_contract_score = mock_score
+    guardian_with_rescue._db.get_contract_score = mock_score
 
-    result = await guardian_with_settings._get_approval_data("0xabc", 56)
+    result = await guardian_with_rescue._get_approval_data("0xabc", 56)
     assert len(result) == 1
     assert result[0]["risk_level"] == "critical"
 
 
 @pytest.mark.asyncio
-async def test_flagged_exposure_from_tokens(guardian_with_settings):
+async def test_flagged_exposure_from_tokens(guardian_with_rescue):
     """Tokens with risk_score >= 70 add 20 points each."""
     async def mock_score(addr, chain_id, **kwargs):
         if addr == "0xtoken1":
             return {"risk_score": 80, "risk_level": "HIGH"}
         return None
-    guardian_with_settings._db.get_contract_score = mock_score
+    guardian_with_rescue._db.get_contract_score = mock_score
 
-    result = await guardian_with_settings._check_flagged_exposure_from_tokens(
+    result = await guardian_with_rescue._check_flagged_exposure_from_tokens(
         ["0xtoken1", "0xtoken2"], 56,
     )
     assert result == 20.0
 
 
 @pytest.mark.asyncio
-async def test_flagged_exposure_empty_tokens(guardian_with_settings):
+async def test_flagged_exposure_empty_tokens(guardian_with_rescue):
     """No tokens = 0 risk."""
-    result = await guardian_with_settings._check_flagged_exposure_from_tokens([], 56)
+    result = await guardian_with_rescue._check_flagged_exposure_from_tokens([], 56)
     assert result == 0.0
 
 
 @pytest.mark.asyncio
-async def test_concentration_single_token_max_risk(guardian_with_settings):
-    """One token = HHI 1.0 = 100 risk."""
-    guardian_with_settings._rpc_balance_of = AsyncMock(return_value=1000000)
-    result = await guardian_with_settings._check_concentration_from_tokens(
-        "0xabc", ["0xtoken1"], 56,
-    )
+async def test_concentration_single_token_max_risk():
+    """One token with all USD value = HHI 1.0 = 100 risk."""
+    approvals = [
+        {"token_address": "0xtoken1", "value_at_risk_usd": 100.0},
+    ]
+    result = GuardianService._check_concentration_from_approvals(approvals)
     assert result == 100.0
 
 
 @pytest.mark.asyncio
-async def test_concentration_even_split_low_risk(guardian_with_settings):
+async def test_concentration_even_split_low_risk():
     """Even split across 4 tokens = HHI 0.25 = 25 risk."""
-    guardian_with_settings._rpc_balance_of = AsyncMock(return_value=1000)
-    result = await guardian_with_settings._check_concentration_from_tokens(
-        "0xabc", ["0xt1", "0xt2", "0xt3", "0xt4"], 56,
-    )
+    approvals = [
+        {"token_address": "0xt1", "value_at_risk_usd": 25.0},
+        {"token_address": "0xt2", "value_at_risk_usd": 25.0},
+        {"token_address": "0xt3", "value_at_risk_usd": 25.0},
+        {"token_address": "0xt4", "value_at_risk_usd": 25.0},
+    ]
+    result = GuardianService._check_concentration_from_approvals(approvals)
     assert abs(result - 25.0) < 0.1
 
 
 @pytest.mark.asyncio
-async def test_deployer_risk_flagged(guardian_with_settings):
+async def test_concentration_no_usd_values():
+    """No USD values = 0 risk (can't measure)."""
+    approvals = [
+        {"token_address": "0xt1", "value_at_risk_usd": None},
+        {"token_address": "0xt2", "value_at_risk_usd": 0},
+    ]
+    result = GuardianService._check_concentration_from_approvals(approvals)
+    assert result == 0.0
+
+
+@pytest.mark.asyncio
+async def test_deployer_risk_flagged(guardian_with_rescue):
     """Watched deployer adds 25 risk points."""
-    guardian_with_settings._db.get_deployer = AsyncMock(
+    guardian_with_rescue._db.get_deployer = AsyncMock(
         return_value={"deployer_address": "0xDeployer1"}
     )
-    guardian_with_settings._db.get_watched_deployer = AsyncMock(
+    guardian_with_rescue._db.get_watched_deployer = AsyncMock(
         return_value={"address": "0xDeployer1", "reason": "serial scammer"}
     )
-    result = await guardian_with_settings._check_deployer_risk_from_tokens(
+    result = await guardian_with_rescue._check_deployer_risk_from_tokens(
         ["0xtoken1"], 56,
     )
     assert result == 25.0
 
 
 @pytest.mark.asyncio
-async def test_health_with_approvals(guardian_with_settings):
-    """Full health check with mocked RPC data returns real score."""
-    fake_log = {
-        "address": "0xtokenaddress1234567890abcdef1234567890ab",
-        "topics": [
-            "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925",
-            "0x000000000000000000000000abc0000000000000000000000000000000000000",
-            "0x000000000000000000000000def0000000000000000000000000000000000000",
+async def test_health_with_approvals(guardian_with_rescue, mock_rescue):
+    """Full health check with rescue data returns real score."""
+    mock_rescue.scan_approvals.return_value = {
+        "approvals": [
+            {
+                "token_address": "0xtoken1",
+                "token_name": "TestToken",
+                "token_symbol": "TT",
+                "spender": "0xspender1",
+                "spender_label": "Unknown Contract",
+                "allowance": "Unlimited",
+                "risk_level": "HIGH",
+                "risk_reason": "Unlimited approval to unknown contract",
+                "chain_id": 56,
+                "value_at_risk_usd": 2.00,
+                "has_revoke_tx": True,
+            },
         ],
-        "data": "0x" + "f" * 64,
-        "timeStamp": hex(int(time.time()) - 86400),
     }
+    guardian_with_rescue._db.get_contract_score = AsyncMock(return_value=None)
 
-    guardian_with_settings._rpc_block_number = AsyncMock(return_value=100)
-    guardian_with_settings._rpc_get_logs = AsyncMock(return_value=[fake_log])
-    guardian_with_settings._rpc_balance_of = AsyncMock(return_value=1000)
-    guardian_with_settings._db.get_contract_score = AsyncMock(return_value=None)
-
-    result = await guardian_with_settings.get_health("0xabc", 56)
+    result = await guardian_with_rescue.get_health("0xabc", 56)
     assert result["level"] != "unknown"
     assert "warnings" not in result
     assert result["total_approvals"] == 1
+    assert result["total_value_at_risk_usd"] == 2.00
+
+
+@pytest.mark.asyncio
+async def test_health_no_approvals_excellent(guardian_with_rescue, mock_rescue):
+    """Empty wallet (no approvals) = excellent health."""
+    mock_rescue.scan_approvals.return_value = {"approvals": []}
+    result = await guardian_with_rescue.get_health("0xabc", 56)
+    assert result["health_score"] == 100.0
+    assert result["level"] == "excellent"
+    assert result["total_approvals"] == 0
+
+
+@pytest.mark.asyncio
+async def test_health_rescue_failure_returns_unknown(mock_db, mock_rescue):
+    """If rescue_service.scan_approvals raises, Guardian falls back to 'unknown'."""
+    mock_rescue.scan_approvals = AsyncMock(side_effect=RuntimeError("RPC down"))
+    g = GuardianService(db=mock_db, rescue_service=mock_rescue)
+    result = await g.get_health("0xabc", 56)
+    assert result["level"] == "unknown"
+    assert "warnings" in result
+
+
+@pytest.mark.asyncio
+async def test_risk_level_mapping():
+    """Rescue uppercase → guardian lowercase."""
+    assert GuardianService._map_risk_level("HIGH") == "high"
+    assert GuardianService._map_risk_level("MEDIUM") == "medium"
+    assert GuardianService._map_risk_level("LOW") == "low"
+    assert GuardianService._map_risk_level("UNKNOWN") == "low"
