@@ -405,7 +405,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     tabBtns.forEach(b => b.classList.toggle("active", b.dataset.tab === tabName));
     panels.forEach(p => p.classList.toggle("active", p.id === tabName + "Panel"));
     localStorage.setItem("shieldbot_active_tab", tabName);
-    if (tabName === "guardian") loadGuardianAlerts();
+    if (tabName === "guardian") loadGuardianData();
   }
 
   tabBtns.forEach(btn => {
@@ -419,40 +419,85 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // -------------------------------------------------------------------
-  // Guardian: load alerts
+  // Guardian: load health + alerts
   // -------------------------------------------------------------------
+  const guardianHealthEl = document.getElementById("guardianHealth");
   const guardianAlertsEl = document.getElementById("guardianAlerts");
 
-  async function loadGuardianAlerts() {
-    guardianAlertsEl.innerHTML = '<div class="placeholder-msg">Loading alerts...</div>';
+  async function loadGuardianData() {
+    guardianHealthEl.innerHTML = "";
+    guardianAlertsEl.innerHTML = '<div class="placeholder-msg">Loading...</div>';
     try {
       const stored = await chrome.storage.local.get({ apiUrl: DEFAULT_API_URL, healthWallet: "" });
       const apiUrl = stored.apiUrl || DEFAULT_API_URL;
       const wallet = stored.healthWallet;
       if (!apiUrl) {
-        guardianAlertsEl.innerHTML = '<div class="placeholder-msg">Set your API URL in extension settings to see alerts.</div>';
+        guardianAlertsEl.innerHTML = '<div class="placeholder-msg">Set your API URL in extension settings.</div>';
         return;
       }
       if (!wallet) {
         guardianAlertsEl.innerHTML = '<div class="placeholder-msg">Enter your wallet address in the popup Health tab first, then come back here.</div>';
         return;
       }
-      const resp = await fetch(`${apiUrl}/api/guardian/alerts?wallet_address=${encodeURIComponent(wallet)}`, {
-        method: "GET",
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const alerts = await resp.json();
-      renderGuardianAlerts(Array.isArray(alerts) ? alerts : []);
+      const chainId = parseInt(await chrome.storage.local.get("selectedChainId").then(r => r.selectedChainId)) || 56;
+      // Fetch health + alerts in parallel
+      const [healthResp, alertsResp] = await Promise.allSettled([
+        fetch(`${apiUrl}/api/guardian/health/${encodeURIComponent(wallet)}?chain_id=${chainId}`, { signal: AbortSignal.timeout(20000) }),
+        fetch(`${apiUrl}/api/guardian/alerts?wallet_address=${encodeURIComponent(wallet)}`, { signal: AbortSignal.timeout(15000) }),
+      ]);
+      // Render health
+      if (healthResp.status === "fulfilled" && healthResp.value.ok) {
+        const health = await healthResp.value.json();
+        renderGuardianHealth(health);
+      } else {
+        guardianHealthEl.innerHTML = '<div class="placeholder-msg" style="padding:16px 16px 0">Could not load health score.</div>';
+      }
+      // Render alerts
+      if (alertsResp.status === "fulfilled" && alertsResp.value.ok) {
+        const alerts = await alertsResp.value.json();
+        renderGuardianAlerts(Array.isArray(alerts) ? alerts : []);
+      } else {
+        guardianAlertsEl.innerHTML = '<div class="placeholder-msg">Could not load alerts.</div>';
+      }
     } catch (err) {
-      guardianAlertsEl.innerHTML = `<div class="placeholder-msg">Could not load alerts: ${escapeHtml(err.message)}</div>`;
+      guardianAlertsEl.innerHTML = `<div class="placeholder-msg">Error: ${escapeHtml(err.message)}</div>`;
     }
+  }
+
+  function renderGuardianHealth(health) {
+    const score = health.health_score ?? 0;
+    const level = health.level || "unknown";
+    const components = health.components || {};
+    const warnings = health.warnings || [];
+    const labels = {
+      dangerous_approvals: "Approvals",
+      flagged_exposure: "Flagged tokens",
+      approval_staleness: "Staleness",
+      concentration_risk: "Concentration",
+      deployer_risk: "Deployer risk",
+    };
+    let compHtml = "";
+    for (const [key, val] of Object.entries(components)) {
+      compHtml += `<div class="health-component"><span>${escapeHtml(labels[key] || key)}</span><span>${val}/100</span></div>`;
+    }
+    let warnHtml = "";
+    if (warnings.length > 0) {
+      warnHtml = `<div class="health-warnings">${warnings.map(w => escapeHtml(w)).join("<br>")}</div>`;
+    }
+    guardianHealthEl.innerHTML = `<div class="health-card">
+      <div class="health-header">
+        <span class="health-score" style="color:${score >= 70 ? '#6ee7b7' : score >= 40 ? '#fcd34d' : '#fca5a5'}">${score}</span>
+        <span class="health-level ${escapeHtml(level)}">${escapeHtml(level)}</span>
+      </div>
+      <div class="health-components">${compHtml}</div>
+      ${warnHtml}
+    </div>`;
   }
 
   function renderGuardianAlerts(alerts) {
     guardianAlertsEl.innerHTML = "";
     if (alerts.length === 0) {
-      guardianAlertsEl.innerHTML = '<div class="placeholder-msg">No alerts. Your wallets are looking good.</div>';
+      guardianAlertsEl.innerHTML = '<div class="placeholder-msg">No active alerts.</div>';
       return;
     }
     alerts.forEach(alert => {
@@ -475,12 +520,12 @@ document.addEventListener("DOMContentLoaded", async () => {
           const stored = await chrome.storage.local.get({ apiUrl: DEFAULT_API_URL });
           const apiUrl = stored.apiUrl || DEFAULT_API_URL;
           await fetch(`${apiUrl}/api/guardian/alerts/${alertId}/acknowledge`, {
-            method: "POST",
+            method: "PUT",
             signal: AbortSignal.timeout(10000),
           });
           card.remove();
           if (!guardianAlertsEl.querySelector(".alert-card")) {
-            guardianAlertsEl.innerHTML = '<div class="placeholder-msg">No alerts. Your wallets are looking good.</div>';
+            guardianAlertsEl.innerHTML = '<div class="placeholder-msg">No active alerts.</div>';
           }
         } catch { /* silent fail */ }
       });
@@ -488,7 +533,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  document.getElementById("refreshAlertsBtn").addEventListener("click", loadGuardianAlerts);
+  document.getElementById("refreshAlertsBtn").addEventListener("click", loadGuardianData);
 
   // -------------------------------------------------------------------
   // Scanner: injection detection

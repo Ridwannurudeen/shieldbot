@@ -55,8 +55,7 @@ def create_guardian_router(container) -> APIRouter:
 
     @router.get("/health/{wallet_address}")
     async def get_health(request: Request, wallet_address: str, chain_id: int = 56):
-        """Get wallet health score with component breakdown."""
-        await _require_api_key(request)
+        """Get wallet health score with component breakdown. Public for single wallet lookup."""
         _validate_address(wallet_address)
         return await guardian.get_health(wallet_address, chain_id)
 
