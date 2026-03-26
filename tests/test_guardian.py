@@ -46,12 +46,13 @@ async def test_get_wallets(guardian, mock_db):
 
 
 @pytest.mark.asyncio
-async def test_health_no_approvals_is_perfect(guardian):
-    """No approvals = 100 health score."""
+async def test_health_no_data_returns_unknown(guardian):
+    """No API key/settings = data unavailable, level should be 'unknown'."""
     result = await guardian.get_health("0xabc", 56)
-    assert result["health_score"] == 100.0
-    assert result["level"] == "excellent"
-    assert result["total_approvals"] == 0
+    assert result["health_score"] == 50.0
+    assert result["level"] == "unknown"
+    assert "warnings" in result
+    assert len(result["warnings"]) > 0
 
 
 @pytest.mark.asyncio
@@ -63,8 +64,7 @@ async def test_health_score_weights_sum_to_one(guardian):
 @pytest.mark.asyncio
 async def test_health_level_classification(guardian):
     result = await guardian.get_health("0xabc", 56)
-    # Perfect score with no approvals
-    assert result["level"] in ("excellent", "good", "fair", "poor", "critical")
+    assert result["level"] in ("excellent", "good", "fair", "poor", "critical", "unknown")
 
 
 @pytest.mark.asyncio
@@ -151,11 +151,11 @@ def guardian_with_settings(mock_db, mock_settings):
 
 
 @pytest.mark.asyncio
-async def test_approval_data_no_settings_returns_empty(mock_db):
-    """Guardian without settings returns empty approvals (graceful degradation)."""
+async def test_approval_data_no_settings_returns_none(mock_db):
+    """Guardian without settings returns None (data unavailable)."""
     g = GuardianService(db=mock_db)
     result = await g._get_approval_data("0xabc", 56)
-    assert result == []
+    assert result is None
 
 
 @pytest.mark.asyncio

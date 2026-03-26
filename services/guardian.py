@@ -43,36 +43,67 @@ class GuardianService:
         """List monitored wallets for an owner."""
         return await self._db.get_guardian_wallets(owner_id)
 
+    _NO_DATA_SCORE = 50.0  # Neutral score when data is unavailable
+
     async def get_health(self, wallet_address: str, chain_id: int = 56) -> Dict:
         """Calculate wallet health score (0-100) with component breakdown."""
         wallet_address = wallet_address.lower()
         components = {}
+        warnings = []
 
-        # 1. Dangerous approvals (35% weight) — stub until on-chain reading
+        # 1. Dangerous approvals (35% weight)
+        approvals_unavailable = False
         approvals = await self._get_approval_data(wallet_address, chain_id)
-        dangerous_count = sum(1 for a in approvals if a.get("risk_level") in ("critical", "high"))
-        unlimited_count = sum(1 for a in approvals if a.get("is_unlimited"))
-        if not approvals:
-            components["dangerous_approvals"] = 100
+        if approvals is None:
+            approvals_unavailable = True
+            components["dangerous_approvals"] = self._NO_DATA_SCORE
+            warnings.append("Could not fetch approval data from block explorer")
+            approvals = []  # safe default for downstream iteration
+        elif not approvals:
+            components["dangerous_approvals"] = 100  # genuinely no approvals = safe
         else:
+            dangerous_count = sum(1 for a in approvals if a.get("risk_level") in ("critical", "high"))
+            unlimited_count = sum(1 for a in approvals if a.get("is_unlimited"))
             danger_ratio = dangerous_count / len(approvals)
             components["dangerous_approvals"] = max(0, 100 - (danger_ratio * 100) - (unlimited_count * 10))
 
-        # 2. Exposure to flagged tokens (25% weight)
-        components["flagged_exposure"] = 100 - (await self._check_flagged_exposure(wallet_address, chain_id))
+        dangerous_count = sum(1 for a in approvals if a.get("risk_level") in ("critical", "high"))
+        unlimited_count = sum(1 for a in approvals if a.get("is_unlimited"))
 
-        # 3. Approval staleness (15% weight)
-        stale_count = sum(
-            1 for a in approvals
-            if a.get("days_since_interaction", 0) > 30 and a.get("is_unlimited")
-        )
-        components["approval_staleness"] = max(0, 100 - stale_count * 15)
+        # 2. Exposure to flagged tokens (25% weight)
+        flagged = await self._check_flagged_exposure(wallet_address, chain_id)
+        if flagged is None:
+            components["flagged_exposure"] = self._NO_DATA_SCORE
+            warnings.append("Could not fetch token list for flagged-exposure check")
+        else:
+            components["flagged_exposure"] = 100 - flagged
+
+        # 3. Approval staleness (15% weight) — depends on approval data
+        stale_count = 0
+        if approvals_unavailable:
+            components["approval_staleness"] = self._NO_DATA_SCORE
+        else:
+            stale_count = sum(
+                1 for a in approvals
+                if a.get("days_since_interaction", 0) > 30 and a.get("is_unlimited")
+            )
+            components["approval_staleness"] = max(0, 100 - stale_count * 15)
 
         # 4. Concentration risk (15% weight)
-        components["concentration_risk"] = 100 - (await self._check_concentration(wallet_address, chain_id))
+        concentration = await self._check_concentration(wallet_address, chain_id)
+        if concentration is None:
+            components["concentration_risk"] = self._NO_DATA_SCORE
+            warnings.append("Could not fetch token list for concentration check")
+        else:
+            components["concentration_risk"] = 100 - concentration
 
         # 5. Deployer risk (10% weight)
-        components["deployer_risk"] = 100 - (await self._check_deployer_risk(wallet_address, chain_id))
+        deployer = await self._check_deployer_risk(wallet_address, chain_id)
+        if deployer is None:
+            components["deployer_risk"] = self._NO_DATA_SCORE
+            warnings.append("Could not fetch token list for deployer-risk check")
+        else:
+            components["deployer_risk"] = 100 - deployer
 
         # Clamp all to 0-100
         for k in components:
@@ -80,7 +111,9 @@ class GuardianService:
 
         composite = sum(components[k] * self.WEIGHTS[k] for k in self.WEIGHTS)
 
-        if composite >= 80:
+        if warnings:
+            level = "unknown"
+        elif composite >= 80:
             level = "excellent"
         elif composite >= 60:
             level = "good"
@@ -94,7 +127,7 @@ class GuardianService:
         # Update DB
         await self._db.update_guardian_health(wallet_address, chain_id, round(composite, 1))
 
-        return {
+        result = {
             "wallet_address": wallet_address,
             "chain_id": chain_id,
             "health_score": round(composite, 1),
@@ -105,6 +138,9 @@ class GuardianService:
             "stale_approvals": stale_count,
             "scanned_at": time.time(),
         }
+        if warnings:
+            result["warnings"] = warnings
+        return result
 
     async def get_approvals(self, wallet_address: str, chain_id: int = 56) -> List[Dict]:
         """Get all token approvals, risk-ranked."""
@@ -167,11 +203,11 @@ class GuardianService:
         attr = mapping.get(chain_id, "bscscan_api_key")
         return getattr(self._settings, attr, "") or fallback
 
-    async def _explorer_api(self, chain_id: int, **params) -> Dict:
-        """Call Etherscan v2 API. Returns parsed JSON or empty dict on failure."""
+    async def _explorer_api(self, chain_id: int, **params) -> Optional[Dict]:
+        """Call Etherscan v2 API. Returns parsed JSON, or None on failure."""
         api_key = self._get_api_key(chain_id)
         if not api_key:
-            return {}
+            return None
         params["chainid"] = chain_id
         params["apikey"] = api_key
         try:
@@ -182,17 +218,19 @@ class GuardianService:
                     timeout=aiohttp.ClientTimeout(total=15),
                 ) as resp:
                     if resp.status != 200:
-                        return {}
+                        return None
                     data = await resp.json()
-                    return data if isinstance(data, dict) else {}
+                    return data if isinstance(data, dict) else None
         except Exception as exc:
             logger.debug("Explorer API call failed (chain %s): %s", chain_id, exc)
-            return {}
+            return None
 
     # --- On-chain data methods ---
 
-    async def _get_approval_data(self, wallet_address: str, chain_id: int) -> List[Dict]:
-        """Get ERC20 approval data from on-chain logs via Etherscan v2."""
+    async def _get_approval_data(self, wallet_address: str, chain_id: int) -> Optional[List[Dict]]:
+        """Get ERC20 approval data from on-chain logs via Etherscan v2.
+        Returns None if data could not be fetched, [] if wallet has no approvals.
+        """
         try:
             # Pad wallet to 32 bytes for topic1 filter
             padded = "0x" + wallet_address.lower().replace("0x", "").zfill(64)
@@ -206,9 +244,11 @@ class GuardianService:
                 toBlock="99999999",
                 topic0_1_opr="and",
             )
+            if data is None:
+                return None
             logs = data.get("result", [])
             if not isinstance(logs, list):
-                return []
+                return None
 
             approvals = []
             now = time.time()
@@ -232,10 +272,10 @@ class GuardianService:
                 except (ValueError, TypeError):
                     days_since = 0
 
-                # Cross-reference spender risk
+                # Cross-reference spender risk (24h TTL — Guardian is historical)
                 risk_level = "low"
                 try:
-                    score_data = await self._db.get_contract_score(spender, chain_id)
+                    score_data = await self._db.get_contract_score(spender, chain_id, max_age_seconds=86400)
                     if score_data:
                         rs = score_data.get("risk_score", 0)
                         if rs >= 70:
@@ -262,10 +302,10 @@ class GuardianService:
             return approvals
         except Exception as exc:
             logger.debug("_get_approval_data failed: %s", exc)
-            return []
+            return None
 
-    async def _check_flagged_exposure(self, wallet_address: str, chain_id: int) -> float:
-        """Risk points from flagged token holdings (0-100)."""
+    async def _check_flagged_exposure(self, wallet_address: str, chain_id: int) -> Optional[float]:
+        """Risk points from flagged token holdings (0-100). None if data unavailable."""
         try:
             data = await self._explorer_api(
                 chain_id,
@@ -273,16 +313,18 @@ class GuardianService:
                 action="tokenlist",
                 address=wallet_address,
             )
+            if data is None:
+                return None
             tokens = data.get("result", [])
             if not isinstance(tokens, list):
-                return 0.0
+                return None
             risk_points = 0.0
             for token in tokens:
                 token_addr = (token.get("contractAddress") or "").lower()
                 if not token_addr:
                     continue
                 try:
-                    score_data = await self._db.get_contract_score(token_addr, chain_id)
+                    score_data = await self._db.get_contract_score(token_addr, chain_id, max_age_seconds=86400)
                     if score_data and score_data.get("risk_score", 0) >= 70:
                         risk_points += 20
                 except Exception:
@@ -290,10 +332,10 @@ class GuardianService:
             return min(100.0, risk_points)
         except Exception as exc:
             logger.debug("_check_flagged_exposure failed: %s", exc)
-            return 0.0
+            return None
 
-    async def _check_concentration(self, wallet_address: str, chain_id: int) -> float:
-        """Risk points from portfolio concentration via HHI (0-100)."""
+    async def _check_concentration(self, wallet_address: str, chain_id: int) -> Optional[float]:
+        """Risk points from portfolio concentration via HHI (0-100). None if data unavailable."""
         try:
             data = await self._explorer_api(
                 chain_id,
@@ -301,8 +343,12 @@ class GuardianService:
                 action="tokenlist",
                 address=wallet_address,
             )
+            if data is None:
+                return None
             tokens = data.get("result", [])
-            if not isinstance(tokens, list) or len(tokens) == 0:
+            if not isinstance(tokens, list):
+                return None
+            if len(tokens) == 0:
                 return 0.0
             balances = []
             for token in tokens:
@@ -318,10 +364,10 @@ class GuardianService:
             return min(100.0, hhi * 100)
         except Exception as exc:
             logger.debug("_check_concentration failed: %s", exc)
-            return 0.0
+            return None
 
-    async def _check_deployer_risk(self, wallet_address: str, chain_id: int) -> float:
-        """Risk points from tokens with flagged deployers (0-100)."""
+    async def _check_deployer_risk(self, wallet_address: str, chain_id: int) -> Optional[float]:
+        """Risk points from tokens with flagged deployers (0-100). None if data unavailable."""
         try:
             data = await self._explorer_api(
                 chain_id,
@@ -329,9 +375,11 @@ class GuardianService:
                 action="tokenlist",
                 address=wallet_address,
             )
+            if data is None:
+                return None
             tokens = data.get("result", [])
             if not isinstance(tokens, list):
-                return 0.0
+                return None
             risk_points = 0.0
             for token in tokens:
                 token_addr = (token.get("contractAddress") or "").lower()
@@ -357,4 +405,4 @@ class GuardianService:
             return min(100.0, risk_points)
         except Exception as exc:
             logger.debug("_check_deployer_risk failed: %s", exc)
-            return 0.0
+            return None
