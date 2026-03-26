@@ -17,10 +17,10 @@ _APPROVAL_TOPIC = "0x" + keccak(b"Approval(address,address,uint256)").hex()
 # Threshold above which an approval is considered "unlimited"
 _UNLIMITED_THRESHOLD = 2 ** 200
 
-# RPC pagination: 50K blocks per chunk, scan last ~90 days (~2.6M blocks on BSC)
+# RPC pagination: 50K blocks per chunk, scan last ~180 days (~5.2M blocks on BSC)
 _RPC_CHUNK = 50_000
-_RPC_MAX_BLOCKS = 2_600_000
-_RPC_CONCURRENCY = 5
+_RPC_MAX_BLOCKS = 5_200_000
+_RPC_CONCURRENCY = 10
 
 # balanceOf(address) selector
 _BALANCE_OF_SELECTOR = "0x70a08231"
