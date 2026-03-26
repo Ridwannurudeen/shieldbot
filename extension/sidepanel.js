@@ -469,6 +469,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     const level = health.level || "unknown";
     const components = health.components || {};
     const warnings = health.warnings || [];
+    const totalApprovals = health.total_approvals || 0;
+    const dangerousCount = health.dangerous_approvals || 0;
+    const valueAtRisk = health.total_value_at_risk_usd || 0;
     const labels = {
       dangerous_approvals: "Approvals",
       flagged_exposure: "Flagged tokens",
@@ -476,6 +479,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       concentration_risk: "Concentration",
       deployer_risk: "Deployer risk",
     };
+    let statsHtml = `<div class="health-stats">
+      <div class="health-stat"><span class="health-stat-val">${totalApprovals}</span><span class="health-stat-label">Approvals</span></div>
+      <div class="health-stat"><span class="health-stat-val" style="color:#fca5a5">${dangerousCount}</span><span class="health-stat-label">High Risk</span></div>
+      <div class="health-stat"><span class="health-stat-val" style="color:#fcd34d">$${valueAtRisk.toFixed(2)}</span><span class="health-stat-label">At Risk</span></div>
+    </div>`;
     let compHtml = "";
     for (const [key, val] of Object.entries(components)) {
       compHtml += `<div class="health-component"><span>${escapeHtml(labels[key] || key)}</span><span>${val}/100</span></div>`;
@@ -489,6 +497,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         <span class="health-score" style="color:${score >= 70 ? '#6ee7b7' : score >= 40 ? '#fcd34d' : '#fca5a5'}">${score}</span>
         <span class="health-level ${escapeHtml(level)}">${escapeHtml(level)}</span>
       </div>
+      ${statsHtml}
       <div class="health-components">${compHtml}</div>
       ${warnHtml}
     </div>`;
