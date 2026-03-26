@@ -1,9 +1,8 @@
 """Tests for Portfolio Guardian service."""
 
-import json
 import time
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from services.guardian import GuardianService
 
@@ -28,6 +27,29 @@ def guardian(mock_db):
     return GuardianService(db=mock_db)
 
 
+@pytest.fixture
+def mock_settings():
+    s = MagicMock()
+    s.bsc_rpc_url = "https://bsc-dataseed.binance.org/"
+    s.logs_rpc_url = "https://bsc-rpc.example.com"
+    s.eth_rpc_url = "https://eth-rpc.example.com"
+    s.base_rpc_url = ""
+    s.arbitrum_rpc_url = ""
+    s.polygon_rpc_url = ""
+    s.opbnb_rpc_url = ""
+    s.optimism_rpc_url = ""
+    s.bscscan_api_key = ""
+    return s
+
+
+@pytest.fixture
+def guardian_with_settings(mock_db, mock_settings):
+    return GuardianService(db=mock_db, settings=mock_settings)
+
+
+# --- Basic operations ---
+
+
 @pytest.mark.asyncio
 async def test_register_wallet(guardian, mock_db):
     result = await guardian.register_wallet("0xABC", 56, "k1")
@@ -47,7 +69,7 @@ async def test_get_wallets(guardian, mock_db):
 
 @pytest.mark.asyncio
 async def test_health_no_data_returns_unknown(guardian):
-    """No API key/settings = data unavailable, level should be 'unknown'."""
+    """No RPC/settings = data unavailable, level should be 'unknown'."""
     result = await guardian.get_health("0xabc", 56)
     assert result["health_score"] == 50.0
     assert result["level"] == "unknown"
@@ -65,6 +87,9 @@ async def test_health_score_weights_sum_to_one(guardian):
 async def test_health_level_classification(guardian):
     result = await guardian.get_health("0xabc", 56)
     assert result["level"] in ("excellent", "good", "fair", "poor", "critical", "unknown")
+
+
+# --- Revoke TX builder ---
 
 
 @pytest.mark.asyncio
@@ -95,6 +120,9 @@ async def test_build_revoke_tx_skips_incomplete(guardian):
     ]
     txs = await guardian.build_revoke_tx("0xWallet", approvals)
     assert len(txs) == 0
+
+
+# --- Alerts ---
 
 
 @pytest.mark.asyncio
@@ -129,25 +157,7 @@ async def test_get_alerts(guardian, mock_db):
     assert len(alerts) == 1
 
 
-# --- Tests for on-chain reads (Item 2) ---
-
-
-@pytest.fixture
-def mock_settings():
-    s = MagicMock()
-    s.bscscan_api_key = "test_bsc_key"
-    s.etherscan_api_key = ""
-    s.basescan_api_key = ""
-    s.arbiscan_api_key = ""
-    s.polygonscan_api_key = ""
-    s.opbnbscan_api_key = ""
-    s.optimism_api_key = ""
-    return s
-
-
-@pytest.fixture
-def guardian_with_settings(mock_db, mock_settings):
-    return GuardianService(db=mock_db, settings=mock_settings)
+# --- RPC-based on-chain reads ---
 
 
 @pytest.mark.asyncio
@@ -159,36 +169,25 @@ async def test_approval_data_no_settings_returns_none(mock_db):
 
 
 @pytest.mark.asyncio
-async def test_approval_data_with_explorer_api(guardian_with_settings):
-    """Mock Etherscan logs response and verify parsed approvals."""
+async def test_approval_data_via_rpc(guardian_with_settings):
+    """Mock RPC getLogs and verify parsed approvals."""
     fake_log = {
-        "address": "0xTokenAddress1234567890abcdef1234567890ab",
+        "address": "0xtokenaddress1234567890abcdef1234567890ab",
         "topics": [
             "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925",
             "0x000000000000000000000000abc0000000000000000000000000000000000000",
             "0x000000000000000000000000def0000000000000000000000000000000000000",
         ],
         "data": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-        "timeStamp": hex(int(time.time()) - 86400),  # 1 day ago
+        "timeStamp": hex(int(time.time()) - 86400),
     }
-    fake_resp = {"status": "1", "result": [fake_log]}
 
-    with patch("aiohttp.ClientSession") as MockSession:
-        mock_resp = AsyncMock()
-        mock_resp.status = 200
-        mock_resp.json = AsyncMock(return_value=fake_resp)
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_session = MagicMock()
-        mock_session.get = MagicMock(return_value=mock_ctx)
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-        MockSession.return_value = mock_session
+    guardian_with_settings._rpc_block_number = AsyncMock(return_value=100)
+    guardian_with_settings._rpc_get_logs = AsyncMock(return_value=[fake_log])
+    guardian_with_settings._db.get_contract_score = AsyncMock(return_value=None)
 
-        guardian_with_settings._db.get_contract_score = AsyncMock(return_value=None)
-        result = await guardian_with_settings._get_approval_data("0xabc", 56)
-
+    result = await guardian_with_settings._get_approval_data("0xabc", 56)
+    assert result is not None
     assert len(result) == 1
     assert result[0]["is_unlimited"] is True
     assert result[0]["risk_level"] == "low"
@@ -196,110 +195,110 @@ async def test_approval_data_with_explorer_api(guardian_with_settings):
 
 
 @pytest.mark.asyncio
-async def test_flagged_exposure_scoring(guardian_with_settings):
-    """Tokens with risk_score >= 70 add 20 points each."""
-    fake_resp = {
-        "result": [
-            {"contractAddress": "0xToken1", "balance": "1000"},
-            {"contractAddress": "0xToken2", "balance": "2000"},
-        ]
+async def test_approval_data_with_risky_spender(guardian_with_settings):
+    """Spender with high risk score gets flagged."""
+    fake_log = {
+        "address": "0xtokenaddress1234567890abcdef1234567890ab",
+        "topics": [
+            "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925",
+            "0x000000000000000000000000abc0000000000000000000000000000000000000",
+            "0x000000000000000000000000def0000000000000000000000000000000000000",
+        ],
+        "data": "0x" + "f" * 64,
+        "timeStamp": hex(int(time.time()) - 3600),
     }
 
-    with patch("aiohttp.ClientSession") as MockSession:
-        mock_resp = AsyncMock()
-        mock_resp.status = 200
-        mock_resp.json = AsyncMock(return_value=fake_resp)
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_session = MagicMock()
-        mock_session.get = MagicMock(return_value=mock_ctx)
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-        MockSession.return_value = mock_session
+    guardian_with_settings._rpc_block_number = AsyncMock(return_value=100)
+    guardian_with_settings._rpc_get_logs = AsyncMock(return_value=[fake_log])
 
-        # Token1 flagged (risk_score=80), Token2 safe
-        async def mock_score(addr, chain_id, **kwargs):
-            if addr == "0xtoken1":
-                return {"risk_score": 80, "risk_level": "HIGH"}
-            return None
-        guardian_with_settings._db.get_contract_score = mock_score
+    async def mock_score(addr, chain_id, **kwargs):
+        if "def0" in addr:
+            return {"risk_score": 85, "risk_level": "HIGH"}
+        return None
+    guardian_with_settings._db.get_contract_score = mock_score
 
-        result = await guardian_with_settings._check_flagged_exposure("0xabc", 56)
-    assert result == 20.0  # 1 flagged token * 20 points
+    result = await guardian_with_settings._get_approval_data("0xabc", 56)
+    assert len(result) == 1
+    assert result[0]["risk_level"] == "critical"
+
+
+@pytest.mark.asyncio
+async def test_flagged_exposure_from_tokens(guardian_with_settings):
+    """Tokens with risk_score >= 70 add 20 points each."""
+    async def mock_score(addr, chain_id, **kwargs):
+        if addr == "0xtoken1":
+            return {"risk_score": 80, "risk_level": "HIGH"}
+        return None
+    guardian_with_settings._db.get_contract_score = mock_score
+
+    result = await guardian_with_settings._check_flagged_exposure_from_tokens(
+        ["0xtoken1", "0xtoken2"], 56,
+    )
+    assert result == 20.0
+
+
+@pytest.mark.asyncio
+async def test_flagged_exposure_empty_tokens(guardian_with_settings):
+    """No tokens = 0 risk."""
+    result = await guardian_with_settings._check_flagged_exposure_from_tokens([], 56)
+    assert result == 0.0
 
 
 @pytest.mark.asyncio
 async def test_concentration_single_token_max_risk(guardian_with_settings):
     """One token = HHI 1.0 = 100 risk."""
-    fake_resp = {"result": [{"balance": "1000000"}]}
-
-    with patch("aiohttp.ClientSession") as MockSession:
-        mock_resp = AsyncMock()
-        mock_resp.status = 200
-        mock_resp.json = AsyncMock(return_value=fake_resp)
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_session = MagicMock()
-        mock_session.get = MagicMock(return_value=mock_ctx)
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-        MockSession.return_value = mock_session
-
-        result = await guardian_with_settings._check_concentration("0xabc", 56)
+    guardian_with_settings._rpc_balance_of = AsyncMock(return_value=1000000)
+    result = await guardian_with_settings._check_concentration_from_tokens(
+        "0xabc", ["0xtoken1"], 56,
+    )
     assert result == 100.0
 
 
 @pytest.mark.asyncio
 async def test_concentration_even_split_low_risk(guardian_with_settings):
     """Even split across 4 tokens = HHI 0.25 = 25 risk."""
-    fake_resp = {"result": [
-        {"balance": "1000"}, {"balance": "1000"},
-        {"balance": "1000"}, {"balance": "1000"},
-    ]}
-
-    with patch("aiohttp.ClientSession") as MockSession:
-        mock_resp = AsyncMock()
-        mock_resp.status = 200
-        mock_resp.json = AsyncMock(return_value=fake_resp)
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_session = MagicMock()
-        mock_session.get = MagicMock(return_value=mock_ctx)
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-        MockSession.return_value = mock_session
-
-        result = await guardian_with_settings._check_concentration("0xabc", 56)
+    guardian_with_settings._rpc_balance_of = AsyncMock(return_value=1000)
+    result = await guardian_with_settings._check_concentration_from_tokens(
+        "0xabc", ["0xt1", "0xt2", "0xt3", "0xt4"], 56,
+    )
     assert abs(result - 25.0) < 0.1
 
 
 @pytest.mark.asyncio
 async def test_deployer_risk_flagged(guardian_with_settings):
     """Watched deployer adds 25 risk points."""
-    fake_resp = {"result": [{"contractAddress": "0xToken1", "balance": "1000"}]}
-
-    with patch("aiohttp.ClientSession") as MockSession:
-        mock_resp = AsyncMock()
-        mock_resp.status = 200
-        mock_resp.json = AsyncMock(return_value=fake_resp)
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_session = MagicMock()
-        mock_session.get = MagicMock(return_value=mock_ctx)
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-        MockSession.return_value = mock_session
-
-        guardian_with_settings._db.get_deployer = AsyncMock(
-            return_value={"deployer_address": "0xDeployer1"}
-        )
-        guardian_with_settings._db.get_watched_deployer = AsyncMock(
-            return_value={"address": "0xDeployer1", "reason": "serial scammer"}
-        )
-
-        result = await guardian_with_settings._check_deployer_risk("0xabc", 56)
+    guardian_with_settings._db.get_deployer = AsyncMock(
+        return_value={"deployer_address": "0xDeployer1"}
+    )
+    guardian_with_settings._db.get_watched_deployer = AsyncMock(
+        return_value={"address": "0xDeployer1", "reason": "serial scammer"}
+    )
+    result = await guardian_with_settings._check_deployer_risk_from_tokens(
+        ["0xtoken1"], 56,
+    )
     assert result == 25.0
+
+
+@pytest.mark.asyncio
+async def test_health_with_approvals(guardian_with_settings):
+    """Full health check with mocked RPC data returns real score."""
+    fake_log = {
+        "address": "0xtokenaddress1234567890abcdef1234567890ab",
+        "topics": [
+            "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925",
+            "0x000000000000000000000000abc0000000000000000000000000000000000000",
+            "0x000000000000000000000000def0000000000000000000000000000000000000",
+        ],
+        "data": "0x" + "f" * 64,
+        "timeStamp": hex(int(time.time()) - 86400),
+    }
+
+    guardian_with_settings._rpc_block_number = AsyncMock(return_value=100)
+    guardian_with_settings._rpc_get_logs = AsyncMock(return_value=[fake_log])
+    guardian_with_settings._rpc_balance_of = AsyncMock(return_value=1000)
+    guardian_with_settings._db.get_contract_score = AsyncMock(return_value=None)
+
+    result = await guardian_with_settings.get_health("0xabc", 56)
+    assert result["level"] != "unknown"
+    assert "warnings" not in result
+    assert result["total_approvals"] == 1

@@ -1,10 +1,12 @@
 """Portfolio Guardian — wallet health monitoring, approval management, and alerts."""
 
+import asyncio
 import time
 import logging
 from typing import Dict, List, Optional
 
 import aiohttp
+from web3 import Web3
 from eth_utils.crypto import keccak
 
 logger = logging.getLogger(__name__)
@@ -14,6 +16,14 @@ _APPROVAL_TOPIC = "0x" + keccak(b"Approval(address,address,uint256)").hex()
 
 # Threshold above which an approval is considered "unlimited"
 _UNLIMITED_THRESHOLD = 2 ** 200
+
+# RPC pagination: 50K blocks per chunk, scan last ~90 days (~2.6M blocks on BSC)
+_RPC_CHUNK = 50_000
+_RPC_MAX_BLOCKS = 2_600_000
+_RPC_CONCURRENCY = 5
+
+# balanceOf(address) selector
+_BALANCE_OF_SELECTOR = "0x70a08231"
 
 
 class GuardianService:
@@ -70,13 +80,19 @@ class GuardianService:
         dangerous_count = sum(1 for a in approvals if a.get("risk_level") in ("critical", "high"))
         unlimited_count = sum(1 for a in approvals if a.get("is_unlimited"))
 
-        # 2. Exposure to flagged tokens (25% weight)
-        flagged = await self._check_flagged_exposure(wallet_address, chain_id)
-        if flagged is None:
+        # Collect unique token addresses from approvals for downstream checks
+        token_addrs = list({a["token_address"] for a in approvals if a.get("token_address")})
+
+        # 2. Exposure to flagged tokens (25% weight) — uses approval tokens
+        if approvals_unavailable:
             components["flagged_exposure"] = self._NO_DATA_SCORE
-            warnings.append("Could not fetch token list for flagged-exposure check")
         else:
-            components["flagged_exposure"] = 100 - flagged
+            flagged = await self._check_flagged_exposure_from_tokens(token_addrs, chain_id)
+            if flagged is None:
+                components["flagged_exposure"] = self._NO_DATA_SCORE
+                warnings.append("Could not check flagged-token exposure")
+            else:
+                components["flagged_exposure"] = 100 - flagged
 
         # 3. Approval staleness (15% weight) — depends on approval data
         stale_count = 0
@@ -89,21 +105,28 @@ class GuardianService:
             )
             components["approval_staleness"] = max(0, 100 - stale_count * 15)
 
-        # 4. Concentration risk (15% weight)
-        concentration = await self._check_concentration(wallet_address, chain_id)
-        if concentration is None:
+        # 4. Concentration risk (15% weight) — uses approval tokens
+        if approvals_unavailable:
             components["concentration_risk"] = self._NO_DATA_SCORE
-            warnings.append("Could not fetch token list for concentration check")
         else:
-            components["concentration_risk"] = 100 - concentration
+            concentration = await self._check_concentration_from_tokens(
+                wallet_address, token_addrs, chain_id,
+            )
+            if concentration is None:
+                components["concentration_risk"] = self._NO_DATA_SCORE
+                warnings.append("Could not check concentration risk")
+            else:
+                components["concentration_risk"] = 100 - concentration
 
-        # 5. Deployer risk (10% weight)
-        deployer = await self._check_deployer_risk(wallet_address, chain_id)
-        if deployer is None:
+        # 5. Deployer risk (10% weight) — uses approval tokens
+        if approvals_unavailable:
             components["deployer_risk"] = self._NO_DATA_SCORE
-            warnings.append("Could not fetch token list for deployer-risk check")
         else:
-            components["deployer_risk"] = 100 - deployer
+            deployer = await self._check_deployer_risk_from_tokens(token_addrs, chain_id)
+            if deployer is None:
+                components["deployer_risk"] = self._NO_DATA_SCORE
+            else:
+                components["deployer_risk"] = 100 - deployer
 
         # Clamp all to 0-100
         for k in components:
@@ -144,7 +167,8 @@ class GuardianService:
 
     async def get_approvals(self, wallet_address: str, chain_id: int = 56) -> List[Dict]:
         """Get all token approvals, risk-ranked."""
-        return await self._get_approval_data(wallet_address.lower(), chain_id)
+        result = await self._get_approval_data(wallet_address.lower(), chain_id)
+        return result if result is not None else []
 
     async def build_revoke_tx(self, wallet_address: str, approvals_to_revoke: List[Dict]) -> List[Dict]:
         """Build unsigned ERC20 approve(spender, 0) transactions."""
@@ -184,80 +208,149 @@ class GuardianService:
             wallet_address, chain_id, alert_type, severity, title, details
         )
 
-    # --- Private helpers ---
+    # --- RPC helpers ---
 
-    def _get_api_key(self, chain_id: int) -> str:
-        """Get the Etherscan v2 API key for a given chain."""
+    def _get_rpc_url(self, chain_id: int) -> Optional[str]:
+        """Get the RPC URL for log queries on this chain."""
         if not self._settings:
-            return ""
-        fallback = getattr(self._settings, "bscscan_api_key", "")
-        mapping = {
-            56: "bscscan_api_key",
-            1: "etherscan_api_key",
-            8453: "basescan_api_key",
-            42161: "arbiscan_api_key",
-            137: "polygonscan_api_key",
-            204: "opbnbscan_api_key",
-            10: "optimism_api_key",
-        }
-        attr = mapping.get(chain_id, "bscscan_api_key")
-        return getattr(self._settings, attr, "") or fallback
-
-    async def _explorer_api(self, chain_id: int, **params) -> Optional[Dict]:
-        """Call Etherscan v2 API. Returns parsed JSON, or None on failure."""
-        api_key = self._get_api_key(chain_id)
-        if not api_key:
             return None
-        params["chainid"] = chain_id
-        params["apikey"] = api_key
+        # Prefer dedicated logs RPC (archive node) for BSC
+        if chain_id == 56:
+            logs_rpc = getattr(self._settings, "logs_rpc_url", "")
+            if logs_rpc:
+                return logs_rpc
+        mapping = {
+            56: "bsc_rpc_url",
+            1: "eth_rpc_url",
+            8453: "base_rpc_url",
+            42161: "arbitrum_rpc_url",
+            137: "polygon_rpc_url",
+            204: "opbnb_rpc_url",
+            10: "optimism_rpc_url",
+        }
+        attr = mapping.get(chain_id, "bsc_rpc_url")
+        return getattr(self._settings, attr, "") or None
+
+    async def _rpc_get_logs(
+        self, rpc_url: str, from_block: int, to_block: int, topics: List[str],
+    ) -> Optional[List[Dict]]:
+        """Single eth_getLogs RPC call. Returns None on failure."""
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "eth_getLogs",
+            "params": [{
+                "fromBlock": hex(from_block),
+                "toBlock": hex(to_block),
+                "topics": topics,
+            }],
+            "id": 1,
+        }
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    "https://api.etherscan.io/v2/api",
-                    params=params,
+                async with session.post(
+                    rpc_url,
+                    json=payload,
                     timeout=aiohttp.ClientTimeout(total=15),
                 ) as resp:
                     if resp.status != 200:
                         return None
                     data = await resp.json()
-                    return data if isinstance(data, dict) else None
+                    if "error" in data:
+                        return None
+                    result = data.get("result", [])
+                    return result if isinstance(result, list) else None
         except Exception as exc:
-            logger.debug("Explorer API call failed (chain %s): %s", chain_id, exc)
+            logger.debug("RPC getLogs failed (%d-%d): %s", from_block, to_block, exc)
             return None
+
+    async def _rpc_block_number(self, rpc_url: str) -> Optional[int]:
+        """Get latest block number via RPC."""
+        payload = {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    rpc_url, json=payload, timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status != 200:
+                        return None
+                    data = await resp.json()
+                    return int(data["result"], 16)
+        except Exception:
+            return None
+
+    async def _rpc_balance_of(self, rpc_url: str, token: str, wallet: str) -> Optional[int]:
+        """Call balanceOf(wallet) on an ERC20 token via RPC."""
+        wallet_padded = wallet.lower().replace("0x", "").zfill(64)
+        calldata = f"{_BALANCE_OF_SELECTOR}{wallet_padded}"
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "eth_call",
+            "params": [{"to": Web3.to_checksum_address(token), "data": calldata}, "latest"],
+            "id": 1,
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    rpc_url, json=payload, timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status != 200:
+                        return None
+                    data = await resp.json()
+                    if "error" in data:
+                        return 0
+                    raw = data.get("result", "0x0")
+                    return int(raw, 16) if raw and raw != "0x" else 0
+        except Exception:
+            return 0
 
     # --- On-chain data methods ---
 
     async def _get_approval_data(self, wallet_address: str, chain_id: int) -> Optional[List[Dict]]:
-        """Get ERC20 approval data from on-chain logs via Etherscan v2.
+        """Get ERC20 approval data via paginated eth_getLogs RPC.
         Returns None if data could not be fetched, [] if wallet has no approvals.
         """
+        rpc_url = self._get_rpc_url(chain_id)
+        if not rpc_url:
+            return None
         try:
-            # Pad wallet to 32 bytes for topic1 filter
-            padded = "0x" + wallet_address.lower().replace("0x", "").zfill(64)
-            data = await self._explorer_api(
-                chain_id,
-                module="logs",
-                action="getLogs",
-                topic0=_APPROVAL_TOPIC,
-                topic1=padded,
-                fromBlock="0",
-                toBlock="99999999",
-                topic0_1_opr="and",
-            )
-            if data is None:
-                return None
-            logs = data.get("result", [])
-            if not isinstance(logs, list):
+            latest = await self._rpc_block_number(rpc_url)
+            if latest is None:
                 return None
 
+            # Pad wallet to 32 bytes for topic1 filter
+            padded = "0x" + wallet_address.lower().replace("0x", "").zfill(64)
+            topics = [_APPROVAL_TOPIC, padded]
+
+            from_block = max(0, latest - _RPC_MAX_BLOCKS)
+            all_logs = []
+            sem = asyncio.Semaphore(_RPC_CONCURRENCY)
+
+            async def fetch_chunk(start: int, end: int):
+                async with sem:
+                    return await self._rpc_get_logs(rpc_url, start, end, topics)
+
+            # Build chunk ranges
+            tasks = []
+            b = from_block
+            while b <= latest:
+                end = min(b + _RPC_CHUNK - 1, latest)
+                tasks.append(fetch_chunk(b, end))
+                b = end + 1
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for r in results:
+                if isinstance(r, list):
+                    all_logs.extend(r)
+
+            # Parse logs into approvals
             approvals = []
             now = time.time()
-            for log in logs:
-                topics = log.get("topics", [])
-                if len(topics) < 3:
+            for log in all_logs:
+                topics_list = log.get("topics", [])
+                if len(topics_list) < 3:
                     continue
                 token_address = log.get("address", "").lower()
-                spender = "0x" + topics[2][-40:].lower()
+                spender = "0x" + topics_list[2][-40:].lower()
                 raw_amount = log.get("data", "0x0")
                 try:
                     amount = int(raw_amount, 16) if raw_amount else 0
@@ -265,12 +358,15 @@ class GuardianService:
                     amount = 0
                 is_unlimited = amount > _UNLIMITED_THRESHOLD
 
-                # Compute days since this log (block timestamp is hex)
-                try:
-                    block_ts = int(log.get("timeStamp", "0x0"), 16)
-                    days_since = (now - block_ts) / 86400 if block_ts > 0 else 0
-                except (ValueError, TypeError):
-                    days_since = 0
+                # Block timestamp — RPC logs use hex timeStamp or blockNumber
+                block_ts = 0
+                ts_raw = log.get("timeStamp") or log.get("timestamp")
+                if ts_raw:
+                    try:
+                        block_ts = int(ts_raw, 16) if isinstance(ts_raw, str) else int(ts_raw)
+                    except (ValueError, TypeError):
+                        pass
+                days_since = (now - block_ts) / 86400 if block_ts > 0 else 0
 
                 # Cross-reference spender risk (24h TTL — Guardian is historical)
                 risk_level = "low"
@@ -304,25 +400,15 @@ class GuardianService:
             logger.debug("_get_approval_data failed: %s", exc)
             return None
 
-    async def _check_flagged_exposure(self, wallet_address: str, chain_id: int) -> Optional[float]:
-        """Risk points from flagged token holdings (0-100). None if data unavailable."""
+    async def _check_flagged_exposure_from_tokens(
+        self, token_addrs: List[str], chain_id: int,
+    ) -> Optional[float]:
+        """Risk points from tokens in approval data that are flagged (0-100)."""
+        if not token_addrs:
+            return 0.0
         try:
-            data = await self._explorer_api(
-                chain_id,
-                module="account",
-                action="tokenlist",
-                address=wallet_address,
-            )
-            if data is None:
-                return None
-            tokens = data.get("result", [])
-            if not isinstance(tokens, list):
-                return None
             risk_points = 0.0
-            for token in tokens:
-                token_addr = (token.get("contractAddress") or "").lower()
-                if not token_addr:
-                    continue
+            for token_addr in token_addrs:
                 try:
                     score_data = await self._db.get_contract_score(token_addr, chain_id, max_age_seconds=86400)
                     if score_data and score_data.get("risk_score", 0) >= 70:
@@ -334,29 +420,22 @@ class GuardianService:
             logger.debug("_check_flagged_exposure failed: %s", exc)
             return None
 
-    async def _check_concentration(self, wallet_address: str, chain_id: int) -> Optional[float]:
-        """Risk points from portfolio concentration via HHI (0-100). None if data unavailable."""
+    async def _check_concentration_from_tokens(
+        self, wallet_address: str, token_addrs: List[str], chain_id: int,
+    ) -> Optional[float]:
+        """Risk points from portfolio concentration via HHI (0-100)."""
+        if not token_addrs:
+            return 0.0
+        rpc_url = self._get_rpc_url(chain_id)
+        if not rpc_url:
+            return None
         try:
-            data = await self._explorer_api(
-                chain_id,
-                module="account",
-                action="tokenlist",
-                address=wallet_address,
-            )
-            if data is None:
-                return None
-            tokens = data.get("result", [])
-            if not isinstance(tokens, list):
-                return None
-            if len(tokens) == 0:
+            # Fetch balances concurrently
+            tasks = [self._rpc_balance_of(rpc_url, t, wallet_address) for t in token_addrs[:20]]
+            balances_raw = await asyncio.gather(*tasks, return_exceptions=True)
+            balances = [b for b in balances_raw if isinstance(b, int) and b > 0]
+            if not balances:
                 return 0.0
-            balances = []
-            for token in tokens:
-                raw = token.get("balance", "0")
-                try:
-                    balances.append(int(raw))
-                except (ValueError, TypeError):
-                    balances.append(0)
             total = sum(balances)
             if total == 0:
                 return 0.0
@@ -366,27 +445,16 @@ class GuardianService:
             logger.debug("_check_concentration failed: %s", exc)
             return None
 
-    async def _check_deployer_risk(self, wallet_address: str, chain_id: int) -> Optional[float]:
-        """Risk points from tokens with flagged deployers (0-100). None if data unavailable."""
+    async def _check_deployer_risk_from_tokens(
+        self, token_addrs: List[str], chain_id: int,
+    ) -> Optional[float]:
+        """Risk points from tokens with flagged deployers (0-100)."""
+        if not token_addrs:
+            return 0.0
         try:
-            data = await self._explorer_api(
-                chain_id,
-                module="account",
-                action="tokenlist",
-                address=wallet_address,
-            )
-            if data is None:
-                return None
-            tokens = data.get("result", [])
-            if not isinstance(tokens, list):
-                return None
             risk_points = 0.0
-            for token in tokens:
-                token_addr = (token.get("contractAddress") or "").lower()
-                if not token_addr:
-                    continue
+            for token_addr in token_addrs:
                 try:
-                    # Check if deployer is watched
                     if not hasattr(self._db, "get_deployer"):
                         continue
                     deployer_info = await self._db.get_deployer(token_addr, chain_id)
