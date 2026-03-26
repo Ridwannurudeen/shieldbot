@@ -35,6 +35,19 @@ logger = logging.getLogger(__name__)
 
 # --- Rate Limiter ---
 
+def _fire_and_forget(coro, label: str = "background"):
+    """Schedule a coroutine as a fire-and-forget task with exception logging."""
+    task = asyncio.create_task(coro)
+    def _done_cb(t):
+        if t.cancelled():
+            return
+        exc = t.exception()
+        if exc:
+            logger.error("Fire-and-forget task '%s' failed: %s", label, exc, exc_info=exc)
+    task.add_done_callback(_done_cb)
+    return task
+
+
 class RateLimiter:
     """In-memory sliding window rate limiter per IP."""
 
@@ -63,6 +76,11 @@ class RateLimiter:
             return False
 
         hits.append(now)
+
+        # Probabilistic cleanup to prevent unbounded memory growth
+        if random.random() < 0.01:
+            self.cleanup()
+
         return True
 
     def cleanup(self):
@@ -102,24 +120,17 @@ SHIELDBOT_TOKEN_ADDRESS = "0x4904c02efa081cb7685346968bac854cdf4e7777"
 
 # Nonce store for token-gate signature verification: wallet -> (nonce, expires_at)
 import secrets
+from cachetools import TTLCache
 from eth_account.messages import encode_defunct
 from web3 import Web3 as _Web3
 
-_nonce_store: Dict[str, tuple[str, float]] = {}
-_NONCE_TTL = 300  # 5 minutes
+_nonce_store: TTLCache = TTLCache(maxsize=10000, ttl=300)
 
 
 def _issue_nonce(wallet: str) -> str:
     """Issue a random nonce for wallet signature verification."""
-    # Probabilistic cleanup of expired nonces to prevent memory leak
-    import random
-    if random.random() < 0.05:
-        now = time.time()
-        expired = [k for k, (_, exp) in _nonce_store.items() if now > exp]
-        for k in expired:
-            del _nonce_store[k]
     nonce = secrets.token_hex(16)
-    _nonce_store[wallet.lower()] = (nonce, time.time() + _NONCE_TTL)
+    _nonce_store[wallet.lower()] = nonce
     return nonce
 
 
@@ -127,7 +138,7 @@ def _verify_wallet_signature(wallet: str, signature: str, nonce: str) -> bool:
     """Verify that `signature` was produced by `wallet` over the expected message."""
     key = wallet.lower()
     stored = _nonce_store.get(key)
-    if not stored or stored[0] != nonce or time.time() > stored[1]:
+    if not stored or stored != nonce:
         return False
     # Consume nonce (one-time use)
     _nonce_store.pop(key, None)
@@ -1039,10 +1050,11 @@ async def firewall(req: FirewallRequest, request: Request):
 
             # Auto-enrich threat graph (fire-and-forget)
             if container and hasattr(container, 'threat_graph'):
-                asyncio.create_task(
+                _fire_and_forget(
                     container.threat_graph.enrich_from_scan(
                         to_addr, req.chainId, risk_output,
-                    )
+                    ),
+                    label="threat_graph_enrich",
                 )
 
             # Sentinel feedback loop: auto-watch deployers of blocked contracts
@@ -1050,12 +1062,12 @@ async def firewall(req: FirewallRequest, request: Request):
                 try:
                     deployer_info = await container.db.get_deployer_risk_summary(to_addr, req.chainId)
                     deployer_addr = deployer_info["deployer_address"] if deployer_info else None
-                    asyncio.create_task(container.sentinel.on_scan_blocked(
+                    _fire_and_forget(container.sentinel.on_scan_blocked(
                         address=to_addr,
                         deployer=deployer_addr,
                         chain_id=req.chainId,
                         risk_score=risk_score,
-                    ))
+                    ), label="sentinel_on_scan_blocked")
                 except Exception as e:
                     logger.error(f"Sentinel feedback failed: {e}")
 

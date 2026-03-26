@@ -320,7 +320,9 @@ export class ShieldBot {
       throw new ShieldBotError('agentId required for check()', 400, 'MISSING_AGENT_ID');
     }
 
-    const cacheKey = `${transaction.to}:${transaction.chainId || 56}:${(transaction.data || '0x').slice(0, 10)}`;
+    const data = transaction.data || '0x';
+    // Use selector (10 chars) + first param (64 chars) for cache key to avoid collisions
+    const cacheKey = `${transaction.to}:${transaction.chainId || 56}:${data.slice(0, 74)}`;
 
     // Check local cache
     const cached = this.verdictCache.get(cacheKey);
@@ -478,9 +480,15 @@ export class ShieldBot {
       });
 
       if (!response.ok) {
-        const text = await response.text().catch(() => '');
+        let errorMsg = `HTTP ${response.status}`;
+        try {
+          const json = await response.json();
+          errorMsg = json.detail || json.error || errorMsg;
+        } catch {
+          // Response wasn't JSON — use status code only
+        }
         throw new ShieldBotError(
-          `ShieldBot API error: ${response.status} ${text}`,
+          `ShieldBot API error: ${errorMsg}`,
           response.status,
         );
       }

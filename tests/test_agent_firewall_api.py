@@ -77,6 +77,9 @@ def mock_container():
     c.threat_graph = MagicMock()
     c.threat_graph.enrich_from_scan = AsyncMock()
 
+    c.reputation_service = MagicMock()
+    c.reputation_service.update_from_verdict = AsyncMock()
+
     return c
 
 

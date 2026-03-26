@@ -476,6 +476,7 @@ function renderDashFeed(history) {
 
 // ---- Stats ----
 function renderDashStats(history) {
+  if (!Array.isArray(history)) return;
   const total   = history.length;
   const blocked = history.filter((h) => h.classification === "BLOCK_RECOMMENDED").length;
   const safe    = history.filter((h) => h.classification === "SAFE").length;

@@ -168,7 +168,8 @@ async function checkPhishing(url) {
     try {
       apiUrl = await getApiUrl();
     } catch {
-      return { is_phishing: false };
+      console.warn("Phishing check skipped: no API URL configured");
+      return { is_phishing: false, check_failed: true };
     }
 
     const response = await fetch(
@@ -180,7 +181,8 @@ async function checkPhishing(url) {
     );
 
     if (!response.ok) {
-      return { is_phishing: false };
+      console.warn("Phishing check failed: HTTP", response.status);
+      return { is_phishing: false, check_failed: true };
     }
 
     const result = await response.json();
@@ -191,8 +193,9 @@ async function checkPhishing(url) {
     }
     _phishingCache.set(cacheKey, { result, expiresAt: Date.now() + PHISHING_CACHE_TTL_MS });
     return result;
-  } catch {
-    return { is_phishing: false };
+  } catch (err) {
+    console.warn("Phishing check failed:", err.message || err);
+    return { is_phishing: false, check_failed: true };
   }
 }
 

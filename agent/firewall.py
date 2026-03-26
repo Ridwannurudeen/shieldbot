@@ -14,6 +14,19 @@ from core.analyzer import AnalysisContext
 logger = logging.getLogger(__name__)
 
 
+def _fire_and_forget(coro, label: str = "background"):
+    """Schedule a coroutine as a fire-and-forget task with exception logging."""
+    task = asyncio.create_task(coro)
+    def _done_cb(t):
+        if t.cancelled():
+            return
+        exc = t.exception()
+        if exc:
+            logger.error("Fire-and-forget task '%s' failed: %s", label, exc, exc_info=exc)
+    task.add_done_callback(_done_cb)
+    return task
+
+
 # --- Request/Response Models ---
 
 class TransactionData(BaseModel):
@@ -116,6 +129,15 @@ def create_agent_firewall_router(container) -> APIRouter:
                 policy_result=policy_result.checks,
                 latency_ms=latency,
             )
+
+            # Update reputation score after verdict
+            if hasattr(container, "reputation_service"):
+                _fire_and_forget(
+                    container.reputation_service.update_from_verdict(
+                        req.agent_id, verdict, cached["score"],
+                    ),
+                    label="reputation_update_cached",
+                )
 
             # Track spending if allowed (Fix: cached path was missing this)
             if verdict == "ALLOW" and tx_value_usd > 0:
@@ -231,10 +253,11 @@ def create_agent_firewall_router(container) -> APIRouter:
 
             # Auto-enrich threat graph (fire-and-forget)
             if hasattr(container, "threat_graph"):
-                asyncio.create_task(
+                _fire_and_forget(
                     container.threat_graph.enrich_from_scan(
                         to_addr, chain_id, risk_output,
-                    )
+                    ),
+                    label="threat_graph_enrich",
                 )
 
         # Cache in Redis for next hit
@@ -264,6 +287,15 @@ def create_agent_firewall_router(container) -> APIRouter:
             policy_result=policy_result.checks,
             latency_ms=latency,
         )
+
+        # Update reputation score after verdict
+        if hasattr(container, "reputation_service"):
+            _fire_and_forget(
+                container.reputation_service.update_from_verdict(
+                    req.agent_id, verdict, risk_score,
+                ),
+                label="reputation_update",
+            )
 
         # Track spending if allowed
         if verdict == "ALLOW" and tx_value_usd > 0:

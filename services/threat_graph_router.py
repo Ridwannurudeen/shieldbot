@@ -61,7 +61,7 @@ def create_threat_graph_router(container) -> APIRouter:
         admin_secret = request.headers.get("X-Admin-Secret", "")
         if not admin_secret:
             raise HTTPException(status_code=401, detail="Missing X-Admin-Secret header")
-        expected = getattr(container.settings, "webhook_secret", "")
+        expected = getattr(container.settings, "admin_secret", "")
         if not expected or admin_secret != expected:
             raise HTTPException(status_code=403, detail="Invalid admin secret")
 
