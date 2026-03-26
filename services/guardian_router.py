@@ -81,9 +81,11 @@ def create_guardian_router(container) -> APIRouter:
 
     @router.get("/alerts")
     async def get_alerts(request: Request, wallet_address: str = None, limit: int = 50):
-        """Get recent guardian alerts."""
-        await _require_api_key(request)
-        if wallet_address:
+        """Get recent guardian alerts. Public when filtered by wallet_address."""
+        if not wallet_address:
+            # Bulk/unfiltered access requires API key
+            await _require_api_key(request)
+        else:
             _validate_address(wallet_address)
         return await guardian.get_alerts(wallet_address, min(limit, 200))
 

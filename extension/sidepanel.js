@@ -426,13 +426,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   async function loadGuardianAlerts() {
     guardianAlertsEl.innerHTML = '<div class="placeholder-msg">Loading alerts...</div>';
     try {
-      const stored = await chrome.storage.local.get({ apiUrl: DEFAULT_API_URL });
+      const stored = await chrome.storage.local.get({ apiUrl: DEFAULT_API_URL, healthWallet: "" });
       const apiUrl = stored.apiUrl || DEFAULT_API_URL;
+      const wallet = stored.healthWallet;
       if (!apiUrl) {
         guardianAlertsEl.innerHTML = '<div class="placeholder-msg">Set your API URL in extension settings to see alerts.</div>';
         return;
       }
-      const resp = await fetch(`${apiUrl}/api/guardian/alerts`, {
+      if (!wallet) {
+        guardianAlertsEl.innerHTML = '<div class="placeholder-msg">Enter your wallet address in the popup Health tab first, then come back here.</div>';
+        return;
+      }
+      const resp = await fetch(`${apiUrl}/api/guardian/alerts?wallet_address=${encodeURIComponent(wallet)}`, {
         method: "GET",
         signal: AbortSignal.timeout(15000),
       });
