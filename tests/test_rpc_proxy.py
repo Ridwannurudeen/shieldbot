@@ -140,7 +140,8 @@ def _build_raw_tx(to: str, value: int = 0, data: bytes = b"") -> str:
         "data": data,
     }
     signed = Account.sign_transaction(tx, key)
-    return signed.raw_transaction.hex()
+    raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
+    return raw.hex()
 
 
 @pytest.mark.asyncio
