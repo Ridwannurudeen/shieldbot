@@ -154,8 +154,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 async function checkPhishing(url) {
   try {
-    const { hostname } = new URL(url);
+    const parsedUrl = new URL(url);
+    const { hostname } = parsedUrl;
     const cacheKey = hostname.toLowerCase();
+    const lookupUrl = `${parsedUrl.protocol}//${parsedUrl.host}/`;
 
     // Check extension-side cache
     const cached = _phishingCache.get(cacheKey);
@@ -173,7 +175,7 @@ async function checkPhishing(url) {
     }
 
     const response = await fetch(
-      `${apiUrl}/api/phishing?url=${encodeURIComponent(url)}`,
+      `${apiUrl}/api/phishing?url=${encodeURIComponent(lookupUrl)}`,
       {
         method: "GET",
         signal: AbortSignal.timeout(5000),

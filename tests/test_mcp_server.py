@@ -117,7 +117,7 @@ class TestSSEConnection:
 
     def test_sse_connection_established(self, client):
         """GET /mcp/sse returns SSE stream with endpoint event."""
-        with client.stream("GET", "/mcp/sse", headers=AUTH_HEADERS) as resp:
+        with client.stream("GET", "/mcp/sse?handshake_only=1", headers=AUTH_HEADERS) as resp:
             assert resp.status_code == 200
             assert resp.headers["content-type"].startswith("text/event-stream")
 
@@ -129,7 +129,7 @@ class TestSSEConnection:
 
     def test_sse_endpoint_event_contains_session_id(self, client):
         """The endpoint event data should contain a messages URL with session_id."""
-        with client.stream("GET", "/mcp/sse", headers=AUTH_HEADERS) as resp:
+        with client.stream("GET", "/mcp/sse?handshake_only=1", headers=AUTH_HEADERS) as resp:
             lines = []
             for line in resp.iter_lines():
                 lines.append(line)

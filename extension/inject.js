@@ -204,10 +204,11 @@
         "*"
       );
 
-      // Timeout after 60 seconds
+      // Timeout after 60 seconds. Fail closed: if the firewall cannot return a
+      // verdict, do not silently forward a potentially malicious transaction.
       setTimeout(() => {
         window.removeEventListener("message", handleVerdict);
-        resolve({ action: "proceed", reason: "Analysis timed out" });
+        resolve({ action: "block", reason: "Analysis timed out" });
       }, 60000);
     });
   }

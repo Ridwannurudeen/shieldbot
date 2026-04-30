@@ -1,7 +1,7 @@
 # Privacy Policy for ShieldAI Transaction Firewall
 
 **Effective Date:** February 16, 2026
-**Last Updated:** February 22, 2026
+**Last Updated:** April 30, 2026
 
 ## Overview
 
@@ -19,12 +19,16 @@ When you interact with a Web3 application that initiates a transaction, ShieldAI
 - **Transaction data** (encoded function call data)
 - **Chain ID** (blockchain network identifier)
 
+### Phishing Check Metadata
+
+When the firewall is enabled, ShieldAI checks the current website origin (scheme, host, and port only) against phishing intelligence so it can warn you before you interact with known malicious sites. Full URL paths and query strings are stripped before the request leaves the browser.
+
 **IMPORTANT:** We do NOT collect, store, or transmit:
 - Private keys
 - Seed phrases
 - Wallet passwords
 - Personal identifying information
-- Browsing history outside of transaction analysis
+- Page contents, form data, or full browsing history
 
 ### Configuration Data
 
@@ -48,12 +52,12 @@ All configuration data and scan history are stored **locally in your browser** u
 
 When the firewall analyzes a transaction:
 
-1. Transaction metadata is sent to **your configured API endpoint** (the server URL you provide in settings)
+1. Transaction metadata is sent to the configured API endpoint. The extension ships with `https://api.shieldbotsecurity.online` as the default endpoint, and you can change it in settings.
 2. The API server performs security analysis (contract verification, risk scoring, threat detection)
 3. Analysis results are returned to the extension and displayed to you
 4. You decide whether to proceed with or block the transaction
 
-**You control the API endpoint.** The extension does not include a default API server. You must configure your own server or use a trusted third-party service.
+**You control the API endpoint.** You can replace the default endpoint with your own HTTPS server, or use localhost during development.
 
 ## Data Retention
 
@@ -75,15 +79,15 @@ API endpoint and firewall settings persist until you:
 
 ## Third-Party Services
 
-### Your Configured API Endpoint
+### Configured API Endpoint
 
-When you configure an API endpoint, transaction data is sent to that server for analysis. The extension does not control or have visibility into:
+Transaction data is sent to the configured API endpoint for analysis. The default endpoint is `https://api.shieldbotsecurity.online`, and you can replace it with your own HTTPS endpoint. If you use a third-party or self-hosted endpoint, the extension does not control or have visibility into:
 
 - What data the API server logs or retains
 - How the API server uses transaction metadata
 - Third-party services the API server may use
 
-**You are responsible for reviewing the privacy policy of any API service you configure.**
+**You are responsible for reviewing the privacy policy of any non-default API service you configure.**
 
 ### No Built-In Tracking or Analytics
 
@@ -109,12 +113,13 @@ The extension requests only the permissions required for transaction security an
 
 - **`storage`**: Stores settings and scan history locally in your browser
 - **`permissions`**: Allows requesting user-approved API origin access at runtime via `chrome.permissions.request()`
+- **`sidePanel`**: Opens the ShieldAI assistant and scanner panel
+- **`tabs`**: Opens extension pages and reads the active tab URL/title only when an extension page requests the "Scan this page" workflow
 
 The extension also includes content script access on HTTPS websites so it can detect Web3 transaction requests across dApps hosted on different domains.
 
 The extension does **NOT** request:
 - Browsing history access
-- Tabs API access
 - Access to sensitive browser APIs unrelated to its core security function
 
 ## Your Rights

@@ -6,12 +6,14 @@ Runs alongside bot.py on the VPS
 
 import os
 import hmac
+import json
 import time
 import asyncio
 import logging
 import random
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
@@ -31,6 +33,13 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+
+
+MAX_REQUEST_BODY_BYTES = 1_000_000
+MAX_FIREWALL_DATA_CHARS = 200_000
+MAX_TYPED_DATA_CHARS = 100_000
+MAX_INJECTION_CONTENT_CHARS = 50_000
+MAX_PHISHING_URL_CHARS = 2_048
 
 
 # --- Rate Limiter ---
@@ -254,8 +263,9 @@ TRUSTED_PROXIES = set(_boot_settings.trusted_proxies)
 
 
 def _get_trusted_proxies() -> set:
-    if container and container.settings:
-        return set(container.settings.trusted_proxies)
+    settings = getattr(container, "settings", None) if container else None
+    if settings:
+        return set(getattr(settings, "trusted_proxies", []))
     return TRUSTED_PROXIES
 
 
@@ -265,7 +275,12 @@ def _get_client_ip(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for")
     trusted = _get_trusted_proxies()
     if forwarded and client_ip in trusted:
-        return forwarded.split(",")[-1].strip()
+        chain = [part.strip() for part in forwarded.split(",") if part.strip()]
+        for candidate in reversed(chain):
+            if candidate not in trusted:
+                return candidate
+        if chain:
+            return chain[0]
     return client_ip
 app.add_middleware(
     CORSMiddleware,
@@ -274,6 +289,24 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def request_size_limit_middleware(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_REQUEST_BODY_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": "Request body too large"},
+                )
+        except ValueError:
+            return JSONResponse(
+                status_code=400,
+                content={"detail": "Invalid Content-Length header"},
+            )
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -339,34 +372,47 @@ async def rate_limit_middleware(request: Request, call_next):
 class FirewallRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    to: str
-    sender: str = Field(alias="from")
-    value: str = "0"
-    data: str = "0x"
-    chainId: int = 56
+    to: str = Field(..., max_length=64)
+    sender: str = Field(..., alias="from", max_length=64)
+    value: str = Field(default="0", max_length=80)
+    data: str = Field(default="0x", max_length=MAX_FIREWALL_DATA_CHARS)
+    chainId: int = Field(default=56, ge=1, le=10_000_000)
     typedData: Optional[Dict] = None
-    signMethod: Optional[str] = None
+    signMethod: Optional[str] = Field(default=None, max_length=64)
+
+    @field_validator("typedData")
+    @classmethod
+    def validate_typed_data_size(cls, v):
+        if v is None:
+            return v
+        try:
+            encoded = json.dumps(v, separators=(",", ":"), default=str)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("typedData must be JSON serializable") from exc
+        if len(encoded) > MAX_TYPED_DATA_CHARS:
+            raise ValueError("typedData is too large")
+        return v
 
 
 class ScanRequest(BaseModel):
-    address: str
-    chainId: int = 56
+    address: str = Field(..., min_length=1, max_length=64)
+    chainId: int = Field(default=56, ge=1, le=10_000_000)
 
 
 class OutcomeRequest(BaseModel):
-    address: str
-    chainId: int = 56
-    risk_score_at_scan: Optional[float] = None
-    user_decision: str  # "proceed", "block", "ignore"
-    outcome: Optional[str] = None  # "safe", "scam", "unknown"
-    tx_hash: Optional[str] = None
+    address: str = Field(..., min_length=1, max_length=64)
+    chainId: int = Field(default=56, ge=1, le=10_000_000)
+    risk_score_at_scan: Optional[float] = Field(default=None, ge=0, le=100)
+    user_decision: str = Field(..., min_length=1, max_length=16)  # "proceed", "block", "ignore"
+    outcome: Optional[str] = Field(default=None, max_length=16)  # "safe", "scam", "unknown"
+    tx_hash: Optional[str] = Field(default=None, max_length=80)
 
 
 class CommunityReportRequest(BaseModel):
-    address: str
-    chainId: int = 56
-    report_type: str  # "false_positive", "false_negative", "scam"
-    reason: Optional[str] = None
+    address: str = Field(..., min_length=1, max_length=64)
+    chainId: int = Field(default=56, ge=1, le=10_000_000)
+    report_type: str = Field(..., min_length=1, max_length=32)  # "false_positive", "false_negative", "scam"
+    reason: Optional[str] = Field(default=None, max_length=1_000)
 
 
 class ChatRequest(BaseModel):
@@ -410,7 +456,7 @@ async def landing_page():
 
 
 class BetaSignupRequest(BaseModel):
-    email: str
+    email: str = Field(..., min_length=3, max_length=254)
 
 
 @app.post("/api/beta-signup")
@@ -518,7 +564,14 @@ async def check_phishing(url: str, request: Request):
     if not container or not container.phishing_service:
         raise HTTPException(status_code=503, detail="Service unavailable")
 
-    result = await container.phishing_service.check_url(url)
+    clean_url = url.strip()
+    if len(clean_url) > MAX_PHISHING_URL_CHARS:
+        raise HTTPException(status_code=400, detail="URL is too long")
+    parsed = urlparse(clean_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="URL must be an absolute http(s) URL")
+
+    result = await container.phishing_service.check_url(clean_url)
     return result
 
 
@@ -808,6 +861,146 @@ async def test_page():
 </html>"""
 
 
+def _is_valid_evm_address(value: str) -> bool:
+    try:
+        return bool(value and web3_client and web3_client.is_valid_address(value))
+    except Exception:
+        return False
+
+
+def _checksum_if_possible(value: str) -> str:
+    try:
+        if _is_valid_evm_address(value):
+            return web3_client.to_checksum_address(value)
+    except Exception:
+        pass
+    return value
+
+
+def _extract_signature_target(req: FirewallRequest) -> str:
+    candidates: List[str] = [req.to]
+
+    typed_data = req.typedData if isinstance(req.typedData, dict) else {}
+    domain = typed_data.get("domain") if isinstance(typed_data.get("domain"), dict) else {}
+    message = typed_data.get("message") if isinstance(typed_data.get("message"), dict) else {}
+    details = message.get("details") if isinstance(message.get("details"), dict) else {}
+
+    for value in (
+        domain.get("verifyingContract"),
+        message.get("verifyingContract"),
+        message.get("spender"),
+        message.get("token"),
+        details.get("token"),
+        req.sender,
+    ):
+        if isinstance(value, str):
+            candidates.append(value)
+
+    for candidate in candidates:
+        if _is_valid_evm_address(candidate):
+            return _checksum_if_possible(candidate)
+    return ""
+
+
+def _is_signature_only_request(req: FirewallRequest) -> bool:
+    if req.typedData:
+        return not _is_valid_evm_address(req.to)
+    return (req.signMethod or "") in {"personal_sign", "eth_sign"} and not _is_valid_evm_address(req.to)
+
+
+async def _build_signature_only_response(req: FirewallRequest) -> Dict:
+    from analyzers.signature import SignaturePermitAnalyzer
+    from core.analyzer import AnalysisContext
+
+    fallback_target = (
+        _checksum_if_possible(req.sender)
+        if _is_valid_evm_address(req.sender)
+        else "0x0000000000000000000000000000000000000000"
+    )
+    target = _extract_signature_target(req) or fallback_target
+    ctx = AnalysisContext(
+        address=target,
+        chain_id=req.chainId,
+        from_address=req.sender,
+        is_token=False,
+        extra={
+            "typed_data": req.typedData,
+            "sign_method": req.signMethod or "",
+            "calldata": req.data,
+        },
+    )
+    result = await SignaturePermitAnalyzer().analyze(ctx)
+    risk_score = int(max(0, min(100, round(result.score))))
+    danger_signals = list(result.flags)
+
+    if req.signMethod == "eth_sign" and risk_score < 30:
+        risk_score = 30
+        danger_signals.append("Blind eth_sign request: wallet may be signing an opaque payload")
+
+    if risk_score >= 70:
+        classification = "BLOCK_RECOMMENDED"
+    elif risk_score >= 40:
+        classification = "HIGH_RISK"
+    elif risk_score >= 15:
+        classification = "CAUTION"
+    else:
+        classification = "SAFE"
+
+    sig_type = result.data.get("sig_type", "signature")
+    sign_method = req.signMethod or result.data.get("sign_method") or "signature"
+    decoded_action = f"{sign_method} signature request"
+    if sig_type and sig_type not in {"unknown", sign_method}:
+        decoded_action += f" ({sig_type})"
+
+    return {
+        "classification": classification,
+        "risk_score": risk_score,
+        "decoded_action": decoded_action,
+        "calldata_details": {
+            "summary": decoded_action,
+            "fields": [
+                {"label": "Method", "value": sign_method},
+                {"label": "Signature Type", "value": sig_type},
+                {"label": "Target", "value": target or "N/A"},
+            ],
+        },
+        "danger_signals": danger_signals,
+        "transaction_impact": {
+            "sending": "No on-chain transaction",
+            "granting_access": "Signature may grant token or marketplace permissions" if danger_signals else "None detected",
+            "recipient": target[:10] + "..." if _is_valid_evm_address(target) else "N/A",
+            "post_tx_state": "Signature can be submitted later by the requesting dApp or spender",
+        },
+        "analysis": f"Signature-only analysis for {sign_method}",
+        "plain_english": (
+            "This signature request contains risky permission patterns. Verify the spender, token, and terms before signing."
+            if risk_score >= 40
+            else "No dangerous signature permission pattern was detected."
+        ),
+        "verdict": f"{classification} - Signature risk {risk_score}%",
+        "raw_checks": {
+            "signature": result.data,
+            "flags": danger_signals,
+        },
+        "shield_score": {
+            "overall": risk_score,
+            "category_scores": {"signature": risk_score},
+            "risk_level": classification,
+            "threat_type": sig_type or "signature",
+            "critical_flags": danger_signals,
+            "confidence": 80 if req.typedData else 60,
+        },
+        "simulation": None,
+        "asset_delta": [],
+        "greenfield_url": None,
+        "chain_id": req.chainId,
+        "network": _chain_id_to_name(req.chainId),
+        "partial": False,
+        "failed_sources": [],
+        "policy_mode": "SIGNATURE_ONLY",
+    }
+
+
 @app.post("/api/firewall")
 async def firewall(req: FirewallRequest, request: Request):
     """
@@ -817,6 +1010,9 @@ async def firewall(req: FirewallRequest, request: Request):
     try:
         to_addr = req.to
         from_addr = req.sender
+
+        if _is_signature_only_request(req):
+            return await _build_signature_only_response(req)
 
         if not web3_client.is_valid_address(to_addr):
             raise HTTPException(status_code=400, detail="Invalid 'to' address")
@@ -1169,8 +1365,19 @@ async def scan(req: ScanRequest):
 async def scan_injection(request: Request):
     """Scan text content for prompt injection attempts targeting AI agents."""
     try:
-        body = await request.json()
-        content = body.get("content", "")[:50000]  # 50KB max to prevent CPU DoS
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid JSON body")
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="JSON body must be an object")
+
+        raw_content = body.get("content", body.get("text", ""))
+        if raw_content is None:
+            raw_content = ""
+        if not isinstance(raw_content, str):
+            raise HTTPException(status_code=400, detail="content/text must be a string")
+        content = raw_content[:MAX_INJECTION_CONTENT_CHARS]
         depth = body.get("depth", "fast")
 
         if depth not in ("fast", "thorough"):
@@ -1391,10 +1598,10 @@ def _require_admin(request: Request):
 
 
 class WatchDeployerRequest(BaseModel):
-    address: str
-    chain_id: int = 0
-    reason: str = "MANUAL"
-    severity: str = "HIGH"
+    address: str = Field(..., min_length=1, max_length=64)
+    chain_id: int = Field(default=0, ge=0, le=10_000_000)
+    reason: str = Field(default="MANUAL", max_length=240)
+    severity: str = Field(default="HIGH", max_length=16)
 
 
 @app.post("/api/admin/watch/deployer")

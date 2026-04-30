@@ -17,20 +17,29 @@ window.addEventListener("DOMContentLoaded", async () => {
       });
       if (!granted) throw new Error(t("welcomePermDenied"));
 
-      statusMsg.textContent = t("welcomeCheckingConn");
-      const { apiUrl } = await chrome.storage.local.get({ apiUrl: "https://api.shieldbotsecurity.online" });
-      const res = await fetch(`${apiUrl}/api/health`, {
-        signal: AbortSignal.timeout(8000)
-      });
-      if (!res.ok) throw new Error(t("welcomeHealthFailed", { status: res.status }));
-
+      // Permissions granted — extension is now active (content scripts inject on all sites)
       btn.textContent = t("welcomeProtected");
       btn.style.background = "#16a34a";
       statusMsg.textContent = t("welcomeActiveMsg");
       closeLink.style.display = "block";
+
+      // Non-blocking: verify API connection in the background
+      try {
+        const { apiUrl } = await chrome.storage.local.get({ apiUrl: "https://api.shieldbotsecurity.online" });
+        const res = await fetch(`${apiUrl}/api/health`, {
+          signal: AbortSignal.timeout(8000)
+        });
+        if (res.ok) {
+          statusMsg.textContent = t("welcomeFullyConnected");
+        } else {
+          statusMsg.textContent = t("welcomeActiveOffline");
+        }
+      } catch (_) {
+        statusMsg.textContent = t("welcomeActiveOffline");
+      }
     } catch (err) {
       const msg = err.message || t("welcomePermDenied");
-      btn.textContent = t("welcomeConnFailed");
+      btn.textContent = t("welcomeRetry");
       btn.style.background = "#dc2626";
       btn.disabled = false;
       statusMsg.textContent = msg;

@@ -18,10 +18,11 @@ This document provides the exact wording to use when completing the Chrome Web S
 
 **Answer:**
 - Financial and payment information (transaction metadata only)
-- Website content (limited to Web3 transaction data)
+- Website content (limited to Web3 transaction data and site origin for phishing checks)
 
 **Justification:**
 The extension intercepts blockchain transaction data (recipient address, sender address, value, encoded function data, and chain ID) to perform security analysis and risk assessment before the user signs the transaction.
+When phishing protection is enabled, the extension also checks the current site origin (scheme, host, and port only) against phishing intelligence. Full paths, query strings, and page contents are not sent.
 
 ---
 
@@ -83,21 +84,22 @@ DATA COLLECTED:
 - Transaction value (amount of cryptocurrency being sent)
 - Transaction data (encoded smart contract function call)
 - Chain ID (blockchain network identifier, e.g., 56 for BNB Chain)
+- Current website origin for phishing checks (for example, https://example.com/)
 
 DATA NOT COLLECTED:
 - Private keys, seed phrases, or wallet passwords
 - Personally identifiable information (PII)
-- Browsing history outside of transaction analysis
+- Page contents, form data, or full browsing history
 - User credentials or authentication data
 
 STORAGE:
 All data is stored locally in the user's browser using chrome.storage.local API. A maximum of 50 transaction scans are retained, with older scans automatically removed. Users can clear this data at any time by removing the extension.
 
 API COMMUNICATION:
-Transaction metadata is sent to a user-configured API endpoint for security analysis. The extension does not include a default API server - users must configure their own server or use a trusted third-party service. Communication with the API uses HTTPS encryption (localhost HTTP allowed for development only).
+Transaction metadata is sent to the configured API endpoint for security analysis. The extension ships with https://api.shieldbotsecurity.online as the default endpoint, and users can replace it with their own HTTPS server or localhost development server. Communication with the API uses HTTPS encryption (localhost HTTP allowed for development only).
 
 THIRD-PARTY SERVICES:
-The extension itself does not use any third-party analytics, tracking, or advertising services. However, the user-configured API endpoint may use external services for threat intelligence and contract verification. Users are responsible for reviewing the privacy policy of any API service they configure. The extension ships without a default API endpoint.
+The extension itself does not use any third-party analytics, tracking, or advertising services. The configured API endpoint may use external services for threat intelligence, phishing checks, and contract verification. The extension ships with https://api.shieldbotsecurity.online as the default endpoint, and users can replace it with their own HTTPS endpoint.
 ```
 
 ---
@@ -128,11 +130,11 @@ USER WORKFLOW:
 DATA RETENTION:
 - Local scan history: Maximum 50 transactions, automatically pruned
 - Configuration settings: Persist until user changes them or removes extension
-- No data is transmitted to any server operated by the extension developer
+- Transaction metadata and site origins are transmitted only to the configured API endpoint for security analysis
 
 SECURITY MEASURES:
 - HTTPS enforcement for API communication (except localhost development)
-- Least-privilege API permissions (only storage and permissions API)
+- Least-privilege API permissions for the shipped workflows
 - No remote code execution or dynamic script loading
 - Open source codebase for transparency and auditability
 ```
@@ -151,6 +153,12 @@ SECURITY MEASURES:
 ### `storage`
 **Justification:** Required to store user settings (API endpoint URL, firewall enabled/disabled state) and local scan history. All data is stored locally in the user's browser using chrome.storage.local.
 
+### `sidePanel`
+**Justification:** Required to open the ShieldAI assistant, wallet health, guardian alerts, and prompt-injection scanner in Chrome's side panel.
+
+### `tabs`
+**Justification:** Required to open extension pages and to read the active tab URL/title only when a popup or side panel page starts the "Scan this page" workflow. Content scripts are blocked from requesting active tab details.
+
 ---
 
 ## Optional Host Permissions
@@ -160,22 +168,21 @@ SECURITY MEASURES:
 **Answer:**
 
 ```
-ShieldAI uses optional_host_permissions to allow users to configure their own API endpoint for transaction security analysis.
+ShieldAI uses optional_host_permissions only for local development endpoints.
 
-When a user configures an API URL in the extension settings:
-1. The extension requests permission for that specific origin using chrome.permissions.request()
-2. Chrome shows a permission prompt asking the user to approve access to that domain
-3. If granted, the extension can make fetch() requests to analyze transactions
+When a developer configures a localhost API URL in the extension settings:
+1. The extension requests permission for that local origin using chrome.permissions.request()
+2. Chrome shows a permission prompt asking the user to approve access to localhost
+3. If granted, the extension can make fetch() requests to the local development API
 4. If denied, the extension displays an error and asks the user to reconfigure
 
 This model provides maximum security:
-- No permissions granted by default
-- User explicitly approves each API endpoint
+- Production API calls use HTTPS
+- Local HTTP access is limited to localhost and 127.0.0.1
 - Permissions can be revoked at any time in chrome://extensions
-- Least-privilege principle - only request what's needed, when it's needed
+- Least-privilege principle for development-only HTTP origins
 
 Optional permissions requested:
-- https://*/* - Allows users to configure any HTTPS API endpoint (production use)
 - http://localhost/* - Allows localhost for development/testing
 - http://127.0.0.1/* - Allows 127.0.0.1 for development/testing
 ```
@@ -197,7 +204,7 @@ Examples of Web3 application domains:
 - opensea.io
 - Any custom or newly launched dApp
 
-The extension ONLY analyzes blockchain transaction data - it does not read, modify, or collect any other website content, form data, or user interactions.
+The extension analyzes blockchain transaction data and the current site origin for phishing checks. It does not read, modify, or collect page contents, form data, or unrelated user interactions.
 
 Content scripts are injected at document_start to ensure transaction interception occurs before wallet extensions process the transaction request.
 ```
@@ -240,7 +247,7 @@ Before submitting to Chrome Web Store, ensure:
    - Web3 applications can be hosted on any domain, and the extension must intercept transaction requests regardless of the dApp's URL.
 
 2. **What happens to collected transaction data?**
-   - Transaction metadata is sent only to the user-configured API endpoint for analysis. The extension developer does not operate any backend servers and does not receive user data.
+   - Transaction metadata is sent only to the configured API endpoint for analysis. The default endpoint is https://api.shieldbotsecurity.online, and users can replace it with their own HTTPS endpoint.
 
 3. **How can users verify privacy claims?**
    - The extension is fully open source at https://github.com/Ridwannurudeen/shieldbot. Users can audit the code to verify no data is sent to third parties.

@@ -285,6 +285,7 @@ def create_mcp_router(container) -> APIRouter:
     async def sse_stream(request: Request):
         """SSE event stream endpoint. Sends server->client events."""
         await _require_api_key(request)
+        handshake_only = request.query_params.get("handshake_only") in {"1", "true", "yes"}
 
         if sse_manager.is_full():
             raise HTTPException(
@@ -299,6 +300,8 @@ def create_mcp_router(container) -> APIRouter:
                 # Send initial endpoint event so client knows where to POST
                 endpoint_event = f"event: endpoint\ndata: /mcp/messages?session_id={session_id}\n\n"
                 yield endpoint_event
+                if handshake_only:
+                    return
 
                 while True:
                     # Check disconnect

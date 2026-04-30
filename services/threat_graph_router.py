@@ -1,5 +1,6 @@
 """Threat Graph API router — endpoints for querying the cross-chain threat graph."""
 
+import hmac
 import logging
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel, Field
@@ -62,7 +63,7 @@ def create_threat_graph_router(container) -> APIRouter:
         if not admin_secret:
             raise HTTPException(status_code=401, detail="Missing X-Admin-Secret header")
         expected = getattr(container.settings, "admin_secret", "")
-        if not expected or admin_secret != expected:
+        if not expected or not hmac.compare_digest(admin_secret, expected):
             raise HTTPException(status_code=403, detail="Invalid admin secret")
 
         # Get all scored contracts above threshold
