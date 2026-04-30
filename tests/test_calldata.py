@@ -119,3 +119,96 @@ class TestUnknownSelector:
         result = decoder.decode("0xdead")
         assert result["function_name"] == "Unknown (truncated)"
         assert result["risk"] == "high"
+
+
+class TestSelectorResolver:
+    """Tests for dynamic OpenChain selector resolution."""
+
+    @pytest.fixture(autouse=True)
+    def clear_cache(self):
+        from utils.calldata_decoder import _selector_cache
+        _selector_cache.clear()
+        yield
+        _selector_cache.clear()
+
+    @pytest.mark.asyncio
+    async def test_resolve_known_selector(self):
+        from unittest.mock import AsyncMock, patch, MagicMock
+        from utils.calldata_decoder import resolve_selector
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.json = AsyncMock(return_value={
+            "ok": True,
+            "result": {
+                "function": {
+                    "0x4766f566": [{"name": "transferTo((address,address,uint256,bool,uint256),address,bytes,bytes)"}]
+                }
+            }
+        })
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=mock_resp)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            result = await resolve_selector("4766f566")
+            assert result == "transferTo"
+
+    @pytest.mark.asyncio
+    async def test_resolve_cache_hit(self):
+        from utils.calldata_decoder import resolve_selector, _selector_cache
+        import time
+
+        # Pre-populate cache
+        _selector_cache["deadbeef"] = ("cachedFunc", time.time())
+
+        result = await resolve_selector("deadbeef")
+        assert result == "cachedFunc"
+
+    @pytest.mark.asyncio
+    async def test_resolve_empty_results_cached_as_none(self):
+        from unittest.mock import AsyncMock, patch, MagicMock
+        from utils.calldata_decoder import resolve_selector, _selector_cache
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.json = AsyncMock(return_value={
+            "ok": True,
+            "result": {"function": {"0xdeadbeef": []}}
+        })
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=mock_resp)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            result = await resolve_selector("deadbeef")
+            assert result is None
+            # Verify it was cached as None
+            assert "deadbeef" in _selector_cache
+            assert _selector_cache["deadbeef"][0] is None
+
+    @pytest.mark.asyncio
+    async def test_resolve_timeout_returns_none(self):
+        from unittest.mock import patch
+        from utils.calldata_decoder import resolve_selector
+        import asyncio
+
+        with patch("aiohttp.ClientSession") as mock_cls:
+            mock_cls.side_effect = asyncio.TimeoutError()
+            result = await resolve_selector("deadbeef")
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_resolve_invalid_selector(self):
+        from utils.calldata_decoder import resolve_selector
+        assert await resolve_selector("") is None
+        assert await resolve_selector("abc") is None
+        assert await resolve_selector(None) is None

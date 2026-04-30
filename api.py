@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, Dict, Any, List
 
-from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD
+from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve_selector
 from core.config import Settings
 from core.container import ServiceContainer
 from core.extension_formatter import format_extension_alert
@@ -2558,3 +2558,9 @@ async def _enrich_decoded(decoded: Dict, to_addr: str, chain_id: int = 56):
                 decimals = token_info.get("decimals", 18)
                 human_amount = amount / (10 ** decimals)
                 decoded["formatted_amount"] = f"{human_amount:g} {token_info['symbol']}"
+
+    # Resolve unknown selectors via OpenChain API
+    if decoded.get("category") == "unknown" and decoded.get("selector"):
+        resolved_name = await resolve_selector(decoded["selector"])
+        if resolved_name:
+            decoded["function_name"] = resolved_name

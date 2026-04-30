@@ -574,3 +574,52 @@ def format_approval_summary(decoded: Dict, token_symbol: str = "tokens") -> str:
         return f"Approving {amount} {token_symbol} to {spender}"
 
     return f"Approval to {spender}"
+
+
+# --- Dynamic Selector Resolution via OpenChain API ---
+import time
+import aiohttp
+
+_selector_cache: Dict[str, tuple] = {}  # selector -> (function_name | None, timestamp)
+_SELECTOR_CACHE_TTL = 86400  # 24h — selectors never change
+_SELECTOR_CACHE_MAX = 5000
+
+
+async def resolve_selector(selector: str) -> Optional[str]:
+    """
+    Resolve an unknown function selector to its name via OpenChain API.
+    Returns the function name (e.g. "transferTo") or None.
+    Results are cached for 24h. Failures cached as None to avoid repeated lookups.
+    """
+    if not selector or len(selector) != 8:
+        return None
+
+    sel_lower = selector.lower()
+
+    # Check cache
+    cached = _selector_cache.get(sel_lower)
+    if cached and (time.time() - cached[1]) < _SELECTOR_CACHE_TTL:
+        return cached[0]
+
+    resolved_name = None
+    try:
+        url = f"https://api.openchain.xyz/signature-database/v1/lookup?function=0x{sel_lower}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    results = data.get("result", {}).get("function", {}).get(f"0x{sel_lower}", [])
+                    if results and len(results) > 0:
+                        full_sig = results[0].get("name", "")
+                        # Extract just the function name from "transferTo(address,bytes)"
+                        resolved_name = full_sig.split("(")[0] if full_sig else None
+    except Exception:
+        pass  # Never block the response — cache None on failure
+
+    # Cache result (even None to avoid repeated failed lookups)
+    if len(_selector_cache) >= _SELECTOR_CACHE_MAX:
+        oldest_key = min(_selector_cache, key=lambda k: _selector_cache[k][1])
+        del _selector_cache[oldest_key]
+    _selector_cache[sel_lower] = (resolved_name, time.time())
+
+    return resolved_name
