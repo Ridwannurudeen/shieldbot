@@ -51,6 +51,7 @@ ai_analyzer = container.ai_analyzer
 tx_scanner = container.tx_scanner
 token_scanner = container.token_scanner
 onchain_recorder = container.onchain_recorder
+base_attestor = container.base_attestor
 scam_db = container.scam_db
 dex_service = container.dex_service
 ethos_service = container.ethos_service
@@ -336,6 +337,8 @@ Future scans will flag it as a known scam.
         if onchain_recorder.is_available():
             await onchain_recorder.record_scan_fire_and_forget(address, 'high', 'report')
             response += "\n🔗 On-chain recording scheduled — [view contract](https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795#events)"
+        if base_attestor.is_available():
+            await base_attestor.attest_fire_and_forget(address, 'high', 'report', source_chain_id=56)
     else:
         response = f"""📝 **Report Recorded**
 
@@ -726,6 +729,8 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
         if onchain_recorder.is_available():
             await onchain_recorder.record_scan_fire_and_forget(address, risk_level, 'contract')
             onchain_line = "\n\U0001F517 On-chain recording scheduled\n"
+        if base_attestor.is_available():
+            await base_attestor.attest_fire_and_forget(address, risk_level, 'contract', source_chain_id=chain_id)
 
         try:
             await progress_msg.delete()
@@ -829,6 +834,8 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
         if onchain_recorder.is_available():
             await onchain_recorder.record_scan_fire_and_forget(address, risk_level, 'token')
             onchain_line = "\n\U0001F517 On-chain recording scheduled\n"
+        if base_attestor.is_available():
+            await base_attestor.attest_fire_and_forget(address, risk_level, 'token', source_chain_id=chain_id)
 
         try:
             await progress_msg.delete()
@@ -1063,6 +1070,7 @@ def main():
     logger.info("🛡️ ShieldBot starting...")
     logger.info(f"AI Analysis: {'enabled' if ai_analyzer.is_available() else 'disabled'}")
     logger.info(f"On-chain Recording: {'enabled' if onchain_recorder.is_available() else 'disabled'}")
+    logger.info(f"Base EAS Attestor: {'enabled' if base_attestor.is_available() else 'disabled'}")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

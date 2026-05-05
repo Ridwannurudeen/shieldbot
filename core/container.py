@@ -8,6 +8,7 @@ from utils.ai_analyzer import AIAnalyzer
 from utils.scam_db import ScamDatabase
 from utils.calldata_decoder import CalldataDecoder
 from utils.onchain_recorder import OnchainRecorder
+from utils.base_attestor import BaseAttestor
 from scanner.transaction_scanner import TransactionScanner
 from scanner.token_scanner import TokenScanner
 from services import (
@@ -56,6 +57,7 @@ class ServiceContainer:
         self.scam_db = ScamDatabase()
         self.calldata_decoder = CalldataDecoder()
         self.onchain_recorder = OnchainRecorder()
+        self.base_attestor = BaseAttestor()
 
         # Register multichain adapters
         # Etherscan v2 API accepts any chain's key across all chains,
@@ -134,7 +136,16 @@ class ServiceContainer:
 
         # Mempool monitor + Rescue mode + Campaign detection
         self.mempool_monitor = MempoolMonitor(self.web3_client, self.db)
-        self.rescue_service = RescueService(self.web3_client, self.db, logs_rpc=settings.logs_rpc_url)
+        logs_rpcs = {}
+        if settings.logs_rpc_url:
+            logs_rpcs[56] = settings.logs_rpc_url
+        if settings.base_logs_rpc_url:
+            logs_rpcs[8453] = settings.base_logs_rpc_url
+        self.rescue_service = RescueService(
+            self.web3_client, self.db,
+            logs_rpc=settings.logs_rpc_url,
+            logs_rpcs=logs_rpcs,
+        )
         self.campaign_service = CampaignService(self.web3_client, self.db)
 
         # Phishing site detection

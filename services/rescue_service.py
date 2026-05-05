@@ -124,14 +124,40 @@ class RescueAlert:
 class RescueService:
     """Rescue Mode service — scans approvals and generates revoke transactions."""
 
-    # Override with LOGS_RPC_URL env var to set the archive node endpoint.
+    # Override with LOGS_RPC_URL (BSC default) or per-chain entries in logs_rpcs.
     _DEFAULT_LOGS_RPC = ""
     _DEXSCREENER_API = "https://api.dexscreener.com/latest/dex/tokens"
 
-    def __init__(self, web3_client, db=None, logs_rpc: str = ""):
+    def __init__(
+        self,
+        web3_client,
+        db=None,
+        logs_rpc: str = "",
+        logs_rpcs: Optional[Dict[int, str]] = None,
+    ):
         self._web3_client = web3_client
         self._db = db
-        self._logs_rpc = logs_rpc or self._DEFAULT_LOGS_RPC
+        # Backward-compat: logs_rpc treated as the BSC (chain 56) entry.
+        rpcs: Dict[int, str] = dict(logs_rpcs or {})
+        bsc_rpc = logs_rpc or self._DEFAULT_LOGS_RPC
+        if bsc_rpc and 56 not in rpcs:
+            rpcs[56] = bsc_rpc
+        self._logs_rpcs: Dict[int, str] = rpcs
+        # Kept for callers that still read it (read-only).
+        self._logs_rpc = self._logs_rpcs.get(56, "")
+
+    def _rpc_for(self, chain_id: int) -> str:
+        """Resolve archive RPC URL for a chain. Falls back to the registered adapter's RPC."""
+        url = self._logs_rpcs.get(chain_id)
+        if url:
+            return url
+        adapter = self._web3_client._get_adapter(chain_id) if self._web3_client else None
+        if adapter is not None:
+            provider = getattr(getattr(adapter, "w3", None), "provider", None)
+            endpoint = getattr(provider, "endpoint_uri", None)
+            if endpoint:
+                return endpoint
+        return ""
 
     async def scan_approvals(
         self, wallet_address: str, chain_id: int = 56, etherscan_api_key: str = ""
@@ -211,11 +237,15 @@ class RescueService:
           6. Enrich with token metadata (parallelized)
         """
         approvals = []
+        rpc_url = self._rpc_for(chain_id)
+        if not rpc_url:
+            logger.warning(f"No logs RPC configured for chain {chain_id}")
+            return approvals
         try:
             async with aiohttp.ClientSession() as session:
                 # Step 1: Get latest block
                 async with session.post(
-                    self._logs_rpc,
+                    rpc_url,
                     json={"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
                     timeout=aiohttp.ClientTimeout(total=5),
                 ) as resp:
@@ -242,7 +272,7 @@ class RescueService:
                     batch = chunks[i: i + CONCURRENCY]
                     batch_results = await asyncio.gather(
                         *[
-                            self._fetch_log_chunk(session, topic0, topic1, from_b, to_b)
+                            self._fetch_log_chunk(session, rpc_url, topic0, topic1, from_b, to_b)
                             for from_b, to_b in batch
                         ],
                         return_exceptions=True,
@@ -282,13 +312,13 @@ class RescueService:
                 return []
 
             # Step 4: Verify current on-chain allowances — eliminates false positives
-            verified = await self._verify_allowances(wallet, candidates)
+            verified = await self._verify_allowances(wallet, candidates, rpc_url)
             if not verified:
                 return []
 
             # Step 5: Fetch wallet balances for value-at-risk calculation
             active_tokens = list({token for (token, _) in verified.keys()})
-            balances = await self._fetch_balances(wallet, active_tokens)
+            balances = await self._fetch_balances(wallet, active_tokens, rpc_url)
 
             # Step 6: Fetch token prices (DexScreener, stablecoins hardcoded)
             prices = await self._fetch_prices(active_tokens)
@@ -365,12 +395,18 @@ class RescueService:
         return approvals
 
     async def _fetch_log_chunk(
-        self, session: aiohttp.ClientSession, topic0: str, topic1: str, from_b: str, to_b: str
+        self,
+        session: aiohttp.ClientSession,
+        rpc_url: str,
+        topic0: str,
+        topic1: str,
+        from_b: str,
+        to_b: str,
     ) -> list:
         """Fetch a single block-range chunk of Approval logs via eth_getLogs."""
         try:
             async with session.post(
-                self._logs_rpc,
+                rpc_url,
                 json={
                     "jsonrpc": "2.0",
                     "method": "eth_getLogs",
@@ -389,7 +425,7 @@ class RescueService:
             return []
 
     async def _verify_allowances(
-        self, wallet: str, candidates: Dict[tuple, Dict]
+        self, wallet: str, candidates: Dict[tuple, Dict], rpc_url: str
     ) -> Dict[tuple, int]:
         """Batch-verify current on-chain allowances via eth_call.
 
@@ -411,7 +447,7 @@ class RescueService:
                 for (token, spender) in batch:
                     spender_padded = spender.replace("0x", "").lower().zfill(64)
                     calldata = f"{selector}{owner_padded}{spender_padded}"
-                    tasks.append(self._eth_call(session, token, calldata))
+                    tasks.append(self._eth_call(session, rpc_url, token, calldata))
 
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 for (token, spender), result in zip(batch, results):
@@ -421,7 +457,7 @@ class RescueService:
         return verified
 
     async def _fetch_balances(
-        self, wallet: str, tokens: List[str]
+        self, wallet: str, tokens: List[str], rpc_url: str
     ) -> Dict[str, int]:
         """Batch-fetch wallet token balances via eth_call."""
         # balanceOf(address owner) → uint256
@@ -435,7 +471,7 @@ class RescueService:
             for i in range(0, len(tokens), CONCURRENCY):
                 batch = tokens[i: i + CONCURRENCY]
                 tasks = [
-                    self._eth_call(session, token, f"{selector}{owner_padded}")
+                    self._eth_call(session, rpc_url, token, f"{selector}{owner_padded}")
                     for token in batch
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -446,12 +482,12 @@ class RescueService:
         return balances
 
     async def _eth_call(
-        self, session: aiohttp.ClientSession, to: str, data: str
+        self, session: aiohttp.ClientSession, rpc_url: str, to: str, data: str
     ) -> int:
         """Make a single eth_call and return result as int (0 on error)."""
         try:
             async with session.post(
-                self._logs_rpc,
+                rpc_url,
                 json={
                     "jsonrpc": "2.0",
                     "method": "eth_call",

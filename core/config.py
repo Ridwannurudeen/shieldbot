@@ -27,7 +27,8 @@ class Settings(BaseSettings):
     bsc_rpc_url: str = "https://bsc-dataseed.binance.org/"
     # Archive RPC for eth_getLogs queries (approval scanning).
     # Must support 50k-block range getLogs. Defaults to NodeReal free tier.
-    logs_rpc_url: str = ""
+    logs_rpc_url: str = ""           # BSC archive (chain 56), back-compat
+    base_logs_rpc_url: str = ""      # Base archive (chain 8453)
     opbnb_rpc_url: str = "https://opbnb-mainnet-rpc.bnbchain.org"
     eth_rpc_url: str = "https://ethereum-rpc.publicnode.com"
     base_rpc_url: str = "https://mainnet.base.org"
