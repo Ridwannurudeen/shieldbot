@@ -5,3 +5,6 @@ broadcast/
 
 # Local env
 .env
+
+# Sensitive deploy output (contains verifier private key)
+.deploy-output
