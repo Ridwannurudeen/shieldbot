@@ -6,12 +6,12 @@ empty list if the indexer is down or not reachable — the dashboard then shows
 """
 
 import os
-import json
 import logging
 from typing import Any, Dict, List, Optional
 
 import aiohttp
 from eth_abi import decode
+from web3 import Web3
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +21,13 @@ EAS_GRAPHQL_BASE = "https://base.easscan.org/graphql"
 RISK_LABELS = {0: "LOW", 1: "MEDIUM", 2: "HIGH", 3: "SAFE", 4: "WARNING", 5: "DANGER"}
 
 _QUERY = """
-query ShieldBotAttestations($attester: String!, $take: Int!) {
+query ShieldBotAttestations($attester: String!, $schemaId: String!, $take: Int!) {
   attestations(
-    where: { attester: { equals: $attester }, revoked: { equals: false } }
+    where: {
+      attester: { equals: $attester }
+      schemaId: { equals: $schemaId }
+      revoked: { equals: false }
+    }
     orderBy: { time: desc }
     take: $take
   ) {
@@ -66,8 +70,16 @@ def _decode_attestation_data(data_hex: str) -> Optional[Dict[str, Any]]:
 class BaseAttestationService:
     """Reads attestations posted by ShieldBotAttestor from EAS on Base."""
 
-    def __init__(self, attestor_address: Optional[str] = None, graphql_url: Optional[str] = None):
-        self.attestor_address = (attestor_address or os.getenv("BASE_ATTESTOR_ADDRESS", "")).lower()
+    def __init__(
+        self,
+        attestor_address: Optional[str] = None,
+        schema_uid: Optional[str] = None,
+        graphql_url: Optional[str] = None,
+    ):
+        raw_addr = attestor_address or os.getenv("BASE_ATTESTOR_ADDRESS", "")
+        # EAS GraphQL accepts checksum form on equals filters.
+        self.attestor_address = Web3.to_checksum_address(raw_addr) if raw_addr else ""
+        self.schema_uid = (schema_uid or os.getenv("BASE_ATTESTOR_SCHEMA_UID", "")).lower()
         self.graphql_url = graphql_url or EAS_GRAPHQL_BASE
 
     def is_available(self) -> bool:
@@ -78,27 +90,28 @@ class BaseAttestationService:
         if not self.is_available():
             return []
         limit = max(1, min(limit, 100))
+        variables = {"attester": self.attestor_address, "take": limit, "schemaId": self.schema_uid}
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     self.graphql_url,
-                    json={
-                        "query": _QUERY,
-                        "variables": {"attester": self.attestor_address, "take": limit},
-                    },
+                    json={"query": _QUERY, "variables": variables},
                     timeout=aiohttp.ClientTimeout(total=10),
                 ) as resp:
                     body = await resp.json()
         except Exception as e:
-            logger.warning(f"EAS GraphQL fetch failed: {e}")
+            logger.warning("EAS GraphQL fetch failed: %s", type(e).__name__)
             return []
 
         if "errors" in body:
-            logger.warning(f"EAS GraphQL errors: {body['errors']}")
+            logger.warning("EAS GraphQL returned errors")
             return []
 
         results: List[Dict[str, Any]] = []
         for att in body.get("data", {}).get("attestations", []):
+            # Defense-in-depth: enforce schemaId match locally even though the query filters server-side.
+            if self.schema_uid and (att.get("schemaId") or "").lower() != self.schema_uid:
+                continue
             decoded = _decode_attestation_data(att.get("data", ""))
             if decoded is None:
                 continue

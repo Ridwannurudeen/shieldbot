@@ -52,6 +52,14 @@ RISK_LEVEL_MAP = {
     "low": 0, "medium": 1, "high": 2, "safe": 3, "warning": 4, "danger": 5,
 }
 
+# Cap matches the Solidity contract — keep in sync with MAX_SCAN_TYPE_BYTES / MAX_EVIDENCE_URI_BYTES.
+MAX_SCAN_TYPE_BYTES = 32
+MAX_EVIDENCE_URI_BYTES = 256
+
+# Hard cap on per-tx fee in wei. Stops a malicious / misconfigured RPC from draining the verifier wallet.
+# 0.01 ETH at gas=350k means maxFeePerGas = ~28.5 gwei. Base mainnet basefee is normally <0.01 gwei.
+MAX_FEE_PER_GAS_WEI = 30_000_000_000  # 30 gwei
+
 
 class BaseAttestor:
     """Posts ShieldBot threat attestations to EAS via the ShieldBotAttestor contract on Base."""
@@ -65,6 +73,7 @@ class BaseAttestor:
         self.contract_address = contract_address or os.getenv("BASE_ATTESTOR_ADDRESS", "")
         self.private_key = private_key or os.getenv("BASE_VERIFIER_PRIVATE_KEY", "")
         rpc = rpc_url or os.getenv("BASE_RPC_URL", "https://mainnet.base.org")
+        self._nonce_lock = asyncio.Lock()
 
         self.web3 = Web3(Web3.HTTPProvider(rpc))
 
@@ -105,6 +114,14 @@ class BaseAttestor:
         if not self.is_available():
             return None
 
+        # Enforce contract-level length caps client-side so the tx isn't built doomed-to-revert.
+        if len(scan_type.encode()) > MAX_SCAN_TYPE_BYTES:
+            logger.warning("scan_type too long; skipping Base attestation")
+            return None
+        if len(evidence_uri.encode()) > MAX_EVIDENCE_URI_BYTES:
+            logger.warning("evidence_uri too long; skipping Base attestation")
+            return None
+
         try:
             checksum = Web3.to_checksum_address(scanned_address)
             risk_uint8 = RISK_LEVEL_MAP.get(risk_level.lower(), 1)
@@ -115,27 +132,43 @@ class BaseAttestor:
             else:
                 evidence_hash = b"\x00" * 32
 
-            nonce = self.web3.eth.get_transaction_count(self.account.address)
-            gas_price = self.web3.eth.gas_price
+            # Serialize nonce read+sign+send across concurrent fire-and-forget calls;
+            # use pending so back-to-back calls don't reuse the same nonce.
+            async with self._nonce_lock:
+                nonce = self.web3.eth.get_transaction_count(self.account.address, "pending")
 
-            tx = self.contract.functions.attest(
-                checksum, risk_uint8, scan_type, source_chain_id, evidence_hash, evidence_uri
-            ).build_transaction({
-                "from": self.account.address,
-                "nonce": nonce,
-                "gas": 350_000,
-                "gasPrice": gas_price,
-                "chainId": 8453,
-            })
+                # EIP-1559 with a hard ceiling so a hostile/misconfigured RPC cannot drain gas.
+                try:
+                    base_fee = self.web3.eth.get_block("latest").get("baseFeePerGas") or 0
+                except Exception:
+                    base_fee = 0
+                priority = 1_000_000_000  # 1 gwei tip
+                max_fee = min(int(base_fee) * 2 + priority, MAX_FEE_PER_GAS_WEI)
 
-            signed = self.web3.eth.account.sign_transaction(tx, self.private_key)
-            raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
-            tx_hash = self.web3.eth.send_raw_transaction(raw)
-            tx_hash_hex = tx_hash.hex()
-            logger.info(f"Base attestation posted: tx={tx_hash_hex} addr={scanned_address} risk={risk_level} chain={source_chain_id}")
+                tx = self.contract.functions.attest(
+                    checksum, risk_uint8, scan_type, source_chain_id, evidence_hash, evidence_uri
+                ).build_transaction({
+                    "from": self.account.address,
+                    "nonce": nonce,
+                    "gas": 350_000,
+                    "maxFeePerGas": max_fee,
+                    "maxPriorityFeePerGas": priority,
+                    "chainId": 8453,
+                })
+
+                signed = self.web3.eth.account.sign_transaction(tx, self.private_key)
+                raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
+                tx_hash = self.web3.eth.send_raw_transaction(raw)
+                tx_hash_hex = tx_hash.hex()
+
+            logger.info(
+                "Base attestation posted: tx=%s addr=%s risk=%s chain=%s",
+                tx_hash_hex, scanned_address, risk_level, source_chain_id,
+            )
             return tx_hash_hex
         except Exception as e:
-            logger.error(f"Base attestation failed: {e}")
+            # Never log e itself — eth_account exceptions can embed signing inputs.
+            logger.error("Base attestation failed: %s", type(e).__name__)
             return None
 
     async def attest_fire_and_forget(self, *args, **kwargs) -> None:
@@ -151,4 +184,4 @@ class BaseAttestor:
         except asyncio.TimeoutError:
             logger.warning("Base attestation timed out")
         except Exception as e:
-            logger.error(f"Background Base attestation failed: {e}")
+            logger.error("Background Base attestation failed: %s", type(e).__name__)

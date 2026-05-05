@@ -12,7 +12,8 @@ contract RegisterSchema is Script {
     // Base mainnet predeploy
     address constant SCHEMA_REGISTRY = 0x4200000000000000000000000000000000000020;
 
-    string constant SCHEMA = "address scannedAddress,uint8 riskLevel,string scanType,uint64 sourceChainId,bytes32 evidenceHash,string evidenceURI";
+    string constant SCHEMA =
+        "address scannedAddress,uint8 riskLevel,string scanType,uint64 sourceChainId,bytes32 evidenceHash,string evidenceURI";
 
     function run() external {
         ISchemaRegistry registry = ISchemaRegistry(SCHEMA_REGISTRY);

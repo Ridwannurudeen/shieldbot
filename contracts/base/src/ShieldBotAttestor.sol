@@ -1,13 +1,22 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {IEAS, AttestationRequest, AttestationRequestData, RevocationRequest, RevocationRequestData} from "@eas/IEAS.sol";
+import {Ownable, Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {
+    IEAS,
+    AttestationRequest,
+    AttestationRequestData,
+    RevocationRequest,
+    RevocationRequestData
+} from "@eas/IEAS.sol";
 
 /// @title ShieldBotAttestor
 /// @notice Posts ShieldBot threat-scan attestations to the Ethereum Attestation Service on Base.
 /// @dev Schema UID and EAS contract are immutable after deploy. Only authorized verifier wallets can attest or revoke.
-contract ShieldBotAttestor is Ownable {
+contract ShieldBotAttestor is Ownable2Step {
+    uint256 public constant MAX_SCAN_TYPE_BYTES = 32;
+    uint256 public constant MAX_EVIDENCE_URI_BYTES = 256;
+
     IEAS public immutable eas;
     bytes32 public immutable schemaUID;
 
@@ -22,6 +31,8 @@ contract ShieldBotAttestor is Ownable {
     error NotVerifier();
     error LengthMismatch();
     error EmptyBatch();
+    error ScanTypeTooLong();
+    error EvidenceURITooLong();
 
     event AttestationPosted(
         address indexed scannedAddress,
@@ -66,6 +77,19 @@ contract ShieldBotAttestor is Ownable {
     ) external onlyVerifier returns (bytes32 uid) {
         if (scannedAddress == address(0)) revert InvalidAddress();
         if (riskLevel > 5) revert InvalidRiskLevel();
+        if (bytes(scanType).length > MAX_SCAN_TYPE_BYTES) revert ScanTypeTooLong();
+        if (bytes(evidenceURI).length > MAX_EVIDENCE_URI_BYTES) revert EvidenceURITooLong();
+
+        // Effects before interaction (CEI). EAS revert reverts the whole tx, so counters stay consistent.
+        if (attestationCount[scannedAddress] == 0) {
+            unchecked {
+                ++uniqueAddressCount;
+            }
+        }
+        unchecked {
+            ++attestationCount[scannedAddress];
+            ++totalAttestations;
+        }
 
         uid = eas.attest(
             AttestationRequest({
@@ -81,27 +105,12 @@ contract ShieldBotAttestor is Ownable {
             })
         );
 
-        if (attestationCount[scannedAddress] == 0) {
-            unchecked {
-                ++uniqueAddressCount;
-            }
-        }
-        unchecked {
-            ++attestationCount[scannedAddress];
-            ++totalAttestations;
-        }
-
         emit AttestationPosted(scannedAddress, riskLevel, scanType, sourceChainId, uid, msg.sender);
     }
 
     /// @notice Revoke a previously-posted attestation. Used for false-positive correction.
     function revoke(bytes32 attestationUID) external onlyVerifier {
-        eas.revoke(
-            RevocationRequest({
-                schema: schemaUID,
-                data: RevocationRequestData({uid: attestationUID, value: 0})
-            })
-        );
+        eas.revoke(RevocationRequest({schema: schemaUID, data: RevocationRequestData({uid: attestationUID, value: 0})}));
         emit AttestationRevoked(attestationUID, msg.sender);
     }
 

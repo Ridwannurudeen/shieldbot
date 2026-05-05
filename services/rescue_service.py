@@ -421,7 +421,8 @@ class RescueService:
                 return []
             return data.get("result", [])
         except Exception as e:
-            logger.warning(f"Log chunk {from_b}-{to_b} failed: {e}")
+            # Don't include `e` — aiohttp errors embed the RPC URL, which may carry an API key.
+            logger.warning("Log chunk %s-%s failed: %s", from_b, to_b, type(e).__name__)
             return []
 
     async def _verify_allowances(
@@ -560,9 +561,9 @@ class RescueService:
                                     except (ValueError, TypeError):
                                         pass
                     except Exception as e:
-                        logger.warning(f"DexScreener batch {i // BATCH_SIZE} failed: {e}")
+                        logger.warning("DexScreener batch %s failed: %s", i // BATCH_SIZE, type(e).__name__)
         except Exception as e:
-            logger.warning(f"Price fetch failed: {e}")
+            logger.warning("Price fetch failed: %s", type(e).__name__)
 
         return prices
 

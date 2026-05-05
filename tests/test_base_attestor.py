@@ -40,26 +40,29 @@ async def test_attest_returns_none_when_disabled():
     assert result is None
 
 
-@pytest.mark.asyncio
-async def test_attest_builds_and_sends_tx():
+def _make_attestor():
     a = BaseAttestor(
         contract_address="0x1111111111111111111111111111111111111111",
         private_key="0x" + "11" * 32,
     )
-
     mock_eth = MagicMock()
     mock_eth.get_transaction_count.return_value = 5
-    mock_eth.gas_price = 1_000_000
     mock_eth.send_raw_transaction.return_value = b"\xab" * 32
-
+    mock_eth.get_block.return_value = {"baseFeePerGas": 100_000}
     mock_signed = MagicMock()
     mock_signed.raw_transaction = b"\xcd" * 100
     mock_eth.account.sign_transaction.return_value = mock_signed
-
     a.web3.eth = mock_eth
     a.contract.functions = MagicMock()
-    mock_tx = {"from": a.account.address, "nonce": 5, "gas": 350_000, "gasPrice": 1_000_000, "chainId": 8453}
-    a.contract.functions.attest.return_value.build_transaction.return_value = mock_tx
+    a.contract.functions.attest.return_value.build_transaction.return_value = {
+        "from": a.account.address, "nonce": 5, "gas": 350_000, "chainId": 8453,
+    }
+    return a, mock_eth
+
+
+@pytest.mark.asyncio
+async def test_attest_builds_and_sends_tx():
+    a, mock_eth = _make_attestor()
 
     tx_hash = await a.attest(
         scanned_address="0x" + "ab" * 20,
@@ -79,25 +82,47 @@ async def test_attest_builds_and_sends_tx():
     assert call_args[3] == 56
     assert len(call_args[4]) == 32  # bytes32 keccak hash
     assert call_args[5] == "ipfs://Qm..."
+    # Pending nonce must be requested for fire-and-forget concurrency safety.
+    mock_eth.get_transaction_count.assert_called_with(a.account.address, "pending")
+    # EIP-1559 gas params should be present on build_transaction call
+    tx_kwargs = a.contract.functions.attest.return_value.build_transaction.call_args[0][0]
+    assert "maxFeePerGas" in tx_kwargs
+    assert "maxPriorityFeePerGas" in tx_kwargs
+    assert "gasPrice" not in tx_kwargs
+
+
+@pytest.mark.asyncio
+async def test_attest_caps_max_fee_at_hard_ceiling():
+    from utils.base_attestor import MAX_FEE_PER_GAS_WEI
+    a, mock_eth = _make_attestor()
+    # Hostile RPC reports an absurd basefee
+    mock_eth.get_block.return_value = {"baseFeePerGas": 10**18}
+
+    await a.attest("0x" + "ab" * 20, "low", "contract")
+
+    tx_kwargs = a.contract.functions.attest.return_value.build_transaction.call_args[0][0]
+    assert tx_kwargs["maxFeePerGas"] == MAX_FEE_PER_GAS_WEI
+
+
+@pytest.mark.asyncio
+async def test_attest_rejects_oversized_scan_type():
+    a, _ = _make_attestor()
+    result = await a.attest("0x" + "ab" * 20, "low", "x" * 33)
+    assert result is None
+    a.contract.functions.attest.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_attest_rejects_oversized_evidence_uri():
+    a, _ = _make_attestor()
+    result = await a.attest("0x" + "ab" * 20, "low", "contract", evidence_uri="x" * 257)
+    assert result is None
+    a.contract.functions.attest.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_attest_evidence_hash_zero_when_none():
-    a = BaseAttestor(
-        contract_address="0x1111111111111111111111111111111111111111",
-        private_key="0x" + "11" * 32,
-    )
-    mock_eth = MagicMock()
-    mock_eth.get_transaction_count.return_value = 0
-    mock_eth.gas_price = 1
-    mock_eth.send_raw_transaction.return_value = b"\xab" * 32
-    mock_signed = MagicMock()
-    mock_signed.raw_transaction = b""
-    mock_eth.account.sign_transaction.return_value = mock_signed
-    a.web3.eth = mock_eth
-    a.contract.functions = MagicMock()
-    a.contract.functions.attest.return_value.build_transaction.return_value = {}
-
+    a, _ = _make_attestor()
     await a.attest("0x" + "ab" * 20, "low", "token")
     call_args = a.contract.functions.attest.call_args[0]
     assert call_args[4] == b"\x00" * 32

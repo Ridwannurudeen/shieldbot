@@ -50,6 +50,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -65,11 +67,38 @@ jobs:
       - name: Install Solidity compiler
         run: |
           solc-select install 0.8.24
+          solc-select install 0.8.28
           solc-select use 0.8.24
 
-      - name: Slither
+      - name: Slither — BSC verifier
         run: |
           slither contracts/ShieldBotVerifier.sol --exclude-informational --fail-high
+
+  foundry:
+    name: Foundry tests (Base attestor)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/base
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Build
+        run: forge build --sizes
+
+      - name: Test
+        run: forge test -vv
+
+      - name: Format check
+        run: forge fmt --check
 
   sdk:
     name: SDK audit and build

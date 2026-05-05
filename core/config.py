@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     # Must support 50k-block range getLogs. Defaults to NodeReal free tier.
     logs_rpc_url: str = ""           # BSC archive (chain 56), back-compat
     base_logs_rpc_url: str = ""      # Base archive (chain 8453)
+
+    # Base EAS attestor (set after deploying ShieldBotAttestor)
+    base_attestor_address: str = ""
+    base_attestor_schema_uid: str = ""    # EAS schema UID — defense-in-depth filter on indexer reads
     opbnb_rpc_url: str = "https://opbnb-mainnet-rpc.bnbchain.org"
     eth_rpc_url: str = "https://ethereum-rpc.publicnode.com"
     base_rpc_url: str = "https://mainnet.base.org"

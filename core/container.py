@@ -59,7 +59,10 @@ class ServiceContainer:
         self.calldata_decoder = CalldataDecoder()
         self.onchain_recorder = OnchainRecorder()
         self.base_attestor = BaseAttestor()
-        self.base_attestation_reader = BaseAttestationService()
+        self.base_attestation_reader = BaseAttestationService(
+            attestor_address=settings.base_attestor_address or None,
+            schema_uid=settings.base_attestor_schema_uid or None,
+        )
 
         # Register multichain adapters
         # Etherscan v2 API accepts any chain's key across all chains,

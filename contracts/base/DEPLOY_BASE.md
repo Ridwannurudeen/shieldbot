@@ -84,6 +84,7 @@ SSH to `root@75.119.153.252`, edit `/opt/shieldbot/.env`:
 ```
 BASE_RPC_URL=https://mainnet.base.org
 BASE_ATTESTOR_ADDRESS=0x...           # from step 5
+BASE_ATTESTOR_SCHEMA_UID=0x...        # from step 3 (defense-in-depth filter on indexer reads)
 BASE_VERIFIER_PRIVATE_KEY=0x...       # from step 4
 BASE_LOGS_RPC_URL=https://...         # paid archive endpoint
 ```

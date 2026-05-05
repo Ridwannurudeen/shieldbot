@@ -9,7 +9,8 @@ import {ISchemaRegistry} from "@eas/ISchemaRegistry.sol";
 import {ISchemaResolver} from "@eas/resolver/ISchemaResolver.sol";
 
 contract ShieldBotAttestorTest is Test {
-    string constant SCHEMA = "address scannedAddress,uint8 riskLevel,string scanType,uint64 sourceChainId,bytes32 evidenceHash,string evidenceURI";
+    string constant SCHEMA =
+        "address scannedAddress,uint8 riskLevel,string scanType,uint64 sourceChainId,bytes32 evidenceHash,string evidenceURI";
 
     SchemaRegistry registry;
     EAS eas;
@@ -91,14 +92,8 @@ contract ShieldBotAttestorTest is Test {
         bytes32 uid = attestor.attest(scanned, 2, "token", 8453, keccak256("evidence"), "https://shieldbot.io/r/1");
 
         bytes memory data = eas.getAttestation(uid).data;
-        (
-            address dScanned,
-            uint8 dRisk,
-            string memory dType,
-            uint64 dChain,
-            bytes32 dHash,
-            string memory dURI
-        ) = abi.decode(data, (address, uint8, string, uint64, bytes32, string));
+        (address dScanned, uint8 dRisk, string memory dType, uint64 dChain, bytes32 dHash, string memory dURI) =
+            abi.decode(data, (address, uint8, string, uint64, bytes32, string));
 
         assertEq(dScanned, scanned);
         assertEq(dRisk, 2);
@@ -194,5 +189,54 @@ contract ShieldBotAttestorTest is Test {
         vm.prank(verifier);
         vm.expectRevert(ShieldBotAttestor.InvalidRiskLevel.selector);
         attestor.attest(scanned, risk, "contract", 56, keccak256("e"), "u");
+    }
+
+    function test_Attest_RevertsOnLongScanType() public {
+        bytes memory tooLong = new bytes(33);
+        for (uint256 i; i < tooLong.length; ++i) {
+            tooLong[i] = "a";
+        }
+        vm.prank(verifier);
+        vm.expectRevert(ShieldBotAttestor.ScanTypeTooLong.selector);
+        attestor.attest(scanned, 5, string(tooLong), 56, keccak256("e"), "u");
+    }
+
+    function test_Attest_RevertsOnLongEvidenceURI() public {
+        bytes memory tooLong = new bytes(257);
+        for (uint256 i; i < tooLong.length; ++i) {
+            tooLong[i] = "a";
+        }
+        vm.prank(verifier);
+        vm.expectRevert(ShieldBotAttestor.EvidenceURITooLong.selector);
+        attestor.attest(scanned, 5, "contract", 56, keccak256("e"), string(tooLong));
+    }
+
+    function test_Attest_AcceptsBoundaryLengths() public {
+        bytes memory scan32 = new bytes(32);
+        bytes memory uri256 = new bytes(256);
+        for (uint256 i; i < 32; ++i) {
+            scan32[i] = "x";
+        }
+        for (uint256 i; i < 256; ++i) {
+            uri256[i] = "y";
+        }
+        vm.prank(verifier);
+        bytes32 uid = attestor.attest(scanned, 5, string(scan32), 56, keccak256("e"), string(uri256));
+        assertTrue(uid != bytes32(0));
+    }
+
+    function test_Ownable2Step_TransferRequiresAcceptance() public {
+        address newOwner = makeAddr("newOwner");
+        vm.prank(owner);
+        attestor.transferOwnership(newOwner);
+
+        // Ownership has NOT changed yet — pending acceptance.
+        assertEq(attestor.owner(), owner);
+        assertEq(attestor.pendingOwner(), newOwner);
+
+        vm.prank(newOwner);
+        attestor.acceptOwnership();
+        assertEq(attestor.owner(), newOwner);
+        assertEq(attestor.pendingOwner(), address(0));
     }
 }

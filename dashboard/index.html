@@ -654,6 +654,57 @@
     }
 
     // ─── Section Label ────────────────────────────────────────────────────────
+    function BaseAttestationsPanel({ data }) {
+      const riskColor = (label) => {
+        if (label === 'DANGER' || label === 'HIGH') return '#EF4444';
+        if (label === 'WARNING' || label === 'MEDIUM') return '#F59E0B';
+        if (label === 'SAFE' || label === 'LOW') return '#10B981';
+        return '#94A3B8';
+      };
+      const chainName = (id) => ({ 56: 'BSC', 8453: 'Base', 1: 'ETH', 42161: 'ARB', 137: 'POLY', 10: 'OP' }[id] || `chain ${id}`);
+      const list = data.attestations || [];
+      const summary = data.summary || {};
+      return (
+        <div className="glass rounded-xl p-4 md:p-5" style={{ border: '1px solid #334155' }}>
+          <div className="flex flex-wrap gap-3 mb-4 text-xs" style={{ color: '#94A3B8' }}>
+            <span>Attestor:&nbsp;
+              <a href={`https://basescan.org/address/${data.attestor}`} target="_blank" rel="noreferrer"
+                 style={{ color: '#3B82F6', fontFamily: 'JetBrains Mono,monospace' }}>
+                {(data.attestor || '').slice(0, 10)}…{(data.attestor || '').slice(-6)}
+              </a>
+            </span>
+            <span>Total recent: <strong style={{ color: '#E2E8F0' }}>{summary.total_recent || 0}</strong></span>
+            <a href={data.explorer || '#'} target="_blank" rel="noreferrer" style={{ color: '#3B82F6' }}>View on EAS Scan ↗</a>
+          </div>
+          {list.length === 0 ? (
+            <div className="text-center py-8 text-sm" style={{ color: '#475569' }}>No attestations yet.</div>
+          ) : (
+            <div className="space-y-2">
+              {list.map((a) => (
+                <div key={a.uid} className="flex items-center gap-3 py-2 px-3 rounded-lg"
+                     style={{ background: '#1E293B', border: '1px solid #334155' }}>
+                  <span className="text-xs font-bold px-2 py-1 rounded"
+                        style={{ background: riskColor(a.risk_label) + '22', color: riskColor(a.risk_label) }}>
+                    {a.risk_label}
+                  </span>
+                  <span className="text-xs" style={{ color: '#94A3B8' }}>{a.scan_type}</span>
+                  <span className="text-xs font-mono" style={{ color: '#E2E8F0' }}>
+                    {(a.scanned_address || '').slice(0, 8)}…{(a.scanned_address || '').slice(-6)}
+                  </span>
+                  <span className="text-xs" style={{ color: '#64748B' }}>via {chainName(a.source_chain_id)}</span>
+                  <span className="text-xs ml-auto" style={{ color: '#64748B' }}>
+                    {a.timestamp ? new Date(a.timestamp * 1000).toLocaleString() : ''}
+                  </span>
+                  <a href={`https://base.easscan.org/attestation/view/${a.uid}`} target="_blank" rel="noreferrer"
+                     className="text-xs" style={{ color: '#3B82F6' }}>EAS ↗</a>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
     function Section({ title, children }) {
       return (
         <section>
@@ -777,13 +828,16 @@
       const [updated,   setUpdated]   = useState(null);
       const [chain,     setChain]     = useState('');
 
+      const [baseAttestations, setBaseAttestations] = useState({ available: false, attestations: [], summary: {} });
+
       const fetchData = useCallback(async () => {
         try {
-          const [f, s, c, p] = await Promise.allSettled([
+          const [f, s, c, p, b] = await Promise.allSettled([
             fetch(`${API}/api/threats/feed?limit=100`).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
             fetch(`${API}/api/mempool/stats`).then(r => r.json()),
             fetch(`${API}/api/campaigns/top?limit=10`).then(r => r.json()),
             fetch(`${API}/api/stats`).then(r => r.json()),
+            fetch(`${API}/api/base/attestations?limit=20`).then(r => r.json()),
           ]);
 
           if (f.status === 'fulfilled') { setThreats(f.value.threats || []); setError(null); }
@@ -792,6 +846,7 @@
           if (s.status === 'fulfilled') setMempool(s.value || {});
           if (c.status === 'fulfilled') setCampaigns(c.value.campaigns || []);
           if (p.status === 'fulfilled') setStats(p.value || {});
+          if (b.status === 'fulfilled') setBaseAttestations(b.value || { available: false, attestations: [], summary: {} });
 
           setUpdated(Date.now());
         } catch (e) {
@@ -843,6 +898,12 @@
             <Section title="Top Campaigns">
               <CampaignsGrid campaigns={campaigns} loading={loading} />
             </Section>
+
+            {baseAttestations.available && (
+              <Section title="Base EAS Attestations">
+                <BaseAttestationsPanel data={baseAttestations} />
+              </Section>
+            )}
 
           </main>
         </div>

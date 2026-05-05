@@ -22,7 +22,7 @@ def test_disabled_when_no_address():
 
 
 def test_available_when_address_set():
-    s = BaseAttestationService(attestor_address="0x" + "11" * 20)
+    s = BaseAttestationService(attestor_address="0x" + "11" * 20, schema_uid="0x" + "11" * 32)
     assert s.is_available()
 
 
@@ -72,16 +72,17 @@ async def test_get_recent_decodes_results():
     addr = "0x" + "ab" * 20
     data1 = _encoded(addr, 5, "contract", 56, b"\xaa" * 32, "ipfs://1")
     data2 = _encoded(addr, 2, "token", 8453, b"\xbb" * 32, "ipfs://2")
+    schema = "0x" + "11" * 32
     payload = {
         "data": {
             "attestations": [
-                {"id": "0xuid1", "attester": "0xatt", "recipient": addr, "time": 1000, "txid": "0xtx1", "data": data1, "schemaId": "0xschema"},
-                {"id": "0xuid2", "attester": "0xatt", "recipient": addr, "time": 999, "txid": "0xtx2", "data": data2, "schemaId": "0xschema"},
+                {"id": "0xuid1", "attester": "0xatt", "recipient": addr, "time": 1000, "txid": "0xtx1", "data": data1, "schemaId": schema},
+                {"id": "0xuid2", "attester": "0xatt", "recipient": addr, "time": 999, "txid": "0xtx2", "data": data2, "schemaId": schema},
             ]
         }
     }
 
-    s = BaseAttestationService(attestor_address="0x" + "11" * 20)
+    s = BaseAttestationService(attestor_address="0x" + "11" * 20, schema_uid=schema)
     with patch("services.base_attestation_service.aiohttp.ClientSession", return_value=_mock_session(payload)):
         results = await s.get_recent()
 
@@ -95,15 +96,42 @@ async def test_get_recent_decodes_results():
 
 
 @pytest.mark.asyncio
+async def test_get_recent_drops_attestations_with_wrong_schema():
+    addr = "0x" + "ab" * 20
+    data = _encoded(addr, 5, "contract", 56, b"\xaa" * 32, "ipfs://1")
+    expected = "0x" + "aa" * 32
+    other = "0x" + "bb" * 32
+    payload = {
+        "data": {
+            "attestations": [
+                {"id": "0xgood", "attester": "0xatt", "recipient": addr, "time": 1, "txid": "0xt", "data": data, "schemaId": expected},
+                {"id": "0xbad",  "attester": "0xatt", "recipient": addr, "time": 1, "txid": "0xt", "data": data, "schemaId": other},
+            ]
+        }
+    }
+    s = BaseAttestationService(attestor_address="0x" + "11" * 20, schema_uid=expected)
+    with patch("services.base_attestation_service.aiohttp.ClientSession", return_value=_mock_session(payload)):
+        results = await s.get_recent()
+    assert [r["uid"] for r in results] == ["0xgood"]
+
+
+def test_attestor_address_is_checksum():
+    s = BaseAttestationService(attestor_address="0xabcdefabcdefabcdefabcdefabcdefabcdefabcd")
+    # Web3.to_checksum_address mixes case. Confirm we don't lower-case it.
+    assert s.attestor_address.startswith("0x")
+    assert s.attestor_address != s.attestor_address.lower()
+
+
+@pytest.mark.asyncio
 async def test_get_recent_skips_undecodable():
     payload = {
         "data": {
             "attestations": [
-                {"id": "0xbad", "attester": "0xatt", "recipient": "0xr", "time": 1, "txid": "0xt", "data": "0xdeadbeef", "schemaId": "0xs"},
+                {"id": "0xbad", "attester": "0xatt", "recipient": "0xr", "time": 1, "txid": "0xt", "data": "0xdeadbeef", "schemaId": "0x" + "11" * 32},
             ]
         }
     }
-    s = BaseAttestationService(attestor_address="0x" + "11" * 20)
+    s = BaseAttestationService(attestor_address="0x" + "11" * 20, schema_uid="0x" + "11" * 32)
     with patch("services.base_attestation_service.aiohttp.ClientSession", return_value=_mock_session(payload)):
         results = await s.get_recent()
     assert results == []
@@ -112,14 +140,14 @@ async def test_get_recent_skips_undecodable():
 @pytest.mark.asyncio
 async def test_get_recent_empty_on_graphql_error():
     payload = {"errors": [{"message": "schema not found"}]}
-    s = BaseAttestationService(attestor_address="0x" + "11" * 20)
+    s = BaseAttestationService(attestor_address="0x" + "11" * 20, schema_uid="0x" + "11" * 32)
     with patch("services.base_attestation_service.aiohttp.ClientSession", return_value=_mock_session(payload)):
         assert await s.get_recent() == []
 
 
 @pytest.mark.asyncio
 async def test_get_recent_empty_on_network_error():
-    s = BaseAttestationService(attestor_address="0x" + "11" * 20)
+    s = BaseAttestationService(attestor_address="0x" + "11" * 20, schema_uid="0x" + "11" * 32)
     with patch("services.base_attestation_service.aiohttp.ClientSession", side_effect=RuntimeError("network down")):
         assert await s.get_recent() == []
 
@@ -130,13 +158,13 @@ async def test_get_summary_aggregates():
     payload = {
         "data": {
             "attestations": [
-                {"id": "1", "attester": "0xatt", "recipient": addr, "time": 3, "txid": "0xt1", "data": _encoded(addr, 5, "contract", 56, b"\x00" * 32, ""), "schemaId": "0xs"},
-                {"id": "2", "attester": "0xatt", "recipient": addr, "time": 2, "txid": "0xt2", "data": _encoded(addr, 5, "contract", 56, b"\x00" * 32, ""), "schemaId": "0xs"},
-                {"id": "3", "attester": "0xatt", "recipient": addr, "time": 1, "txid": "0xt3", "data": _encoded(addr, 3, "token", 8453, b"\x00" * 32, ""), "schemaId": "0xs"},
+                {"id": "1", "attester": "0xatt", "recipient": addr, "time": 3, "txid": "0xt1", "data": _encoded(addr, 5, "contract", 56, b"\x00" * 32, ""), "schemaId": "0x" + "11" * 32},
+                {"id": "2", "attester": "0xatt", "recipient": addr, "time": 2, "txid": "0xt2", "data": _encoded(addr, 5, "contract", 56, b"\x00" * 32, ""), "schemaId": "0x" + "11" * 32},
+                {"id": "3", "attester": "0xatt", "recipient": addr, "time": 1, "txid": "0xt3", "data": _encoded(addr, 3, "token", 8453, b"\x00" * 32, ""), "schemaId": "0x" + "11" * 32},
             ]
         }
     }
-    s = BaseAttestationService(attestor_address="0x" + "11" * 20)
+    s = BaseAttestationService(attestor_address="0x" + "11" * 20, schema_uid="0x" + "11" * 32)
     with patch("services.base_attestation_service.aiohttp.ClientSession", return_value=_mock_session(payload)):
         summary = await s.get_summary()
 
