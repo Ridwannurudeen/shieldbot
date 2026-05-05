@@ -1568,6 +1568,21 @@ async def public_stats():
     }
 
 
+@app.get("/api/base/attestations")
+async def base_attestations(limit: int = 25):
+    """Recent ShieldBot threat attestations on Base EAS. Newest first."""
+    if not container or not container.base_attestation_reader.is_available():
+        return {"available": False, "attestations": [], "summary": {}}
+    reader = container.base_attestation_reader
+    return {
+        "available": True,
+        "attestor": reader.attestor_address,
+        "explorer": f"https://base.easscan.org/address/{reader.attestor_address}",
+        "attestations": await reader.get_recent(limit=limit),
+        "summary": await reader.get_summary(),
+    }
+
+
 @app.get("/api/admin/signups")
 async def admin_signups(request: Request):
     """List all beta signups. Requires ADMIN_SECRET header."""

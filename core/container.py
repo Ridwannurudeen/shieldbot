@@ -9,6 +9,7 @@ from utils.scam_db import ScamDatabase
 from utils.calldata_decoder import CalldataDecoder
 from utils.onchain_recorder import OnchainRecorder
 from utils.base_attestor import BaseAttestor
+from services.base_attestation_service import BaseAttestationService
 from scanner.transaction_scanner import TransactionScanner
 from scanner.token_scanner import TokenScanner
 from services import (
@@ -58,6 +59,7 @@ class ServiceContainer:
         self.calldata_decoder = CalldataDecoder()
         self.onchain_recorder = OnchainRecorder()
         self.base_attestor = BaseAttestor()
+        self.base_attestation_reader = BaseAttestationService()
 
         # Register multichain adapters
         # Etherscan v2 API accepts any chain's key across all chains,
