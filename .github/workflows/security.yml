@@ -74,6 +74,13 @@ jobs:
         run: |
           slither contracts/ShieldBotVerifier.sol --exclude-informational --fail-high
 
+      - name: Slither — Base attestor
+        run: |
+          solc-select use 0.8.28
+          slither contracts/base/src/ShieldBotAttestor.sol \
+            --solc-remaps "@openzeppelin/=contracts/base/lib/openzeppelin-contracts/ @eas/=contracts/base/lib/eas-contracts/contracts/ forge-std/=contracts/base/lib/forge-std/src/" \
+            --exclude-informational --fail-high
+
   foundry:
     name: Foundry tests (Base attestor)
     runs-on: ubuntu-latest
