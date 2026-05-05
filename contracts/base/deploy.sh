@@ -27,7 +27,11 @@ SCHEMA_REGISTRY="0x4200000000000000000000000000000000000020"
 
 # ─── Validate env ────────────────────────────────────────────────────────────
 [[ -z "${BASE_DEPLOYER_PRIVATE_KEY:-}" ]] && { echo "ERROR: BASE_DEPLOYER_PRIVATE_KEY not set"; exit 1; }
-[[ -z "${BASESCAN_API_KEY:-}" ]]         && { echo "ERROR: BASESCAN_API_KEY not set"; exit 1; }
+# Etherscan v2 unified API: any explorer key works (BscScan/BaseScan/Etherscan).
+# Fall back to BSCSCAN_API_KEY if ETHERSCAN_V2_API_KEY / BASESCAN_API_KEY aren't set.
+ETHERSCAN_V2_API_KEY="${ETHERSCAN_V2_API_KEY:-${BASESCAN_API_KEY:-${BSCSCAN_API_KEY:-}}}"
+export ETHERSCAN_V2_API_KEY
+[[ -z "$ETHERSCAN_V2_API_KEY" ]] && { echo "ERROR: no Etherscan-family API key (set BSCSCAN_API_KEY or BASESCAN_API_KEY)"; exit 1; }
 BASE_RPC_URL="${BASE_RPC_URL:-https://mainnet.base.org}"
 
 cd "$(dirname "$0")"
@@ -109,7 +113,7 @@ DEPLOY_OUT=$(SCHEMA_UID="$SCHEMA_UID" INITIAL_VERIFIER="$VERIFIER_ADDR" \
   --broadcast \
   --private-key "$BASE_DEPLOYER_PRIVATE_KEY" \
   --verify \
-  --etherscan-api-key "$BASESCAN_API_KEY" \
+  --etherscan-api-key "$ETHERSCAN_V2_API_KEY" \
   2>&1)
 
 ATTESTOR_ADDR=$(grep -oE "Deployed at: 0x[a-fA-F0-9]{40}" <<<"$DEPLOY_OUT" | grep -oE "0x[a-fA-F0-9]{40}" | head -1)
