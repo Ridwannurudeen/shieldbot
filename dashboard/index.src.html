@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ShieldBot Threat Dashboard</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBGMTcyQSIvPjxwYXRoIGQ9Ik0xNiAzTDI3IDcuNVYxNUMyNyAyMS41IDE2IDI5IDE2IDI5QzE2IDI5IDUgMjEuNSA1IDE1VjcuNUwxNiAzWiIgZmlsbD0iIzNCODJGNiIvPjxwYXRoIGQ9Ik0xNiA3TDIzIDEwVjE1QzIzIDE5IDE2IDI0IDE2IDI0QzE2IDI0IDkgMTkgOSAxNVYxMEwxNiA3WiIgZmlsbD0iIzBGMTcyQSIvPjxwb2x5bGluZSBwb2ludHM9IjEyLDE1IDE1LDE4IDIwLDEzIiBmaWxsPSJub25lIiBzdHJva2U9IiMxMEI5ODEiIHN0cm9rZS13aWR0aD0iMi4yIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=" />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- React + ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+
+  <!-- prop-types (required by Recharts UMD) -->
+  <script src="https://unpkg.com/prop-types@15/prop-types.min.js" crossorigin></script>
+
+  <!-- Recharts -->
+  <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js" crossorigin></script>
+
+  <!-- Babel (JSX in browser) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0F172A;
+      font-family: 'Inter', system-ui, sans-serif;
+      color: #F8FAFC;
+      min-height: 100vh;
+    }
+
+    .glass {
+      background: rgba(30, 41, 59, 0.75);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    /* Skeleton shimmer */
+    @keyframes shimmer {
+      0%   { background-position: -400px 0; }
+      100% { background-position: 400px 0; }
+    }
+    .skeleton {
+      background: linear-gradient(90deg, #1E293B 25%, #2D3F55 50%, #1E293B 75%);
+      background-size: 400px 100%;
+      animation: shimmer 1.4s infinite linear;
+      border-radius: 6px;
+    }
+
+    /* Toast slide-in */
+    @keyframes slideInRight {
+      from { transform: translateX(110%); opacity: 0; }
+      to   { transform: translateX(0);   opacity: 1; }
+    }
+    .toast-anim { animation: slideInRight 0.25s ease; }
+
+    /* Fade in */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .fade-up { animation: fadeUp 0.2s ease both; }
+
+    /* CRITICAL badge pulse glow */
+    @keyframes critPulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.5); }
+      50%       { box-shadow: 0 0 0 5px rgba(239,68,68,0); }
+    }
+    .badge-critical { animation: critPulse 2s infinite; }
+
+    /* Reduced motion */
+    @media (prefers-reduced-motion: reduce) {
+      .skeleton    { animation: none; background: #1E293B; }
+      .toast-anim  { animation: none; }
+      .fade-up     { animation: none; }
+      .badge-critical { animation: none; }
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: #1E293B; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #475569; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useMemo } = React;
+    const {
+      AreaChart, Area, BarChart, Bar, Cell,
+      XAxis, YAxis, CartesianGrid, Tooltip,
+      ResponsiveContainer,
+    } = Recharts;
+
+    // ─── Constants ────────────────────────────────────────────────────────────
+    const API              = window.location.origin;
+    const REFRESH_MS       = 15000;
+
+    const CHAIN_NAMES  = { 56:'BNB', 1:'ETH', 8453:'Base', 42161:'ARB', 137:'Polygon', 10:'OP', 204:'opBNB' };
+    const CHAIN_COLORS = { 56:'#F0B90B', 1:'#627EEA', 8453:'#0052FF', 42161:'#28A0F0', 137:'#8247E5', 10:'#FF0420', 204:'#F0B90B' };
+    const EXPLORERS    = { 56:'https://bscscan.com', 1:'https://etherscan.io', 8453:'https://basescan.org', 42161:'https://arbiscan.io', 137:'https://polygonscan.com', 10:'https://optimistic.etherscan.io', 204:'https://opbnbscan.com' };
+
+    const SEV = {
+      CRITICAL: { bg:'rgba(239,68,68,0.15)',   text:'#EF4444', border:'rgba(239,68,68,0.35)' },
+      HIGH:     { bg:'rgba(245,158,11,0.15)',  text:'#F59E0B', border:'rgba(245,158,11,0.35)' },
+      MEDIUM:   { bg:'rgba(59,130,246,0.15)',  text:'#3B82F6', border:'rgba(59,130,246,0.35)' },
+      LOW:      { bg:'rgba(16,185,129,0.15)',  text:'#10B981', border:'rgba(16,185,129,0.35)' },
+    };
+
+    // Pre-seeded baseline so tiles never look empty on first load
+    const SEED_KPI = { total:100, highRisk:93, sandwiches:8, approvals:17944, chains:3 };
+
+    // ─── Utilities ────────────────────────────────────────────────────────────
+    function timeAgo(ts) {
+      if (!ts) return '—';
+      const d = Date.now() / 1000 - ts;
+      if (d < 60)    return `${Math.floor(d)}s ago`;
+      if (d < 3600)  return `${Math.floor(d/60)}m ago`;
+      if (d < 86400) return `${Math.floor(d/3600)}h ago`;
+      return `${Math.floor(d/86400)}d ago`;
+    }
+
+    function short(addr) {
+      if (!addr) return '—';
+      return addr.slice(0,6) + '…' + addr.slice(-4);
+    }
+
+    function bucketByHour(threats, hrs = 24) {
+      const now = Date.now() / 1000;
+      const buckets = Array(hrs).fill(0);
+      threats.forEach(t => {
+        const age = Math.floor((now - (t.detected_at || t.created_at || 0)) / 3600);
+        if (age >= 0 && age < hrs) buckets[hrs - 1 - age]++;
+      });
+      return buckets.map((count, i) => {
+        const d = new Date(Date.now() - (hrs - 1 - i) * 3600000);
+        return { hour: String(d.getHours()).padStart(2,'0') + ':00', count };
+      });
+    }
+
+    function pctChange(threats) {
+      const now = Date.now() / 1000;
+      const last = threats.filter(t => (now - (t.detected_at || t.created_at || 0)) < 86400).length;
+      const prev = threats.filter(t => {
+        const a = now - (t.detected_at || t.created_at || 0);
+        return a >= 86400 && a < 172800;
+      }).length;
+      if (prev === 0) return null;
+      return ((last - prev) / prev) * 100;
+    }
+
+    function chainDist(threats) {
+      const m = {};
+      threats.forEach(t => {
+        const n = CHAIN_NAMES[t.chain_id] || (t.chain_id ? `Chain ${t.chain_id}` : 'Unknown');
+        m[n] = (m[n] || 0) + 1;
+      });
+      return Object.entries(m).map(([name, count]) => ({ name, count })).sort((a,b) => b.count - a.count);
+    }
+
+    // ─── SparkLine (SVG) ──────────────────────────────────────────────────────
+    function SparkLine({ data = [], color = '#3B82F6', h = 34 }) {
+      if (data.length < 2) return <div style={{ height: h, width: 80 }} />;
+      const w = 80;
+      const max = Math.max(...data, 1);
+      const pts = data.map((v, i) =>
+        `${(i / (data.length - 1)) * w},${h - (v / max) * (h - 4) - 2}`
+      ).join(' ');
+      return (
+        <svg width={w} height={h} style={{ overflow:'visible', flexShrink:0 }}>
+          <polyline points={pts} fill="none" stroke={color}
+            strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.85" />
+        </svg>
+      );
+    }
+
+    // ─── KPI Tile ──────────────────────────────────────────────────────────────
+    function KPITile({ label, value, color, sparkData, pct, icon }) {
+      const isUp = pct > 0;
+      return (
+        <div className="glass rounded-xl p-4 fade-up flex flex-col gap-2"
+             style={{ border:'1px solid #334155' }}>
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-widest"
+                  style={{ color:'#64748B' }}>{label}</span>
+            <span style={{ fontSize:16 }}>{icon}</span>
+          </div>
+          <div className="flex items-end justify-between gap-2">
+            <div>
+              <div className="text-2xl font-bold leading-none" style={{ color }}>
+                {typeof value === 'number' ? value.toLocaleString() : value}
+              </div>
+              <div className="text-xs mt-1.5 font-medium"
+                   style={{ color: pct === null ? '#334155' : pct === 0 ? '#64748B' : isUp ? '#EF4444' : '#10B981' }}>
+                {pct === null ? '— no baseline' : pct === 0 ? '= 0.0% vs yesterday' : `${isUp ? '↑' : '↓'} ${Math.abs(pct).toFixed(1)}% vs yesterday`}
+              </div>
+            </div>
+            <SparkLine data={sparkData} color={color} />
+          </div>
+        </div>
+      );
+    }
+
+    // ─── Skeletons ────────────────────────────────────────────────────────────
+    function SkeletonTile() {
+      return (
+        <div className="rounded-xl p-4 flex flex-col gap-3"
+             style={{ background:'#1E293B', border:'1px solid #334155' }}>
+          <div className="skeleton" style={{ height:12, width:96 }} />
+          <div className="skeleton" style={{ height:28, width:64 }} />
+          <div className="skeleton" style={{ height:10, width:80 }} />
+        </div>
+      );
+    }
+
+    function SkeletonRow() {
+      return (
+        <div className="flex items-center gap-4 p-4 rounded-xl"
+             style={{ background:'#1E293B', border:'1px solid #334155' }}>
+          <div className="skeleton" style={{ height:24, width:64, borderRadius:20 }} />
+          <div className="flex-1 flex flex-col gap-2">
+            <div className="skeleton" style={{ height:14, width:160 }} />
+            <div className="skeleton" style={{ height:11, width:220 }} />
+          </div>
+          <div className="skeleton" style={{ height:12, width:72 }} />
+          <div className="skeleton" style={{ height:12, width:52 }} />
+        </div>
+      );
+    }
+
+    // ─── Toast ────────────────────────────────────────────────────────────────
+    function Toast({ msg, type = 'success', onDone }) {
+      useEffect(() => { const t = setTimeout(onDone, 2200); return () => clearTimeout(t); }, []);
+      const isErr = type === 'error';
+      return (
+        <div className="toast-anim fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-2xl"
+             style={{ background:'#1E293B', border:`1px solid ${isErr ? 'rgba(239,68,68,0.35)' : '#334155'}`,
+                      color: isErr ? '#EF4444' : '#10B981', fontSize:13 }}>
+          {isErr
+            ? <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+            : <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+          }
+          <span className="font-medium">{msg}</span>
+        </div>
+      );
+    }
+
+    // ─── Flag Modal ───────────────────────────────────────────────────────────
+    function FlagModal({ threat, onClose }) {
+      if (!threat) return null;
+      const addr = threat.address || threat.target_token || '';
+      const type = (threat.type || threat.alert_type || 'unknown').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center"
+             style={{ background:'rgba(15,23,42,0.85)', backdropFilter:'blur(6px)' }}
+             onClick={onClose}>
+          <div className="glass rounded-2xl p-6 w-full max-w-md mx-4 fade-up"
+               style={{ border:'1px solid #334155' }}
+               onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <span className="font-semibold text-base" style={{ color:'#F8FAFC' }}>Flag False Positive</span>
+              <button onClick={onClose} className="transition-colors hover:text-white"
+                      style={{ color:'#64748B', fontSize:18, lineHeight:1 }}>✕</button>
+            </div>
+
+            <div className="space-y-2 mb-4">
+              <div className="rounded-lg p-3" style={{ background:'#0F172A' }}>
+                <div className="text-xs mb-1" style={{ color:'#64748B' }}>Threat Type</div>
+                <div className="text-sm font-medium" style={{ color:'#F8FAFC' }}>{type}</div>
+              </div>
+              <div className="rounded-lg p-3" style={{ background:'#0F172A' }}>
+                <div className="text-xs mb-1" style={{ color:'#64748B' }}>Address</div>
+                <div className="text-xs font-mono break-all" style={{ color:'#3B82F6', fontFamily:'JetBrains Mono,monospace' }}>
+                  {addr || '—'}
+                </div>
+              </div>
+            </div>
+
+            <textarea className="w-full rounded-lg p-3 text-sm resize-none"
+                      style={{ background:'#0F172A', border:'1px solid #334155', color:'#F8FAFC',
+                               outline:'none', height:80, fontFamily:'inherit' }}
+                      placeholder="Why is this a false positive?" />
+
+            <div className="flex gap-2 mt-4">
+              <button onClick={onClose} className="flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                      style={{ background:'#334155', color:'#94A3B8' }}>Cancel</button>
+              <button onClick={onClose} className="flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                      style={{ background:'#3B82F6', color:'#fff' }}>Submit Report</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── Error Banner ──────────────────────────────────────────────────────────
+    function ErrorBanner({ msg, onRetry }) {
+      return (
+        <div className="flex items-center justify-between px-4 py-3 rounded-xl mb-3 text-sm"
+             style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', color:'#FCA5A5' }}>
+          <span className="flex items-center gap-2">
+            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+            </svg>
+            {msg}
+          </span>
+          <button onClick={onRetry} className="ml-4 px-3 py-1 rounded-lg text-xs font-semibold transition-colors"
+                  style={{ background:'rgba(239,68,68,0.18)', color:'#EF4444' }}>Retry</button>
+        </div>
+      );
+    }
+
+    // ─── Threat Row ────────────────────────────────────────────────────────────
+    function ThreatRow({ t, onCopy, onFlag }) {
+      const [hov, setHov] = useState(false);
+      const rawSev  = (t.risk_level || t.severity || 'MEDIUM').toUpperCase();
+      const sev     = SEV[rawSev] ? rawSev : 'MEDIUM';
+      const sc      = SEV[sev];
+      const type    = (t.type || t.alert_type || 'unknown').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+      const addr    = t.address || t.target_token || '';
+      const chain   = CHAIN_NAMES[t.chain_id] || (t.chain_id ? `Chain ${t.chain_id}` : 'Unknown');
+      const cColor  = CHAIN_COLORS[t.chain_id] || '#64748B';
+      const exp     = EXPLORERS[t.chain_id] || '';
+      const ts      = t.detected_at || t.created_at || 0;
+      const note    = (Array.isArray(t.flags) ? t.flags : []).slice(0,2).join(', ') || t.description || '';
+
+      return (
+        <div className="rounded-xl p-4 transition-all duration-150"
+             style={{
+               background: hov ? '#253349' : '#1E293B',
+               border: `1px solid ${hov ? '#475569' : '#334155'}`,
+               transform: hov ? 'translateY(-1px)' : 'translateY(0)',
+               boxShadow: hov ? '0 6px 24px rgba(0,0,0,0.35)' : 'none',
+             }}
+             onMouseEnter={() => setHov(true)}
+             onMouseLeave={() => setHov(false)}>
+          <div className="flex items-start gap-3">
+
+            {/* Severity badge */}
+            <span className={`shrink-0 text-xs font-bold px-2 py-1 rounded-md uppercase tracking-wide text-center ${sev === 'CRITICAL' ? 'badge-critical' : ''}`}
+                  style={{ background:sc.bg, color:sc.text, border:`1px solid ${sc.border}`, minWidth:64 }}>
+              {sev}
+            </span>
+
+            {/* Content */}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-sm" style={{ color:'#F8FAFC' }}>{type}</span>
+                <span className="text-xs px-2 py-0.5 rounded-full font-medium"
+                      style={{ background:`${cColor}20`, color:cColor }}>{chain}</span>
+              </div>
+              {note && <div className="text-xs mt-0.5 truncate" style={{ color:'#475569' }}>{note}</div>}
+              <div className="text-xs mt-0.5 font-mono" style={{ color:'#3B82F6', fontFamily:'JetBrains Mono,monospace' }}>
+                {addr ? short(addr) : '—'}
+              </div>
+            </div>
+
+            {/* Time */}
+            <div className="text-xs shrink-0" style={{ color:'#475569' }}>{timeAgo(ts)}</div>
+
+            {/* Quick actions — visible on hover */}
+            <div className="flex items-center gap-1 shrink-0 transition-all duration-150"
+                 style={{ opacity: hov ? 1 : 0, pointerEvents: hov ? 'auto' : 'none' }}>
+
+              {exp && addr && (
+                <a href={`${exp}/address/${addr}`} target="_blank" rel="noopener noreferrer"
+                   title="Investigate on Explorer" aria-label="Investigate on Explorer"
+                   className="p-1.5 rounded-lg transition-colors"
+                   style={{ background:'rgba(59,130,246,0.15)', color:'#3B82F6' }}
+                   onClick={e => e.stopPropagation()}>
+                  <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                  </svg>
+                </a>
+              )}
+
+              {addr && (
+                <button title="Copy Address" aria-label="Copy address to clipboard"
+                        className="p-1.5 rounded-lg transition-colors"
+                        style={{ background:'rgba(16,185,129,0.15)', color:'#10B981' }}
+                        onClick={() => onCopy(addr)}>
+                  <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="9" y="9" width="13" height="13" rx="2"/>
+                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                  </svg>
+                </button>
+              )}
+
+              <button title="Flag False Positive" aria-label="Flag as false positive"
+                      className="p-1.5 rounded-lg transition-colors"
+                      style={{ background:'rgba(245,158,11,0.15)', color:'#F59E0B' }}
+                      onClick={() => onFlag(t)}>
+                <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
+                  <line x1="4" y1="22" x2="4" y2="15"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── Threat Log Table ─────────────────────────────────────────────────────
+    const CHAIN_FILTERS = [
+      { label:'All Chains', val:'' },
+      { label:'BNB',        val:'56' },
+      { label:'ETH',        val:'1' },
+      { label:'Base',       val:'8453' },
+      { label:'Arbitrum',   val:'42161' },
+      { label:'Polygon',    val:'137' },
+      { label:'Optimism',   val:'10' },
+      { label:'opBNB',      val:'204' },
+    ];
+
+    function ThreatLogTable({ threats, loading, error, onRetry, chain, onChain }) {
+      const [toast, setToast] = useState(null);
+      const [flag,  setFlag]  = useState(null);
+
+      const filtered = chain ? threats.filter(t => String(t.chain_id) === chain) : threats;
+
+      function handleCopy(addr) {
+        navigator.clipboard.writeText(addr)
+          .then(() => setToast({ msg:'Address copied to clipboard', type:'success' }))
+          .catch(() => setToast({ msg:'Failed to copy — try manually', type:'error' }));
+      }
+
+      return (
+        <div>
+          {/* Chain filter pills */}
+          <div className="flex gap-2 flex-wrap mb-4">
+            {CHAIN_FILTERS.map(f => {
+              const active = chain === f.val;
+              return (
+                <button key={f.val} onClick={() => onChain(f.val)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150"
+                        style={{
+                          background: active ? 'rgba(59,130,246,0.18)' : '#1E293B',
+                          border: `1px solid ${active ? '#3B82F6' : '#334155'}`,
+                          color: active ? '#3B82F6' : '#64748B',
+                        }}>
+                  {f.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {error && <ErrorBanner msg={error} onRetry={onRetry} />}
+
+          <div className="flex flex-col gap-2" style={{ maxHeight:520, overflowY:'auto', paddingRight:2 }}>
+            {loading
+              ? Array(6).fill(0).map((_,i) => <SkeletonRow key={i} />)
+              : filtered.length === 0
+                ? <div className="text-center py-16 text-sm" style={{ color:'#334155' }}>
+                    {error
+                      ? 'Threat data unavailable — check the error above.'
+                      : chain
+                        ? 'No threats on this chain in the current window.'
+                        : 'No threats detected. Monitoring active.'
+                    }
+                  </div>
+                : filtered.slice(0,100).map((t,i) => (
+                    <ThreatRow key={t.id || i} t={t} onCopy={handleCopy} onFlag={setFlag} />
+                  ))
+            }
+          </div>
+
+          {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
+          <FlagModal threat={flag} onClose={() => setFlag(null)} />
+        </div>
+      );
+    }
+
+    // ─── Campaigns Grid ────────────────────────────────────────────────────────
+    function CampaignsGrid({ campaigns, loading }) {
+      if (loading) {
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {Array(3).fill(0).map((_,i) => (
+              <div key={i} className="rounded-xl p-4 flex flex-col gap-3"
+                   style={{ background:'#1E293B', border:'1px solid #334155' }}>
+                <div className="skeleton" style={{ height:14, width:140 }} />
+                <div className="skeleton" style={{ height:11, width:190 }} />
+                <div className="skeleton" style={{ height:6, width:'100%' }} />
+              </div>
+            ))}
+          </div>
+        );
+      }
+
+      if (!campaigns.length) {
+        return <div className="text-center py-8 text-sm" style={{ color:'#334155' }}>No campaigns detected.</div>;
+      }
+
+      return (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {campaigns.map((c, i) => {
+            const rp  = c.risk_profile || {};
+            const hi  = (rp.HIGH || 0) + (rp.CRITICAL || 0);
+            const tot = c.contract_count || 1;
+            const pct = Math.min(100, (hi / tot) * 100);
+            const bar = pct > 50 ? '#EF4444' : pct > 20 ? '#F59E0B' : '#10B981';
+            return (
+              <div key={i} className="rounded-xl p-4 fade-up"
+                   style={{ background:'#1E293B', border:'1px solid #334155' }}>
+                <div className="text-sm font-medium font-mono break-all"
+                     style={{ color:'#3B82F6', fontFamily:'JetBrains Mono,monospace' }}>
+                  {(c.deployer || '').slice(0,10)}…{(c.deployer || '').slice(-6)}
+                </div>
+                <div className="text-xs mt-2" style={{ color:'#64748B' }}>
+                  {c.contract_count} contracts · {c.chain_count} chain(s)
+                  {c.funder ? ` · Funder: ${c.funder.slice(0,8)}…` : ''}
+                </div>
+                <div className="mt-3 rounded-full overflow-hidden" style={{ height:5, background:'#334155' }}>
+                  <div className="h-full rounded-full transition-all duration-700"
+                       style={{ width:`${pct}%`, background:bar }} />
+                </div>
+                <div className="text-xs mt-2" style={{ color:'#94A3B8' }}>
+                  <span style={{ color:bar }}>{hi} HIGH/CRIT</span> / {tot} total
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // ─── Threat Velocity Chart ────────────────────────────────────────────────
+    function ThreatVelocityChart({ data }) {
+      return (
+        <div className="glass rounded-xl p-5" style={{ border:'1px solid #334155' }}>
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <div className="text-sm font-semibold" style={{ color:'#F8FAFC' }}>Threat Velocity</div>
+              <div className="text-xs mt-0.5" style={{ color:'#64748B' }}>Detections per hour · last 24h</div>
+            </div>
+            <span className="text-xs px-2.5 py-1 rounded-full font-medium"
+                  style={{ background:'rgba(59,130,246,0.15)', color:'#3B82F6' }}>Hourly</span>
+          </div>
+          <ResponsiveContainer width="100%" height={190}>
+            <AreaChart data={data} margin={{ top:4, right:4, left:-20, bottom:0 }}>
+              <defs>
+                <linearGradient id="velGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor="#3B82F6" stopOpacity={0.35} />
+                  <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1E293B" vertical={false} />
+              <XAxis dataKey="hour" tick={{ fill:'#475569', fontSize:10 }}
+                     tickLine={false} axisLine={false} interval={5} />
+              <YAxis tick={{ fill:'#475569', fontSize:10 }} tickLine={false} axisLine={false} />
+              <Tooltip contentStyle={{ background:'#1E293B', border:'1px solid #334155',
+                                       borderRadius:8, color:'#F8FAFC', fontSize:12 }}
+                       cursor={{ stroke:'#334155', strokeWidth:1 }} />
+              <Area type="monotone" dataKey="count" name="Threats"
+                    stroke="#3B82F6" strokeWidth={2} fill="url(#velGrad)" dot={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      );
+    }
+
+    // ─── Chain Distribution Chart ─────────────────────────────────────────────
+    const BAR_COLORS = { BNB:'#F0B90B', ETH:'#627EEA', Base:'#0052FF', ARB:'#28A0F0', Polygon:'#8247E5', OP:'#FF0420', opBNB:'#F0B90B' };
+    const FALLBACK_CHAIN_DATA = [
+      { name:'BNB', count:30 }, { name:'ETH', count:40 },
+      { name:'Base', count:15 }, { name:'Polygon', count:15 },
+    ];
+
+    function ChainDistributionChart({ data }) {
+      const haslive = data.length > 0;
+      const d = haslive ? data : FALLBACK_CHAIN_DATA;
+      return (
+        <div className="glass rounded-xl p-5" style={{ border:'1px solid #334155' }}>
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <div className="text-sm font-semibold" style={{ color:'#F8FAFC' }}>Chain Distribution</div>
+              <div className="text-xs mt-0.5" style={{ color:'#64748B' }}>Threats grouped by network</div>
+            </div>
+            {haslive
+              ? <span className="text-xs px-2.5 py-1 rounded-full font-medium"
+                      style={{ background:'rgba(240,185,11,0.15)', color:'#F0B90B' }}>Live</span>
+              : <span className="text-xs px-2.5 py-1 rounded-full font-medium"
+                      style={{ background:'rgba(100,116,139,0.15)', color:'#64748B' }}>No data</span>
+            }
+          </div>
+          <ResponsiveContainer width="100%" height={190}>
+            <BarChart data={d} margin={{ top:4, right:4, left:-20, bottom:0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1E293B" vertical={false} />
+              <XAxis dataKey="name" tick={{ fill:'#475569', fontSize:11 }} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fill:'#475569', fontSize:10 }} tickLine={false} axisLine={false} />
+              <Tooltip contentStyle={{ background:'#1E293B', border:'1px solid #334155',
+                                       borderRadius:8, color:'#F8FAFC', fontSize:12 }}
+                       cursor={{ fill:'rgba(255,255,255,0.03)' }} />
+              <Bar dataKey="count" name="Threats" radius={[4,4,0,0]}>
+                {d.map((e,i) => <Cell key={i} fill={BAR_COLORS[e.name] || '#3B82F6'} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      );
+    }
+
+    // ─── KPI Tiles Row ────────────────────────────────────────────────────────
+    function KPITilesRow({ threats, mempool, loading }) {
+      const hourly     = useMemo(() => bucketByHour(threats).map(b => b.count), [threats]);
+      const delta      = useMemo(() => pctChange(threats), [threats]);
+      const highRisk   = useMemo(() => threats.filter(t => ['HIGH','CRITICAL'].includes((t.risk_level || t.severity || '').toUpperCase())).length, [threats]);
+      const chains     = useMemo(() => new Set(threats.map(t => t.chain_id)).size, [threats]);
+      const sandwiches = mempool.sandwiches_detected  ?? SEED_KPI.sandwiches;
+      const approvals  = mempool.suspicious_approvals ?? SEED_KPI.approvals;
+
+      const tiles = useMemo(() => [
+        { label:'High Risk',           value: loading ? SEED_KPI.highRisk   : highRisk,       color:'#EF4444', icon:'🔴', sparkData: hourly,                                    pct: delta },
+        { label:'Sandwich Attacks',    value: loading ? SEED_KPI.sandwiches : sandwiches,     color:'#F59E0B', icon:'⚡', sparkData: hourly.map(v => Math.round(v * 0.08)),      pct: null  },
+        { label:'Suspicious Approvals',value: loading ? SEED_KPI.approvals  : approvals,      color:'#8B5CF6', icon:'⚠️', sparkData: hourly.map(v => v * 180),                  pct: null  },
+        { label:'Active Chains',       value: loading ? SEED_KPI.chains     : chains,         color:'#10B981', icon:'🔗', sparkData: Array(24).fill(chains),                    pct: null  },
+        { label:'Total Threats',       value: loading ? SEED_KPI.total      : threats.length, color:'#3B82F6', icon:'🛡️', sparkData: hourly,                                    pct: delta },
+      ], [hourly, highRisk, chains, sandwiches, approvals, loading, threats.length, delta]);
+
+      return (
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
+          {loading
+            ? Array(5).fill(0).map((_,i) => <SkeletonTile key={i} />)
+            : tiles.map(tile => <KPITile key={tile.label} {...tile} />)
+          }
+        </div>
+      );
+    }
+
+    // ─── Section Label ────────────────────────────────────────────────────────
+    function BaseAttestationsPanel({ data }) {
+      const riskColor = (label) => {
+        if (label === 'DANGER' || label === 'HIGH') return '#EF4444';
+        if (label === 'WARNING' || label === 'MEDIUM') return '#F59E0B';
+        if (label === 'SAFE' || label === 'LOW') return '#10B981';
+        return '#94A3B8';
+      };
+      const chainName = (id) => ({ 56: 'BSC', 8453: 'Base', 1: 'ETH', 42161: 'ARB', 137: 'POLY', 10: 'OP' }[id] || `chain ${id}`);
+      const list = data.attestations || [];
+      const summary = data.summary || {};
+      return (
+        <div className="glass rounded-xl p-4 md:p-5" style={{ border: '1px solid #334155' }}>
+          <div className="flex flex-wrap gap-3 mb-4 text-xs" style={{ color: '#94A3B8' }}>
+            <span>Attestor:&nbsp;
+              <a href={`https://basescan.org/address/${data.attestor}`} target="_blank" rel="noreferrer"
+                 style={{ color: '#3B82F6', fontFamily: 'JetBrains Mono,monospace' }}>
+                {(data.attestor || '').slice(0, 10)}…{(data.attestor || '').slice(-6)}
+              </a>
+            </span>
+            <span>Total recent: <strong style={{ color: '#E2E8F0' }}>{summary.total_recent || 0}</strong></span>
+            <a href={data.explorer || '#'} target="_blank" rel="noreferrer" style={{ color: '#3B82F6' }}>View on EAS Scan ↗</a>
+          </div>
+          {list.length === 0 ? (
+            <div className="text-center py-8 text-sm" style={{ color: '#475569' }}>No attestations yet.</div>
+          ) : (
+            <div className="space-y-2">
+              {list.map((a) => (
+                <div key={a.uid} className="flex items-center gap-3 py-2 px-3 rounded-lg"
+                     style={{ background: '#1E293B', border: '1px solid #334155' }}>
+                  <span className="text-xs font-bold px-2 py-1 rounded"
+                        style={{ background: riskColor(a.risk_label) + '22', color: riskColor(a.risk_label) }}>
+                    {a.risk_label}
+                  </span>
+                  <span className="text-xs" style={{ color: '#94A3B8' }}>{a.scan_type}</span>
+                  <span className="text-xs font-mono" style={{ color: '#E2E8F0' }}>
+                    {(a.scanned_address || '').slice(0, 8)}…{(a.scanned_address || '').slice(-6)}
+                  </span>
+                  <span className="text-xs" style={{ color: '#64748B' }}>via {chainName(a.source_chain_id)}</span>
+                  <span className="text-xs ml-auto" style={{ color: '#64748B' }}>
+                    {a.timestamp ? new Date(a.timestamp * 1000).toLocaleString() : ''}
+                  </span>
+                  <a href={`https://base.easscan.org/attestation/view/${a.uid}`} target="_blank" rel="noreferrer"
+                     className="text-xs" style={{ color: '#3B82F6' }}>EAS ↗</a>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function Section({ title, children }) {
+      return (
+        <section>
+          <div className="text-xs font-semibold uppercase tracking-widest mb-3"
+               style={{ color:'#475569' }}>{title}</div>
+          {children}
+        </section>
+      );
+    }
+
+    // ─── Header ───────────────────────────────────────────────────────────────
+    function Header({ lastUpdated }) {
+      const [glow, setGlow] = useState(true);
+      useEffect(() => { const t = setInterval(() => setGlow(v => !v), 900); return () => clearInterval(t); }, []);
+
+      return (
+        <header className="glass border-b px-5 md:px-8 py-4 flex items-center justify-between flex-wrap gap-3"
+                style={{ borderColor:'#1E293B', position:'sticky', top:0, zIndex:40 }}>
+          <div>
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-lg font-bold" style={{ color:'#F8FAFC' }}>
+                <span style={{ color:'#3B82F6' }}>Shield</span>Bot
+              </span>
+              <span className="text-sm" style={{ color:'#475569' }}>Threat Dashboard</span>
+              <div className="flex items-center gap-1.5">
+                <div style={{
+                  width:8, height:8, borderRadius:'50%', background:'#10B981',
+                  boxShadow: glow ? '0 0 8px #10B981' : 'none',
+                  transition:'box-shadow 0.4s',
+                }} />
+                <span className="text-xs font-semibold" style={{ color:'#10B981' }}>LIVE</span>
+              </div>
+            </div>
+            <div className="text-xs mt-0.5" style={{ color:'#334155' }}>
+              Security Shield · Active Monitoring · Low Latency Mode
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <a href="https://shieldbotsecurity.online" style={{ color:'#475569', fontSize:'0.75rem', textDecoration:'none', display:'flex', alignItems:'center', gap:'0.25rem' }}
+               onMouseOver={e => e.currentTarget.style.color='#94A3B8'}
+               onMouseOut={e => e.currentTarget.style.color='#475569'}>
+              ← Home
+            </a>
+            <a href="mailto:support@shieldbotsecurity.online" style={{ color:'#475569', fontSize:'0.75rem', textDecoration:'none' }}
+               onMouseOver={e => e.currentTarget.style.color='#94A3B8'}
+               onMouseOut={e => e.currentTarget.style.color='#475569'}>
+              Support
+            </a>
+            <div className="text-xs font-mono" style={{ color:'#334155', fontFamily:'JetBrains Mono,monospace' }}>
+              {lastUpdated ? `↻ ${timeAgo(lastUpdated / 1000)}` : 'Connecting…'}
+            </div>
+          </div>
+        </header>
+      );
+    }
+
+    // ─── Platform Stats Bar ────────────────────────────────────────────────────
+    const STAT_ITEMS = [
+      { key:'transactions_monitored', label:'Transactions Monitored', color:'#3B82F6' },
+      { key:'contracts_scanned',      label:'Contracts Scanned',      color:'#10B981' },
+      { key:'threats_detected',       label:'Threats Detected',       color:'#EF4444' },
+      { key:'transactions_blocked',   label:'Transactions Blocked',   color:'#F59E0B' },
+      { key:'sandwiches_caught',      label:'Sandwich Attacks Caught',color:'#8B5CF6' },
+      { key:'suspicious_approvals',   label:'Suspicious Approvals',   color:'#F97316' },
+      { key:'chains_protected',       label:'Chains Protected',       color:'#06B6D4' },
+    ];
+
+    function useCountUp(target, duration = 1200) {
+      const [display, setDisplay] = useState(0);
+      useEffect(() => {
+        if (!target) return;
+        const start = Date.now();
+        const from = 0;
+        const tick = () => {
+          const elapsed = Date.now() - start;
+          const progress = Math.min(elapsed / duration, 1);
+          const eased = 1 - Math.pow(1 - progress, 3);
+          setDisplay(Math.round(from + (target - from) * eased));
+          if (progress < 1) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }, [target]);
+      return display;
+    }
+
+    function StatCard({ label, value, color, loading }) {
+      const display = useCountUp(loading ? 0 : value);
+      return (
+        <div className="glass rounded-xl p-4 fade-up flex flex-col gap-1 text-center"
+             style={{ border:'1px solid #1E293B', minWidth:0 }}>
+          {loading
+            ? <div className="skeleton mx-auto" style={{ height:28, width:72 }} />
+            : <div className="text-2xl font-bold leading-none" style={{ color }}>
+                {display.toLocaleString()}
+              </div>
+          }
+          <div className="text-xs font-medium mt-1" style={{ color:'#64748B' }}>{label}</div>
+        </div>
+      );
+    }
+
+    function PlatformStatsBar({ stats, loading }) {
+      return (
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+          {STAT_ITEMS.map(s => (
+            <StatCard key={s.key} label={s.label} value={stats[s.key] || 0}
+                      color={s.color} loading={loading} />
+          ))}
+        </div>
+      );
+    }
+
+    // ─── App ──────────────────────────────────────────────────────────────────
+    function App() {
+      const [threats,   setThreats]   = useState([]);
+      const [mempool,   setMempool]   = useState({});
+      const [campaigns, setCampaigns] = useState([]);
+      const [stats,     setStats]     = useState({});
+      const [loading,   setLoading]   = useState(true);
+      const [error,     setError]     = useState(null);
+      const [updated,   setUpdated]   = useState(null);
+      const [chain,     setChain]     = useState('');
+
+      const [baseAttestations, setBaseAttestations] = useState({ available: false, attestations: [], summary: {} });
+
+      const fetchData = useCallback(async () => {
+        try {
+          const [f, s, c, p, b] = await Promise.allSettled([
+            fetch(`${API}/api/threats/feed?limit=100`).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+            fetch(`${API}/api/mempool/stats`).then(r => r.json()),
+            fetch(`${API}/api/campaigns/top?limit=10`).then(r => r.json()),
+            fetch(`${API}/api/stats`).then(r => r.json()),
+            fetch(`${API}/api/base/attestations?limit=20`).then(r => r.json()),
+          ]);
+
+          if (f.status === 'fulfilled') { setThreats(f.value.threats || []); setError(null); }
+          else setError('Failed to load threat feed — ' + (f.reason?.message || 'unknown error'));
+
+          if (s.status === 'fulfilled') setMempool(s.value || {});
+          if (c.status === 'fulfilled') setCampaigns(c.value.campaigns || []);
+          if (p.status === 'fulfilled') setStats(p.value || {});
+          if (b.status === 'fulfilled') setBaseAttestations(b.value || { available: false, attestations: [], summary: {} });
+
+          setUpdated(Date.now());
+        } catch (e) {
+          setError('Network error — ' + e.message);
+        } finally {
+          setLoading(false);
+        }
+      }, []);
+
+      useEffect(() => {
+        fetchData();
+        const id = setInterval(fetchData, REFRESH_MS);
+        return () => clearInterval(id);
+      }, [fetchData]);
+
+      const velocityData = useMemo(() => bucketByHour(threats),    [threats]);
+      const chainData    = useMemo(() => chainDist(threats),        [threats]);
+
+      return (
+        <div style={{ minHeight:'100vh', background:'#0F172A' }}>
+          <Header lastUpdated={updated} />
+
+          <main className="px-4 md:px-8 py-6 space-y-8 mx-auto" style={{ maxWidth:1600 }}>
+
+            <Section title="Platform Statistics">
+              <PlatformStatsBar stats={stats} loading={loading} />
+            </Section>
+
+            <Section title="Performance Overview">
+              <KPITilesRow threats={threats} mempool={mempool} loading={loading} />
+            </Section>
+
+            <Section title="Analytics">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <ThreatVelocityChart data={velocityData} />
+                <ChainDistributionChart data={chainData} />
+              </div>
+            </Section>
+
+            <Section title="Live Threat Feed">
+              <div className="glass rounded-xl p-4 md:p-5" style={{ border:'1px solid #334155' }}>
+                <ThreatLogTable
+                  threats={threats} loading={loading} error={error}
+                  onRetry={fetchData} chain={chain} onChain={setChain}
+                />
+              </div>
+            </Section>
+
+            <Section title="Top Campaigns">
+              <CampaignsGrid campaigns={campaigns} loading={loading} />
+            </Section>
+
+            {baseAttestations.available && (
+              <Section title="Base EAS Attestations">
+                <BaseAttestationsPanel data={baseAttestations} />
+              </Section>
+            )}
+
+          </main>
+        </div>
+      );
+    }
+
+    // ─── Mount ────────────────────────────────────────────────────────────────
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

@@ -58,6 +58,10 @@ demo/
 # Landing page source (build output is in landing/)
 landing-src/
 
+# Dashboard build artifacts (source is dashboard/index.src.html; output is dashboard/index.html)
+dashboard/build/node_modules/
+dashboard/build/tw.css
+
 # Build scripts (local tooling)
 scripts/build_*.py
 
