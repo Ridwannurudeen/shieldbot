@@ -3,15 +3,20 @@ Scam Database Checker
 Checks addresses against known scam databases and blocklists
 """
 
+import asyncio
 import re
 import time
 import logging
 import aiohttp
 from typing import List, Dict
+from cachetools import TTLCache
 
 logger = logging.getLogger(__name__)
 
 _ETH_ADDR_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
+
+_GOPLUS_CACHE = TTLCache(maxsize=1024, ttl=30)
+_GOPLUS_INFLIGHT = {}
 
 # Addresses that must never be blacklisted (routers, WBNB, stables, etc.)
 _PROTECTED_ADDRESSES: set[str] = set()
@@ -46,7 +51,6 @@ class ScamDatabase:
     def __init__(self):
         # Public scam databases
         self.chainabuse_api = "https://www.chainabuse.com/api/address/"
-        self.goplus_api = "https://api.gopluslabs.io/api/v1/token_security/"
 
         # Shared session (created lazily, reused across requests)
         self._session: aiohttp.ClientSession = None
@@ -125,40 +129,71 @@ class ScamDatabase:
             logger.error(f"Error checking ChainAbuse: {e}")
             return []
 
+    @staticmethod
+    async def fetch_token_security(address: str, chain_id: int = 56) -> dict:
+        """Share GoPlus token data across concurrent scan components."""
+        if not _ETH_ADDR_RE.fullmatch(address):
+            return {'status': 'unknown', 'reason': 'Invalid token address', 'data': {}}
+        key = (chain_id, address.lower())
+        if key in _GOPLUS_CACHE:
+            return _GOPLUS_CACHE[key]
+        flight_key = (asyncio.get_running_loop(), key)
+        if flight_key not in _GOPLUS_INFLIGHT:
+            _GOPLUS_INFLIGHT[flight_key] = asyncio.create_task(
+                ScamDatabase._fetch_token_security(key, flight_key)
+            )
+        return await asyncio.shield(_GOPLUS_INFLIGHT[flight_key])
+
+    @staticmethod
+    async def _fetch_token_security(key: tuple, flight_key: tuple) -> dict:
+        chain_id, address = key
+        result = {'status': 'unknown', 'reason': 'GoPlus unavailable', 'data': {}}
+        try:
+            url = f"https://api.gopluslabs.io/api/v1/token_security/{chain_id}?contract_addresses={address}"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                    if resp.status != 200:
+                        result['reason'] = f'GoPlus HTTP {resp.status}'
+                    else:
+                        payload = await resp.json()
+                        tokens = payload.get('result') if isinstance(payload, dict) else None
+                        token = tokens.get(address) if isinstance(tokens, dict) else None
+                        if not isinstance(payload, dict) or payload.get('code') != 1:
+                            result['reason'] = 'GoPlus returned an unsuccessful response'
+                        elif not isinstance(token, dict) or not token:
+                            result['reason'] = 'GoPlus has no data for this token on this chain'
+                        else:
+                            result = {'status': 'ok', 'reason': None, 'data': token}
+        except Exception as e:
+            logger.error("Error fetching GoPlus token security: %s", e)
+            result['reason'] = f'GoPlus request failed ({type(e).__name__})'
+        finally:
+            _GOPLUS_INFLIGHT.pop(flight_key, None)
+        _GOPLUS_CACHE[key] = result
+        return result
+
     async def _check_goplus(self, address: str, chain_id: int = 56) -> List[Dict]:
         """Check GoPlus Security API for token risk indicators."""
-        try:
-            session = await self._get_session()
-            url = f"{self.goplus_api}{chain_id}?contract_addresses={address.lower()}"
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        result = data.get('result', {}).get(address.lower(), {})
-                        if not result:
-                            return []
-
-                        flags = []
-                        if result.get('is_blacklisted') == '1':
-                            flags.append('Blacklisted token')
-                        if result.get('is_honeypot') == '1':
-                            flags.append('Honeypot (GoPlus)')
-                        if result.get('is_open_source') == '0':
-                            flags.append('Not open source')
-                        if result.get('cannot_sell_all') == '1':
-                            flags.append('Cannot sell all tokens')
-                        if result.get('owner_change_balance') == '1':
-                            flags.append('Owner can change balance')
-
-                        if flags:
-                            return [{
-                                'type': 'GoPlus Security',
-                                'reason': '; '.join(flags),
-                                'source': 'gopluslabs.io',
-                            }]
-            return []
-        except Exception as e:
-            logger.error(f"Error checking GoPlus: {e}")
-            return []
+        response = await self.fetch_token_security(address, chain_id)
+        result = response['data']
+        flags = []
+        if result.get('is_blacklisted') == '1':
+            flags.append('Blacklisted token')
+        if result.get('is_honeypot') == '1':
+            flags.append('Honeypot (GoPlus)')
+        if result.get('is_open_source') == '0':
+            flags.append('Not open source')
+        if result.get('cannot_sell_all') == '1':
+            flags.append('Cannot sell all tokens')
+        if result.get('owner_change_balance') == '1':
+            flags.append('Owner can change balance')
+        if flags:
+            return [{
+                'type': 'GoPlus Security',
+                'reason': '; '.join(flags),
+                'source': 'gopluslabs.io',
+            }]
+        return []
     
     def report_address(self, address: str, reporter_id: str) -> dict:
         """Community report with rate-limiting, whitelist protection, and multi-report threshold.
