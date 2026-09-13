@@ -39,6 +39,12 @@ CHAIN_INFO: Dict[int, Dict[str, str]] = {
         'dexscreener_slug': 'polygon',
         'native_symbol': 'MATIC',
     },
+    4663: {
+        'name': 'Robinhood Chain',
+        'explorer_url': 'https://robinhoodchain.blockscout.com',
+        'dexscreener_slug': 'robinhood',
+        'native_symbol': 'ETH',
+    },
     10: {
         'name': 'Optimism',
         'explorer_url': 'https://optimistic.etherscan.io',
@@ -61,6 +67,8 @@ CHAIN_PREFIXES: Dict[str, int] = {
     'polygon': 137,
     'op': 10,
     'optimism': 10,
+    'robinhood': 4663,
+    'rh': 4663,
 }
 
 
@@ -70,22 +78,22 @@ def get_chain_name(chain_id: int) -> str:
     return info['name'] if info else f'Chain {chain_id}'
 
 
-def get_explorer_url(chain_id: int) -> str:
+def get_explorer_url(chain_id: int) -> Optional[str]:
     """Get block explorer base URL for a chain."""
     info = CHAIN_INFO.get(chain_id)
-    return info['explorer_url'] if info else 'https://bscscan.com'
+    return info['explorer_url'] if info else None
 
 
-def get_dexscreener_slug(chain_id: int) -> str:
+def get_dexscreener_slug(chain_id: int) -> Optional[str]:
     """Get DexScreener chain slug."""
     info = CHAIN_INFO.get(chain_id)
-    return info['dexscreener_slug'] if info else 'bsc'
+    return info['dexscreener_slug'] if info else None
 
 
-def get_native_symbol(chain_id: int) -> str:
+def get_native_symbol(chain_id: int) -> Optional[str]:
     """Get native currency symbol."""
     info = CHAIN_INFO.get(chain_id)
-    return info['native_symbol'] if info else 'ETH'
+    return info['native_symbol'] if info else None
 
 
 def parse_chain_prefix(text: str) -> Tuple[Optional[int], str]:

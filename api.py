@@ -20,6 +20,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, Dict, Any, List
 
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve_selector
+from utils.chain_info import get_chain_name
+from utils.web3_client import UnsupportedChainError
+from services.mempool_service import supports_pending_transactions
 from core.config import Settings
 from core.container import ServiceContainer
 from core.extension_formatter import format_extension_alert
@@ -287,24 +290,6 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def request_size_limit_middleware(request: Request, call_next):
-    content_length = request.headers.get("content-length")
-    if content_length:
-        try:
-            if int(content_length) > MAX_REQUEST_BODY_BYTES:
-                return JSONResponse(
-                    status_code=413,
-                    content={"detail": "Request body too large"},
-                )
-        except ValueError:
-            return JSONResponse(
-                status_code=400,
-                content={"detail": "Invalid Content-Length header"},
-            )
-    return await call_next(request)
-
-
-@app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -362,9 +347,82 @@ async def rate_limit_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+def _validate_chain_id(chain_id: int) -> int:
+    if web3_client is None:
+        raise HTTPException(status_code=503, detail="Chain registry not available")
+    try:
+        web3_client.validate_chain_id(chain_id)
+    except UnsupportedChainError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return chain_id
+
+
+@app.middleware("http")
+async def request_validation_middleware(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_REQUEST_BODY_BYTES:
+                return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length header"})
+
+    # Validate before authentication records usage or an endpoint accesses providers.
+    chain_ids = [
+        value for key, value in request.query_params.multi_items()
+        if key in {"chainId", "chain_id"}
+    ]
+    request_path = request.url.path.rstrip("/")
+    path_parts = request_path.strip("/").split("/")
+    if len(path_parts) == 2 and path_parts[0] == "rpc":
+        chain_ids.append(path_parts[1])
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type == "application/json" or content_type.endswith("+json"):
+        try:
+            body = await request.json()
+        except (ValueError, UnicodeDecodeError):
+            return JSONResponse(status_code=400, content={"detail": "Invalid JSON body"})
+        if isinstance(body, dict):
+            body_chain_ids = [body[key] for key in ("chainId", "chain_id") if key in body]
+            if request_path == "/api/agent/firewall":
+                transaction = body.get("transaction")
+                if isinstance(transaction, dict):
+                    body_chain_ids.append(transaction.get("chain_id", 56))
+            if request_path == "/mcp/messages" and body.get("method") == "tools/call":
+                params = body.get("params")
+                arguments = params.get("arguments") if isinstance(params, dict) else None
+                if isinstance(arguments, dict) and "chain_id" in arguments:
+                    body_chain_ids.append(arguments["chain_id"])
+            if any(type(chain_id) is not int for chain_id in body_chain_ids):
+                return JSONResponse(status_code=400, content={"detail": "Invalid chain ID"})
+            chain_ids.extend(body_chain_ids)
+
+    for chain_id in chain_ids:
+        if isinstance(chain_id, bool) or not isinstance(chain_id, (int, str)):
+            return JSONResponse(status_code=400, content={"detail": "Invalid chain ID"})
+        try:
+            parsed_chain_id = int(chain_id)
+        except (ValueError, TypeError, OverflowError):
+            return JSONResponse(status_code=400, content={"detail": "Invalid chain ID"})
+        try:
+            _validate_chain_id(parsed_chain_id)
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return await call_next(request)
+
+
 # --- Request / Response Models ---
 
-class FirewallRequest(BaseModel):
+class ChainRequest(BaseModel):
+    model_config = ConfigDict(validate_default=True)
+
+    @field_validator("chainId", "chain_id", check_fields=False)
+    @classmethod
+    def validate_chain(cls, value):
+        return _validate_chain_id(value)
+
+
+class FirewallRequest(ChainRequest):
     model_config = ConfigDict(populate_by_name=True)
 
     to: str = Field(..., max_length=64)
@@ -389,12 +447,12 @@ class FirewallRequest(BaseModel):
         return v
 
 
-class ScanRequest(BaseModel):
+class ScanRequest(ChainRequest):
     address: str = Field(..., min_length=1, max_length=64)
     chainId: int = Field(default=56, ge=1, le=10_000_000)
 
 
-class OutcomeRequest(BaseModel):
+class OutcomeRequest(ChainRequest):
     address: str = Field(..., min_length=1, max_length=64)
     chainId: int = Field(default=56, ge=1, le=10_000_000)
     risk_score_at_scan: Optional[float] = Field(default=None, ge=0, le=100)
@@ -403,14 +461,14 @@ class OutcomeRequest(BaseModel):
     tx_hash: Optional[str] = Field(default=None, max_length=80)
 
 
-class CommunityReportRequest(BaseModel):
+class CommunityReportRequest(ChainRequest):
     address: str = Field(..., min_length=1, max_length=64)
     chainId: int = Field(default=56, ge=1, le=10_000_000)
     report_type: str = Field(..., min_length=1, max_length=32)  # "false_positive", "false_negative", "scam"
     reason: Optional[str] = Field(default=None, max_length=1_000)
 
 
-class ChatRequest(BaseModel):
+class ChatRequest(ChainRequest):
     message: str = Field(..., min_length=1, max_length=2000)
     user_id: str = Field(..., min_length=1, max_length=100)
     chain_id: int = Field(default=56, ge=1)
@@ -574,7 +632,7 @@ async def health():
     return {
         "status": "ok",
         "service": "shieldai-firewall",
-        "supported_chains": [56, 1, 8453, 42161, 137, 10, 204],
+        "supported_chains": list(web3_client.get_supported_chain_ids()) if web3_client else [],
     }
 
 
@@ -1461,6 +1519,8 @@ async def campaign_graph(address: str, chain_id: int = None):
     Enhanced with campaign detection: cross-chain correlation, funder clustering,
     and coordinated scam campaign indicators.
     """
+    if chain_id is not None:
+        _validate_chain_id(chain_id)
     if not container or not container.campaign_service:
         raise HTTPException(status_code=503, detail="Campaign service not available")
     if not web3_client or not web3_client.is_valid_address(address):
@@ -1606,9 +1666,9 @@ def _require_admin(request: Request):
         raise HTTPException(status_code=503, detail="Database not available")
 
 
-class WatchDeployerRequest(BaseModel):
+class WatchDeployerRequest(ChainRequest):
     address: str = Field(..., min_length=1, max_length=64)
-    chain_id: int = Field(default=0, ge=0, le=10_000_000)
+    chain_id: int = Field(default=56, ge=1, le=10_000_000)
     reason: str = Field(default="MANUAL", max_length=240)
     severity: str = Field(default="HIGH", max_length=16)
 
@@ -1626,8 +1686,9 @@ async def watch_deployer_add(req: WatchDeployerRequest, request: Request):
 
 
 @app.delete("/api/admin/watch/deployer/{address}")
-async def watch_deployer_remove(address: str, request: Request, chain_id: int = 0):
+async def watch_deployer_remove(address: str, request: Request, chain_id: int = 56):
     """Remove a deployer from the watch list. Requires X-Admin-Secret."""
+    _validate_chain_id(chain_id)
     _require_admin(request)
     await container.db.remove_watched_deployer(address, chain_id)
     return {"ok": True, "address": address.lower(), "chain_id": chain_id}
@@ -1756,6 +1817,10 @@ async def agent_explain(req: ExplainRequest, request: Request):
 @app.get("/api/mempool/alerts")
 async def mempool_alerts(request: Request, chain_id: int = None, limit: int = 50):
     """Get recent mempool alerts (sandwich attacks, frontrunning, suspicious approvals)."""
+    if chain_id is not None:
+        _validate_chain_id(chain_id)
+        if not supports_pending_transactions(chain_id):
+            raise HTTPException(status_code=400, detail="Pending-transaction monitoring is not available on this chain")
     if not container or not container.mempool_monitor:
         raise HTTPException(status_code=503, detail="Mempool monitor not available")
     limit = max(1, min(limit, 200))
@@ -1764,8 +1829,12 @@ async def mempool_alerts(request: Request, chain_id: int = None, limit: int = 50
 
 
 @app.get("/api/mempool/stats")
-async def mempool_stats(request: Request):
+async def mempool_stats(request: Request, chain_id: int = None):
     """Get mempool monitoring statistics."""
+    if chain_id is not None:
+        _validate_chain_id(chain_id)
+        if not supports_pending_transactions(chain_id):
+            raise HTTPException(status_code=400, detail="Pending-transaction monitoring is not available on this chain")
     if not container or not container.mempool_monitor:
         raise HTTPException(status_code=503, detail="Mempool monitor not available")
     return container.mempool_monitor.get_stats()
@@ -1780,6 +1849,7 @@ async def rescue_scan(wallet_address: str, chain_id: int = 56):
     Returns risky approvals, Tier 1 alerts with explanations, and
     Tier 2 pre-built revoke transactions for one-click cleanup.
     """
+    _validate_chain_id(chain_id)
     if not container or not container.rescue_service:
         raise HTTPException(status_code=503, detail="Rescue service not available")
 
@@ -1807,6 +1877,8 @@ async def threat_feed(
     - limit: max results (default 50, max 200)
     - since: unix timestamp to fetch threats after (optional)
     """
+    if chain_id is not None:
+        _validate_chain_id(chain_id)
     if not container:
         raise HTTPException(status_code=503, detail="Service not available")
 
@@ -1854,7 +1926,11 @@ async def threat_feed(
         logger.error(f"Threat feed DB error: {e}")
 
     # Mempool alerts
-    mempool_alerts = container.mempool_monitor.get_alerts(chain_id=chain_id, limit=limit)
+    mempool_available = chain_id is None or supports_pending_transactions(chain_id)
+    mempool_alerts = (
+        container.mempool_monitor.get_alerts(chain_id=chain_id, limit=limit)
+        if mempool_available else []
+    )
     for alert in mempool_alerts:
         if since and alert.get('created_at', 0) < since:
             continue
@@ -1866,11 +1942,14 @@ async def threat_feed(
     # Sort all by time, most recent first
     threats.sort(key=lambda t: t.get('detected_at') or t.get('created_at', 0), reverse=True)
 
-    return {
+    response = {
         'threats': threats[:limit],
         'count': len(threats[:limit]),
         'chain_id': chain_id,
     }
+    if not mempool_available:
+        response['mempool_unavailable'] = "Pending-transaction monitoring is not available on this chain"
+    return response
 
 
 @app.get("/api/threats/subscribe")
@@ -1881,7 +1960,7 @@ async def threat_subscribe_info():
             'rest_polling': '/api/threats/feed?since=<unix_timestamp>',
             'websocket': '/ws/threats (coming soon)',
         },
-        'supported_chains': list(_CHAIN_NAMES.keys()),
+        'supported_chains': list(web3_client.get_supported_chain_ids()) if web3_client else [],
         'alert_types': [
             'high_risk_contract',
             'mempool_sandwich_attack',
@@ -1892,12 +1971,9 @@ async def threat_subscribe_info():
 
 # --- Helpers ---
 
-_CHAIN_NAMES = {56: "BSC", 204: "opBNB", 1: "Ethereum", 8453: "Base", 42161: "Arbitrum", 137: "Polygon", 10: "Optimism"}
-
-
 def _chain_id_to_name(chain_id: int) -> str:
     """Map chain_id to a human-readable network name."""
-    return _CHAIN_NAMES.get(chain_id, f"Chain {chain_id}")
+    return get_chain_name(chain_id)
 
 
 # Campaign risk boost thresholds

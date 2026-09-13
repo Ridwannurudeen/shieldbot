@@ -7,6 +7,8 @@ import aiohttp
 import rlp
 from eth_account import Account
 
+from utils.web3_client import UnsupportedChainError
+
 logger = logging.getLogger(__name__)
 
 # Methods that should be intercepted for security analysis
@@ -36,12 +38,10 @@ class RPCProxy:
         if self._session and not self._session.closed:
             await self._session.close()
 
-    def get_upstream_rpc(self, chain_id: int) -> Optional[str]:
+    def get_upstream_rpc(self, chain_id: int) -> str:
         """Get the upstream RPC URL for a chain."""
-        adapter = self._container.web3_client._get_adapter(chain_id)
-        if adapter:
-            return adapter.w3.provider.endpoint_uri
-        return None
+        self._container.web3_client.validate_chain_id(chain_id)
+        return self._container.web3_client.get_web3(chain_id).provider.endpoint_uri
 
     async def handle_request(self, chain_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Handle a single JSON-RPC request.
@@ -52,9 +52,10 @@ class RPCProxy:
         params = payload.get("params", [])
         rpc_id = payload.get("id", 1)
 
-        upstream_rpc = self.get_upstream_rpc(chain_id)
-        if not upstream_rpc:
-            return self._error_response(rpc_id, -32000, f"Unsupported chain_id: {chain_id}")
+        try:
+            upstream_rpc = self.get_upstream_rpc(chain_id)
+        except UnsupportedChainError as exc:
+            return self._error_response(rpc_id, -32000, str(exc))
 
         # Non-intercepted methods: forward transparently
         if method not in INTERCEPTED_METHODS:

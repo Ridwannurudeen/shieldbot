@@ -6,6 +6,8 @@ from collections import defaultdict
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from utils.web3_client import UnsupportedChainError
+
 logger = logging.getLogger(__name__)
 
 rpc_router = APIRouter()
@@ -81,6 +83,28 @@ async def rpc_endpoint(chain_id: int, request: Request):
     # Get the RPC proxy from the app state
     proxy = getattr(request.app.state, "rpc_proxy", None)
 
+    if not proxy:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32000, "message": "RPC proxy not available"},
+            },
+        )
+
+    try:
+        proxy._container.web3_client.validate_chain_id(chain_id)
+    except UnsupportedChainError as exc:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32000, "message": str(exc)},
+            },
+        )
+
     # Rate limiting (API key preferred when provided)
     api_key = request.headers.get("x-api-key")
     if proxy and api_key and proxy._container and proxy._container.auth_manager:
@@ -119,28 +143,6 @@ async def rpc_endpoint(chain_id: int, request: Request):
                     "error": {"code": -32005, "message": "Rate limit exceeded"},
                 },
             )
-
-    if not proxy:
-        return JSONResponse(
-            status_code=503,
-            content={
-                "jsonrpc": "2.0",
-                "id": None,
-                "error": {"code": -32000, "message": "RPC proxy not available"},
-            },
-        )
-
-    # Validate chain_id
-    supported = proxy._container.web3_client.get_supported_chain_ids()
-    if chain_id not in supported:
-        return JSONResponse(
-            status_code=400,
-            content={
-                "jsonrpc": "2.0",
-                "id": None,
-                "error": {"code": -32000, "message": f"Unsupported chain_id: {chain_id}. Supported: {supported}"},
-            },
-        )
 
     # Parse JSON-RPC body
     try:

@@ -148,7 +148,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
 async def handle_scan_contract(container, params: Dict) -> Dict:
     """Run all analyzers on a contract and return composite risk score."""
     address = _validate_address(params["address"])
-    chain_id = params.get("chain_id", 56)
+    chain_id = container.web3_client.validate_chain_id(params.get("chain_id", 56))
 
     ctx = AnalysisContext(address=address, chain_id=chain_id)
     results = await container.registry.run_all(ctx)
@@ -169,7 +169,7 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
     to_addr = params["to"]
     data = params.get("data", "0x")
     value = params.get("value", "0")
-    chain_id = params.get("chain_id", 56)
+    chain_id = container.web3_client.validate_chain_id(params.get("chain_id", 56))
 
     if not container.tenderly_simulator.is_enabled():
         return {
@@ -205,7 +205,7 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
 async def handle_check_deployer(container, params: Dict) -> Dict:
     """Look up deployer history for a contract."""
     address = _validate_address(params["address"])
-    chain_id = params.get("chain_id", 56)
+    chain_id = container.web3_client.validate_chain_id(params.get("chain_id", 56))
 
     summary = await container.db.get_deployer_risk_summary(address, chain_id)
     if summary is None:
@@ -260,7 +260,7 @@ async def handle_check_approval_risk(container, params: Dict) -> Dict:
     wallet = _validate_address(params["wallet_address"])
     return {
         "wallet_address": wallet,
-        "chain_id": params.get("chain_id", 56),
+        "chain_id": container.web3_client.validate_chain_id(params.get("chain_id", 56)),
         "approvals": [],
         "risk_summary": "Approval scanning not yet implemented. Coming in V3.2 (Guardian).",
     }
@@ -300,7 +300,7 @@ async def handle_query_threat_graph(container, params: Dict) -> Dict:
     address = _validate_address(params["address"])
     return {
         "address": address,
-        "chain_id": params.get("chain_id", 56),
+        "chain_id": container.web3_client.validate_chain_id(params.get("chain_id", 56)),
         "connected_to_cluster": False,
         "cluster_id": None,
         "edges": [],

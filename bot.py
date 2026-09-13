@@ -31,7 +31,7 @@ from core.container import ServiceContainer
 from core.telegram_formatter import format_full_report
 from utils.chain_info import (
     get_chain_name, get_explorer_url, get_dexscreener_slug,
-    parse_chain_prefix, CHAIN_INFO,
+    parse_chain_prefix,
 )
 
 # Configure logging
@@ -163,7 +163,8 @@ Commands:
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show help message"""
-    help_text = """
+    supported_chains = ", ".join(get_chain_name(cid) for cid in web3_client.get_supported_chain_ids())
+    help_text = f"""
 🛡️ **ShieldBot Commands**
 
 **/start** - Welcome message & quick start
@@ -181,7 +182,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Send any address and I'll auto-detect what to scan
 • Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`
 • Or use /chain to switch your default chain
-• Supported: BSC, Ethereum, Base, Arbitrum, Polygon, Optimism, opBNB
+• Supported: {supported_chains}
 
 Stay safe! 🛡️
 """
@@ -190,12 +191,31 @@ Stay safe! 🛡️
 
 async def chain_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /chain command — select active chain."""
+    if context.args:
+        selection = context.args[0]
+        try:
+            chain_id = int(selection)
+        except ValueError:
+            chain_id, _ = parse_chain_prefix(selection + ':0x')
+        try:
+            web3_client.validate_chain_id(chain_id)
+        except ValueError:
+            await update.message.reply_text(
+                f"Unsupported chain selection. Supported: {web3_client.get_supported_chain_ids()}",
+            )
+            return
+        context.user_data['chain_id'] = chain_id
+        await update.message.reply_text(
+            f"Switched to {get_chain_name(chain_id)} (chain_id={chain_id}).",
+        )
+        return
+
     keyboard = []
-    for cid, info in CHAIN_INFO.items():
+    for cid in web3_client.get_supported_chain_ids():
         current = _get_user_chain_id(context)
         marker = " (current)" if cid == current else ""
         keyboard.append([InlineKeyboardButton(
-            f"{info['name']}{marker}",
+            f"{get_chain_name(cid)}{marker}",
             callback_data=f"chain_{cid}",
         )])
 
@@ -863,7 +883,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     if query.data.startswith('chain_'):
-        chain_id = int(query.data.replace('chain_', ''))
+        try:
+            chain_id = int(query.data.replace('chain_', ''))
+            web3_client.validate_chain_id(chain_id)
+        except ValueError:
+            await query.edit_message_text(
+                f"Unsupported chain selection. Supported: {web3_client.get_supported_chain_ids()}",
+            )
+            return
         context.user_data['chain_id'] = chain_id
         chain_name = get_chain_name(chain_id)
         await query.edit_message_text(
