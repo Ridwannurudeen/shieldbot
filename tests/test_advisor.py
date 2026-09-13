@@ -408,3 +408,36 @@ async def test_explain_scan_ai_exception_falls_back(advisor, mock_ai):
     mock_ai.chat = AsyncMock(side_effect=RuntimeError("quota exceeded"))
     result = await advisor.explain_scan({"risk_score": 85, "risk_level": "HIGH"})
     assert "85/100" in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('method,args', [
+    ('compute_ai_risk_score', ('0xABC', {'chain_id': 4663})),
+    ('analyze_verified_source', ('0xABC', 'contract Token {}', 4663)),
+    ('analyze_contract_bytecode', ('0xABC', '0x00', {'chain_id': 4663})),
+    ('analyze_token_safety', ('0xABC', {}, {'chain_id': 4663})),
+    ('generate_forensic_report', ('0xABC', {'chain_id': 4663}, 'token')),
+    ('generate_firewall_report', ({'chainId': 4663}, {'chain_id': 4663})),
+])
+async def test_analysis_prompts_use_scan_chain(method, args):
+    from utils.ai_analyzer import AIAnalyzer
+
+    analyzer = AIAnalyzer.__new__(AIAnalyzer)
+    analyzer.model = 'test-model'
+    analyzer.client = MagicMock()
+    response = MagicMock()
+    response.content = [MagicMock(text='{"risk_score": 20}')]
+    analyzer.client.messages.create = AsyncMock(return_value=response)
+    with patch('utils.ai_analyzer.get_chain_name', return_value='Robinhood Chain') as lookup:
+        await getattr(analyzer, method)(*args)
+    lookup.assert_called_with(4663)
+    content = analyzer.client.messages.create.call_args.kwargs['messages'][0]['content']
+    assert 'Robinhood Chain' in content
+    assert 'on BNB Chain' not in content
+
+
+def test_advisor_prompt_uses_supplied_chain_identity():
+    from agent.prompts import ADVISOR_SYSTEM_PROMPT
+
+    assert 'BNB Chain' not in ADVISOR_SYSTEM_PROMPT
+    assert 'chain' in ADVISOR_SYSTEM_PROMPT.lower()
