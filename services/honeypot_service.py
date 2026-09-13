@@ -94,17 +94,29 @@ class HoneypotService:
                     data[action] = data[tax] < 100
                     data['field_providers'][action] = 'honeypot.is'
         if any(data[field] is None for field in _TRADE_FIELDS):
-            response = await ScamDatabase.fetch_token_security(address, chain_id)
-            mapped = map_goplus_token_security(response['data'])
-            if response['reason']:
-                reasons.append(response['reason'])
-            for field, value in mapped.items():
-                if data.get(field) is None:
-                    data[field] = value
-                    if value is not None:
-                        data['field_providers'][field] = 'goplus'
+            try:
+                response = await ScamDatabase.fetch_token_security(address, chain_id)
+                mapped = map_goplus_token_security(response['data'])
+                if response['reason']:
+                    reasons.append(response['reason'])
+                for field, value in mapped.items():
+                    if data.get(field) is None:
+                        data[field] = value
+                        if value is not None:
+                            data['field_providers'][field] = 'goplus'
+            except Exception as e:
+                logger.error('GoPlus fallback failed for %s: %s', address, e)
+                reasons.append(f'GoPlus fallback failed ({type(e).__name__})')
+
+        if data['simulation_failed']:
+            if data['can_sell'] is True:
+                data['can_sell'] = None
+                data['field_providers'].pop('can_sell', None)
+            reasons.append('Honeypot simulation failed (unresolved)')
 
         data['coverage'] = {field: data[field] is not None for field in _TRADE_FIELDS}
+        if data['simulation_failed']:
+            data['coverage']['can_sell'] = False
         missing = [field for field, covered in data['coverage'].items() if not covered]
         data['status'] = 'unknown' if missing else 'ok'
         if missing:

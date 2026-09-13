@@ -126,6 +126,15 @@ class RiskEngine:
         if honeypot_data.get('can_sell') is False:
             honeypot_score += 60
             critical_flags.append('Cannot sell token')
+        if honeypot_data.get('cannot_buy') is True:
+            honeypot_score += 20
+            critical_flags.append('Cannot buy token')
+        if honeypot_data.get('cannot_sell_all') is True:
+            honeypot_score += 20
+            critical_flags.append('Cannot sell all tokens')
+        if honeypot_data.get('transfer_pausable') is True:
+            honeypot_score += 20
+            critical_flags.append('Token transfers can be paused')
         sell_tax = honeypot_data.get('sell_tax')
         buy_tax = honeypot_data.get('buy_tax')
         if sell_tax is not None and sell_tax > 50:
@@ -363,6 +372,13 @@ class RiskEngine:
         for result in results:
             data = result.data
             fields = data.get('coverage')
+            simulation_failed = result.name == 'honeypot' and data.get('simulation_failed')
+            if simulation_failed:
+                fields = dict(fields) if isinstance(fields, dict) and fields else {
+                    field: data.get(field) is not None
+                    for field in ('is_honeypot', 'can_sell', 'buy_tax', 'sell_tax')
+                }
+                fields['can_sell'] = False
             if result.error:
                 fraction = 0
             elif data.get('skipped'):
@@ -377,7 +393,10 @@ class RiskEngine:
             coverage[result.name] = fraction
             covered_weight += result.weight * fraction
             if fraction < 1:
-                reasons[result.name] = result.error or data.get('reason') or 'Provider data unavailable or incomplete'
+                reasons[result.name] = result.error or (
+                    'Honeypot simulation failed (unresolved)' if simulation_failed
+                    else data.get('reason') or 'Provider data unavailable or incomplete'
+                )
             # Known adverse evidence remains actionable even if other fields are unknown.
             if not result.error and (fraction == 1 or result.score > 0):
                 included.append(result)
