@@ -33,7 +33,12 @@ class ExplorerService:
         self._last_request = 0.0
 
     async def _request(self, provider: str, url: str, params: dict) -> ExplorerResult:
-        cache_key = (url, tuple(sorted(params.items())))
+        cache_key = (
+            url,
+            tuple(
+                sorted((key, value) for key, value in params.items() if key != "apikey")
+            ),
+        )
         if cache_key in self._cache:
             return self._cache[cache_key]
 
@@ -240,6 +245,18 @@ class ExplorerService:
                     if failed:
                         continue
                     recipient = tx.get("to")
+                    if history == "internal-transactions":
+                        call_type = tx.get("type")
+                        if call_type in ("delegatecall", "callcode", "staticcall"):
+                            continue
+                        if call_type in ("create", "create2"):
+                            recipient = tx.get("created_contract")
+                        elif call_type not in ("call", "selfdestruct"):
+                            return ExplorerResult(
+                                "unknown",
+                                reason="Missing or unrecognised internal transaction type",
+                                provider="blockscout",
+                            )
                     sender = tx.get("from")
                     value = tx.get("value")
                     block = tx.get("block_number")

@@ -271,6 +271,7 @@ def transfer(block=10, internal=False, **changes):
     item.update(
         {
             "success": True,
+            "type": "call",
             "transaction_index": 0,
             "index": 0,
             "transaction_hash": TX_HASH,
@@ -549,3 +550,131 @@ async def test_funder_orders_transactions_and_internal_calls_within_same_block(h
     ):
         result = await ExplorerService().get_first_funder(ADDRESS, 4663)
     assert result.data == {"funder": FUNDER, "value": 111}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("call_type", ["delegatecall", "callcode", "staticcall"])
+async def test_funder_excludes_non_transfer_internal_call_types(http, call_type):
+    http[0]({"items": [], "next_page_params": None})
+    http[0](
+        {
+            "items": [
+                transfer(1, True, type=call_type),
+                transfer(2, True, value="456"),
+            ],
+            "next_page_params": None,
+        }
+    )
+    with (
+        patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}),
+        patch("services.explorer_service.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        result = await ExplorerService().get_first_funder(ADDRESS, 4663)
+    assert result.status == "known"
+    assert result.data == {"funder": FUNDER, "value": 456}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("call_type", [None, "unrecognised", 1])
+async def test_funder_unknown_internal_type_cannot_prove_earliest_funding(
+    http, call_type
+):
+    record = transfer(1, True, type=call_type)
+    if call_type is None:
+        del record["type"]
+    http[0]({"items": [transfer(2, value="456")], "next_page_params": None})
+    http[0]({"items": [record], "next_page_params": None})
+    with (
+        patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}),
+        patch("services.explorer_service.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        result = await ExplorerService().get_first_funder(ADDRESS, 4663)
+    assert result.status == "unknown"
+    assert result.data is None
+    assert "type" in result.reason
+
+
+@pytest.mark.asyncio
+async def test_blockscout_cache_does_not_retain_api_key(http):
+    http[0](BLOCKSCOUT_ADDRESS)
+    service = ExplorerService()
+    test_key = "cache-regression-key-material"
+    with patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": test_key}):
+        result = await service.get_contract_creation_info(ADDRESS, 4663)
+    assert result.status == "known"
+    assert test_key not in repr(list(service._cache.items()))
+    assert "apikey" not in repr(list(service._cache.keys()))
+    assert test_key not in repr(result)
+    assert http[1].get.call_args.kwargs["params"]["apikey"] == test_key
+    with patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "replacement-test-key"}):
+        assert await service.get_contract_creation_info(ADDRESS, 4663) == result
+    assert http[1].get.call_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("call_type", ["create", "create2"])
+async def test_funder_creation_uses_created_contract_recipient(http, call_type):
+    http[0]({"items": [], "next_page_params": None})
+    http[0](
+        {
+            "items": [
+                transfer(
+                    1, True, type=call_type, to=None, created_contract={"hash": ADDRESS}
+                )
+            ],
+            "next_page_params": None,
+        }
+    )
+    with (
+        patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}),
+        patch("services.explorer_service.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        result = await ExplorerService().get_first_funder(ADDRESS, 4663)
+    assert result.status == "known"
+    assert result.data == {"funder": FUNDER, "value": 123}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("call_type", ["create", "create2"])
+async def test_funder_creation_does_not_use_to_field(http, call_type):
+    http[0]({"items": [transfer(2, value="456")], "next_page_params": None})
+    http[0](
+        {
+            "items": [
+                transfer(1, True, type=call_type, created_contract={"hash": FUNDER})
+            ],
+            "next_page_params": None,
+        }
+    )
+    with (
+        patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}),
+        patch("services.explorer_service.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        result = await ExplorerService().get_first_funder(ADDRESS, 4663)
+    assert result.data == {"funder": FUNDER, "value": 456}
+
+
+@pytest.mark.asyncio
+async def test_funder_creation_missing_recipient_is_unknown(http):
+    http[0]({"items": [], "next_page_params": None})
+    http[0]({"items": [transfer(1, True, type="create")], "next_page_params": None})
+    with (
+        patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}),
+        patch("services.explorer_service.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        result = await ExplorerService().get_first_funder(ADDRESS, 4663)
+    assert result.status == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_funder_selfdestruct_uses_to_recipient(http):
+    http[0]({"items": [], "next_page_params": None})
+    http[0](
+        {"items": [transfer(1, True, type="selfdestruct")], "next_page_params": None}
+    )
+    with (
+        patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}),
+        patch("services.explorer_service.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        result = await ExplorerService().get_first_funder(ADDRESS, 4663)
+    assert result.data == {"funder": FUNDER, "value": 123}
