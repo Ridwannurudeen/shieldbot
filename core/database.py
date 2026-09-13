@@ -96,7 +96,7 @@ class Database:
                 deployer_address TEXT NOT NULL,
                 chain_id INTEGER NOT NULL,
                 funder_address TEXT NOT NULL,
-                funding_value_wei INTEGER DEFAULT 0,
+                funding_value_wei TEXT DEFAULT '0',
                 indexed_at REAL NOT NULL,
                 PRIMARY KEY (deployer_address, chain_id)
             );
@@ -305,6 +305,7 @@ class Database:
             );
         """)
         await self._db.commit()
+        await self._migrate_funding_value_wei()
 
         # Migrate: add registered_by_key column for existing DBs
         try:
@@ -314,6 +315,57 @@ class Database:
             await self._db.commit()
         except Exception:
             pass  # Column already exists
+
+    async def _migrate_funding_value_wei(self):
+        """Store integer wei as decimal text without losing rows or precision."""
+        await self._db.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = await self._db.execute("PRAGMA table_info(funder_links)")
+            columns = await cursor.fetchall()
+            funding_column = next(c for c in columns if c[1] == "funding_value_wei")
+            if funding_column[2].upper() == "TEXT":
+                await self._db.commit()
+                return
+
+            cursor = await self._db.execute("""
+                SELECT 1 FROM funder_links
+                WHERE typeof(funding_value_wei) NOT IN ('integer', 'text', 'null')
+                LIMIT 1
+            """)
+            if await cursor.fetchone():
+                raise ValueError("Cannot perform lossless funding-value migration: non-integer values exist")
+
+            cursor = await self._db.execute("""
+                SELECT sql FROM sqlite_master
+                WHERE tbl_name = 'funder_links'
+                    AND type IN ('index', 'trigger') AND sql IS NOT NULL
+            """)
+            schema_objects = await cursor.fetchall()
+            await self._db.execute("""
+                CREATE TABLE funder_links_new (
+                    deployer_address TEXT NOT NULL,
+                    chain_id INTEGER NOT NULL,
+                    funder_address TEXT NOT NULL,
+                    funding_value_wei TEXT DEFAULT '0',
+                    indexed_at REAL NOT NULL,
+                    PRIMARY KEY (deployer_address, chain_id)
+                )
+            """)
+            await self._db.execute("""
+                INSERT INTO funder_links_new
+                    (rowid, deployer_address, chain_id, funder_address, funding_value_wei, indexed_at)
+                SELECT rowid, deployer_address, chain_id, funder_address,
+                    CAST(funding_value_wei AS TEXT), indexed_at
+                FROM funder_links
+            """)
+            await self._db.execute("DROP TABLE funder_links")
+            await self._db.execute("ALTER TABLE funder_links_new RENAME TO funder_links")
+            for (sql,) in schema_objects:
+                await self._db.execute(sql)
+            await self._db.commit()
+        except BaseException:
+            await self._db.rollback()
+            raise
 
     # --- Contract Scores ---
 

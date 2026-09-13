@@ -123,7 +123,7 @@ class TestDeployerIndexer:
         response = AsyncMock()
         response.status = 200
         response.json.return_value = {'status': '1', 'result': [
-            {'from': '0xFunder', 'to': '0xDeployer', 'value': '123'}
+            {'from': '0xFunder', 'to': '0xDeployer', 'value': '123', 'isError': '0'}
         ]}
         session = MagicMock()
         session.get.return_value.__aenter__.return_value = response
@@ -145,7 +145,7 @@ class TestDeployerIndexer:
     async def test_etherscan_funder_missing_value_or_http_error_is_unknown(self, db, status, missing_value):
         web3 = MagicMock()
         web3._get_adapter.return_value = SimpleNamespace(chain_id=56, etherscan_api_key='test_key')
-        tx = {'from': '0xFunder', 'to': '0xDeployer'}
+        tx = {'from': '0xFunder', 'to': '0xDeployer', 'isError': '0'}
         if not missing_value:
             tx['value'] = '123'
         response = AsyncMock()
@@ -250,3 +250,40 @@ class TestDeployerIndexer:
         else:
             assert result is None
             factory.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('invalid', [
+        {'isError': '1'}, {'isError': None}, {'value': '0'}, {'value': '-1'},
+        {'value': '1.5'}, {'value': '1e18'}, {'value': 123}, {'value': None},
+        {'value': ' 123'}, {'value': '+123'}, {'value': '١٢٣'},
+    ])
+    @pytest.mark.parametrize('has_later_funding', [True, False])
+    async def test_etherscan_skips_failed_or_nonpositive_funding(self, db, invalid, has_later_funding):
+        web3 = MagicMock()
+        web3._get_adapter.return_value = SimpleNamespace(chain_id=56, etherscan_api_key='test_key')
+        record = {'from': '0xFalseFunder', 'to': '0xDeployer', 'value': '123', 'isError': '0', **invalid}
+        if invalid.get('isError', '0') is None:
+            del record['isError']
+        records = [record]
+        if has_later_funding:
+            records.append({'from': '0xRealFunder', 'to': '0xDeployer', 'value': '456', 'isError': '0'})
+        response = AsyncMock()
+        response.status = 200
+        response.json.return_value = {'status': '1', 'result': records}
+        session = MagicMock()
+        session.get.return_value.__aenter__.return_value = response
+        with patch('aiohttp.ClientSession') as factory:
+            factory.return_value.__aenter__.return_value = session
+            result = await DeployerIndexer(web3, db)._fetch_funder('0xDeployer', 56)
+        assert result == ({'funder': '0xRealFunder', 'value': 456} if has_later_funding else None)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('value', [0, 2**63 - 1, 2**63, 2**256 - 1])
+    async def test_indexer_stores_full_wei_range_as_decimal_text(self, db, mock_web3, value):
+        indexer = DeployerIndexer(mock_web3, db)
+        indexer._fetch_funder = AsyncMock(return_value={'funder': '0xFunder', 'value': value})
+        await indexer._index_contract('0xContract', 56)
+        cursor = await db._db.execute('SELECT funding_value_wei, typeof(funding_value_wei) FROM funder_links')
+        row = await cursor.fetchone()
+        assert row is not None
+        assert tuple(row) == (str(value), 'text')

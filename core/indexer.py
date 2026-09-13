@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 import time
 from typing import Optional
 
@@ -106,7 +107,7 @@ class DeployerIndexer:
                 """, (
                     deployer.lower(), chain_id,
                     funder_info['funder'].lower(),
-                    funder_info.get('value', 0),
+                    str(funder_info['value']),
                     now,
                 ))
 
@@ -208,10 +209,18 @@ class DeployerIndexer:
                     if data.get('status') == '1' and data.get('result'):
                         # Find first incoming tx (to == deployer)
                         for tx in data['result']:
+                            value = tx.get('value')
+                            if (
+                                tx.get('isError') != '0'
+                                or not isinstance(value, str)
+                                or re.fullmatch(r'[0-9]{1,78}', value) is None
+                                or not 0 < int(value) < 2**256
+                            ):
+                                continue
                             if tx.get('to', '').lower() == deployer_address.lower():
                                 return {
                                     'funder': tx['from'],
-                                    'value': int(tx['value']),
+                                    'value': int(value),
                                 }
             return None
         except Exception as e:
