@@ -55,8 +55,8 @@ demo/
 # PDF files
 *.pdf
 
-# Landing page source (build output is in landing/)
-landing-src/
+# Landing page dependencies (source is landing-src/, build output is landing/)
+/landing-src/node_modules/
 
 # Dashboard build artifacts (source is dashboard/index.src.html; output is dashboard/index.html)
 dashboard/build/node_modules/
@@ -71,6 +71,8 @@ scripts/x_session.json
 
 # Screenshots and zips
 *.png
+!/landing-src/public/*.png
+!/landing/*.png
 *.zip
 
 # Local working docs (investor decks, roadmaps)
