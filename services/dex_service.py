@@ -1,5 +1,8 @@
 import aiohttp
 import logging
+import math
+
+from utils.chain_info import get_dexscreener_slug
 
 logger = logging.getLogger(__name__)
 
@@ -14,18 +17,26 @@ class DexService:
             'token_name': None,
             'token_symbol': None,
             'price_usd': None,
-            'liquidity_usd': 0,
-            'volume_24h': 0,
-            'price_change_24h': 0,
-            'fdv': 0,
+            'liquidity_usd': None,
+            'volume_24h': None,
+            'price_change_24h': None,
+            'fdv': None,
             'pair_age_hours': None,
-            'volatility_flag': False,
-            'low_liquidity_flag': False,
-            'wash_trade_flag': False,
-            'new_pair_flag': False,
+            'volatility_flag': None,
+            'low_liquidity_flag': None,
+            'wash_trade_flag': None,
+            'new_pair_flag': None,
         }
 
+        metrics = ('price_usd', 'liquidity_usd', 'volume_24h', 'price_change_24h', 'fdv', 'pair_age_hours')
+        defaults.update(status='unknown', reason='DexScreener data unavailable',
+                        coverage={field: False for field in metrics})
+
         try:
+            slug = get_dexscreener_slug(chain_id)
+            if not slug:
+                defaults['reason'] = f'DexScreener unsupported for chain {chain_id}'
+                return defaults
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     DEX_API_URL.format(address=address),
@@ -33,33 +44,45 @@ class DexService:
                 ) as resp:
                     if resp.status != 200:
                         logger.warning("DexScreener returned %s for %s", resp.status, address)
+                        defaults['reason'] = f'DexScreener HTTP {resp.status}'
                         return defaults
 
                     data = await resp.json()
 
-            pairs = data.get('pairs') or []
+            pairs = [p for p in (data.get('pairs') or []) if p.get('chainId') == slug]
             if not pairs:
+                defaults['reason'] = f'No DexScreener pairs on requested chain ({slug})'
                 return defaults
 
             # Use the highest-liquidity pair for price/liquidity/FDV metrics
-            pair = max(pairs, key=lambda p: float(p.get('liquidity', {}).get('usd', 0) or 0))
+            pair = max(pairs, key=lambda p: float((p.get('liquidity') or {}).get('usd', 0) or 0))
 
             base_token = pair.get('baseToken') or {}
             token_name = base_token.get('name')
             token_symbol = base_token.get('symbol')
-            price_usd = pair.get('priceUsd')
-            if price_usd is not None:
-                price_usd = float(price_usd)
+            values = {
+                'price_usd': pair.get('priceUsd'),
+                'liquidity_usd': (pair.get('liquidity') or {}).get('usd'),
+                'price_change_24h': (pair.get('priceChange') or {}).get('h24'),
+                'fdv': pair.get('fdv'),
+            }
+            for field, value in values.items():
+                if value is None or value == '':
+                    values[field] = None
+                else:
+                    number = float(value)
+                    values[field] = number if math.isfinite(number) else None
+            price_usd = values['price_usd']
+            liquidity_usd = values['liquidity_usd']
+            price_change_24h = values['price_change_24h']
+            fdv = values['fdv']
 
-            liquidity_usd = float(pair.get('liquidity', {}).get('usd', 0) or 0)
-            price_change_24h = float(pair.get('priceChange', {}).get('h24', 0) or 0)
-            fdv = float(pair.get('fdv', 0) or 0)
-
-            # Aggregate volume across ALL pairs for accurate total trading activity
-            volume_24h = sum(
-                float(p.get('volume', {}).get('h24', 0) or 0)
-                for p in pairs
-            )
+            # Total volume is unknown if any requested-chain pair lacks volume.
+            volumes = [(p.get('volume') or {}).get('h24') for p in pairs]
+            volume_24h = None
+            if all(v is not None and v != '' for v in volumes):
+                total = sum(float(v) for v in volumes)
+                volume_24h = total if math.isfinite(total) else None
 
             pair_created = pair.get('pairCreatedAt')
             if pair_created:
@@ -69,16 +92,16 @@ class DexService:
                 pair_age_hours = None
 
             # Risk flags
-            low_liquidity_flag = liquidity_usd < 10_000
-            new_pair_flag = pair_age_hours is not None and pair_age_hours < 24
-            volatility_flag = abs(price_change_24h) > 200
+            low_liquidity_flag = liquidity_usd < 10_000 if liquidity_usd is not None else None
+            new_pair_flag = pair_age_hours < 24 if pair_age_hours is not None else None
+            volatility_flag = abs(price_change_24h) > 200 if price_change_24h is not None else None
             wash_trade_flag = (
                 liquidity_usd < 50_000
                 and liquidity_usd > 0
                 and volume_24h > liquidity_usd * 10
-            )
+            ) if liquidity_usd is not None and volume_24h is not None else None
 
-            return {
+            result = {
                 'token_name': token_name,
                 'token_symbol': token_symbol,
                 'price_usd': price_usd,
@@ -86,13 +109,20 @@ class DexService:
                 'volume_24h': volume_24h,
                 'price_change_24h': price_change_24h,
                 'fdv': fdv,
-                'pair_age_hours': round(pair_age_hours, 1) if pair_age_hours else None,
+                'pair_age_hours': round(pair_age_hours, 1) if pair_age_hours is not None else None,
                 'volatility_flag': volatility_flag,
                 'low_liquidity_flag': low_liquidity_flag,
                 'wash_trade_flag': wash_trade_flag,
                 'new_pair_flag': new_pair_flag,
             }
 
+            coverage = {field: result[field] is not None for field in metrics}
+            missing = [field for field, covered in coverage.items() if not covered]
+            result.update(coverage=coverage, status='unknown' if missing else 'ok',
+                          reason='Missing DexScreener fields: ' + ', '.join(missing) if missing else None)
+            return result
+
         except Exception as e:
             logger.error("DexScreener fetch failed for %s: %s", address, e)
+            defaults['reason'] = f'DexScreener fetch failed: {type(e).__name__}'
             return defaults

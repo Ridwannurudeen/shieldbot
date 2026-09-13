@@ -30,7 +30,7 @@ class MarketAnalyzer(Analyzer):
                 score=0, flags=[], data={'skipped': True, 'reason': 'non-token contract'},
             )
 
-        data = await self._service.fetch_token_market_data(ctx.address)
+        data = await self._service.fetch_token_market_data(ctx.address, chain_id=ctx.chain_id)
         score, flags = self._compute(data)
         return AnalyzerResult(
             name=self.name, weight=self.weight,
@@ -40,6 +40,8 @@ class MarketAnalyzer(Analyzer):
     def _compute(self, d: dict) -> tuple:
         score = 0
         flags = []
+        if d.get('status') == 'unknown':
+            flags.append(f"Market data unknown: {d.get('reason') or 'provider data unavailable'}")
         if d.get('low_liquidity_flag'):
             score += 30
             flags.append('Low liquidity (<$10k)')
@@ -52,9 +54,9 @@ class MarketAnalyzer(Analyzer):
         if d.get('wash_trade_flag'):
             score += 25
             flags.append('Possible wash trading')
-        fdv = d.get('fdv', 0)
-        volume_24h = d.get('volume_24h', 0)
-        if fdv > 1_000_000 and volume_24h < 1000:
+        fdv = d.get('fdv')
+        volume_24h = d.get('volume_24h')
+        if fdv is not None and volume_24h is not None and fdv > 1_000_000 and volume_24h < 1000:
             score += 20
             volume_ratio = (volume_24h / fdv * 100) if fdv > 0 else 0
             flags.append(
