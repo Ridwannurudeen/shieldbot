@@ -78,6 +78,7 @@ jobs:
         run: |
           solc-select use 0.8.28
           slither contracts/base/src/ShieldBotAttestor.sol \
+            --compile-force-framework solc \
             --solc-remaps "@openzeppelin/=contracts/base/lib/openzeppelin-contracts/ @eas/=contracts/base/lib/eas-contracts/contracts/ forge-std/=contracts/base/lib/forge-std/src/" \
             --exclude-informational --fail-high
 
