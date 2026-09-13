@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import asyncio
 import json
 
+import aiohttp
 import pytest
 from cachetools import TTLCache
 
@@ -678,3 +679,81 @@ async def test_funder_selfdestruct_uses_to_recipient(http):
     ):
         result = await ExplorerService().get_first_funder(ADDRESS, 4663)
     assert result.data == {"funder": FUNDER, "value": 123}
+
+
+@pytest.mark.asyncio
+async def test_blockscout_echoed_api_key_is_removed_before_caching(http):
+    test_key = "echoed-provider-test-key"
+    payload = {
+        **BLOCKSCOUT_ADDRESS,
+        "apikey": test_key,
+        "metadata": [
+            {"echo": test_key, "request_url": f"https://api.invalid/?apikey={test_key}"}
+        ],
+        test_key: {"nested": [None, 7, False, test_key]},
+    }
+    http[0](payload)
+    service = ExplorerService()
+    with patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": test_key}):
+        result = await service.get_contract_creation_info(ADDRESS, 4663)
+        assert await service.get_contract_creation_info(ADDRESS, 4663) == result
+    assert result.data == {"creator": FUNDER, "tx_hash": TX_HASH}
+    assert test_key not in repr(list(service._cache.items()))
+    assert test_key not in repr(result)
+    assert payload["apikey"] == test_key
+    assert http[1].get.call_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method,chain_id",
+    [
+        ("is_verified_contract", 56),
+        ("get_contract_creation_info", 56),
+        ("get_contract_creation_info", 4663),
+    ],
+)
+async def test_adapter_explorer_exception_logs_do_not_expose_api_key(
+    http, caplog, method, chain_id
+):
+    test_key = "exception-log-test-key"
+    error = aiohttp.ClientResponseError(
+        MagicMock(real_url=f"https://api.etherscan.io/v2/api?apikey={test_key}"),
+        (),
+        status=403,
+        message=f"provider echoed {test_key}",
+    )
+    adapter = EvmAdapter(
+        chain_id, "Test Chain", "https://rpc.invalid", etherscan_api_key=test_key
+    )
+    if chain_id == 4663:
+        adapter._explorer_service = MagicMock()
+        adapter._explorer_service.get_contract_creation_info = AsyncMock(
+            side_effect=error
+        )
+    else:
+        http[0]({}).json.side_effect = error
+    result = await getattr(adapter, method)(ADDRESS)
+    assert result == ((None, None) if method == "is_verified_contract" else None)
+    assert "ClientResponseError" in caplog.text
+    assert test_key not in caplog.text
+    assert "https://api.etherscan.io" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_adapter_creation_time_exception_log_does_not_expose_key(http, caplog):
+    test_key = "creation-time-test-key"
+    adapter = EvmAdapter(4663, "Robinhood Chain", "https://rpc.invalid")
+    adapter._explorer_service = MagicMock()
+    adapter._explorer_service.get_contract_creation_info = AsyncMock(
+        return_value=ExplorerResult(
+            "known", data={"creator": FUNDER, "tx_hash": TX_HASH}
+        )
+    )
+    adapter._call_with_retry = AsyncMock(
+        side_effect=RuntimeError(f"https://rpc.invalid/?apikey={test_key}")
+    )
+    result = await adapter.get_contract_creation_info(ADDRESS)
+    assert result["creation_time"] is None
+    assert "RuntimeError" in caplog.text
+    assert test_key not in caplog.text

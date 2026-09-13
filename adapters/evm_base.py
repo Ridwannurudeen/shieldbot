@@ -231,7 +231,7 @@ class EvmAdapter(ChainAdapter):
                         }
             return None
         except Exception as e:
-            logger.error(f"[{self._chain_name}] Error getting creation info: {e}")
+            logger.error("[%s] Error getting creation info: %s", self._chain_name, type(e).__name__)
             return None
 
     async def get_token_info(self, address: str) -> Dict:

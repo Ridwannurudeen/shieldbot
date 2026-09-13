@@ -24,6 +24,19 @@ def _is_address(value) -> bool:
     )
 
 
+def _redact_api_key(value, api_key: str):
+    if isinstance(value, str):
+        return value.replace(api_key, "[REDACTED]")
+    if isinstance(value, dict):
+        return {
+            _redact_api_key(key, api_key): _redact_api_key(item, api_key)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_api_key(item, api_key) for item in value]
+    return value
+
+
 class ExplorerService:
     """Cache provider responses for five minutes; share one PRO rate limiter."""
 
@@ -76,6 +89,9 @@ class ExplorerService:
                                     reason="Unexpected JSON shape",
                                     provider=provider,
                                 )
+                            api_key = params.get("apikey")
+                            if api_key:
+                                data = _redact_api_key(data, api_key)
                             return ExplorerResult("known", data=data, provider=provider)
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
                 return ExplorerResult(
