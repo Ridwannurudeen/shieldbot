@@ -226,3 +226,26 @@ def test_rpc_unknown_chain_rejected_before_auth_database_work(proxy, mock_contai
     assert "Supported" in response.json()["error"]["message"]
     mock_container.auth_manager.validate_key.assert_not_awaited()
     mock_container.auth_manager.record_usage.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["is_token_contract", "is_verified_contract", "registry"])
+async def test_rpc_analysis_routing_error_never_forwards(proxy, mock_container, method):
+    from utils.web3_client import UnsupportedChainError
+
+    error = UnsupportedChainError("removed chain")
+    mock_container.web3_client.is_token_contract = AsyncMock(return_value=True)
+    mock_container.web3_client.is_verified_contract = AsyncMock(return_value=True)
+    if method == "registry":
+        mock_container.registry.run_all.side_effect = error
+    else:
+        getattr(mock_container.web3_client, method).side_effect = error
+    proxy._forward = AsyncMock()
+    with pytest.raises(UnsupportedChainError) as exc:
+        await proxy.handle_request(56, {
+            "jsonrpc": "2.0", "id": 1, "method": "eth_sendTransaction",
+            "params": [{"to": "0x" + "a" * 40, "from": "0x" + "b" * 40}],
+        })
+    assert exc.value is error
+    proxy._forward.assert_not_awaited()
+    mock_container.risk_engine.compute_from_results.assert_not_called()

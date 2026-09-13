@@ -10,6 +10,8 @@ from typing import Dict, List, Optional, Set
 import aiohttp
 from web3 import Web3
 
+from utils.web3_client import UnsupportedChainError
+
 logger = logging.getLogger(__name__)
 
 # Preserve existing monitoring coverage; new chains require explicit support.
@@ -143,6 +145,8 @@ class MempoolMonitor:
                 await asyncio.sleep(2)  # Poll every 2 seconds
             except asyncio.CancelledError:
                 break
+            except UnsupportedChainError:
+                raise
             except Exception as e:
                 logger.error(f"MempoolMonitor error: {e}")
                 await asyncio.sleep(5)

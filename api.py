@@ -376,8 +376,23 @@ async def request_validation_middleware(request: Request, call_next):
     path_parts = request_path.strip("/").split("/")
     if len(path_parts) == 2 and path_parts[0] == "rpc":
         chain_ids.append(path_parts[1])
+    allows_all_chain_watch = (
+        request.method == "POST" and request_path == "/api/admin/watch/deployer"
+        or request.method == "GET" and request_path == "/api/admin/watch/deployers"
+        or request.method == "DELETE" and len(path_parts) == 5
+        and path_parts[:4] == ["api", "admin", "watch", "deployer"]
+    )
     content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-    if content_type == "application/json" or content_type.endswith("+json"):
+    raw_body = await request.body()
+    is_json = content_type == "application/json" or (
+        content_type.startswith("application/") and content_type.endswith("+json")
+    )
+    is_webhook_form = request_path == "/webhook/uptime" and content_type in {
+        "application/x-www-form-urlencoded", "multipart/form-data",
+    }
+    if raw_body and not is_json and not is_webhook_form:
+        return JSONResponse(status_code=415, content={"detail": "Content-Type must be application/json"})
+    if raw_body and is_json:
         try:
             body = await request.json()
         except (ValueError, UnicodeDecodeError):
@@ -404,6 +419,8 @@ async def request_validation_middleware(request: Request, call_next):
             parsed_chain_id = int(chain_id)
         except (ValueError, TypeError, OverflowError):
             return JSONResponse(status_code=400, content={"detail": "Invalid chain ID"})
+        if parsed_chain_id == 0 and allows_all_chain_watch:
+            continue
         try:
             _validate_chain_id(parsed_chain_id)
         except HTTPException as exc:
@@ -1125,11 +1142,15 @@ async def firewall(req: FirewallRequest, request: Request):
             is_verified = False
             try:
                 is_token = await web3_client.is_token_contract(to_addr, chain_id=req.chainId)
+            except UnsupportedChainError:
+                raise
             except Exception:
                 pass
             try:
                 verified_result = await web3_client.is_verified_contract(to_addr, chain_id=req.chainId)
                 is_verified = verified_result[0] if isinstance(verified_result, tuple) else bool(verified_result)
+            except UnsupportedChainError:
+                raise
             except Exception:
                 pass
 
@@ -1293,6 +1314,8 @@ async def firewall(req: FirewallRequest, request: Request):
                         flags=risk_output.get("critical_flags"),
                         confidence=alert.get("confidence"),
                     )
+                except UnsupportedChainError:
+                    raise
                 except Exception as e:
                     logger.error(f"DB upsert failed: {e}")
 
@@ -1316,6 +1339,8 @@ async def firewall(req: FirewallRequest, request: Request):
                         chain_id=req.chainId,
                         risk_score=risk_score,
                     ), label="sentinel_on_scan_blocked")
+                except UnsupportedChainError:
+                    raise
                 except Exception as e:
                     logger.error(f"Sentinel feedback failed: {e}")
 
@@ -1337,11 +1362,15 @@ async def firewall(req: FirewallRequest, request: Request):
                         },
                     )
                     response["greenfield_url"] = gf_url
+                except UnsupportedChainError:
+                    raise
                 except Exception as e:
                     logger.error(f"Greenfield upload failed: {e}")
 
             return response
 
+        except UnsupportedChainError:
+            raise
         except Exception as e:
             logger.warning(f"Composite pipeline failed for {to_addr}, falling back: {e}")
 
@@ -1350,6 +1379,8 @@ async def firewall(req: FirewallRequest, request: Request):
         contract_scan = {}
         try:
             is_token = await web3_client.is_token_contract(to_addr, chain_id=req.chainId)
+        except UnsupportedChainError:
+            raise
         except Exception:
             pass
 
@@ -1384,6 +1415,8 @@ async def firewall(req: FirewallRequest, request: Request):
 
     except HTTPException:
         raise
+    except UnsupportedChainError:
+        raise
     except Exception as e:
         logger.error(f"Firewall error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -1407,6 +1440,8 @@ async def scan(req: ScanRequest):
         return result
 
     except HTTPException:
+        raise
+    except UnsupportedChainError:
         raise
     except Exception as e:
         logger.error(f"Scan error: {e}", exc_info=True)
@@ -1668,9 +1703,14 @@ def _require_admin(request: Request):
 
 class WatchDeployerRequest(ChainRequest):
     address: str = Field(..., min_length=1, max_length=64)
-    chain_id: int = Field(default=56, ge=1, le=10_000_000)
+    chain_id: int = Field(default=0, ge=0, le=10_000_000)
     reason: str = Field(default="MANUAL", max_length=240)
     severity: str = Field(default="HIGH", max_length=16)
+
+    @field_validator("chain_id")
+    @classmethod
+    def validate_chain(cls, value):
+        return value if value == 0 else _validate_chain_id(value)
 
 
 @app.post("/api/admin/watch/deployer")
@@ -1686,9 +1726,10 @@ async def watch_deployer_add(req: WatchDeployerRequest, request: Request):
 
 
 @app.delete("/api/admin/watch/deployer/{address}")
-async def watch_deployer_remove(address: str, request: Request, chain_id: int = 56):
+async def watch_deployer_remove(address: str, request: Request, chain_id: int = 0):
     """Remove a deployer from the watch list. Requires X-Admin-Secret."""
-    _validate_chain_id(chain_id)
+    if chain_id != 0:
+        _validate_chain_id(chain_id)
     _require_admin(request)
     await container.db.remove_watched_deployer(address, chain_id)
     return {"ok": True, "address": address.lower(), "chain_id": chain_id}
@@ -1790,6 +1831,8 @@ async def agent_chat(req: ChatRequest, request: Request):
             return resp
         # Backward compat: plain string return
         return {"response": result, "user_id": req.user_id}
+    except UnsupportedChainError:
+        raise
     except Exception as e:
         logger.error(f"Agent chat error: {e}")
         raise HTTPException(500, "Agent error")
@@ -1807,6 +1850,8 @@ async def agent_explain(req: ExplainRequest, request: Request):
     try:
         explanation = await container.advisor.explain_scan(req.scan_result)
         return {"explanation": explanation}
+    except UnsupportedChainError:
+        raise
     except Exception as e:
         logger.error(f"Agent explain error: {e}")
         raise HTTPException(500, "Agent error")
@@ -2007,6 +2052,8 @@ async def _get_deployer_campaign_context(contract_addr: str, chain_id: int, cont
                     summary["deployer_address"], 0, "SERIAL_SCAMMER", "HIGH",
                     summary["total_contracts"], n,
                 )
+        except UnsupportedChainError:
+            raise
         except Exception:
             pass
 
@@ -2018,6 +2065,8 @@ async def _get_deployer_campaign_context(contract_addr: str, chain_id: int, cont
             "danger_signal": signal,
             "risk_boost": boost,
         }
+    except UnsupportedChainError:
+        raise
     except Exception as e:
         logger.debug(f"Campaign context lookup failed for {contract_addr}: {e}")
         return None
@@ -2432,6 +2481,8 @@ async def _analyze_router_swap(
         try:
             verified_result = await web3_client.is_verified_contract(token_addr, chain_id=req.chainId)
             is_verified = verified_result[0] if isinstance(verified_result, tuple) else bool(verified_result)
+        except UnsupportedChainError:
+            raise
         except Exception:
             pass
 
@@ -2589,6 +2640,8 @@ async def _resolve_token(address: str, chain_id: int = 56) -> Optional[Dict]:
                 del _token_cache[oldest_key]
             _token_cache[cache_key] = (result, time.time())
             return result
+    except UnsupportedChainError:
+        raise
     except Exception:
         pass
 

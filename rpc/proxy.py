@@ -93,11 +93,15 @@ class RPCProxy:
             is_verified = False
             try:
                 is_token = await self._container.web3_client.is_token_contract(to_addr, chain_id=chain_id)
+            except UnsupportedChainError:
+                raise
             except Exception:
                 pass
             try:
                 verified_result = await self._container.web3_client.is_verified_contract(to_addr, chain_id=chain_id)
                 is_verified = verified_result[0] if isinstance(verified_result, tuple) else bool(verified_result)
+            except UnsupportedChainError:
+                raise
             except Exception:
                 pass
 
@@ -140,6 +144,8 @@ class RPCProxy:
 
             return await self._forward(upstream_rpc, payload)
 
+        except UnsupportedChainError:
+            raise
         except Exception as e:
             logger.error(f"RPC Proxy analysis error: {e}")
             # On analysis failure, block the transaction (fail-closed)

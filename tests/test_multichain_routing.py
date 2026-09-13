@@ -178,3 +178,19 @@ def test_mempool_alerts_reject_unavailable_chain(chain_id, error):
     monitor = MempoolMonitor(client)
     with pytest.raises(ValueError, match=error):
         monitor.get_alerts(chain_id=chain_id)
+
+
+@pytest.mark.asyncio
+async def test_mempool_loop_preserves_routing_error(monkeypatch):
+    from services.mempool_service import MempoolMonitor
+
+    client = Web3Client.__new__(Web3Client)
+    client._adapters = {}
+    monitor = MempoolMonitor(client)
+    monitor._running = True
+    monitor._monitored_chains = {56}
+    sleep = AsyncMock(side_effect=RuntimeError("unexpected retry"))
+    monkeypatch.setattr("services.mempool_service.asyncio.sleep", sleep)
+    with pytest.raises(UnsupportedChainError):
+        await monitor._monitor_loop()
+    sleep.assert_not_awaited()

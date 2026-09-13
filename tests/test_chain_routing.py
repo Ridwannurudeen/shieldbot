@@ -1,5 +1,7 @@
 """HTTP routing rejects unknown chains before touching providers or persistence."""
 
+import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -27,6 +29,7 @@ def routing_api(monkeypatch):
     from agent.firewall import create_agent_firewall_router
     from mcp_server.server import create_mcp_router
     from services.guardian_router import create_guardian_router
+    from services.reputation_router import create_reputation_router
 
     registry = Web3Client.__new__(Web3Client)
     registry._adapters = {
@@ -60,6 +63,7 @@ def routing_api(monkeypatch):
     api.app.include_router(create_agent_firewall_router(services), prefix="/api/agent")
     api.app.include_router(create_mcp_router(services), prefix="/mcp")
     api.app.include_router(create_guardian_router(services), prefix="/api/guardian")
+    api.app.include_router(create_reputation_router(services), prefix="/api/reputation")
     client = TestClient(api.app, raise_server_exceptions=False)
     yield client, registry, services
     client.close()
@@ -155,7 +159,6 @@ def test_malformed_chain_cannot_be_coerced_to_supported_chain(routing_api, chain
     ("OutcomeRequest", BODY_CASES[2][1], "chainId"),
     ("CommunityReportRequest", BODY_CASES[3][1], "chainId"),
     ("ChatRequest", BODY_CASES[4][1], "chain_id"),
-    ("WatchDeployerRequest", BODY_CASES[5][1], "chain_id"),
 ])
 def test_request_models_validate_explicit_and_default_chain(routing_api, model_name, payload, field):
     import api
@@ -261,3 +264,151 @@ def test_threat_feed_preserves_contract_results_without_unavailable_mempool(rout
         monitor.get_alerts.assert_called_once_with(chain_id=chain_id, limit=50)
     for adapter in registry._adapters.values():
         assert adapter.mock_calls == []
+
+
+@pytest.mark.parametrize("content_type", [None, "text/plain", "application/x-www-form-urlencoded"])
+@pytest.mark.parametrize("path,payload", [
+    ("/api/scan/injection", {"content": "test"}),
+    ("/api/keys", {"owner": "test"}),
+    ("/api/guardian/wallets", {"wallet_address": ADDRESS, "chain_id": 999999}),
+    ("/api/guardian/revoke/build", {"wallet_address": ADDRESS, "approvals": []}),
+    ("/api/reputation/batch", {"agent_ids": ["test"]}),
+    ("/rpc/56", {"jsonrpc": "2.0", "id": 1, "method": "eth_chainId", "params": []}),
+    ("/mcp/messages", {
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": "scan_contract", "arguments": {"address": ADDRESS, "chain_id": 999999}},
+    }),
+])
+def test_raw_json_routes_require_content_type_before_any_downstream_call(routing_api, path, payload, content_type):
+    client, registry, services = routing_api
+    headers = {"x-api-key": "test-key", "x-admin-secret": "test-admin"}
+    if content_type:
+        headers["content-type"] = content_type
+    response = client.post(path, content=json.dumps(payload), headers=headers)
+    assert response.status_code == 415
+    assert "application/json" in response.json()["detail"]
+    services.auth_manager.record_usage.assert_not_awaited()
+    assert services.mock_calls == []
+    for adapter in registry._adapters.values():
+        assert adapter.mock_calls == []
+
+
+@pytest.mark.parametrize("content_type", [None, "text/plain"])
+@pytest.mark.parametrize("path,payload,field", BODY_CASES)
+def test_json_models_require_content_type_before_authentication(routing_api, path, payload, field, content_type):
+    client, _, services = routing_api
+    headers = {"x-api-key": "test-key", "x-admin-secret": "test-admin"}
+    if content_type:
+        headers["content-type"] = content_type
+    response = client.post(path, content=json.dumps({**payload, field: 999999}), headers=headers)
+    assert response.status_code == 415
+    assert services.mock_calls == []
+
+
+@pytest.mark.parametrize("path", ["/api/health", "/api/mempool/alerts?chain_id=56", "/api/threats/feed?chain_id=56"])
+def test_sdk_json_header_without_body_preserves_get_responses(routing_api, path):
+    client, _, services = routing_api
+    services.db._db.execute = AsyncMock(return_value=SimpleNamespace(fetchall=AsyncMock(return_value=[])))
+    ordinary = client.get(path)
+    sdk = client.get(path, headers={"content-type": "application/json"})
+    assert ordinary.status_code == sdk.status_code == 200
+    assert ordinary.json() == sdk.json()
+
+
+@pytest.mark.parametrize("method,path", [
+    ("HEAD", "/api/health"),
+    ("DELETE", f"/api/admin/watch/deployer/{ADDRESS}"),
+])
+def test_json_header_without_body_preserves_head_and_delete(routing_api, method, path):
+    client, _, _ = routing_api
+    ordinary = client.request(method, path, headers={"x-admin-secret": "test-admin"})
+    sdk = client.request(method, path, headers={"x-admin-secret": "test-admin", "content-type": "application/json"})
+    assert sdk.status_code == ordinary.status_code
+    assert sdk.content == ordinary.content
+
+
+@pytest.mark.parametrize("explicit_scope", [False, True])
+def test_legacy_all_chain_watch_can_be_listed_and_deleted(routing_api, explicit_scope):
+    from core.database import Database
+
+    client, _, services = routing_api
+    db = Database(":memory:")
+    services.db = db
+    asyncio.run(db.initialize())
+    try:
+        asyncio.run(db.add_watched_deployer(ADDRESS, 0))
+        asyncio.run(db.add_watched_deployer(ADDRESS, 56))
+        headers = {"x-admin-secret": "test-admin"}
+        response = client.get("/api/admin/watch/deployers", params={"chain_id": 0}, headers=headers)
+        assert response.status_code == 200
+        assert {item["chain_id"] for item in response.json()["deployers"]} == {0, 56}
+        response = client.delete(
+            f"/api/admin/watch/deployer/{ADDRESS}", headers=headers,
+            params={"chain_id": 0} if explicit_scope else {},
+        )
+        assert response.status_code == 200
+        assert response.json()["chain_id"] == 0
+        remaining = asyncio.run(db.get_watched_deployers())
+        assert [item["chain_id"] for item in remaining] == [56]
+    finally:
+        asyncio.run(db.close())
+
+
+@pytest.mark.parametrize("explicit_scope", [False, True])
+def test_watch_creation_preserves_all_chain_scope(routing_api, explicit_scope):
+    client, _, services = routing_api
+    payload = {"address": ADDRESS}
+    if explicit_scope:
+        payload["chain_id"] = 0
+    response = client.post("/api/admin/watch/deployer", json=payload, headers={"x-admin-secret": "test-admin"})
+    assert response.status_code == 200
+    assert response.json()["chain_id"] == 0
+    services.db.add_watched_deployer.assert_awaited_once_with(ADDRESS, 0, "MANUAL", "HIGH")
+
+
+def test_watch_model_validates_concrete_chain_but_keeps_wildcard(routing_api):
+    import api
+
+    _, registry, _ = routing_api
+    registry._adapters.pop(56)
+    assert api.WatchDeployerRequest(address=ADDRESS).chain_id == 0
+    assert api.WatchDeployerRequest(address=ADDRESS, chain_id=0).chain_id == 0
+    with pytest.raises(HTTPException) as exc:
+        api.WatchDeployerRequest(address=ADDRESS, chain_id=999999)
+    assert exc.value.status_code == 400
+
+
+def test_watch_list_rejects_unsupported_concrete_chain(routing_api):
+    client, _, services = routing_api
+    response = client.get("/api/admin/watch/deployers", params={"chain_id": 999999}, headers={"x-api-key": "test-key"})
+    assert response.status_code == 400
+    assert services.mock_calls == []
+
+
+def test_zero_chain_is_not_a_wildcard_outside_watch_routes(routing_api):
+    client, _, services = routing_api
+    response = client.post("/api/outcome", json={"address": ADDRESS, "chainId": 0, "user_decision": "block"})
+    assert response.status_code == 400
+    assert services.mock_calls == []
+
+
+@pytest.mark.parametrize("content_type", [None, "text/plain"])
+def test_webhook_rejects_non_json_content_type_for_json_body(routing_api, content_type):
+    client, _, services = routing_api
+    headers = {"x-api-key": "test-key"}
+    if content_type:
+        headers["content-type"] = content_type
+    response = client.post("/webhook/uptime", content='{"alertType":"0"}', headers=headers)
+    assert response.status_code == 415
+    assert services.mock_calls == []
+
+
+def test_uptime_webhook_keeps_form_transport(routing_api):
+    client, _, services = routing_api
+    services.settings.webhook_secret = "test-webhook"
+    response = client.post(
+        "/webhook/uptime", data={"alertType": "0"},
+        headers={"x-webhook-secret": "test-webhook"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
