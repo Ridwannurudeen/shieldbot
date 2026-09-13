@@ -142,12 +142,21 @@ class Rpc:
 
 
 class Collector:
-    def __init__(self, rpc, db, confirmations=60, chunk_size=2000, v3_factory=None):
+    def __init__(
+        self,
+        rpc,
+        db,
+        confirmations=60,
+        chunk_size=2000,
+        v3_factory=None,
+        header_rpc=None,
+    ):
         if confirmations < 1 or chunk_size < 1:
             raise ValueError("Confirmations and chunk size must be positive")
         if v3_factory is not None and not is_address(v3_factory):
             raise ValueError("Invalid v3 factory address")
         self.rpc = rpc
+        self.header_rpc = header_rpc if header_rpc is not None else rpc
         self.db = db
         self.confirmations = confirmations
         self.chunk_size = chunk_size
@@ -159,7 +168,7 @@ class Collector:
 
     async def _headers(self, numbers):
         numbers = sorted(set(numbers))
-        rows = await self.rpc.batch(
+        rows = await self.header_rpc.batch(
             [("eth_getBlockByNumber", [hex(n), False]) for n in numbers]
         )
         headers = {}
@@ -219,6 +228,11 @@ class Collector:
     async def run_once(self, from_block=None, to_block=None):
         if int(await self.rpc.call("eth_chainId", []), 16) != CHAIN_ID:
             raise ValueError("RPC chain mismatch: expected chain 4663")
+        if (
+            self.header_rpc is not self.rpc
+            and int(await self.header_rpc.call("eth_chainId", []), 16) != CHAIN_ID
+        ):
+            raise ValueError("Header RPC chain mismatch: expected chain 4663")
         meta = await self._meta()
         if meta and meta.get("chain_id") != str(CHAIN_ID):
             raise ValueError("Census database chain mismatch")
@@ -536,12 +550,15 @@ async def run(args):
         aiosqlite.connect(directory / "census.sqlite3") as db,
     ):
         await initialize(db)
+        header_url = os.getenv("CENSUS_HEADER_RPC_URL")
+        endpoint_rps = args.rps / 2 if header_url else args.rps
         collector = Collector(
-            Rpc(session, os.getenv("CENSUS_RPC_URL", RPC_URL), args.rps),
+            Rpc(session, os.getenv("CENSUS_RPC_URL", RPC_URL), endpoint_rps),
             db,
             args.confirmations,
             args.chunk_size,
             args.v3_factory,
+            header_rpc=Rpc(session, header_url, endpoint_rps) if header_url else None,
         )
         while True:
             cursor = await collector.run_once(args.from_block, args.to_block)

@@ -35,7 +35,15 @@ exponential backoff. An exhausted or inconsistent request fails visibly without
 advancing that chunk; rerunning resumes from its durable cursor.
 
 The default RPC is `https://rpc.mainnet.chain.robinhood.com`. An operator may set
-`CENSUS_RPC_URL` in the environment. Every polling cycle verifies `eth_chainId`;
+`CENSUS_RPC_URL` in the environment. For sustained collection, setting
+`CENSUS_HEADER_RPC_URL=https://robinhood-rpc.publicnode.com` is recommended to
+offload header reads when the primary RPC throttles batches. Only block headers
+go to this optional endpoint; logs, transactions and receipts use the primary.
+Both endpoints must return chain 4663, and log/receipt block hashes must match the
+headers. The configured request-rate budget is divided evenly between endpoints.
+PublicNode rejected this historical log range without a personal token during
+verification, so it is used only for its publicly accessible header reads.
+Every polling cycle verifies `eth_chainId` for each configured endpoint;
 a mismatched RPC or database fails explicitly. Requests use aiohttp and explicit
 timeouts, not urllib. SQLite WAL stores pools, decoded events, creation receipt
 evidence, block hashes and cursor together in atomic chunk transactions.

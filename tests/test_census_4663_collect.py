@@ -628,3 +628,65 @@ async def test_creation_uses_canonical_header_when_rpc_log_timestamp_is_zero(tmp
     assert data["meta"]["cursor"] == "200"
     assert data["pools"][0]["timestamp"] == 1700000150
     assert data["events"][0]["timestamp"] == 1700000150
+
+
+@pytest.mark.asyncio
+async def test_separate_header_rpc_only_receives_headers_and_chain_check(tmp_path):
+    rpc = FakeRpc()
+    header_rpc = FakeRpc()
+    rpc.creation()
+    rpc.call = AsyncMock(wraps=rpc.call)
+    header_rpc.call = AsyncMock(wraps=header_rpc.call)
+    header_rpc.logs = AsyncMock(
+        side_effect=AssertionError("Header provider must not fetch logs")
+    )
+    async with aiosqlite.connect(tmp_path / "census.sqlite3") as db:
+        await initialize(db)
+        await Collector(rpc, db, confirmations=2, header_rpc=header_rpc).run_once(
+            100, 101
+        )
+    primary_methods = {call.args[0] for call in rpc.call.call_args_list}
+    header_methods = {call.args[0] for call in header_rpc.call.call_args_list}
+    assert primary_methods == {
+        "eth_chainId",
+        "eth_blockNumber",
+        "eth_getTransactionByHash",
+        "eth_getTransactionReceipt",
+    }
+    assert header_methods == {"eth_chainId", "eth_getBlockByNumber"}
+    assert rpc.queries
+    header_rpc.logs.assert_not_awaited()
+    data = await load_data(tmp_path)
+    assert data["meta"]["cursor"] == "101"
+    assert data["pools"][0]["timestamp"] == 1700000100
+    assert data["events"][0]["timestamp"] == 1700000100
+
+
+@pytest.mark.asyncio
+async def test_separate_header_rpc_wrong_chain_rejected_before_cursor_or_logs(tmp_path):
+    rpc = FakeRpc()
+    header_rpc = FakeRpc()
+    header_rpc.chain_id = 1
+    async with aiosqlite.connect(tmp_path / "census.sqlite3") as db:
+        await initialize(db)
+        collector = Collector(rpc, db, confirmations=2, header_rpc=header_rpc)
+        with pytest.raises(ValueError, match="chain mismatch|chain 4663"):
+            await collector.run_once(100, 101)
+        assert await (await db.execute("SELECT count(*) FROM meta")).fetchone() == (0,)
+    assert not rpc.queries and not header_rpc.queries
+
+
+@pytest.mark.asyncio
+async def test_separate_header_rpc_conflicting_hash_rejected_without_advance(tmp_path):
+    rpc = FakeRpc()
+    header_rpc = FakeRpc()
+    rpc.creation()
+    header_rpc.hashes[100] = "0x" + "ab" * 32
+    async with aiosqlite.connect(tmp_path / "census.sqlite3") as db:
+        await initialize(db)
+        collector = Collector(rpc, db, confirmations=2, header_rpc=header_rpc)
+        with pytest.raises(RpcError, match="mismatch"):
+            await collector.run_once(100, 101)
+    data = await load_data(tmp_path)
+    assert data["meta"]["cursor"] == "99"
+    assert not data["pools"] and not data["events"] and not data["blocks"]
