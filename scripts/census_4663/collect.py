@@ -328,41 +328,13 @@ class Collector:
             or log["topics"][0].lower() == TOPICS["Initialize"]
             or log["topics"][1].lower() in tracked_v4
         ]
-        header_numbers = {start, end} | set(
-            range(max(start, end - self.confirmations + 1), end + 1)
+        # eth_getLogs on this RPC can expose blockTimestamp=0x0 even when
+        # receipt logs have a timestamp. Use canonical headers for event times.
+        headers = await self._headers(
+            {start, end}
+            | {int(log["blockNumber"], 16) for log, _ in logs}
+            | set(range(max(start, end - self.confirmations + 1), end + 1))
         )
-        reported = {}
-        for log, _ in logs:
-            number = int(log["blockNumber"], 16)
-            if log.get("blockTimestamp") is None:
-                header_numbers.add(number)
-                continue
-            timestamp = log["blockTimestamp"]
-            if not isinstance(timestamp, str) or not timestamp.startswith("0x"):
-                raise RpcError("Malformed log blockTimestamp")
-            header = {
-                "number": log["blockNumber"],
-                "hash": log["blockHash"].lower(),
-                "timestamp": hex(int(timestamp, 16)),
-            }
-            if number in reported and reported[number] != header:
-                raise RpcError("Conflicting log block metadata")
-            reported[number] = header
-        headers = await self._headers(header_numbers)
-        for number, header in reported.items():
-            timestamp = int(header["timestamp"], 16)
-            if (
-                not int(headers[start]["timestamp"], 16)
-                <= timestamp
-                <= int(headers[end]["timestamp"], 16)
-            ):
-                raise RpcError("Log timestamp outside chunk boundaries")
-            if number in headers and (
-                headers[number]["hash"].lower() != header["hash"]
-                or int(headers[number]["timestamp"], 16) != timestamp
-            ):
-                raise RpcError("Log block metadata mismatch with canonical header")
-            headers[number] = header
         for log, source in logs:
             number = int(log["blockNumber"], 16)
             allowed = {

@@ -608,15 +608,11 @@ async def test_untracked_v4_activity_does_not_fetch_unneeded_block_headers(tmp_p
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("has_log_timestamp", [True, False])
-async def test_creation_log_timestamp_avoids_header_fetch_with_missing_field_fallback(
-    tmp_path, has_log_timestamp
-):
+async def test_creation_uses_canonical_header_when_rpc_log_timestamp_is_zero(tmp_path):
     rpc = FakeRpc()
     rpc.tip = 202
     creation = rpc.creation(number=150)
-    if has_log_timestamp:
-        creation["blockTimestamp"] = rpc.header(150)["timestamp"]
+    creation["blockTimestamp"] = "0x0"
     rpc.batch = AsyncMock(wraps=rpc.batch)
     async with aiosqlite.connect(tmp_path / "census.sqlite3") as db:
         await initialize(db)
@@ -627,31 +623,8 @@ async def test_creation_log_timestamp_avoids_header_fetch_with_missing_field_fal
         for method, params in batch_call.args[0]
         if method == "eth_getBlockByNumber"
     }
-    expected_blocks = {100, 199, 200}
-    if not has_log_timestamp:
-        expected_blocks.add(150)
-    assert requested_blocks == expected_blocks
+    assert requested_blocks == {100, 150, 199, 200}
     data = await load_data(tmp_path)
     assert data["meta"]["cursor"] == "200"
     assert data["pools"][0]["timestamp"] == 1700000150
     assert data["events"][0]["timestamp"] == 1700000150
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("creation_block", [100, 199, 200])
-async def test_log_timestamp_must_match_canonical_boundary_header(
-    tmp_path, creation_block
-):
-    rpc = FakeRpc()
-    rpc.tip = 202
-    creation = rpc.creation(number=creation_block)
-    creation["blockTimestamp"] = hex(
-        int(rpc.header(creation_block)["timestamp"], 16) + 1
-    )
-    async with aiosqlite.connect(tmp_path / "census.sqlite3") as db:
-        await initialize(db)
-        with pytest.raises(RpcError, match="[Tt]imestamp|mismatch"):
-            await Collector(rpc, db, confirmations=2).run_once(100, 200)
-    data = await load_data(tmp_path)
-    assert data["meta"]["cursor"] == "99"
-    assert not data["pools"] and not data["events"] and not data["blocks"]
