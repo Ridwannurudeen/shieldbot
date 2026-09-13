@@ -43,9 +43,12 @@ evidence, block hashes and cursor together in atomic chunk transactions.
 The collector retains contiguous hashes at the end of each chunk and checks the
 last confirmation-depth window on resume/follow. A changed hash rewinds to a
 matching ancestor, deletes affected pools, events and evidence, and replays.
-It retains event-block headers and chunk boundaries for deeper rewinds and time
-coverage. Reorg checks protect collector data; previously exported reports,
-probes and fixed smoke selections are snapshots and must be regenerated or
+For interior event blocks it uses the RPC's observed `blockTimestamp` and hash
+when supplied, falling back to header lookups when the field is absent. Boundary
+and confirmation-window headers are fetched independently; inconsistent metadata
+fails the chunk. These event-block records and chunk boundaries remain available
+for deeper rewinds and time coverage. Reorg checks protect collector data;
+previously exported reports, probes and fixed smoke selections are snapshots and must be regenerated or
 reviewed separately after a reorg.
 
 Measured sources:
