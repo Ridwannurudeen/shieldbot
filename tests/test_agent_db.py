@@ -74,10 +74,36 @@ class TestAgentFindings:
         await db.insert_agent_finding(finding_type="type_b", address="0x2")
         await db.insert_agent_finding(finding_type="type_c", address="0x3")
 
+        # Spread the timestamps apart by manipulating the DB directly
+        now = time.time()
+        for offset, address in ((300, "0x1"), (200, "0x2"), (100, "0x3")):
+            await db._db.execute(
+                "UPDATE agent_findings SET created_at = ? WHERE address = ?",
+                (now - offset, address),
+            )
+        await db._db.commit()
+
         findings = await db.get_agent_findings()
         # Most recent (type_c) should be first
         assert findings[0]["finding_type"] == "type_c"
         assert findings[-1]["finding_type"] == "type_a"
+
+    @pytest.mark.asyncio
+    async def test_findings_with_equal_timestamps_ordered_newest_first(self, db):
+        """Findings sharing a created_at fall back to insertion order, newest first."""
+        await db.insert_agent_finding(finding_type="rug_pull", address="0x1")
+        await db.insert_agent_finding(finding_type="rug_pull", address="0x2")
+        await db.insert_agent_finding(finding_type="rug_pull", address="0x3")
+
+        # Force identical timestamps by manipulating the DB directly
+        await db._db.execute("UPDATE agent_findings SET created_at = ?", (time.time(),))
+        await db._db.commit()
+
+        findings = await db.get_agent_findings()
+        assert [f["address"] for f in findings] == ["0x3", "0x2", "0x1"]
+
+        rug_pulls = await db.get_agent_findings(limit=2, finding_type="rug_pull")
+        assert [f["address"] for f in rug_pulls] == ["0x3", "0x2"]
 
 
 class TestChatHistory:
