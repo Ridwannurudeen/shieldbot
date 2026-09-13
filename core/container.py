@@ -35,6 +35,8 @@ from adapters.arbitrum import ArbitrumAdapter
 from adapters.polygon import PolygonAdapter
 from adapters.opbnb import OpBNBAdapter
 from adapters.optimism import OptimismAdapter
+from adapters.robinhood import RobinhoodAdapter
+from services.mempool_service import supports_pending_transactions
 from services.cache import CacheService
 from services.injection_scanner import InjectionScanner
 from services.threat_graph import ThreatGraphService
@@ -105,6 +107,9 @@ class ServiceContainer:
         )
         self.web3_client.register_adapter(self.opbnb_adapter)
         self.web3_client.register_adapter(self.optimism_adapter)
+
+        self.robinhood_adapter = RobinhoodAdapter(rpc_url=settings.robinhood_rpc_url)
+        self.web3_client.register_adapter(self.robinhood_adapter)
 
         # Scanners (legacy fallback)
         self.tx_scanner = TransactionScanner(self.web3_client, self.ai_analyzer)
@@ -224,9 +229,12 @@ class ServiceContainer:
         await self.db.initialize()
         await self.indexer.start()
         await self.greenfield_service.async_init()
-        # Start mempool monitor on all supported chains
+        # Start mempool monitor only where pending transactions are available
         await self.mempool_monitor.start(
-            chain_ids=self.web3_client.get_supported_chain_ids()
+            chain_ids=[
+                chain_id for chain_id in self.web3_client.get_supported_chain_ids()
+                if supports_pending_transactions(chain_id)
+            ]
         )
         await self.cache.connect()
         logger.info("ServiceContainer started")
