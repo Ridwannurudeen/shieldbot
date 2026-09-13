@@ -5,6 +5,9 @@ import logging
 import time
 from typing import Optional
 
+from adapters.evm_base import _get_explorer_backend
+from services.explorer_service import explorer_service
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,8 +66,19 @@ class DeployerIndexer:
 
     async def _index_contract(self, address: str, chain_id: int):
         """Fetch deployer and funder info for a contract."""
+        backend = _get_explorer_backend(chain_id)
+        adapter = self._web3._get_adapter(chain_id)
+        if adapter is None or adapter.chain_id != chain_id:
+            raise ValueError(f"No matching adapter registered for chain {chain_id}")
         try:
-            creation_info = await self._web3.get_contract_creation_info(address, chain_id=chain_id)
+            if backend == 'sourcify_blockscout':
+                result = await explorer_service.get_contract_creation_info(address, chain_id)
+                if result.status == 'unknown':
+                    logger.warning(f"Unknown creator for {address} on chain {chain_id}: {result.reason}")
+                    return
+                creation_info = result.data
+            else:
+                creation_info = await self._web3.get_contract_creation_info(address, chain_id=chain_id)
             if not creation_info:
                 return
 
@@ -155,11 +169,20 @@ class DeployerIndexer:
 
     async def _fetch_funder(self, deployer_address: str, chain_id: int) -> Optional[dict]:
         """Fetch the first funding transaction to a deployer address."""
+        backend = _get_explorer_backend(chain_id)
+        adapter = self._web3._get_adapter(chain_id)
+        if adapter is None or adapter.chain_id != chain_id:
+            raise ValueError(f"No matching adapter registered for chain {chain_id}")
         try:
+            if backend == 'sourcify_blockscout':
+                result = await explorer_service.get_first_funder(deployer_address, chain_id)
+                if result.status == 'unknown':
+                    logger.warning(f"Unknown funder for {deployer_address} on chain {chain_id}: {result.reason}")
+                    return None
+                return result.data
             import aiohttp
             # Use Etherscan API to get first normal tx
-            adapter = self._web3._get_adapter(chain_id) if hasattr(self._web3, '_get_adapter') else None
-            api_key = adapter.etherscan_api_key if adapter else ''
+            api_key = adapter.etherscan_api_key
             params = {
                 'chainid': chain_id,
                 'module': 'account',
@@ -178,6 +201,9 @@ class DeployerIndexer:
                     params=params,
                     timeout=aiohttp.ClientTimeout(total=10),
                 ) as resp:
+                    if resp.status != 200:
+                        logger.warning(f"Unknown funder for {deployer_address} on chain {chain_id}: HTTP {resp.status}")
+                        return None
                     data = await resp.json()
                     if data.get('status') == '1' and data.get('result'):
                         # Find first incoming tx (to == deployer)
@@ -185,7 +211,7 @@ class DeployerIndexer:
                             if tx.get('to', '').lower() == deployer_address.lower():
                                 return {
                                     'funder': tx['from'],
-                                    'value': int(tx.get('value', 0)),
+                                    'value': int(tx['value']),
                                 }
             return None
         except Exception as e:
