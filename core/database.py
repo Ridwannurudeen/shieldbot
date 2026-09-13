@@ -910,7 +910,7 @@ class Database:
                        chain_id, risk_score, narrative, evidence, action_taken, created_at
                 FROM agent_findings
                 WHERE finding_type = ?
-                ORDER BY created_at DESC
+                ORDER BY created_at DESC, id DESC
                 LIMIT ?
             """, (finding_type, limit))
         else:
@@ -918,7 +918,7 @@ class Database:
                 SELECT id, finding_type, investigation_id, address, deployer,
                        chain_id, risk_score, narrative, evidence, action_taken, created_at
                 FROM agent_findings
-                ORDER BY created_at DESC
+                ORDER BY created_at DESC, id DESC
                 LIMIT ?
             """, (limit,))
         rows = await cursor.fetchall()

@@ -52,9 +52,16 @@ class TestContractScores:
     @pytest.mark.asyncio
     async def test_get_returns_none_when_stale(self, db):
         await db.upsert_contract_score("0xOLD", 56, 50.0, "MEDIUM")
+        assert await db.get_contract_score("0xOLD", 56, max_age_seconds=300) is not None
 
-        # max_age_seconds=0 means everything is stale
-        result = await db.get_contract_score("0xOLD", 56, max_age_seconds=0)
+        # Back-date the scan past the freshness window by manipulating the DB directly
+        await db._db.execute(
+            "UPDATE contract_scores SET last_scanned_at = ? WHERE address = ? AND chain_id = ?",
+            (time.time() - 1000, "0xold", 56),
+        )
+        await db._db.commit()
+
+        result = await db.get_contract_score("0xOLD", 56, max_age_seconds=300)
         assert result is None
 
     @pytest.mark.asyncio
