@@ -28,7 +28,7 @@ OUTPUT FORMAT — Return ONLY a valid JSON object with this exact schema:
   "risk_score": <0-100 integer>,
   "danger_signals": ["<signal1>", "<signal2>"],
   "transaction_impact": {
-    "sending": "<what user sends, e.g. '0.5 BNB' or '0 BNB'>",
+    "sending": "<what user sends, amount and native token symbol from the provided chain data; state Unknown if unavailable>",
     "granting_access": "<what access is being granted, e.g. 'UNLIMITED USDT' or 'None'>",
     "recipient": "<to address with label if known>",
     "post_tx_state": "<what happens after this tx executes>"

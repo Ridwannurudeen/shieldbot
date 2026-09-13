@@ -26,6 +26,10 @@ _OPENAI_FALLBACK_MODELS = {
 }
 
 
+def _get_prompt_chain_name(chain_id: Optional[int]) -> str:
+    return get_chain_name(chain_id) if chain_id is not None else 'Unknown chain'
+
+
 class AIAnalyzer:
     """Claude AI-powered contract analysis with structured scoring.
 
@@ -113,7 +117,7 @@ class AIAnalyzer:
         try:
             context = self._format_scan_data(scan_data)
 
-            prompt = f"""You are a blockchain security analyst scoring a smart contract on {get_chain_name(scan_data.get('chain_id', 56))}.
+            prompt = f"""You are a blockchain security analyst scoring a smart contract on {_get_prompt_chain_name(scan_data.get('chain_id'))}.
 
 Address: {address}
 Scan Data:
@@ -159,7 +163,7 @@ Base your score on: verification status, contract age, scam DB matches, bytecode
             logger.error(f"AI risk score failed: {e}")
             return None
 
-    async def analyze_verified_source(self, address: str, source_code: str, chain_id: int = 56) -> Optional[Dict]:
+    async def analyze_verified_source(self, address: str, source_code: str, chain_id: Optional[int] = None) -> Optional[Dict]:
         """
         AI analysis of verified Solidity source code for dangerous patterns.
 
@@ -173,7 +177,7 @@ Base your score on: verification status, contract age, scam DB matches, bytecode
             # Truncate source for API limits (first 12KB)
             source_sample = source_code[:12000] if len(source_code) > 12000 else source_code
 
-            prompt = f"""Analyze this {get_chain_name(chain_id)} smart contract source code for dangerous patterns.
+            prompt = f"""Analyze this {_get_prompt_chain_name(chain_id)} smart contract source code for dangerous patterns.
 
 Address: {address}
 Source Code:
@@ -227,7 +231,7 @@ Look for: honeypot mechanisms (blacklists, trading pauses, max tx traps), hidden
             context = self._prepare_scan_context(address, scan_results)
             bytecode_sample = bytecode[:8000] if len(bytecode) > 8000 else bytecode
 
-            prompt = f"""You are a blockchain security expert analyzing a smart contract on {get_chain_name(scan_results.get('chain_id', 56))}.
+            prompt = f"""You are a blockchain security expert analyzing a smart contract on {_get_prompt_chain_name(scan_results.get('chain_id'))}.
 
 Contract Address: {address}
 Bytecode Sample (first 4KB): {bytecode_sample}
@@ -265,7 +269,7 @@ Keep response under 200 words, focused and actionable."""
         try:
             context = self._prepare_token_context(address, token_info, safety_results)
 
-            prompt = f"""You are a DeFi security expert analyzing a token on {get_chain_name(safety_results.get('chain_id', 56))}.
+            prompt = f"""You are a DeFi security expert analyzing a token on {_get_prompt_chain_name(safety_results.get('chain_id'))}.
 
 Token: {token_info.get('name', 'Unknown')} ({token_info.get('symbol', 'N/A')})
 Address: {address}
@@ -363,7 +367,7 @@ Provide a clear, helpful answer in 2-3 sentences. Use simple language."""
         try:
             context = self._build_forensic_context(address, scan_data, scan_type)
 
-            system_prompt = f"""You are ShieldAI — a blockchain security analyst on {get_chain_name(scan_data.get('chain_id', 56))}. Provide a concise forensic report.
+            system_prompt = f"""You are ShieldAI — a blockchain security analyst on {_get_prompt_chain_name(scan_data.get('chain_id'))}. Provide a concise forensic report.
 
 OUTPUT FORMAT (Telegram Markdown: ** for bold, ` for code):
 
@@ -497,7 +501,7 @@ Generate the ShieldAI forensic report now."""
         try:
             context = self._build_firewall_context(tx_data, contract_scan)
 
-            chain_name = get_chain_name(contract_scan.get('chain_id', tx_data.get('chainId', 56)))
+            chain_name = _get_prompt_chain_name(contract_scan.get('chain_id', tx_data.get('chainId')))
             user_message = f"""Analyze this pending {chain_name} transaction:
 
 {context}
@@ -550,7 +554,7 @@ Return the firewall analysis JSON now."""
             f"From: {tx_data.get('from', 'unknown')}",
             f"To: {tx_data.get('to', 'unknown')}",
             f"Value: {tx_data.get('value', '0')} wei",
-            f"Chain ID: {tx_data.get('chainId', 56)}",
+            f"Chain ID: {tx_data.get('chainId') if tx_data.get('chainId') is not None else 'Unknown'}",
         ]
 
         # Decoded calldata

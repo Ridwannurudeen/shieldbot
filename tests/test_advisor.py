@@ -441,3 +441,69 @@ def test_advisor_prompt_uses_supplied_chain_identity():
 
     assert 'BNB Chain' not in ADVISOR_SYSTEM_PROMPT
     assert 'chain' in ADVISOR_SYSTEM_PROMPT.lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('method,args', [
+    ('compute_ai_risk_score', ('0xABC', {})),
+    ('compute_ai_risk_score', ('0xABC', {'chain_id': None})),
+    ('analyze_verified_source', ('0xABC', 'contract Token {}')),
+    ('analyze_verified_source', ('0xABC', 'contract Token {}', None)),
+    ('analyze_contract_bytecode', ('0xABC', '0x00', {})),
+    ('analyze_contract_bytecode', ('0xABC', '0x00', {'chain_id': None})),
+    ('analyze_token_safety', ('0xABC', {}, {})),
+    ('analyze_token_safety', ('0xABC', {}, {'chain_id': None})),
+    ('generate_forensic_report', ('0xABC', {}, 'token')),
+    ('generate_forensic_report', ('0xABC', {'chain_id': None}, 'token')),
+    ('generate_firewall_report', ({}, {})),
+    ('generate_firewall_report', ({'chainId': None}, {'chain_id': None})),
+])
+async def test_missing_prompt_chain_is_unknown(method, args):
+    from utils.ai_analyzer import AIAnalyzer
+
+    analyzer = AIAnalyzer.__new__(AIAnalyzer)
+    analyzer.model = 'test-model'
+    analyzer.client = MagicMock()
+    response = MagicMock()
+    response.content = [MagicMock(text='{"risk_score": 20}')]
+    analyzer.client.messages.create = AsyncMock(return_value=response)
+    with patch('utils.ai_analyzer.get_chain_name', return_value='BSC') as lookup:
+        await getattr(analyzer, method)(*args)
+    content = analyzer.client.messages.create.call_args.kwargs['messages'][0]['content']
+    assert 'Unknown chain' in content
+    assert 'BSC' not in content
+    assert 'Chain ID: 56' not in content
+    lookup.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id,expected', [(56, 'BSC'), (1, 'Ethereum'), (999999, 'Chain 999999')])
+async def test_forensic_prompt_respects_actual_chain_lookup(chain_id, expected):
+    from utils.ai_analyzer import AIAnalyzer
+
+    analyzer = AIAnalyzer.__new__(AIAnalyzer)
+    analyzer.model = 'test-model'
+    analyzer.client = MagicMock()
+    response = MagicMock()
+    response.content = [MagicMock(text='report')]
+    analyzer.client.messages.create = AsyncMock(return_value=response)
+    await analyzer.generate_forensic_report('0xABC', {'chain_id': chain_id}, 'token')
+    content = analyzer.client.messages.create.call_args.kwargs['messages'][0]['content']
+    assert f'analyst on {expected}.' in content
+
+
+def test_firewall_examples_are_chain_neutral():
+    from utils.firewall_prompt import FIREWALL_SYSTEM_PROMPT
+
+    sending_line = next(line for line in FIREWALL_SYSTEM_PROMPT.splitlines() if '"sending"' in line)
+    assert 'BNB' not in sending_line
+    assert 'native token' in sending_line
+    assert 'BNB CHAIN WHITELISTED ROUTERS' in FIREWALL_SYSTEM_PROMPT
+
+
+def test_firewall_context_does_not_invent_chain_id():
+    from utils.ai_analyzer import AIAnalyzer
+
+    analyzer = AIAnalyzer.__new__(AIAnalyzer)
+    assert 'Chain ID: Unknown' in analyzer._build_firewall_context({}, {})
+    assert 'Chain ID: Unknown' in analyzer._build_firewall_context({'chainId': None}, {})
