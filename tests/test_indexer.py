@@ -1,5 +1,6 @@
 """Tests for core.indexer.DeployerIndexer."""
 
+import aiohttp
 import pytest
 import pytest_asyncio
 import asyncio
@@ -8,6 +9,10 @@ from types import SimpleNamespace
 from core.database import Database
 from core.indexer import DeployerIndexer
 from services.explorer_service import ExplorerService
+
+
+DEPLOYER = '0x' + '1' * 40
+FUNDER = '0x' + '2' * 40
 
 
 @pytest_asyncio.fixture
@@ -123,19 +128,19 @@ class TestDeployerIndexer:
         response = AsyncMock()
         response.status = 200
         response.json.return_value = {'status': '1', 'result': [
-            {'from': '0xFunder', 'to': '0xDeployer', 'value': '123', 'isError': '0'}
+            {'from': FUNDER, 'to': DEPLOYER, 'value': '123', 'isError': '0'}
         ]}
         session = MagicMock()
         session.get.return_value.__aenter__.return_value = response
         with patch('aiohttp.ClientSession') as factory:
             factory.return_value.__aenter__.return_value = session
-            result = await DeployerIndexer(web3, db)._fetch_funder('0xDeployer', chain_id)
-        assert result == {'funder': '0xFunder', 'value': 123}
+            result = await DeployerIndexer(web3, db)._fetch_funder(DEPLOYER, chain_id)
+        assert result == {'funder': FUNDER, 'value': 123}
         args, kwargs = session.get.call_args
         assert args == ('https://api.etherscan.io/v2/api',)
         assert kwargs['params'] == {
             'chainid': chain_id, 'module': 'account', 'action': 'txlist',
-            'address': '0xDeployer', 'startblock': 0, 'endblock': 99999999,
+            'address': DEPLOYER, 'startblock': 0, 'endblock': 99999999,
             'page': 1, 'offset': 5, 'sort': 'asc', 'apikey': 'test_key',
         }
         assert kwargs['timeout'].total == 10
@@ -145,7 +150,7 @@ class TestDeployerIndexer:
     async def test_etherscan_funder_missing_value_or_http_error_is_unknown(self, db, status, missing_value):
         web3 = MagicMock()
         web3._get_adapter.return_value = SimpleNamespace(chain_id=56, etherscan_api_key='test_key')
-        tx = {'from': '0xFunder', 'to': '0xDeployer', 'isError': '0'}
+        tx = {'from': FUNDER, 'to': DEPLOYER, 'isError': '0'}
         if not missing_value:
             tx['value'] = '123'
         response = AsyncMock()
@@ -155,7 +160,7 @@ class TestDeployerIndexer:
         session.get.return_value.__aenter__.return_value = response
         with patch('aiohttp.ClientSession') as factory:
             factory.return_value.__aenter__.return_value = session
-            result = await DeployerIndexer(web3, db)._fetch_funder('0xDeployer', 56)
+            result = await DeployerIndexer(web3, db)._fetch_funder(DEPLOYER, 56)
         assert result is None
 
     @pytest.mark.asyncio
@@ -261,12 +266,12 @@ class TestDeployerIndexer:
     async def test_etherscan_skips_failed_or_nonpositive_funding(self, db, invalid, has_later_funding):
         web3 = MagicMock()
         web3._get_adapter.return_value = SimpleNamespace(chain_id=56, etherscan_api_key='test_key')
-        record = {'from': '0xFalseFunder', 'to': '0xDeployer', 'value': '123', 'isError': '0', **invalid}
+        record = {'from': '0x' + '3' * 40, 'to': DEPLOYER, 'value': '123', 'isError': '0', **invalid}
         if invalid.get('isError', '0') is None:
             del record['isError']
         records = [record]
         if has_later_funding:
-            records.append({'from': '0xRealFunder', 'to': '0xDeployer', 'value': '456', 'isError': '0'})
+            records.append({'from': FUNDER, 'to': DEPLOYER, 'value': '456', 'isError': '0'})
         response = AsyncMock()
         response.status = 200
         response.json.return_value = {'status': '1', 'result': records}
@@ -274,8 +279,8 @@ class TestDeployerIndexer:
         session.get.return_value.__aenter__.return_value = response
         with patch('aiohttp.ClientSession') as factory:
             factory.return_value.__aenter__.return_value = session
-            result = await DeployerIndexer(web3, db)._fetch_funder('0xDeployer', 56)
-        assert result == ({'funder': '0xRealFunder', 'value': 456} if has_later_funding else None)
+            result = await DeployerIndexer(web3, db)._fetch_funder(DEPLOYER, 56)
+        assert result == ({'funder': FUNDER, 'value': 456} if has_later_funding else None)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('value', [0, 2**63 - 1, 2**63, 2**256 - 1])
@@ -287,3 +292,54 @@ class TestDeployerIndexer:
         row = await cursor.fetchone()
         assert row is not None
         assert tuple(row) == (str(value), 'text')
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('malformed', [
+        None, [], 'not-an-object', {},
+        {'from': FUNDER, 'to': None, 'value': '123', 'isError': '0'},
+        {'from': FUNDER, 'value': '123', 'isError': '0'},
+        {'to': DEPLOYER, 'value': '123', 'isError': '0'},
+        {'from': None, 'to': DEPLOYER, 'value': '123', 'isError': '0'},
+        {'from': 'not-an-address', 'to': DEPLOYER, 'value': '123', 'isError': '0'},
+        {'from': '0x' + 'g' * 40, 'to': DEPLOYER, 'value': '123', 'isError': '0'},
+        {'from': '0x1234', 'to': DEPLOYER, 'value': '123', 'isError': '0'},
+        {'from': FUNDER, 'to': [], 'value': '123', 'isError': '0'},
+        {'from': [], 'to': DEPLOYER, 'value': '123', 'isError': '0'},
+    ])
+    @pytest.mark.parametrize('has_later_funding', [True, False])
+    async def test_etherscan_skips_malformed_funder_records(self, db, malformed, has_later_funding):
+        web3 = MagicMock()
+        web3._get_adapter.return_value = SimpleNamespace(chain_id=56, etherscan_api_key='test_key')
+        records = [malformed]
+        if has_later_funding:
+            records.append({'from': FUNDER, 'to': DEPLOYER, 'value': '456', 'isError': '0'})
+        response = AsyncMock()
+        response.status = 200
+        response.json.return_value = {'status': '1', 'result': records}
+        session = MagicMock()
+        session.get.return_value.__aenter__.return_value = response
+        with patch('aiohttp.ClientSession') as factory:
+            factory.return_value.__aenter__.return_value = session
+            result = await DeployerIndexer(web3, db)._fetch_funder(DEPLOYER, 56)
+        assert result == ({'funder': FUNDER, 'value': 456} if has_later_funding else None)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('method', ['_index_contract', '_fetch_funder'])
+    async def test_explorer_exception_logs_do_not_expose_api_key(self, db, caplog, method):
+        synthetic_key = 'synthetic-etherscan-test-key'
+        error = aiohttp.ClientResponseError(
+            SimpleNamespace(real_url=f'https://api.etherscan.io/v2/api?apikey={synthetic_key}'),
+            (), status=429, message=synthetic_key,
+        )
+        web3 = MagicMock()
+        web3._get_adapter.return_value = SimpleNamespace(chain_id=56, etherscan_api_key=synthetic_key)
+        web3.get_contract_creation_info = AsyncMock(side_effect=error)
+        session = MagicMock()
+        session.get.return_value.__aenter__.side_effect = error
+        with patch('aiohttp.ClientSession') as factory:
+            factory.return_value.__aenter__.return_value = session
+            result = await getattr(DeployerIndexer(web3, db), method)(DEPLOYER, 56)
+        assert result is None
+        assert 'ClientResponseError' in caplog.text
+        assert synthetic_key not in caplog.text
+        assert 'https://' not in caplog.text

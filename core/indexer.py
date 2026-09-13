@@ -7,7 +7,7 @@ import time
 from typing import Optional
 
 from adapters.evm_base import _get_explorer_backend
-from services.explorer_service import explorer_service
+from services.explorer_service import _is_address, explorer_service
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +132,7 @@ class DeployerIndexer:
                 logger.error(f"Watch-deployer check failed for {deployer}: {e}")
 
         except Exception as e:
-            logger.error(f"Error indexing {address}: {e}")
+            logger.error(f"Error indexing {address}: {type(e).__name__}")
 
     async def _send_watch_alert(self, deployer: str, chain_id: int, new_contract: str, watch_record: dict) -> bool:
         """Send a Telegram notification when a watched deployer creates a new contract."""
@@ -209,6 +209,12 @@ class DeployerIndexer:
                     if data.get('status') == '1' and data.get('result'):
                         # Find first incoming tx (to == deployer)
                         for tx in data['result']:
+                            if (
+                                not isinstance(tx, dict)
+                                or not _is_address(tx.get('to'))
+                                or not _is_address(tx.get('from'))
+                            ):
+                                continue
                             value = tx.get('value')
                             if (
                                 tx.get('isError') != '0'
@@ -224,5 +230,5 @@ class DeployerIndexer:
                                 }
             return None
         except Exception as e:
-            logger.error(f"Error fetching funder for {deployer_address}: {e}")
+            logger.error(f"Error fetching funder for {deployer_address}: {type(e).__name__}")
             return None
