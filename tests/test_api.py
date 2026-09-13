@@ -100,6 +100,17 @@ class TestHealthEndpoint:
         assert "ai_available" not in data
 
 
+class TestLandingEndpoint:
+    def test_root_redirects_to_marketing_site(self, client):
+        resp = client.get("/", follow_redirects=False)
+        assert resp.status_code == 301
+        assert resp.headers["location"] == "https://shieldbotsecurity.online/"
+
+    def test_landing_assets_return_not_found(self, client):
+        resp = client.get("/assets/index-BP6m19EZ.js")
+        assert resp.status_code == 404
+
+
 class TestFirewallFallback:
     def test_firewall_fallback_when_ai_unavailable(self, client):
         """When composite pipeline fails and AI is unavailable, fallback should return heuristic result."""

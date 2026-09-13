@@ -1,0 +1,4 @@
+Contact: mailto:support@shieldbotsecurity.online
+Expires: 2027-09-13T00:00:00.000Z
+Canonical: https://shieldbotsecurity.online/.well-known/security.txt
+Preferred-Languages: en

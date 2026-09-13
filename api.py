@@ -4,7 +4,6 @@ FastAPI backend for the Chrome extension transaction firewall
 Runs alongside bot.py on the VPS
 """
 
-import os
 import hmac
 import json
 import time
@@ -16,8 +15,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, Dict, Any, List
 
@@ -243,9 +241,6 @@ app = FastAPI(
 # Mount RPC proxy router
 app.include_router(rpc_router)
 
-# Serve Vite-built landing page assets (hashed JS/CSS bundles)
-app.mount("/assets", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "landing", "assets")), name="landing-assets")
-
 # CORS: configurable via CORS_ALLOW_ORIGINS env (comma-separated)
 # Parsed at startup from Settings; fallback to localhost dev origins.
 _boot_settings = Settings()
@@ -450,9 +445,8 @@ _watch_alerts_limiter = RateLimiter(requests_per_minute=10, burst=5)
 
 @app.get("/", include_in_schema=False)
 async def landing_page():
-    """Marketing landing page."""
-    landing_path = os.path.join(os.path.dirname(__file__), "landing", "index.html")
-    return FileResponse(landing_path, media_type="text/html")
+    """Redirect to the marketing site; the API host does not serve the landing page."""
+    return RedirectResponse("https://shieldbotsecurity.online/", status_code=301)
 
 
 class BetaSignupRequest(BaseModel):
