@@ -62,7 +62,7 @@ class TokenScanner:
             'symbol': None,
             'decimals': None,
             'total_supply': None,
-            'is_honeypot': False,
+            'is_honeypot': None,
             'safety_level': 'unknown',
             'risk_score': 0,
             'confidence': 0,
@@ -242,12 +242,23 @@ class TokenScanner:
     async def _check_honeypot(self, address: str, result: Dict, chain_id: int = 56):
         """Check if token is a honeypot with cross-validation"""
         if chain_id != 56:
-            # Honeypot.is API only supports BSC — skip for other chains
-            result['is_honeypot'] = False
+            result['is_honeypot'] = None
+            result['checks']['can_sell'] = None
+            result['honeypot_status'] = 'unknown'
+            result['honeypot_reason'] = 'Legacy honeypot check unavailable for this chain'
+            result['risks'].append('Honeypot and sellability unknown: legacy check unavailable for this chain')
             return
         try:
             honeypot_result = await self.web3.check_honeypot(address)
-            is_honeypot = honeypot_result.get('is_honeypot', False)
+            is_honeypot = honeypot_result.get('is_honeypot')
+            result['honeypot_status'] = honeypot_result.get('status', 'ok' if is_honeypot is not None else 'unknown')
+            result['honeypot_reason'] = honeypot_result.get('reason')
+            if is_honeypot is None:
+                result['is_honeypot'] = None
+                result['checks']['can_sell'] = None
+                reason = honeypot_result.get('reason') or 'provider data unavailable'
+                result['risks'].append(f'Honeypot and sellability unknown: {reason}')
+                return
 
             if is_honeypot:
                 is_verified = result.get('is_verified', False)
@@ -267,32 +278,52 @@ class TokenScanner:
 
         except Exception as e:
             logger.error(f"Error checking honeypot: {e}")
-            result['is_honeypot'] = False
+            result['is_honeypot'] = None
+            result['checks']['can_sell'] = None
+            result['honeypot_status'] = 'unknown'
+            result['honeypot_reason'] = 'Honeypot provider failed'
+            result['risks'].append('Honeypot and sellability unknown: provider failed')
 
     async def _check_taxes(self, address: str, result: Dict, chain_id: int = 56) -> bool:
         """Check buy and sell taxes. Returns True if check succeeded."""
         if chain_id != 56:
-            # Honeypot.is tax API only supports BSC
+            result['buy_tax'] = None
+            result['sell_tax'] = None
+            result['tax_status'] = 'unknown'
+            result['tax_reason'] = 'Legacy tax check unavailable for this chain'
+            result['risks'].append('Buy/sell taxes unknown: legacy check unavailable for this chain')
             return False
+        result['buy_tax'] = None
+        result['sell_tax'] = None
         try:
             tax_info = await self.web3.get_tax_info(address)
 
-            buy_tax = tax_info.get('buy_tax', 0)
-            sell_tax = tax_info.get('sell_tax', 0)
+            buy_tax = tax_info.get('buy_tax')
+            sell_tax = tax_info.get('sell_tax')
 
             result['buy_tax'] = buy_tax
             result['sell_tax'] = sell_tax
 
-            if buy_tax > 10:
+            if buy_tax is not None and buy_tax > 10:
                 result['risks'].append(f"High buy tax: {buy_tax}%")
-            if sell_tax > 10:
+            if sell_tax is not None and sell_tax > 10:
                 result['risks'].append(f"High sell tax: {sell_tax}%")
-            if sell_tax > 50:
+            if sell_tax is not None and sell_tax > 50:
                 result['risks'].append("Extremely high sell tax - possible honeypot")
 
+            if buy_tax is None or sell_tax is None:
+                result['tax_status'] = 'unknown'
+                result['tax_reason'] = tax_info.get('reason') or 'Tax provider data incomplete'
+                result['risks'].append(f"Buy/sell taxes unknown: {result['tax_reason']}")
+                return False
+            result['tax_status'] = 'ok'
+            result['tax_reason'] = None
             return True
         except Exception as e:
             logger.error(f"Error checking taxes: {e}")
+            result['tax_status'] = 'unknown'
+            result['tax_reason'] = 'Tax provider failed'
+            result['risks'].append('Buy/sell taxes unknown: provider failed')
             return False
 
     def _analyze_source_code(self, source_code: str, result: Dict):
@@ -325,9 +356,13 @@ class TokenScanner:
 
         if result['is_honeypot']:
             return 'danger'
-        if not checks.get('can_sell'):
+        if checks.get('can_sell') is False:
             return 'danger'
-        if result.get('sell_tax', 0) > 50:
+        if result.get('is_honeypot') is None or checks.get('can_sell') is None:
+            return 'unknown'
+        sell_tax = result.get('sell_tax')
+        buy_tax = result.get('buy_tax')
+        if sell_tax is not None and sell_tax > 50:
             return 'danger'
 
         warning_count = 0
@@ -335,11 +370,14 @@ class TokenScanner:
             warning_count += 1
         if not checks.get('liquidity_locked'):
             warning_count += 1
-        if result.get('buy_tax', 0) > 10 or result.get('sell_tax', 0) > 10:
+        if (buy_tax is not None and buy_tax > 10) or (sell_tax is not None and sell_tax > 10):
             warning_count += 1
 
         if warning_count >= 2:
             return 'warning'
+
+        if buy_tax is None or sell_tax is None:
+            return 'unknown'
 
         if all([
             checks.get('can_buy'),
