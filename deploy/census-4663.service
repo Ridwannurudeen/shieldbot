@@ -1,0 +1,25 @@
+[Unit]
+Description=ShieldBot Robinhood Chain observation census
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=shieldbot-census
+Group=shieldbot-census
+WorkingDirectory=/opt/shieldbot
+EnvironmentFile=/etc/shieldbot/census-4663.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/shieldbot/venv/bin/python -m scripts.census_4663.collect --data-dir /var/lib/shieldbot-census-4663 --follow
+Restart=on-failure
+RestartSec=15
+StateDirectory=shieldbot-census-4663
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/shieldbot-census-4663
+
+[Install]
+WantedBy=multi-user.target
