@@ -12,8 +12,21 @@ except ImportError:
 from datetime import datetime, timezone
 
 from core.chain_adapter import ChainAdapter
+from services.explorer_service import explorer_service
 
 logger = logging.getLogger(__name__)
+
+EXPLORER_BACKENDS = {
+    1: 'etherscan', 56: 'etherscan', 8453: 'etherscan',
+    42161: 'etherscan', 137: 'etherscan', 10: 'etherscan', 204: 'etherscan',
+    4663: 'sourcify_blockscout',
+}
+
+
+def _get_explorer_backend(chain_id: int) -> str:
+    if chain_id not in EXPLORER_BACKENDS:
+        raise ValueError(f"Unsupported explorer chain: {chain_id}")
+    return EXPLORER_BACKENDS[chain_id]
 
 FACTORY_ABI = [
     {
@@ -74,13 +87,15 @@ class EvmAdapter(ChainAdapter):
         factory_address: str = None,
         whitelisted_routers: Dict[str, str] = None,
     ):
+        self._explorer_backend = _get_explorer_backend(chain_id_value)
+        self._explorer_service = explorer_service
         self._chain_id = chain_id_value
         self._chain_name = chain_name_value
         self.w3 = Web3(Web3.HTTPProvider(rpc_url))
         self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
         self.etherscan_api_key = etherscan_api_key
         self.etherscan_api_url = 'https://api.etherscan.io/v2/api'
-        self._honeypot_chain_id = honeypot_chain_id or chain_id_value
+        self._honeypot_chain_id = honeypot_chain_id
         self._known_lockers = known_lockers or {}
         self._quote_tokens = quote_tokens or []
         self._factory_address = factory_address
@@ -134,7 +149,14 @@ class EvmAdapter(ChainAdapter):
             logger.error(f"[{self._chain_name}] Error getting bytecode: {e}")
             return None
 
-    async def is_verified_contract(self, address: str) -> Tuple[bool, Optional[str]]:
+    async def is_verified_contract(self, address: str) -> Tuple[Optional[bool], Optional[str]]:
+        """Return (verification, source); None means unknown, False means unverified."""
+        if self._explorer_backend == 'sourcify_blockscout':
+            result = await self._explorer_service.get_verification_status(address, self._chain_id)
+            if result.status == 'unknown':
+                logger.warning("[%s] Verification unknown: %s", self._chain_name, result.reason)
+                return (None, None)
+            return (result.status == 'verified', None)
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
                 params = {
@@ -145,18 +167,42 @@ class EvmAdapter(ChainAdapter):
                     'apikey': self.etherscan_api_key,
                 }
                 async with session.get(self.etherscan_api_url, params=params) as resp:
+                    if resp.status != 200:
+                        logger.warning("[%s] Verification unknown: HTTP %s", self._chain_name, resp.status)
+                        return (None, None)
                     data = await resp.json()
-                    if data['status'] == '1' and data['result']:
-                        source_code = data['result'][0].get('SourceCode', '')
+                    if (
+                        isinstance(data, dict) and data.get('status') == '1'
+                        and isinstance(data.get('result'), list) and len(data['result']) == 1
+                        and isinstance(data['result'][0], dict)
+                        and isinstance(data['result'][0].get('SourceCode'), str)
+                    ):
+                        source_code = data['result'][0]['SourceCode']
                         is_verified = len(source_code) > 0
                         return (is_verified, source_code if is_verified else None)
-            return (False, None)
+            logger.warning("[%s] Verification unknown: missing source response", self._chain_name)
+            return (None, None)
         except Exception as e:
-            logger.error(f"[{self._chain_name}] Error checking verification: {e}")
-            return (False, None)
+            logger.error("[%s] Error checking verification: %s", self._chain_name, type(e).__name__)
+            return (None, None)
 
     async def get_contract_creation_info(self, address: str) -> Optional[Dict]:
         try:
+            if self._explorer_backend == 'sourcify_blockscout':
+                result = await self._explorer_service.get_contract_creation_info(address, self._chain_id)
+                if result.status == 'unknown':
+                    logger.warning("[%s] Creation unknown: %s", self._chain_name, result.reason)
+                    return None
+                creation_info = {**result.data, 'creation_time': None, 'age_days': None}
+                try:
+                    tx = await self._call_with_retry(self.w3.eth.get_transaction, creation_info['tx_hash'])
+                    block = await self._call_with_retry(self.w3.eth.get_block, tx['blockNumber'])
+                    creation_time = datetime.fromtimestamp(block['timestamp'], tz=timezone.utc)
+                    creation_info['creation_time'] = creation_time.isoformat()
+                    creation_info['age_days'] = (datetime.now(timezone.utc) - creation_time).days
+                except Exception as e:
+                    logger.warning("[%s] Creation time unknown: %s", self._chain_name, type(e).__name__)
+                return creation_info
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
                 params = {
                     'chainid': self._chain_id,
@@ -166,6 +212,9 @@ class EvmAdapter(ChainAdapter):
                     'apikey': self.etherscan_api_key,
                 }
                 async with session.get(self.etherscan_api_url, params=params) as resp:
+                    if resp.status != 200:
+                        logger.warning("[%s] Creation unknown: HTTP %s", self._chain_name, resp.status)
+                        return None
                     data = await resp.json()
                     if data['status'] == '1' and data['result']:
                         result = data['result'][0]
@@ -182,7 +231,7 @@ class EvmAdapter(ChainAdapter):
                         }
             return None
         except Exception as e:
-            logger.error(f"[{self._chain_name}] Error getting creation info: {e}")
+            logger.error("[%s] Error getting creation info: %s", self._chain_name, type(e).__name__)
             return None
 
     async def get_token_info(self, address: str) -> Dict:
