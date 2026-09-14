@@ -437,3 +437,168 @@ async def test_goplus_escape_is_normalized_inside_service(failure, partial):
         assert data['field_providers']['buy_tax'] == 'honeypot.is'
     else:
         assert all(data[field] is None for field in FIELDS)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('verified,age,score', [(None, 100, 0), (True, None, 0), (None, None, 0), (False, 100, 25)])
+async def test_structural_tristate_coverage_and_penalty(verified, age, score):
+    from analyzers.structural import StructuralAnalyzer
+
+    service = MagicMock()
+    service.fetch_contract_data = AsyncMock(return_value={
+        'is_contract': True, 'is_verified': verified, 'contract_age_days': age,
+    })
+    sniffer = MagicMock()
+    sniffer.is_enabled.return_value = True
+    sniffer.fetch = AsyncMock(return_value={})
+    result = await StructuralAnalyzer(service, sniffer).analyze(AnalysisContext(ADDRESS))
+    assert result.score == score
+    assert ('Contract not verified' in result.flags) is (verified is False)
+    assert result.data['coverage']['is_verified'] is (verified is not None)
+    assert result.data['coverage']['contract_age_days'] is (age is not None)
+    if verified is None or age is None:
+        assert result.data['status'] == 'unknown'
+        assert result.data['reason']
+    else:
+        assert result.data['status'] == 'ok'
+    if verified is None:
+        sniffer.fetch.assert_not_awaited()
+    result.weight = 1
+    risk = RiskEngine().compute_from_results([result], is_token=False)
+    assert risk['status'] == result.data['status']
+    if verified is None or age is None:
+        assert risk['risk_level'] == 'MEDIUM'
+        assert risk['risk_archetype'] == 'unknown'
+        assert risk['coverage_reasons']['structural'] == result.data['reason']
+
+
+@pytest.mark.parametrize('entrypoint', ['direct', 'registry'])
+@pytest.mark.parametrize('verified,age', [(None, 100), (True, None), (None, None)])
+def test_structural_unknown_reaches_both_risk_entrypoints(entrypoint, verified, age):
+    contract = {'is_contract': True, 'is_verified': verified, 'contract_age_days': age}
+    honeypot = {'is_honeypot': False, 'can_sell': True, 'buy_tax': 0, 'sell_tax': 0}
+    market = {'liquidity_usd': 200000, 'pair_age_hours': 100}
+    ethos = {'reputation_score': 80}
+    if entrypoint == 'direct':
+        risk = RiskEngine().compute_composite_risk(contract, honeypot, market, ethos)
+    else:
+        risk = RiskEngine().compute_from_results([
+            AnalyzerResult('structural', .4, 0, data=contract),
+            AnalyzerResult('market', .25, 0, data=market),
+            AnalyzerResult('behavioral', .2, 0, data=ethos),
+            AnalyzerResult('honeypot', .15, 0, data=honeypot),
+        ])
+    assert risk['status'] == 'unknown'
+    assert risk['coverage']['structural'] < 1
+    assert risk['risk_level'] == 'MEDIUM'
+    assert risk['coverage_reasons']['structural']
+    assert risk['risk_archetype'] == 'unknown'
+    assert 'Contract not verified' not in risk['critical_flags']
+    assert risk['rug_probability'] == 0
+
+
+@pytest.mark.parametrize('verified,expected', [(None, 8), (False, 55)])
+def test_unknown_verification_does_not_trigger_unverified_escalation(verified, expected):
+    risk = RiskEngine().compute_from_results([
+        AnalyzerResult('structural', .4, 20, data={
+            'is_contract': True, 'is_verified': verified, 'contract_age_days': 100,
+            'has_mint': True, 'ownership_renounced': False,
+        }),
+        AnalyzerResult('market', .25, 0, data={'liquidity_usd': 50000}),
+        AnalyzerResult('behavioral', .2, 0, data={'reputation_score': 80}),
+        AnalyzerResult('honeypot', .15, 0, data={
+            'is_honeypot': False, 'can_sell': True, 'buy_tax': 0, 'sell_tax': 0,
+        }),
+    ])
+    assert risk['rug_probability'] == expected
+
+
+@pytest.mark.asyncio
+async def test_structural_preserves_explicit_service_unknown():
+    from analyzers.structural import StructuralAnalyzer
+
+    service = MagicMock()
+    service.fetch_contract_data = AsyncMock(return_value={
+        'is_contract': True, 'is_verified': True, 'contract_age_days': 100,
+        'status': 'unknown', 'reason': 'Bytecode provider unavailable',
+    })
+    result = await StructuralAnalyzer(service).analyze(AnalysisContext(ADDRESS))
+    assert result.data['status'] == 'unknown'
+    result.weight = 1
+    risk = RiskEngine().compute_from_results([result], is_token=False)
+    assert risk['status'] == 'unknown'
+    assert risk['coverage']['structural'] < 1
+    assert risk['coverage_reasons']['structural'] == 'Bytecode provider unavailable'
+    assert risk['risk_level'] == 'MEDIUM'
+
+
+@pytest.mark.parametrize('entrypoint', ['direct', 'registry'])
+@pytest.mark.parametrize('component', ['structural', 'market', 'behavioral', 'honeypot'])
+def test_explicit_unknown_overrides_complete_fields(entrypoint, component):
+    data = {
+        'structural': {'is_contract': True, 'is_verified': True, 'contract_age_days': 100},
+        'market': {'liquidity_usd': 200000, 'pair_age_hours': 100},
+        'behavioral': {'reputation_score': 80},
+        'honeypot': {'is_honeypot': False, 'can_sell': True, 'buy_tax': 0, 'sell_tax': 0},
+    }
+    data[component]['coverage'] = {field: True for field in data[component]}
+    data[component]['status'] = 'unknown'
+    data[component]['reason'] = 'Provider response incomplete'
+    if entrypoint == 'direct':
+        risk = RiskEngine().compute_composite_risk(
+            data['structural'], data['honeypot'], data['market'], data['behavioral'],
+        )
+    else:
+        risk = RiskEngine().compute_from_results([
+            AnalyzerResult(name, weight, 0, data=data[name])
+            for name, weight in [('structural', .4), ('market', .25), ('behavioral', .2), ('honeypot', .15)]
+        ])
+    assert risk['status'] == 'unknown'
+    assert risk['coverage'][component] < 1
+    assert risk['coverage_reasons'][component] == 'Provider response incomplete'
+    assert risk['risk_level'] == 'MEDIUM'
+    assert risk['risk_archetype'] == 'unknown'
+    assert risk['rug_probability'] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('unknown', [False, True])
+async def test_zero_weight_result_preserves_unknown_without_invalidating_skip(unknown):
+    from core.registry import AnalyzerRegistry
+
+    registry = AnalyzerRegistry()
+    for result in [
+        AnalyzerResult('structural', 1, 0, data={'is_verified': True, 'contract_age_days': 100}),
+        AnalyzerResult('intent', 0, 0, data={
+            'status': 'unknown', 'coverage': {'selector_verification': False},
+            'reason': 'Verification unavailable',
+        } if unknown else {'skipped': True, 'reason': 'Not applicable'}),
+    ]:
+        analyzer = MagicMock()
+        analyzer.name = result.name
+        analyzer.analyze = AsyncMock(return_value=result)
+        registry.register(analyzer)
+    results = await registry.run_all(AnalysisContext(ADDRESS, is_token=False))
+    risk = RiskEngine().compute_from_results(results, is_token=False)
+    assert risk['status'] == ('unknown' if unknown else 'ok')
+    assert risk['risk_level'] == ('MEDIUM' if unknown else 'LOW')
+    assert risk['coverage']['intent'] == (0 if unknown else 1)
+
+
+@pytest.mark.asyncio
+async def test_honeypot_preserves_explicit_service_unknown():
+    service = MagicMock()
+    service.fetch_honeypot_data = AsyncMock(return_value={
+        'is_honeypot': False, 'can_buy': True, 'can_sell': True,
+        'buy_tax': 0, 'sell_tax': 0,
+        'status': 'unknown', 'reason': 'Provider response incomplete',
+    })
+    result = await HoneypotAnalyzer(service).analyze(AnalysisContext(ADDRESS))
+    assert result.data['status'] == 'unknown'
+    assert any('unknown' in flag for flag in result.flags)
+    result.weight = 1
+    risk = RiskEngine().compute_from_results([result])
+    assert risk['status'] == 'unknown'
+    assert risk['coverage']['honeypot'] < 1
+    assert risk['coverage_reasons']['honeypot'] == 'Provider response incomplete'
+    assert risk['risk_level'] == 'MEDIUM'

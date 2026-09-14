@@ -4,6 +4,7 @@ import logging
 from typing import List
 
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
+from utils.web3_client import UnsupportedChainError
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,8 @@ class AnalyzerRegistry:
 
         final = []
         for analyzer, result in zip(self._analyzers, results):
+            if isinstance(result, UnsupportedChainError):
+                raise result
             if isinstance(result, Exception):
                 logger.error(f"Analyzer {analyzer.name} failed: {result}")
                 # Cautious neutral score (not 0/safe) — fail-closed on missing data

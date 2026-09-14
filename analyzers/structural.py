@@ -28,11 +28,24 @@ class StructuralAnalyzer(Analyzer):
     async def analyze(self, ctx: AnalysisContext) -> AnalyzerResult:
         data = await self._service.fetch_contract_data(ctx.address, chain_id=ctx.chain_id)
 
+        data = dict(data)
+        data['coverage'] = {
+            **data.get('coverage', {}),
+            'is_verified': data.get('is_verified') is not None,
+            'contract_age_days': data.get('contract_age_days') is not None,
+        }
+        data['status'] = 'unknown' if data.get('status') == 'unknown' or not all(data['coverage'].values()) else 'ok'
+        if data['status'] == 'unknown':
+            missing = ', '.join(field for field, covered in data['coverage'].items() if not covered)
+            data['reason'] = data.get('reason') or (
+                f'Structural data unknown: {missing}' if missing else 'Structural provider data incomplete'
+            )
+
         sniffer_data = {}
         if (
             self._sniffer
             and self._sniffer.is_enabled()
-            and not data.get("is_verified")
+            and data.get("is_verified") is False
             and data.get("is_contract")
         ):
             sniffer_data = await self._sniffer.fetch(ctx.address, chain_id=ctx.chain_id)
@@ -53,7 +66,7 @@ class StructuralAnalyzer(Analyzer):
         if d.get("is_contract") is False:
             score += 50
             flags.append("No contract bytecode at address (destroyed or EOA)")
-        elif not d.get("is_verified"):
+        elif d.get("is_verified") is False:
             ts_score = sniffer.get("score")  # 0-100, 100 = safest
             if ts_score is not None:
                 if ts_score <= 30:

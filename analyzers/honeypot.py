@@ -39,7 +39,7 @@ class HoneypotAnalyzer(Analyzer):
         if data.get('simulation_failed'):
             data['coverage']['can_sell'] = False
             data['reason'] = data.get('reason') or 'Honeypot simulation failed (unresolved)'
-        data['status'] = 'ok' if all(data['coverage'].values()) else 'unknown'
+        data['status'] = 'unknown' if data.get('status') == 'unknown' or not all(data['coverage'].values()) else 'ok'
         if data['status'] == 'unknown':
             data['reason'] = data.get('reason') or 'Incomplete honeypot provider data'
         score, flags = self._compute(data)

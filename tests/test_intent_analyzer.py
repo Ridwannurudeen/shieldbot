@@ -75,13 +75,51 @@ async def test_missing_calldata_graceful(analyzer):
 
 @pytest.mark.asyncio
 async def test_unknown_selector_flagged(analyzer):
-    """Unknown selector should get a moderate score."""
+    """Unknown selector on a confirmed unverified token gets a moderate score."""
     calldata = "0xdeadbeef" + "0" * 128
     ctx = AnalysisContext(
         address="0x" + "b" * 40,
         chain_id=56,
-        extra={'calldata': calldata, 'value': '0'},
+        extra={'calldata': calldata, 'value': '0', 'is_verified': False},
     )
     result = await analyzer.analyze(ctx)
     assert result.score >= 20
     assert any('Unknown function selector' in f for f in result.flags)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('verified', [None, True, False])
+async def test_unknown_selector_tristate_reaches_risk(analyzer, verified):
+    from core.risk_engine import RiskEngine
+
+    result = await analyzer.analyze(AnalysisContext(
+        address='0x' + 'b' * 40,
+        extra={'calldata': '0xdeadbeef', 'is_verified': verified},
+    ))
+    assert result.score == (20 if verified is False else 0)
+    assert bool(result.flags) is (verified is not True)
+    assert result.data['status'] == ('unknown' if verified is None else 'ok')
+    result.weight = 1
+    risk = RiskEngine().compute_from_results([result], is_token=False)
+    assert risk['coverage']['intent'] == (0 if verified is None else 1)
+    assert risk['status'] == ('unknown' if verified is None else 'ok')
+    if verified is None:
+        assert risk['risk_level'] == 'MEDIUM'
+        assert risk['coverage_reasons']['intent']
+        assert risk['risk_archetype'] == 'unknown'
+
+
+@pytest.mark.asyncio
+async def test_intent_value_parser_propagates_unsupported_chain(analyzer):
+    from unittest.mock import MagicMock
+    from utils.web3_client import UnsupportedChainError
+
+    value = MagicMock()
+    failure = UnsupportedChainError('unsupported chain')
+    value.__str__.side_effect = failure
+    with pytest.raises(UnsupportedChainError) as raised:
+        await analyzer.analyze(AnalysisContext(
+            address='0x' + 'a' * 40,
+            extra={'calldata': '0x095ea7b3' + '0' * 128, 'value': value},
+        ))
+    assert raised.value is failure
