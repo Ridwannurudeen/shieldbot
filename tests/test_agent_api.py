@@ -74,7 +74,7 @@ def test_chat_calls_advisor(client):
 def test_explain_success(client):
     response = client.post(
         "/api/agent/explain",
-        json={"scan_result": {"risk_score": 85, "risk_level": "HIGH"}},
+        json={"scan_result": {"risk_score": 85, "risk_level": "HIGH", "status": "ok", "coverage": {"honeypot": 1}}},
     )
     assert response.status_code == 200
     data = response.json()
@@ -86,7 +86,7 @@ def test_explain_calls_advisor(client):
 
     advisor = api_module.container.advisor
 
-    scan = {"risk_score": 85, "risk_level": "HIGH"}
+    scan = {"risk_score": 85, "risk_level": "HIGH", "status": "ok", "coverage": {"honeypot": 1}}
     client.post("/api/agent/explain", json={"scan_result": scan})
 
     advisor.explain_scan.assert_awaited_once_with(scan)
@@ -127,7 +127,8 @@ def test_chat_response_includes_scan_data(client):
     import api as api_module
     api_module.container.advisor.chat = AsyncMock(return_value={
         "text": "This is dangerous.",
-        "scan_data": {"address": "0xdead", "risk_level": "HIGH", "risk_score": 90},
+        "scan_data": {"address": "0xdead", "risk_level": "HIGH", "risk_score": 90,
+                      "status": "ok", "coverage": {"honeypot": 1}},
     })
     resp = client.post("/api/agent/chat", json={"message": "Check 0xdead", "user_id": "u1"})
     assert resp.status_code == 200

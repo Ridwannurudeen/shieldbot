@@ -19,6 +19,7 @@ async def test_check_returns_verdict(sb):
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
+        "status": "ok", "coverage": {"honeypot": 1},
         "verdict": "ALLOW", "score": 12, "flags": [],
         "policy_check": {"passed": True, "checks": {}, "failed": [], "needs_owner_approval": False},
         "cached": False, "latency_ms": 100,
@@ -56,6 +57,7 @@ async def test_local_cache_hit(sb):
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
+        "status": "ok", "coverage": {"honeypot": 1},
         "verdict": "ALLOW", "score": 5, "flags": [],
         "policy_check": {"passed": True, "checks": {}, "failed": [], "needs_owner_approval": False},
         "cached": False, "latency_ms": 100,
@@ -70,7 +72,7 @@ async def test_local_cache_hit(sb):
 
 def test_verdict_properties():
     """Verdict model properties work correctly."""
-    v = Verdict(verdict="ALLOW", score=12, flags=[], evidence=None,
+    v = Verdict(verdict="ALLOW", score=12, status="ok", coverage={"honeypot": 1}, flags=[], evidence=None,
                 policy_check={}, cached=False, latency_ms=100)
     assert v.allowed is True
     assert v.blocked is False

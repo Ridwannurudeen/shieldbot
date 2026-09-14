@@ -26,7 +26,7 @@ from utils.web3_client import UnsupportedChainError
 from services.mempool_service import supports_pending_transactions
 from core.config import Settings
 from core.container import ServiceContainer
-from core.extension_formatter import format_extension_alert
+from core.extension_formatter import format_extension_alert, is_scan_incomplete
 from rpc.router import rpc_router
 from rpc.proxy import RPCProxy
 
@@ -542,6 +542,7 @@ class ExplainRequest(BaseModel):
             "risk_score", "risk_level", "classification", "danger_signals",
             "decoded_action", "flags", "critical_flags", "contract_verified",
             "honeypot", "sell_tax", "buy_tax", "is_honeypot",
+            "status", "coverage", "coverage_reasons", "risk_display", "partial",
         }
         return {k: v[k] for k in v if k in allowed}
 
@@ -1057,11 +1058,23 @@ async def _build_signature_only_response(req: FirewallRequest) -> Dict:
 
     sig_type = result.data.get("sig_type", "signature")
     sign_method = req.signMethod or result.data.get("sign_method") or "signature"
+    covered = (
+        sig_type in {'eip2612_permit', 'permit2', 'seaport_order'}
+        and not result.error and 'Failed to parse typed data' not in danger_signals
+    )
+    alert = format_extension_alert({
+        'rug_probability': risk_score, 'risk_level': 'LOW' if covered else 'UNKNOWN',
+        'status': 'ok' if covered else 'unknown', 'coverage': {'signature': int(covered)},
+        'coverage_reasons': {} if covered else {'signature': 'Signature payload analysis unavailable or unsupported'},
+    })
+    if not covered and classification == 'SAFE':
+        classification = 'CAUTION'
     decoded_action = f"{sign_method} signature request"
     if sig_type and sig_type not in {"unknown", sign_method}:
         decoded_action += f" ({sig_type})"
 
     return {
+        **_coverage_fields(alert),
         "classification": classification,
         "risk_score": risk_score,
         "decoded_action": decoded_action,
@@ -1082,11 +1095,11 @@ async def _build_signature_only_response(req: FirewallRequest) -> Dict:
         },
         "analysis": f"Signature-only analysis for {sign_method}",
         "plain_english": (
-            "This signature request contains risky permission patterns. Verify the spender, token, and terms before signing."
-            if risk_score >= 40
+            alert['recommended_action'] if not covered else
+            "This signature request contains risky permission patterns. Verify the spender, token, and terms before signing." if risk_score >= 40
             else "No dangerous signature permission pattern was detected."
         ),
-        "verdict": f"{classification} - Signature risk {risk_score}%",
+        "verdict": f"{classification} - Signature risk {alert['risk_display']}",
         "raw_checks": {
             "signature": result.data,
             "flags": danger_signals,
@@ -1094,7 +1107,8 @@ async def _build_signature_only_response(req: FirewallRequest) -> Dict:
         "shield_score": {
             "overall": risk_score,
             "category_scores": {"signature": risk_score},
-            "risk_level": classification,
+            **_coverage_fields(alert),
+            "risk_level": classification if covered else 'UNKNOWN',
             "threat_type": sig_type or "signature",
             "critical_flags": danger_signals,
             "confidence": 80 if req.typedData else 60,
@@ -1104,7 +1118,7 @@ async def _build_signature_only_response(req: FirewallRequest) -> Dict:
         "greenfield_url": None,
         "chain_id": req.chainId,
         "network": _chain_id_to_name(req.chainId),
-        "partial": False,
+        "partial": not covered,
         "failed_sources": [],
         "policy_mode": "SIGNATURE_ONLY",
     }
@@ -1158,7 +1172,7 @@ async def firewall(req: FirewallRequest, request: Request):
         # 2b. Check cache for recent result
         if container and container.db:
             cached = await container.db.get_contract_score(to_addr, req.chainId, max_age_seconds=300)
-            if cached:
+            if cached and cached.get('category_scores', {}).get('_scan_metadata', {}).get('coverage'):
                 policy_mode = container.settings.policy_mode if container else "BALANCED"
                 req_policy = request.headers.get("X-Policy-Mode")
                 return _build_cached_response(
@@ -1179,7 +1193,7 @@ async def firewall(req: FirewallRequest, request: Request):
             # bridges, governance) should not be penalized by token-specific
             # checks (honeypot simulation, DEX liquidity, etc.)
             is_token = True
-            is_verified = False
+            is_verified = None
             try:
                 is_token = await web3_client.is_token_contract(to_addr, chain_id=req.chainId)
             except UnsupportedChainError:
@@ -1188,7 +1202,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 pass
             try:
                 verified_result = await web3_client.is_verified_contract(to_addr, chain_id=req.chainId)
-                is_verified = verified_result[0] if isinstance(verified_result, tuple) else bool(verified_result)
+                is_verified = verified_result[0] if isinstance(verified_result, tuple) else verified_result
             except UnsupportedChainError:
                 raise
             except Exception:
@@ -1252,11 +1266,15 @@ async def firewall(req: FirewallRequest, request: Request):
                 dex_data = by_name["market"].data if "market" in by_name else {}
                 ethos_data = by_name["behavioral"].data if "behavioral" in by_name else {}
             else:
-                contract_data = {}
-                honeypot_data = {}
-                dex_data = {}
-                ethos_data = {}
+                contract_data, honeypot_data, dex_data, ethos_data = results
 
+            if simulation_result is not None and not simulation_result.get('success'):
+                risk_output = {
+                    **risk_output, 'status': 'unknown',
+                    'coverage': {**risk_output.get('coverage', {}), 'transaction_simulation': 0},
+                    'coverage_reasons': {**risk_output.get('coverage_reasons', {}),
+                        'transaction_simulation': simulation_result.get('revert_reason') or 'Transaction simulation failed'},
+                }
             alert = format_extension_alert(risk_output)
 
             # Policy override may force BLOCK
@@ -1291,11 +1309,14 @@ async def firewall(req: FirewallRequest, request: Request):
                 if boosted > risk_score:
                     risk_score = boosted
                     alert["rug_probability"] = risk_score
+                    if alert['status'] == 'ok':
+                        alert['risk_display'] = f'{risk_score}%'
                     if risk_score >= 71:
                         classification = "BLOCK_RECOMMENDED"
 
             # Shield score breakdown
             shield_score = {
+                **_coverage_fields(alert),
                 "overall": risk_score,
                 "category_scores": risk_output.get("category_scores", {}),
                 "risk_level": risk_output.get("risk_level", "UNKNOWN"),
@@ -1306,6 +1327,7 @@ async def firewall(req: FirewallRequest, request: Request):
 
             # Build response
             response = {
+                **_coverage_fields(alert),
                 "classification": classification,
                 "risk_score": risk_score,
                 "decoded_action": _format_decoded_action(decoded),
@@ -1319,13 +1341,16 @@ async def firewall(req: FirewallRequest, request: Request):
                 },
                 "analysis": f"Composite risk analysis — archetype: {alert['risk_archetype']}, confidence: {alert['confidence']}%",
                 "plain_english": alert["recommended_action"],
-                "verdict": f"{classification} — Rug probability {risk_score}%",
+                "verdict": f"{classification} — Rug probability {alert['risk_display']}",
                 "raw_checks": {
-                    "is_verified": contract_data.get("is_verified", False),
+                    "is_verified": contract_data.get("is_verified"),
                     "scam_matches": len(contract_data.get("scam_matches", [])),
                     "contract_age_days": contract_data.get("contract_age_days"),
-                    "is_honeypot": honeypot_data.get("is_honeypot", False),
-                    "ownership_renounced": contract_data.get("ownership_renounced", False),
+                    "is_honeypot": honeypot_data.get("is_honeypot"),
+                    "buy_tax": honeypot_data.get("buy_tax"),
+                    "sell_tax": honeypot_data.get("sell_tax"),
+                    "can_sell": honeypot_data.get("can_sell"),
+                    "ownership_renounced": contract_data.get("ownership_renounced"),
                     "risk_score_heuristic": risk_score,
                     "whitelisted_router": whitelisted,
                 },
@@ -1335,7 +1360,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 "greenfield_url": None,
                 "chain_id": req.chainId,
                 "network": _chain_id_to_name(req.chainId),
-                "partial": risk_output.get("partial", False),
+                "partial": alert['status'] == 'unknown' or risk_output.get("partial", False),
                 "failed_sources": risk_output.get("failed_sources", []),
                 "policy_mode": risk_output.get("policy_mode", "BALANCED"),
                 "campaign_context": _deployer_ctx,
@@ -1350,7 +1375,10 @@ async def firewall(req: FirewallRequest, request: Request):
                         risk_score=risk_score,
                         risk_level=risk_output.get("risk_level", "UNKNOWN"),
                         archetype=risk_output.get("risk_archetype"),
-                        category_scores=risk_output.get("category_scores"),
+                        category_scores={
+                            **risk_output.get("category_scores", {}),
+                            '_scan_metadata': _coverage_fields(alert),
+                        },
                         flags=risk_output.get("critical_flags"),
                         confidence=alert.get("confidence"),
                     )
@@ -1396,6 +1424,7 @@ async def firewall(req: FirewallRequest, request: Request):
                         risk_score=risk_score,
                         category_scores=risk_output.get("category_scores", {}),
                         full_analysis={
+                            **_coverage_fields(alert),
                             "classification": response.get("classification"),
                             "danger_signals": response.get("danger_signals"),
                             "raw_checks": response.get("raw_checks"),
@@ -1443,10 +1472,14 @@ async def firewall(req: FirewallRequest, request: Request):
         }
 
         firewall_result = None
-        if ai_analyzer and ai_analyzer.is_available():
+        if not is_scan_incomplete(contract_scan) and ai_analyzer and ai_analyzer.is_available():
             firewall_result = await ai_analyzer.generate_firewall_report(tx_data, contract_scan)
 
         if firewall_result:
+            alert = format_extension_alert({
+                **contract_scan, 'rug_probability': firewall_result.get('risk_score', contract_scan.get('risk_score', 0)),
+            })
+            firewall_result.update(_coverage_fields(alert))
             firewall_result["raw_checks"] = _extract_raw_checks(contract_scan)
             firewall_result.setdefault("asset_delta", [])
             return firewall_result
@@ -1477,6 +1510,14 @@ async def scan(req: ScanRequest):
         result.pop("source_code", None)
         result.pop("forensic_report", None)
 
+        alert = format_extension_alert({**result, 'rug_probability': result.get('risk_score', 0)})
+        result.update(_coverage_fields(alert))
+        result['classification'] = alert['risk_classification']
+        result['partial'] = alert['status'] == 'unknown' or result.get('partial', False)
+        if alert['status'] == 'unknown':
+            result['risk_level'] = 'UNKNOWN'
+            result['verdict'] = alert['recommended_action']
+            result.pop('ai_analysis', None)
         return result
 
     except HTTPException:
@@ -1867,7 +1908,14 @@ async def agent_chat(req: ChatRequest, request: Request):
         if isinstance(result, dict):
             resp = {"response": result["text"], "user_id": req.user_id}
             if result.get("scan_data"):
-                resp["scan_data"] = result["scan_data"]
+                scan_data = result['scan_data']
+                alert = format_extension_alert({
+                    **scan_data, 'rug_probability': scan_data.get('risk_score', 0),
+                    'risk_archetype': scan_data.get('archetype') or 'unknown',
+                })
+                resp["scan_data"] = {**scan_data, **_coverage_fields(alert)}
+                if alert['status'] == 'unknown':
+                    resp['response'] = alert['recommended_action']
             return resp
         # Backward compat: plain string return
         return {"response": result, "user_id": req.user_id}
@@ -1888,6 +1936,11 @@ async def agent_explain(req: ExplainRequest, request: Request):
         raise HTTPException(429, "Rate limit exceeded")
 
     try:
+        if is_scan_incomplete(req.scan_result):
+            alert = format_extension_alert({
+                **req.scan_result, 'rug_probability': req.scan_result.get('risk_score', 0),
+            })
+            return {"explanation": alert['recommended_action']}
         explanation = await container.advisor.explain_scan(req.scan_result)
         return {"explanation": explanation}
     except UnsupportedChainError:
@@ -2264,6 +2317,10 @@ def _build_asset_delta(simulation_result: Optional[Dict], decoded: Dict, value_b
     return _build_asset_delta_fallback(decoded, value_bnb)
 
 
+def _coverage_fields(alert: Dict) -> Dict:
+    return {key: alert[key] for key in ('status', 'coverage', 'coverage_reasons', 'risk_display')}
+
+
 def _build_cached_response(
     cached: Dict, decoded: Dict, value_bnb: float, chain_id: int = 56,
     to_addr: str = "", policy_mode: str = "BALANCED",
@@ -2274,16 +2331,17 @@ def _build_cached_response(
     flags = cached.get('flags', [])
     archetype = cached.get('archetype', 'unknown')
 
-    if risk_score >= 80:
-        classification = "BLOCK_RECOMMENDED"
-    elif risk_score >= 60:
-        classification = "HIGH_RISK"
-    elif risk_score >= 30:
-        classification = "CAUTION"
-    else:
-        classification = "SAFE"
+    category_scores = dict(cached.get('category_scores', {}))
+    metadata = category_scores.pop('_scan_metadata', {})
+    alert = format_extension_alert({
+        **metadata, 'rug_probability': risk_score, 'risk_level': risk_level,
+        'critical_flags': flags, 'risk_archetype': archetype or 'unknown',
+        'confidence_level': cached.get('confidence', 0),
+    })
+    classification = alert['risk_classification']
 
     return {
+        **_coverage_fields(alert),
         "classification": classification,
         "risk_score": risk_score,
         "decoded_action": _format_decoded_action(decoded),
@@ -2296,14 +2354,15 @@ def _build_cached_response(
             "post_tx_state": f"Risk archetype: {archetype}",
         },
         "analysis": f"Cached result (scanned {cached.get('scan_count', 1)} times)",
-        "plain_english": f"Previously analyzed — risk level: {risk_level}",
-        "verdict": f"{classification} — Rug probability {risk_score}% (cached)",
+        "plain_english": alert['recommended_action'],
+        "verdict": f"{classification} — Rug probability {alert['risk_display']} (cached)",
         "raw_checks": {
             "risk_score_heuristic": risk_score,
         },
         "shield_score": {
+            **_coverage_fields(alert),
             "overall": risk_score,
-            "category_scores": cached.get('category_scores', {}),
+            "category_scores": category_scores,
             "risk_level": risk_level,
             "threat_type": archetype,
             "critical_flags": flags,
@@ -2315,7 +2374,7 @@ def _build_cached_response(
         "cached": True,
         "chain_id": chain_id,
         "network": _chain_id_to_name(chain_id),
-        "partial": False,
+        "partial": alert['status'] == 'unknown',
         "failed_sources": [],
         "policy_mode": policy_mode,
     }
@@ -2324,12 +2383,15 @@ def _build_cached_response(
 def _extract_raw_checks(scan: Dict) -> Dict:
     """Extract key raw check values for the extension."""
     return {
-        "is_verified": scan.get("is_verified", False),
+        "is_verified": scan.get("is_verified"),
         "scam_matches": len(scan.get("scam_matches", [])),
         "contract_age_days": scan.get("contract_age_days"),
-        "is_honeypot": scan.get("is_honeypot", False),
-        "ownership_renounced": scan.get("checks", {}).get("ownership_renounced", False),
-        "risk_score_heuristic": scan.get("risk_score", 0),
+        "is_honeypot": scan.get("is_honeypot"),
+        "ownership_renounced": scan.get("checks", {}).get("ownership_renounced"),
+        "buy_tax": scan.get('buy_tax'),
+        "sell_tax": scan.get('sell_tax'),
+        "can_sell": scan.get('checks', {}).get('can_sell'),
+        "risk_score_heuristic": scan.get("risk_score"),
     }
 
 
@@ -2337,8 +2399,8 @@ def _build_fallback_response(decoded: Dict, scan: Dict, whitelisted: Optional[st
     """Build a firewall response when AI is unavailable."""
     risk_score = scan.get("risk_score", 50)
     scam_matches = len(scan.get("scam_matches", []))
-    is_honeypot = scan.get("is_honeypot", False)
-    is_verified = scan.get("is_verified", False)
+    is_honeypot = scan.get("is_honeypot")
+    is_verified = scan.get("is_verified")
     is_unlimited_approval = decoded.get("is_unlimited_approval", False)
 
     danger_signals = []
@@ -2351,12 +2413,14 @@ def _build_fallback_response(decoded: Dict, scan: Dict, whitelisted: Optional[st
         danger_signals.append("Honeypot detected — cannot sell after buying")
         risk_score = max(risk_score, 90)
 
-    if is_unlimited_approval and not is_verified:
+    if is_unlimited_approval and is_verified is False:
         danger_signals.append("Unlimited approval to unverified contract")
         risk_score = max(risk_score, 85)
 
-    if not is_verified:
+    if is_verified is False:
         danger_signals.append("Contract source code is not verified")
+    elif is_verified is None:
+        danger_signals.append("Contract source verification unknown")
 
     if whitelisted:
         risk_score = max(0, risk_score - 20)
@@ -2371,7 +2435,13 @@ def _build_fallback_response(decoded: Dict, scan: Dict, whitelisted: Optional[st
     else:
         classification = "SAFE"
 
+    alert = format_extension_alert({**scan, 'rug_probability': risk_score})
+    if alert['status'] == 'unknown' and classification == 'SAFE':
+        classification = 'CAUTION'
+
     return {
+        **_coverage_fields(alert),
+        "partial": alert['status'] == 'unknown',
         "classification": classification,
         "risk_score": min(100, risk_score),
         "decoded_action": _format_decoded_action(decoded),
@@ -2386,8 +2456,9 @@ def _build_fallback_response(decoded: Dict, scan: Dict, whitelisted: Optional[st
             "post_tx_state": "AI analysis unavailable — review manually",
         },
         "analysis": "AI analysis unavailable. Showing heuristic results only.",
-        "plain_english": "Could not generate AI analysis. Review the danger signals above carefully.",
-        "verdict": f"{classification} — Risk score {risk_score}/100",
+        "plain_english": alert['recommended_action'],
+        "verdict": (f"{classification} — {alert['risk_display']}" if alert['status'] == 'unknown'
+                    else f"{classification} — Risk score {risk_score}/100"),
         "raw_checks": _extract_raw_checks(scan),
         "asset_delta": [],
     }
@@ -2418,12 +2489,8 @@ def _extract_swap_path(decoded: Dict, raw_calldata: str = "") -> List[str]:
 
 
 def _select_router_tokens(path: List[str]) -> List[str]:
-    """Select representative token addresses from a swap path (first + last)."""
-    if not path:
-        return []
-    if len(path) == 1:
-        return [path[0]]
-    return [path[0], path[-1]]
+    """Select every distinct token in a swap path."""
+    return list(dict.fromkeys(token.lower() for token in path))
 
 
 async def _analyze_router_swap(
@@ -2440,7 +2507,7 @@ async def _analyze_router_swap(
         return None
 
     path = _extract_swap_path(decoded, req.data)
-    if not path:
+    if not path or not any(web3_client.is_valid_address(token) for token in path):
         # Cannot decode the swap path (e.g. Uniswap V3 / aggregator calldata).
         # Returning None here would cause the main pipeline to analyse the
         # whitelisted router itself — which always scores safe — giving a false
@@ -2448,6 +2515,10 @@ async def _analyze_router_swap(
         # Return CAUTION so the user is warned that token safety is unverified.
         return {
             "classification": "CAUTION",
+            "status": "unknown",
+            "coverage": {'token_path': 0},
+            "coverage_reasons": {'token_path': 'Token path could not be decoded'},
+            "risk_display": 'Unknown (incomplete provider coverage)',
             "risk_score": 35,
             "decoded_action": _format_decoded_action(decoded),
             "calldata_details": _build_calldata_details(decoded),
@@ -2470,16 +2541,20 @@ async def _analyze_router_swap(
             ),
             "verdict": "CAUTION — Token path unverifiable",
             "raw_checks": {
-                "is_verified": False,
+                "is_verified": None,
                 "scam_matches": 0,
                 "contract_age_days": None,
-                "is_honeypot": False,
-                "ownership_renounced": False,
+                "is_honeypot": None,
+                "ownership_renounced": None,
                 "risk_score_heuristic": 35,
                 "whitelisted_router": whitelisted,
                 "tokens_analyzed": [],
             },
             "shield_score": {
+                "status": "unknown",
+                "coverage": {'token_path': 0},
+                "coverage_reasons": {'token_path': 'Token path could not be decoded'},
+                "risk_display": 'Unknown (incomplete provider coverage)',
                 "overall": 35,
                 "category_scores": {},
                 "risk_level": "CAUTION",
@@ -2517,10 +2592,10 @@ async def _analyze_router_swap(
             continue
         token_addr = web3_client.to_checksum_address(token)
 
-        is_verified = False
+        is_verified = None
         try:
             verified_result = await web3_client.is_verified_contract(token_addr, chain_id=req.chainId)
-            is_verified = verified_result[0] if isinstance(verified_result, tuple) else bool(verified_result)
+            is_verified = verified_result[0] if isinstance(verified_result, tuple) else verified_result
         except UnsupportedChainError:
             raise
         except Exception:
@@ -2554,6 +2629,7 @@ async def _analyze_router_swap(
             )
 
         token_summaries.append({
+            **_coverage_fields(format_extension_alert(risk_output)),
             "address": token_addr,
             "risk_score": risk_output.get("rug_probability", 0),
             "risk_level": risk_output.get("risk_level", "UNKNOWN"),
@@ -2565,7 +2641,29 @@ async def _analyze_router_swap(
     if not best:
         return None
 
-    risk_output = best["risk_output"]
+    risk_output = dict(best["risk_output"])
+    unknown_tokens = [item for item in token_summaries if item['status'] == 'unknown']
+    if unknown_tokens or len(token_summaries) != len(candidates):
+        risk_output['status'] = 'unknown'
+        if risk_output.get('risk_level') == 'LOW':
+            risk_output['risk_level'] = 'UNKNOWN'
+        risk_output['coverage_reasons'] = {
+            f"{item['address']}:{source}": reason
+            for item in unknown_tokens for source, reason in item['coverage_reasons'].items()
+        }
+        if len(token_summaries) != len(candidates):
+            risk_output['coverage_reasons']['token_path'] = 'Invalid token address in swap path'
+    risk_output['coverage'] = {
+        f"{item['address']}:{source}": fraction
+        for item in token_summaries for source, fraction in item['coverage'].items()
+    }
+    if sim_result is not None and not sim_result.get('success'):
+        risk_output['status'] = 'unknown'
+        risk_output['coverage']['transaction_simulation'] = 0
+        risk_output['coverage_reasons'] = {
+            **risk_output.get('coverage_reasons', {}),
+            'transaction_simulation': sim_result.get('revert_reason') or 'Transaction simulation failed',
+        }
     alert = format_extension_alert(risk_output)
 
     # Simulation overrides
@@ -2589,6 +2687,7 @@ async def _analyze_router_swap(
     honeypot_data = (by_name["honeypot"].data or {}) if "honeypot" in by_name else {}
 
     shield_score = {
+        **_coverage_fields(alert),
         "overall": risk_score,
         "category_scores": risk_output.get("category_scores", {}),
         "risk_level": risk_output.get("risk_level", "UNKNOWN"),
@@ -2598,6 +2697,7 @@ async def _analyze_router_swap(
     }
 
     return {
+        **_coverage_fields(alert),
         "classification": classification,
         "risk_score": risk_score,
         "decoded_action": _format_decoded_action(decoded),
@@ -2611,13 +2711,16 @@ async def _analyze_router_swap(
         },
         "analysis": f"Trusted router detected ({whitelisted}), analyzed swap path tokens.",
         "plain_english": alert["recommended_action"],
-        "verdict": f"{classification} — Rug probability {risk_score}%",
+        "verdict": f"{classification} — Rug probability {alert['risk_display']}",
         "raw_checks": {
-            "is_verified": contract_data.get("is_verified", False),
+            "is_verified": contract_data.get("is_verified"),
             "scam_matches": len(contract_data.get("scam_matches", [])),
             "contract_age_days": contract_data.get("contract_age_days"),
-            "is_honeypot": honeypot_data.get("is_honeypot", False),
-            "ownership_renounced": contract_data.get("ownership_renounced", False),
+            "is_honeypot": honeypot_data.get("is_honeypot"),
+            "buy_tax": honeypot_data.get("buy_tax"),
+            "sell_tax": honeypot_data.get("sell_tax"),
+            "can_sell": honeypot_data.get("can_sell"),
+            "ownership_renounced": contract_data.get("ownership_renounced"),
             "risk_score_heuristic": risk_score,
             "whitelisted_router": whitelisted,
             "tokens_analyzed": token_summaries,
@@ -2632,7 +2735,7 @@ async def _analyze_router_swap(
         "greenfield_url": None,
         "chain_id": req.chainId,
         "network": _chain_id_to_name(req.chainId),
-        "partial": risk_output.get("partial", False),
+        "partial": alert['status'] == 'unknown' or risk_output.get("partial", False),
         "failed_sources": risk_output.get("failed_sources", []),
         "policy_mode": risk_output.get("policy_mode", "BALANCED"),
     }

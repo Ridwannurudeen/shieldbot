@@ -29,6 +29,7 @@ except ImportError:
 from core.config import Settings
 from core.container import ServiceContainer
 from core.telegram_formatter import format_full_report
+from core.extension_formatter import is_scan_incomplete
 from utils.web3_client import UnsupportedChainError
 from utils.chain_info import (
     get_chain_name, get_explorer_url, get_dexscreener_slug,
@@ -75,6 +76,8 @@ def _get_cached(address: str, scan_type: str):
     key = f"{scan_type}:{address.lower()}"
     entry = _scan_cache.get(key)
     if entry and (time.time() - entry['timestamp']) < CACHE_TTL:
+        if not entry['result'].get('coverage') or entry['result'].get('status') not in ('ok', 'unknown'):
+            return None
         logger.info(f"Cache hit for {key}")
         return entry['result']
     return None
@@ -636,7 +639,11 @@ async def _handle_advisor_chat(update: Update, message: str, chain_id: int = 56)
 
     try:
         response = await container.advisor.chat(user_id, message, chain_id=chain_id)
-        await typing_msg.edit_text(response)
+        scan_data = response.get('scan_data')
+        response_text = response['text']
+        if scan_data is not None and is_scan_incomplete(scan_data):
+            response_text = 'Unknown risk: provider coverage incomplete. Review the missing data before proceeding.'
+        await typing_msg.edit_text(response_text)
     except UnsupportedChainError:
         raise
     except Exception as e:
@@ -724,7 +731,7 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
 
             # Generate AI forensic analysis
             ai_analysis = None
-            if ai_analyzer and ai_analyzer.is_available():
+            if ai_analyzer and ai_analyzer.is_available() and not is_scan_incomplete(risk_output):
                 scan_data = {
                     'chain_id': chain_id,
                     'chain_name': chain_name,
@@ -741,10 +748,13 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
                 honeypot_data=honeypot_data, address=address, ai_analysis=ai_analysis,
                 token_info=token_info,
             )
-            risk_level = risk_output.get('risk_level', 'medium').lower()
+            risk_level = 'unknown' if is_scan_incomplete(risk_output) else risk_output.get('risk_level', 'medium').lower()
 
             # Cache the composite result
-            _set_cache(cache_key, 'contract', {'composite_report': response, 'risk_level': risk_level})
+            _set_cache(cache_key, 'contract', {
+                **risk_output, 'address': address, 'composite_report': response,
+                'risk_level': risk_level, 'status': 'unknown' if risk_level == 'unknown' else 'ok',
+            })
 
             # Enqueue deployer/funder indexing (fire-and-forget)
             if hasattr(container, 'indexer') and container.indexer:
@@ -758,18 +768,20 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
         # Fallback to legacy scanner
         if not response:
             result = await tx_scanner.scan_address(address, chain_id=chain_id)
+            if is_scan_incomplete(result):
+                result = {**result, 'status': 'unknown', 'risk_level': 'unknown', 'safety_level': 'unknown'}
             _set_cache(cache_key, 'contract', result)
             response = format_scan_result(result)
-            risk_level = result.get('risk_level', 'medium')
+            risk_level = 'unknown' if is_scan_incomplete(result) else result.get('risk_level', 'medium')
 
         keyboard = _scan_buttons(address, chain_id)
 
         # Record on-chain (fire-and-forget — non-blocking)
         onchain_line = ""
-        if onchain_recorder.is_available():
+        if risk_level != 'unknown' and onchain_recorder.is_available():
             await onchain_recorder.record_scan_fire_and_forget(address, risk_level, 'contract')
             onchain_line = "\n\U0001F517 On-chain recording scheduled\n"
-        if base_attestor.is_available():
+        if risk_level != 'unknown' and base_attestor.is_available():
             await base_attestor.attest_fire_and_forget(address, risk_level, 'contract', source_chain_id=chain_id)
 
         try:
@@ -837,7 +849,7 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
 
             # Generate AI forensic analysis
             ai_analysis = None
-            if ai_analyzer and ai_analyzer.is_available():
+            if ai_analyzer and ai_analyzer.is_available() and not is_scan_incomplete(risk_output):
                 scan_data = {
                     'chain_id': chain_id,
                     'chain_name': chain_name,
@@ -854,9 +866,12 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
                 honeypot_data=honeypot_data, address=address, ai_analysis=ai_analysis,
                 token_info=token_info,
             )
-            risk_level = risk_output.get('risk_level', 'medium').lower()
+            risk_level = 'unknown' if is_scan_incomplete(risk_output) else risk_output.get('risk_level', 'medium').lower()
 
-            _set_cache(cache_key, 'token', {'composite_report': response, 'risk_level': risk_level})
+            _set_cache(cache_key, 'token', {
+                **risk_output, 'address': address, 'composite_report': response,
+                'risk_level': risk_level, 'status': 'unknown' if risk_level == 'unknown' else 'ok',
+            })
 
             # Enqueue deployer/funder indexing (fire-and-forget)
             if hasattr(container, 'indexer') and container.indexer:
@@ -870,18 +885,20 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
         # Fallback to legacy scanner
         if not response:
             result = await token_scanner.check_token(address, chain_id=chain_id)
+            if is_scan_incomplete(result):
+                result = {**result, 'status': 'unknown', 'risk_level': 'unknown', 'safety_level': 'unknown'}
             _set_cache(cache_key, 'token', result)
             response = format_token_result(result)
-            risk_level = result.get('safety_level', 'warning')
+            risk_level = 'unknown' if is_scan_incomplete(result) else result.get('safety_level', 'warning')
 
         keyboard = _token_buttons(address, chain_id)
 
         # Record on-chain (fire-and-forget — non-blocking)
         onchain_line = ""
-        if onchain_recorder.is_available():
+        if risk_level != 'unknown' and onchain_recorder.is_available():
             await onchain_recorder.record_scan_fire_and_forget(address, risk_level, 'token')
             onchain_line = "\n\U0001F517 On-chain recording scheduled\n"
-        if base_attestor.is_available():
+        if risk_level != 'unknown' and base_attestor.is_available():
             await base_attestor.attest_fire_and_forget(address, risk_level, 'token', source_chain_id=chain_id)
 
         try:
@@ -937,10 +954,10 @@ def _scan_buttons(address: str, chain_id: int = 56) -> InlineKeyboardMarkup:
     """Generate action buttons for scan results."""
     explorer = get_explorer_url(chain_id)
     chain_name = get_chain_name(chain_id)
-    keyboard = [
-        [InlineKeyboardButton(f"🔍 View on {chain_name} Explorer", url=f"{explorer}/address/{address}")],
-        [InlineKeyboardButton("💰 Check Token Safety", callback_data=f"token_{address}")]
-    ]
+    keyboard = []
+    if explorer:
+        keyboard.append([InlineKeyboardButton(f"🔍 View on {chain_name} Explorer", url=f"{explorer}/address/{address}")])
+    keyboard.append([InlineKeyboardButton("💰 Check Token Safety", callback_data=f"token_{address}")])
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -949,18 +966,22 @@ def _token_buttons(address: str, chain_id: int = 56) -> InlineKeyboardMarkup:
     explorer = get_explorer_url(chain_id)
     dex_slug = get_dexscreener_slug(chain_id)
     chain_name = get_chain_name(chain_id)
-    keyboard = [
-        [InlineKeyboardButton(f"🔍 View on {chain_name} Explorer", url=f"{explorer}/token/{address}")],
-        [InlineKeyboardButton("📊 View on DexScreener", url=f"https://dexscreener.com/{dex_slug}/{address}")]
-    ]
+    keyboard = []
+    if explorer:
+        keyboard.append([InlineKeyboardButton(f"🔍 View on {chain_name} Explorer", url=f"{explorer}/token/{address}")])
+    if dex_slug:
+        keyboard.append([InlineKeyboardButton("📊 View on DexScreener", url=f"https://dexscreener.com/{dex_slug}/{address}")])
     return InlineKeyboardMarkup(keyboard)
 
 
 def format_scan_result(result: dict) -> str:
     """Format scan result — use composite report, forensic report, or fallback"""
     if result.get('composite_report'):
+        if is_scan_incomplete(result):
+            return format_full_report(result, {}, {}, {}, address=result.get('address', ''))
         return result['composite_report']
-    if result.get('forensic_report'):
+    incomplete = is_scan_incomplete(result) or result.get('is_verified') is None
+    if result.get('forensic_report') and not incomplete:
         return result['forensic_report']
 
     risk_emoji = {
@@ -970,24 +991,29 @@ def format_scan_result(result: dict) -> str:
         'none': '✅'
     }
 
-    risk_level = result.get('risk_level', 'unknown')
+    risk_level = 'unknown' if incomplete else result.get('risk_level', 'unknown')
     emoji = risk_emoji.get(risk_level, '⚪')
+    score = 'Unknown (incomplete provider coverage)' if incomplete else f"{result.get('risk_score', 'N/A')}/100"
+    verified = result.get('is_verified')
+    verification = 'Unknown (verification data unavailable)' if verified is None else (
+        '✅ Contract verified' if verified else '❌ Contract not verified'
+    )
 
     response = f"""
 🛡️ **Security Scan Report**
 
 **Address:** `{result['address']}`
 **Risk Level:** {emoji} {risk_level.upper()}
-**Risk Score:** {result.get('risk_score', 'N/A')}/100 (Confidence: {result.get('confidence', 'N/A')}%)
+**Risk Score:** {score} (Confidence: {result.get('confidence', 'N/A')}%)
 
 **Verification Status:**
-{'✅' if result['is_verified'] else '❌'} Contract {'verified' if result['is_verified'] else 'not verified'} on BscScan
+{verification}
 
 **Security Checks:**
 """
 
     for check, status in result.get('checks', {}).items():
-        status_icon = '✅' if status else '❌'
+        status_icon = 'Unknown' if status is None else ('✅' if status else '❌')
         check_name = check.replace('_', ' ').title()
         response += f"{status_icon} {check_name}\n"
 
@@ -1003,7 +1029,7 @@ def format_scan_result(result: dict) -> str:
 
     # AI structured risk score
     ai_risk = result.get('ai_risk_score')
-    if ai_risk:
+    if ai_risk and not incomplete:
         response += f"\n🤖 **AI Risk Assessment:**\n"
         response += f"Score: {ai_risk.get('risk_score', 'N/A')}/100 | Level: {ai_risk.get('risk_level', 'N/A')}\n"
         findings = ai_risk.get('key_findings', [])
@@ -1014,7 +1040,7 @@ def format_scan_result(result: dict) -> str:
             response += f"💡 {rec}\n"
 
     # Narrative AI analysis
-    if result.get('ai_analysis'):
+    if result.get('ai_analysis') and not incomplete:
         response += f"\n🧠 **AI Analysis:**\n{result['ai_analysis'][:500]}\n"
 
     return response
@@ -1023,8 +1049,13 @@ def format_scan_result(result: dict) -> str:
 def format_token_result(result: dict) -> str:
     """Format token result — use composite report, forensic report, or fallback"""
     if result.get('composite_report'):
+        if is_scan_incomplete(result):
+            return format_full_report(result, {}, {}, {}, address=result.get('address', ''))
         return result['composite_report']
-    if result.get('forensic_report'):
+    incomplete = is_scan_incomplete(result) or any(
+        result.get(field) is None for field in ('is_honeypot', 'buy_tax', 'sell_tax')
+    ) or result.get('checks', {}).get('can_sell') is None
+    if result.get('forensic_report') and not incomplete:
         return result['forensic_report']
 
     safety_emoji = {
@@ -1034,8 +1065,14 @@ def format_token_result(result: dict) -> str:
         'unknown': '⚪'
     }
 
-    safety_level = result.get('safety_level', 'unknown')
+    safety_level = 'unknown' if incomplete else result.get('safety_level', 'unknown')
     emoji = safety_emoji.get(safety_level, '⚪')
+    score = 'Unknown (incomplete provider coverage)' if incomplete else f"{result.get('risk_score', 'N/A')}/100"
+    honeypot = result.get('is_honeypot')
+    if honeypot is None or (result.get('simulation_failed') and honeypot is False):
+        honeypot_display = 'Unknown (honeypot data incomplete)'
+    else:
+        honeypot_display = '🔴 HONEYPOT DETECTED' if honeypot else '✅ Not a honeypot'
 
     response = f"""
 💰 **Token Safety Report**
@@ -1043,32 +1080,37 @@ def format_token_result(result: dict) -> str:
 **Token:** {result.get('name', 'Unknown')} ({result.get('symbol', 'N/A')})
 **Address:** `{result['address']}`
 **Safety:** {emoji} {safety_level.upper()}
-**Risk Score:** {result.get('risk_score', 'N/A')}/100 (Confidence: {result.get('confidence', 'N/A')}%)
+**Risk Score:** {score} (Confidence: {result.get('confidence', 'N/A')}%)
 
 **Honeypot Check:**
-{'✅ Not a honeypot' if not result.get('is_honeypot') else '🔴 HONEYPOT DETECTED'}
+{honeypot_display}
 
 **Contract Analysis:**
 """
 
     checks = result.get('checks', {})
-    response += f"{'✅' if checks.get('can_buy') else '❌'} Can Buy\n"
-    response += f"{'✅' if checks.get('can_sell') else '❌'} Can Sell\n"
-    response += f"{'✅' if checks.get('ownership_renounced') else '❌'} Ownership Renounced\n"
-    response += f"{'✅' if checks.get('liquidity_locked') else '❌'} Liquidity Locked\n"
+    for key, label in (('can_buy', 'Can Buy'), ('can_sell', 'Can Sell'),
+                       ('ownership_renounced', 'Ownership Renounced'), ('liquidity_locked', 'Liquidity Locked')):
+        value = checks.get(key)
+        if key == 'can_sell' and result.get('simulation_failed'):
+            value = None
+        status_icon = 'Unknown' if value is None else ('✅' if value else '❌')
+        response += f"{status_icon} {label}\n"
 
     if result.get('risks'):
         response += "\n**Risks Detected:**\n"
         for risk in result['risks'][:6]:
             response += f"• {risk}\n"
 
-    if result.get('buy_tax') or result.get('sell_tax'):
-        response += f"\n**Taxes:**\n"
-        response += f"Buy: {result.get('buy_tax', 0)}% | Sell: {result.get('sell_tax', 0)}%\n"
+    buy_tax = result.get('buy_tax')
+    sell_tax = result.get('sell_tax')
+    buy_display = 'Unknown' if buy_tax is None else f'{buy_tax}%'
+    sell_display = 'Unknown' if sell_tax is None else f'{sell_tax}%'
+    response += f"\n**Taxes:**\nBuy: {buy_display} | Sell: {sell_display}\n"
 
     # AI structured risk score
     ai_risk = result.get('ai_risk_score')
-    if ai_risk:
+    if ai_risk and not incomplete:
         response += f"\n🤖 **AI Risk Assessment:**\n"
         response += f"Score: {ai_risk.get('risk_score', 'N/A')}/100 | Level: {ai_risk.get('risk_level', 'N/A')}\n"
         findings = ai_risk.get('key_findings', [])
@@ -1079,7 +1121,7 @@ def format_token_result(result: dict) -> str:
             response += f"💡 {rec}\n"
 
     # Narrative AI analysis
-    if result.get('ai_analysis'):
+    if result.get('ai_analysis') and not incomplete:
         response += f"\n🧠 **AI Analysis:**\n{result['ai_analysis'][:500]}\n"
 
     return response

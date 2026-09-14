@@ -33,7 +33,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   chatMessages.forEach(m => {
     if (!m || typeof m.text !== "string" || (m.role !== "user" && m.role !== "assistant")) return;
     if (m.scanData && typeof m.scanData === "object") renderRiskCard(m.scanData);
-    appendMessage(m.role, m.text, { save: false });
+    appendMessage(m.role, m.text, { save: false, scanData: m.scanData });
   });
 
   // Show suggested prompts if chat is empty
@@ -126,10 +126,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   // -------------------------------------------------------------------
   function renderRiskCard(scanData) {
     if (!scanData || typeof scanData !== "object") return;
-    const score = Number(scanData.risk_score) || 0;
-    let level = "low";
-    if (score >= 70) level = "high";
-    else if (score >= 40) level = "medium";
+    const incomplete = scanData.status !== "ok" || scanData.partial === true ||
+      scanData.risk_level === "UNKNOWN" || !Number.isFinite(scanData.risk_score) ||
+      Object.values(scanData.coverage || {}).some(value => Number(value) < 1);
+    const score = scanData.risk_score;
+    let level = incomplete ? "medium" : "low";
+    if (!incomplete && score >= 70) level = "high";
+    else if (!incomplete && score >= 40) level = "medium";
 
     const card = document.createElement("div");
     card.className = "risk-card";
@@ -143,12 +146,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     let metaParts = [];
     const hp = (typeof scanData.honeypot === "object" && scanData.honeypot) || {};
-    if (hp.is_honeypot !== undefined) {
-      metaParts.push(`Honeypot: <span>${hp.is_honeypot ? "Yes" : "No"}</span>`);
-    }
-    if (hp.sell_tax !== undefined) {
-      metaParts.push(`Sell tax: <span>${Number(hp.sell_tax)}%</span>`);
-    }
+    metaParts.push(`Honeypot: <span>${hp.is_honeypot === true ? "Yes" : hp.is_honeypot === false ? "No" : "Unknown"}</span>`);
+    metaParts.push(`Sell tax: <span>${hp.sell_tax == null || hp.sell_tax === "" ? "Unknown" : `${Number(hp.sell_tax)}%`}</span>`);
     const mkt = (typeof scanData.market === "object" && scanData.market) || {};
     if (mkt.liquidity_usd !== undefined) {
       metaParts.push(`Liq: <span>$${Number(mkt.liquidity_usd).toLocaleString()}</span>`);
@@ -163,9 +162,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     card.innerHTML = `
       <div class="risk-card-header">
-        <div class="risk-score-badge ${level}">${score}</div>
+        <div class="risk-score-badge ${level}">${incomplete ? "?" : score}</div>
         <div>
-          <div class="risk-card-title">${escapeHtml(scanData.risk_level || level.toUpperCase())} Risk ${shortAddr ? `— ${shortAddr}` : ""}</div>
+          <div class="risk-card-title">${escapeHtml(incomplete ? "UNKNOWN" : scanData.risk_level || level.toUpperCase())} Risk ${shortAddr ? `— ${shortAddr}` : ""}</div>
           ${archetype}
         </div>
       </div>
@@ -300,6 +299,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   // -------------------------------------------------------------------
   function appendMessage(role, text, opts = {}) {
     const { isError = false, originalMessage = null, scanData = null } = opts;
+    if (scanData && (scanData.status !== "ok" || scanData.partial === true ||
+      scanData.risk_level === "UNKNOWN" || !Number.isFinite(scanData.risk_score) ||
+      Object.values(scanData.coverage || {}).some(value => Number(value) < 1))) {
+      text = "Unknown (incomplete provider coverage). " +
+        Object.values(scanData.coverage_reasons || {}).join("; ");
+    }
 
     if (role === "assistant") {
       const wrapper = document.createElement("div");

@@ -40,14 +40,22 @@ export interface FirewallOptions extends ScanOptions {
 
 export interface RiskScore {
   overall: number;
-  risk_level: 'LOW' | 'MEDIUM' | 'HIGH';
+  risk_level: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN';
   threat_type: string;
   critical_flags: string[];
   confidence: number;
-  category_scores: Record<string, number>;
+  category_scores: Record<string, number | null>;
+  status?: 'ok' | 'unknown';
+  coverage?: Record<string, number>;
+  coverage_reasons?: Record<string, string>;
+  risk_display?: string;
 }
 
 export interface ScanResult {
+  status?: 'ok' | 'unknown';
+  coverage?: Record<string, number>;
+  coverage_reasons?: Record<string, string>;
+  risk_display?: string;
   classification: string;
   risk_score: number;
   danger_signals: string[];
@@ -177,6 +185,15 @@ export interface Verdict {
   /** Convenience: true if verdict === 'BLOCK' */
   blocked: boolean;
   evidence?: string;
+  status: 'ok' | 'unknown';
+  coverage: Record<string, number>;
+  coverage_reasons: Record<string, string>;
+  risk_display: string;
+  risk_level?: RiskScore['risk_level'];
+  category_scores?: Record<string, number | null>;
+  confidence?: number | null;
+  /** True when the decision comes from fail-mode rather than a completed analysis. */
+  analysis_unavailable: boolean;
 }
 
 export interface ReputationScore {
@@ -342,15 +359,26 @@ export class ShieldBot {
         },
       });
 
+      const coverage = (raw.coverage || {}) as Record<string, number>;
+      const incomplete = raw.status !== 'ok' || raw.risk_level === 'UNKNOWN' || Object.keys(coverage).length === 0 || Object.values(coverage).some(value => value !== 1);
+      const decision = incomplete && raw.verdict === 'ALLOW' && !raw.analysis_unavailable ? 'WARN' : raw.verdict as Verdict['verdict'];
       const verdict: Verdict = {
-        verdict: raw.verdict as Verdict['verdict'],
+        verdict: decision,
+        status: incomplete ? 'unknown' : 'ok',
+        coverage,
+        coverage_reasons: (raw.coverage_reasons || {}) as Record<string, string>,
+        risk_display: incomplete ? 'Unknown (incomplete provider coverage)' : (raw.risk_display as string || `${raw.score}%`),
+        risk_level: raw.risk_level as RiskScore['risk_level'],
+        category_scores: raw.category_scores as Record<string, number | null>,
+        confidence: raw.confidence as number | null,
+        analysis_unavailable: !!raw.analysis_unavailable,
         score: raw.score as number,
         flags: (raw.flags || []) as string[],
         policy_check: raw.policy_check as Record<string, unknown>,
         cached: !!raw.cached,
         latency_ms: raw.latency_ms as number,
-        allowed: raw.verdict === 'ALLOW',
-        blocked: raw.verdict === 'BLOCK',
+        allowed: decision === 'ALLOW',
+        blocked: decision === 'BLOCK',
         evidence: raw.evidence as string,
       };
 
@@ -358,6 +386,9 @@ export class ShieldBot {
       this._cacheVerdict(cacheKey, verdict);
       return verdict;
     } catch (error) {
+      if (error instanceof ShieldBotError && error.status >= 400 && error.status < 500 && error.code !== 'TIMEOUT') {
+        throw error;
+      }
       return this._handleFailMode(cacheKey, error as Error);
     }
   }
@@ -424,6 +455,11 @@ export class ShieldBot {
     if (this.failMode === 'open') {
       return {
         verdict: 'ALLOW',
+        status: 'unknown',
+        coverage: {},
+        coverage_reasons: { analysis: 'API unavailable' },
+        risk_display: 'Unknown (analysis unavailable)',
+        analysis_unavailable: true,
         score: 0,
         flags: ['fail_open'],
         cached: false,
@@ -437,6 +473,11 @@ export class ShieldBot {
     // fail_closed or no cache
     return {
       verdict: 'BLOCK',
+      status: 'unknown',
+      coverage: {},
+      coverage_reasons: { analysis: 'API unavailable' },
+      risk_display: 'Unknown (analysis unavailable)',
+      analysis_unavailable: true,
       score: 100,
       flags: ['fail_closed'],
       cached: false,

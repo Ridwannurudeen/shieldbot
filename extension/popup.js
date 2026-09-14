@@ -42,6 +42,13 @@ function shortAddr(addr) {
   return addr.slice(0, 6) + "…" + addr.slice(-4);
 }
 
+function isIncompleteScan(scan) {
+  return scan.status !== "ok" || scan.partial === true ||
+    scan.risk_level === "UNKNOWN" || scan.classification === "UNKNOWN" ||
+    !Number.isFinite(scan.risk_score) ||
+    Object.values(scan.coverage || {}).some(value => Number(value) < 1);
+}
+
 function fmtUsd(val) {
   if (!val && val !== 0) return null;
   if (val >= 1e6) return "$" + (val / 1e6).toFixed(1) + "M";
@@ -238,15 +245,17 @@ function renderCompactHistory(history, listEl) {
     BLOCK_RECOMMENDED: { cls: "badge-block",   label: t("classBlock") },
   };
   listEl.innerHTML = history.map((item) => {
-    const b = MAP[item.classification] || { cls: "badge-caution", label: item.classification };
-    const safety = 100 - (item.risk_score || 0);
+    const incomplete = isIncompleteScan(item);
+    const b = incomplete ? { cls: "badge-caution", label: "UNKNOWN" } :
+      MAP[item.classification] || { cls: "badge-caution", label: item.classification };
+    const scoreDisplay = incomplete ? "Unknown" : `${100 - item.risk_score}/100`;
     return `<div class="history-item">
       <span class="history-badge ${b.cls}">${b.label}</span>
       <div class="history-info">
         <div class="history-recipient">${escapeHtml(item.recipient || item.to || "Unknown")}</div>
         <div class="history-time">${formatTime(item.timestamp)}</div>
       </div>
-      <div class="history-score">${safety}/100</div>
+      <div class="history-score">${scoreDisplay}</div>
     </div>`;
   }).join("");
 }
@@ -459,9 +468,10 @@ function renderDashFeed(history) {
     BLOCK_RECOMMENDED: t("classBlock"),
   };
   feedEl.innerHTML = history.slice(0, 8).map((item) => {
-    const b = FEED_MAP[item.classification] || { cls: "badge-caution", color: "#EAB308", border: "#EAB308" };
-    const lbl = FEED_LABELS[item.classification] || item.classification;
-    const safety = 100 - (item.risk_score || 0);
+    const incomplete = isIncompleteScan(item);
+    const b = (incomplete ? null : FEED_MAP[item.classification]) || { cls: "badge-caution", color: "#EAB308", border: "#EAB308" };
+    const lbl = incomplete ? "UNKNOWN" : FEED_LABELS[item.classification] || item.classification;
+    const safety = incomplete ? "Unknown" : 100 - item.risk_score;
     const addr = escapeHtml(shortAddr(item.recipient || item.to || "Unknown"));
     return `<div class="feed-item" style="--fc:${b.border}">
       <span class="feed-badge ${b.cls}">${lbl}</span>
@@ -479,7 +489,7 @@ function renderDashStats(history) {
   if (!Array.isArray(history)) return;
   const total   = history.length;
   const blocked = history.filter((h) => h.classification === "BLOCK_RECOMMENDED").length;
-  const safe    = history.filter((h) => h.classification === "SAFE").length;
+  const safe    = history.filter((h) => !isIncompleteScan(h) && h.classification === "SAFE").length;
   const safeRate = total > 0 ? Math.round((safe / total) * 100) : 100;
 
   document.getElementById("dash-stat-total").textContent   = total;
@@ -508,7 +518,8 @@ function renderDashCenter(lastScan) {
     return;
   }
 
-  const safety = 100 - (lastScan.risk_score || 0);
+  const incomplete = isIncompleteScan(lastScan);
+  const safety = incomplete ? null : 100 - lastScan.risk_score;
   setGauge(gaugeArc, gaugeNum, safety, false);
 
   const CLS = {
@@ -517,7 +528,8 @@ function renderDashCenter(lastScan) {
     HIGH_RISK:         { cls: "cls-high",    label: t("classHighRisk") },
     BLOCK_RECOMMENDED: { cls: "cls-block",   label: t("classBlock") },
   };
-  const b = CLS[lastScan.classification] || { cls: "cls-caution", label: lastScan.classification };
+  const b = incomplete ? { cls: "cls-caution", label: "UNKNOWN" } :
+    CLS[lastScan.classification] || { cls: "cls-caution", label: lastScan.classification };
   clsBadge.textContent = b.label;
   clsBadge.className   = `cls-badge ${b.cls}`;
 
@@ -526,7 +538,7 @@ function renderDashCenter(lastScan) {
 
   protectedList.style.display = "none";
   verdictWrap.style.display   = "block";
-  verdictEl.textContent = lastScan.verdict || t("overlayNoAnalysis");
+  verdictEl.textContent = incomplete ? "Unknown (incomplete provider coverage)" : lastScan.verdict || t("overlayNoAnalysis");
 }
 
 function setGauge(arcEl, numEl, score, glow) {
@@ -537,10 +549,10 @@ function setGauge(arcEl, numEl, score, glow) {
 
   arcEl.style.strokeDasharray = `${filled} ${circumference - filled}`;
 
-  const color = clamped >= 80 ? "#22C55E" : clamped >= 50 ? "#F97316" : "#EF4444";
+  const color = score === null ? "#EAB308" : clamped >= 80 ? "#22C55E" : clamped >= 50 ? "#F97316" : "#EF4444";
   arcEl.style.stroke = color;
 
-  numEl.textContent  = clamped;
+  numEl.textContent  = score === null ? "?" : clamped;
   numEl.style.fill   = clamped >= 80 ? "#f8fafc" : color;
 
   if (glow) {

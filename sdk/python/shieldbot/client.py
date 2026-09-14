@@ -81,8 +81,8 @@ class ShieldBot:
                 logger.info(f"Using cached verdict for {to_addr} (API unavailable)")
                 return cached
         if self._fail_mode in ("open", "cached"):
-            return Verdict(verdict="ALLOW", score=0, flags=["api_unavailable"])
-        return Verdict(verdict="BLOCK", score=100, flags=["api_unavailable"])
+            return Verdict(verdict="ALLOW", score=0, flags=["api_unavailable"], analysis_unavailable=True)
+        return Verdict(verdict="BLOCK", score=100, flags=["api_unavailable"], analysis_unavailable=True)
 
     async def check(self, transaction: Dict) -> Verdict:
         """Check a transaction against the agent firewall.
@@ -124,6 +124,14 @@ class ShieldBot:
                 policy_check=data.get("policy_check"),
                 cached=data.get("cached", False),
                 latency_ms=data.get("latency_ms", 0),
+                status=data.get("status", "unknown"),
+                coverage=data.get("coverage") or {},
+                coverage_reasons=data.get("coverage_reasons") or {},
+                risk_display=data.get("risk_display", ""),
+                risk_level=data.get("risk_level"),
+                category_scores=data.get("category_scores") or {},
+                confidence=data.get("confidence"),
+                analysis_unavailable=data.get("analysis_unavailable", False),
             )
             self._set_cached(cache_key, verdict)
             return verdict

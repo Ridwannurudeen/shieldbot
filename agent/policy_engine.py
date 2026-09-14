@@ -36,7 +36,7 @@ class AgentPolicyEngine:
     - auto_allow_below: transactions scoring below this pass automatically.
     - auto_block_above: transactions scoring above this are blocked.
     - Middle range: asks the owner for approval.
-    - Explicit allowlist/blocklist override everything.
+    - Required provider coverage is checked before explicit allowlist/blocklist overrides.
     - Spending limits and slippage caps are hard gates.
     """
 
@@ -52,6 +52,9 @@ class AgentPolicyEngine:
         tx_value_usd: float = 0,
         daily_spend_usd: float = 0,
         simulated_slippage: float = None,
+        status: Optional[str] = None,
+        coverage: Optional[Dict[str, float]] = None,
+        coverage_reasons: Optional[Dict[str, str]] = None,
     ) -> PolicyVerdict:
         """Evaluate a transaction against an agent's policy."""
         # Treat NaN or negative risk scores as maximum risk
@@ -60,6 +63,14 @@ class AgentPolicyEngine:
                 verdict="BLOCK",
                 checks={"risk_score_validation": f"fail — invalid score ({risk_score})"},
                 failed_checks=["risk_score_validation"],
+            )
+
+        if status != "ok" or not coverage or any(value != 1 for value in coverage.values()):
+            reason = "; ".join(dict.fromkeys((coverage_reasons or {}).values())) or "Provider data unavailable or incomplete"
+            return PolicyVerdict(
+                verdict="BLOCK",
+                checks={"coverage": f"fail — incomplete coverage: {reason}"},
+                failed_checks=["coverage"],
             )
 
         checks = {}

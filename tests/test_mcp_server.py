@@ -40,7 +40,8 @@ def mock_container():
 
     c.risk_engine = MagicMock()
     c.risk_engine.compute_from_results = MagicMock(return_value={
-        "risk_score": 15, "risk_level": "LOW", "flags": [],
+        "rug_probability": 15, "risk_level": "LOW", "critical_flags": [],
+        "status": "ok", "coverage": {"honeypot": 1},
         "category_scores": {"structural": 10, "market": 20},
         "confidence": 0.9,
     })
@@ -881,3 +882,30 @@ def test_mcp_robinhood_reaches_analyzers(client, mock_container):
     }, headers=AUTH_HEADERS)
     assert response.status_code == 200
     assert mock_container.registry.run_all.call_args.args[0].chain_id == 4663
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,reason,score", [("unknown", "Provider unavailable", 0), ("unknown", "Simulation failed", 13), ("ok", "", 7)])
+async def test_mcp_maps_engine_keys_and_coverage(mock_container, status, reason, score):
+    from mcp_server.tools import handle_scan_contract
+    mock_container.risk_engine.compute_from_results.return_value = {
+        "rug_probability": score, "critical_flags": [reason] if reason else [],
+        "risk_level": "UNKNOWN" if reason else "LOW", "confidence_level": 40,
+        "status": status, "coverage": {"honeypot": 0 if reason else 1},
+        "coverage_reasons": {"honeypot": reason} if reason else {},
+        "category_scores": {"honeypot": None if reason else 0},
+    }
+    result = await handle_scan_contract(mock_container, {"address": "0x" + "a" * 40})
+    assert result["score"] == score
+    assert result["flags"] == ([reason] if reason else [])
+    assert result["status"] == status
+    assert result["confidence"] == 40
+    assert result["coverage_reasons"] == ({"honeypot": reason} if reason else {})
+    assert result["risk_display"] == ("Unknown (incomplete provider coverage)" if reason else "7%")
+    if reason:
+        assert result["verdict"] == "UNKNOWN"
+
+
+def test_mcp_prompt_includes_unknown():
+    from mcp_server.prompts import get_prompt
+    assert "UNKNOWN" in get_prompt("security-analysis")["messages"][0]["content"]["text"]

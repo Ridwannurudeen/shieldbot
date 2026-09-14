@@ -29,6 +29,7 @@ def default_policy():
 def test_auto_allow_below_threshold(engine, default_policy):
     """Score below auto_allow → ALLOW, all checks pass."""
     result = engine.evaluate(
+        status="ok", coverage={"honeypot": 1},
         policy=default_policy,
         risk_score=12,
         target_address="0xsometoken",
@@ -43,6 +44,7 @@ def test_auto_allow_below_threshold(engine, default_policy):
 def test_auto_block_above_threshold(engine, default_policy):
     """Score above auto_block → BLOCK."""
     result = engine.evaluate(
+        status="ok", coverage={"honeypot": 1},
         policy=default_policy,
         risk_score=85,
         target_address="0xsometoken",
@@ -56,6 +58,7 @@ def test_auto_block_above_threshold(engine, default_policy):
 def test_middle_range_asks_owner(engine, default_policy):
     """Score in middle range → WARN (ask owner)."""
     result = engine.evaluate(
+        status="ok", coverage={"honeypot": 1},
         policy=default_policy,
         risk_score=45,
         target_address="0xsometoken",
@@ -69,6 +72,7 @@ def test_middle_range_asks_owner(engine, default_policy):
 def test_always_allow_overrides(engine, default_policy):
     """Address in always_allow passes regardless of score."""
     result = engine.evaluate(
+        status="ok", coverage={"honeypot": 1},
         policy=default_policy,
         risk_score=90,
         target_address="0x10ed43c718714eb63d5aa57b78b54704e256024e",
@@ -82,6 +86,7 @@ def test_always_allow_overrides(engine, default_policy):
 def test_always_block_overrides(engine, default_policy):
     """Address in always_block blocks regardless of score."""
     result = engine.evaluate(
+        status="ok", coverage={"honeypot": 1},
         policy=default_policy,
         risk_score=5,
         target_address="0xscammer",
@@ -95,6 +100,7 @@ def test_always_block_overrides(engine, default_policy):
 def test_spending_limit_exceeded(engine, default_policy):
     """Tx value exceeding per-tx limit → BLOCK."""
     result = engine.evaluate(
+        status="ok", coverage={"honeypot": 1},
         policy=default_policy,
         risk_score=10,
         target_address="0xsafe",
@@ -108,6 +114,7 @@ def test_spending_limit_exceeded(engine, default_policy):
 def test_daily_spend_exceeded(engine, default_policy):
     """Daily spend exceeded → BLOCK."""
     result = engine.evaluate(
+        status="ok", coverage={"honeypot": 1},
         policy=default_policy,
         risk_score=10,
         target_address="0xsafe",
@@ -121,6 +128,7 @@ def test_daily_spend_exceeded(engine, default_policy):
 def test_slippage_exceeded(engine, default_policy):
     """Simulated slippage over max → BLOCK."""
     result = engine.evaluate(
+        status="ok", coverage={"honeypot": 1},
         policy=default_policy,
         risk_score=10,
         target_address="0xsafe",
@@ -135,6 +143,7 @@ def test_slippage_exceeded(engine, default_policy):
 def test_empty_policy_defaults(engine):
     """Empty policy uses safe defaults."""
     result = engine.evaluate(
+        status="ok", coverage={"honeypot": 1},
         policy={},
         risk_score=50,
         target_address="0xsafe",
@@ -148,6 +157,7 @@ def test_empty_policy_defaults(engine):
 def test_boundary_exact_allow_threshold(engine, default_policy):
     """Score exactly at auto_allow_below (25) falls to WARN (exclusive boundary)."""
     result = engine.evaluate(
+        status="ok", coverage={"honeypot": 1},
         policy=default_policy,
         risk_score=25,
         target_address="0xsafe",
@@ -161,6 +171,7 @@ def test_boundary_exact_allow_threshold(engine, default_policy):
 def test_boundary_exact_block_threshold(engine, default_policy):
     """Score exactly at auto_block_above (70) falls to WARN (exclusive boundary)."""
     result = engine.evaluate(
+        status="ok", coverage={"honeypot": 1},
         policy=default_policy,
         risk_score=70,
         target_address="0xsafe",
@@ -169,3 +180,16 @@ def test_boundary_exact_block_threshold(engine, default_policy):
     )
     assert result.verdict == "WARN"
     assert result.needs_owner_approval is True
+
+
+@pytest.mark.parametrize("status,coverage", [("unknown", {"honeypot": 0}), ("unknown", {"honeypot": 0.8}), ("ok", {"honeypot": 0}), (None, None)])
+@pytest.mark.parametrize("allowlisted", [False, True])
+def test_incomplete_coverage_blocks_even_allowlist(engine, status, coverage, allowlisted):
+    result = engine.evaluate(
+        policy={"always_allow": ["0xtarget"] if allowlisted else []},
+        risk_score=0, target_address="0xtarget", status=status, coverage=coverage,
+        coverage_reasons={"honeypot": "Simulation failed"},
+    )
+    assert result.verdict == "BLOCK"
+    assert "coverage" in result.failed_checks
+    assert "Simulation failed" in result.checks["coverage"]

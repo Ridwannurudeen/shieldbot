@@ -49,6 +49,7 @@ def mock_container():
     c.risk_engine = MagicMock()
     c.risk_engine.compute_from_results = MagicMock(return_value={
         "risk_score": 12, "risk_level": "LOW", "flags": [],
+        "status": "ok", "coverage": {"honeypot": 1},
         "category_scores": {}, "confidence": 0.9,
     })
 
@@ -99,6 +100,7 @@ def test_agent_firewall_allow(client, mock_container):
     """Transaction to safe contract returns ALLOW."""
     mock_container.risk_engine.compute_from_results.return_value = {
         "risk_score": 12, "risk_level": "LOW", "flags": [],
+        "status": "ok", "coverage": {"honeypot": 1},
         "category_scores": {}, "confidence": 0.9,
     }
     resp = client.post("/api/agent/firewall", json={
@@ -121,6 +123,7 @@ def test_agent_firewall_block(client, mock_container):
     """Transaction to high-risk contract returns BLOCK."""
     mock_container.risk_engine.compute_from_results.return_value = {
         "risk_score": 91, "risk_level": "HIGH", "flags": ["honeypot"],
+        "status": "ok", "coverage": {"honeypot": 1},
         "category_scores": {}, "confidence": 0.95,
     }
     resp = client.post("/api/agent/firewall", json={
@@ -178,7 +181,7 @@ def test_agent_register(client, mock_container):
 def test_agent_firewall_cached_verdict(client, mock_container):
     """Transaction with cached verdict skips analyzer pipeline."""
     mock_container.cache.get_verdict = AsyncMock(return_value={
-        "score": 45, "flags": ["suspicious"],
+        "score": 45, "flags": ["suspicious"], "status": "ok", "coverage": {"honeypot": 1}, "risk_level": "MEDIUM",
     })
     resp = client.post("/api/agent/firewall", json={
         "agent_id": "agent:1",
@@ -246,6 +249,7 @@ def test_agent_firewall_tenderly_revert_floors_risk(client, mock_container):
     mock_container.tenderly_simulator.is_enabled.return_value = True
     mock_container.risk_engine.compute_from_results.return_value = {
         "risk_score": 30, "risk_level": "LOW", "flags": [],
+        "status": "ok", "coverage": {"honeypot": 1},
         "category_scores": {}, "confidence": 0.8,
     }
     mock_container.tenderly_simulator.simulate_transaction = AsyncMock(return_value={
@@ -285,3 +289,99 @@ def test_agent_firewall_tenderly_disabled_no_simulation(client, mock_container):
     assert resp.status_code == 200
     body = resp.json()
     assert body.get("simulation") is None
+
+
+@pytest.mark.parametrize("reason,fraction", [("Provider unavailable", 0), ("Simulation failed", 0.8)])
+@pytest.mark.parametrize("source", ["fresh", "redis", "sqlite"])
+def test_agent_incomplete_coverage_survives_caches(client, mock_container, reason, fraction, source):
+    metadata = {"status": "unknown", "coverage": {"honeypot": fraction}, "coverage_reasons": {"honeypot": reason}}
+    output = {"rug_probability": 0, "risk_level": "UNKNOWN", "critical_flags": [reason], **metadata}
+    mock_container.risk_engine.compute_from_results.return_value = output
+    if source == "redis":
+        mock_container.cache.get_verdict.return_value = {"score": 0, "flags": [reason], **metadata}
+    elif source == "sqlite":
+        mock_container.db.get_contract_score.return_value = {"risk_score": 0, "risk_level": "UNKNOWN", "flags": [reason], "category_scores": {"_scan_metadata": metadata}}
+    resp = client.post("/api/agent/firewall", json=_make_firewall_request(), headers={"X-API-Key": "sb_testkey"})
+    body = resp.json()
+    assert resp.status_code == 200
+    assert body["verdict"] == "BLOCK"
+    assert body["score"] == 0
+    assert body["status"] == "unknown"
+    assert body["coverage"] == metadata["coverage"]
+    assert body["coverage_reasons"] == metadata["coverage_reasons"]
+    assert "Unknown" in body["risk_display"]
+    if source == "fresh":
+        stored = mock_container.db.upsert_contract_score.call_args.kwargs["category_scores"]["_scan_metadata"]
+        assert stored["status"] == "unknown"
+    if source != "redis":
+        assert mock_container.cache.set_verdict.call_args.args[2]["status"] == "unknown"
+
+
+def test_agent_legacy_sqlite_cache_rescans(client, mock_container):
+    mock_container.db.get_contract_score.return_value = {"risk_score": 0, "risk_level": "LOW", "category_scores": {}}
+    resp = client.post("/api/agent/firewall", json=_make_firewall_request(), headers={"X-API-Key": "sb_testkey"})
+    assert resp.status_code == 200
+    mock_container.registry.run_all.assert_awaited_once()
+
+
+@pytest.mark.parametrize("source", ["registry", "simulation"])
+def test_agent_routing_errors_propagate(client, mock_container, source):
+    from utils.web3_client import UnsupportedChainError
+    if source == "registry":
+        mock_container.registry.run_all.side_effect = UnsupportedChainError("Unsupported chain")
+    else:
+        mock_container.tenderly_simulator.is_enabled.return_value = True
+        mock_container.tenderly_simulator.simulate_transaction = AsyncMock(side_effect=UnsupportedChainError("Unsupported chain"))
+    with pytest.raises(UnsupportedChainError):
+        client.post("/api/agent/firewall", json=_make_firewall_request(), headers={"X-API-Key": "sb_testkey"})
+    mock_container.cache.set_verdict.assert_not_awaited()
+
+
+def test_agent_legacy_redis_cache_rescans(client, mock_container):
+    mock_container.cache.get_verdict.return_value = {"score": 0, "flags": []}
+    response = client.post("/api/agent/firewall", json=_make_firewall_request(), headers={"X-API-Key": "sb_testkey"})
+    assert response.status_code == 200
+    mock_container.registry.run_all.assert_awaited_once()
+
+
+@pytest.mark.parametrize("simulation", [None, {"success": False}, RuntimeError("offline")])
+def test_agent_failed_optional_simulation_blocks(client, mock_container, simulation):
+    mock_container.tenderly_simulator.is_enabled.return_value = True
+    mock_container.tenderly_simulator.simulate_transaction = AsyncMock(
+        side_effect=simulation if isinstance(simulation, Exception) else None,
+        return_value=simulation if not isinstance(simulation, Exception) else None,
+    )
+    response = client.post("/api/agent/firewall", json=_make_firewall_request(), headers={"X-API-Key": "sb_testkey"})
+    result = response.json()
+    assert response.status_code == 200
+    assert result["verdict"] == "BLOCK"
+    assert result["status"] == "unknown"
+    assert result["coverage"]["simulation"] == 0
+    assert "simulation" in result["coverage_reasons"]
+    assert mock_container.cache.set_verdict.call_args.args[2]["status"] == "unknown"
+
+
+@pytest.mark.parametrize("source", ["fresh", "redis", "sqlite"])
+@pytest.mark.parametrize("uncertainty", [{"risk_level": "UNKNOWN"}, {"partial": True}])
+def test_agent_normalizes_inconsistent_unknown_before_policy(client, mock_container, source, uncertainty):
+    data = {"risk_level": "LOW", "rug_probability": 0, "critical_flags": [], "status": "ok", "coverage": {"honeypot": 1}, **uncertainty}
+    mock_container.risk_engine.compute_from_results.return_value = data
+    if source == "redis":
+        mock_container.cache.get_verdict.return_value = {**data, "score": 0}
+    elif source == "sqlite":
+        mock_container.db.get_contract_score.return_value = {
+            **data, "risk_score": 0,
+            "category_scores": {"_scan_metadata": {key: value for key, value in data.items() if key in ("status", "coverage", "partial")}},
+        }
+    response = client.post("/api/agent/firewall", json=_make_firewall_request(), headers={"X-API-Key": "sb_testkey"})
+    assert response.status_code == 200
+    assert response.json()["verdict"] == "BLOCK"
+    assert response.json()["status"] == "unknown"
+
+
+def test_agent_exposes_complete_risk_metadata(client, mock_container):
+    response = client.post("/api/agent/firewall", json=_make_firewall_request(), headers={"X-API-Key": "sb_testkey"})
+    assert response.json()["risk_level"] == "LOW"
+    assert response.json()["category_scores"] == {}
+    assert response.json()["confidence"] == 0.9
+    assert mock_container.cache.set_verdict.call_args.args[2]["risk_level"] == "LOW"

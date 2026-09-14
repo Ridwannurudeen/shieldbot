@@ -1,5 +1,7 @@
 """Formats composite risk data into a full Telegram intelligence report."""
 
+from core.extension_formatter import is_scan_incomplete
+
 
 def format_full_report(
     risk_output: dict,
@@ -17,7 +19,11 @@ def format_full_report(
     confidence = risk_output.get('confidence_level', 0)
     flags = risk_output.get('critical_flags', [])
     scores = risk_output.get('category_scores', {})
-    incomplete = risk_output.get('status') == 'unknown' or risk_level == 'UNKNOWN'
+    incomplete = is_scan_incomplete(risk_output) or bool(
+        honeypot_data and honeypot_data.get('simulation_failed')
+    )
+    if incomplete and risk_level == 'LOW':
+        risk_level = 'UNKNOWN'
     coverage_reasons = risk_output.get('coverage_reasons', {})
 
     # Verdict emoji
@@ -132,7 +138,7 @@ def format_full_report(
         lines.append('*\U0001F9EA Trade Simulation:*')
         reason = honeypot_data.get('reason') or honeypot_data.get('honeypot_reason') or 'Provider data unavailable'
         is_honeypot = honeypot_data.get('is_honeypot')
-        if is_honeypot is None:
+        if is_honeypot is None or (honeypot_data.get('simulation_failed') and is_honeypot is False):
             hp = f'Unknown ({reason})'
         else:
             hp = '\u274C Honeypot' if is_honeypot else '\u2705 Not Honeypot'
@@ -143,6 +149,8 @@ def format_full_report(
             lines.append(f'  {label}: {rendered}')
         for key, label in (('can_buy', 'Buyability'), ('can_sell', 'Sellability')):
             value = honeypot_data.get(key)
+            if key == 'can_sell' and honeypot_data.get('simulation_failed'):
+                value = None
             rendered = f'Unknown ({reason})' if value is None else ('Yes' if value else 'No')
             lines.append(f'  {label}: {rendered}')
         if reason and reason not in ('Unknown', 'None', ''):
@@ -150,7 +158,7 @@ def format_full_report(
         lines.append('')
 
     # AI Analysis
-    if ai_analysis:
+    if ai_analysis and not incomplete:
         lines.append('*\U0001F9E0 AI Analysis:*')
         lines.append(ai_analysis)
         lines.append('')
@@ -158,7 +166,8 @@ def format_full_report(
     # Final verdict
     lines.append('*Final Verdict:*')
     if rug_prob >= 71:
-        lines.append(f'{verdict_icon} DO NOT PROCEED — Rug probability {rug_prob}%')
+        detail = 'Unknown risk: provider coverage incomplete' if incomplete else f'Rug probability {rug_prob}%'
+        lines.append(f'{verdict_icon} DO NOT PROCEED — {detail}')
     elif rug_prob >= 31 or incomplete or risk_level in ('MEDIUM', 'HIGH'):
         detail = 'Unknown risk: provider coverage incomplete' if incomplete else f'Moderate risk ({rug_prob}%)'
         lines.append(f'{verdict_icon} PROCEED WITH CAUTION — {detail}')
