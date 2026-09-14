@@ -226,6 +226,8 @@ class Advisor:
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=300,
             )
+        except UnsupportedChainError:
+            raise
         except Exception as e:
             logger.error("Advisor explain_scan failed: %s", e)
             return self._rule_based_explanation(scan_result)

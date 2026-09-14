@@ -415,6 +415,20 @@ async def test_explain_scan_ai_exception_falls_back(advisor, mock_ai):
 
 
 @pytest.mark.asyncio
+async def test_explain_scan_propagates_routing_error(advisor, mock_ai):
+    from utils.web3_client import UnsupportedChainError
+    error = UnsupportedChainError('Chain removed')
+    mock_ai.chat.side_effect = error
+
+    with patch.object(advisor, '_rule_based_explanation') as fallback:
+        with pytest.raises(UnsupportedChainError) as raised:
+            await advisor.explain_scan({'risk_score': 0, 'risk_level': 'LOW'})
+
+    assert raised.value is error
+    fallback.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_advisor_chain_context_and_result(advisor, mock_ai):
     result = await advisor.chat('u1', 'Check 0x' + 'a' * 40, chain_id=4663)
     assert result['scan_data']['chain_id'] == 4663
