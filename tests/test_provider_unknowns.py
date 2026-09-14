@@ -350,13 +350,15 @@ async def test_partial_goplus_restrictions_score_in_both_engine_paths(field, fla
 
 @pytest.mark.parametrize('failed', [False, True])
 @pytest.mark.parametrize('entrypoint', ['direct', 'registry'])
-def test_simulation_failure_is_the_explicit_successful_input_parity_exception(failed, entrypoint):
-    # Baseline successful input: structural 70 * .4 = 28 (LOW).
+def test_successful_unrestricted_parity_and_failed_simulation_exception(failed, entrypoint):
+    # Parity applies to successful simulations with none of the three restrictions.
+    # Baseline unrestricted input: structural 70 * .4 = 28 (LOW).
     # An unresolved failure adds 40 * .15 = 6 and cannot be coverage-complete.
     contract = {'is_contract': True, 'is_verified': False, 'contract_age_days': 1,
                 'has_mint': True, 'has_blacklist': True, 'ownership_renounced': True}
     data = {'is_honeypot': False, 'can_buy': True, 'can_sell': True,
             'buy_tax': 0, 'sell_tax': 0, 'simulation_failed': failed,
+            'cannot_buy': False, 'cannot_sell_all': False, 'transfer_pausable': False,
             'status': 'ok', 'coverage': {field: True for field in FIELDS}}
     market = {'liquidity_usd': 50000, 'fdv': 200000, 'volume_24h': 2000, 'pair_age_hours': 100}
     ethos = {'reputation_score': 80}
@@ -373,6 +375,46 @@ def test_simulation_failure_is_the_explicit_successful_input_parity_exception(fa
     assert risk['risk_level'] == ('MEDIUM' if failed else 'LOW')
     assert risk['status'] == ('unknown' if failed else 'ok')
     assert (risk['coverage']['honeypot'] < 1) is failed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('restriction,flag', [
+    ('cannot_buy', 'Cannot buy token'),
+    ('cannot_sell_all', 'Cannot sell all tokens'),
+    ('transfer_pausable', 'Token transfers can be paused'),
+])
+@pytest.mark.parametrize('entrypoint', ['direct', 'registry'])
+async def test_complete_restrictions_are_deliberate_parity_exceptions(restriction, flag, entrypoint):
+    # c1d1adf ignored these restrictions: 70 * .4 = 28 (LOW) in both paths.
+    # Each known restriction now adds 20 * .15 = 3, retaining complete coverage.
+    contract = {'is_contract': True, 'is_verified': False, 'contract_age_days': 1,
+                'has_mint': True, 'has_blacklist': True, 'ownership_renounced': True}
+    data = {'is_honeypot': False, 'can_buy': restriction != 'cannot_buy', 'can_sell': True,
+            'buy_tax': 0, 'sell_tax': 0, 'simulation_failed': False,
+            'cannot_buy': False, 'cannot_sell_all': False, 'transfer_pausable': False,
+            'status': 'ok', 'coverage': {field: True for field in FIELDS}}
+    data[restriction] = True
+    market = {'liquidity_usd': 50000, 'fdv': 200000, 'volume_24h': 2000, 'pair_age_hours': 100}
+    ethos = {'reputation_score': 80}
+    service = MagicMock()
+    service.fetch_honeypot_data = AsyncMock(return_value=data)
+    result = await HoneypotAnalyzer(service).analyze(AnalysisContext(ADDRESS))
+    if entrypoint == 'direct':
+        risk = RiskEngine().compute_composite_risk(contract, data, market, ethos)
+    else:
+        risk = RiskEngine().compute_from_results([
+            AnalyzerResult('structural', .4, 70, data=contract),
+            AnalyzerResult('market', .25, 0, data=market),
+            AnalyzerResult('behavioral', .2, 0, data=ethos), result,
+        ])
+    assert risk['rug_probability'] == 31
+    assert risk['risk_level'] == 'MEDIUM'
+    assert risk['category_scores']['honeypot'] == result.score == 20
+    assert flag in risk['critical_flags']
+    assert risk['risk_archetype'] != 'honeypot'
+    assert risk['status'] == result.data['status'] == 'ok'
+    assert all(value == 1 for value in risk['coverage'].values())
+    assert all(result.data['coverage'].values())
 
 
 @pytest.mark.asyncio
