@@ -10,13 +10,14 @@ import time
 import asyncio
 import logging
 import random
+import re
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, RedirectResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Optional, Dict, Any, List
 
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve_selector
@@ -357,6 +358,30 @@ def _validate_chain_id(chain_id: int) -> int:
     return chain_id
 
 
+def _validate_signing_chain(typed_data: Optional[Dict], chain_id: int):
+    if not isinstance(typed_data, dict):
+        return
+    domain = typed_data.get("domain")
+    if not isinstance(domain, dict) or "chainId" not in domain:
+        return
+
+    domain_chain = domain["chainId"]
+    if isinstance(domain_chain, str) and re.fullmatch(r"[0-9]+|0[xX][0-9a-fA-F]+", domain_chain):
+        try:
+            domain_chain = int(domain_chain, 16 if domain_chain.lower().startswith("0x") else 10)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid typedData.domain.chainId") from exc
+    if type(domain_chain) is not int:
+        raise HTTPException(status_code=400, detail="Invalid typedData.domain.chainId")
+
+    _validate_chain_id(domain_chain)
+    if domain_chain != chain_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Signing domain chain ID {domain_chain} does not match request chain ID {chain_id}",
+        )
+
+
 @app.middleware("http")
 async def request_validation_middleware(request: Request, call_next):
     content_length = request.headers.get("content-length")
@@ -392,6 +417,7 @@ async def request_validation_middleware(request: Request, call_next):
     }
     if raw_body and not is_json and not is_webhook_form:
         return JSONResponse(status_code=415, content={"detail": "Content-Type must be application/json"})
+    body = None
     if raw_body and is_json:
         try:
             body = await request.json()
@@ -425,6 +451,11 @@ async def request_validation_middleware(request: Request, call_next):
             _validate_chain_id(parsed_chain_id)
         except HTTPException as exc:
             return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    if request_path == "/api/firewall" and isinstance(body, dict):
+        try:
+            _validate_signing_chain(body.get("typedData"), body.get("chainId", 56))
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
     return await call_next(request)
 
 
@@ -449,6 +480,11 @@ class FirewallRequest(ChainRequest):
     chainId: int = Field(default=56, ge=1, le=10_000_000)
     typedData: Optional[Dict] = None
     signMethod: Optional[str] = Field(default=None, max_length=64)
+
+    @model_validator(mode="after")
+    def validate_signing_chain(self):
+        _validate_signing_chain(self.typedData, self.chainId)
+        return self
 
     @field_validator("typedData")
     @classmethod

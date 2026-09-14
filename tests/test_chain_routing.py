@@ -60,6 +60,7 @@ def routing_api(monkeypatch):
     monkeypatch.setattr(api, "chat_limiter", api.RateLimiter(1000, 1000))
     monkeypatch.setattr(api, "_report_limiter", api.RateLimiter(1000, 1000))
     monkeypatch.setattr(api.app.router, "routes", list(api.app.router.routes))
+    monkeypatch.setattr(api.app.router, "lifespan_context", api.app.router.lifespan_context)
     api.app.include_router(create_agent_firewall_router(services), prefix="/api/agent")
     api.app.include_router(create_mcp_router(services), prefix="/mcp")
     api.app.include_router(create_guardian_router(services), prefix="/api/guardian")
@@ -412,3 +413,118 @@ def test_uptime_webhook_keeps_form_transport(routing_api):
     )
     assert response.status_code == 200
     assert response.json() == {"ok": True}
+
+
+PERMIT_TYPED_DATA = {
+    "types": {
+        "EIP712Domain": [
+            {"name": "name", "type": "string"},
+            {"name": "version", "type": "string"},
+            {"name": "chainId", "type": "uint256"},
+            {"name": "verifyingContract", "type": "address"},
+        ],
+        "Permit": [
+            {"name": "owner", "type": "address"},
+            {"name": "spender", "type": "address"},
+            {"name": "value", "type": "uint256"},
+            {"name": "nonce", "type": "uint256"},
+            {"name": "deadline", "type": "uint256"},
+        ],
+    },
+    "primaryType": "Permit",
+    "domain": {"name": "Token", "version": "1", "chainId": 56, "verifyingContract": ADDRESS},
+    "message": {
+        "owner": ADDRESS,
+        "spender": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+        "value": "100", "nonce": "0", "deadline": "1800000000",
+    },
+}
+
+
+@pytest.mark.parametrize("domain_chain", [
+    999999, "999999", "0xf423f", 0, -1, True, False, 56.0, None,
+    "", "56.0", "0x", "0xgg", "+56", "-1", " 56", "56 ", "5_6", "0b111000", [], {},
+])
+@pytest.mark.parametrize("target", ["", ADDRESS])
+def test_signing_domain_rejected_before_auth_usage_and_analysis(routing_api, monkeypatch, domain_chain, target):
+    import api
+
+    client, registry, services = routing_api
+    signature_analysis = AsyncMock(return_value={})
+    monkeypatch.setattr(api, "_build_signature_only_response", signature_analysis)
+    response = client.post("/api/firewall", json={
+        "to": target, "from": ADDRESS, "chainId": 56, "signMethod": "eth_signTypedData_v4",
+        "typedData": {**PERMIT_TYPED_DATA, "domain": {**PERMIT_TYPED_DATA["domain"], "chainId": domain_chain}},
+    }, headers={"x-api-key": "test-key"})
+
+    assert response.status_code == 400
+    if domain_chain in (999999, "999999", "0xf423f"):
+        assert "999999" in response.json()["detail"]
+        assert "Supported chain IDs" in response.json()["detail"]
+    services.auth_manager.validate_key.assert_not_called()
+    services.auth_manager.record_usage.assert_not_called()
+    signature_analysis.assert_not_called()
+    assert services.mock_calls == []
+    for adapter in registry._adapters.values():
+        assert adapter.mock_calls == []
+
+
+@pytest.mark.parametrize("domain_chain", [1, "1", "0x1", 4663, "4663", "0x1237"])
+@pytest.mark.parametrize("explicit_chain", [False, True])
+def test_signing_domain_mismatch_names_both_chains_before_auth(routing_api, domain_chain, explicit_chain):
+    client, _, services = routing_api
+    payload = {
+        "to": "", "from": ADDRESS, "signMethod": "eth_signTypedData_v4",
+        "typedData": {**PERMIT_TYPED_DATA, "domain": {**PERMIT_TYPED_DATA["domain"], "chainId": domain_chain}},
+    }
+    if explicit_chain:
+        payload["chainId"] = 56
+    response = client.post("/api/firewall", json=payload, headers={"x-api-key": "test-key"})
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "does not match" in detail
+    assert "56" in detail
+    assert str(int(domain_chain, 0) if isinstance(domain_chain, str) else domain_chain) in detail
+    assert services.mock_calls == []
+
+
+@pytest.mark.parametrize("chain_id,domain_chain", [
+    (56, 56), (56, "56"), (56, "0x38"), (56, "0X38"), (56, "056"),
+    (4663, 4663), (4663, "4663"), (4663, "0x1237"),
+])
+def test_matching_signing_domain_preserves_signature_response(routing_api, chain_id, domain_chain):
+    import api
+
+    client, _, services = routing_api
+    payload = {
+        "to": "", "from": ADDRESS, "chainId": chain_id, "signMethod": "eth_signTypedData_v4",
+        "typedData": {**PERMIT_TYPED_DATA, "domain": {**PERMIT_TYPED_DATA["domain"], "chainId": domain_chain}},
+    }
+    expected = asyncio.run(api._build_signature_only_response(api.FirewallRequest(**payload)))
+    response = client.post("/api/firewall", json=payload, headers={"x-api-key": "test-key"})
+    assert response.status_code == 200
+    assert response.json() == expected
+    assert response.json()["chain_id"] == chain_id
+    services.auth_manager.validate_key.assert_awaited_once()
+    services.auth_manager.record_usage.assert_awaited_once()
+
+
+@pytest.mark.parametrize("domain_chain", [999999, "0xf423f", 1, "0x1", True, 56.0, None])
+def test_firewall_model_rejects_invalid_signing_domain(routing_api, domain_chain):
+    import api
+
+    with pytest.raises(HTTPException) as exc:
+        api.FirewallRequest(to="", sender=ADDRESS, typedData={
+            **PERMIT_TYPED_DATA, "domain": {**PERMIT_TYPED_DATA["domain"], "chainId": domain_chain},
+        })
+    assert exc.value.status_code == 400
+
+
+def test_signing_domain_without_chain_remains_optional(routing_api):
+    client, _, _ = routing_api
+    domain = {key: value for key, value in PERMIT_TYPED_DATA["domain"].items() if key != "chainId"}
+    response = client.post("/api/firewall", json={
+        "to": "", "from": ADDRESS, "typedData": {**PERMIT_TYPED_DATA, "domain": domain},
+    })
+    assert response.status_code == 200
+    assert response.json()["chain_id"] == 56
