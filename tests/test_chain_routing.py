@@ -528,3 +528,64 @@ def test_signing_domain_without_chain_remains_optional(routing_api):
     })
     assert response.status_code == 200
     assert response.json()["chain_id"] == 56
+
+
+@pytest.mark.parametrize("domain_chain", [
+    pytest.param("0x" + "f" * 4000, id="oversized-hex"),
+    pytest.param("9" * 5000, id="oversized-decimal"),
+    pytest.param("0x" + "0" * 63 + "38", id="overlong-padded-hex"),
+    pytest.param("0" * 77 + "56", id="overlong-padded-decimal"),
+    pytest.param(10_000_001, id="integer-above-range"),
+    pytest.param("10000001", id="decimal-above-range"),
+    pytest.param("0x989681", id="hex-above-range"),
+    pytest.param(0, id="zero"),
+    pytest.param(-1, id="negative"),
+])
+@pytest.mark.parametrize("boundary", ["http", "model"])
+def test_oversized_signing_chain_is_rejected_before_services(routing_api, monkeypatch, domain_chain, boundary):
+    import api
+
+    client, registry, services = routing_api
+    signature_analysis = AsyncMock(return_value={})
+    monkeypatch.setattr(api, "_build_signature_only_response", signature_analysis)
+    payload = {
+        "to": "", "from": ADDRESS, "chainId": 56, "signMethod": "eth_signTypedData_v4",
+        "typedData": {**PERMIT_TYPED_DATA, "domain": {**PERMIT_TYPED_DATA["domain"], "chainId": domain_chain}},
+    }
+    if boundary == "http":
+        response = client.post("/api/firewall", json=payload, headers={"x-api-key": "test-key"})
+        assert response.status_code == 400
+        detail = response.json()["detail"]
+    else:
+        with pytest.raises(HTTPException) as raised:
+            api.FirewallRequest(**payload)
+        assert raised.value.status_code == 400
+        detail = raised.value.detail
+    assert detail == "typedData.domain.chainId must be between 1 and 10000000"
+    services.auth_manager.validate_key.assert_not_called()
+    services.auth_manager.record_usage.assert_not_called()
+    signature_analysis.assert_not_called()
+    assert services.mock_calls == []
+    for adapter in registry._adapters.values():
+        assert adapter.mock_calls == []
+
+
+def test_signing_chain_range_check_precedes_registry_validation(monkeypatch):
+    import api
+
+    validate = MagicMock()
+    monkeypatch.setattr(api, "_validate_chain_id", validate)
+    with pytest.raises(HTTPException) as raised:
+        api._validate_signing_chain({"domain": {"chainId": 10**5000}}, 56)
+    assert raised.value.status_code == 400
+    assert raised.value.detail == "typedData.domain.chainId must be between 1 and 10000000"
+    validate.assert_not_called()
+
+
+@pytest.mark.parametrize("domain_chain", ["0x" + "0" * 62 + "38", "0" * 76 + "56"])
+def test_signing_chain_accepts_bounded_padding(routing_api, domain_chain):
+    import api
+
+    req = api.FirewallRequest(to="", sender=ADDRESS, typedData={"domain": {"chainId": domain_chain}})
+    assert req.chainId == 56
+    assert req.typedData["domain"]["chainId"] == domain_chain

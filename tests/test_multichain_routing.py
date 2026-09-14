@@ -167,6 +167,22 @@ def test_registry_rejects_non_integer_chain_ids(chain_id):
         client.validate_chain_id(chain_id)
 
 
+@pytest.mark.parametrize("chain_id", [0, -1, 10_000_001, 10**5000, -(10**5000)],
+                         ids=["zero", "negative", "above_maximum", "huge_positive", "huge_negative"])
+def test_registry_rejects_out_of_range_chain_ids_with_bounded_error(chain_id):
+    client = Web3Client()
+    with pytest.raises(UnsupportedChainError) as exc_info:
+        client.validate_chain_id(chain_id)
+    assert str(exc_info.value) == "Unsupported chain ID: must be between 1 and 10000000."
+
+
+@pytest.mark.parametrize("chain_id", [1, 10_000_000])
+def test_registry_accepts_registered_chain_ids_at_range_boundaries(chain_id):
+    client = Web3Client()
+    client.register_adapter(MagicMock(chain_id=chain_id, chain_name="test"))
+    assert client.validate_chain_id(chain_id) == chain_id
+
+
 @pytest.mark.parametrize("chain_id,error", [
     (4663, "pending-transaction monitoring is not available on this chain"),
     (999999, "Unsupported chain ID 999999"),

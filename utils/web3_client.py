@@ -63,6 +63,10 @@ class Web3Client:
 
     def validate_chain_id(self, chain_id: int) -> int:
         """Reject chains without an adapter before accessing any provider."""
+        if type(chain_id) is int and not 1 <= chain_id <= 10_000_000:
+            raise UnsupportedChainError(
+                "Unsupported chain ID: must be between 1 and 10000000."
+            )
         if type(chain_id) is not int or chain_id not in self._adapters:
             supported = ", ".join(str(cid) for cid in self.get_supported_chain_ids())
             raise UnsupportedChainError(
