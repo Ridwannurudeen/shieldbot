@@ -46,8 +46,10 @@ class HoneypotService:
         self.web3_client = web3_client
 
     async def fetch_honeypot_data(self, address: str, chain_id: int = 56) -> dict:
+        from utils.web3_client import UnsupportedChainError
+
         if chain_id not in self.web3_client.get_supported_chain_ids():
-            raise ValueError(f'No registered adapter for chain {chain_id}')
+            raise UnsupportedChainError(f'No registered adapter for chain {chain_id}')
         data = {
             'is_honeypot': None,
             'honeypot_reason': None,
@@ -83,6 +85,8 @@ class HoneypotService:
                     if type(value) in (int, float) and math.isfinite(value) and value >= 0:
                         data[field] = value
                         data['field_providers'][field] = 'honeypot.is'
+            except UnsupportedChainError:
+                raise
             except Exception as e:
                 logger.error('Honeypot fetch failed for %s: %s', address, e)
                 reasons.append(f'honeypot.is request failed ({type(e).__name__})')
@@ -104,6 +108,8 @@ class HoneypotService:
                         data[field] = value
                         if value is not None:
                             data['field_providers'][field] = 'goplus'
+            except UnsupportedChainError:
+                raise
             except Exception as e:
                 logger.error('GoPlus fallback failed for %s: %s', address, e)
                 reasons.append(f'GoPlus fallback failed ({type(e).__name__})')

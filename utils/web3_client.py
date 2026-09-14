@@ -4,7 +4,7 @@ Preserves the original interface for backward compatibility.
 """
 
 import logging
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple
 from web3 import Web3
 
 from adapters.bsc import BscAdapter
@@ -94,13 +94,15 @@ class Web3Client:
             )
             contract.functions.symbol().call()
             return True
+        except UnsupportedChainError:
+            raise
         except Exception:
             return False
 
     async def get_bytecode(self, address: str, chain_id: int = 56) -> Optional[str]:
         return await self._get_adapter(chain_id).get_bytecode(address)
 
-    async def is_verified_contract(self, address: str, chain_id: int = 56) -> Union[bool, Tuple[bool, Optional[str]]]:
+    async def is_verified_contract(self, address: str, chain_id: int = 56) -> Tuple[Optional[bool], Optional[str]]:
         return await self._get_adapter(chain_id).is_verified_contract(address)
 
     async def get_contract_creation_info(self, address: str, chain_id: int = 56) -> Optional[Dict]:
@@ -117,6 +119,8 @@ class Web3Client:
             )
             contract.functions.decimals().call()
             return True
+        except UnsupportedChainError:
+            raise
         except Exception:
             return False
 

@@ -7,6 +7,7 @@ Integrates risk_scorer for numeric scoring and AI analysis
 import logging
 from typing import Dict, List, Optional
 from utils.chain_info import get_chain_name
+from utils.web3_client import UnsupportedChainError
 from utils.risk_scorer import (
     findings_from_scan_result, calculate_risk_score,
     blend_scores, compute_confidence
@@ -98,6 +99,20 @@ class TokenScanner:
         # Resolve conflicts
         self._resolve_conflicts(result)
 
+        result['coverage'] = {
+            field: result.get(field) is not None
+            for field in ('is_verified', 'contract_age_days', 'is_honeypot', 'buy_tax', 'sell_tax')
+        }
+        result['coverage'].update({
+            field: result['checks'].get(field) is not None
+            for field in ('can_buy', 'can_sell', 'ownership_renounced', 'liquidity_locked')
+        })
+        result['coverage_reasons'] = {
+            field: f'{field} unknown: provider data unavailable'
+            for field, covered in result['coverage'].items() if not covered
+        }
+        result['status'] = 'unknown' if result['coverage_reasons'] else 'ok'
+
         # Calculate safety level (legacy)
         result['safety_level'] = self._calculate_safety_level(result)
 
@@ -110,6 +125,8 @@ class TokenScanner:
         if self.ai_analyzer and self.ai_analyzer.is_available():
             try:
                 ai_result = await self.ai_analyzer.compute_ai_risk_score(address, result)
+            except UnsupportedChainError:
+                raise
             except Exception as e:
                 logger.error(f"AI risk scoring failed: {e}")
 
@@ -138,6 +155,8 @@ class TokenScanner:
                 )
                 if report:
                     result['forensic_report'] = report
+            except UnsupportedChainError:
+                raise
             except Exception as e:
                 logger.error(f"Forensic report generation failed: {e}")
 
@@ -151,6 +170,8 @@ class TokenScanner:
             result['symbol'] = token_info.get('symbol')
             result['decimals'] = token_info.get('decimals')
             result['total_supply'] = token_info.get('total_supply')
+        except UnsupportedChainError:
+            raise
         except Exception as e:
             logger.error(f"Error getting token info: {e}")
 
@@ -170,14 +191,15 @@ class TokenScanner:
                 result['source_code'] = source_code
 
             creation_info = await self.web3.get_contract_creation_info(address, chain_id=chain_id)
-            if creation_info:
-                result['contract_age_days'] = creation_info.get('age_days', 0)
+            result['contract_age_days'] = creation_info.get('age_days') if creation_info else None
 
-            return True
+            return is_verified is not None and result['contract_age_days'] is not None
+        except UnsupportedChainError:
+            raise
         except Exception as e:
             logger.error(f"Error getting contract metadata: {e}")
-            result['is_verified'] = False
-            result['contract_age_days'] = 0
+            result['is_verified'] = None
+            result['contract_age_days'] = None
             return False
 
     async def _check_trading_functions(self, address: str, result: Dict, chain_id: int = 56):
@@ -189,6 +211,8 @@ class TokenScanner:
 
             if not can_transfer:
                 result['risks'].append("Token transfers may be restricted or disabled")
+        except UnsupportedChainError:
+            raise
         except Exception as e:
             logger.error(f"Error checking trading functions: {e}")
             result['checks']['can_buy'] = None
@@ -213,6 +237,8 @@ class TokenScanner:
 
             if not is_renounced and owner:
                 result['risks'].append(f"Contract has active owner: {owner[:10]}...")
+        except UnsupportedChainError:
+            raise
         except Exception as e:
             logger.error(f"Error checking ownership: {e}")
             result['checks']['ownership_renounced'] = None
@@ -234,6 +260,8 @@ class TokenScanner:
                 result['risks'].append(f"Only {lock_percentage}% of liquidity is locked")
 
             return True
+        except UnsupportedChainError:
+            raise
         except Exception as e:
             logger.error(f"Error checking liquidity: {e}")
             result['checks']['liquidity_locked'] = None
@@ -253,6 +281,8 @@ class TokenScanner:
             is_honeypot = honeypot_result.get('is_honeypot')
             result['honeypot_status'] = honeypot_result.get('status', 'ok' if is_honeypot is not None else 'unknown')
             result['honeypot_reason'] = honeypot_result.get('reason')
+            if result['honeypot_status'] == 'unknown':
+                result['checks']['can_sell'] = None
             if is_honeypot is None:
                 result['is_honeypot'] = None
                 result['checks']['can_sell'] = None
@@ -264,7 +294,7 @@ class TokenScanner:
                 is_verified = result.get('is_verified', False)
                 contract_age_days = result.get('contract_age_days', 0)
 
-                if is_verified and contract_age_days > 30:
+                if is_verified and contract_age_days is not None and contract_age_days > 30:
                     logger.info(f"Honeypot API flagged {address} but contract is verified and {contract_age_days} days old - likely false positive")
                     result['is_honeypot'] = False
                     result['risks'].append("High sell restrictions detected, but contract appears legitimate (verified + established)")
@@ -276,6 +306,8 @@ class TokenScanner:
             else:
                 result['is_honeypot'] = False
 
+        except UnsupportedChainError:
+            raise
         except Exception as e:
             logger.error(f"Error checking honeypot: {e}")
             result['is_honeypot'] = None
@@ -319,6 +351,8 @@ class TokenScanner:
             result['tax_status'] = 'ok'
             result['tax_reason'] = None
             return True
+        except UnsupportedChainError:
+            raise
         except Exception as e:
             logger.error(f"Error checking taxes: {e}")
             result['tax_status'] = 'unknown'
@@ -358,6 +392,8 @@ class TokenScanner:
             return 'danger'
         if checks.get('can_sell') is False:
             return 'danger'
+        if result.get('status') == 'unknown':
+            return 'unknown'
         if result.get('is_honeypot') is None or checks.get('can_sell') is None:
             return 'unknown'
         sell_tax = result.get('sell_tax')

@@ -148,10 +148,10 @@ class RescueService:
 
     def _rpc_for(self, chain_id: int) -> str:
         """Resolve archive RPC URL for a chain. Falls back to the registered adapter's RPC."""
+        adapter = self._web3_client._get_adapter(chain_id) if self._web3_client else None
         url = self._logs_rpcs.get(chain_id)
         if url:
             return url
-        adapter = self._web3_client._get_adapter(chain_id) if self._web3_client else None
         if adapter is not None:
             provider = getattr(getattr(adapter, "w3", None), "provider", None)
             endpoint = getattr(provider, "endpoint_uri", None)
@@ -236,6 +236,8 @@ class RescueService:
           5. DexScreener — fetch token prices for USD risk calculation
           6. Enrich with token metadata (parallelized)
         """
+        from utils.web3_client import UnsupportedChainError
+
         approvals = []
         rpc_url = self._rpc_for(chain_id)
         if not rpc_url:
@@ -278,6 +280,8 @@ class RescueService:
                         return_exceptions=True,
                     )
                     for result in batch_results:
+                        if isinstance(result, Exception):
+                            raise result
                         if isinstance(result, list):
                             all_logs.extend(result)
 
@@ -303,6 +307,8 @@ class RescueService:
                             "amount": amount,
                             "block": block,
                         }
+                except UnsupportedChainError:
+                    raise
                 except (ValueError, IndexError, KeyError):
                     continue
 
@@ -330,6 +336,8 @@ class RescueService:
             )
             token_info_map: Dict[str, Dict] = {}
             for token, result in zip(active_tokens, token_info_results):
+                if isinstance(result, Exception):
+                    raise result
                 if isinstance(result, dict):
                     token_info_map[token] = result
                 else:
@@ -352,6 +360,8 @@ class RescueService:
                 else:
                     try:
                         allowance_str = f"{current_allowance / (10 ** decimals):,.2f}"
+                    except UnsupportedChainError:
+                        raise
                     except Exception:
                         allowance_str = str(current_allowance)
 
@@ -364,6 +374,8 @@ class RescueService:
                         at_risk_raw = min(current_allowance, balance)
                         at_risk_tokens = at_risk_raw / (10 ** decimals)
                         value_at_risk_usd = round(at_risk_tokens * price, 2)
+                    except UnsupportedChainError:
+                        raise
                     except Exception:
                         pass
 
@@ -384,8 +396,11 @@ class RescueService:
                     )
                 )
 
+        except UnsupportedChainError:
+            raise
         except Exception as e:
             logger.error(f"Error fetching approvals: {e}", exc_info=True)
+            raise RuntimeError("Approval scan unavailable") from e
 
         # Sort HIGH → MEDIUM → LOW, then by USD value at risk descending
         risk_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
@@ -404,6 +419,8 @@ class RescueService:
         to_b: str,
     ) -> list:
         """Fetch a single block-range chunk of Approval logs via eth_getLogs."""
+        from utils.web3_client import UnsupportedChainError
+
         try:
             async with session.post(
                 rpc_url,
@@ -415,15 +432,18 @@ class RescueService:
                 },
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
+                if resp.status != 200:
+                    raise RuntimeError("Approval log request failed")
                 data = await resp.json()
-            if "error" in data:
-                logger.warning(f"eth_getLogs {from_b}-{to_b}: {data['error']}")
-                return []
-            return data.get("result", [])
+            if "error" in data or not isinstance(data.get("result"), list):
+                raise RuntimeError("Approval logs unavailable")
+            return data["result"]
+        except UnsupportedChainError:
+            raise
         except Exception as e:
             # Don't include `e` — aiohttp errors embed the RPC URL, which may carry an API key.
             logger.warning("Log chunk %s-%s failed: %s", from_b, to_b, type(e).__name__)
-            return []
+            raise
 
     async def _verify_allowances(
         self, wallet: str, candidates: Dict[tuple, Dict], rpc_url: str
@@ -452,6 +472,8 @@ class RescueService:
 
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 for (token, spender), result in zip(batch, results):
+                    if isinstance(result, Exception):
+                        raise result
                     if isinstance(result, int) and result > 0:
                         verified[(token, spender)] = result
 
@@ -477,6 +499,8 @@ class RescueService:
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 for token, result in zip(batch, results):
+                    if isinstance(result, Exception):
+                        raise result
                     if isinstance(result, int):
                         balances[token] = result
 
@@ -485,7 +509,9 @@ class RescueService:
     async def _eth_call(
         self, session: aiohttp.ClientSession, rpc_url: str, to: str, data: str
     ) -> int:
-        """Make a single eth_call and return result as int (0 on error)."""
+        """Make a single eth_call and return its observed integer result."""
+        from utils.web3_client import UnsupportedChainError
+
         try:
             async with session.post(
                 rpc_url,
@@ -497,13 +523,17 @@ class RescueService:
                 },
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
+                if resp.status != 200:
+                    raise RuntimeError("Approval state request failed")
                 data_resp = await resp.json()
-            result = data_resp.get("result", "0x0")
-            if not result or result == "0x":
-                return 0
+            result = data_resp.get("result")
+            if "error" in data_resp or not isinstance(result, str) or not result or result == "0x":
+                raise RuntimeError("Approval state unavailable")
             return int(result, 16)
-        except Exception:
-            return 0
+        except UnsupportedChainError:
+            raise
+        except Exception as e:
+            raise RuntimeError("Approval state unavailable") from e
 
     async def _fetch_prices(self, tokens: List[str]) -> Dict[str, float]:
         """Fetch token USD prices from DexScreener (free, no API key needed).
@@ -511,6 +541,8 @@ class RescueService:
         Stablecoins are hardcoded to $1.00.
         Up to 30 tokens per DexScreener request.
         """
+        from utils.web3_client import UnsupportedChainError
+
         prices: Dict[str, float] = {}
 
         # Hardcode stablecoin prices
@@ -558,10 +590,16 @@ class RescueService:
                                 if price_str:
                                     try:
                                         prices[token] = float(price_str)
+                                    except UnsupportedChainError:
+                                        raise
                                     except (ValueError, TypeError):
                                         pass
+                    except UnsupportedChainError:
+                        raise
                     except Exception as e:
                         logger.warning("DexScreener batch %s failed: %s", i // BATCH_SIZE, type(e).__name__)
+        except UnsupportedChainError:
+            raise
         except Exception as e:
             logger.warning("Price fetch failed: %s", type(e).__name__)
 

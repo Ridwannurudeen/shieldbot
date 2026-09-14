@@ -46,15 +46,17 @@ class GuardianService:
         wallet_address = wallet_address.lower()
         components = {}
         warnings = []
+        coverage = dict.fromkeys(self.WEIGHTS, True)
 
         # 1. Dangerous approvals (35% weight)
         approvals_unavailable = False
         approvals = await self._get_approval_data(wallet_address, chain_id)
         if approvals is None:
             approvals_unavailable = True
+            coverage = dict.fromkeys(self.WEIGHTS, False)
             components["dangerous_approvals"] = self._NO_DATA_SCORE
             warnings.append("Could not fetch approval data from block explorer")
-            approvals = []  # safe default for downstream iteration
+            approvals = []
         elif not approvals:
             components["dangerous_approvals"] = 100  # genuinely no approvals = safe
         else:
@@ -62,6 +64,10 @@ class GuardianService:
             unlimited_count = sum(1 for a in approvals if a.get("is_unlimited"))
             danger_ratio = dangerous_count / len(approvals)
             components["dangerous_approvals"] = max(0, 100 - (danger_ratio * 100) - (unlimited_count * 10))
+            if any(a.get("status") == "unknown" or a.get("risk_level") == "unknown" for a in approvals):
+                coverage["dangerous_approvals"] = False
+                components["dangerous_approvals"] = min(components["dangerous_approvals"], self._NO_DATA_SCORE)
+                warnings.append("Approval risk data incomplete")
 
         dangerous_count = sum(1 for a in approvals if a.get("risk_level") in ("critical", "high"))
         unlimited_count = sum(1 for a in approvals if a.get("is_unlimited"))
@@ -75,6 +81,7 @@ class GuardianService:
         else:
             flagged = await self._check_flagged_exposure_from_tokens(token_addrs, chain_id)
             if flagged is None:
+                coverage["flagged_exposure"] = False
                 components["flagged_exposure"] = self._NO_DATA_SCORE
                 warnings.append("Could not check flagged-token exposure")
             else:
@@ -104,7 +111,9 @@ class GuardianService:
         else:
             deployer = await self._check_deployer_risk_from_tokens(token_addrs, chain_id)
             if deployer is None:
+                coverage["deployer_risk"] = False
                 components["deployer_risk"] = self._NO_DATA_SCORE
+                warnings.append("Could not check deployer risk")
             else:
                 components["deployer_risk"] = 100 - deployer
 
@@ -128,7 +137,8 @@ class GuardianService:
             level = "critical"
 
         # Update DB
-        await self._db.update_guardian_health(wallet_address, chain_id, round(composite, 1))
+        if not warnings:
+            await self._db.update_guardian_health(wallet_address, chain_id, round(composite, 1))
 
         # Aggregate USD value at risk
         total_value_at_risk = sum(
@@ -140,6 +150,11 @@ class GuardianService:
             "chain_id": chain_id,
             "health_score": round(composite, 1),
             "level": level,
+            "status": "unknown" if warnings else "ok",
+            "coverage": coverage,
+            "coverage_reasons": {
+                key: f"{key} data incomplete" for key, covered in coverage.items() if not covered
+            },
             "components": {k: round(v, 1) for k, v in components.items()},
             "total_approvals": len(approvals),
             "dangerous_approvals": dangerous_count,
@@ -154,7 +169,9 @@ class GuardianService:
     async def get_approvals(self, wallet_address: str, chain_id: int = 56) -> List[Dict]:
         """Get all token approvals, risk-ranked."""
         result = await self._get_approval_data(wallet_address.lower(), chain_id)
-        return result if result is not None else []
+        if result is None:
+            raise RuntimeError("Approval data unavailable or incomplete")
+        return result
 
     async def build_revoke_tx(self, wallet_address: str, approvals_to_revoke: List[Dict]) -> List[Dict]:
         """Build unsigned ERC20 approve(spender, 0) transactions."""
@@ -201,16 +218,23 @@ class GuardianService:
 
         Returns None if data could not be fetched, [] if wallet has no approvals.
         """
+        from utils.web3_client import UnsupportedChainError
+
         if not self._rescue:
             return None
         try:
             scan_result = await self._rescue.scan_approvals(wallet_address, chain_id)
+            if scan_result.get("status") == "unknown":
+                return None
             raw_approvals = scan_result.get("approvals", [])
 
             approvals = []
             for a in raw_approvals:
                 # Map rescue risk levels (uppercase) to guardian levels (lowercase)
-                risk_level = self._map_risk_level(a.get("risk_level", "LOW"))
+                risk_level = self._map_risk_level(a.get("risk_level", "UNKNOWN"))
+                coverage_reasons = {}
+                if a.get("status") == "unknown" or risk_level == "unknown":
+                    coverage_reasons["approval_risk"] = "Approval risk data incomplete"
 
                 # Overlay DB contract score — may upgrade risk
                 spender = a.get("spender", "")
@@ -218,14 +242,22 @@ class GuardianService:
                     score_data = await self._db.get_contract_score(
                         spender, chain_id, max_age_seconds=86400,
                     )
-                    if score_data:
+                    if score_data and score_data.get("status") == "unknown":
+                        coverage_reasons["spender_score"] = "Spender scan incomplete"
+                    elif score_data:
                         rs = score_data.get("risk_score", 0)
                         if rs >= 70:
                             risk_level = "critical"
                         elif rs >= 50 and risk_level not in ("critical",):
                             risk_level = "high"
-                except Exception:
-                    pass
+                except UnsupportedChainError:
+                    raise
+                except Exception as exc:
+                    logger.debug("Spender score unavailable: %s", exc)
+                    coverage_reasons["spender_score"] = "Spender score unavailable"
+
+                if coverage_reasons and risk_level == "low":
+                    risk_level = "unknown"
 
                 is_unlimited = a.get("allowance") == "Unlimited"
 
@@ -238,15 +270,20 @@ class GuardianService:
                     "allowance": a.get("allowance", "0"),
                     "is_unlimited": is_unlimited,
                     "risk_level": risk_level,
+                    "status": "unknown" if coverage_reasons else "ok",
+                    "coverage": {"approval_risk": not coverage_reasons},
+                    "coverage_reasons": coverage_reasons,
                     "risk_reason": a.get("risk_reason", ""),
                     "value_at_risk_usd": a.get("value_at_risk_usd"),
                     "days_since_interaction": 0,
                 })
 
             # Sort by risk severity
-            risk_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+            risk_order = {"critical": 0, "high": 1, "medium": 2, "unknown": 3, "low": 4}
             approvals.sort(key=lambda x: risk_order.get(x["risk_level"], 4))
             return approvals
+        except UnsupportedChainError:
+            raise
         except Exception as exc:
             logger.error("_get_approval_data via rescue failed: %s", exc, exc_info=True)
             return None
@@ -254,7 +291,7 @@ class GuardianService:
     @staticmethod
     def _map_risk_level(rescue_level: str) -> str:
         """Map rescue service risk levels (uppercase) to guardian levels (lowercase)."""
-        return {"HIGH": "high", "MEDIUM": "medium", "LOW": "low"}.get(rescue_level, "low")
+        return {"HIGH": "high", "MEDIUM": "medium", "LOW": "low"}.get(rescue_level, "unknown")
 
     # --- Health sub-checks ---
 
@@ -262,6 +299,8 @@ class GuardianService:
         self, token_addrs: List[str], chain_id: int,
     ) -> Optional[float]:
         """Risk points from tokens in approval data that are flagged (0-100)."""
+        from utils.web3_client import UnsupportedChainError
+
         if not token_addrs:
             return 0.0
         try:
@@ -269,11 +308,17 @@ class GuardianService:
             for token_addr in token_addrs:
                 try:
                     score_data = await self._db.get_contract_score(token_addr, chain_id, max_age_seconds=86400)
+                    if score_data and score_data.get("status") == "unknown":
+                        return None
                     if score_data and score_data.get("risk_score", 0) >= 70:
                         risk_points += 20
+                except UnsupportedChainError:
+                    raise
                 except Exception:
                     pass
             return min(100.0, risk_points)
+        except UnsupportedChainError:
+            raise
         except Exception as exc:
             logger.debug("_check_flagged_exposure failed: %s", exc)
             return None
@@ -306,6 +351,8 @@ class GuardianService:
         self, token_addrs: List[str], chain_id: int,
     ) -> Optional[float]:
         """Risk points from tokens with flagged deployers (0-100)."""
+        from utils.web3_client import UnsupportedChainError
+
         if not token_addrs:
             return 0.0
         try:
@@ -325,9 +372,13 @@ class GuardianService:
                     watched = await self._db.get_watched_deployer(deployer_addr)
                     if watched:
                         risk_points += 25
+                except UnsupportedChainError:
+                    raise
                 except Exception:
                     pass
             return min(100.0, risk_points)
+        except UnsupportedChainError:
+            raise
         except Exception as exc:
             logger.debug("_check_deployer_risk failed: %s", exc)
             return None

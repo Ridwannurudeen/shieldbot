@@ -28,9 +28,11 @@ class ContractService:
         self.scam_db = scam_db
 
     async def fetch_contract_data(self, address: str, chain_id: int = 56) -> dict:
+        from utils.web3_client import UnsupportedChainError
+
         defaults = {
             'is_contract': False,
-            'is_verified': False,
+            'is_verified': None,
             'contract_age_days': None,
             'scam_matches': [],
             'ownership_renounced': None,
@@ -91,6 +93,8 @@ class ContractService:
                                 has_blacklist = True
                             elif pattern_name in ('proxy_upgrade', 'delegatecall'):
                                 has_proxy = True
+            except UnsupportedChainError:
+                raise
             except Exception as e:
                 logger.warning("Bytecode scan failed for %s: %s", address, e)
 
@@ -116,6 +120,8 @@ class ContractService:
 
             return {**defaults, **results}
 
+        except UnsupportedChainError:
+            raise
         except Exception as e:
             logger.error("Contract data fetch failed for %s: %s", address, e)
             return defaults
