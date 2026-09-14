@@ -10,8 +10,6 @@ from typing import Dict, List, Optional, Set
 import aiohttp
 from web3 import Web3
 
-from utils.web3_client import UnsupportedChainError
-
 logger = logging.getLogger(__name__)
 
 # Preserve existing monitoring coverage; new chains require explicit support.
@@ -137,6 +135,8 @@ class MempoolMonitor:
 
     async def _monitor_loop(self):
         """Main monitoring loop — polls pending transactions."""
+        from utils.web3_client import UnsupportedChainError
+
         while self._running:
             try:
                 for chain_id in self._monitored_chains:
