@@ -40,6 +40,75 @@ async def mock_web3():
 
 class TestDeployerIndexer:
     @pytest.mark.asyncio
+    @pytest.mark.parametrize('method', ['_index_contract', '_fetch_funder'])
+    async def test_unregistered_chain_raises_routing_error_before_explorer(self, db, method):
+        from utils.web3_client import UnsupportedChainError, Web3Client
+
+        client = Web3Client.__new__(Web3Client)
+        client._adapters = {}
+        with patch('core.indexer._get_explorer_backend') as backend:
+            with pytest.raises(UnsupportedChainError):
+                await getattr(DeployerIndexer(client, db), method)('0xABC', 999999)
+            backend.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('failure_at', ['creation', 'funder', 'watch'])
+    async def test_index_contract_propagates_routing_error(self, db, mock_web3, failure_at):
+        from utils.web3_client import UnsupportedChainError
+
+        error = UnsupportedChainError('unsupported chain')
+        indexer = DeployerIndexer(mock_web3, db)
+        indexer._fetch_funder = AsyncMock(return_value=None)
+        if failure_at == 'creation':
+            mock_web3.get_contract_creation_info.side_effect = error
+        elif failure_at == 'funder':
+            indexer._fetch_funder.side_effect = error
+        else:
+            db.is_watched_deployer = AsyncMock(side_effect=error)
+        with pytest.raises(UnsupportedChainError) as caught:
+            await indexer._index_contract('0xContract', 56)
+        assert caught.value is error
+        if failure_at != 'watch':
+            cursor = await db._db.execute('SELECT COUNT(*) FROM deployers')
+            assert (await cursor.fetchone())[0] == 0
+
+    @pytest.mark.asyncio
+    async def test_fetch_funder_propagates_routing_error(self, db, mock_web3):
+        from utils.web3_client import UnsupportedChainError
+
+        mock_web3._get_adapter.return_value = SimpleNamespace(chain_id=4663)
+        error = UnsupportedChainError('unsupported chain')
+        with patch('core.indexer.explorer_service.get_first_funder', AsyncMock(side_effect=error)):
+            with pytest.raises(UnsupportedChainError) as caught:
+                await DeployerIndexer(mock_web3, db)._fetch_funder(DEPLOYER, 4663)
+        assert caught.value is error
+
+    @pytest.mark.asyncio
+    async def test_worker_skips_unsupported_chain_and_processes_next(self, db, mock_web3, caplog):
+        from utils.web3_client import UnsupportedChainError
+
+        indexer = DeployerIndexer(mock_web3, db)
+        indexer._fetch_funder = AsyncMock(return_value=None)
+        mock_web3.get_contract_creation_info.side_effect = [
+            UnsupportedChainError('unsupported chain'),
+            {'creator': DEPLOYER, 'tx_hash': '0xTx'},
+        ]
+        processed = asyncio.Event()
+        db.is_watched_deployer = AsyncMock(side_effect=lambda *args: processed.set())
+        indexer.enqueue('0xRejected', 56)
+        indexer.enqueue('0xAccepted', 56)
+        await indexer.start()
+        try:
+            await asyncio.wait_for(processed.wait(), timeout=2)
+            assert not indexer._task.done()
+        finally:
+            await indexer.stop()
+        cursor = await db._db.execute('SELECT contract_address FROM deployers')
+        assert [row[0] for row in await cursor.fetchall()] == ['0xaccepted']
+        assert 'unsupported chain' in caplog.text.lower()
+        assert '0xRejected' in caplog.text
+
+    @pytest.mark.asyncio
     async def test_enqueue_and_process(self, db, mock_web3):
         indexer = DeployerIndexer(mock_web3, db)
 
