@@ -14,6 +14,10 @@ from agent.advisor import Advisor
 @pytest.fixture
 def mock_tools():
     tools = MagicMock()
+    from utils.web3_client import Web3Client
+    client = Web3Client.__new__(Web3Client)
+    client._adapters = {56: MagicMock(), 1: MagicMock(), 4663: MagicMock()}
+    tools._container.web3_client = client
     tools.scan_contract = AsyncMock(return_value={
         "rug_probability": 72,
         "risk_level": "HIGH",
@@ -507,3 +511,67 @@ def test_firewall_context_does_not_invent_chain_id():
     analyzer = AIAnalyzer.__new__(AIAnalyzer)
     assert 'Chain ID: Unknown' in analyzer._build_firewall_context({}, {})
     assert 'Chain ID: Unknown' in analyzer._build_firewall_context({'chainId': None}, {})
+
+
+@pytest.mark.asyncio
+async def test_explain_scan_propagates_routing_error(advisor, mock_ai):
+    from utils.web3_client import UnsupportedChainError
+    error = UnsupportedChainError('Chain removed')
+    mock_ai.chat.side_effect = error
+
+    with patch.object(advisor, '_rule_based_explanation') as fallback:
+        with pytest.raises(UnsupportedChainError) as raised:
+            await advisor.explain_scan({'risk_score': 0, 'risk_level': 'LOW'})
+
+    assert raised.value is error
+    fallback.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_advisor_chain_context_and_result(advisor, mock_ai):
+    result = await advisor.chat('u1', 'Check 0x' + 'a' * 40, chain_id=4663)
+    assert result['scan_data']['chain_id'] == 4663
+    assert result['scan_data']['chain_name'] == 'Robinhood Chain'
+    system = mock_ai.chat.call_args.kwargs['system']
+    assert 'Robinhood Chain' in system
+    assert '4663' in system
+
+
+@pytest.mark.asyncio
+async def test_advisor_rejects_chain_before_history_and_tools(advisor, mock_db, mock_tools, mock_ai):
+    from utils.web3_client import UnsupportedChainError
+    with pytest.raises(UnsupportedChainError):
+        await advisor.chat('u1', 'Check 0x' + 'a' * 40, chain_id=999999)
+    mock_db.get_chat_history.assert_not_called()
+    mock_db.insert_chat_message.assert_not_called()
+    mock_tools.scan_contract.assert_not_called()
+    mock_tools.check_deployer.assert_not_called()
+    mock_tools.check_honeypot.assert_not_called()
+    mock_tools.get_market_data.assert_not_called()
+    mock_ai.chat.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('tool', ['scan_contract', 'check_deployer', 'check_honeypot', 'get_market_data'])
+async def test_advisor_gather_propagates_routing_error(advisor, mock_tools, tool):
+    from utils.web3_client import UnsupportedChainError
+    getattr(mock_tools, tool).side_effect = UnsupportedChainError('Chain removed')
+    with pytest.raises(UnsupportedChainError):
+        await advisor._gather_context('CONTRACT_CHECK', {'address': '0x' + 'a' * 40}, chain_id=4663)
+
+
+@pytest.mark.asyncio
+async def test_advisor_threat_routing_error_propagates(advisor, mock_tools):
+    from utils.web3_client import UnsupportedChainError
+    mock_tools.get_agent_findings.side_effect = UnsupportedChainError('Chain removed')
+    with pytest.raises(UnsupportedChainError):
+        await advisor._gather_context('THREAT_FEED', {}, chain_id=4663)
+
+
+@pytest.mark.asyncio
+async def test_advisor_ai_routing_error_does_not_save_fallback(advisor, mock_db, mock_ai):
+    from utils.web3_client import UnsupportedChainError
+    mock_ai.chat.side_effect = UnsupportedChainError('Chain removed')
+    with pytest.raises(UnsupportedChainError):
+        await advisor.chat('u1', 'Explain liquidity', chain_id=4663)
+    mock_db.insert_chat_message.assert_not_called()

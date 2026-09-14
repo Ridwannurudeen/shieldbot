@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from eth_account import Account
 from web3 import Web3
 from rpc.proxy import RPCProxy
+from utils.web3_client import Web3Client
 
 
 @pytest.fixture
@@ -15,8 +16,8 @@ def mock_container():
     # Mock web3_client
     adapter = MagicMock()
     adapter.w3.provider.endpoint_uri = "https://bsc-dataseed1.binance.org/"
-    container.web3_client._get_adapter.return_value = adapter
-    container.web3_client.get_supported_chain_ids.return_value = [56, 1, 8453]
+    container.web3_client = Web3Client.__new__(Web3Client)
+    container.web3_client._adapters = {56: adapter, 1: adapter, 8453: adapter}
 
     # Mock registry
     container.registry.run_all = AsyncMock(return_value=[])
@@ -88,7 +89,6 @@ async def test_honeypot_blocked(proxy, mock_container):
 @pytest.mark.asyncio
 async def test_unsupported_chain_id(proxy, mock_container):
     """Unsupported chain_id should return an error."""
-    mock_container.web3_client._get_adapter.return_value = None
 
     result = await proxy.handle_request(999, {
         "jsonrpc": "2.0", "id": 1, "method": "eth_chainId", "params": [],
@@ -181,3 +181,71 @@ async def test_raw_tx_safe_forwarded(proxy, mock_container):
 
     assert "error" not in result
     proxy._forward.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_unknown_chain_lists_registry_and_does_not_forward(proxy, mock_container):
+    proxy._forward = AsyncMock()
+    result = await proxy.handle_request(999999, {
+        "jsonrpc": "2.0", "id": 1, "method": "eth_sendTransaction", "params": [],
+    })
+    assert "Supported" in result["error"]["message"]
+    assert "56" in result["error"]["message"]
+    mock_container.registry.run_all.assert_not_awaited()
+    proxy._forward.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_robinhood_rpc_routes_registered_provider(proxy, mock_container):
+    adapter = MagicMock()
+    adapter.w3.provider.endpoint_uri = "https://rpc.mainnet.chain.robinhood.com"
+    mock_container.web3_client._adapters[4663] = adapter
+    payload = {"jsonrpc": "2.0", "id": 7, "method": "eth_chainId", "params": []}
+    proxy._forward = AsyncMock(return_value={"jsonrpc": "2.0", "id": 7, "result": "0x1237"})
+    result = await proxy.handle_request(4663, payload)
+    assert result["result"] == "0x1237"
+    proxy._forward.assert_awaited_once_with(adapter.w3.provider.endpoint_uri, payload)
+
+
+def test_rpc_unknown_chain_rejected_before_auth_database_work(proxy, mock_container):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from rpc.router import rpc_router
+
+    app = FastAPI()
+    app.state.rpc_proxy = proxy
+    app.include_router(rpc_router)
+    mock_container.auth_manager.validate_key = AsyncMock(return_value={"key_id": "test"})
+    mock_container.auth_manager.check_rate_limit = AsyncMock(return_value=True)
+    mock_container.auth_manager.record_usage = AsyncMock()
+    with TestClient(app) as client:
+        response = client.post('/rpc/999999', json={
+            "jsonrpc": "2.0", "id": 1, "method": "eth_chainId", "params": [],
+        }, headers={"x-api-key": "test"})
+    assert response.status_code == 400
+    assert "Supported" in response.json()["error"]["message"]
+    mock_container.auth_manager.validate_key.assert_not_awaited()
+    mock_container.auth_manager.record_usage.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["is_token_contract", "is_verified_contract", "registry"])
+async def test_rpc_analysis_routing_error_never_forwards(proxy, mock_container, method):
+    from utils.web3_client import UnsupportedChainError
+
+    error = UnsupportedChainError("removed chain")
+    mock_container.web3_client.is_token_contract = AsyncMock(return_value=True)
+    mock_container.web3_client.is_verified_contract = AsyncMock(return_value=True)
+    if method == "registry":
+        mock_container.registry.run_all.side_effect = error
+    else:
+        getattr(mock_container.web3_client, method).side_effect = error
+    proxy._forward = AsyncMock()
+    with pytest.raises(UnsupportedChainError) as exc:
+        await proxy.handle_request(56, {
+            "jsonrpc": "2.0", "id": 1, "method": "eth_sendTransaction",
+            "params": [{"to": "0x" + "a" * 40, "from": "0x" + "b" * 40}],
+        })
+    assert exc.value is error
+    proxy._forward.assert_not_awaited()
+    mock_container.risk_engine.compute_from_results.assert_not_called()

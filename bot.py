@@ -29,9 +29,10 @@ except ImportError:
 from core.config import Settings
 from core.container import ServiceContainer
 from core.telegram_formatter import format_full_report
+from utils.web3_client import UnsupportedChainError
 from utils.chain_info import (
     get_chain_name, get_explorer_url, get_dexscreener_slug,
-    parse_chain_prefix, CHAIN_INFO,
+    parse_chain_prefix,
 )
 
 # Configure logging
@@ -66,7 +67,7 @@ CACHE_TTL = 300  # 5 minutes
 
 def _get_user_chain_id(context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get the user's selected chain_id, default BSC (56)."""
-    return context.user_data.get('chain_id', 56)
+    return web3_client.validate_chain_id(context.user_data.get('chain_id', 56))
 
 
 def _get_cached(address: str, scan_type: str):
@@ -163,7 +164,8 @@ Commands:
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show help message"""
-    help_text = """
+    supported_chains = ", ".join(get_chain_name(cid) for cid in web3_client.get_supported_chain_ids())
+    help_text = f"""
 🛡️ **ShieldBot Commands**
 
 **/start** - Welcome message & quick start
@@ -181,7 +183,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Send any address and I'll auto-detect what to scan
 • Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`
 • Or use /chain to switch your default chain
-• Supported: BSC, Ethereum, Base, Arbitrum, Polygon, Optimism, opBNB
+• Supported: {supported_chains}
 
 Stay safe! 🛡️
 """
@@ -190,12 +192,34 @@ Stay safe! 🛡️
 
 async def chain_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /chain command — select active chain."""
-    keyboard = []
-    for cid, info in CHAIN_INFO.items():
+    if context.args:
+        selection = context.args[0]
+        try:
+            chain_id = int(selection)
+        except ValueError:
+            chain_id, _ = parse_chain_prefix(selection + ':0x')
+        try:
+            web3_client.validate_chain_id(chain_id)
+        except ValueError:
+            await update.message.reply_text(
+                f"Unsupported chain selection. Supported: {web3_client.get_supported_chain_ids()}",
+            )
+            return
+        context.user_data['chain_id'] = chain_id
+        await update.message.reply_text(
+            f"Switched to {get_chain_name(chain_id)} (chain_id={chain_id}).",
+        )
+        return
+
+    try:
         current = _get_user_chain_id(context)
+    except UnsupportedChainError:
+        current = None
+    keyboard = []
+    for cid in web3_client.get_supported_chain_ids():
         marker = " (current)" if cid == current else ""
         keyboard.append([InlineKeyboardButton(
-            f"{info['name']}{marker}",
+            f"{get_chain_name(cid)}{marker}",
             callback_data=f"chain_{cid}",
         )])
 
@@ -220,7 +244,7 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     raw = context.args[0]
     prefix_chain_id, address = parse_chain_prefix(raw)
-    chain_id = prefix_chain_id or _get_user_chain_id(context)
+    chain_id = web3_client.validate_chain_id(prefix_chain_id or _get_user_chain_id(context))
     await scan_contract(update, address, chain_id=chain_id)
 
 
@@ -237,7 +261,7 @@ async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     raw = context.args[0]
     prefix_chain_id, address = parse_chain_prefix(raw)
-    chain_id = prefix_chain_id or _get_user_chain_id(context)
+    chain_id = web3_client.validate_chain_id(prefix_chain_id or _get_user_chain_id(context))
     await check_token(update, address, chain_id=chain_id)
 
 
@@ -365,7 +389,7 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     raw = context.args[0]
     prefix_chain_id, address = parse_chain_prefix(raw)
-    chain_id = prefix_chain_id or _get_user_chain_id(context)
+    chain_id = web3_client.validate_chain_id(prefix_chain_id or _get_user_chain_id(context))
 
     if not web3_client.is_valid_address(address):
         await update.message.reply_text("❌ Invalid address format.")
@@ -441,6 +465,8 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response, parse_mode='Markdown', disable_web_page_preview=True,
         )
 
+    except UnsupportedChainError:
+        raise
     except Exception as e:
         logger.error(f"Error in /rescue: {e}")
         await status_msg.edit_text(f"❌ Error scanning approvals: {str(e)}")
@@ -456,6 +482,11 @@ async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except ValueError:
             prefix_chain_id, _ = parse_chain_prefix(context.args[0] + ":0x")
             chain_id = prefix_chain_id
+        try:
+            web3_client.validate_chain_id(chain_id)
+        except UnsupportedChainError as e:
+            await update.message.reply_text(str(e))
+            return
 
     try:
         alerts = container.mempool_monitor.get_alerts(chain_id=chain_id, limit=10)
@@ -591,8 +622,9 @@ async def campaign_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text(f"❌ Error investigating campaign: {str(e)}")
 
 
-async def _handle_advisor_chat(update: Update, message: str):
+async def _handle_advisor_chat(update: Update, message: str, chain_id: int = 56):
     """Route free-text messages to the AI advisor."""
+    web3_client.validate_chain_id(chain_id)
     if not hasattr(container, 'advisor') or container.advisor is None:
         await update.message.reply_text(
             "AI advisor is not available at the moment."
@@ -603,8 +635,10 @@ async def _handle_advisor_chat(update: Update, message: str):
     typing_msg = await update.message.reply_text("\U0001f914 Thinking...")
 
     try:
-        response = await container.advisor.chat(user_id, message)
+        response = await container.advisor.chat(user_id, message, chain_id=chain_id)
         await typing_msg.edit_text(response)
+    except UnsupportedChainError:
+        raise
     except Exception as e:
         logger.error(f"Advisor chat error: {e}")
         await typing_msg.edit_text(
@@ -619,6 +653,7 @@ async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Parse optional chain prefix (e.g. "eth:0x..." or "base:0x...")
     prefix_chain_id, address = parse_chain_prefix(message_text)
     if prefix_chain_id:
+        web3_client.validate_chain_id(prefix_chain_id)
         context.user_data['chain_id'] = prefix_chain_id
 
     user_chain_id = _get_user_chain_id(context)
@@ -642,11 +677,12 @@ async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await scan_contract(update, address, chain_id=user_chain_id)
     else:
         # Route free text to AI advisor
-        await _handle_advisor_chat(update, message_text)
+        await _handle_advisor_chat(update, message_text, chain_id=user_chain_id)
 
 
 async def scan_contract(update: Update, address: str, chain_id: int = 56):
     """Scan a contract for security risks with composite intelligence pipeline"""
+    web3_client.validate_chain_id(chain_id)
     try:
         # Check cache first
         cache_key = f"{chain_id}:{address}"
@@ -690,6 +726,8 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
             ai_analysis = None
             if ai_analyzer and ai_analyzer.is_available():
                 scan_data = {
+                    'chain_id': chain_id,
+                    'chain_name': chain_name,
                     'contract': contract_data,
                     'honeypot': honeypot_data,
                     'dex': dex_data,
@@ -712,6 +750,8 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
             if hasattr(container, 'indexer') and container.indexer:
                 container.indexer.enqueue(address, chain_id)
 
+        except UnsupportedChainError:
+            raise
         except Exception as e:
             logger.warning(f"Composite pipeline failed for {address}, falling back: {e}")
 
@@ -744,6 +784,8 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
             disable_web_page_preview=True
         )
 
+    except UnsupportedChainError:
+        raise
     except Exception as e:
         logger.error(f"Error scanning contract: {e}")
         await update.message.reply_text(
@@ -754,6 +796,7 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
 
 async def check_token(update: Update, address: str, chain_id: int = 56):
     """Check token safety with composite intelligence pipeline"""
+    web3_client.validate_chain_id(chain_id)
     try:
         # Check cache first
         cache_key = f"{chain_id}:{address}"
@@ -796,6 +839,8 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
             ai_analysis = None
             if ai_analyzer and ai_analyzer.is_available():
                 scan_data = {
+                    'chain_id': chain_id,
+                    'chain_name': chain_name,
                     'contract': contract_data,
                     'honeypot': honeypot_data,
                     'dex': dex_data,
@@ -817,6 +862,8 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
             if hasattr(container, 'indexer') and container.indexer:
                 container.indexer.enqueue(address, chain_id)
 
+        except UnsupportedChainError:
+            raise
         except Exception as e:
             logger.warning(f"Composite pipeline failed for {address}, falling back: {e}")
 
@@ -849,6 +896,8 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
             disable_web_page_preview=True
         )
 
+    except UnsupportedChainError:
+        raise
     except Exception as e:
         logger.error(f"Error checking token: {e}")
         await update.message.reply_text(
@@ -863,7 +912,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     if query.data.startswith('chain_'):
-        chain_id = int(query.data.replace('chain_', ''))
+        try:
+            chain_id = int(query.data.replace('chain_', ''))
+            web3_client.validate_chain_id(chain_id)
+        except ValueError:
+            await query.edit_message_text(
+                f"Unsupported chain selection. Supported: {web3_client.get_supported_chain_ids()}",
+            )
+            return
         context.user_data['chain_id'] = chain_id
         chain_name = get_chain_name(chain_id)
         await query.edit_message_text(
@@ -1032,6 +1088,8 @@ def format_token_result(result: dict) -> str:
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Log errors"""
     logger.error(f"Update {update} caused error {context.error}")
+    if isinstance(context.error, UnsupportedChainError) and update and update.effective_message:
+        await update.effective_message.reply_text(str(context.error))
 
 
 def main():

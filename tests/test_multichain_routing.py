@@ -1,7 +1,9 @@
 """Tests for multichain adapter routing in Web3Client."""
 
-from unittest.mock import MagicMock, patch
-from utils.web3_client import Web3Client
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from utils.web3_client import UnsupportedChainError, Web3Client
 from adapters.bsc import BscAdapter
 from adapters.eth import EthAdapter
 from adapters.base_chain import BaseChainAdapter
@@ -36,10 +38,11 @@ def test_register_base_adapter():
         assert adapter.chain_name == "Base"
 
 
-def test_unsupported_chain_returns_none():
+def test_unsupported_chain_raises():
     with patch.dict('os.environ', {'BSC_RPC_URL': 'https://bsc-dataseed1.binance.org/'}):
         client = Web3Client()
-        assert client._get_adapter(999) is None
+        with pytest.raises(UnsupportedChainError, match="Unsupported chain ID 999"):
+            client._get_adapter(999)
 
 
 def test_get_supported_chain_ids():
@@ -73,3 +76,121 @@ def test_calldata_decoder_whitelisted_with_adapter():
     result = decoder.is_whitelisted_target(uniswap_v2, chain_id=1, adapter=eth_adapter)
     assert result is not None
     assert "Uniswap" in result
+
+
+ROUTING_METHODS = [
+    "is_contract", "is_token_contract", "get_bytecode", "is_verified_contract",
+    "get_contract_creation_info", "get_token_info", "can_transfer_token",
+    "get_ownership_info", "get_liquidity_info", "check_honeypot", "get_tax_info",
+]
+
+
+def test_get_web3_rejects_unknown_chain_before_provider():
+    client = Web3Client()
+    client._bsc_adapter.w3 = MagicMock()
+    client.bsc_web3 = client._bsc_adapter.w3
+    with pytest.raises(UnsupportedChainError, match="Unsupported chain ID 999999"):
+        client.get_web3(999999)
+    client._bsc_adapter.w3.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ROUTING_METHODS)
+async def test_every_routing_wrapper_rejects_unknown_chain(method):
+    client = Web3Client()
+    client._bsc_adapter = MagicMock()
+    client._adapters[56] = client._bsc_adapter
+    client.bsc_web3 = client._bsc_adapter.w3
+    with pytest.raises(UnsupportedChainError, match="Unsupported chain ID 999999"):
+        await getattr(client, method)("0x000000000000000000000000000000000000dEaD", 999999)
+    assert not client._bsc_adapter.mock_calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [56, 204])
+@pytest.mark.parametrize("method", [m for m in ROUTING_METHODS if m not in {"is_token_contract", "can_transfer_token"}])
+async def test_registered_chain_preserves_adapter_result(chain_id, method):
+    client = Web3Client()
+    adapter = MagicMock(chain_id=chain_id, chain_name="test")
+    result = {"provider_value": None}
+    setattr(adapter, method, AsyncMock(return_value=result))
+    client.register_adapter(adapter)
+    assert client.get_web3(chain_id) is adapter.w3
+    assert await getattr(client, method)("address", chain_id) is result
+    getattr(adapter, method).assert_awaited_once_with("address")
+
+
+@pytest.mark.asyncio
+async def test_mempool_start_excludes_robinhood():
+    from services.mempool_service import MempoolMonitor
+    client = Web3Client()
+    client.register_adapter(MagicMock(chain_id=4663, chain_name="Robinhood Chain"))
+    monitor = MempoolMonitor(client)
+    monitor._poll_pending = AsyncMock()
+    await monitor.start([56, 4663])
+    try:
+        assert monitor._monitored_chains == {56}
+    finally:
+        await monitor.stop()
+    monitor._poll_pending.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_mempool_empty_chain_list_does_not_fall_back():
+    from services.mempool_service import MempoolMonitor
+    monitor = MempoolMonitor(Web3Client())
+    await monitor.start([])
+    try:
+        assert monitor._monitored_chains == set()
+        assert monitor._task is None
+    finally:
+        await monitor.stop()
+
+
+@pytest.mark.asyncio
+async def test_mempool_unknown_chain_rejected_before_start():
+    from services.mempool_service import MempoolMonitor
+    monitor = MempoolMonitor(Web3Client())
+    try:
+        with pytest.raises(UnsupportedChainError, match="Unsupported chain ID 999999"):
+            await monitor.start([999999])
+        assert not monitor._running
+        assert monitor._task is None
+    finally:
+        await monitor.stop()
+
+
+@pytest.mark.parametrize("chain_id", [True, 56.0, "56", None, [], {}])
+def test_registry_rejects_non_integer_chain_ids(chain_id):
+    client = Web3Client()
+    with pytest.raises(UnsupportedChainError, match="Supported chain IDs: 56"):
+        client.validate_chain_id(chain_id)
+
+
+@pytest.mark.parametrize("chain_id,error", [
+    (4663, "pending-transaction monitoring is not available on this chain"),
+    (999999, "Unsupported chain ID 999999"),
+])
+def test_mempool_alerts_reject_unavailable_chain(chain_id, error):
+    from services.mempool_service import MempoolMonitor
+    client = Web3Client()
+    client.register_adapter(MagicMock(chain_id=4663, chain_name="Robinhood Chain"))
+    monitor = MempoolMonitor(client)
+    with pytest.raises(ValueError, match=error):
+        monitor.get_alerts(chain_id=chain_id)
+
+
+@pytest.mark.asyncio
+async def test_mempool_loop_preserves_routing_error(monkeypatch):
+    from services.mempool_service import MempoolMonitor
+
+    client = Web3Client.__new__(Web3Client)
+    client._adapters = {}
+    monitor = MempoolMonitor(client)
+    monitor._running = True
+    monitor._monitored_chains = {56}
+    sleep = AsyncMock(side_effect=RuntimeError("unexpected retry"))
+    monkeypatch.setattr("services.mempool_service.asyncio.sleep", sleep)
+    with pytest.raises(UnsupportedChainError):
+        await monitor._monitor_loop()
+    sleep.assert_not_awaited()

@@ -17,7 +17,9 @@ import uuid
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+
+from utils.web3_client import UnsupportedChainError
 
 from mcp_server.tools import TOOL_DEFINITIONS, execute_tool
 from mcp_server.resources import RESOURCE_DEFINITIONS, read_resource
@@ -153,6 +155,8 @@ async def _handle_tools_call(container, params: Dict) -> Dict:
                 {"type": "text", "text": json.dumps(result)},
             ],
         }
+    except UnsupportedChainError:
+        raise
     except ValueError as exc:
         return {
             "content": [
@@ -248,6 +252,8 @@ async def process_jsonrpc(container, body: Dict) -> Dict:
     try:
         result = await handler(container, params)
         return _jsonrpc_result(request_id, result)
+    except UnsupportedChainError:
+        raise
     except ValueError as exc:
         return _jsonrpc_error(request_id, INVALID_PARAMS, str(exc))
     except Exception as exc:
@@ -356,7 +362,13 @@ def create_mcp_router(container) -> APIRouter:
             return error_resp
 
         # Process the JSON-RPC request
-        response = await process_jsonrpc(container, body)
+        try:
+            response = await process_jsonrpc(container, body)
+        except UnsupportedChainError as exc:
+            return JSONResponse(
+                status_code=400,
+                content=_jsonrpc_error(body.get("id"), INVALID_PARAMS, str(exc)),
+            )
 
         # If a session is active, push the response to the SSE stream
         if session_id:

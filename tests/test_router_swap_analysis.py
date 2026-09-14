@@ -9,6 +9,7 @@ from eth_abi import encode
 from core.analyzer import AnalyzerResult
 from core.risk_engine import RiskEngine
 from utils.calldata_decoder import CalldataDecoder
+from utils.web3_client import Web3Client
 
 
 @pytest.mark.asyncio
@@ -48,7 +49,10 @@ async def test_router_swap_analysis_blocks_high_risk_token():
         policy_engine=DummyPolicy(),
     )
     api_module.risk_engine = RiskEngine()
+    chain_registry = Web3Client.__new__(Web3Client)
+    chain_registry._adapters = {56: SimpleNamespace()}
     api_module.web3_client = SimpleNamespace(
+        validate_chain_id=chain_registry.validate_chain_id,
         is_valid_address=lambda a: True,
         to_checksum_address=lambda a: a,
         is_verified_contract=AsyncMock(return_value=False),
