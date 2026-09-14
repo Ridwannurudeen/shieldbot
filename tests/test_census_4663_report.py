@@ -283,3 +283,125 @@ def test_missing_launch_evidence_is_unknown_not_prior():
     ]
     assert build_report(data)["new_tokens"]["prior"] == 0
     assert build_report(data)["new_tokens"]["launch_source_unknown"] == 1
+
+
+@pytest.mark.parametrize("source", ["v2", "v4"])
+@pytest.mark.parametrize("threshold_wei", [10**17, 5 * 10**17, 10**18])
+@pytest.mark.parametrize("offset", [-1, 0, 1])
+def test_liquidity_thresholds_preserve_one_wei(source, threshold_wei, offset):
+    data = census()
+    pool(data, source=source)
+    wei = threshold_wei + offset
+    if source == "v2":
+        event(data, "Sync", {"reserve1": wei})
+    else:
+        # Above tick 2, side-1 principal is L * (1.0001 - 1) = L / 10000.
+        event(data, "Initialize", {"sqrt_price_x96": 2**97})
+        event(
+            data,
+            "ModifyLiquidity",
+            {
+                "sender": OTHER,
+                "tick_lower": 0,
+                "tick_upper": 2,
+                "salt": "0x00",
+                "liquidity_delta": wei * 10000,
+            },
+        )
+    result = build_report(data)
+    expected = int(offset >= 0)
+    for grid in result["threshold_grid"]:
+        if grid["eth_threshold"] == threshold_wei / 10**18:
+            assert grid["passed"] == expected
+            assert grid["failed"] == 1 - expected
+            assert grid["unknown"] == 0
+    if threshold_wei == 5 * 10**17:
+        assert result["eligibility"]["passed"] == expected
+        assert result["tokens"][0]["eligibility"] == ("pass" if expected else "fail")
+
+
+@pytest.mark.parametrize(
+    "excluded",
+    [
+        "0x8366a39cc670b4001a1121b8f6a443a643e40951",  # PoolManager
+        "0x58daec3116aae6d93017baaea7749052e8a04fa7",
+        "0x8876789976decbfcbbbe364623c63652db8c0904",
+        "0x000000000022d473030f116ddee9f6b43ac78ba3",
+        "0x8dc178efb8111bb0973dd9d722ebeff267c98f94",
+        "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b",
+        "0x8bceaa40b9acdfaedf85adf4ff01f5ad6517937f",
+        "0x89e5db8b5aa49aa85ac63f691524311aeb649eba",
+        WETH,
+        TOKEN,
+        "0x" + "33" * 20,  # Observed pair contract
+    ],
+)
+def test_launch_ranking_excludes_infrastructure_tokens_and_pairs(excluded):
+    data = census()
+    pair = "0x" + "33" * 20
+    pool(data, key=pair)
+    data["evidence"] = [
+        {
+            "tx_hash": pair,
+            "data": {
+                "to": excluded,
+                "emitters": [excluded, OTHER],
+                "tokens": {TOKEN: {"first_transfer_mint": True}},
+                "logs": [{"address": excluded, "topics": ["0x123"]}],
+            },
+        }
+    ]
+    before = copy.deepcopy(data)
+    result = build_report(data)
+    assert [item["address"] for item in result["candidate_launch_contracts"]] == [OTHER]
+    assert excluded not in result["new_tokens_per_day"]["1970-01-01"]
+    assert data == before
+
+
+def test_doppler_components_form_one_deduplicated_launch_stack():
+    data = census()
+    hook = "0x4e3468951d49f2eea976ed0d6e75ffcb44a9a544"
+    airlock = "0xeb7c034704ef8dcd2d32324c1545f62fb4ad0862"
+    third = "0x" + "33" * 20
+    for key, token, emitters in (
+        ("first", TOKEN, [hook, airlock]),
+        ("second", OTHER, [hook]),
+        ("third", third, [airlock]),
+    ):
+        pool(data, key=key, token=token)
+        data["evidence"].append(
+            {
+                "tx_hash": key,
+                "data": {
+                    "to": emitters[0],
+                    "emitters": emitters,
+                    "tokens": {token: {"first_transfer_mint": True}},
+                    "logs": [
+                        {"address": address, "topics": ["0x123"]}
+                        for address in emitters
+                    ],
+                },
+            }
+        )
+    result = build_report(data)
+    assert result["launch_sources"] == [
+        {"name": "Doppler", "new_tokens": 3, "contracts": sorted([hook, airlock])}
+    ]
+    assert result["new_tokens_per_day"]["1970-01-01"]["Doppler"] == 3
+    assert hook not in result["new_tokens_per_day"]["1970-01-01"]
+    assert airlock not in result["new_tokens_per_day"]["1970-01-01"]
+    assert {item["label"] for item in result["candidate_launch_contracts"]} == {
+        "Doppler HookInitializer",
+        "Doppler Airlock",
+    }
+    assert all(
+        item["launch_stack"] == "Doppler"
+        for item in result["candidate_launch_contracts"]
+    )
+    markdown = render_markdown(result)
+    assert "| Doppler | 3 |" in markdown
+    assert "must not be summed" in markdown
+    assert (
+        "https://raw.githubusercontent.com/whetstoneresearch/doppler/main/deployments.config.toml"
+        in markdown
+    )

@@ -12,18 +12,42 @@ from decimal import Decimal, localcontext
 WETH = "0x0bd7d308f8e1639fab988df18a8011f41eacad73"
 NATIVE = "0x0000000000000000000000000000000000000000"
 ETH_CURRENCIES = {WETH, NATIVE}
+INFRASTRUCTURE = {
+    "0x8366a39cc670b4001a1121b8f6a443a643e40951",  # v4 PoolManager
+    "0x58daec3116aae6d93017baaea7749052e8a04fa7",  # PositionManager
+    "0x8876789976decbfcbbbe364623c63652db8c0904",  # Universal Router
+    "0x000000000022d473030f116ddee9f6b43ac78ba3",  # Permit2
+    "0x8dc178efb8111bb0973dd9d722ebeff267c98f94",  # Quoter
+    "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b",  # StateView
+    "0x8bceaa40b9acdfaedf85adf4ff01f5ad6517937f",  # V2 factory
+    "0x89e5db8b5aa49aa85ac63f691524311aeb649eba",  # V2 Router02
+    *ETH_CURRENCIES,
+}
+DOPPLER_SOURCE = "https://raw.githubusercontent.com/whetstoneresearch/doppler/main/deployments.config.toml"
+# [4663.address] in the official deployment configuration above.
+LAUNCH_LABELS = {
+    "0x4e3468951d49f2eea976ed0d6e75ffcb44a9a544": "Doppler HookInitializer",
+    "0xeb7c034704ef8dcd2d32324c1545f62fb4ad0862": "Doppler Airlock",
+}
 METHODS = {
     "new_tokens": "First observed pool creation in this census, not token deployment. "
     "One token per day globally; source counts deduplicate tokens but overlap across sources.",
     "candidates": "Transaction recipient and receipt emitters are candidates, not proven "
     "launchpads. Launch counts require the token's first Transfer in that receipt to be "
     "a mint; earlier-minted tokens are prior. Topic counts include candidate logs in "
-    "pool-creation receipts and one example transaction per topic.",
+    "pool-creation receipts and one example transaction per topic. Known AMM infrastructure, "
+    "tokens and pair contracts are excluded from ranking; full receipt evidence is retained. "
+    "Contract counts from the same launch transaction overlap, are not independent launchpads "
+    "and must not be summed. Doppler components form one token-deduplicated launch stack; "
+    "unlabelled addresses remain separate candidates with potentially overlapping counts.",
+    "launch_labels": f"Doppler labels: [official deployment configuration]({DOPPLER_SOURCE}), "
+    "section [4663.address].",
     "eligibility": "At least 10 Swap logs OR at least 0.5 ETH of simultaneously observed "
     "ETH/WETH-side liquidity across a token's pools within 1,800 seconds of its first "
     "observed pool. Tokens younger than 1,800 seconds at the coverage-clamped window "
     "end are excluded. Missing liquidity evidence is unknown; observed lower bounds "
-    "can establish a pass. Pass rate denominator includes all mature tokens.",
+    "can establish a pass. Pass rate denominator includes all mature tokens. "
+    "All threshold comparisons use Decimal liquidity; floats are presentation only.",
     "v4_liquidity": "Estimate of position principal reconstructed from signed "
     "ModifyLiquidity deltas grouped by sender/tickLower/tickUpper/salt and repriced "
     "at Initialize/Swap sqrtPriceX96. For sqrt tick bounds a,b and clamped price p: "
@@ -150,7 +174,9 @@ def _token_metrics(token, pools, events, first_seen, end):
             )
         current = [s["value"] for s in states.values() if s["value"] is not None]
         if current:
-            total = sum(current, Decimal(0))
+            with localcontext() as context:
+                context.prec = 70
+                total = sum(current, Decimal(0))
             maximum = total if maximum is None else max(maximum, total)
     unknown |= any(state["value"] is None for state in states.values())
     return {
@@ -163,7 +189,7 @@ def _token_metrics(token, pools, events, first_seen, end):
         "swaps_30m": swaps,
         "buys_window": buys,
         "sells_window": sells,
-        "max_eth_liquidity_30m": float(maximum) if maximum is not None else None,
+        "max_eth_liquidity_30m": maximum,
         "liquidity_incomplete": unknown,
     }
 
@@ -172,7 +198,9 @@ def _status(token, swaps, eth):
     if not token["mature"]:
         return "young"
     liquidity = token["max_eth_liquidity_30m"]
-    if token["swaps_30m"] >= swaps or (liquidity is not None and liquidity >= eth):
+    if token["swaps_30m"] >= swaps or (
+        liquidity is not None and liquidity >= Decimal(str(eth))
+    ):
         return "pass"
     return "unknown" if token["liquidity_incomplete"] else "fail"
 
@@ -228,6 +256,12 @@ def build_report(data, since=None, until=None):
             daily[day][source].add(token)
             source_tokens[source].add(token)
     cohort = {token["token"]: token for token in tokens}
+    excluded = INFRASTRUCTURE | set(token_pools)
+    excluded.update(
+        pool["pool_key"] for pool in data["pools"] if pool["source"] in ("v2", "v3")
+    )
+    if data["meta"].get("v3_factory"):
+        excluded.add(data["meta"]["v3_factory"])
     candidates = {}
     prior = set()
     atomic = set()
@@ -259,13 +293,14 @@ def build_report(data, since=None, until=None):
         addresses = set(fields["emitters"])
         if fields.get("to"):
             addresses.add(fields["to"])
-        for address in addresses:
+        for address in addresses - excluded - fields["tokens"].keys():
             candidate = candidates.setdefault(
                 address, {"tokens": set(), "topics": Counter(), "examples": {}}
             )
             candidate["tokens"].update(minted)
             for token in minted:
-                daily[_iso(cohort[token]["first_seen"])[:10]][address].add(token)
+                source = "Doppler" if address in LAUNCH_LABELS else address
+                daily[_iso(cohort[token]["first_seen"])[:10]][source].add(token)
             for log in fields["logs"]:
                 if log["address"] == address and log["topics"]:
                     topic = log["topics"][0]
@@ -274,6 +309,8 @@ def build_report(data, since=None, until=None):
     ranked = [
         {
             "address": address,
+            "label": LAUNCH_LABELS.get(address),
+            "launch_stack": "Doppler" if address in LAUNCH_LABELS else None,
             "new_tokens": len(candidate["tokens"]),
             "topics": [
                 {
@@ -289,6 +326,23 @@ def build_report(data, since=None, until=None):
         for address, candidate in candidates.items()
     ]
     ranked.sort(key=lambda candidate: (-candidate["new_tokens"], candidate["address"]))
+    launch_sources = {}
+    for address, candidate in candidates.items():
+        name = "Doppler" if address in LAUNCH_LABELS else address
+        source = launch_sources.setdefault(name, {"tokens": set(), "contracts": []})
+        source["tokens"].update(candidate["tokens"])
+        source["contracts"].append(address)
+    source_ranking = sorted(
+        (
+            {
+                "name": name,
+                "new_tokens": len(source["tokens"]),
+                "contracts": sorted(source["contracts"]),
+            }
+            for name, source in launch_sources.items()
+        ),
+        key=lambda source: (-source["new_tokens"], source["name"]),
+    )
     creation_keys = {
         pool["pool_key"]
         for pool in data["pools"]
@@ -313,7 +367,7 @@ def build_report(data, since=None, until=None):
         distribution[label] = (
             latency[max(0, math.ceil(quantile * len(latency)) - 1)] if latency else None
         )
-    return {
+    result = {
         "version": 1,
         "chain_id": 4663,
         "window": {
@@ -348,9 +402,16 @@ def build_report(data, since=None, until=None):
         ],
         "discovery_latency_seconds": distribution,
         "candidate_launch_contracts": ranked,
+        "launch_sources": source_ranking,
         "tokens": tokens,
         "methods": METHODS,
     }
+    for token in tokens:
+        liquidity = token["max_eth_liquidity_30m"]
+        token["max_eth_liquidity_30m"] = (
+            float(liquidity) if liquidity is not None else None
+        )
+    return result
 
 
 def render_markdown(report):
@@ -401,14 +462,30 @@ def render_markdown(report):
             "",
             json.dumps(report["discovery_latency_seconds"], sort_keys=True),
             "",
-            "## Candidate launch contracts",
+            "## Launch-source ranking",
+            "",
+            "| Launch stack / candidate | Tokens |",
+            "| --- | ---: |",
+        ]
+    )
+    lines.extend(
+        f"| {source['name']} | {source['new_tokens']} |"
+        for source in report["launch_sources"]
+    )
+    lines.extend(
+        [
+            "",
+            "Contract counts overlap and must not be summed. Doppler is one launch stack.",
+            "",
+            "## Per-contract evidence (components, not independent launchpads)",
             "",
         ]
     )
     for candidate in report["candidate_launch_contracts"]:
         lines.extend(
             [
-                f"### {candidate['address']} ({candidate['new_tokens']} tokens)",
+                f"### {candidate['label'] or candidate['address']} ({candidate['new_tokens']} tokens)",
+                f"Address: {candidate['address']}",
                 "",
                 "| Topic0 | Logs | Example transaction |",
                 "| --- | ---: | --- |",

@@ -28,9 +28,10 @@ block. Omit `--from-block` on resume, or repeat the original start exactly.
 requested end if both are supplied. Only one collector may own a data directory.
 
 Defaults are `--confirmations 60`, `--chunk-size 2000`, and `--rps 4`. The rate
-ceiling applies to HTTP requests, including retries; header and receipt requests
-batch up to 50 JSON-RPC operations per HTTP request. Size/range errors recursively
-halve log ranges. Transient transport and throttling failures use bounded
+ceiling counts HTTP requests, including retries, not individual JSON-RPC operations
+inside a batch. Header and receipt requests batch up to 50 operations per HTTP
+request. Size/range errors recursively halve log ranges. Transient transport and
+throttling failures use bounded
 exponential backoff. An exhausted or inconsistent request fails visibly without
 advancing that chunk; rerunning resumes from its durable cursor.
 
@@ -102,17 +103,35 @@ ERC-20 `Transfer` in that receipt has a zero sender. This is evidence consistent
 with atomic launch, not proof of token deployment or ownership: an existing token
 can mint again. Otherwise its source is **prior**; no historical tracing is done.
 Candidate launch contracts are the transaction recipient and emitting contracts,
-ranked by distinct atomic-mint tokens. Infrastructure and the token itself can
-appear in this list; these addresses are candidates, not confirmed launchpads.
+ranked by distinct atomic-mint tokens after excluding known infrastructure and
+observed token and pair/pool contracts. The infrastructure exclusions are the v4
+PoolManager, PositionManager, Universal Router, Permit2, Quoter and StateView;
+the V2 factory and Router02; and WETH. Full receipt evidence remains stored.
+The remaining addresses are candidates, not confirmed independent launchpads.
 Each candidate includes its topic0 histogram and an example transaction per topic
 from observed creation receipts, including prior-token receipts.
+
+The [Doppler deployment configuration](https://raw.githubusercontent.com/whetstoneresearch/doppler/main/deployments.config.toml)
+identifies two chain-4663 components:
+
+| Contract | Label | Launch stack |
+| --- | --- | --- |
+| `0xeb7c034704ef8dcd2d32324c1545f62fb4ad0862` | Doppler Airlock | Doppler |
+| `0x4e3468951d49f2eea976ed0d6e75ffcb44a9a544` | Doppler HookInitializer | Doppler |
+
+The launch-source ranking groups these components as one **Doppler** stack and
+counts the union of their token addresses once. Contract-level evidence remains
+available. Counts attributed to contracts in the same launch transaction overlap;
+they are not independent launchpads and must not be summed.
 
 **Eligibility** is at least 10 observed swaps **OR** at least 0.5 ETH of ETH/WETH-side
 liquidity within 1,800 seconds after a token's first observed pool. Pool activity
 is combined per token. Tokens younger than 30 minutes at the report window end are
 excluded and counted separately. The pass rate denominator is all mature tokens;
 unknown cases remain in that denominator and are also reported separately. The
-grid repeats this calculation for swaps 5/10/20 and ETH 0.1/0.5/1.0.
+grid repeats this calculation for swaps 5/10/20 and ETH 0.1/0.5/1.0. Liquidity
+retains Decimal precision through every threshold comparison, including the grid;
+conversion to float is only for presentation.
 
 - **V2 liquidity:** latest `Sync` WETH-side reserve divided by `10**18`.
   Missing `Sync` is unknown, not zero.
