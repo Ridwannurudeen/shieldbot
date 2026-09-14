@@ -366,13 +366,17 @@ def _validate_signing_chain(typed_data: Optional[Dict], chain_id: int):
         return
 
     domain_chain = domain["chainId"]
-    if isinstance(domain_chain, str) and re.fullmatch(r"[0-9]+|0[xX][0-9a-fA-F]+", domain_chain):
-        try:
-            domain_chain = int(domain_chain, 16 if domain_chain.lower().startswith("0x") else 10)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="Invalid typedData.domain.chainId") from exc
+    range_error = "typedData.domain.chainId must be between 1 and 10000000"
+    if isinstance(domain_chain, str):
+        is_hex = domain_chain.startswith(("0x", "0X"))
+        if len(domain_chain) > (66 if is_hex else 78):
+            raise HTTPException(status_code=400, detail=range_error)
+        if re.fullmatch(r"[0-9]+|0[xX][0-9a-fA-F]+", domain_chain):
+            domain_chain = int(domain_chain, 16 if is_hex else 10)
     if type(domain_chain) is not int:
         raise HTTPException(status_code=400, detail="Invalid typedData.domain.chainId")
+    if not 1 <= domain_chain <= 10_000_000:
+        raise HTTPException(status_code=400, detail=range_error)
 
     _validate_chain_id(domain_chain)
     if domain_chain != chain_id:
