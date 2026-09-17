@@ -198,6 +198,9 @@ class Advisor:
                     "archetype": scan.get("risk_archetype"),
                     "flags": scan.get("critical_flags", scan.get("flags", [])),
                     "confidence": scan.get("confidence"),
+                    "status": scan.get("status"),
+                    "coverage": scan.get("coverage", {}),
+                    "coverage_reasons": scan.get("coverage_reasons", {}),
                     "honeypot": context.get("honeypot", {}),
                     "market": context.get("market", {}),
                 }

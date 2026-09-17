@@ -420,3 +420,38 @@ def test_bot_logging_setup_keeps_httpx_request_urls_out_of_info_logs():
         assert httpx_logger.level >= logging.WARNING
     finally:
         httpx_logger.setLevel(previous)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('complete', [True, False], ids=['complete', 'incomplete'])
+async def test_real_advisor_chat_keeps_text_only_for_complete_scan(consumer_api, complete):
+    from agent.advisor import Advisor
+    from utils.web3_client import Web3Client
+    api, services = consumer_api
+    honeypot = {'is_honeypot': False, 'can_sell': True, 'buy_tax': 0, 'sell_tax': 0} if complete else {
+        'is_honeypot': None, 'can_sell': None, 'buy_tax': None, 'sell_tax': None, 'status': 'unknown'}
+    scan = RiskEngine().compute_from_results([
+        AnalyzerResult('structural', 0.5, 0, data={'is_contract': True}),
+        AnalyzerResult('honeypot', 0.5, 0, data=honeypot),
+    ])
+    assert (scan['status'] == 'ok') is complete
+    chain_registry = Web3Client.__new__(Web3Client)
+    chain_registry._adapters = {56: MagicMock()}
+    tools = SimpleNamespace(
+        _container=SimpleNamespace(web3_client=chain_registry),
+        scan_contract=AsyncMock(return_value=scan), check_deployer=AsyncMock(return_value={}),
+        check_honeypot=AsyncMock(return_value=honeypot), get_market_data=AsyncMock(return_value={}),
+    )
+    db = SimpleNamespace(get_chat_history=AsyncMock(return_value=[]), insert_chat_message=AsyncMock())
+    ai = SimpleNamespace(is_available=lambda: True, chat=AsyncMock(return_value='Advisor analysis text'))
+    services.advisor = Advisor(tools, db, ai)
+    response = await api.agent_chat(api.ChatRequest(message='check 0x' + 'a' * 40, user_id='test'),
+        SimpleNamespace(client=SimpleNamespace(host='advisor-' + str(complete)), headers={}))
+    assert response['scan_data']['status'] == ('ok' if complete else 'unknown')
+    assert response['scan_data']['coverage'] == scan['coverage']
+    if complete:
+        assert response['response'] == 'Advisor analysis text'
+        assert not response['scan_data']['risk_display'].startswith('Unknown')
+    else:
+        assert response['response'] != 'Advisor analysis text'
+        assert 'Unknown' in response['response']
