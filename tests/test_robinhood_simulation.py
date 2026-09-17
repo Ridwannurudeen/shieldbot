@@ -392,6 +392,26 @@ def test_weth_funding_failure_is_unknown():
     assert all(outcome[field] is None for field in FIELDS)
 
 
+@pytest.mark.parametrize(
+    "name", ["v4_native_liquidity_launcher", "v4_doppler_native_fee_hook", "v2_router02"]
+)
+def test_untraced_native_transfers_make_the_sell_unknown_instead_of_a_trap(name):
+    # Without traceTransfers evidence in the buy, a sell paying ETH looks like zero output.
+    fixture = load(name)
+    calls = calls_by_label(fixture)
+    calls["buy"]["logs"] = [
+        log for log in calls["buy"]["logs"] if log["address"] != "0x" + "e" * 40
+    ]
+    calls["sell"]["logs"] = [
+        log for log in calls["sell"]["logs"] if log["address"] != "0x" + "e" * 40
+    ]
+    outcome = evaluate(fixture)
+    assert outcome["can_buy"] is True
+    assert outcome["can_sell"] is None
+    assert outcome["is_honeypot"] is None
+    assert "tracing unavailable" in outcome["reason"]
+
+
 def test_buy_transfer_tax_is_measured_but_sell_is_not_sizeable():
     fixture = load("v4_native_liquidity_launcher")
     calls = calls_by_label(fixture)
