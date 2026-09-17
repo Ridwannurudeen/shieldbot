@@ -485,3 +485,21 @@ async def test_rescue_forwards_approval_coverage(consumer_api):
     }))
     response = await api.rescue_scan('0x' + 'b' * 40, chain_id=4663)
     assert {key: response[key] for key in coverage} == coverage
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('surface', ['fresh', 'swap'])
+async def test_verification_lookup_failure_stays_unknown(consumer_api, surface):
+    api, services = consumer_api
+    api.web3_client.is_verified_contract.side_effect = RuntimeError('explorer unavailable')
+    api.risk_engine.compute_from_results.return_value = {
+        'rug_probability': 0, 'risk_level': 'LOW', 'status': 'ok',
+        'coverage': {'honeypot': 1}, 'coverage_reasons': {},
+    }
+    req = api.FirewallRequest(to='0x' + 'a' * 40, sender='0x' + 'b' * 40)
+    if surface == 'fresh':
+        await api.firewall(req, SimpleNamespace(headers={}))
+    else:
+        await api._analyze_router_swap(req, req.to, req.sender,
+            {'params': {'path': ['0x' + 'c' * 40]}}, 'Router', 0)
+    assert services.registry.run_all.call_args.args[0].extra['is_verified'] is None
