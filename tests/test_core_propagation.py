@@ -773,7 +773,6 @@ PROVIDER_PATH_MODULES = [
     'services/rescue_service.py',
     'services/reputation.py',
     'services/tenderly_service.py',
-    'services/tier_service.py',
     'services/token_gate_service.py',
     'services/token_sniffer_service.py',
 ]
