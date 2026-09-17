@@ -768,6 +768,7 @@ PROVIDER_PATH_MODULES = [
     'services/guardian.py',
     'services/honeypot_service.py',
     'services/injection_scanner.py',
+    'services/launch_discovery.py',
     'services/mempool_service.py',
     'services/phishing_service.py',
     'services/rescue_service.py',
