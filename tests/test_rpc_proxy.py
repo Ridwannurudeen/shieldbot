@@ -204,7 +204,7 @@ async def test_robinhood_rpc_routes_registered_provider(proxy, mock_container):
     proxy._forward = AsyncMock(return_value={"jsonrpc": "2.0", "id": 7, "result": "0x1237"})
     result = await proxy.handle_request(4663, payload)
     assert result["result"] == "0x1237"
-    proxy._forward.assert_awaited_once_with(adapter.w3.provider.endpoint_uri, payload)
+    proxy._forward.assert_awaited_once_with(adapter.w3.provider.endpoint_uri, payload, 4663)
 
 
 def test_rpc_unknown_chain_rejected_before_auth_database_work(proxy, mock_container):
@@ -249,3 +249,43 @@ async def test_rpc_analysis_routing_error_never_forwards(proxy, mock_container, 
     assert exc.value is error
     proxy._forward.assert_not_awaited()
     mock_container.risk_engine.compute_from_results.assert_not_called()
+
+
+SYNTHETIC_RPC_KEY = "SYNTHETIC-RPC-KEY-4f2c9e"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["forward", "analysis", "decode"])
+async def test_rpc_failures_log_chain_and_class_without_secrets(proxy, mock_container, caplog, failure):
+    import logging
+    import aiohttp
+
+    leaky = f"https://rpc.example/v2/{SYNTHETIC_RPC_KEY}"
+    adapter = MagicMock()
+    adapter.w3.provider.endpoint_uri = leaky
+    mock_container.web3_client._adapters[4663] = adapter
+    session = MagicMock()
+    session.post.side_effect = aiohttp.ClientConnectionError(f"Cannot connect to {leaky}")
+    proxy._get_session = AsyncMock(return_value=session)
+    payload = {"jsonrpc": "2.0", "id": 1, "method": "eth_chainId", "params": []}
+    if failure == "analysis":
+        mock_container.web3_client.is_token_contract = AsyncMock(return_value=True)
+        mock_container.web3_client.is_verified_contract = AsyncMock(return_value=True)
+        mock_container.registry.run_all.side_effect = RuntimeError(f"request to {leaky} failed")
+        payload = {"jsonrpc": "2.0", "id": 1, "method": "eth_sendTransaction",
+                   "params": [{"to": "0x" + "a" * 40, "from": "0x" + "b" * 40}]}
+    elif failure == "decode":
+        payload = {"jsonrpc": "2.0", "id": 1, "method": "eth_sendRawTransaction", "params": ["0x02c0"]}
+    with caplog.at_level(logging.DEBUG, logger="rpc.proxy"):
+        if failure == "decode":
+            with patch("rpc.proxy.rlp.decode", side_effect=ValueError(f"bad payload from {leaky}")):
+                result = await proxy.handle_request(4663, payload)
+        else:
+            result = await proxy.handle_request(4663, payload)
+    assert "error" in result
+    assert SYNTHETIC_RPC_KEY not in caplog.text
+    assert "rpc.example" not in caplog.text
+    expected = {"forward": "ClientConnectionError", "analysis": "RuntimeError", "decode": "ValueError"}[failure]
+    assert expected in caplog.text
+    if failure == "forward":
+        assert "4663" in caplog.text

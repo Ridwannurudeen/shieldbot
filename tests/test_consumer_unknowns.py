@@ -711,7 +711,7 @@ async def test_advisor_scan_failure_renders_unknown_chat(consumer_api):
     assert secret not in str(response)
 
 
-@pytest.mark.parametrize('path', ['api.py', 'bot.py', 'agent/advisor.py', 'agent/firewall.py'])
+@pytest.mark.parametrize('path', ['api.py', 'bot.py', 'agent/advisor.py', 'agent/firewall.py', 'rpc/proxy.py'])
 def test_exception_text_never_reaches_replies_or_logs(path):
     import ast
     from pathlib import Path
