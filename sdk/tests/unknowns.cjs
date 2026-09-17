@@ -31,15 +31,17 @@ for (const [reason, fraction] of [['Provider unavailable', 0], ['Simulation fail
   });
 }
 
-for (const [mode, allowed] of [['open', true], ['cached', false], ['closed', false]]) {
+for (const [mode, decision] of [['open', 'ALLOW'], ['cached', 'WARN'], ['closed', 'BLOCK']]) {
   test(`unavailable decision is explicit: ${mode}`, async () => {
     global.fetch = async () => { throw new Error('offline'); };
     const sdk = new ShieldBot({ agentId: 'agent:1', failMode: mode });
     const result = await sdk.check({ from: '0xa', to: '0xb' });
-    assert.equal(result.allowed, allowed);
+    assert.equal(result.verdict, decision);
+    assert.equal(result.allowed, decision === 'ALLOW');
+    assert.equal(result.blocked, decision === 'BLOCK');
     assert.equal(result.analysis_unavailable, true);
     assert.equal(result.status, 'unknown');
-    assert.match(result.risk_display, /Unknown/);
+    assert.equal(result.risk_display, 'Unknown (analysis unavailable)');
   });
 }
 

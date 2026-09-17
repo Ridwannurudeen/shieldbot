@@ -80,7 +80,8 @@ class ShieldBot:
             if cached is not None:
                 logger.info(f"Using cached verdict for {to_addr} (API unavailable)")
                 return cached
-        if self._fail_mode in ("open", "cached"):
+            return Verdict(verdict="WARN", score=50, flags=["api_unavailable"], analysis_unavailable=True)
+        if self._fail_mode == "open":
             return Verdict(verdict="ALLOW", score=0, flags=["api_unavailable"], analysis_unavailable=True)
         return Verdict(verdict="BLOCK", score=100, flags=["api_unavailable"], analysis_unavailable=True)
 

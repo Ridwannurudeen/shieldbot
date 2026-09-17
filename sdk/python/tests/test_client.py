@@ -104,14 +104,14 @@ async def test_4xx_raises_shieldbot_error(sb, status_code, label):
 
 @pytest.mark.asyncio
 async def test_500_uses_fail_mode(sb):
-    """5xx server errors use fail-mode (ALLOW for default cached/open) instead of raising."""
+    """5xx server errors use fail-mode (WARN for default cached with no cached verdict) instead of raising."""
     mock_resp = MagicMock()
     mock_resp.status_code = 500
     mock_resp.text = "Internal Server Error"
     with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp):
         verdict = await sb.check({"from": "0xA", "to": "0xB", "chain_id": 56})
     assert isinstance(verdict, Verdict)
-    assert verdict.verdict == "ALLOW"
+    assert verdict.verdict == "WARN"
     assert "api_unavailable" in verdict.flags
 
 
@@ -136,7 +136,7 @@ async def test_network_error_uses_fail_mode(sb):
                side_effect=httpx.ConnectError("Connection refused")):
         verdict = await sb.check({"from": "0xA", "to": "0xB", "chain_id": 56})
     assert isinstance(verdict, Verdict)
-    assert verdict.verdict == "ALLOW"
+    assert verdict.verdict == "WARN"
     assert "api_unavailable" in verdict.flags
 
 

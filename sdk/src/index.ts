@@ -470,7 +470,25 @@ export class ShieldBot {
       };
     }
 
-    // fail_closed or no cache
+    if (this.failMode === 'cached') {
+      return {
+        verdict: 'WARN',
+        status: 'unknown',
+        coverage: {},
+        coverage_reasons: { analysis: 'API unavailable' },
+        risk_display: 'Unknown (analysis unavailable)',
+        analysis_unavailable: true,
+        score: 50,
+        flags: ['fail_cached'],
+        cached: false,
+        latency_ms: 0,
+        allowed: false,
+        blocked: false,
+        evidence: `API unreachable, no cached verdict: ${error.message}`,
+      };
+    }
+
+    // fail_closed
     return {
       verdict: 'BLOCK',
       status: 'unknown',

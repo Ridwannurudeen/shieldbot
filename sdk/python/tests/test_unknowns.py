@@ -40,12 +40,13 @@ async def test_incomplete_verdict_preserves_metadata_in_cache(reason, fraction):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fail_mode,allowed", [("open", True), ("cached", True), ("closed", False)])
-async def test_unavailable_decision_is_explicit(fail_mode, allowed):
+@pytest.mark.parametrize("fail_mode,decision", [("open", "ALLOW"), ("cached", "WARN"), ("closed", "BLOCK")])
+async def test_unavailable_decision_is_explicit(fail_mode, decision):
     client = ShieldBot(api_key="test", agent_id="agent:1", fail_mode=fail_mode)
     with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, side_effect=httpx.ConnectError("offline")):
         result = await client.check({"to": "0xtarget"})
-    assert result.allowed is allowed
+    assert result.verdict == decision
+    assert result.allowed is (decision == "ALLOW")
     assert result.analysis_unavailable is True
     assert result.status == "unknown"
     assert result.risk_display == "Unknown (analysis unavailable)"
