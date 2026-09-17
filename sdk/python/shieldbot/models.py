@@ -27,7 +27,10 @@ class Verdict:
         incomplete = self.status != "ok" or self.risk_level == "UNKNOWN" or not self.coverage or any(value != 1 for value in self.coverage.values())
         if incomplete:
             self.status = "unknown"
-            self.risk_display = "Unknown (incomplete provider coverage)"
+            self.risk_display = (
+                "Unknown (analysis unavailable)" if self.analysis_unavailable
+                else "Unknown (incomplete provider coverage)"
+            )
             if self.verdict == "ALLOW" and not self.analysis_unavailable:
                 self.verdict = "WARN"
         elif not self.risk_display:

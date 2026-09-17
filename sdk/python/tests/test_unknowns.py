@@ -48,7 +48,7 @@ async def test_unavailable_decision_is_explicit(fail_mode, allowed):
     assert result.allowed is allowed
     assert result.analysis_unavailable is True
     assert result.status == "unknown"
-    assert "Unknown" in result.risk_display
+    assert result.risk_display == "Unknown (analysis unavailable)"
     await client.close()
 
 
@@ -56,6 +56,7 @@ def test_unknown_model_never_allows_without_explicit_fail_open():
     result = Verdict(verdict="ALLOW", score=0, status="unknown", risk_level="UNKNOWN", category_scores={"honeypot": None})
     assert result.verdict != "ALLOW"
     assert not result.allowed
+    assert result.risk_display == "Unknown (incomplete provider coverage)"
 
 
 def test_complete_model_still_allows():
