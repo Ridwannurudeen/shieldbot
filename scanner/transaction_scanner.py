@@ -108,23 +108,33 @@ class TransactionScanner:
         # Check if it's a contract
         result['is_contract'] = await self.web3.is_contract(address, chain_id=chain_id)
 
+        # Scam database lookups do not depend on contract detection, so run them before any early return.
+        data_sources['scam_db'] = await self._check_scam_database(address, result, chain_id=chain_id)
+        if not data_sources['scam_db']:
+            result['coverage']['scam_database'] = False
+            result['coverage_reasons']['scam_database'] = 'scam_database unknown: provider data unavailable'
+
         if result['is_contract'] is None:
             result['status'] = 'unknown'
-            result['coverage'] = {'is_contract': False}
-            result['coverage_reasons'] = {'is_contract': 'is_contract unknown: provider data unavailable'}
+            result['coverage']['is_contract'] = False
+            result['coverage_reasons']['is_contract'] = 'is_contract unknown: provider data unavailable'
             result['warnings'].append("Could not determine whether this address is a contract")
+            self._apply_scam_match_risk(result)
             return result
 
         if not result['is_contract']:
-            result['risk_level'] = 'low'
             result['risk_score'] = 5
-            result['confidence'] = 95
             result['warnings'].append("This is an EOA (externally owned account), not a contract")
+            if result['coverage_reasons']:
+                result['status'] = 'unknown'
+            else:
+                result['risk_level'] = 'low'
+                result['confidence'] = 95
+            self._apply_scam_match_risk(result)
             return result
 
         # Run all security checks (BscScan API only covers BSC; bytecode uses chain_id)
         data_sources['bscscan'] = await self._check_verification(address, result, chain_id=chain_id)
-        data_sources['scam_db'] = await self._check_scam_database(address, result, chain_id=chain_id)
         data_sources['contract_age'] = await self._check_contract_age(address, result, chain_id=chain_id)
         data_sources['bytecode'] = await self._check_similar_scams(address, result, chain_id)
 
@@ -200,6 +210,14 @@ class TransactionScanner:
             result['risk_level'] = 'unknown'
 
         return result
+
+    def _apply_scam_match_risk(self, result: Dict):
+        """Score scam database matches with the contract path's thresholds when contract checks are skipped."""
+        if not result['scam_matches']:
+            return
+        heuristic_score, _, _ = calculate_risk_score(findings_from_scan_result(result))
+        result['risk_score'] = max(result['risk_score'], heuristic_score)
+        result['risk_level'] = 'high' if result['risk_score'] >= 71 else 'medium'
 
     async def _check_verification(self, address: str, result: Dict, chain_id: int = 56) -> bool:
         """Check if contract is verified on BscScan. Returns True if check succeeded."""
