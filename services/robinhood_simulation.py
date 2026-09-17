@@ -542,11 +542,6 @@ def evaluate_simulation(pool: Pool, token: str, amount: int, buyer: str, result)
             f"sell not sizeable in one request: bought {amount} token units but received {delivered}"
         )
         return outcome
-    if not _pays_weth(pool) and not _traces_native_transfers(call["buy"]):
-        # The sell output of a native pool is only visible as a traceTransfers log, so without that
-        # evidence a sell returning nothing is indistinguishable from an untraced transfer.
-        outcome["reason"] = "native transfer tracing unavailable; the sell output cannot be measured"
-        return outcome
     for label in ("approve", "permit"):
         if label in call and not _succeeded(call[label]):
             outcome["reason"] = (
@@ -570,6 +565,11 @@ def evaluate_simulation(pool: Pool, token: str, amount: int, buyer: str, result)
             outcome.update(
                 can_sell=False, is_honeypot=True, reason=f"sell reverted: {trap}; {attribution}"
             )
+        return outcome
+    if not _pays_weth(pool) and not _traces_native_transfers(call["buy"]):
+        # The sell output of a native pool is only visible as a traceTransfers log, so without that
+        # evidence a sell returning nothing is indistinguishable from an untraced transfer.
+        outcome["reason"] = "native transfer tracing unavailable; the sell output cannot be measured"
         return outcome
     output = _sell_output(pool, call["sell"].get("logs"), buyer)
     if output is None:

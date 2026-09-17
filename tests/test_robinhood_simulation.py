@@ -412,6 +412,17 @@ def test_untraced_native_transfers_make_the_sell_unknown_instead_of_a_trap(name)
     assert "tracing unavailable" in outcome["reason"]
 
 
+def test_a_reverting_sell_is_still_a_honeypot_without_transfer_tracing():
+    # A revert is authoritative on its own, so the tracing guard must not downgrade it to unknown.
+    fixture = load("v2_honeypot_sell_reverts")
+    for call in fixture["response"]["result"][0]["calls"]:
+        call["logs"] = [log for log in call["logs"] if log["address"] != "0x" + "e" * 40]
+    outcome = evaluate(fixture)
+    assert outcome["can_sell"] is False
+    assert outcome["is_honeypot"] is True
+    assert 'Error("TransferHelper: TRANSFER_FROM_FAILED")' in outcome["reason"]
+
+
 def test_buy_transfer_tax_is_measured_but_sell_is_not_sizeable():
     fixture = load("v4_native_liquidity_launcher")
     calls = calls_by_label(fixture)
