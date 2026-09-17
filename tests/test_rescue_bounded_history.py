@@ -172,6 +172,43 @@ async def test_robinhood_rate_limited_window_backs_off_then_succeeds():
 
 
 @pytest.mark.asyncio
+async def test_robinhood_error_with_rate_inside_a_word_is_not_retried():
+    unrelated = (
+        200,
+        {"jsonrpc": "2.0", "id": 1, "error": {"code": -32000, "message": "separate state generated"}},
+    )
+    result, rpc, sleep = await scan(
+        chain_handler(logs=lambda to_b: unrelated if to_b == LATEST else None)
+    )
+
+    assert [to_b for _, to_b in window_bounds(rpc)].count(LATEST) == 1
+    sleep.assert_not_awaited()
+    assert result["coverage_reasons"] == {
+        "allowances": f"Approvals before block {LATEST + 1} not scanned"
+    }
+
+
+@pytest.mark.asyncio
+async def test_robinhood_rate_limit_code_and_message_are_retried():
+    answers = iter([
+        (200, {"jsonrpc": "2.0", "id": 1, "error": {"code": 429, "message": "slow down"}}),
+        (200, {"jsonrpc": "2.0", "id": 1, "error": {
+            "code": -32005, "message": "Your app has exceeded its rate limit",
+        }}),
+    ])
+    result, rpc, sleep = await scan(
+        chain_handler(logs=lambda to_b: next(answers, None) if to_b == LATEST else None)
+    )
+
+    assert [to_b for _, to_b in window_bounds(rpc)].count(LATEST) == 3
+    assert sleep.await_args_list == [call(1), call(2)]
+    assert len(result["approvals"]) == 1
+    assert result["coverage_reasons"] == {
+        "allowances": f"Approvals before block {WINDOW_START} not scanned"
+    }
+
+
+@pytest.mark.asyncio
 async def test_robinhood_window_rate_limited_after_retries_truncates_and_keeps_found_approvals(
     caplog,
 ):

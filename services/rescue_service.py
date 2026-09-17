@@ -29,7 +29,7 @@ RECENT_LOG_WINDOW_BLOCKS = 10_000
 RECENT_LOG_WINDOWS = 24
 PUBLIC_RPC_CONCURRENCY = 4
 PUBLIC_RPC_ATTEMPTS = 3
-RATE_LIMIT_TERMS = ("rate", "too many requests", "busy", "timeout")
+RATE_LIMIT_TERMS = ("rate limit", "rate-limit", "too many requests")
 
 UNLIMITED_THRESHOLD = 2**128
 # Approvals above this (but below UNLIMITED_THRESHOLD) are considered "large"
@@ -97,6 +97,16 @@ STABLECOINS = {
     "0xdac17f958d2ee523a2206206994597c13d831ec7",  # ETH USDT
     "0x6b175474e89094c44da98b954eedeac495271d0f",  # DAI
 }
+
+
+def _is_rate_limited(error) -> bool:
+    """Whether a JSON-RPC error asks the caller to slow down rather than rejecting the query."""
+    if isinstance(error, dict):
+        if error.get("code") == 429:
+            return True
+        error = error.get("message", "")
+    text = str(error).lower()
+    return any(term in text for term in RATE_LIMIT_TERMS)
 
 
 @dataclass
@@ -516,7 +526,7 @@ class RescueService:
             error = data.get("error")
             if error is None:
                 return data.get("result")
-            if not any(term in str(error).lower() for term in RATE_LIMIT_TERMS):
+            if not _is_rate_limited(error):
                 raise RuntimeError("Public RPC request returned an error")
         raise RuntimeError("Public RPC still rate limited")
 
