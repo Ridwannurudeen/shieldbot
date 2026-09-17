@@ -514,12 +514,37 @@ async def test_bot_advisor_hides_uncovered_safety_claim(bot_chain_functions, sca
     assert 'Unknown' in rendered and 'SAFE' not in rendered
 
 
-@pytest.mark.parametrize('formatter', ['format_scan_result', 'format_token_result'])
-@pytest.mark.parametrize('metadata', [{}, {'status': 'unknown', 'coverage': {'honeypot': 0}}])
-def test_bot_uncovered_cached_text_cannot_bypass_verdict(bot_report_functions, formatter, metadata):
-    report = bot_report_functions[formatter]({'composite_report': 'SAFE', 'risk_score': 0, **metadata})
-    assert 'SAFE' not in report
-    assert 'Unknown' in report
+@pytest.mark.asyncio
+@pytest.mark.parametrize('handler,formatter', [('scan_contract', 'format_scan_result'),
+                                               ('check_token', 'format_token_result')])
+async def test_bot_cached_incomplete_composite_report_is_served_intact(bot_report_functions, handler, formatter):
+    import ast
+    import time
+    from pathlib import Path
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+    ns = bot_report_functions
+    ns['web3_client'].get_token_info.return_value = {'name': 'Probe Token', 'symbol': 'PROBE'}
+    ns['risk_engine'].compute_from_results.return_value = {
+        'status': 'unknown', 'coverage': {'structural': 1, 'honeypot': 0},
+        'coverage_reasons': {'honeypot': 'Simulation failed'}, 'risk_level': 'MEDIUM', 'rug_probability': 0,
+    }
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock()))
+    await ns[handler](update, '0x' + 'a' * 40, chain_id=4663)
+    stored = ns['_set_cache'].call_args.args[2]
+
+    scan_type = 'contract' if handler == 'scan_contract' else 'token'
+    tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
+    cache = {'time': time, 'CACHE_TTL': 300, 'logger': MagicMock(),
+             '_scan_cache': {f'{scan_type}:key': {'timestamp': time.time(), 'result': stored}}}
+    exec(compile(ast.Module(body=[node for node in tree.body if isinstance(node, ast.FunctionDef)
+                                  and node.name == '_get_cached'], type_ignores=[]), 'bot.py', 'exec'), cache)
+    assert cache['_get_cached']('key', scan_type) is stored
+
+    rendered = ns[formatter](stored)
+    assert rendered == stored['composite_report']
+    assert 'Probe Token (PROBE)' in rendered
+    assert 'Unknown' in rendered and 'Generally Safe' not in rendered
 
 
 def test_bot_legacy_cache_without_coverage_is_miss():

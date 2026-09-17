@@ -978,8 +978,6 @@ def _token_buttons(address: str, chain_id: int = 56) -> InlineKeyboardMarkup:
 def format_scan_result(result: dict) -> str:
     """Format scan result — use composite report, forensic report, or fallback"""
     if result.get('composite_report'):
-        if is_scan_incomplete(result):
-            return format_full_report(result, {}, {}, {}, address=result.get('address', ''))
         return result['composite_report']
     incomplete = is_scan_incomplete(result) or result.get('is_verified') is None
     if result.get('forensic_report') and not incomplete:
@@ -1050,8 +1048,6 @@ def format_scan_result(result: dict) -> str:
 def format_token_result(result: dict) -> str:
     """Format token result — use composite report, forensic report, or fallback"""
     if result.get('composite_report'):
-        if is_scan_incomplete(result):
-            return format_full_report(result, {}, {}, {}, address=result.get('address', ''))
         return result['composite_report']
     incomplete = is_scan_incomplete(result) or any(
         result.get(field) is None for field in ('is_honeypot', 'buy_tax', 'sell_tax')
