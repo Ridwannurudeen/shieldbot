@@ -95,5 +95,5 @@ class EthosService:
             }
 
         except Exception as e:
-            logger.error("Ethos fetch failed for %s: %s", wallet_address, e)
+            logger.error("Ethos fetch failed for %s: %s", wallet_address, type(e).__name__)
             return defaults

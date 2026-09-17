@@ -1,5 +1,8 @@
 """Regression tests for core routing and incomplete provider coverage."""
 
+import ast
+import logging
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -607,3 +610,187 @@ async def test_rescue_all_empty_allowances_are_unknown_not_clean(rescue_pipeline
     assert result['status'] == 'unknown'
     assert result['coverage']['allowances'] is False
     assert result['total_value_at_risk_usd'] is None
+
+
+SYNTHETIC_KEY = 'SYNTHETIC-KEY-7f3a91'
+LEAKY_ERROR = f'request to https://rpc.invalid/v1/{SYNTHETIC_KEY} failed'
+
+
+def _assert_no_secret_logged(caplog):
+    assert any(record.levelno >= logging.DEBUG for record in caplog.records)
+    assert SYNTHETIC_KEY not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('scanner_type, entrypoint, target, method', [
+    *[(TokenScanner, 'check_token', 'web3', method) for method in (
+        'get_token_info', 'is_verified_contract', 'can_transfer_token', 'get_ownership_info',
+        'get_liquidity_info', 'check_honeypot', 'get_tax_info',
+    )],
+    *[(TransactionScanner, 'scan_address', 'web3', method) for method in (
+        'is_verified_contract', 'get_contract_creation_info', 'get_bytecode',
+    )],
+    (TransactionScanner, 'scan_address', 'scam_db', 'check_address'),
+    *[(scanner_type, entrypoint, 'ai', method)
+      for scanner_type, entrypoint in ((TokenScanner, 'check_token'), (TransactionScanner, 'scan_address'))
+      for method in ('compute_ai_risk_score', 'generate_forensic_report')],
+])
+async def test_scanner_provider_errors_do_not_log_secrets(
+    mock_web3_client, mock_ai_analyzer, caplog, scanner_type, entrypoint, target, method,
+):
+    scanner = scanner_type(mock_web3_client, mock_ai_analyzer)
+    if isinstance(scanner, TransactionScanner):
+        scanner.scam_db.check_address = AsyncMock(return_value=[])
+    targets = {'web3': mock_web3_client, 'ai': mock_ai_analyzer, 'scam_db': getattr(scanner, 'scam_db', None)}
+    getattr(targets[target], method).side_effect = RuntimeError(LEAKY_ERROR)
+    with caplog.at_level(logging.DEBUG):
+        result = await getattr(scanner, entrypoint)('0xABC')
+    _assert_no_secret_logged(caplog)
+    assert SYNTHETIC_KEY not in repr(result)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('method', ['check_honeypot', 'get_tax_info', 'goplus'])
+async def test_honeypot_service_provider_errors_do_not_log_secrets(mock_web3_client, caplog, method):
+    from services.honeypot_service import HoneypotService
+
+    mock_web3_client.get_supported_chain_ids.return_value = [56]
+    fallback = AsyncMock(return_value={'data': {}, 'reason': None})
+    if method == 'goplus':
+        mock_web3_client.check_honeypot.return_value = {}
+        fallback.side_effect = RuntimeError(LEAKY_ERROR)
+    else:
+        getattr(mock_web3_client, method).side_effect = RuntimeError(LEAKY_ERROR)
+    with patch('services.honeypot_service.ScamDatabase.fetch_token_security', fallback):
+        with caplog.at_level(logging.DEBUG):
+            data = await HoneypotService(mock_web3_client).fetch_honeypot_data('0xABC')
+    _assert_no_secret_logged(caplog)
+    assert SYNTHETIC_KEY not in repr(data)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('method', ['get_bytecode', 'is_verified_contract'])
+async def test_contract_service_provider_errors_do_not_log_secrets(mock_web3_client, caplog, method):
+    from services.contract_service import ContractService
+
+    getattr(mock_web3_client, method).side_effect = RuntimeError(LEAKY_ERROR)
+    service = ContractService(mock_web3_client, MagicMock(check_address=AsyncMock(return_value=[])))
+    with patch('services.contract_service.BSCSCAN_DELAY', 0), caplog.at_level(logging.DEBUG):
+        data = await service.fetch_contract_data('0xABC')
+    _assert_no_secret_logged(caplog)
+    assert SYNTHETIC_KEY not in repr(data)
+
+
+@pytest.mark.asyncio
+async def test_rescue_and_guardian_provider_errors_do_not_log_secrets(rescue_pipeline, caplog):
+    from services.guardian import GuardianService
+
+    service, wallet, _, _, session = rescue_pipeline
+    session.post.side_effect = RuntimeError(LEAKY_ERROR)
+    with caplog.at_level(logging.DEBUG):
+        health = await GuardianService(MagicMock(), rescue_service=service).get_health(wallet, 56)
+    assert health['status'] == 'unknown'
+    _assert_no_secret_logged(caplog)
+
+
+@pytest.mark.asyncio
+async def test_registry_analyzer_errors_do_not_leak_secrets(caplog):
+    from core.analyzer import AnalysisContext
+    from core.registry import AnalyzerRegistry
+    from core.risk_engine import RiskEngine
+
+    analyzer = MagicMock()
+    analyzer.name = 'structural'
+    analyzer.weight = 1
+    analyzer.analyze = AsyncMock(side_effect=RuntimeError(LEAKY_ERROR))
+    registry = AnalyzerRegistry()
+    registry.register(analyzer)
+    with caplog.at_level(logging.DEBUG):
+        results = await registry.run_all(AnalysisContext('0xABC'))
+    risk = RiskEngine().compute_from_results(results, is_token=False)
+    _assert_no_secret_logged(caplog)
+    assert results[0].error
+    assert SYNTHETIC_KEY not in repr(results)
+    assert SYNTHETIC_KEY not in repr(risk)
+
+
+@pytest.mark.asyncio
+async def test_indexer_provider_errors_do_not_log_secrets(caplog):
+    from types import SimpleNamespace
+    from core.indexer import DeployerIndexer
+
+    indexer = DeployerIndexer(MagicMock(), MagicMock(), SimpleNamespace(
+        telegram_bot_token=SYNTHETIC_KEY, telegram_alert_chat_id='1',
+    ))
+
+    async def failing_index(address, chain_id):
+        indexer._running = False
+        raise RuntimeError(LEAKY_ERROR)
+
+    indexer._index_contract = failing_index
+    indexer._running = True
+    indexer.enqueue('0xABC', 56)
+    with patch('aiohttp.ClientSession', side_effect=RuntimeError(LEAKY_ERROR)), caplog.at_level(logging.DEBUG):
+        assert await indexer._send_watch_alert('0x' + '1' * 40, 56, '0xABC', {}) is False
+        await indexer._worker()
+    _assert_no_secret_logged(caplog)
+
+
+@pytest.mark.asyncio
+async def test_mempool_poll_errors_do_not_log_secrets(mock_web3_client, caplog):
+    from services.mempool_service import MempoolMonitor
+
+    monitor = MempoolMonitor(mock_web3_client)
+    monitor._get_txpool_content = AsyncMock(side_effect=RuntimeError(LEAKY_ERROR))
+    with caplog.at_level(logging.DEBUG):
+        await monitor._poll_pending(56)
+    _assert_no_secret_logged(caplog)
+
+
+PROVIDER_PATH_MODULES = [
+    'core/indexer.py',
+    'scanner/token_scanner.py',
+    'scanner/transaction_scanner.py',
+    'services/contract_service.py',
+    'services/dex_service.py',
+    'services/email_service.py',
+    'services/ethos_service.py',
+    'services/greenfield_service.py',
+    'services/guardian.py',
+    'services/honeypot_service.py',
+    'services/injection_scanner.py',
+    'services/mempool_service.py',
+    'services/phishing_service.py',
+    'services/rescue_service.py',
+    'services/tenderly_service.py',
+    'services/tier_service.py',
+    'services/token_gate_service.py',
+    'services/token_sniffer_service.py',
+]
+
+
+@pytest.mark.parametrize('module', PROVIDER_PATH_MODULES)
+def test_provider_path_logs_record_exception_class_not_text(module):
+    root = Path(__file__).resolve().parent.parent
+    offenders = []
+    for handler in ast.walk(ast.parse((root / module).read_text(encoding='utf-8'))):
+        if not isinstance(handler, ast.ExceptHandler) or not handler.name:
+            continue
+        for call in ast.walk(handler):
+            if not (
+                isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                and isinstance(call.func.value, ast.Name) and call.func.value.id == 'logger'
+            ):
+                continue
+            for arg in call.args:
+                allowed = {
+                    id(inner) for node in ast.walk(arg)
+                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'type'
+                    for inner in node.args
+                }
+                if any(
+                    isinstance(node, ast.Name) and node.id == handler.name and id(node) not in allowed
+                    for node in ast.walk(arg)
+                ):
+                    offenders.append(f'{module}:{call.lineno}')
+    assert offenders == []

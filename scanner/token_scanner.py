@@ -128,7 +128,7 @@ class TokenScanner:
             except UnsupportedChainError:
                 raise
             except Exception as e:
-                logger.error(f"AI risk scoring failed: {e}")
+                logger.error("AI risk scoring failed: %s", type(e).__name__)
 
         # Only mark AI as successful if we got a valid dict with risk_score
         ai_score = None
@@ -158,7 +158,7 @@ class TokenScanner:
             except UnsupportedChainError:
                 raise
             except Exception as e:
-                logger.error(f"Forensic report generation failed: {e}")
+                logger.error("Forensic report generation failed: %s", type(e).__name__)
 
         return result
 
@@ -173,7 +173,7 @@ class TokenScanner:
         except UnsupportedChainError:
             raise
         except Exception as e:
-            logger.error(f"Error getting token info: {e}")
+            logger.error("Error getting token info: %s", type(e).__name__)
 
     async def _get_contract_metadata(self, address: str, result: Dict, chain_id: int = 56) -> bool:
         """Get contract verification and age info for cross-validation. Returns True if succeeded."""
@@ -197,7 +197,7 @@ class TokenScanner:
         except UnsupportedChainError:
             raise
         except Exception as e:
-            logger.error(f"Error getting contract metadata: {e}")
+            logger.error("Error getting contract metadata: %s", type(e).__name__)
             result['is_verified'] = None
             result['contract_age_days'] = None
             return False
@@ -214,7 +214,7 @@ class TokenScanner:
         except UnsupportedChainError:
             raise
         except Exception as e:
-            logger.error(f"Error checking trading functions: {e}")
+            logger.error("Error checking trading functions: %s", type(e).__name__)
             result['checks']['can_buy'] = None
             result['checks']['can_sell'] = None
 
@@ -240,7 +240,7 @@ class TokenScanner:
         except UnsupportedChainError:
             raise
         except Exception as e:
-            logger.error(f"Error checking ownership: {e}")
+            logger.error("Error checking ownership: %s", type(e).__name__)
             result['checks']['ownership_renounced'] = None
 
     async def _check_liquidity(self, address: str, result: Dict, chain_id: int = 56) -> bool:
@@ -263,7 +263,7 @@ class TokenScanner:
         except UnsupportedChainError:
             raise
         except Exception as e:
-            logger.error(f"Error checking liquidity: {e}")
+            logger.error("Error checking liquidity: %s", type(e).__name__)
             result['checks']['liquidity_locked'] = None
             return False
 
@@ -309,7 +309,7 @@ class TokenScanner:
         except UnsupportedChainError:
             raise
         except Exception as e:
-            logger.error(f"Error checking honeypot: {e}")
+            logger.error("Error checking honeypot: %s", type(e).__name__)
             result['is_honeypot'] = None
             result['checks']['can_sell'] = None
             result['honeypot_status'] = 'unknown'
@@ -354,7 +354,7 @@ class TokenScanner:
         except UnsupportedChainError:
             raise
         except Exception as e:
-            logger.error(f"Error checking taxes: {e}")
+            logger.error("Error checking taxes: %s", type(e).__name__)
             result['tax_status'] = 'unknown'
             result['tax_reason'] = 'Tax provider failed'
             result['risks'].append('Buy/sell taxes unknown: provider failed')

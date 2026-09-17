@@ -88,7 +88,7 @@ class HoneypotService:
             except UnsupportedChainError:
                 raise
             except Exception as e:
-                logger.error('Honeypot fetch failed for %s: %s', address, e)
+                logger.error('Honeypot fetch failed for %s: %s', address, type(e).__name__)
                 reasons.append(f'honeypot.is request failed ({type(e).__name__})')
 
         if (not data['simulation_failed'] and simulation_success is not False
@@ -111,7 +111,7 @@ class HoneypotService:
             except UnsupportedChainError:
                 raise
             except Exception as e:
-                logger.error('GoPlus fallback failed for %s: %s', address, e)
+                logger.error('GoPlus fallback failed for %s: %s', address, type(e).__name__)
                 reasons.append(f'GoPlus fallback failed ({type(e).__name__})')
 
         if data['simulation_failed']:

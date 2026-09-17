@@ -66,7 +66,7 @@ class DeployerIndexer:
             except UnsupportedChainError:
                 logger.error("Skipping %s: unsupported chain %s", address, chain_id)
             except Exception as e:
-                logger.error(f"Indexer worker error: {e}")
+                logger.error("Indexer worker error: %s", type(e).__name__)
 
     async def _index_contract(self, address: str, chain_id: int):
         """Fetch deployer and funder info for a contract."""
@@ -136,7 +136,7 @@ class DeployerIndexer:
             except UnsupportedChainError:
                 raise
             except Exception as e:
-                logger.error(f"Watch-deployer check failed for {deployer}: {e}")
+                logger.error("Watch-deployer check failed for %s: %s", deployer, type(e).__name__)
 
         except UnsupportedChainError:
             raise
@@ -176,7 +176,7 @@ class DeployerIndexer:
         except UnsupportedChainError:
             raise
         except Exception as e:
-            logger.error(f"Telegram watch alert failed: {e}")
+            logger.error("Telegram watch alert failed: %s", type(e).__name__)
             return False
 
     async def _fetch_funder(self, deployer_address: str, chain_id: int) -> Optional[dict]:

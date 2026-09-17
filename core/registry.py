@@ -48,14 +48,14 @@ class AnalyzerRegistry:
             if isinstance(result, UnsupportedChainError):
                 raise result
             if isinstance(result, Exception):
-                logger.error(f"Analyzer {analyzer.name} failed: {result}")
+                logger.error("Analyzer %s failed: %s", analyzer.name, type(result).__name__)
                 # Cautious neutral score (not 0/safe) — fail-closed on missing data
                 final.append(AnalyzerResult(
                     name=analyzer.name,
                     weight=analyzer.weight,
                     score=50,
                     flags=[f"{analyzer.name} analysis unavailable"],
-                    error=str(result),
+                    error=f"{analyzer.name} analysis unavailable ({type(result).__name__})",
                 ))
             else:
                 final.append(result)

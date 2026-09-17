@@ -41,7 +41,7 @@ class EmailService:
             logger.info(f"Beta welcome email sent to {to_email}: {response}")
             return response
         except Exception as e:
-            logger.error(f"Failed to send beta welcome email to {to_email}: {e}")
+            logger.error("Failed to send beta welcome email to %s: %s", to_email, type(e).__name__)
             return None
 
 

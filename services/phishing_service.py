@@ -101,8 +101,8 @@ class PhishingService:
             return result
 
         except aiohttp.ClientError as e:
-            logger.warning("GoPlus phishing check network error for %s: %s", url, e)
+            logger.warning("GoPlus phishing check network error for %s: %s", url, type(e).__name__)
             return defaults
         except Exception as e:
-            logger.error("Phishing check failed for %s: %s", url, e)
+            logger.error("Phishing check failed for %s: %s", url, type(e).__name__)
             return defaults

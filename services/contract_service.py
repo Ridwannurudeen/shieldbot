@@ -96,7 +96,7 @@ class ContractService:
             except UnsupportedChainError:
                 raise
             except Exception as e:
-                logger.warning("Bytecode scan failed for %s: %s", address, e)
+                logger.warning("Bytecode scan failed for %s: %s", address, type(e).__name__)
                 results['coverage'] = {'bytecode': False}
                 results['reason'] = 'Bytecode scan unavailable'
 
@@ -125,5 +125,5 @@ class ContractService:
         except UnsupportedChainError:
             raise
         except Exception as e:
-            logger.error("Contract data fetch failed for %s: %s", address, e)
+            logger.error("Contract data fetch failed for %s: %s", address, type(e).__name__)
             return {**defaults, 'is_contract': None, 'status': 'unknown', 'reason': 'Contract data unavailable'}

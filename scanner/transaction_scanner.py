@@ -155,7 +155,7 @@ class TransactionScanner:
             except UnsupportedChainError:
                 raise
             except Exception as e:
-                logger.error(f"AI risk scoring failed: {e}")
+                logger.error("AI risk scoring failed: %s", type(e).__name__)
 
         # Only mark AI as successful if we got a valid dict with risk_score
         ai_score = None
@@ -180,7 +180,7 @@ class TransactionScanner:
             except UnsupportedChainError:
                 raise
             except Exception as e:
-                logger.error(f"Forensic report generation failed: {e}")
+                logger.error("Forensic report generation failed: %s", type(e).__name__)
 
         # Override risk_level from blended score for consistency
         if result['risk_score'] >= 71:
@@ -218,7 +218,7 @@ class TransactionScanner:
         except UnsupportedChainError:
             raise
         except Exception as e:
-            logger.error(f"Error checking verification: {e}")
+            logger.error("Error checking verification: %s", type(e).__name__)
             result['is_verified'] = None
             result['checks']['verified_source'] = None
             return False
@@ -239,7 +239,7 @@ class TransactionScanner:
         except UnsupportedChainError:
             raise
         except Exception as e:
-            logger.error(f"Error checking scam database: {e}")
+            logger.error("Error checking scam database: %s", type(e).__name__)
             result['checks']['scam_database_clean'] = None
             return False
 
@@ -267,7 +267,7 @@ class TransactionScanner:
         except UnsupportedChainError:
             raise
         except Exception as e:
-            logger.error(f"Error checking contract age: {e}")
+            logger.error("Error checking contract age: %s", type(e).__name__)
             result['checks']['not_too_new'] = None
             return False
 
@@ -290,7 +290,7 @@ class TransactionScanner:
         except UnsupportedChainError:
             raise
         except Exception as e:
-            logger.error(f"Error checking similar scams: {e}")
+            logger.error("Error checking similar scams: %s", type(e).__name__)
             result['checks']['no_suspicious_patterns'] = None
             return False
 

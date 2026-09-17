@@ -79,7 +79,7 @@ class TierService:
                 )
                 self._enabled = True
             except Exception as exc:
-                logger.warning("TierService: web3 init failed: %s", exc)
+                logger.warning("TierService: web3 init failed: %s", type(exc).__name__)
 
     def is_enabled(self) -> bool:
         return self._enabled
@@ -142,7 +142,7 @@ class TierService:
             self._balance_cache[cache_key] = (balance, now + CACHE_TTL)
             return balance
         except Exception as exc:
-            logger.debug("Token balance check failed for %s: %s", address, exc)
+            logger.debug("Token balance check failed for %s: %s", address, type(exc).__name__)
             return 0
 
     async def _check_token_tier(self, address: str) -> Optional[str]:

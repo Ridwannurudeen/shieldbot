@@ -253,7 +253,7 @@ class GuardianService:
                 except UnsupportedChainError:
                     raise
                 except Exception as exc:
-                    logger.debug("Spender score unavailable: %s", exc)
+                    logger.debug("Spender score unavailable: %s", type(exc).__name__)
                     coverage_reasons["spender_score"] = "Spender score unavailable"
 
                 if coverage_reasons and risk_level == "low":
@@ -285,10 +285,10 @@ class GuardianService:
         except UnsupportedChainError:
             raise
         except RuntimeError as exc:
-            logger.warning("_get_approval_data via rescue unavailable: %s", exc)
+            logger.warning("_get_approval_data via rescue unavailable: %s", type(exc).__name__)
             return None
         except Exception as exc:
-            logger.error("_get_approval_data via rescue failed: %s", exc, exc_info=True)
+            logger.error("_get_approval_data via rescue failed: %s", type(exc).__name__, exc_info=True)
             return None
 
     @staticmethod
@@ -323,7 +323,7 @@ class GuardianService:
         except UnsupportedChainError:
             raise
         except Exception as exc:
-            logger.debug("_check_flagged_exposure failed: %s", exc)
+            logger.debug("_check_flagged_exposure failed: %s", type(exc).__name__)
             return None
 
     @staticmethod
@@ -383,5 +383,5 @@ class GuardianService:
         except UnsupportedChainError:
             raise
         except Exception as exc:
-            logger.debug("_check_deployer_risk failed: %s", exc)
+            logger.debug("_check_deployer_risk failed: %s", type(exc).__name__)
             return None

@@ -408,7 +408,7 @@ class RescueService:
         except UnsupportedChainError:
             raise
         except Exception as e:
-            logger.error(f"Error fetching approvals: {e}", exc_info=True)
+            logger.error("Error fetching approvals: %s", type(e).__name__)
             raise RuntimeError("Approval scan unavailable") from e
 
         # Sort HIGH → MEDIUM → LOW, then by USD value at risk descending
