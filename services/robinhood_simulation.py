@@ -62,7 +62,7 @@ CACHE_TTL_SECONDS = 60
 MAX_UINT256 = 2**256 - 1
 MAX_UINT160 = 2**160 - 1
 MAX_UINT48 = 2**48 - 1
-ROUTES = ("v4-native", "v4-doppler", "v2")
+ROUTES = ("v4-native", "v4-weth", "v4-doppler", "v2")
 
 V4_SWAP = 0x10
 SWAP_EXACT_IN_SINGLE = 0x06
@@ -155,6 +155,7 @@ KNOWN_ERRORS = {
 # The router's revert when the token refuses transferFrom (Permit2 solmate SafeTransferLib; V2 TransferHelper).
 TOKEN_REFUSED = {
     "v4-native": "TRANSFER_FROM_FAILED",
+    "v4-weth": "TRANSFER_FROM_FAILED",
     "v4-doppler": "TRANSFER_FROM_FAILED",
     "v2": "TransferHelper: TRANSFER_FROM_FAILED",
 }
@@ -958,8 +959,9 @@ def _pool_from_initialize(log, token: str) -> tuple:
         return None, None
     key = (currency0, currency1, fee, tick_spacing, hooks.lower())
     other = currency1 if currency0 == token else currency0
-    if key[4] == NATIVE and currency0 == NATIVE:
-        return Pool("v4-native", NATIVE, key=key), None
+    if key[4] == NATIVE and other in (NATIVE, WETH):
+        # A hookless pool needs no extra encoding, and WETH is funded as for a Doppler WETH pool.
+        return Pool("v4-native" if other == NATIVE else "v4-weth", other, key=key), None
     if key[4] == DOPPLER_HOOK_INITIALIZER and other in (NATIVE, WETH):
         return Pool("v4-doppler", other, key=key), None
     return None, (

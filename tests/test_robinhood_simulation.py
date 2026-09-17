@@ -36,6 +36,7 @@ ZERO = "0x" + "0" * 40
 POOL_MANAGER = "0x8366a39cc670b4001a1121b8f6a443a643e40951"
 HOOK_INITIALIZER = "0x4e3468951d49f2eea976ed0d6e75ffcb44a9a544"
 V2_FACTORY = "0x8bceaa40b9acdfaedf85adf4ff01f5ad6517937f"
+WETH = "0x0bd7d308f8e1639fab988df18a8011f41eacad73"
 FIELDS = ("is_honeypot", "buy_tax", "sell_tax", "can_buy", "can_sell")
 SECRET = "rpc-secret-key-51c2"
 
@@ -114,6 +115,7 @@ def evaluate(fixture, sell_amount=None):
         "v4_native_liquidity_launcher",
         "v4_doppler_weth",
         "v4_doppler_native_fee_hook",
+        "v4_weth_hookless",
         "v2_router02",
         "v2_honeypot_sell_reverts",
     ],
@@ -189,6 +191,7 @@ def test_v4_buy_and_sell_use_the_deployed_router_layout():
         ("v4_native_liquidity_launcher", 65551497, 2526684544832),
         ("v4_doppler_weth", 65551506, 59887538073233),
         ("v4_doppler_native_fee_hook", 65551521, 7988294284787),
+        ("v4_weth_hookless", 65704949, 2002143633592),
         ("v2_router02", 65551531, 1141608),
     ],
 )
@@ -222,6 +225,7 @@ def test_live_honeypot_is_proven_unsellable():
     [
         ("v4_native_liquidity_launcher", "TRANSFER_FROM_FAILED"),
         ("v4_doppler_weth", "TRANSFER_FROM_FAILED"),
+        ("v4_weth_hookless", "TRANSFER_FROM_FAILED"),
         ("v2_router02", "TransferHelper: TRANSFER_FROM_FAILED"),
     ],
 )
@@ -881,7 +885,7 @@ def rpc_for(fixture, **overrides):
         options["slot0"] = 1 << 100
     elif fixture["route"] == "v4-doppler":
         options["state"] = doppler_state(tuple(fixture["key"]), fixture["numeraire"], status=2)
-    else:
+    elif fixture["route"] == "v2":
         options.update(pair=fixture["pair"], reserves=(10**20, 10**27))
     options.update(overrides)
     return FakeRpc(**options)
@@ -1100,6 +1104,52 @@ async def test_simulated_pools_are_capped():
     assert rpc.simulations == []
     assert "not simulated (cap of 3 pools)" in result["reason"]
     assert result["can_sell"] is True
+
+
+@pytest.mark.asyncio
+async def test_hookless_weth_pool_found_by_the_log_scan_is_measured():
+    fixture = load("v4_weth_hookless")
+    head = 65_540_000
+    logs = {(head - LOG_WINDOW_BLOCKS + 1, head): [initialize_log(*fixture["key"], head)]}
+    rpc = rpc_for(fixture, logs=logs, head=head)
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+    with fresh_addresses(fixture):
+        result = await simulator.simulate(fixture["token"])
+    assert result["can_buy"] is result["can_sell"] is True
+    assert result["buy_tax"] == result["sell_tax"] == 0.0
+    assert result["is_honeypot"] is False
+    assert result["simulation_block"] == 65704949
+    assert "v4-weth pool" in result["reason"]
+    assert rpc.simulations == []
+
+
+@pytest.mark.asyncio
+async def test_log_scan_finds_a_hookless_weth_pool():
+    # Hookless WETH pools need the same WETH funding as a Doppler WETH pool and no new encoding.
+    token = "0x" + "b3" * 20
+    amount, head = 10**18, 65_540_000
+    key = (WETH, token, 100, 1, ZERO)
+    pool = Pool("v4-weth", WETH, key=key)
+    buyer, receiver = "0x" + "11" * 20, "0x" + "22" * 20
+    request = build_simulation_request(pool, token, amount, buyer, receiver)
+    rpc = FakeRpc(
+        token,
+        amount * 1_000_000,
+        head=head,
+        simulations=[([request, "latest"], {"error": {"code": -32000, "message": "boom"}})],
+        logs={(head - LOG_WINDOW_BLOCKS + 1, head): [initialize_log(*key, head)]},
+    )
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+    with patch(
+        "services.robinhood_simulation._fresh_address", side_effect=[buyer, receiver]
+    ):
+        result = await simulator.simulate(token)
+    pool_id = keccak(encode(["address", "address", "uint24", "int24", "address"], list(key)))
+    assert f"v4-weth pool 0x{pool_id.hex()}" in result["reason"]
+    assert call_labels(pool)[:3] == ["fund", "fund_approve", "fund_permit"]
+    assert all(result[field] is None for field in FIELDS)
 
 
 def short_delivery(fixture, delivered):
