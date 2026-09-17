@@ -12,7 +12,6 @@ except ImportError:
 from datetime import datetime, timezone
 
 from core.chain_adapter import ChainAdapter
-from services.explorer_service import explorer_service
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +86,8 @@ class EvmAdapter(ChainAdapter):
         factory_address: str = None,
         whitelisted_routers: Dict[str, str] = None,
     ):
+        from services.explorer_service import explorer_service
+
         self._explorer_backend = _get_explorer_backend(chain_id_value)
         self._explorer_service = explorer_service
         self._chain_id = chain_id_value
