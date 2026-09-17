@@ -186,8 +186,11 @@ class RiskEngine:
                 if pair_age is not None and pair_age < 24:
                     composite = min(composite + 15, 100)
 
-            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown:
+            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not contract_data.get('scam_matches'):
                 composite = max(composite - 20, 0)
+
+            if contract_data.get('scam_matches'):
+                composite = max(composite, 70)
 
         rug_probability = round(min(max(composite, 0), 100), 1)
 
@@ -308,8 +311,11 @@ class RiskEngine:
 
             # Positive signals — reduce score for renounced ownership with high liquidity
             liquidity_info = dex_data.get('liquidity_usd')
-            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown:
+            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not contract_data.get('scam_matches'):
                 composite = max(composite - 20, 0)
+
+            if contract_data.get('scam_matches'):
+                composite = max(composite, 70)
         else:
             # Non-token: only escalate for verified scam matches or behavioral flags
             if contract_data.get('scam_matches'):

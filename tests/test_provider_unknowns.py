@@ -232,6 +232,31 @@ def test_fully_covered_discount_matches_baseline(method):
     from core.analyzer import AnalyzerResult
     contract = {'is_verified': False, 'is_contract': True, 'has_mint': True,
                 'has_proxy': True, 'has_pause': True, 'has_blacklist': True,
+                'contract_age_days': 1, 'ownership_renounced': True}
+    honeypot = {'is_honeypot': False, 'can_sell': False, 'buy_tax': 0, 'sell_tax': 0}
+    market = {'liquidity_usd': 200000, 'fdv': 200000, 'volume_24h': 2000,
+              'pair_age_hours': 100}
+    ethos = {'reputation_score': 80}
+    engine = RiskEngine()
+    if method == 'compute_composite_risk':
+        result = engine.compute_composite_risk(contract, honeypot, market, ethos)
+    else:
+        result = engine.compute_from_results([
+            AnalyzerResult('structural', .4, 95, data=contract),
+            AnalyzerResult('market', .25, 0, data=market),
+            AnalyzerResult('behavioral', .2, 0, data=ethos),
+            AnalyzerResult('honeypot', .15, 60, data=honeypot),
+        ])
+    # c1d1adf gives 27 (LOW) for these inputs in both entry points.
+    assert result['rug_probability'] == 27
+    assert result['risk_level'] == 'LOW'
+
+
+@pytest.mark.parametrize('method', ['compute_composite_risk', 'compute_from_results'])
+def test_scam_match_token_is_never_discounted_to_low(method):
+    from core.analyzer import AnalyzerResult
+    contract = {'is_verified': False, 'is_contract': True, 'has_mint': True,
+                'has_proxy': True, 'has_pause': True, 'has_blacklist': True,
                 'contract_age_days': 1, 'scam_matches': ['match'], 'ownership_renounced': True}
     honeypot = {'is_honeypot': False, 'can_sell': False, 'buy_tax': 0, 'sell_tax': 0}
     market = {'liquidity_usd': 200000, 'fdv': 200000, 'volume_24h': 2000,
@@ -247,8 +272,10 @@ def test_fully_covered_discount_matches_baseline(method):
             AnalyzerResult('behavioral', .2, 0, data=ethos),
             AnalyzerResult('honeypot', .15, 60, data=honeypot),
         ])
-    assert result['rug_probability'] == 29
-    assert result['risk_level'] == 'LOW'
+    assert result['status'] == 'ok'
+    assert result['rug_probability'] >= 70
+    assert result['risk_level'] != 'LOW'
+    assert format_extension_alert(result)['risk_classification'] != 'SAFE'
 
 
 @pytest.mark.asyncio

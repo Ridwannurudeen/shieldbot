@@ -987,3 +987,16 @@ async def test_confirmed_eoa_with_failed_scam_lookup_is_unknown(mock_web3_client
     assert result["coverage"] == {"is_contract": True, "scam_database": False}
     assert result["coverage_reasons"]["scam_database"]
     assert result["checks"]["scam_database_clean"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scam_matches, expected", [([], (4, "low")), ([SCAM_MATCH], (40, "medium"))])
+async def test_ai_blend_cannot_lower_scam_match_below_its_floor(mock_web3_client, mock_ai_analyzer, scam_matches, expected):
+    mock_web3_client.get_contract_creation_info.return_value = {"age_days": 400}
+    mock_ai_analyzer.compute_ai_risk_score.return_value = {"risk_score": 10}
+    scanner = TransactionScanner(mock_web3_client, mock_ai_analyzer)
+    scanner.scam_db.check_address = AsyncMock(return_value=scam_matches)
+    result = await scanner.scan_address("0xABC")
+    assert result["status"] == "ok"
+    assert result["is_verified"] is True
+    assert (result["risk_score"], result["risk_level"]) == expected

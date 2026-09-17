@@ -185,6 +185,7 @@ class TransactionScanner:
 
         # Blend scores (heuristic + AI when available)
         result['risk_score'] = blend_scores(heuristic_score, ai_score)
+        self._apply_scam_match_risk(result)
         result['confidence'] = compute_confidence(data_sources)
 
         # Generate unified forensic report (replaces separate AI calls)
