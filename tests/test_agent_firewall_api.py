@@ -384,6 +384,21 @@ def test_agent_unavailable_simulation_has_no_coverage_penalty(client, mock_conta
     assert mock_container.cache.set_verdict.call_args.args[2]["status"] == "ok"
 
 
+@pytest.mark.parametrize("simulation", [
+    {"gas_used": 21000, "asset_changes": [], "warnings": []},
+    {"success": None, "gas_used": 21000, "asset_changes": [], "warnings": []},
+], ids=["missing-success", "none-success"])
+def test_agent_simulation_without_explicit_failure_has_no_penalty(client, mock_container, simulation):
+    mock_container.tenderly_simulator.is_enabled.return_value = True
+    mock_container.tenderly_simulator.simulate_transaction = AsyncMock(return_value=simulation)
+    response = client.post("/api/agent/firewall", json=_make_firewall_request(), headers={"X-API-Key": "sb_testkey"})
+    result = response.json()
+    assert response.status_code == 200
+    assert (result["verdict"], result["score"], result["status"]) == ("ALLOW", 12, "ok")
+    assert "transaction_simulation" not in result["coverage"]
+    assert "simulation_revert" not in result["flags"]
+
+
 @pytest.mark.parametrize("revert_reason,expected_reason", [
     ("execution reverted", "execution reverted"),
     (None, "Transaction simulation failed"),

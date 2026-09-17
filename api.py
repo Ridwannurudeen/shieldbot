@@ -1269,7 +1269,7 @@ async def firewall(req: FirewallRequest, request: Request):
             else:
                 contract_data, honeypot_data, dex_data, ethos_data = results
 
-            if simulation_result is not None and not simulation_result.get('success'):
+            if simulation_result is not None and simulation_result.get('success') is False:
                 risk_output = {
                     **risk_output, 'status': 'unknown',
                     'coverage': {**risk_output.get('coverage', {}), 'transaction_simulation': 0},
@@ -2676,7 +2676,7 @@ async def _analyze_router_swap(
         f"{item['address']}:{source}": fraction
         for item in token_summaries for source, fraction in item['coverage'].items()
     }
-    if sim_result is not None and not sim_result.get('success'):
+    if sim_result is not None and sim_result.get('success') is False:
         risk_output['status'] = 'unknown'
         risk_output['coverage']['transaction_simulation'] = 0
         risk_output['coverage_reasons'] = {

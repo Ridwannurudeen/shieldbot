@@ -185,6 +185,31 @@ async def test_failed_transaction_simulation_is_incomplete(consumer_api, surface
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('surface', ['fresh', 'swap'])
+@pytest.mark.parametrize('simulation, penalised', [
+    ({'gas_used': 21000}, False),
+    ({'success': None, 'gas_used': 21000}, False),
+    ({'success': False, 'gas_used': 21000}, True),
+], ids=['missing-success', 'none-success', 'false-success'])
+async def test_only_explicit_simulation_failure_is_a_coverage_penalty(consumer_api, surface, simulation, penalised):
+    api, _ = consumer_api
+    api.risk_engine.compute_from_results.return_value = {
+        'rug_probability': 0, 'risk_level': 'LOW', 'status': 'ok',
+        'coverage': {'honeypot': 1}, 'coverage_reasons': {},
+    }
+    api.tenderly_simulator.is_enabled = lambda: True
+    api.tenderly_simulator.simulate_transaction = AsyncMock(return_value=simulation)
+    req = api.FirewallRequest(to='0x' + 'a' * 40, sender='0x' + 'b' * 40)
+    if surface == 'fresh':
+        response = await api.firewall(req, SimpleNamespace(headers={}))
+    else:
+        response = await api._analyze_router_swap(req, req.to, req.sender,
+            {'params': {'path': ['0x' + 'c' * 40]}}, 'Router', 0)
+    assert ('transaction_simulation' in response['coverage']) is penalised
+    assert response['status'] == ('unknown' if penalised else 'ok')
+
+
+@pytest.mark.asyncio
 async def test_scan_endpoint_preserves_unknown_verdict(consumer_api, incomplete_output, monkeypatch):
     api, _ = consumer_api
     monkeypatch.setattr(api, 'tx_scanner', SimpleNamespace(scan_address=AsyncMock(return_value={

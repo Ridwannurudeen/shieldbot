@@ -247,7 +247,7 @@ def create_agent_firewall_router(container) -> APIRouter:
                     status_code=503,
                     detail="Analysis pipeline temporarily unavailable",
                 )
-            if simulation_result and not simulation_result.get("success", True):
+            if simulation_result and simulation_result.get("success") is False:
                 risk_output = {
                     **risk_output,
                     "status": "unknown",
@@ -263,7 +263,7 @@ def create_agent_firewall_router(container) -> APIRouter:
             # Tenderly risk augmentation
             if simulation_result:
                 sim_flags = []
-                if not simulation_result.get("success", True):
+                if simulation_result.get("success") is False:
                     risk_score = max(risk_score, 70)
                     sim_flags.append("simulation_revert")
                 asset_changes = simulation_result.get("asset_changes") or []
