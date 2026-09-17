@@ -80,16 +80,16 @@ async def test_guardian_propagates_rescue_routing_error(entrypoint):
 @pytest.mark.parametrize('entrypoint, method', [
     ('_get_approval_data', 'get_contract_score'),
     ('_check_flagged_exposure_from_tokens', 'get_contract_score'),
-    ('_check_deployer_risk_from_tokens', 'get_deployer'),
-    ('_check_deployer_risk_from_tokens', 'get_watched_deployer'),
+    ('_check_deployer_risk_from_tokens', 'get_deployer_risk_summary'),
+    ('_check_deployer_risk_from_tokens', 'is_watched_deployer'),
 ])
 async def test_guardian_nested_routing_error_propagates(entrypoint, method):
     from services.guardian import GuardianService
 
     db = MagicMock(
         get_contract_score=AsyncMock(return_value=None),
-        get_deployer=AsyncMock(return_value={'deployer_address': '0xDeployer'}),
-        get_watched_deployer=AsyncMock(return_value=None),
+        get_deployer_risk_summary=AsyncMock(return_value={'deployer_address': '0xDeployer'}),
+        is_watched_deployer=AsyncMock(return_value=None),
     )
     getattr(db, method).side_effect = UnsupportedChainError('unsupported')
     rescue = MagicMock(scan_approvals=AsyncMock(return_value={'approvals': [{'spender': '0xSpender'}]}))

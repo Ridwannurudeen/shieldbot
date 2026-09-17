@@ -395,17 +395,14 @@ class GuardianService:
             risk_points = 0.0
             for token_addr in token_addrs:
                 try:
-                    if not hasattr(self._db, "get_deployer"):
-                        continue
-                    deployer_info = await self._db.get_deployer(token_addr, chain_id)
+                    # None means the token's deployer is not indexed yet: no deployer risk observed.
+                    deployer_info = await self._db.get_deployer_risk_summary(token_addr, chain_id)
                     if not deployer_info:
                         continue
                     deployer_addr = deployer_info.get("deployer_address", "")
                     if not deployer_addr:
                         continue
-                    if not hasattr(self._db, "get_watched_deployer"):
-                        continue
-                    watched = await self._db.get_watched_deployer(deployer_addr)
+                    watched = await self._db.is_watched_deployer(deployer_addr, chain_id)
                     if watched:
                         risk_points += 25
                 except UnsupportedChainError:
