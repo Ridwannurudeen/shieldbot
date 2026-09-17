@@ -397,3 +397,26 @@ load('background', 'function saveToHistory');
         encoding='utf-8', check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_bot_logging_setup_keeps_httpx_request_urls_out_of_info_logs():
+    import ast
+    import logging
+    from pathlib import Path
+    from unittest.mock import patch
+
+    tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
+    calls = [node for node in tree.body if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+             and ast.unparse(node.value.func).startswith('logging.')]
+    basic_config = next(node for node in calls if ast.unparse(node.value.func) == 'logging.basicConfig')
+    httpx_setup = [node for node in calls if "getLogger('httpx')" in ast.unparse(node)]
+    assert httpx_setup and httpx_setup[0].lineno > basic_config.lineno
+    httpx_logger = logging.getLogger('httpx')
+    previous = httpx_logger.level
+    httpx_logger.setLevel(logging.NOTSET)
+    try:
+        with patch('logging.basicConfig'):
+            exec(compile(ast.Module(body=calls, type_ignores=[]), 'bot.py', 'exec'), {'logging': logging})
+        assert httpx_logger.level >= logging.WARNING
+    finally:
+        httpx_logger.setLevel(previous)
