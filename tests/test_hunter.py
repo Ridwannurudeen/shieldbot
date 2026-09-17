@@ -11,6 +11,7 @@ from agent.hunter import (
     LAUNCH_SCANS_PER_SWEEP,
     RECHECK_MIN_INTERVAL_SECONDS,
     RECHECK_PAIRS_PER_SWEEP,
+    SCAN_INTERVAL_SECONDS,
     Hunter,
 )
 from core.database import Database
@@ -59,6 +60,13 @@ def ai():
 @pytest.fixture
 def sentinel():
     return MagicMock()
+
+
+@pytest.fixture(autouse=True)
+def unpaced_scans():
+    """Scan pacing is asserted on its own; every other test runs without the wait."""
+    with patch("agent.hunter.SCAN_INTERVAL_SECONDS", 0):
+        yield
 
 
 @pytest.fixture
@@ -630,7 +638,44 @@ async def test_recheck_scans_at_most_the_sweep_budget(tools, ai, sentinel, real_
     assert len(await sweep_scans(hunter, tools)) == RECHECK_PAIRS_PER_SWEEP
 
 
-# --- pair address reuse ---
+# --- scan pacing and pair address reuse ---
+
+
+@pytest.mark.asyncio
+async def test_recheck_waits_between_scans(tools, ai, sentinel, real_db):
+    for index in range(3):
+        await watching_row(real_db, launch(index)["token_address"], 4663, DAY + index)
+    tools.scan_contract = AsyncMock(return_value=scan_result(10, complete=False))
+    hunter = Hunter(tools=tools, db=real_db, ai_analyzer=ai, sentinel=sentinel)
+
+    with (
+        patch("agent.hunter.SCAN_INTERVAL_SECONDS", 1.5),
+        patch("agent.hunter.asyncio.sleep", new_callable=AsyncMock) as sleep,
+    ):
+        await hunter._recheck_warn_contracts("sweep")
+
+    assert tools.scan_contract.await_count == 3
+    assert [call.args[0] for call in sleep.await_args_list] == [1.5, 1.5]
+    assert SCAN_INTERVAL_SECONDS > 0
+
+
+@pytest.mark.asyncio
+async def test_launch_scans_wait_between_scans(tools, ai, sentinel, real_db):
+    await real_db.upsert_discovered_launches(4663, [launch(index) for index in range(3)])
+    tools.scan_contract = AsyncMock(return_value=scan_result(10, complete=False))
+    hunter = Hunter(
+        tools=tools, db=real_db, ai_analyzer=ai, sentinel=sentinel,
+        discovery=MagicMock(run=AsyncMock(return_value=None)),
+    )
+
+    with (
+        patch("agent.hunter.SCAN_INTERVAL_SECONDS", 1.5),
+        patch("agent.hunter.asyncio.sleep", new_callable=AsyncMock) as sleep,
+    ):
+        await hunter._scan_new_pairs("sweep")
+
+    assert tools.scan_contract.await_count == 3
+    assert [call.args[0] for call in sleep.await_args_list] == [1.5, 1.5]
 
 
 @pytest.mark.asyncio

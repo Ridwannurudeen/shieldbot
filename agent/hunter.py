@@ -31,6 +31,9 @@ RECHECK_PAIRS_PER_SWEEP = 20
 # Chain 4663 scans cannot reach full coverage yet, so those pairs would otherwise be
 # rescanned every sweep forever. Six hours caps a pair at four rechecks a day.
 RECHECK_MIN_INTERVAL_SECONDS = 6 * 3600
+# Every scan makes several provider and RPC calls, and the public 4663 RPC is shared, so
+# scans are spaced instead of running back to back. Thirty paced scans add a minute to a sweep.
+SCAN_INTERVAL_SECONDS = 2.0
 
 
 class Hunter:
@@ -189,7 +192,9 @@ class Hunter:
         pairs = []
         for chain in chains:
             pairs += await self.db.get_recheck_pairs("watching", chain, quota, checked_before)
-        for pair in pairs[:RECHECK_PAIRS_PER_SWEEP]:
+        for index, pair in enumerate(pairs[:RECHECK_PAIRS_PER_SWEEP]):
+            if index > 0:
+                await asyncio.sleep(SCAN_INTERVAL_SECONDS)
             try:
                 chain_id = pair.get("chain_id", 56)
                 await self.db.mark_tracked_pair_checked(pair["pair_address"])
@@ -252,7 +257,9 @@ class Hunter:
 
         flagged = []
         launches = await self.db.get_unscanned_launches(LAUNCH_CHAIN_ID, LAUNCH_SCANS_PER_SWEEP)
-        for launch in launches:
+        for index, launch in enumerate(launches):
+            if index > 0:
+                await asyncio.sleep(SCAN_INTERVAL_SECONDS)
             token = launch["token_address"]
             try:
                 result = await self.tools.scan_contract(token, chain_id=LAUNCH_CHAIN_ID)
