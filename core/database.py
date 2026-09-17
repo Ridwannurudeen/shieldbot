@@ -322,6 +322,8 @@ class Database:
         """)
         await self._db.commit()
         await self._migrate_funding_value_wei()
+        await self._migrate_tracked_pairs_chain_id()
+        await self._create_launch_discovery_tables()
 
         # Migrate: add registered_by_key column for existing DBs
         try:
@@ -378,6 +380,20 @@ class Database:
             await self._db.execute("ALTER TABLE funder_links_new RENAME TO funder_links")
             for (sql,) in schema_objects:
                 await self._db.execute(sql)
+            await self._db.commit()
+        except BaseException:
+            await self._db.rollback()
+            raise
+
+    async def _migrate_tracked_pairs_chain_id(self):
+        """Tag tracked pairs with their chain; rows from before chain tracking are BSC."""
+        await self._db.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = await self._db.execute("PRAGMA table_info(tracked_pairs)")
+            if not any(column[1] == "chain_id" for column in await cursor.fetchall()):
+                await self._db.execute(
+                    "ALTER TABLE tracked_pairs ADD COLUMN chain_id INTEGER NOT NULL DEFAULT 56"
+                )
             await self._db.commit()
         except BaseException:
             await self._db.rollback()
@@ -1089,20 +1105,21 @@ class Database:
         deployer: str = None,
         liquidity_usd: float = None,
         status: str = "watching",
+        chain_id: int = 56,
     ):
-        """Insert or update a tracked PancakeSwap pair."""
+        """Insert or update a tracked pair."""
         now = time.time()
         await self._db.execute("""
             INSERT INTO tracked_pairs
-                (pair_address, token_address, deployer, liquidity_usd, first_seen, last_checked, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (pair_address, token_address, deployer, liquidity_usd, first_seen, last_checked, status, chain_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(pair_address) DO UPDATE SET
                 token_address = COALESCE(excluded.token_address, tracked_pairs.token_address),
                 deployer = COALESCE(excluded.deployer, tracked_pairs.deployer),
                 liquidity_usd = COALESCE(excluded.liquidity_usd, tracked_pairs.liquidity_usd),
                 last_checked = excluded.last_checked,
                 status = excluded.status
-        """, (pair_address, token_address, deployer, liquidity_usd, now, now, status))
+        """, (pair_address, token_address, deployer, liquidity_usd, now, now, status, chain_id))
         await self._db.commit()
 
     async def get_tracked_pairs(
@@ -1112,7 +1129,7 @@ class Database:
         if status:
             cursor = await self._db.execute("""
                 SELECT id, pair_address, token_address, deployer, liquidity_usd,
-                       first_seen, last_checked, status
+                       first_seen, last_checked, status, chain_id
                 FROM tracked_pairs
                 WHERE status = ?
                 ORDER BY first_seen DESC
@@ -1121,7 +1138,7 @@ class Database:
         else:
             cursor = await self._db.execute("""
                 SELECT id, pair_address, token_address, deployer, liquidity_usd,
-                       first_seen, last_checked, status
+                       first_seen, last_checked, status, chain_id
                 FROM tracked_pairs
                 ORDER BY first_seen DESC
                 LIMIT ?
@@ -1137,6 +1154,7 @@ class Database:
                 "first_seen": r[5],
                 "last_checked": r[6],
                 "status": r[7],
+                "chain_id": r[8],
             }
             for r in rows
         ]
@@ -1725,3 +1743,125 @@ class Database:
                     pass
             results.append(entry)
         return results
+
+    # --- Launch Discovery ---
+
+    async def _create_launch_discovery_tables(self):
+        await self._db.executescript("""
+            CREATE TABLE IF NOT EXISTS launch_discovery_cursors (
+                chain_id INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                last_block INTEGER NOT NULL,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (chain_id, source)
+            );
+
+            CREATE TABLE IF NOT EXISTS discovered_launches (
+                chain_id INTEGER NOT NULL,
+                token_address TEXT NOT NULL,
+                source TEXT NOT NULL,
+                launchpad TEXT NOT NULL,
+                source_rank INTEGER NOT NULL,
+                pool_id TEXT,
+                block_number INTEGER NOT NULL,
+                tx_hash TEXT NOT NULL,
+                block_timestamp INTEGER NOT NULL,
+                discovered_at REAL NOT NULL,
+                scan_status TEXT,
+                risk_score REAL,
+                scanned_at REAL,
+                PRIMARY KEY (chain_id, token_address)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_discovered_launches_unscanned
+                ON discovered_launches(chain_id, scanned_at, block_number);
+        """)
+        await self._db.commit()
+
+    async def get_launch_cursor(self, chain_id: int, source: str) -> Optional[int]:
+        """Return the last block processed for a launch source, or None before its first sweep."""
+        cursor = await self._db.execute(
+            "SELECT last_block FROM launch_discovery_cursors WHERE chain_id = ? AND source = ?",
+            (chain_id, source),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+    async def set_launch_cursor(self, chain_id: int, source: str, last_block: int):
+        """Store the last block processed for a launch source."""
+        await self._db.execute("""
+            INSERT INTO launch_discovery_cursors (chain_id, source, last_block, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(chain_id, source) DO UPDATE SET
+                last_block = excluded.last_block,
+                updated_at = excluded.updated_at
+        """, (chain_id, source, last_block, time.time()))
+        await self._db.commit()
+
+    async def upsert_discovered_launches(self, chain_id: int, launches: List[Dict]):
+        """Record launches idempotently, one row per token.
+
+        On conflict the higher-ranked source keeps the label, the first known pool is kept,
+        and the earliest block with its transaction and timestamp wins. Scan outcomes are kept.
+        """
+        now = time.time()
+        await self._db.executemany("""
+            INSERT INTO discovered_launches
+                (chain_id, token_address, source, launchpad, source_rank, pool_id,
+                 block_number, tx_hash, block_timestamp, discovered_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(chain_id, token_address) DO UPDATE SET
+                source = CASE WHEN excluded.source_rank > discovered_launches.source_rank
+                    THEN excluded.source ELSE discovered_launches.source END,
+                launchpad = CASE WHEN excluded.source_rank > discovered_launches.source_rank
+                    THEN excluded.launchpad ELSE discovered_launches.launchpad END,
+                source_rank = MAX(excluded.source_rank, discovered_launches.source_rank),
+                pool_id = COALESCE(discovered_launches.pool_id, excluded.pool_id),
+                tx_hash = CASE WHEN excluded.block_number < discovered_launches.block_number
+                    THEN excluded.tx_hash ELSE discovered_launches.tx_hash END,
+                block_timestamp = CASE WHEN excluded.block_number < discovered_launches.block_number
+                    THEN excluded.block_timestamp ELSE discovered_launches.block_timestamp END,
+                block_number = MIN(excluded.block_number, discovered_launches.block_number)
+        """, [
+            (
+                chain_id, launch["token_address"], launch["source"], launch["launchpad"],
+                launch["source_rank"], launch["pool_id"], launch["block_number"], launch["tx_hash"],
+                launch["block_timestamp"], now,
+            )
+            for launch in launches
+        ])
+        await self._db.commit()
+
+    async def get_unscanned_launches(self, chain_id: int, limit: int) -> List[Dict]:
+        """Return launches that have not been scanned, newest first."""
+        cursor = await self._db.execute("""
+            SELECT token_address, source, launchpad, pool_id, block_number, tx_hash, block_timestamp
+            FROM discovered_launches
+            WHERE chain_id = ? AND scanned_at IS NULL
+            ORDER BY block_number DESC, token_address
+            LIMIT ?
+        """, (chain_id, limit))
+        rows = await cursor.fetchall()
+        return [
+            {
+                "token_address": r[0],
+                "source": r[1],
+                "launchpad": r[2],
+                "pool_id": r[3],
+                "block_number": r[4],
+                "tx_hash": r[5],
+                "block_timestamp": r[6],
+            }
+            for r in rows
+        ]
+
+    async def record_launch_scan(
+        self, chain_id: int, token_address: str, scan_status: str, risk_score: Optional[float]
+    ):
+        """Record the outcome of scanning a discovered launch."""
+        await self._db.execute("""
+            UPDATE discovered_launches
+            SET scan_status = ?, risk_score = ?, scanned_at = ?
+            WHERE chain_id = ? AND token_address = ?
+        """, (scan_status, risk_score, time.time(), chain_id, token_address))
+        await self._db.commit()
