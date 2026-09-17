@@ -3,6 +3,7 @@
 import asyncio
 import time
 import logging
+import traceback
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Request, HTTPException
@@ -238,8 +239,8 @@ def create_agent_firewall_router(container) -> APIRouter:
                 raise
             except Exception as exc:
                 logger.error(
-                    "Analyzer pipeline failed for %s on chain %s: %s",
-                    to_addr, chain_id, type(exc).__name__,
+                    "Analyzer pipeline failed for %s on chain %s: %s\n%s",
+                    to_addr, chain_id, type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
                 )
                 raise HTTPException(
                     status_code=503,

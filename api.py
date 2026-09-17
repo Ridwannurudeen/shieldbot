@@ -11,6 +11,7 @@ import asyncio
 import logging
 import random
 import re
+import traceback
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
@@ -1491,7 +1492,7 @@ async def firewall(req: FirewallRequest, request: Request):
     except UnsupportedChainError:
         raise
     except Exception as e:
-        logger.error(f"Firewall error: {type(e).__name__}")
+        logger.error(f"Firewall error: {type(e).__name__}\n{''.join(traceback.format_tb(e.__traceback__))}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1525,7 +1526,7 @@ async def scan(req: ScanRequest):
     except UnsupportedChainError:
         raise
     except Exception as e:
-        logger.error(f"Scan error: {type(e).__name__}")
+        logger.error(f"Scan error: {type(e).__name__}\n{''.join(traceback.format_tb(e.__traceback__))}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1560,7 +1561,7 @@ async def scan_injection(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Injection scan error: {type(e).__name__}")
+        logger.error(f"Injection scan error: {type(e).__name__}\n{''.join(traceback.format_tb(e.__traceback__))}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1579,7 +1580,7 @@ async def report_outcome(req: OutcomeRequest):
             )
         return {"status": "recorded"}
     except Exception as e:
-        logger.error(f"Outcome recording error: {type(e).__name__}")
+        logger.error(f"Outcome recording error: {type(e).__name__}\n{''.join(traceback.format_tb(e.__traceback__))}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1612,7 +1613,7 @@ async def community_report(req: CommunityReportRequest, request: Request):
             )
         return {"status": "recorded", "address": req.address, "report_type": req.report_type}
     except Exception as e:
-        logger.error(f"Community report error: {type(e).__name__}")
+        logger.error(f"Community report error: {type(e).__name__}\n{''.join(traceback.format_tb(e.__traceback__))}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1922,7 +1923,7 @@ async def agent_chat(req: ChatRequest, request: Request):
     except UnsupportedChainError:
         raise
     except Exception as e:
-        logger.error(f"Agent chat error: {type(e).__name__}")
+        logger.error(f"Agent chat error: {type(e).__name__}\n{''.join(traceback.format_tb(e.__traceback__))}")
         raise HTTPException(500, "Agent error")
 
 
@@ -1946,7 +1947,7 @@ async def agent_explain(req: ExplainRequest, request: Request):
     except UnsupportedChainError:
         raise
     except Exception as e:
-        logger.error(f"Agent explain error: {type(e).__name__}")
+        logger.error(f"Agent explain error: {type(e).__name__}\n{''.join(traceback.format_tb(e.__traceback__))}")
         raise HTTPException(500, "Agent error")
 
 
