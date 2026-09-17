@@ -625,6 +625,14 @@ if (surface === 'sidepanel-guardian') {
   assert(html.includes('Unknown'));
   assert(!html.includes('#6ee7b7'));
   context.renderGuardianHealth({
+    health_score: 50, level: 'unknown', status: 'unknown', total_value_at_risk_usd: null,
+    coverage_reasons: {dangerous_approvals: 'dangerous_approvals data incomplete'},
+    warnings: ['Approval data incomplete: USD price unavailable for 1 token(s)'], components: {},
+  });
+  html = context.guardianHealthEl.innerHTML;
+  assert(!html.includes('$'));
+  assert(html.includes('Unknown'));
+  context.renderGuardianHealth({
     health_score: 85, level: 'excellent', status: 'ok', total_value_at_risk_usd: 0, warnings: [], components: {},
   });
   html = context.guardianHealthEl.innerHTML;

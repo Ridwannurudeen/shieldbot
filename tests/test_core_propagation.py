@@ -65,7 +65,7 @@ async def test_honeypot_service_propagates_routing_error(mock_web3_client, metho
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('entrypoint', ['_get_approval_data', 'get_approvals', 'get_health'])
+@pytest.mark.parametrize('entrypoint', ['_scan_approvals', 'get_approvals', 'get_health'])
 async def test_guardian_propagates_rescue_routing_error(entrypoint):
     from services.guardian import GuardianService
 
@@ -78,7 +78,7 @@ async def test_guardian_propagates_rescue_routing_error(entrypoint):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('entrypoint, method', [
-    ('_get_approval_data', 'get_contract_score'),
+    ('_scan_approvals', 'get_contract_score'),
     ('_check_flagged_exposure_from_tokens', 'get_contract_score'),
     ('_check_deployer_risk_from_tokens', 'get_deployer_risk_summary'),
     ('_check_deployer_risk_from_tokens', 'is_watched_deployer'),
@@ -93,7 +93,7 @@ async def test_guardian_nested_routing_error_propagates(entrypoint, method):
     )
     getattr(db, method).side_effect = UnsupportedChainError('unsupported')
     rescue = MagicMock(scan_approvals=AsyncMock(return_value={'approvals': [{'spender': '0xSpender'}]}))
-    argument = '0xABC' if entrypoint == '_get_approval_data' else ['0xABC']
+    argument = '0xABC' if entrypoint == '_scan_approvals' else ['0xABC']
     with pytest.raises(UnsupportedChainError, match='unsupported'):
         await getattr(GuardianService(db, rescue_service=rescue), entrypoint)(argument, 56)
 

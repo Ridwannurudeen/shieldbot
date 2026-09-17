@@ -173,7 +173,7 @@ async def test_get_alerts(guardian, mock_db):
 async def test_approval_data_no_rescue_returns_none(mock_db):
     """Guardian without rescue_service returns None (data unavailable)."""
     g = GuardianService(db=mock_db)
-    result = await g._get_approval_data("0xabc", 56)
+    result = await g._scan_approvals("0xabc", 56)
     assert result is None
 
 
@@ -199,7 +199,7 @@ async def test_approval_data_via_rescue(guardian_with_rescue, mock_rescue):
     }
     guardian_with_rescue._db.get_contract_score = AsyncMock(return_value=None)
 
-    result = await guardian_with_rescue._get_approval_data("0xabc", 56)
+    result = (await guardian_with_rescue._scan_approvals("0xabc", 56))["approvals"]
     assert result is not None
     assert len(result) == 1
     assert result[0]["is_unlimited"] is True
@@ -233,7 +233,7 @@ async def test_approval_data_db_score_upgrades_risk(guardian_with_rescue, mock_r
         return None
     guardian_with_rescue._db.get_contract_score = mock_score
 
-    result = await guardian_with_rescue._get_approval_data("0xabc", 56)
+    result = (await guardian_with_rescue._scan_approvals("0xabc", 56))["approvals"]
     assert len(result) == 1
     assert result[0]["risk_level"] == "critical"
 
@@ -453,6 +453,28 @@ async def test_token_lookup_failure_is_unknown_not_zero_risk(
     result = await guardian_with_rescue.get_health("0xabc", 56)
     assert result["status"] == "unknown"
     assert result["level"] == "unknown"
+    assert result["total_value_at_risk_usd"] is None
+    mock_db.update_guardian_health.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scan, expected_warning", [
+    (None, "Could not fetch approval data from block explorer"),
+    ({"approvals": [], "status": "unknown", "coverage": {"allowances": True, "balances": True, "prices": False},
+      "coverage_reasons": {"prices": "USD price unavailable for 1 token(s)"}},
+     "Approval data incomplete: USD price unavailable for 1 token(s)"),
+], ids=["scan-failed", "scan-incomplete"])
+async def test_health_unknown_approvals_explain_reason_and_value_is_unknown(
+    guardian_with_rescue, mock_rescue, mock_db, scan, expected_warning,
+):
+    if scan is None:
+        mock_rescue.scan_approvals.side_effect = RuntimeError("Approval scan unavailable")
+    else:
+        mock_rescue.scan_approvals.return_value = scan
+    health = await guardian_with_rescue.get_health("0xabc", 56)
+    assert health["status"] == "unknown"
+    assert health["warnings"] == [expected_warning]
+    assert health["total_value_at_risk_usd"] is None
     mock_db.update_guardian_health.assert_not_awaited()
 
 
@@ -460,7 +482,7 @@ async def test_token_lookup_failure_is_unknown_not_zero_risk(
 async def test_unavailable_rescue_scan_logs_warning_without_traceback(guardian_with_rescue, mock_rescue, caplog):
     mock_rescue.scan_approvals.side_effect = RuntimeError("Approval scan unavailable")
     with caplog.at_level(logging.WARNING, logger="services.guardian"):
-        assert await guardian_with_rescue._get_approval_data("0xabc", 56) is None
+        assert await guardian_with_rescue._scan_approvals("0xabc", 56) is None
     records = [record for record in caplog.records if record.name == "services.guardian"]
     assert [record.levelno for record in records] == [logging.WARNING]
     assert records[0].exc_info is None
@@ -471,7 +493,7 @@ async def test_unavailable_rescue_scan_logs_warning_without_traceback(guardian_w
 async def test_unexpected_rescue_failure_logs_error_with_traceback(guardian_with_rescue, mock_rescue, caplog):
     mock_rescue.scan_approvals.side_effect = KeyError("SYNTHETIC-KEY-9d41b7")
     with caplog.at_level(logging.WARNING, logger="services.guardian"):
-        assert await guardian_with_rescue._get_approval_data("0xabc", 56) is None
+        assert await guardian_with_rescue._scan_approvals("0xabc", 56) is None
     records = [record for record in caplog.records if record.name == "services.guardian"]
     assert [record.levelno for record in records] == [logging.ERROR]
     assert records[0].exc_info is None

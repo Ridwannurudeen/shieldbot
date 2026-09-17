@@ -51,12 +51,17 @@ class GuardianService:
 
         # 1. Dangerous approvals (35% weight)
         approvals_unavailable = False
-        approvals = await self._get_approval_data(wallet_address, chain_id)
+        scan = await self._scan_approvals(wallet_address, chain_id)
+        approvals = None if scan is None or scan["status"] == "unknown" else scan["approvals"]
         if approvals is None:
             approvals_unavailable = True
             coverage = dict.fromkeys(self.WEIGHTS, False)
             components["dangerous_approvals"] = self._NO_DATA_SCORE
-            warnings.append("Could not fetch approval data from block explorer")
+            reasons = "; ".join(dict.fromkeys(scan["coverage_reasons"].values())) if scan else ""
+            warnings.append(
+                f"Approval data incomplete: {reasons}" if reasons
+                else "Could not fetch approval data from block explorer"
+            )
             approvals = []
         elif not approvals:
             components["dangerous_approvals"] = 100  # genuinely no approvals = safe
@@ -160,7 +165,7 @@ class GuardianService:
             "total_approvals": len(approvals),
             "dangerous_approvals": dangerous_count,
             "stale_approvals": stale_count,
-            "total_value_at_risk_usd": round(total_value_at_risk, 2),
+            "total_value_at_risk_usd": None if warnings else round(total_value_at_risk, 2),
             "scanned_at": time.time(),
         }
         if warnings:
@@ -226,16 +231,6 @@ class GuardianService:
         )
 
     # --- Approval data via rescue_service ---
-
-    async def _get_approval_data(self, wallet_address: str, chain_id: int) -> Optional[List[Dict]]:
-        """Get ERC20 approval data for health scoring.
-
-        Returns None if the scan failed or is incomplete, [] if wallet has no approvals.
-        """
-        scan = await self._scan_approvals(wallet_address, chain_id)
-        if scan is None or scan["status"] == "unknown":
-            return None
-        return scan["approvals"]
 
     async def _scan_approvals(self, wallet_address: str, chain_id: int) -> Optional[Dict]:
         """Map a rescue_service approval scan (full-chain scan + on-chain verification).
