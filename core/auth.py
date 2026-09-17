@@ -93,12 +93,14 @@ class AuthManager:
         key_id = str(uuid.uuid4())
         limits = TIER_LIMITS[tier]
 
-        async with self.db._db.execute("BEGIN IMMEDIATE"):
-            await self.db._db.execute("""
-                INSERT INTO api_keys (key_id, key_hash, owner, tier, rpm_limit, daily_limit, is_active, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 1, ?)
-            """, (key_id, key_hash, owner, tier, limits["rpm"], limits["daily"], time.time()))
-            await self.db._db.commit()
+        # No explicit BEGIN: one INSERT of a new row is atomic on its own, and an explicit
+        # transaction fails while another request's metering holds the shared connection's
+        # implicit transaction open.
+        await self.db._db.execute("""
+            INSERT INTO api_keys (key_id, key_hash, owner, tier, rpm_limit, daily_limit, is_active, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+        """, (key_id, key_hash, owner, tier, limits["rpm"], limits["daily"], time.time()))
+        await self.db._db.commit()
 
         return {"key": raw_key, "key_id": key_id, "owner": owner, "tier": tier}
 

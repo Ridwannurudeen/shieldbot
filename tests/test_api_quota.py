@@ -1,5 +1,6 @@
 """Durable daily API-key quotas, exactly-once metering and rate-limit headers."""
 
+import asyncio
 import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -157,6 +158,30 @@ class TestDurableDailyQuota:
         assert await _counted(db, created["key_id"]) == 1
         assert await auth.check_rate_limit(await auth.validate_key(created["key"])) is True
         assert await _counted(db, created["key_id"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_key_creation_survives_an_open_quota_count(self, db, clock):
+        auth = AuthManager(db)
+        created = await _create_key(db, auth)
+        info = await auth.validate_key(created["key"])
+        counting, resume = asyncio.Event(), asyncio.Event()
+        used_on_day = auth._used_on_day
+
+        async def paused(key_id, day):
+            counting.set()
+            await resume.wait()
+            return await used_on_day(key_id, day)
+
+        auth._used_on_day = paused
+        check = asyncio.create_task(auth.check_rate_limit(info))
+        await counting.wait()
+        assert db._db.in_transaction
+
+        admin_key = await auth.create_key(owner="admin", tier="pro")
+        resume.set()
+        assert await check is True
+        assert (await auth.validate_key(admin_key["key"]))["tier"] == "pro"
+        assert await _counted(db, created["key_id"]) == 1
 
     @pytest.mark.asyncio
     async def test_get_quota_reports_the_utc_day(self, db, clock):
