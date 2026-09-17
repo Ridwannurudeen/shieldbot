@@ -139,7 +139,7 @@ class EvmAdapter(ChainAdapter):
             code = await self._call_with_retry(self.w3.eth.get_code, Web3.to_checksum_address(address))
             return len(code) > 0
         except Exception as e:
-            logger.error(f"[{self._chain_name}] Error checking if contract: {e}")
+            logger.error("[%s] Error checking if contract: %s", self._chain_name, type(e).__name__)
             return False
 
     async def get_bytecode(self, address: str) -> Optional[str]:
@@ -147,7 +147,7 @@ class EvmAdapter(ChainAdapter):
             code = await self._call_with_retry(self.w3.eth.get_code, Web3.to_checksum_address(address))
             return code.hex()
         except Exception as e:
-            logger.error(f"[{self._chain_name}] Error getting bytecode: {e}")
+            logger.error("[%s] Error getting bytecode: %s", self._chain_name, type(e).__name__)
             return None
 
     async def is_verified_contract(self, address: str) -> Tuple[Optional[bool], Optional[str]]:
@@ -249,7 +249,7 @@ class EvmAdapter(ChainAdapter):
                 'decimals': decimals, 'total_supply': total_supply / (10 ** decimals),
             }
         except Exception as e:
-            logger.error(f"[{self._chain_name}] Error getting token info: {e}")
+            logger.error("[%s] Error getting token info: %s", self._chain_name, type(e).__name__)
             return {}
 
     async def get_ownership_info(self, address: str) -> Dict:
@@ -262,7 +262,7 @@ class EvmAdapter(ChainAdapter):
             is_renounced = owner.lower() == zero_address.lower()
             return {'owner': owner, 'is_renounced': is_renounced}
         except Exception as e:
-            logger.error(f"[{self._chain_name}] Error getting ownership info: {e}")
+            logger.error("[%s] Error getting ownership info: %s", self._chain_name, type(e).__name__)
             return {'owner': None, 'is_renounced': None}
 
     async def check_honeypot(self, address: str) -> Dict:
@@ -443,7 +443,7 @@ class EvmAdapter(ChainAdapter):
                 'lockers': locker_details,
             }
         except Exception as e:
-            logger.error(f"[{self._chain_name}] Error getting liquidity info: {e}")
+            logger.error("[%s] Error getting liquidity info: %s", self._chain_name, type(e).__name__)
             return {'is_locked': False, 'lock_percentage': 0}
 
     def get_whitelisted_routers(self) -> Dict[str, str]:
