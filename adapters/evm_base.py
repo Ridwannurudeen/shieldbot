@@ -126,8 +126,8 @@ class EvmAdapter(ChainAdapter):
                 if is_retriable and attempt < retries - 1:
                     delay = base_delay * (2 ** attempt)
                     logger.warning(
-                        f"[{self._chain_name}] RPC rate-limited (attempt {attempt + 1}/{retries}), "
-                        f"retrying in {delay}s: {err_str[:80]}"
+                        "[%s] RPC rate-limited (attempt %d/%d), retrying in %ss: %s",
+                        self._chain_name, attempt + 1, retries, delay, type(e).__name__,
                     )
                     await asyncio.sleep(delay)
                 elif not is_retriable:
