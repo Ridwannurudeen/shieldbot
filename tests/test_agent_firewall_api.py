@@ -360,14 +360,18 @@ def test_agent_unavailable_simulation_has_no_coverage_penalty(client, mock_conta
     assert response.status_code == 200
     assert result["verdict"] == "ALLOW"
     assert result["status"] == "ok"
-    assert "simulation" not in result["coverage"]
+    assert "transaction_simulation" not in result["coverage"]
     assert mock_container.cache.set_verdict.call_args.args[2]["status"] == "ok"
 
 
-def test_agent_reverted_simulation_is_incomplete_and_keeps_risk_floor(client, mock_container):
+@pytest.mark.parametrize("revert_reason,expected_reason", [
+    ("execution reverted", "execution reverted"),
+    (None, "Transaction simulation failed"),
+])
+def test_agent_reverted_simulation_is_incomplete_and_keeps_risk_floor(client, mock_container, revert_reason, expected_reason):
     mock_container.tenderly_simulator.is_enabled.return_value = True
     mock_container.tenderly_simulator.simulate_transaction = AsyncMock(return_value={
-        "success": False, "revert_reason": "execution reverted",
+        "success": False, "revert_reason": revert_reason,
         "asset_changes": [], "warnings": [], "gas_used": 0,
     })
     response = client.post("/api/agent/firewall", json=_make_firewall_request(), headers={"X-API-Key": "sb_testkey"})
@@ -376,8 +380,8 @@ def test_agent_reverted_simulation_is_incomplete_and_keeps_risk_floor(client, mo
     assert result["verdict"] == "WARN"
     assert result["score"] >= 70
     assert result["status"] == "unknown"
-    assert result["coverage"]["simulation"] == 0
-    assert result["coverage_reasons"]["simulation"] == "execution reverted"
+    assert result["coverage"]["transaction_simulation"] == 0
+    assert result["coverage_reasons"]["transaction_simulation"] == expected_reason
     assert mock_container.cache.set_verdict.call_args.args[2]["status"] == "unknown"
 
 

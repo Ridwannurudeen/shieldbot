@@ -250,10 +250,10 @@ def create_agent_firewall_router(container) -> APIRouter:
                 risk_output = {
                     **risk_output,
                     "status": "unknown",
-                    "coverage": {**risk_output.get("coverage", {}), "simulation": 0},
+                    "coverage": {**risk_output.get("coverage", {}), "transaction_simulation": 0},
                     "coverage_reasons": {
                         **risk_output.get("coverage_reasons", {}),
-                        "simulation": simulation_result.get("revert_reason") or "Transaction simulation reverted",
+                        "transaction_simulation": simulation_result.get("revert_reason") or "Transaction simulation failed",
                     },
                 }
             risk_score = risk_output.get("rug_probability", risk_output.get("risk_score", 50))
