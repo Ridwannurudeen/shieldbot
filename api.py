@@ -1058,9 +1058,9 @@ async def _build_signature_only_response(req: FirewallRequest) -> Dict:
 
     sig_type = result.data.get("sig_type", "signature")
     sign_method = req.signMethod or result.data.get("sign_method") or "signature"
-    covered = (
-        sig_type in {'eip2612_permit', 'permit2', 'seaport_order'}
-        and not result.error and 'Failed to parse typed data' not in danger_signals
+    covered = not result.error and 'Failed to parse typed data' not in danger_signals and (
+        sig_type in {'eip2612_permit', 'permit2', 'seaport_order', 'personal_sign'}
+        or (not req.typedData and req.signMethod == 'personal_sign')
     )
     alert = format_extension_alert({
         'rug_probability': risk_score, 'risk_level': 'LOW' if covered else 'UNKNOWN',

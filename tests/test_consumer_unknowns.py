@@ -241,13 +241,28 @@ async def test_missing_swap_analyzers_does_not_fall_back_to_router(consumer_api)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('typed_data', [None, {'primaryType': 'UnknownType', 'message': {}}])
-async def test_signature_without_supported_analysis_is_unknown(consumer_api, typed_data):
+@pytest.mark.parametrize('sign_method,typed_data', [
+    ('eth_signTypedData_v4', {'primaryType': 'UnknownType', 'message': {}}),
+    ('eth_signTypedData_v4', {'primaryType': 'Permit', 'message': 'not-an-object', 'domain': {}}),
+    ('eth_sign', None),
+], ids=['unrecognised-typed-data', 'typed-data-parse-failure', 'blind-eth-sign'])
+async def test_signature_without_decoded_analysis_is_unknown(consumer_api, sign_method, typed_data):
     api, _ = consumer_api
-    req = api.FirewallRequest(to='', sender='0x' + 'b' * 40,
-        signMethod='personal_sign' if typed_data is None else 'eth_signTypedData_v4', typedData=typed_data)
+    req = api.FirewallRequest(to='', sender='0x' + 'b' * 40, signMethod=sign_method, typedData=typed_data)
     response = await api._build_signature_only_response(req)
     assert_unknown_response(response)
+
+
+@pytest.mark.asyncio
+async def test_personal_sign_is_covered(consumer_api):
+    api, _ = consumer_api
+    req = api.FirewallRequest(to='', sender='0x' + 'b' * 40, signMethod='personal_sign')
+    response = await api._build_signature_only_response(req)
+    assert response['classification'] == 'SAFE'
+    assert response['status'] == 'ok'
+    assert response['partial'] is False
+    assert response['coverage'] == {'signature': 1}
+    assert response['risk_display'] == '0%'
 
 
 @pytest.mark.asyncio
