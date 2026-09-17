@@ -131,7 +131,6 @@ class ShieldBot:
                 risk_level=data.get("risk_level"),
                 category_scores=data.get("category_scores") or {},
                 confidence=data.get("confidence"),
-                analysis_unavailable=data.get("analysis_unavailable", False),
             )
             self._set_cached(cache_key, verdict)
             return verdict

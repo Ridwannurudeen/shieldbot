@@ -69,3 +69,18 @@ def test_explicit_unknown_overrides_ok_status():
     assert result.verdict != "ALLOW"
     assert result.status == "unknown"
     assert "Unknown" in result.risk_display
+
+
+@pytest.mark.asyncio
+async def test_server_cannot_mark_incomplete_allow_as_unavailable_analysis():
+    client = ShieldBot(api_key="test", agent_id="agent:1")
+    response = MagicMock(status_code=200)
+    response.json.return_value = {
+        "verdict": "ALLOW", "score": 0, "status": "unknown", "coverage": {"honeypot": 0},
+        "analysis_unavailable": True,
+    }
+    with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response):
+        result = await client.check({"to": "0xtarget"})
+    assert not result.allowed
+    assert result.analysis_unavailable is False
+    await client.close()

@@ -361,7 +361,7 @@ export class ShieldBot {
 
       const coverage = (raw.coverage || {}) as Record<string, number>;
       const incomplete = raw.status !== 'ok' || raw.risk_level === 'UNKNOWN' || Object.keys(coverage).length === 0 || Object.values(coverage).some(value => value !== 1);
-      const decision = incomplete && raw.verdict === 'ALLOW' && !raw.analysis_unavailable ? 'WARN' : raw.verdict as Verdict['verdict'];
+      const decision = incomplete && raw.verdict === 'ALLOW' ? 'WARN' : raw.verdict as Verdict['verdict'];
       const verdict: Verdict = {
         verdict: decision,
         status: incomplete ? 'unknown' : 'ok',
@@ -371,7 +371,7 @@ export class ShieldBot {
         risk_level: raw.risk_level as RiskScore['risk_level'],
         category_scores: raw.category_scores as Record<string, number | null>,
         confidence: raw.confidence as number | null,
-        analysis_unavailable: !!raw.analysis_unavailable,
+        analysis_unavailable: false,
         score: raw.score as number,
         flags: (raw.flags || []) as string[],
         policy_check: raw.policy_check as Record<string, unknown>,

@@ -63,3 +63,10 @@ test('explicit unknown overrides ok status', async () => {
   assert.notEqual(result.verdict, 'ALLOW');
   assert.equal(result.status, 'unknown');
 });
+
+test('server cannot mark incomplete allow as unavailable analysis', async () => {
+  global.fetch = async () => ({ ok: true, json: async () => ({ verdict: 'ALLOW', score: 0, status: 'unknown', coverage: { honeypot: 0 }, analysis_unavailable: true }) });
+  const result = await new ShieldBot({ agentId: 'agent:1' }).check({ from: '0xa', to: '0xb' });
+  assert.equal(result.allowed, false);
+  assert.equal(result.analysis_unavailable, false);
+});
