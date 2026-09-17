@@ -852,3 +852,25 @@ async def test_transaction_scanner_unknown_contract_lookup_is_not_low_risk(mock_
     assert result["coverage"] == {"is_contract": False}
     assert result["coverage_reasons"]["is_contract"]
     assert not any("EOA" in warning for warning in result["warnings"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('bytecode, unavailable', [(None, True), ('', False), ('0x', False)])
+async def test_missing_bytecode_is_unknown_but_empty_code_is_observed(mock_web3_client, bytecode, unavailable):
+    from analyzers.structural import StructuralAnalyzer
+    from core.analyzer import AnalysisContext
+    from services.contract_service import ContractService
+
+    mock_web3_client.get_bytecode.return_value = bytecode
+    service = ContractService(mock_web3_client, MagicMock(check_address=AsyncMock(return_value=[])))
+    with patch('services.contract_service.BSCSCAN_DELAY', 0):
+        data = await service.fetch_contract_data('0xABC')
+        structural = await StructuralAnalyzer(service).analyze(AnalysisContext('0xABC', is_token=False))
+    if unavailable:
+        assert data['coverage'] == {'bytecode': False}
+        assert data['reason'] == 'Bytecode scan unavailable'
+        assert structural.data['status'] == 'unknown'
+    else:
+        assert 'coverage' not in data
+        assert structural.data['status'] == 'ok'
+    assert data['bytecode_warnings'] == []

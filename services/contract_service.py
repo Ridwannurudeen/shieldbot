@@ -82,7 +82,10 @@ class ContractService:
 
             try:
                 bytecode = await self.web3_client.get_bytecode(address, chain_id=chain_id)
-                if bytecode:
+                if bytecode is None:
+                    results['coverage'] = {'bytecode': False}
+                    results['reason'] = 'Bytecode scan unavailable'
+                elif bytecode:
                     bytecode_hex = bytecode.hex() if isinstance(bytecode, bytes) else str(bytecode)
                     for sig, pattern_name in BYTECODE_PATTERNS.items():
                         if sig in bytecode_hex:
