@@ -3,6 +3,7 @@
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
 import pytest
 import requests
 
@@ -119,3 +120,21 @@ async def test_rpc_error_handlers_log_class_without_rpc_url(caplog, method, fail
     assert TEST_KEY not in caplog.text
     errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
     assert len(errors) == 1 and errors[0].endswith(": HTTPError")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method,prefix", [
+    ("check_honeypot", "Error checking honeypot.is"),
+    ("get_tax_info", "Error getting honeypot.is taxes"),
+])
+async def test_honeypot_errors_return_and_log_class_without_exception_text(caplog, method, prefix):
+    adapter = EvmAdapter(56, "BSC", "https://rpc.invalid", honeypot_chain_id=56)
+    error = aiohttp.ClientConnectionError(f"Cannot connect to host: {TEST_KEY}")
+    caplog.set_level(logging.DEBUG, logger="adapters.evm_base")
+    with patch("adapters.evm_base.aiohttp.ClientSession", side_effect=error):
+        result = await getattr(adapter, method)(ADDRESS)
+    assert result["status"] == "unknown"
+    assert result["reason"] == f"{prefix}: ClientConnectionError"
+    assert TEST_KEY not in caplog.text
+    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(errors) == 1 and errors[0].endswith(": ClientConnectionError")

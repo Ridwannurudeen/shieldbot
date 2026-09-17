@@ -325,8 +325,8 @@ class EvmAdapter(ChainAdapter):
                             })
             return result
         except Exception as e:
-            logger.error(f"[{self._chain_name}] Error checking honeypot: {e}")
-            result['reason'] = f'Error checking honeypot.is: {str(e) or type(e).__name__}'
+            logger.error("[%s] Error checking honeypot: %s", self._chain_name, type(e).__name__)
+            result['reason'] = f'Error checking honeypot.is: {type(e).__name__}'
             return result
 
     async def get_tax_info(self, address: str) -> Dict:
@@ -371,8 +371,8 @@ class EvmAdapter(ChainAdapter):
                         result['reason'] = 'Missing or invalid honeypot.is tax data'
             return result
         except Exception as e:
-            logger.error(f"[{self._chain_name}] Error getting tax info: {e}")
-            result['reason'] = f'Error getting honeypot.is taxes: {str(e) or type(e).__name__}'
+            logger.error("[%s] Error getting tax info: %s", self._chain_name, type(e).__name__)
+            result['reason'] = f'Error getting honeypot.is taxes: {type(e).__name__}'
             return result
 
     async def get_liquidity_info(self, address: str) -> Dict:
