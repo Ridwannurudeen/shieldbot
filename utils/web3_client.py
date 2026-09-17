@@ -83,7 +83,7 @@ class Web3Client:
     def to_checksum_address(self, address: str) -> str:
         return Web3.to_checksum_address(address)
 
-    async def is_contract(self, address: str, chain_id: int = 56) -> bool:
+    async def is_contract(self, address: str, chain_id: int = 56) -> Optional[bool]:
         return await self._get_adapter(chain_id).is_contract(address)
 
     async def is_token_contract(self, address: str, chain_id: int = 56) -> bool:

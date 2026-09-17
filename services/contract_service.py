@@ -46,6 +46,8 @@ class ContractService:
 
         try:
             is_contract = await self.web3_client.is_contract(address, chain_id=chain_id)
+            if is_contract is None:
+                return {**defaults, 'is_contract': None, 'status': 'unknown', 'reason': 'Contract data unavailable'}
             if not is_contract:
                 return defaults
 

@@ -822,3 +822,33 @@ def test_guardian_router_returns_known_approvals_with_scan_coverage(rescue_pipel
     assert body['status'] == ('ok' if priced else 'unknown')
     assert body['coverage']['prices'] is priced
     assert ('prices' in body['coverage_reasons']) is (not priced)
+
+
+@pytest.mark.asyncio
+async def test_unknown_contract_lookup_is_not_a_confirmed_eoa(mock_web3_client):
+    from analyzers.structural import StructuralAnalyzer
+    from core.analyzer import AnalysisContext
+    from services.contract_service import ContractService
+
+    mock_web3_client.is_contract.return_value = None
+    service = ContractService(mock_web3_client, MagicMock(check_address=AsyncMock(return_value=[])))
+    data = await service.fetch_contract_data('0xABC')
+    assert data['is_contract'] is None
+    assert data['status'] == 'unknown'
+    assert data['reason'] == 'Contract data unavailable'
+    structural = await StructuralAnalyzer(service).analyze(AnalysisContext('0xABC', is_token=False))
+    assert structural.data['status'] == 'unknown'
+    assert 'No contract bytecode at address (destroyed or EOA)' not in structural.flags
+
+
+@pytest.mark.asyncio
+async def test_transaction_scanner_unknown_contract_lookup_is_not_low_risk(mock_web3_client):
+    mock_web3_client.is_contract.return_value = None
+    result = await TransactionScanner(mock_web3_client).scan_address("0xABC")
+    assert result["is_contract"] is None
+    assert result["status"] == "unknown"
+    assert result["risk_level"] == "unknown"
+    assert result["confidence"] != 95
+    assert result["coverage"] == {"is_contract": False}
+    assert result["coverage_reasons"]["is_contract"]
+    assert not any("EOA" in warning for warning in result["warnings"])

@@ -108,6 +108,13 @@ class TransactionScanner:
         # Check if it's a contract
         result['is_contract'] = await self.web3.is_contract(address, chain_id=chain_id)
 
+        if result['is_contract'] is None:
+            result['status'] = 'unknown'
+            result['coverage'] = {'is_contract': False}
+            result['coverage_reasons'] = {'is_contract': 'is_contract unknown: provider data unavailable'}
+            result['warnings'].append("Could not determine whether this address is a contract")
+            return result
+
         if not result['is_contract']:
             result['risk_level'] = 'low'
             result['risk_score'] = 5

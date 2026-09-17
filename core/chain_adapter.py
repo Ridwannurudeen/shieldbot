@@ -18,8 +18,8 @@ class ChainAdapter(ABC):
         """Human-readable chain name."""
 
     @abstractmethod
-    async def is_contract(self, address: str) -> bool:
-        """Check if address is a contract."""
+    async def is_contract(self, address: str) -> Optional[bool]:
+        """Check if address is a contract. Returns None when the lookup failed."""
 
     @abstractmethod
     async def get_bytecode(self, address: str) -> Optional[str]:
