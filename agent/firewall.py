@@ -207,8 +207,7 @@ def create_agent_firewall_router(container) -> APIRouter:
                     is_token=is_token,
                 )
 
-                simulation_attempted = container.tenderly_simulator.is_enabled()
-                if simulation_attempted:
+                if container.tenderly_simulator.is_enabled():
                     # Run analyzers + Tenderly in parallel
                     analyzer_task = container.registry.run_all(ctx)
                     sim_task = container.tenderly_simulator.simulate_transaction(
@@ -246,12 +245,15 @@ def create_agent_firewall_router(container) -> APIRouter:
                     status_code=503,
                     detail="Analysis pipeline temporarily unavailable",
                 )
-            if simulation_attempted and (not simulation_result or simulation_result.get("success") is not True):
+            if simulation_result and not simulation_result.get("success", True):
                 risk_output = {
                     **risk_output,
                     "status": "unknown",
                     "coverage": {**risk_output.get("coverage", {}), "simulation": 0},
-                    "coverage_reasons": {**risk_output.get("coverage_reasons", {}), "simulation": "Transaction simulation failed or unavailable"},
+                    "coverage_reasons": {
+                        **risk_output.get("coverage_reasons", {}),
+                        "simulation": simulation_result.get("revert_reason") or "Transaction simulation reverted",
+                    },
                 }
             risk_score = risk_output.get("rug_probability", risk_output.get("risk_score", 50))
             flags = risk_output.get("flags") or risk_output.get("critical_flags", [])

@@ -345,20 +345,36 @@ def test_agent_legacy_redis_cache_rescans(client, mock_container):
     mock_container.registry.run_all.assert_awaited_once()
 
 
-@pytest.mark.parametrize("simulation", [None, {"success": False}, RuntimeError("offline")])
-def test_agent_failed_optional_simulation_blocks(client, mock_container, simulation):
+@pytest.mark.parametrize("simulation", [None, RuntimeError("offline")], ids=["unavailable", "exception"])
+def test_agent_unavailable_simulation_has_no_coverage_penalty(client, mock_container, simulation):
     mock_container.tenderly_simulator.is_enabled.return_value = True
     mock_container.tenderly_simulator.simulate_transaction = AsyncMock(
         side_effect=simulation if isinstance(simulation, Exception) else None,
-        return_value=simulation if not isinstance(simulation, Exception) else None,
+        return_value=None,
     )
     response = client.post("/api/agent/firewall", json=_make_firewall_request(), headers={"X-API-Key": "sb_testkey"})
     result = response.json()
     assert response.status_code == 200
+    assert result["verdict"] == "ALLOW"
+    assert result["status"] == "ok"
+    assert "simulation" not in result["coverage"]
+    assert mock_container.cache.set_verdict.call_args.args[2]["status"] == "ok"
+
+
+def test_agent_reverted_simulation_is_incomplete_and_keeps_risk_floor(client, mock_container):
+    mock_container.tenderly_simulator.is_enabled.return_value = True
+    mock_container.tenderly_simulator.simulate_transaction = AsyncMock(return_value={
+        "success": False, "revert_reason": "execution reverted",
+        "asset_changes": [], "warnings": [], "gas_used": 0,
+    })
+    response = client.post("/api/agent/firewall", json=_make_firewall_request(), headers={"X-API-Key": "sb_testkey"})
+    result = response.json()
+    assert response.status_code == 200
     assert result["verdict"] == "WARN"
+    assert result["score"] >= 70
     assert result["status"] == "unknown"
     assert result["coverage"]["simulation"] == 0
-    assert "simulation" in result["coverage_reasons"]
+    assert result["coverage_reasons"]["simulation"] == "execution reverted"
     assert mock_container.cache.set_verdict.call_args.args[2]["status"] == "unknown"
 
 
