@@ -5,7 +5,6 @@ from typing import List
 
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD
-from utils.web3_client import UnsupportedChainError
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +135,5 @@ def _parse_value(value) -> int:
         if s.startswith('0x') or s.startswith('0X'):
             return int(s, 16)
         return int(s)
-    except UnsupportedChainError:
-        raise
     except (ValueError, TypeError):
         return 0

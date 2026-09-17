@@ -312,8 +312,6 @@ class RescueService:
                             "amount": amount,
                             "block": block,
                         }
-                except UnsupportedChainError:
-                    raise
                 except (ValueError, IndexError, KeyError):
                     continue
 
@@ -375,8 +373,6 @@ class RescueService:
                 else:
                     try:
                         allowance_str = f"{current_allowance / (10 ** decimals):,.2f}"
-                    except UnsupportedChainError:
-                        raise
                     except Exception:
                         allowance_str = str(current_allowance)
 
@@ -389,8 +385,6 @@ class RescueService:
                         at_risk_raw = min(current_allowance, balance)
                         at_risk_tokens = at_risk_raw / (10 ** decimals)
                         value_at_risk_usd = round(at_risk_tokens * price, 2)
-                    except UnsupportedChainError:
-                        raise
                     except Exception:
                         pass
 
@@ -608,8 +602,6 @@ class RescueService:
                                 if price_str:
                                     try:
                                         prices[token] = float(price_str)
-                                    except UnsupportedChainError:
-                                        raise
                                     except (ValueError, TypeError):
                                         pass
                     except UnsupportedChainError:

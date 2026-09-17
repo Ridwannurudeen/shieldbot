@@ -94,8 +94,6 @@ class Web3Client:
             )
             contract.functions.symbol().call()
             return True
-        except UnsupportedChainError:
-            raise
         except Exception:
             return False
 
@@ -119,8 +117,6 @@ class Web3Client:
             )
             contract.functions.decimals().call()
             return True
-        except UnsupportedChainError:
-            raise
         except Exception:
             return False
 

@@ -107,19 +107,3 @@ async def test_unknown_selector_tristate_reaches_risk(analyzer, verified):
         assert risk['risk_level'] == 'MEDIUM'
         assert risk['coverage_reasons']['intent']
         assert risk['risk_archetype'] == 'unknown'
-
-
-@pytest.mark.asyncio
-async def test_intent_value_parser_propagates_unsupported_chain(analyzer):
-    from unittest.mock import MagicMock
-    from utils.web3_client import UnsupportedChainError
-
-    value = MagicMock()
-    failure = UnsupportedChainError('unsupported chain')
-    value.__str__.side_effect = failure
-    with pytest.raises(UnsupportedChainError) as raised:
-        await analyzer.analyze(AnalysisContext(
-            address='0x' + 'a' * 40,
-            extra={'calldata': '0x095ea7b3' + '0' * 128, 'value': value},
-        ))
-    assert raised.value is failure

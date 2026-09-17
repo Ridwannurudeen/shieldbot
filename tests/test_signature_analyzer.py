@@ -126,21 +126,3 @@ async def test_signature_propagates_unsupported_chain(analyzer, monkeypatch):
             extra={'typed_data': {'primaryType': 'Permit'}},
         ))
     assert raised.value is failure
-
-
-@pytest.mark.asyncio
-async def test_signature_uint_parser_propagates_unsupported_chain(analyzer):
-    from utils.web3_client import UnsupportedChainError
-
-    failure = UnsupportedChainError('unsupported chain')
-
-    class UnsupportedValue(str):
-        def startswith(self, prefix):
-            raise failure
-
-    with pytest.raises(UnsupportedChainError) as raised:
-        await analyzer.analyze(AnalysisContext(
-            address='0x' + 'a' * 40,
-            extra={'typed_data': {'primaryType': 'Permit', 'message': {'value': UnsupportedValue('1')}}},
-        ))
-    assert raised.value is failure

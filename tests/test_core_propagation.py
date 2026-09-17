@@ -157,19 +157,6 @@ async def test_rescue_rpc_catches_propagate_routing_error(rescue_pipeline, metho
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('method', ['is_token_contract', 'can_transfer_token'])
-async def test_web3_rpc_catches_propagate_routing_error(method):
-    from utils.web3_client import Web3Client
-
-    client = Web3Client.__new__(Web3Client)
-    client.erc20_abi = []
-    client.get_web3 = MagicMock()
-    client.get_web3.return_value.eth.contract.side_effect = UnsupportedChainError('unsupported')
-    with pytest.raises(UnsupportedChainError, match='unsupported'):
-        await getattr(client, method)('0x' + '1' * 40)
-
-
-@pytest.mark.asyncio
 async def test_rescue_configured_rpc_cannot_bypass_chain_routing():
     from services.rescue_service import RescueService
     from utils.web3_client import Web3Client

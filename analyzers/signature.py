@@ -225,8 +225,6 @@ def _parse_uint(value) -> int:
             if value.startswith('0x') or value.startswith('0X'):
                 return int(value, 16)
             return int(value)
-        except UnsupportedChainError:
-            raise
         except (ValueError, TypeError):
             return 0
     return 0
