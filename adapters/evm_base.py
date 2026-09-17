@@ -111,7 +111,15 @@ class EvmAdapter(ChainAdapter):
         return self._chain_name
 
     async def _call_with_retry(self, fn, *args, retries=3, base_delay=1.0):
-        """Wrap a synchronous web3 call with retry + executor to avoid blocking the event loop."""
+        """Wrap a synchronous web3 call with retry + executor to avoid blocking the event loop.
+
+        Only transient provider failures are retried, decided from structured error data, never
+        exception text: the HTTP status on the requests HTTPError that web3's HTTPProvider raises,
+        or the JSON-RPC "limit exceeded" code -32005 (web3 6 raises ValueError(error object),
+        web3 7 raises Web3RPCError with rpc_response). Reverts and other errors raise at once.
+        """
+        import requests
+
         if retries < 1:
             retries = 1
         loop = asyncio.get_event_loop()
@@ -121,8 +129,15 @@ class EvmAdapter(ChainAdapter):
                 return await loop.run_in_executor(None, fn, *args)
             except Exception as e:
                 last_exc = e
-                err_str = str(e)
-                is_retriable = '429' in err_str or '502' in err_str or '503' in err_str
+                if isinstance(e, requests.exceptions.HTTPError):
+                    is_retriable = e.response is not None and e.response.status_code in (429, 502, 503)
+                else:
+                    rpc_response = getattr(e, 'rpc_response', None)
+                    if isinstance(rpc_response, dict):
+                        rpc_error = rpc_response.get('error')
+                    else:
+                        rpc_error = e.args[0] if isinstance(e, ValueError) and e.args else None
+                    is_retriable = isinstance(rpc_error, dict) and rpc_error.get('code') == -32005
                 if is_retriable and attempt < retries - 1:
                     delay = base_delay * (2 ** attempt)
                     logger.warning(
