@@ -1995,9 +1995,13 @@ async def rescue_scan(wallet_address: str, chain_id: int = 56):
         raise HTTPException(status_code=400, detail="Invalid wallet address")
 
     api_key = container.settings.bscscan_api_key
-    result = await container.rescue_service.scan_approvals(
-        wallet_address, chain_id=chain_id, etherscan_api_key=api_key,
-    )
+    try:
+        result = await container.rescue_service.scan_approvals(
+            wallet_address, chain_id=chain_id, etherscan_api_key=api_key,
+        )
+    except RuntimeError as exc:
+        logger.warning(f"Approval scan unavailable for chain {chain_id}")
+        raise HTTPException(status_code=503, detail="Approval scan unavailable") from exc
     return result
 
 

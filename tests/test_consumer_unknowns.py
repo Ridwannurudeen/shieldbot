@@ -456,3 +456,32 @@ async def test_real_advisor_chat_keeps_text_only_for_complete_scan(consumer_api,
     else:
         assert response['response'] != 'Advisor analysis text'
         assert 'Unknown' in response['response']
+
+
+@pytest.mark.asyncio
+async def test_rescue_unavailable_approval_scan_returns_503_without_raw_error(consumer_api):
+    from fastapi import HTTPException
+    api, services = consumer_api
+    services.settings.bscscan_api_key = ''
+    services.rescue_service = SimpleNamespace(scan_approvals=AsyncMock(
+        side_effect=RuntimeError('Session is closed: https://rpc.example/secret-key'),
+    ))
+    with pytest.raises(HTTPException) as exc:
+        await api.rescue_scan('0x' + 'b' * 40, chain_id=4663)
+    assert exc.value.status_code == 503
+    assert exc.value.detail == 'Approval scan unavailable'
+
+
+@pytest.mark.asyncio
+async def test_rescue_forwards_approval_coverage(consumer_api):
+    api, services = consumer_api
+    services.settings.bscscan_api_key = ''
+    coverage = {
+        'status': 'unknown', 'coverage': {'approval_state': 0},
+        'coverage_reasons': {'approval_state': 'Approval state unavailable'},
+    }
+    services.rescue_service = SimpleNamespace(scan_approvals=AsyncMock(return_value={
+        'total_approvals': 1, 'high_risk': 0, 'medium_risk': 0, **coverage,
+    }))
+    response = await api.rescue_scan('0x' + 'b' * 40, chain_id=4663)
+    assert {key: response[key] for key in coverage} == coverage
