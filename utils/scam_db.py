@@ -18,6 +18,12 @@ _GOPLUS_CACHE = TTLCache(maxsize=1024, ttl=30)
 _GOPLUS_INFLIGHT = {}
 _GOPLUS_NO_DATA = 'GoPlus has no data for this token on this chain'
 
+# Response codes that ask for the same request again; their meaning is not
+# documented anywhere we can read offline, so the reason stays neutral.
+_GOPLUS_RETRY_CODES = (2, 4029)
+_GOPLUS_ATTEMPTS = 3
+_GOPLUS_BACKOFF = 0.5
+
 # Addresses that must never be blacklisted (routers, WBNB, stables, etc.)
 _PROTECTED_ADDRESSES: set[str] = set()
 
@@ -124,19 +130,32 @@ class ScamDatabase:
         try:
             url = f"https://api.gopluslabs.io/api/v1/token_security/{chain_id}?contract_addresses={address}"
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
-                    if resp.status != 200:
-                        result['reason'] = f'GoPlus HTTP {resp.status}'
-                    else:
-                        payload = await resp.json()
-                        tokens = payload.get('result') if isinstance(payload, dict) else None
-                        token = tokens.get(address) if isinstance(tokens, dict) else None
-                        if not isinstance(payload, dict) or payload.get('code') != 1:
-                            result['reason'] = 'GoPlus returned an unsuccessful response'
-                        elif not isinstance(token, dict) or not token:
-                            result['reason'] = _GOPLUS_NO_DATA
+                # Rate limits are retried with bounded backoff; only a failure that
+                # survives every attempt is cached as unknown.
+                for attempt in range(_GOPLUS_ATTEMPTS):
+                    if attempt:
+                        await asyncio.sleep(_GOPLUS_BACKOFF * (2 ** (attempt - 1)))
+                    retriable = False
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                        if resp.status != 200:
+                            result = {'status': 'unknown', 'reason': f'GoPlus HTTP {resp.status}', 'data': {}}
+                            retriable = resp.status == 429
                         else:
-                            result = {'status': 'ok', 'reason': None, 'data': token}
+                            payload = await resp.json()
+                            code = payload.get('code') if isinstance(payload, dict) else None
+                            tokens = payload.get('result') if isinstance(payload, dict) else None
+                            token = tokens.get(address) if isinstance(tokens, dict) else None
+                            if code in _GOPLUS_RETRY_CODES:
+                                result = {'status': 'unknown', 'reason': f'GoPlus returned code {code}', 'data': {}}
+                                retriable = True
+                            elif code != 1:
+                                result = {'status': 'unknown', 'reason': 'GoPlus returned an unsuccessful response', 'data': {}}
+                            elif not isinstance(token, dict) or not token:
+                                result = {'status': 'unknown', 'reason': _GOPLUS_NO_DATA, 'data': {}}
+                            else:
+                                result = {'status': 'ok', 'reason': None, 'data': token}
+                    if not retriable:
+                        break
         except Exception as e:
             logger.error("Error fetching GoPlus token security: %s", type(e).__name__)
             result['reason'] = f'GoPlus request failed ({type(e).__name__})'
