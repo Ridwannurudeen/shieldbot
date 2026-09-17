@@ -528,11 +528,11 @@ async def test_discovered_launch_is_rechecked_and_logged_on_robinhood_chain(tool
     await hunter._scan_new_pairs("sweep-1")
 
     # Six hours later the launch is due a recheck, which an incomplete scan does not clear.
-    await watching_row(real_db, token, 4663, RECHECK_MIN_INTERVAL_SECONDS + 60)
+    await backdate(real_db, token, RECHECK_MIN_INTERVAL_SECONDS + 60)
     await hunter._recheck_warn_contracts("sweep-2")
     assert [row["token_address"] for row in await real_db.get_tracked_pairs(status="watching")] == [token]
 
-    await watching_row(real_db, token, 4663, RECHECK_MIN_INTERVAL_SECONDS + 60)
+    await backdate(real_db, token, RECHECK_MIN_INTERVAL_SECONDS + 60)
     tools.scan_contract = AsyncMock(return_value=scan_result(95))
     assert await hunter._recheck_warn_contracts("sweep-3") == [token]
 
@@ -547,14 +547,19 @@ async def test_discovered_launch_is_rechecked_and_logged_on_robinhood_chain(tool
 DAY = 24 * 3600
 
 
-async def watching_row(database, pair_address, chain_id, checked_ago):
-    """Insert a watching pair whose last check was checked_ago seconds ago (None: never)."""
-    await database.upsert_tracked_pair(pair_address, token_address=pair_address, chain_id=chain_id)
+async def backdate(database, pair_address, checked_ago):
+    """Move a pair's last check checked_ago seconds into the past (None: never checked)."""
     checked = None if checked_ago is None else time.time() - checked_ago
     await database._db.execute(
         "UPDATE tracked_pairs SET last_checked = ? WHERE pair_address = ?", (checked, pair_address)
     )
     await database._db.commit()
+
+
+async def watching_row(database, pair_address, chain_id, checked_ago):
+    """Insert a watching pair whose last check was checked_ago seconds ago (None: never)."""
+    await database.upsert_tracked_pair(pair_address, token_address=pair_address, chain_id=chain_id)
+    await backdate(database, pair_address, checked_ago)
 
 
 async def sweep_scans(hunter, tools):
@@ -623,3 +628,23 @@ async def test_recheck_scans_at_most_the_sweep_budget(tools, ai, sentinel, real_
     hunter = Hunter(tools=tools, db=real_db, ai_analyzer=ai, sentinel=sentinel)
 
     assert len(await sweep_scans(hunter, tools)) == RECHECK_PAIRS_PER_SWEEP
+
+
+# --- pair address reuse ---
+
+
+@pytest.mark.asyncio
+async def test_a_reused_pair_address_moves_to_its_new_chain(tools, ai, sentinel, real_db):
+    await real_db.upsert_tracked_pair("0xshared", token_address="0xbsctoken", chain_id=56)
+    await real_db.upsert_tracked_pair("0xshared", token_address=ROBINHOOD_TOKEN, chain_id=4663)
+
+    rows = await real_db.get_tracked_pairs(status="watching")
+    assert [(row["pair_address"], row["token_address"], row["chain_id"]) for row in rows] == [
+        ("0xshared", ROBINHOOD_TOKEN, 4663)
+    ]
+
+    await backdate(real_db, "0xshared", DAY)
+    tools.scan_contract = AsyncMock(return_value=scan_result(10, complete=False))
+    hunter = Hunter(tools=tools, db=real_db, ai_analyzer=ai, sentinel=sentinel)
+
+    assert await sweep_scans(hunter, tools) == [(ROBINHOOD_TOKEN, 4663)]

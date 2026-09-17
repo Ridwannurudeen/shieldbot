@@ -1118,7 +1118,8 @@ class Database:
                 deployer = COALESCE(excluded.deployer, tracked_pairs.deployer),
                 liquidity_usd = COALESCE(excluded.liquidity_usd, tracked_pairs.liquidity_usd),
                 last_checked = excluded.last_checked,
-                status = excluded.status
+                status = excluded.status,
+                chain_id = excluded.chain_id
         """, (pair_address, token_address, deployer, liquidity_usd, now, now, status, chain_id))
         await self._db.commit()
 
