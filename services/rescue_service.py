@@ -338,7 +338,10 @@ class RescueService:
 
             # Step 6: Fetch token prices (DexScreener, stablecoins hardcoded)
             prices = await self._fetch_prices(active_tokens)
-            unpriced = [token for token in active_tokens if balances.get(token, 0) > 0 and token not in prices]
+            unpriced = [
+                token for token in active_tokens
+                if (token not in balances or balances[token] > 0) and token not in prices
+            ]
             if unpriced:
                 coverage_reasons["prices"] = f"USD price unavailable for {len(unpriced)} token(s)"
 

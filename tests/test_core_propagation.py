@@ -874,3 +874,16 @@ async def test_missing_bytecode_is_unknown_but_empty_code_is_observed(mock_web3_
         assert 'coverage' not in data
         assert structural.data['status'] == 'ok'
     assert data['bytecode_warnings'] == []
+
+
+@pytest.mark.asyncio
+async def test_rescue_unknown_balance_without_price_marks_prices_unknown(rescue_pipeline):
+    service, wallet, token, spender, _ = rescue_pipeline
+    _use_real_rpc_batches(
+        service, token, spender,
+        lambda session, rpc_url, to, data: 1 if data.startswith(ALLOWANCE_SELECTOR) or to != DEAD_TOKEN else None,
+    )
+    service._fetch_prices.return_value = {token: 1.0}
+    result = await service.scan_approvals(wallet)
+    assert result['coverage'] == {'allowances': True, 'balances': False, 'prices': False}
+    assert set(result['coverage_reasons']) == {'balances', 'prices'}
