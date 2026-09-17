@@ -599,3 +599,13 @@ def test_guardian_router_unavailable_approvals_return_503_without_provider_detai
         response = client.get('/api/guardian/approvals/0x' + '1' * 40, headers={'X-API-Key': 'test-key'})
     assert response.status_code == 503
     assert response.json() == {'detail': 'Approval data unavailable or incomplete'}
+
+
+@pytest.mark.asyncio
+async def test_transaction_scanner_confirmed_eoa_carries_complete_coverage(mock_web3_client):
+    mock_web3_client.is_contract.return_value = False
+    result = await TransactionScanner(mock_web3_client).scan_address("0xABC")
+    assert result["risk_level"] == "low"
+    assert result["status"] == "ok"
+    assert result["coverage"] == {}
+    assert result["coverage_reasons"] == {}

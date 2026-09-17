@@ -100,6 +100,9 @@ class TransactionScanner:
             'scan_type': 'contract',
             'chain_id': chain_id,
             'network': get_chain_name(chain_id),
+            'status': 'ok',
+            'coverage': {},
+            'coverage_reasons': {},
         }
 
         # Check if it's a contract
