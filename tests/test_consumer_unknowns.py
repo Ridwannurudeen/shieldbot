@@ -664,3 +664,28 @@ async def test_api_rescans_legacy_row_from_real_database(consumer_api, incomplet
         assert stored['category_scores']['_scan_metadata']['status'] == 'unknown'
     finally:
         await database.close()
+
+
+@pytest.mark.asyncio
+async def test_advisor_scan_failure_renders_unknown_chat(consumer_api):
+    from agent.advisor import Advisor
+    from utils.web3_client import Web3Client
+    api, services = consumer_api
+    secret = 'https://rpc.example/v2/SYNTHETIC_KEY_123'
+    chain_registry = Web3Client.__new__(Web3Client)
+    chain_registry._adapters = {56: MagicMock()}
+    tools = SimpleNamespace(
+        _container=SimpleNamespace(web3_client=chain_registry),
+        scan_contract=AsyncMock(side_effect=RuntimeError(secret)), check_deployer=AsyncMock(return_value={}),
+        check_honeypot=AsyncMock(return_value={}), get_market_data=AsyncMock(return_value={}),
+    )
+    db = SimpleNamespace(get_chat_history=AsyncMock(return_value=[]), insert_chat_message=AsyncMock())
+    ai = SimpleNamespace(is_available=lambda: True, chat=AsyncMock(return_value='SAFE: this token looks fine'))
+    services.advisor = Advisor(tools, db, ai)
+    response = await api.agent_chat(api.ChatRequest(message='check 0x' + 'a' * 40, user_id='test'),
+        SimpleNamespace(client=SimpleNamespace(host='advisor-scan-failure'), headers={}))
+    assert 'Unknown' in response['response']
+    assert 'SAFE' not in response['response']
+    assert response['scan_data']['status'] == 'unknown'
+    assert response['scan_data']['coverage_reasons']
+    assert secret not in str(response)

@@ -1910,7 +1910,7 @@ async def agent_chat(req: ChatRequest, request: Request):
             if result.get("scan_data"):
                 scan_data = result['scan_data']
                 alert = format_extension_alert({
-                    **scan_data, 'rug_probability': scan_data.get('risk_score', 0),
+                    **scan_data, 'rug_probability': scan_data.get('risk_score') or 0,
                     'risk_archetype': scan_data.get('archetype') or 'unknown',
                 })
                 resp["scan_data"] = {**scan_data, **_coverage_fields(alert)}

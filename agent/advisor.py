@@ -80,7 +80,10 @@ class Advisor:
                     raise result
             if isinstance(scan, Exception):
                 logger.warning("scan_contract failed: %s", scan)
-                scan = {}
+                scan = {
+                    "status": "unknown", "coverage": {},
+                    "coverage_reasons": {"scan": "Contract scan unavailable"},
+                }
             if isinstance(deployer, Exception):
                 logger.warning("check_deployer failed: %s", deployer)
                 deployer = {}
