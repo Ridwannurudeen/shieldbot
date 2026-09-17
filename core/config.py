@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     arbitrum_rpc_url: str = "https://arb1.arbitrum.io/rpc"
     polygon_rpc_url: str = "https://polygon-bor-rpc.publicnode.com"
     optimism_rpc_url: str = "https://mainnet.optimism.io"
+    robinhood_rpc_url: str = "https://rpc.mainnet.chain.robinhood.com"
 
     # Etherscan API keys (per chain — all use Etherscan v2 API)
     etherscan_api_key: str = ""

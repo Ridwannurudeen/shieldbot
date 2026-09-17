@@ -395,7 +395,7 @@ class InjectionScanner:
                 "reason": answer_text[:200],
             }
         except Exception as exc:
-            logger.warning("Layer 4 LLM classification failed: %s", exc)
+            logger.warning("Layer 4 LLM classification failed: %s", type(exc).__name__)
             return {"flagged": False, "confidence": 0.0, "reason": "LLM unavailable"}
 
     # ── Result building ────────────────────────────────────────────────

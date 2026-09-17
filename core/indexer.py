@@ -2,8 +2,13 @@
 
 import asyncio
 import logging
+import re
 import time
 from typing import Optional
+
+from adapters.evm_base import _get_explorer_backend
+from services.explorer_service import _is_address, explorer_service
+from utils.web3_client import UnsupportedChainError
 
 logger = logging.getLogger(__name__)
 
@@ -58,13 +63,26 @@ class DeployerIndexer:
                 continue
             except asyncio.CancelledError:
                 break
+            except UnsupportedChainError:
+                logger.error("Skipping %s: unsupported chain %s", address, chain_id)
             except Exception as e:
-                logger.error(f"Indexer worker error: {e}")
+                logger.error("Indexer worker error: %s", type(e).__name__)
 
     async def _index_contract(self, address: str, chain_id: int):
         """Fetch deployer and funder info for a contract."""
+        adapter = self._web3._get_adapter(chain_id)
+        if adapter is None or adapter.chain_id != chain_id:
+            raise UnsupportedChainError(f"No matching adapter registered for chain {chain_id}")
+        backend = _get_explorer_backend(chain_id)
         try:
-            creation_info = await self._web3.get_contract_creation_info(address, chain_id=chain_id)
+            if backend == 'sourcify_blockscout':
+                result = await explorer_service.get_contract_creation_info(address, chain_id)
+                if result.status == 'unknown':
+                    logger.warning(f"Unknown creator for {address} on chain {chain_id}: {result.reason}")
+                    return
+                creation_info = result.data
+            else:
+                creation_info = await self._web3.get_contract_creation_info(address, chain_id=chain_id)
             if not creation_info:
                 return
 
@@ -73,6 +91,9 @@ class DeployerIndexer:
 
             if not deployer:
                 return
+
+            # Resolve routed data before recording the item.
+            funder_info = await self._fetch_funder(deployer, chain_id)
 
             # Store deployer
             now = time.time()
@@ -83,7 +104,6 @@ class DeployerIndexer:
             """, (address.lower(), chain_id, deployer.lower(), tx_hash, now))
 
             # Try to find funder (first incoming tx to deployer)
-            funder_info = await self._fetch_funder(deployer, chain_id)
             if funder_info:
                 await self._db._db.execute("""
                     INSERT OR IGNORE INTO funder_links
@@ -92,7 +112,7 @@ class DeployerIndexer:
                 """, (
                     deployer.lower(), chain_id,
                     funder_info['funder'].lower(),
-                    funder_info.get('value', 0),
+                    str(funder_info['value']),
                     now,
                 ))
 
@@ -113,11 +133,15 @@ class DeployerIndexer:
                             "UPDATE deployment_alerts SET telegram_sent=1 WHERE id=?", (alert_id,)
                         )
                         await self._db._db.commit()
+            except UnsupportedChainError:
+                raise
             except Exception as e:
-                logger.error(f"Watch-deployer check failed for {deployer}: {e}")
+                logger.error("Watch-deployer check failed for %s: %s", deployer, type(e).__name__)
 
+        except UnsupportedChainError:
+            raise
         except Exception as e:
-            logger.error(f"Error indexing {address}: {e}")
+            logger.error(f"Error indexing {address}: {type(e).__name__}")
 
     async def _send_watch_alert(self, deployer: str, chain_id: int, new_contract: str, watch_record: dict) -> bool:
         """Send a Telegram notification when a watched deployer creates a new contract."""
@@ -149,17 +173,28 @@ class DeployerIndexer:
                     timeout=aiohttp.ClientTimeout(total=5),
                 ) as resp:
                     return resp.status == 200
+        except UnsupportedChainError:
+            raise
         except Exception as e:
-            logger.error(f"Telegram watch alert failed: {e}")
+            logger.error("Telegram watch alert failed: %s", type(e).__name__)
             return False
 
     async def _fetch_funder(self, deployer_address: str, chain_id: int) -> Optional[dict]:
         """Fetch the first funding transaction to a deployer address."""
+        adapter = self._web3._get_adapter(chain_id)
+        if adapter is None or adapter.chain_id != chain_id:
+            raise UnsupportedChainError(f"No matching adapter registered for chain {chain_id}")
+        backend = _get_explorer_backend(chain_id)
         try:
+            if backend == 'sourcify_blockscout':
+                result = await explorer_service.get_first_funder(deployer_address, chain_id)
+                if result.status == 'unknown':
+                    logger.warning(f"Unknown funder for {deployer_address} on chain {chain_id}: {result.reason}")
+                    return None
+                return result.data
             import aiohttp
             # Use Etherscan API to get first normal tx
-            adapter = self._web3._get_adapter(chain_id) if hasattr(self._web3, '_get_adapter') else None
-            api_key = adapter.etherscan_api_key if adapter else ''
+            api_key = adapter.etherscan_api_key
             params = {
                 'chainid': chain_id,
                 'module': 'account',
@@ -178,16 +213,35 @@ class DeployerIndexer:
                     params=params,
                     timeout=aiohttp.ClientTimeout(total=10),
                 ) as resp:
+                    if resp.status != 200:
+                        logger.warning(f"Unknown funder for {deployer_address} on chain {chain_id}: HTTP {resp.status}")
+                        return None
                     data = await resp.json()
                     if data.get('status') == '1' and data.get('result'):
                         # Find first incoming tx (to == deployer)
                         for tx in data['result']:
+                            if (
+                                not isinstance(tx, dict)
+                                or not _is_address(tx.get('to'))
+                                or not _is_address(tx.get('from'))
+                            ):
+                                continue
+                            value = tx.get('value')
+                            if (
+                                tx.get('isError') != '0'
+                                or not isinstance(value, str)
+                                or re.fullmatch(r'[0-9]{1,78}', value) is None
+                                or not 0 < int(value) < 2**256
+                            ):
+                                continue
                             if tx.get('to', '').lower() == deployer_address.lower():
                                 return {
                                     'funder': tx['from'],
-                                    'value': int(tx.get('value', 0)),
+                                    'value': int(value),
                                 }
             return None
+        except UnsupportedChainError:
+            raise
         except Exception as e:
-            logger.error(f"Error fetching funder for {deployer_address}: {e}")
+            logger.error(f"Error fetching funder for {deployer_address}: {type(e).__name__}")
             return None

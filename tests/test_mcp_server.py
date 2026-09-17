@@ -22,6 +22,9 @@ from fastapi.testclient import TestClient
 def mock_container():
     """Mock ServiceContainer with all dependencies needed by MCP server."""
     c = MagicMock()
+    from utils.web3_client import Web3Client
+    c.web3_client = Web3Client.__new__(Web3Client)
+    c.web3_client._adapters = {56: MagicMock(), 4663: MagicMock()}
 
     # --- Auth ---
     c.auth_manager = MagicMock()
@@ -37,7 +40,8 @@ def mock_container():
 
     c.risk_engine = MagicMock()
     c.risk_engine.compute_from_results = MagicMock(return_value={
-        "risk_score": 15, "risk_level": "LOW", "flags": [],
+        "rug_probability": 15, "risk_level": "LOW", "critical_flags": [],
+        "status": "ok", "coverage": {"honeypot": 1},
         "category_scores": {"structural": 10, "market": 20},
         "confidence": 0.9,
     })
@@ -837,3 +841,71 @@ class TestProcessJsonRpc:
         })
         assert "error" in result
         assert result["error"]["code"] == -32601
+
+
+@pytest.mark.parametrize("tool_name,arguments", [
+    ("scan_contract", {"address": "0x" + "a" * 40}),
+    ("simulate_transaction", {"from": "0x" + "a" * 40, "to": "0x" + "b" * 40, "data": "0x"}),
+    ("check_deployer", {"address": "0x" + "a" * 40}),
+    ("check_approval_risk", {"wallet_address": "0x" + "a" * 40}),
+    ("query_threat_graph", {"address": "0x" + "a" * 40}),
+])
+def test_unknown_chain_rejected_before_mcp_services(client, mock_container, tool_name, arguments):
+    response = client.post("/mcp/messages", json={
+        "jsonrpc": "2.0", "id": 10, "method": "tools/call",
+        "params": {"name": tool_name, "arguments": {**arguments, "chain_id": 999999}},
+    }, headers=AUTH_HEADERS)
+    assert response.status_code == 400
+    assert "4663" in response.json()["error"]["message"]
+    mock_container.registry.run_all.assert_not_awaited()
+    mock_container.db.get_deployer_risk_summary.assert_not_awaited()
+    mock_container.tenderly_simulator.is_enabled.assert_not_called()
+    mock_container.tenderly_simulator.simulate_transaction.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_direct_mcp_tool_rejects_unknown_chain(mock_container):
+    from mcp_server.tools import execute_tool
+    with pytest.raises(ValueError, match="Unsupported"):
+        await execute_tool(mock_container, "scan_contract", {
+            "address": "0x" + "a" * 40, "chain_id": 999999,
+        })
+    mock_container.registry.run_all.assert_not_awaited()
+
+
+def test_mcp_robinhood_reaches_analyzers(client, mock_container):
+    response = client.post("/mcp/messages", json={
+        "jsonrpc": "2.0", "id": 11, "method": "tools/call",
+        "params": {"name": "scan_contract", "arguments": {
+            "address": "0x" + "a" * 40, "chain_id": 4663,
+        }},
+    }, headers=AUTH_HEADERS)
+    assert response.status_code == 200
+    assert mock_container.registry.run_all.call_args.args[0].chain_id == 4663
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,reason,score", [("unknown", "Provider unavailable", 0), ("unknown", "Simulation failed", 13), ("ok", "", 7)])
+async def test_mcp_maps_engine_keys_and_coverage(mock_container, status, reason, score):
+    from mcp_server.tools import handle_scan_contract
+    mock_container.risk_engine.compute_from_results.return_value = {
+        "rug_probability": score, "critical_flags": [reason] if reason else [],
+        "risk_level": "UNKNOWN" if reason else "LOW", "confidence_level": 40,
+        "status": status, "coverage": {"honeypot": 0 if reason else 1},
+        "coverage_reasons": {"honeypot": reason} if reason else {},
+        "category_scores": {"honeypot": None if reason else 0},
+    }
+    result = await handle_scan_contract(mock_container, {"address": "0x" + "a" * 40})
+    assert result["score"] == score
+    assert result["flags"] == ([reason] if reason else [])
+    assert result["status"] == status
+    assert result["confidence"] == 40
+    assert result["coverage_reasons"] == ({"honeypot": reason} if reason else {})
+    assert result["risk_display"] == ("Unknown (incomplete provider coverage)" if reason else "7%")
+    if reason:
+        assert result["verdict"] == "UNKNOWN"
+
+
+def test_mcp_prompt_includes_unknown():
+    from mcp_server.prompts import get_prompt
+    assert "UNKNOWN" in get_prompt("security-analysis")["messages"][0]["content"]["text"]

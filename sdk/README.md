@@ -82,7 +82,7 @@ const shield = new ShieldBot({
 
 ## Fail Modes
 
-- **`cached`** (default): Return last cached verdict if API is unreachable
+- **`cached`** (default): Return last cached verdict if API is unreachable; with no cached verdict, return `WARN` with `analysis_unavailable: true`
 - **`open`**: Allow transactions when API is down (fail-open)
 - **`closed`**: Block transactions when API is down (fail-closed)
 

@@ -78,6 +78,8 @@ class IntentMismatchAnalyzer(Analyzer):
                 score += 30
                 flags.append('Native value sent with approval call (unusual)')
 
+        verification_unknown = False
+
         # 4. Unknown selector — skip entirely for verified/non-token contracts
         if decoded.get('category') == 'unknown':
             is_verified = ctx.extra.get('is_verified')
@@ -86,9 +88,12 @@ class IntentMismatchAnalyzer(Analyzer):
                 # bridges, governance) commonly have selectors outside our
                 # known list — this is normal, not suspicious.  No penalty.
                 pass
-            else:
+            elif is_verified is False:
                 score += 20
                 flags.append(f'Unknown function selector 0x{selector}')
+            else:
+                verification_unknown = True
+                flags.append('Selector risk unknown: contract verification unavailable')
 
         # 5. Approval to EOA — check via extra data if available
         if decoded.get('is_approval'):
@@ -106,6 +111,9 @@ class IntentMismatchAnalyzer(Analyzer):
             score=score,
             flags=flags,
             data={
+                'status': 'unknown' if verification_unknown else 'ok',
+                'coverage': {'selector_verification': not verification_unknown},
+                'reason': 'Contract verification unavailable for unknown selector' if verification_unknown else None,
                 'selector': selector,
                 'function_name': decoded.get('function_name'),
                 'category': decoded.get('category'),

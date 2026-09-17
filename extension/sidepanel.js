@@ -33,7 +33,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   chatMessages.forEach(m => {
     if (!m || typeof m.text !== "string" || (m.role !== "user" && m.role !== "assistant")) return;
     if (m.scanData && typeof m.scanData === "object") renderRiskCard(m.scanData);
-    appendMessage(m.role, m.text, { save: false });
+    appendMessage(m.role, m.text, { save: false, scanData: m.scanData });
   });
 
   // Show suggested prompts if chat is empty
@@ -126,10 +126,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   // -------------------------------------------------------------------
   function renderRiskCard(scanData) {
     if (!scanData || typeof scanData !== "object") return;
-    const score = Number(scanData.risk_score) || 0;
-    let level = "low";
-    if (score >= 70) level = "high";
-    else if (score >= 40) level = "medium";
+    const incomplete = scanData.status !== "ok" || scanData.partial === true ||
+      scanData.risk_level === "UNKNOWN" || !Number.isFinite(scanData.risk_score) ||
+      Object.values(scanData.coverage || {}).some(value => Number(value) < 1);
+    const score = scanData.risk_score;
+    let level = incomplete ? "medium" : "low";
+    if (!incomplete && score >= 70) level = "high";
+    else if (!incomplete && score >= 40) level = "medium";
 
     const card = document.createElement("div");
     card.className = "risk-card";
@@ -143,12 +146,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     let metaParts = [];
     const hp = (typeof scanData.honeypot === "object" && scanData.honeypot) || {};
-    if (hp.is_honeypot !== undefined) {
-      metaParts.push(`Honeypot: <span>${hp.is_honeypot ? "Yes" : "No"}</span>`);
-    }
-    if (hp.sell_tax !== undefined) {
-      metaParts.push(`Sell tax: <span>${Number(hp.sell_tax)}%</span>`);
-    }
+    metaParts.push(`Honeypot: <span>${hp.is_honeypot === true ? "Yes" : hp.is_honeypot === false ? "No" : "Unknown"}</span>`);
+    metaParts.push(`Sell tax: <span>${hp.sell_tax == null || hp.sell_tax === "" ? "Unknown" : `${Number(hp.sell_tax)}%`}</span>`);
     const mkt = (typeof scanData.market === "object" && scanData.market) || {};
     if (mkt.liquidity_usd !== undefined) {
       metaParts.push(`Liq: <span>$${Number(mkt.liquidity_usd).toLocaleString()}</span>`);
@@ -163,9 +162,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     card.innerHTML = `
       <div class="risk-card-header">
-        <div class="risk-score-badge ${level}">${score}</div>
+        <div class="risk-score-badge ${level}">${incomplete ? "?" : score}</div>
         <div>
-          <div class="risk-card-title">${escapeHtml(scanData.risk_level || level.toUpperCase())} Risk ${shortAddr ? `— ${shortAddr}` : ""}</div>
+          <div class="risk-card-title">${escapeHtml(incomplete ? "UNKNOWN" : scanData.risk_level || level.toUpperCase())} Risk ${shortAddr ? `— ${shortAddr}` : ""}</div>
           ${archetype}
         </div>
       </div>
@@ -300,6 +299,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   // -------------------------------------------------------------------
   function appendMessage(role, text, opts = {}) {
     const { isError = false, originalMessage = null, scanData = null } = opts;
+    if (scanData && (scanData.status !== "ok" || scanData.partial === true ||
+      scanData.risk_level === "UNKNOWN" || !Number.isFinite(scanData.risk_score) ||
+      Object.values(scanData.coverage || {}).some(value => Number(value) < 1))) {
+      text = "Unknown (incomplete provider coverage). " +
+        Object.values(scanData.coverage_reasons || {}).join("; ");
+    }
 
     if (role === "assistant") {
       const wrapper = document.createElement("div");
@@ -471,7 +476,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     const warnings = health.warnings || [];
     const totalApprovals = health.total_approvals || 0;
     const dangerousCount = health.dangerous_approvals || 0;
-    const valueAtRisk = health.total_value_at_risk_usd || 0;
+    const incomplete = health.status === "unknown";
+    const valueAtRisk = health.total_value_at_risk_usd;
+    const valueText = incomplete || valueAtRisk == null ? "Unknown" : `$${valueAtRisk.toFixed(2)}`;
     const labels = {
       dangerous_approvals: "Approvals",
       flagged_exposure: "Flagged tokens",
@@ -482,7 +489,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     let statsHtml = `<div class="health-stats">
       <div class="health-stat"><span class="health-stat-val">${totalApprovals}</span><span class="health-stat-label">Approvals</span></div>
       <div class="health-stat"><span class="health-stat-val" style="color:#fca5a5">${dangerousCount}</span><span class="health-stat-label">High Risk</span></div>
-      <div class="health-stat"><span class="health-stat-val" style="color:#fcd34d">$${valueAtRisk.toFixed(2)}</span><span class="health-stat-label">At Risk</span></div>
+      <div class="health-stat"><span class="health-stat-val" style="color:#fcd34d">${valueText}</span><span class="health-stat-label">At Risk</span></div>
     </div>`;
     let compHtml = "";
     for (const [key, val] of Object.entries(components)) {
@@ -494,7 +501,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     guardianHealthEl.innerHTML = `<div class="health-card">
       <div class="health-header">
-        <span class="health-score" style="color:${score >= 70 ? '#6ee7b7' : score >= 40 ? '#fcd34d' : '#fca5a5'}">${score}</span>
+        <span class="health-score" style="color:${incomplete ? '#fcd34d' : score >= 70 ? '#6ee7b7' : score >= 40 ? '#fcd34d' : '#fca5a5'}">${incomplete ? "?" : score}</span>
         <span class="health-level ${escapeHtml(level)}">${escapeHtml(level)}</span>
       </div>
       ${statsHtml}

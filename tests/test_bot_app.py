@@ -20,6 +20,9 @@ def bot_module(monkeypatch):
     settings = SimpleNamespace(telegram_bot_token="123456:TEST-TOKEN")
     mock_settings = MagicMock(return_value=settings)
     mock_container = MagicMock()
+    mock_container.return_value.web3_client.get_supported_chain_ids.return_value = [
+        56, 1, 8453, 42161, 137, 204, 10, 4663,
+    ]
     monkeypatch.setattr(core.config, "Settings", mock_settings)
     monkeypatch.setattr(core.container, "ServiceContainer", mock_container)
 
@@ -161,7 +164,7 @@ class TestHelpCommand:
 • Send any address and I'll auto-detect what to scan
 • Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`
 • Or use /chain to switch your default chain
-• Supported: BSC, Ethereum, Base, Arbitrum, Polygon, Optimism, opBNB
+• Supported: BSC, Ethereum, Base, Arbitrum, Polygon, opBNB, Optimism, Robinhood Chain
 
 Stay safe! 🛡️
 """

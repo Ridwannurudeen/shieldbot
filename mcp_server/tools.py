@@ -9,6 +9,7 @@ import re
 from typing import Any, Dict, List
 
 from core.analyzer import AnalysisContext
+from core.extension_formatter import format_extension_alert
 
 logger = logging.getLogger(__name__)
 
@@ -148,16 +149,22 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
 async def handle_scan_contract(container, params: Dict) -> Dict:
     """Run all analyzers on a contract and return composite risk score."""
     address = _validate_address(params["address"])
-    chain_id = params.get("chain_id", 56)
+    chain_id = container.web3_client.validate_chain_id(params.get("chain_id", 56))
 
     ctx = AnalysisContext(address=address, chain_id=chain_id)
     results = await container.registry.run_all(ctx)
     score_data = container.risk_engine.compute_from_results(results)
 
+    alert = format_extension_alert(score_data)
     return {
-        "verdict": score_data.get("risk_level", "UNKNOWN"),
-        "score": score_data.get("risk_score", 0),
-        "flags": score_data.get("flags", []),
+        "verdict": "UNKNOWN" if alert["status"] == "unknown" else score_data.get("risk_level", "UNKNOWN"),
+        "score": score_data["rug_probability"],
+        "flags": score_data.get("critical_flags", []),
+        "status": alert["status"],
+        "coverage": score_data.get("coverage", {}),
+        "coverage_reasons": alert["coverage_reasons"],
+        "confidence": score_data.get("confidence_level"),
+        "risk_display": alert["risk_display"],
         "risk_level": score_data.get("risk_level", "UNKNOWN"),
         "categories": score_data.get("category_scores", {}),
     }
@@ -169,7 +176,7 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
     to_addr = params["to"]
     data = params.get("data", "0x")
     value = params.get("value", "0")
-    chain_id = params.get("chain_id", 56)
+    chain_id = container.web3_client.validate_chain_id(params.get("chain_id", 56))
 
     if not container.tenderly_simulator.is_enabled():
         return {
@@ -205,7 +212,7 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
 async def handle_check_deployer(container, params: Dict) -> Dict:
     """Look up deployer history for a contract."""
     address = _validate_address(params["address"])
-    chain_id = params.get("chain_id", 56)
+    chain_id = container.web3_client.validate_chain_id(params.get("chain_id", 56))
 
     summary = await container.db.get_deployer_risk_summary(address, chain_id)
     if summary is None:
@@ -260,7 +267,7 @@ async def handle_check_approval_risk(container, params: Dict) -> Dict:
     wallet = _validate_address(params["wallet_address"])
     return {
         "wallet_address": wallet,
-        "chain_id": params.get("chain_id", 56),
+        "chain_id": container.web3_client.validate_chain_id(params.get("chain_id", 56)),
         "approvals": [],
         "risk_summary": "Approval scanning not yet implemented. Coming in V3.2 (Guardian).",
     }
@@ -300,7 +307,7 @@ async def handle_query_threat_graph(container, params: Dict) -> Dict:
     address = _validate_address(params["address"])
     return {
         "address": address,
-        "chain_id": params.get("chain_id", 56),
+        "chain_id": container.web3_client.validate_chain_id(params.get("chain_id", 56)),
         "connected_to_cluster": False,
         "cluster_id": None,
         "edges": [],

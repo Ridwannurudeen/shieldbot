@@ -28,9 +28,11 @@ class ContractService:
         self.scam_db = scam_db
 
     async def fetch_contract_data(self, address: str, chain_id: int = 56) -> dict:
+        from utils.web3_client import UnsupportedChainError
+
         defaults = {
             'is_contract': False,
-            'is_verified': False,
+            'is_verified': None,
             'contract_age_days': None,
             'scam_matches': [],
             'ownership_renounced': None,
@@ -44,6 +46,8 @@ class ContractService:
 
         try:
             is_contract = await self.web3_client.is_contract(address, chain_id=chain_id)
+            if is_contract is None:
+                return {**defaults, 'is_contract': None, 'status': 'unknown', 'reason': 'Contract data unavailable'}
             if not is_contract:
                 return defaults
 
@@ -78,7 +82,10 @@ class ContractService:
 
             try:
                 bytecode = await self.web3_client.get_bytecode(address, chain_id=chain_id)
-                if bytecode:
+                if bytecode is None:
+                    results['coverage'] = {'bytecode': False}
+                    results['reason'] = 'Bytecode scan unavailable'
+                elif bytecode:
                     bytecode_hex = bytecode.hex() if isinstance(bytecode, bytes) else str(bytecode)
                     for sig, pattern_name in BYTECODE_PATTERNS.items():
                         if sig in bytecode_hex:
@@ -91,8 +98,12 @@ class ContractService:
                                 has_blacklist = True
                             elif pattern_name in ('proxy_upgrade', 'delegatecall'):
                                 has_proxy = True
+            except UnsupportedChainError:
+                raise
             except Exception as e:
-                logger.warning("Bytecode scan failed for %s: %s", address, e)
+                logger.warning("Bytecode scan failed for %s: %s", address, type(e).__name__)
+                results['coverage'] = {'bytecode': False}
+                results['reason'] = 'Bytecode scan unavailable'
 
             results['bytecode_warnings'] = bytecode_warnings
             results['has_proxy'] = has_proxy
@@ -116,6 +127,8 @@ class ContractService:
 
             return {**defaults, **results}
 
+        except UnsupportedChainError:
+            raise
         except Exception as e:
-            logger.error("Contract data fetch failed for %s: %s", address, e)
-            return defaults
+            logger.error("Contract data fetch failed for %s: %s", address, type(e).__name__)
+            return {**defaults, 'is_contract': None, 'status': 'unknown', 'reason': 'Contract data unavailable'}

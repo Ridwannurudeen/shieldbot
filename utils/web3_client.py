@@ -3,18 +3,17 @@ Web3 Client — thin router that delegates to chain-specific adapters.
 Preserves the original interface for backward compatibility.
 """
 
-import os
 import logging
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple
 from web3 import Web3
-try:
-    from web3.middleware import ExtraDataToPOAMiddleware as geth_poa_middleware
-except ImportError:
-    from web3.middleware import geth_poa_middleware
 
 from adapters.bsc import BscAdapter
 
 logger = logging.getLogger(__name__)
+
+
+class UnsupportedChainError(ValueError):
+    """Raised when a chain has no registered adapter."""
 
 
 class Web3Client:
@@ -32,7 +31,7 @@ class Web3Client:
         # Legacy compat aliases
         self.bsc_web3 = self._bsc_adapter.w3
 
-        # ERC20 ABI for opBNB fallback + is_token_contract
+        # ERC20 ABI for token interface checks
         self.erc20_abi = [
             {"constant": True, "inputs": [], "name": "name",
              "outputs": [{"name": "", "type": "string"}], "type": "function"},
@@ -54,18 +53,29 @@ class Web3Client:
         logger.info(f"Registered adapter: {adapter.chain_name} (chain_id={adapter.chain_id})")
 
     def _get_adapter(self, chain_id: int):
-        """Return adapter for chain_id, or None for unsupported chains."""
-        return self._adapters.get(chain_id)
+        """Return the registered adapter, rejecting unsupported chains."""
+        self.validate_chain_id(chain_id)
+        return self._adapters[chain_id]
 
     def get_supported_chain_ids(self):
         """Return list of chain IDs with registered adapters."""
         return list(self._adapters.keys())
 
+    def validate_chain_id(self, chain_id: int) -> int:
+        """Reject chains without an adapter before accessing any provider."""
+        if type(chain_id) is int and not 1 <= chain_id <= 10_000_000:
+            raise UnsupportedChainError(
+                "Unsupported chain ID: must be between 1 and 10000000."
+            )
+        if type(chain_id) is not int or chain_id not in self._adapters:
+            supported = ", ".join(str(cid) for cid in self.get_supported_chain_ids())
+            raise UnsupportedChainError(
+                f"Unsupported chain ID {chain_id}. Supported chain IDs: {supported}"
+            )
+        return chain_id
+
     def get_web3(self, chain_id: int = 56):
-        adapter = self._get_adapter(chain_id)
-        if adapter:
-            return adapter.w3
-        return self.bsc_web3
+        return self._get_adapter(chain_id).w3
 
     def is_valid_address(self, address: str) -> bool:
         return Web3.is_address(address)
@@ -73,22 +83,12 @@ class Web3Client:
     def to_checksum_address(self, address: str) -> str:
         return Web3.to_checksum_address(address)
 
-    async def is_contract(self, address: str, chain_id: int = 56) -> bool:
-        adapter = self._get_adapter(chain_id)
-        if adapter:
-            return await adapter.is_contract(address)
-        # opBNB fallback
-        try:
-            w3 = self.get_web3(chain_id)
-            code = w3.eth.get_code(Web3.to_checksum_address(address))
-            return len(code) > 0
-        except Exception as e:
-            logger.error(f"Error checking if contract: {e}")
-            return False
+    async def is_contract(self, address: str, chain_id: int = 56) -> Optional[bool]:
+        return await self._get_adapter(chain_id).is_contract(address)
 
     async def is_token_contract(self, address: str, chain_id: int = 56) -> bool:
+        w3 = self.get_web3(chain_id)
         try:
-            w3 = self.get_web3(chain_id)
             contract = w3.eth.contract(
                 address=Web3.to_checksum_address(address), abi=self.erc20_abi,
             )
@@ -98,54 +98,20 @@ class Web3Client:
             return False
 
     async def get_bytecode(self, address: str, chain_id: int = 56) -> Optional[str]:
-        adapter = self._get_adapter(chain_id)
-        if adapter:
-            return await adapter.get_bytecode(address)
-        try:
-            w3 = self.get_web3(chain_id)
-            code = w3.eth.get_code(Web3.to_checksum_address(address))
-            return code.hex()
-        except Exception as e:
-            logger.error(f"Error getting bytecode: {e}")
-            return None
+        return await self._get_adapter(chain_id).get_bytecode(address)
 
-    async def is_verified_contract(self, address: str, chain_id: int = 56) -> Union[bool, Tuple[bool, Optional[str]]]:
-        adapter = self._get_adapter(chain_id)
-        if adapter:
-            return await adapter.is_verified_contract(address)
-        return (False, None)
+    async def is_verified_contract(self, address: str, chain_id: int = 56) -> Tuple[Optional[bool], Optional[str]]:
+        return await self._get_adapter(chain_id).is_verified_contract(address)
 
     async def get_contract_creation_info(self, address: str, chain_id: int = 56) -> Optional[Dict]:
-        adapter = self._get_adapter(chain_id)
-        if adapter:
-            return await adapter.get_contract_creation_info(address)
-        return None
+        return await self._get_adapter(chain_id).get_contract_creation_info(address)
 
     async def get_token_info(self, address: str, chain_id: int = 56) -> Dict:
-        adapter = self._get_adapter(chain_id)
-        if adapter:
-            return await adapter.get_token_info(address)
-        # opBNB fallback
-        try:
-            w3 = self.get_web3(chain_id)
-            contract = w3.eth.contract(
-                address=Web3.to_checksum_address(address), abi=self.erc20_abi,
-            )
-            name = contract.functions.name().call()
-            symbol = contract.functions.symbol().call()
-            decimals = contract.functions.decimals().call()
-            total_supply = contract.functions.totalSupply().call()
-            return {
-                'name': name, 'symbol': symbol,
-                'decimals': decimals, 'total_supply': total_supply / (10 ** decimals),
-            }
-        except Exception as e:
-            logger.error(f"Error getting token info: {e}")
-            return {}
+        return await self._get_adapter(chain_id).get_token_info(address)
 
     async def can_transfer_token(self, address: str, chain_id: int = 56) -> bool:
+        w3 = self.get_web3(chain_id)
         try:
-            w3 = self.get_web3(chain_id)
             contract = w3.eth.contract(
                 address=Web3.to_checksum_address(address), abi=self.erc20_abi,
             )
@@ -155,36 +121,13 @@ class Web3Client:
             return False
 
     async def get_ownership_info(self, address: str, chain_id: int = 56) -> Dict:
-        adapter = self._get_adapter(chain_id)
-        if adapter:
-            return await adapter.get_ownership_info(address)
-        try:
-            w3 = self.get_web3(chain_id)
-            contract = w3.eth.contract(
-                address=Web3.to_checksum_address(address), abi=self.erc20_abi,
-            )
-            owner = contract.functions.owner().call()
-            zero_address = '0x0000000000000000000000000000000000000000'
-            is_renounced = owner.lower() == zero_address.lower()
-            return {'owner': owner, 'is_renounced': is_renounced}
-        except Exception as e:
-            logger.error(f"Error getting ownership info: {e}")
-            return {'owner': None, 'is_renounced': None}
+        return await self._get_adapter(chain_id).get_ownership_info(address)
 
     async def get_liquidity_info(self, address: str, chain_id: int = 56) -> Dict:
-        adapter = self._get_adapter(chain_id)
-        if adapter:
-            return await adapter.get_liquidity_info(address)
-        return {'is_locked': False, 'lock_percentage': 0}
+        return await self._get_adapter(chain_id).get_liquidity_info(address)
 
     async def check_honeypot(self, address: str, chain_id: int = 56) -> Dict:
-        adapter = self._get_adapter(chain_id)
-        if adapter:
-            return await adapter.check_honeypot(address)
-        return {'is_honeypot': False, 'reason': 'No adapter for chain'}
+        return await self._get_adapter(chain_id).check_honeypot(address)
 
     async def get_tax_info(self, address: str, chain_id: int = 56) -> Dict:
-        adapter = self._get_adapter(chain_id)
-        if adapter:
-            return await adapter.get_tax_info(address)
-        return {'buy_tax': 0, 'sell_tax': 0}
+        return await self._get_adapter(chain_id).get_tax_info(address)

@@ -299,3 +299,169 @@ class TestSignatureFirewall:
         assert data["classification"] in {"HIGH_RISK", "BLOCK_RECOMMENDED"}
         assert data["risk_score"] >= 50
         assert any("unlimited" in signal.lower() for signal in data["danger_signals"])
+
+
+@pytest.fixture
+def routing_error_api(monkeypatch):
+    import api
+    from utils.web3_client import Web3Client
+
+    registry = Web3Client.__new__(Web3Client)
+    registry._adapters = {56: MagicMock()}
+    registry.is_token_contract = AsyncMock(return_value=True)
+    registry.is_verified_contract = AsyncMock(return_value=(True, None))
+    registry.get_token_info = AsyncMock(return_value={})
+    services = SimpleNamespace(
+        web3_client=registry,
+        db=SimpleNamespace(
+            get_contract_score=AsyncMock(return_value=None),
+            get_deployer_risk_summary=AsyncMock(return_value=None),
+        ),
+        registry=SimpleNamespace(run_all=AsyncMock(return_value=[])),
+        policy_engine=None,
+    )
+    scanner = SimpleNamespace(scan_address=AsyncMock(return_value={}))
+    token_scanner = SimpleNamespace(check_token=AsyncMock(return_value={}))
+    decoder = SimpleNamespace(
+        decode=MagicMock(return_value={"selector": None}),
+        is_whitelisted_target=MagicMock(return_value=None),
+    )
+    simulator = SimpleNamespace(is_enabled=lambda: False, simulate_transaction=AsyncMock())
+    monkeypatch.setattr(api, "container", services)
+    monkeypatch.setattr(api, "web3_client", registry)
+    monkeypatch.setattr(api, "calldata_decoder", decoder)
+    monkeypatch.setattr(api, "tx_scanner", scanner)
+    monkeypatch.setattr(api, "token_scanner", token_scanner)
+    monkeypatch.setattr(api, "tenderly_simulator", simulator)
+    monkeypatch.setattr(api, "ai_analyzer", SimpleNamespace(is_available=lambda: False))
+    monkeypatch.setattr(api, "risk_engine", MagicMock())
+    monkeypatch.setattr(api, "_token_cache", {})
+    return api, services, scanner, token_scanner
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["is_token_contract", "is_verified_contract", "registry", "simulation", "fallback"])
+async def test_firewall_routing_error_never_enters_legacy_scanner(routing_error_api, stage):
+    from utils.web3_client import UnsupportedChainError
+
+    api, services, scanner, token_scanner = routing_error_api
+    error = UnsupportedChainError("removed chain")
+    if stage == "registry":
+        services.registry.run_all.side_effect = error
+    elif stage == "simulation":
+        api.tenderly_simulator.is_enabled = lambda: True
+        api.tenderly_simulator.simulate_transaction.side_effect = error
+    elif stage == "fallback":
+        services.registry.run_all.side_effect = RuntimeError("ordinary provider failure")
+        api.web3_client.is_token_contract.side_effect = [True, error]
+    else:
+        getattr(api.web3_client, stage).side_effect = error
+    req = api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40, chainId=56)
+
+    with pytest.raises(UnsupportedChainError) as exc:
+        await api.firewall(req, SimpleNamespace(headers={}))
+
+    assert exc.value is error
+    scanner.scan_address.assert_not_awaited()
+    token_scanner.check_token.assert_not_awaited()
+    api.risk_engine.compute_from_results.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_legacy_service_gather_preserves_routing_error(routing_error_api, monkeypatch):
+    from utils.web3_client import UnsupportedChainError
+
+    api, _, scanner, token_scanner = routing_error_api
+    error = UnsupportedChainError("removed chain")
+    monkeypatch.setattr(api, "container", None)
+    monkeypatch.setattr(api, "contract_service", SimpleNamespace(fetch_contract_data=AsyncMock(side_effect=error)))
+    monkeypatch.setattr(api, "honeypot_service", SimpleNamespace(fetch_honeypot_data=AsyncMock(return_value={})))
+    monkeypatch.setattr(api, "dex_service", SimpleNamespace(fetch_token_market_data=AsyncMock(return_value={})))
+    monkeypatch.setattr(api, "ethos_service", SimpleNamespace(fetch_wallet_reputation=AsyncMock(return_value={})))
+    req = api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40)
+
+    with pytest.raises(UnsupportedChainError) as exc:
+        await api.firewall(req, SimpleNamespace(headers={}))
+
+    assert exc.value is error
+    scanner.scan_address.assert_not_awaited()
+    token_scanner.check_token.assert_not_awaited()
+    api.risk_engine.compute_composite_risk.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_resolve_token_preserves_routing_error(routing_error_api):
+    from utils.web3_client import UnsupportedChainError
+
+    api, _, _, _ = routing_error_api
+    error = UnsupportedChainError("removed chain")
+    api.web3_client.get_token_info.side_effect = error
+    with pytest.raises(UnsupportedChainError) as exc:
+        await api._resolve_token("0x" + "a" * 40, 56)
+    assert exc.value is error
+    assert api._token_cache == {}
+
+
+@pytest.mark.asyncio
+async def test_router_analysis_preserves_routing_error(routing_error_api):
+    from utils.web3_client import UnsupportedChainError
+
+    api, services, _, _ = routing_error_api
+    error = UnsupportedChainError("removed chain")
+    api.web3_client.is_verified_contract.side_effect = error
+    req = api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40)
+    with pytest.raises(UnsupportedChainError) as exc:
+        await api._analyze_router_swap(
+            req, req.to, req.sender, {"params": {"path": ["0x" + "c" * 40]}}, "Router", 0,
+        )
+    assert exc.value is error
+    services.registry.run_all.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["summary", "watch_lookup", "watch_write"])
+async def test_campaign_context_preserves_routing_error(routing_error_api, stage):
+    from utils.web3_client import UnsupportedChainError
+
+    api, services, _, _ = routing_error_api
+    error = UnsupportedChainError("removed chain")
+    services.db.get_deployer_risk_summary.return_value = {
+        "high_risk_contracts": 3, "total_contracts": 4, "deployer_address": "0x" + "a" * 40,
+    }
+    services.db.is_watched_deployer = AsyncMock(return_value=None)
+    services.db.add_watched_deployer = AsyncMock()
+    method = {"summary": "get_deployer_risk_summary", "watch_lookup": "is_watched_deployer", "watch_write": "add_watched_deployer"}[stage]
+    getattr(services.db, method).side_effect = error
+    with pytest.raises(UnsupportedChainError) as exc:
+        await api._get_deployer_campaign_context("0x" + "b" * 40, 56, services)
+    assert exc.value is error
+
+
+@pytest.mark.asyncio
+async def test_scan_endpoint_preserves_routing_error(routing_error_api):
+    from utils.web3_client import UnsupportedChainError
+
+    api, _, scanner, _ = routing_error_api
+    error = UnsupportedChainError("removed chain")
+    scanner.scan_address.side_effect = error
+    with pytest.raises(UnsupportedChainError) as exc:
+        await api.scan(api.ScanRequest(address="0x" + "a" * 40))
+    assert exc.value is error
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("endpoint", ["agent_chat", "agent_explain"])
+async def test_agent_endpoint_preserves_routing_error(routing_error_api, monkeypatch, endpoint):
+    from utils.web3_client import UnsupportedChainError
+
+    api, services, _, _ = routing_error_api
+    error = UnsupportedChainError("removed chain")
+    services.advisor = SimpleNamespace(chat=AsyncMock(side_effect=error), explain_scan=AsyncMock(side_effect=error))
+    monkeypatch.setattr(api, "chat_limiter", api.RateLimiter(1000, 1000))
+    req = api.ChatRequest(message="hello", user_id="test") if endpoint == "agent_chat" else api.ExplainRequest(
+        scan_result={'status': 'ok', 'coverage': {'honeypot': 1}},
+    )
+    request = SimpleNamespace(client=SimpleNamespace(host="test"), headers={})
+    with pytest.raises(UnsupportedChainError) as exc:
+        await getattr(api, endpoint)(req, request)
+    assert exc.value is error

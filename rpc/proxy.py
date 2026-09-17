@@ -7,6 +7,8 @@ import aiohttp
 import rlp
 from eth_account import Account
 
+from utils.web3_client import UnsupportedChainError
+
 logger = logging.getLogger(__name__)
 
 # Methods that should be intercepted for security analysis
@@ -36,12 +38,10 @@ class RPCProxy:
         if self._session and not self._session.closed:
             await self._session.close()
 
-    def get_upstream_rpc(self, chain_id: int) -> Optional[str]:
+    def get_upstream_rpc(self, chain_id: int) -> str:
         """Get the upstream RPC URL for a chain."""
-        adapter = self._container.web3_client._get_adapter(chain_id)
-        if adapter:
-            return adapter.w3.provider.endpoint_uri
-        return None
+        self._container.web3_client.validate_chain_id(chain_id)
+        return self._container.web3_client.get_web3(chain_id).provider.endpoint_uri
 
     async def handle_request(self, chain_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Handle a single JSON-RPC request.
@@ -52,13 +52,14 @@ class RPCProxy:
         params = payload.get("params", [])
         rpc_id = payload.get("id", 1)
 
-        upstream_rpc = self.get_upstream_rpc(chain_id)
-        if not upstream_rpc:
-            return self._error_response(rpc_id, -32000, f"Unsupported chain_id: {chain_id}")
+        try:
+            upstream_rpc = self.get_upstream_rpc(chain_id)
+        except UnsupportedChainError as exc:
+            return self._error_response(rpc_id, -32000, str(exc))
 
         # Non-intercepted methods: forward transparently
         if method not in INTERCEPTED_METHODS:
-            return await self._forward(upstream_rpc, payload)
+            return await self._forward(upstream_rpc, payload, chain_id)
 
         # Extract tx fields depending on method
         try:
@@ -85,18 +86,22 @@ class RPCProxy:
 
             if not to_addr:
                 # Contract creation — forward without analysis
-                return await self._forward(upstream_rpc, payload)
+                return await self._forward(upstream_rpc, payload, chain_id)
 
             # Detect token vs non-token for accurate risk assessment
             is_token = True
             is_verified = False
             try:
                 is_token = await self._container.web3_client.is_token_contract(to_addr, chain_id=chain_id)
+            except UnsupportedChainError:
+                raise
             except Exception:
                 pass
             try:
                 verified_result = await self._container.web3_client.is_verified_contract(to_addr, chain_id=chain_id)
                 is_verified = verified_result[0] if isinstance(verified_result, tuple) else bool(verified_result)
+            except UnsupportedChainError:
+                raise
             except Exception:
                 pass
 
@@ -137,10 +142,12 @@ class RPCProxy:
             if risk_level == "MEDIUM":
                 logger.info(f"RPC Proxy WARN tx to {to_addr} (risk={risk_score})")
 
-            return await self._forward(upstream_rpc, payload)
+            return await self._forward(upstream_rpc, payload, chain_id)
 
+        except UnsupportedChainError:
+            raise
         except Exception as e:
-            logger.error(f"RPC Proxy analysis error: {e}")
+            logger.error("RPC Proxy analysis error: %s", type(e).__name__)
             # On analysis failure, block the transaction (fail-closed)
             return self._error_response(
                 rpc_id, -32003,
@@ -199,10 +206,10 @@ class RPCProxy:
                 "data": ("0x" + data_bytes.hex()) if data_bytes else "0x",
             }
         except Exception as e:
-            logger.warning(f"Failed to decode raw transaction: {e}")
+            logger.warning("Failed to decode raw transaction: %s", type(e).__name__)
             return None
 
-    async def _forward(self, upstream_rpc: str, payload: Dict) -> Dict:
+    async def _forward(self, upstream_rpc: str, payload: Dict, chain_id: int) -> Dict:
         """Forward a JSON-RPC request to the upstream RPC."""
         try:
             session = await self._get_session()
@@ -213,7 +220,7 @@ class RPCProxy:
             ) as resp:
                 return await resp.json()
         except Exception as e:
-            logger.error(f"RPC forward error to {upstream_rpc}: {e}")
+            logger.error("RPC forward error on chain %s: %s", chain_id, type(e).__name__)
             return self._error_response(
                 payload.get("id", 1), -32000,
                 "Upstream RPC temporarily unavailable"

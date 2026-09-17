@@ -7,6 +7,7 @@ Integrates risk_scorer for numeric scoring and AI analysis
 import logging
 from typing import Dict, List, Optional
 from utils.chain_info import get_chain_name
+from utils.web3_client import UnsupportedChainError
 from utils.risk_scorer import (
     findings_from_scan_result, calculate_risk_score,
     blend_scores, compute_confidence
@@ -62,7 +63,7 @@ class TokenScanner:
             'symbol': None,
             'decimals': None,
             'total_supply': None,
-            'is_honeypot': False,
+            'is_honeypot': None,
             'safety_level': 'unknown',
             'risk_score': 0,
             'confidence': 0,
@@ -98,6 +99,20 @@ class TokenScanner:
         # Resolve conflicts
         self._resolve_conflicts(result)
 
+        result['coverage'] = {
+            field: result.get(field) is not None
+            for field in ('is_verified', 'contract_age_days', 'is_honeypot', 'buy_tax', 'sell_tax')
+        }
+        result['coverage'].update({
+            field: result['checks'].get(field) is not None
+            for field in ('can_buy', 'can_sell', 'ownership_renounced', 'liquidity_locked')
+        })
+        result['coverage_reasons'] = {
+            field: f'{field} unknown: provider data unavailable'
+            for field, covered in result['coverage'].items() if not covered
+        }
+        result['status'] = 'unknown' if result['coverage_reasons'] else 'ok'
+
         # Calculate safety level (legacy)
         result['safety_level'] = self._calculate_safety_level(result)
 
@@ -110,8 +125,10 @@ class TokenScanner:
         if self.ai_analyzer and self.ai_analyzer.is_available():
             try:
                 ai_result = await self.ai_analyzer.compute_ai_risk_score(address, result)
+            except UnsupportedChainError:
+                raise
             except Exception as e:
-                logger.error(f"AI risk scoring failed: {e}")
+                logger.error("AI risk scoring failed: %s", type(e).__name__)
 
         # Only mark AI as successful if we got a valid dict with risk_score
         ai_score = None
@@ -138,8 +155,10 @@ class TokenScanner:
                 )
                 if report:
                     result['forensic_report'] = report
+            except UnsupportedChainError:
+                raise
             except Exception as e:
-                logger.error(f"Forensic report generation failed: {e}")
+                logger.error("Forensic report generation failed: %s", type(e).__name__)
 
         return result
 
@@ -151,8 +170,10 @@ class TokenScanner:
             result['symbol'] = token_info.get('symbol')
             result['decimals'] = token_info.get('decimals')
             result['total_supply'] = token_info.get('total_supply')
+        except UnsupportedChainError:
+            raise
         except Exception as e:
-            logger.error(f"Error getting token info: {e}")
+            logger.error("Error getting token info: %s", type(e).__name__)
 
     async def _get_contract_metadata(self, address: str, result: Dict, chain_id: int = 56) -> bool:
         """Get contract verification and age info for cross-validation. Returns True if succeeded."""
@@ -170,14 +191,15 @@ class TokenScanner:
                 result['source_code'] = source_code
 
             creation_info = await self.web3.get_contract_creation_info(address, chain_id=chain_id)
-            if creation_info:
-                result['contract_age_days'] = creation_info.get('age_days', 0)
+            result['contract_age_days'] = creation_info.get('age_days') if creation_info else None
 
-            return True
+            return is_verified is not None and result['contract_age_days'] is not None
+        except UnsupportedChainError:
+            raise
         except Exception as e:
-            logger.error(f"Error getting contract metadata: {e}")
-            result['is_verified'] = False
-            result['contract_age_days'] = 0
+            logger.error("Error getting contract metadata: %s", type(e).__name__)
+            result['is_verified'] = None
+            result['contract_age_days'] = None
             return False
 
     async def _check_trading_functions(self, address: str, result: Dict, chain_id: int = 56):
@@ -189,8 +211,10 @@ class TokenScanner:
 
             if not can_transfer:
                 result['risks'].append("Token transfers may be restricted or disabled")
+        except UnsupportedChainError:
+            raise
         except Exception as e:
-            logger.error(f"Error checking trading functions: {e}")
+            logger.error("Error checking trading functions: %s", type(e).__name__)
             result['checks']['can_buy'] = None
             result['checks']['can_sell'] = None
 
@@ -213,8 +237,10 @@ class TokenScanner:
 
             if not is_renounced and owner:
                 result['risks'].append(f"Contract has active owner: {owner[:10]}...")
+        except UnsupportedChainError:
+            raise
         except Exception as e:
-            logger.error(f"Error checking ownership: {e}")
+            logger.error("Error checking ownership: %s", type(e).__name__)
             result['checks']['ownership_renounced'] = None
 
     async def _check_liquidity(self, address: str, result: Dict, chain_id: int = 56) -> bool:
@@ -234,26 +260,41 @@ class TokenScanner:
                 result['risks'].append(f"Only {lock_percentage}% of liquidity is locked")
 
             return True
+        except UnsupportedChainError:
+            raise
         except Exception as e:
-            logger.error(f"Error checking liquidity: {e}")
+            logger.error("Error checking liquidity: %s", type(e).__name__)
             result['checks']['liquidity_locked'] = None
             return False
 
     async def _check_honeypot(self, address: str, result: Dict, chain_id: int = 56):
         """Check if token is a honeypot with cross-validation"""
         if chain_id != 56:
-            # Honeypot.is API only supports BSC — skip for other chains
-            result['is_honeypot'] = False
+            result['is_honeypot'] = None
+            result['checks']['can_sell'] = None
+            result['honeypot_status'] = 'unknown'
+            result['honeypot_reason'] = 'Legacy honeypot check unavailable for this chain'
+            result['risks'].append('Honeypot and sellability unknown: legacy check unavailable for this chain')
             return
         try:
             honeypot_result = await self.web3.check_honeypot(address)
-            is_honeypot = honeypot_result.get('is_honeypot', False)
+            is_honeypot = honeypot_result.get('is_honeypot')
+            result['honeypot_status'] = honeypot_result.get('status', 'ok' if is_honeypot is not None else 'unknown')
+            result['honeypot_reason'] = honeypot_result.get('reason')
+            if result['honeypot_status'] == 'unknown':
+                result['checks']['can_sell'] = None
+            if is_honeypot is None:
+                result['is_honeypot'] = None
+                result['checks']['can_sell'] = None
+                reason = honeypot_result.get('reason') or 'provider data unavailable'
+                result['risks'].append(f'Honeypot and sellability unknown: {reason}')
+                return
 
             if is_honeypot:
                 is_verified = result.get('is_verified', False)
                 contract_age_days = result.get('contract_age_days', 0)
 
-                if is_verified and contract_age_days > 30:
+                if is_verified and contract_age_days is not None and contract_age_days > 30:
                     logger.info(f"Honeypot API flagged {address} but contract is verified and {contract_age_days} days old - likely false positive")
                     result['is_honeypot'] = False
                     result['risks'].append("High sell restrictions detected, but contract appears legitimate (verified + established)")
@@ -265,34 +306,58 @@ class TokenScanner:
             else:
                 result['is_honeypot'] = False
 
+        except UnsupportedChainError:
+            raise
         except Exception as e:
-            logger.error(f"Error checking honeypot: {e}")
-            result['is_honeypot'] = False
+            logger.error("Error checking honeypot: %s", type(e).__name__)
+            result['is_honeypot'] = None
+            result['checks']['can_sell'] = None
+            result['honeypot_status'] = 'unknown'
+            result['honeypot_reason'] = 'Honeypot provider failed'
+            result['risks'].append('Honeypot and sellability unknown: provider failed')
 
     async def _check_taxes(self, address: str, result: Dict, chain_id: int = 56) -> bool:
         """Check buy and sell taxes. Returns True if check succeeded."""
         if chain_id != 56:
-            # Honeypot.is tax API only supports BSC
+            result['buy_tax'] = None
+            result['sell_tax'] = None
+            result['tax_status'] = 'unknown'
+            result['tax_reason'] = 'Legacy tax check unavailable for this chain'
+            result['risks'].append('Buy/sell taxes unknown: legacy check unavailable for this chain')
             return False
+        result['buy_tax'] = None
+        result['sell_tax'] = None
         try:
             tax_info = await self.web3.get_tax_info(address)
 
-            buy_tax = tax_info.get('buy_tax', 0)
-            sell_tax = tax_info.get('sell_tax', 0)
+            buy_tax = tax_info.get('buy_tax')
+            sell_tax = tax_info.get('sell_tax')
 
             result['buy_tax'] = buy_tax
             result['sell_tax'] = sell_tax
 
-            if buy_tax > 10:
+            if buy_tax is not None and buy_tax > 10:
                 result['risks'].append(f"High buy tax: {buy_tax}%")
-            if sell_tax > 10:
+            if sell_tax is not None and sell_tax > 10:
                 result['risks'].append(f"High sell tax: {sell_tax}%")
-            if sell_tax > 50:
+            if sell_tax is not None and sell_tax > 50:
                 result['risks'].append("Extremely high sell tax - possible honeypot")
 
+            if buy_tax is None or sell_tax is None:
+                result['tax_status'] = 'unknown'
+                result['tax_reason'] = tax_info.get('reason') or 'Tax provider data incomplete'
+                result['risks'].append(f"Buy/sell taxes unknown: {result['tax_reason']}")
+                return False
+            result['tax_status'] = 'ok'
+            result['tax_reason'] = None
             return True
+        except UnsupportedChainError:
+            raise
         except Exception as e:
-            logger.error(f"Error checking taxes: {e}")
+            logger.error("Error checking taxes: %s", type(e).__name__)
+            result['tax_status'] = 'unknown'
+            result['tax_reason'] = 'Tax provider failed'
+            result['risks'].append('Buy/sell taxes unknown: provider failed')
             return False
 
     def _analyze_source_code(self, source_code: str, result: Dict):
@@ -325,9 +390,15 @@ class TokenScanner:
 
         if result['is_honeypot']:
             return 'danger'
-        if not checks.get('can_sell'):
+        if checks.get('can_sell') is False:
             return 'danger'
-        if result.get('sell_tax', 0) > 50:
+        if result.get('status') == 'unknown':
+            return 'unknown'
+        if result.get('is_honeypot') is None or checks.get('can_sell') is None:
+            return 'unknown'
+        sell_tax = result.get('sell_tax')
+        buy_tax = result.get('buy_tax')
+        if sell_tax is not None and sell_tax > 50:
             return 'danger'
 
         warning_count = 0
@@ -335,11 +406,14 @@ class TokenScanner:
             warning_count += 1
         if not checks.get('liquidity_locked'):
             warning_count += 1
-        if result.get('buy_tax', 0) > 10 or result.get('sell_tax', 0) > 10:
+        if (buy_tax is not None and buy_tax > 10) or (sell_tax is not None and sell_tax > 10):
             warning_count += 1
 
         if warning_count >= 2:
             return 'warning'
+
+        if buy_tax is None or sell_tax is None:
+            return 'unknown'
 
         if all([
             checks.get('can_buy'),

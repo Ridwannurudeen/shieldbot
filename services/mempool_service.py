@@ -12,6 +12,13 @@ from web3 import Web3
 
 logger = logging.getLogger(__name__)
 
+# Preserve existing monitoring coverage; new chains require explicit support.
+PENDING_TRANSACTION_CHAINS = frozenset({56, 1, 8453, 42161, 137, 10, 204})
+
+
+def supports_pending_transactions(chain_id: int) -> bool:
+    return chain_id in PENDING_TRANSACTION_CHAINS
+
 # Known DEX router selectors
 SWAP_SELECTORS = {
     "0x38ed1739": "swapExactTokensForTokens",
@@ -102,8 +109,15 @@ class MempoolMonitor:
         """Start monitoring specified chains."""
         if self._running:
             return
+        requested = self._web3_client.get_supported_chain_ids() if chain_ids is None else chain_ids
+        for chain_id in requested:
+            self._web3_client.validate_chain_id(chain_id)
+        self._monitored_chains = {
+            chain_id for chain_id in requested if supports_pending_transactions(chain_id)
+        }
+        if not self._monitored_chains:
+            return
         self._running = True
-        self._monitored_chains = set(chain_ids or [56, 1])
         self._task = asyncio.create_task(self._monitor_loop())
         logger.info(f"MempoolMonitor started for chains: {self._monitored_chains}")
 
@@ -121,6 +135,8 @@ class MempoolMonitor:
 
     async def _monitor_loop(self):
         """Main monitoring loop — polls pending transactions."""
+        from utils.web3_client import UnsupportedChainError
+
         while self._running:
             try:
                 for chain_id in self._monitored_chains:
@@ -129,8 +145,10 @@ class MempoolMonitor:
                 await asyncio.sleep(2)  # Poll every 2 seconds
             except asyncio.CancelledError:
                 break
+            except UnsupportedChainError:
+                raise
             except Exception as e:
-                logger.error(f"MempoolMonitor error: {e}")
+                logger.error("MempoolMonitor error: %s", type(e).__name__)
                 await asyncio.sleep(5)
 
     async def _poll_pending(self, chain_id: int):
@@ -153,7 +171,7 @@ class MempoolMonitor:
                     await self._analyze_pending_tx(tx)
 
         except Exception as e:
-            logger.debug(f"Pending poll failed for chain {chain_id}: {e}")
+            logger.debug("Pending poll failed for chain %s: %s", chain_id, type(e).__name__)
 
     async def _get_txpool_content(self, w3: Web3, chain_id: int) -> List[PendingTx]:
         """Fetch pending txs via txpool_content RPC."""
@@ -346,7 +364,7 @@ class MempoolMonitor:
                     self._add_alert(alert)
                     self._stats['suspicious_approvals'] += 1
         except Exception as e:
-            logger.debug(f"Approval analysis error: {e}")
+            logger.debug("Approval analysis error: %s", type(e).__name__)
 
     def _add_alert(self, alert: MempoolAlert):
         """Add an alert and maintain max size."""
@@ -363,8 +381,12 @@ class MempoolMonitor:
 
     def get_alerts(self, chain_id: int = None, limit: int = 50) -> List[Dict]:
         """Get recent alerts, optionally filtered by chain."""
+        if chain_id is not None:
+            self._web3_client.validate_chain_id(chain_id)
+            if not supports_pending_transactions(chain_id):
+                raise ValueError("pending-transaction monitoring is not available on this chain")
         alerts = self._alerts
-        if chain_id:
+        if chain_id is not None:
             alerts = [a for a in alerts if a.chain_id == chain_id]
         return [
             {

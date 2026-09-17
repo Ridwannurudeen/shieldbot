@@ -85,7 +85,7 @@ class TenderlySimulator:
             }
 
         except Exception as e:
-            logger.error(f"Transaction simulation failed: {e}")
+            logger.error("Transaction simulation failed: %s", type(e).__name__)
             self._register_failure()
             return None
 
@@ -144,7 +144,7 @@ class TenderlySimulator:
             return response.json()
 
         except Exception as e:
-            logger.error(f"Tenderly API error: {e}")
+            logger.error("Tenderly API error: %s", type(e).__name__)
             return None
 
     def _register_failure(self):

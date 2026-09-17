@@ -6,6 +6,7 @@ Degrades gracefully to no-op when Redis is unavailable (fail-open).
 import json
 import logging
 from typing import Dict, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import redis.asyncio as aioredis
 
@@ -31,11 +32,14 @@ class CacheService:
             )
             await self._redis.ping()
             self._available = True
-            logger.info("Redis cache connected at %s", self._redis_url)
+            parts = urlsplit(self._redis_url)
+            # Drop userinfo and query so credentials never reach the log.
+            safe_url = urlunsplit((parts.scheme, parts.netloc.rpartition("@")[2], parts.path, "", ""))
+            logger.info("Redis cache connected at %s", safe_url)
         except Exception as exc:
             self._available = False
             self._redis = None
-            logger.warning("Redis unavailable, cache disabled: %s", exc)
+            logger.warning("Redis unavailable, cache disabled: %s", type(exc).__name__)
 
     async def close(self) -> None:
         """Close the Redis connection."""
@@ -62,7 +66,7 @@ class CacheService:
                 return None
             return json.loads(raw)
         except Exception as exc:
-            logger.debug("Cache get failed for %s:%s: %s", address, chain_id, exc)
+            logger.debug("Cache get failed for %s:%s: %s", address, chain_id, type(exc).__name__)
             return None
 
     async def set_verdict(
@@ -80,7 +84,7 @@ class CacheService:
             value = json.dumps(verdict)
             await self._redis.set(key, value, ex=ttl or self._ttl)
         except Exception as exc:
-            logger.debug("Cache set failed for %s:%s: %s", address, chain_id, exc)
+            logger.debug("Cache set failed for %s:%s: %s", address, chain_id, type(exc).__name__)
 
     # ── Rate limiting ───────────────────────────────────────────────
 
@@ -104,5 +108,5 @@ class CacheService:
             current = results[0]  # INCR returns the new value
             return current <= limit
         except Exception as exc:
-            logger.debug("Rate limit check failed for %s: %s", key, exc)
+            logger.debug("Rate limit check failed for %s: %s", key, type(exc).__name__)
             return True

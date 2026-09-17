@@ -10,6 +10,9 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from utils.chain_info import get_chain_name
+from utils.web3_client import UnsupportedChainError
+
 from agent.prompts import ADVISOR_SYSTEM_PROMPT, EXPLAIN_SCAN_TEMPLATE, HAIKU_MODEL, SONNET_MODEL
 
 logger = logging.getLogger(__name__)
@@ -62,6 +65,7 @@ class Advisor:
 
         Returns a dict or list depending on intent.
         """
+        self.tools._container.web3_client.validate_chain_id(chain_id)
         if intent == "CONTRACT_CHECK":
             addr = data["address"]
             scan, deployer, honeypot, market = await asyncio.gather(
@@ -71,25 +75,33 @@ class Advisor:
                 self.tools.get_market_data(addr, chain_id=chain_id),
                 return_exceptions=True,
             )
+            for result in (scan, deployer, honeypot, market):
+                if isinstance(result, UnsupportedChainError):
+                    raise result
             if isinstance(scan, Exception):
-                logger.warning("scan_contract failed: %s", scan)
-                scan = {}
+                logger.warning("scan_contract failed: %s", type(scan).__name__)
+                scan = {
+                    "status": "unknown", "coverage": {},
+                    "coverage_reasons": {"scan": "Contract scan unavailable"},
+                }
             if isinstance(deployer, Exception):
-                logger.warning("check_deployer failed: %s", deployer)
+                logger.warning("check_deployer failed: %s", type(deployer).__name__)
                 deployer = {}
             if isinstance(honeypot, Exception):
-                logger.warning("check_honeypot failed: %s", honeypot)
+                logger.warning("check_honeypot failed: %s", type(honeypot).__name__)
                 honeypot = {}
             if isinstance(market, Exception):
-                logger.warning("get_market_data failed: %s", market)
+                logger.warning("get_market_data failed: %s", type(market).__name__)
                 market = {}
             return {"scan": scan, "deployer": deployer, "honeypot": honeypot, "market": market}
 
         if intent == "THREAT_FEED":
             try:
                 return await self.tools.get_agent_findings(limit=10)
+            except UnsupportedChainError:
+                raise
             except Exception as e:
-                logger.warning("get_agent_findings failed: %s", e)
+                logger.warning("get_agent_findings failed: %s", type(e).__name__)
                 return []
 
         return {}
@@ -109,6 +121,8 @@ class Advisor:
         6. Save user + assistant messages
         7. Return {"text": str, "scan_data": optional dict}
         """
+        self.tools._container.web3_client.validate_chain_id(chain_id)
+        chain_name = get_chain_name(chain_id)
         intent, data = self.route(message)
         history = await self.db.get_chat_history(user_id, limit=10)
         context = await self._gather_context(intent, data, chain_id=chain_id)
@@ -146,7 +160,10 @@ class Advisor:
                     self.ai.chat(
                         model=self.sonnet_model,
                         messages=messages,
-                        system=ADVISOR_SYSTEM_PROMPT,
+                        system=(
+                            ADVISOR_SYSTEM_PROMPT
+                            + f"\nCurrent chain: {chain_name} (chain_id={chain_id})."
+                        ),
                         max_tokens=500,
                     ),
                     timeout=30.0,
@@ -156,8 +173,10 @@ class Advisor:
                 response_text = (
                     "The request timed out. Please try again."
                 )
+            except UnsupportedChainError:
+                raise
             except Exception as e:
-                logger.error("Advisor chat failed: %s", e)
+                logger.error("Advisor chat failed: %s", type(e).__name__)
                 response_text = (
                     "I encountered an error processing your request. "
                     "Please try again."
@@ -174,12 +193,17 @@ class Advisor:
             scan = context.get("scan", {})
             if scan:
                 result["scan_data"] = {
+                    "chain_id": chain_id,
+                    "chain_name": chain_name,
                     "address": data.get("address", ""),
                     "risk_score": scan.get("risk_score", scan.get("rug_probability")),
                     "risk_level": scan.get("risk_level"),
                     "archetype": scan.get("risk_archetype"),
                     "flags": scan.get("critical_flags", scan.get("flags", [])),
                     "confidence": scan.get("confidence"),
+                    "status": scan.get("status"),
+                    "coverage": scan.get("coverage", {}),
+                    "coverage_reasons": scan.get("coverage_reasons", {}),
                     "honeypot": context.get("honeypot", {}),
                     "market": context.get("market", {}),
                 }
@@ -208,8 +232,10 @@ class Advisor:
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=300,
             )
+        except UnsupportedChainError:
+            raise
         except Exception as e:
-            logger.error("Advisor explain_scan failed: %s", e)
+            logger.error("Advisor explain_scan failed: %s", type(e).__name__)
             return self._rule_based_explanation(scan_result)
 
     # ------------------------------------------------------------------

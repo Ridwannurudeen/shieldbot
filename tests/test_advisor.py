@@ -14,6 +14,10 @@ from agent.advisor import Advisor
 @pytest.fixture
 def mock_tools():
     tools = MagicMock()
+    from utils.web3_client import Web3Client
+    client = Web3Client.__new__(Web3Client)
+    client._adapters = {56: MagicMock(), 1: MagicMock(), 4663: MagicMock()}
+    tools._container.web3_client = client
     tools.scan_contract = AsyncMock(return_value={
         "rug_probability": 72,
         "risk_level": "HIGH",
@@ -303,11 +307,11 @@ async def test_gather_context_custom_chain_id(advisor, mock_tools):
 
 @pytest.mark.asyncio
 async def test_gather_context_scan_failure(advisor, mock_tools):
-    """If scan_contract raises, context.scan falls back to {}."""
+    """If scan_contract raises, context.scan is an unknown-coverage placeholder."""
     mock_tools.scan_contract = AsyncMock(side_effect=RuntimeError("API down"))
     addr = "0x4904c02efa081cb7685346968bac854cdf4e7777"
     context = await advisor._gather_context("CONTRACT_CHECK", {"address": addr})
-    assert context["scan"] == {}
+    assert context["scan"] == {"status": "unknown", "coverage": {}, "coverage_reasons": {"scan": "Contract scan unavailable"}}
     assert context["deployer"]["deployer_address"] == "0xdead"
 
 
@@ -343,14 +347,14 @@ async def test_gather_context_market_failure(advisor, mock_tools):
 
 @pytest.mark.asyncio
 async def test_gather_context_all_tools_fail(advisor, mock_tools):
-    """If every tool raises, all context keys fall back to {}."""
+    """If every tool raises, scan is unknown and the other context keys fall back to {}."""
     mock_tools.scan_contract = AsyncMock(side_effect=RuntimeError("fail"))
     mock_tools.check_deployer = AsyncMock(side_effect=RuntimeError("fail"))
     mock_tools.check_honeypot = AsyncMock(side_effect=RuntimeError("fail"))
     mock_tools.get_market_data = AsyncMock(side_effect=RuntimeError("fail"))
     addr = "0x4904c02efa081cb7685346968bac854cdf4e7777"
     context = await advisor._gather_context("CONTRACT_CHECK", {"address": addr})
-    assert context == {"scan": {}, "deployer": {}, "honeypot": {}, "market": {}}
+    assert context == {"scan": {"status": "unknown", "coverage": {}, "coverage_reasons": {"scan": "Contract scan unavailable"}}, "deployer": {}, "honeypot": {}, "market": {}}
 
 
 # ---------------------------------------------------------------------------
@@ -380,12 +384,13 @@ async def test_chat_ai_exception_returns_error(advisor, mock_db, mock_ai):
 
 
 @pytest.mark.asyncio
-async def test_chat_no_scan_data_on_scan_failure(advisor, mock_tools, mock_db, mock_ai):
-    """If scan_contract fails, result should NOT contain scan_data."""
+async def test_chat_scan_failure_attaches_unknown_scan_data(advisor, mock_tools, mock_db, mock_ai):
+    """If scan_contract fails, scan_data marks the scan unknown so surfaces cannot show the text as safe."""
     mock_tools.scan_contract = AsyncMock(side_effect=RuntimeError("fail"))
     mock_ai.chat = AsyncMock(return_value="Could not scan.")
     result = await advisor.chat("user1", "Check 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-    assert "scan_data" not in result
+    assert result["scan_data"]["status"] == "unknown"
+    assert result["scan_data"]["coverage_reasons"] == {"scan": "Contract scan unavailable"}
     assert result["text"] == "Could not scan."
 
 
@@ -408,3 +413,166 @@ async def test_explain_scan_ai_exception_falls_back(advisor, mock_ai):
     mock_ai.chat = AsyncMock(side_effect=RuntimeError("quota exceeded"))
     result = await advisor.explain_scan({"risk_score": 85, "risk_level": "HIGH"})
     assert "85/100" in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('method,args', [
+    ('compute_ai_risk_score', ('0xABC', {'chain_id': 4663})),
+    ('analyze_verified_source', ('0xABC', 'contract Token {}', 4663)),
+    ('analyze_contract_bytecode', ('0xABC', '0x00', {'chain_id': 4663})),
+    ('analyze_token_safety', ('0xABC', {}, {'chain_id': 4663})),
+    ('generate_forensic_report', ('0xABC', {'chain_id': 4663}, 'token')),
+    ('generate_firewall_report', ({'chainId': 4663}, {'chain_id': 4663})),
+])
+async def test_analysis_prompts_use_scan_chain(method, args):
+    from utils.ai_analyzer import AIAnalyzer
+
+    analyzer = AIAnalyzer.__new__(AIAnalyzer)
+    analyzer.model = 'test-model'
+    analyzer.client = MagicMock()
+    response = MagicMock()
+    response.content = [MagicMock(text='{"risk_score": 20}')]
+    analyzer.client.messages.create = AsyncMock(return_value=response)
+    with patch('utils.ai_analyzer.get_chain_name', return_value='Robinhood Chain') as lookup:
+        await getattr(analyzer, method)(*args)
+    lookup.assert_called_with(4663)
+    content = analyzer.client.messages.create.call_args.kwargs['messages'][0]['content']
+    assert 'Robinhood Chain' in content
+    assert 'on BNB Chain' not in content
+
+
+def test_advisor_prompt_uses_supplied_chain_identity():
+    from agent.prompts import ADVISOR_SYSTEM_PROMPT
+
+    assert 'BNB Chain' not in ADVISOR_SYSTEM_PROMPT
+    assert 'chain' in ADVISOR_SYSTEM_PROMPT.lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('method,args', [
+    ('compute_ai_risk_score', ('0xABC', {})),
+    ('compute_ai_risk_score', ('0xABC', {'chain_id': None})),
+    ('analyze_verified_source', ('0xABC', 'contract Token {}')),
+    ('analyze_verified_source', ('0xABC', 'contract Token {}', None)),
+    ('analyze_contract_bytecode', ('0xABC', '0x00', {})),
+    ('analyze_contract_bytecode', ('0xABC', '0x00', {'chain_id': None})),
+    ('analyze_token_safety', ('0xABC', {}, {})),
+    ('analyze_token_safety', ('0xABC', {}, {'chain_id': None})),
+    ('generate_forensic_report', ('0xABC', {}, 'token')),
+    ('generate_forensic_report', ('0xABC', {'chain_id': None}, 'token')),
+    ('generate_firewall_report', ({}, {})),
+    ('generate_firewall_report', ({'chainId': None}, {'chain_id': None})),
+])
+async def test_missing_prompt_chain_is_unknown(method, args):
+    from utils.ai_analyzer import AIAnalyzer
+
+    analyzer = AIAnalyzer.__new__(AIAnalyzer)
+    analyzer.model = 'test-model'
+    analyzer.client = MagicMock()
+    response = MagicMock()
+    response.content = [MagicMock(text='{"risk_score": 20}')]
+    analyzer.client.messages.create = AsyncMock(return_value=response)
+    with patch('utils.ai_analyzer.get_chain_name', return_value='BSC') as lookup:
+        await getattr(analyzer, method)(*args)
+    content = analyzer.client.messages.create.call_args.kwargs['messages'][0]['content']
+    assert 'Unknown chain' in content
+    assert 'BSC' not in content
+    assert 'Chain ID: 56' not in content
+    lookup.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id,expected', [(56, 'BSC'), (1, 'Ethereum'), (999999, 'Chain 999999')])
+async def test_forensic_prompt_respects_actual_chain_lookup(chain_id, expected):
+    from utils.ai_analyzer import AIAnalyzer
+
+    analyzer = AIAnalyzer.__new__(AIAnalyzer)
+    analyzer.model = 'test-model'
+    analyzer.client = MagicMock()
+    response = MagicMock()
+    response.content = [MagicMock(text='report')]
+    analyzer.client.messages.create = AsyncMock(return_value=response)
+    await analyzer.generate_forensic_report('0xABC', {'chain_id': chain_id}, 'token')
+    content = analyzer.client.messages.create.call_args.kwargs['messages'][0]['content']
+    assert f'analyst on {expected}.' in content
+
+
+def test_firewall_examples_are_chain_neutral():
+    from utils.firewall_prompt import FIREWALL_SYSTEM_PROMPT
+
+    sending_line = next(line for line in FIREWALL_SYSTEM_PROMPT.splitlines() if '"sending"' in line)
+    assert 'BNB' not in sending_line
+    assert 'native token' in sending_line
+    assert 'BNB CHAIN WHITELISTED ROUTERS' in FIREWALL_SYSTEM_PROMPT
+
+
+def test_firewall_context_does_not_invent_chain_id():
+    from utils.ai_analyzer import AIAnalyzer
+
+    analyzer = AIAnalyzer.__new__(AIAnalyzer)
+    assert 'Chain ID: Unknown' in analyzer._build_firewall_context({}, {})
+    assert 'Chain ID: Unknown' in analyzer._build_firewall_context({'chainId': None}, {})
+
+
+@pytest.mark.asyncio
+async def test_explain_scan_propagates_routing_error(advisor, mock_ai):
+    from utils.web3_client import UnsupportedChainError
+    error = UnsupportedChainError('Chain removed')
+    mock_ai.chat.side_effect = error
+
+    with patch.object(advisor, '_rule_based_explanation') as fallback:
+        with pytest.raises(UnsupportedChainError) as raised:
+            await advisor.explain_scan({'risk_score': 0, 'risk_level': 'LOW'})
+
+    assert raised.value is error
+    fallback.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_advisor_chain_context_and_result(advisor, mock_ai):
+    result = await advisor.chat('u1', 'Check 0x' + 'a' * 40, chain_id=4663)
+    assert result['scan_data']['chain_id'] == 4663
+    assert result['scan_data']['chain_name'] == 'Robinhood Chain'
+    system = mock_ai.chat.call_args.kwargs['system']
+    assert 'Robinhood Chain' in system
+    assert '4663' in system
+
+
+@pytest.mark.asyncio
+async def test_advisor_rejects_chain_before_history_and_tools(advisor, mock_db, mock_tools, mock_ai):
+    from utils.web3_client import UnsupportedChainError
+    with pytest.raises(UnsupportedChainError):
+        await advisor.chat('u1', 'Check 0x' + 'a' * 40, chain_id=999999)
+    mock_db.get_chat_history.assert_not_called()
+    mock_db.insert_chat_message.assert_not_called()
+    mock_tools.scan_contract.assert_not_called()
+    mock_tools.check_deployer.assert_not_called()
+    mock_tools.check_honeypot.assert_not_called()
+    mock_tools.get_market_data.assert_not_called()
+    mock_ai.chat.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('tool', ['scan_contract', 'check_deployer', 'check_honeypot', 'get_market_data'])
+async def test_advisor_gather_propagates_routing_error(advisor, mock_tools, tool):
+    from utils.web3_client import UnsupportedChainError
+    getattr(mock_tools, tool).side_effect = UnsupportedChainError('Chain removed')
+    with pytest.raises(UnsupportedChainError):
+        await advisor._gather_context('CONTRACT_CHECK', {'address': '0x' + 'a' * 40}, chain_id=4663)
+
+
+@pytest.mark.asyncio
+async def test_advisor_threat_routing_error_propagates(advisor, mock_tools):
+    from utils.web3_client import UnsupportedChainError
+    mock_tools.get_agent_findings.side_effect = UnsupportedChainError('Chain removed')
+    with pytest.raises(UnsupportedChainError):
+        await advisor._gather_context('THREAT_FEED', {}, chain_id=4663)
+
+
+@pytest.mark.asyncio
+async def test_advisor_ai_routing_error_does_not_save_fallback(advisor, mock_db, mock_ai):
+    from utils.web3_client import UnsupportedChainError
+    mock_ai.chat.side_effect = UnsupportedChainError('Chain removed')
+    with pytest.raises(UnsupportedChainError):
+        await advisor.chat('u1', 'Explain liquidity', chain_id=4663)
+    mock_db.insert_chat_message.assert_not_called()

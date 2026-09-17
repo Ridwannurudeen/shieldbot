@@ -1,5 +1,7 @@
 """Formats composite risk data into a full Telegram intelligence report."""
 
+from core.extension_formatter import is_scan_incomplete
+
 
 def format_full_report(
     risk_output: dict,
@@ -17,13 +19,19 @@ def format_full_report(
     confidence = risk_output.get('confidence_level', 0)
     flags = risk_output.get('critical_flags', [])
     scores = risk_output.get('category_scores', {})
+    incomplete = is_scan_incomplete(risk_output) or bool(
+        honeypot_data and honeypot_data.get('simulation_failed')
+    )
+    if incomplete and risk_level == 'LOW':
+        risk_level = 'UNKNOWN'
+    coverage_reasons = risk_output.get('coverage_reasons', {})
 
     # Verdict emoji
     if rug_prob >= 71:
         verdict_icon = '\U0001F6A8'  # 🚨
     elif rug_prob >= 50:
         verdict_icon = '\U0001F534'  # 🔴
-    elif rug_prob >= 31:
+    elif rug_prob >= 31 or incomplete or risk_level in ('MEDIUM', 'HIGH'):
         verdict_icon = '\U0001F7E1'  # 🟡
     else:
         verdict_icon = '\U0001F7E2'  # 🟢
@@ -41,7 +49,8 @@ def format_full_report(
     else:
         lines.append(f'*Target:* `{address}`')
     lines.append(f'*Risk Archetype:* {archetype.replace("_", " ").title()}')
-    lines.append(f'*Rug Probability:* {rug_prob}%  |  *Risk Level:* {risk_level}')
+    probability = 'Unknown (incomplete coverage)' if incomplete else f'{rug_prob}%'
+    lines.append(f'*Rug Probability:* {probability}  |  *Risk Level:* {risk_level}')
     lines.append(f'*Confidence:* {confidence}%')
     lines.append('')
 
@@ -54,19 +63,24 @@ def format_full_report(
 
     # Category scores
     lines.append('*Category Breakdown:*')
-    lines.append(f'  Structural: {scores.get("structural", 0)}/100')
-    lines.append(f'  Market: {scores.get("market", 0)}/100')
-    lines.append(f'  Behavioral: {scores.get("behavioral", 0)}/100')
-    lines.append(f'  Honeypot: {scores.get("honeypot", 0)}/100')
+    for category in ('structural', 'market', 'behavioral', 'honeypot'):
+        score = scores.get(category)
+        value = f'{score}/100' if score is not None else 'Unknown'
+        reason = coverage_reasons.get(category)
+        if reason:
+            value += f' ({reason})'
+        lines.append(f'  {category.title()}: {value}')
     lines.append('')
 
     # Contract analysis
     lines.append('*\U0001F4DC Contract Analysis:*')
-    verified = '\u2705' if contract_data.get('is_verified') else '\u274C'
+    verified_value = contract_data.get('is_verified')
+    verified = 'Unknown' if verified_value is None else ('\u2705' if verified_value else '\u274C')
     lines.append(f'  Verified: {verified}')
     age = contract_data.get('contract_age_days')
     lines.append(f'  Age: {age} days' if age is not None else '  Age: Unknown')
-    renounced = '\u2705' if contract_data.get('ownership_renounced') else '\u274C'
+    ownership = contract_data.get('ownership_renounced')
+    renounced = 'Unknown' if ownership is None else ('\u2705' if ownership else '\u274C')
     lines.append(f'  Ownership Renounced: {renounced}')
 
     bytecode_warnings = contract_data.get('bytecode_warnings', [])
@@ -82,17 +96,16 @@ def format_full_report(
 
     # Market intelligence
     lines.append('*\U0001F4CA Market Intelligence:*')
-    liq = dex_data.get('liquidity_usd', 0)
-    vol = dex_data.get('volume_24h', 0)
-    change = dex_data.get('price_change_24h', 0)
-    fdv = dex_data.get('fdv', 0)
+    market_reason = dex_data.get('reason') or 'Provider data unavailable'
+    for key, label in (('liquidity_usd', 'Liquidity'), ('volume_24h', '24h Volume'), ('fdv', 'FDV')):
+        value = dex_data.get(key)
+        rendered = f'${value:,.0f}' if value is not None else f'Unknown ({market_reason})'
+        lines.append(f'  {label}: {rendered}')
+    change = dex_data.get('price_change_24h')
+    rendered_change = f'{change:+.1f}%' if change is not None else f'Unknown ({market_reason})'
+    lines.append(f'  24h Price Change: {rendered_change}')
     pair_age = dex_data.get('pair_age_hours')
-    lines.append(f'  Liquidity: ${liq:,.0f}')
-    lines.append(f'  24h Volume: ${vol:,.0f}')
-    lines.append(f'  24h Price Change: {change:+.1f}%')
-    lines.append(f'  FDV: ${fdv:,.0f}')
-    if pair_age is not None:
-        lines.append(f'  Pair Age: {pair_age:.1f}h')
+    lines.append(f'  Pair Age: {pair_age:.1f}h' if pair_age is not None else f'  Pair Age: Unknown ({market_reason})')
 
     dex_flags = []
     if dex_data.get('low_liquidity_flag'):
@@ -121,23 +134,31 @@ def format_full_report(
     lines.append('')
 
     # Trade simulation
-    if honeypot_data:
+    if honeypot_data is not None:
         lines.append('*\U0001F9EA Trade Simulation:*')
-        hp = '\u274C Honeypot' if honeypot_data.get('is_honeypot') else '\u2705 Not Honeypot'
+        reason = honeypot_data.get('reason') or honeypot_data.get('honeypot_reason') or 'Provider data unavailable'
+        is_honeypot = honeypot_data.get('is_honeypot')
+        if is_honeypot is None or (honeypot_data.get('simulation_failed') and is_honeypot is False):
+            hp = f'Unknown ({reason})'
+        else:
+            hp = '\u274C Honeypot' if is_honeypot else '\u2705 Not Honeypot'
         lines.append(f'  {hp}')
-        bt = honeypot_data.get('buy_tax', 0)
-        st = honeypot_data.get('sell_tax', 0)
-        lines.append(f'  Buy Tax: {bt}%  |  Sell Tax: {st}%')
-        can_buy = '\u2705' if honeypot_data.get('can_buy') else '\u274C'
-        can_sell = '\u2705' if honeypot_data.get('can_sell') else '\u274C'
-        lines.append(f'  Can Buy: {can_buy}  |  Can Sell: {can_sell}')
-        reason = honeypot_data.get('honeypot_reason')
+        for key, label in (('buy_tax', 'Buy Tax'), ('sell_tax', 'Sell Tax')):
+            value = honeypot_data.get(key)
+            rendered = f'{value}%' if value is not None else f'Unknown ({reason})'
+            lines.append(f'  {label}: {rendered}')
+        for key, label in (('can_buy', 'Buyability'), ('can_sell', 'Sellability')):
+            value = honeypot_data.get(key)
+            if key == 'can_sell' and honeypot_data.get('simulation_failed'):
+                value = None
+            rendered = f'Unknown ({reason})' if value is None else ('Yes' if value else 'No')
+            lines.append(f'  {label}: {rendered}')
         if reason and reason not in ('Unknown', 'None', ''):
             lines.append(f'  Reason: {reason}')
         lines.append('')
 
     # AI Analysis
-    if ai_analysis:
+    if ai_analysis and not incomplete:
         lines.append('*\U0001F9E0 AI Analysis:*')
         lines.append(ai_analysis)
         lines.append('')
@@ -145,9 +166,11 @@ def format_full_report(
     # Final verdict
     lines.append('*Final Verdict:*')
     if rug_prob >= 71:
-        lines.append(f'{verdict_icon} DO NOT PROCEED — Rug probability {rug_prob}%')
-    elif rug_prob >= 31:
-        lines.append(f'{verdict_icon} PROCEED WITH CAUTION — Moderate risk ({rug_prob}%)')
+        detail = 'Unknown risk: provider coverage incomplete' if incomplete else f'Rug probability {rug_prob}%'
+        lines.append(f'{verdict_icon} DO NOT PROCEED — {detail}')
+    elif rug_prob >= 31 or incomplete or risk_level in ('MEDIUM', 'HIGH'):
+        detail = 'Unknown risk: provider coverage incomplete' if incomplete else f'Moderate risk ({rug_prob}%)'
+        lines.append(f'{verdict_icon} PROCEED WITH CAUTION — {detail}')
     else:
         lines.append(f'{verdict_icon} Generally Safe — Low risk ({rug_prob}%)')
 

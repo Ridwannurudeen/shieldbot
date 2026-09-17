@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import time
+import traceback
 
 from agent.prompts import HAIKU_MODEL, NARRATIVE_TEMPLATE
 
@@ -69,8 +70,11 @@ class Hunter:
         while self._running:
             try:
                 await self.sweep()
-            except Exception:
-                logger.exception("Hunter sweep failed")
+            except Exception as exc:
+                logger.error(
+                    "Hunter sweep failed: %s\n%s",
+                    type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+                )
             await asyncio.sleep(interval)
 
     async def sweep(self):
@@ -87,26 +91,38 @@ class Hunter:
         # Phase 1: check watched deployers
         try:
             flagged += await self._check_watched_deployers(investigation_id)
-        except Exception:
-            logger.exception("Hunter: _check_watched_deployers failed")
+        except Exception as exc:
+            logger.error(
+                "Hunter: _check_watched_deployers failed: %s\n%s",
+                type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+            )
 
         # Phase 2: recheck WARN contracts
         try:
             flagged += await self._recheck_warn_contracts(investigation_id)
-        except Exception:
-            logger.exception("Hunter: _recheck_warn_contracts failed")
+        except Exception as exc:
+            logger.error(
+                "Hunter: _recheck_warn_contracts failed: %s\n%s",
+                type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+            )
 
         # Phase 3: scan new PancakeSwap pairs (placeholder)
         try:
             flagged += await self._scan_new_pairs(investigation_id)
-        except Exception:
-            logger.exception("Hunter: _scan_new_pairs failed")
+        except Exception as exc:
+            logger.error(
+                "Hunter: _scan_new_pairs failed: %s\n%s",
+                type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+            )
 
         # Housekeeping: prune stale chat history (>24h)
         try:
             await self.db.prune_old_chats()
-        except Exception:
-            logger.exception("Hunter: chat pruning failed")
+        except Exception as exc:
+            logger.error(
+                "Hunter: chat pruning failed: %s\n%s",
+                type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+            )
 
         logger.info(
             "Hunter sweep %s complete: %d flagged", investigation_id, len(flagged)
@@ -132,10 +148,11 @@ class Hunter:
                 # Future: query BSCScan for recent contract creations by this deployer
                 # and scan any that aren't already tracked.
                 pass
-            except Exception:
-                logger.exception(
-                    "Hunter: error checking deployer %s",
+            except Exception as exc:
+                logger.error(
+                    "Hunter: error checking deployer %s: %s\n%s",
                     d.get("deployer_address"),
+                    type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
                 )
         return flagged
 
@@ -176,9 +193,10 @@ class Hunter:
                         pair["pair_address"], "cleared"
                     )
                 # else: still WARN, leave as watching
-            except Exception:
-                logger.exception(
-                    "Hunter: error rechecking %s", pair.get("token_address")
+            except Exception as exc:
+                logger.error(
+                    "Hunter: error rechecking %s: %s\n%s", pair.get("token_address"),
+                    type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
                 )
         return flagged
 
@@ -214,8 +232,11 @@ class Hunter:
                     max_tokens=200,
                 )
                 narrative = narrative.strip()
-            except Exception:
-                logger.warning("Hunter: AI narrative failed", exc_info=True)
+            except Exception as exc:
+                logger.warning(
+                    "Hunter: AI narrative failed: %s\n%s",
+                    type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+                )
 
         await self.db.insert_agent_finding(
             finding_type="hunter_sweep",

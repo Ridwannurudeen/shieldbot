@@ -8,6 +8,7 @@ import logging
 from typing import Dict, List, Optional
 from utils.scam_db import ScamDatabase
 from utils.chain_info import get_chain_name
+from utils.web3_client import UnsupportedChainError
 from utils.risk_scorer import (
     findings_from_scan_result, calculate_risk_score,
     blend_scores, compute_confidence
@@ -88,7 +89,7 @@ class TransactionScanner:
 
         result = {
             'address': address,
-            'is_verified': False,
+            'is_verified': None,
             'is_contract': False,
             'risk_level': 'unknown',
             'risk_score': 0,
@@ -99,23 +100,56 @@ class TransactionScanner:
             'scan_type': 'contract',
             'chain_id': chain_id,
             'network': get_chain_name(chain_id),
+            'status': 'ok',
+            'coverage': {},
+            'coverage_reasons': {},
         }
 
         # Check if it's a contract
         result['is_contract'] = await self.web3.is_contract(address, chain_id=chain_id)
 
+        # Scam database lookups do not depend on contract detection, so run them before any early return.
+        data_sources['scam_db'] = await self._check_scam_database(address, result, chain_id=chain_id)
+        result['coverage']['scam_database'] = data_sources['scam_db']
+        if not data_sources['scam_db']:
+            result['coverage_reasons']['scam_database'] = 'scam_database unknown: provider data unavailable'
+
+        if result['is_contract'] is None:
+            result['status'] = 'unknown'
+            result['coverage']['is_contract'] = False
+            result['coverage_reasons']['is_contract'] = 'is_contract unknown: provider data unavailable'
+            result['warnings'].append("Could not determine whether this address is a contract")
+            self._apply_scam_match_risk(result)
+            return result
+
         if not result['is_contract']:
-            result['risk_level'] = 'low'
+            result['coverage']['is_contract'] = True
             result['risk_score'] = 5
-            result['confidence'] = 95
             result['warnings'].append("This is an EOA (externally owned account), not a contract")
+            if result['coverage_reasons']:
+                result['status'] = 'unknown'
+            else:
+                result['risk_level'] = 'low'
+                result['confidence'] = 95
+            self._apply_scam_match_risk(result)
             return result
 
         # Run all security checks (BscScan API only covers BSC; bytecode uses chain_id)
         data_sources['bscscan'] = await self._check_verification(address, result, chain_id=chain_id)
-        data_sources['scam_db'] = await self._check_scam_database(address, result, chain_id=chain_id)
         data_sources['contract_age'] = await self._check_contract_age(address, result, chain_id=chain_id)
         data_sources['bytecode'] = await self._check_similar_scams(address, result, chain_id)
+
+        result['coverage'] = {
+            'is_verified': data_sources['bscscan'],
+            'contract_age_days': data_sources['contract_age'],
+            'scam_database': data_sources['scam_db'],
+            'bytecode': data_sources['bytecode'],
+        }
+        result['coverage_reasons'] = {
+            field: f'{field} unknown: provider data unavailable'
+            for field, covered in result['coverage'].items() if not covered
+        }
+        result['status'] = 'unknown' if result['coverage_reasons'] else 'ok'
 
         # Source code analysis if verified
         source_code = result.get('source_code')
@@ -136,8 +170,10 @@ class TransactionScanner:
         if self.ai_analyzer and self.ai_analyzer.is_available():
             try:
                 ai_result = await self.ai_analyzer.compute_ai_risk_score(address, result)
+            except UnsupportedChainError:
+                raise
             except Exception as e:
-                logger.error(f"AI risk scoring failed: {e}")
+                logger.error("AI risk scoring failed: %s", type(e).__name__)
 
         # Only mark AI as successful if we got a valid dict with risk_score
         ai_score = None
@@ -149,6 +185,7 @@ class TransactionScanner:
 
         # Blend scores (heuristic + AI when available)
         result['risk_score'] = blend_scores(heuristic_score, ai_score)
+        self._apply_scam_match_risk(result)
         result['confidence'] = compute_confidence(data_sources)
 
         # Generate unified forensic report (replaces separate AI calls)
@@ -159,8 +196,10 @@ class TransactionScanner:
                 )
                 if report:
                     result['forensic_report'] = report
+            except UnsupportedChainError:
+                raise
             except Exception as e:
-                logger.error(f"Forensic report generation failed: {e}")
+                logger.error("Forensic report generation failed: %s", type(e).__name__)
 
         # Override risk_level from blended score for consistency
         if result['risk_score'] >= 71:
@@ -169,8 +208,18 @@ class TransactionScanner:
             result['risk_level'] = 'medium'
         else:
             result['risk_level'] = 'low'
+        if result['status'] == 'unknown' and result['risk_level'] == 'low':
+            result['risk_level'] = 'unknown'
 
         return result
+
+    def _apply_scam_match_risk(self, result: Dict):
+        """Floor the score and level for scam database matches, whether or not contract checks ran."""
+        if not result['scam_matches']:
+            return
+        heuristic_score, _, _ = calculate_risk_score(findings_from_scan_result(result))
+        result['risk_score'] = max(result['risk_score'], heuristic_score)
+        result['risk_level'] = 'high' if result['risk_score'] >= 71 else 'medium'
 
     async def _check_verification(self, address: str, result: Dict, chain_id: int = 56) -> bool:
         """Check if contract is verified on BscScan. Returns True if check succeeded."""
@@ -189,13 +238,16 @@ class TransactionScanner:
             if source_code:
                 result['source_code'] = source_code
 
-            if not is_verified:
+            if is_verified is False:
                 result['warnings'].append("Contract source code is not verified")
 
-            return True
+            return is_verified is not None
+        except UnsupportedChainError:
+            raise
         except Exception as e:
-            logger.error(f"Error checking verification: {e}")
-            result['checks']['verified_source'] = False
+            logger.error("Error checking verification: %s", type(e).__name__)
+            result['is_verified'] = None
+            result['checks']['verified_source'] = None
             return False
 
     async def _check_scam_database(self, address: str, result: Dict, chain_id: int = 56) -> bool:
@@ -211,20 +263,26 @@ class TransactionScanner:
                 result['checks']['scam_database_clean'] = True
 
             return True
+        except UnsupportedChainError:
+            raise
         except Exception as e:
-            logger.error(f"Error checking scam database: {e}")
+            logger.error("Error checking scam database: %s", type(e).__name__)
             result['checks']['scam_database_clean'] = None
             return False
 
     async def _check_contract_age(self, address: str, result: Dict, chain_id: int = 56) -> bool:
         """Check contract creation time. Returns True if check succeeded."""
+        result['contract_age_days'] = None
+        result['checks']['not_too_new'] = None
         try:
             creation_info = await self.web3.get_contract_creation_info(address, chain_id=chain_id)
 
             if creation_info:
-                age_days = creation_info.get('age_days', 0)
+                age_days = creation_info.get('age_days')
                 result['contract_age_days'] = age_days
 
+                if age_days is None:
+                    return False
                 if age_days < 7:
                     result['warnings'].append(f"Contract is only {age_days} days old")
                     result['checks']['not_too_new'] = False
@@ -233,8 +291,10 @@ class TransactionScanner:
                 return True
 
             return False
+        except UnsupportedChainError:
+            raise
         except Exception as e:
-            logger.error(f"Error checking contract age: {e}")
+            logger.error("Error checking contract age: %s", type(e).__name__)
             result['checks']['not_too_new'] = None
             return False
 
@@ -254,8 +314,10 @@ class TransactionScanner:
                 return True
 
             return False
+        except UnsupportedChainError:
+            raise
         except Exception as e:
-            logger.error(f"Error checking similar scams: {e}")
+            logger.error("Error checking similar scams: %s", type(e).__name__)
             result['checks']['no_suspicious_patterns'] = None
             return False
 
@@ -299,6 +361,9 @@ class TransactionScanner:
 
         if checks.get('verified_source') is False or checks.get('no_suspicious_patterns') is False:
             return 'medium'
+
+        if result.get('status') == 'unknown':
+            return 'unknown'
 
         if all([
             checks.get('verified_source'),

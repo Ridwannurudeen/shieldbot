@@ -6,8 +6,13 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
     import api as api_module
+    from utils.web3_client import Web3Client
+
+    web3_client = Web3Client.__new__(Web3Client)
+    web3_client._adapters = {56: MagicMock(), 1: MagicMock()}
+    monkeypatch.setattr(api_module, "web3_client", web3_client)
 
     advisor = MagicMock()
     advisor.chat = AsyncMock(return_value={"text": "This contract looks risky."})
@@ -69,7 +74,7 @@ def test_chat_calls_advisor(client):
 def test_explain_success(client):
     response = client.post(
         "/api/agent/explain",
-        json={"scan_result": {"risk_score": 85, "risk_level": "HIGH"}},
+        json={"scan_result": {"risk_score": 85, "risk_level": "HIGH", "status": "ok", "coverage": {"honeypot": 1}}},
     )
     assert response.status_code == 200
     data = response.json()
@@ -81,7 +86,7 @@ def test_explain_calls_advisor(client):
 
     advisor = api_module.container.advisor
 
-    scan = {"risk_score": 85, "risk_level": "HIGH"}
+    scan = {"risk_score": 85, "risk_level": "HIGH", "status": "ok", "coverage": {"honeypot": 1}}
     client.post("/api/agent/explain", json={"scan_result": scan})
 
     advisor.explain_scan.assert_awaited_once_with(scan)
@@ -106,15 +111,15 @@ def test_chat_forwards_chain_id(client):
 
 
 def test_chat_invalid_chain_id_zero(client):
-    """chain_id=0 rejected by ge=1 validator."""
+    """chain_id=0 rejected before the advisor is called."""
     resp = client.post("/api/agent/chat", json={"message": "hi", "user_id": "u1", "chain_id": 0})
-    assert resp.status_code == 422
+    assert resp.status_code == 400
 
 
 def test_chat_invalid_chain_id_negative(client):
     """Negative chain_id rejected."""
     resp = client.post("/api/agent/chat", json={"message": "hi", "user_id": "u1", "chain_id": -5})
-    assert resp.status_code == 422
+    assert resp.status_code == 400
 
 
 def test_chat_response_includes_scan_data(client):
@@ -122,7 +127,8 @@ def test_chat_response_includes_scan_data(client):
     import api as api_module
     api_module.container.advisor.chat = AsyncMock(return_value={
         "text": "This is dangerous.",
-        "scan_data": {"address": "0xdead", "risk_level": "HIGH", "risk_score": 90},
+        "scan_data": {"address": "0xdead", "risk_level": "HIGH", "risk_score": 90,
+                      "status": "ok", "coverage": {"honeypot": 1}},
     })
     resp = client.post("/api/agent/chat", json={"message": "Check 0xdead", "user_id": "u1"})
     assert resp.status_code == 200

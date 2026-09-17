@@ -406,14 +406,19 @@
       SAFE: _t("classSafe"),
     };
 
-    const classification = result.classification || "CAUTION";
+    const incomplete = result.status !== "ok" || result.partial === true ||
+      result.risk_level === "UNKNOWN" || result.classification === "UNKNOWN" ||
+      !Number.isFinite(result.risk_score) ||
+      Object.values(result.coverage || {}).some(value => Number(value) < 1);
+    const classification = incomplete && !["HIGH_RISK", "BLOCK_RECOMMENDED"].includes(result.classification)
+      ? "UNKNOWN" : result.classification || "CAUTION";
     const color = classColors[classification] || "#eab308";
     const label = classLabels[classification] || classification;
     const isBlock = classification === "BLOCK_RECOMMENDED";
 
     // Display as safety score (100 - risk) so higher = better
-    const riskScore = result.risk_score || 0;
-    const safetyScore = 100 - riskScore;
+    const scoreDisplay = incomplete ? "Unknown (incomplete provider coverage)" :
+      `${_t("overlaySafety")} ${100 - result.risk_score}/100`;
 
     const overlay = document.createElement("div");
     overlay.id = "shieldai-overlay";
@@ -450,7 +455,7 @@
         </div>
 
         <div class="shieldai-badge" style="background:${color}">
-          ${escapeHtml(label)} &mdash; ${_t("overlaySafety")} ${safetyScore}/100
+          ${escapeHtml(label)} &mdash; ${escapeHtml(scoreDisplay)}
         </div>
 
         ${result.partial ? `
@@ -492,11 +497,11 @@
 
         <div class="shieldai-section">
           <h3>${_t("overlayAnalysis")}</h3>
-          <p>${escapeHtml(result.plain_english || result.analysis || _t("overlayNoAnalysis"))}</p>
+          <p>${escapeHtml(incomplete ? "Unknown (incomplete provider coverage)" : result.plain_english || result.analysis || _t("overlayNoAnalysis"))}</p>
         </div>
 
         <div class="shieldai-verdict">
-          ${escapeHtml(result.verdict || "")}
+          ${escapeHtml(incomplete ? "Unknown (incomplete provider coverage)" : result.verdict || "")}
         </div>
 
         <div class="shieldai-actions">
@@ -566,6 +571,14 @@
       responseDiv.style.display = "block";
       loadingEl.style.display = "block";
       textEl.style.display = "none";
+
+      if (incomplete) {
+        loadingEl.style.display = "none";
+        textEl.style.display = "block";
+        textEl.textContent = "Unknown (incomplete provider coverage). " +
+          Object.values(result.coverage_reasons || {}).join("; ");
+        return;
+      }
 
       chrome.runtime.sendMessage(
         { type: "SHIELDAI_EXPLAIN", scanResult: result },

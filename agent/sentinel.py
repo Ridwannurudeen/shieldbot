@@ -9,6 +9,7 @@ Every public method is wrapped in try/except so it never crashes the caller.
 
 import json
 import logging
+import traceback
 from typing import Optional
 
 from agent.prompts import HAIKU_MODEL, NARRATIVE_TEMPLATE
@@ -65,8 +66,11 @@ class Sentinel:
                 address,
             )
 
-        except Exception:
-            logger.exception("Sentinel.on_scan_blocked failed (non-fatal)")
+        except Exception as exc:
+            logger.error(
+                "Sentinel.on_scan_blocked failed (non-fatal): %s\n%s",
+                type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+            )
 
     # ------------------------------------------------------------------
     # Event: mempool monitor detected suspicious activity
@@ -87,8 +91,11 @@ class Sentinel:
                         max_tokens=200,
                     )
                     narrative = narrative.strip()
-                except Exception:
-                    logger.warning("Sentinel: AI narrative generation failed", exc_info=True)
+                except Exception as exc:
+                    logger.warning(
+                        "Sentinel: AI narrative generation failed: %s\n%s",
+                        type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+                    )
 
             await self.db.insert_agent_finding(
                 finding_type="mempool_alert",
@@ -103,8 +110,11 @@ class Sentinel:
 
             logger.info("Sentinel: mempool alert logged for %s", alert_data.get("address"))
 
-        except Exception:
-            logger.exception("Sentinel.on_mempool_alert failed (non-fatal)")
+        except Exception as exc:
+            logger.error(
+                "Sentinel.on_mempool_alert failed (non-fatal): %s\n%s",
+                type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+            )
 
     # ------------------------------------------------------------------
     # Event: a watched deployer deployed a new contract
@@ -140,5 +150,8 @@ class Sentinel:
                 action,
             )
 
-        except Exception:
-            logger.exception("Sentinel.on_deployer_flagged failed (non-fatal)")
+        except Exception as exc:
+            logger.error(
+                "Sentinel.on_deployer_flagged failed (non-fatal): %s\n%s",
+                type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+            )

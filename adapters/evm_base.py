@@ -15,6 +15,18 @@ from core.chain_adapter import ChainAdapter
 
 logger = logging.getLogger(__name__)
 
+EXPLORER_BACKENDS = {
+    1: 'etherscan', 56: 'etherscan', 8453: 'etherscan',
+    42161: 'etherscan', 137: 'etherscan', 10: 'etherscan', 204: 'etherscan',
+    4663: 'sourcify_blockscout',
+}
+
+
+def _get_explorer_backend(chain_id: int) -> str:
+    if chain_id not in EXPLORER_BACKENDS:
+        raise ValueError(f"Unsupported explorer chain: {chain_id}")
+    return EXPLORER_BACKENDS[chain_id]
+
 FACTORY_ABI = [
     {
         "constant": True,
@@ -74,13 +86,17 @@ class EvmAdapter(ChainAdapter):
         factory_address: str = None,
         whitelisted_routers: Dict[str, str] = None,
     ):
+        from services.explorer_service import explorer_service
+
+        self._explorer_backend = _get_explorer_backend(chain_id_value)
+        self._explorer_service = explorer_service
         self._chain_id = chain_id_value
         self._chain_name = chain_name_value
         self.w3 = Web3(Web3.HTTPProvider(rpc_url))
         self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
         self.etherscan_api_key = etherscan_api_key
         self.etherscan_api_url = 'https://api.etherscan.io/v2/api'
-        self._honeypot_chain_id = honeypot_chain_id or chain_id_value
+        self._honeypot_chain_id = honeypot_chain_id
         self._known_lockers = known_lockers or {}
         self._quote_tokens = quote_tokens or []
         self._factory_address = factory_address
@@ -110,31 +126,39 @@ class EvmAdapter(ChainAdapter):
                 if is_retriable and attempt < retries - 1:
                     delay = base_delay * (2 ** attempt)
                     logger.warning(
-                        f"[{self._chain_name}] RPC rate-limited (attempt {attempt + 1}/{retries}), "
-                        f"retrying in {delay}s: {err_str[:80]}"
+                        "[%s] RPC rate-limited (attempt %d/%d), retrying in %ss: %s",
+                        self._chain_name, attempt + 1, retries, delay, type(e).__name__,
                     )
                     await asyncio.sleep(delay)
                 elif not is_retriable:
                     raise
         raise last_exc
 
-    async def is_contract(self, address: str) -> bool:
+    async def is_contract(self, address: str) -> Optional[bool]:
+        """Return True/False from on-chain code; None means the lookup failed."""
         try:
             code = await self._call_with_retry(self.w3.eth.get_code, Web3.to_checksum_address(address))
             return len(code) > 0
         except Exception as e:
-            logger.error(f"[{self._chain_name}] Error checking if contract: {e}")
-            return False
+            logger.error("[%s] Error checking if contract: %s", self._chain_name, type(e).__name__)
+            return None
 
     async def get_bytecode(self, address: str) -> Optional[str]:
         try:
             code = await self._call_with_retry(self.w3.eth.get_code, Web3.to_checksum_address(address))
             return code.hex()
         except Exception as e:
-            logger.error(f"[{self._chain_name}] Error getting bytecode: {e}")
+            logger.error("[%s] Error getting bytecode: %s", self._chain_name, type(e).__name__)
             return None
 
-    async def is_verified_contract(self, address: str) -> Tuple[bool, Optional[str]]:
+    async def is_verified_contract(self, address: str) -> Tuple[Optional[bool], Optional[str]]:
+        """Return (verification, source); None means unknown, False means unverified."""
+        if self._explorer_backend == 'sourcify_blockscout':
+            result = await self._explorer_service.get_verification_status(address, self._chain_id)
+            if result.status == 'unknown':
+                logger.warning("[%s] Verification unknown: %s", self._chain_name, result.reason)
+                return (None, None)
+            return (result.status == 'verified', None)
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
                 params = {
@@ -145,18 +169,42 @@ class EvmAdapter(ChainAdapter):
                     'apikey': self.etherscan_api_key,
                 }
                 async with session.get(self.etherscan_api_url, params=params) as resp:
+                    if resp.status != 200:
+                        logger.warning("[%s] Verification unknown: HTTP %s", self._chain_name, resp.status)
+                        return (None, None)
                     data = await resp.json()
-                    if data['status'] == '1' and data['result']:
-                        source_code = data['result'][0].get('SourceCode', '')
+                    if (
+                        isinstance(data, dict) and data.get('status') == '1'
+                        and isinstance(data.get('result'), list) and len(data['result']) == 1
+                        and isinstance(data['result'][0], dict)
+                        and isinstance(data['result'][0].get('SourceCode'), str)
+                    ):
+                        source_code = data['result'][0]['SourceCode']
                         is_verified = len(source_code) > 0
                         return (is_verified, source_code if is_verified else None)
-            return (False, None)
+            logger.warning("[%s] Verification unknown: missing source response", self._chain_name)
+            return (None, None)
         except Exception as e:
-            logger.error(f"[{self._chain_name}] Error checking verification: {e}")
-            return (False, None)
+            logger.error("[%s] Error checking verification: %s", self._chain_name, type(e).__name__)
+            return (None, None)
 
     async def get_contract_creation_info(self, address: str) -> Optional[Dict]:
         try:
+            if self._explorer_backend == 'sourcify_blockscout':
+                result = await self._explorer_service.get_contract_creation_info(address, self._chain_id)
+                if result.status == 'unknown':
+                    logger.warning("[%s] Creation unknown: %s", self._chain_name, result.reason)
+                    return None
+                creation_info = {**result.data, 'creation_time': None, 'age_days': None}
+                try:
+                    tx = await self._call_with_retry(self.w3.eth.get_transaction, creation_info['tx_hash'])
+                    block = await self._call_with_retry(self.w3.eth.get_block, tx['blockNumber'])
+                    creation_time = datetime.fromtimestamp(block['timestamp'], tz=timezone.utc)
+                    creation_info['creation_time'] = creation_time.isoformat()
+                    creation_info['age_days'] = (datetime.now(timezone.utc) - creation_time).days
+                except Exception as e:
+                    logger.warning("[%s] Creation time unknown: %s", self._chain_name, type(e).__name__)
+                return creation_info
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
                 params = {
                     'chainid': self._chain_id,
@@ -166,6 +214,9 @@ class EvmAdapter(ChainAdapter):
                     'apikey': self.etherscan_api_key,
                 }
                 async with session.get(self.etherscan_api_url, params=params) as resp:
+                    if resp.status != 200:
+                        logger.warning("[%s] Creation unknown: HTTP %s", self._chain_name, resp.status)
+                        return None
                     data = await resp.json()
                     if data['status'] == '1' and data['result']:
                         result = data['result'][0]
@@ -182,7 +233,7 @@ class EvmAdapter(ChainAdapter):
                         }
             return None
         except Exception as e:
-            logger.error(f"[{self._chain_name}] Error getting creation info: {e}")
+            logger.error("[%s] Error getting creation info: %s", self._chain_name, type(e).__name__)
             return None
 
     async def get_token_info(self, address: str) -> Dict:
@@ -199,7 +250,7 @@ class EvmAdapter(ChainAdapter):
                 'decimals': decimals, 'total_supply': total_supply / (10 ** decimals),
             }
         except Exception as e:
-            logger.error(f"[{self._chain_name}] Error getting token info: {e}")
+            logger.error("[%s] Error getting token info: %s", self._chain_name, type(e).__name__)
             return {}
 
     async def get_ownership_info(self, address: str) -> Dict:
@@ -212,78 +263,118 @@ class EvmAdapter(ChainAdapter):
             is_renounced = owner.lower() == zero_address.lower()
             return {'owner': owner, 'is_renounced': is_renounced}
         except Exception as e:
-            logger.error(f"[{self._chain_name}] Error getting ownership info: {e}")
+            logger.error("[%s] Error getting ownership info: %s", self._chain_name, type(e).__name__)
             return {'owner': None, 'is_renounced': None}
 
     async def check_honeypot(self, address: str) -> Dict:
+        result = {
+            'is_honeypot': None, 'status': 'unknown',
+            'reason': 'No honeypot data returned', 'field_providers': {},
+        }
+        if self._honeypot_chain_id is None:
+            result['reason'] = 'honeypot.is unsupported for this chain'
+            return result
         try:
             async with aiohttp.ClientSession() as session:
                 url = f"https://api.honeypot.is/v2/IsHoneypot?address={address}&chainID={self._honeypot_chain_id}"
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        honeypot_result = data.get('honeypotResult', {})
-                        simulation = data.get('simulationResult', {})
-                        is_honeypot = honeypot_result.get('isHoneypot', False)
-                        reason = honeypot_result.get('honeypotReason', 'Unknown')
-                        sim_success = data.get('simulationSuccess', True)
+                    if resp.status != 200:
+                        result['reason'] = (
+                            'Token not found on honeypot.is' if resp.status == 404
+                            else f'honeypot.is HTTP {resp.status}'
+                        )
+                        return result
+                    data = await resp.json()
+                    sim_success = data.get('simulationSuccess')
+                    if isinstance(sim_success, bool):
+                        result['simulation_success'] = sim_success
+                    if sim_success is False:
+                        result['reason'] = 'Simulation failed (inconclusive)'
+                        result['simulation_failed'] = True
+                        return result
 
-                        if not sim_success:
-                            return {
+                    honeypot_result = data.get('honeypotResult') or {}
+                    is_honeypot = honeypot_result.get('isHoneypot')
+                    if not isinstance(is_honeypot, bool):
+                        return result
+                    reason = honeypot_result.get('honeypotReason') or 'honeypot.is result'
+                    result.update({
+                        'is_honeypot': is_honeypot, 'status': 'ok', 'reason': reason,
+                        'field_providers': {'is_honeypot': 'honeypot.is'},
+                    })
+                    simulation = data.get('simulationResult') or {}
+                    sell_tax = simulation.get('sellTax')
+                    buy_tax = simulation.get('buyTax')
+                    if (
+                        is_honeypot and sim_success is True
+                        and isinstance(sell_tax, (int, float)) and not isinstance(sell_tax, bool)
+                        and isinstance(buy_tax, (int, float)) and not isinstance(buy_tax, bool)
+                        and 0 <= sell_tax < 5 and 0 <= buy_tax < 5
+                    ):
+                        # Preserve the existing verified, low-tax false-positive rule.
+                        verified, _ = await self.is_verified_contract(address)
+                        if verified is True:
+                            result.update({
                                 'is_honeypot': False,
-                                'reason': 'Simulation failed (inconclusive)',
-                                'simulation_failed': True,
-                            }
-
-                        sell_tax = float(simulation.get('sellTax', 0))
-                        buy_tax = float(simulation.get('buyTax', 0))
-                        if is_honeypot and sell_tax < 5 and buy_tax < 5:
-                            # Low taxes but flagged — check if verified.
-                            # Verified contracts with 0% taxes are almost
-                            # always honeypot.is false positives (e.g.
-                            # Binance-pegged tokens like LINK, DOGE, XVS).
-                            verified, _ = await self.is_verified_contract(address)
-                            if verified:
-                                return {
-                                    'is_honeypot': False,
-                                    'reason': f'Flagged but verified with normal taxes (buy:{buy_tax}% sell:{sell_tax}%)',
-                                    'likely_false_positive': True,
-                                }
-                            # Unverified + flagged = trust the flag
-                            return {
-                                'is_honeypot': True,
-                                'reason': f'{reason} (taxes low: buy:{buy_tax}% sell:{sell_tax}%)',
+                                'reason': f'Flagged but verified with normal taxes (buy:{float(buy_tax)}% sell:{float(sell_tax)}%)',
+                                'likely_false_positive': True,
+                            })
+                        else:
+                            result.update({
+                                'reason': f'{reason} (taxes low: buy:{float(buy_tax)}% sell:{float(sell_tax)}%)',
                                 'low_tax_honeypot': True,
-                            }
-
-                        return {'is_honeypot': is_honeypot, 'reason': reason}
-                    if resp.status == 404:
-                        return {
-                            'is_honeypot': False,
-                            'reason': 'Token not found on honeypot.is',
-                            'simulation_failed': True,
-                        }
-            return {'is_honeypot': False, 'reason': 'Unable to check'}
+                            })
+            return result
         except Exception as e:
-            logger.error(f"[{self._chain_name}] Error checking honeypot: {e}")
-            return {'is_honeypot': False, 'reason': f'Error: {str(e)}'}
+            logger.error("[%s] Error checking honeypot: %s", self._chain_name, type(e).__name__)
+            result['reason'] = f'Error checking honeypot.is: {type(e).__name__}'
+            return result
 
     async def get_tax_info(self, address: str) -> Dict:
+        result = {
+            'buy_tax': None, 'sell_tax': None, 'status': 'unknown',
+            'reason': 'No tax data returned', 'field_providers': {},
+        }
+        if self._honeypot_chain_id is None:
+            result['reason'] = 'honeypot.is unsupported for this chain'
+            return result
         try:
             async with aiohttp.ClientSession() as session:
                 url = f"https://api.honeypot.is/v2/IsHoneypot?address={address}&chainID={self._honeypot_chain_id}"
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        simulation = data.get('simulationResult', {})
-                        return {
-                            'buy_tax': float(simulation.get('buyTax', 0)),
-                            'sell_tax': float(simulation.get('sellTax', 0)),
-                        }
-            return {'buy_tax': 0, 'sell_tax': 0}
+                    if resp.status != 200:
+                        result['reason'] = f'honeypot.is HTTP {resp.status}'
+                        return result
+                    data = await resp.json()
+                    if data.get('simulationSuccess') is False:
+                        result['reason'] = 'Simulation failed (inconclusive)'
+                        result['simulation_failed'] = True
+                        return result
+                    if data.get('simulationSuccess') is not True:
+                        result['reason'] = 'Simulation success unknown'
+                        return result
+                    simulation = data.get('simulationResult') or {}
+                    for field, provider_field in (('buy_tax', 'buyTax'), ('sell_tax', 'sellTax')):
+                        value = simulation.get(provider_field)
+                        if value is None or value == '' or isinstance(value, bool):
+                            continue
+                        try:
+                            value = float(value)
+                        except (TypeError, ValueError):
+                            continue
+                        if 0 <= value < float('inf'):
+                            result[field] = value
+                            result['field_providers'][field] = 'honeypot.is'
+                    if result['buy_tax'] is not None and result['sell_tax'] is not None:
+                        result['status'] = 'ok'
+                        result['reason'] = 'honeypot.is simulation taxes'
+                    else:
+                        result['reason'] = 'Missing or invalid honeypot.is tax data'
+            return result
         except Exception as e:
-            logger.error(f"[{self._chain_name}] Error getting tax info: {e}")
-            return {'buy_tax': 0, 'sell_tax': 0}
+            logger.error("[%s] Error getting tax info: %s", self._chain_name, type(e).__name__)
+            result['reason'] = f'Error getting honeypot.is taxes: {type(e).__name__}'
+            return result
 
     async def get_liquidity_info(self, address: str) -> Dict:
         if not self._factory_address:
@@ -353,7 +444,7 @@ class EvmAdapter(ChainAdapter):
                 'lockers': locker_details,
             }
         except Exception as e:
-            logger.error(f"[{self._chain_name}] Error getting liquidity info: {e}")
+            logger.error("[%s] Error getting liquidity info: %s", self._chain_name, type(e).__name__)
             return {'is_locked': False, 'lock_percentage': 0}
 
     def get_whitelisted_routers(self) -> Dict[str, str]:

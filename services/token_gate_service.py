@@ -56,5 +56,5 @@ class TokenGateService:
             self._cache[cache_key] = (has_minimum, now + CACHE_TTL_SECONDS)
             return has_minimum
         except Exception as exc:
-            logger.warning("Token gate balance check failed for %s: %s", address, exc)
+            logger.warning("Token gate balance check failed for %s: %s", address, type(exc).__name__)
             return False

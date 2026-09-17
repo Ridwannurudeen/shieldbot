@@ -15,6 +15,7 @@ except ImportError:
     _openai_mod = None
 
 from utils.firewall_prompt import FIREWALL_SYSTEM_PROMPT
+from utils.chain_info import get_chain_name
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,10 @@ _OPENAI_FALLBACK_MODELS = {
     "claude-3-haiku-20240307": "gpt-4o-mini",
     "claude-sonnet-4-20250514": "gpt-4o",
 }
+
+
+def _get_prompt_chain_name(chain_id: Optional[int]) -> str:
+    return get_chain_name(chain_id) if chain_id is not None else 'Unknown chain'
 
 
 class AIAnalyzer:
@@ -112,7 +117,7 @@ class AIAnalyzer:
         try:
             context = self._format_scan_data(scan_data)
 
-            prompt = f"""You are a blockchain security analyst scoring a BNB Chain smart contract.
+            prompt = f"""You are a blockchain security analyst scoring a smart contract on {_get_prompt_chain_name(scan_data.get('chain_id'))}.
 
 Address: {address}
 Scan Data:
@@ -152,13 +157,13 @@ Base your score on: verification status, contract age, scam DB matches, bytecode
             return result
 
         except (json.JSONDecodeError, KeyError) as e:
-            logger.error(f"AI risk score parse error: {e}")
+            logger.error("AI risk score parse error: %s", type(e).__name__)
             return None
         except Exception as e:
-            logger.error(f"AI risk score failed: {e}")
+            logger.error("AI risk score failed: %s", type(e).__name__)
             return None
 
-    async def analyze_verified_source(self, address: str, source_code: str) -> Optional[Dict]:
+    async def analyze_verified_source(self, address: str, source_code: str, chain_id: Optional[int] = None) -> Optional[Dict]:
         """
         AI analysis of verified Solidity source code for dangerous patterns.
 
@@ -172,7 +177,7 @@ Base your score on: verification status, contract age, scam DB matches, bytecode
             # Truncate source for API limits (first 12KB)
             source_sample = source_code[:12000] if len(source_code) > 12000 else source_code
 
-            prompt = f"""Analyze this BNB Chain smart contract source code for dangerous patterns.
+            prompt = f"""Analyze this {_get_prompt_chain_name(chain_id)} smart contract source code for dangerous patterns.
 
 Address: {address}
 Source Code:
@@ -209,10 +214,10 @@ Look for: honeypot mechanisms (blacklists, trading pauses, max tx traps), hidden
             return result
 
         except (json.JSONDecodeError, KeyError) as e:
-            logger.error(f"AI source analysis parse error: {e}")
+            logger.error("AI source analysis parse error: %s", type(e).__name__)
             return None
         except Exception as e:
-            logger.error(f"AI source analysis failed: {e}")
+            logger.error("AI source analysis failed: %s", type(e).__name__)
             return None
 
     async def analyze_contract_bytecode(self, address: str, bytecode: str, scan_results: Dict) -> Optional[str]:
@@ -226,7 +231,7 @@ Look for: honeypot mechanisms (blacklists, trading pauses, max tx traps), hidden
             context = self._prepare_scan_context(address, scan_results)
             bytecode_sample = bytecode[:8000] if len(bytecode) > 8000 else bytecode
 
-            prompt = f"""You are a blockchain security expert analyzing a smart contract on BNB Chain.
+            prompt = f"""You are a blockchain security expert analyzing a smart contract on {_get_prompt_chain_name(scan_results.get('chain_id'))}.
 
 Contract Address: {address}
 Bytecode Sample (first 4KB): {bytecode_sample}
@@ -251,7 +256,7 @@ Keep response under 200 words, focused and actionable."""
             return message.content[0].text
 
         except Exception as e:
-            logger.error(f"AI analysis failed: {e}")
+            logger.error("AI analysis failed: %s", type(e).__name__)
             return None
 
     async def analyze_token_safety(self, address: str, token_info: Dict, safety_results: Dict) -> Optional[str]:
@@ -264,7 +269,7 @@ Keep response under 200 words, focused and actionable."""
         try:
             context = self._prepare_token_context(address, token_info, safety_results)
 
-            prompt = f"""You are a DeFi security expert analyzing a token on BNB Chain.
+            prompt = f"""You are a DeFi security expert analyzing a token on {_get_prompt_chain_name(safety_results.get('chain_id'))}.
 
 Token: {token_info.get('name', 'Unknown')} ({token_info.get('symbol', 'N/A')})
 Address: {address}
@@ -289,7 +294,7 @@ Keep response under 200 words, actionable for traders."""
             return message.content[0].text
 
         except Exception as e:
-            logger.error(f"AI token analysis failed: {e}")
+            logger.error("AI token analysis failed: %s", type(e).__name__)
             return None
 
     async def explain_findings(self, user_question: str, scan_context: Dict) -> Optional[str]:
@@ -315,7 +320,7 @@ Provide a clear, helpful answer in 2-3 sentences. Use simple language."""
             return message.content[0].text
 
         except Exception as e:
-            logger.error(f"AI explanation failed: {e}")
+            logger.error("AI explanation failed: %s", type(e).__name__)
             return None
 
     def _format_scan_data(self, scan_data: Dict) -> str:
@@ -362,7 +367,7 @@ Provide a clear, helpful answer in 2-3 sentences. Use simple language."""
         try:
             context = self._build_forensic_context(address, scan_data, scan_type)
 
-            system_prompt = """You are ShieldAI — a blockchain security analyst on BNB Chain. Provide a concise forensic report.
+            system_prompt = f"""You are ShieldAI — a blockchain security analyst on {_get_prompt_chain_name(scan_data.get('chain_id'))}. Provide a concise forensic report.
 
 OUTPUT FORMAT (Telegram Markdown: ** for bold, ` for code):
 
@@ -400,7 +405,7 @@ Generate the ShieldAI forensic report now."""
             return report
 
         except Exception as e:
-            logger.error(f"Forensic report generation failed: {e}")
+            logger.error("Forensic report generation failed: %s", type(e).__name__)
             return None
 
     def _build_forensic_context(self, address: str, data: Dict, scan_type: str) -> str:
@@ -496,7 +501,8 @@ Generate the ShieldAI forensic report now."""
         try:
             context = self._build_firewall_context(tx_data, contract_scan)
 
-            user_message = f"""Analyze this pending BNB Chain transaction:
+            chain_name = _get_prompt_chain_name(contract_scan.get('chain_id', tx_data.get('chainId')))
+            user_message = f"""Analyze this pending {chain_name} transaction:
 
 {context}
 
@@ -506,7 +512,7 @@ Return the firewall analysis JSON now."""
                 model=self.model,
                 max_tokens=800,
                 messages=[
-                    {"role": "user", "content": FIREWALL_SYSTEM_PROMPT + "\n\n" + user_message}
+                    {"role": "user", "content": FIREWALL_SYSTEM_PROMPT.replace("{chain_name}", chain_name) + "\n\n" + user_message}
                 ]
             )
 
@@ -535,10 +541,10 @@ Return the firewall analysis JSON now."""
             return result
 
         except (json.JSONDecodeError, KeyError) as e:
-            logger.error(f"Firewall report parse error: {e}")
+            logger.error("Firewall report parse error: %s", type(e).__name__)
             return None
         except Exception as e:
-            logger.error(f"Firewall report failed: {e}")
+            logger.error("Firewall report failed: %s", type(e).__name__)
             return None
 
     def _build_firewall_context(self, tx_data: Dict, contract_scan: Dict) -> str:
@@ -548,7 +554,7 @@ Return the firewall analysis JSON now."""
             f"From: {tx_data.get('from', 'unknown')}",
             f"To: {tx_data.get('to', 'unknown')}",
             f"Value: {tx_data.get('value', '0')} wei",
-            f"Chain ID: {tx_data.get('chainId', 56)}",
+            f"Chain ID: {tx_data.get('chainId') if tx_data.get('chainId') is not None else 'Unknown'}",
         ]
 
         # Decoded calldata
