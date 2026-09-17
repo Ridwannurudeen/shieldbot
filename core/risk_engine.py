@@ -171,7 +171,7 @@ class RiskEngine:
             if has_mint and has_proxy and ownership_renounced is False:
                 composite = max(composite, 85)
 
-            if not contract_data.get('is_contract') and honeypot_data.get('simulation_failed'):
+            if contract_data.get('is_contract') is False and honeypot_data.get('simulation_failed'):
                 composite = max(composite, 80)
 
             if honeypot_data.get('is_honeypot'):
@@ -297,7 +297,7 @@ class RiskEngine:
                 composite = max(composite, 55)
 
             # No contract bytecode + honeypot simulation failed → destroyed scam token
-            if not contract_data.get('is_contract') and honeypot_data.get('simulation_failed'):
+            if contract_data.get('is_contract') is False and honeypot_data.get('simulation_failed'):
                 composite = max(composite, 80)
 
             # Honeypot escalation — floor at 80 if confirmed
