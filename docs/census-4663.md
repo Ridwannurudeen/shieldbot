@@ -87,7 +87,11 @@ python -m scripts.census_4663.report --data-dir /var/lib/shieldbot-census-4663 -
 This writes `report.json` and `report.md` in the data directory. Dates must include
 a timezone. The requested window is clamped to actual collected block timestamps;
 the current wall clock cannot turn an incompletely observed token into a mature
-one. Reports read a consistent database snapshot while the collector runs.
+one. Reports, probe token samples and smoke selection open the database read-only
+and read one consistent snapshot while the collector runs. The collector keeps
+committing; its WAL cannot be checkpointed past that snapshot until the command
+finishes. Events and creation receipt evidence are streamed, so memory grows with
+the number of pools and tokens, not with the number of events.
 
 **New tokens** means unique non-native/non-WETH addresses at their first observed
 pool creation in this census, not proof of token deployment. WETH is

@@ -1,6 +1,7 @@
 import copy
 from argparse import Namespace
-from unittest.mock import AsyncMock, patch
+from contextlib import nullcontext
+from unittest.mock import patch
 
 import pytest
 
@@ -260,7 +261,7 @@ async def test_report_command_writes_json_and_markdown(tmp_path):
     data = census()
     pool(data)
     with patch(
-        "scripts.census_4663.storage.load_data", new=AsyncMock(return_value=data)
+        "scripts.census_4663.storage.read_snapshot", return_value=nullcontext(data)
     ):
         await run(Namespace(data_dir=tmp_path, since=None, until=None))
     assert '"chain_id": 4663' in (tmp_path / "report.json").read_text(encoding="utf-8")

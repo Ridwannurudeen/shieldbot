@@ -94,7 +94,41 @@ def _principal(positions, sqrt_price_x96, side):
         return total / Decimal(10**18)
 
 
-def _token_metrics(token, pools, events, first_seen, end):
+class _LoadedCensus:
+    """Report source over fully loaded census data, for tests and small databases."""
+
+    def __init__(self, data):
+        self.data = data
+        self.meta = data["meta"]
+        self.pool_events = defaultdict(list)
+        for event in data["events"]:
+            self.pool_events[event["pool_key"]].append(event)
+
+    def coverage(self):
+        timestamps = [block["timestamp"] for block in self.data["blocks"]]
+        return (min(timestamps), max(timestamps)) if timestamps else (None, None)
+
+    def pools(self):
+        return self.data["pools"]
+
+    def token_events(self, pools, first_seen, deadline, end):
+        events = [
+            event for pool in pools for event in self.pool_events[pool["pool_key"]]
+        ]
+        return sorted(events, key=lambda e: (e["block_number"], e["log_index"]))
+
+    def creation_events(self):
+        return (
+            event
+            for event in self.data["events"]
+            if event["name"] in ("Initialize", "PairCreated", "PoolCreated")
+        )
+
+    def evidence(self):
+        return self.data["evidence"]
+
+
+def _token_metrics(token, pools, census, first_seen, end):
     deadline = min(first_seen + 1800, end)
     pool_map = {pool["pool_key"]: pool for pool in pools}
     states = {}
@@ -115,7 +149,7 @@ def _token_metrics(token, pools, events, first_seen, end):
     swaps = buys = sells = 0
     maximum = None
     unknown = any(state["side"] is None for state in states.values())
-    for event in sorted(events, key=lambda e: (e["block_number"], e["log_index"])):
+    for event in census.token_events(pools, first_seen, deadline, end):
         key = event["pool_key"]
         if (
             key not in pool_map
@@ -221,21 +255,19 @@ def _eligibility(tokens, swaps, eth):
 
 
 def build_report(data, since=None, until=None):
-    if data["meta"].get("chain_id") != "4663":
+    census = _LoadedCensus(data) if isinstance(data, dict) else data
+    if census.meta.get("chain_id") != "4663":
         raise ValueError("Census chain_id must be 4663")
-    if not data["blocks"]:
+    coverage_start, coverage_end = census.coverage()
+    if coverage_start is None:
         raise ValueError("Census contains no collected blocks")
-    coverage_start = min(block["timestamp"] for block in data["blocks"])
-    coverage_end = max(block["timestamp"] for block in data["blocks"])
     start = max(coverage_start, since) if since is not None else coverage_start
     end = min(coverage_end, until) if until is not None else coverage_end
     if start > end:
         raise ValueError("Report window does not overlap collected data")
+    all_pools = list(census.pools())
     token_pools = defaultdict(list)
-    pool_events = defaultdict(list)
-    for event in data["events"]:
-        pool_events[event["pool_key"]].append(event)
-    for pool in data["pools"]:
+    for pool in all_pools:
         for token in {pool["token0"], pool["token1"]} - ETH_CURRENCIES:
             token_pools[token].append(pool)
     tokens = []
@@ -246,8 +278,7 @@ def build_report(data, since=None, until=None):
         if not start <= first <= end:
             continue
         pools = [pool for pool in pools if pool["timestamp"] <= end]
-        events = [event for pool in pools for event in pool_events[pool["pool_key"]]]
-        metrics = _token_metrics(token, pools, events, first, end)
+        metrics = _token_metrics(token, pools, census, first, end)
         metrics["eligibility"] = _status(metrics, 10, 0.5)
         tokens.append(metrics)
         day = _iso(first)[:10]
@@ -258,14 +289,14 @@ def build_report(data, since=None, until=None):
     cohort = {token["token"]: token for token in tokens}
     excluded = INFRASTRUCTURE | set(token_pools)
     excluded.update(
-        pool["pool_key"] for pool in data["pools"] if pool["source"] in ("v2", "v3")
+        pool["pool_key"] for pool in all_pools if pool["source"] in ("v2", "v3")
     )
-    if data["meta"].get("v3_factory"):
-        excluded.add(data["meta"]["v3_factory"])
+    if census.meta.get("v3_factory"):
+        excluded.add(census.meta["v3_factory"])
     candidates = {}
     prior = set()
     atomic = set()
-    for evidence in data["evidence"]:
+    for evidence in census.evidence():
         fields = evidence["data"]
         matching = {
             token
@@ -345,15 +376,14 @@ def build_report(data, since=None, until=None):
     )
     creation_keys = {
         pool["pool_key"]
-        for pool in data["pools"]
+        for pool in all_pools
         if start <= pool["timestamp"] <= end
         and ({pool["token0"], pool["token1"]} & cohort.keys())
     }
     latency = sorted(
         event["ingested_at"] - event["timestamp"]
-        for event in data["events"]
+        for event in census.creation_events()
         if event["pool_key"] in creation_keys
-        and event["name"] in ("Initialize", "PairCreated", "PoolCreated")
     )
     distribution = {"count": len(latency)}
     for label, quantile in (
@@ -377,7 +407,7 @@ def build_report(data, since=None, until=None):
             "coverage_end": _iso(coverage_end),
         },
         "v3": "measured (creation only; eligibility unknown)"
-        if data["meta"].get("v3_factory")
+        if census.meta.get("v3_factory")
         else "v3 not measured",
         "new_tokens": {
             "total": len(tokens),
@@ -504,17 +534,19 @@ def render_markdown(report):
 
 
 async def run(args):
-    from .storage import data_directory, load_data
+    from .storage import data_directory, read_snapshot
 
-    directory = data_directory(args.data_dir)
-    report = build_report(
-        await load_data(directory),
-        parse_time(args.since) if args.since else None,
-        parse_time(args.until) if args.until else None,
-    )
-    (directory / "report.json").write_text(
-        json.dumps(report, indent=2) + "\n", encoding="utf-8"
-    )
+    directory = data_directory(args.data_dir, create=False)
+    with read_snapshot(directory) as census:
+        report = build_report(
+            census,
+            parse_time(args.since) if args.since else None,
+            parse_time(args.until) if args.until else None,
+        )
+    # json.dump streams the per-token list instead of building one large string.
+    with (directory / "report.json").open("w", encoding="utf-8") as output:
+        json.dump(report, output, indent=2)
+        output.write("\n")
     (directory / "report.md").write_text(render_markdown(report), encoding="utf-8")
     print(
         json.dumps(
