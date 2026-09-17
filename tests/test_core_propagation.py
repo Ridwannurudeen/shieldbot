@@ -495,3 +495,87 @@ async def test_failed_bytecode_scan_is_unknown_not_clean_patterns(mock_web3_clie
         assert risk['risk_level'] != 'LOW'
         assert risk['coverage']['structural'] < 1
         assert risk['coverage_reasons']['structural'] == 'Bytecode scan unavailable'
+
+
+ALLOWANCE_SELECTOR = '0xdd62ed3e'
+DEAD_TOKEN = '0x' + '4' * 40
+
+
+def _use_real_rpc_batches(service, token, spender, eth_call):
+    service._fetch_log_chunk.return_value = [
+        {'address': address, 'topics': ['0x0', '0x0', spender], 'data': '0x1', 'blockNumber': '0x1'}
+        for address in (token, DEAD_TOKEN)
+    ]
+    del service._verify_allowances
+    del service._fetch_balances
+    service._eth_call = AsyncMock(side_effect=eth_call)
+
+
+@pytest.mark.asyncio
+async def test_rescue_empty_eth_call_result_is_none(rescue_pipeline):
+    from services.rescue_service import RescueService
+
+    service, _, token, _, session = rescue_pipeline
+    response = session.post.return_value.__aenter__.return_value
+    response.status = 200
+    response.json.return_value = {'result': '0x'}
+    assert await RescueService._eth_call(service, session, 'https://rpc.invalid', token, '0x0') is None
+
+
+@pytest.mark.asyncio
+async def test_rescue_empty_allowance_marks_pair_unknown_without_aborting(rescue_pipeline):
+    service, wallet, token, spender, _ = rescue_pipeline
+    _use_real_rpc_batches(
+        service, token, spender,
+        lambda session, rpc_url, to, data: None if to == DEAD_TOKEN else 1,
+    )
+    service._fetch_prices.return_value = {token: 1.0}
+    result = await service.scan_approvals(wallet)
+    assert [approval['token_address'] for approval in result['approvals']] == [token]
+    assert all(approval['risk_level'] in ('HIGH', 'MEDIUM', 'LOW') for approval in result['approvals'])
+    assert result['status'] == 'unknown'
+    assert result['coverage'] == {'allowances': False, 'balances': True, 'prices': True}
+    assert set(result['coverage_reasons']) == {'allowances'}
+    assert result['total_value_at_risk_usd'] is None
+
+
+@pytest.mark.asyncio
+async def test_rescue_empty_balance_marks_value_unknown(rescue_pipeline):
+    service, wallet, token, spender, _ = rescue_pipeline
+    _use_real_rpc_batches(
+        service, token, spender,
+        lambda session, rpc_url, to, data: 1 if data.startswith(ALLOWANCE_SELECTOR) or to != DEAD_TOKEN else None,
+    )
+    service._fetch_prices.return_value = {token: 1.0, DEAD_TOKEN: 1.0}
+    result = await service.scan_approvals(wallet)
+    assert sorted(approval['token_address'] for approval in result['approvals']) == sorted([token, DEAD_TOKEN])
+    assert result['status'] == 'unknown'
+    assert result['coverage'] == {'allowances': True, 'balances': False, 'prices': True}
+    assert result['total_value_at_risk_usd'] is None
+
+
+@pytest.mark.asyncio
+async def test_rescue_price_failure_is_not_zero_value_at_risk(rescue_pipeline):
+    service, wallet, _, _, session = rescue_pipeline
+    session.get.side_effect = RuntimeError('price provider unavailable')
+    del service._fetch_prices
+    result = await service.scan_approvals(wallet)
+    assert result['total_approvals'] == 1
+    assert result['status'] == 'unknown'
+    assert result['coverage'] == {'allowances': True, 'balances': True, 'prices': False}
+    assert result['coverage_reasons']['prices']
+    assert result['total_value_at_risk_usd'] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('balance, priced', [(1, True), (0, False)])
+async def test_rescue_complete_scan_reports_ok_coverage(rescue_pipeline, balance, priced):
+    # With a zero balance nothing is at risk, so a missing price leaves the value known.
+    service, wallet, token, _, _ = rescue_pipeline
+    service._fetch_balances.return_value = {token: balance}
+    service._fetch_prices.return_value = {token: 2.0} if priced else {}
+    result = await service.scan_approvals(wallet)
+    assert result['status'] == 'ok'
+    assert result['coverage'] == {'allowances': True, 'balances': True, 'prices': True}
+    assert result['coverage_reasons'] == {}
+    assert result['total_value_at_risk_usd'] == 0.0
