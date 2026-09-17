@@ -749,6 +749,7 @@ async def test_mempool_poll_errors_do_not_log_secrets(mock_web3_client, caplog):
 
 PROVIDER_PATH_MODULES = [
     'core/indexer.py',
+    'core/registry.py',
     'scanner/token_scanner.py',
     'scanner/transaction_scanner.py',
     'services/cache.py',
@@ -763,6 +764,7 @@ PROVIDER_PATH_MODULES = [
     'services/mempool_service.py',
     'services/phishing_service.py',
     'services/rescue_service.py',
+    'services/reputation.py',
     'services/tenderly_service.py',
     'services/tier_service.py',
     'services/token_gate_service.py',
@@ -770,31 +772,63 @@ PROVIDER_PATH_MODULES = [
 ]
 
 
-@pytest.mark.parametrize('module', PROVIDER_PATH_MODULES)
-def test_provider_path_logs_record_exception_class_not_text(module):
-    root = Path(__file__).resolve().parent.parent
-    offenders = []
-    for handler in ast.walk(ast.parse((root / module).read_text(encoding='utf-8'))):
+def _is_logger_call(node):
+    return (
+        isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name) and node.func.value.id == 'logger'
+    )
+
+
+def _logged_exception_lines(source):
+    tree = ast.parse(source)
+    lines = {call.lineno for call in ast.walk(tree) if _is_logger_call(call) and call.func.attr == 'exception'}
+    for handler in ast.walk(tree):
         if not isinstance(handler, ast.ExceptHandler) or not handler.name:
             continue
-        for call in ast.walk(handler):
-            if not (
-                isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
-                and isinstance(call.func.value, ast.Name) and call.func.value.id == 'logger'
-            ):
-                continue
-            for arg in call.args:
+        for call in filter(_is_logger_call, ast.walk(handler)):
+            for value in [*call.args, *(keyword.value for keyword in call.keywords)]:
                 allowed = {
-                    id(inner) for node in ast.walk(arg)
+                    id(inner) for node in ast.walk(value)
                     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'type'
                     for inner in node.args
                 }
                 if any(
                     isinstance(node, ast.Name) and node.id == handler.name and id(node) not in allowed
-                    for node in ast.walk(arg)
+                    for node in ast.walk(value)
                 ):
-                    offenders.append(f'{module}:{call.lineno}')
-    assert offenders == []
+                    lines.add(call.lineno)
+    return sorted(lines)
+
+
+def test_logging_guard_flags_keywords_and_logger_exception():
+    source = '''
+try:
+    pass
+except Exception as exc:
+    logger.error("failed: %s", type(exc).__name__, exc_info=True)
+    logger.error("failed", exc_info=exc)
+    logger.error("failed", extra={"error": exc})
+    logger.exception("failed")
+'''
+    assert _logged_exception_lines(source) == [6, 7, 8]
+
+
+@pytest.mark.parametrize('module', PROVIDER_PATH_MODULES)
+def test_provider_path_logs_record_exception_class_not_text(module):
+    root = Path(__file__).resolve().parent.parent
+    assert _logged_exception_lines((root / module).read_text(encoding='utf-8')) == []
+
+
+@pytest.mark.asyncio
+async def test_reputation_batch_lookup_does_not_leak_provider_errors(caplog):
+    from services.reputation import ReputationService
+
+    service = ReputationService(MagicMock())
+    service.get_trust_score = AsyncMock(side_effect=RuntimeError(LEAKY_ERROR))
+    with caplog.at_level(logging.DEBUG):
+        results = await service.batch_lookup(['agent-1'])
+    _assert_no_secret_logged(caplog)
+    assert results == [{'agent_id': 'agent-1', 'error': 'RuntimeError'}]
 
 
 @pytest.mark.parametrize('priced', [False, True])

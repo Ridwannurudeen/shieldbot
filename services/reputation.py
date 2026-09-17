@@ -145,10 +145,10 @@ class ReputationService:
                 score = await self.get_trust_score(agent_id)
                 results.append(score)
             except Exception as exc:
-                logger.warning("Batch lookup failed for %s: %s", agent_id, exc)
+                logger.warning("Batch lookup failed for %s: %s", agent_id, type(exc).__name__)
                 results.append({
                     "agent_id": agent_id,
-                    "error": str(exc),
+                    "error": type(exc).__name__,
                 })
         return results
 
@@ -211,7 +211,7 @@ class ReputationService:
         try:
             await self._db.invalidate_reputation_cache(agent_id)
         except Exception as exc:
-            logger.debug("Cache invalidation failed for %s: %s", agent_id, exc)
+            logger.debug("Cache invalidation failed for %s: %s", agent_id, type(exc).__name__)
 
     # ── Private: ShieldBot Component Score ───────────────────────────
 
