@@ -4,8 +4,11 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import pytest_asyncio
 
-from agent.hunter import Hunter
+from agent.hunter import LAUNCH_SCANS_PER_SWEEP, Hunter
+from core.database import Database
+from services.launch_discovery import LaunchDiscoveryError
 
 
 @pytest.fixture
@@ -130,7 +133,10 @@ async def test_recheck_clears_low_score(hunter, tools, db):
         "deployer": "0xdeploy2",
     }])
     tools.scan_contract = AsyncMock(
-        return_value={"risk_score": 20, "risk_level": "LOW", "flags": []}
+        return_value={
+            "risk_score": 20, "risk_level": "LOW", "flags": [],
+            "status": "ok", "coverage": {"structural": 1, "honeypot": 1},
+        }
     )
 
     result = await hunter._recheck_warn_contracts("sweep-1")
@@ -297,3 +303,219 @@ async def test_log_finding_ai_failure_still_stores(hunter, db, ai):
     db.insert_agent_finding.assert_awaited_once()
     call_kwargs = db.insert_agent_finding.call_args.kwargs
     assert call_kwargs["narrative"] is None
+
+
+# --- chain propagation and incomplete scans ---
+
+ROBINHOOD_TOKEN = "0xcde854116e1be8d52612c03d099e2415dc921e18"
+
+
+def scan_result(score, complete=True):
+    """Shape of RiskEngine.compute_from_results: the score is rug_probability."""
+    return {
+        "rug_probability": score,
+        "risk_level": "LOW" if score <= 30 else "HIGH",
+        "critical_flags": [],
+        "status": "ok" if complete else "unknown",
+        "coverage": {"structural": 1, "honeypot": 1 if complete else 0},
+        "coverage_reasons": {} if complete else {"honeypot": "Honeypot simulation unavailable"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_recheck_rescans_and_logs_a_robinhood_pair_on_its_own_chain(hunter, tools, db):
+    db.get_tracked_pairs = AsyncMock(return_value=[{
+        "pair_address": ROBINHOOD_TOKEN,
+        "token_address": ROBINHOOD_TOKEN,
+        "deployer": None,
+        "chain_id": 4663,
+    }])
+    tools.scan_contract = AsyncMock(return_value=scan_result(90))
+
+    result = await hunter._recheck_warn_contracts("sweep-1")
+
+    assert result == [ROBINHOOD_TOKEN]
+    tools.scan_contract.assert_awaited_once_with(ROBINHOOD_TOKEN, chain_id=4663)
+    db.update_tracked_pair_status.assert_awaited_once_with(ROBINHOOD_TOKEN, "blocked")
+    assert db.insert_agent_finding.call_args.kwargs["chain_id"] == 4663
+    tools.auto_watch_deployer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recheck_keeps_bsc_rows_on_bsc(hunter, tools, db):
+    db.get_tracked_pairs = AsyncMock(return_value=[{
+        "pair_address": "0xpair1",
+        "token_address": "0xtoken1",
+        "deployer": "0xdeploy1",
+        "chain_id": 56,
+    }])
+    tools.scan_contract = AsyncMock(
+        return_value={"risk_score": 85, "risk_level": "HIGH", "flags": ["rug"]}
+    )
+
+    await hunter._recheck_warn_contracts("sweep-1")
+
+    tools.scan_contract.assert_awaited_once_with("0xtoken1", chain_id=56)
+    assert db.insert_agent_finding.call_args.kwargs["chain_id"] == 56
+    tools.auto_watch_deployer.assert_awaited_once_with(
+        "0xdeploy1", reason="auto: recheck upgrade 0xtoken1 (score=85)"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("result", [
+    scan_result(10, complete=False),
+    {"risk_score": 20, "risk_level": "LOW", "flags": []},
+    {**scan_result(10), "partial": True},
+    {key: value for key, value in scan_result(10).items() if key != "rug_probability"},
+])
+async def test_recheck_incomplete_scan_never_clears(hunter, tools, db, result):
+    db.get_tracked_pairs = AsyncMock(return_value=[{
+        "pair_address": "0xpair2", "token_address": "0xtoken2", "deployer": "0xdeploy2", "chain_id": 4663,
+    }])
+    tools.scan_contract = AsyncMock(return_value=result)
+
+    assert await hunter._recheck_warn_contracts("sweep-1") == []
+    db.update_tracked_pair_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("score,status", [(10, "cleared"), (85, "blocked")])
+async def test_recheck_reads_the_score_scan_contract_returns(hunter, tools, db, score, status):
+    db.get_tracked_pairs = AsyncMock(return_value=[{
+        "pair_address": "0xpair4", "token_address": "0xtoken4", "deployer": None, "chain_id": 56,
+    }])
+    tools.scan_contract = AsyncMock(return_value=scan_result(score))
+
+    await hunter._recheck_warn_contracts("sweep-1")
+
+    db.update_tracked_pair_status.assert_awaited_once_with("0xpair4", status)
+
+
+# --- _scan_new_pairs: Robinhood Chain launches ---
+
+
+@pytest_asyncio.fixture
+async def real_db(tmp_path):
+    database = Database(str(tmp_path / "hunter.db"))
+    await database.initialize()
+    yield database
+    await database.close()
+
+
+def launch(index):
+    return {
+        "token_address": "0x" + f"{index + 1:040x}",
+        "source": "uniswap_v4",
+        "launchpad": "Uniswap v4",
+        "source_rank": 2,
+        "pool_id": None,
+        "block_number": 65_000_000 + index,
+        "tx_hash": "0x" + f"{index + 1:064x}",
+        "block_timestamp": 1_789_000_000 + index,
+    }
+
+
+async def scan_statuses(database):
+    cursor = await database._db.execute(
+        "SELECT token_address, scan_status FROM discovered_launches WHERE chain_id = 4663"
+    )
+    return dict(await cursor.fetchall())
+
+
+@pytest.mark.asyncio
+async def test_scan_new_pairs_discovers_then_scans_newest_launches_up_to_the_cap(tools, ai, sentinel, real_db):
+    count = LAUNCH_SCANS_PER_SWEEP + 5
+    await real_db.upsert_discovered_launches(4663, [launch(index) for index in range(count)])
+    order = []
+    discovery = MagicMock()
+    discovery.run = AsyncMock(side_effect=lambda: order.append("discover"))
+
+    async def scan(token, chain_id):
+        order.append(token)
+        return scan_result(10)
+
+    tools.scan_contract = AsyncMock(side_effect=scan)
+    hunter = Hunter(tools=tools, db=real_db, ai_analyzer=ai, sentinel=sentinel, discovery=discovery)
+
+    assert await hunter._scan_new_pairs("sweep-1") == []
+
+    newest = [launch(index)["token_address"] for index in reversed(range(count))]
+    assert order == ["discover", *newest[:LAUNCH_SCANS_PER_SWEEP]]
+    assert all(call.kwargs == {"chain_id": 4663} for call in tools.scan_contract.await_args_list)
+    remaining = await real_db.get_unscanned_launches(4663, limit=100)
+    assert [row["token_address"] for row in remaining] == newest[LAUNCH_SCANS_PER_SWEEP:]
+
+
+@pytest.mark.asyncio
+async def test_scan_new_pairs_records_each_outcome_and_never_clears_an_incomplete_scan(
+    tools, ai, sentinel, real_db
+):
+    outcomes = {
+        "blocked": scan_result(85, complete=False),
+        "unknown": scan_result(5, complete=False),
+        "watching": scan_result(50),
+        "cleared": scan_result(5),
+        "error": RuntimeError("provider unavailable"),
+    }
+    tokens = {status: launch(index)["token_address"] for index, status in enumerate(outcomes)}
+    await real_db.upsert_discovered_launches(4663, [launch(index) for index in range(len(outcomes))])
+    by_token = {tokens[status]: outcome for status, outcome in outcomes.items()}
+
+    async def scan(token, chain_id):
+        if isinstance(by_token[token], Exception):
+            raise by_token[token]
+        return by_token[token]
+
+    tools.scan_contract = AsyncMock(side_effect=scan)
+    discovery = MagicMock(run=AsyncMock(return_value={}))
+    hunter = Hunter(tools=tools, db=real_db, ai_analyzer=ai, sentinel=sentinel, discovery=discovery)
+
+    assert await hunter._scan_new_pairs("sweep-1") == [tokens["blocked"]]
+
+    assert await scan_statuses(real_db) == {token: status for status, token in tokens.items()}
+    findings = await real_db.get_agent_findings()
+    assert [(f["address"], f["chain_id"], f["action_taken"]) for f in findings] == [
+        (tokens["blocked"], 4663, "blocked")
+    ]
+    watching = await real_db.get_tracked_pairs(status="watching")
+    assert {(row["token_address"], row["chain_id"]) for row in watching} == {
+        (tokens["unknown"], 4663), (tokens["watching"], 4663),
+    }
+    tools.auto_watch_deployer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_scan_new_pairs_still_scans_known_launches_when_discovery_fails(tools, ai, sentinel, real_db):
+    await real_db.upsert_discovered_launches(4663, [launch(0)])
+    discovery = MagicMock(run=AsyncMock(side_effect=LaunchDiscoveryError("RPC unavailable")))
+    tools.scan_contract = AsyncMock(return_value=scan_result(5, complete=False))
+    hunter = Hunter(tools=tools, db=real_db, ai_analyzer=ai, sentinel=sentinel, discovery=discovery)
+
+    assert await hunter._scan_new_pairs("sweep-1") == []
+
+    tools.scan_contract.assert_awaited_once_with(launch(0)["token_address"], chain_id=4663)
+    assert await scan_statuses(real_db) == {launch(0)["token_address"]: "unknown"}
+
+
+@pytest.mark.asyncio
+async def test_discovered_launch_is_rechecked_and_logged_on_robinhood_chain(tools, ai, sentinel, real_db):
+    token = launch(0)["token_address"]
+    await real_db.upsert_discovered_launches(4663, [launch(0)])
+    hunter = Hunter(
+        tools=tools, db=real_db, ai_analyzer=ai, sentinel=sentinel,
+        discovery=MagicMock(run=AsyncMock(return_value={})),
+    )
+    tools.scan_contract = AsyncMock(return_value=scan_result(10, complete=False))
+    await hunter._scan_new_pairs("sweep-1")
+
+    await hunter._recheck_warn_contracts("sweep-2")
+    assert [row["token_address"] for row in await real_db.get_tracked_pairs(status="watching")] == [token]
+
+    tools.scan_contract = AsyncMock(return_value=scan_result(95))
+    assert await hunter._recheck_warn_contracts("sweep-3") == [token]
+
+    tools.scan_contract.assert_awaited_once_with(token, chain_id=4663)
+    assert [row["chain_id"] for row in await real_db.get_tracked_pairs(status="blocked")] == [4663]
+    findings = await real_db.get_agent_findings()
+    assert [(f["address"], f["chain_id"], f["investigation_id"]) for f in findings] == [(token, 4663, "sweep-3")]
