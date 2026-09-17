@@ -99,6 +99,13 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_api_usage_key
                 ON api_usage(key_id, created_at);
 
+            CREATE TABLE IF NOT EXISTS api_daily_usage (
+                key_id TEXT NOT NULL,
+                utc_day INTEGER NOT NULL,
+                used INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (key_id, utc_day)
+            );
+
             CREATE TABLE IF NOT EXISTS deployers (
                 contract_address TEXT NOT NULL,
                 chain_id INTEGER NOT NULL,

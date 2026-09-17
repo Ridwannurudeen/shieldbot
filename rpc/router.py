@@ -108,29 +108,34 @@ async def rpc_endpoint(chain_id: int, request: Request):
     # Rate limiting (API key preferred when provided)
     api_key = request.headers.get("x-api-key")
     if proxy and api_key and proxy._container and proxy._container.auth_manager:
-        key_info = await proxy._container.auth_manager.validate_key(api_key)
-        if not key_info:
-            return JSONResponse(
-                status_code=401,
-                content={
-                    "jsonrpc": "2.0",
-                    "id": None,
-                    "error": {"code": -32001, "message": "Invalid API key"},
-                },
-            )
-        if not await proxy._container.auth_manager.check_rate_limit(key_info):
-            return JSONResponse(
-                status_code=429,
-                content={
-                    "jsonrpc": "2.0",
-                    "id": None,
-                    "error": {"code": -32005, "message": "API key rate limit exceeded"},
-                },
-            )
-        try:
-            await proxy._container.auth_manager.record_usage(key_info["key_id"], f"/rpc/{chain_id}")
-        except Exception:
-            pass
+        # Mounted in api.py, the rate-limit middleware has already validated and counted this key.
+        if getattr(request.state, "api_key_info", None) is None:
+            from core.auth import rate_limit_headers
+
+            key_info = await proxy._container.auth_manager.validate_key(api_key)
+            if not key_info:
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "jsonrpc": "2.0",
+                        "id": None,
+                        "error": {"code": -32001, "message": "Invalid API key"},
+                    },
+                )
+            if not await proxy._container.auth_manager.check_rate_limit(key_info):
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "jsonrpc": "2.0",
+                        "id": None,
+                        "error": {"code": -32005, "message": "API key rate limit exceeded"},
+                    },
+                    headers=rate_limit_headers(key_info),
+                )
+            try:
+                await proxy._container.auth_manager.record_usage(key_info["key_id"], f"/rpc/{chain_id}")
+            except Exception as e:
+                logger.error("API usage record failed: %s", type(e).__name__)
     else:
         trusted = set(proxy._container.settings.trusted_proxies) if proxy else set()
         client_ip = _get_client_ip(request, trusted)
