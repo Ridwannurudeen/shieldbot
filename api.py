@@ -2493,6 +2493,75 @@ def _select_router_tokens(path: List[str]) -> List[str]:
     return list(dict.fromkeys(token.lower() for token in path))
 
 
+def _build_unverified_swap_response(
+    req: FirewallRequest, to_addr: str, decoded: Dict, whitelisted: str, value_bnb: float,
+    source: str, reason: str,
+) -> Dict:
+    """Build a CAUTION response for a trusted-router swap whose path tokens were not analyzed.
+
+    Returning None instead would make the main pipeline analyse the whitelisted
+    router itself, which always scores safe, while the swapped tokens are never checked.
+    """
+    coverage_fields = {
+        "status": "unknown",
+        "coverage": {source: 0},
+        "coverage_reasons": {source: reason},
+        "risk_display": 'Unknown (incomplete provider coverage)',
+    }
+    return {
+        "classification": "CAUTION",
+        **coverage_fields,
+        "risk_score": 35,
+        "decoded_action": _format_decoded_action(decoded),
+        "calldata_details": _build_calldata_details(decoded),
+        "danger_signals": [
+            f"Swap via trusted router ({whitelisted}) but {reason.lower()} — token safety unverified",
+        ],
+        "transaction_impact": {
+            "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens (via router)",
+            "granting_access": "UNLIMITED" if decoded.get("is_unlimited_approval") else "None",
+            "recipient": f"{whitelisted} ({to_addr[:10]}...)",
+            "post_tx_state": f"Swap via {whitelisted} — {reason.lower()}",
+        },
+        "analysis": (
+            f"Trusted router ({whitelisted}) detected but {reason.lower()}. "
+            "Token safety cannot be verified."
+        ),
+        "plain_english": (
+            "This transaction goes to a trusted DEX router, but the tokens in the swap "
+            "path could not be checked. Verify the tokens manually before proceeding."
+        ),
+        "verdict": "CAUTION — Token safety unverifiable",
+        "raw_checks": {
+            "is_verified": None,
+            "scam_matches": 0,
+            "contract_age_days": None,
+            "is_honeypot": None,
+            "ownership_renounced": None,
+            "risk_score_heuristic": 35,
+            "whitelisted_router": whitelisted,
+            "tokens_analyzed": [],
+        },
+        "shield_score": {
+            **coverage_fields,
+            "overall": 35,
+            "category_scores": {},
+            "risk_level": "UNKNOWN",
+            "threat_type": "unknown",
+            "critical_flags": [],
+            "confidence": 30,
+        },
+        "simulation": None,
+        "asset_delta": _build_asset_delta_fallback(decoded, value_bnb),
+        "greenfield_url": None,
+        "chain_id": req.chainId,
+        "network": _chain_id_to_name(req.chainId),
+        "partial": True,
+        "failed_sources": [source],
+        "policy_mode": "BALANCED",
+    }
+
+
 async def _analyze_router_swap(
     req: FirewallRequest,
     to_addr: str,
@@ -2504,73 +2573,18 @@ async def _analyze_router_swap(
 ) -> Optional[Dict]:
     """Analyze swap path tokens when interacting with a trusted router."""
     if not container or not container.registry or not risk_engine:
-        return None
+        return _build_unverified_swap_response(
+            req, to_addr, decoded, whitelisted, value_bnb,
+            'token_analysis', 'Token analyzers are unavailable',
+        )
 
     path = _extract_swap_path(decoded, req.data)
     if not path or not any(web3_client.is_valid_address(token) for token in path):
         # Cannot decode the swap path (e.g. Uniswap V3 / aggregator calldata).
-        # Returning None here would cause the main pipeline to analyse the
-        # whitelisted router itself — which always scores safe — giving a false
-        # SAFE result while the token in the path is never checked.
-        # Return CAUTION so the user is warned that token safety is unverified.
-        return {
-            "classification": "CAUTION",
-            "status": "unknown",
-            "coverage": {'token_path': 0},
-            "coverage_reasons": {'token_path': 'Token path could not be decoded'},
-            "risk_display": 'Unknown (incomplete provider coverage)',
-            "risk_score": 35,
-            "decoded_action": _format_decoded_action(decoded),
-            "calldata_details": _build_calldata_details(decoded),
-            "danger_signals": [
-                f"Swap via trusted router ({whitelisted}) but token path could not be decoded — token safety unverified",
-            ],
-            "transaction_impact": {
-                "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens (via router)",
-                "granting_access": "UNLIMITED" if decoded.get("is_unlimited_approval") else "None",
-                "recipient": f"{whitelisted} ({to_addr[:10]}...)",
-                "post_tx_state": f"Swap via {whitelisted} — token path not decoded",
-            },
-            "analysis": (
-                f"Trusted router ({whitelisted}) detected but the swap path tokens could not be "
-                "decoded from the calldata. Token safety cannot be verified."
-            ),
-            "plain_english": (
-                "This transaction goes to a trusted DEX router, but the specific tokens in the swap "
-                "path couldn't be identified. Verify the tokens manually before proceeding."
-            ),
-            "verdict": "CAUTION — Token path unverifiable",
-            "raw_checks": {
-                "is_verified": None,
-                "scam_matches": 0,
-                "contract_age_days": None,
-                "is_honeypot": None,
-                "ownership_renounced": None,
-                "risk_score_heuristic": 35,
-                "whitelisted_router": whitelisted,
-                "tokens_analyzed": [],
-            },
-            "shield_score": {
-                "status": "unknown",
-                "coverage": {'token_path': 0},
-                "coverage_reasons": {'token_path': 'Token path could not be decoded'},
-                "risk_display": 'Unknown (incomplete provider coverage)',
-                "overall": 35,
-                "category_scores": {},
-                "risk_level": "CAUTION",
-                "threat_type": "unknown",
-                "critical_flags": [],
-                "confidence": 30,
-            },
-            "simulation": None,
-            "asset_delta": _build_asset_delta_fallback(decoded, value_bnb),
-            "greenfield_url": None,
-            "chain_id": req.chainId,
-            "network": _chain_id_to_name(req.chainId),
-            "partial": True,
-            "failed_sources": ["token_path_decoding"],
-            "policy_mode": "BALANCED",
-        }
+        return _build_unverified_swap_response(
+            req, to_addr, decoded, whitelisted, value_bnb,
+            'token_path', 'Token path could not be decoded',
+        )
 
     candidates = _select_router_tokens(path)
     if not candidates:
