@@ -565,3 +565,28 @@ def test_formatter_requires_known_completion_status():
     from core.extension_formatter import format_extension_alert
     alert = format_extension_alert({'coverage': {'honeypot': 1}, 'rug_probability': 0, 'risk_level': 'LOW'})
     assert alert['status'] == 'unknown'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('complete', [True, False], ids=['complete', 'incomplete'])
+async def test_bot_rescue_safe_count_requires_complete_scan(bot_chain_functions, complete):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    ns = bot_chain_functions
+    ns['settings'] = SimpleNamespace(bscscan_api_key='', etherscan_api_key='')
+    result = {'total_approvals': 3, 'high_risk': 0, 'medium_risk': 0,
+              'approvals': [], 'alerts': [], 'revoke_txs': []}
+    if not complete:
+        result.update(status='unknown', coverage={'approval_prices': 0},
+                      coverage_reasons={'approval_prices': 'Token price unavailable'})
+    ns['container'].rescue_service.scan_approvals.return_value = result
+    status_msg = SimpleNamespace(delete=AsyncMock(), edit_text=AsyncMock())
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock(side_effect=[status_msg, None])))
+    context = SimpleNamespace(args=['0x' + 'b' * 40], user_data={'chain_id': 4663})
+    await ns['rescue_command'](update, context)
+    text = update.message.reply_text.call_args.args[0]
+    if complete:
+        assert 'Safe: 3' in text and 'look safe' in text
+    else:
+        assert 'Safe: 3' not in text and 'look safe' not in text
+        assert 'incomplete' in text and 'Token price unavailable' in text

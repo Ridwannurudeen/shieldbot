@@ -420,12 +420,18 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         high = result.get('high_risk', 0)
         medium = result.get('medium_risk', 0)
         safe = total - high - medium
+        incomplete = result.get('status') == 'unknown'
 
         response = f"🚨 **Rescue Mode — Approval Scan**\n\n"
         response += f"**Wallet:** `{address}`\n"
         response += f"**Chain:** {chain_name}\n"
         response += f"**Total Approvals:** {total}\n"
-        response += f"🔴 High Risk: {high} | 🟡 Medium: {medium} | 🟢 Safe: {safe}\n"
+        if incomplete:
+            reasons = '; '.join(dict.fromkeys(result.get('coverage_reasons', {}).values())) or 'Approval data unavailable'
+            response += f"🔴 High Risk: {high} | 🟡 Medium: {medium} | ⚪ Unconfirmed: {safe}\n"
+            response += f"⚠️ **Scan incomplete:** {reasons}\n"
+        else:
+            response += f"🔴 High Risk: {high} | 🟡 Medium: {medium} | 🟢 Safe: {safe}\n"
 
         # Show risky approvals
         approvals = result.get('approvals', [])
@@ -457,7 +463,7 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response += f"\n**Revoke Instructions:**\n"
             response += f"Found {len(revoke_txs)} approval(s) to revoke.\n"
             response += "Use [Revoke.cash](https://revoke.cash/) or submit the revoke transactions from your wallet.\n"
-        elif total > 0 and high == 0 and medium == 0:
+        elif total > 0 and high == 0 and medium == 0 and not incomplete:
             response += "\n✅ All approvals look safe — no action needed.\n"
 
         try:
