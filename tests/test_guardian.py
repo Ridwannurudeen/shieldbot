@@ -371,8 +371,10 @@ async def test_unknown_rescue_scan_cannot_be_empty_clean_approvals(guardian_with
     mock_rescue.scan_approvals.return_value = {
         "status": "unknown", "approvals": [], "reason": "Approval log scan incomplete",
     }
-    with pytest.raises(RuntimeError, match="Approval data unavailable"):
-        await guardian_with_rescue.get_approvals("0xabc", 56)
+    scan = await guardian_with_rescue.get_approvals("0xabc", 56)
+    assert scan["approvals"] == []
+    assert scan["status"] == "unknown"
+    assert scan["coverage_reasons"]
     result = await guardian_with_rescue.get_health("0xabc", 56)
     assert result["status"] == "unknown"
     assert result["level"] == "unknown"
@@ -405,7 +407,10 @@ async def test_unknown_approval_risk_never_becomes_low_or_persisted_health(
         approval["risk_level"] = "UNKNOWN"
     else:
         mock_db.get_contract_score.side_effect = RuntimeError("score unavailable")
-    approvals = await guardian_with_rescue.get_approvals("0xabc", 56)
+    scan = await guardian_with_rescue.get_approvals("0xabc", 56)
+    assert scan["status"] == "unknown"
+    assert scan["coverage_reasons"]["approval_risk"]
+    approvals = scan["approvals"]
     assert approvals[0]["risk_level"] == "unknown"
     assert approvals[0]["status"] == "unknown"
     assert approvals[0]["coverage_reasons"]
@@ -471,3 +476,46 @@ async def test_unexpected_rescue_failure_logs_error_with_traceback(guardian_with
     records = [record for record in caplog.records if record.name == "services.guardian"]
     assert [record.levelno for record in records] == [logging.ERROR]
     assert records[0].exc_info is not None
+
+
+@pytest.mark.asyncio
+async def test_incomplete_scan_still_returns_known_dangerous_approvals(guardian_with_rescue, mock_rescue, mock_db):
+    mock_rescue.scan_approvals.return_value = {
+        "approvals": [{
+            "token_address": "0xtoken", "spender": "0xspender", "allowance": "Unlimited", "risk_level": "HIGH",
+        }],
+        "status": "unknown",
+        "coverage": {"allowances": True, "balances": True, "prices": False},
+        "coverage_reasons": {"prices": "USD price unavailable for 1 token(s)"},
+    }
+    mock_db.get_contract_score = AsyncMock(return_value=None)
+    scan = await guardian_with_rescue.get_approvals("0xabc", 56)
+    assert [approval["risk_level"] for approval in scan["approvals"]] == ["high"]
+    assert scan["status"] == "unknown"
+    assert scan["coverage"] == {"allowances": True, "balances": True, "prices": False}
+    assert scan["coverage_reasons"] == {"prices": "USD price unavailable for 1 token(s)"}
+    health = await guardian_with_rescue.get_health("0xabc", 56)
+    assert health["status"] == "unknown"
+    mock_db.update_guardian_health.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_complete_scan_returns_ok_approvals(guardian_with_rescue, mock_rescue, mock_db):
+    coverage = {"allowances": True, "balances": True, "prices": True}
+    mock_rescue.scan_approvals.return_value = {
+        "approvals": [{"token_address": "0xtoken", "spender": "0xspender", "risk_level": "HIGH"}],
+        "status": "ok", "coverage": coverage, "coverage_reasons": {},
+    }
+    mock_db.get_contract_score = AsyncMock(return_value=None)
+    scan = await guardian_with_rescue.get_approvals("0xabc", 56)
+    assert len(scan["approvals"]) == 1
+    assert scan["status"] == "ok"
+    assert scan["coverage"] == coverage
+    assert scan["coverage_reasons"] == {}
+
+
+@pytest.mark.asyncio
+async def test_approval_scan_failure_raises(guardian_with_rescue, mock_rescue):
+    mock_rescue.scan_approvals.side_effect = RuntimeError("Approval scan unavailable")
+    with pytest.raises(RuntimeError, match="^Approval data unavailable$"):
+        await guardian_with_rescue.get_approvals("0xabc", 56)

@@ -588,7 +588,7 @@ def test_guardian_router_unavailable_approvals_return_503_without_provider_detai
     with TestClient(app, raise_server_exceptions=False) as client:
         response = client.get('/api/guardian/approvals/0x' + '1' * 40, headers={'X-API-Key': 'test-key'})
     assert response.status_code == 503
-    assert response.json() == {'detail': 'Approval data unavailable or incomplete'}
+    assert response.json() == {'detail': 'Approval data unavailable'}
 
 
 @pytest.mark.asyncio
@@ -794,3 +794,30 @@ def test_provider_path_logs_record_exception_class_not_text(module):
                 ):
                     offenders.append(f'{module}:{call.lineno}')
     assert offenders == []
+
+
+@pytest.mark.parametrize('priced', [False, True])
+def test_guardian_router_returns_known_approvals_with_scan_coverage(rescue_pipeline, priced):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from services.guardian import GuardianService
+    from services.guardian_router import create_guardian_router
+
+    service, wallet, token, spender, _ = rescue_pipeline
+    service._verify_allowances.return_value = {(token, spender): 2 ** 128}
+    service._fetch_prices.return_value = {token: 1.0} if priced else {}
+    container = MagicMock()
+    container.auth_manager.validate_key = AsyncMock(return_value={'key_id': 'test-key'})
+    container.guardian_service = GuardianService(
+        MagicMock(get_contract_score=AsyncMock(return_value=None)), rescue_service=service,
+    )
+    app = FastAPI()
+    app.include_router(create_guardian_router(container), prefix='/api/guardian')
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get(f'/api/guardian/approvals/{wallet}', headers={'X-API-Key': 'test-key'})
+    assert response.status_code == 200
+    body = response.json()
+    assert [approval['risk_level'] for approval in body['approvals']] == ['high']
+    assert body['status'] == ('ok' if priced else 'unknown')
+    assert body['coverage']['prices'] is priced
+    assert ('prices' in body['coverage_reasons']) is (not priced)

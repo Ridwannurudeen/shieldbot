@@ -166,12 +166,25 @@ class GuardianService:
             result["warnings"] = warnings
         return result
 
-    async def get_approvals(self, wallet_address: str, chain_id: int = 56) -> List[Dict]:
-        """Get all token approvals, risk-ranked."""
-        result = await self._get_approval_data(wallet_address.lower(), chain_id)
-        if result is None:
-            raise RuntimeError("Approval data unavailable or incomplete")
-        return result
+    async def get_approvals(self, wallet_address: str, chain_id: int = 56) -> Dict:
+        """Get known token approvals, risk-ranked, with the scan's coverage.
+
+        Raises RuntimeError only when the approval scan itself could not run.
+        """
+        scan = await self._scan_approvals(wallet_address.lower(), chain_id)
+        if scan is None:
+            raise RuntimeError("Approval data unavailable")
+        coverage = dict(scan["coverage"])
+        coverage_reasons = dict(scan["coverage_reasons"])
+        if any(a["status"] == "unknown" for a in scan["approvals"]):
+            coverage["approval_risk"] = False
+            coverage_reasons["approval_risk"] = "Approval risk data incomplete"
+        return {
+            "approvals": scan["approvals"],
+            "status": "unknown" if coverage_reasons else "ok",
+            "coverage": coverage,
+            "coverage_reasons": coverage_reasons,
+        }
 
     async def build_revoke_tx(self, wallet_address: str, approvals_to_revoke: List[Dict]) -> List[Dict]:
         """Build unsigned ERC20 approve(spender, 0) transactions."""
@@ -214,9 +227,20 @@ class GuardianService:
     # --- Approval data via rescue_service ---
 
     async def _get_approval_data(self, wallet_address: str, chain_id: int) -> Optional[List[Dict]]:
-        """Get ERC20 approval data via rescue_service (full-chain scan + on-chain verification).
+        """Get ERC20 approval data for health scoring.
 
-        Returns None if data could not be fetched, [] if wallet has no approvals.
+        Returns None if the scan failed or is incomplete, [] if wallet has no approvals.
+        """
+        scan = await self._scan_approvals(wallet_address, chain_id)
+        if scan is None or scan["status"] == "unknown":
+            return None
+        return scan["approvals"]
+
+    async def _scan_approvals(self, wallet_address: str, chain_id: int) -> Optional[Dict]:
+        """Map a rescue_service approval scan (full-chain scan + on-chain verification).
+
+        Returns None if the scan could not run, otherwise the known approvals with
+        the scan's status, coverage and coverage_reasons.
         """
         from utils.web3_client import UnsupportedChainError
 
@@ -224,8 +248,6 @@ class GuardianService:
             return None
         try:
             scan_result = await self._rescue.scan_approvals(wallet_address, chain_id)
-            if scan_result.get("status") == "unknown":
-                return None
             raw_approvals = scan_result.get("approvals", [])
 
             approvals = []
@@ -281,14 +303,25 @@ class GuardianService:
             # Sort by risk severity
             risk_order = {"critical": 0, "high": 1, "medium": 2, "unknown": 3, "low": 4}
             approvals.sort(key=lambda x: risk_order.get(x["risk_level"], 4))
-            return approvals
+
+            coverage = dict(scan_result.get("coverage") or {})
+            coverage_reasons = dict(scan_result.get("coverage_reasons") or {})
+            if scan_result.get("status") == "unknown" and not coverage_reasons:
+                coverage["scan"] = False
+                coverage_reasons["scan"] = scan_result.get("reason") or "Approval scan incomplete"
+            return {
+                "approvals": approvals,
+                "status": "unknown" if coverage_reasons else "ok",
+                "coverage": coverage,
+                "coverage_reasons": coverage_reasons,
+            }
         except UnsupportedChainError:
             raise
         except RuntimeError as exc:
-            logger.warning("_get_approval_data via rescue unavailable: %s", type(exc).__name__)
+            logger.warning("Approval scan via rescue unavailable: %s", type(exc).__name__)
             return None
         except Exception as exc:
-            logger.error("_get_approval_data via rescue failed: %s", type(exc).__name__, exc_info=True)
+            logger.error("Approval scan via rescue failed: %s", type(exc).__name__, exc_info=True)
             return None
 
     @staticmethod
