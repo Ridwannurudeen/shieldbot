@@ -751,6 +751,7 @@ PROVIDER_PATH_MODULES = [
     'core/indexer.py',
     'scanner/token_scanner.py',
     'scanner/transaction_scanner.py',
+    'services/cache.py',
     'services/contract_service.py',
     'services/dex_service.py',
     'services/email_service.py',
