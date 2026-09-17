@@ -94,13 +94,14 @@ def failed_sell(fixture, data):
     return fixture
 
 
-def evaluate(fixture):
+def evaluate(fixture, sell_amount=None):
     return evaluate_simulation(
         pool_of(fixture),
         fixture["token"],
         fixture["amount"],
         fixture["buyer"],
         fixture["response"]["result"],
+        sell_amount,
     )
 
 
@@ -843,7 +844,7 @@ class FakeRpc:
         raise AssertionError(f"unexpected call {method} {params}")
 
 
-def replay(fixture):
+def replay(fixture, sell_amount=None):
     return (
         [
             build_simulation_request(
@@ -852,6 +853,7 @@ def replay(fixture):
                 fixture["amount"],
                 fixture["buyer"],
                 fixture["receiver"],
+                sell_amount,
             ),
             "latest",
         ],
@@ -1097,6 +1099,128 @@ async def test_simulated_pools_are_capped():
     assert methods.count("eth_simulateV1") == MAX_POOLS
     assert rpc.simulations == []
     assert "not simulated (cap of 3 pools)" in result["reason"]
+    assert result["can_sell"] is True
+
+
+def short_delivery(fixture, delivered):
+    """The buy paid out `amount`, but a transfer tax delivered less to the buyer."""
+    fixture = copy.deepcopy(fixture)
+    set_uint(calls_by_label(fixture)["delivered"], delivered)
+    return fixture
+
+
+def sized_sell(fixture, delivered):
+    """A follow-up sized to the delivered balance: the whole balance reaches the pair."""
+    fixture = short_delivery(fixture, delivered)
+    calls = calls_by_label(fixture)
+    set_uint(calls["after_sell"], 0)
+    set_uint(calls["pool_after_sell"], int(calls["pool_before_sell"]["returnData"], 16) + delivered)
+    return fixture
+
+
+def simulation_requests(rpc):
+    return [calls for calls in rpc.requests if calls[0][0] == "eth_simulateV1"]
+
+
+@pytest.mark.parametrize("name", ["v2_router02", "v4_doppler_weth", "v4_native_liquidity_launcher"])
+def test_sized_request_buys_the_full_amount_and_sells_the_delivered_balance(name):
+    fixture = load(name)
+    pool, token, amount = pool_of(fixture), fixture["token"], fixture["amount"]
+    delivered = amount * 88 // 100
+    addresses = (fixture["buyer"], fixture["receiver"])
+    labels = call_labels(pool)
+
+    def calls_of(*args):
+        request = build_simulation_request(*args)
+        return dict(zip(labels, request["blockStateCalls"][0]["calls"]))
+
+    sized = calls_of(pool, token, amount, *addresses, delivered)
+    full = calls_of(pool, token, amount, *addresses)
+    smaller = calls_of(pool, token, delivered, *addresses)
+    assert sized["buy"] == full["buy"]
+    assert sized["sell"] == smaller["sell"] != full["sell"]
+    assert sized["transfer"] == smaller["transfer"]
+    assert [label for label in labels if sized[label] != full[label]] == ["sell", "transfer"]
+
+
+def test_sized_evaluation_measures_the_sell_of_a_taxed_token():
+    fixture = load("v2_router02")
+    delivered = fixture["amount"] * 88 // 100
+    outcome = evaluate(sized_sell(fixture, delivered), sell_amount=delivered)
+    assert outcome["can_buy"] is outcome["can_sell"] is True
+    assert outcome["buy_tax"] == 12.0
+    assert outcome["sell_tax"] == 0.0
+    assert outcome["is_honeypot"] is False
+    assert outcome["retry_sell_amount"] is None
+
+
+@pytest.mark.asyncio
+async def test_short_delivery_is_retried_once_sized_to_the_delivered_balance():
+    fixture = load("v2_router02")
+    delivered = fixture["amount"] * 88 // 100
+    first, second = short_delivery(fixture, delivered), sized_sell(fixture, delivered)
+    rpc = rpc_for(fixture, simulations=[replay(first), replay(second, sell_amount=delivered)])
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+    with fresh_addresses(first, second):
+        result = await simulator.simulate(fixture["token"])
+    assert len(simulation_requests(rpc)) == 2
+    assert result["can_buy"] is result["can_sell"] is True
+    assert result["buy_tax"] == 12.0
+    assert result["sell_tax"] == 0.0
+    assert result["is_honeypot"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_still_short_follow_up_stays_unknown_after_one_extra_request():
+    fixture = load("v2_router02")
+    delivered = fixture["amount"] * 88 // 100
+    first = short_delivery(fixture, delivered)
+    second = short_delivery(fixture, delivered * 9 // 10)
+    rpc = rpc_for(fixture, simulations=[replay(first), replay(second, sell_amount=delivered)])
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+    with fresh_addresses(first, second):
+        result = await simulator.simulate(fixture["token"])
+    assert len(simulation_requests(rpc)) == 2
+    assert result["can_buy"] is True
+    assert result["can_sell"] is None
+    assert result["is_honeypot"] is None
+    assert result["sell_tax"] is None
+    assert "not sizeable in one request" in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_follow_up_keeps_the_buy_evidence_and_stays_unknown():
+    fixture = load("v2_router02")
+    delivered = fixture["amount"] * 88 // 100
+    first = short_delivery(fixture, delivered)
+    sized = replay(first, sell_amount=delivered)[0]
+    rpc = rpc_for(
+        fixture,
+        simulations=[replay(first), (sized, {"error": {"code": -32000, "message": "boom"}})],
+    )
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+    with fresh_addresses(first, first):
+        result = await simulator.simulate(fixture["token"])
+    assert len(simulation_requests(rpc)) == 2
+    assert result["can_buy"] is True
+    assert result["buy_tax"] == 12.0
+    assert result["can_sell"] is None
+    assert result["is_honeypot"] is None
+    assert "not sizeable in one request" in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_a_full_delivery_issues_exactly_one_simulation_request():
+    fixture = load("v2_router02")
+    rpc = rpc_for(fixture)
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+    with fresh_addresses(fixture):
+        result = await simulator.simulate(fixture["token"])
+    assert len(simulation_requests(rpc)) == 1
     assert result["can_sell"] is True
 
 

@@ -217,9 +217,11 @@ def call_labels(pool: Pool) -> list:
 
 
 def build_simulation_request(
-    pool: Pool, token: str, amount: int, buyer: str, receiver: str
+    pool: Pool, token: str, amount: int, buyer: str, receiver: str, sell_amount: Optional[int] = None
 ) -> dict:
+    """Buy exactly `amount` tokens, then sell `sell_amount` of them (default: all of `amount`)."""
     token = token.lower()
+    sell_amount = amount if sell_amount is None else sell_amount
     if pool.route == "v2":
         spender = V2_ROUTER
         buy = _call(
@@ -238,7 +240,7 @@ def build_simulation_request(
             _calldata(
                 "swapExactTokensForETHSupportingFeeOnTransferTokens(uint256,uint256,address[],address,uint256)",
                 ["uint256", "uint256", "address[]", "address", "uint256"],
-                [amount, 0, [token, WETH], buyer, MAX_UINT256],
+                [sell_amount, 0, [token, WETH], buyer, MAX_UINT256],
             ),
         )
     else:
@@ -268,7 +270,7 @@ def build_simulation_request(
             _universal_router_swap(
                 [SETTLE, SWAP_EXACT_IN_SINGLE, TAKE_ALL],
                 [
-                    encode(["address", "uint256", "bool"], [token, amount, True]),
+                    encode(["address", "uint256", "bool"], [token, sell_amount, True]),
                     encode([SINGLE_SWAP], [(pool.key, token_is_currency0, 0, 0, 0, b"")]),
                     encode(["address", "uint256"], [pool.numeraire, 0]),
                 ],
@@ -309,7 +311,9 @@ def build_simulation_request(
         "transfer": _call(
             buyer,
             token,
-            _calldata("transfer(address,uint256)", ["address", "uint256"], [receiver, amount // 2]),
+            _calldata(
+                "transfer(address,uint256)", ["address", "uint256"], [receiver, sell_amount // 2]
+            ),
         ),
     }
     if pool.route == "v2":
@@ -485,6 +489,7 @@ def _traces_native_transfers(call: dict) -> bool:
 
 def _outcome(pool: Pool, reason: str, block: Optional[int] = None) -> dict:
     return {
+        "retry_sell_amount": None,
         "route": pool.route,
         "pool": _pool_label(pool),
         "block": block,
@@ -497,8 +502,11 @@ def _outcome(pool: Pool, reason: str, block: Optional[int] = None) -> dict:
     }
 
 
-def evaluate_simulation(pool: Pool, token: str, amount: int, buyer: str, result) -> dict:
+def evaluate_simulation(
+    pool: Pool, token: str, amount: int, buyer: str, result, sell_amount: Optional[int] = None
+) -> dict:
     token = token.lower()
+    sell_amount = amount if sell_amount is None else sell_amount
     labels = call_labels(pool)
     block = result[0] if isinstance(result, list) and result and isinstance(result[0], dict) else {}
     calls = block.get("calls")
@@ -537,7 +545,11 @@ def evaluate_simulation(pool: Pool, token: str, amount: int, buyer: str, result)
         outcome["reason"] = "buy succeeded but delivered no tokens"
         return outcome
     outcome["can_buy"] = True
-    if delivered != amount:
+    if delivered != sell_amount:
+        # A transfer-taxed token delivers less than the pool paid out; one sized follow-up can sell
+        # exactly that balance. A follow-up that is still short stays unknown.
+        if sell_amount == amount and delivered < amount:
+            outcome["retry_sell_amount"] = delivered
         outcome["reason"] = (
             f"sell not sizeable in one request: bought {amount} token units but received {delivered}"
         )
@@ -689,29 +701,37 @@ class RobinhoodSimulator:
             amount, pools, notes = await self._discover(session, token)
             outcomes = []
             for pool in pools:
-                buyer, receiver = _fresh_address(), _fresh_address()
-                request = build_simulation_request(pool, token, amount, buyer, receiver)
-                try:
-                    rows = await self._request(session, [("eth_simulateV1", [request, "latest"])])
-                    error = rows[0].get("error")
-                    if error is not None:
-                        code = error.get("code") if isinstance(error, dict) else None
-                        if code == -32601 or "does not exist" in str(error).lower():
-                            raise SimulationUnavailable("eth_simulateV1 unsupported by the RPC")
-                        raise SimulationUnavailable(
-                            f"eth_simulateV1 failed (JSON-RPC error {code})"
-                        )
-                    outcomes.append(
-                        evaluate_simulation(pool, token, amount, buyer, rows[0].get("result"))
+                outcome = await self._simulate_pool(session, pool, token, amount)
+                if outcome["retry_sell_amount"]:
+                    sized = await self._simulate_pool(
+                        session, pool, token, amount, outcome["retry_sell_amount"]
                     )
-                except SimulationUnavailable as e:
-                    outcomes.append(_outcome(pool, e.reason))
-                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                    logger.warning("Robinhood simulation request failed: %s", type(e).__name__)
-                    outcomes.append(
-                        _outcome(pool, f"Simulation RPC request failed ({type(e).__name__})")
-                    )
+                    # A follow-up that could not run leaves the first attempt's buy verdict standing.
+                    outcome = sized if sized["can_buy"] is not None else outcome
+                outcomes.append(outcome)
         return aggregate_outcomes(outcomes, notes)
+
+    async def _simulate_pool(
+        self, session, pool: Pool, token: str, amount: int, sell_amount: Optional[int] = None
+    ) -> dict:
+        buyer, receiver = _fresh_address(), _fresh_address()
+        request = build_simulation_request(pool, token, amount, buyer, receiver, sell_amount)
+        try:
+            rows = await self._request(session, [("eth_simulateV1", [request, "latest"])])
+            error = rows[0].get("error")
+            if error is not None:
+                code = error.get("code") if isinstance(error, dict) else None
+                if code == -32601 or "does not exist" in str(error).lower():
+                    raise SimulationUnavailable("eth_simulateV1 unsupported by the RPC")
+                raise SimulationUnavailable(f"eth_simulateV1 failed (JSON-RPC error {code})")
+            return evaluate_simulation(
+                pool, token, amount, buyer, rows[0].get("result"), sell_amount
+            )
+        except SimulationUnavailable as e:
+            return _outcome(pool, e.reason)
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            logger.warning("Robinhood simulation request failed: %s", type(e).__name__)
+            return _outcome(pool, f"Simulation RPC request failed ({type(e).__name__})")
 
     async def _request(self, session, calls: list) -> list:
         """POST one JSON-RPC request or batch; retry HTTP 429 and JSON-RPC rate limits with backoff."""
