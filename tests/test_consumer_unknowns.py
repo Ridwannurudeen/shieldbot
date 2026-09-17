@@ -110,6 +110,7 @@ def test_cached_response_preserves_unknowns(consumer_api, incomplete_output):
     response = api._build_cached_response(cached, {}, 0)
     assert_unknown_response(response)
     assert '_scan_metadata' not in response['shield_score']['category_scores']
+    assert '_scan_metadata' in cached['category_scores']
 
 
 @pytest.mark.asyncio
