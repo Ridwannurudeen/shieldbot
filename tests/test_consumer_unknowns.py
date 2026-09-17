@@ -626,7 +626,7 @@ if (surface === 'sidepanel-guardian') {
     assert(!ctx.statsEl.innerHTML.includes('$0'));
     assert(ctx.statsEl.innerHTML.includes('Unknown'));
     assert(ctx.approvalsEl.innerHTML.includes('Token price unavailable'));
-    assert(ctx.approvalsEl.innerHTML.includes('Unknown'));
+    assert(ctx.approvalsEl.innerHTML.includes(ctx.compact ? 'health-usd-risk">Unknown' : 'wh-appr-usd">Unknown'));
     assert(!ctx.approvalsEl.innerHTML.includes('$0'));
   }
   context.renderHealthData({
