@@ -641,3 +641,26 @@ if (surface === 'sidepanel-guardian') {
         encoding='utf-8', check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.asyncio
+async def test_api_rescans_legacy_row_from_real_database(consumer_api, incomplete_output):
+    from core.database import Database
+    api, services = consumer_api
+    database = Database(':memory:')
+    await database.initialize()
+    try:
+        address = '0x' + 'a' * 40
+        await database.upsert_contract_score(address, 56, 0.0, 'LOW', category_scores={'honeypot': 0})
+        legacy = await database.get_contract_score(address, 56)
+        assert legacy['status'] == 'unknown'
+        services.db = database
+        api.risk_engine.compute_from_results.return_value = incomplete_output
+        response = await api.firewall(api.FirewallRequest(to=address, sender='0x' + 'b' * 40),
+                                      SimpleNamespace(headers={}))
+        services.registry.run_all.assert_awaited_once()
+        assert response.get('cached') is not True
+        stored = await database.get_contract_score(address, 56)
+        assert stored['category_scores']['_scan_metadata']['status'] == 'unknown'
+    finally:
+        await database.close()

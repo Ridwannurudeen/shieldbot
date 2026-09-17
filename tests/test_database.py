@@ -336,9 +336,14 @@ class TestContractScoreCoverage:
             assert row["category_scores"]["_scan_metadata"] == metadata
 
     @pytest.mark.asyncio
-    async def test_score_without_metadata_gains_no_coverage_keys(self, db):
-        await db.upsert_contract_score("0xLEGACY", 56, 0.0, "LOW", category_scores={"honeypot": 0})
+    @pytest.mark.parametrize("category_scores", [{"honeypot": 0}, None])
+    async def test_score_without_metadata_is_unknown(self, db, category_scores):
+        await db.upsert_contract_score("0xLEGACY", 56, 0.0, "LOW", category_scores=category_scores)
 
         cached = await db.get_contract_score("0xLEGACY", 56, max_age_seconds=60)
+        scored = await db.get_all_scored_contracts(min_risk_score=0)
 
-        assert not {"status", "coverage", "coverage_reasons"} & cached.keys()
+        for row in (cached, scored[0]):
+            assert row["status"] == "unknown"
+            assert row["coverage_reasons"] == {"coverage": "Score predates coverage tracking"}
+            assert row["category_scores"] == (category_scores or {})

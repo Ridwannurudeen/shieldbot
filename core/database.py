@@ -11,8 +11,15 @@ logger = logging.getLogger(__name__)
 
 
 def _lift_scan_metadata(score: Dict) -> Dict:
-    """Expose stored scan coverage at the top level while keeping it in category_scores."""
-    metadata = score['category_scores'].get('_scan_metadata') or {}
+    """Expose stored scan coverage at the top level while keeping it in category_scores.
+
+    Rows written before coverage tracking carry no metadata and are reported as unknown.
+    """
+    metadata = score['category_scores'].get('_scan_metadata')
+    if not metadata:
+        score['status'] = 'unknown'
+        score['coverage_reasons'] = {'coverage': 'Score predates coverage tracking'}
+        return score
     for key in ('status', 'coverage', 'coverage_reasons'):
         if key in metadata:
             score[key] = metadata[key]

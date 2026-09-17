@@ -318,8 +318,11 @@ def test_agent_incomplete_coverage_survives_caches(client, mock_container, reaso
         assert mock_container.cache.set_verdict.call_args.args[2]["status"] == "unknown"
 
 
-def test_agent_legacy_sqlite_cache_rescans(client, mock_container):
-    mock_container.db.get_contract_score.return_value = {"risk_score": 0, "risk_level": "LOW", "category_scores": {}}
+@pytest.mark.parametrize("row_status", ["raw", "database"])
+def test_agent_legacy_sqlite_cache_rescans(client, mock_container, row_status):
+    from core.database import _lift_scan_metadata
+    row = {"risk_score": 0, "risk_level": "LOW", "category_scores": {}}
+    mock_container.db.get_contract_score.return_value = row if row_status == "raw" else _lift_scan_metadata(row)
     resp = client.post("/api/agent/firewall", json=_make_firewall_request(), headers={"X-API-Key": "sb_testkey"})
     assert resp.status_code == 200
     mock_container.registry.run_all.assert_awaited_once()
