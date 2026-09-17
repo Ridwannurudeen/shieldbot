@@ -1,12 +1,18 @@
 """Tests for agent.hunter — scheduled threat sweep loop."""
 
 import asyncio
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
 
-from agent.hunter import LAUNCH_SCANS_PER_SWEEP, Hunter
+from agent.hunter import (
+    LAUNCH_SCANS_PER_SWEEP,
+    RECHECK_MIN_INTERVAL_SECONDS,
+    RECHECK_PAIRS_PER_SWEEP,
+    Hunter,
+)
 from core.database import Database
 from services.launch_discovery import LaunchDiscoveryError
 
@@ -25,10 +31,22 @@ def tools():
 def db():
     d = MagicMock()
     d.get_watched_deployers = AsyncMock(return_value=[])
-    d.get_tracked_pairs = AsyncMock(return_value=[])
+    d.get_recheck_chains = AsyncMock(return_value=[])
+    d.get_recheck_pairs = AsyncMock(return_value=[])
+    d.mark_tracked_pair_checked = AsyncMock()
     d.update_tracked_pair_status = AsyncMock()
     d.insert_agent_finding = AsyncMock()
     return d
+
+
+def watching_pairs(db, rows):
+    """Serve rows to the recheck phase the way the database does, grouped by chain."""
+    db.get_recheck_chains = AsyncMock(return_value=sorted({row.get("chain_id", 56) for row in rows}))
+
+    async def recheck_pairs(status, chain_id, limit, checked_before):
+        return [row for row in rows if row.get("chain_id", 56) == chain_id][:limit]
+
+    db.get_recheck_pairs = AsyncMock(side_effect=recheck_pairs)
 
 
 @pytest.fixture
@@ -107,7 +125,7 @@ async def test_check_watched_deployers_empty(hunter, db):
 @pytest.mark.asyncio
 async def test_recheck_upgrades_to_blocked(hunter, tools, db):
     """A pair with rescan score >= 71 should be blocked and deployer auto-watched."""
-    db.get_tracked_pairs = AsyncMock(return_value=[{
+    watching_pairs(db, [{
         "pair_address": "0xpair1",
         "token_address": "0xtoken1",
         "deployer": "0xdeploy1",
@@ -127,7 +145,7 @@ async def test_recheck_upgrades_to_blocked(hunter, tools, db):
 @pytest.mark.asyncio
 async def test_recheck_clears_low_score(hunter, tools, db):
     """A pair with rescan score <= 30 should be cleared."""
-    db.get_tracked_pairs = AsyncMock(return_value=[{
+    watching_pairs(db, [{
         "pair_address": "0xpair2",
         "token_address": "0xtoken2",
         "deployer": "0xdeploy2",
@@ -150,7 +168,7 @@ async def test_recheck_clears_low_score(hunter, tools, db):
 @pytest.mark.asyncio
 async def test_recheck_leaves_warn_alone(hunter, tools, db):
     """A pair with rescan score 31-70 should stay in watching status."""
-    db.get_tracked_pairs = AsyncMock(return_value=[{
+    watching_pairs(db, [{
         "pair_address": "0xpair3",
         "token_address": "0xtoken3",
         "deployer": "0xdeploy3",
@@ -220,7 +238,7 @@ async def test_sweep_exception_doesnt_crash(hunter):
 @pytest.mark.asyncio
 async def test_recheck_individual_error_doesnt_stop_others(hunter, tools, db):
     """If one pair recheck fails, others should still be processed."""
-    db.get_tracked_pairs = AsyncMock(return_value=[
+    watching_pairs(db, [
         {"pair_address": "0xpairA", "token_address": "0xtokenA", "deployer": "0xdA"},
         {"pair_address": "0xpairB", "token_address": "0xtokenB", "deployer": "0xdB"},
     ])
@@ -324,7 +342,7 @@ def scan_result(score, complete=True):
 
 @pytest.mark.asyncio
 async def test_recheck_rescans_and_logs_a_robinhood_pair_on_its_own_chain(hunter, tools, db):
-    db.get_tracked_pairs = AsyncMock(return_value=[{
+    watching_pairs(db, [{
         "pair_address": ROBINHOOD_TOKEN,
         "token_address": ROBINHOOD_TOKEN,
         "deployer": None,
@@ -343,7 +361,7 @@ async def test_recheck_rescans_and_logs_a_robinhood_pair_on_its_own_chain(hunter
 
 @pytest.mark.asyncio
 async def test_recheck_keeps_bsc_rows_on_bsc(hunter, tools, db):
-    db.get_tracked_pairs = AsyncMock(return_value=[{
+    watching_pairs(db, [{
         "pair_address": "0xpair1",
         "token_address": "0xtoken1",
         "deployer": "0xdeploy1",
@@ -370,7 +388,7 @@ async def test_recheck_keeps_bsc_rows_on_bsc(hunter, tools, db):
     {key: value for key, value in scan_result(10).items() if key != "rug_probability"},
 ])
 async def test_recheck_incomplete_scan_never_clears(hunter, tools, db, result):
-    db.get_tracked_pairs = AsyncMock(return_value=[{
+    watching_pairs(db, [{
         "pair_address": "0xpair2", "token_address": "0xtoken2", "deployer": "0xdeploy2", "chain_id": 4663,
     }])
     tools.scan_contract = AsyncMock(return_value=result)
@@ -382,7 +400,7 @@ async def test_recheck_incomplete_scan_never_clears(hunter, tools, db, result):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("score,status", [(10, "cleared"), (85, "blocked")])
 async def test_recheck_reads_the_score_scan_contract_returns(hunter, tools, db, score, status):
-    db.get_tracked_pairs = AsyncMock(return_value=[{
+    watching_pairs(db, [{
         "pair_address": "0xpair4", "token_address": "0xtoken4", "deployer": None, "chain_id": 56,
     }])
     tools.scan_contract = AsyncMock(return_value=scan_result(score))
@@ -509,9 +527,12 @@ async def test_discovered_launch_is_rechecked_and_logged_on_robinhood_chain(tool
     tools.scan_contract = AsyncMock(return_value=scan_result(10, complete=False))
     await hunter._scan_new_pairs("sweep-1")
 
+    # Six hours later the launch is due a recheck, which an incomplete scan does not clear.
+    await watching_row(real_db, token, 4663, RECHECK_MIN_INTERVAL_SECONDS + 60)
     await hunter._recheck_warn_contracts("sweep-2")
     assert [row["token_address"] for row in await real_db.get_tracked_pairs(status="watching")] == [token]
 
+    await watching_row(real_db, token, 4663, RECHECK_MIN_INTERVAL_SECONDS + 60)
     tools.scan_contract = AsyncMock(return_value=scan_result(95))
     assert await hunter._recheck_warn_contracts("sweep-3") == [token]
 
@@ -519,3 +540,86 @@ async def test_discovered_launch_is_rechecked_and_logged_on_robinhood_chain(tool
     assert [row["chain_id"] for row in await real_db.get_tracked_pairs(status="blocked")] == [4663]
     findings = await real_db.get_agent_findings()
     assert [(f["address"], f["chain_id"], f["investigation_id"]) for f in findings] == [(token, 4663, "sweep-3")]
+
+
+# --- recheck fairness, rotation and interval ---
+
+DAY = 24 * 3600
+
+
+async def watching_row(database, pair_address, chain_id, checked_ago):
+    """Insert a watching pair whose last check was checked_ago seconds ago (None: never)."""
+    await database.upsert_tracked_pair(pair_address, token_address=pair_address, chain_id=chain_id)
+    checked = None if checked_ago is None else time.time() - checked_ago
+    await database._db.execute(
+        "UPDATE tracked_pairs SET last_checked = ? WHERE pair_address = ?", (checked, pair_address)
+    )
+    await database._db.commit()
+
+
+async def sweep_scans(hunter, tools):
+    """Run one recheck phase and return the (token, chain) pairs it scanned."""
+    tools.scan_contract.reset_mock()
+    await hunter._recheck_warn_contracts("sweep")
+    return [(call.args[0], call.kwargs["chain_id"]) for call in tools.scan_contract.await_args_list]
+
+
+@pytest.mark.asyncio
+async def test_recheck_gives_every_chain_a_turn(tools, ai, sentinel, real_db):
+    await watching_row(real_db, "0xbsc1", 56, 3 * DAY)
+    for index in range(25):
+        await watching_row(real_db, launch(index)["token_address"], 4663, DAY + index)
+    tools.scan_contract = AsyncMock(return_value=scan_result(10, complete=False))
+    hunter = Hunter(tools=tools, db=real_db, ai_analyzer=ai, sentinel=sentinel)
+
+    scanned = await sweep_scans(hunter, tools)
+
+    assert ("0xbsc1", 56) in scanned
+    assert len(scanned) <= RECHECK_PAIRS_PER_SWEEP
+    assert sum(1 for _, chain in scanned if chain == 4663) <= RECHECK_PAIRS_PER_SWEEP // 2
+
+
+@pytest.mark.asyncio
+async def test_recheck_rotates_the_least_recently_checked_rows(tools, ai, sentinel, real_db):
+    await watching_row(real_db, "0xnever", 4663, None)
+    await watching_row(real_db, "0xoldest", 4663, 3 * DAY)
+    await watching_row(real_db, "0xmiddle", 4663, 2 * DAY)
+    await watching_row(real_db, "0xnewest", 4663, DAY)
+    tools.scan_contract = AsyncMock(return_value=scan_result(10, complete=False))
+    hunter = Hunter(tools=tools, db=real_db, ai_analyzer=ai, sentinel=sentinel)
+
+    with patch("agent.hunter.RECHECK_PAIRS_PER_SWEEP", 2):
+        first = await sweep_scans(hunter, tools)
+        second = await sweep_scans(hunter, tools)
+        third = await sweep_scans(hunter, tools)
+
+    assert [token for token, _ in first] == ["0xnever", "0xoldest"]
+    assert [token for token, _ in second] == ["0xmiddle", "0xnewest"]
+    assert third == []
+
+
+@pytest.mark.asyncio
+async def test_recheck_skips_a_row_checked_within_the_minimum_interval(tools, ai, sentinel, real_db):
+    await watching_row(real_db, "0xfresh", 4663, RECHECK_MIN_INTERVAL_SECONDS / 2)
+    tools.scan_contract = AsyncMock(return_value=scan_result(10, complete=False))
+    hunter = Hunter(tools=tools, db=real_db, ai_analyzer=ai, sentinel=sentinel)
+
+    assert await sweep_scans(hunter, tools) == []
+
+    await watching_row(real_db, "0xfresh", 4663, RECHECK_MIN_INTERVAL_SECONDS + 60)
+
+    assert await sweep_scans(hunter, tools) == [("0xfresh", 4663)]
+    # The attempt is recorded even though an incomplete scan leaves the row watching.
+    row = (await real_db.get_recheck_pairs("watching", 4663, 10, time.time()))[0]
+    assert row["last_checked"] > time.time() - 60
+    assert await sweep_scans(hunter, tools) == []
+
+
+@pytest.mark.asyncio
+async def test_recheck_scans_at_most_the_sweep_budget(tools, ai, sentinel, real_db):
+    for index in range(RECHECK_PAIRS_PER_SWEEP + 10):
+        await watching_row(real_db, launch(index)["token_address"], 4663, DAY + index)
+    tools.scan_contract = AsyncMock(return_value=scan_result(10, complete=False))
+    hunter = Hunter(tools=tools, db=real_db, ai_analyzer=ai, sentinel=sentinel)
+
+    assert len(await sweep_scans(hunter, tools)) == RECHECK_PAIRS_PER_SWEEP

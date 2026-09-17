@@ -25,6 +25,12 @@ logger = logging.getLogger(__name__)
 
 # Each scan runs every analyzer, so only the newest launches are scanned per sweep.
 LAUNCH_SCANS_PER_SWEEP = 10
+# One sweep rechecks at most this many tracked pairs, shared equally between the chains
+# that have any, so no chain can starve another.
+RECHECK_PAIRS_PER_SWEEP = 20
+# Chain 4663 scans cannot reach full coverage yet, so those pairs would otherwise be
+# rescanned every sweep forever. Six hours caps a pair at four rechecks a day.
+RECHECK_MIN_INTERVAL_SECONDS = 6 * 3600
 
 
 class Hunter:
@@ -167,15 +173,26 @@ class Hunter:
     # ------------------------------------------------------------------
 
     async def _recheck_warn_contracts(self, investigation_id: str):
-        """Recheck contracts previously scored WARN (31-70). Cap at 20.
+        """Recheck watching contracts, least recently checked first.
 
-        Only a complete scan clears a contract; an incomplete one leaves it watching.
+        Every chain holding watching pairs gets an equal share of RECHECK_PAIRS_PER_SWEEP,
+        and a pair waits RECHECK_MIN_INTERVAL_SECONDS between rechecks, so no chain starves
+        another and no pair is rescanned every sweep. Only a complete scan clears a
+        contract; an incomplete one leaves it watching.
         """
         flagged = []
-        pairs = await self.db.get_tracked_pairs(status="watching", limit=20)
-        for pair in pairs:
+        chains = await self.db.get_recheck_chains("watching")
+        if not chains:
+            return flagged
+        quota = max(1, RECHECK_PAIRS_PER_SWEEP // len(chains))
+        checked_before = time.time() - RECHECK_MIN_INTERVAL_SECONDS
+        pairs = []
+        for chain in chains:
+            pairs += await self.db.get_recheck_pairs("watching", chain, quota, checked_before)
+        for pair in pairs[:RECHECK_PAIRS_PER_SWEEP]:
             try:
                 chain_id = pair.get("chain_id", 56)
+                await self.db.mark_tracked_pair_checked(pair["pair_address"])
                 result = await self.tools.scan_contract(pair["token_address"], chain_id=chain_id)
                 risk_score = result.get("risk_score", result.get("rug_probability"))
 

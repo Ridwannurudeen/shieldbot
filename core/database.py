@@ -1159,6 +1159,53 @@ class Database:
             for r in rows
         ]
 
+    async def get_recheck_chains(self, status: str) -> List[int]:
+        """Return the chains that have tracked pairs in this status."""
+        cursor = await self._db.execute(
+            "SELECT DISTINCT chain_id FROM tracked_pairs WHERE status = ? ORDER BY chain_id",
+            (status,),
+        )
+        return [row[0] for row in await cursor.fetchall()]
+
+    async def get_recheck_pairs(
+        self, status: str, chain_id: int, limit: int, checked_before: float
+    ) -> List[Dict]:
+        """Get one chain's pairs that are due a recheck, least recently checked first.
+
+        A pair that has never been checked sorts first.
+        """
+        cursor = await self._db.execute("""
+            SELECT id, pair_address, token_address, deployer, liquidity_usd,
+                   first_seen, last_checked, status, chain_id
+            FROM tracked_pairs
+            WHERE status = ? AND chain_id = ? AND COALESCE(last_checked, 0) <= ?
+            ORDER BY COALESCE(last_checked, 0), id
+            LIMIT ?
+        """, (status, chain_id, checked_before, limit))
+        rows = await cursor.fetchall()
+        return [
+            {
+                "id": r[0],
+                "pair_address": r[1],
+                "token_address": r[2],
+                "deployer": r[3],
+                "liquidity_usd": r[4],
+                "first_seen": r[5],
+                "last_checked": r[6],
+                "status": r[7],
+                "chain_id": r[8],
+            }
+            for r in rows
+        ]
+
+    async def mark_tracked_pair_checked(self, pair_address: str):
+        """Record a recheck attempt without changing the pair's status."""
+        await self._db.execute(
+            "UPDATE tracked_pairs SET last_checked = ? WHERE pair_address = ?",
+            (time.time(), pair_address),
+        )
+        await self._db.commit()
+
     async def update_tracked_pair_status(self, pair_address: str, status: str):
         """Update a tracked pair's status and last_checked timestamp."""
         now = time.time()
