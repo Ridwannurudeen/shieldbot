@@ -478,6 +478,42 @@ async def test_lower_ranked_event_never_downgrades_a_launchpad_label(db):
     )
 
 
+def test_container_wires_launch_discovery_into_the_hunter():
+    from core.config import Settings
+    from core.container import ServiceContainer
+
+    patched = (
+        "Web3Client",
+        "AIAnalyzer",
+        "ScamDatabase",
+        "CalldataDecoder",
+        "OnchainRecorder",
+        "TransactionScanner",
+        "TokenScanner",
+        "DexService",
+        "EthosService",
+        "HoneypotService",
+        "ContractService",
+        "GreenfieldService",
+        "TenderlySimulator",
+        "RiskEngine",
+    )
+    patches = [patch(f"core.container.{name}") for name in patched]
+    for active in patches:
+        active.start()
+    try:
+        container = ServiceContainer(
+            Settings(_env_file=None, robinhood_rpc_url="https://rpc.example/4663")
+        )
+    finally:
+        for active in patches:
+            active.stop()
+
+    assert isinstance(container.hunter.discovery, LaunchDiscovery)
+    assert container.hunter.discovery.db is container.db
+    assert container.hunter.discovery.rpc_url == "https://rpc.example/4663"
+
+
 @pytest.mark.asyncio
 async def test_reprocessing_a_range_does_not_duplicate_launches(db):
     rpc = FakeRpc()

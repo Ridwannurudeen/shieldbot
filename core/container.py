@@ -185,12 +185,14 @@ class ServiceContainer:
         )
 
         from agent.hunter import Hunter
+        from services.launch_discovery import LaunchDiscovery
 
         self.hunter = Hunter(
             tools=self.agent_tools,
             db=self.db,
             ai_analyzer=self.ai_analyzer,
             sentinel=self.sentinel,
+            discovery=LaunchDiscovery(self.db, rpc_url=settings.robinhood_rpc_url),
         )
 
         # Optional services (need async init)
