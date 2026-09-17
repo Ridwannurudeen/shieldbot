@@ -287,41 +287,48 @@ async function runHealthScan(addr, ctx) {
 function renderHealthData(data, ctx) {
   const highRisk   = data.high_risk || 0;
   const mediumRisk = data.medium_risk || 0;
-  const totalUsd   = data.total_value_at_risk_usd || 0;
+  const totalUsd   = data.total_value_at_risk_usd;
   const incomplete = data.status === "unknown";
+  const usdText    = incomplete || totalUsd == null ? "Unknown" : fmtUsd(totalUsd) || "$0";
+  const reasonText = Object.values(data.coverage_reasons || {}).join("; ") || "Approval data incomplete";
   const score      = Math.max(0, 100 - highRisk * 20 - mediumRisk * 5);
   const scoreColor = score < 50 ? "#ef4444" : score < 80 ? "#f97316" : "#22c55e";
 
   ctx.scoreNumEl.textContent = incomplete ? "?" : score;
   ctx.scoreNumEl.style.color = incomplete ? "#eab308" : scoreColor;
 
-  const usdColor = totalUsd > 0 ? "#ef4444" : "#94a3b8";
+  const usdColor = incomplete ? "#eab308" : totalUsd > 0 ? "#ef4444" : "#94a3b8";
 
   if (ctx.compact) {
     ctx.statsEl.innerHTML = `
       <div class="health-stat"><div class="health-stat-num" style="color:#ef4444">${highRisk}</div><div class="health-stat-label">${t("healthHighRisk")}</div></div>
       <div class="health-stat"><div class="health-stat-num" style="color:#f97316">${mediumRisk}</div><div class="health-stat-label">${t("healthMedium")}</div></div>
-      <div class="health-stat"><div class="health-stat-num" style="color:${usdColor};font-size:14px">${fmtUsd(totalUsd) || "$0"}</div><div class="health-stat-label">${t("healthAtRisk")}</div></div>`;
+      <div class="health-stat"><div class="health-stat-num" style="color:${usdColor};font-size:14px">${usdText}</div><div class="health-stat-label">${t("healthAtRisk")}</div></div>`;
   } else {
     ctx.statsEl.innerHTML = `
       <div class="wh-stat"><div class="wh-statnum" style="color:#ef4444">${highRisk}</div><div class="wh-statlbl">${t("healthHighRisk")}</div></div>
       <div class="wh-stat"><div class="wh-statnum" style="color:#f97316">${mediumRisk}</div><div class="wh-statlbl">${t("healthMedium")}</div></div>
-      <div class="wh-stat"><div class="wh-statnum" style="color:${usdColor};font-size:11px">${fmtUsd(totalUsd) || "$0"}</div><div class="wh-statlbl">${t("healthAtRisk")}</div></div>`;
+      <div class="wh-stat"><div class="wh-statnum" style="color:${usdColor};font-size:11px">${usdText}</div><div class="wh-statlbl">${t("healthAtRisk")}</div></div>`;
   }
 
   const approvals  = data.approvals || [];
   const riskClass  = { HIGH: "risk-high", MEDIUM: "risk-medium", LOW: "risk-low" };
+  const reasonHtml = incomplete
+    ? `<div class="${ctx.compact ? "health-empty" : "wh-empty"}">Unknown: ${escapeHtml(reasonText)}</div>`
+    : "";
 
   if (!approvals.length) {
-    ctx.approvalsEl.innerHTML = ctx.compact
+    ctx.approvalsEl.innerHTML = reasonHtml || (ctx.compact
       ? `<div class="health-empty">${t("healthNoApprovals")}</div>`
-      : `<div class="wh-empty">${t("healthNoApprovalsDash")}</div>`;
+      : `<div class="wh-empty">${t("healthNoApprovalsDash")}</div>`);
   } else if (ctx.compact) {
-    ctx.approvalsEl.innerHTML = approvals.slice(0, 12).map((a) => {
+    ctx.approvalsEl.innerHTML = reasonHtml + approvals.slice(0, 12).map((a) => {
       const spd = a.spender_label && a.spender_label !== "Unknown Contract" ? escapeHtml(a.spender_label) : escapeHtml(shortAddr(a.spender || ""));
-      const right = a.value_at_risk_usd
-        ? `<div class="health-usd-risk">${escapeHtml(fmtUsd(a.value_at_risk_usd))}</div>`
-        : `<div class="health-allowance">${escapeHtml(a.allowance || "")}</div>`;
+      const right = a.value_at_risk_usd == null
+        ? `<div class="health-usd-risk">Unknown</div>`
+        : a.value_at_risk_usd
+          ? `<div class="health-usd-risk">${escapeHtml(fmtUsd(a.value_at_risk_usd))}</div>`
+          : `<div class="health-allowance">${escapeHtml(a.allowance || "")}</div>`;
       return `<div class="health-approval-item">
         <span class="health-risk-badge ${riskClass[a.risk_level] || "risk-unknown"}">${escapeHtml(a.risk_level)}</span>
         <div class="health-token">
@@ -330,9 +337,11 @@ function renderHealthData(data, ctx) {
         </div>${right}</div>`;
     }).join("");
   } else {
-    ctx.approvalsEl.innerHTML = approvals.slice(0, 20).map((a) => {
+    ctx.approvalsEl.innerHTML = reasonHtml + approvals.slice(0, 20).map((a) => {
       const spd = a.spender_label && a.spender_label !== "Unknown Contract" ? escapeHtml(a.spender_label) : escapeHtml(shortAddr(a.spender || ""));
-      const usdEl = a.value_at_risk_usd ? `<div class="wh-appr-usd">${escapeHtml(fmtUsd(a.value_at_risk_usd))}</div>` : "";
+      const usdEl = a.value_at_risk_usd == null
+        ? `<div class="wh-appr-usd">Unknown</div>`
+        : a.value_at_risk_usd ? `<div class="wh-appr-usd">${escapeHtml(fmtUsd(a.value_at_risk_usd))}</div>` : "";
       return `<div class="wh-appr">
         <span class="wh-appr-badge ${riskClass[a.risk_level] || "risk-unknown"}">${escapeHtml(a.risk_level)}</span>
         <div class="wh-appr-tok">

@@ -476,7 +476,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     const warnings = health.warnings || [];
     const totalApprovals = health.total_approvals || 0;
     const dangerousCount = health.dangerous_approvals || 0;
-    const valueAtRisk = health.total_value_at_risk_usd || 0;
+    const incomplete = health.status === "unknown";
+    const valueAtRisk = health.total_value_at_risk_usd;
+    const valueText = incomplete || valueAtRisk == null ? "Unknown" : `$${valueAtRisk.toFixed(2)}`;
     const labels = {
       dangerous_approvals: "Approvals",
       flagged_exposure: "Flagged tokens",
@@ -487,7 +489,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     let statsHtml = `<div class="health-stats">
       <div class="health-stat"><span class="health-stat-val">${totalApprovals}</span><span class="health-stat-label">Approvals</span></div>
       <div class="health-stat"><span class="health-stat-val" style="color:#fca5a5">${dangerousCount}</span><span class="health-stat-label">High Risk</span></div>
-      <div class="health-stat"><span class="health-stat-val" style="color:#fcd34d">$${valueAtRisk.toFixed(2)}</span><span class="health-stat-label">At Risk</span></div>
+      <div class="health-stat"><span class="health-stat-val" style="color:#fcd34d">${valueText}</span><span class="health-stat-label">At Risk</span></div>
     </div>`;
     let compHtml = "";
     for (const [key, val] of Object.entries(components)) {
@@ -499,7 +501,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     guardianHealthEl.innerHTML = `<div class="health-card">
       <div class="health-header">
-        <span class="health-score" style="color:${score >= 70 ? '#6ee7b7' : score >= 40 ? '#fcd34d' : '#fca5a5'}">${score}</span>
+        <span class="health-score" style="color:${incomplete ? '#fcd34d' : score >= 70 ? '#6ee7b7' : score >= 40 ? '#fcd34d' : '#fca5a5'}">${incomplete ? "?" : score}</span>
         <span class="health-level ${escapeHtml(level)}">${escapeHtml(level)}</span>
       </div>
       ${statsHtml}

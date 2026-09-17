@@ -564,3 +564,80 @@ assert(ctx.approvalsEl.innerHTML.includes('risk-low'));
         encoding='utf-8', check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('surface', ['popup-compact', 'popup-dashboard', 'sidepanel-guardian'])
+def test_extension_unknown_value_at_risk_is_never_zero(surface):
+    import json
+    from pathlib import Path
+    import shutil
+    import subprocess
+
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('Node.js is required for extension JavaScript regression tests')
+    script = '''
+const fs = require('fs');
+const vm = require('vm');
+const assert = require('assert/strict');
+const surface = JSON.parse(process.argv[1]);
+function element() {return {innerHTML: '', textContent: '', style: {}};}
+const context = {
+  URLSearchParams, location: {search: ''}, t: key => key, escapeHtml: String,
+  document: {addEventListener() {}, createElement: element, getElementById: element},
+  chrome: {runtime: {sendMessage() {}}, storage: {local: {get() {}, set() {}}}},
+};
+vm.createContext(context);
+if (surface === 'sidepanel-guardian') {
+  const source = fs.readFileSync('extension/sidepanel.js', 'utf8');
+  const start = source.indexOf('  function renderGuardianHealth');
+  const end = source.indexOf('  function renderGuardianAlerts');
+  assert(start >= 0 && end > start);
+  context.guardianHealthEl = element();
+  vm.runInContext(source.slice(start, end), context);
+  context.renderGuardianHealth({
+    health_score: 85, level: 'unknown', status: 'unknown', total_value_at_risk_usd: 0,
+    coverage_reasons: {deployer_risk: 'deployer_risk data incomplete'},
+    warnings: ['Could not check deployer risk'], components: {},
+  });
+  let html = context.guardianHealthEl.innerHTML;
+  assert(!html.includes('$0'));
+  assert(html.includes('Unknown'));
+  assert(!html.includes('#6ee7b7'));
+  context.renderGuardianHealth({
+    health_score: 85, level: 'excellent', status: 'ok', total_value_at_risk_usd: 0, warnings: [], components: {},
+  });
+  html = context.guardianHealthEl.innerHTML;
+  assert(html.includes('$0.00'));
+  assert(html.includes('#6ee7b7'));
+} else {
+  vm.runInContext(fs.readFileSync('extension/popup.js', 'utf8'), context);
+  context.escapeHtml = String;
+  const ctx = {compact: surface === 'popup-compact', scoreNumEl: element(), statsEl: element(), approvalsEl: element(), resultEl: element()};
+  for (const total of [null, 0]) {
+    context.renderHealthData({
+      status: 'unknown', total_value_at_risk_usd: total, coverage: {prices: false},
+      coverage_reasons: {prices: 'Token price unavailable'}, high_risk: 0, medium_risk: 0,
+      approvals: [{risk_level: 'LOW', token_symbol: 'TKN', spender: '0xabc', allowance: '5', value_at_risk_usd: null}],
+    }, ctx);
+    assert(!ctx.statsEl.innerHTML.includes('$0'));
+    assert(ctx.statsEl.innerHTML.includes('Unknown'));
+    assert(ctx.approvalsEl.innerHTML.includes('Token price unavailable'));
+    assert(ctx.approvalsEl.innerHTML.includes('Unknown'));
+    assert(!ctx.approvalsEl.innerHTML.includes('$0'));
+  }
+  context.renderHealthData({
+    status: 'ok', total_value_at_risk_usd: 0, high_risk: 0, medium_risk: 0,
+    approvals: [{risk_level: 'LOW', token_symbol: 'TKN', spender: '0xabc', allowance: '5', value_at_risk_usd: 12.5}],
+  }, ctx);
+  assert(ctx.statsEl.innerHTML.includes('$0'));
+  assert(ctx.approvalsEl.innerHTML.includes('$12.50'));
+  assert(!ctx.approvalsEl.innerHTML.includes('Unknown'));
+}
+'''
+    result = subprocess.run(
+        [node, '-e', script, json.dumps(surface)],
+        cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True,
+        encoding='utf-8', check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
