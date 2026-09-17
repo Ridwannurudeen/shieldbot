@@ -579,3 +579,23 @@ async def test_rescue_complete_scan_reports_ok_coverage(rescue_pipeline, balance
     assert result['coverage'] == {'allowances': True, 'balances': True, 'prices': True}
     assert result['coverage_reasons'] == {}
     assert result['total_value_at_risk_usd'] == 0.0
+
+
+def test_guardian_router_unavailable_approvals_return_503_without_provider_details():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from services.guardian import GuardianService
+    from services.guardian_router import create_guardian_router
+
+    rescue = MagicMock(scan_approvals=AsyncMock(
+        side_effect=RuntimeError('Log chunk failed for https://rpc.invalid/secret-key'),
+    ))
+    container = MagicMock()
+    container.auth_manager.validate_key = AsyncMock(return_value={'key_id': 'test-key'})
+    container.guardian_service = GuardianService(MagicMock(), rescue_service=rescue)
+    app = FastAPI()
+    app.include_router(create_guardian_router(container), prefix='/api/guardian')
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get('/api/guardian/approvals/0x' + '1' * 40, headers={'X-API-Key': 'test-key'})
+    assert response.status_code == 503
+    assert response.json() == {'detail': 'Approval data unavailable or incomplete'}

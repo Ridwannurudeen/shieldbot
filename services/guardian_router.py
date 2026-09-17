@@ -64,7 +64,10 @@ def create_guardian_router(container) -> APIRouter:
         """Get all token approvals, risk-ranked."""
         await _require_api_key(request)
         _validate_address(wallet_address)
-        return await guardian.get_approvals(wallet_address.lower(), chain_id)
+        try:
+            return await guardian.get_approvals(wallet_address.lower(), chain_id)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @router.post("/revoke/build")
     async def build_revoke(request: Request):
