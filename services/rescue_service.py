@@ -21,6 +21,16 @@ APPROVAL_TOPIC = Web3.keccak(text="Approval(address,address,uint256)").hex()
 # ApprovalForAll event topic (ERC-721/1155)
 APPROVAL_FOR_ALL_TOPIC = Web3.keccak(text="ApprovalForAll(address,address,bool)").hex()
 
+# Robinhood Chain has no archive logs RPC, and its public Blockscout API answers server clients
+# with a Cloudflare challenge, so rescue reads only recent approval history from the public RPC:
+# 24 windows of 10,000 blocks (240,000 blocks, about 6.7 hours at the measured ~0.1 s per block).
+BOUNDED_HISTORY_CHAIN_ID = 4663
+RECENT_LOG_WINDOW_BLOCKS = 10_000
+RECENT_LOG_WINDOWS = 24
+PUBLIC_RPC_CONCURRENCY = 4
+PUBLIC_RPC_ATTEMPTS = 3
+RATE_LIMIT_TERMS = ("rate", "too many requests", "busy", "timeout")
+
 UNLIMITED_THRESHOLD = 2**128
 # Approvals above this (but below UNLIMITED_THRESHOLD) are considered "large"
 HIGH_APPROVAL = 10**24  # ~1 million tokens at 18 decimals
@@ -248,47 +258,53 @@ class RescueService:
         if not rpc_url:
             logger.warning(f"No logs RPC configured for chain {chain_id}")
             raise RuntimeError(f"Approval scan unavailable: no logs RPC configured for chain {chain_id}")
+        public_rpc = chain_id == BOUNDED_HISTORY_CHAIN_ID
         try:
-            async with aiohttp.ClientSession() as session:
-                # Step 1: Get latest block
-                async with session.post(
-                    rpc_url,
-                    json={"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
-                    timeout=aiohttp.ClientTimeout(total=5),
-                ) as resp:
-                    bn_data = await resp.json()
-                if "error" in bn_data or "result" not in bn_data:
-                    raise RuntimeError(f"eth_blockNumber failed: {bn_data.get('error', bn_data)}")
-                latest = int(bn_data["result"], 16)
+            if public_rpc:
+                all_logs, history_reason = await self._fetch_recent_approval_logs(wallet, rpc_url)
+                if history_reason:
+                    coverage_reasons["allowances"] = history_reason
+            else:
+                async with aiohttp.ClientSession() as session:
+                    # Step 1: Get latest block
+                    async with session.post(
+                        rpc_url,
+                        json={"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
+                        timeout=aiohttp.ClientTimeout(total=5),
+                    ) as resp:
+                        bn_data = await resp.json()
+                    if "error" in bn_data or "result" not in bn_data:
+                        raise RuntimeError(f"eth_blockNumber failed: {bn_data.get('error', bn_data)}")
+                    latest = int(bn_data["result"], 16)
 
-            # Step 2: Scan ALL blocks from genesis with CONCURRENCY=50
-            # ~1680 chunks on BSC / 50 concurrent = 34 batches ≈ 10-25s
-            CHUNK_SIZE = 49_999
-            CONCURRENCY = 50
-            chunks = [
-                (hex(b), hex(min(b + CHUNK_SIZE - 1, latest)))
-                for b in range(0, latest + 1, CHUNK_SIZE)
-            ]
+                # Step 2: Scan ALL blocks from genesis with CONCURRENCY=50
+                # ~1680 chunks on BSC / 50 concurrent = 34 batches ≈ 10-25s
+                CHUNK_SIZE = 49_999
+                CONCURRENCY = 50
+                chunks = [
+                    (hex(b), hex(min(b + CHUNK_SIZE - 1, latest)))
+                    for b in range(0, latest + 1, CHUNK_SIZE)
+                ]
 
-            topic0 = APPROVAL_TOPIC
-            topic1 = "0x" + wallet.replace("0x", "").lower().zfill(64)
+                topic0 = APPROVAL_TOPIC
+                topic1 = "0x" + wallet.replace("0x", "").lower().zfill(64)
 
-            all_logs: list = []
-            async with aiohttp.ClientSession() as session:
-                for i in range(0, len(chunks), CONCURRENCY):
-                    batch = chunks[i: i + CONCURRENCY]
-                    batch_results = await asyncio.gather(
-                        *[
-                            self._fetch_log_chunk(session, rpc_url, topic0, topic1, from_b, to_b)
-                            for from_b, to_b in batch
-                        ],
-                        return_exceptions=True,
-                    )
-                    for result in batch_results:
-                        if isinstance(result, Exception):
-                            raise result
-                        if isinstance(result, list):
-                            all_logs.extend(result)
+                all_logs: list = []
+                async with aiohttp.ClientSession() as session:
+                    for i in range(0, len(chunks), CONCURRENCY):
+                        batch = chunks[i: i + CONCURRENCY]
+                        batch_results = await asyncio.gather(
+                            *[
+                                self._fetch_log_chunk(session, rpc_url, topic0, topic1, from_b, to_b)
+                                for from_b, to_b in batch
+                            ],
+                            return_exceptions=True,
+                        )
+                        for result in batch_results:
+                            if isinstance(result, Exception):
+                                raise result
+                            if isinstance(result, list):
+                                all_logs.extend(result)
 
             # Step 3: Keep latest event per (token, spender)
             latest_events: Dict[tuple, Dict] = {}
@@ -321,17 +337,19 @@ class RescueService:
                 return [], coverage_reasons
 
             # Step 4: Verify current on-chain allowances — eliminates false positives
-            allowances = await self._verify_allowances(wallet, candidates, rpc_url)
+            allowances = await self._verify_allowances(wallet, candidates, rpc_url, public_rpc)
             unresolved = [pair for pair, allowance in allowances.items() if allowance is None]
             if unresolved:
-                coverage_reasons["allowances"] = f"Allowance unavailable for {len(unresolved)} approval(s)"
+                reason = f"Allowance unavailable for {len(unresolved)} approval(s)"
+                history_reason = coverage_reasons.get("allowances")
+                coverage_reasons["allowances"] = f"{history_reason}; {reason}" if history_reason else reason
             verified = {pair: allowance for pair, allowance in allowances.items() if allowance}
             if not verified:
                 return [], coverage_reasons
 
             # Step 5: Fetch wallet balances for value-at-risk calculation
             active_tokens = list({token for (token, _) in verified.keys()})
-            balances = await self._fetch_balances(wallet, active_tokens, rpc_url)
+            balances = await self._fetch_balances(wallet, active_tokens, rpc_url, public_rpc)
             unresolved_balances = [token for token in active_tokens if token not in balances]
             if unresolved_balances:
                 coverage_reasons["balances"] = f"Balance unavailable for {len(unresolved_balances)} token(s)"
@@ -421,6 +439,106 @@ class RescueService:
         )
         return approvals, coverage_reasons
 
+    async def _fetch_recent_approval_logs(
+        self, wallet: str, rpc_url: str
+    ) -> Tuple[list, Optional[str]]:
+        """Fetch Approval logs from the newest RECENT_LOG_WINDOWS block windows of a public RPC.
+
+        Windows are read newest first, PUBLIC_RPC_CONCURRENCY at a time. Scanning stops after a
+        batch in which a window stayed unavailable; logs already read are kept. Returns the logs
+        and the reason naming the history not scanned, or None when the windows reached genesis.
+        """
+        from utils.web3_client import UnsupportedChainError
+
+        topics = [APPROVAL_TOPIC, "0x" + wallet.replace("0x", "").lower().zfill(64)]
+        async with aiohttp.ClientSession() as session:
+            latest = int(await self._public_rpc(session, rpc_url, "eth_blockNumber", []), 16)
+            oldest = max(latest - RECENT_LOG_WINDOW_BLOCKS * RECENT_LOG_WINDOWS + 1, 0)
+            windows = [
+                (max(to_b - RECENT_LOG_WINDOW_BLOCKS + 1, oldest), to_b)
+                for to_b in range(latest, oldest - 1, -RECENT_LOG_WINDOW_BLOCKS)
+            ]
+            logs: list = []
+            scanned_from = latest + 1
+            gap = False
+            for i in range(0, len(windows), PUBLIC_RPC_CONCURRENCY):
+                batch = windows[i: i + PUBLIC_RPC_CONCURRENCY]
+                results = await asyncio.gather(
+                    *[
+                        self._public_rpc(
+                            session, rpc_url, "eth_getLogs",
+                            [{"topics": topics, "fromBlock": hex(from_b), "toBlock": hex(to_b)}],
+                        )
+                        for from_b, to_b in batch
+                    ],
+                    return_exceptions=True,
+                )
+                for (from_b, to_b), result in zip(batch, results):
+                    if isinstance(result, UnsupportedChainError):
+                        raise result
+                    if isinstance(result, list):
+                        logs.extend(result)
+                        if not gap:
+                            scanned_from = from_b
+                    else:
+                        # Don't log `result` — aiohttp errors embed the RPC URL.
+                        logger.warning(
+                            "Approval log window %s-%s unavailable: %s", from_b, to_b, type(result).__name__
+                        )
+                        gap = True
+                if gap:
+                    break
+        if scanned_from == 0:
+            return logs, None
+        return logs, f"Approvals before block {scanned_from} not scanned"
+
+    async def _public_rpc(
+        self, session: aiohttp.ClientSession, rpc_url: str, method: str, params: list
+    ) -> Any:
+        """Make a JSON-RPC call to a rate-limited public RPC and return its result.
+
+        HTTP 429 and rate-limit errors are retried with 1 s then 2 s backoff; the call raises when it
+        fails or is still rate limited after PUBLIC_RPC_ATTEMPTS attempts.
+        """
+        for attempt in range(PUBLIC_RPC_ATTEMPTS):
+            if attempt:
+                await asyncio.sleep(2 ** (attempt - 1))
+            async with session.post(
+                rpc_url,
+                json={"jsonrpc": "2.0", "method": method, "params": params, "id": 1},
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status == 429:
+                    continue
+                if resp.status != 200:
+                    raise RuntimeError("Public RPC request failed")
+                data = await resp.json()
+            error = data.get("error")
+            if error is None:
+                return data.get("result")
+            if not any(term in str(error).lower() for term in RATE_LIMIT_TERMS):
+                raise RuntimeError("Public RPC request returned an error")
+        raise RuntimeError("Public RPC still rate limited")
+
+    async def _public_eth_call(
+        self, session: aiohttp.ClientSession, rpc_url: str, to: str, data: str
+    ) -> Optional[int]:
+        """eth_call through _public_rpc. A call that returned no data or stayed unavailable is None."""
+        from utils.web3_client import UnsupportedChainError
+
+        try:
+            result = await self._public_rpc(
+                session, rpc_url, "eth_call", [{"to": to, "data": data}, "latest"]
+            )
+            if not isinstance(result, str) or result in ("", "0x"):
+                return None
+            return int(result, 16)
+        except UnsupportedChainError:
+            raise
+        except Exception as e:
+            logger.warning("Approval state call unavailable: %s", type(e).__name__)
+            return None
+
     async def _fetch_log_chunk(
         self,
         session: aiohttp.ClientSession,
@@ -458,13 +576,14 @@ class RescueService:
             raise
 
     async def _verify_allowances(
-        self, wallet: str, candidates: Dict[tuple, Dict], rpc_url: str
+        self, wallet: str, candidates: Dict[tuple, Dict], rpc_url: str, public_rpc: bool = False
     ) -> Dict[tuple, Optional[int]]:
         """Batch-verify current on-chain allowances via eth_call.
 
         Eliminates false positives where approval events exist but the
         allowance has been consumed (spent) or explicitly revoked.
-        Pairs whose allowance call returned no data map to None.
+        Pairs whose allowance call returned no data map to None; on a public
+        RPC, so do calls that stayed unavailable.
         """
         # allowance(address owner, address spender) → uint256
         selector = "0xdd62ed3e"
@@ -472,7 +591,8 @@ class RescueService:
 
         pairs = list(candidates.keys())
         verified: Dict[tuple, int] = {}
-        CONCURRENCY = 50
+        CONCURRENCY = PUBLIC_RPC_CONCURRENCY if public_rpc else 50
+        eth_call = self._public_eth_call if public_rpc else self._eth_call
 
         async with aiohttp.ClientSession() as session:
             for i in range(0, len(pairs), CONCURRENCY):
@@ -481,7 +601,7 @@ class RescueService:
                 for (token, spender) in batch:
                     spender_padded = spender.replace("0x", "").lower().zfill(64)
                     calldata = f"{selector}{owner_padded}{spender_padded}"
-                    tasks.append(self._eth_call(session, rpc_url, token, calldata))
+                    tasks.append(eth_call(session, rpc_url, token, calldata))
 
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 for (token, spender), result in zip(batch, results):
@@ -493,21 +613,25 @@ class RescueService:
         return verified
 
     async def _fetch_balances(
-        self, wallet: str, tokens: List[str], rpc_url: str
+        self, wallet: str, tokens: List[str], rpc_url: str, public_rpc: bool = False
     ) -> Dict[str, int]:
-        """Batch-fetch wallet token balances via eth_call, omitting calls that returned no data."""
+        """Batch-fetch wallet token balances via eth_call, omitting calls that returned no data.
+
+        On a public RPC, calls that stayed unavailable are omitted too.
+        """
         # balanceOf(address owner) → uint256
         selector = "0x70a08231"
         owner_padded = wallet.replace("0x", "").lower().zfill(64)
 
         balances: Dict[str, int] = {}
-        CONCURRENCY = 50
+        CONCURRENCY = PUBLIC_RPC_CONCURRENCY if public_rpc else 50
+        eth_call = self._public_eth_call if public_rpc else self._eth_call
 
         async with aiohttp.ClientSession() as session:
             for i in range(0, len(tokens), CONCURRENCY):
                 batch = tokens[i: i + CONCURRENCY]
                 tasks = [
-                    self._eth_call(session, rpc_url, token, f"{selector}{owner_padded}")
+                    eth_call(session, rpc_url, token, f"{selector}{owner_padded}")
                     for token in batch
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
