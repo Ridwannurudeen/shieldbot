@@ -284,6 +284,9 @@ class GuardianService:
             return approvals
         except UnsupportedChainError:
             raise
+        except RuntimeError as exc:
+            logger.warning("_get_approval_data via rescue unavailable: %s", exc)
+            return None
         except Exception as exc:
             logger.error("_get_approval_data via rescue failed: %s", exc, exc_info=True)
             return None
@@ -315,7 +318,7 @@ class GuardianService:
                 except UnsupportedChainError:
                     raise
                 except Exception:
-                    pass
+                    return None
             return min(100.0, risk_points)
         except UnsupportedChainError:
             raise
@@ -375,7 +378,7 @@ class GuardianService:
                 except UnsupportedChainError:
                     raise
                 except Exception:
-                    pass
+                    return None
             return min(100.0, risk_points)
         except UnsupportedChainError:
             raise

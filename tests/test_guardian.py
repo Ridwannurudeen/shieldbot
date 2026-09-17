@@ -1,5 +1,6 @@
 """Tests for Portfolio Guardian service."""
 
+import logging
 import time
 import pytest
 from unittest.mock import AsyncMock, MagicMock
@@ -19,6 +20,7 @@ def mock_db():
     db.create_guardian_alert = AsyncMock(return_value=1)
     db.get_guardian_alerts = AsyncMock(return_value=[])
     db.acknowledge_guardian_alert = AsyncMock(return_value=True)
+    db.get_deployer = AsyncMock(return_value=None)
     return db
 
 
@@ -425,3 +427,47 @@ async def test_complete_empty_approval_scan_still_persists_health(guardian_with_
     assert result["status"] == "ok"
     assert result["level"] == "excellent"
     mock_db.update_guardian_health.assert_awaited_once_with("0xabc", 56, 100.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("check, method", [
+    ("_check_flagged_exposure_from_tokens", "get_contract_score"),
+    ("_check_deployer_risk_from_tokens", "get_deployer"),
+    ("_check_deployer_risk_from_tokens", "get_watched_deployer"),
+])
+async def test_token_lookup_failure_is_unknown_not_zero_risk(
+    guardian_with_rescue, mock_rescue, mock_db, check, method,
+):
+    mock_rescue.scan_approvals.return_value = {
+        "approvals": [{"token_address": "0xtoken", "spender": "0xspender", "risk_level": "HIGH"}],
+    }
+    mock_db.get_contract_score = AsyncMock(return_value=None)
+    mock_db.get_deployer = AsyncMock(return_value={"deployer_address": "0xdeployer"})
+    mock_db.get_watched_deployer = AsyncMock(return_value=None)
+    getattr(mock_db, method).side_effect = RuntimeError("lookup unavailable")
+    assert await getattr(guardian_with_rescue, check)(["0xtoken"], 56) is None
+    result = await guardian_with_rescue.get_health("0xabc", 56)
+    assert result["status"] == "unknown"
+    assert result["level"] == "unknown"
+    mock_db.update_guardian_health.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unavailable_rescue_scan_logs_warning_without_traceback(guardian_with_rescue, mock_rescue, caplog):
+    mock_rescue.scan_approvals.side_effect = RuntimeError("Approval scan unavailable")
+    with caplog.at_level(logging.WARNING, logger="services.guardian"):
+        assert await guardian_with_rescue._get_approval_data("0xabc", 56) is None
+    records = [record for record in caplog.records if record.name == "services.guardian"]
+    assert [record.levelno for record in records] == [logging.WARNING]
+    assert records[0].exc_info is None
+    assert "Traceback" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_unexpected_rescue_failure_logs_error_with_traceback(guardian_with_rescue, mock_rescue, caplog):
+    mock_rescue.scan_approvals.side_effect = KeyError("approvals")
+    with caplog.at_level(logging.WARNING, logger="services.guardian"):
+        assert await guardian_with_rescue._get_approval_data("0xabc", 56) is None
+    records = [record for record in caplog.records if record.name == "services.guardian"]
+    assert [record.levelno for record in records] == [logging.ERROR]
+    assert records[0].exc_info is not None
