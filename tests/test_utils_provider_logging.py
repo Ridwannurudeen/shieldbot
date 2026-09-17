@@ -43,18 +43,6 @@ def goplus_cache():
 
 
 @pytest.mark.asyncio
-async def test_chainabuse_failure_logs_class_only(caplog):
-    db = ScamDatabase()
-    session = MagicMock()
-    session.get.side_effect = _connection_error()
-    db._get_session = AsyncMock(return_value=session)
-    caplog.set_level(logging.DEBUG, logger="utils.scam_db")
-    assert await db._check_chainabuse(ADDRESS) == []
-    assert TEST_KEY not in caplog.text
-    assert "ClientConnectionError" in caplog.text
-
-
-@pytest.mark.asyncio
 async def test_goplus_failure_logs_class_only(caplog, goplus_cache):
     caplog.set_level(logging.DEBUG, logger="utils.scam_db")
     with patch("utils.scam_db.aiohttp.ClientSession", side_effect=_connection_error()):

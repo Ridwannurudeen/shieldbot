@@ -1,9 +1,7 @@
 """A scam database provider failure must never read as a clean address."""
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import aiohttp
 import pytest
 
 import utils.scam_db as scam_module
@@ -16,9 +14,10 @@ from utils.scam_db import ScamDatabase, ScamMatches
 
 
 ADDRESS = "0x1111111111111111111111111111111111111111"
-SECRET = "SCAM-DB-SECRET-51c2"
 SCAM_MATCH = {"type": "Local Blacklist", "reason": "Known scam address", "source": "ShieldBot"}
 GOPLUS_OK = {"status": "ok", "reason": None, "data": {"is_honeypot": "0", "is_open_source": "1"}}
+# Recorded GoPlus reply for an address it has no token record for (chain 56 router, 2026-09-17).
+GOPLUS_NO_RECORD = {"code": 1, "message": "OK", "result": {}}
 
 
 @pytest.fixture(autouse=True)
@@ -28,87 +27,38 @@ def goplus_cache():
     scam_module._GOPLUS_CACHE.clear()
 
 
-def _chainabuse(db, status=200, payload=None, error=None):
-    response = MagicMock(status=status)
-    response.json = AsyncMock(return_value=payload)
-    session = MagicMock()
-    session.get.return_value.__aenter__ = AsyncMock(return_value=response)
-    session.get.return_value.__aexit__ = AsyncMock(return_value=False)
-    if error is not None:
-        session.get.side_effect = error
-    db._get_session = AsyncMock(return_value=session)
-
-
 async def _lookup(db, goplus=GOPLUS_OK):
     with patch.object(ScamDatabase, "fetch_token_security", new=AsyncMock(return_value=goplus)):
         return await db.check_address(ADDRESS, chain_id=4663)
 
 
+def _goplus_http(payload):
+    response = MagicMock(status=200)
+    response.json = AsyncMock(return_value=payload)
+    session = MagicMock()
+    session.get.return_value.__aenter__ = AsyncMock(return_value=response)
+    session.get.return_value.__aexit__ = AsyncMock(return_value=False)
+    http = patch("utils.scam_db.aiohttp.ClientSession")
+    return http, session
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("payload", [[], None])
-async def test_every_provider_answered_without_matches_is_complete(payload):
-    db = ScamDatabase()
-    _chainabuse(db, payload=payload)
-    matches = await _lookup(db)
+async def test_every_provider_answered_without_matches_is_complete():
+    matches = await _lookup(ScamDatabase())
     assert matches == []
     assert matches.failed_providers == ()
 
 
 @pytest.mark.asyncio
 async def test_goplus_without_a_record_for_the_address_answered():
-    # GoPlus answers code 1 with no entry for wallets and unindexed contracts.
-    db = ScamDatabase()
-    _chainabuse(db, payload=[])
-    response = MagicMock(status=200)
-    response.json = AsyncMock(return_value={"code": 1, "result": {}})
-    session = MagicMock()
-    session.get.return_value.__aenter__ = AsyncMock(return_value=response)
-    session.get.return_value.__aexit__ = AsyncMock(return_value=False)
-    with patch("utils.scam_db.aiohttp.ClientSession") as http:
-        http.return_value.__aenter__ = AsyncMock(return_value=session)
-        http.return_value.__aexit__ = AsyncMock(return_value=False)
-        matches = await db.check_address(ADDRESS, chain_id=4663)
-    assert session.get.call_count == 1
+    http, session = _goplus_http(GOPLUS_NO_RECORD)
+    with http as factory:
+        factory.return_value.__aenter__ = AsyncMock(return_value=session)
+        factory.return_value.__aexit__ = AsyncMock(return_value=False)
+        matches = await ScamDatabase().check_address(ADDRESS, chain_id=4663)
+    assert factory.call_count == 1
+    assert session.get.call_args.args[0].startswith("https://api.gopluslabs.io/")
     assert (matches, matches.failed_providers) == ([], ())
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("status", [404, 429, 500, 503])
-async def test_chainabuse_non_200_is_a_failed_lookup(status):
-    # The client documents no "not found" status: only HTTP 200 carries an answer.
-    db = ScamDatabase()
-    _chainabuse(db, status=status, payload=[])
-    matches = await _lookup(db)
-    assert matches == []
-    assert matches.failed_providers == (f"ChainAbuse HTTP {status}",)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "error, name",
-    [
-        (
-            aiohttp.ClientConnectionError(f"Cannot connect to host {SECRET}"),
-            "ClientConnectionError",
-        ),
-        (asyncio.TimeoutError(), "TimeoutError"),
-    ],
-)
-async def test_chainabuse_exception_is_a_failed_lookup_with_class_only_reason(error, name):
-    db = ScamDatabase()
-    _chainabuse(db, error=error)
-    matches = await _lookup(db)
-    assert matches == []
-    assert matches.failed_providers == (f"ChainAbuse request failed ({name})",)
-    assert SECRET not in repr(matches.failed_providers)
-
-
-@pytest.mark.asyncio
-async def test_chainabuse_malformed_success_body_is_a_failed_lookup():
-    db = ScamDatabase()
-    _chainabuse(db, payload={"unexpected": "shape"})
-    matches = await _lookup(db)
-    assert matches.failed_providers == ("ChainAbuse request failed (KeyError)",)
 
 
 @pytest.mark.asyncio
@@ -121,23 +71,22 @@ async def test_chainabuse_malformed_success_body_is_a_failed_lookup():
     ],
 )
 async def test_goplus_failure_is_a_failed_lookup(reason):
-    db = ScamDatabase()
-    _chainabuse(db, payload=[])
-    matches = await _lookup(db, goplus={"status": "unknown", "reason": reason, "data": {}})
+    matches = await _lookup(
+        ScamDatabase(), goplus={"status": "unknown", "reason": reason, "data": {}}
+    )
     assert matches == []
     assert matches.failed_providers == (reason,)
 
 
 @pytest.mark.asyncio
-async def test_matches_found_by_answering_providers_survive_a_failure():
+async def test_local_blacklist_match_survives_a_goplus_failure():
     db = ScamDatabase()
     db.known_scams.add(ADDRESS)
-    _chainabuse(db, status=503)
     matches = await _lookup(
-        db, goplus={"status": "ok", "reason": None, "data": {"is_honeypot": "1"}}
+        db, goplus={"status": "unknown", "reason": "GoPlus HTTP 503", "data": {}}
     )
-    assert [match["type"] for match in matches] == ["Local Blacklist", "GoPlus Security"]
-    assert matches.failed_providers == ("ChainAbuse HTTP 503",)
+    assert matches == [SCAM_MATCH]
+    assert matches.failed_providers == ("GoPlus HTTP 503",)
 
 
 @pytest.mark.asyncio
@@ -147,8 +96,41 @@ async def test_invalid_address_is_not_a_clean_lookup():
     assert matches.failed_providers
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_contract", [False, True])
+async def test_clean_address_with_goplus_no_record_is_covered(mock_web3_client, is_contract):
+    mock_web3_client.is_contract.return_value = is_contract
+    http, session = _goplus_http(GOPLUS_NO_RECORD)
+    with http as factory:
+        factory.return_value.__aenter__ = AsyncMock(return_value=session)
+        factory.return_value.__aexit__ = AsyncMock(return_value=False)
+        result = await TransactionScanner(mock_web3_client).scan_address(ADDRESS, chain_id=56)
+    assert factory.call_count == 1
+    assert result["status"] == "ok"
+    assert result["coverage"]["scam_database"] is True
+    assert "scam_database" not in result["coverage_reasons"]
+    assert result["checks"]["scam_database_clean"] is True
+    assert result["risk_level"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_contract_service_clean_address_with_goplus_no_record_is_covered(mock_web3_client):
+    http, session = _goplus_http(GOPLUS_NO_RECORD)
+    service = ContractService(mock_web3_client, ScamDatabase())
+    with http as factory, patch("services.contract_service.BSCSCAN_DELAY", 0):
+        factory.return_value.__aenter__ = AsyncMock(return_value=session)
+        factory.return_value.__aexit__ = AsyncMock(return_value=False)
+        structural = await StructuralAnalyzer(service).analyze(
+            AnalysisContext(ADDRESS, chain_id=56)
+        )
+    assert factory.call_count == 1
+    assert structural.data["scam_matches"] == []
+    assert "scam_database" not in structural.data["coverage"]
+    assert structural.data["status"] == "ok"
+
+
 def _incomplete(matches=()):
-    return ScamMatches(matches, failed_providers=("ChainAbuse HTTP 503",))
+    return ScamMatches(matches, failed_providers=("GoPlus HTTP 503",))
 
 
 async def _scan(mock_web3_client, is_contract, lookup, ai_analyzer=None):
@@ -167,9 +149,7 @@ async def test_transaction_scanner_incomplete_lookup_without_matches_is_unknown(
     assert result["status"] == "unknown"
     assert result["risk_level"] == "unknown"
     assert result["coverage"]["scam_database"] is False
-    assert (
-        result["coverage_reasons"]["scam_database"] == "scam_database unknown: ChainAbuse HTTP 503"
-    )
+    assert result["coverage_reasons"]["scam_database"] == "scam_database unknown: GoPlus HTTP 503"
     assert result["checks"]["scam_database_clean"] is None
     assert result["scam_matches"] == []
     assert type(result["scam_matches"]) is list
@@ -189,9 +169,7 @@ async def test_transaction_scanner_incomplete_lookup_keeps_matches_and_floor(
     assert result["checks"]["scam_database_clean"] is False
     assert result["status"] == "unknown"
     assert result["coverage"]["scam_database"] is False
-    assert (
-        result["coverage_reasons"]["scam_database"] == "scam_database unknown: ChainAbuse HTTP 503"
-    )
+    assert result["coverage_reasons"]["scam_database"] == "scam_database unknown: GoPlus HTTP 503"
     assert result["risk_score"] >= 40
     assert result["risk_level"] in ("medium", "high")
 
@@ -227,7 +205,7 @@ async def test_contract_service_incomplete_lookup_without_matches_is_unknown(moc
     assert data["scam_matches"] == []
     assert type(data["scam_matches"]) is list
     assert data["coverage"] == {"scam_database": False}
-    assert data["reason"] == "Scam database unavailable: ChainAbuse HTTP 503"
+    assert data["reason"] == "Scam database unavailable: GoPlus HTTP 503"
     assert structural.data["status"] == "unknown"
     direct = RiskEngine().compute_composite_risk(
         data,
@@ -241,8 +219,7 @@ async def test_contract_service_incomplete_lookup_without_matches_is_unknown(moc
         assert risk["risk_level"] != "LOW"
         assert risk["coverage"]["structural"] < 1
         assert (
-            risk["coverage_reasons"]["structural"]
-            == "Scam database unavailable: ChainAbuse HTTP 503"
+            risk["coverage_reasons"]["structural"] == "Scam database unavailable: GoPlus HTTP 503"
         )
 
 
@@ -262,8 +239,5 @@ async def test_contract_service_scam_and_bytecode_failures_are_both_reported(moc
     mock_web3_client.get_bytecode.return_value = None
     data, structural = await _structural(mock_web3_client, _incomplete())
     assert data["coverage"] == {"scam_database": False, "bytecode": False}
-    assert (
-        data["reason"]
-        == "Scam database unavailable: ChainAbuse HTTP 503; Bytecode scan unavailable"
-    )
+    assert data["reason"] == "Scam database unavailable: GoPlus HTTP 503; Bytecode scan unavailable"
     assert structural.data["status"] == "unknown"

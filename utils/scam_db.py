@@ -61,12 +61,6 @@ class ScamDatabase:
     """Check addresses against scam databases"""
 
     def __init__(self):
-        # Public scam databases
-        self.chainabuse_api = "https://www.chainabuse.com/api/address/"
-
-        # Shared session (created lazily, reused across requests)
-        self._session: aiohttp.ClientSession = None
-
         # Local blacklist (can be expanded)
         self.known_scams = set([
             # Add known scam addresses here
@@ -77,17 +71,6 @@ class ScamDatabase:
 
         # Per-user rate limiting: reporter_id -> list of timestamps
         self._user_report_times: dict[str, list[float]] = {}
-
-    async def _get_session(self) -> aiohttp.ClientSession:
-        """Return a shared aiohttp session, creating it if needed."""
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
-        return self._session
-
-    async def close(self):
-        """Close the shared session."""
-        if self._session and not self._session.closed:
-            await self._session.close()
 
     async def check_address(self, address: str, chain_id: int = 56) -> ScamMatches:
         """
@@ -112,11 +95,6 @@ class ScamDatabase:
                 'source': 'ShieldBot'
             })
 
-        # Check ChainAbuse
-        chainabuse_results = await self._check_chainabuse(address)
-        matches.extend(chainabuse_results)
-        failed_providers.extend(chainabuse_results.failed_providers)
-
         # Check GoPlus Security
         goplus_results = await self._check_goplus(address, chain_id)
         matches.extend(goplus_results)
@@ -124,26 +102,6 @@ class ScamDatabase:
 
         return ScamMatches(matches, failed_providers)
     
-    async def _check_chainabuse(self, address: str) -> ScamMatches:
-        """Check ChainAbuse database. No "not found" status is known, so only HTTP 200 is an answer."""
-        try:
-            session = await self._get_session()
-            url = f"{self.chainabuse_api}{address}"
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                if resp.status != 200:
-                    return ScamMatches(failed_providers=(f'ChainAbuse HTTP {resp.status}',))
-                data = await resp.json()
-                if data and len(data) > 0:
-                    return ScamMatches([{
-                        'type': 'ChainAbuse',
-                        'reason': data[0].get('description', 'Reported scam'),
-                        'source': 'chainabuse.com'
-                    }])
-            return ScamMatches()
-        except Exception as e:
-            logger.error("Error checking ChainAbuse: %s", type(e).__name__)
-            return ScamMatches(failed_providers=(f'ChainAbuse request failed ({type(e).__name__})',))
-
     @staticmethod
     async def fetch_token_security(address: str, chain_id: int = 56) -> dict:
         """Share GoPlus token data across concurrent scan components."""
