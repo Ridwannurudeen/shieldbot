@@ -480,7 +480,7 @@ async def test_scan_new_pairs_records_each_outcome_and_never_clears_an_incomplet
     ]
     watching = await real_db.get_tracked_pairs(status="watching")
     assert {(row["token_address"], row["chain_id"]) for row in watching} == {
-        (tokens["unknown"], 4663), (tokens["watching"], 4663),
+        (tokens["unknown"], 4663), (tokens["watching"], 4663), (tokens["error"], 4663),
     }
     tools.auto_watch_deployer.assert_not_awaited()
 

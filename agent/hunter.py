@@ -244,6 +244,7 @@ class Hunter:
                     "Hunter: error scanning launch %s: %s\n%s", token,
                     type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
                 )
+                await self.db.upsert_tracked_pair(token, token_address=token, chain_id=LAUNCH_CHAIN_ID)
                 await self.db.record_launch_scan(LAUNCH_CHAIN_ID, token, "error", None)
                 continue
 
