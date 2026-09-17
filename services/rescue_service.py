@@ -458,8 +458,6 @@ class RescueService:
         batch in which a window stayed unavailable; logs already read are kept. Returns the logs
         and the reason naming the history not scanned, or None when the windows reached genesis.
         """
-        from utils.web3_client import UnsupportedChainError
-
         topics = [APPROVAL_TOPIC, "0x" + wallet.replace("0x", "").lower().zfill(64)]
         async with aiohttp.ClientSession() as session:
             latest = int(await self._public_rpc(session, rpc_url, "eth_blockNumber", []), 16)
@@ -484,8 +482,6 @@ class RescueService:
                     return_exceptions=True,
                 )
                 for (from_b, to_b), result in zip(batch, results):
-                    if isinstance(result, UnsupportedChainError):
-                        raise result
                     if isinstance(result, list):
                         logs.extend(result)
                         if not gap:
@@ -534,8 +530,6 @@ class RescueService:
         self, session: aiohttp.ClientSession, rpc_url: str, to: str, data: str
     ) -> Optional[int]:
         """eth_call through _public_rpc. A call that returned no data or stayed unavailable is None."""
-        from utils.web3_client import UnsupportedChainError
-
         try:
             result = await self._public_rpc(
                 session, rpc_url, "eth_call", [{"to": to, "data": data}, "latest"]
@@ -543,8 +537,6 @@ class RescueService:
             if not isinstance(result, str) or result in ("", "0x"):
                 return None
             return int(result, 16)
-        except UnsupportedChainError:
-            raise
         except Exception as e:
             logger.warning("Approval state call unavailable: %s", type(e).__name__)
             return None
