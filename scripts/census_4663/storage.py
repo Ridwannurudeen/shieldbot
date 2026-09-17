@@ -1,19 +1,22 @@
 """Durable, atomic census snapshots outside the application checkout."""
 
 import json
+import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 import aiosqlite
 
 
-def data_directory(path):
+def data_directory(path, create=True):
     directory = Path(path).expanduser().resolve()
     repo = Path(__file__).resolve().parents[2]
     if directory == repo or repo in directory.parents:
         raise ValueError("Census data directory must be outside the repository")
     if any((parent / ".git").exists() for parent in (directory, *directory.parents)):
         raise ValueError("Census data directory must be outside any repository")
-    directory.mkdir(parents=True, exist_ok=True)
+    if create:
+        directory.mkdir(parents=True, exist_ok=True)
     return directory
 
 
@@ -64,3 +67,93 @@ async def load_data(data_dir):
         if result["meta"].get("chain_id") != "4663":
             raise ValueError("Census database is not bound to chain 4663")
         return result
+
+
+class CensusSnapshot:
+    """Stream report inputs from one snapshot without loading events or evidence."""
+
+    def __init__(self, connection):
+        self.connection = connection
+        self.meta = {
+            row["key"]: row["value"]
+            for row in connection.execute("SELECT key, value FROM meta")
+        }
+        connection.execute(
+            "CREATE TEMP TABLE token_pools "
+            "(position INTEGER PRIMARY KEY, pool_key TEXT NOT NULL)"
+        )
+
+    def coverage(self):
+        return tuple(
+            self.connection.execute(
+                "SELECT MIN(timestamp), MAX(timestamp) FROM blocks"
+            ).fetchone()
+        )
+
+    def pools(self):
+        for row in self.connection.execute("SELECT * FROM pools ORDER BY rowid"):
+            yield {**dict(row), "data": json.loads(row["data"])}
+
+    def token_events(self, pools, first_seen, deadline, end):
+        """Yield events from first_seen to deadline in log order, then later swaps.
+
+        Metrics use events after the deadline only as swap directions, so those
+        need no ordering. Sorting only the first window keeps SQLite's sorter
+        small for tokens paired in thousands of pools.
+        """
+        self.connection.execute("DELETE FROM temp.token_pools")
+        self.connection.executemany(
+            "INSERT INTO temp.token_pools VALUES (?, ?)",
+            enumerate(pool["pool_key"] for pool in pools),
+        )
+        early = self.connection.execute(
+            "SELECT e.pool_key, e.name, e.timestamp, e.data "
+            "FROM temp.token_pools AS p CROSS JOIN events AS e "
+            "ON e.pool_key = p.pool_key "
+            "WHERE e.timestamp >= ? AND e.timestamp <= ? "
+            "ORDER BY e.block_number, e.log_index, p.position, e.rowid",
+            (first_seen, deadline),
+        )
+        for row in early:
+            yield {**dict(row), "data": json.loads(row["data"])}
+        late = self.connection.execute(
+            "SELECT e.pool_key, e.name, e.timestamp, e.data "
+            "FROM temp.token_pools AS p CROSS JOIN events AS e "
+            "ON e.pool_key = p.pool_key "
+            "WHERE e.name = 'Swap' AND e.timestamp > ? AND e.timestamp <= ?",
+            (deadline, end),
+        )
+        for row in late:
+            yield {**dict(row), "data": json.loads(row["data"])}
+
+    def creation_events(self):
+        return self.connection.execute(
+            "SELECT pool_key, timestamp, ingested_at FROM events "
+            "WHERE name IN ('Initialize', 'PairCreated', 'PoolCreated')"
+        )
+
+    def evidence(self):
+        rows = self.connection.execute(
+            "SELECT tx_hash, data FROM evidence ORDER BY rowid"
+        )
+        for row in rows:
+            yield {"tx_hash": row["tx_hash"], "data": json.loads(row["data"])}
+
+
+@contextmanager
+def read_snapshot(data_dir):
+    path = data_directory(data_dir, create=False) / "census.sqlite3"
+    if not path.is_file():
+        raise ValueError("No census database; run the collector first")
+    # A read-only connection never takes a write lock. One deferred transaction
+    # pins a single WAL snapshot while the collector keeps committing.
+    connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
+    try:
+        connection.row_factory = sqlite3.Row
+        connection.execute("BEGIN")
+        snapshot = CensusSnapshot(connection)
+        if snapshot.meta.get("chain_id") != "4663":
+            raise ValueError("Census database is not bound to chain 4663")
+        yield snapshot
+    finally:
+        connection.close()

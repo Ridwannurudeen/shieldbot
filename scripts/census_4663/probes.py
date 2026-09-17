@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 import aiohttp
 
-from .storage import data_directory, load_data
+from .storage import data_directory, read_snapshot
 
 
 IMPORTANT_FIELDS = (
@@ -25,17 +25,17 @@ WETH = "0x0bd7d308f8e1639fab988df18a8011f41eacad73"
 async def sample_tokens(data_dir, limit):
     if limit < 1:
         raise ValueError("limit must be positive")
-    data = await load_data(data_directory(data_dir))
-    if str(data["meta"].get("chain_id")) != "4663":
-        raise ValueError("Census data must identify chain 4663")
-    tokens = set()
-    for pool in data["pools"]:
-        for key in ("token0", "token1"):
-            token = pool[key].lower()
-            if not re.fullmatch(r"0x[0-9a-f]{40}", token):
-                raise ValueError("Invalid census token address")
-            if token not in (WETH, "0x" + "0" * 40):
-                tokens.add(token)
+    with read_snapshot(data_dir) as census:
+        if str(census.meta.get("chain_id")) != "4663":
+            raise ValueError("Census data must identify chain 4663")
+        tokens = set()
+        for pool in census.pools():
+            for key in ("token0", "token1"):
+                token = pool[key].lower()
+                if not re.fullmatch(r"0x[0-9a-f]{40}", token):
+                    raise ValueError("Invalid census token address")
+                if token not in (WETH, "0x" + "0" * 40):
+                    tokens.add(token)
     return sorted(tokens)[:limit]
 
 

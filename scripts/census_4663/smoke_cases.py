@@ -159,11 +159,12 @@ def record_verdict(
 
 
 async def run(args):
-    from .storage import data_directory, load_data
+    from .storage import data_directory, read_snapshot
 
     if args.command == "select":
-        directory = data_directory(args.data_dir)
-        report = build_report(await load_data(directory))
+        directory = data_directory(args.data_dir, create=False)
+        with read_snapshot(directory) as census:
+            report = build_report(census)
         probe_path = directory / "probe_goplus.json"
         probe = (
             json.loads(probe_path.read_text(encoding="utf-8"))

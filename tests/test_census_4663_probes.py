@@ -1,6 +1,8 @@
 """Offline tests for census provider availability and request accounting."""
 
 import json
+from contextlib import nullcontext
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
@@ -226,15 +228,15 @@ async def test_blockscout_missing_wrong_chain_and_wrong_address_unknown(
 
 @pytest.mark.asyncio
 async def test_sample_tokens_deduplicates_excludes_quote_and_sorts(tmp_path):
-    data = {
-        "meta": {"chain_id": "4663"},
-        "pools": [
+    census = SimpleNamespace(
+        meta={"chain_id": "4663"},
+        pools=lambda: [
             {"token0": OTHER, "token1": probes.WETH},
             {"token0": TOKEN, "token1": "0x" + "0" * 40},
             {"token0": TOKEN, "token1": OTHER},
         ],
-    }
-    with patch.object(probes, "load_data", AsyncMock(return_value=data)):
+    )
+    with patch.object(probes, "read_snapshot", return_value=nullcontext(census)):
         assert await probes.sample_tokens(tmp_path, 20) == [TOKEN, OTHER]
         assert await probes.sample_tokens(tmp_path, 1) == [TOKEN]
 
@@ -245,8 +247,10 @@ async def test_sample_wrong_chain_rejected_before_provider_call(tmp_path, chain_
     with (
         patch.object(
             probes,
-            "load_data",
-            AsyncMock(return_value={"meta": {"chain_id": chain_id}, "pools": []}),
+            "read_snapshot",
+            return_value=nullcontext(
+                SimpleNamespace(meta={"chain_id": chain_id}, pools=lambda: [])
+            ),
         ),
         patch.object(probe_goplus.aiohttp, "ClientSession") as session,
     ):
