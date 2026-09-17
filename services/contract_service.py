@@ -97,6 +97,8 @@ class ContractService:
                 raise
             except Exception as e:
                 logger.warning("Bytecode scan failed for %s: %s", address, e)
+                results['coverage'] = {'bytecode': False}
+                results['reason'] = 'Bytecode scan unavailable'
 
             results['bytecode_warnings'] = bytecode_warnings
             results['has_proxy'] = has_proxy

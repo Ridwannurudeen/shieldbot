@@ -467,3 +467,31 @@ async def test_failed_contract_lookup_is_unknown_not_confirmed_eoa(mock_web3_cli
     assert risk['risk_archetype'] == 'unknown'
     assert risk['coverage']['structural'] < 1
     assert risk['coverage_reasons']['structural'] == data['reason']
+
+
+@pytest.mark.asyncio
+async def test_failed_bytecode_scan_is_unknown_not_clean_patterns(mock_web3_client):
+    from analyzers.structural import StructuralAnalyzer
+    from core.analyzer import AnalysisContext
+    from core.risk_engine import RiskEngine
+    from services.contract_service import ContractService
+
+    mock_web3_client.get_bytecode.side_effect = RuntimeError('provider unavailable')
+    service = ContractService(mock_web3_client, MagicMock(check_address=AsyncMock(return_value=[])))
+    with patch('services.contract_service.BSCSCAN_DELAY', 0):
+        data = await service.fetch_contract_data('0xABC')
+        structural = await StructuralAnalyzer(service).analyze(AnalysisContext('0xABC', is_token=False))
+    assert data['coverage'] == {'bytecode': False}
+    assert data['reason'] == 'Bytecode scan unavailable'
+    assert structural.data['status'] == 'unknown'
+    assert structural.data['reason'] == 'Bytecode scan unavailable'
+    direct = RiskEngine().compute_composite_risk(
+        data, {'is_honeypot': False, 'can_sell': True, 'buy_tax': 0, 'sell_tax': 0},
+        {'liquidity_usd': 200000, 'pair_age_hours': 100}, {'reputation_score': 80}, is_token=False,
+    )
+    registry = RiskEngine().compute_from_results(_complete_non_token_results(structural), is_token=False)
+    for risk in (direct, registry):
+        assert risk['status'] == 'unknown'
+        assert risk['risk_level'] != 'LOW'
+        assert risk['coverage']['structural'] < 1
+        assert risk['coverage_reasons']['structural'] == 'Bytecode scan unavailable'
