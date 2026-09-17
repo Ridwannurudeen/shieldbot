@@ -757,3 +757,13 @@ async def test_api_error_logs_never_include_provider_error_text(consumer_api, mo
                 await calls[endpoint]()
     assert caplog.records
     assert 'SYNTHETIC_KEY_123' not in caplog.text
+
+
+def test_popup_styles_unknown_risk_badge_neutrally():
+    import re
+    from pathlib import Path
+
+    html = Path('extension/popup.html').read_text(encoding='utf-8')
+    rules = {name: body for name, body in re.findall(r'\.(risk-\w+)\s*\{([^}]*)\}', html)}
+    assert 'background' in rules.get('risk-unknown', '')
+    assert rules['risk-unknown'] not in (rules['risk-low'], rules['risk-medium'], rules['risk-high'])
