@@ -21,8 +21,17 @@ QUOTE = "0x" + "3" * 40
 PAIR = "0x" + "4" * 40
 
 
+def _http_error(status, message, url):
+    # requests.Response.raise_for_status builds HTTPError(message, response=self).
+    response = requests.Response()
+    response.status_code = int(status)
+    response.url = url
+    return requests.exceptions.HTTPError(message, response=response)
+
+
 def _provider_error(status):
-    return RuntimeError(f"{status} Server Error: https://rpc.invalid/?apikey={TEST_KEY}")
+    url = f"https://rpc.invalid/?apikey={TEST_KEY}"
+    return _http_error(status, f"{status} Server Error: {url}", url)
 
 
 @pytest.mark.asyncio
@@ -32,7 +41,7 @@ async def test_retry_warnings_log_class_and_attempts_without_exception_text(capl
     fn = MagicMock(side_effect=_provider_error(status))
     caplog.set_level(logging.DEBUG, logger="adapters.evm_base")
     with patch("adapters.evm_base.asyncio.sleep", new_callable=AsyncMock) as sleep:
-        with pytest.raises(RuntimeError):
+        with pytest.raises(requests.exceptions.HTTPError):
             await adapter._call_with_retry(fn, retries=3, base_delay=1.0)
     assert fn.call_count == 3
     assert [call.args for call in sleep.await_args_list] == [(1.0,), (2.0,)]
@@ -40,7 +49,7 @@ async def test_retry_warnings_log_class_and_attempts_without_exception_text(capl
     assert [r.levelno for r in records] == [logging.WARNING, logging.WARNING]
     assert TEST_KEY not in caplog.text
     assert "attempt 1/3" in caplog.text and "attempt 2/3" in caplog.text
-    assert "RuntimeError" in caplog.text
+    assert "HTTPError" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -49,7 +58,7 @@ async def test_non_retriable_error_is_raised_without_retry_or_log(caplog):
     fn = MagicMock(side_effect=_provider_error("400"))
     caplog.set_level(logging.DEBUG, logger="adapters.evm_base")
     with patch("adapters.evm_base.asyncio.sleep", new_callable=AsyncMock) as sleep:
-        with pytest.raises(RuntimeError):
+        with pytest.raises(requests.exceptions.HTTPError):
             await adapter._call_with_retry(fn, retries=3, base_delay=1.0)
     assert fn.call_count == 1
     sleep.assert_not_awaited()
@@ -71,13 +80,11 @@ async def test_creation_time_enrichment_retries_do_not_log_key(caplog):
     assert result["creator"] == FUNDER and result["creation_time"] is None
     assert adapter.w3.eth.get_transaction.call_count == 3
     assert TEST_KEY not in caplog.text
-    assert "RuntimeError" in caplog.text
+    assert "HTTPError" in caplog.text
 
 
 def _rpc_rate_limit():
-    return requests.exceptions.HTTPError(
-        f"429 Client Error: Too Many Requests for url: {RPC_URL}"
-    )
+    return _http_error(429, f"429 Client Error: Too Many Requests for url: {RPC_URL}", RPC_URL)
 
 
 def _fail_get_code(w3):
