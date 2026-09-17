@@ -8,7 +8,6 @@ import re
 import time
 import logging
 import aiohttp
-from typing import List, Dict
 from cachetools import TTLCache
 
 logger = logging.getLogger(__name__)
@@ -17,6 +16,7 @@ _ETH_ADDR_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
 
 _GOPLUS_CACHE = TTLCache(maxsize=1024, ttl=30)
 _GOPLUS_INFLIGHT = {}
+_GOPLUS_NO_DATA = 'GoPlus has no data for this token on this chain'
 
 # Addresses that must never be blacklisted (routers, WBNB, stables, etc.)
 _PROTECTED_ADDRESSES: set[str] = set()
@@ -43,6 +43,18 @@ def load_protected_addresses():
 
 # Run once on module load
 load_protected_addresses()
+
+
+class ScamMatches(list):
+    """Scam database matches plus the providers that failed to answer.
+
+    A list, so callers that expect the historical return value keep working.
+    Matches with a non-empty ``failed_providers`` are incomplete, never clean.
+    """
+
+    def __init__(self, matches=(), failed_providers=()):
+        super().__init__(matches)
+        self.failed_providers = tuple(failed_providers)
 
 
 class ScamDatabase:
@@ -77,18 +89,20 @@ class ScamDatabase:
         if self._session and not self._session.closed:
             await self._session.close()
 
-    async def check_address(self, address: str, chain_id: int = 56) -> List[Dict]:
+    async def check_address(self, address: str, chain_id: int = 56) -> ScamMatches:
         """
         Check address against multiple scam databases
 
         Returns:
-            list: List of matches with type and reason
+            ScamMatches: matches with type and reason; ``failed_providers`` names
+            each provider that did not answer, with a class-only reason
         """
         if not _ETH_ADDR_RE.match(address):
             logger.warning(f"Invalid address format passed to check_address: {address[:20]}")
-            return []
+            return ScamMatches(failed_providers=('Invalid address format',))
 
         matches = []
+        failed_providers = []
 
         # Check local blacklist
         if address.lower() in self.known_scams:
@@ -100,34 +114,35 @@ class ScamDatabase:
 
         # Check ChainAbuse
         chainabuse_results = await self._check_chainabuse(address)
-        if chainabuse_results:
-            matches.extend(chainabuse_results)
+        matches.extend(chainabuse_results)
+        failed_providers.extend(chainabuse_results.failed_providers)
 
         # Check GoPlus Security
         goplus_results = await self._check_goplus(address, chain_id)
-        if goplus_results:
-            matches.extend(goplus_results)
+        matches.extend(goplus_results)
+        failed_providers.extend(goplus_results.failed_providers)
 
-        return matches
+        return ScamMatches(matches, failed_providers)
     
-    async def _check_chainabuse(self, address: str) -> List[Dict]:
-        """Check ChainAbuse database"""
+    async def _check_chainabuse(self, address: str) -> ScamMatches:
+        """Check ChainAbuse database. No "not found" status is known, so only HTTP 200 is an answer."""
         try:
             session = await self._get_session()
             url = f"{self.chainabuse_api}{address}"
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data and len(data) > 0:
-                        return [{
-                            'type': 'ChainAbuse',
-                            'reason': data[0].get('description', 'Reported scam'),
-                            'source': 'chainabuse.com'
-                        }]
-            return []
+                if resp.status != 200:
+                    return ScamMatches(failed_providers=(f'ChainAbuse HTTP {resp.status}',))
+                data = await resp.json()
+                if data and len(data) > 0:
+                    return ScamMatches([{
+                        'type': 'ChainAbuse',
+                        'reason': data[0].get('description', 'Reported scam'),
+                        'source': 'chainabuse.com'
+                    }])
+            return ScamMatches()
         except Exception as e:
             logger.error("Error checking ChainAbuse: %s", type(e).__name__)
-            return []
+            return ScamMatches(failed_providers=(f'ChainAbuse request failed ({type(e).__name__})',))
 
     @staticmethod
     async def fetch_token_security(address: str, chain_id: int = 56) -> dict:
@@ -161,7 +176,7 @@ class ScamDatabase:
                         if not isinstance(payload, dict) or payload.get('code') != 1:
                             result['reason'] = 'GoPlus returned an unsuccessful response'
                         elif not isinstance(token, dict) or not token:
-                            result['reason'] = 'GoPlus has no data for this token on this chain'
+                            result['reason'] = _GOPLUS_NO_DATA
                         else:
                             result = {'status': 'ok', 'reason': None, 'data': token}
         except Exception as e:
@@ -172,9 +187,14 @@ class ScamDatabase:
         _GOPLUS_CACHE[key] = result
         return result
 
-    async def _check_goplus(self, address: str, chain_id: int = 56) -> List[Dict]:
-        """Check GoPlus Security API for token risk indicators."""
+    async def _check_goplus(self, address: str, chain_id: int = 56) -> ScamMatches:
+        """Check GoPlus Security API for token risk indicators.
+
+        A successful response without a record for the address is an answer, not a failure.
+        """
         response = await self.fetch_token_security(address, chain_id)
+        if response['status'] != 'ok' and response['reason'] != _GOPLUS_NO_DATA:
+            return ScamMatches(failed_providers=(response['reason'],))
         result = response['data']
         flags = []
         if result.get('is_blacklisted') == '1':
@@ -188,12 +208,12 @@ class ScamDatabase:
         if result.get('owner_change_balance') == '1':
             flags.append('Owner can change balance')
         if flags:
-            return [{
+            return ScamMatches([{
                 'type': 'GoPlus Security',
                 'reason': '; '.join(flags),
                 'source': 'gopluslabs.io',
-            }]
-        return []
+            }])
+        return ScamMatches()
     
     def report_address(self, address: str, reporter_id: str) -> dict:
         """Community report with rate-limiting, whitelist protection, and multi-report threshold.
