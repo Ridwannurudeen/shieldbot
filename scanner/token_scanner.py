@@ -6,6 +6,7 @@ Integrates risk_scorer for numeric scoring and AI analysis
 
 import logging
 from typing import Dict, List, Optional
+from adapters.robinhood import SIMULATION_PROVIDER
 from utils.chain_info import get_chain_name
 from utils.web3_client import UnsupportedChainError
 from utils.risk_scorer import (
@@ -293,8 +294,11 @@ class TokenScanner:
             if is_honeypot:
                 is_verified = result.get('is_verified', False)
                 contract_age_days = result.get('contract_age_days', 0)
+                providers = honeypot_result.get('field_providers') or {}
+                # A third-party flag can be a false positive; our own simulation executed the sell.
+                simulated = providers.get('is_honeypot') == SIMULATION_PROVIDER
 
-                if is_verified and contract_age_days is not None and contract_age_days > 30:
+                if not simulated and is_verified and contract_age_days is not None and contract_age_days > 30:
                     logger.info(f"Honeypot API flagged {address} but contract is verified and {contract_age_days} days old - likely false positive")
                     result['is_honeypot'] = False
                     result['risks'].append("High sell restrictions detected, but contract appears legitimate (verified + established)")

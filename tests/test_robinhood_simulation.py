@@ -1432,6 +1432,59 @@ async def test_legacy_scanner_still_refuses_chains_without_a_honeypot_provider()
     assert result["is_honeypot"] is None and result["checks"]["can_sell"] is None
 
 
+def honeypot_web3(provider):
+    web3 = MagicMock()
+    web3.supports_honeypot_simulation.return_value = True
+    web3.check_honeypot = AsyncMock(
+        return_value={
+            "is_honeypot": True,
+            "can_buy": True,
+            "can_sell": False,
+            "status": "ok",
+            "reason": "sell reverted: the token refused the transfer to the pool",
+            "field_providers": {"is_honeypot": provider} if provider else {},
+        }
+    )
+    return web3
+
+
+@pytest.mark.asyncio
+async def test_legacy_scanner_keeps_a_simulation_proven_honeypot_for_an_old_verified_token():
+    # Our simulation executed the sell and it reverted, so the false-positive override must not apply.
+    from scanner.token_scanner import TokenScanner
+
+    scanner = TokenScanner(honeypot_web3("eth_simulateV1"))
+    result = {"checks": {"can_sell": False}, "risks": [], "is_verified": True, "contract_age_days": 400}
+    await scanner._check_honeypot(TOKEN, result, chain_id=4663)
+    assert result["is_honeypot"] is True
+    assert result["honeypot_reason"] == "sell reverted: the token refused the transfer to the pool"
+    assert "HONEYPOT DETECTED - Cannot sell after buying" in result["risks"]
+    assert not any("appears legitimate" in risk for risk in result["risks"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["honeypot.is", None])
+async def test_legacy_scanner_still_softens_a_third_party_flag_for_an_old_verified_token(provider):
+    from scanner.token_scanner import TokenScanner
+
+    scanner = TokenScanner(honeypot_web3(provider))
+    result = {"checks": {"can_sell": False}, "risks": [], "is_verified": True, "contract_age_days": 400}
+    await scanner._check_honeypot(TOKEN, result, chain_id=56)
+    assert result["is_honeypot"] is False
+    assert any("appears legitimate" in risk for risk in result["risks"])
+    assert "HONEYPOT DETECTED - Cannot sell after buying" not in result["risks"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_scanner_flags_a_simulation_honeypot_that_is_new_or_unverified():
+    from scanner.token_scanner import TokenScanner
+
+    scanner = TokenScanner(honeypot_web3("eth_simulateV1"))
+    result = {"checks": {"can_sell": False}, "risks": [], "is_verified": False, "contract_age_days": 2}
+    await scanner._check_honeypot(TOKEN, result, chain_id=4663)
+    assert result["is_honeypot"] is True
+
+
 def test_web3_client_reports_simulation_support_per_adapter():
     from adapters.robinhood import RobinhoodAdapter
     from utils.web3_client import UnsupportedChainError
