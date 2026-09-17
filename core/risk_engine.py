@@ -447,7 +447,7 @@ class RiskEngine:
             if dex_data.get('wash_trade_flag'):
                 return 'wash_traded'
             if (contract_data.get('has_mint') and contract_data.get('has_proxy')
-                    and not contract_data.get('ownership_renounced')):
+                    and contract_data.get('ownership_renounced') is False):
                 return 'rug_pull'
         if rug_prob >= 71:
             return 'high_risk_contract'
