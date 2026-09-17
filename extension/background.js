@@ -325,14 +325,24 @@ async function ensureHostPermission(url) {
 }
 
 function saveToHistory(tx, result) {
+  const incomplete = result.status !== "ok" || result.partial === true ||
+    result.risk_level === "UNKNOWN" || result.classification === "UNKNOWN" ||
+    !Number.isFinite(result.risk_score) ||
+    Object.values(result.coverage || {}).some(value => Number(value) < 1);
   chrome.storage.local.get({ scanHistory: [] }, (data) => {
     const history = data.scanHistory;
     history.unshift({
       timestamp: Date.now(),
       to: tx.to || "",
-      classification: result.classification || "UNKNOWN",
-      risk_score: result.risk_score || 0,
-      verdict: result.verdict || "",
+      classification: incomplete && !["HIGH_RISK", "BLOCK_RECOMMENDED"].includes(result.classification)
+        ? "UNKNOWN" : result.classification || "UNKNOWN",
+      risk_score: result.risk_score ?? null,
+      status: incomplete ? "unknown" : "ok",
+      coverage: result.coverage || {},
+      coverage_reasons: result.coverage_reasons || {},
+      risk_display: incomplete ? "Unknown (incomplete provider coverage)" : result.risk_display,
+      partial: incomplete,
+      verdict: incomplete ? "Unknown (incomplete provider coverage)" : result.verdict || "",
       recipient: result.transaction_impact?.recipient || tx.to || "",
     });
 

@@ -113,6 +113,7 @@ def bot_chain_functions():
     from unittest.mock import AsyncMock, MagicMock
     import asyncio
     from utils.web3_client import UnsupportedChainError, Web3Client
+    from core.extension_formatter import is_scan_incomplete
 
     # Load the real menu handlers without importing the optional Telegram package.
     tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
@@ -136,11 +137,15 @@ def bot_chain_functions():
     recorder.is_available.return_value = False
     namespace = {
         'asyncio': asyncio,
+        'is_scan_incomplete': is_scan_incomplete,
         'UnsupportedChainError': UnsupportedChainError,
         'logger': MagicMock(),
         'container': services,
         'ai_analyzer': ai,
-        'risk_engine': MagicMock(),
+        'risk_engine': MagicMock(compute_from_results=MagicMock(return_value={
+            'status': 'ok', 'coverage': {'structural': 1, 'honeypot': 1},
+            'risk_level': 'LOW', 'rug_probability': 0,
+        })),
         'onchain_recorder': recorder,
         'base_attestor': recorder,
         'tx_scanner': SimpleNamespace(scan_address=AsyncMock(return_value={})),
@@ -354,3 +359,297 @@ async def test_bot_error_handler_reports_unsupported_chain(bot_chain_functions):
     await bot_chain_functions['error_handler'](SimpleNamespace(effective_message=message),
                                              SimpleNamespace(error=UnsupportedChainError('Unsupported chain ID 999999')))
     message.reply_text.assert_awaited_once_with('Unsupported chain ID 999999')
+
+
+@pytest.fixture
+def bot_report_functions(bot_chain_functions):
+    import ast
+    from pathlib import Path
+    from core.extension_formatter import is_scan_incomplete
+    from core.telegram_formatter import format_full_report
+    tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
+    names = {'format_scan_result', 'format_token_result'}
+    module = ast.Module(body=[node for node in tree.body if isinstance(node, ast.FunctionDef)
+                             and node.name in names], type_ignores=[])
+    bot_chain_functions['is_scan_incomplete'] = is_scan_incomplete
+    bot_chain_functions['format_full_report'] = format_full_report
+    exec(compile(module, 'bot.py', 'exec'), bot_chain_functions)
+    return bot_chain_functions
+
+
+@pytest.mark.parametrize('formatter', ['format_scan_result', 'format_token_result'])
+@pytest.mark.parametrize('failed_simulation', [False, True])
+def test_legacy_bot_unknown_values_never_look_safe(bot_report_functions, formatter, failed_simulation):
+    result = {
+        'address': '0x' + 'a' * 40, 'status': 'unknown', 'risk_level': 'low',
+        'safety_level': 'safe', 'risk_score': 0, 'confidence': 50,
+        'coverage': {'structural': 1, 'honeypot': 0.5},
+        'is_verified': None, 'contract_age_days': None, 'is_honeypot': None,
+        'buy_tax': None, 'sell_tax': None, 'simulation_failed': failed_simulation,
+        'checks': {'can_buy': None, 'can_sell': None, 'ownership_renounced': None,
+                   'liquidity_locked': None, 'verified_source': None},
+        'ai_risk_score': {'risk_score': 0, 'risk_level': 'SAFE', 'recommendation': 'SAFE'},
+        'ai_analysis': 'SAFE', 'forensic_report': 'SAFE',
+    }
+    report = bot_report_functions[formatter](result)
+    assert 'Unknown' in report
+    for unsafe in ('SAFE', '0/100', 'Not a honeypot', 'not verified', 'Buy: 0%', 'Sell: 0%', '❌ Can Sell'):
+        assert unsafe not in report
+
+
+@pytest.mark.parametrize('formatter', ['format_scan_result', 'format_token_result'])
+def test_legacy_bot_complete_results_keep_scores(bot_report_functions, formatter):
+    result = {'address': '0x' + 'a' * 40, 'status': 'ok', 'risk_level': 'low',
+              'safety_level': 'safe', 'risk_score': 0, 'confidence': 100,
+              'coverage': {'structural': 1, 'honeypot': 1}, 'is_verified': True,
+              'is_honeypot': False, 'buy_tax': 0, 'sell_tax': 0,
+              'checks': {'can_buy': True, 'can_sell': True}}
+    report = bot_report_functions[formatter](result)
+    assert '0/100' in report
+    if formatter == 'format_token_result':
+        assert 'SAFE' in report and 'Not a honeypot' in report
+
+
+@pytest.mark.parametrize('buttons,expected_count', [('_scan_buttons', 1), ('_token_buttons', 0)])
+def test_bot_omits_buttons_without_chain_metadata(bot_chain_functions, buttons, expected_count):
+    keyboard = bot_chain_functions[buttons]('0xabc', 999999).inline_keyboard
+    assert len(keyboard) == expected_count
+
+
+@pytest.mark.parametrize('status,coverage', [('unknown', {'honeypot': 0}),
+                                           ('ok', {'honeypot': 0.5}), ('ok', {})])
+def test_formatters_preserve_incomplete_coverage(status, coverage):
+    from core.extension_formatter import format_extension_alert
+    from core.telegram_formatter import format_full_report
+    result = {'status': status, 'coverage': coverage, 'rug_probability': 0,
+              'risk_level': 'LOW', 'coverage_reasons': {'honeypot': 'Simulation failed'}}
+    alert = format_extension_alert(result)
+    assert alert['risk_classification'] != 'SAFE'
+    assert alert['status'] == 'unknown'
+    assert alert['coverage'] == coverage
+    assert alert['risk_display'].startswith('Unknown')
+    report = format_full_report(result, {}, {}, {}, {'simulation_failed': True,
+                              'is_honeypot': None, 'can_sell': None}, ai_analysis='SAFE')
+    assert 'SAFE' not in report and 'Generally Safe' not in report
+    assert 'Rug Probability:* 0%' not in report
+
+
+def test_telegram_failed_simulation_overrides_raw_sellability():
+    from core.telegram_formatter import format_full_report
+    result = {'status': 'unknown', 'coverage': {'honeypot': 0.8},
+              'rug_probability': 90, 'risk_level': 'HIGH'}
+    report = format_full_report(result, {}, {}, {}, {'simulation_failed': True,
+                              'is_honeypot': False, 'can_sell': True})
+    assert 'Sellability: Unknown' in report
+    assert 'Not Honeypot' not in report
+    assert 'Rug probability 90%' not in report
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('handler', ['scan_contract', 'check_token'])
+async def test_bot_caches_uncertainty_and_does_not_attest_as_low(bot_chain_functions, handler):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    ns = bot_chain_functions
+    coverage = {'structural': 1, 'honeypot': 0.5}
+    ns['risk_engine'].compute_from_results.return_value = {
+        'status': 'unknown', 'coverage': coverage, 'coverage_reasons': {'honeypot': 'Simulation failed'},
+        'risk_level': 'LOW', 'rug_probability': 0,
+    }
+    recorder = ns['onchain_recorder']
+    recorder.is_available.return_value = True
+    recorder.record_scan_fire_and_forget = AsyncMock()
+    recorder.attest_fire_and_forget = AsyncMock()
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock()))
+    await ns[handler](update, '0x' + 'a' * 40, chain_id=4663)
+    cached = ns['_set_cache'].call_args.args[2]
+    assert cached['status'] == 'unknown'
+    assert cached['coverage'] == coverage
+    assert cached['risk_level'] == 'unknown'
+    ns['ai_analyzer'].generate_forensic_report.assert_not_called()
+    recorder.record_scan_fire_and_forget.assert_not_called()
+    recorder.attest_fire_and_forget.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('handler', ['scan_contract', 'check_token'])
+async def test_bot_legacy_fallback_cache_cannot_store_safe_unknown(bot_report_functions, handler):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    ns = bot_report_functions
+    ns['container'].registry.run_all.side_effect = RuntimeError('Unavailable')
+    raw = {'address': '0x' + 'a' * 40, 'risk_level': 'low', 'safety_level': 'safe',
+           'status': 'unknown', 'coverage': {'honeypot': 0}, 'is_verified': None}
+    ns['tx_scanner'].scan_address.return_value = raw
+    ns['token_scanner'].check_token.return_value = raw
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock()))
+    await ns[handler](update, raw['address'], chain_id=4663)
+    cached = ns['_set_cache'].call_args.args[2]
+    assert cached['risk_level'] == 'unknown'
+    assert cached['safety_level'] == 'unknown'
+
+
+def test_formatter_partial_flag_prevents_safe():
+    from core.extension_formatter import format_extension_alert
+    alert = format_extension_alert({'status': 'ok', 'partial': True,
+                                   'coverage': {'honeypot': 1}, 'risk_level': 'LOW',
+                                   'rug_probability': 0})
+    assert alert['status'] == 'unknown'
+    assert alert['risk_classification'] != 'SAFE'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('scan_data', [{'status': 'unknown'}, {'risk_score': 0, 'risk_level': 'LOW'}])
+async def test_bot_advisor_hides_uncovered_safety_claim(bot_chain_functions, scan_data):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    ns = bot_chain_functions
+    ns['container'].advisor.chat.return_value = {'text': 'SAFE', 'scan_data': scan_data}
+    typing = SimpleNamespace(edit_text=AsyncMock())
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock(return_value=typing)),
+                             effective_user=SimpleNamespace(id=123))
+    await ns['_handle_advisor_chat'](update, 'Scan this', chain_id=4663)
+    rendered = typing.edit_text.call_args.args[0]
+    assert isinstance(rendered, str)
+    assert 'Unknown' in rendered and 'SAFE' not in rendered
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('handler,formatter', [('scan_contract', 'format_scan_result'),
+                                               ('check_token', 'format_token_result')])
+async def test_bot_cached_incomplete_composite_report_is_served_intact(bot_report_functions, handler, formatter):
+    import ast
+    import time
+    from pathlib import Path
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+    ns = bot_report_functions
+    ns['web3_client'].get_token_info.return_value = {'name': 'Probe Token', 'symbol': 'PROBE'}
+    ns['risk_engine'].compute_from_results.return_value = {
+        'status': 'unknown', 'coverage': {'structural': 1, 'honeypot': 0},
+        'coverage_reasons': {'honeypot': 'Simulation failed'}, 'risk_level': 'MEDIUM', 'rug_probability': 0,
+    }
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock()))
+    await ns[handler](update, '0x' + 'a' * 40, chain_id=4663)
+    stored = ns['_set_cache'].call_args.args[2]
+
+    scan_type = 'contract' if handler == 'scan_contract' else 'token'
+    tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
+    cache = {'time': time, 'CACHE_TTL': 300, 'logger': MagicMock(),
+             '_scan_cache': {f'{scan_type}:key': {'timestamp': time.time(), 'result': stored}}}
+    exec(compile(ast.Module(body=[node for node in tree.body if isinstance(node, ast.FunctionDef)
+                                  and node.name == '_get_cached'], type_ignores=[]), 'bot.py', 'exec'), cache)
+    assert cache['_get_cached']('key', scan_type) is stored
+
+    rendered = ns[formatter](stored)
+    assert rendered == stored['composite_report']
+    assert 'Probe Token (PROBE)' in rendered
+    assert 'Unknown' in rendered and 'Generally Safe' not in rendered
+
+
+def test_bot_legacy_cache_without_coverage_is_miss():
+    import ast
+    import time
+    from pathlib import Path
+    from unittest.mock import MagicMock
+    tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
+    module = ast.Module(body=[node for node in tree.body if isinstance(node, ast.FunctionDef)
+                             and node.name == '_get_cached'], type_ignores=[])
+    ns = {'time': time, 'CACHE_TTL': 300, 'logger': MagicMock(), '_scan_cache': {
+        'contract:0xabc': {'timestamp': time.time(), 'result': {'composite_report': 'SAFE', 'risk_level': 'low'}}}}
+    exec(compile(module, 'bot.py', 'exec'), ns)
+    assert ns['_get_cached']('0xabc', 'contract') is None
+
+
+def test_formatter_requires_known_completion_status():
+    from core.extension_formatter import format_extension_alert
+    alert = format_extension_alert({'coverage': {'honeypot': 1}, 'rug_probability': 0, 'risk_level': 'LOW'})
+    assert alert['status'] == 'unknown'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('complete', [True, False], ids=['complete', 'incomplete'])
+async def test_bot_rescue_safe_count_requires_complete_scan(bot_chain_functions, complete):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    ns = bot_chain_functions
+    ns['settings'] = SimpleNamespace(bscscan_api_key='', etherscan_api_key='')
+    result = {'total_approvals': 3, 'high_risk': 0, 'medium_risk': 0,
+              'approvals': [], 'alerts': [], 'revoke_txs': []}
+    if not complete:
+        result.update(status='unknown', coverage={'approval_prices': 0},
+                      coverage_reasons={'approval_prices': 'Token price unavailable'})
+    ns['container'].rescue_service.scan_approvals.return_value = result
+    status_msg = SimpleNamespace(delete=AsyncMock(), edit_text=AsyncMock())
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock(side_effect=[status_msg, None])))
+    context = SimpleNamespace(args=['0x' + 'b' * 40], user_data={'chain_id': 4663})
+    await ns['rescue_command'](update, context)
+    text = update.message.reply_text.call_args.args[0]
+    if complete:
+        assert 'Safe: 3' in text and 'look safe' in text
+    else:
+        assert 'Safe: 3' not in text and 'look safe' not in text
+        assert 'incomplete' in text and 'Token price unavailable' in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('handler', ['history_command', 'rescue_command', 'threats_command', 'campaign_command',
+                                     'scan_contract', 'check_token', '_handle_advisor_chat', 'error_handler'])
+async def test_bot_never_sends_or_logs_provider_error_text(bot_chain_functions, handler):
+    import ast
+    from pathlib import Path
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    ns = bot_chain_functions
+    tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
+    extra = {'history_command', 'campaign_command'}
+    exec(compile(ast.Module(body=[node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)
+                                  and node.name in extra], type_ignores=[]), 'bot.py', 'exec'), ns)
+    error = RuntimeError('https://rpc.example/v2/SYNTHETIC_KEY_123')
+    ns['settings'] = SimpleNamespace(bscscan_api_key='', etherscan_api_key='')
+    ns['onchain_recorder'].get_latest_scan = AsyncMock(side_effect=error)
+    ns['container'].rescue_service.scan_approvals.side_effect = error
+    ns['container'].mempool_monitor.get_alerts.side_effect = error
+    ns['container'].campaign_service.get_entity_graph = AsyncMock(side_effect=error)
+    ns['container'].registry.run_all.side_effect = error
+    ns['container'].advisor.chat.side_effect = error
+    ns['tx_scanner'].scan_address.side_effect = error
+    ns['token_scanner'].check_token.side_effect = error
+    status_msg = SimpleNamespace(edit_text=AsyncMock(), delete=AsyncMock())
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock(return_value=status_msg)),
+                             effective_user=SimpleNamespace(id=1), effective_message=None)
+    address = '0x' + 'a' * 40
+    if handler in ('scan_contract', 'check_token'):
+        await ns[handler](update, address, chain_id=56)
+    elif handler == '_handle_advisor_chat':
+        await ns[handler](update, 'hello', chain_id=56)
+    elif handler == 'error_handler':
+        await ns[handler](update, SimpleNamespace(error=error))
+    else:
+        args = [] if handler == 'threats_command' else [address]
+        await ns[handler](update, SimpleNamespace(args=args, user_data={'chain_id': 56}))
+    sent = [str(call) for mock in (update.message.reply_text, status_msg.edit_text) for call in mock.call_args_list]
+    logged = [str(call) for call in ns['logger'].method_calls]
+    assert logged
+    assert all('SYNTHETIC_KEY_123' not in text for text in sent + logged)
+
+
+@pytest.mark.asyncio
+async def test_bot_campaign_preserves_routing_error(bot_chain_functions):
+    import ast
+    from pathlib import Path
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from utils.web3_client import UnsupportedChainError
+    ns = bot_chain_functions
+    tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
+    exec(compile(ast.Module(body=[node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)
+                                  and node.name == 'campaign_command'], type_ignores=[]), 'bot.py', 'exec'), ns)
+    error = UnsupportedChainError('Unsupported chain ID 999999')
+    ns['container'].campaign_service.get_entity_graph = AsyncMock(side_effect=error)
+    status_msg = SimpleNamespace(edit_text=AsyncMock(), delete=AsyncMock())
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock(return_value=status_msg)))
+    with pytest.raises(UnsupportedChainError) as exc:
+        await ns['campaign_command'](update, SimpleNamespace(args=['0x' + 'a' * 40], user_data={}))
+    assert exc.value is error
+    status_msg.edit_text.assert_not_called()

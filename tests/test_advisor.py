@@ -307,11 +307,11 @@ async def test_gather_context_custom_chain_id(advisor, mock_tools):
 
 @pytest.mark.asyncio
 async def test_gather_context_scan_failure(advisor, mock_tools):
-    """If scan_contract raises, context.scan falls back to {}."""
+    """If scan_contract raises, context.scan is an unknown-coverage placeholder."""
     mock_tools.scan_contract = AsyncMock(side_effect=RuntimeError("API down"))
     addr = "0x4904c02efa081cb7685346968bac854cdf4e7777"
     context = await advisor._gather_context("CONTRACT_CHECK", {"address": addr})
-    assert context["scan"] == {}
+    assert context["scan"] == {"status": "unknown", "coverage": {}, "coverage_reasons": {"scan": "Contract scan unavailable"}}
     assert context["deployer"]["deployer_address"] == "0xdead"
 
 
@@ -347,14 +347,14 @@ async def test_gather_context_market_failure(advisor, mock_tools):
 
 @pytest.mark.asyncio
 async def test_gather_context_all_tools_fail(advisor, mock_tools):
-    """If every tool raises, all context keys fall back to {}."""
+    """If every tool raises, scan is unknown and the other context keys fall back to {}."""
     mock_tools.scan_contract = AsyncMock(side_effect=RuntimeError("fail"))
     mock_tools.check_deployer = AsyncMock(side_effect=RuntimeError("fail"))
     mock_tools.check_honeypot = AsyncMock(side_effect=RuntimeError("fail"))
     mock_tools.get_market_data = AsyncMock(side_effect=RuntimeError("fail"))
     addr = "0x4904c02efa081cb7685346968bac854cdf4e7777"
     context = await advisor._gather_context("CONTRACT_CHECK", {"address": addr})
-    assert context == {"scan": {}, "deployer": {}, "honeypot": {}, "market": {}}
+    assert context == {"scan": {"status": "unknown", "coverage": {}, "coverage_reasons": {"scan": "Contract scan unavailable"}}, "deployer": {}, "honeypot": {}, "market": {}}
 
 
 # ---------------------------------------------------------------------------
@@ -384,12 +384,13 @@ async def test_chat_ai_exception_returns_error(advisor, mock_db, mock_ai):
 
 
 @pytest.mark.asyncio
-async def test_chat_no_scan_data_on_scan_failure(advisor, mock_tools, mock_db, mock_ai):
-    """If scan_contract fails, result should NOT contain scan_data."""
+async def test_chat_scan_failure_attaches_unknown_scan_data(advisor, mock_tools, mock_db, mock_ai):
+    """If scan_contract fails, scan_data marks the scan unknown so surfaces cannot show the text as safe."""
     mock_tools.scan_contract = AsyncMock(side_effect=RuntimeError("fail"))
     mock_ai.chat = AsyncMock(return_value="Could not scan.")
     result = await advisor.chat("user1", "Check 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-    assert "scan_data" not in result
+    assert result["scan_data"]["status"] == "unknown"
+    assert result["scan_data"]["coverage_reasons"] == {"scan": "Contract scan unavailable"}
     assert result["text"] == "Could not scan."
 
 

@@ -37,6 +37,7 @@ class AgentPolicyEngine:
     - auto_block_above: transactions scoring above this are blocked.
     - Middle range: asks the owner for approval.
     - Explicit allowlist/blocklist override everything.
+    - Incomplete provider coverage turns any ALLOW into WARN (owner approval).
     - Spending limits and slippage caps are hard gates.
     """
 
@@ -52,6 +53,9 @@ class AgentPolicyEngine:
         tx_value_usd: float = 0,
         daily_spend_usd: float = 0,
         simulated_slippage: float = None,
+        status: Optional[str] = None,
+        coverage: Optional[Dict[str, float]] = None,
+        coverage_reasons: Optional[Dict[str, str]] = None,
     ) -> PolicyVerdict:
         """Evaluate a transaction against an agent's policy."""
         # Treat NaN or negative risk scores as maximum risk
@@ -66,6 +70,11 @@ class AgentPolicyEngine:
         failed = []
         target_lower = target_address.lower()
 
+        incomplete = status != "ok" or not coverage or any(value != 1 for value in coverage.values())
+        if incomplete:
+            reason = "; ".join(dict.fromkeys((coverage_reasons or {}).values())) or "Provider data unavailable or incomplete"
+            checks["coverage"] = f"warn — incomplete coverage: {reason}"
+
         # 1. Explicit lists (highest priority)
         always_allow = [a.lower() for a in (self._get(policy, "always_allow") or [])]
         always_block = [a.lower() for a in (self._get(policy, "always_block") or [])]
@@ -79,6 +88,11 @@ class AgentPolicyEngine:
 
         if target_lower in always_allow:
             checks["contract_list"] = "pass — allowlist match"
+            if incomplete:
+                return PolicyVerdict(
+                    verdict="WARN", checks=checks, failed_checks=["coverage"],
+                    needs_owner_approval=True,
+                )
             return PolicyVerdict(
                 verdict="ALLOW", checks=checks, all_passed=True,
             )
@@ -123,6 +137,11 @@ class AgentPolicyEngine:
 
         if risk_score < allow_below:
             checks["risk_threshold"] = f"pass — score {risk_score} < {allow_below}"
+            if incomplete:
+                return PolicyVerdict(
+                    verdict="WARN", checks=checks, failed_checks=["coverage"],
+                    needs_owner_approval=True,
+                )
             return PolicyVerdict(
                 verdict="ALLOW", checks=checks, all_passed=True,
             )
@@ -137,6 +156,6 @@ class AgentPolicyEngine:
         # Middle range → ask owner
         checks["risk_threshold"] = f"warn — score {risk_score} in [{allow_below}, {block_above}]"
         return PolicyVerdict(
-            verdict="WARN", checks=checks,
+            verdict="WARN", checks=checks, failed_checks=["coverage"] if incomplete else [],
             needs_owner_approval=True,
         )

@@ -9,6 +9,7 @@ import re
 from typing import Any, Dict, List
 
 from core.analyzer import AnalysisContext
+from core.extension_formatter import format_extension_alert
 
 logger = logging.getLogger(__name__)
 
@@ -154,10 +155,16 @@ async def handle_scan_contract(container, params: Dict) -> Dict:
     results = await container.registry.run_all(ctx)
     score_data = container.risk_engine.compute_from_results(results)
 
+    alert = format_extension_alert(score_data)
     return {
-        "verdict": score_data.get("risk_level", "UNKNOWN"),
-        "score": score_data.get("risk_score", 0),
-        "flags": score_data.get("flags", []),
+        "verdict": "UNKNOWN" if alert["status"] == "unknown" else score_data.get("risk_level", "UNKNOWN"),
+        "score": score_data["rug_probability"],
+        "flags": score_data.get("critical_flags", []),
+        "status": alert["status"],
+        "coverage": score_data.get("coverage", {}),
+        "coverage_reasons": alert["coverage_reasons"],
+        "confidence": score_data.get("confidence_level"),
+        "risk_display": alert["risk_display"],
         "risk_level": score_data.get("risk_level", "UNKNOWN"),
         "categories": score_data.get("category_scores", {}),
     }

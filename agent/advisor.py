@@ -79,16 +79,19 @@ class Advisor:
                 if isinstance(result, UnsupportedChainError):
                     raise result
             if isinstance(scan, Exception):
-                logger.warning("scan_contract failed: %s", scan)
-                scan = {}
+                logger.warning("scan_contract failed: %s", type(scan).__name__)
+                scan = {
+                    "status": "unknown", "coverage": {},
+                    "coverage_reasons": {"scan": "Contract scan unavailable"},
+                }
             if isinstance(deployer, Exception):
-                logger.warning("check_deployer failed: %s", deployer)
+                logger.warning("check_deployer failed: %s", type(deployer).__name__)
                 deployer = {}
             if isinstance(honeypot, Exception):
-                logger.warning("check_honeypot failed: %s", honeypot)
+                logger.warning("check_honeypot failed: %s", type(honeypot).__name__)
                 honeypot = {}
             if isinstance(market, Exception):
-                logger.warning("get_market_data failed: %s", market)
+                logger.warning("get_market_data failed: %s", type(market).__name__)
                 market = {}
             return {"scan": scan, "deployer": deployer, "honeypot": honeypot, "market": market}
 
@@ -98,7 +101,7 @@ class Advisor:
             except UnsupportedChainError:
                 raise
             except Exception as e:
-                logger.warning("get_agent_findings failed: %s", e)
+                logger.warning("get_agent_findings failed: %s", type(e).__name__)
                 return []
 
         return {}
@@ -173,7 +176,7 @@ class Advisor:
             except UnsupportedChainError:
                 raise
             except Exception as e:
-                logger.error("Advisor chat failed: %s", e)
+                logger.error("Advisor chat failed: %s", type(e).__name__)
                 response_text = (
                     "I encountered an error processing your request. "
                     "Please try again."
@@ -198,6 +201,9 @@ class Advisor:
                     "archetype": scan.get("risk_archetype"),
                     "flags": scan.get("critical_flags", scan.get("flags", [])),
                     "confidence": scan.get("confidence"),
+                    "status": scan.get("status"),
+                    "coverage": scan.get("coverage", {}),
+                    "coverage_reasons": scan.get("coverage_reasons", {}),
                     "honeypot": context.get("honeypot", {}),
                     "market": context.get("market", {}),
                 }
@@ -229,7 +235,7 @@ class Advisor:
         except UnsupportedChainError:
             raise
         except Exception as e:
-            logger.error("Advisor explain_scan failed: %s", e)
+            logger.error("Advisor explain_scan failed: %s", type(e).__name__)
             return self._rule_based_explanation(scan_result)
 
     # ------------------------------------------------------------------

@@ -3,6 +3,7 @@
 import asyncio
 import time
 import logging
+import traceback
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Request, HTTPException
@@ -10,6 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agent.policy_engine import AgentPolicyEngine
 from core.analyzer import AnalysisContext
+from core.extension_formatter import format_extension_alert, is_scan_incomplete
+from utils.web3_client import UnsupportedChainError
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +25,7 @@ def _fire_and_forget(coro, label: str = "background"):
             return
         exc = t.exception()
         if exc:
-            logger.error("Fire-and-forget task '%s' failed: %s", label, exc, exc_info=exc)
+            logger.error("Fire-and-forget task '%s' failed: %s", label, type(exc).__name__)
     task.add_done_callback(_done_cb)
     return task
 
@@ -108,7 +111,8 @@ def create_agent_firewall_router(container) -> APIRouter:
 
         # 1. Check Redis verdict cache
         cached = await container.cache.get_verdict(to_addr, chain_id)
-        if cached:
+        if cached and cached.get("status") and cached.get("coverage"):
+            cached = {**cached, "status": "unknown" if is_scan_incomplete(cached) else cached["status"]}
             # Still run policy check against cached score
             daily_spend = await container.db.get_agent_daily_spend(req.agent_id)
             tx_value_usd = _estimate_value_usd(tx.value)
@@ -118,6 +122,9 @@ def create_agent_firewall_router(container) -> APIRouter:
                 target_address=to_addr,
                 tx_value_usd=tx_value_usd,
                 daily_spend_usd=daily_spend,
+                status=cached["status"],
+                coverage=cached["coverage"],
+                coverage_reasons=cached.get("coverage_reasons", {}),
             )
             verdict = policy_result.verdict
             latency = time.time() * 1000 - start_ms
@@ -143,7 +150,20 @@ def create_agent_firewall_router(container) -> APIRouter:
             if verdict == "ALLOW" and tx_value_usd > 0:
                 await container.db.record_agent_spend(req.agent_id, tx_value_usd)
 
+            alert = format_extension_alert({
+                "rug_probability": cached["score"],
+                "risk_level": cached.get("risk_level"),
+                **{key: cached[key] for key in ("status", "coverage")},
+                "coverage_reasons": cached.get("coverage_reasons", {}),
+            })
             return {
+                "status": alert["status"],
+                "coverage": cached["coverage"],
+                "coverage_reasons": alert["coverage_reasons"],
+                "risk_display": alert["risk_display"],
+                "risk_level": cached.get("risk_level"),
+                "category_scores": cached.get("category_scores", {}),
+                "confidence": cached.get("confidence"),
                 "verdict": verdict,
                 "score": cached["score"],
                 "flags": cached.get("flags", []),
@@ -164,7 +184,15 @@ def create_agent_firewall_router(container) -> APIRouter:
 
         simulation_result = None
 
-        if db_cached:
+        metadata = (db_cached.get("category_scores") or {}).get("_scan_metadata", {}) if db_cached else {}
+        if db_cached and metadata.get("status") and metadata.get("coverage"):
+            risk_output = {
+                "risk_level": db_cached["risk_level"],
+                "confidence_level": db_cached.get("confidence"),
+                "category_scores": {key: value for key, value in db_cached.get("category_scores", {}).items() if key != "_scan_metadata"},
+                **metadata,
+            }
+            metadata = {**metadata, "status": "unknown" if is_scan_incomplete(risk_output) else metadata["status"]}
             risk_score = db_cached["risk_score"]
             flags = db_cached.get("flags", [])
         else:
@@ -195,8 +223,10 @@ def create_agent_firewall_router(container) -> APIRouter:
                     )
                     if isinstance(results, Exception):
                         raise results
+                    if isinstance(sim_raw, UnsupportedChainError):
+                        raise sim_raw
                     if isinstance(sim_raw, Exception):
-                        logger.warning("Tenderly simulation failed: %s", sim_raw)
+                        logger.warning("Tenderly simulation failed: %s", type(sim_raw).__name__)
                         sim_raw = None
                     simulation_result = sim_raw
                 else:
@@ -205,16 +235,28 @@ def create_agent_firewall_router(container) -> APIRouter:
                 risk_output = container.risk_engine.compute_from_results(
                     results, is_token,
                 )
+            except UnsupportedChainError:
+                raise
             except Exception as exc:
                 logger.error(
-                    "Analyzer pipeline failed for %s on chain %s: %s",
-                    to_addr, chain_id, exc, exc_info=True,
+                    "Analyzer pipeline failed for %s on chain %s: %s\n%s",
+                    to_addr, chain_id, type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
                 )
                 raise HTTPException(
                     status_code=503,
                     detail="Analysis pipeline temporarily unavailable",
                 )
-            risk_score = risk_output.get("risk_score") or risk_output.get("rug_probability", 50)
+            if simulation_result and not simulation_result.get("success", True):
+                risk_output = {
+                    **risk_output,
+                    "status": "unknown",
+                    "coverage": {**risk_output.get("coverage", {}), "transaction_simulation": 0},
+                    "coverage_reasons": {
+                        **risk_output.get("coverage_reasons", {}),
+                        "transaction_simulation": simulation_result.get("revert_reason") or "Transaction simulation failed",
+                    },
+                }
+            risk_score = risk_output.get("rug_probability", risk_output.get("risk_score", 50))
             flags = risk_output.get("flags") or risk_output.get("critical_flags", [])
 
             # Tenderly risk augmentation
@@ -240,15 +282,20 @@ def create_agent_firewall_router(container) -> APIRouter:
                     sim_flags.append("reentrancy_warning")
                 flags = list(flags) + sim_flags
 
+            metadata = {
+                "status": "unknown" if is_scan_incomplete(risk_output) else risk_output.get("status", "unknown"),
+                "coverage": risk_output.get("coverage", {}),
+                "coverage_reasons": risk_output.get("coverage_reasons", {}),
+            }
             # Cache in DB
             await container.db.upsert_contract_score(
                 address=to_addr, chain_id=chain_id,
                 risk_score=risk_score,
                 risk_level=risk_output.get("risk_level", "UNKNOWN"),
                 archetype=risk_output.get("risk_archetype"),
-                category_scores=risk_output.get("category_scores"),
+                category_scores={**(risk_output.get("category_scores") or {}), "_scan_metadata": metadata},
                 flags=flags,
-                confidence=risk_output.get("confidence") or risk_output.get("confidence_level"),
+                confidence=risk_output.get("confidence_level", risk_output.get("confidence")),
             )
 
             # Auto-enrich threat graph (fire-and-forget)
@@ -263,6 +310,10 @@ def create_agent_firewall_router(container) -> APIRouter:
         # Cache in Redis for next hit
         await container.cache.set_verdict(to_addr, chain_id, {
             "score": risk_score, "flags": flags,
+            "risk_level": risk_output.get("risk_level", "UNKNOWN"),
+            "category_scores": risk_output.get("category_scores", {}),
+            "confidence": risk_output.get("confidence_level", risk_output.get("confidence")),
+            **metadata,
         })
 
         # 4. Policy check
@@ -274,6 +325,9 @@ def create_agent_firewall_router(container) -> APIRouter:
             target_address=to_addr,
             tx_value_usd=tx_value_usd,
             daily_spend_usd=daily_spend,
+            status=metadata["status"],
+            coverage=metadata["coverage"],
+            coverage_reasons=metadata.get("coverage_reasons", {}),
         )
         verdict = policy_result.verdict
 
@@ -301,7 +355,15 @@ def create_agent_firewall_router(container) -> APIRouter:
         if verdict == "ALLOW" and tx_value_usd > 0:
             await container.db.record_agent_spend(req.agent_id, tx_value_usd)
 
+        alert = format_extension_alert({**risk_output, **metadata, "rug_probability": risk_score})
         return {
+            "status": alert["status"],
+            "coverage": metadata["coverage"],
+            "coverage_reasons": alert["coverage_reasons"],
+            "risk_display": alert["risk_display"],
+            "risk_level": risk_output.get("risk_level", "UNKNOWN"),
+            "category_scores": risk_output.get("category_scores", {}),
+            "confidence": risk_output.get("confidence_level", risk_output.get("confidence")),
             "verdict": verdict,
             "score": risk_score,
             "flags": flags,

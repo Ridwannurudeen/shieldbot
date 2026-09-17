@@ -45,6 +45,7 @@ def full_client():
     container.risk_engine = MagicMock()
     container.risk_engine.compute_from_results = MagicMock(return_value={
         "risk_score": 15, "risk_level": "LOW", "flags": [],
+        "status": "ok", "coverage": {"honeypot": 1},
         "category_scores": {}, "confidence": 0.9,
     })
 
@@ -120,6 +121,7 @@ def test_full_agent_lifecycle(full_client):
     # 4. Check a high-risk transaction
     container.risk_engine.compute_from_results.return_value = {
         "risk_score": 91, "risk_level": "HIGH", "flags": ["honeypot"],
+        "status": "ok", "coverage": {"honeypot": 1},
         "category_scores": {}, "confidence": 0.95,
     }
     container.cache.get_verdict = AsyncMock(return_value=None)  # no cache

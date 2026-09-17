@@ -314,3 +314,36 @@ class TestFundingValueStorage:
         cursor = await db._db.execute("SELECT funding_value_wei FROM funder_links")
         assert await cursor.fetchone() == original
         assert db._db.in_transaction is False
+
+
+class TestContractScoreCoverage:
+    @pytest.mark.asyncio
+    async def test_scan_metadata_round_trips_to_top_level(self, db):
+        metadata = {
+            "status": "unknown", "coverage": {"honeypot": 0},
+            "coverage_reasons": {"honeypot": "Simulation failed"},
+        }
+        await db.upsert_contract_score(
+            "0xUNKNOWN", 4663, 0.0, "UNKNOWN",
+            category_scores={"honeypot": None, "_scan_metadata": metadata},
+        )
+
+        cached = await db.get_contract_score("0xUNKNOWN", 4663, max_age_seconds=60)
+        scored = await db.get_all_scored_contracts(min_risk_score=0)
+
+        for row in (cached, scored[0]):
+            assert {key: row[key] for key in metadata} == metadata
+            assert row["category_scores"]["_scan_metadata"] == metadata
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("category_scores", [{"honeypot": 0}, None])
+    async def test_score_without_metadata_is_unknown(self, db, category_scores):
+        await db.upsert_contract_score("0xLEGACY", 56, 0.0, "LOW", category_scores=category_scores)
+
+        cached = await db.get_contract_score("0xLEGACY", 56, max_age_seconds=60)
+        scored = await db.get_all_scored_contracts(min_risk_score=0)
+
+        for row in (cached, scored[0]):
+            assert row["status"] == "unknown"
+            assert row["coverage_reasons"] == {"coverage": "Score predates coverage tracking"}
+            assert row["category_scores"] == (category_scores or {})

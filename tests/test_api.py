@@ -458,7 +458,9 @@ async def test_agent_endpoint_preserves_routing_error(routing_error_api, monkeyp
     error = UnsupportedChainError("removed chain")
     services.advisor = SimpleNamespace(chat=AsyncMock(side_effect=error), explain_scan=AsyncMock(side_effect=error))
     monkeypatch.setattr(api, "chat_limiter", api.RateLimiter(1000, 1000))
-    req = api.ChatRequest(message="hello", user_id="test") if endpoint == "agent_chat" else api.ExplainRequest(scan_result={})
+    req = api.ChatRequest(message="hello", user_id="test") if endpoint == "agent_chat" else api.ExplainRequest(
+        scan_result={'status': 'ok', 'coverage': {'honeypot': 1}},
+    )
     request = SimpleNamespace(client=SimpleNamespace(host="test"), headers={})
     with pytest.raises(UnsupportedChainError) as exc:
         await getattr(api, endpoint)(req, request)
