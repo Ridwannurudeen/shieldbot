@@ -214,7 +214,7 @@ class TransactionScanner:
         return result
 
     def _apply_scam_match_risk(self, result: Dict):
-        """Score scam database matches with the contract path's thresholds when contract checks are skipped."""
+        """Floor the score and level for scam database matches, whether or not contract checks ran."""
         if not result['scam_matches']:
             return
         heuristic_score, _, _ = calculate_risk_score(findings_from_scan_result(result))
