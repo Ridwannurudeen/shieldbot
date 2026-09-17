@@ -401,3 +401,69 @@ async def test_unknown_age_never_reaches_ai_as_low_risk(mock_web3_client, mock_a
     await scanner.scan_address("0xABC")
     mock_ai_analyzer.compute_ai_risk_score.assert_awaited_once()
     assert observed_levels == [("unknown", "unknown")]
+
+
+def _complete_non_token_results(structural):
+    from core.analyzer import AnalyzerResult
+
+    return [
+        structural,
+        AnalyzerResult('market', .25, 0, data={'skipped': True}),
+        AnalyzerResult('behavioral', .2, 0, data={'reputation_score': 80}),
+        AnalyzerResult('honeypot', .15, 0, data={'skipped': True}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_confirmed_eoa_structural_coverage_is_complete(mock_web3_client):
+    from analyzers.structural import StructuralAnalyzer
+    from core.analyzer import AnalysisContext
+    from core.risk_engine import RiskEngine
+    from services.contract_service import ContractService
+
+    mock_web3_client.is_contract.return_value = False
+    service = ContractService(mock_web3_client, MagicMock(check_address=AsyncMock(return_value=[])))
+    structural = await StructuralAnalyzer(service).analyze(AnalysisContext('0xABC', is_token=False))
+    assert structural.data['is_contract'] is False
+    assert structural.data['status'] == 'ok'
+    for entrypoint in ('direct', 'registry'):
+        if entrypoint == 'direct':
+            risk = RiskEngine().compute_composite_risk(
+                await service.fetch_contract_data('0xABC'),
+                {'is_honeypot': False, 'can_sell': True, 'buy_tax': 0, 'sell_tax': 0},
+                {'liquidity_usd': 200000, 'pair_age_hours': 100}, {'reputation_score': 80},
+                is_token=False,
+            )
+            assert risk['coverage']['structural'] == 1
+            assert risk['status'] == 'ok'
+            continue
+        risk = RiskEngine().compute_from_results(_complete_non_token_results(structural), is_token=False)
+        assert risk['rug_probability'] == 20
+        assert risk['risk_level'] == 'LOW'
+        assert risk['risk_archetype'] == 'legitimate'
+        assert risk['status'] == 'ok'
+        assert risk['coverage']['structural'] == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_contract_lookup_is_unknown_not_confirmed_eoa(mock_web3_client):
+    from analyzers.structural import StructuralAnalyzer
+    from core.analyzer import AnalysisContext
+    from core.risk_engine import RiskEngine
+    from services.contract_service import ContractService
+
+    mock_web3_client.is_contract.side_effect = RuntimeError('provider unavailable')
+    service = ContractService(mock_web3_client, MagicMock(check_address=AsyncMock(return_value=[])))
+    data = await service.fetch_contract_data('0xABC')
+    assert data['is_contract'] is None
+    assert data['status'] == 'unknown'
+    assert data['reason']
+    structural = await StructuralAnalyzer(service).analyze(AnalysisContext('0xABC', is_token=False))
+    assert structural.data['status'] == 'unknown'
+    assert 'No contract bytecode at address (destroyed or EOA)' not in structural.flags
+    risk = RiskEngine().compute_from_results(_complete_non_token_results(structural), is_token=False)
+    assert risk['status'] == 'unknown'
+    assert risk['risk_level'] != 'LOW'
+    assert risk['risk_archetype'] == 'unknown'
+    assert risk['coverage']['structural'] < 1
+    assert risk['coverage_reasons']['structural'] == data['reason']

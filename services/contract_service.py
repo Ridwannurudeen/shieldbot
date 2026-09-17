@@ -124,4 +124,4 @@ class ContractService:
             raise
         except Exception as e:
             logger.error("Contract data fetch failed for %s: %s", address, e)
-            return defaults
+            return {**defaults, 'is_contract': None, 'status': 'unknown', 'reason': 'Contract data unavailable'}

@@ -29,11 +29,11 @@ class StructuralAnalyzer(Analyzer):
         data = await self._service.fetch_contract_data(ctx.address, chain_id=ctx.chain_id)
 
         data = dict(data)
-        data['coverage'] = {
-            **data.get('coverage', {}),
-            'is_verified': data.get('is_verified') is not None,
-            'contract_age_days': data.get('contract_age_days') is not None,
-        }
+        data['coverage'] = dict(data.get('coverage', {}))
+        # A confirmed EOA has no verification or age to observe.
+        if data.get('is_contract') is not False:
+            data['coverage']['is_verified'] = data.get('is_verified') is not None
+            data['coverage']['contract_age_days'] = data.get('contract_age_days') is not None
         data['status'] = 'unknown' if data.get('status') == 'unknown' or not all(data['coverage'].values()) else 'ok'
         if data['status'] == 'unknown':
             missing = ', '.join(field for field, covered in data['coverage'].items() if not covered)

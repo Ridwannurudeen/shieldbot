@@ -377,7 +377,7 @@ class RiskEngine:
             structural_missing = []
             if result.name == 'structural':
                 fields = dict(fields) if isinstance(fields, dict) else {}
-                for field in ('is_verified', 'contract_age_days'):
+                for field in ('is_verified', 'contract_age_days') if data.get('is_contract') is not False else ():
                     fields[field] = data.get(field) is not None
                     if not fields[field]:
                         structural_missing.append(field)
