@@ -242,7 +242,7 @@ class RescueService:
         rpc_url = self._rpc_for(chain_id)
         if not rpc_url:
             logger.warning(f"No logs RPC configured for chain {chain_id}")
-            return approvals
+            raise RuntimeError(f"Approval scan unavailable: no logs RPC configured for chain {chain_id}")
         try:
             async with aiohttp.ClientSession() as session:
                 # Step 1: Get latest block
