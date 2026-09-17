@@ -76,15 +76,16 @@ class HoneypotService:
                     simulation_success = False
                 elif response.get('simulation_success') is True and simulation_success is None:
                     simulation_success = True
+                providers = response.get('field_providers') or {}
                 for field in ('is_honeypot', 'can_buy', 'can_sell'):
                     if isinstance(response.get(field), bool):
                         data[field] = response[field]
-                        data['field_providers'][field] = 'honeypot.is'
+                        data['field_providers'][field] = providers.get(field, 'honeypot.is')
                 for field in ('buy_tax', 'sell_tax'):
                     value = response.get(field)
                     if type(value) in (int, float) and math.isfinite(value) and value >= 0:
                         data[field] = value
-                        data['field_providers'][field] = 'honeypot.is'
+                        data['field_providers'][field] = providers.get(field, 'honeypot.is')
             except UnsupportedChainError:
                 raise
             except Exception as e:
@@ -96,7 +97,7 @@ class HoneypotService:
             for action, tax in (('can_buy', 'buy_tax'), ('can_sell', 'sell_tax')):
                 if data[action] is None and data[tax] is not None:
                     data[action] = data[tax] < 100
-                    data['field_providers'][action] = 'honeypot.is'
+                    data['field_providers'][action] = data['field_providers'][tax]
         if any(data[field] is None for field in _TRADE_FIELDS):
             try:
                 response = await ScamDatabase.fetch_token_security(address, chain_id)

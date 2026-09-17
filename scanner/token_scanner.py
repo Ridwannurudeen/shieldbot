@@ -269,7 +269,7 @@ class TokenScanner:
 
     async def _check_honeypot(self, address: str, result: Dict, chain_id: int = 56):
         """Check if token is a honeypot with cross-validation"""
-        if chain_id != 56:
+        if chain_id != 56 and self.web3.supports_honeypot_simulation(chain_id) is not True:
             result['is_honeypot'] = None
             result['checks']['can_sell'] = None
             result['honeypot_status'] = 'unknown'
@@ -277,7 +277,7 @@ class TokenScanner:
             result['risks'].append('Honeypot and sellability unknown: legacy check unavailable for this chain')
             return
         try:
-            honeypot_result = await self.web3.check_honeypot(address)
+            honeypot_result = await self.web3.check_honeypot(address, chain_id=chain_id)
             is_honeypot = honeypot_result.get('is_honeypot')
             result['honeypot_status'] = honeypot_result.get('status', 'ok' if is_honeypot is not None else 'unknown')
             result['honeypot_reason'] = honeypot_result.get('reason')
@@ -318,7 +318,7 @@ class TokenScanner:
 
     async def _check_taxes(self, address: str, result: Dict, chain_id: int = 56) -> bool:
         """Check buy and sell taxes. Returns True if check succeeded."""
-        if chain_id != 56:
+        if chain_id != 56 and self.web3.supports_honeypot_simulation(chain_id) is not True:
             result['buy_tax'] = None
             result['sell_tax'] = None
             result['tax_status'] = 'unknown'
@@ -328,7 +328,7 @@ class TokenScanner:
         result['buy_tax'] = None
         result['sell_tax'] = None
         try:
-            tax_info = await self.web3.get_tax_info(address)
+            tax_info = await self.web3.get_tax_info(address, chain_id=chain_id)
 
             buy_tax = tax_info.get('buy_tax')
             sell_tax = tax_info.get('sell_tax')
