@@ -609,3 +609,14 @@ async def test_transaction_scanner_confirmed_eoa_carries_complete_coverage(mock_
     assert result["status"] == "ok"
     assert result["coverage"] == {}
     assert result["coverage_reasons"] == {}
+
+
+@pytest.mark.asyncio
+async def test_rescue_all_empty_allowances_are_unknown_not_clean(rescue_pipeline):
+    service, wallet, token, spender, _ = rescue_pipeline
+    _use_real_rpc_batches(service, token, spender, lambda session, rpc_url, to, data: None)
+    result = await service.scan_approvals(wallet)
+    assert result['total_approvals'] == 0
+    assert result['status'] == 'unknown'
+    assert result['coverage']['allowances'] is False
+    assert result['total_value_at_risk_usd'] is None
