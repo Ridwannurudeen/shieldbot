@@ -182,3 +182,28 @@ class TestHoneypotProviderUnknowns:
         assert result['status'] == 'unknown'
         assert result['buy_tax'] is None
         assert result['sell_tax'] is None
+
+
+class TestIsContract:
+    ADDRESS = '0x10ED43C718714eb63d5aA57B78B54704E256024E'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('code,expected', [(b'', False), (bytes.fromhex('6080'), True)])
+    async def test_code_lookup_decides_contract(self, code, expected):
+        adapter = BscAdapter(rpc_url='https://example.invalid')
+        adapter.w3 = MagicMock()
+        adapter.w3.eth.get_code.return_value = code
+        assert await adapter.is_contract(self.ADDRESS) is expected
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('error,attempts', [
+        (RuntimeError('503 Service Unavailable'), 3),
+        (ConnectionError('connection refused'), 1),
+    ])
+    async def test_failed_code_lookup_is_unknown(self, error, attempts):
+        adapter = BscAdapter(rpc_url='https://example.invalid')
+        adapter.w3 = MagicMock()
+        adapter.w3.eth.get_code.side_effect = error
+        with patch('adapters.evm_base.asyncio.sleep', new_callable=AsyncMock):
+            assert await adapter.is_contract(self.ADDRESS) is None
+        assert adapter.w3.eth.get_code.call_count == attempts

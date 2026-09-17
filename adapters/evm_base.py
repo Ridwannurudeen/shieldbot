@@ -134,13 +134,14 @@ class EvmAdapter(ChainAdapter):
                     raise
         raise last_exc
 
-    async def is_contract(self, address: str) -> bool:
+    async def is_contract(self, address: str) -> Optional[bool]:
+        """Return True/False from on-chain code; None means the lookup failed."""
         try:
             code = await self._call_with_retry(self.w3.eth.get_code, Web3.to_checksum_address(address))
             return len(code) > 0
         except Exception as e:
             logger.error("[%s] Error checking if contract: %s", self._chain_name, type(e).__name__)
-            return False
+            return None
 
     async def get_bytecode(self, address: str) -> Optional[str]:
         try:
