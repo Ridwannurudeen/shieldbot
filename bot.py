@@ -987,7 +987,9 @@ def format_scan_result(result: dict) -> str:
     """Format scan result — use composite report, forensic report, or fallback"""
     if result.get('composite_report'):
         return result['composite_report']
-    incomplete = is_scan_incomplete(result) or result.get('is_verified') is None
+    incomplete = is_scan_incomplete(result) or (
+        result.get('is_contract') is not False and result.get('is_verified') is None
+    )
     if result.get('forensic_report') and not incomplete:
         return result['forensic_report']
 

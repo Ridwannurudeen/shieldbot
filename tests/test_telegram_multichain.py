@@ -489,6 +489,27 @@ async def test_bot_legacy_fallback_cache_cannot_store_safe_unknown(bot_report_fu
     assert cached['safety_level'] == 'unknown'
 
 
+@pytest.mark.asyncio
+async def test_bot_legacy_fallback_renders_confirmed_eoa_as_low(bot_report_functions, mock_web3_client):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from scanner.transaction_scanner import TransactionScanner
+    ns = bot_report_functions
+    ns['container'].registry.run_all.side_effect = RuntimeError('Unavailable')
+    mock_web3_client.is_contract.return_value = False
+    scanner = TransactionScanner(mock_web3_client)
+    scanner.scam_db.check_address = AsyncMock(return_value=[])
+    ns['tx_scanner'] = scanner
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock()))
+    await ns['scan_contract'](update, '0x' + 'a' * 40, chain_id=56)
+    cached = ns['_set_cache'].call_args.args[2]
+    assert (cached['status'], cached['risk_level']) == ('ok', 'low')
+    report = update.message.reply_text.call_args.args[0]
+    assert '🟢 LOW' in report
+    assert '5/100' in report
+    assert 'UNKNOWN' not in report
+
+
 def test_formatter_partial_flag_prevents_safe():
     from core.extension_formatter import format_extension_alert
     alert = format_extension_alert({'status': 'ok', 'partial': True,

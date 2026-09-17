@@ -593,14 +593,19 @@ def test_guardian_router_unavailable_approvals_return_503_without_provider_detai
 
 @pytest.mark.asyncio
 async def test_transaction_scanner_confirmed_eoa_carries_complete_coverage(mock_web3_client):
+    from core.extension_formatter import format_extension_alert, is_scan_incomplete
+
     mock_web3_client.is_contract.return_value = False
     scanner = TransactionScanner(mock_web3_client)
     scanner.scam_db.check_address = AsyncMock(return_value=[])
     result = await scanner.scan_address("0xABC")
     assert result["risk_level"] == "low"
     assert result["status"] == "ok"
-    assert result["coverage"] == {}
+    assert result["coverage"] == {"is_contract": True, "scam_database": True}
     assert result["coverage_reasons"] == {}
+    assert not is_scan_incomplete(result)
+    alert = format_extension_alert({**result, "rug_probability": result["risk_score"]})
+    assert (alert["risk_classification"], alert["status"], alert["risk_display"]) == ("SAFE", "ok", "5%")
 
 
 @pytest.mark.asyncio
@@ -887,7 +892,7 @@ async def test_transaction_scanner_unknown_contract_lookup_is_not_low_risk(mock_
     assert result["status"] == "unknown"
     assert result["risk_level"] == "unknown"
     assert result["confidence"] != 95
-    assert result["coverage"] == {"is_contract": False}
+    assert result["coverage"] == {"is_contract": False, "scam_database": True}
     assert result["coverage_reasons"]["is_contract"]
     assert not any("EOA" in warning for warning in result["warnings"])
 
@@ -950,10 +955,10 @@ async def test_scam_database_hit_is_flagged_without_contract_checks(mock_web3_cl
     assert result["risk_level"] == "medium"
     if is_contract is None:
         assert result["status"] == "unknown"
-        assert result["coverage"] == {"is_contract": False}
+        assert result["coverage"] == {"is_contract": False, "scam_database": True}
     else:
         assert result["status"] == "ok"
-        assert result["coverage"] == {}
+        assert result["coverage"] == {"is_contract": True, "scam_database": True}
         assert result["confidence"] == 95
     mock_web3_client.get_bytecode.assert_not_awaited()
 
@@ -964,7 +969,9 @@ async def test_confirmed_eoa_without_scam_hit_is_unchanged(mock_web3_client):
     result = await _scan_without_contract_checks(mock_web3_client, False, lookup)
     lookup.assert_awaited_once_with("0xABC", chain_id=56)
     assert (result["risk_level"], result["risk_score"], result["confidence"]) == ("low", 5, 95)
-    assert (result["status"], result["coverage"], result["coverage_reasons"]) == ("ok", {}, {})
+    assert (result["status"], result["coverage"], result["coverage_reasons"]) == (
+        "ok", {"is_contract": True, "scam_database": True}, {},
+    )
     assert result["warnings"] == ["This is an EOA (externally owned account), not a contract"]
     assert result["scam_matches"] == []
 
@@ -977,6 +984,6 @@ async def test_confirmed_eoa_with_failed_scam_lookup_is_unknown(mock_web3_client
     assert result["status"] == "unknown"
     assert result["risk_level"] == "unknown"
     assert result["confidence"] != 95
-    assert result["coverage"] == {"scam_database": False}
+    assert result["coverage"] == {"is_contract": True, "scam_database": False}
     assert result["coverage_reasons"]["scam_database"]
     assert result["checks"]["scam_database_clean"] is None

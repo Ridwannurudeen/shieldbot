@@ -110,8 +110,8 @@ class TransactionScanner:
 
         # Scam database lookups do not depend on contract detection, so run them before any early return.
         data_sources['scam_db'] = await self._check_scam_database(address, result, chain_id=chain_id)
+        result['coverage']['scam_database'] = data_sources['scam_db']
         if not data_sources['scam_db']:
-            result['coverage']['scam_database'] = False
             result['coverage_reasons']['scam_database'] = 'scam_database unknown: provider data unavailable'
 
         if result['is_contract'] is None:
@@ -123,6 +123,7 @@ class TransactionScanner:
             return result
 
         if not result['is_contract']:
+            result['coverage']['is_contract'] = True
             result['risk_score'] = 5
             result['warnings'].append("This is an EOA (externally owned account), not a contract")
             if result['coverage_reasons']:

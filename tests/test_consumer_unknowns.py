@@ -196,6 +196,23 @@ async def test_scan_endpoint_preserves_unknown_verdict(consumer_api, incomplete_
 
 
 @pytest.mark.asyncio
+async def test_confirmed_eoa_scan_and_firewall_fallback_render_safe(consumer_api, monkeypatch, mock_web3_client):
+    from scanner.transaction_scanner import TransactionScanner
+    api, _ = consumer_api
+    mock_web3_client.is_contract.return_value = False
+    scanner = TransactionScanner(mock_web3_client)
+    scanner.scam_db.check_address = AsyncMock(return_value=[])
+    monkeypatch.setattr(api, 'tx_scanner', scanner)
+    response = await api.scan(api.ScanRequest(address='0x' + 'a' * 40))
+    assert (response['status'], response['risk_level'], response['classification']) == ('ok', 'low', 'SAFE')
+    assert (response['risk_score'], response['confidence'], response['partial']) == (5, 95, False)
+    assert response['risk_display'] == '5%'
+    fallback = api._build_fallback_response({}, await scanner.scan_address('0x' + 'a' * 40), None)
+    assert (fallback['status'], fallback['classification'], fallback['partial']) == ('ok', 'SAFE', False)
+    assert fallback['verdict'] == 'SAFE — Risk score 5/100'
+
+
+@pytest.mark.asyncio
 async def test_unknown_explanation_avoids_ai_safe_text(consumer_api, incomplete_output):
     api, services = consumer_api
     services.advisor = SimpleNamespace(explain_scan=AsyncMock(return_value='SAFE: risk 0%'))
