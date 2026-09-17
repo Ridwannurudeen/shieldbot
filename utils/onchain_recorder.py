@@ -155,7 +155,7 @@ class OnchainRecorder:
             return tx_hash_hex
 
         except Exception as e:
-            logger.error(f"On-chain recording failed: {e}")
+            logger.error("On-chain recording failed: %s", type(e).__name__)
             return None
 
     async def record_scan_fire_and_forget(self, address: str, risk_level: str, scan_type: str) -> None:
@@ -178,7 +178,7 @@ class OnchainRecorder:
         except asyncio.TimeoutError:
             logger.warning(f"On-chain recording timed out for {address}")
         except Exception as e:
-            logger.error(f"Fire-and-forget recording failed: {e}")
+            logger.error("Fire-and-forget recording failed: %s", type(e).__name__)
 
     async def get_latest_scan(self, address: str) -> Optional[dict]:
         """
@@ -222,7 +222,7 @@ class OnchainRecorder:
             }
 
         except Exception as e:
-            logger.error(f"Error querying on-chain scan: {e}")
+            logger.error("Error querying on-chain scan: %s", type(e).__name__)
             return None
 
     async def get_stats(self) -> Optional[dict]:
@@ -241,5 +241,5 @@ class OnchainRecorder:
             total = contract.functions.totalScans().call()
             return {'total_scans': total}
         except Exception as e:
-            logger.error(f"Error getting on-chain stats: {e}")
+            logger.error("Error getting on-chain stats: %s", type(e).__name__)
             return None

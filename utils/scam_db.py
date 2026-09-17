@@ -126,7 +126,7 @@ class ScamDatabase:
                         }]
             return []
         except Exception as e:
-            logger.error(f"Error checking ChainAbuse: {e}")
+            logger.error("Error checking ChainAbuse: %s", type(e).__name__)
             return []
 
     @staticmethod
@@ -165,7 +165,7 @@ class ScamDatabase:
                         else:
                             result = {'status': 'ok', 'reason': None, 'data': token}
         except Exception as e:
-            logger.error("Error fetching GoPlus token security: %s", e)
+            logger.error("Error fetching GoPlus token security: %s", type(e).__name__)
             result['reason'] = f'GoPlus request failed ({type(e).__name__})'
         finally:
             _GOPLUS_INFLIGHT.pop(flight_key, None)

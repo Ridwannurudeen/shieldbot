@@ -157,10 +157,10 @@ Base your score on: verification status, contract age, scam DB matches, bytecode
             return result
 
         except (json.JSONDecodeError, KeyError) as e:
-            logger.error(f"AI risk score parse error: {e}")
+            logger.error("AI risk score parse error: %s", type(e).__name__)
             return None
         except Exception as e:
-            logger.error(f"AI risk score failed: {e}")
+            logger.error("AI risk score failed: %s", type(e).__name__)
             return None
 
     async def analyze_verified_source(self, address: str, source_code: str, chain_id: Optional[int] = None) -> Optional[Dict]:
@@ -214,10 +214,10 @@ Look for: honeypot mechanisms (blacklists, trading pauses, max tx traps), hidden
             return result
 
         except (json.JSONDecodeError, KeyError) as e:
-            logger.error(f"AI source analysis parse error: {e}")
+            logger.error("AI source analysis parse error: %s", type(e).__name__)
             return None
         except Exception as e:
-            logger.error(f"AI source analysis failed: {e}")
+            logger.error("AI source analysis failed: %s", type(e).__name__)
             return None
 
     async def analyze_contract_bytecode(self, address: str, bytecode: str, scan_results: Dict) -> Optional[str]:
@@ -256,7 +256,7 @@ Keep response under 200 words, focused and actionable."""
             return message.content[0].text
 
         except Exception as e:
-            logger.error(f"AI analysis failed: {e}")
+            logger.error("AI analysis failed: %s", type(e).__name__)
             return None
 
     async def analyze_token_safety(self, address: str, token_info: Dict, safety_results: Dict) -> Optional[str]:
@@ -294,7 +294,7 @@ Keep response under 200 words, actionable for traders."""
             return message.content[0].text
 
         except Exception as e:
-            logger.error(f"AI token analysis failed: {e}")
+            logger.error("AI token analysis failed: %s", type(e).__name__)
             return None
 
     async def explain_findings(self, user_question: str, scan_context: Dict) -> Optional[str]:
@@ -320,7 +320,7 @@ Provide a clear, helpful answer in 2-3 sentences. Use simple language."""
             return message.content[0].text
 
         except Exception as e:
-            logger.error(f"AI explanation failed: {e}")
+            logger.error("AI explanation failed: %s", type(e).__name__)
             return None
 
     def _format_scan_data(self, scan_data: Dict) -> str:
@@ -405,7 +405,7 @@ Generate the ShieldAI forensic report now."""
             return report
 
         except Exception as e:
-            logger.error(f"Forensic report generation failed: {e}")
+            logger.error("Forensic report generation failed: %s", type(e).__name__)
             return None
 
     def _build_forensic_context(self, address: str, data: Dict, scan_type: str) -> str:
@@ -541,10 +541,10 @@ Return the firewall analysis JSON now."""
             return result
 
         except (json.JSONDecodeError, KeyError) as e:
-            logger.error(f"Firewall report parse error: {e}")
+            logger.error("Firewall report parse error: %s", type(e).__name__)
             return None
         except Exception as e:
-            logger.error(f"Firewall report failed: {e}")
+            logger.error("Firewall report failed: %s", type(e).__name__)
             return None
 
     def _build_firewall_context(self, tx_data: Dict, contract_scan: Dict) -> str:
