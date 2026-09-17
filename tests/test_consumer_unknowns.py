@@ -722,6 +722,10 @@ def test_exception_text_never_reaches_replies_or_logs(path):
                     leaks.append(f'{path}:{node.lineno} {ast.unparse(parent)[:80]}')
     leaks += [f'{path}:{parents[node].lineno} exc_info' for node in ast.walk(tree)
               if isinstance(node, ast.keyword) and node.arg == 'exc_info']
+    message_loggers = {'logger.exception', 'logging.exception', 'traceback.format_exc',
+                       'traceback.print_exc', 'sys.exc_info'}
+    leaks += [f'{path}:{node.lineno} {ast.unparse(node.func)}' for node in ast.walk(tree)
+              if isinstance(node, ast.Call) and ast.unparse(node.func) in message_loggers]
     for function in ast.walk(tree):
         if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
