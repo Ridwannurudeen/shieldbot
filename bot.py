@@ -322,8 +322,8 @@ async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text(response, parse_mode='Markdown', disable_web_page_preview=True)
 
     except Exception as e:
-        logger.error(f"Error in /history: {e}")
-        await status_msg.edit_text(f"❌ Error querying history: {str(e)}")
+        logger.error(f"Error in /history: {type(e).__name__}")
+        await status_msg.edit_text("❌ Error querying history. Please try again later.")
 
 
 async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -478,8 +478,8 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except UnsupportedChainError:
         raise
     except Exception as e:
-        logger.error(f"Error in /rescue: {e}")
-        await status_msg.edit_text(f"❌ Error scanning approvals: {str(e)}")
+        logger.error(f"Error in /rescue: {type(e).__name__}")
+        await status_msg.edit_text("❌ Error scanning approvals. Please try again later.")
 
 
 async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -536,8 +536,8 @@ async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     except Exception as e:
-        logger.error(f"Error in /threats: {e}")
-        await update.message.reply_text(f"❌ Error fetching threats: {str(e)}")
+        logger.error(f"Error in /threats: {type(e).__name__}")
+        await update.message.reply_text("❌ Error fetching threats. Please try again later.")
 
 
 async def campaign_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -628,8 +628,8 @@ async def campaign_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     except Exception as e:
-        logger.error(f"Error in /campaign: {e}")
-        await status_msg.edit_text(f"❌ Error investigating campaign: {str(e)}")
+        logger.error(f"Error in /campaign: {type(e).__name__}")
+        await status_msg.edit_text("❌ Error investigating campaign. Please try again later.")
 
 
 async def _handle_advisor_chat(update: Update, message: str, chain_id: int = 56):
@@ -654,7 +654,7 @@ async def _handle_advisor_chat(update: Update, message: str, chain_id: int = 56)
     except UnsupportedChainError:
         raise
     except Exception as e:
-        logger.error(f"Advisor chat error: {e}")
+        logger.error(f"Advisor chat error: {type(e).__name__}")
         await typing_msg.edit_text(
             "Sorry, I couldn't process that request. Try again or send a contract address to scan."
         )
@@ -770,7 +770,7 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
         except UnsupportedChainError:
             raise
         except Exception as e:
-            logger.warning(f"Composite pipeline failed for {address}, falling back: {e}")
+            logger.warning(f"Composite pipeline failed for {address}, falling back: {type(e).__name__}")
 
         # Fallback to legacy scanner
         if not response:
@@ -806,9 +806,9 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
     except UnsupportedChainError:
         raise
     except Exception as e:
-        logger.error(f"Error scanning contract: {e}")
+        logger.error(f"Error scanning contract: {type(e).__name__}")
         await update.message.reply_text(
-            f"\u274C Error scanning contract: {str(e)}\n\n"
+            "\u274C Error scanning contract.\n\n"
             "Please check the address and try again."
         )
 
@@ -887,7 +887,7 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
         except UnsupportedChainError:
             raise
         except Exception as e:
-            logger.warning(f"Composite pipeline failed for {address}, falling back: {e}")
+            logger.warning(f"Composite pipeline failed for {address}, falling back: {type(e).__name__}")
 
         # Fallback to legacy scanner
         if not response:
@@ -923,9 +923,9 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
     except UnsupportedChainError:
         raise
     except Exception as e:
-        logger.error(f"Error checking token: {e}")
+        logger.error(f"Error checking token: {type(e).__name__}")
         await update.message.reply_text(
-            f"\u274C Error checking token: {str(e)}\n\n"
+            "\u274C Error checking token.\n\n"
             "Please check the address and try again."
         )
 
@@ -1132,7 +1132,7 @@ def format_token_result(result: dict) -> str:
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Log errors"""
-    logger.error(f"Update {update} caused error {context.error}")
+    logger.error(f"Update caused error {type(context.error).__name__}")
     if isinstance(context.error, UnsupportedChainError) and update and update.effective_message:
         await update.effective_message.reply_text(str(context.error))
 

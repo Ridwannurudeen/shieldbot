@@ -689,3 +689,71 @@ async def test_advisor_scan_failure_renders_unknown_chat(consumer_api):
     assert response['scan_data']['status'] == 'unknown'
     assert response['scan_data']['coverage_reasons']
     assert secret not in str(response)
+
+
+@pytest.mark.parametrize('path', ['api.py', 'bot.py'])
+def test_exception_text_never_reaches_replies_or_logs(path):
+    import ast
+    from pathlib import Path
+
+    tree = ast.parse(Path(path).read_text(encoding='utf-8'))
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    leaks = []
+    for handler in ast.walk(tree):
+        if not isinstance(handler, ast.ExceptHandler) or not handler.name:
+            continue
+        handled = ast.unparse(handler.type)
+        for statement in handler.body:
+            for node in ast.walk(statement):
+                if not (isinstance(node, ast.Name) and node.id == handler.name):
+                    continue
+                parent = parents[node]
+                allowed = (
+                    (isinstance(parent, ast.Raise) and parent.cause is node)
+                    or (isinstance(parent, ast.Call) and ast.unparse(parent.func) == 'type')
+                    or (handled == 'HTTPException' and isinstance(parent, ast.Attribute))
+                    or (handled == 'UnsupportedChainError' and isinstance(parent, ast.Call)
+                        and ast.unparse(parent.func) == 'str')
+                )
+                if not allowed:
+                    leaks.append(f'{path}:{node.lineno} {ast.unparse(parent)[:80]}')
+    leaks += [f'{path}:{parents[node].lineno} exc_info' for node in ast.walk(tree)
+              if isinstance(node, ast.keyword) and node.arg == 'exc_info']
+    assert leaks == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('endpoint', ['firewall', 'scan', 'scan_injection', 'agent_chat', 'agent_explain', 'background'])
+async def test_api_error_logs_never_include_provider_error_text(consumer_api, monkeypatch, caplog, endpoint):
+    import asyncio
+    import logging
+    from fastapi import HTTPException
+    api, services = consumer_api
+    error = RuntimeError('https://rpc.example/v2/SYNTHETIC_KEY_123')
+    services.registry.run_all.side_effect = error
+    services.injection_scanner = SimpleNamespace(scan=AsyncMock(side_effect=error))
+    services.advisor = SimpleNamespace(chat=AsyncMock(side_effect=error), explain_scan=AsyncMock(side_effect=error))
+    monkeypatch.setattr(api, 'token_scanner', SimpleNamespace(check_token=AsyncMock(side_effect=error)))
+    monkeypatch.setattr(api, 'tx_scanner', SimpleNamespace(scan_address=AsyncMock(side_effect=error)))
+    request = SimpleNamespace(client=SimpleNamespace(host='leak-' + endpoint), headers={},
+                              json=AsyncMock(return_value={'content': 'hello'}))
+    calls = {
+        'firewall': lambda: api.firewall(api.FirewallRequest(to='0x' + 'a' * 40, sender='0x' + 'b' * 40), request),
+        'scan': lambda: api.scan(api.ScanRequest(address='0x' + 'a' * 40)),
+        'scan_injection': lambda: api.scan_injection(request),
+        'agent_chat': lambda: api.agent_chat(api.ChatRequest(message='hello', user_id='test'), request),
+        'agent_explain': lambda: api.agent_explain(api.ExplainRequest(
+            scan_result={'status': 'ok', 'coverage': {'honeypot': 1}}), request),
+    }
+    with caplog.at_level(logging.DEBUG, logger='api'):
+        if endpoint == 'background':
+            async def fail():
+                raise error
+            task = api._fire_and_forget(fail(), label='leak-test')
+            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.sleep(0)
+        else:
+            with pytest.raises(HTTPException):
+                await calls[endpoint]()
+    assert caplog.records
+    assert 'SYNTHETIC_KEY_123' not in caplog.text

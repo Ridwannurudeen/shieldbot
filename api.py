@@ -54,7 +54,7 @@ def _fire_and_forget(coro, label: str = "background"):
             return
         exc = t.exception()
         if exc:
-            logger.error("Fire-and-forget task '%s' failed: %s", label, exc, exc_info=exc)
+            logger.error("Fire-and-forget task '%s' failed: %s", label, type(exc).__name__)
     task.add_done_callback(_done_cb)
     return task
 
@@ -589,7 +589,7 @@ async def beta_signup(req: BetaSignupRequest, request: Request):
             try:
                 await container.email_service.send_beta_welcome(email)
             except Exception as e:
-                logger.error(f"Beta welcome email failed: {e}")
+                logger.error(f"Beta welcome email failed: {type(e).__name__}")
         return {"message": "You're on the list! We'll be in touch."}
     return JSONResponse(
         status_code=409,
@@ -1385,7 +1385,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 except UnsupportedChainError:
                     raise
                 except Exception as e:
-                    logger.error(f"DB upsert failed: {e}")
+                    logger.error(f"DB upsert failed: {type(e).__name__}")
 
             # Auto-enrich threat graph (fire-and-forget)
             if container and hasattr(container, 'threat_graph'):
@@ -1410,7 +1410,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 except UnsupportedChainError:
                     raise
                 except Exception as e:
-                    logger.error(f"Sentinel feedback failed: {e}")
+                    logger.error(f"Sentinel feedback failed: {type(e).__name__}")
 
             # Enqueue deployer indexing (fire-and-forget)
             if container and container.indexer:
@@ -1434,14 +1434,14 @@ async def firewall(req: FirewallRequest, request: Request):
                 except UnsupportedChainError:
                     raise
                 except Exception as e:
-                    logger.error(f"Greenfield upload failed: {e}")
+                    logger.error(f"Greenfield upload failed: {type(e).__name__}")
 
             return response
 
         except UnsupportedChainError:
             raise
         except Exception as e:
-            logger.warning(f"Composite pipeline failed for {to_addr}, falling back: {e}")
+            logger.warning(f"Composite pipeline failed for {to_addr}, falling back: {type(e).__name__}")
 
         # 4. Fallback: legacy scanner + AI firewall
         is_token = False
@@ -1491,7 +1491,7 @@ async def firewall(req: FirewallRequest, request: Request):
     except UnsupportedChainError:
         raise
     except Exception as e:
-        logger.error(f"Firewall error: {e}", exc_info=True)
+        logger.error(f"Firewall error: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1525,7 +1525,7 @@ async def scan(req: ScanRequest):
     except UnsupportedChainError:
         raise
     except Exception as e:
-        logger.error(f"Scan error: {e}", exc_info=True)
+        logger.error(f"Scan error: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1560,7 +1560,7 @@ async def scan_injection(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Injection scan error: {e}", exc_info=True)
+        logger.error(f"Injection scan error: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1579,7 +1579,7 @@ async def report_outcome(req: OutcomeRequest):
             )
         return {"status": "recorded"}
     except Exception as e:
-        logger.error(f"Outcome recording error: {e}", exc_info=True)
+        logger.error(f"Outcome recording error: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1612,7 +1612,7 @@ async def community_report(req: CommunityReportRequest, request: Request):
             )
         return {"status": "recorded", "address": req.address, "report_type": req.report_type}
     except Exception as e:
-        logger.error(f"Community report error: {e}", exc_info=True)
+        logger.error(f"Community report error: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1922,7 +1922,7 @@ async def agent_chat(req: ChatRequest, request: Request):
     except UnsupportedChainError:
         raise
     except Exception as e:
-        logger.error(f"Agent chat error: {e}")
+        logger.error(f"Agent chat error: {type(e).__name__}")
         raise HTTPException(500, "Agent error")
 
 
@@ -1946,7 +1946,7 @@ async def agent_explain(req: ExplainRequest, request: Request):
     except UnsupportedChainError:
         raise
     except Exception as e:
-        logger.error(f"Agent explain error: {e}")
+        logger.error(f"Agent explain error: {type(e).__name__}")
         raise HTTPException(500, "Agent error")
 
 
@@ -2065,7 +2065,7 @@ async def threat_feed(
                 'detected_at': scanned_at,
             })
     except Exception as e:
-        logger.error(f"Threat feed DB error: {e}")
+        logger.error(f"Threat feed DB error: {type(e).__name__}")
 
     # Mempool alerts
     mempool_available = chain_id is None or supports_pending_transactions(chain_id)
@@ -2165,7 +2165,7 @@ async def _get_deployer_campaign_context(contract_addr: str, chain_id: int, cont
     except UnsupportedChainError:
         raise
     except Exception as e:
-        logger.debug(f"Campaign context lookup failed for {contract_addr}: {e}")
+        logger.debug(f"Campaign context lookup failed for {contract_addr}: {type(e).__name__}")
         return None
 
 

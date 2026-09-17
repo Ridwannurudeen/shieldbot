@@ -590,3 +590,45 @@ async def test_bot_rescue_safe_count_requires_complete_scan(bot_chain_functions,
     else:
         assert 'Safe: 3' not in text and 'look safe' not in text
         assert 'incomplete' in text and 'Token price unavailable' in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('handler', ['history_command', 'rescue_command', 'threats_command', 'campaign_command',
+                                     'scan_contract', 'check_token', '_handle_advisor_chat', 'error_handler'])
+async def test_bot_never_sends_or_logs_provider_error_text(bot_chain_functions, handler):
+    import ast
+    from pathlib import Path
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    ns = bot_chain_functions
+    tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
+    extra = {'history_command', 'campaign_command'}
+    exec(compile(ast.Module(body=[node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)
+                                  and node.name in extra], type_ignores=[]), 'bot.py', 'exec'), ns)
+    error = RuntimeError('https://rpc.example/v2/SYNTHETIC_KEY_123')
+    ns['settings'] = SimpleNamespace(bscscan_api_key='', etherscan_api_key='')
+    ns['onchain_recorder'].get_latest_scan = AsyncMock(side_effect=error)
+    ns['container'].rescue_service.scan_approvals.side_effect = error
+    ns['container'].mempool_monitor.get_alerts.side_effect = error
+    ns['container'].campaign_service.get_entity_graph = AsyncMock(side_effect=error)
+    ns['container'].registry.run_all.side_effect = error
+    ns['container'].advisor.chat.side_effect = error
+    ns['tx_scanner'].scan_address.side_effect = error
+    ns['token_scanner'].check_token.side_effect = error
+    status_msg = SimpleNamespace(edit_text=AsyncMock(), delete=AsyncMock())
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock(return_value=status_msg)),
+                             effective_user=SimpleNamespace(id=1), effective_message=None)
+    address = '0x' + 'a' * 40
+    if handler in ('scan_contract', 'check_token'):
+        await ns[handler](update, address, chain_id=56)
+    elif handler == '_handle_advisor_chat':
+        await ns[handler](update, 'hello', chain_id=56)
+    elif handler == 'error_handler':
+        await ns[handler](update, SimpleNamespace(error=error))
+    else:
+        args = [] if handler == 'threats_command' else [address]
+        await ns[handler](update, SimpleNamespace(args=args, user_data={'chain_id': 56}))
+    sent = [str(call) for mock in (update.message.reply_text, status_msg.edit_text) for call in mock.call_args_list]
+    logged = [str(call) for call in ns['logger'].method_calls]
+    assert logged
+    assert all('SYNTHETIC_KEY_123' not in text for text in sent + logged)
