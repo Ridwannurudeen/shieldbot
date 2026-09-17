@@ -24,7 +24,7 @@ def _fire_and_forget(coro, label: str = "background"):
             return
         exc = t.exception()
         if exc:
-            logger.error("Fire-and-forget task '%s' failed: %s", label, exc, exc_info=exc)
+            logger.error("Fire-and-forget task '%s' failed: %s", label, type(exc).__name__)
     task.add_done_callback(_done_cb)
     return task
 
@@ -225,7 +225,7 @@ def create_agent_firewall_router(container) -> APIRouter:
                     if isinstance(sim_raw, UnsupportedChainError):
                         raise sim_raw
                     if isinstance(sim_raw, Exception):
-                        logger.warning("Tenderly simulation failed: %s", sim_raw)
+                        logger.warning("Tenderly simulation failed: %s", type(sim_raw).__name__)
                         sim_raw = None
                     simulation_result = sim_raw
                 else:
@@ -239,7 +239,7 @@ def create_agent_firewall_router(container) -> APIRouter:
             except Exception as exc:
                 logger.error(
                     "Analyzer pipeline failed for %s on chain %s: %s",
-                    to_addr, chain_id, exc, exc_info=True,
+                    to_addr, chain_id, type(exc).__name__,
                 )
                 raise HTTPException(
                     status_code=503,

@@ -691,7 +691,7 @@ async def test_advisor_scan_failure_renders_unknown_chat(consumer_api):
     assert secret not in str(response)
 
 
-@pytest.mark.parametrize('path', ['api.py', 'bot.py'])
+@pytest.mark.parametrize('path', ['api.py', 'bot.py', 'agent/advisor.py', 'agent/firewall.py'])
 def test_exception_text_never_reaches_replies_or_logs(path):
     import ast
     from pathlib import Path
@@ -719,7 +719,52 @@ def test_exception_text_never_reaches_replies_or_logs(path):
                     leaks.append(f'{path}:{node.lineno} {ast.unparse(parent)[:80]}')
     leaks += [f'{path}:{parents[node].lineno} exc_info' for node in ast.walk(tree)
               if isinstance(node, ast.keyword) and node.arg == 'exc_info']
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        exception_names = {
+            ast.unparse(node.args[0]) for node in ast.walk(function)
+            if isinstance(node, ast.Call) and ast.unparse(node.func) == 'isinstance'
+            and 'Exception' in ast.unparse(node.args[1])
+        } | {
+            target.id for node in ast.walk(function)
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
+            and ast.unparse(node.value.func).endswith('.exception')
+            for target in node.targets if isinstance(target, ast.Name)
+        }
+        for call in ast.walk(function):
+            if not (isinstance(call, ast.Call) and ast.unparse(call.func).startswith('logger.')):
+                continue
+            for node in ast.walk(call):
+                if (isinstance(node, ast.Name) and node.id in exception_names
+                        and not (isinstance(parents[node], ast.Call) and ast.unparse(parents[node].func) == 'type')):
+                    leaks.append(f'{path}:{node.lineno} {ast.unparse(call)[:80]}')
     assert leaks == []
+
+
+def test_agent_firewall_pipeline_failure_logs_exception_class_only(caplog):
+    import logging
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from agent.firewall import create_agent_firewall_router
+    container = MagicMock()
+    container.auth_manager.validate_key = AsyncMock(return_value={'key_id': 'k1', 'tier': 'free'})
+    container.auth_manager.check_rate_limit = AsyncMock(return_value=True)
+    container.db.get_agent_policy = AsyncMock(return_value={'policy': {}})
+    container.db.get_contract_score = AsyncMock(return_value=None)
+    container.cache.get_verdict = AsyncMock(return_value=None)
+    container.web3_client.is_token_contract = AsyncMock(return_value=True)
+    container.tenderly_simulator.is_enabled = MagicMock(return_value=False)
+    container.registry.run_all = AsyncMock(side_effect=RuntimeError('https://rpc.example/v2/SYNTHETIC_KEY_123'))
+    app = FastAPI()
+    app.include_router(create_agent_firewall_router(container), prefix='/api/agent')
+    with caplog.at_level(logging.DEBUG, logger='agent.firewall'):
+        response = TestClient(app).post('/api/agent/firewall', headers={'X-API-Key': 'sb_test'}, json={
+            'agent_id': 'agent:1', 'transaction': {'from': '0x' + 'b' * 40, 'to': '0x' + 'a' * 40, 'chain_id': 56},
+        })
+    assert response.status_code == 503
+    assert 'RuntimeError' in caplog.text
+    assert 'SYNTHETIC_KEY_123' not in caplog.text
 
 
 @pytest.mark.asyncio
