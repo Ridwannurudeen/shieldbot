@@ -37,6 +37,7 @@ def test_module_imports_first_in_fresh_interpreter(module):
         cwd=PROJECT_ROOT,
         capture_output=True,
         encoding="utf-8",
+        errors="replace",
         timeout=60,
     )
     assert result.returncode == 0, result.stderr
