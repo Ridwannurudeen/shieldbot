@@ -208,6 +208,10 @@ class RiskEngine:
         if incomplete and risk_level == 'LOW':
             risk_level = 'MEDIUM'
 
+        # A calibrated medium threshold can sit above the scam floor; a scam match is never LOW.
+        if contract_data.get('scam_matches') and risk_level == 'LOW':
+            risk_level = 'MEDIUM'
+
         # --- Risk archetype ---
         archetype = self._determine_archetype(
             contract_data, honeypot_data, dex_data, rug_probability,
@@ -336,6 +340,10 @@ class RiskEngine:
             risk_level = 'LOW'
 
         if incomplete and risk_level == 'LOW':
+            risk_level = 'MEDIUM'
+
+        # A calibrated medium threshold can sit above the scam floor; a scam match is never LOW.
+        if contract_data.get('scam_matches') and risk_level == 'LOW':
             risk_level = 'MEDIUM'
 
         archetype = self._determine_archetype(
