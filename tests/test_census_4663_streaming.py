@@ -138,7 +138,8 @@ async def census_database(directory):
             event(source, key, name, timestamp, fields, number)
 
     # A token whose pools tie on (block, log index), where the tie order changes
-    # its simultaneous liquidity peak, and whose events sit on the deadline.
+    # its simultaneous liquidity peak, and whose swaps sit on its first-seen
+    # timestamp and on the deadline.
     edge = "0x" + "a1" * 20
     pair, _ = pool("v2", edge, WETH, 10000)
     second, _ = pool("v2", edge, WETH, 10000)
@@ -166,8 +167,18 @@ async def census_database(directory):
     event("v2", pair, "Swap", 11801, {"amount0_in": 1, "amount1_out": 5}, 180, 2)
     event("v2", pair, "Sync", 11801, {"reserve0": 1, "reserve1": 10**19}, 180, 3)
     event("v2", pair, "Swap", 9999, {"amount0_out": 1}, 0, 0)
+    event("v2", pair, "Swap", 10000, {"amount0_out": 1, "amount1_in": 5}, 0, 1)
     for timestamp in (12000, 16000, 18000):
         event("v2", pair, "Swap", timestamp, {"amount0_out": 2, "amount1_in": 3})
+
+    # A token whose Sync logs tie within one pool, so only row order breaks the
+    # tie, and whose later peak keeps whichever tied reserve came last.
+    tied_token = "0x" + "a2" * 20
+    tied, _ = pool("v2", tied_token, WETH, 10000)
+    raised, _ = pool("v2", tied_token, WETH, 10000)
+    event("v2", tied, "Sync", 10200, {"reserve0": 1, "reserve1": 9 * 10**17}, 20, 3)
+    event("v2", tied, "Sync", 10200, {"reserve0": 1, "reserve1": 10**17}, 20, 3)
+    event("v2", raised, "Sync", 10300, {"reserve0": 1, "reserve1": 2 * 10**18}, 30, 1)
 
     # A hub token paired with many generated tokens, including pools created
     # after later report windows end, and an ETH-only pool.
