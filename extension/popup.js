@@ -288,11 +288,12 @@ function renderHealthData(data, ctx) {
   const highRisk   = data.high_risk || 0;
   const mediumRisk = data.medium_risk || 0;
   const totalUsd   = data.total_value_at_risk_usd || 0;
+  const incomplete = data.status === "unknown";
   const score      = Math.max(0, 100 - highRisk * 20 - mediumRisk * 5);
   const scoreColor = score < 50 ? "#ef4444" : score < 80 ? "#f97316" : "#22c55e";
 
-  ctx.scoreNumEl.textContent = score;
-  ctx.scoreNumEl.style.color = scoreColor;
+  ctx.scoreNumEl.textContent = incomplete ? "?" : score;
+  ctx.scoreNumEl.style.color = incomplete ? "#eab308" : scoreColor;
 
   const usdColor = totalUsd > 0 ? "#ef4444" : "#94a3b8";
 
@@ -322,7 +323,7 @@ function renderHealthData(data, ctx) {
         ? `<div class="health-usd-risk">${escapeHtml(fmtUsd(a.value_at_risk_usd))}</div>`
         : `<div class="health-allowance">${escapeHtml(a.allowance || "")}</div>`;
       return `<div class="health-approval-item">
-        <span class="health-risk-badge ${riskClass[a.risk_level] || "risk-low"}">${escapeHtml(a.risk_level)}</span>
+        <span class="health-risk-badge ${riskClass[a.risk_level] || "risk-unknown"}">${escapeHtml(a.risk_level)}</span>
         <div class="health-token">
           <div class="health-token-name">${escapeHtml(a.token_symbol || shortAddr(a.token_address))}</div>
           <div class="health-token-reason">${spd}</div>
@@ -333,7 +334,7 @@ function renderHealthData(data, ctx) {
       const spd = a.spender_label && a.spender_label !== "Unknown Contract" ? escapeHtml(a.spender_label) : escapeHtml(shortAddr(a.spender || ""));
       const usdEl = a.value_at_risk_usd ? `<div class="wh-appr-usd">${escapeHtml(fmtUsd(a.value_at_risk_usd))}</div>` : "";
       return `<div class="wh-appr">
-        <span class="wh-appr-badge ${riskClass[a.risk_level] || "risk-low"}">${escapeHtml(a.risk_level)}</span>
+        <span class="wh-appr-badge ${riskClass[a.risk_level] || "risk-unknown"}">${escapeHtml(a.risk_level)}</span>
         <div class="wh-appr-tok">
           <div class="wh-appr-name">${escapeHtml(a.token_symbol || shortAddr(a.token_address))}</div>
           <div class="wh-appr-spender">${spd}</div>

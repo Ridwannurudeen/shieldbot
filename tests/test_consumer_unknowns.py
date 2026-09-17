@@ -503,3 +503,49 @@ async def test_verification_lookup_failure_stays_unknown(consumer_api, surface):
         await api._analyze_router_swap(req, req.to, req.sender,
             {'params': {'path': ['0x' + 'c' * 40]}}, 'Router', 0)
     assert services.registry.run_all.call_args.args[0].extra['is_verified'] is None
+
+
+@pytest.mark.parametrize('compact', [True, False], ids=['compact', 'dashboard'])
+def test_extension_wallet_health_never_paints_unknown_green(compact):
+    import json
+    from pathlib import Path
+    import shutil
+    import subprocess
+
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('Node.js is required for extension JavaScript regression tests')
+    script = '''
+const fs = require('fs');
+const vm = require('vm');
+const assert = require('assert/strict');
+const compact = JSON.parse(process.argv[1]);
+function element() {return {innerHTML: '', textContent: '', style: {}};}
+const context = {
+  URLSearchParams, location: {search: ''}, t: key => key, escapeHtml: String,
+  document: {addEventListener() {}, createElement: element, getElementById: element},
+  chrome: {runtime: {sendMessage() {}}, storage: {local: {get() {}, set() {}}}},
+};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync('extension/popup.js', 'utf8'), context);
+const ctx = {compact, scoreNumEl: element(), statsEl: element(), approvalsEl: element(), resultEl: element()};
+context.renderHealthData({
+  status: 'unknown', coverage_reasons: {approval_state: 'Approval state unavailable'},
+  high_risk: 0, medium_risk: 0, approvals: [{risk_level: 'unknown', token_symbol: 'TKN', spender: '0xabc'}],
+}, ctx);
+assert.notEqual(ctx.scoreNumEl.textContent, 100);
+assert.notEqual(ctx.scoreNumEl.style.color, '#22c55e');
+assert(!ctx.approvalsEl.innerHTML.includes('risk-low'));
+context.renderHealthData({
+  high_risk: 0, medium_risk: 0, approvals: [{risk_level: 'LOW', token_symbol: 'TKN', spender: '0xabc'}],
+}, ctx);
+assert.equal(ctx.scoreNumEl.textContent, 100);
+assert.equal(ctx.scoreNumEl.style.color, '#22c55e');
+assert(ctx.approvalsEl.innerHTML.includes('risk-low'));
+'''
+    result = subprocess.run(
+        [node, '-e', script, json.dumps(compact)],
+        cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True,
+        encoding='utf-8', check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
