@@ -829,3 +829,13 @@ def test_popup_styles_unknown_risk_badge_neutrally():
     rules = {name: body for name, body in re.findall(r'\.(risk-\w+)\s*\{([^}]*)\}', html)}
     assert 'background' in rules.get('risk-unknown', '')
     assert rules['risk-unknown'] not in (rules['risk-low'], rules['risk-medium'], rules['risk-high'])
+
+
+@pytest.mark.asyncio
+async def test_unknown_explanation_accepts_missing_risk_score(consumer_api):
+    api, services = consumer_api
+    services.advisor = SimpleNamespace(explain_scan=AsyncMock(return_value='SAFE: risk 0%'))
+    response = await api.agent_explain(api.ExplainRequest(scan_result={'risk_score': None, 'status': 'unknown'}),
+        SimpleNamespace(client=SimpleNamespace(host='explain-none-score'), headers={}))
+    assert 'Unknown' in response['explanation']
+    services.advisor.explain_scan.assert_not_awaited()

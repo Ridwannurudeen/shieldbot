@@ -1939,7 +1939,7 @@ async def agent_explain(req: ExplainRequest, request: Request):
     try:
         if is_scan_incomplete(req.scan_result):
             alert = format_extension_alert({
-                **req.scan_result, 'rug_probability': req.scan_result.get('risk_score', 0),
+                **req.scan_result, 'rug_probability': req.scan_result.get('risk_score') or 0,
             })
             return {"explanation": alert['recommended_action']}
         explanation = await container.advisor.explain_scan(req.scan_result)
