@@ -632,3 +632,24 @@ async def test_bot_never_sends_or_logs_provider_error_text(bot_chain_functions, 
     logged = [str(call) for call in ns['logger'].method_calls]
     assert logged
     assert all('SYNTHETIC_KEY_123' not in text for text in sent + logged)
+
+
+@pytest.mark.asyncio
+async def test_bot_campaign_preserves_routing_error(bot_chain_functions):
+    import ast
+    from pathlib import Path
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from utils.web3_client import UnsupportedChainError
+    ns = bot_chain_functions
+    tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
+    exec(compile(ast.Module(body=[node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)
+                                  and node.name == 'campaign_command'], type_ignores=[]), 'bot.py', 'exec'), ns)
+    error = UnsupportedChainError('Unsupported chain ID 999999')
+    ns['container'].campaign_service.get_entity_graph = AsyncMock(side_effect=error)
+    status_msg = SimpleNamespace(edit_text=AsyncMock(), delete=AsyncMock())
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock(return_value=status_msg)))
+    with pytest.raises(UnsupportedChainError) as exc:
+        await ns['campaign_command'](update, SimpleNamespace(args=['0x' + 'a' * 40], user_data={}))
+    assert exc.value is error
+    status_msg.edit_text.assert_not_called()

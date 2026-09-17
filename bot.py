@@ -627,6 +627,8 @@ async def campaign_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response, parse_mode='Markdown', disable_web_page_preview=True,
         )
 
+    except UnsupportedChainError:
+        raise
     except Exception as e:
         logger.error(f"Error in /campaign: {type(e).__name__}")
         await status_msg.edit_text("❌ Error investigating campaign. Please try again later.")
