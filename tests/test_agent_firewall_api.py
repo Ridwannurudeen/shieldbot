@@ -304,7 +304,8 @@ def test_agent_incomplete_coverage_survives_caches(client, mock_container, reaso
     resp = client.post("/api/agent/firewall", json=_make_firewall_request(), headers={"X-API-Key": "sb_testkey"})
     body = resp.json()
     assert resp.status_code == 200
-    assert body["verdict"] == "BLOCK"
+    assert body["verdict"] == "WARN"
+    assert body["policy_check"]["needs_owner_approval"] is True
     assert body["score"] == 0
     assert body["status"] == "unknown"
     assert body["coverage"] == metadata["coverage"]
@@ -354,7 +355,7 @@ def test_agent_failed_optional_simulation_blocks(client, mock_container, simulat
     response = client.post("/api/agent/firewall", json=_make_firewall_request(), headers={"X-API-Key": "sb_testkey"})
     result = response.json()
     assert response.status_code == 200
-    assert result["verdict"] == "BLOCK"
+    assert result["verdict"] == "WARN"
     assert result["status"] == "unknown"
     assert result["coverage"]["simulation"] == 0
     assert "simulation" in result["coverage_reasons"]
@@ -375,7 +376,7 @@ def test_agent_normalizes_inconsistent_unknown_before_policy(client, mock_contai
         }
     response = client.post("/api/agent/firewall", json=_make_firewall_request(), headers={"X-API-Key": "sb_testkey"})
     assert response.status_code == 200
-    assert response.json()["verdict"] == "BLOCK"
+    assert response.json()["verdict"] == "WARN"
     assert response.json()["status"] == "unknown"
 
 

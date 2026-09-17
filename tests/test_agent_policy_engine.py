@@ -183,13 +183,29 @@ def test_boundary_exact_block_threshold(engine, default_policy):
 
 
 @pytest.mark.parametrize("status,coverage", [("unknown", {"honeypot": 0}), ("unknown", {"honeypot": 0.8}), ("ok", {"honeypot": 0}), (None, None)])
-@pytest.mark.parametrize("allowlisted", [False, True])
-def test_incomplete_coverage_blocks_even_allowlist(engine, status, coverage, allowlisted):
+@pytest.mark.parametrize("allowlisted,score", [(False, 0), (False, 45), (True, 0), (True, 90)])
+def test_incomplete_coverage_asks_owner_instead_of_allowing(engine, status, coverage, allowlisted, score):
     result = engine.evaluate(
         policy={"always_allow": ["0xtarget"] if allowlisted else []},
-        risk_score=0, target_address="0xtarget", status=status, coverage=coverage,
+        risk_score=score, target_address="0xtarget", status=status, coverage=coverage,
         coverage_reasons={"honeypot": "Simulation failed"},
     )
-    assert result.verdict == "BLOCK"
+    assert result.verdict == "WARN"
+    assert result.needs_owner_approval is True
     assert "coverage" in result.failed_checks
     assert "Simulation failed" in result.checks["coverage"]
+
+
+@pytest.mark.parametrize("policy,score,tx_value_usd,failed_check", [
+    ({"always_block": ["0xtarget"]}, 0, 0, "contract_list"),
+    ({"max_spend_per_tx_usd": 10}, 0, 50, "spending_limit"),
+    ({}, 90, 0, "risk_threshold"),
+])
+def test_incomplete_coverage_keeps_existing_blocks(engine, policy, score, tx_value_usd, failed_check):
+    result = engine.evaluate(
+        policy=policy, risk_score=score, target_address="0xtarget", tx_value_usd=tx_value_usd,
+        status="unknown", coverage={"honeypot": 0}, coverage_reasons={"honeypot": "Simulation failed"},
+    )
+    assert result.verdict == "BLOCK"
+    assert failed_check in result.failed_checks
+    assert result.needs_owner_approval is False
