@@ -318,6 +318,26 @@ def test_agent_incomplete_coverage_survives_caches(client, mock_container, reaso
         assert mock_container.cache.set_verdict.call_args.args[2]["status"] == "unknown"
 
 
+def test_agent_sqlite_cached_verdict_reports_cached(client, mock_container):
+    metadata = {"status": "ok", "coverage": {"honeypot": 1}, "coverage_reasons": {}}
+    mock_container.db.get_contract_score.return_value = {
+        "risk_score": 12, "risk_level": "LOW", "flags": [], "category_scores": {"_scan_metadata": metadata},
+    }
+    resp = client.post("/api/agent/firewall", json=_make_firewall_request(), headers={"X-API-Key": "sb_testkey"})
+    body = resp.json()
+    assert resp.status_code == 200
+    assert (body["verdict"], body["score"], body["status"]) == ("ALLOW", 12, "ok")
+    assert body["cached"] is True
+    mock_container.registry.run_all.assert_not_awaited()
+
+
+def test_agent_fresh_verdict_reports_not_cached(client, mock_container):
+    resp = client.post("/api/agent/firewall", json=_make_firewall_request(), headers={"X-API-Key": "sb_testkey"})
+    assert resp.status_code == 200
+    assert resp.json()["cached"] is False
+    mock_container.registry.run_all.assert_awaited_once()
+
+
 @pytest.mark.parametrize("row_status", ["raw", "database"])
 def test_agent_legacy_sqlite_cache_rescans(client, mock_container, row_status):
     from core.database import _lift_scan_metadata

@@ -185,7 +185,8 @@ def create_agent_firewall_router(container) -> APIRouter:
         simulation_result = None
 
         metadata = (db_cached.get("category_scores") or {}).get("_scan_metadata", {}) if db_cached else {}
-        if db_cached and metadata.get("status") and metadata.get("coverage"):
+        from_db_cache = bool(db_cached and metadata.get("status") and metadata.get("coverage"))
+        if from_db_cache:
             risk_output = {
                 "risk_level": db_cached["risk_level"],
                 "confidence_level": db_cached.get("confidence"),
@@ -379,7 +380,7 @@ def create_agent_firewall_router(container) -> APIRouter:
                 "warnings": simulation_result.get("warnings"),
                 "gas_used": simulation_result.get("gas_used"),
             } if simulation_result else None,
-            "cached": False,
+            "cached": from_db_cache,
             "latency_ms": round(latency, 1),
         }
 
