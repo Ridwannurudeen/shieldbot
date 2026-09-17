@@ -245,7 +245,10 @@ async def test_missing_swap_analyzers_does_not_fall_back_to_router(consumer_api)
     ('eth_signTypedData_v4', {'primaryType': 'UnknownType', 'message': {}}),
     ('eth_signTypedData_v4', {'primaryType': 'Permit', 'message': 'not-an-object', 'domain': {}}),
     ('eth_sign', None),
-], ids=['unrecognised-typed-data', 'typed-data-parse-failure', 'blind-eth-sign'])
+    ('personal_sign', {'primaryType': 'UnknownType', 'message': {}}),
+    ('eth_sign', {'primaryType': 'UnknownType', 'message': {}}),
+], ids=['unrecognised-typed-data', 'typed-data-parse-failure', 'blind-eth-sign',
+        'personal-sign-unrecognised-typed-data', 'eth-sign-unrecognised-typed-data'])
 async def test_signature_without_decoded_analysis_is_unknown(consumer_api, sign_method, typed_data):
     api, _ = consumer_api
     req = api.FirewallRequest(to='', sender='0x' + 'b' * 40, signMethod=sign_method, typedData=typed_data)
