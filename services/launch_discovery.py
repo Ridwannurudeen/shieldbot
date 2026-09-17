@@ -37,6 +37,10 @@ CHAIN_ID = 4663
 CONFIRMATIONS = 600
 # Inclusive block span of one eth_getLogs request.
 CHUNK_BLOCKS = 10_000
+# A query the RPC rejects (for example "logs matched by query exceeds limit of 10000") is
+# halved down to this floor. At the measured log density 500 blocks hold about ten logs,
+# so a rejection at the floor is not a size problem and the source stops instead.
+MIN_CHUNK_BLOCKS = 500
 # A 1,800 s sweep interval accrues about 18,000 blocks, so a cursor that falls behind catches up.
 MAX_BLOCKS_PER_SWEEP = 50_000
 # The first sweep starts about one hour (36,000 blocks) behind the confirmed head.
@@ -55,6 +59,10 @@ _RATE_LIMIT_TERMS = ("rate limit", "request rate", "too many requests", "busy", 
 
 class LaunchDiscoveryError(RuntimeError):
     """An RPC read or log could not be trusted; the blocks involved stay unprocessed."""
+
+
+class RpcUnavailableError(LaunchDiscoveryError):
+    """The RPC did not answer within the retry budget, so a smaller query would not help."""
 
 
 @dataclass(frozen=True)
@@ -202,10 +210,11 @@ def _launch_records(decoded) -> List[Dict]:
 
 
 def _is_rate_limited(error) -> bool:
+    """Match throttling by message; error codes here also cover query size limits."""
     if not isinstance(error, dict):
         return False
     message = str(error.get("message", "")).lower()
-    return error.get("code") == -32005 or any(term in message for term in _RATE_LIMIT_TERMS)
+    return any(term in message for term in _RATE_LIMIT_TERMS)
 
 
 class LaunchDiscovery:
@@ -236,21 +245,9 @@ class LaunchDiscovery:
                 if cursor is None:
                     cursor = target - BACKFILL_BLOCKS
                     await self.db.set_launch_cursor(CHAIN_ID, source.name, cursor)
-                done = cursor
                 end = min(target, cursor + MAX_BLOCKS_PER_SWEEP)
-                for start in range(cursor + 1, end + 1, CHUNK_BLOCKS):
-                    upper = min(end, start + CHUNK_BLOCKS - 1)
-                    try:
-                        decoded += await self._logs(source, start, upper)
-                    except LaunchDiscoveryError as exc:
-                        logger.warning(
-                            "Launch discovery %s stopped at block %d: %s",
-                            source.name,
-                            start,
-                            type(exc).__name__,
-                        )
-                        break
-                    done = upper
+                logs, done = await self._sweep_source(source, cursor, end)
+                decoded += logs
                 progress[source.name] = (cursor, done)
 
             records = _launch_records(decoded)
@@ -264,6 +261,39 @@ class LaunchDiscovery:
             for name, (cursor, done) in progress.items():
                 if done > cursor:
                     await self.db.set_launch_cursor(CHAIN_ID, name, done)
+
+    async def _sweep_source(self, source: LaunchSource, cursor: int, end: int):
+        """Read one source up to ``end``, halving a rejected query down to MIN_CHUNK_BLOCKS.
+
+        Returns the decoded logs and the last block covered without a gap.
+        """
+        decoded = []
+        done = cursor
+        chunk = CHUNK_BLOCKS
+        while done < end:
+            start = done + 1
+            upper = min(end, start + chunk - 1)
+            try:
+                decoded += await self._logs(source, start, upper)
+            except RpcUnavailableError as exc:
+                logger.warning(
+                    "Launch discovery %s stopped at block %d: %s", source.name, start, type(exc).__name__
+                )
+                break
+            except LaunchDiscoveryError as exc:
+                if chunk <= MIN_CHUNK_BLOCKS:
+                    logger.warning(
+                        "Launch discovery %s stopped at block %d: %s", source.name, start, type(exc).__name__
+                    )
+                    break
+                chunk = max(MIN_CHUNK_BLOCKS, chunk // 2)
+                logger.warning(
+                    "Launch discovery %s retrying block %d with %d blocks: %s",
+                    source.name, start, chunk, type(exc).__name__,
+                )
+                continue
+            done = upper
+        return decoded, done
 
     async def _logs(self, source: LaunchSource, start: int, end: int):
         query = {
@@ -333,7 +363,7 @@ class LaunchDiscovery:
                     return body
             if attempt + 1 < MAX_ATTEMPTS:
                 await asyncio.sleep(2**attempt)
-        raise LaunchDiscoveryError(f"RPC unavailable after {MAX_ATTEMPTS} attempts")
+        raise RpcUnavailableError(f"RPC unavailable after {MAX_ATTEMPTS} attempts")
 
     async def _post(self, payload):
         async with self._session.post(self.rpc_url, json=payload) as response:

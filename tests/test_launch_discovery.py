@@ -18,9 +18,11 @@ from services.launch_discovery import (
     CONFIRMATIONS,
     MAX_ATTEMPTS,
     MAX_BLOCKS_PER_SWEEP,
+    MIN_CHUNK_BLOCKS,
     SOURCES,
     LaunchDiscovery,
     LaunchDiscoveryError,
+    RpcUnavailableError,
     _decode_log,
 )
 
@@ -131,6 +133,7 @@ class FakeRpc:
         self.payloads = []
         self.throttled = set()
         self.failing_ranges = set()
+        self.max_span = {}
 
     def log_queries(self, source_name):
         address = SOURCE[source_name].address
@@ -166,6 +169,12 @@ class FakeRpc:
                 or (query["address"], start) in self.failing_ranges
             ):
                 return 429, None
+            if end - start + 1 > self.max_span.get(query["address"], CHUNK_BLOCKS):
+                return 200, {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "error": {"code": -32000, "message": "logs matched by query exceeds limit of 10000"},
+                }
             result = [
                 log
                 for log in self.logs
@@ -580,7 +589,7 @@ async def test_http_429_backs_off_exponentially_then_returns_the_result(db, slee
 @pytest.mark.parametrize(
     "error",
     [
-        {"code": -32005, "message": "limit exceeded"},
+        {"code": -32005, "message": "request rate exceeded"},
         {"code": -32000, "message": "Too Many Requests"},
     ],
 )
@@ -613,6 +622,8 @@ async def test_retries_are_bounded_and_end_in_an_error(db, sleep):
     "response",
     [
         (200, {"jsonrpc": "2.0", "id": 1, "error": {"code": -32602, "message": "invalid params"}}),
+        (200, {"jsonrpc": "2.0", "id": 1,
+               "error": {"code": -32005, "message": "logs matched by query exceeds limit of 10000"}}),
         (200, {"jsonrpc": "2.0", "id": 1, "result": None}),
         (400, None),
     ],
@@ -700,3 +711,49 @@ async def test_tracked_pairs_migration_tags_legacy_rows_as_bsc(tmp_path):
         assert {row["chain_id"] for row in await reopened.get_tracked_pairs()} == {56, CHAIN_ID}
     finally:
         await reopened.close()
+
+
+# --- oversized log queries ---
+
+
+@pytest.mark.asyncio
+async def test_oversized_log_queries_are_halved_until_they_succeed(db):
+    rpc = FakeRpc()
+    rpc.max_span[SOURCE["uniswap_v4"].address] = CHUNK_BLOCKS // 4
+    await discovery_with(db, rpc).run()
+
+    queries = rpc.log_queries("uniswap_v4")
+    spans = [end - start + 1 for start, end in queries]
+    assert spans[:3] == [CHUNK_BLOCKS, CHUNK_BLOCKS // 2, CHUNK_BLOCKS // 4]
+    assert all(span <= CHUNK_BLOCKS // 4 for span in spans[2:])
+    # Every rejected range is retried smaller from the same block, and coverage has no gap.
+    accepted = [query for query in queries if query[1] - query[0] + 1 <= CHUNK_BLOCKS // 4]
+    assert accepted[0][0] == ANCHOR + 1 and accepted[-1][1] == TARGET
+    assert all(nxt[0] == prev[1] + 1 for prev, nxt in zip(accepted, accepted[1:]))
+    assert (await cursors(db))["uniswap_v4"] == TARGET
+    assert "0x5fc5360d0400a0fd4f2af552add042d716f1d168" in await launches(db)
+
+
+@pytest.mark.asyncio
+async def test_a_query_rejected_at_the_chunk_floor_advances_no_cursor(db):
+    rpc = FakeRpc()
+    rpc.max_span[SOURCE["uniswap_v2"].address] = 0
+    await discovery_with(db, rpc).run()
+
+    spans = [end - start + 1 for start, end in rpc.log_queries("uniswap_v2")]
+    assert spans == [10_000, 5_000, 2_500, 1_250, 625, MIN_CHUNK_BLOCKS]
+    assert all(start == ANCHOR + 1 for start, _ in rpc.log_queries("uniswap_v2"))
+    assert (await cursors(db))["uniswap_v2"] == ANCHOR
+    assert (await cursors(db))["uniswap_v4"] == TARGET
+    assert "0x0ec5cc8c070fea2f4a9c6657ea540f7412907777" not in await launches(db)
+
+
+@pytest.mark.asyncio
+async def test_a_throttled_query_is_not_halved(db):
+    rpc = FakeRpc()
+    rpc.throttled.add(SOURCE["uniswap_v2"].address)
+    await discovery_with(db, rpc).run()
+
+    spans = [end - start + 1 for start, end in rpc.log_queries("uniswap_v2")]
+    assert spans == [CHUNK_BLOCKS] * MAX_ATTEMPTS
+    assert issubclass(RpcUnavailableError, LaunchDiscoveryError)
