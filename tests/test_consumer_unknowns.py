@@ -447,7 +447,7 @@ async def test_real_advisor_chat_keeps_text_only_for_complete_scan(consumer_api,
     honeypot = {'is_honeypot': False, 'can_sell': True, 'buy_tax': 0, 'sell_tax': 0} if complete else {
         'is_honeypot': None, 'can_sell': None, 'buy_tax': None, 'sell_tax': None, 'status': 'unknown'}
     scan = RiskEngine().compute_from_results([
-        AnalyzerResult('structural', 0.5, 0, data={'is_contract': True}),
+        AnalyzerResult('structural', 0.5, 0, data={'is_contract': True, 'is_verified': True, 'contract_age_days': 100}),
         AnalyzerResult('honeypot', 0.5, 0, data=honeypot),
     ])
     assert (scan['status'] == 'ok') is complete
