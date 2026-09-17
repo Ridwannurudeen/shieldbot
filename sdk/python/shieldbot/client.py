@@ -111,7 +111,7 @@ class ShieldBot:
                 "transaction": transaction,
             })
         except (httpx.RequestError, httpx.TimeoutException) as e:
-            logger.error(f"ShieldBot network error: {e}")
+            logger.error("ShieldBot network error: %s", type(e).__name__)
             return self._fail_verdict(cache_key, to_addr)
 
         # 200 OK — parse and cache the verdict

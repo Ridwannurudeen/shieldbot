@@ -798,6 +798,9 @@ def _logged_exception_lines(source):
                     id(inner) for node in ast.walk(value)
                     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'type'
                     for inner in node.args
+                } | {
+                    id(node.value) for node in ast.walk(value)
+                    if isinstance(node, ast.Attribute) and node.attr == '__traceback__'
                 }
                 if any(
                     isinstance(node, ast.Name) and node.id == handler.name and id(node) not in allowed
@@ -816,8 +819,10 @@ except Exception as exc:
     logger.error("failed", exc_info=exc)
     logger.error("failed", extra={"error": exc})
     logger.exception("failed")
+    logger.error("failed: %s", "".join(traceback.format_tb(exc.__traceback__)))
+    logger.error("failed: %s", exc.args)
 '''
-    assert _logged_exception_lines(source) == [6, 7, 8]
+    assert _logged_exception_lines(source) == [6, 7, 8, 10]
 
 
 @pytest.mark.parametrize('module', PROVIDER_PATH_MODULES)

@@ -6,6 +6,7 @@ on-chain verification, price enrichment) instead of rolling its own RPC queries.
 
 import time
 import logging
+import traceback
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -321,7 +322,10 @@ class GuardianService:
             logger.warning("Approval scan via rescue unavailable: %s", type(exc).__name__)
             return None
         except Exception as exc:
-            logger.error("Approval scan via rescue failed: %s", type(exc).__name__, exc_info=True)
+            logger.error(
+                "Approval scan via rescue failed: %s\n%s",
+                type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+            )
             return None
 
     @staticmethod

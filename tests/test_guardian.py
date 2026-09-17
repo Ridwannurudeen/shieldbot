@@ -469,12 +469,15 @@ async def test_unavailable_rescue_scan_logs_warning_without_traceback(guardian_w
 
 @pytest.mark.asyncio
 async def test_unexpected_rescue_failure_logs_error_with_traceback(guardian_with_rescue, mock_rescue, caplog):
-    mock_rescue.scan_approvals.side_effect = KeyError("approvals")
+    mock_rescue.scan_approvals.side_effect = KeyError("SYNTHETIC-KEY-9d41b7")
     with caplog.at_level(logging.WARNING, logger="services.guardian"):
         assert await guardian_with_rescue._get_approval_data("0xabc", 56) is None
     records = [record for record in caplog.records if record.name == "services.guardian"]
     assert [record.levelno for record in records] == [logging.ERROR]
-    assert records[0].exc_info is not None
+    assert records[0].exc_info is None
+    assert "KeyError" in caplog.text
+    assert 'File "' in caplog.text
+    assert "SYNTHETIC-KEY-9d41b7" not in caplog.text
 
 
 @pytest.mark.asyncio

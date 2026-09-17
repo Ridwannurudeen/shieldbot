@@ -97,7 +97,7 @@ class SignaturePermitAnalyzer(Analyzer):
         except UnsupportedChainError:
             raise
         except Exception as e:
-            logger.error(f"Error analyzing typed data: {e}")
+            logger.error("Error analyzing typed data: %s", type(e).__name__)
             flags.append('Failed to parse typed data')
             score = 15  # Mild suspicion on parse failure
 
