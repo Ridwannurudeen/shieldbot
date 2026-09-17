@@ -75,7 +75,10 @@ def format_full_report(
     # Contract analysis
     lines.append('*\U0001F4DC Contract Analysis:*')
     verified_value = contract_data.get('is_verified')
-    verified = 'Unknown' if verified_value is None else ('\u2705' if verified_value else '\u274C')
+    if contract_data.get('is_contract') is False:
+        verified = 'Not applicable (wallet or destroyed contract)'
+    else:
+        verified = 'Unknown' if verified_value is None else ('\u2705' if verified_value else '\u274C')
     lines.append(f'  Verified: {verified}')
     age = contract_data.get('contract_age_days')
     lines.append(f'  Age: {age} days' if age is not None else '  Age: Unknown')

@@ -1004,9 +1004,12 @@ def format_scan_result(result: dict) -> str:
     emoji = risk_emoji.get(risk_level, '⚪')
     score = 'Unknown (incomplete provider coverage)' if incomplete else f"{result.get('risk_score', 'N/A')}/100"
     verified = result.get('is_verified')
-    verification = 'Unknown (verification data unavailable)' if verified is None else (
-        '✅ Contract verified' if verified else '❌ Contract not verified'
-    )
+    if result.get('is_contract') is False:
+        verification = 'Not applicable (wallet address, not a contract)'
+    else:
+        verification = 'Unknown (verification data unavailable)' if verified is None else (
+            '✅ Contract verified' if verified else '❌ Contract not verified'
+        )
 
     response = f"""
 🛡️ **Security Scan Report**
