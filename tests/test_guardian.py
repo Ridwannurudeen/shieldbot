@@ -1,8 +1,9 @@
 """Tests for Portfolio Guardian service."""
 
+import logging
 import time
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, create_autospec
 
 from services.guardian import GuardianService
 
@@ -19,6 +20,8 @@ def mock_db():
     db.create_guardian_alert = AsyncMock(return_value=1)
     db.get_guardian_alerts = AsyncMock(return_value=[])
     db.acknowledge_guardian_alert = AsyncMock(return_value=True)
+    db.get_deployer_risk_summary = AsyncMock(return_value=None)
+    db.is_watched_deployer = AsyncMock(return_value=None)
     return db
 
 
@@ -294,11 +297,11 @@ async def test_concentration_no_usd_values():
 @pytest.mark.asyncio
 async def test_deployer_risk_flagged(guardian_with_rescue):
     """Watched deployer adds 25 risk points."""
-    guardian_with_rescue._db.get_deployer = AsyncMock(
-        return_value={"deployer_address": "0xDeployer1"}
+    guardian_with_rescue._db.get_deployer_risk_summary = AsyncMock(
+        return_value={"deployer_address": "0xdeployer1", "total_contracts": 3, "high_risk_contracts": 2}
     )
-    guardian_with_rescue._db.get_watched_deployer = AsyncMock(
-        return_value={"address": "0xDeployer1", "reason": "serial scammer"}
+    guardian_with_rescue._db.is_watched_deployer = AsyncMock(
+        return_value={"deployer_address": "0xdeployer1", "chain_id": 0, "watch_reason": "SERIAL_SCAMMER"}
     )
     result = await guardian_with_rescue._check_deployer_risk_from_tokens(
         ["0xtoken1"], 56,
@@ -361,4 +364,196 @@ async def test_risk_level_mapping():
     assert GuardianService._map_risk_level("HIGH") == "high"
     assert GuardianService._map_risk_level("MEDIUM") == "medium"
     assert GuardianService._map_risk_level("LOW") == "low"
-    assert GuardianService._map_risk_level("UNKNOWN") == "low"
+    assert GuardianService._map_risk_level("UNKNOWN") == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_unknown_rescue_scan_cannot_be_empty_clean_approvals(guardian_with_rescue, mock_rescue, mock_db):
+    mock_rescue.scan_approvals.return_value = {
+        "status": "unknown", "approvals": [], "reason": "Approval log scan incomplete",
+    }
+    scan = await guardian_with_rescue.get_approvals("0xabc", 56)
+    assert scan["approvals"] == []
+    assert scan["status"] == "unknown"
+    assert scan["coverage_reasons"]
+    result = await guardian_with_rescue.get_health("0xabc", 56)
+    assert result["status"] == "unknown"
+    assert result["level"] == "unknown"
+    assert result["coverage_reasons"]
+    mock_db.update_guardian_health.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unavailable_approvals_raise_instead_of_empty_list(guardian, mock_db):
+    with pytest.raises(RuntimeError, match="Approval data unavailable"):
+        await guardian.get_approvals("0xabc", 56)
+    await guardian.get_health("0xabc", 56)
+    mock_db.update_guardian_health.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unknown_source", ["cached_score", "rescue_approval", "risk_level", "score_failure"])
+async def test_unknown_approval_risk_never_becomes_low_or_persisted_health(
+    guardian_with_rescue, mock_rescue, mock_db, unknown_source,
+):
+    approval = {"token_address": "0xtoken", "spender": "0xspender", "risk_level": "LOW"}
+    mock_rescue.scan_approvals.return_value = {"approvals": [approval]}
+    mock_db.get_contract_score = AsyncMock(return_value=None)
+    if unknown_source == "cached_score":
+        mock_db.get_contract_score.return_value = {"status": "unknown", "risk_score": 0}
+    elif unknown_source == "rescue_approval":
+        approval["status"] = "unknown"
+    elif unknown_source == "risk_level":
+        approval["risk_level"] = "UNKNOWN"
+    else:
+        mock_db.get_contract_score.side_effect = RuntimeError("score unavailable")
+    scan = await guardian_with_rescue.get_approvals("0xabc", 56)
+    assert scan["status"] == "unknown"
+    assert scan["coverage_reasons"]["approval_risk"]
+    approvals = scan["approvals"]
+    assert approvals[0]["risk_level"] == "unknown"
+    assert approvals[0]["status"] == "unknown"
+    assert approvals[0]["coverage_reasons"]
+    result = await guardian_with_rescue.get_health("0xabc", 56)
+    assert result["status"] == "unknown"
+    assert result["level"] == "unknown"
+    mock_db.update_guardian_health.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unknown_cached_token_exposure_is_not_clean(guardian_with_rescue, mock_db):
+    mock_db.get_contract_score = AsyncMock(return_value={"status": "unknown", "risk_score": 0})
+    assert await guardian_with_rescue._check_flagged_exposure_from_tokens(["0xtoken"], 56) is None
+
+
+@pytest.mark.asyncio
+async def test_complete_empty_approval_scan_still_persists_health(guardian_with_rescue, mock_db):
+    result = await guardian_with_rescue.get_health("0xabc", 56)
+    assert result["status"] == "ok"
+    assert result["level"] == "excellent"
+    mock_db.update_guardian_health.assert_awaited_once_with("0xabc", 56, 100.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("check, method", [
+    ("_check_flagged_exposure_from_tokens", "get_contract_score"),
+    ("_check_deployer_risk_from_tokens", "get_deployer_risk_summary"),
+    ("_check_deployer_risk_from_tokens", "is_watched_deployer"),
+])
+async def test_token_lookup_failure_is_unknown_not_zero_risk(
+    guardian_with_rescue, mock_rescue, mock_db, check, method,
+):
+    mock_rescue.scan_approvals.return_value = {
+        "approvals": [{"token_address": "0xtoken", "spender": "0xspender", "risk_level": "HIGH"}],
+    }
+    mock_db.get_contract_score = AsyncMock(return_value=None)
+    mock_db.get_deployer_risk_summary = AsyncMock(return_value={"deployer_address": "0xdeployer"})
+    getattr(mock_db, method).side_effect = RuntimeError("lookup unavailable")
+    assert await getattr(guardian_with_rescue, check)(["0xtoken"], 56) is None
+    result = await guardian_with_rescue.get_health("0xabc", 56)
+    assert result["status"] == "unknown"
+    assert result["level"] == "unknown"
+    mock_db.update_guardian_health.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unavailable_rescue_scan_logs_warning_without_traceback(guardian_with_rescue, mock_rescue, caplog):
+    mock_rescue.scan_approvals.side_effect = RuntimeError("Approval scan unavailable")
+    with caplog.at_level(logging.WARNING, logger="services.guardian"):
+        assert await guardian_with_rescue._get_approval_data("0xabc", 56) is None
+    records = [record for record in caplog.records if record.name == "services.guardian"]
+    assert [record.levelno for record in records] == [logging.WARNING]
+    assert records[0].exc_info is None
+    assert "Traceback" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_unexpected_rescue_failure_logs_error_with_traceback(guardian_with_rescue, mock_rescue, caplog):
+    mock_rescue.scan_approvals.side_effect = KeyError("approvals")
+    with caplog.at_level(logging.WARNING, logger="services.guardian"):
+        assert await guardian_with_rescue._get_approval_data("0xabc", 56) is None
+    records = [record for record in caplog.records if record.name == "services.guardian"]
+    assert [record.levelno for record in records] == [logging.ERROR]
+    assert records[0].exc_info is not None
+
+
+@pytest.mark.asyncio
+async def test_incomplete_scan_still_returns_known_dangerous_approvals(guardian_with_rescue, mock_rescue, mock_db):
+    mock_rescue.scan_approvals.return_value = {
+        "approvals": [{
+            "token_address": "0xtoken", "spender": "0xspender", "allowance": "Unlimited", "risk_level": "HIGH",
+        }],
+        "status": "unknown",
+        "coverage": {"allowances": True, "balances": True, "prices": False},
+        "coverage_reasons": {"prices": "USD price unavailable for 1 token(s)"},
+    }
+    mock_db.get_contract_score = AsyncMock(return_value=None)
+    scan = await guardian_with_rescue.get_approvals("0xabc", 56)
+    assert [approval["risk_level"] for approval in scan["approvals"]] == ["high"]
+    assert scan["status"] == "unknown"
+    assert scan["coverage"] == {"allowances": True, "balances": True, "prices": False}
+    assert scan["coverage_reasons"] == {"prices": "USD price unavailable for 1 token(s)"}
+    health = await guardian_with_rescue.get_health("0xabc", 56)
+    assert health["status"] == "unknown"
+    mock_db.update_guardian_health.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_complete_scan_returns_ok_approvals(guardian_with_rescue, mock_rescue, mock_db):
+    coverage = {"allowances": True, "balances": True, "prices": True}
+    mock_rescue.scan_approvals.return_value = {
+        "approvals": [{"token_address": "0xtoken", "spender": "0xspender", "risk_level": "HIGH"}],
+        "status": "ok", "coverage": coverage, "coverage_reasons": {},
+    }
+    mock_db.get_contract_score = AsyncMock(return_value=None)
+    scan = await guardian_with_rescue.get_approvals("0xabc", 56)
+    assert len(scan["approvals"]) == 1
+    assert scan["status"] == "ok"
+    assert scan["coverage"] == coverage
+    assert scan["coverage_reasons"] == {}
+
+
+@pytest.mark.asyncio
+async def test_approval_scan_failure_raises(guardian_with_rescue, mock_rescue):
+    mock_rescue.scan_approvals.side_effect = RuntimeError("Approval scan unavailable")
+    with pytest.raises(RuntimeError, match="^Approval data unavailable$"):
+        await guardian_with_rescue.get_approvals("0xabc", 56)
+
+
+def _database_mock():
+    from core.database import Database
+
+    db = create_autospec(Database, instance=True)
+    db.get_contract_score.return_value = None
+    db.get_deployer_risk_summary.return_value = None
+    db.is_watched_deployer.return_value = None
+    return db
+
+
+@pytest.mark.asyncio
+async def test_deployer_risk_uses_real_database_lookups(mock_rescue):
+    db = _database_mock()
+    db.get_deployer_risk_summary.return_value = {
+        "deployer_address": "0xdeployer1", "total_contracts": 3, "high_risk_contracts": 2,
+    }
+    db.is_watched_deployer.return_value = {"deployer_address": "0xdeployer1", "chain_id": 0}
+    guardian = GuardianService(db=db, rescue_service=mock_rescue)
+    assert await guardian._check_deployer_risk_from_tokens(["0xtoken1"], 56) == 25.0
+    db.get_deployer_risk_summary.assert_awaited_once_with("0xtoken1", 56)
+    db.is_watched_deployer.assert_awaited_once_with("0xdeployer1", 56)
+
+
+@pytest.mark.asyncio
+async def test_unindexed_deployer_is_zero_risk_not_unknown_health(mock_rescue):
+    db = _database_mock()
+    mock_rescue.scan_approvals.return_value = {
+        "approvals": [{"token_address": "0xtoken1", "spender": "0xspender", "risk_level": "LOW"}],
+        "status": "ok", "coverage": {"allowances": True, "balances": True, "prices": True}, "coverage_reasons": {},
+    }
+    guardian = GuardianService(db=db, rescue_service=mock_rescue)
+    assert await guardian._check_deployer_risk_from_tokens(["0xtoken1"], 56) == 0.0
+    health = await guardian.get_health("0xabc", 56)
+    assert health["status"] == "ok"
+    assert health["components"]["deployer_risk"] == 100.0
+    db.is_watched_deployer.assert_not_awaited()
+    db.update_guardian_health.assert_awaited_once()

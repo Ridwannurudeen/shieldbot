@@ -111,3 +111,18 @@ async def test_personal_sign_benign(analyzer):
     )
     result = await analyzer.analyze(ctx)
     assert result.score == 0
+
+
+@pytest.mark.asyncio
+async def test_signature_propagates_unsupported_chain(analyzer, monkeypatch):
+    from unittest.mock import MagicMock
+    from utils.web3_client import UnsupportedChainError
+
+    failure = UnsupportedChainError('unsupported chain')
+    monkeypatch.setattr(analyzer, '_check_permit', MagicMock(side_effect=failure))
+    with pytest.raises(UnsupportedChainError) as raised:
+        await analyzer.analyze(AnalysisContext(
+            address='0x' + 'a' * 40,
+            extra={'typed_data': {'primaryType': 'Permit'}},
+        ))
+    assert raised.value is failure

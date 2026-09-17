@@ -9,6 +9,21 @@ from core.risk_engine import RiskEngine
 
 class TestAnalyzerRegistry:
     @pytest.mark.asyncio
+    async def test_routing_error_propagates_from_gather(self):
+        from utils.web3_client import UnsupportedChainError
+
+        registry = AnalyzerRegistry()
+        analyzer = MagicMock()
+        analyzer.name = 'routing'
+        analyzer.weight = 1
+        error = UnsupportedChainError('unsupported chain')
+        analyzer.analyze = AsyncMock(side_effect=error)
+        registry.register(analyzer)
+        with pytest.raises(UnsupportedChainError) as caught:
+            await registry.run_all(AnalysisContext(address='0xABC'))
+        assert caught.value is error
+
+    @pytest.mark.asyncio
     async def test_register_and_run_all(self):
         registry = AnalyzerRegistry()
 
@@ -42,7 +57,7 @@ class TestAnalyzerRegistry:
         ctx = AnalysisContext(address="0xABC")
         results = await registry.run_all(ctx)
         assert len(results) == 1
-        assert results[0].error == "boom"
+        assert results[0].error == "failing analysis unavailable (Exception)"
         assert results[0].score == 50  # fail-closed: cautious neutral, not 0 (safe)
         assert "failing analysis unavailable" in results[0].flags
 
@@ -365,7 +380,7 @@ class TestProviderCoverageRisk:
 
     def test_fully_covered_regression(self):
         output = RiskEngine().compute_from_results([
-            AnalyzerResult("structural", .40, 25, data={"is_verified": True}),
+            AnalyzerResult("structural", .40, 25, data={"is_verified": True, "contract_age_days": 100}),
             AnalyzerResult("market", .25, 20, data={"liquidity_usd": 50000}),
             AnalyzerResult("behavioral", .20, 30, data={"reputation_score": 70}),
             AnalyzerResult("honeypot", .15, 0, data={
@@ -375,7 +390,7 @@ class TestProviderCoverageRisk:
         assert output["rug_probability"] == 21
         assert output["risk_level"] == "LOW"
         assert output["risk_archetype"] == "legitimate"
-        assert output["confidence_level"] == 70
+        assert output["confidence_level"] == 80
 
     def test_formatters_empty_market_data_is_unknown(self):
         from core.telegram_formatter import format_full_report

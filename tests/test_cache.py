@@ -131,3 +131,28 @@ async def test_rate_limit_exceeded(cache_service, mock_redis):
     pipe.incr.assert_called_once_with("rate:agent:0xabc")
     pipe.expire.assert_called_once_with("rate:agent:0xabc", 60)
     pipe.execute.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails", [False, True])
+async def test_connect_never_logs_redis_credentials(caplog, fails):
+    """Neither the connected nor the unavailable log line carries URL credentials."""
+    import logging
+    from services.cache import CacheService
+
+    url = "redis://cacheuser:s3cr3t-redis-pass@cache.internal:6380/2?password=q5-redis-pass"
+    client = AsyncMock()
+    if fails:
+        client.ping.side_effect = ConnectionError(f"Error connecting to {url}")
+    svc = CacheService(redis_url=url)
+    with patch("services.cache.aioredis.from_url", return_value=client):
+        with caplog.at_level(logging.DEBUG, logger="services.cache"):
+            await svc.connect()
+    assert svc._available is (not fails)
+    assert caplog.records
+    for secret in ("cacheuser", "s3cr3t-redis-pass", "q5-redis-pass"):
+        assert secret not in caplog.text
+    if fails:
+        assert "ConnectionError" in caplog.text
+    else:
+        assert "redis://cache.internal:6380/2" in caplog.text

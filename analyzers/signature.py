@@ -4,6 +4,7 @@ import logging
 from typing import Dict, List, Optional
 
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
+from utils.web3_client import UnsupportedChainError
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,8 @@ class SignaturePermitAnalyzer(Analyzer):
             else:
                 sig_type = primary_type or sign_method or 'unknown'
 
+        except UnsupportedChainError:
+            raise
         except Exception as e:
             logger.error(f"Error analyzing typed data: {e}")
             flags.append('Failed to parse typed data')

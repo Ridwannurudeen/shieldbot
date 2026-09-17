@@ -123,6 +123,6 @@ class DexService:
             return result
 
         except Exception as e:
-            logger.error("DexScreener fetch failed for %s: %s", address, e)
+            logger.error("DexScreener fetch failed for %s: %s", address, type(e).__name__)
             defaults['reason'] = f'DexScreener fetch failed: {type(e).__name__}'
             return defaults

@@ -157,6 +157,7 @@ class RiskEngine:
         ]
         composite, category_scores, coverage, coverage_reasons, covered_weight = self._covered_scores(component_results)
         required_unknown = is_token and coverage.get('honeypot', 0) < 1
+        incomplete = required_unknown or covered_weight < 1 - 1e-9 or any(fraction < 1 for fraction in coverage.values())
         if required_unknown:
             critical_flags.append('Sellability unknown: ' + coverage_reasons.get('honeypot', 'Incomplete honeypot data'))
 
@@ -201,7 +202,7 @@ class RiskEngine:
         else:
             risk_level = 'LOW'
 
-        if required_unknown and risk_level == 'LOW':
+        if incomplete and risk_level == 'LOW':
             risk_level = 'MEDIUM'
 
         # --- Risk archetype ---
@@ -210,7 +211,7 @@ class RiskEngine:
             is_token=is_token,
         )
 
-        if required_unknown and archetype == 'legitimate':
+        if incomplete and archetype == 'legitimate':
             archetype = 'unknown'
 
         # --- Confidence ---
@@ -234,7 +235,7 @@ class RiskEngine:
             'category_scores': category_scores,
             'coverage': coverage,
             'coverage_reasons': coverage_reasons,
-            'status': 'unknown' if required_unknown or covered_weight < 1 - 1e-9 else 'ok',
+            'status': 'unknown' if incomplete else 'ok',
         }
 
     def compute_from_results(self, results: List["AnalyzerResult"], is_token: bool = True) -> dict:
@@ -262,6 +263,7 @@ class RiskEngine:
 
         composite, category_scores, coverage, coverage_reasons, covered_weight = self._covered_scores(results)
         required_unknown = is_token and coverage.get('honeypot', 0) < 1
+        incomplete = required_unknown or covered_weight < 1 - 1e-9 or any(fraction < 1 for fraction in coverage.values())
         critical_flags = [flag for result in results for flag in result.flags]
         if required_unknown:
             critical_flags.append('Sellability unknown: ' + coverage_reasons.get('honeypot', 'No honeypot data'))
@@ -284,7 +286,7 @@ class RiskEngine:
 
             # Unverified contract with dangerous bytecode patterns — likely scam
             liquidity = dex_data.get('liquidity_usd')
-            if not is_verified and (has_mint or has_blacklist) and ownership_renounced is False and liquidity is not None and liquidity < 100_000:
+            if is_verified is False and (has_mint or has_blacklist) and ownership_renounced is False and liquidity is not None and liquidity < 100_000:
                 composite = max(composite, 55)
 
             # No contract bytecode + honeypot simulation failed → destroyed scam token
@@ -327,7 +329,7 @@ class RiskEngine:
         else:
             risk_level = 'LOW'
 
-        if required_unknown and risk_level == 'LOW':
+        if incomplete and risk_level == 'LOW':
             risk_level = 'MEDIUM'
 
         archetype = self._determine_archetype(
@@ -340,7 +342,7 @@ class RiskEngine:
         if self._calibration and self._calibration.confidence_boost:
             confidence = min(100, confidence + self._calibration.confidence_boost)
         confidence = min(confidence, round(covered_weight * 100))
-        if required_unknown and archetype == 'legitimate':
+        if incomplete and archetype == 'legitimate':
             archetype = 'unknown'
 
         # Deduplicate flags
@@ -360,7 +362,7 @@ class RiskEngine:
             'category_scores': category_scores,
             'coverage': coverage,
             'coverage_reasons': coverage_reasons,
-            'status': 'unknown' if required_unknown or covered_weight < 1 - 1e-9 else 'ok',
+            'status': 'unknown' if incomplete else 'ok',
         }
 
     def _covered_scores(self, results):
@@ -372,6 +374,13 @@ class RiskEngine:
         for result in results:
             data = result.data
             fields = data.get('coverage')
+            structural_missing = []
+            if result.name == 'structural':
+                fields = dict(fields) if isinstance(fields, dict) else {}
+                for field in ('is_verified', 'contract_age_days') if data.get('is_contract') is not False else ():
+                    fields[field] = data.get(field) is not None
+                    if not fields[field]:
+                        structural_missing.append(field)
             simulation_failed = result.name == 'honeypot' and data.get('simulation_failed')
             if simulation_failed:
                 fields = dict(fields) if isinstance(fields, dict) and fields else {
@@ -390,12 +399,17 @@ class RiskEngine:
                 fraction = sum(data.get(key) is not None for key in required) / len(required)
             else:
                 fraction = 1 if data and data.get('status') != 'unknown' else 0
+            if fraction == 1 and data.get('status') == 'unknown':
+                fraction = 0
             coverage[result.name] = fraction
             covered_weight += result.weight * fraction
             if fraction < 1:
                 reasons[result.name] = result.error or (
                     'Honeypot simulation failed (unresolved)' if simulation_failed
-                    else data.get('reason') or 'Provider data unavailable or incomplete'
+                    else data.get('reason') or (
+                        'Structural data unknown: ' + ', '.join(structural_missing)
+                        if structural_missing else 'Provider data unavailable or incomplete'
+                    )
                 )
             # Known adverse evidence remains actionable even if other fields are unknown.
             if not result.error and (fraction == 1 or result.score > 0):

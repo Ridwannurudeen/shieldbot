@@ -82,10 +82,10 @@ class TokenSnifferService:
             return result
 
         except aiohttp.ClientError as e:
-            logger.warning("Token Sniffer network error for %s: %s", address, e)
+            logger.warning("Token Sniffer network error for %s: %s", address, type(e).__name__)
             return {}
         except Exception as e:
-            logger.error("Token Sniffer fetch failed for %s: %s", address, e)
+            logger.error("Token Sniffer fetch failed for %s: %s", address, type(e).__name__)
             return {}
 
     async def close(self):

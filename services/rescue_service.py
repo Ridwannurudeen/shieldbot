@@ -8,7 +8,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import aiohttp
 from web3 import Web3
@@ -148,10 +148,10 @@ class RescueService:
 
     def _rpc_for(self, chain_id: int) -> str:
         """Resolve archive RPC URL for a chain. Falls back to the registered adapter's RPC."""
+        adapter = self._web3_client._get_adapter(chain_id) if self._web3_client else None
         url = self._logs_rpcs.get(chain_id)
         if url:
             return url
-        adapter = self._web3_client._get_adapter(chain_id) if self._web3_client else None
         if adapter is not None:
             provider = getattr(getattr(adapter, "w3", None), "provider", None)
             endpoint = getattr(provider, "endpoint_uri", None)
@@ -168,11 +168,12 @@ class RescueService:
         - approvals: list of ApprovalInfo (verified on-chain, no false positives)
         - alerts: list of RescueAlert (Tier 1)
         - revoke_txs: list of pre-built revoke transactions (Tier 2)
-        - total_value_at_risk_usd: aggregate USD value exposed
+        - total_value_at_risk_usd: aggregate USD value exposed (None when incomplete)
         - summary: risk summary
+        - status, coverage, coverage_reasons: "unknown" when allowances, balances or prices are incomplete
         """
         wallet = wallet_address.lower()
-        approvals = await self._fetch_approvals(wallet, chain_id)
+        approvals, coverage_reasons = await self._fetch_approvals(wallet, chain_id)
 
         alerts = []
         revoke_txs = []
@@ -216,17 +217,20 @@ class RescueService:
             'total_approvals': len(approvals),
             'high_risk': high_risk_count,
             'medium_risk': medium_risk_count,
-            'total_value_at_risk_usd': round(total_value_at_risk, 2),
+            'total_value_at_risk_usd': None if coverage_reasons else round(total_value_at_risk, 2),
             'approvals': [self._approval_to_dict(a) for a in approvals],
             'alerts': [self._alert_to_dict(a) for a in alerts],
             'revoke_txs': revoke_txs,
+            'status': 'unknown' if coverage_reasons else 'ok',
+            'coverage': {key: key not in coverage_reasons for key in ('allowances', 'balances', 'prices')},
+            'coverage_reasons': coverage_reasons,
             'scanned_at': time.time(),
         }
 
     async def _fetch_approvals(
         self, wallet: str, chain_id: int, api_key: str = ""
-    ) -> List[ApprovalInfo]:
-        """Fetch and verify active token approvals.
+    ) -> Tuple[List[ApprovalInfo], Dict[str, str]]:
+        """Fetch and verify active token approvals, with reasons for incomplete data.
 
         Pipeline:
           1. eth_getLogs — scan ALL BSC history at CONCURRENCY=50
@@ -236,11 +240,14 @@ class RescueService:
           5. DexScreener — fetch token prices for USD risk calculation
           6. Enrich with token metadata (parallelized)
         """
+        from utils.web3_client import UnsupportedChainError
+
         approvals = []
+        coverage_reasons: Dict[str, str] = {}
         rpc_url = self._rpc_for(chain_id)
         if not rpc_url:
             logger.warning(f"No logs RPC configured for chain {chain_id}")
-            return approvals
+            raise RuntimeError(f"Approval scan unavailable: no logs RPC configured for chain {chain_id}")
         try:
             async with aiohttp.ClientSession() as session:
                 # Step 1: Get latest block
@@ -278,6 +285,8 @@ class RescueService:
                         return_exceptions=True,
                     )
                     for result in batch_results:
+                        if isinstance(result, Exception):
+                            raise result
                         if isinstance(result, list):
                             all_logs.extend(result)
 
@@ -309,19 +318,32 @@ class RescueService:
             # Filter out already-revoked events before hitting the chain
             candidates = {k: v for k, v in latest_events.items() if v["amount"] > 0}
             if not candidates:
-                return []
+                return [], coverage_reasons
 
             # Step 4: Verify current on-chain allowances — eliminates false positives
-            verified = await self._verify_allowances(wallet, candidates, rpc_url)
+            allowances = await self._verify_allowances(wallet, candidates, rpc_url)
+            unresolved = [pair for pair, allowance in allowances.items() if allowance is None]
+            if unresolved:
+                coverage_reasons["allowances"] = f"Allowance unavailable for {len(unresolved)} approval(s)"
+            verified = {pair: allowance for pair, allowance in allowances.items() if allowance}
             if not verified:
-                return []
+                return [], coverage_reasons
 
             # Step 5: Fetch wallet balances for value-at-risk calculation
             active_tokens = list({token for (token, _) in verified.keys()})
             balances = await self._fetch_balances(wallet, active_tokens, rpc_url)
+            unresolved_balances = [token for token in active_tokens if token not in balances]
+            if unresolved_balances:
+                coverage_reasons["balances"] = f"Balance unavailable for {len(unresolved_balances)} token(s)"
 
             # Step 6: Fetch token prices (DexScreener, stablecoins hardcoded)
             prices = await self._fetch_prices(active_tokens)
+            unpriced = [
+                token for token in active_tokens
+                if (token not in balances or balances[token] > 0) and token not in prices
+            ]
+            if unpriced:
+                coverage_reasons["prices"] = f"USD price unavailable for {len(unpriced)} token(s)"
 
             # Step 7: Enrich with token metadata — parallelized
             token_info_results = await asyncio.gather(
@@ -330,6 +352,8 @@ class RescueService:
             )
             token_info_map: Dict[str, Dict] = {}
             for token, result in zip(active_tokens, token_info_results):
+                if isinstance(result, Exception):
+                    raise result
                 if isinstance(result, dict):
                     token_info_map[token] = result
                 else:
@@ -384,15 +408,18 @@ class RescueService:
                     )
                 )
 
+        except UnsupportedChainError:
+            raise
         except Exception as e:
-            logger.error(f"Error fetching approvals: {e}", exc_info=True)
+            logger.error("Error fetching approvals: %s", type(e).__name__)
+            raise RuntimeError("Approval scan unavailable") from e
 
         # Sort HIGH → MEDIUM → LOW, then by USD value at risk descending
         risk_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
         approvals.sort(
             key=lambda a: (risk_order.get(a.risk_level, 3), -(a.value_at_risk_usd or 0))
         )
-        return approvals
+        return approvals, coverage_reasons
 
     async def _fetch_log_chunk(
         self,
@@ -404,6 +431,8 @@ class RescueService:
         to_b: str,
     ) -> list:
         """Fetch a single block-range chunk of Approval logs via eth_getLogs."""
+        from utils.web3_client import UnsupportedChainError
+
         try:
             async with session.post(
                 rpc_url,
@@ -415,23 +444,27 @@ class RescueService:
                 },
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
+                if resp.status != 200:
+                    raise RuntimeError("Approval log request failed")
                 data = await resp.json()
-            if "error" in data:
-                logger.warning(f"eth_getLogs {from_b}-{to_b}: {data['error']}")
-                return []
-            return data.get("result", [])
+            if "error" in data or not isinstance(data.get("result"), list):
+                raise RuntimeError("Approval logs unavailable")
+            return data["result"]
+        except UnsupportedChainError:
+            raise
         except Exception as e:
             # Don't include `e` — aiohttp errors embed the RPC URL, which may carry an API key.
             logger.warning("Log chunk %s-%s failed: %s", from_b, to_b, type(e).__name__)
-            return []
+            raise
 
     async def _verify_allowances(
         self, wallet: str, candidates: Dict[tuple, Dict], rpc_url: str
-    ) -> Dict[tuple, int]:
+    ) -> Dict[tuple, Optional[int]]:
         """Batch-verify current on-chain allowances via eth_call.
 
         Eliminates false positives where approval events exist but the
         allowance has been consumed (spent) or explicitly revoked.
+        Pairs whose allowance call returned no data map to None.
         """
         # allowance(address owner, address spender) → uint256
         selector = "0xdd62ed3e"
@@ -452,7 +485,9 @@ class RescueService:
 
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 for (token, spender), result in zip(batch, results):
-                    if isinstance(result, int) and result > 0:
+                    if isinstance(result, Exception):
+                        raise result
+                    if result is None or (isinstance(result, int) and result > 0):
                         verified[(token, spender)] = result
 
         return verified
@@ -460,7 +495,7 @@ class RescueService:
     async def _fetch_balances(
         self, wallet: str, tokens: List[str], rpc_url: str
     ) -> Dict[str, int]:
-        """Batch-fetch wallet token balances via eth_call."""
+        """Batch-fetch wallet token balances via eth_call, omitting calls that returned no data."""
         # balanceOf(address owner) → uint256
         selector = "0x70a08231"
         owner_padded = wallet.replace("0x", "").lower().zfill(64)
@@ -477,6 +512,8 @@ class RescueService:
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 for token, result in zip(batch, results):
+                    if isinstance(result, Exception):
+                        raise result
                     if isinstance(result, int):
                         balances[token] = result
 
@@ -484,8 +521,10 @@ class RescueService:
 
     async def _eth_call(
         self, session: aiohttp.ClientSession, rpc_url: str, to: str, data: str
-    ) -> int:
-        """Make a single eth_call and return result as int (0 on error)."""
+    ) -> Optional[int]:
+        """Make a single eth_call and return its integer result, or None when it returned no data."""
+        from utils.web3_client import UnsupportedChainError
+
         try:
             async with session.post(
                 rpc_url,
@@ -497,13 +536,19 @@ class RescueService:
                 },
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
+                if resp.status != 200:
+                    raise RuntimeError("Approval state request failed")
                 data_resp = await resp.json()
-            result = data_resp.get("result", "0x0")
-            if not result or result == "0x":
-                return 0
+            result = data_resp.get("result")
+            if "error" in data_resp or not isinstance(result, str) or not result:
+                raise RuntimeError("Approval state unavailable")
+            if result == "0x":
+                return None
             return int(result, 16)
-        except Exception:
-            return 0
+        except UnsupportedChainError:
+            raise
+        except Exception as e:
+            raise RuntimeError("Approval state unavailable") from e
 
     async def _fetch_prices(self, tokens: List[str]) -> Dict[str, float]:
         """Fetch token USD prices from DexScreener (free, no API key needed).
@@ -511,6 +556,8 @@ class RescueService:
         Stablecoins are hardcoded to $1.00.
         Up to 30 tokens per DexScreener request.
         """
+        from utils.web3_client import UnsupportedChainError
+
         prices: Dict[str, float] = {}
 
         # Hardcode stablecoin prices
@@ -560,8 +607,12 @@ class RescueService:
                                         prices[token] = float(price_str)
                                     except (ValueError, TypeError):
                                         pass
+                    except UnsupportedChainError:
+                        raise
                     except Exception as e:
                         logger.warning("DexScreener batch %s failed: %s", i // BATCH_SIZE, type(e).__name__)
+        except UnsupportedChainError:
+            raise
         except Exception as e:
             logger.warning("Price fetch failed: %s", type(e).__name__)
 

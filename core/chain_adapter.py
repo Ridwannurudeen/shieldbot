@@ -18,15 +18,15 @@ class ChainAdapter(ABC):
         """Human-readable chain name."""
 
     @abstractmethod
-    async def is_contract(self, address: str) -> bool:
-        """Check if address is a contract."""
+    async def is_contract(self, address: str) -> Optional[bool]:
+        """Check if address is a contract. Returns None when the lookup failed."""
 
     @abstractmethod
     async def get_bytecode(self, address: str) -> Optional[str]:
         """Get contract bytecode as hex string."""
 
     @abstractmethod
-    async def is_verified_contract(self, address: str) -> Tuple[bool, Optional[str]]:
+    async def is_verified_contract(self, address: str) -> Tuple[Optional[bool], Optional[str]]:
         """Check if contract is verified. Returns (is_verified, source_code_or_None)."""
 
     @abstractmethod

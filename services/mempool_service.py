@@ -148,7 +148,7 @@ class MempoolMonitor:
             except UnsupportedChainError:
                 raise
             except Exception as e:
-                logger.error(f"MempoolMonitor error: {e}")
+                logger.error("MempoolMonitor error: %s", type(e).__name__)
                 await asyncio.sleep(5)
 
     async def _poll_pending(self, chain_id: int):
@@ -171,7 +171,7 @@ class MempoolMonitor:
                     await self._analyze_pending_tx(tx)
 
         except Exception as e:
-            logger.debug(f"Pending poll failed for chain {chain_id}: {e}")
+            logger.debug("Pending poll failed for chain %s: %s", chain_id, type(e).__name__)
 
     async def _get_txpool_content(self, w3: Web3, chain_id: int) -> List[PendingTx]:
         """Fetch pending txs via txpool_content RPC."""
@@ -364,7 +364,7 @@ class MempoolMonitor:
                     self._add_alert(alert)
                     self._stats['suspicious_approvals'] += 1
         except Exception as e:
-            logger.debug(f"Approval analysis error: {e}")
+            logger.debug("Approval analysis error: %s", type(e).__name__)
 
     def _add_alert(self, alert: MempoolAlert):
         """Add an alert and maintain max size."""

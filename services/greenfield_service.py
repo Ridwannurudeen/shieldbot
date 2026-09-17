@@ -83,7 +83,7 @@ class GreenfieldService:
             self.enabled = True
 
         except Exception as e:
-            logger.error(f"Greenfield SDK initialization failed: {e}")
+            logger.error("Greenfield SDK initialization failed: %s", type(e).__name__)
             self._client = None
             self.enabled = False
 
@@ -168,7 +168,7 @@ class GreenfieldService:
                 return public_url
 
             except Exception as e:
-                logger.error(f"Greenfield upload attempt {attempt + 1} failed: {e}")
+                logger.error("Greenfield upload attempt %s failed: %s", attempt + 1, type(e).__name__)
 
             if attempt == 0:
                 await asyncio.sleep(2.0)
