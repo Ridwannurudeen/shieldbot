@@ -226,9 +226,11 @@ async def lifespan(app: FastAPI):
     app.include_router(guard_router, prefix="/api/guardian")
 
     await container.hunter.start()
+    await container.launch_watch.start()
 
     logger.info("ShieldAI Firewall API started")
     yield
+    await container.launch_watch.stop()
     await container.hunter.stop()
     await container.shutdown()
     rpc_proxy = getattr(app.state, "rpc_proxy", None)

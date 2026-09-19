@@ -29,11 +29,17 @@ class AgentTools:
     def __init__(self, container):
         self._container = container
 
-    async def scan_contract(self, address: str, chain_id: int = 56) -> Dict:
-        """Run all analyzers on a contract and return composite risk score."""
+    async def scan_contract(
+        self, address: str, chain_id: int = 56, deadline: Optional[float] = None
+    ) -> Dict:
+        """Run all analyzers on a contract and return composite risk score.
+
+        ``deadline`` replaces the interactive scan deadline; background scans pass
+        core.registry.BACKGROUND_SCAN_DEADLINE_SECONDS.
+        """
         address = _validate_address(address)
         ctx = AnalysisContext(address=address, chain_id=chain_id)
-        results = await self._container.registry.run_all(ctx)
+        results = await self._container.registry.run_all(ctx, deadline=deadline)
         return self._container.risk_engine.compute_from_results(results)
 
     async def check_deployer(self, address: str, chain_id: int = 56) -> Optional[Dict]:

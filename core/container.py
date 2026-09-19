@@ -184,15 +184,25 @@ class ServiceContainer:
         )
 
         from agent.hunter import Hunter
+        from agent.launch_watch import LaunchWatch
         from services.launch_discovery import LaunchDiscovery
+        from services.rpc_guard import RpcGuard
 
+        # One request budget and circuit breaker for all background reads of the public 4663 RPC.
+        self.robinhood_rpc_guard = RpcGuard("Robinhood Chain")
         self.hunter = Hunter(
             tools=self.agent_tools,
             db=self.db,
             ai_analyzer=self.ai_analyzer,
             sentinel=self.sentinel,
-            discovery=LaunchDiscovery(self.db, rpc_url=settings.robinhood_rpc_url),
+            discovery=LaunchDiscovery(
+                self.db, rpc_url=settings.robinhood_rpc_url, guard=self.robinhood_rpc_guard
+            ),
+            rpc_guard=self.robinhood_rpc_guard,
         )
+        # Fast 4663 launch discovery and triaged scans; the lifespan starts and stops it.
+        self.launch_watch = LaunchWatch(self.hunter)
+        self.hunter.launch_watch = self.launch_watch
 
         # Optional services (need async init)
         self.greenfield_service = GreenfieldService()
@@ -244,6 +254,7 @@ class ServiceContainer:
 
     async def shutdown(self):
         """Clean up resources."""
+        await self.launch_watch.stop()
         await self.hunter.stop()
         await self.mempool_monitor.stop()
         await self.indexer.stop()
