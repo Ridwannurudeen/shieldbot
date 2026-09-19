@@ -1,13 +1,47 @@
 """Database layer — SQLite with WAL mode for contract reputation and outcome tracking."""
 
 import json
+import re
 import time
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import aiosqlite
 
+from core.extension_formatter import is_scan_incomplete
+
 logger = logging.getLogger(__name__)
+
+_LAUNCH_CURSOR = re.compile(r"(\d+):(0x[0-9a-f]{40})")
+_NO_SCAN_DETAIL = "Coverage details were not recorded for this scan"
+
+# One row per discovered launch with its latest outcome. A recheck records blocked or cleared on
+# the launch's tracked pair (keyed by the token), and a newer one supersedes the launch scan. A
+# watching pair has only been queued for a recheck, so it changes nothing.
+_LAUNCH_ROWS = """
+    SELECT token_address, source, launchpad, pool_id, block_number, tx_hash, block_timestamp,
+           discovered_at,
+           CASE WHEN rechecked THEN recheck_status ELSE scan_status END,
+           CASE WHEN rechecked THEN NULL ELSE risk_score END,
+           CASE WHEN rechecked THEN recheck_at ELSE scanned_at END AS outcome_at
+    FROM (
+        SELECT l.*, p.status AS recheck_status, p.last_checked AS recheck_at,
+               COALESCE(p.status IN ('blocked', 'cleared') AND p.last_checked >= l.scanned_at, 0)
+                   AS rechecked
+        FROM discovered_launches l
+        LEFT JOIN tracked_pairs p ON p.pair_address = l.token_address AND p.chain_id = l.chain_id
+        WHERE l.chain_id = ?
+    )
+"""
+_LAUNCH_FEED_FIRST_PAGE = _LAUNCH_ROWS + """
+    ORDER BY block_number DESC, token_address DESC
+    LIMIT ?
+"""
+_LAUNCH_FEED_NEXT_PAGE = _LAUNCH_ROWS + """
+    WHERE (block_number, token_address) < (?, ?)
+    ORDER BY block_number DESC, token_address DESC
+    LIMIT ?
+"""
 
 
 def _lift_scan_metadata(score: Dict) -> Dict:
@@ -24,6 +58,45 @@ def _lift_scan_metadata(score: Dict) -> Dict:
         if key in metadata:
             score[key] = metadata[key]
     return score
+
+
+def _launch_scan(stored_status, risk_score, scanned_at, finding) -> Dict:
+    """Describe a launch's latest outcome; any status the feed does not know is unknown.
+
+    The hunter records watching and cleared only for complete scans, and a recheck clears only
+    a complete scan, so both are complete. A blocked launch takes its detail from the hunter's
+    finding evidence and is not shown as complete without it. An unknown scan's partial score
+    is withheld so that it cannot read as a verdict.
+    """
+    scan = {
+        "outcome": "unknown",
+        "status": "unknown",
+        "risk_level": None,
+        "risk_score": None,
+        "coverage_reasons": {"scan": "Scan incomplete; coverage details were not recorded"},
+        "flags": [],
+        "scanned_at": scanned_at,
+    }
+    if scanned_at is None:
+        scan.update(outcome="not_scanned", coverage_reasons={"scan": "Not scanned yet"})
+    elif stored_status in ("watching", "cleared"):
+        scan.update(outcome=stored_status, status="ok", risk_score=risk_score, coverage_reasons={})
+    elif stored_status == "blocked":
+        finding_score, evidence = finding
+        scan.update(outcome="blocked", risk_score=risk_score if risk_score is not None else finding_score)
+        if evidence is None:
+            scan["coverage_reasons"] = {"scan": _NO_SCAN_DETAIL}
+        else:
+            incomplete = is_scan_incomplete(evidence)
+            scan.update(
+                status="unknown" if incomplete else "ok",
+                risk_level=evidence.get("risk_level"),
+                coverage_reasons=evidence.get("coverage_reasons") or ({"scan": _NO_SCAN_DETAIL} if incomplete else {}),
+                flags=evidence.get("critical_flags") or [],
+            )
+    elif stored_status == "error":
+        scan["coverage_reasons"] = {"scan": "Scan failed before completing"}
+    return scan
 
 
 class Database:
@@ -331,6 +404,7 @@ class Database:
         await self._migrate_funding_value_wei()
         await self._migrate_tracked_pairs_chain_id()
         await self._create_launch_discovery_tables()
+        await self._create_launch_feed_tables()
 
         # Migrate: add registered_by_key column for existing DBs
         try:
@@ -1920,3 +1994,70 @@ class Database:
             WHERE chain_id = ? AND token_address = ?
         """, (scan_status, risk_score, time.time(), chain_id, token_address))
         await self._db.commit()
+
+    # --- Launch Feed ---
+
+    async def _create_launch_feed_tables(self):
+        await self._db.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_discovered_launches_feed
+                ON discovered_launches(chain_id, block_number DESC, token_address DESC);
+        """)
+        await self._db.commit()
+
+    async def get_launch_feed(
+        self, chain_id: int, limit: int, cursor: Optional[str] = None
+    ) -> Tuple[List[Dict], Optional[str]]:
+        """Return a page of discovered launches, newest first, each with its latest outcome.
+
+        ``cursor`` is the ``next_cursor`` of the previous page ("block:token"). The next cursor
+        is None on the last page. A malformed cursor raises ValueError.
+        """
+        if cursor is None:
+            result = await self._db.execute(_LAUNCH_FEED_FIRST_PAGE, (chain_id, limit + 1))
+        else:
+            match = _LAUNCH_CURSOR.fullmatch(cursor)
+            if match is None:
+                raise ValueError("Invalid cursor")
+            result = await self._db.execute(
+                _LAUNCH_FEED_NEXT_PAGE, (chain_id, int(match.group(1)), match.group(2), limit + 1)
+            )
+        rows = await result.fetchall()
+        next_cursor = f"{rows[limit - 1][4]}:{rows[limit - 1][0]}" if len(rows) > limit else None
+        return [await self._launch_item(chain_id, row) for row in rows[:limit]], next_cursor
+
+    async def _launch_item(self, chain_id: int, row) -> Dict:
+        (token, source, launchpad, pool_id, block_number, tx_hash, block_timestamp,
+         discovered_at, stored_status, risk_score, outcome_at) = row
+        finding = (None, None)
+        if outcome_at is not None and stored_status == "blocked":
+            finding = await self._latest_hunter_finding(chain_id, token)
+        return {
+            "chain_id": chain_id,
+            "token_address": token,
+            "launchpad": launchpad,
+            "source": source,
+            "pool_id": pool_id,
+            "tx_hash": tx_hash,
+            "block_number": block_number,
+            "block_timestamp": block_timestamp,
+            "discovered_at": discovered_at,
+            "scan": _launch_scan(stored_status, risk_score, outcome_at, finding),
+            "verdict_url": f"/api/verdict/{chain_id}/{token}",
+        }
+
+    async def _latest_hunter_finding(self, chain_id: int, address: str):
+        """Return the risk score and evidence of the hunter's latest finding for an address."""
+        cursor = await self._db.execute("""
+            SELECT risk_score, evidence FROM agent_findings
+            WHERE finding_type = 'hunter_sweep' AND chain_id = ? AND address = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+        """, (chain_id, address))
+        row = await cursor.fetchone()
+        if row is None:
+            return None, None
+        try:
+            evidence = json.loads(row[1]) if row[1] else None
+        except (json.JSONDecodeError, TypeError):
+            evidence = None
+        return row[0], evidence if isinstance(evidence, dict) else None

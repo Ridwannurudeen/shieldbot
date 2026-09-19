@@ -2105,6 +2105,44 @@ async def threat_feed(
     return response
 
 
+@app.get("/api/launches/{chain_id}")
+async def launch_feed(chain_id: int, limit: int = 50, cursor: str = None):
+    """Recently discovered token launches, newest first, each with its latest scan outcome.
+
+    The outcome is blocked, watching, cleared, unknown (scan incomplete) or not_scanned, with
+    its status and coverage reasons; unknown and not_scanned are never safe. Each launch links
+    its public verdict at verdict_url.
+    Query params:
+    - limit: max results (default 50, max 200)
+    - cursor: next_cursor from the previous page (optional)
+    """
+    from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
+
+    _validate_chain_id(chain_id)
+    if not container:
+        raise HTTPException(status_code=503, detail="Service not available")
+
+    limit = max(1, min(limit, 200))  # cap between 1 and 200
+    if chain_id != LAUNCH_CHAIN_ID:
+        return {
+            'launches': [],
+            'count': 0,
+            'chain_id': chain_id,
+            'next_cursor': None,
+            'discovery_unavailable': "Launch discovery is not available on this chain",
+        }
+    try:
+        launches, next_cursor = await container.db.get_launch_feed(chain_id, limit, cursor)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid cursor") from exc
+    return {
+        'launches': launches,
+        'count': len(launches),
+        'chain_id': chain_id,
+        'next_cursor': next_cursor,
+    }
+
+
 @app.get("/api/threats/subscribe")
 async def threat_subscribe_info():
     """Information about threat feed subscription options."""
