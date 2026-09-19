@@ -276,9 +276,9 @@ class RiskEngine:
         incomplete = required_unknown or covered_weight < 1 - 1e-9 or any(fraction < 1 for fraction in coverage.values())
         critical_flags = [flag for result in results for flag in result.flags]
         if required_unknown:
-            # A proven can_sell=False is known, so only the rest of the honeypot data is unknown.
-            # The honeypot analyzer uses the same labels, and its flag already carries a reason.
-            label = 'Honeypot coverage unknown: ' if honeypot_data.get('can_sell') is False else 'Sellability unknown: '
+            # A measured can_sell is known either way, so only the rest of the honeypot data is
+            # unknown. The honeypot analyzer uses the same labels, and its flag already carries a reason.
+            label = 'Honeypot coverage unknown: ' if honeypot_data.get('can_sell') is not None else 'Sellability unknown: '
             if not any(flag.startswith(label) for flag in critical_flags):
                 critical_flags.append(label + coverage_reasons.get('honeypot', 'No honeypot data'))
 

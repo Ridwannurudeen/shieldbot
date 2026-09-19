@@ -114,6 +114,26 @@ def test_known_cannot_sell_without_analyzer_flags_names_only_the_missing_coverag
     ]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("through_analyzer", [True, False])
+async def test_known_can_sell_with_partial_coverage_is_not_sellability_unknown(through_analyzer):
+    data = {
+        "is_honeypot": False, "can_sell": True, "can_buy": True, "buy_tax": 1.0, "sell_tax": None,
+        "reason": "sell tax unmeasured",
+    }
+    if through_analyzer:
+        service = MagicMock()
+        service.fetch_honeypot_data = AsyncMock(return_value=data)
+        honeypot = await HoneypotAnalyzer(service).analyze(AnalysisContext(ADDRESS))
+    else:
+        honeypot = AnalyzerResult("honeypot", 0.15, 0, flags=[], data={**data, "status": "unknown"})
+
+    risk = RiskEngine().compute_from_results([STRUCTURAL, honeypot])
+
+    assert risk["status"] == "unknown"
+    assert _unknown_flags(risk["critical_flags"]) == ["Honeypot coverage unknown: sell tax unmeasured"]
+
+
 @pytest.mark.parametrize("with_analyzer_flags", [True, False])
 def test_unknown_sellability_is_still_flagged_once(with_analyzer_flags):
     data = {
