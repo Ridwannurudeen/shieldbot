@@ -200,7 +200,7 @@ Each verdict's `onchain_status` moves through:
 | `sending` | claimed by the drain; the signed transaction's hash is stored before it is broadcast |
 | `confirmed` / `reverted` | the receipt of `tx_hash` shows success / a revert |
 | `submitted` | the node accepted `tx_hash`, but no receipt arrived within the timeout |
-| `failed` | the node explicitly rejected the signed transaction; nothing was broadcast |
+| `failed` | the node explicitly rejected the signed transaction and no receipt was found; treated as not broadcast |
 | `unconfirmed` | the broadcast outcome is unknown and no receipt was found; never resent |
 | `off` | stored only (another chain, or no registry configured) |
 

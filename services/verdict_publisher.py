@@ -15,7 +15,8 @@ Each row moves through onchain_status:
   submitted    the node accepted the transaction; no receipt arrived within the receipt timeout
   confirmed    the receipt shows success, so VerdictRecorded was emitted
   reverted     the receipt shows the call reverted
-  failed       the node explicitly rejected the signed transaction, so nothing was broadcast
+  failed       the node explicitly rejected the signed transaction and no receipt was found, so it is
+               treated as not broadcast
   unconfirmed  the broadcast outcome is unknown (a transport error during the send, or a crash after signing)
                and no receipt was found; never resent, because it may already be on-chain
 
