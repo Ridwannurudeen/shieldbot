@@ -78,6 +78,8 @@ async def test_successful_lookup_shape_is_unchanged(caplog, owner, renounced):
     [
         {"code": -32000, "message": "execution reverted"},
         {"code": 3, "message": "execution reverted", "data": None},
+        # Robinhood Chain's exact reply for owner() on a token without one (measured 2026-09-19).
+        {"code": 3, "message": "execution reverted", "data": "0x"},
     ],
 )
 async def test_reverting_owner_is_a_complete_answer(caplog, error):
