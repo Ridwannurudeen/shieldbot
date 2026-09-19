@@ -1,5 +1,6 @@
 """Analyzer registry — collects and runs all registered analyzers."""
 
+import asyncio
 import logging
 from typing import List
 
@@ -7,6 +8,12 @@ from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
 from utils.web3_client import UnsupportedChainError
 
 logger = logging.getLogger(__name__)
+
+# Overall deadline for one scan's analyzers. It outlasts the longest single provider timeout on
+# the scan path (15 s explorer calls; honeypot.is, DexScreener, Ethos and TokenSniffer use 10 s),
+# so a slow provider still reports its own reason, and it ends before the extension abandons a
+# firewall request at 30 s, so a hung provider yields an incomplete answer instead of none.
+RUN_ALL_DEADLINE_SECONDS = 20
 
 
 class AnalyzerRegistry:
@@ -37,11 +44,24 @@ class AnalyzerRegistry:
         """Run all analyzers and return results with normalized weights.
 
         Each result's weight is normalized so that all weights sum to 1.0,
-        regardless of how many analyzers are registered.
+        regardless of how many analyzers are registered. An analyzer still running at
+        RUN_ALL_DEADLINE_SECONDS is cancelled and reported exactly like one that raised
+        TimeoutError: unavailable, never safe.
         """
-        import asyncio
-        tasks = [a.analyze(ctx) for a in self._analyzers]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        tasks = [asyncio.ensure_future(a.analyze(ctx)) for a in self._analyzers]
+        pending = set()
+        try:
+            if tasks:
+                _, pending = await asyncio.wait(tasks, timeout=RUN_ALL_DEADLINE_SECONDS)
+        finally:
+            for task in tasks:
+                task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        results = [
+            asyncio.TimeoutError() if task in pending else task.exception() or task.result()
+            for task in tasks
+        ]
 
         final = []
         for analyzer, result in zip(self._analyzers, results):
