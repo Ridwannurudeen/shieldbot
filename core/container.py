@@ -202,6 +202,7 @@ class ServiceContainer:
                 self.db, rpc_url=settings.robinhood_rpc_url, guard=self.robinhood_rpc_guard
             ),
             rpc_guard=self.robinhood_rpc_guard,
+            verdict_publisher=self.verdict_publisher,
         )
         # Fast 4663 launch discovery and triaged scans; the lifespan starts and stops it.
         self.launch_watch = LaunchWatch(self.hunter)

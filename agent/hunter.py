@@ -279,6 +279,7 @@ class Hunter:
         A 4663 pair the open breaker refuses raises BreakerOpenError before it is marked checked.
         """
         blocked = False
+        published = False
         try:
             chain_id = pair.get("chain_id", 56)
             await self._reserve_scan(chain_id)
@@ -303,6 +304,9 @@ class Hunter:
                 await self.db.update_tracked_pair_status(
                     pair["pair_address"], "blocked"
                 )
+                # Publish before the auto-watch: that insert can raise, and the verdict is already final.
+                await self._publish_verdict(chain_id, pair["token_address"], result)
+                published = True
                 if pair.get("deployer"):
                     await self.tools.auto_watch_deployer(
                         pair["deployer"],
@@ -316,7 +320,8 @@ class Hunter:
                 )
             # else: still WARN, leave as watching
             # FINAL RECHECK VERDICT: the rescan's result supersedes the launch's earlier one.
-            await self._publish_verdict(chain_id, pair["token_address"], result)
+            if not published:
+                await self._publish_verdict(chain_id, pair["token_address"], result)
         except BreakerOpenError:
             raise
         except Exception as exc:
