@@ -52,6 +52,12 @@ SCAN_INTERVAL_SECONDS = 2.0
 # live). The buy/sell simulation sends up to 12: the pool lookup batch, V2 reserves, a block number
 # and three Initialize log windows, then up to three pools simulated twice each.
 SCAN_REQUEST_COST = 22
+# Bound on the optional AI narrative for a finding. The narrative is a 200-token Haiku reply that
+# normally returns in seconds; the advisor gives a 500-token interactive reply 30 s. Findings are
+# written while launch_lock may be held, so a hung call holds it for at most one launch-watch poll
+# interval (20 s) instead of the SDK's 600 s timeout with two retries. On timeout the finding is
+# stored without a narrative.
+NARRATIVE_TIMEOUT_SECONDS = 20
 
 
 class Hunter:
@@ -406,17 +412,23 @@ class Hunter:
     async def _log_finding(
         self, investigation_id, address, deployer, risk_score, evidence, action, chain_id=56
     ):
-        """Store a finding and optionally generate AI narrative."""
+        """Store a finding and optionally generate AI narrative.
+
+        The narrative is bounded by NARRATIVE_TIMEOUT_SECONDS; without it the finding is still stored.
+        """
         narrative = None
         if self.ai and self.ai.is_available():
             try:
                 prompt = NARRATIVE_TEMPLATE.format(
                     data=json.dumps(evidence, default=str)
                 )
-                narrative = await self.ai.chat(
-                    model=HAIKU_MODEL,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=200,
+                narrative = await asyncio.wait_for(
+                    self.ai.chat(
+                        model=HAIKU_MODEL,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=200,
+                    ),
+                    timeout=NARRATIVE_TIMEOUT_SECONDS,
                 )
                 narrative = narrative.strip()
             except Exception as exc:
