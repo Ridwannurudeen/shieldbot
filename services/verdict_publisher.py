@@ -42,6 +42,10 @@ confirmed or reverted, or queues it again while it has signed fewer than MAX_SEN
 the same bytes again does not count: it cannot record twice). A row at the cap is still looked up, every
 RECONCILE_AFTER_SECONDS, so a transaction that lands late is reported.
 
+Sending the same bytes again is not a new attempt (it cannot record twice), so a node that takes them without
+ever sequencing them would otherwise only show up as INFO: after RESEND_ALARM_AFTER such broadcasts the drain logs
+a WARNING naming the record and its transaction.
+
 Claim before send: each claimed row's prepare -> store -> broadcast -> record outcome runs in a task shielded from
 cancellation, and stop() lets it finish (for up to STOP_TIMEOUT_SECONDS) before the database closes. A row still
 left `sending` (the process was killed, or the database failed) is recovered once it is RECONCILE_AFTER_SECONDS
@@ -115,6 +119,10 @@ MAX_SEND_ATTEMPTS = 5
 STOP_TIMEOUT_SECONDS = 30
 # After this many consecutive waits on an earlier transaction, the drain says so loudly.
 WAIT_ALARM_AFTER = 10
+# After this many broadcasts of the same signed bytes, the drain says so loudly. Re-sends are at least
+# RECONCILE_AFTER_SECONDS apart and Robinhood Chain sequences a transaction within about a second, so by the third
+# the node has held those bytes for minutes: a lagging replica or a lost packet no longer explains it.
+RESEND_ALARM_AFTER = 3
 
 ADDRESS_RE = re.compile(r"0x[0-9a-fA-F]{40}")
 QUANTITY_RE = re.compile(r"0x[0-9a-fA-F]+")
@@ -152,6 +160,8 @@ class VerdictPublisher:
         self._drain_task = None
         self._wake = None
         self._waits = 0
+        # Per row, the bytes last broadcast again and how often in a row: {evidence_id: (tx_hash, count)}.
+        self._resends = {}
         if not registry:
             logger.info(
                 "Robinhood verdict registry: disabled (set ROBINHOOD_VERDICT_REGISTRY to enable)"
@@ -480,10 +490,13 @@ class VerdictPublisher:
                     # One of the row's earlier transactions was mined after all; nothing is sent.
                     _, status, tx_hash = prepared
                     await self._db.update_verdict_onchain(evidence_id, status, tx_hash=tx_hash)
+                    self._resends.pop(evidence_id, None)
                     logger.info("Verdict record %s by an earlier transaction: tx=%s", status, tx_hash)
                     return "done"
                 _, raw, nonce, max_fee = prepared
                 tx_hash = "0x" + keccak(raw).hex()
+                if any(transaction["tx_hash"] == tx_hash for transaction in transactions):
+                    self._note_resend(evidence_id, tx_hash)
                 # Stored, with its bytes and fee, before the broadcast, so every later check covers it.
                 if not await self._db.set_verdict_tx_hash(
                     evidence_id, tx_hash, nonce, raw.hex(), max_fee
@@ -515,6 +528,8 @@ class VerdictPublisher:
         await self._db.update_verdict_onchain(
             evidence_id, status, tx_hash=tx_hash, onchain_error=error
         )
+        if status in ("confirmed", "reverted"):
+            self._resends.pop(evidence_id, None)
         if error is None:
             logger.info("Verdict record %s: tx=%s subject=%s", status, tx_hash, row["subject"])
         else:
@@ -531,6 +546,18 @@ class VerdictPublisher:
                 "Verdict drain has waited %d times in a row for an earlier transaction at the same nonce; "
                 "check the recorder's pending transactions",
                 self._waits,
+            )
+
+    def _note_resend(self, evidence_id: int, tx_hash: str) -> None:
+        """Count broadcasts of the same signed bytes and say so loudly when a node never sequences them."""
+        previous, count = self._resends.get(evidence_id, (None, 0))
+        count = count + 1 if previous == tx_hash else 1
+        self._resends[evidence_id] = (tx_hash, count)
+        if count >= RESEND_ALARM_AFTER:
+            logger.warning(
+                "Verdict record %d has re-sent %s %d times with no receipt and no other transaction at its "
+                "nonce; check whether the node forwards it",
+                evidence_id, tx_hash, count,
             )
 
     async def _prepare(self, session, row: dict, transactions: list, data: str) -> tuple:

@@ -262,6 +262,10 @@ drain looks up the receipts of all of the verdict's transactions:
 - only when every nonce the verdict used has been taken by a transaction that is not one of its own, so none of
   them can ever be mined, does it sign a new transaction at the next nonce.
 
+Sending the same bytes again is not counted as one of the 5, because it cannot record twice. After three such
+broadcasts the log warns that a verdict `has re-sent` that transaction: the node is taking those bytes without
+sequencing them, so check the RPC endpoint in `ROBINHOOD_RPC_URL`.
+
 Stopping the API waits up to 30 seconds for a send under way to record its outcome before the database closes. If
 the process is killed first, or the send takes longer, the verdict stays `sending`. The drain resolves it once it is 2
 minutes old (which gives a lagging read replica time to show a mined transaction): at start, after a drain error, and

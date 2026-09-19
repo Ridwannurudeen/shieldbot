@@ -1907,6 +1907,37 @@ async def test_long_waits_on_an_earlier_transaction_raise_an_alarm(db, reconcile
     assert len(chain.sent) == 1
 
 
+@pytest.mark.asyncio
+async def test_repeated_broadcasts_of_the_same_bytes_raise_an_alarm(db, reconcile_now, caplog):
+    """Bytes a node keeps taking without sequencing them are re-sent at attempts 1, so say so loudly."""
+    chain = FakeChain()
+    chain.mine = False
+    chain.lagging = True  # the node takes the bytes, never sequences them, and its nonce never moves
+    publisher = sender(db)
+    first = await record_once(db, chain, publisher)
+    assert first["onchain_status"] == "submitted"
+    with rpc_node(chain):
+        for resend in range(1, vp.RESEND_ALARM_AFTER + 1):
+            caplog.clear()
+            assert await publisher._reconcile() == 1
+            assert await publisher.drain_once() == "done"
+            assert posted_hash(chain) == first["tx_hash"]
+            alarm = f"re-sent {first['tx_hash']} {resend} times" in caplog.text
+            assert alarm == (resend == vp.RESEND_ALARM_AFTER)
+        # A fee spike replaces the bytes; the count starts again with the new transaction.
+        chain.base_fee = 400_000_000
+        caplog.clear()
+        assert await publisher._reconcile() == 1
+        assert await publisher.drain_once() == "done"
+        replacement = posted_hash(chain)
+        assert replacement != first["tx_hash"]
+        assert await publisher._reconcile() == 1
+        assert await publisher.drain_once() == "done"
+        assert posted_hash(chain) == replacement
+    assert "re-sent" not in caplog.text
+    assert await attempts(db) == (7, 2)
+
+
 @pytest.mark.parametrize("delay,refused", [(92, True), (93, False)])
 def test_the_module_refuses_a_reconcile_delay_that_a_live_send_could_outlast(delay, refused):
     """Claim recovery must never take a live send's row: 60 s + 2 s + 20 s of work, plus two 5 s lock waits."""
