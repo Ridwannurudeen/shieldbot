@@ -692,3 +692,26 @@ class TestLaunchAlertLoop:
         assert [call.args for call in deliver.await_args_list] == [(bot,), (bot,)]
         assert sleeps == [30, 30, 30]
         assert "RuntimeError" in caplog.text and "SECRET_KEY" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_the_loop_keeps_a_held_block_inside_its_next_window(self, bot_module, monkeypatch):
+        clock = iter([1000.0, 1030.0, 1060.0])
+        monkeypatch.setattr(bot_module, "time", SimpleNamespace(time=lambda: next(clock)))
+        db = MagicMock(enqueue_launch_alerts=AsyncMock(side_effect=[None, 945.0, None]))
+        monkeypatch.setattr(bot_module, "container", SimpleNamespace(db=db))
+        monkeypatch.setattr(bot_module, "deliver_launch_alerts", AsyncMock())
+        sleeps = []
+
+        async def sleep(seconds):
+            sleeps.append(seconds)
+            if len(sleeps) == 3:
+                raise asyncio.CancelledError
+
+        monkeypatch.setattr(bot_module.asyncio, "sleep", sleep)
+
+        with pytest.raises(asyncio.CancelledError):
+            await bot_module.launch_alert_loop(object())
+
+        assert [call.args for call in db.enqueue_launch_alerts.await_args_list] == [
+            (CHAIN, 1000.0 - 3600), (CHAIN, 1000.0 - 60), (CHAIN, 945.0),
+        ]

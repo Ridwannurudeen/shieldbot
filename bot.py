@@ -808,17 +808,20 @@ async def launch_alert_loop(bot):
     """Queue and send launch alerts every LAUNCH_ALERT_POLL_SECONDS until cancelled.
 
     The first pass after a start covers the last LAUNCH_ALERT_MAX_AGE_SECONDS; later passes
-    reread LAUNCH_ALERT_OVERLAP_SECONDS before the previous one.
+    reread LAUNCH_ALERT_OVERLAP_SECONDS before the previous one, or from the oldest blocked
+    launch still held back for its evidence.
     """
-    queued_until = None
+    next_since = None
     while True:
         now = time.time()
         since = now - LAUNCH_ALERT_MAX_AGE_SECONDS
-        if queued_until is not None:
-            since = max(since, queued_until - LAUNCH_ALERT_OVERLAP_SECONDS)
+        if next_since is not None:
+            since = max(since, next_since)
         try:
-            await container.db.enqueue_launch_alerts(LAUNCH_CHAIN_ID, since)
-            queued_until = now
+            held = await container.db.enqueue_launch_alerts(LAUNCH_CHAIN_ID, since)
+            next_since = now - LAUNCH_ALERT_OVERLAP_SECONDS
+            if held is not None:
+                next_since = min(next_since, held)
             await deliver_launch_alerts(bot)
         except Exception as e:
             logger.error(

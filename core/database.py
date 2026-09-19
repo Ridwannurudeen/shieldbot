@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 # Eighteen digits keep a cursor block inside SQLite's signed 64-bit integers.
 _LAUNCH_CURSOR = re.compile(r"(\d{1,18}):(0x[0-9a-f]{40})")
 _NO_SCAN_DETAIL = "Coverage details were not recorded for this scan"
+# A recheck marks a pair blocked before the hunter stores the finding holding its evidence,
+# and the finding waits on an AI narrative first, so a blocked launch's alert waits this long
+# for the evidence before it is queued without it.
+_BLOCKED_EVIDENCE_WAIT_SECONDS = 300
 
 # One row per discovered launch with its latest outcome. A recheck records blocked or cleared on
 # the launch's tracked pair (keyed by the token), and a newer one supersedes the launch scan. A
@@ -122,6 +126,24 @@ def _launch_scan(stored_status, risk_score, scanned_at, finding) -> Dict:
     elif stored_status == "error":
         scan["coverage_reasons"] = {"scan": "Scan failed before completing"}
     return scan
+
+
+def _launch_item(chain_id: int, row, finding) -> Dict:
+    (token, source, launchpad, pool_id, block_number, tx_hash, block_timestamp,
+     discovered_at, stored_status, risk_score, outcome_at) = row
+    return {
+        "chain_id": chain_id,
+        "token_address": token,
+        "launchpad": launchpad,
+        "source": source,
+        "pool_id": pool_id,
+        "tx_hash": tx_hash,
+        "block_number": block_number,
+        "block_timestamp": block_timestamp,
+        "discovered_at": discovered_at,
+        "scan": _launch_scan(stored_status, risk_score, outcome_at, finding),
+        "verdict_url": f"/api/verdict/{chain_id}/{token}",
+    }
 
 
 class Database:
@@ -2050,27 +2072,14 @@ class Database:
             )
         rows = await result.fetchall()
         next_cursor = f"{rows[limit - 1][4]}:{rows[limit - 1][0]}" if len(rows) > limit else None
-        return [await self._launch_item(chain_id, row) for row in rows[:limit]], next_cursor
+        items = [_launch_item(chain_id, row, await self._launch_finding(chain_id, row)) for row in rows[:limit]]
+        return items, next_cursor
 
-    async def _launch_item(self, chain_id: int, row) -> Dict:
-        (token, source, launchpad, pool_id, block_number, tx_hash, block_timestamp,
-         discovered_at, stored_status, risk_score, outcome_at) = row
-        finding = (None, None)
-        if outcome_at is not None and stored_status == "blocked":
-            finding = await self._latest_hunter_finding(chain_id, token)
-        return {
-            "chain_id": chain_id,
-            "token_address": token,
-            "launchpad": launchpad,
-            "source": source,
-            "pool_id": pool_id,
-            "tx_hash": tx_hash,
-            "block_number": block_number,
-            "block_timestamp": block_timestamp,
-            "discovered_at": discovered_at,
-            "scan": _launch_scan(stored_status, risk_score, outcome_at, finding),
-            "verdict_url": f"/api/verdict/{chain_id}/{token}",
-        }
+    async def _launch_finding(self, chain_id: int, row):
+        """Return the hunter finding behind a blocked launch, or (None, None) for other outcomes."""
+        if row[10] is not None and row[8] == "blocked":
+            return await self._latest_hunter_finding(chain_id, row[0])
+        return None, None
 
     async def _latest_hunter_finding(self, chain_id: int, address: str):
         """Return the risk score and evidence of the hunter's latest finding for an address."""
@@ -2163,12 +2172,16 @@ class Database:
             """, (new_chat_id, time.time(), chat_id, chain_id))
         await self.unsubscribe_launch_alerts(chat_id, chain_id)
 
-    async def enqueue_launch_alerts(self, chain_id: int, since: float):
+    async def enqueue_launch_alerts(self, chain_id: int, since: float) -> Optional[float]:
         """Queue alerts for the launch outcomes recorded at or after ``since``.
 
         A chat gets outcomes recorded after it subscribed: every one in "all" mode, otherwise
         only blocked ones. A chat is queued at most one alert per launch and outcome, so passes
         over the same window, and passes after a restart, never queue an alert twice.
+
+        A blocked launch whose evidence is not stored yet is held back for up to
+        _BLOCKED_EVIDENCE_WAIT_SECONDS. Returns the outcome time of the oldest one held, which
+        the caller keeps inside its next window, or None.
         """
         cursor = await self._db.execute(
             "SELECT chat_id, mode, created_at FROM launch_alert_subscriptions WHERE chain_id = ? ORDER BY chat_id",
@@ -2176,11 +2189,12 @@ class Database:
         )
         subscriptions = await cursor.fetchall()
         if not subscriptions:
-            return
+            return None
         cursor = await self._db.execute(
             _LAUNCH_OUTCOMES_SINCE, (chain_id, since, chain_id, chain_id, since, since)
         )
         alerts = []
+        held = None
         now = time.time()
         for row in await cursor.fetchall():
             token, stored_status, outcome_at = row[0], row[8], row[10]
@@ -2189,15 +2203,21 @@ class Database:
                 chat_id for chat_id, mode, created_at in subscriptions
                 if created_at <= outcome_at and (mode == "all" or outcome == "blocked")
             ]
-            if chats:
-                payload = json.dumps(await self._launch_item(chain_id, row))
-                alerts += [(chat_id, chain_id, token, outcome, outcome_at, payload, now, now) for chat_id in chats]
+            if not chats:
+                continue
+            finding = await self._launch_finding(chain_id, row)
+            if outcome == "blocked" and finding[1] is None and outcome_at > now - _BLOCKED_EVIDENCE_WAIT_SECONDS:
+                held = outcome_at if held is None else min(held, outcome_at)
+                continue
+            payload = json.dumps(_launch_item(chain_id, row, finding))
+            alerts += [(chat_id, chain_id, token, outcome, outcome_at, payload, now, now) for chat_id in chats]
         await self._db.executemany("""
             INSERT OR IGNORE INTO launch_alert_outbox
                 (chat_id, chain_id, token_address, outcome, outcome_at, payload, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, alerts)
         await self._db.commit()
+        return held
 
     async def get_pending_launch_alerts(
         self, now: float, max_age: float, per_chat: int, limit: int

@@ -1,8 +1,11 @@
 """Launch alert subscriptions and the durable outbox the Telegram bot polls (no Telegram needed)."""
 
+from types import SimpleNamespace
+
 import pytest
 import pytest_asyncio
 
+import core.database
 from core.database import Database
 
 
@@ -237,6 +240,55 @@ async def test_repeated_passes_and_a_restart_queue_nothing_twice(tmp_path):
         assert await _outbox(reopened) == [(CHAT_A, TOKENS[0], "blocked", "pending")]
     finally:
         await reopened.close()
+
+
+async def _recheck_blocked(db, token, at):
+    await db.upsert_tracked_pair(token, token_address=token, chain_id=CHAIN)
+    await db._db.execute(
+        "UPDATE tracked_pairs SET status = 'blocked', last_checked = ? WHERE pair_address = ?",
+        (at, token),
+    )
+    await db._db.commit()
+
+
+@pytest.mark.asyncio
+async def test_a_rechecked_block_waits_for_its_evidence_before_queueing(db, monkeypatch):
+    await _subscribe(db, CHAT_A, "blocked", at=500.0)
+    await _scan(db, TOKENS[0], "unknown", 20, at=1000.0)
+    await _recheck_blocked(db, TOKENS[0], at=2000.0)
+    monkeypatch.setattr(core.database, "time", SimpleNamespace(time=lambda: 2010.0))
+
+    held = await db.enqueue_launch_alerts(CHAIN, since=1990.0)
+    assert held == 2000.0
+    assert await _outbox(db) == []
+
+    await db.insert_agent_finding(
+        finding_type="hunter_sweep", address=TOKENS[0], chain_id=CHAIN,
+        risk_score=85, evidence=EVIDENCE, action_taken="blocked",
+    )
+    assert await db.enqueue_launch_alerts(CHAIN, since=held) is None
+
+    (alert,) = await db.get_pending_launch_alerts(now=2010.0, max_age=3600, per_chat=5, limit=5)
+    assert alert["outcome"] == "blocked"
+    assert alert["payload"]["scan"]["coverage"] == EVIDENCE["coverage"]
+    assert alert["payload"]["scan"]["flags"] == EVIDENCE["critical_flags"]
+    assert alert["payload"]["scan"]["risk_score"] == 85
+
+
+@pytest.mark.asyncio
+async def test_a_block_whose_evidence_never_arrives_is_queued_after_the_wait_without_it(db, monkeypatch):
+    await _subscribe(db, CHAT_A, "blocked", at=500.0)
+    await _scan(db, TOKENS[0], "unknown", 20, at=1000.0)
+    await _recheck_blocked(db, TOKENS[0], at=2000.0)
+    monkeypatch.setattr(core.database, "time", SimpleNamespace(time=lambda: 2301.0))
+
+    assert await db.enqueue_launch_alerts(CHAIN, since=1990.0) is None
+
+    (alert,) = await db.get_pending_launch_alerts(now=2301.0, max_age=3600, per_chat=5, limit=5)
+    assert alert["payload"]["scan"]["status"] == "unknown"
+    assert alert["payload"]["scan"]["coverage_reasons"] == {
+        "scan": "Coverage details were not recorded for this scan"
+    }
 
 
 @pytest.mark.asyncio
