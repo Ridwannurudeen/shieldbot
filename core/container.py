@@ -43,7 +43,6 @@ from services.threat_graph import ThreatGraphService
 from services.reputation import ReputationService
 from services.guardian import GuardianService
 from services.anomaly_detector import AnomalyDetector
-from services.tier_service import TierService
 
 logger = logging.getLogger(__name__)
 
@@ -220,9 +219,6 @@ class ServiceContainer:
 
         # Anomaly detection (agent behavioral baselines)
         self.anomaly_detector = AnomalyDetector(self.db)
-
-        # Premium tier management (token gating)
-        self.tier_service = TierService(rpc_url=settings.bsc_rpc_url)
 
     async def startup(self):
         """Initialize async-dependent services."""
