@@ -273,18 +273,29 @@ class EvmAdapter(ChainAdapter):
 
         A reverting owner() (ContractLogicError, raised by web3 6 and 7 alike) is a definitive
         answer: there is no Ownable owner to read, so the lookup is complete with both fields None.
-        Every other failure is missing data and carries status unknown with a class-only reason.
-        That includes BadFunctionCallOutput, which web3 raises both for output that is not an
-        address and for an empty reply from a node that is not synced, so it cannot count as an
-        answer. OffchainLookup is a ContractLogicError subclass but asks for more data, not a revert.
+        So is an empty reply, which is how a contract whose fallback does not revert (WETH9 and
+        its WBNB copy) answers a function it lacks. web3 raises BadFunctionCallOutput for that and
+        for output that is not an address alike, so the raw reply is read again to tell them apart
+        by length. Every other failure is missing data and carries status unknown with a
+        class-only reason. OffchainLookup is a ContractLogicError subclass that asks for more
+        data rather than reverting.
         """
-        from web3.exceptions import ContractLogicError, OffchainLookup
+        from web3.exceptions import BadFunctionCallOutput, ContractLogicError, OffchainLookup
 
         try:
             contract = self.w3.eth.contract(
                 address=Web3.to_checksum_address(address), abi=ERC20_ABI,
             )
-            owner = await self._call_with_retry(contract.functions.owner().call)
+            try:
+                owner = await self._call_with_retry(contract.functions.owner().call)
+            except BadFunctionCallOutput:
+                # 0x8da5cb5b is the owner() selector.
+                reply = await self._call_with_retry(
+                    self.w3.eth.call, {'to': contract.address, 'data': '0x8da5cb5b'},
+                )
+                if len(reply) == 0:
+                    return {'owner': None, 'is_renounced': None}
+                raise
             zero_address = '0x0000000000000000000000000000000000000000'
             is_renounced = owner.lower() == zero_address.lower()
             return {'owner': owner, 'is_renounced': is_renounced}

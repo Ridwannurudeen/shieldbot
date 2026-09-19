@@ -23,22 +23,28 @@ RPC_URL = f"https://rpc.invalid/v2/{TEST_KEY}"
 TOKEN = "0x1111111111111111111111111111111111111111"
 OWNER = Web3.to_checksum_address("0x" + "0" * 38 + "aa")
 UNKNOWN = {"owner": None, "is_renounced": None}
+# A contract with code whose non-reverting fallback answers owner() with no data, as WETH9 does.
+WETH9_CODE = "0x6060604052361561"
 
 
 def _word(hex_value):
     return "0x" + hex_value.rjust(64, "0")
 
 
-def _node(call_reply, status=200):
+def _node(call_reply, status=200, code="0x", calls=None):
     """Patch requests so the installed web3 builds its own result or exception."""
 
     def post(session, url, data=None, **kwargs):
         request = json.loads(data)
+        if calls is not None:
+            calls.append((request["method"], request["params"]))
         body = {"jsonrpc": "2.0", "id": request["id"]}
         if request["method"] == "eth_call":
             body.update(call_reply)
         elif request["method"] == "eth_chainId":
             body["result"] = hex(4663)
+        elif request["method"] == "eth_getCode":
+            body["result"] = code
         else:
             body["result"] = "0x"
         response = requests.Response()
@@ -52,11 +58,11 @@ def _node(call_reply, status=200):
     return patch.object(requests.Session, "post", post)
 
 
-async def _lookup(caplog, call_reply, status=200):
+async def _lookup(caplog, call_reply, status=200, calls=None):
     adapter = EvmAdapter(4663, "Robinhood Chain", RPC_URL)
     caplog.set_level(logging.DEBUG, logger="adapters.evm_base")
     with (
-        _node(call_reply, status),
+        _node(call_reply, status, code=WETH9_CODE, calls=calls),
         patch("time.sleep"),
         patch("adapters.evm_base.asyncio.sleep", new_callable=AsyncMock),
     ):
@@ -88,14 +94,25 @@ async def test_reverting_owner_is_a_complete_answer(caplog, error):
 
 
 @pytest.mark.asyncio
+async def test_empty_reply_means_there_is_no_owner_function(caplog):
+    calls = []
+    result = await _lookup(caplog, {"result": "0x"}, calls=calls)
+    assert result == UNKNOWN
+    owner_calls = [params for method, params in calls if method == "eth_call"]
+    # The raw re-read sends exactly the calldata web3 sent for owner().
+    assert len(owner_calls) == 2
+    assert owner_calls[0][0]["data"] == owner_calls[1][0]["data"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "call_reply",
     [
-        {"result": "0x"},
         {"result": "0x" + "ff" * 32},
+        {"result": "0x12345678"},
     ],
 )
-async def test_empty_or_non_address_output_is_missing_data(caplog, call_reply):
+async def test_non_empty_non_address_output_is_missing_data(caplog, call_reply):
     result = await _lookup(caplog, call_reply)
     assert result == {
         **UNKNOWN,
@@ -206,3 +223,45 @@ async def test_ownership_and_bytecode_failures_are_both_reported(mock_web3_clien
         data = await service.fetch_contract_data(TOKEN, chain_id=4663)
     assert data["coverage"] == {"ownership_renounced": False, "bytecode": False}
     assert data["reason"] == "Ownership lookup failed (HTTPError); Bytecode scan unavailable"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "chain_id, token",
+    [
+        (56, "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"),  # WBNB
+        (1, "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),  # WETH
+    ],
+)
+async def test_weth9_shaped_token_scan_stays_ok(mock_web3_client, chain_id, token):
+    adapter = EvmAdapter(chain_id, "Wrapped native", RPC_URL)
+    mock_web3_client.get_bytecode.return_value = WETH9_CODE
+
+    async def ownership(address, chain_id=56):
+        return await adapter.get_ownership_info(address)
+
+    mock_web3_client.get_ownership_info = ownership
+    service = ContractService(mock_web3_client, MagicMock(check_address=AsyncMock(return_value=[])))
+    with (
+        _node({"result": "0x"}, code=WETH9_CODE),
+        patch("time.sleep"),
+        patch("adapters.evm_base.asyncio.sleep", new_callable=AsyncMock),
+        patch("services.contract_service.BSCSCAN_DELAY", 0),
+    ):
+        data = await service.fetch_contract_data(token, chain_id=chain_id)
+        structural = await StructuralAnalyzer(service).analyze(AnalysisContext(token, chain_id=chain_id))
+    assert "coverage" not in data
+    assert data["ownership_renounced"] is None
+    direct = RiskEngine().compute_composite_risk(data, HONEYPOT, MARKET, ETHOS)
+    registry = RiskEngine().compute_from_results(
+        [
+            structural,
+            AnalyzerResult("market", 0.25, 0, data=MARKET),
+            AnalyzerResult("behavioral", 0.2, 0, data=ETHOS),
+            AnalyzerResult("honeypot", 0.15, 0, data=HONEYPOT),
+        ]
+    )
+    for risk in (direct, registry):
+        assert risk["status"] == "ok"
+        assert risk["coverage"]["structural"] == 1
+        assert format_extension_alert(risk)["status"] == "ok"
