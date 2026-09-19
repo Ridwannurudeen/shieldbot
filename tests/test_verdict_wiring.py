@@ -321,7 +321,7 @@ def test_api_lifespan_starts_the_drain_after_the_container_and_stops_it_before_s
         "container startup", "drain start", "hunter start", "hunter stop", "drain stop", "container shutdown",
     ]
     mock_container.verdict_publisher.start.assert_called_once_with()
-    mock_container.verdict_publisher.stop.assert_called_once_with()
+    mock_container.verdict_publisher.stop.assert_awaited_once_with()
 
 
 def test_only_the_api_process_starts_the_drain_or_reads_the_key():
