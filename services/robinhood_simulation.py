@@ -67,8 +67,10 @@ BALANCE_OVERRIDE_WEI = 100 * 10**18
 # most a few wei, so after a buy costing at least 1 gwei a zero output means the round trip lost
 # over 99.9999999% of its value, which no legitimate fee takes. A cheaper buy (the whole supply
 # priced under 0.001 ETH, since the buy is a millionth of it) is a dust or rugged pool: unknown.
-# The cost is counted in the numeraire's base units, so for USDG the bar is 1,000 USDG.
 MIN_TRAP_COST_WEI = 10**9
+# The same bar for a USDG-quoted pool, in USDG base units (6 decimals): after a buy costing at least 1 USDG,
+# a zero output means over 99.9999% of the value was lost, which a few units of rounding cannot explain.
+USDG_MIN_TRAP_COST = 10**6
 RPC_ATTEMPTS = 3
 RPC_BACKOFF_SECONDS = 1.0
 RPC_TIMEOUT_SECONDS = 30
@@ -652,10 +654,11 @@ def evaluate_simulation(
         if sold is None or (not hooked and sold[1] > 0):
             outcome["reason"] = "Malformed eth_simulateV1 sell logs"
             return outcome
-        if cost < MIN_TRAP_COST_WEI:
+        usdg = pool.numeraire == USDG
+        if cost < (USDG_MIN_TRAP_COST if usdg else MIN_TRAP_COST_WEI):
             outcome["reason"] = (
-                f"sell of {sent} token units returned zero output, but the buy cost only {cost} wei, "
-                "too little to rule out rounding"
+                f"sell of {sent} token units returned zero output, but the buy cost only {cost} "
+                f"{'USDG units' if usdg else 'wei'}, too little to rule out rounding"
             )
             return outcome
         outcome.update(

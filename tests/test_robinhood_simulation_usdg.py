@@ -17,6 +17,8 @@ from services.robinhood_simulation import (
     USDG,
     USDG_BALANCE_SLOT,
     USDG_BUY_BUDGET,
+    USDG_MIN_TRAP_COST,
+    MIN_TRAP_COST_WEI,
     Pool,
     RobinhoodSimulator,
     _pool_from_initialize,
@@ -36,6 +38,7 @@ from tests.test_robinhood_simulation import (
     pool_of,
     rpc_for,
     selector,
+    set_router_swap,
     strip_sell_payout,
 )
 
@@ -197,12 +200,32 @@ def test_usdg_sell_refused_by_the_token_is_a_honeypot():
     assert outcome["is_honeypot"] is True
 
 
-def test_zero_usdg_output_after_a_cheap_buy_stays_unknown():
-    # The trap bar is counted in the numeraire's base units; this buy cost far less than 10**9 USDG units.
+def test_the_usdg_trap_bar_is_one_usdg():
+    assert USDG_MIN_TRAP_COST == 10**6
+    assert MIN_TRAP_COST_WEI == 10**9
+
+
+@pytest.mark.parametrize("cost,trap", [(10**6 - 1, False), (10**6, True), (10**9 - 1, True)])
+def test_zero_usdg_output_is_a_trap_from_one_usdg_of_buy_cost(cost, trap):
+    # Zero output after a buy costing at least 1 USDG means over 99.9999% of the value was lost, which swap
+    # rounding (a few base units) cannot explain. Below that it may be dust, so it stays unknown.
+    fixture = strip_sell_payout(load("v4_doppler_usdg"))
+    set_router_swap(fixture, "buy", fixture["amount"], -cost)
+    outcome = evaluate(fixture)
+    assert outcome["can_buy"] is True
+    if trap:
+        assert (outcome["can_sell"], outcome["is_honeypot"]) == (False, True)
+        assert "zero output" in outcome["reason"]
+    else:
+        assert (outcome["can_sell"], outcome["is_honeypot"]) == (None, None)
+        assert f"the buy cost only {cost} USDG units, too little to rule out rounding" in outcome["reason"]
+
+
+def test_the_recorded_usdg_buy_is_below_the_bar_so_a_zero_sell_there_stays_unknown():
+    # The live buy cost about 0.02 USDG: a zero output at that size could be rounding.
     outcome = evaluate(strip_sell_payout(load("v4_doppler_usdg")))
-    assert outcome["can_sell"] is None
-    assert outcome["is_honeypot"] is None
-    assert "too little to rule out rounding" in outcome["reason"]
+    assert (outcome["can_sell"], outcome["is_honeypot"]) == (None, None)
+    assert "USDG units, too little to rule out rounding" in outcome["reason"]
 
 
 @pytest.mark.asyncio
