@@ -6,8 +6,8 @@ AgentTools.scan_contract, so a simulation-proven honeypot and its simulation blo
 
 import copy
 import json
-import subprocess
 import types
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -174,13 +174,15 @@ async def test_scan_contract_without_a_honeypot_analyzer_sets_the_key_to_none():
 # --- BSC parity: HoneypotService output is byte-identical to the base commit ---------------------
 
 
+BASE_HONEYPOT_SERVICE = Path(__file__).parent / "fixtures" / "honeypot_service_00b3c81.py.txt"
+
+
 def base_honeypot_service():
-    source = subprocess.run(
-        ["git", "show", "00b3c81:services/honeypot_service.py"],
-        capture_output=True,
-        encoding="utf-8",
-        check=True,
-    ).stdout
+    """HoneypotService as of 00b3c81, from a snapshot: CI checks out with depth 1, so git history is absent.
+
+    The snapshot is `git show 00b3c81:services/honeypot_service.py` (blob f27e8baf76).
+    """
+    source = BASE_HONEYPOT_SERVICE.read_text(encoding="utf-8")
     module = types.ModuleType("base_honeypot_service")
     exec(compile(source, "base_honeypot_service.py", "exec"), module.__dict__)
     return module.HoneypotService
