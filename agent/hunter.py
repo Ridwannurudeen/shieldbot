@@ -14,7 +14,8 @@ Robinhood Chain (4663) work shares one RPC budget and circuit breaker (services.
 every 4663 scan reserves its worst-case request count first, and while the breaker is open no
 4663 discovery or scan runs and nothing is recorded. When the fast launch watch
 (agent.launch_watch) is running it owns all 4663 work, so the sweep leaves launches to it and
-hands it the 4663 pairs due a recheck.
+hands it the 4663 pairs due a recheck. Each final 4663 scan result, a launch's first scan or a
+later recheck, goes to the optional verdict publisher.
 
 Every public method is wrapped in try/except so it never crashes the caller.
 """
@@ -56,13 +57,16 @@ SCAN_REQUEST_COST = 22
 class Hunter:
     """Proactive scheduled threat sweeps."""
 
-    def __init__(self, tools, db, ai_analyzer, sentinel, discovery=None, rpc_guard=None):
+    def __init__(
+        self, tools, db, ai_analyzer, sentinel, discovery=None, rpc_guard=None, verdict_publisher=None
+    ):
         self.tools = tools
         self.db = db
         self.ai = ai_analyzer
         self.sentinel = sentinel
         self.discovery = discovery
         self.rpc_guard = rpc_guard
+        self.verdict_publisher = verdict_publisher
         # The fast launch watch, when one is wired in; it owns 4663 work while it runs.
         self.launch_watch = None
         # Held while discovering or scanning 4663 launches, so the sweep and the watch never
@@ -110,6 +114,21 @@ class Hunter:
 
     def _watch_running(self) -> bool:
         return self.launch_watch is not None and self.launch_watch.is_running
+
+    async def _publish_verdict(self, chain_id: int, subject: str, result: dict):
+        """Hand a final 4663 scan result to the verdict publisher, when one is wired in.
+
+        A publisher failure never breaks a scan; it is logged by exception class only.
+        """
+        if self.verdict_publisher is None or chain_id != LAUNCH_CHAIN_ID:
+            return
+        try:
+            await self.verdict_publisher.publish(chain_id, subject, result)
+        except Exception as exc:
+            logger.error(
+                "Hunter: verdict publishing failed for %s: %s\n%s", subject,
+                type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+            )
 
     async def _reserve_scan(self, chain_id: int):
         """Reserve a 4663 scan's worst-case requests; raises BreakerOpenError while the breaker is open."""
@@ -253,6 +272,7 @@ class Hunter:
 
         A 4663 pair the open breaker refuses raises BreakerOpenError before it is marked checked.
         """
+        blocked = False
         try:
             chain_id = pair.get("chain_id", 56)
             await self._reserve_scan(chain_id)
@@ -281,13 +301,15 @@ class Hunter:
                     "blocked",
                     chain_id=chain_id,
                 )
-                return True
+                blocked = True
             elif risk_score is not None and risk_score <= 30 and not is_scan_incomplete(result):
                 # Cleared
                 await self.db.update_tracked_pair_status(
                     pair["pair_address"], "cleared"
                 )
             # else: still WARN, leave as watching
+            # FINAL RECHECK VERDICT: the rescan's result supersedes the launch's earlier one.
+            await self._publish_verdict(chain_id, pair["token_address"], result)
         except BreakerOpenError:
             raise
         except Exception as exc:
@@ -295,7 +317,7 @@ class Hunter:
                 "Hunter: error rechecking %s: %s\n%s", pair.get("token_address"),
                 type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
             )
-        return False
+        return blocked
 
     # ------------------------------------------------------------------
     # Phase 3: New Robinhood Chain launches
@@ -371,9 +393,9 @@ class Hunter:
         if status in ("unknown", "watching"):
             await self.db.upsert_tracked_pair(token, token_address=token, chain_id=LAUNCH_CHAIN_ID)
         await self.db.record_launch_scan(LAUNCH_CHAIN_ID, token, status, risk_score)
-        # FINAL LAUNCH VERDICT. This is the single call site where a launch's scan result is
-        # final (status recorded above, full result in ``result``). Verdict publishing plugs in
-        # here at integration: container.verdict_publisher.publish(LAUNCH_CHAIN_ID, token, result).
+        # FINAL LAUNCH VERDICT: a launch's first scan result is final here; recheck_pair publishes
+        # the results of later rescans.
+        await self._publish_verdict(LAUNCH_CHAIN_ID, token, result)
         return status
 
     # ------------------------------------------------------------------
