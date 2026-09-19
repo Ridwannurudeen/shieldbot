@@ -27,8 +27,8 @@ import logging
 import time
 import traceback
 
-from services.launch_discovery import CHAIN_ID, LaunchDiscoveryError
-from services.rpc_guard import BreakerOpenError
+from services.launch_discovery import CHAIN_ID, LaunchDiscoveryError, WrongChainError
+from services.rpc_guard import BREAKER_BASE_COOLDOWN_SECONDS, BREAKER_MAX_COOLDOWN_SECONDS, BreakerOpenError
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +45,12 @@ CANDIDATE_LIMIT = 500
 class LaunchWatch:
     """Poll 4663 discovery on a short interval and scan triaged launches between polls."""
 
-    def __init__(self, hunter):
+    def __init__(self, hunter, clock=time.monotonic):
         self.hunter = hunter
+        self._clock = clock
         self._task = None
+        self._pause = 0
+        self._paused_until = 0.0
         self._target = None
         self._swaps = {}
         self._rechecks = {}
@@ -83,7 +86,7 @@ class LaunchWatch:
 
     async def _loop(self):
         while True:
-            started = time.monotonic()
+            started = self._clock()
             try:
                 await self.cycle()
             except Exception as exc:
@@ -91,15 +94,19 @@ class LaunchWatch:
                     "Launch watch cycle failed: %s\n%s",
                     type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
                 )
-            await asyncio.sleep(max(0.0, started + POLL_INTERVAL_SECONDS - time.monotonic()))
+            await asyncio.sleep(max(0.0, started + POLL_INTERVAL_SECONDS - self._clock()))
 
     async def cycle(self):
         """Poll discovery once, then scan until the next poll is due or nothing is eligible.
 
         Nothing runs while the RPC breaker is open; once its cooldown has passed, the hunter
-        sends the one probe. A scan the breaker refuses is left pending, not recorded.
+        sends the one probe. A scan the breaker refuses is left pending, not recorded. An RPC
+        that answers for another chain pauses all 4663 work, with the pause doubling from the
+        breaker's base cooldown to its cap and one log line per pause.
         """
-        deadline = time.monotonic() + POLL_INTERVAL_SECONDS
+        if self._clock() < self._paused_until:
+            return
+        deadline = self._clock() + POLL_INTERVAL_SECONDS
         async with self.hunter.launch_lock:
             if not await self.hunter.rpc_ready():
                 return
@@ -109,16 +116,25 @@ class LaunchWatch:
                 polled = await self.hunter.discovery.poll(
                     pools={row["pool_id"] for row in window if row["pool_id"]}
                 )
+            except WrongChainError as exc:
+                self._pause = (
+                    min(self._pause * 2, BREAKER_MAX_COOLDOWN_SECONDS) if self._pause
+                    else BREAKER_BASE_COOLDOWN_SECONDS
+                )
+                self._paused_until = self._clock() + self._pause
+                logger.error("Launch watch paused %d s: %s", self._pause, type(exc).__name__)
+                return
             except LaunchDiscoveryError as exc:
                 logger.warning("Launch watch poll failed: %s", type(exc).__name__)
             else:
+                self._pause = 0
                 self._target = polled["target"]
                 for pool, count in polled["swaps"].items():
                     self._swaps[pool] = self._swaps.get(pool, 0) + count
             window = await self._window()
             pools = {row["pool_id"] for row in window}
             self._swaps = {pool: count for pool, count in self._swaps.items() if pool in pools}
-            while time.monotonic() < deadline:
+            while self._clock() < deadline:
                 job = self._next_job(window)
                 if job is None:
                     return

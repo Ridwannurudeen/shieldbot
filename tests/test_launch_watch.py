@@ -1,6 +1,8 @@
 """The fast Robinhood Chain launch watch: polling, triage, rechecks, breaker and lifecycle."""
 
 import asyncio
+import logging
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,7 +12,7 @@ from agent.hunter import Hunter
 from agent.launch_watch import POLL_INTERVAL_SECONDS, TRIAGE_WINDOW_BLOCKS, LaunchWatch
 from core.database import Database
 from core.registry import BACKGROUND_SCAN_DEADLINE_SECONDS
-from services.launch_discovery import LaunchDiscovery, RpcUnavailableError
+from services.launch_discovery import LaunchDiscovery, RpcUnavailableError, WrongChainError
 from services.rpc_guard import BREAKER_BASE_COOLDOWN_SECONDS, BREAKER_FAILURE_THRESHOLD, OPEN, RpcGuard
 
 _real_sleep = asyncio.sleep
@@ -69,7 +71,7 @@ class Polls:
         return {"target": TARGET, "launches": [], "swaps": self.swaps.pop(0) if self.swaps else {}}
 
 
-def make_watch(db, polls=None, scan=None, guard=None, discovery=None):
+def make_watch(db, polls=None, scan=None, guard=None, discovery=None, clock=time.monotonic):
     tools = MagicMock()
     tools.scan_contract = AsyncMock(side_effect=scan) if scan else AsyncMock(return_value=incomplete())
     tools.auto_watch_deployer = AsyncMock()
@@ -80,7 +82,7 @@ def make_watch(db, polls=None, scan=None, guard=None, discovery=None):
         tools=tools, db=db, ai_analyzer=MagicMock(is_available=MagicMock(return_value=False)),
         sentinel=MagicMock(), discovery=discovery, rpc_guard=guard,
     )
-    watch = LaunchWatch(hunter)
+    watch = LaunchWatch(hunter, clock=clock)
     hunter.launch_watch = watch
     return watch
 
@@ -243,6 +245,43 @@ async def test_a_throttled_poll_opens_the_breaker_and_skips_the_cycle_scans(db):
 
     watch.hunter.tools.scan_contract.assert_not_awaited()
     assert await unscanned(db) == [token(0)]
+
+
+@pytest.mark.asyncio
+async def test_a_wrong_chain_rpc_pauses_the_watch_with_a_growing_backoff(db, caplog):
+    now = [1_000.0]
+    await db.upsert_discovered_launches(4663, [launch(0)])
+    wrong_chain = AsyncMock(side_effect=WrongChainError("RPC is not Robinhood Chain"))
+    watch = make_watch(db, discovery=MagicMock(poll=wrong_chain), clock=lambda: now[0])
+
+    with caplog.at_level(logging.DEBUG, logger="agent.launch_watch"):
+        for _ in range(10):
+            await watch.cycle()
+            now[0] += POLL_INTERVAL_SECONDS
+
+    # Ten cycles over 200 s poll only at 0 s, then after 60 s and 120 s pauses.
+    assert wrong_chain.await_count == 3
+    assert [r.getMessage() for r in caplog.records if r.name == "agent.launch_watch"] == [
+        "Launch watch paused 60 s: WrongChainError",
+        "Launch watch paused 120 s: WrongChainError",
+        "Launch watch paused 240 s: WrongChainError",
+    ]
+    watch.hunter.tools.scan_contract.assert_not_awaited()
+
+    # A good poll after the pause resumes the watch and resets the backoff.
+    now[0] += 240
+    watch.hunter.discovery.poll = AsyncMock(
+        side_effect=[{"target": TARGET, "launches": [], "swaps": {pool(0): 1}}, WrongChainError("again")]
+    )
+    await watch.cycle()
+    assert [call.args[0] for call in watch.hunter.tools.scan_contract.await_args_list] == [token(0)]
+    now[0] += POLL_INTERVAL_SECONDS
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG, logger="agent.launch_watch"):
+        await watch.cycle()
+    assert [r.getMessage() for r in caplog.records if r.name == "agent.launch_watch"] == [
+        "Launch watch paused 60 s: WrongChainError"
+    ]
 
 
 # --- no duplicate scans between the watch and the sweep ---

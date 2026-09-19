@@ -76,6 +76,10 @@ class RpcUnavailableError(LaunchDiscoveryError):
     """The RPC did not answer within the retry budget, so a smaller query would not help."""
 
 
+class WrongChainError(LaunchDiscoveryError):
+    """The RPC answered for another chain, so nothing it reports about 4663 can be used."""
+
+
 @dataclass(frozen=True)
 class LaunchSource:
     name: str
@@ -352,7 +356,7 @@ class LaunchDiscovery:
 
     async def _check_chain(self):
         if _quantity(await self._call("eth_chainId", [])) != CHAIN_ID:
-            raise LaunchDiscoveryError("RPC is not Robinhood Chain")
+            raise WrongChainError("RPC is not Robinhood Chain")
 
     async def _confirmed_head(self) -> int:
         return _quantity(await self._call("eth_blockNumber", [])) - CONFIRMATIONS

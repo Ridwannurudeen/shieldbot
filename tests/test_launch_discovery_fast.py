@@ -17,6 +17,7 @@ from services.launch_discovery import (
     LaunchDiscovery,
     LaunchDiscoveryError,
     RpcUnavailableError,
+    WrongChainError,
 )
 from services.rpc_guard import (
     BREAKER_BASE_COOLDOWN_SECONDS,
@@ -290,6 +291,20 @@ async def test_a_failed_or_inconclusive_probe_reopens_with_a_longer_cooldown(db,
     assert not discovery.guard.probe_due
     clock.now += BREAKER_BASE_COOLDOWN_SECONDS
     assert discovery.guard.probe_due
+
+
+@pytest.mark.asyncio
+async def test_a_wrong_chain_raises_wrong_chain_error_and_is_checked_again_next_poll(db, clock):
+    rpc = FastRpc()
+    discovery = guarded(db, rpc, clock)
+    discovery._post = AsyncMock(return_value=answer(hex(56)))
+
+    for _ in range(2):
+        with pytest.raises(WrongChainError):
+            await discovery.poll()
+
+    assert [call.args[0]["method"] for call in discovery._post.await_args_list] == ["eth_chainId"] * 2
+    assert await cursors(db) == {source.name: None for source in SOURCES}
 
 
 # --- the combined poll ---
