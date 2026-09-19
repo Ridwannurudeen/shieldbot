@@ -51,6 +51,11 @@ MIN_CHUNK_BLOCKS = 500
 MAX_BLOCKS_PER_SWEEP = 50_000
 # The first sweep starts about one hour (36,000 blocks) behind the confirmed head.
 BACKFILL_BLOCKS = 36_000
+# Largest range the fast path reads in one combined query. A poll normally covers about 200
+# blocks (20 s at 0.1 s per block). The combined query also returns every v4 Swap on the chain,
+# and swap volume is what pushes a range towards the RPC's 10,000-log limit, so anything larger
+# goes through the per-source sweep, which reads no swaps.
+COMBINED_MAX_BLOCKS = 2_000
 HEADER_BATCH = 50
 MAX_ATTEMPTS = 4
 REQUEST_INTERVAL = 0.5
@@ -269,6 +274,7 @@ class LaunchDiscovery:
         self._session: Optional[aiohttp.ClientSession] = None
         self._last_request = 0.0
         self._chain_checked = False
+        self._combined_failed = False
 
     async def run(self):
         """Run one bounded sweep over every source.
@@ -286,12 +292,14 @@ class LaunchDiscovery:
         """Run one fast-path read and return the confirmed target, new launches and swap counts.
 
         ``pools`` are the Uniswap v4 pool ids and V2 pair addresses of launches being triaged.
-        While every source cursor agrees and the confirmed head is at most CHUNK_BLOCKS ahead, one
-        eth_getLogs reads all sources and those pools' Swap events (every v4 Swap is emitted by
-        the PoolManager, which is already a source address). Swaps are counted for ``pools`` and
-        for the pools of launches found in the same range. Otherwise, or if the RPC rejects the
-        combined query, the per-source sweep catches up and no swaps are counted. The chain id
-        is checked once per instance.
+        While every source cursor agrees and the confirmed head is at most COMBINED_MAX_BLOCKS
+        ahead, one eth_getLogs reads all sources and those pools' Swap events (every v4 Swap is
+        emitted by the PoolManager, which is already a source address). Swaps are counted for
+        ``pools`` and for the pools of launches found in the same range. Otherwise the per-source
+        sweep catches up and no swaps are counted; so it does when the RPC rejects the combined
+        query or returns a log that cannot be trusted, and on the poll after the RPC gave up on
+        one, so a query the RPC keeps failing is never repeated. The chain id is checked once per
+        instance.
         """
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
             self._session = session
@@ -303,18 +311,20 @@ class LaunchDiscovery:
             cursor = cursors.pop() if len(cursors) == 1 else None
             if cursor is not None and target <= cursor:
                 return {"target": target, "launches": [], "swaps": {}}
-            if cursor is None or target - cursor > CHUNK_BLOCKS:
+            if cursor is None or target - cursor > COMBINED_MAX_BLOCKS or self._combined_failed:
+                self._combined_failed = False
                 return {"target": target, "launches": await self._sweep(target), "swaps": {}}
             pools = set(pools)
             pairs = sorted(pool for pool in pools if len(pool) == 42)
             try:
                 logs = await self._combined_logs(cursor + 1, target, pairs)
+                decoded, swapped = _split_combined(logs, cursor + 1, target, pairs)
             except RpcUnavailableError:
+                self._combined_failed = True
                 raise
             except LaunchDiscoveryError as exc:
                 logger.warning("Launch discovery combined read rejected: %s", type(exc).__name__)
                 return {"target": target, "launches": await self._sweep(target), "swaps": {}}
-            decoded, swapped = _split_combined(logs, cursor + 1, target, pairs)
             records = await self._store(decoded, {source.name: (cursor, target) for source in SOURCES})
             pools.update(record["pool_id"] for record in records if record["pool_id"])
             counts = {}

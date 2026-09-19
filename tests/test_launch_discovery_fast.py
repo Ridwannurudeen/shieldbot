@@ -10,7 +10,7 @@ import pytest_asyncio
 from core.database import Database
 from services.launch_discovery import (
     CHAIN_ID,
-    CHUNK_BLOCKS,
+    COMBINED_MAX_BLOCKS,
     SOURCES,
     SWAP_V2_TOPIC,
     SWAP_V4_TOPIC,
@@ -341,7 +341,7 @@ async def test_poll_catches_up_per_source_when_the_cursors_are_not_ready(db, clo
         await set_cursors(db, RECENT)
         await db.set_launch_cursor(CHAIN_ID, "uniswap_v2", RECENT - 1)
     elif setup == "far behind":
-        await set_cursors(db, TARGET - CHUNK_BLOCKS - 1)
+        await set_cursors(db, TARGET - COMBINED_MAX_BLOCKS - 1)
     rpc = FastRpc()
 
     polled = await guarded(db, rpc, clock).poll(pools=[LONG_POOL])
@@ -349,6 +349,57 @@ async def test_poll_catches_up_per_source_when_the_cursors_are_not_ready(db, clo
     assert polled["swaps"] == {}
     assert all(isinstance(query["address"], str) for query in rpc.log_queries())
     assert await cursors(db) == {source.name: TARGET for source in SOURCES}
+
+
+@pytest.mark.asyncio
+async def test_the_combined_read_spans_at_most_its_block_limit(db, clock):
+    await set_cursors(db, TARGET - COMBINED_MAX_BLOCKS)
+    rpc = FastRpc()
+
+    await guarded(db, rpc, clock).poll(pools=[LONG_POOL])
+
+    (query,) = rpc.log_queries()
+    assert isinstance(query["address"], list)
+    assert int(query["toBlock"], 16) - int(query["fromBlock"], 16) + 1 == COMBINED_MAX_BLOCKS
+    assert COMBINED_MAX_BLOCKS <= 2_000
+
+
+@pytest.mark.asyncio
+async def test_after_the_combined_read_gives_up_the_next_poll_sweeps_per_source(db, clock):
+    await set_cursors(db, RECENT)
+    rpc = FastRpc()
+
+    async def combined_times_out(payload):
+        if isinstance(payload, dict) and payload["method"] == "eth_getLogs" \
+                and isinstance(payload["params"][0]["address"], list):
+            rpc.payloads.append(payload)
+            return 200, {"jsonrpc": "2.0", "id": payload["id"],
+                         "error": {"code": -32000, "message": "request timeout"}}
+        return await rpc(payload)
+
+    discovery = guarded(db, rpc, clock)
+    discovery._post = combined_times_out
+
+    # A message-classified error is retried, then given up on without touching the breaker.
+    with pytest.raises(RpcUnavailableError):
+        await discovery.poll(pools=[LONG_POOL])
+    assert [isinstance(query["address"], list) for query in rpc.log_queries()] == [True] * 4
+    assert discovery.guard.state == CLOSED
+    assert await cursors(db) == {source.name: RECENT for source in SOURCES}
+
+    rpc.payloads.clear()
+    polled = await discovery.poll(pools=[LONG_POOL])
+
+    assert rpc.log_queries() and all(isinstance(query["address"], str) for query in rpc.log_queries())
+    assert polled["swaps"] == {}
+    assert await cursors(db) == {source.name: TARGET for source in SOURCES}
+
+    # With the range read, the poll after tries the combined read again.
+    rpc.payloads.clear()
+    rpc.head += 100
+    discovery._post = rpc
+    await discovery.poll(pools=[LONG_POOL])
+    assert [isinstance(query["address"], list) for query in rpc.log_queries()] == [True]
 
 
 @pytest.mark.asyncio
@@ -395,21 +446,30 @@ async def test_a_throttled_poll_records_nothing_and_moves_no_cursor(db, clock):
 
 
 @pytest.mark.asyncio
-async def test_a_log_nobody_asked_for_is_rejected_before_anything_is_written(db, clock):
+@pytest.mark.parametrize("bad_log", [
+    v2_swap("0x" + "99" * 20, 65_516_700),
+    v4_swap("0x1234", 65_516_700),
+])
+async def test_an_untrusted_log_in_the_combined_read_falls_back_to_the_per_source_sweep(db, clock, bad_log):
     await set_cursors(db, RECENT)
-    stray = v2_swap("0x" + "99" * 20, 65_516_700)
     rpc = FastRpc()
 
-    async def serve_stray(payload):
+    async def serve_bad_log(payload):
         status, body = await rpc(payload)
-        if isinstance(payload, dict) and payload["method"] == "eth_getLogs":
-            body = {**body, "result": body["result"] + [stray]}
+        if isinstance(payload, dict) and payload["method"] == "eth_getLogs" \
+                and isinstance(payload["params"][0]["address"], list):
+            body = {**body, "result": body["result"] + [bad_log]}
         return status, body
 
     discovery = guarded(db, rpc, clock)
-    discovery._post = serve_stray
-    with pytest.raises(LaunchDiscoveryError):
-        await discovery.poll(pools=[V2_PAIR])
+    discovery._post = serve_bad_log
+    polled = await discovery.poll(pools=[V2_PAIR])
 
-    assert await launches(db) == {}
-    assert await cursors(db) == {source.name: RECENT for source in SOURCES}
+    queries = rpc.log_queries()
+    assert isinstance(queries[0]["address"], list)
+    assert [query["address"] for query in queries[1:]] == SOURCE_ADDRESSES
+    assert polled["swaps"] == {}
+    assert {row["token_address"] for row in polled["launches"]} == {
+        token for token, row in EXPECTED.items() if row[3] > RECENT
+    }
+    assert await cursors(db) == {source.name: TARGET for source in SOURCES}
