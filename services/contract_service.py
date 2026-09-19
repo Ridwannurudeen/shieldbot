@@ -76,6 +76,9 @@ class ContractService:
             ownership = await self.web3_client.get_ownership_info(address, chain_id=chain_id)
             if ownership:
                 results['ownership_renounced'] = ownership.get('is_renounced')
+                if ownership.get('status') == 'unknown':
+                    results['coverage'] = {**results.get('coverage', {}), 'ownership_renounced': False}
+                    results['reason'] = '; '.join(filter(None, (results.get('reason'), ownership.get('reason'))))
 
             # Bytecode pattern scan (RPC call)
             bytecode_warnings = []

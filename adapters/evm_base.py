@@ -269,6 +269,17 @@ class EvmAdapter(ChainAdapter):
             return {}
 
     async def get_ownership_info(self, address: str) -> Dict:
+        """Return the owner and whether it is renounced.
+
+        A reverting owner() (ContractLogicError, raised by web3 6 and 7 alike) is a definitive
+        answer: there is no Ownable owner to read, so the lookup is complete with both fields None.
+        Every other failure is missing data and carries status unknown with a class-only reason.
+        That includes BadFunctionCallOutput, which web3 raises both for output that is not an
+        address and for an empty reply from a node that is not synced, so it cannot count as an
+        answer. OffchainLookup is a ContractLogicError subclass but asks for more data, not a revert.
+        """
+        from web3.exceptions import ContractLogicError, OffchainLookup
+
         try:
             contract = self.w3.eth.contract(
                 address=Web3.to_checksum_address(address), abi=ERC20_ABI,
@@ -279,7 +290,10 @@ class EvmAdapter(ChainAdapter):
             return {'owner': owner, 'is_renounced': is_renounced}
         except Exception as e:
             logger.error("[%s] Error getting ownership info: %s", self._chain_name, type(e).__name__)
-            return {'owner': None, 'is_renounced': None}
+            result = {'owner': None, 'is_renounced': None}
+            if isinstance(e, ContractLogicError) and not isinstance(e, OffchainLookup):
+                return result
+            return {**result, 'status': 'unknown', 'reason': f'Ownership lookup failed ({type(e).__name__})'}
 
     async def check_honeypot(self, address: str) -> Dict:
         result = {
