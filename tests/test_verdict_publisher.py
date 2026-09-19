@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 from contextlib import contextmanager
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
@@ -1884,3 +1885,17 @@ async def test_long_waits_on_an_earlier_transaction_raise_an_alarm(db, reconcile
         assert await publisher.drain_once() == "retry"
     assert "waited 2 times in a row" in caplog.text
     assert len(chain.sent) == 1
+
+
+@pytest.mark.parametrize("delay,refused", [(87, True), (88, False)])
+def test_the_module_refuses_a_reconcile_delay_that_a_live_send_could_outlast(delay, refused):
+    """Claim recovery must never take a live send's row: 60 s + 2 s + 20 s without a touch, plus 5 s of margin."""
+    source = Path(vp.__file__).read_text(encoding="utf-8")
+    assert source.count("RECONCILE_AFTER_SECONDS = 120") == 1
+    changed = source.replace("RECONCILE_AFTER_SECONDS = 120", f"RECONCILE_AFTER_SECONDS = {delay}")
+    module = compile(changed, vp.__file__, "exec")
+    if refused:
+        with pytest.raises(RuntimeError, match="RECONCILE_AFTER_SECONDS"):
+            exec(module, {"__name__": "verdict_publisher_probe"})
+    else:
+        exec(module, {"__name__": "verdict_publisher_probe"})

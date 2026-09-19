@@ -99,8 +99,11 @@ DRAIN_MAX_BACKOFF_SECONDS = 300.0
 # Unresolved records are looked at again only after this long, in batches, and re-sent a bounded number of times.
 # Claim recovery uses the same age, so it must exceed the longest a live send goes without touching its row:
 # PHASE_TIMEOUT_SECONDS before storing, then PHASE_TIMEOUT_SECONDS + RECEIPT_DELAY_SECONDS + RECEIPT_TIMEOUT_SECONDS
-# (82 s) before recording the outcome.
+# (82 s) before recording the outcome. Checked here with 5 s of margin for the database writes; a raise rather than
+# an assert, so it also holds under python -O.
 RECONCILE_AFTER_SECONDS = 120
+if RECONCILE_AFTER_SECONDS <= PHASE_TIMEOUT_SECONDS + RECEIPT_DELAY_SECONDS + RECEIPT_TIMEOUT_SECONDS + 5:
+    raise RuntimeError("RECONCILE_AFTER_SECONDS must exceed the longest a live send leaves its row untouched")
 RECONCILE_BATCH = 5
 MAX_SEND_ATTEMPTS = 5
 # stop() waits this long for a send under way to record its outcome.
