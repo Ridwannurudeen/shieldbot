@@ -408,7 +408,7 @@ class TestLaunchAlertDelivery:
         assert alerts.bot.send_message.await_count == 6
 
     @pytest.mark.asyncio
-    async def test_flood_control_requeues_the_alert_and_ends_the_pass(self, bot_module, alerts, caplog):
+    async def test_flood_control_requeues_the_alert_and_pauses_the_chat(self, bot_module, alerts, caplog):
         await _subscribe(alerts.db, CHAT_A, "blocked")
         await _scan(alerts.db, TOKENS[0], "blocked", 90, at=990.0)
         await _scan(alerts.db, TOKENS[1], "blocked", 90, at=991.0, block=101)
@@ -424,6 +424,31 @@ class TestLaunchAlertDelivery:
         assert alerts.bot.send_message.await_count == 3
         assert await _states(alerts.db) == [(CHAT_A, TOKENS[0], "sent", None), (CHAT_A, TOKENS[1], "sent", None)]
         assert "RetryAfter" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_a_flood_controlled_chat_does_not_hold_up_other_chats(self, bot_module, alerts):
+        await _subscribe(alerts.db, CHAT_A, "blocked")
+        await _subscribe(alerts.db, CHAT_B, "blocked")
+        await _scan(alerts.db, TOKENS[0], "blocked", 90, at=990.0)
+        await _scan(alerts.db, TOKENS[1], "blocked", 90, at=991.0, block=101)
+        await alerts.db.enqueue_launch_alerts(CHAIN, 900.0)
+
+        async def send(chat_id, **kwargs):
+            if chat_id == CHAT_B:
+                raise RetryAfter(30)
+
+        alerts.bot.send_message.side_effect = send
+        await bot_module.deliver_launch_alerts(alerts.bot)
+
+        assert [call.kwargs["chat_id"] for call in alerts.bot.send_message.await_args_list] == [
+            CHAT_B, CHAT_A, CHAT_A,
+        ]
+        assert await _states(alerts.db) == [
+            (CHAT_B, TOKENS[0], "pending", None),
+            (CHAT_A, TOKENS[0], "sent", None),
+            (CHAT_B, TOKENS[1], "pending", None),
+            (CHAT_A, TOKENS[1], "sent", None),
+        ]
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("error", [Forbidden("bot was blocked by the user"), ChatMigrated(-100999)])

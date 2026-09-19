@@ -738,15 +738,16 @@ async def deliver_launch_alerts(bot):
     """Send one pass of queued launch alerts, each at most once.
 
     An alert is claimed before it is sent, so one that may have reached Telegram is never sent
-    again, even after a restart. Flood control returns the alert to the queue and ends the pass,
-    as does an unclear network error or a bot-wide error. A chat that blocked the bot or moved
-    is unsubscribed; other chats still get their alerts.
+    again, even after a restart. Flood control returns the alert to the queue and skips that
+    chat for the rest of the pass, so other chats still get theirs. An unclear network error or
+    a bot-wide error ends the pass. A chat that blocked the bot or moved is unsubscribed.
     """
     alerts = await container.db.get_pending_launch_alerts(
         time.time(), LAUNCH_ALERT_MAX_AGE_SECONDS, LAUNCH_ALERTS_PER_CHAT_PER_PASS, LAUNCH_ALERTS_PER_PASS,
     )
+    flood_controlled = set()
     for alert in alerts:
-        if not await container.db.claim_launch_alert(alert['id']):
+        if alert['chat_id'] in flood_controlled or not await container.db.claim_launch_alert(alert['id']):
             continue
         try:
             await bot.send_message(
@@ -754,9 +755,10 @@ async def deliver_launch_alerts(bot):
                 disable_web_page_preview=True,
             )
         except RetryAfter:
+            # Telegram refused the message, so it was not delivered and can be sent later.
             await container.db.set_launch_alert_state(alert['id'], 'pending')
-            logger.warning("Launch alert delivery paused by Telegram flood control (RetryAfter)")
-            return
+            flood_controlled.add(alert['chat_id'])
+            logger.warning("Launch alerts to a chat paused by Telegram flood control (RetryAfter)")
         except (Forbidden, ChatMigrated) as e:
             await container.db.set_launch_alert_state(alert['id'], 'failed', type(e).__name__)
             await container.db.unsubscribe_launch_alerts(alert['chat_id'], alert['chain_id'])
