@@ -33,11 +33,15 @@ the evidence has no simulation block.
     cast wallet import robinhood-owner --interactive
     ```
     This writes an encrypted keystore to `~/.foundry/keystores/robinhood-owner`. The plaintext key never touches disk.
-  - **Recorder**: a fresh hot wallet used only by the server. Generate it offline and store the key in a password
-    manager; it goes only into the API service's environment (step 8), nowhere else:
+  - **Recorder**: a fresh hot wallet used only by the server's API process. Do NOT run a bare `cast wallet new`:
+    it prints the private key to the terminal and its scrollback. Create an encrypted keystore instead; it asks for
+    a password and prints only the address:
     ```bash
-    cast wallet new
+    cast wallet new ~/.foundry/keystores robinhood-recorder
     ```
+    The plaintext key is needed once, to write the API's environment file in step 8. Decrypt it there with
+    `cast wallet decrypt-keystore robinhood-recorder` in a private terminal, and clear the screen afterwards. It
+    goes into that file and nowhere else.
 - A little ETH on Robinhood Chain in the owner wallet for the deployment (the dry run below prints the estimate).
 
 ```bash
@@ -119,6 +123,20 @@ cast call $REGISTRY "totalRecords()(uint256)"  --rpc-url $RH_RPC   # 0
 cast call $REGISTRY "MAX_BATCH()(uint256)"     --rpc-url $RH_RPC   # 50
 ```
 
+Check once that `record()` fits the server's gas cap. Robinhood Chain is an Arbitrum chain, so `eth_estimateGas`
+includes the L1 data fee as gas. The server signs with the estimate plus 20% and defers anything above 1,000,000
+gas, so the estimate must be well under 833,334. This is a read-only simulation from the recorder's address;
+nothing is sent:
+
+```bash
+cast estimate $REGISTRY "record(address,uint8,bytes32,uint64)" \
+  0x0000000000000000000000000000000000000001 1 "$(cast keccak shieldbot)" 0 \
+  --from $RECORDER --rpc-url $RH_RPC
+```
+
+The Foundry gas report measured about 117k execution gas for a first record. If the estimate is near 833,334 or
+above it, stop and raise `MAX_GAS_LIMIT` in `services/verdict_publisher.py` before configuring the server.
+
 ## 6. Set or rotate the recorder (OWNER-ONLY)
 
 The recorder is set at deployment. To replace it (key rotation, or if the server key may be compromised):
@@ -134,6 +152,9 @@ The old recorder loses access in the same transaction. Then put the new recorder
 Ownership moves in two steps: the owner calls `transferOwnership(<new owner>)`, and nothing changes until the new
 owner calls `acceptOwnership()`.
 
+Never call `renounceOwnership()` (inherited from OpenZeppelin). It removes the owner permanently, so the recorder
+could never be rotated again, not even after the recorder key is compromised.
+
 ## 7. Fund the recorder (OWNER-ONLY)
 
 The recorder pays gas for every `record()`. The first record for a token measured 116,795 execution gas in the
@@ -148,23 +169,29 @@ cast balance $RECORDER --rpc-url $RH_RPC --ether
 
 Spend limits in the server (`services/verdict_publisher.py`). Only the API process sends, so they are global:
 - at most 60 records per hour; further verdicts wait in the queue as `pending`;
-- a gas limit of `eth_estimateGas` + 20%, deferred above 500,000 gas;
+- a gas limit of `eth_estimateGas` + 20%, deferred above 1,000,000 gas;
 - `maxFeePerGas` = 2 x base fee, capped at 1 gwei, and deferred while the base fee itself is above 1 gwei;
 - deferred while the recorder's balance cannot cover gas limit x `maxFeePerGas`.
 
-At the full 60 records per hour and the fee above, the recorder spends about 0.0005 ETH per hour. When it runs
-out of ETH, nothing is lost: verdicts stay `pending` and are recorded once the recorder is funded again.
+At the full 60 records per hour and the fee above, the recorder spends about 0.0005 ETH per hour. At the caps a
+single record could cost at most 1,000,000 gas x 1 gwei = 0.001 ETH. When the recorder runs out of ETH, nothing
+is lost: verdicts stay `pending` and are recorded once it is funded again.
 
 ## 8. Configure the server
 
-Exactly one process sends transactions: the API service (the unit that runs `uvicorn api:app`, with its single
-worker). Its lifespan starts the verdict drain. The bot, and every other path, only stores evidence and queues
-Robinhood Chain verdicts as `pending` in the shared SQLite database; the bot code never reads the key.
+Exactly one process sends transactions: the API service. On the server the API unit is `shieldbot` (it runs
+`uvicorn api:app`) and the Telegram bot unit is `shieldbot-bot`. The API's lifespan starts the verdict drain. The
+bot, and every other path, only stores evidence and queues Robinhood Chain verdicts as `pending` in the shared
+SQLite database; the bot code never reads the key.
+
+**The API must run as a single uvicorn process: no `--workers` and no `--reload`** (as in `shieldbot-api.service`
+in this repository). Two API processes would be two senders racing for the recorder's nonces.
 
 **Only the API service's environment gets `ROBINHOOD_RECORDER_PRIVATE_KEY`.** The API and bot units both load
 `/opt/shieldbot/.env`, so do NOT put the key there. Put it in a separate file that only the API unit loads:
 
 ```bash
+sudo install -d -m 755 -o root -g root /etc/shieldbot   # the directory must exist first
 sudo install -m 600 -o root -g root /dev/null /etc/shieldbot/recorder.env
 sudo nano /etc/shieldbot/recorder.env        # one line: ROBINHOOD_RECORDER_PRIVATE_KEY=0x...
 sudo systemctl edit shieldbot                # the API unit; `systemctl cat shieldbot` must show uvicorn api:app
@@ -182,6 +209,16 @@ Add to the shared `/opt/shieldbot/.env` (both services may read these; neither i
 ```
 ROBINHOOD_VERDICT_REGISTRY=0x...          # $REGISTRY from step 3
 ROBINHOOD_RPC_URL=https://rpc.mainnet.chain.robinhood.com   # optional; this is the default
+```
+
+**Hard stop: before restarting anything, check that only the API unit can see the key.** Each command must print
+what its comment says. If any does not, stop and fix the configuration first:
+
+```bash
+sudo grep -c ROBINHOOD_RECORDER_PRIVATE_KEY /opt/shieldbot/.env   # 0: the shared file has no key
+systemctl cat shieldbot-bot | grep -c recorder.env              # 0: the bot does not load the key file
+systemctl cat shieldbot | grep -c recorder.env                  # 1: the API loads it
+systemctl cat shieldbot | grep ExecStart                        # uvicorn api:app, no --workers, no --reload
 ```
 
 Restart both services. The logs show:

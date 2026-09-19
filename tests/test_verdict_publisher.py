@@ -688,7 +688,7 @@ async def test_persistent_429_returns_the_row_to_the_queue(db):
         ),
         (lambda chain: setattr(chain, "block", {"number": "0x1"}), "MalformedRPCResponse"),
         (lambda chain: setattr(chain, "base_fee", vp.MAX_FEE_PER_GAS_WEI + 1), "FeeCapExceeded"),
-        (lambda chain: setattr(chain, "estimate", 416_668), "GasCapExceeded"),
+        (lambda chain: setattr(chain, "estimate", 833_335), "GasCapExceeded"),
         (lambda chain: setattr(chain, "balance", 120_000 * 2 * BASE_FEE - 1), "InsufficientFunds"),
         (
             lambda chain: chain.raise_on.update(
@@ -718,13 +718,15 @@ async def test_failures_before_signing_return_the_row_to_the_queue(db, caplog, s
 
 def test_gas_boundary_constants():
     # The gas limit is the estimate plus 20%: 416,667 gives exactly 500,000 and 416,668 gives 500,001.
-    assert 416_667 * 6 // 5 == vp.MAX_GAS_LIMIT
-    assert 416_668 * 6 // 5 == vp.MAX_GAS_LIMIT + 1
+    # The gas limit is the estimate plus 20%: 833,334 gives exactly 1,000,000 and 833,335 gives 1,000,002.
+    assert vp.MAX_GAS_LIMIT == 1_000_000
+    assert 833_334 * 6 // 5 == vp.MAX_GAS_LIMIT
+    assert 833_335 * 6 // 5 == vp.MAX_GAS_LIMIT + 2
 
 
 @pytest.mark.asyncio
 async def test_gas_limit_at_the_cap_and_max_fee_cap(db):
-    chain = FakeChain(estimate=416_667, base_fee=vp.MAX_FEE_PER_GAS_WEI * 3 // 4)
+    chain = FakeChain(estimate=833_334, base_fee=vp.MAX_FEE_PER_GAS_WEI * 3 // 4)
     publisher = sender(db)
     await publisher.publish(4663, TOKEN, COMPLETE)
     with rpc_node(chain):
@@ -1403,3 +1405,36 @@ async def test_rows_requeued_by_reconcile_are_drained_without_waiting(db, monkey
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(publisher._drain_loop(), 5)
     assert publisher.drain_once.await_count == 3
+
+
+def test_the_publisher_imports_no_private_names_from_the_simulator():
+    import ast
+
+    with open(vp.__file__, encoding="utf-8") as source:
+        tree = ast.parse(source.read())
+    private = [
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "services.robinhood_simulation"
+        for alias in node.names
+        if alias.name.startswith("_")
+    ]
+    assert private == []
+
+
+@pytest.mark.parametrize("value,expected", [("0x0", 0), ("0x1f", 31), ("0X1F", None), ("1f", None), ("0x", None), (31, None)])
+def test_quantities_are_strict_hex(value, expected):
+    assert vp._quantity(value) == expected
+
+
+@pytest.mark.parametrize("error,limited", [
+    ({"code": 429}, True),
+    ({"code": -32005, "message": "limit exceeded"}, True),
+    ({"code": -32000, "message": "Rate limit reached"}, True),
+    ({"code": -32000, "message": "Too Many Requests"}, True),
+    ({"code": -32000, "message": "nonce too low"}, False),
+    ("rate limit", False),
+    (None, False),
+])
+def test_rate_limit_errors_are_recognised(error, limited):
+    assert vp._rate_limited(error) is limited

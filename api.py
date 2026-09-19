@@ -1794,10 +1794,13 @@ async def verdict_permalink(chain_id: int, address: str):
         "onchain_error": stored["onchain_error"],
         "verify": (
             "keccak256 of the UTF-8 bytes of `canonical`, exactly as served, must equal evidence_hash. "
-            "When onchain_status is confirmed, Robinhood Chain transaction tx_hash emitted "
+            "onchain_status `confirmed`: Robinhood Chain transaction tx_hash emitted "
             "VerdictRecorded(subject, verdict, evidenceHash, observedBlock, timestamp) from `registry` "
             "with this subject, verdict_code, evidence_hash and the evidence's observed_block. "
-            "pending means queued for the chain; submitted and unconfirmed mean not yet proven on-chain."
+            "`reverted`: transaction tx_hash reverted and recorded nothing. "
+            "`pending` and `sending`: queued for, or being sent to, the chain. "
+            "`submitted`, `unconfirmed` and `failed`: not yet proven on-chain; retried automatically. "
+            "`off`: this verdict is stored here only and is not recorded on-chain."
         ),
     }
 

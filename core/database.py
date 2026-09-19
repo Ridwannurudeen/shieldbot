@@ -1946,6 +1946,9 @@ class Database:
 
             CREATE INDEX IF NOT EXISTS idx_verdict_evidence_subject
                 ON verdict_evidence(chain_id, subject, id);
+
+            CREATE INDEX IF NOT EXISTS idx_verdict_evidence_outbox
+                ON verdict_evidence(chain_id, onchain_status, id);
         """)
         await self._db.commit()
 

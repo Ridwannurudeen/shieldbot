@@ -285,3 +285,20 @@ def test_evidence_hash_format():
     digest = evidence_hash({"a": 1})
     assert digest == "0x" + keccak(b'{"a":1}').hex()
     assert len(digest) == 66
+
+
+@pytest.mark.parametrize("bot_style,hunter_style", [
+    (({}, None), (None, None)),
+    (({}, {}), (None, None)),
+])
+def test_empty_honeypot_data_is_the_same_as_none(bot_style, hunter_style):
+    """The bot passes {} for a scan without honeypot data, the hunter passes None: one scan, one hash."""
+    def payload(explicit, carried):
+        scan = dict(complete("MEDIUM"))
+        if carried is not None:
+            scan["honeypot_data"] = carried
+        return build_evidence(4663, SUBJECT, scan, explicit, scanned_at=1)
+
+    bot, hunter = payload(*bot_style), payload(*hunter_style)
+    assert "honeypot" not in bot
+    assert evidence_hash(bot) == evidence_hash(hunter)

@@ -50,11 +50,14 @@ def is_simulation_proven_honeypot(honeypot: Optional[dict]) -> bool:
 
 
 def _honeypot_of(scan_result: dict, honeypot: Optional[dict]) -> Optional[dict]:
-    """Explicit honeypot data, else the `honeypot_data` that AgentTools.scan_contract returns."""
-    if honeypot is not None:
+    """Explicit honeypot data, else the `honeypot_data` that AgentTools.scan_contract returns.
+
+    An empty dict counts as no data, so the bot's {} and the hunter's None give one document and one hash.
+    """
+    if honeypot:
         return honeypot
     carried = scan_result.get("honeypot_data")
-    return carried if isinstance(carried, dict) else None
+    return carried if isinstance(carried, dict) and carried else None
 
 
 def verdict_for(scan_result: dict, honeypot: Optional[dict] = None) -> Verdict:

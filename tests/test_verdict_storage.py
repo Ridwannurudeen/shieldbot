@@ -239,3 +239,19 @@ async def test_two_connections_never_claim_the_same_row(tmp_path):
     finally:
         await first.close()
         await second.close()
+
+
+@pytest.mark.asyncio
+async def test_the_claim_query_uses_the_outbox_index(db):
+    cursor = await db._db.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_verdict_evidence_outbox'"
+    )
+    [sql] = await cursor.fetchone()
+    assert "verdict_evidence(chain_id, onchain_status, id)" in " ".join(sql.split())
+    cursor = await db._db.execute(
+        "EXPLAIN QUERY PLAN SELECT id FROM verdict_evidence "
+        "WHERE chain_id = ? AND onchain_status = 'pending' ORDER BY id LIMIT 1",
+        (4663,),
+    )
+    plan = " ".join(row[-1] for row in await cursor.fetchall())
+    assert "idx_verdict_evidence_outbox" in plan

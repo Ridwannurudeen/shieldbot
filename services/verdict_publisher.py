@@ -60,7 +60,6 @@ from eth_account import Account
 from eth_utils import keccak, to_checksum_address
 
 from core.verdict_evidence import Verdict, build_evidence, canonical_bytes
-from services.robinhood_simulation import _quantity, _rate_limited
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +72,8 @@ MAX_RECORDS_PER_HOUR = 60
 RATE_WINDOW_SECONDS = 3600
 # About 18x the 0.056 gwei base fee of a recorded 4663 block. Arbitrum chains ignore priority fees.
 MAX_FEE_PER_GAS_WEI = 10**9
-MAX_GAS_LIMIT = 500_000
+# Arbitrum Nitro's eth_estimateGas includes the L1 data fee as gas, so leave room above the ~140k execution cost.
+MAX_GAS_LIMIT = 1_000_000
 RPC_ATTEMPTS = 3
 RPC_BACKOFF_SECONDS = 1.0
 RPC_TIMEOUT_SECONDS = 15
@@ -91,6 +91,7 @@ RECONCILE_BATCH = 5
 MAX_SEND_ATTEMPTS = 5
 
 ADDRESS_RE = re.compile(r"0x[0-9a-fA-F]{40}")
+QUANTITY_RE = re.compile(r"0x[0-9a-fA-F]+")
 
 
 class RecordFailed(Exception):
@@ -566,3 +567,22 @@ def _receipt_outcome(receipt) -> Optional[str]:
     """"confirmed" or "reverted" for a mined transaction's receipt, None when there is no usable receipt."""
     status = receipt.get("status") if isinstance(receipt, dict) else None
     return {"0x1": "confirmed", "0x0": "reverted"}.get(status)
+
+
+def _quantity(value) -> Optional[int]:
+    """A JSON-RPC hex quantity as an int, or None if it is not one."""
+    if not isinstance(value, str) or not QUANTITY_RE.fullmatch(value):
+        return None
+    return int(value, 16)
+
+
+def _rate_limited(error) -> bool:
+    """True for a JSON-RPC error that signals rate limiting (HTTP-style 429 or -32005, or its usual wording)."""
+    if not isinstance(error, dict):
+        return False
+    message = str(error.get("message", "")).lower()
+    return (
+        error.get("code") in (429, -32005)
+        or "rate limit" in message
+        or "too many requests" in message
+    )

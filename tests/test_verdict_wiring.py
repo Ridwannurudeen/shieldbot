@@ -114,6 +114,8 @@ async def test_permalink_serves_the_latest_evidence_and_how_to_verify(verdict_ap
     assert body["published_at"] > 0
     assert "VerdictRecorded" in body["verify"]
     assert "canonical" in body["verify"]
+    for status in ("confirmed", "reverted", "pending", "sending", "submitted", "unconfirmed", "failed", "off"):
+        assert f"`{status}`" in body["verify"]
 
 
 @pytest.mark.asyncio
