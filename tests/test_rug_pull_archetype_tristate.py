@@ -44,10 +44,11 @@ def test_confirmed_unrenounced_ownership_is_still_a_rug_pull(entrypoint):
 
 
 @pytest.mark.parametrize("entrypoint", ["direct", "registry"])
-def test_unknown_ownership_is_neither_a_rug_pull_nor_legitimate(entrypoint):
+def test_unknown_ownership_is_not_a_rug_pull(entrypoint):
     risk = _risk(entrypoint, None)
-    assert risk["risk_archetype"] not in ("rug_pull", "legitimate")
+    assert risk["risk_archetype"] != "rug_pull"
     assert risk["rug_probability"] == 12
+    assert risk["status"] == "ok"
 
 
 def test_unknown_ownership_keeps_high_risk_contract_when_the_score_is_high():

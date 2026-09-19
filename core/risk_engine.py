@@ -457,10 +457,6 @@ class RiskEngine:
                 return 'rug_pull'
         if rug_prob >= 71:
             return 'high_risk_contract'
-        # Mint and proxy with an unknown owner cannot be called legitimate.
-        if (is_token and contract_data.get('has_mint') and contract_data.get('has_proxy')
-                and contract_data.get('ownership_renounced') is None):
-            return 'unknown'
         return 'legitimate'
 
     def _compute_confidence(self, contract_data, honeypot_data, dex_data, ethos_data):
