@@ -52,7 +52,7 @@
 │  (BSC/opBNB) │ │  APIs        │ │  Databases   │
 │              │ │              │ │              │
 │ • Contract   │ │ • BscScan    │ │ • GoPlus     │
-│   Code       │ │ • Honeypot.is│ │ • ScamSniffer│
+│   Code       │ │ • Honeypot.is│ │ • Local list │
 │ • Bytecode   │ │              │ │              │
 │ • Token Data │ │              │ │              │
 └──────────────┘ └──────────────┘ └──────────────┘
@@ -89,7 +89,6 @@ User Input → Validate Address → Detect Type → Route to Scanner → Format 
 
 2. Scam Database Check (Multi-source)
    ├─ GoPlus Security lookup
-   ├─ ScamSniffer.io lookup
    └─ Local blacklist check
 
 3. Age Analysis
@@ -221,15 +220,13 @@ Honeypot.is API:
 ```python
 Sources:
   ├─ GoPlus Security (token risk flags)
-  ├─ ScamSniffer.io (flagged addresses)
   └─ Local blacklist (manually added)
 
 Check Flow:
   1. Query GoPlus Security API
-  2. Query ScamSniffer API
-  3. Check local blacklist
-  4. Aggregate results
-  5. Return all matches
+  2. Check local blacklist
+  3. Aggregate results
+  4. Return all matches
 ```
 
 ---
