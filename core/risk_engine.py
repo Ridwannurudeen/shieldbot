@@ -186,9 +186,10 @@ class RiskEngine:
                 if pair_age is not None and pair_age < 24:
                     composite = min(composite + 15, 100)
 
-            # A failed scam lookup is not a clean one, so it earns no positive signal.
-            scam_database_covered = contract_data.get('coverage', {}).get('scam_database', True)
-            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not contract_data.get('scam_matches') and scam_database_covered:
+            # A failed scam lookup or bytecode scan is not a clean one, so it earns no positive signal.
+            contract_coverage = contract_data.get('coverage', {})
+            checks_covered = contract_coverage.get('scam_database', True) and contract_coverage.get('bytecode', True)
+            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not contract_data.get('scam_matches') and checks_covered:
                 composite = max(composite - 20, 0)
 
             if contract_data.get('scam_matches'):
@@ -316,10 +317,11 @@ class RiskEngine:
                     composite = min(composite + 15, 100)
 
             # Positive signals — reduce score for renounced ownership with high liquidity.
-            # A failed scam lookup is not a clean one, so it earns no positive signal.
+            # A failed scam lookup or bytecode scan is not a clean one, so it earns no positive signal.
             liquidity_info = dex_data.get('liquidity_usd')
-            scam_database_covered = contract_data.get('coverage', {}).get('scam_database', True)
-            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not contract_data.get('scam_matches') and scam_database_covered:
+            contract_coverage = contract_data.get('coverage', {})
+            checks_covered = contract_coverage.get('scam_database', True) and contract_coverage.get('bytecode', True)
+            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not contract_data.get('scam_matches') and checks_covered:
                 composite = max(composite - 20, 0)
 
             if contract_data.get('scam_matches'):

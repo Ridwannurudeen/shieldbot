@@ -71,3 +71,48 @@ def test_failed_scam_lookup_loses_the_discount(entrypoint):
     assert risk["rug_probability"] == 26
     assert risk["status"] == "unknown"
     assert risk["risk_level"] != "LOW"
+
+
+def _bytecode_risk(entrypoint, bytecode_covered):
+    # A failed bytecode read leaves every pattern flag False (services/contract_service.py),
+    # so only the unverified 25 remains: 25 * 0.4 = 10.
+    contract = {
+        "is_contract": True,
+        "is_verified": False,
+        "contract_age_days": 400,
+        "has_mint": False,
+        "has_proxy": False,
+        "has_blacklist": False,
+        "ownership_renounced": True,
+        "scam_matches": [],
+    }
+    if not bytecode_covered:
+        contract["coverage"] = {"bytecode": False, "is_verified": True, "contract_age_days": True}
+        contract["status"] = "unknown"
+        contract["reason"] = "Bytecode scan unavailable"
+    engine = RiskEngine()
+    if entrypoint == "direct":
+        return engine.compute_composite_risk(contract, HONEYPOT, MARKET, ETHOS)
+    return engine.compute_from_results(
+        [
+            AnalyzerResult("structural", 0.4, 25, data=contract),
+            AnalyzerResult("market", 0.25, 0, data=MARKET),
+            AnalyzerResult("behavioral", 0.2, 0, data=ETHOS),
+            AnalyzerResult("honeypot", 0.15, 0, data=HONEYPOT),
+        ]
+    )
+
+
+@pytest.mark.parametrize("entrypoint", ["direct", "registry"])
+def test_successful_bytecode_read_keeps_the_discount(entrypoint):
+    risk = _bytecode_risk(entrypoint, True)
+    assert risk["rug_probability"] == 0
+    assert risk["status"] == "ok"
+
+
+@pytest.mark.parametrize("entrypoint", ["direct", "registry"])
+def test_failed_bytecode_scan_loses_the_discount(entrypoint):
+    risk = _bytecode_risk(entrypoint, False)
+    assert risk["rug_probability"] == 10
+    assert risk["status"] == "unknown"
+    assert risk["risk_level"] != "LOW"
