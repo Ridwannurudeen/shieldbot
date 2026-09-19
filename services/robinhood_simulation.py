@@ -9,6 +9,8 @@ Sourcify for chain 4663 and was exercised by live eth_simulateV1 runs:
 - Uniswap V2 Router02 0x89e5...9eba: swap functions, TransferHelper and UniswapV2Library strings,
   and the IUniswapV2Pair Swap event it bundles.
 - Doppler DopplerHookInitializer 0x4e34...a544: the getState(address) public getter.
+- Paxos USDG implementation 0x6818...6f8f (behind the EIP-1967 proxy 0x5fc5...d168): the balanceData
+  storage layout, confirmed by a live eth_call that read an overridden balance back exactly.
 """
 
 import asyncio
@@ -44,6 +46,10 @@ WETH = WETH_ADDRESS.lower()
 V2_FACTORY = UNISWAP_V2_FACTORY.lower()
 V2_ROUTER = UNISWAP_V2_ROUTER.lower()
 DOPPLER_HOOK_INITIALIZER = "0x4e3468951d49f2eea976ed0d6e75ffcb44a9a544"
+# Paxos USDG keeps balanceData, a mapping(address => TokenAccountData), at slot 1, and TokenAccountData
+# packs `uint64 balance` into the lowest 8 bytes, so a stateDiff of that slot funds a buyer with USDG.
+USDG = "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
+USDG_BALANCE_SLOT = 1
 # With traceTransfers, eth_simulateV1 reports native ETH movements as Transfer logs from this address.
 NATIVE_TRANSFER_LOG_ADDRESS = "0x" + "e" * 40
 LIQUIDITY_LAUNCHER_FEE = 2500
@@ -54,12 +60,17 @@ LOG_WINDOW_BLOCKS = 10_000
 MAX_LOG_WINDOWS = 3
 SUPPLY_FRACTION = 1_000_000
 BUY_BUDGET_WEI = 10 * 10**18
+# 1,000,000 USDG (6 decimals); it must fit TokenAccountData.balance, a uint64.
+USDG_BUY_BUDGET = 10**12
 BALANCE_OVERRIDE_WEI = 100 * 10**18
 # A zero sell output proves a trap only when rounding cannot explain it. Swap math rounds away at
 # most a few wei, so after a buy costing at least 1 gwei a zero output means the round trip lost
 # over 99.9999999% of its value, which no legitimate fee takes. A cheaper buy (the whole supply
 # priced under 0.001 ETH, since the buy is a millionth of it) is a dust or rugged pool: unknown.
 MIN_TRAP_COST_WEI = 10**9
+# The same bar for a USDG-quoted pool, in USDG base units (6 decimals): after a buy costing at least 1 USDG,
+# a zero output means over 99.9999% of the value was lost, which a few units of rounding cannot explain.
+USDG_MIN_TRAP_COST = 10**6
 RPC_ATTEMPTS = 3
 RPC_BACKOFF_SECONDS = 1.0
 RPC_TIMEOUT_SECONDS = 30
@@ -218,7 +229,9 @@ def _universal_router_swap(actions: list, params: list) -> bytes:
 
 
 def call_labels(pool: Pool) -> list:
-    labels = ["fund", "fund_approve", "fund_permit"] if _pays_weth(pool) else []
+    labels = []
+    if _pays_token(pool):
+        labels = (["fund"] if pool.numeraire == WETH else []) + ["fund_approve", "fund_permit"]
     labels += ["buy", "delivered"]
     if pool.route == "v2":
         return labels + ["pool_before_sell", "approve", "sell", "after_sell", "pool_after_sell", "transfer"]
@@ -231,6 +244,7 @@ def build_simulation_request(
     """Buy exactly `amount` tokens, then sell `sell_amount` of them (default: all of `amount`)."""
     token = token.lower()
     sell_amount = amount if sell_amount is None else sell_amount
+    budget = USDG_BUY_BUDGET if pool.numeraire == USDG else BUY_BUDGET_WEI
     if pool.route == "v2":
         spender = V2_ROUTER
         buy = _call(
@@ -263,13 +277,13 @@ def build_simulation_request(
                 [
                     encode(
                         [SINGLE_SWAP],
-                        [(pool.key, not token_is_currency0, amount, BUY_BUDGET_WEI, 0, b"")],
+                        [(pool.key, not token_is_currency0, amount, budget, 0, b"")],
                     ),
-                    encode(["address", "uint256"], [pool.numeraire, BUY_BUDGET_WEI]),
+                    encode(["address", "uint256"], [pool.numeraire, budget]),
                     encode(["address", "uint256"], [token, 0]),
                 ],
             ),
-            BUY_BUDGET_WEI if pool.numeraire == NATIVE else 0,
+            budget if pool.numeraire == NATIVE else 0,
         )
         # SETTLE before the swap so the swap spends exactly what the pool manager received
         # (amountIn 0 = OPEN_DELTA); a fee-on-transfer token then cannot fail with CurrencyNotSettled.
@@ -309,8 +323,8 @@ def build_simulation_request(
 
     steps = {
         "fund": _call(buyer, WETH, _selector("deposit()"), BUY_BUDGET_WEI),
-        "fund_approve": approve(WETH, PERMIT2),
-        "fund_permit": permit(WETH),
+        "fund_approve": approve(pool.numeraire, PERMIT2),
+        "fund_permit": permit(pool.numeraire),
         "buy": buy,
         "delivered": balance(buyer),
         "approve": approve(token, spender),
@@ -328,10 +342,14 @@ def build_simulation_request(
     if pool.route == "v2":
         steps["pool_before_sell"] = balance(pool.pair)
         steps["pool_after_sell"] = balance(pool.pair)
+    overrides = {buyer: {"balance": hex(BALANCE_OVERRIDE_WEI)}}
+    if pool.numeraire == USDG:
+        slot = keccak(encode(["address", "uint256"], [buyer, USDG_BALANCE_SLOT]))
+        overrides[USDG] = {"stateDiff": {"0x" + slot.hex(): "0x" + budget.to_bytes(32, "big").hex()}}
     return {
         "blockStateCalls": [
             {
-                "stateOverrides": {buyer: {"balance": hex(BALANCE_OVERRIDE_WEI)}},
+                "stateOverrides": overrides,
                 "calls": [steps[label] for label in call_labels(pool)],
             }
         ],
@@ -442,14 +460,14 @@ def _sell_trap(pool: Pool, data: bytes) -> Optional[str]:
     return None
 
 
-def _pays_weth(pool: Pool) -> bool:
-    return pool.route != "v2" and pool.numeraire == WETH
+def _pays_token(pool: Pool) -> bool:
+    return pool.route != "v2" and pool.numeraire != NATIVE
 
 
 def _sell_output(pool: Pool, logs, buyer: str) -> Optional[int]:
     if not isinstance(logs, list):
         return None
-    source = WETH if _pays_weth(pool) else NATIVE_TRANSFER_LOG_ADDRESS
+    source = pool.numeraire if _pays_token(pool) else NATIVE_TRANSFER_LOG_ADDRESS
     recipient = "0x" + "0" * 24 + buyer[2:]
     total = 0
     for log in logs:
@@ -610,7 +628,7 @@ def evaluate_simulation(
                 can_sell=False, is_honeypot=True, reason=f"sell reverted: {trap}; {attribution}"
             )
         return outcome
-    if not _pays_weth(pool) and not _traces_native_transfers(call["buy"]):
+    if not _pays_token(pool) and not _traces_native_transfers(call["buy"]):
         # The sell output of a native pool is only visible as a traceTransfers log, so without that
         # evidence a sell returning nothing is indistinguishable from an untraced transfer.
         outcome["reason"] = "native transfer tracing unavailable; the sell output cannot be measured"
@@ -636,10 +654,11 @@ def evaluate_simulation(
         if sold is None or (not hooked and sold[1] > 0):
             outcome["reason"] = "Malformed eth_simulateV1 sell logs"
             return outcome
-        if cost < MIN_TRAP_COST_WEI:
+        usdg = pool.numeraire == USDG
+        if cost < (USDG_MIN_TRAP_COST if usdg else MIN_TRAP_COST_WEI):
             outcome["reason"] = (
-                f"sell of {sent} token units returned zero output, but the buy cost only {cost} wei, "
-                "too little to rule out rounding"
+                f"sell of {sent} token units returned zero output, but the buy cost only {cost} "
+                f"{'USDG units' if usdg else 'wei'}, too little to rule out rounding"
             )
             return outcome
         outcome.update(
@@ -654,8 +673,8 @@ def evaluate_simulation(
         can_sell=True,
         is_honeypot=sell_tax is not None and sell_tax >= 100,
         reason=(
-            f"buy and sell succeeded: sold {sent} token units for {output} wei "
-            f"{'WETH' if _pays_weth(pool) else 'ETH'}"
+            f"buy and sell succeeded: sold {sent} token units for {output} "
+            + {USDG: "USDG units", WETH: "wei WETH"}.get(pool.numeraire, "wei ETH")
             + ("" if sell_tax is not None else "; sell tax unmeasurable")
         ),
     )
@@ -925,7 +944,7 @@ class RobinhoodSimulator:
                 numeraire = numeraire.lower()
                 if key[4] != DOPPLER_HOOK_INITIALIZER or {token, numeraire} != {key[0], key[1]}:
                     notes.append("Doppler pool state is inconsistent with the token")
-                elif numeraire in (NATIVE, WETH):
+                elif numeraire in (NATIVE, WETH, USDG):
                     pools.append(Pool("v4-doppler", numeraire, key=key))
                 else:
                     notes.append(
@@ -1012,7 +1031,7 @@ def _pool_from_initialize(log, token: str) -> tuple:
     if key[4] == NATIVE and other in (NATIVE, WETH):
         # A hookless pool needs no extra encoding, and WETH is funded as for a Doppler WETH pool.
         return Pool("v4-native" if other == NATIVE else "v4-weth", other, key=key), None
-    if key[4] == DOPPLER_HOOK_INITIALIZER and other in (NATIVE, WETH):
+    if key[4] == DOPPLER_HOOK_INITIALIZER and other in (NATIVE, WETH, USDG):
         return Pool("v4-doppler", other, key=key), None
     return None, (
         f"unsupported route: v4 pool 0x{_pool_id(key).hex()} "

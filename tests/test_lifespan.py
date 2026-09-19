@@ -35,6 +35,7 @@ def mock_container(monkeypatch):
     container.hunter.stop = AsyncMock()
     container.launch_watch.start = AsyncMock()
     container.launch_watch.stop = AsyncMock()
+    container.verdict_publisher.stop = AsyncMock()
     container.auth_manager.validate_key = AsyncMock(
         return_value={"key_id": "lifespan-key", "tier": "free"},
     )

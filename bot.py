@@ -954,6 +954,7 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
                 honeypot_data=honeypot_data, address=address, ai_analysis=ai_analysis,
                 token_info=token_info,
             )
+            verdict_scan, verdict_honeypot = risk_output, honeypot_data
             risk_level = 'unknown' if is_scan_incomplete(risk_output) else risk_output.get('risk_level', 'medium').lower()
 
             # Cache the composite result
@@ -977,6 +978,7 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
             if is_scan_incomplete(result):
                 result = {**result, 'status': 'unknown', 'risk_level': 'unknown', 'safety_level': 'unknown'}
             _set_cache(cache_key, 'contract', result)
+            verdict_scan, verdict_honeypot = result, None
             response = format_scan_result(result)
             risk_level = 'unknown' if is_scan_incomplete(result) else result.get('risk_level', 'medium')
 
@@ -989,6 +991,10 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
             onchain_line = "\n\U0001F517 On-chain recording scheduled\n"
         if risk_level != 'unknown' and base_attestor.is_available():
             await base_attestor.attest_fire_and_forget(address, risk_level, 'contract', source_chain_id=chain_id)
+        if chain_id == 4663:
+            container.verdict_publisher.publish_fire_and_forget(
+                chain_id, address, verdict_scan, honeypot_data=verdict_honeypot,
+            )
 
         try:
             await progress_msg.delete()
@@ -1072,6 +1078,7 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
                 honeypot_data=honeypot_data, address=address, ai_analysis=ai_analysis,
                 token_info=token_info,
             )
+            verdict_scan, verdict_honeypot = risk_output, honeypot_data
             risk_level = 'unknown' if is_scan_incomplete(risk_output) else risk_output.get('risk_level', 'medium').lower()
 
             _set_cache(cache_key, 'token', {
@@ -1094,6 +1101,7 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
             if is_scan_incomplete(result):
                 result = {**result, 'status': 'unknown', 'risk_level': 'unknown', 'safety_level': 'unknown'}
             _set_cache(cache_key, 'token', result)
+            verdict_scan, verdict_honeypot = result, None
             response = format_token_result(result)
             risk_level = 'unknown' if is_scan_incomplete(result) else result.get('safety_level', 'warning')
 
@@ -1106,6 +1114,10 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
             onchain_line = "\n\U0001F517 On-chain recording scheduled\n"
         if risk_level != 'unknown' and base_attestor.is_available():
             await base_attestor.attest_fire_and_forget(address, risk_level, 'token', source_chain_id=chain_id)
+        if chain_id == 4663:
+            container.verdict_publisher.publish_fire_and_forget(
+                chain_id, address, verdict_scan, honeypot_data=verdict_honeypot,
+            )
 
         try:
             await progress_msg.delete()

@@ -43,6 +43,7 @@ from services.threat_graph import ThreatGraphService
 from services.reputation import ReputationService
 from services.guardian import GuardianService
 from services.anomaly_detector import AnomalyDetector
+from services.verdict_publisher import VerdictPublisher
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +143,8 @@ class ServiceContainer:
         self.db = Database(settings.database_path)
         self.auth_manager = AuthManager(self.db)
         self.indexer = DeployerIndexer(self.web3_client, self.db, settings=settings)
+        # Verdict evidence storage, plus on-chain records in the Robinhood Chain registry when configured
+        self.verdict_publisher = VerdictPublisher(self.db, rpc_url=settings.robinhood_rpc_url)
 
         # Mempool monitor + Rescue mode + Campaign detection
         self.mempool_monitor = MempoolMonitor(self.web3_client, self.db)

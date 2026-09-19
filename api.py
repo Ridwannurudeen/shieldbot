@@ -193,6 +193,7 @@ async def lifespan(app: FastAPI):
     container = ServiceContainer(settings)
     _bind_globals(container)
     await container.startup()
+    container.verdict_publisher.start()
 
     # Initialize RPC proxy if enabled
     if settings.rpc_proxy_enabled:
@@ -232,6 +233,7 @@ async def lifespan(app: FastAPI):
     yield
     await container.launch_watch.stop()
     await container.hunter.stop()
+    await container.verdict_publisher.stop()
     await container.shutdown()
     rpc_proxy = getattr(app.state, "rpc_proxy", None)
     if rpc_proxy:
@@ -1763,6 +1765,50 @@ async def base_attestations(limit: int = 25):
         "explorer": f"https://base.easscan.org/address/{reader.attestor_address}",
         "attestations": await reader.get_recent(limit=limit),
         "summary": await reader.get_summary(),
+    }
+
+
+@app.get("/api/verdict/{chain_id}/{address}")
+async def verdict_permalink(chain_id: int, address: str):
+    """Latest published ShieldBot verdict for a token, with its evidence document and on-chain record."""
+    from core.verdict_evidence import Verdict
+    from services.verdict_publisher import MAX_SEND_ATTEMPTS
+
+    _validate_chain_id(chain_id)
+    if not web3_client.is_valid_address(address):
+        raise HTTPException(status_code=400, detail="Invalid address")
+    if not container or not container.db:
+        raise HTTPException(status_code=503, detail="Database not available")
+    stored = await container.db.get_latest_verdict_evidence(chain_id, address.lower())
+    if stored is None:
+        raise HTTPException(status_code=404, detail="No verdict published for this address")
+    return {
+        "chain_id": stored["chain_id"],
+        "subject": stored["subject"],
+        "verdict": stored["verdict"],
+        "verdict_code": int(Verdict[stored["verdict"]]),
+        "evidence_hash": stored["evidence_hash"],
+        "canonical": stored["canonical"],
+        "evidence": json.loads(stored["canonical"]),
+        "published_at": stored["created_at"],
+        "onchain_status": stored["onchain_status"],
+        "registry": stored["registry"],
+        "tx_hash": stored["tx_hash"],
+        "onchain_error": stored["onchain_error"],
+        "verify": (
+            "keccak256 of the UTF-8 bytes of `canonical`, exactly as served, must equal evidence_hash. "
+            "onchain_status `confirmed`: Robinhood Chain transaction tx_hash emitted "
+            "VerdictRecorded(subject, verdict, evidenceHash, observedBlock, timestamp) from `registry` "
+            "with this subject, verdict_code, evidence_hash and the evidence's observed_block; this is the "
+            "sequencer's soft finality, final on the parent chain once the batch is posted. "
+            "`reverted`: transaction tx_hash reverted and recorded nothing. "
+            "`pending` and `sending`: queued for, or being sent to, the chain. "
+            "`submitted`, `unconfirmed` and `failed`: not yet proven on-chain. Every transaction sent for this "
+            "verdict is looked up again periodically, and a mined one makes it `confirmed` or `reverted`; it is "
+            f"sent again only until {MAX_SEND_ATTEMPTS} transactions have been signed for it, and after that it "
+            "is only looked up. "
+            "`off`: this verdict is stored here only and is not recorded on-chain."
+        ),
     }
 
 

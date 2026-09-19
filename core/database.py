@@ -468,6 +468,7 @@ class Database:
         await self._create_launch_discovery_tables()
         await self._create_launch_feed_tables()
         await self._create_launch_alert_tables()
+        await self._create_verdict_evidence_tables()
 
         # Migrate: add registered_by_key column for existing DBs
         try:
@@ -2293,3 +2294,242 @@ class Database:
             (state, error, time.time(), alert_id),
         )
         await self._db.commit()
+    # --- Verdict Evidence ---
+
+    async def _create_verdict_evidence_tables(self):
+        await self._db.executescript("""
+            CREATE TABLE IF NOT EXISTS verdict_evidence (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chain_id INTEGER NOT NULL,
+                subject TEXT NOT NULL,
+                verdict TEXT NOT NULL,
+                evidence_hash TEXT NOT NULL,
+                canonical TEXT NOT NULL,
+                observed_block INTEGER NOT NULL,
+                created_at REAL NOT NULL,
+                onchain_status TEXT NOT NULL,
+                registry TEXT,
+                tx_hash TEXT,
+                nonce INTEGER,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                onchain_error TEXT,
+                updated_at REAL NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_verdict_evidence_subject
+                ON verdict_evidence(chain_id, subject, id);
+
+            CREATE INDEX IF NOT EXISTS idx_verdict_evidence_outbox
+                ON verdict_evidence(chain_id, onchain_status, id);
+
+            CREATE TABLE IF NOT EXISTS verdict_transactions (
+                evidence_id INTEGER NOT NULL,
+                tx_hash TEXT NOT NULL,
+                nonce INTEGER NOT NULL,
+                raw_tx TEXT,
+                max_fee_per_gas INTEGER,
+                created_at REAL NOT NULL,
+                PRIMARY KEY (evidence_id, tx_hash)
+            );
+        """)
+        await self._db.commit()
+        await self._migrate_verdict_outbox_columns()
+
+    async def _migrate_verdict_outbox_columns(self):
+        """Add the outbox's columns to verdict tables created before them; a transaction's fee stays unknown."""
+        await self._db.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = await self._db.execute("PRAGMA table_info(verdict_evidence)")
+            columns = {column[1] for column in await cursor.fetchall()}
+            if "nonce" not in columns:
+                await self._db.execute("ALTER TABLE verdict_evidence ADD COLUMN nonce INTEGER")
+            if "attempts" not in columns:
+                await self._db.execute(
+                    "ALTER TABLE verdict_evidence ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0"
+                )
+            cursor = await self._db.execute("PRAGMA table_info(verdict_transactions)")
+            columns = {column[1] for column in await cursor.fetchall()}
+            if "max_fee_per_gas" not in columns:
+                await self._db.execute(
+                    "ALTER TABLE verdict_transactions ADD COLUMN max_fee_per_gas INTEGER"
+                )
+            await self._db.commit()
+        except BaseException:
+            await self._db.rollback()
+            raise
+
+    async def insert_verdict_evidence(
+        self, chain_id: int, subject: str, verdict: str, evidence_hash: str, canonical: str,
+        observed_block: int, onchain_status: str, registry: Optional[str] = None,
+        onchain_error: Optional[str] = None,
+    ) -> int:
+        """Store one published evidence document; earlier documents for the subject are kept."""
+        now = time.time()
+        cursor = await self._db.execute("""
+            INSERT INTO verdict_evidence
+                (chain_id, subject, verdict, evidence_hash, canonical, observed_block, created_at,
+                 onchain_status, registry, onchain_error, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            chain_id, subject, verdict, evidence_hash, canonical, observed_block, now,
+            onchain_status, registry, onchain_error, now,
+        ))
+        await self._db.commit()
+        return cursor.lastrowid
+
+    async def update_verdict_onchain(
+        self, evidence_id: int, onchain_status: str, tx_hash: Optional[str] = None,
+        onchain_error: Optional[str] = None,
+    ):
+        """Record the on-chain outcome for one stored evidence document."""
+        await self._db.execute("""
+            UPDATE verdict_evidence
+            SET onchain_status = ?, tx_hash = ?, onchain_error = ?, updated_at = ?
+            WHERE id = ?
+        """, (onchain_status, tx_hash, onchain_error, time.time(), evidence_id))
+        await self._db.commit()
+
+    async def get_latest_verdict_evidence(self, chain_id: int, subject: str) -> Optional[Dict]:
+        """Return the most recently published evidence for a subject, or None if never published."""
+        cursor = await self._db.execute("""
+            SELECT id, chain_id, subject, verdict, evidence_hash, canonical, observed_block, created_at,
+                   onchain_status, registry, tx_hash, onchain_error, updated_at
+            FROM verdict_evidence
+            WHERE chain_id = ? AND subject = ?
+            ORDER BY id DESC
+            LIMIT 1
+        """, (chain_id, subject))
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        keys = (
+            "id", "chain_id", "subject", "verdict", "evidence_hash", "canonical", "observed_block",
+            "created_at", "onchain_status", "registry", "tx_hash", "onchain_error", "updated_at",
+        )
+        return dict(zip(keys, row))
+
+    async def claim_next_pending_verdict(self, chain_id: int) -> Optional[Dict]:
+        """Claim the oldest row waiting to be recorded on-chain by moving it from pending to sending.
+
+        The conditional UPDATE is atomic in SQLite, so two connections, even in two processes, never claim
+        the same row.
+        """
+        while True:
+            cursor = await self._db.execute("""
+                SELECT id, subject, verdict, evidence_hash, observed_block, tx_hash, nonce, attempts
+                FROM verdict_evidence
+                WHERE chain_id = ? AND onchain_status = 'pending'
+                ORDER BY id
+                LIMIT 1
+            """, (chain_id,))
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            cursor = await self._db.execute("""
+                UPDATE verdict_evidence SET onchain_status = 'sending', updated_at = ?
+                WHERE id = ? AND onchain_status = 'pending'
+            """, (time.time(), row[0]))
+            await self._db.commit()
+            if cursor.rowcount == 1:
+                return dict(zip(
+                    ("id", "subject", "verdict", "evidence_hash", "observed_block", "tx_hash", "nonce", "attempts"),
+                    row,
+                ))
+
+    async def set_verdict_tx_hash(
+        self, evidence_id: int, tx_hash: str, nonce: int, raw_tx: Optional[str] = None,
+        max_fee_per_gas: Optional[int] = None,
+    ) -> bool:
+        """Record a transaction about to be broadcast for a claimed row; returns False if the row is not claimed.
+
+        Every transaction a row has ever broadcast is kept in verdict_transactions, and the row's tx_hash and nonce
+        show the latest one. Each new transaction counts one attempt; sending the same bytes again adds nothing.
+        """
+        now = time.time()
+        # One transaction: a failure must not leave the row update behind for a later commit to land alone.
+        try:
+            cursor = await self._db.execute("""
+                UPDATE verdict_evidence SET tx_hash = ?, nonce = ?, updated_at = ?
+                WHERE id = ? AND onchain_status = 'sending'
+            """, (tx_hash, nonce, now, evidence_id))
+            claimed = cursor.rowcount == 1
+            if claimed:
+                cursor = await self._db.execute("""
+                    INSERT OR IGNORE INTO verdict_transactions
+                        (evidence_id, tx_hash, nonce, raw_tx, max_fee_per_gas, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (evidence_id, tx_hash, nonce, raw_tx, max_fee_per_gas, now))
+                if cursor.rowcount == 1:
+                    await self._db.execute(
+                        "UPDATE verdict_evidence SET attempts = attempts + 1 WHERE id = ?", (evidence_id,)
+                    )
+            await self._db.commit()
+        except BaseException:
+            await self._db.rollback()
+            raise
+        return claimed
+
+    async def get_verdict_transactions(self, evidence_ids: List[int]) -> Dict[int, List[Dict]]:
+        """Every transaction broadcast for each row, oldest first."""
+        transactions: Dict[int, List[Dict]] = {}
+        for evidence_id in evidence_ids:
+            cursor = await self._db.execute("""
+                SELECT tx_hash, nonce, raw_tx, max_fee_per_gas FROM verdict_transactions
+                WHERE evidence_id = ?
+                ORDER BY created_at, rowid
+            """, (evidence_id,))
+            transactions[evidence_id] = [
+                {"tx_hash": r[0], "nonce": r[1], "raw_tx": r[2], "max_fee_per_gas": r[3]}
+                for r in await cursor.fetchall()
+            ]
+        return transactions
+
+    async def touch_verdict(self, evidence_id: int):
+        """Mark a row as just looked at, so reconciliation looks at it again only after its delay."""
+        await self._db.execute(
+            "UPDATE verdict_evidence SET updated_at = ? WHERE id = ?", (time.time(), evidence_id)
+        )
+        await self._db.commit()
+
+    async def release_verdict_claim(self, evidence_id: int):
+        """Return a claimed row to the pending queue.
+
+        An earlier transaction's hash and nonce are kept, so the next attempt can check whether it may still land.
+        """
+        await self._db.execute("""
+            UPDATE verdict_evidence SET onchain_status = 'pending', updated_at = ?
+            WHERE id = ? AND onchain_status = 'sending'
+        """, (time.time(), evidence_id))
+        await self._db.commit()
+
+    async def requeue_verdict(self, evidence_id: int):
+        """Queue an unresolved record (submitted, unconfirmed or failed) for another attempt."""
+        await self._db.execute("""
+            UPDATE verdict_evidence SET onchain_status = 'pending', updated_at = ?
+            WHERE id = ? AND onchain_status IN ('submitted', 'unconfirmed', 'failed')
+        """, (time.time(), evidence_id))
+        await self._db.commit()
+
+    async def get_unresolved_verdicts(self, chain_id: int, updated_before: float, limit: int) -> List[Dict]:
+        """Signed records with no receipt yet, untouched since `updated_before`, least recently looked at first."""
+        cursor = await self._db.execute("""
+            SELECT id, tx_hash, nonce, attempts FROM verdict_evidence
+            WHERE chain_id = ? AND onchain_status IN ('submitted', 'unconfirmed', 'failed')
+              AND tx_hash IS NOT NULL AND updated_at < ?
+            ORDER BY updated_at, id
+            LIMIT ?
+        """, (chain_id, updated_before, limit))
+        return [
+            {"id": r[0], "tx_hash": r[1], "nonce": r[2], "attempts": r[3]} for r in await cursor.fetchall()
+        ]
+
+    async def get_claimed_verdicts(self, chain_id: int, claimed_before: Optional[float] = None) -> List[Dict]:
+        """Rows claimed for sending whose outcome was never recorded, optionally only those untouched since then."""
+        cursor = await self._db.execute("""
+            SELECT id, tx_hash, nonce, attempts FROM verdict_evidence
+            WHERE chain_id = ? AND onchain_status = 'sending' AND (? IS NULL OR updated_at < ?)
+            ORDER BY id
+        """, (chain_id, claimed_before, claimed_before))
+        return [
+            {"id": r[0], "tx_hash": r[1], "nonce": r[2], "attempts": r[3]} for r in await cursor.fetchall()
+        ]

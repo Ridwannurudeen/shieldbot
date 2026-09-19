@@ -782,6 +782,7 @@ PROVIDER_PATH_MODULES = [
     'services/tenderly_service.py',
     'services/token_gate_service.py',
     'services/token_sniffer_service.py',
+    'services/verdict_publisher.py',
 ]
 
 
