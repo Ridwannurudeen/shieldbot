@@ -1,0 +1,189 @@
+# Deploy ShieldBotVerdictRegistry on Robinhood Chain (4663)
+
+Runbook for the owner. Every command that sends a transaction is marked **OWNER-ONLY**. Nothing here passes a
+raw private key on the command line: transactions are signed with a Foundry keystore (`--account`).
+
+## What it is
+
+`src/ShieldBotVerdictRegistry.sol` is a small, non-upgradeable registry. It has no payable functions and makes
+no external calls.
+
+- **Owner** (the deploying account, `Ownable2Step`) can only rotate the recorder and hand over ownership.
+- **Recorder** (a hot wallet on the server) can only call `record` and `recordBatch` (at most `MAX_BATCH` = 50 entries).
+- Each record stores the latest `(verdict, observedBlock, timestamp, evidenceHash)` per token, plus a per-token
+  count and a total count, and emits:
+
+```
+VerdictRecorded(address indexed subject, uint8 indexed verdict, bytes32 indexed evidenceHash, uint64 observedBlock, uint64 timestamp)
+```
+
+Verdict codes: `0 UNKNOWN` (incomplete scan, never a safety claim), `1 LOW`, `2 MEDIUM`, `3 HIGH`,
+`4 HONEYPOT` (a buy-then-sell simulation proved holders cannot sell). A token never recorded reads as `UNKNOWN`.
+
+`evidenceHash` is the keccak256 of the canonical evidence JSON that ShieldBot serves at
+`GET /api/verdict/4663/<token>`. `observedBlock` is the Robinhood Chain block of the sell simulation, or 0 when
+the evidence has no simulation block.
+
+## Prerequisites
+
+- Foundry (`forge`, `cast`). Run everything below from `contracts/base`.
+- Two wallets:
+  - **Owner**: your cold or identity wallet. It deploys and owns the registry. Import it once as a keystore:
+    ```bash
+    cast wallet import robinhood-owner --interactive
+    ```
+    This writes an encrypted keystore to `~/.foundry/keystores/robinhood-owner`. The plaintext key never touches disk.
+  - **Recorder**: a fresh hot wallet used only by the server. Generate it offline and store the key in a password
+    manager; it goes into the server `.env` and nowhere else:
+    ```bash
+    cast wallet new
+    ```
+- A little ETH on Robinhood Chain in the owner wallet for the deployment (the dry run below prints the estimate).
+
+```bash
+export RH_RPC=https://rpc.mainnet.chain.robinhood.com
+export OWNER=0x<owner address>
+export RECORDER=0x<recorder address>
+```
+
+## 1. Build and test
+
+```bash
+forge build --sizes
+forge test -vv
+```
+
+## 2. Dry run against Robinhood Chain (no transaction is sent)
+
+Without `--broadcast`, `forge script` only simulates. No key is needed; `--sender` sets the simulated owner.
+
+```bash
+INITIAL_RECORDER=$RECORDER \
+  forge script script/DeployVerdictRegistry.s.sol:DeployVerdictRegistry \
+    --rpc-url $RH_RPC \
+    --sender $OWNER
+```
+
+Check the output before going further:
+- `Chain id: 4663`
+- `owner():` is `$OWNER` and `recorder():` is `$RECORDER`
+- it ends with `SIMULATION COMPLETE. To broadcast these transactions, add --broadcast ...`
+
+The same command against a local `anvil` (no fork, chain id 31337) was run during development and printed
+`owner(): 0xf39F...2266`, `recorder(): 0x7099...79C8` and `SIMULATION COMPLETE`; anvil's block number stayed 0.
+
+## 3. Deploy (OWNER-ONLY)
+
+```bash
+INITIAL_RECORDER=$RECORDER \
+  forge script script/DeployVerdictRegistry.s.sol:DeployVerdictRegistry \
+    --rpc-url $RH_RPC \
+    --account robinhood-owner --sender $OWNER \
+    --broadcast
+```
+
+Forge asks for the keystore password. Copy the `Deployed at: 0x...` address:
+
+```bash
+export REGISTRY=0x<deployed address>
+```
+
+The deployment transaction hash is in `broadcast/DeployVerdictRegistry.s.sol/4663/run-latest.json`
+(the `broadcast/` directory is gitignored).
+
+## 4. Verify the source on Sourcify (chain 4663)
+
+Sourcify lists chain 4663 as supported. Verification needs no API key:
+
+```bash
+forge verify-contract $REGISTRY src/ShieldBotVerdictRegistry.sol:ShieldBotVerdictRegistry \
+  --chain 4663 \
+  --verifier sourcify \
+  --watch
+```
+
+If Sourcify asks for the creation transaction, add `--creation-transaction-hash <deployment tx hash>`.
+Confirm the match:
+
+```bash
+curl -s https://sourcify.dev/server/v2/contract/4663/$REGISTRY
+# expect "match":"match" (or "exact_match")
+```
+
+## 5. Read-only sanity checks
+
+```bash
+cast call $REGISTRY "owner()(address)"         --rpc-url $RH_RPC   # $OWNER
+cast call $REGISTRY "recorder()(address)"      --rpc-url $RH_RPC   # $RECORDER
+cast call $REGISTRY "totalRecords()(uint256)"  --rpc-url $RH_RPC   # 0
+cast call $REGISTRY "MAX_BATCH()(uint256)"     --rpc-url $RH_RPC   # 50
+```
+
+## 6. Set or rotate the recorder (OWNER-ONLY)
+
+The recorder is set at deployment. To replace it (key rotation, or if the server key may be compromised):
+
+```bash
+cast send $REGISTRY "setRecorder(address)" 0x<new recorder address> \
+  --rpc-url $RH_RPC --account robinhood-owner
+cast call $REGISTRY "recorder()(address)" --rpc-url $RH_RPC
+```
+
+The old recorder loses access in the same transaction. Then put the new recorder key on the server (step 8).
+
+Ownership moves in two steps: the owner calls `transferOwnership(<new owner>)`, and nothing changes until the new
+owner calls `acceptOwnership()`.
+
+## 7. Fund the recorder (OWNER-ONLY)
+
+The recorder pays gas for every `record()`. The first record for a token measured 116,795 execution gas in the
+Foundry gas report; with the 21,000 base cost and calldata, a `record()` transaction is at most about 140k gas.
+The base fee on a recorded Robinhood Chain block (65,526,359) was 0.056 gwei, which makes one record about
+0.0000079 ETH. Send a small float, for example:
+
+```bash
+cast send $RECORDER --value 0.002ether --rpc-url $RH_RPC --account robinhood-owner
+cast balance $RECORDER --rpc-url $RH_RPC --ether
+```
+
+Spend limits in the server (`services/verdict_publisher.py`):
+- at most 60 records per hour per process;
+- a gas limit of `eth_estimateGas` + 20%, refused above 500,000 gas;
+- `maxFeePerGas` = 2 x base fee, capped at 1 gwei, and refused if the base fee itself is above 1 gwei.
+
+At the full 60 records per hour and the fee above, the recorder spends about 0.0005 ETH per hour. When it runs
+out of ETH, records fail and are marked failed; the evidence is still stored and served.
+
+## 8. Configure the server
+
+Add to the server `.env` and restart the API and the bot:
+
+```
+ROBINHOOD_VERDICT_REGISTRY=0x...          # $REGISTRY from step 3
+ROBINHOOD_RECORDER_PRIVATE_KEY=0x...      # the recorder key from the prerequisites (secret)
+ROBINHOOD_RPC_URL=https://rpc.mainnet.chain.robinhood.com   # optional; this is the default
+```
+
+With both set, the log shows `Robinhood verdict registry: enabled`. With either missing, evidence is still
+stored and served at `/api/verdict/...`, but nothing is sent on-chain. The key is never logged.
+
+## 9. Smoke test and independent verification
+
+Scan a Robinhood Chain token in the Telegram bot (`rh:0x...`). Then:
+
+```bash
+curl -s https://<api host>/api/verdict/4663/<token> | jq '{verdict, evidence_hash, tx_hash}'
+```
+
+Anyone can check a verdict without trusting ShieldBot's server:
+
+```bash
+# 1. Re-hash the canonical evidence document exactly as served.
+cast keccak "$(curl -s https://<api host>/api/verdict/4663/<token> | jq -r .canonical)"
+# 2. It must equal evidence_hash, and match the on-chain record.
+cast call $REGISTRY "latestRecord(address)((uint8,uint64,uint64,bytes32))" <token> --rpc-url $RH_RPC
+cast receipt <tx_hash> --rpc-url $RH_RPC
+```
+
+The `VerdictRecorded` log in the receipt carries the token (topic 1), the verdict code (topic 2) and the evidence
+hash (topic 3), with the observed block and timestamp in the data.
