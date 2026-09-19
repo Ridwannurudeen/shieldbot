@@ -82,12 +82,13 @@ def _launch_outcome(stored_status, scanned_at) -> str:
 
 
 def _launch_scan(stored_status, risk_score, scanned_at, finding) -> Dict:
-    """Describe a launch's latest outcome.
+    """Describe a launch's latest outcome; ``status`` is the authoritative completeness field.
 
     The hunter records watching and cleared only for complete scans, and a recheck clears only
-    a complete scan, so both are complete. A blocked launch takes its detail from the hunter's
-    finding evidence and is not shown as complete without it. An unknown scan's partial score
-    is withheld so that it cannot read as a verdict.
+    a complete scan, so both are complete. A blocked launch takes its detail, including
+    per-field coverage, from the hunter's finding evidence and is not shown as complete without
+    it; no other outcome has per-field coverage recorded. An unknown scan's partial score is
+    withheld so that it cannot read as a verdict.
     """
     outcome = _launch_outcome(stored_status, scanned_at)
     scan = {
@@ -95,6 +96,7 @@ def _launch_scan(stored_status, risk_score, scanned_at, finding) -> Dict:
         "status": "unknown",
         "risk_level": None,
         "risk_score": None,
+        "coverage": None,
         "coverage_reasons": {"scan": "Scan incomplete; coverage details were not recorded"},
         "flags": [],
         "scanned_at": scanned_at,
@@ -113,6 +115,7 @@ def _launch_scan(stored_status, risk_score, scanned_at, finding) -> Dict:
             scan.update(
                 status="unknown" if incomplete else "ok",
                 risk_level=evidence.get("risk_level"),
+                coverage=evidence.get("coverage"),
                 coverage_reasons=evidence.get("coverage_reasons") or ({"scan": _NO_SCAN_DETAIL} if incomplete else {}),
                 flags=evidence.get("critical_flags") or [],
             )
@@ -2032,8 +2035,9 @@ class Database:
     ) -> Tuple[List[Dict], Optional[str]]:
         """Return a page of discovered launches, newest first, each with its latest outcome.
 
-        ``cursor`` is the ``next_cursor`` of the previous page ("block:token"). The next cursor
-        is None on the last page. A malformed cursor raises ValueError.
+        Each launch's ``scan.status`` is authoritative: "ok" only for a complete scan. ``cursor``
+        is the ``next_cursor`` of the previous page ("block:token"). The next cursor is None on
+        the last page. A malformed cursor raises ValueError.
         """
         if cursor is None:
             result = await self._db.execute(_LAUNCH_FEED_FIRST_PAGE, (chain_id, limit + 1))

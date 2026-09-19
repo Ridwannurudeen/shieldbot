@@ -163,6 +163,7 @@ async def test_unscanned_item_has_the_full_shape_and_is_never_safe(db):
                 "status": "unknown",
                 "risk_level": None,
                 "risk_score": None,
+                "coverage": None,
                 "coverage_reasons": {"scan": "Not scanned yet"},
                 "flags": [],
                 "scanned_at": None,
@@ -186,6 +187,7 @@ async def test_blocked_item_takes_detail_from_the_hunter_evidence(db):
         "status": "unknown",
         "risk_level": "HIGH",
         "risk_score": 80,
+        "coverage": {"structural": 1.0, "honeypot": 0.8},
         "coverage_reasons": {"honeypot": REASON},
         "flags": HONEYPOT_EVIDENCE["critical_flags"],
         "scanned_at": 1000.0,
@@ -207,6 +209,8 @@ async def test_complete_blocked_evidence_is_ok(db):
     scan = (await _by_token(db))[TOKENS[0]]["scan"]
 
     assert (scan["outcome"], scan["status"], scan["coverage_reasons"]) == ("blocked", "ok", {})
+    assert scan["coverage"] == {"structural": 1, "honeypot": 1}
+    assert not is_scan_incomplete(scan)
 
 
 @pytest.mark.asyncio
@@ -261,6 +265,7 @@ async def test_incomplete_outcomes_are_unknown_without_a_score(db, stored, reaso
         "status": "unknown",
         "risk_level": None,
         "risk_score": None,
+        "coverage": None,
         "coverage_reasons": {"scan": reason},
         "flags": [],
         "scanned_at": 1000.0,
@@ -281,10 +286,26 @@ async def test_complete_outcomes_keep_their_score(db, stored, score):
         "status": "ok",
         "risk_level": None,
         "risk_score": score,
+        "coverage": None,
         "coverage_reasons": {},
         "flags": [],
         "scanned_at": 1000.0,
     }
+
+
+@pytest.mark.asyncio
+async def test_a_cleared_launch_as_a_consumer_sees_it(db):
+    await db.upsert_discovered_launches(CHAIN, [_launch(TOKENS[0], 100)])
+    await _scan(db, TOKENS[0], "cleared", 12, at=1000.0)
+
+    scan = (await _by_token(db))[TOKENS[0]]["scan"]
+
+    # scan.status is the authoritative field: "ok" only for a complete scan.
+    assert (scan["outcome"], scan["status"], scan["coverage_reasons"]) == ("cleared", "ok", {})
+    # The hunter records per-field coverage only with a blocked launch's evidence, so a
+    # field-level check of this item cannot confirm it and stays on the safe side.
+    assert scan["coverage"] is None
+    assert is_scan_incomplete(scan)
 
 
 @pytest.mark.asyncio

@@ -154,7 +154,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "Read-only. List recent Robinhood Chain (chain 4663) token launches discovered by ShieldBot, newest first, "
             "each with its latest scan outcome: blocked, watching, cleared, unknown (scan incomplete) or not_scanned. "
             "unknown and not_scanned have status 'unknown' with coverage_reasons and are never safe. "
-            "Page with next_cursor."
+            "scan.status is authoritative: 'ok' only for a complete scan; per-field coverage is present only "
+            "for blocked launches. Page with next_cursor."
         ),
         "inputSchema": {
             "type": "object",

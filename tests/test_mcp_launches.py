@@ -99,6 +99,7 @@ def test_launch_tool_is_registered_read_only_and_describes_outcomes():
         "unknown",
         "not_scanned",
         "never safe",
+        "scan.status is authoritative",
         "Read-only",
     ):
         assert phrase in tool["description"]
