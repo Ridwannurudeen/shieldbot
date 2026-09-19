@@ -866,34 +866,249 @@ async def test_a_crash_between_claim_and_signing_is_queued_again_and_sent_once(d
     assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "confirmed"
 
 
+async def sends_settled(publisher):
+    """Wait for shielded sends that outlived a cancelled drain."""
+    while publisher._tasks:
+        await asyncio.gather(*list(publisher._tasks))
+
+
+async def until(predicate, tries=500):
+    for _ in range(tries):
+        if await predicate():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("condition never became true")
+
+
+def gate_method(chain, method):
+    """Hold the node's answer to `method` until the returned event is set."""
+    gate = asyncio.Event()
+    original = chain.post
+
+    def post(url, json):
+        response = original(url, json)
+        rows = json if isinstance(json, list) else [json]
+        if any(row["method"] == method for row in rows):
+            response._gate = gate
+        return response
+
+    chain.post = post
+    return gate
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mined", [True, False])
-async def test_a_crash_after_signing_is_reconciled_and_never_resent(db, mined):
+@pytest.mark.parametrize("window", ["pre-sign reads", "broadcast", "receipt"])
+async def test_cancelling_the_drain_never_interrupts_a_send(db, window):
     chain = FakeChain()
-    # The process dies while broadcasting: the claim holds a tx hash, but the outcome was never stored.
-    chain.raise_on["eth_sendRawTransaction"] = asyncio.CancelledError()
+    method = {
+        "pre-sign reads": "eth_getTransactionCount",
+        "broadcast": "eth_sendRawTransaction",
+        "receipt": "eth_getTransactionReceipt",
+    }[window]
+    gate = gate_method(chain, method)
+    publisher = sender(db)
+    await publisher.publish(4663, TOKEN, COMPLETE)
+    with rpc_node(chain):
+        drain = asyncio.create_task(publisher.drain_once())
+        await until(lambda: asyncio.sleep(0, any(
+            row["method"] == method
+            for _, body in chain.posts for row in (body if isinstance(body, list) else [body])
+        )))
+        drain.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await drain
+        gate.set()
+        await sends_settled(publisher)
+    assert len(chain.sent) == 1
+    stored = await db.get_latest_verdict_evidence(4663, TOKEN)
+    assert outbox_row(stored) == ("confirmed", "0x" + keccak(chain.sent[0]).hex(), None)
+
+
+@pytest.mark.asyncio
+async def test_cancelling_between_storing_the_hash_and_the_broadcast_still_broadcasts(db, monkeypatch):
+    chain = FakeChain()
+    publisher = sender(db)
+    await publisher.publish(4663, TOKEN, COMPLETE)
+    stored_hash, release = asyncio.Event(), asyncio.Event()
+    store = db.set_verdict_tx_hash
+
+    async def store_then_pause(*args):
+        await store(*args)
+        stored_hash.set()
+        await release.wait()
+
+    monkeypatch.setattr(db, "set_verdict_tx_hash", store_then_pause)
+    with rpc_node(chain):
+        drain = asyncio.create_task(publisher.drain_once())
+        await stored_hash.wait()
+        assert chain.sent == []
+        drain.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await drain
+        release.set()
+        await sends_settled(publisher)
+    assert len(chain.sent) == 1
+    assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "confirmed"
+
+
+@pytest.mark.asyncio
+async def test_stop_lets_a_send_under_way_finish(db, monkeypatch):
+    monkeypatch.setattr(vp, "DRAIN_POLL_SECONDS", 3600)
+    chain = FakeChain()
+    gate = gate_method(chain, "eth_sendRawTransaction")
+    publisher = make_publisher(db)
+    with rpc_node(chain):
+        publisher.start(recorder_key=KEY)
+        await publisher.publish(4663, TOKEN, COMPLETE)
+        await until(lambda: asyncio.sleep(0, bool(chain.sent)))
+        publisher.stop()
+        gate.set()
+        await sends_settled(publisher)
+    assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "confirmed"
+    assert len(chain.sent) == 1
+
+
+async def crash_during(db, chain, method):
+    """Simulate the process dying during `method`: the shielded send itself is torn down."""
+    chain.raise_on[method] = asyncio.CancelledError()
     publisher = sender(db)
     await publisher.publish(4663, TOKEN, COMPLETE)
     with rpc_node(chain):
         with pytest.raises(asyncio.CancelledError):
             await publisher.drain_once()
-    [claimed] = await db.get_claimed_verdicts(4663)
-    assert claimed["tx_hash"] is not None
-    if mined:
-        chain.receipts[claimed["tx_hash"]] = {"status": "0x1"}
-
-    restarted = sender(db)
     chain.raise_on.clear()
+    [claimed] = await db.get_claimed_verdicts(4663)
+    assert claimed["tx_hash"] is not None and claimed["nonce"] == 7
+    return claimed
+
+
+@pytest.mark.asyncio
+async def test_a_crash_after_storing_the_hash_but_before_the_broadcast_is_sent_once_at_the_same_nonce(db):
+    chain = FakeChain()
+    claimed = await crash_during(db, chain, "eth_sendRawTransaction")
+    assert chain.sent == []
+    restarted = sender(db)
+    with rpc_node(chain):
+        await restarted._recover_claims()
+        assert await restarted.drain_once() == "done"
+    [replacement] = chain.sent
+    assert decode_record(replacement)["nonce"] == claimed["nonce"]
+    stored = await db.get_latest_verdict_evidence(4663, TOKEN)
+    assert outbox_row(stored) == ("confirmed", "0x" + keccak(replacement).hex(), None)
+    assert await attempts(db) == (7, 2)
+
+
+@pytest.mark.asyncio
+async def test_a_crash_after_a_mined_broadcast_is_finished_without_resending(db):
+    chain = FakeChain()
+    claimed = await crash_during(db, chain, "eth_getTransactionReceipt")
+    assert len(chain.sent) == 1
+    restarted = sender(db)
     with rpc_node(chain):
         await restarted._recover_claims()
         assert await restarted.drain_once() == "idle"
+    assert len(chain.sent) == 1
     stored = await db.get_latest_verdict_evidence(4663, TOKEN)
-    assert stored["tx_hash"] == claimed["tx_hash"]
-    assert (stored["onchain_status"], stored["onchain_error"]) == (
-        ("confirmed", None) if mined else ("unconfirmed", "ClaimInterrupted")
-    )
+    assert outbox_row(stored) == ("confirmed", claimed["tx_hash"], None)
+
+
+@pytest.mark.asyncio
+async def test_a_crash_after_a_pending_broadcast_waits_instead_of_resending(db):
+    chain = FakeChain()
+    chain.mine = False
+    claimed = await crash_during(db, chain, "eth_getTransactionReceipt")
+    restarted = sender(db)
+    with rpc_node(chain):
+        await restarted._recover_claims()
+        assert await restarted.drain_once() == "retry"
+    assert len(chain.sent) == 1
+    stored = await db.get_latest_verdict_evidence(4663, TOKEN)
+    assert (stored["onchain_status"], stored["tx_hash"]) == ("pending", claimed["tx_hash"])
+
+
+@pytest.mark.asyncio
+async def test_a_crashed_claim_at_the_attempt_cap_is_left_unconfirmed(db, monkeypatch):
+    monkeypatch.setattr(vp, "MAX_SEND_ATTEMPTS", 1)
+    chain = FakeChain()
+    claimed = await crash_during(db, chain, "eth_sendRawTransaction")
+    restarted = sender(db)
+    with rpc_node(chain):
+        await restarted._recover_claims()
+        assert await restarted.drain_once() == "idle"
     assert chain.sent == []
-    assert await db.get_claimed_verdicts(4663) == []
+    stored = await db.get_latest_verdict_evidence(4663, TOKEN)
+    assert outbox_row(stored) == ("unconfirmed", claimed["tx_hash"], "ClaimInterrupted")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method,broadcasts,after_recovery", [
+    ("set_verdict_tx_hash", 0, ["done", "idle"]),
+    ("update_verdict_onchain", 1, ["idle"]),
+    ("release_verdict_claim", 0, ["done", "idle"]),
+])
+async def test_a_database_failure_mid_send_is_recovered_and_sent_once(
+    db, monkeypatch, caplog, method, broadcasts, after_recovery
+):
+    chain = FakeChain()
+    if method == "release_verdict_claim":
+        chain.http_statuses.append(503)  # a failure before signing, so the claim must be released
+    publisher = sender(db)
+    await publisher.publish(4663, TOKEN, COMPLETE)
+    real = getattr(db, method)
+    failures = [RuntimeError(f"database is locked {KEY}")]
+
+    async def fail_once(*args, **kwargs):
+        if failures:
+            raise failures.pop()
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(db, method, fail_once)
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "error"
+        assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "sending"
+        assert len(chain.sent) == broadcasts
+        await publisher._recover_claims()
+        assert await drain_all(publisher) == after_recovery
+    assert len(chain.sent) == 1
+    assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "confirmed"
+    assert "RuntimeError" in caplog.text and KEY[2:] not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_the_drain_recovers_claims_after_an_error(db, monkeypatch):
+    publisher = sender(db)
+    publisher._wake = asyncio.Event()
+    outcomes = iter(["error", "done", "retry"])
+
+    async def drain_once():
+        try:
+            return next(outcomes)
+        except StopIteration:
+            raise asyncio.CancelledError
+
+    recoveries = []
+    monkeypatch.setattr(publisher, "drain_once", drain_once)
+    monkeypatch.setattr(publisher, "_reconcile", AsyncMock(return_value=0))
+    monkeypatch.setattr(publisher, "_recover_claims", AsyncMock(side_effect=lambda: recoveries.append("recover")))
+    with patch("services.verdict_publisher.asyncio.sleep", new=AsyncMock()):
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(publisher._drain_loop(), 5)
+    # Once at start and once after the error; a plain retry does not trigger recovery.
+    assert recoveries == ["recover", "recover"]
+
+
+@pytest.mark.asyncio
+async def test_a_failing_claim_query_is_an_error_not_a_crash(db, monkeypatch):
+    publisher = sender(db)
+    publisher._wake = asyncio.Event()
+    monkeypatch.setattr(db, "claim_next_pending_verdict", AsyncMock(side_effect=[RuntimeError("locked"), None]))
+    monkeypatch.setattr(publisher, "_reconcile", AsyncMock(side_effect=[0, asyncio.CancelledError()]))
+    recover = AsyncMock()
+    monkeypatch.setattr(publisher, "_recover_claims", recover)
+    with patch("services.verdict_publisher.asyncio.sleep", new=AsyncMock()):
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(publisher._drain_loop(), 5)
+    assert recover.await_count == 2
 
 
 @pytest.mark.asyncio

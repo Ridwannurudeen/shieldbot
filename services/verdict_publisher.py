@@ -32,9 +32,12 @@ latest nonce:
     pending nonce == N
   otherwise              something is pending at N (possibly H): wait and retry
 
-Claim before send: a row left `sending` by a crash is recovered when the drain next starts. A row without a
-tx hash was never signed and goes back to `pending`. A row with a tx hash may have been broadcast, so one
-receipt lookup marks it confirmed or reverted, otherwise unconfirmed, which the reconciler handles as above.
+Claim before send: each claimed row's sign -> store hash and nonce -> broadcast -> record outcome runs in a
+task shielded from cancellation, so stop() cannot interrupt it half-way. A row still left `sending` (the process
+died, or the database failed) is recovered when the drain starts and after any drain error. A row without a tx
+hash was never signed and goes back to `pending`. A row with a tx hash is finished if one receipt lookup finds
+it mined; otherwise it goes back to `pending` too, and the check above decides whether and at which nonce it
+is re-signed, so it is never recorded twice. After MAX_SEND_ATTEMPTS it is left `unconfirmed` instead.
 
 The public 4663 RPC is shared, so the drain is bounded: at most MAX_RECORDS_PER_HOUR records (rows beyond that
 wait as pending), one at a time under a nonce lock, a timeout on every request and phase, bounded retries with
@@ -195,10 +198,11 @@ class VerdictPublisher:
             "onchain_status": status,
         }
 
-    def _spawn(self, coroutine) -> None:
+    def _spawn(self, coroutine) -> asyncio.Task:
         task = asyncio.create_task(coroutine)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+        return task
 
     # ------------------------------------------------------------------
     # Sending (the API process only)
@@ -234,16 +238,13 @@ class VerdictPublisher:
         logger.info("Robinhood verdict registry: sending as recorder %s", self.recorder)
 
     def stop(self) -> None:
-        """Stop the drain. A row interrupted mid-send is recovered by the next start()."""
+        """Stop the drain. A send already under way is shielded and runs to completion."""
         if self._drain_task is not None:
             self._drain_task.cancel()
             self._drain_task = None
 
     async def _drain_loop(self) -> None:
-        try:
-            await self._recover_claims()
-        except Exception as e:
-            logger.error("Verdict claim recovery failed: %s", type(e).__name__)
+        await self._recover_claims()
         await self._reconcile()
         backoff = 0.0
         while True:
@@ -256,10 +257,13 @@ class VerdictPublisher:
                     type(e).__name__,
                     "".join(traceback.format_tb(e.__traceback__)),
                 )
-                outcome = "retry"
+                outcome = "error"
             if outcome == "done":
                 backoff = 0.0
-            elif outcome == "retry":
+            elif outcome in ("retry", "error"):
+                if outcome == "error":
+                    # A database failure can leave a claim `sending`; resolve it before going on.
+                    await self._recover_claims()
                 backoff = min(max(backoff * 2, DRAIN_BACKOFF_SECONDS), DRAIN_MAX_BACKOFF_SECONDS)
                 await asyncio.sleep(backoff)
             elif outcome == "capped":
@@ -283,7 +287,8 @@ class VerdictPublisher:
         """Claim and record the oldest pending row.
 
         Returns "idle" (nothing pending), "capped" (rate cap reached; rows wait), "done" (the row reached a
-        recorded outcome) or "retry" (a failure before signing returned the row to pending).
+        recorded outcome), "retry" (a failure before signing returned the row to pending) or "error" (the send
+        failed unexpectedly, for example in the database, and may have left the claim `sending`).
         """
         if self._account is None:
             return "idle"
@@ -293,30 +298,46 @@ class VerdictPublisher:
         if row is None:
             return "idle"
         self._sent_at.append(time.monotonic())
-        return await self._send(row)
+        # Shielded: cancelling the drain (stop()) never interrupts sign -> store -> broadcast -> record outcome.
+        return await asyncio.shield(self._spawn(self._send_safely(row)))
+
+    async def _send_safely(self, row: dict) -> str:
+        try:
+            return await self._send(row)
+        except Exception as e:
+            logger.error(
+                "Verdict send failed: %s\n%s",
+                type(e).__name__,
+                "".join(traceback.format_tb(e.__traceback__)),
+            )
+            return "error"
 
     async def _recover_claims(self) -> None:
-        """Resolve rows left `sending` by a previous process: re-queue unsigned ones, never resend signed ones."""
-        for row in await self._db.get_claimed_verdicts(CHAIN_ID):
-            if row["tx_hash"] is None:
-                await self._db.release_verdict_claim(row["id"])
-                logger.warning("Verdict claim %d was never signed; queued again", row["id"])
-                continue
-            async with aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=RPC_TIMEOUT_SECONDS)
-            ) as session:
-                status = await self._receipt_status(session, row["tx_hash"])
-            await self._db.update_verdict_onchain(
-                row["id"],
-                status or "unconfirmed",
-                tx_hash=row["tx_hash"],
-                onchain_error=None if status else "ClaimInterrupted",
-            )
-            logger.warning(
-                "Verdict claim %d was interrupted after signing: %s",
-                row["id"],
-                status or "unconfirmed",
-            )
+        """Resolve rows left `sending`: finish the mined ones and queue the rest again. Never raises."""
+        try:
+            for row in await self._db.get_claimed_verdicts(CHAIN_ID):
+                if row["tx_hash"] is None:
+                    await self._db.release_verdict_claim(row["id"])
+                    logger.warning("Verdict claim %d was never signed; queued again", row["id"])
+                    continue
+                async with aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=RPC_TIMEOUT_SECONDS)
+                ) as session:
+                    status = await self._receipt_status(session, row["tx_hash"])
+                if status is not None:
+                    await self._db.update_verdict_onchain(row["id"], status, tx_hash=row["tx_hash"])
+                elif row["attempts"] < MAX_SEND_ATTEMPTS:
+                    # The nonce check before re-signing decides whether and at which nonce it is sent again.
+                    await self._db.release_verdict_claim(row["id"])
+                    status = "pending"
+                else:
+                    await self._db.update_verdict_onchain(
+                        row["id"], "unconfirmed", tx_hash=row["tx_hash"], onchain_error="ClaimInterrupted"
+                    )
+                    status = "unconfirmed"
+                logger.warning("Verdict claim %d was interrupted after signing: %s", row["id"], status)
+        except Exception as e:
+            logger.error("Verdict claim recovery failed: %s", type(e).__name__)
 
     async def _reconcile(self) -> int:
         """Look up receipts for old unresolved records; finish the mined ones and queue the rest again.

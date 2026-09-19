@@ -213,9 +213,11 @@ nonce was used by another transaction, it can never be mined, so a new nonce is 
 unused, the replacement takes that same nonce, so at most one of the two can be mined; if something is pending at
 that nonce, the drain waits.
 
-If the API stops while a verdict is `sending`, the next start resolves it. A claim with no transaction hash was
-never signed, so it is queued again. A claim with a hash may have been broadcast: one receipt lookup marks it
-`confirmed` or `reverted`, otherwise `unconfirmed`, which is then reconciled as above.
+Stopping the API never interrupts a send under way: sign, store hash and nonce, broadcast and record the outcome
+run to completion. A verdict still left `sending` (the process was killed, or the database failed) is resolved when
+the drain starts and after any drain error. A claim with no transaction hash was never signed, so it is queued
+again. A claim with a hash is `confirmed` or `reverted` if its receipt exists; otherwise it is queued again and the
+nonce check above decides whether and at which nonce it is re-signed. After 5 attempts it is left `unconfirmed`.
 
 ## 9. Smoke test and independent verification
 
