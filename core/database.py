@@ -331,6 +331,7 @@ class Database:
         await self._migrate_funding_value_wei()
         await self._migrate_tracked_pairs_chain_id()
         await self._create_launch_discovery_tables()
+        await self._create_verdict_evidence_tables()
 
         # Migrate: add registered_by_key column for existing DBs
         try:
@@ -1920,3 +1921,78 @@ class Database:
             WHERE chain_id = ? AND token_address = ?
         """, (scan_status, risk_score, time.time(), chain_id, token_address))
         await self._db.commit()
+
+    # --- Verdict Evidence ---
+
+    async def _create_verdict_evidence_tables(self):
+        await self._db.executescript("""
+            CREATE TABLE IF NOT EXISTS verdict_evidence (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chain_id INTEGER NOT NULL,
+                subject TEXT NOT NULL,
+                verdict TEXT NOT NULL,
+                evidence_hash TEXT NOT NULL,
+                canonical TEXT NOT NULL,
+                observed_block INTEGER NOT NULL,
+                created_at REAL NOT NULL,
+                onchain_status TEXT NOT NULL,
+                registry TEXT,
+                tx_hash TEXT,
+                onchain_error TEXT,
+                updated_at REAL NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_verdict_evidence_subject
+                ON verdict_evidence(chain_id, subject, id);
+        """)
+        await self._db.commit()
+
+    async def insert_verdict_evidence(
+        self, chain_id: int, subject: str, verdict: str, evidence_hash: str, canonical: str,
+        observed_block: int, onchain_status: str, registry: Optional[str] = None,
+        onchain_error: Optional[str] = None,
+    ) -> int:
+        """Store one published evidence document; earlier documents for the subject are kept."""
+        now = time.time()
+        cursor = await self._db.execute("""
+            INSERT INTO verdict_evidence
+                (chain_id, subject, verdict, evidence_hash, canonical, observed_block, created_at,
+                 onchain_status, registry, onchain_error, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            chain_id, subject, verdict, evidence_hash, canonical, observed_block, now,
+            onchain_status, registry, onchain_error, now,
+        ))
+        await self._db.commit()
+        return cursor.lastrowid
+
+    async def update_verdict_onchain(
+        self, evidence_id: int, onchain_status: str, tx_hash: Optional[str] = None,
+        onchain_error: Optional[str] = None,
+    ):
+        """Record the on-chain outcome for one stored evidence document."""
+        await self._db.execute("""
+            UPDATE verdict_evidence
+            SET onchain_status = ?, tx_hash = ?, onchain_error = ?, updated_at = ?
+            WHERE id = ?
+        """, (onchain_status, tx_hash, onchain_error, time.time(), evidence_id))
+        await self._db.commit()
+
+    async def get_latest_verdict_evidence(self, chain_id: int, subject: str) -> Optional[Dict]:
+        """Return the most recently published evidence for a subject, or None if never published."""
+        cursor = await self._db.execute("""
+            SELECT id, chain_id, subject, verdict, evidence_hash, canonical, observed_block, created_at,
+                   onchain_status, registry, tx_hash, onchain_error, updated_at
+            FROM verdict_evidence
+            WHERE chain_id = ? AND subject = ?
+            ORDER BY id DESC
+            LIMIT 1
+        """, (chain_id, subject))
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        keys = (
+            "id", "chain_id", "subject", "verdict", "evidence_hash", "canonical", "observed_block",
+            "created_at", "onchain_status", "registry", "tx_hash", "onchain_error", "updated_at",
+        )
+        return dict(zip(keys, row))
