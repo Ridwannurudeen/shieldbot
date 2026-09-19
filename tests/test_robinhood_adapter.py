@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from adapters.evm_base import RPC_REQUEST_TIMEOUT_SECONDS
 from core.config import Settings
 
 
@@ -58,7 +59,9 @@ def test_robinhood_rpc_precedence(monkeypatch, rpc_url, env_url, expected):
     with patch('adapters.evm_base.Web3') as web3:
         RobinhoodAdapter(rpc_url=rpc_url)
 
-    web3.HTTPProvider.assert_called_once_with(expected)
+    web3.HTTPProvider.assert_called_once_with(
+        expected, request_kwargs={'timeout': RPC_REQUEST_TIMEOUT_SECONDS},
+    )
 
 
 def test_robinhood_settings(monkeypatch):
@@ -83,7 +86,9 @@ def test_container_registers_robinhood_from_settings():
 
     client.return_value.register_adapter.assert_any_call(container.robinhood_adapter)
     assert container.robinhood_adapter.chain_id == 4663
-    web3.HTTPProvider.assert_any_call('https://setting.example')
+    web3.HTTPProvider.assert_any_call(
+        'https://setting.example', request_kwargs={'timeout': RPC_REQUEST_TIMEOUT_SECONDS},
+    )
 
 
 @pytest.mark.asyncio

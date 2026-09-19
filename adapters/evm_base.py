@@ -15,6 +15,11 @@ from core.chain_adapter import ChainAdapter
 
 logger = logging.getLogger(__name__)
 
+# Per-request timeout for every web3 HTTP call. It equals web3 6.15.1's own default
+# (web3._utils.request.DEFAULT_TIMEOUT), so production on 6.15.1 behaves as before, and it stops
+# web3 7 from waiting its 30 s default. Both versions accept HTTPProvider(request_kwargs=...).
+RPC_REQUEST_TIMEOUT_SECONDS = 10
+
 EXPLORER_BACKENDS = {
     1: 'etherscan', 56: 'etherscan', 8453: 'etherscan',
     42161: 'etherscan', 137: 'etherscan', 10: 'etherscan', 204: 'etherscan',
@@ -92,7 +97,7 @@ class EvmAdapter(ChainAdapter):
         self._explorer_service = explorer_service
         self._chain_id = chain_id_value
         self._chain_name = chain_name_value
-        self.w3 = Web3(Web3.HTTPProvider(rpc_url))
+        self.w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={'timeout': RPC_REQUEST_TIMEOUT_SECONDS}))
         self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
         self.etherscan_api_key = etherscan_api_key
         self.etherscan_api_url = 'https://api.etherscan.io/v2/api'
