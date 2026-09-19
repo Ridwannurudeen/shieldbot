@@ -11,33 +11,39 @@ processes can never race for the recorder's nonces.
 Each row moves through onchain_status:
   off          stored only (another chain, or no registry configured)
   pending      waiting for the drain
-  sending      claimed by the drain; the signed transaction's hash is stored BEFORE it is broadcast
+  sending      claimed by the drain; each transaction's hash, nonce and signed bytes are stored BEFORE it is broadcast
   submitted    the node accepted the transaction; no receipt arrived within the receipt timeout
-  confirmed    the receipt shows success, so VerdictRecorded was emitted
+  confirmed    the receipt shows success, so VerdictRecorded was emitted. This is the sequencer's (soft) finality;
+               it becomes final on the parent chain once the sequencer posts the batch
   reverted     the receipt shows the call reverted
-  failed       the node explicitly rejected the signed transaction and no receipt was found
-  unconfirmed  the broadcast outcome is unknown (a transport error during the send, or a crash after signing)
+  failed       the node explicitly rejected the transaction and no receipt was found
+  unconfirmed  the broadcast outcome is unknown (a transport error during the send, or a crash after storing)
                and no receipt was found
 
-submitted, unconfirmed and failed rows keep their tx hash and nonce and are reconciled at start and whenever the
-drain is idle: once a row is RECONCILE_AFTER_SECONDS old, one batched receipt lookup (at most RECONCILE_BATCH
-rows) marks it confirmed or reverted, or queues it again, up to MAX_SEND_ATTEMPTS signed transactions per row.
+A row never records its verdict twice. Every transaction a row has broadcast is kept (verdict_transactions), and
+every check looks up the receipts of ALL of them in one RPC batch, so a transaction that lands late is always
+found. Before anything is broadcast for a row that already has transactions, under the nonce lock and in the same
+batch as the nonce reads:
+  a receipt for any of them    it is on-chain: the row is finished with that transaction, nothing is sent
+  latest nonce <= the row's    that nonce is still unused, so our transaction there may still be mined: send the
+    last nonce                 SAME stored bytes again (never a second transaction at one nonce), and only while
+                               the pending nonce equals it; otherwise wait
+  latest nonce > every nonce   each was used by a transaction that is not ours, so none of ours can ever be mined:
+    the row used               sign a new transaction at the next nonce
+The batch is one HTTP request, answered from one node's view, so a nonce it shows as used comes with the receipt of
+whatever used it.
 
-A row queued again after an earlier transaction H with nonce N is never double-recorded. Before signing, under
-the nonce lock and in the same RPC batch as the nonce read, the drain looks up H's receipt and the recorder's
-latest nonce:
-  receipt for H          H is on-chain: the row is finished with H and nothing new is signed
-  latest nonce > N       N was used by another transaction, so H can never be mined: sign with the next nonce
-  latest nonce <= N and  nothing holds N: sign the replacement AT nonce N, so at most one of the two is mined
-    pending nonce == N
-  otherwise              something is pending at N (possibly H): wait and retry
+submitted, unconfirmed and failed rows are reconciled at start and whenever the drain is idle: once a row is
+RECONCILE_AFTER_SECONDS old, one batched lookup (at most RECONCILE_BATCH rows, every transaction of each) marks it
+confirmed or reverted, or queues it again while under MAX_SEND_ATTEMPTS broadcasts. A row at the cap is still
+looked up, every RECONCILE_AFTER_SECONDS, so a transaction that lands late is reported.
 
-Claim before send: each claimed row's sign -> store hash and nonce -> broadcast -> record outcome runs in a
-task shielded from cancellation, so stop() never cancels it half-way. A row still left `sending` (the process
-exited first, or the database failed) is recovered when the drain starts and after any drain error. A row without a tx
-hash was never signed and goes back to `pending`. A row with a tx hash is finished if one receipt lookup finds
-it mined; otherwise it goes back to `pending` too, and the check above decides whether and at which nonce it
-is re-signed, so it is never recorded twice. After MAX_SEND_ATTEMPTS it is left `unconfirmed` instead.
+Claim before send: each claimed row's prepare -> store -> broadcast -> record outcome runs in a task shielded from
+cancellation, and stop() lets it finish (for up to STOP_TIMEOUT_SECONDS) before the database closes. A row still
+left `sending` (the process was killed, or the database failed) is recovered once it is RECONCILE_AFTER_SECONDS
+old, which gives a lagging replica time to show a mined transaction: at start, after any drain error and whenever
+the drain is idle. A mined transaction finishes it; otherwise it goes back to `pending` and the checks above
+decide what, if anything, is sent. After MAX_SEND_ATTEMPTS it is left `unconfirmed`.
 
 The public 4663 RPC is shared, so the drain is bounded: at most MAX_RECORDS_PER_HOUR records (rows beyond that
 wait as pending), one at a time under a nonce lock, a timeout on every request and phase, bounded retries with
@@ -89,6 +95,10 @@ DRAIN_MAX_BACKOFF_SECONDS = 300.0
 RECONCILE_AFTER_SECONDS = 120
 RECONCILE_BATCH = 5
 MAX_SEND_ATTEMPTS = 5
+# stop() waits this long for a send under way to record its outcome.
+STOP_TIMEOUT_SECONDS = 30
+# After this many consecutive waits on an earlier transaction, the drain says so loudly.
+WAIT_ALARM_AFTER = 10
 
 ADDRESS_RE = re.compile(r"0x[0-9a-fA-F]{40}")
 QUANTITY_RE = re.compile(r"0x[0-9a-fA-F]+")
@@ -125,6 +135,7 @@ class VerdictPublisher:
         self._tasks = set()
         self._drain_task = None
         self._wake = None
+        self._waits = 0
         if not registry:
             logger.info(
                 "Robinhood verdict registry: disabled (set ROBINHOOD_VERDICT_REGISTRY to enable)"
@@ -238,12 +249,27 @@ class VerdictPublisher:
         self._drain_task = asyncio.create_task(self._drain_loop())
         logger.info("Robinhood verdict registry: sending as recorder %s", self.recorder)
 
-    def stop(self) -> None:
-        """Stop the drain. A send already under way is not cancelled; if the process exits first, its claim is
-        resolved by the next start()."""
+    def stop(self) -> "asyncio.Future":
+        """Stop the drain now; returns an awaitable that finishes when sends already under way have finished.
+
+        The drain loop is cancelled at once. Sends are shielded, so they run on; awaiting the result waits for them
+        for at most STOP_TIMEOUT_SECONDS, which lets them record their outcome before the database closes.
+        """
         if self._drain_task is not None:
             self._drain_task.cancel()
             self._drain_task = None
+        return asyncio.ensure_future(self._settle_sends())
+
+    async def _settle_sends(self) -> None:
+        tasks = list(self._tasks)
+        if not tasks:
+            return
+        _, unfinished = await asyncio.wait(tasks, timeout=STOP_TIMEOUT_SECONDS)
+        if unfinished:
+            logger.warning(
+                "Verdict drain stopped with %d send(s) still under way; their claims are resolved at the next start",
+                len(unfinished),
+            )
 
     async def _drain_loop(self) -> None:
         await self._recover_claims()
@@ -264,17 +290,20 @@ class VerdictPublisher:
                 backoff = 0.0
             elif outcome in ("retry", "error"):
                 if outcome == "error":
-                    # A database failure can leave a claim `sending`; resolve it before going on.
+                    # A database failure can leave a claim `sending`; resolve old ones before going on.
                     await self._recover_claims()
                 backoff = min(max(backoff * 2, DRAIN_BACKOFF_SECONDS), DRAIN_MAX_BACKOFF_SECONDS)
                 await asyncio.sleep(backoff)
             elif outcome == "capped":
                 await asyncio.sleep(self._rate_wait())
-            elif not await self._reconcile():
-                try:
-                    await asyncio.wait_for(self._wake.wait(), DRAIN_POLL_SECONDS)
-                except asyncio.TimeoutError:
-                    pass
+            else:
+                released = await self._recover_claims()
+                requeued = await self._reconcile()
+                if not (released or requeued):
+                    try:
+                        await asyncio.wait_for(self._wake.wait(), DRAIN_POLL_SECONDS)
+                    except asyncio.TimeoutError:
+                        pass
 
     def _rate_wait(self) -> float:
         """Seconds until a send slot frees up in the MAX_RECORDS_PER_HOUR window, 0 if one is free."""
@@ -289,8 +318,9 @@ class VerdictPublisher:
         """Claim and record the oldest pending row.
 
         Returns "idle" (nothing pending), "capped" (rate cap reached; rows wait), "done" (the row reached a
-        recorded outcome), "retry" (a failure before signing returned the row to pending) or "error" (the send
-        failed unexpectedly, for example in the database, and may have left the claim `sending`).
+        recorded outcome), "retry" (the row went back to pending: a failure before broadcasting, or an earlier
+        transaction that may still land) or "error" (the send failed unexpectedly, for example in the database,
+        and may have left the claim `sending`).
         """
         if self._account is None:
             return "idle"
@@ -300,7 +330,7 @@ class VerdictPublisher:
         if row is None:
             return "idle"
         self._sent_at.append(time.monotonic())
-        # Shielded: cancelling the drain (stop()) never interrupts sign -> store -> broadcast -> record outcome.
+        # Shielded: cancelling the drain (stop()) never interrupts prepare -> store -> broadcast -> record outcome.
         return await asyncio.shield(self._spawn(self._send_safely(row)))
 
     async def _send_safely(self, row: dict) -> str:
@@ -314,60 +344,83 @@ class VerdictPublisher:
             )
             return "error"
 
-    async def _recover_claims(self) -> None:
-        """Resolve rows left `sending`: finish the mined ones and queue the rest again. Never raises."""
+    async def _recover_claims(self) -> int:
+        """Resolve rows left `sending` for RECONCILE_AFTER_SECONDS: finish the mined ones, queue the rest again.
+
+        The delay gives a lagging replica time to show a transaction that was mined. A row queued again goes
+        through the checks in _prepare, so it is never recorded twice. Returns how many rows were queued again.
+        Never raises.
+        """
+        released = 0
         try:
-            for row in await self._db.get_claimed_verdicts(CHAIN_ID):
-                if row["tx_hash"] is None:
-                    await self._db.release_verdict_claim(row["id"])
-                    logger.warning("Verdict claim %d was never signed; queued again", row["id"])
-                    continue
-                async with aiohttp.ClientSession(
-                    timeout=aiohttp.ClientTimeout(total=RPC_TIMEOUT_SECONDS)
-                ) as session:
-                    status = await self._receipt_status(session, row["tx_hash"])
+            rows = await self._db.get_claimed_verdicts(CHAIN_ID, time.time() - RECONCILE_AFTER_SECONDS)
+            transactions = await self._db.get_verdict_transactions([row["id"] for row in rows])
+            for row in rows:
+                hashes = _row_hashes(row, transactions.get(row["id"], []))
+                status, tx_hash = None, None
+                if hashes:
+                    async with aiohttp.ClientSession(
+                        timeout=aiohttp.ClientTimeout(total=RPC_TIMEOUT_SECONDS)
+                    ) as session:
+                        status, tx_hash = await self._mined(session, hashes)
                 if status is not None:
-                    await self._db.update_verdict_onchain(row["id"], status, tx_hash=row["tx_hash"])
-                elif row["attempts"] < MAX_SEND_ATTEMPTS:
-                    # The nonce check before re-signing decides whether and at which nonce it is sent again.
+                    await self._db.update_verdict_onchain(row["id"], status, tx_hash=tx_hash)
+                elif not hashes or row["attempts"] < MAX_SEND_ATTEMPTS:
                     await self._db.release_verdict_claim(row["id"])
+                    released += 1
                     status = "pending"
                 else:
                     await self._db.update_verdict_onchain(
                         row["id"], "unconfirmed", tx_hash=row["tx_hash"], onchain_error="ClaimInterrupted"
                     )
                     status = "unconfirmed"
-                logger.warning("Verdict claim %d was interrupted after signing: %s", row["id"], status)
+                logger.warning("Verdict claim %d was interrupted: %s", row["id"], status)
         except Exception as e:
             logger.error("Verdict claim recovery failed: %s", type(e).__name__)
+        return released
 
     async def _reconcile(self) -> int:
-        """Look up receipts for old unresolved records; finish the mined ones and queue the rest again.
+        """Look up receipts for every transaction of old unresolved records; finish the mined ones.
 
+        The rest are queued again while under MAX_SEND_ATTEMPTS; a row at the cap is only looked at again later.
         Returns how many rows were queued again. Never raises.
         """
         try:
             rows = await self._db.get_unresolved_verdicts(
-                CHAIN_ID, time.time() - RECONCILE_AFTER_SECONDS, MAX_SEND_ATTEMPTS, RECONCILE_BATCH
+                CHAIN_ID, time.time() - RECONCILE_AFTER_SECONDS, RECONCILE_BATCH
             )
             if not rows:
                 return 0
+            transactions = await self._db.get_verdict_transactions([row["id"] for row in rows])
+            hashes = {row["id"]: _row_hashes(row, transactions.get(row["id"], [])) for row in rows}
             async with aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=RPC_TIMEOUT_SECONDS)
             ) as session:
-                receipts = await asyncio.wait_for(
-                    self._rpc(session, [("eth_getTransactionReceipt", [row["tx_hash"]]) for row in rows]),
-                    RECEIPT_TIMEOUT_SECONDS,
+                receipts = iter(
+                    await asyncio.wait_for(
+                        self._rpc(
+                            session,
+                            [("eth_getTransactionReceipt", [h]) for row in rows for h in hashes[row["id"]]],
+                        ),
+                        RECEIPT_TIMEOUT_SECONDS,
+                    )
                 )
             requeued = 0
-            for row, receipt in zip(rows, receipts):
-                status = _receipt_outcome(receipt)
-                if status is not None:
-                    await self._db.update_verdict_onchain(row["id"], status, tx_hash=row["tx_hash"])
+            for row in rows:
+                mined = None
+                for tx_hash in hashes[row["id"]]:
+                    status = _receipt_outcome(next(receipts))
+                    if status is not None and mined is None:
+                        mined = status, tx_hash
+                if mined is not None:
+                    status, tx_hash = mined
+                    await self._db.update_verdict_onchain(row["id"], status, tx_hash=tx_hash)
                     logger.info("Verdict record %d reconciled: %s", row["id"], status)
-                else:
+                elif row["attempts"] < MAX_SEND_ATTEMPTS:
                     await self._db.requeue_verdict(row["id"])
                     requeued += 1
+                else:
+                    await self._db.touch_verdict(row["id"])
             return requeued
         except Exception as e:
             logger.warning("Verdict reconciliation failed: %s", type(e).__name__)
@@ -390,28 +443,35 @@ class VerdictPublisher:
                 )
             ).hex()
         )
+        transactions = (await self._db.get_verdict_transactions([evidence_id])).get(evidence_id, [])
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=RPC_TIMEOUT_SECONDS)
         ) as session:
             async with self._nonce_lock:
                 try:
-                    raw, nonce, recorded = await asyncio.wait_for(
-                        self._sign(session, row, data), PHASE_TIMEOUT_SECONDS
+                    prepared = await asyncio.wait_for(
+                        self._prepare(session, row, transactions, data), PHASE_TIMEOUT_SECONDS
                     )
                 except Exception as e:
                     # Nothing new has left this process, so returning the row to the queue is always safe.
                     reason = e.reason if isinstance(e, RecordFailed) else type(e).__name__
                     await self._db.release_verdict_claim(evidence_id)
+                    self._note_wait(reason)
                     logger.warning("Verdict record deferred: %s", reason)
                     return "retry"
-                if recorded is not None:
-                    # The row's earlier transaction was mined after all; nothing new is signed.
-                    await self._db.update_verdict_onchain(evidence_id, recorded, tx_hash=row["tx_hash"])
-                    logger.info("Verdict record %s by an earlier transaction: tx=%s", recorded, row["tx_hash"])
+                self._waits = 0
+                if prepared[0] == "mined":
+                    # One of the row's earlier transactions was mined after all; nothing is sent.
+                    _, status, tx_hash = prepared
+                    await self._db.update_verdict_onchain(evidence_id, status, tx_hash=tx_hash)
+                    logger.info("Verdict record %s by an earlier transaction: tx=%s", status, tx_hash)
                     return "done"
+                _, raw, nonce = prepared
                 tx_hash = "0x" + keccak(raw).hex()
-                # Stored with its nonce before the broadcast, so any later attempt can prove what may still land.
-                await self._db.set_verdict_tx_hash(evidence_id, tx_hash, nonce)
+                # Stored, with its bytes, before the broadcast, so every later check covers it.
+                if not await self._db.set_verdict_tx_hash(evidence_id, tx_hash, nonce, raw.hex()):
+                    logger.error("Verdict record %d is no longer claimed; not broadcasting", evidence_id)
+                    return "done"
                 try:
                     await asyncio.wait_for(
                         self._rpc(session, [("eth_sendRawTransaction", ["0x" + raw.hex()])]),
@@ -424,9 +484,10 @@ class VerdictPublisher:
                     accepted = False
                     error = e.reason if isinstance(e, RecordFailed) else type(e).__name__
             await asyncio.sleep(RECEIPT_DELAY_SECONDS)
-            status = await self._receipt_status(session, tx_hash)
+            hashes = _row_hashes({"tx_hash": tx_hash}, transactions)
+            status, mined_hash = await self._mined(session, hashes)
         if status is not None:
-            error = None
+            tx_hash, error = mined_hash, None
         elif accepted:
             status = "submitted"
         elif rejected:
@@ -442,41 +503,62 @@ class VerdictPublisher:
             logger.warning("Verdict record %s: %s", status, error)
         return "done"
 
-    async def _sign(self, session, row: dict, data: str) -> tuple:
-        """Read the nonce, fee, gas and balance, then sign record().
+    def _note_wait(self, reason: str) -> None:
+        """Count consecutive waits on an earlier transaction and say so loudly when they go on."""
+        if reason != "PreviousTransactionPending":
+            return
+        self._waits += 1
+        if self._waits % WAIT_ALARM_AFTER == 0:
+            logger.error(
+                "Verdict drain has waited %d times in a row for an earlier transaction at the same nonce; "
+                "check the recorder's pending transactions",
+                self._waits,
+            )
 
-        Returns (raw transaction, nonce, None), or (None, None, "confirmed"/"reverted") when the row's earlier
-        transaction turns out to be mined. Raises RecordFailed when it cannot sign safely now.
+    async def _prepare(self, session, row: dict, transactions: list, data: str) -> tuple:
+        """Decide what to broadcast for a claimed row, in one RPC batch read under the nonce lock.
+
+        Returns ("mined", status, tx_hash) when one of the row's earlier transactions is on-chain, or
+        ("send", raw transaction, nonce). Raises RecordFailed when nothing can be sent safely now.
         """
         sender = self.recorder
+        hashes = _row_hashes(row, transactions)
         calls = [
             ("eth_getTransactionCount", [sender, "pending"]),
             ("eth_getBlockByNumber", ["latest", False]),
             ("eth_estimateGas", [{"from": sender, "to": self.registry, "data": data}]),
             ("eth_getBalance", [sender, "latest"]),
         ]
-        previous = row["tx_hash"]
-        if previous is not None:
-            calls += [
-                ("eth_getTransactionReceipt", [previous]),
-                ("eth_getTransactionCount", [sender, "latest"]),
-            ]
+        if hashes:
+            calls.append(("eth_getTransactionCount", [sender, "latest"]))
+            calls += [("eth_getTransactionReceipt", [tx_hash]) for tx_hash in hashes]
         results = await self._rpc(session, calls)
         nonce, estimate, balance = _quantity(results[0]), _quantity(results[2]), _quantity(results[3])
         block = results[1]
         base_fee = _quantity(block.get("baseFeePerGas")) if isinstance(block, dict) else None
         if None in (nonce, estimate, balance, base_fee):
             raise RecordFailed("MalformedRPCResponse")
-        if previous is not None:
-            recorded = _receipt_outcome(results[4])
-            if recorded is not None:
-                return None, None, recorded
-            latest = _quantity(results[5])
+        if hashes:
+            for tx_hash, receipt in zip(hashes, results[5:]):
+                status = _receipt_outcome(receipt)
+                if status is not None:
+                    return "mined", status, tx_hash
+            latest = _quantity(results[4])
             if latest is None:
                 raise RecordFailed("MalformedRPCResponse")
-            # While nonce N is unused, a replacement must take N itself, so at most one of the two can be mined.
-            if latest <= row["nonce"] and nonce != row["nonce"]:
-                raise RecordFailed("PreviousTransactionPending")
+            nonces = [transaction["nonce"] for transaction in transactions]
+            if row["nonce"] is not None:
+                nonces.append(row["nonce"])
+            last = max(nonces)
+            if latest <= last:
+                # Nonce `last` is unused, so our transaction there may still be mined. Send those same bytes
+                # again rather than a second transaction: a row never has two different hashes at one nonce.
+                raws = [t["raw_tx"] for t in transactions if t["nonce"] == last and t["raw_tx"]]
+                if nonce != last or not raws:
+                    raise RecordFailed("PreviousTransactionPending")
+                return "send", bytes.fromhex(raws[-1]), last
+            # Every nonce the row used is taken, and no transaction of the row is mined, so none of them can
+            # ever be: a new transaction at the next nonce is safe.
         if base_fee > MAX_FEE_PER_GAS_WEI:
             raise RecordFailed("FeeCapExceeded")
         gas = estimate * 6 // 5
@@ -499,19 +581,23 @@ class VerdictPublisher:
             }
         )
         # eth-account renamed rawTransaction to raw_transaction; HexBytes.hex() changed prefix, so use bytes.
-        return bytes(getattr(signed, "raw_transaction", None) or signed.rawTransaction), nonce, None
+        return "send", bytes(getattr(signed, "raw_transaction", None) or signed.rawTransaction), nonce
 
-    async def _receipt_status(self, session, tx_hash: str) -> Optional[str]:
-        """One bounded receipt lookup: "confirmed", "reverted", or None if there is no usable receipt."""
+    async def _mined(self, session, hashes: list) -> tuple:
+        """One bounded batch of receipt lookups: (status, tx_hash) of a mined transaction, else (None, None)."""
         try:
-            [receipt] = await asyncio.wait_for(
-                self._rpc(session, [("eth_getTransactionReceipt", [tx_hash])]),
+            receipts = await asyncio.wait_for(
+                self._rpc(session, [("eth_getTransactionReceipt", [tx_hash]) for tx_hash in hashes]),
                 RECEIPT_TIMEOUT_SECONDS,
             )
         except Exception as e:
             logger.warning("Verdict receipt unavailable: %s", type(e).__name__)
-            return None
-        return _receipt_outcome(receipt)
+            return None, None
+        for tx_hash, receipt in zip(hashes, receipts):
+            status = _receipt_outcome(receipt)
+            if status is not None:
+                return status, tx_hash
+        return None, None
 
     async def _rpc(self, session, calls: list) -> list:
         """POST one JSON-RPC request or batch and return each result in order.
@@ -587,3 +673,11 @@ def _rate_limited(error) -> bool:
         or "rate limit" in message
         or "too many requests" in message
     )
+
+
+def _row_hashes(row: dict, transactions: list) -> list:
+    """Every transaction hash a row has broadcast, oldest first, including the row's latest."""
+    hashes = list(dict.fromkeys(transaction["tx_hash"] for transaction in transactions))
+    if row.get("tx_hash") is not None and row["tx_hash"] not in hashes:
+        hashes.append(row["tx_hash"])
+    return hashes

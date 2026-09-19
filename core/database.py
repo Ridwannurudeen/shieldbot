@@ -1949,6 +1949,15 @@ class Database:
 
             CREATE INDEX IF NOT EXISTS idx_verdict_evidence_outbox
                 ON verdict_evidence(chain_id, onchain_status, id);
+
+            CREATE TABLE IF NOT EXISTS verdict_transactions (
+                evidence_id INTEGER NOT NULL,
+                tx_hash TEXT NOT NULL,
+                nonce INTEGER NOT NULL,
+                raw_tx TEXT,
+                created_at REAL NOT NULL,
+                PRIMARY KEY (evidence_id, tx_hash)
+            );
         """)
         await self._db.commit()
 
@@ -2030,12 +2039,47 @@ class Database:
                     row,
                 ))
 
-    async def set_verdict_tx_hash(self, evidence_id: int, tx_hash: str, nonce: int):
-        """Store a newly signed transaction's hash and nonce on a claimed row before it is broadcast."""
-        await self._db.execute("""
+    async def set_verdict_tx_hash(
+        self, evidence_id: int, tx_hash: str, nonce: int, raw_tx: Optional[str] = None
+    ) -> bool:
+        """Record a transaction about to be broadcast for a claimed row; returns False if the row is not claimed.
+
+        Every transaction a row has ever broadcast is kept in verdict_transactions (a rebroadcast of the same bytes
+        adds nothing), and the row's tx_hash and nonce show the latest one. Each call counts one attempt.
+        """
+        now = time.time()
+        cursor = await self._db.execute("""
             UPDATE verdict_evidence SET tx_hash = ?, nonce = ?, attempts = attempts + 1, updated_at = ?
             WHERE id = ? AND onchain_status = 'sending'
-        """, (tx_hash, nonce, time.time(), evidence_id))
+        """, (tx_hash, nonce, now, evidence_id))
+        claimed = cursor.rowcount == 1
+        if claimed:
+            await self._db.execute("""
+                INSERT OR IGNORE INTO verdict_transactions (evidence_id, tx_hash, nonce, raw_tx, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (evidence_id, tx_hash, nonce, raw_tx, now))
+        await self._db.commit()
+        return claimed
+
+    async def get_verdict_transactions(self, evidence_ids: List[int]) -> Dict[int, List[Dict]]:
+        """Every transaction broadcast for each row, oldest first."""
+        transactions: Dict[int, List[Dict]] = {}
+        for evidence_id in evidence_ids:
+            cursor = await self._db.execute("""
+                SELECT tx_hash, nonce, raw_tx FROM verdict_transactions
+                WHERE evidence_id = ?
+                ORDER BY created_at, rowid
+            """, (evidence_id,))
+            transactions[evidence_id] = [
+                {"tx_hash": r[0], "nonce": r[1], "raw_tx": r[2]} for r in await cursor.fetchall()
+            ]
+        return transactions
+
+    async def touch_verdict(self, evidence_id: int):
+        """Mark a row as just looked at, so reconciliation looks at it again only after its delay."""
+        await self._db.execute(
+            "UPDATE verdict_evidence SET updated_at = ? WHERE id = ?", (time.time(), evidence_id)
+        )
         await self._db.commit()
 
     async def release_verdict_claim(self, evidence_id: int):
@@ -2057,28 +2101,26 @@ class Database:
         """, (time.time(), evidence_id))
         await self._db.commit()
 
-    async def get_unresolved_verdicts(
-        self, chain_id: int, updated_before: float, max_attempts: int, limit: int
-    ) -> List[Dict]:
-        """Oldest signed records with no receipt yet, untouched since `updated_before` and under the attempt cap."""
+    async def get_unresolved_verdicts(self, chain_id: int, updated_before: float, limit: int) -> List[Dict]:
+        """Signed records with no receipt yet, untouched since `updated_before`, least recently looked at first."""
         cursor = await self._db.execute("""
             SELECT id, tx_hash, nonce, attempts FROM verdict_evidence
             WHERE chain_id = ? AND onchain_status IN ('submitted', 'unconfirmed', 'failed')
-              AND tx_hash IS NOT NULL AND attempts < ? AND updated_at < ?
-            ORDER BY id
+              AND tx_hash IS NOT NULL AND updated_at < ?
+            ORDER BY updated_at, id
             LIMIT ?
-        """, (chain_id, max_attempts, updated_before, limit))
+        """, (chain_id, updated_before, limit))
         return [
             {"id": r[0], "tx_hash": r[1], "nonce": r[2], "attempts": r[3]} for r in await cursor.fetchall()
         ]
 
-    async def get_claimed_verdicts(self, chain_id: int) -> List[Dict]:
-        """Rows claimed for sending whose outcome was never recorded."""
+    async def get_claimed_verdicts(self, chain_id: int, claimed_before: Optional[float] = None) -> List[Dict]:
+        """Rows claimed for sending whose outcome was never recorded, optionally only those untouched since then."""
         cursor = await self._db.execute("""
             SELECT id, tx_hash, nonce, attempts FROM verdict_evidence
-            WHERE chain_id = ? AND onchain_status = 'sending'
+            WHERE chain_id = ? AND onchain_status = 'sending' AND (? IS NULL OR updated_at < ?)
             ORDER BY id
-        """, (chain_id,))
+        """, (chain_id, claimed_before, claimed_before))
         return [
             {"id": r[0], "tx_hash": r[1], "nonce": r[2], "attempts": r[3]} for r in await cursor.fetchall()
         ]

@@ -236,26 +236,34 @@ Each verdict's `onchain_status` moves through:
 |---|---|
 | `pending` | queued; the API's drain records queued verdicts oldest-first |
 | `sending` | claimed by the drain; the signed transaction's hash is stored before it is broadcast |
-| `confirmed` / `reverted` | the receipt of `tx_hash` shows success / a revert |
+| `confirmed` / `reverted` | the receipt of `tx_hash` shows success (sequencer, soft finality) / a revert |
 | `submitted` | the node accepted `tx_hash`, but no receipt arrived yet; reconciled later |
 | `failed` | the node rejected the signed transaction and no receipt was found; reconciled later |
 | `unconfirmed` | the broadcast outcome is unknown and no receipt was found; reconciled later |
 | `off` | stored only (another chain, or no registry configured) |
 
-`submitted`, `failed` and `unconfirmed` verdicts keep their transaction hash and nonce. At start and whenever the
-queue is empty, the drain looks up the receipts of up to 5 of them that are at least 2 minutes old, in one
-request: a mined transaction becomes `confirmed` or `reverted`, anything else is queued again, up to 5 signed
-transactions per verdict. A verdict is never recorded twice: before re-signing, in the same request as the
-nonce read, the drain checks the earlier transaction again. If it was mined, the verdict is finished with it. If its
-nonce was used by another transaction, it can never be mined, so a new nonce is safe. If its nonce is still
-unused, the replacement takes that same nonce, so at most one of the two can be mined; if something is pending at
-that nonce, the drain waits.
+`confirmed` means the sequencer included the transaction (soft finality). It becomes final on the parent chain
+(Ethereum) once the sequencer posts the batch that contains it.
 
-Stopping the drain never cancels a send under way. If the process exits before that send finishes (or the
-database fails mid-send), the verdict stays `sending` and is resolved when the drain next starts, or after the
-next drain error. A claim with no transaction hash was never signed, so it is queued
-again. A claim with a hash is `confirmed` or `reverted` if its receipt exists; otherwise it is queued again and the
-nonce check above decides whether and at which nonce it is re-signed. After 5 attempts it is left `unconfirmed`.
+Every transaction a verdict has broadcast is kept, with its nonce and signed bytes. At start and whenever the queue
+is empty, the drain looks up the receipts of every transaction of up to 5 `submitted`, `failed` or `unconfirmed`
+verdicts that are at least 2 minutes old, in one request. A mined transaction makes the verdict `confirmed` or
+`reverted`. Otherwise the verdict is queued again, up to 5 broadcasts; after that it is still looked up every 2
+minutes, so a transaction that lands late is reported.
+
+A verdict is never recorded twice. Before anything is broadcast again, in the same request as the nonce reads, the
+drain looks up the receipts of all of the verdict's transactions:
+- if any of them is mined, the verdict is finished with it and nothing is sent;
+- if the verdict's last nonce is still unused, the drain sends the same signed bytes again, never a second
+  transaction at that nonce (and waits while something else is pending there);
+- only when every nonce the verdict used has been taken by a transaction that is not one of its own, so none of
+  them can ever be mined, does it sign a new transaction at the next nonce.
+
+Stopping the API waits up to 30 seconds for a send under way to record its outcome before the database closes. If
+the process is killed first, or the send takes longer, the verdict stays `sending`. The drain resolves it once it is 2
+minutes old (which gives a lagging read replica time to show a mined transaction): at start, after a drain error, and
+whenever the queue is empty. A mined transaction finishes it; otherwise it is queued again and the rules above decide
+what, if anything, is sent. After 5 broadcasts it is left `unconfirmed`.
 
 ## 9. Smoke test and independent verification
 
