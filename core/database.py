@@ -53,8 +53,20 @@ _LAUNCH_FEED_NEXT_PAGE = _LAUNCH_ROWS + """
     LIMIT ?
 """
 # Launches whose latest outcome was recorded at or after a time, found through the scan-time
-# index and the rechecked pairs rather than a scan of every discovered launch.
-_LAUNCH_OUTCOMES_SINCE = _LAUNCH_SELECT + """
+# index and the rechecked pairs rather than a scan of every discovered launch. It repeats
+# _LAUNCH_SELECT as one literal because its filter holds a subquery.
+_LAUNCH_OUTCOMES_SINCE = """
+    SELECT token_address, source, launchpad, pool_id, block_number, tx_hash, block_timestamp,
+           discovered_at,
+           CASE WHEN rechecked THEN recheck_status ELSE scan_status END,
+           CASE WHEN rechecked THEN NULL ELSE risk_score END,
+           CASE WHEN rechecked THEN recheck_at ELSE scanned_at END AS outcome_at
+    FROM (
+        SELECT l.*, p.status AS recheck_status, p.last_checked AS recheck_at,
+               COALESCE(p.status IN ('blocked', 'cleared') AND p.last_checked >= l.scanned_at, 0)
+                   AS rechecked
+        FROM discovered_launches l
+        LEFT JOIN tracked_pairs p ON p.pair_address = l.token_address AND p.chain_id = l.chain_id
         WHERE (l.chain_id = ? AND l.scanned_at >= ?) OR (l.chain_id = ? AND l.token_address IN (
             SELECT pair_address FROM tracked_pairs
             WHERE chain_id = ? AND status IN ('blocked', 'cleared') AND last_checked >= ?
