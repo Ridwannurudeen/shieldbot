@@ -777,6 +777,7 @@ PROVIDER_PATH_MODULES = [
     'services/rescue_service.py',
     'services/reputation.py',
     'services/robinhood_simulation.py',
+    'services/rpc_guard.py',
     'services/tenderly_service.py',
     'services/token_gate_service.py',
     'services/token_sniffer_service.py',
