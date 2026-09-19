@@ -739,44 +739,63 @@ async def deliver_launch_alerts(bot):
 
     An alert is claimed before it is sent, so one that may have reached Telegram is never sent
     again, even after a restart. Flood control returns the alert to the queue and skips that
-    chat for the rest of the pass, so other chats still get theirs. An unclear network error or
-    a bot-wide error ends the pass. A chat that blocked the bot or moved is unsubscribed.
+    chat for the rest of the pass, so other chats still get theirs. A group that migrated keeps
+    its subscription and queue under its new id. A chat that blocked the bot, or that Telegram
+    reports as not found, is unsubscribed. An unclear network error or a bot-wide error ends
+    the pass.
     """
     alerts = await container.db.get_pending_launch_alerts(
         time.time(), LAUNCH_ALERT_MAX_AGE_SECONDS, LAUNCH_ALERTS_PER_CHAT_PER_PASS, LAUNCH_ALERTS_PER_PASS,
     )
-    flood_controlled = set()
+    skipped_chats = set()
     for alert in alerts:
-        if alert['chat_id'] in flood_controlled or not await container.db.claim_launch_alert(alert['id']):
+        if alert['chat_id'] in skipped_chats or not await container.db.claim_launch_alert(alert['id']):
             continue
-        try:
-            await bot.send_message(
+        # A failed send comes back as a value, so its migration target and Telegram's
+        # description can be read; only the error class is ever logged or stored.
+        (result,) = await asyncio.gather(
+            bot.send_message(
                 chat_id=alert['chat_id'], text=format_launch_alert(alert['payload']),
                 disable_web_page_preview=True,
-            )
-        except RetryAfter:
+            ),
+            return_exceptions=True,
+        )
+        if not isinstance(result, BaseException):
+            await container.db.set_launch_alert_state(alert['id'], 'sent')
+            continue
+        error = type(result).__name__
+        if isinstance(result, RetryAfter):
             # Telegram refused the message, so it was not delivered and can be sent later.
             await container.db.set_launch_alert_state(alert['id'], 'pending')
-            flood_controlled.add(alert['chat_id'])
-            logger.warning("Launch alerts to a chat paused by Telegram flood control (RetryAfter)")
-        except (Forbidden, ChatMigrated) as e:
-            await container.db.set_launch_alert_state(alert['id'], 'failed', type(e).__name__)
+            skipped_chats.add(alert['chat_id'])
+            logger.warning("Launch alerts to a chat paused by Telegram flood control (%s)", error)
+        elif isinstance(result, ChatMigrated):
+            # Telegram refused the message, so it and the rest of the queue follow the group.
+            await container.db.set_launch_alert_state(alert['id'], 'pending')
+            await container.db.move_launch_alert_chat(alert['chat_id'], result.new_chat_id, alert['chain_id'])
+            skipped_chats.add(alert['chat_id'])
+            logger.warning("Launch alerts moved to a migrated group (%s)", error)
+        elif isinstance(result, Forbidden) or (
+            # Telegram's description for a deleted chat or one the bot was never in.
+            isinstance(result, BadRequest) and result.message.lower() == 'chat not found'
+        ):
+            await container.db.set_launch_alert_state(alert['id'], 'failed', error)
             await container.db.unsubscribe_launch_alerts(alert['chat_id'], alert['chain_id'])
-            logger.warning("Launch alerts stopped for an unreachable chat: %s", type(e).__name__)
-        except BadRequest:
-            await container.db.set_launch_alert_state(alert['id'], 'failed', 'BadRequest')
-            logger.warning("Launch alert rejected: BadRequest")
-        except NetworkError as e:
+            logger.warning("Launch alerts stopped for an unreachable chat: %s", error)
+        elif isinstance(result, BadRequest):
+            await container.db.set_launch_alert_state(alert['id'], 'failed', error)
+            logger.warning("Launch alert rejected: %s", error)
+        elif isinstance(result, NetworkError):
             # The message may have been delivered, so it is recorded as unconfirmed and never resent.
-            await container.db.set_launch_alert_state(alert['id'], 'unconfirmed', type(e).__name__)
-            logger.warning("Launch alert delivery unconfirmed: %s", type(e).__name__)
+            await container.db.set_launch_alert_state(alert['id'], 'unconfirmed', error)
+            logger.warning("Launch alert delivery unconfirmed: %s", error)
             return
-        except TelegramError as e:
-            await container.db.set_launch_alert_state(alert['id'], 'failed', type(e).__name__)
-            logger.warning("Launch alert delivery failed: %s", type(e).__name__)
+        elif isinstance(result, TelegramError):
+            await container.db.set_launch_alert_state(alert['id'], 'failed', error)
+            logger.warning("Launch alert delivery failed: %s", error)
             return
         else:
-            await container.db.set_launch_alert_state(alert['id'], 'sent')
+            raise result
 
 
 async def launch_alert_loop(bot):

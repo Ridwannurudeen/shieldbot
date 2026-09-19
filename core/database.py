@@ -2142,6 +2142,23 @@ class Database:
         await self._db.commit()
         return cursor.rowcount == 1
 
+    async def move_launch_alert_chat(self, chat_id: int, new_chat_id: int, chain_id: int):
+        """Follow a group that became a supergroup: move its subscription and queued alerts.
+
+        If the new id is already subscribed, that subscription stays and the old queue is
+        cancelled.
+        """
+        cursor = await self._db.execute(
+            "UPDATE OR IGNORE launch_alert_subscriptions SET chat_id = ? WHERE chat_id = ? AND chain_id = ?",
+            (new_chat_id, chat_id, chain_id),
+        )
+        if cursor.rowcount == 1:
+            await self._db.execute("""
+                UPDATE OR IGNORE launch_alert_outbox SET chat_id = ?, updated_at = ?
+                WHERE chat_id = ? AND chain_id = ? AND state = 'pending'
+            """, (new_chat_id, time.time(), chat_id, chain_id))
+        await self.unsubscribe_launch_alerts(chat_id, chain_id)
+
     async def enqueue_launch_alerts(self, chain_id: int, since: float):
         """Queue alerts for the launch outcomes recorded at or after ``since``.
 

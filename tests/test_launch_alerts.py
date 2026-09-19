@@ -120,6 +120,44 @@ async def test_unsubscribe_removes_the_chat_and_cancels_its_queue(db):
     ]
 
 
+@pytest.mark.asyncio
+async def test_a_migrated_chat_keeps_its_subscription_and_queue(db):
+    await _subscribe(db, CHAT_A, "all", at=500.0)
+    for index, token in enumerate(TOKENS[:3]):
+        await _scan(db, token, "blocked", 90, at=1000.0 + index, block=100 + index)
+    await db.enqueue_launch_alerts(CHAIN, since=900.0)
+    sent, *_ = await db.get_pending_launch_alerts(now=1000.0, max_age=3600, per_chat=5, limit=5)
+    await db.claim_launch_alert(sent["id"])
+    await db.set_launch_alert_state(sent["id"], "sent")
+
+    await db.move_launch_alert_chat(CHAT_A, -100999, CHAIN)
+
+    assert await _subscriptions(db) == [(-100999, CHAIN, "all", 500.0)]
+    assert await _outbox(db) == [
+        (CHAT_A, TOKENS[0], "blocked", "sent"),
+        (-100999, TOKENS[1], "blocked", "pending"),
+        (-100999, TOKENS[2], "blocked", "pending"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_chat_migrating_into_a_subscribed_chat_keeps_that_subscription_and_queue(db):
+    await _subscribe(db, CHAT_A, "all", at=500.0)
+    await _subscribe(db, CHAT_B, "blocked", at=700.0)
+    await _scan(db, TOKENS[0], "blocked", 90, at=1000.0)
+    await _scan(db, TOKENS[1], "unknown", None, at=1001.0, block=101)
+    await db.enqueue_launch_alerts(CHAIN, since=900.0)
+
+    await db.move_launch_alert_chat(CHAT_A, CHAT_B, CHAIN)
+
+    assert await _subscriptions(db) == [(CHAT_B, CHAIN, "blocked", 700.0)]
+    assert await _outbox(db) == [
+        (CHAT_B, TOKENS[0], "blocked", "pending"),
+        (CHAT_A, TOKENS[0], "blocked", "cancelled"),
+        (CHAT_A, TOKENS[1], "unknown", "cancelled"),
+    ]
+
+
 # --- enqueue ----------------------------------------------------------------------------------
 
 

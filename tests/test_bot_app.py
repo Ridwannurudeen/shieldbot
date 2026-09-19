@@ -451,7 +451,10 @@ class TestLaunchAlertDelivery:
         ]
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("error", [Forbidden("bot was blocked by the user"), ChatMigrated(-100999)])
+    @pytest.mark.parametrize("error", [
+        Forbidden("Forbidden: bot was blocked by the user"),
+        BadRequest("Bad Request: chat not found"),
+    ])
     async def test_a_chat_that_is_gone_is_unsubscribed_and_others_still_get_alerts(self, bot_module, alerts, error):
         await _subscribe(alerts.db, CHAT_A, "blocked")
         await _subscribe(alerts.db, CHAT_B, "blocked")
@@ -477,12 +480,50 @@ class TestLaunchAlertDelivery:
         assert [row[0] for row in await cursor.fetchall()] == [CHAT_B]
 
     @pytest.mark.asyncio
-    async def test_a_rejected_message_fails_alone(self, bot_module, alerts):
+    async def test_a_migrated_group_keeps_its_subscription_and_queue_under_the_new_id(self, bot_module, alerts):
+        await _subscribe(alerts.db, CHAT_A, "all", at=500.0)
+        await _subscribe(alerts.db, CHAT_B, "blocked")
+        await _scan(alerts.db, TOKENS[0], "blocked", 90, at=990.0)
+        await _scan(alerts.db, TOKENS[1], "blocked", 90, at=991.0, block=101)
+        await alerts.db.enqueue_launch_alerts(CHAIN, 900.0)
+        migrated = -100999
+
+        async def send(chat_id, **kwargs):
+            if chat_id == CHAT_A:
+                raise ChatMigrated(migrated)
+
+        alerts.bot.send_message.side_effect = send
+        await bot_module.deliver_launch_alerts(alerts.bot)
+        await bot_module.deliver_launch_alerts(alerts.bot)
+
+        assert [call.kwargs["chat_id"] for call in alerts.bot.send_message.await_args_list] == [
+            CHAT_B, CHAT_A, CHAT_B, migrated, migrated,
+        ]
+        assert await _states(alerts.db) == [
+            (CHAT_B, TOKENS[0], "sent", None),
+            (migrated, TOKENS[0], "sent", None),
+            (CHAT_B, TOKENS[1], "sent", None),
+            (migrated, TOKENS[1], "sent", None),
+        ]
+        cursor = await alerts.db._db.execute(
+            "SELECT chat_id, mode, created_at FROM launch_alert_subscriptions ORDER BY chat_id"
+        )
+        assert [tuple(row) for row in await cursor.fetchall()] == [
+            (migrated, "all", 500.0), (CHAT_B, "blocked", 500.0),
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("description", [
+        "Bad Request: message is too long",
+        "Bad Request: chat_id is empty",
+        "Bad Request: chat not found in the message text",
+    ])
+    async def test_a_rejected_message_fails_alone(self, bot_module, alerts, description):
         await _subscribe(alerts.db, CHAT_A, "blocked")
         await _scan(alerts.db, TOKENS[0], "blocked", 90, at=990.0)
         await _scan(alerts.db, TOKENS[1], "blocked", 90, at=991.0, block=101)
         await alerts.db.enqueue_launch_alerts(CHAIN, 900.0)
-        alerts.bot.send_message.side_effect = [BadRequest("Message is too long"), None]
+        alerts.bot.send_message.side_effect = [BadRequest(description), None]
 
         await bot_module.deliver_launch_alerts(alerts.bot)
 
@@ -490,6 +531,8 @@ class TestLaunchAlertDelivery:
             (CHAT_A, TOKENS[0], "failed", "BadRequest"),
             (CHAT_A, TOKENS[1], "sent", None),
         ]
+        cursor = await alerts.db._db.execute("SELECT chat_id FROM launch_alert_subscriptions")
+        assert [row[0] for row in await cursor.fetchall()] == [CHAT_A]
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("error,state", [(TimedOut(), "unconfirmed"), (InvalidToken(), "failed")])
@@ -510,6 +553,18 @@ class TestLaunchAlertDelivery:
         assert await _states(alerts.db) == [(CHAT_A, TOKENS[0], state, name), (CHAT_A, TOKENS[1], "sent", None)]
         assert alerts.bot.send_message.await_count == 2
         assert name in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_an_error_outside_telegram_propagates_and_leaves_the_alert_claimed(self, bot_module, alerts):
+        await _subscribe(alerts.db, CHAT_A, "blocked")
+        await _scan(alerts.db, TOKENS[0], "blocked", 90, at=990.0)
+        await alerts.db.enqueue_launch_alerts(CHAIN, 900.0)
+        alerts.bot.send_message.side_effect = RuntimeError("bug")
+
+        with pytest.raises(RuntimeError):
+            await bot_module.deliver_launch_alerts(alerts.bot)
+
+        assert await _states(alerts.db) == [(CHAT_A, TOKENS[0], "sending", None)]
 
     @pytest.mark.asyncio
     async def test_all_mode_marks_unknown_outcomes_unknown_never_safe(self, bot_module, alerts):
