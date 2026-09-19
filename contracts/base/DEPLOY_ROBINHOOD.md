@@ -199,14 +199,23 @@ Each verdict's `onchain_status` moves through:
 | `pending` | queued; the API's drain records queued verdicts oldest-first |
 | `sending` | claimed by the drain; the signed transaction's hash is stored before it is broadcast |
 | `confirmed` / `reverted` | the receipt of `tx_hash` shows success / a revert |
-| `submitted` | the node accepted `tx_hash`, but no receipt arrived within the timeout |
-| `failed` | the node explicitly rejected the signed transaction and no receipt was found; treated as not broadcast |
-| `unconfirmed` | the broadcast outcome is unknown and no receipt was found; never resent |
+| `submitted` | the node accepted `tx_hash`, but no receipt arrived yet; reconciled later |
+| `failed` | the node rejected the signed transaction and no receipt was found; reconciled later |
+| `unconfirmed` | the broadcast outcome is unknown and no receipt was found; reconciled later |
 | `off` | stored only (another chain, or no registry configured) |
 
+`submitted`, `failed` and `unconfirmed` verdicts keep their transaction hash and nonce. At start and whenever the
+queue is empty, the drain looks up the receipts of up to 5 of them that are at least 2 minutes old, in one
+request: a mined transaction becomes `confirmed` or `reverted`, anything else is queued again, up to 5 signed
+transactions per verdict. A verdict is never recorded twice: before re-signing, in the same request as the
+nonce read, the drain checks the earlier transaction again. If it was mined, the verdict is finished with it. If its
+nonce was used by another transaction, it can never be mined, so a new nonce is safe. If its nonce is still
+unused, the replacement takes that same nonce, so at most one of the two can be mined; if something is pending at
+that nonce, the drain waits.
+
 If the API stops while a verdict is `sending`, the next start resolves it. A claim with no transaction hash was
-never signed, so it is queued again. A claim with a hash is never re-signed or resent: one receipt lookup marks it
-`confirmed` or `reverted`, otherwise `unconfirmed`.
+never signed, so it is queued again. A claim with a hash may have been broadcast: one receipt lookup marks it
+`confirmed` or `reverted`, otherwise `unconfirmed`, which is then reconciled as above.
 
 ## 9. Smoke test and independent verification
 

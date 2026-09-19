@@ -1,6 +1,7 @@
 """Storage of published verdict evidence, keyed by (chain_id, subject) with history."""
 
 import asyncio
+import time
 
 import pytest
 import pytest_asyncio
@@ -11,6 +12,8 @@ TOKEN = "0x" + "ab" * 20
 OTHER = "0x" + "cd" * 20
 HASH_A = "0x" + "11" * 32
 HASH_B = "0x" + "22" * 32
+TX_A = "0x" + "44" * 32
+TX_B = "0x" + "55" * 32
 REGISTRY = "0x" + "33" * 20
 
 
@@ -134,6 +137,7 @@ async def test_claim_takes_the_oldest_pending_robinhood_row(db):
     claimed = await db.claim_next_pending_verdict(4663)
     assert claimed == {
         "id": first, "subject": TOKEN, "verdict": "UNKNOWN", "evidence_hash": HASH_A, "observed_block": 0,
+        "tx_hash": None, "nonce": None, "attempts": 0,
     }
     assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "sending"
     assert (await db.claim_next_pending_verdict(4663))["id"] == second
@@ -141,30 +145,78 @@ async def test_claim_takes_the_oldest_pending_robinhood_row(db):
 
 
 @pytest.mark.asyncio
-async def test_tx_hash_is_stored_on_the_claimed_row_before_broadcast(db):
+async def test_tx_hash_and_nonce_are_stored_on_the_claimed_row_before_broadcast(db):
     evidence_id = await insert(db, onchain_status="pending")
     await db.claim_next_pending_verdict(4663)
-    await db.set_verdict_tx_hash(evidence_id, "0x" + "44" * 32)
-    [claimed] = await db.get_claimed_verdicts(4663)
-    assert (claimed["id"], claimed["tx_hash"]) == (evidence_id, "0x" + "44" * 32)
+    await db.set_verdict_tx_hash(evidence_id, TX_A, 7)
+    assert await db.get_claimed_verdicts(4663) == [
+        {"id": evidence_id, "tx_hash": TX_A, "nonce": 7, "attempts": 1},
+    ]
 
 
 @pytest.mark.asyncio
-async def test_a_released_claim_is_pending_again(db):
+async def test_a_released_claim_is_pending_again_and_keeps_its_last_transaction(db):
     evidence_id = await insert(db, onchain_status="pending")
     await db.claim_next_pending_verdict(4663)
+    await db.set_verdict_tx_hash(evidence_id, TX_A, 7)
     await db.release_verdict_claim(evidence_id)
     assert await db.get_claimed_verdicts(4663) == []
-    assert (await db.claim_next_pending_verdict(4663))["id"] == evidence_id
+    claimed = await db.claim_next_pending_verdict(4663)
+    assert (claimed["id"], claimed["tx_hash"], claimed["nonce"], claimed["attempts"]) == (evidence_id, TX_A, 7, 1)
 
 
 @pytest.mark.asyncio
 async def test_release_and_tx_hash_only_touch_claimed_rows(db):
     evidence_id = await insert(db, onchain_status="pending")
-    await db.set_verdict_tx_hash(evidence_id, "0x" + "44" * 32)
+    await db.set_verdict_tx_hash(evidence_id, TX_A, 7)
     await db.release_verdict_claim(evidence_id)
     stored = await db.get_latest_verdict_evidence(4663, TOKEN)
     assert (stored["onchain_status"], stored["tx_hash"]) == ("pending", None)
+
+
+async def signed_row(db, status, subject=TOKEN, tx_hash=TX_A):
+    evidence_id = await insert(db, subject=subject, onchain_status="pending")
+    await db.claim_next_pending_verdict(4663)
+    await db.set_verdict_tx_hash(evidence_id, tx_hash, 7)
+    await db.update_verdict_onchain(evidence_id, status, tx_hash=tx_hash)
+    return evidence_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["submitted", "unconfirmed", "failed"])
+async def test_unresolved_records_are_listed_and_can_be_requeued(db, status):
+    evidence_id = await signed_row(db, status)
+    later = time.time() + 1
+    assert await db.get_unresolved_verdicts(4663, later, max_attempts=5, limit=10) == [
+        {"id": evidence_id, "tx_hash": TX_A, "nonce": 7, "attempts": 1},
+    ]
+    await db.requeue_verdict(evidence_id)
+    stored = await db.get_latest_verdict_evidence(4663, TOKEN)
+    assert (stored["onchain_status"], stored["tx_hash"]) == ("pending", TX_A)
+    assert await db.get_unresolved_verdicts(4663, later, max_attempts=5, limit=10) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["confirmed", "reverted", "off", "pending", "sending"])
+async def test_resolved_or_active_records_are_never_listed_or_requeued(db, status):
+    evidence_id = await signed_row(db, status)
+    assert await db.get_unresolved_verdicts(4663, time.time() + 1, max_attempts=5, limit=10) == []
+    await db.requeue_verdict(evidence_id)
+    assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == status
+
+
+@pytest.mark.asyncio
+async def test_unresolved_listing_honours_age_attempts_limit_and_order(db):
+    first = await signed_row(db, "submitted")
+    second = await signed_row(db, "unconfirmed", subject=OTHER, tx_hash=TX_B)
+    assert await db.get_unresolved_verdicts(4663, time.time() - 60, max_attempts=5, limit=10) == []
+    later = time.time() + 1
+    assert [r["id"] for r in await db.get_unresolved_verdicts(4663, later, max_attempts=5, limit=10)] == [
+        first, second,
+    ]
+    assert [r["id"] for r in await db.get_unresolved_verdicts(4663, later, max_attempts=5, limit=1)] == [first]
+    assert await db.get_unresolved_verdicts(4663, later, max_attempts=1, limit=10) == []
+    assert await db.get_unresolved_verdicts(56, later, max_attempts=5, limit=10) == []
 
 
 @pytest.mark.asyncio

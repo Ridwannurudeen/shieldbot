@@ -1938,6 +1938,8 @@ class Database:
                 onchain_status TEXT NOT NULL,
                 registry TEXT,
                 tx_hash TEXT,
+                nonce INTEGER,
+                attempts INTEGER NOT NULL DEFAULT 0,
                 onchain_error TEXT,
                 updated_at REAL NOT NULL
             );
@@ -2005,7 +2007,7 @@ class Database:
         """
         while True:
             cursor = await self._db.execute("""
-                SELECT id, subject, verdict, evidence_hash, observed_block
+                SELECT id, subject, verdict, evidence_hash, observed_block, tx_hash, nonce, attempts
                 FROM verdict_evidence
                 WHERE chain_id = ? AND onchain_status = 'pending'
                 ORDER BY id
@@ -2020,29 +2022,60 @@ class Database:
             """, (time.time(), row[0]))
             await self._db.commit()
             if cursor.rowcount == 1:
-                return dict(zip(("id", "subject", "verdict", "evidence_hash", "observed_block"), row))
+                return dict(zip(
+                    ("id", "subject", "verdict", "evidence_hash", "observed_block", "tx_hash", "nonce", "attempts"),
+                    row,
+                ))
 
-    async def set_verdict_tx_hash(self, evidence_id: int, tx_hash: str):
-        """Store the signed transaction's hash on a claimed row before it is broadcast."""
+    async def set_verdict_tx_hash(self, evidence_id: int, tx_hash: str, nonce: int):
+        """Store a newly signed transaction's hash and nonce on a claimed row before it is broadcast."""
         await self._db.execute("""
-            UPDATE verdict_evidence SET tx_hash = ?, updated_at = ?
+            UPDATE verdict_evidence SET tx_hash = ?, nonce = ?, attempts = attempts + 1, updated_at = ?
             WHERE id = ? AND onchain_status = 'sending'
-        """, (tx_hash, time.time(), evidence_id))
+        """, (tx_hash, nonce, time.time(), evidence_id))
         await self._db.commit()
 
     async def release_verdict_claim(self, evidence_id: int):
-        """Return a claimed row that was never signed to the pending queue."""
+        """Return a claimed row to the pending queue.
+
+        An earlier transaction's hash and nonce are kept, so the next attempt can check whether it may still land.
+        """
         await self._db.execute("""
-            UPDATE verdict_evidence SET onchain_status = 'pending', tx_hash = NULL, updated_at = ?
+            UPDATE verdict_evidence SET onchain_status = 'pending', updated_at = ?
             WHERE id = ? AND onchain_status = 'sending'
         """, (time.time(), evidence_id))
         await self._db.commit()
 
+    async def requeue_verdict(self, evidence_id: int):
+        """Queue an unresolved record (submitted, unconfirmed or failed) for another attempt."""
+        await self._db.execute("""
+            UPDATE verdict_evidence SET onchain_status = 'pending', updated_at = ?
+            WHERE id = ? AND onchain_status IN ('submitted', 'unconfirmed', 'failed')
+        """, (time.time(), evidence_id))
+        await self._db.commit()
+
+    async def get_unresolved_verdicts(
+        self, chain_id: int, updated_before: float, max_attempts: int, limit: int
+    ) -> List[Dict]:
+        """Oldest signed records with no receipt yet, untouched since `updated_before` and under the attempt cap."""
+        cursor = await self._db.execute("""
+            SELECT id, tx_hash, nonce, attempts FROM verdict_evidence
+            WHERE chain_id = ? AND onchain_status IN ('submitted', 'unconfirmed', 'failed')
+              AND tx_hash IS NOT NULL AND attempts < ? AND updated_at < ?
+            ORDER BY id
+            LIMIT ?
+        """, (chain_id, max_attempts, updated_before, limit))
+        return [
+            {"id": r[0], "tx_hash": r[1], "nonce": r[2], "attempts": r[3]} for r in await cursor.fetchall()
+        ]
+
     async def get_claimed_verdicts(self, chain_id: int) -> List[Dict]:
         """Rows claimed for sending whose outcome was never recorded."""
         cursor = await self._db.execute("""
-            SELECT id, tx_hash FROM verdict_evidence
+            SELECT id, tx_hash, nonce, attempts FROM verdict_evidence
             WHERE chain_id = ? AND onchain_status = 'sending'
             ORDER BY id
         """, (chain_id,))
-        return [{"id": r[0], "tx_hash": r[1]} for r in await cursor.fetchall()]
+        return [
+            {"id": r[0], "tx_hash": r[1], "nonce": r[2], "attempts": r[3]} for r in await cursor.fetchall()
+        ]

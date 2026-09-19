@@ -80,6 +80,8 @@ class FakeChain:
 
     def __init__(self, nonce=7, base_fee=BASE_FEE, estimate=100_000, balance=10**18):
         self.nonce = nonce
+        self.latest = nonce
+        self.mine = True
         self.base_fee = base_fee
         self.estimate = estimate
         self.balance = balance
@@ -121,7 +123,7 @@ class FakeChain:
         if method in self.errors:
             return {"jsonrpc": "2.0", "id": row["id"], "error": self.errors[method]}
         if method == "eth_getTransactionCount":
-            result = hex(self.nonce)
+            result = hex(self.latest if params[1] == "latest" else self.nonce)
         elif method == "eth_getBlockByNumber":
             result = (
                 self.block
@@ -140,7 +142,9 @@ class FakeChain:
             self.sent.append(raw)
             self.nonce += 1
             tx_hash = "0x" + keccak(raw).hex()
-            if self.receipt_status is not None:
+            if self.mine:
+                self.latest = self.nonce
+            if self.mine and self.receipt_status is not None:
                 self.receipts[tx_hash] = {"transactionHash": tx_hash, "status": self.receipt_status}
             result = tx_hash
         elif method == "eth_getTransactionReceipt":
@@ -792,7 +796,7 @@ async def test_the_running_drain_wakes_on_publish_and_stops(db, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_an_explicitly_rejected_send_fails_without_a_tx_hash(db):
+async def test_an_explicitly_rejected_send_fails_and_keeps_its_tx_hash(db):
     chain = FakeChain()
     chain.errors["eth_sendRawTransaction"] = {
         "code": -32000,
@@ -803,7 +807,7 @@ async def test_an_explicitly_rejected_send_fails_without_a_tx_hash(db):
     with rpc_node(chain):
         assert await drain_all(publisher) == ["done", "idle"]
     stored = await db.get_latest_verdict_evidence(4663, TOKEN)
-    assert (stored["onchain_status"], stored["tx_hash"]) == ("failed", None)
+    assert (stored["onchain_status"], stored["tx_hash"]) == ("failed", posted_hash(chain))
     assert stored["onchain_error"] == "eth_sendRawTransaction JSON-RPC error -32000"
 
 
@@ -937,3 +941,250 @@ async def test_key_and_rpc_url_never_reach_logs_or_storage(db, caplog):
         assert secret not in caplog.text
         assert secret not in json.dumps(stored)
     assert "ClientConnectionError" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Reconciling unresolved records and re-sending them safely
+# ---------------------------------------------------------------------------
+
+RESEND = [PRE_SIGN + ["eth_getTransactionReceipt", "eth_getTransactionCount"]]
+
+
+def posted_hash(chain):
+    # Hash of the last raw transaction posted to the node, whether or not the node accepted it.
+    [raw] = [body["params"][0] for _, body in chain.posts
+             if not isinstance(body, list) and body["method"] == "eth_sendRawTransaction"][-1:]
+    return "0x" + keccak(bytes.fromhex(raw[2:])).hex()
+
+
+def outbox_row(db_row):
+    return (db_row["onchain_status"], db_row["tx_hash"], db_row["onchain_error"])
+
+
+async def attempts(db, subject=TOKEN):
+    cursor = await db._db.execute(
+        "SELECT nonce, attempts FROM verdict_evidence WHERE subject = ? ORDER BY id DESC LIMIT 1", (subject,)
+    )
+    return tuple(await cursor.fetchone())
+
+
+async def record_once(db, chain, publisher, subject=TOKEN):
+    await publisher.publish(4663, subject, COMPLETE)
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "done"
+    return await db.get_latest_verdict_evidence(4663, subject)
+
+
+@pytest.fixture
+def reconcile_now(monkeypatch):
+    monkeypatch.setattr(vp, "RECONCILE_AFTER_SECONDS", -1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("setup,status", [
+    (lambda chain: setattr(chain, "receipt_status", None), "submitted"),
+    (lambda chain: chain.raise_on.update(eth_sendRawTransaction=aiohttp.ClientConnectionError()), "unconfirmed"),
+    (lambda chain: chain.errors.update(eth_sendRawTransaction={"code": -32000, "message": "x"}), "failed"),
+])
+async def test_reconcile_finishes_a_record_whose_receipt_arrived_late(db, reconcile_now, setup, status):
+    chain = FakeChain()
+    setup(chain)
+    publisher = sender(db)
+    first = await record_once(db, chain, publisher)
+    assert first["onchain_status"] == status
+    chain.receipts[first["tx_hash"]] = {"status": "0x1"}
+    chain.posts.clear()
+    with rpc_node(chain):
+        assert await publisher._reconcile() == 0
+    stored = await db.get_latest_verdict_evidence(4663, TOKEN)
+    assert outbox_row(stored) == ("confirmed", first["tx_hash"], None)
+    assert chain.methods() == [["eth_getTransactionReceipt"]]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_requeues_a_record_without_a_receipt_and_keeps_its_transaction(db, reconcile_now):
+    chain = FakeChain()
+    chain.receipt_status = None
+    publisher = sender(db)
+    first = await record_once(db, chain, publisher)
+    with rpc_node(chain):
+        assert await publisher._reconcile() == 1
+    stored = await db.get_latest_verdict_evidence(4663, TOKEN)
+    assert (stored["onchain_status"], stored["tx_hash"]) == ("pending", first["tx_hash"])
+    assert await attempts(db) == (7, 1)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_waits_until_a_record_is_old_enough(db):
+    chain = FakeChain()
+    chain.receipt_status = None
+    publisher = sender(db)
+    await record_once(db, chain, publisher)
+    chain.posts.clear()
+    with rpc_node(chain) as factory:
+        assert await publisher._reconcile() == 0
+    factory.assert_not_called()
+    assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "submitted"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_looks_up_at_most_one_batch_in_one_request(db, reconcile_now):
+    chain = FakeChain()
+    chain.receipt_status = None
+    publisher = sender(db)
+    for digit in "abcdef1":
+        await record_once(db, chain, publisher, subject="0x" + digit * 40)
+    chain.posts.clear()
+    with rpc_node(chain):
+        assert await publisher._reconcile() == vp.RECONCILE_BATCH
+    assert chain.methods() == [["eth_getTransactionReceipt"] * vp.RECONCILE_BATCH]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_leaves_a_record_alone_after_the_attempt_cap(db, reconcile_now, monkeypatch):
+    monkeypatch.setattr(vp, "MAX_SEND_ATTEMPTS", 1)
+    chain = FakeChain()
+    chain.receipt_status = None
+    publisher = sender(db)
+    await record_once(db, chain, publisher)
+    chain.posts.clear()
+    with rpc_node(chain) as factory:
+        assert await publisher._reconcile() == 0
+    factory.assert_not_called()
+    assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "submitted"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_reconcile_changes_nothing(db, reconcile_now, caplog):
+    chain = FakeChain()
+    chain.receipt_status = None
+    publisher = sender(db)
+    await record_once(db, chain, publisher)
+    chain.http_statuses.append(503)
+    with rpc_node(chain):
+        assert await publisher._reconcile() == 0
+    assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "submitted"
+    assert "RecordFailed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_record_is_resent_at_a_fresh_nonce_once_its_nonce_is_used(db, reconcile_now):
+    chain = FakeChain()
+    chain.errors["eth_sendRawTransaction"] = {"code": -32000, "message": "fee too low"}
+    publisher = sender(db)
+    first = await record_once(db, chain, publisher)
+    assert outbox_row(first)[:2] == ("failed", posted_hash(chain))
+    # The rejected transaction never took nonce 7; another transaction has used it since.
+    chain.errors.clear()
+    chain.nonce = chain.latest = 8
+    chain.posts.clear()
+    with rpc_node(chain):
+        assert await publisher._reconcile() == 1
+        assert await publisher.drain_once() == "done"
+    assert chain.methods() == [["eth_getTransactionReceipt"]] + RESEND + [
+        ["eth_sendRawTransaction"], ["eth_getTransactionReceipt"],
+    ]
+    retry = decode_record(chain.sent[-1])
+    assert retry["nonce"] == 8
+    stored = await db.get_latest_verdict_evidence(4663, TOKEN)
+    assert outbox_row(stored) == ("confirmed", "0x" + keccak(chain.sent[-1]).hex(), None)
+    assert await attempts(db) == (8, 2)
+
+
+@pytest.mark.asyncio
+async def test_a_requeued_record_takes_the_same_nonce_while_it_is_unused(db, reconcile_now):
+    chain = FakeChain()
+    # The send's outcome is unknown: the transaction never reached the node.
+    chain.raise_on["eth_sendRawTransaction"] = aiohttp.ClientConnectionError()
+    chain.receipt_status = None
+    publisher = sender(db)
+    first = await record_once(db, chain, publisher)
+    assert first["onchain_status"] == "unconfirmed"
+    assert chain.sent == []
+    chain.raise_on.clear()
+    chain.receipt_status = "0x1"
+    with rpc_node(chain):
+        assert await publisher._reconcile() == 1
+        assert await publisher.drain_once() == "done"
+    [replacement] = chain.sent
+    # Same nonce as the unknown first attempt: whichever lands first, the other can never be mined.
+    assert decode_record(replacement)["nonce"] == 7
+    assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "confirmed"
+    assert await attempts(db) == (7, 2)
+
+
+@pytest.mark.asyncio
+async def test_a_requeued_record_waits_while_something_is_pending_at_its_nonce(db, reconcile_now):
+    chain = FakeChain()
+    chain.mine = False
+    publisher = sender(db)
+    first = await record_once(db, chain, publisher)
+    assert first["onchain_status"] == "submitted"
+    assert (chain.latest, chain.nonce) == (7, 8)
+    with rpc_node(chain):
+        assert await publisher._reconcile() == 1
+        assert await publisher.drain_once() == "retry"
+    assert len(chain.sent) == 1
+    stored = await db.get_latest_verdict_evidence(4663, TOKEN)
+    assert (stored["onchain_status"], stored["tx_hash"]) == ("pending", first["tx_hash"])
+    assert await attempts(db) == (7, 1)
+
+
+@pytest.mark.asyncio
+async def test_a_requeued_record_whose_first_transaction_was_mined_is_not_resent(db):
+    chain = FakeChain()
+    chain.receipt_status = None
+    publisher = sender(db)
+    first = await record_once(db, chain, publisher)
+    await db.requeue_verdict(first["id"])
+    chain.receipts[first["tx_hash"]] = {"status": "0x1"}
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "done"
+    assert len(chain.sent) == 1
+    stored = await db.get_latest_verdict_evidence(4663, TOKEN)
+    assert outbox_row(stored) == ("confirmed", first["tx_hash"], None)
+    assert await attempts(db) == (7, 1)
+
+
+@pytest.mark.asyncio
+async def test_the_drain_reconciles_at_start_and_when_idle(db, monkeypatch):
+    monkeypatch.setattr(vp, "DRAIN_POLL_SECONDS", 0.01)
+    publisher = sender(db)
+    publisher._wake = asyncio.Event()
+    monkeypatch.setattr(publisher, "_recover_claims", AsyncMock())
+    monkeypatch.setattr(publisher, "drain_once", AsyncMock(return_value="idle"))
+    calls = []
+
+    async def reconcile():
+        calls.append(len(publisher.drain_once.await_args_list))
+        if len(calls) == 3:
+            raise asyncio.CancelledError
+        return 0
+
+    monkeypatch.setattr(publisher, "_reconcile", reconcile)
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(publisher._drain_loop(), 5)
+    # Once before the first drain, then after each idle drain.
+    assert calls == [0, 1, 2]
+
+
+@pytest.mark.asyncio
+async def test_rows_requeued_by_reconcile_are_drained_without_waiting(db, monkeypatch):
+    monkeypatch.setattr(vp, "DRAIN_POLL_SECONDS", 3600)
+    publisher = sender(db)
+    publisher._wake = asyncio.Event()
+    monkeypatch.setattr(publisher, "_recover_claims", AsyncMock())
+    outcomes = iter(["idle", "done", "idle"])
+    monkeypatch.setattr(publisher, "drain_once", AsyncMock(side_effect=lambda: next(outcomes)))
+    results = iter([0, 1])
+
+    async def reconcile():
+        try:
+            return next(results)
+        except StopIteration:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(publisher, "_reconcile", reconcile)
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(publisher._drain_loop(), 5)
+    assert publisher.drain_once.await_count == 3
