@@ -51,7 +51,7 @@
 │  BNB Chain   │ │  External    │ │  Scam        │
 │  (BSC/opBNB) │ │  APIs        │ │  Databases   │
 │              │ │              │ │              │
-│ • Contract   │ │ • BscScan    │ │ • ChainAbuse │
+│ • Contract   │ │ • BscScan    │ │ • GoPlus     │
 │   Code       │ │ • Honeypot.is│ │ • ScamSniffer│
 │ • Bytecode   │ │              │ │              │
 │ • Token Data │ │              │ │              │
@@ -88,7 +88,7 @@ User Input → Validate Address → Detect Type → Route to Scanner → Format 
    └─ Verified by BscScan?
 
 2. Scam Database Check (Multi-source)
-   ├─ ChainAbuse.com lookup
+   ├─ GoPlus Security lookup
    ├─ ScamSniffer.io lookup
    └─ Local blacklist check
 
@@ -220,12 +220,12 @@ Honeypot.is API:
 **Multi-Source Validation:**
 ```python
 Sources:
-  ├─ ChainAbuse.com (reported scams)
+  ├─ GoPlus Security (token risk flags)
   ├─ ScamSniffer.io (flagged addresses)
   └─ Local blacklist (manually added)
 
 Check Flow:
-  1. Query ChainAbuse API
+  1. Query GoPlus Security API
   2. Query ScamSniffer API
   3. Check local blacklist
   4. Aggregate results

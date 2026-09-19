@@ -156,7 +156,7 @@ else:
 
 **Behavioral Score Factors** (0-100):
 - Wallet reputation (Ethos Network)
-- Scam database matches (ChainAbuse, ScamSniffer)
+- Scam database matches (GoPlus Security, local blacklist)
 - Historical abuse flags
 - Community reports
 
@@ -189,7 +189,7 @@ contract_data, honeypot_data, dex_data, ethos_data, token_info = await asyncio.g
 #### ContractService (`services/contract_service.py`)
 - BscScan API: Contract verification, source code, deployment age
 - Web3.py: Bytecode analysis, ownership checks
-- Scam databases: ChainAbuse, ScamSniffer cross-reference
+- Scam databases: GoPlus Security and the local blacklist
 - Rate limiting: 0.25s delay between BscScan calls (free tier = 5 req/sec)
 
 #### HoneypotService (`services/honeypot_service.py`)
