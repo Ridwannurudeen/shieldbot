@@ -273,19 +273,79 @@ def test_sell_crediting_nothing_to_the_pool_is_a_honeypot(name, data):
     assert outcome["is_honeypot"] is True
 
 
-@pytest.mark.parametrize("name", ["v4_native_liquidity_launcher", "v4_doppler_weth", "v4_doppler_native_fee_hook", "v2_router02"])
-def test_zero_sell_output_is_a_honeypot(name):
-    fixture = load(name)
-    calls = calls_by_label(fixture)
+def strip_sell_payout(fixture):
     buyer_topic = "0x" + "0" * 24 + fixture["buyer"][2:]
+    calls = calls_by_label(fixture)
     calls["sell"]["logs"] = [
         log for log in calls["sell"]["logs"] if log["topics"][-1] != buyer_topic
     ]
-    outcome = evaluate(fixture)
+    return fixture
+
+
+@pytest.mark.parametrize("name", ["v4_doppler_weth", "v4_doppler_native_fee_hook"])
+def test_zero_sell_output_from_a_hooked_pool_is_a_honeypot(name):
+    # The hook runs after the Swap event, so it can take the whole payout from the seller.
+    outcome = evaluate(strip_sell_payout(load(name)))
     assert outcome["can_buy"] is True
     assert outcome["can_sell"] is False
     assert outcome["is_honeypot"] is True
     assert "zero output" in outcome["reason"]
+
+
+@pytest.mark.parametrize(
+    "name", ["v4_native_liquidity_launcher", "v4_weth_hookless", "v2_router02"]
+)
+def test_zero_output_while_a_hookless_pool_paid_out_is_unknown(name):
+    # Without a hook nothing sits between the pool's payout and the seller, so a payout the Swap event
+    # reports but no transfer delivered is a gap in the trace, not something the token did.
+    outcome = evaluate(strip_sell_payout(load(name)))
+    assert outcome["can_buy"] is True
+    assert outcome["can_sell"] is None
+    assert outcome["is_honeypot"] is None
+    assert outcome["sell_tax"] is None
+    assert outcome["reason"] == "Malformed eth_simulateV1 sell logs"
+
+
+def test_zero_output_from_a_hookless_pool_that_paid_nothing_is_a_honeypot():
+    fixture = strip_sell_payout(load("v4_native_liquidity_launcher"))
+    event = router_swap_event(fixture)
+    words = [event["data"][2 + 64 * index : 2 + 64 * (index + 1)] for index in range(6)]
+    words[0] = encode(["int128"], [0]).hex()
+    event["data"] = "0x" + "".join(words)
+    outcome = evaluate(fixture)
+    assert outcome["can_sell"] is False
+    assert outcome["is_honeypot"] is True
+    assert "zero output" in outcome["reason"]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "v4_native_liquidity_launcher",
+        "v4_weth_hookless",
+        "v4_doppler_weth",
+        "v4_doppler_native_fee_hook",
+        "v2_router02",
+    ],
+)
+def test_a_successful_sell_without_logs_is_unknown(name):
+    fixture = load(name)
+    calls_by_label(fixture)["sell"]["logs"] = []
+    outcome = evaluate(fixture)
+    assert outcome["can_buy"] is True
+    assert outcome["can_sell"] is None
+    assert outcome["is_honeypot"] is None
+    assert outcome["sell_tax"] is None
+    assert outcome["reason"] == "Malformed eth_simulateV1 sell logs"
+
+
+def test_a_duplicated_sell_swap_event_leaves_the_sell_tax_unmeasured():
+    fixture = load("v4_doppler_weth")
+    calls_by_label(fixture)["sell"]["logs"].append(copy.deepcopy(router_swap_event(fixture)))
+    outcome = evaluate(fixture)
+    assert outcome["can_sell"] is True
+    assert outcome["sell_tax"] is None
+    assert "sell tax unmeasurable" in outcome["reason"]
 
 
 @pytest.mark.parametrize(

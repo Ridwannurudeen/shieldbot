@@ -6,7 +6,8 @@ Sourcify for chain 4663 and was exercised by live eth_simulateV1 runs:
   whose ExactInputSingleParams/ExactOutputSingleParams carry minHopPriceX36 before hookData.
 - PoolManager 0x8366...0951 ABI and v4-core StateLibrary (pools mapping at slot 6).
 - Permit2 0x0000...8BA3: IAllowanceTransfer.approve and solmate SafeTransferLib revert strings.
-- Uniswap V2 Router02 0x89e5...9eba: swap functions, TransferHelper and UniswapV2Library strings.
+- Uniswap V2 Router02 0x89e5...9eba: swap functions, TransferHelper and UniswapV2Library strings,
+  and the IUniswapV2Pair Swap event it bundles.
 - Doppler DopplerHookInitializer 0x4e34...a544: the getState(address) public getter.
 """
 
@@ -80,6 +81,8 @@ HEX_RE = re.compile(r"0x(?:[0-9a-fA-F]{2})*")
 QUANTITY_RE = re.compile(r"0x[0-9a-fA-F]+")
 TRANSFER_TOPIC = "0x" + keccak(text="Transfer(address,address,uint256)").hex()
 SWAP_TOPIC = "0x" + keccak(text="Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)").hex()
+# IUniswapV2Pair.Swap(sender, amount0In, amount1In, amount0Out, amount1Out, to), Router02 bundle.
+V2_SWAP_TOPIC = "0x" + keccak(text="Swap(address,uint256,uint256,uint256,uint256,address)").hex()
 INITIALIZE_TOPIC = (
     "0x"
     + keccak(text="Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)").hex()
@@ -460,25 +463,38 @@ def _sell_output(pool: Pool, logs, buyer: str) -> Optional[int]:
     return total
 
 
-def _swap_credit(pool: Pool, token: str, logs: list) -> Optional[int]:
-    """Tokens the PoolManager credited the router for the sell, from its verified Swap event."""
-    topics = [SWAP_TOPIC, "0x" + _pool_id(pool.key).hex(), "0x" + "0" * 24 + UNIVERSAL_ROUTER[2:]]
-    for log in logs:
-        if (
-            isinstance(log, dict)
-            and str(log.get("address", "")).lower() == POOL_MANAGER
-            and isinstance(log.get("topics"), list)
-            and [str(topic).lower() for topic in log["topics"]] == topics
-        ):
-            data = _hex_bytes(log.get("data"))
-            if data is None or len(data) != 6 * 32:
-                return None
-            try:
-                amount0, amount1 = decode(["int128", "int128"], data[:64])
-            except DecodingError:
-                return None
-            return -(amount0 if pool.key[0] == token else amount1)
-    return None
+def _pool_swap(pool: Pool, token: str, logs) -> Optional[tuple]:
+    """Signed (token, numeraire) amounts of the router's swap with the pool, positive when the router
+    received them, from the pool's own Swap event. None unless exactly one such event is present."""
+    if not isinstance(logs, list):
+        return None
+    if pool.route == "v2":
+        emitter, prefix, words = pool.pair, [V2_SWAP_TOPIC], 4
+    else:
+        # Only the router's swap: hook-internal swaps in the same pool have the hook as sender.
+        router = "0x" + "0" * 24 + UNIVERSAL_ROUTER[2:]
+        emitter, prefix, words = POOL_MANAGER, [SWAP_TOPIC, "0x" + _pool_id(pool.key).hex(), router], 6
+    matches = [
+        log
+        for log in logs
+        if isinstance(log, dict)
+        and str(log.get("address", "")).lower() == emitter
+        and isinstance(log.get("topics"), list)
+        and [str(topic).lower() for topic in log["topics"][: len(prefix)]] == prefix
+    ]
+    data = _hex_bytes(matches[0].get("data")) if len(matches) == 1 else None
+    if data is None or len(data) != words * 32:
+        return None
+    try:
+        if pool.route == "v2":
+            in0, in1, out0, out1 = decode(["uint256"] * 4, data)
+            amount0, amount1, token_is_currency0 = out0 - in0, out1 - in1, token < WETH
+        else:
+            amount0, amount1 = decode(["int128", "int128"], data[:64])
+            token_is_currency0 = pool.key[0] == token
+    except DecodingError:
+        return None
+    return (amount0, amount1) if token_is_currency0 else (amount1, amount0)
 
 
 def _traces_native_transfers(call: dict) -> bool:
@@ -585,6 +601,7 @@ def evaluate_simulation(
         outcome["reason"] = "native transfer tracing unavailable; the sell output cannot be measured"
         return outcome
     output = _sell_output(pool, call["sell"].get("logs"), buyer)
+    sold = _pool_swap(pool, token, call["sell"].get("logs"))
     if output is None:
         outcome["reason"] = "Malformed eth_simulateV1 sell logs"
         return outcome
@@ -594,17 +611,25 @@ def evaluate_simulation(
     else:
         # Pool hooks can move the token through the PoolManager during the swap, so its balance delta is
         # not the transfer amount; the router's Swap event states exactly what the settle credited.
-        received = _swap_credit(pool, token, call["sell"]["logs"])
-    outcome["sell_tax"] = None if received is None else tax_percent(sent, received)
+        received = None if sold is None else -sold[0]
+    sell_tax = None if received is None else tax_percent(sent, received)
     if output == 0:
+        # Only the sell's own Swap event shows the swap ran. A hook runs after that event and can take
+        # the payout, but in a hookless pool nothing sits between the payout and the seller, so a
+        # hookless pool must itself have paid nothing; otherwise the trace is missing a transfer.
+        hooked = pool.route != "v2" and pool.key[4] != NATIVE
+        if sold is None or (not hooked and sold[1] > 0):
+            outcome["reason"] = "Malformed eth_simulateV1 sell logs"
+            return outcome
         outcome.update(
+            sell_tax=sell_tax,
             can_sell=False,
             is_honeypot=True,
             reason=f"sell of {sent} token units returned zero output",
         )
         return outcome
-    sell_tax = outcome["sell_tax"]
     outcome.update(
+        sell_tax=sell_tax,
         can_sell=True,
         is_honeypot=sell_tax is not None and sell_tax >= 100,
         reason=(
