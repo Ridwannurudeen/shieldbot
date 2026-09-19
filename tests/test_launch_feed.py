@@ -466,11 +466,21 @@ async def test_supported_chain_without_discovery_says_so(feed_api):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_rejects_a_malformed_cursor(feed_api):
-    response = await feed_api.client.get(f"/api/launches/{CHAIN}", params={"cursor": "nope"})
+@pytest.mark.parametrize("cursor", ["nope", "9" * 19 + ":" + TOKENS[0], "1" + "0" * 40 + ":" + TOKENS[0]])
+async def test_endpoint_rejects_a_malformed_cursor(feed_api, cursor):
+    response = await feed_api.client.get(f"/api/launches/{CHAIN}", params={"cursor": cursor})
 
     assert response.status_code == 400
     assert response.json() == {"detail": "Invalid cursor"}
+
+
+@pytest.mark.asyncio
+async def test_the_largest_accepted_cursor_block_is_a_valid_query(db):
+    await db.upsert_discovered_launches(CHAIN, [_launch(TOKENS[0], 100)])
+
+    items, _ = await db.get_launch_feed(CHAIN, 10, cursor="9" * 18 + ":" + TOKENS[1])
+
+    assert [item["token_address"] for item in items] == [TOKENS[0]]
 
 
 @pytest.mark.asyncio

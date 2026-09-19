@@ -12,7 +12,8 @@ from core.extension_formatter import is_scan_incomplete
 
 logger = logging.getLogger(__name__)
 
-_LAUNCH_CURSOR = re.compile(r"(\d+):(0x[0-9a-f]{40})")
+# Eighteen digits keep a cursor block inside SQLite's signed 64-bit integers.
+_LAUNCH_CURSOR = re.compile(r"(\d{1,18}):(0x[0-9a-f]{40})")
 _NO_SCAN_DETAIL = "Coverage details were not recorded for this scan"
 
 # One row per discovered launch with its latest outcome. A recheck records blocked or cleared on

@@ -151,7 +151,7 @@ async def test_launch_tool_bounds_the_page_size(requested, expected):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("cursor", ["nope", 123])
+@pytest.mark.parametrize("cursor", ["nope", 123, "9" * 19 + ":" + TOKEN, "1" + "0" * 40 + ":" + TOKEN])
 async def test_launch_tool_reports_a_malformed_cursor_as_a_tool_error(db, cursor):
     from mcp_server.server import process_jsonrpc
 
