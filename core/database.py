@@ -2015,7 +2015,7 @@ class Database:
         if cursor is None:
             result = await self._db.execute(_LAUNCH_FEED_FIRST_PAGE, (chain_id, limit + 1))
         else:
-            match = _LAUNCH_CURSOR.fullmatch(cursor)
+            match = _LAUNCH_CURSOR.fullmatch(cursor) if isinstance(cursor, str) else None
             if match is None:
                 raise ValueError("Invalid cursor")
             result = await self._db.execute(

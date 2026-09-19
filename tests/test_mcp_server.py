@@ -189,8 +189,8 @@ class TestConnectionLimits:
 class TestToolListing:
     """Test tools/list JSON-RPC method."""
 
-    def test_tools_list_returns_8_tools(self, client):
-        """tools/list should return exactly 8 tools."""
+    def test_tools_list_returns_9_tools(self, client):
+        """tools/list should return exactly 9 tools."""
         resp = client.post("/mcp/messages", json={
             "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {},
         }, headers=AUTH_HEADERS)
@@ -198,10 +198,10 @@ class TestToolListing:
         body = resp.json()
         assert "result" in body
         tools = body["result"]["tools"]
-        assert len(tools) == 8
+        assert len(tools) == 9
 
     def test_tools_list_tool_names(self, client):
-        """Verify all 8 tool names are present."""
+        """Verify all 9 tool names are present."""
         resp = client.post("/mcp/messages", json={
             "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {},
         }, headers=AUTH_HEADERS)
@@ -211,6 +211,7 @@ class TestToolListing:
             "scan_contract", "simulate_transaction", "check_deployer",
             "check_agent_reputation", "check_approval_risk",
             "scan_for_injection", "query_threat_graph", "get_threat_feed",
+            "get_robinhood_launches",
         }
         assert names == expected
 
