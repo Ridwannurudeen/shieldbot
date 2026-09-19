@@ -34,7 +34,7 @@ the evidence has no simulation block.
     ```
     This writes an encrypted keystore to `~/.foundry/keystores/robinhood-owner`. The plaintext key never touches disk.
   - **Recorder**: a fresh hot wallet used only by the server. Generate it offline and store the key in a password
-    manager; it goes into the server `.env` and nowhere else:
+    manager; it goes only into the API service's environment (step 8), nowhere else:
     ```bash
     cast wallet new
     ```
@@ -129,7 +129,7 @@ cast send $REGISTRY "setRecorder(address)" 0x<new recorder address> \
 cast call $REGISTRY "recorder()(address)" --rpc-url $RH_RPC
 ```
 
-The old recorder loses access in the same transaction. Then put the new recorder key on the server (step 8).
+The old recorder loses access in the same transaction. Then put the new recorder key in the API service's environment file and restart the API (step 8).
 
 Ownership moves in two steps: the owner calls `transferOwnership(<new owner>)`, and nothing changes until the new
 owner calls `acceptOwnership()`.
@@ -146,33 +146,76 @@ cast send $RECORDER --value 0.002ether --rpc-url $RH_RPC --account robinhood-own
 cast balance $RECORDER --rpc-url $RH_RPC --ether
 ```
 
-Spend limits in the server (`services/verdict_publisher.py`):
-- at most 60 records per hour per process;
-- a gas limit of `eth_estimateGas` + 20%, refused above 500,000 gas;
-- `maxFeePerGas` = 2 x base fee, capped at 1 gwei, and refused if the base fee itself is above 1 gwei.
+Spend limits in the server (`services/verdict_publisher.py`). Only the API process sends, so they are global:
+- at most 60 records per hour; further verdicts wait in the queue as `pending`;
+- a gas limit of `eth_estimateGas` + 20%, deferred above 500,000 gas;
+- `maxFeePerGas` = 2 x base fee, capped at 1 gwei, and deferred while the base fee itself is above 1 gwei;
+- deferred while the recorder's balance cannot cover gas limit x `maxFeePerGas`.
 
 At the full 60 records per hour and the fee above, the recorder spends about 0.0005 ETH per hour. When it runs
-out of ETH, records fail and are marked failed; the evidence is still stored and served.
+out of ETH, nothing is lost: verdicts stay `pending` and are recorded once the recorder is funded again.
 
 ## 8. Configure the server
 
-Add to the server `.env` and restart the API and the bot:
+Exactly one process sends transactions: the API service (the unit that runs `uvicorn api:app`, with its single
+worker). Its lifespan starts the verdict drain. The bot, and every other path, only stores evidence and queues
+Robinhood Chain verdicts as `pending` in the shared SQLite database; the bot code never reads the key.
+
+**Only the API service's environment gets `ROBINHOOD_RECORDER_PRIVATE_KEY`.** The API and bot units both load
+`/opt/shieldbot/.env`, so do NOT put the key there. Put it in a separate file that only the API unit loads:
+
+```bash
+sudo install -m 600 -o root -g root /dev/null /etc/shieldbot/recorder.env
+sudo nano /etc/shieldbot/recorder.env        # one line: ROBINHOOD_RECORDER_PRIVATE_KEY=0x...
+sudo systemctl edit shieldbot                # the API unit; `systemctl cat shieldbot` must show uvicorn api:app
+```
+
+In the editor, add:
+
+```
+[Service]
+EnvironmentFile=/etc/shieldbot/recorder.env
+```
+
+Add to the shared `/opt/shieldbot/.env` (both services may read these; neither is secret):
 
 ```
 ROBINHOOD_VERDICT_REGISTRY=0x...          # $REGISTRY from step 3
-ROBINHOOD_RECORDER_PRIVATE_KEY=0x...      # the recorder key from the prerequisites (secret)
 ROBINHOOD_RPC_URL=https://rpc.mainnet.chain.robinhood.com   # optional; this is the default
 ```
 
-With both set, the log shows `Robinhood verdict registry: enabled`. With either missing, evidence is still
-stored and served at `/api/verdict/...`, but nothing is sent on-chain. The key is never logged.
+Restart both services. The logs show:
+- API: `Robinhood verdict registry: sending as recorder 0x...`
+- bot: `Robinhood verdict registry: verdicts queued for 0x...`, and never `sending`.
+
+With `ROBINHOOD_VERDICT_REGISTRY` missing, evidence is still stored and served at `/api/verdict/...` but nothing
+is queued. With the key missing from the API, verdicts are queued as `pending` and wait until it is added. The key
+is never logged.
+
+Each verdict's `onchain_status` moves through:
+
+| Status | Meaning |
+|---|---|
+| `pending` | queued; the API's drain records queued verdicts oldest-first |
+| `sending` | claimed by the drain; the signed transaction's hash is stored before it is broadcast |
+| `confirmed` / `reverted` | the receipt of `tx_hash` shows success / a revert |
+| `submitted` | the node accepted `tx_hash`, but no receipt arrived within the timeout |
+| `failed` | the node explicitly rejected the signed transaction; nothing was broadcast |
+| `unconfirmed` | the broadcast outcome is unknown and no receipt was found; never resent |
+| `off` | stored only (another chain, or no registry configured) |
+
+If the API stops while a verdict is `sending`, the next start resolves it. A claim with no transaction hash was
+never signed, so it is queued again. A claim with a hash is never re-signed or resent: one receipt lookup marks it
+`confirmed` or `reverted`, otherwise `unconfirmed`.
 
 ## 9. Smoke test and independent verification
 
-Scan a Robinhood Chain token in the Telegram bot (`rh:0x...`). Then:
+Scan a Robinhood Chain token in the Telegram bot (`rh:0x...`). The bot queues the verdict; the API's drain
+checks the queue at least every 10 seconds and records it. Then:
 
 ```bash
-curl -s https://<api host>/api/verdict/4663/<token> | jq '{verdict, evidence_hash, tx_hash}'
+curl -s https://<api host>/api/verdict/4663/<token> | jq '{verdict, evidence_hash, onchain_status, tx_hash}'
+# onchain_status goes pending -> confirmed within a few seconds of the drain picking it up
 ```
 
 Anyone can check a verdict without trusting ShieldBot's server:

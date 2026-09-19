@@ -17,6 +17,7 @@ from core.database import Database
 from core.extension_formatter import is_scan_incomplete
 from services.verdict_publisher import VerdictPublisher
 from utils.web3_client import UnsupportedChainError, Web3Client
+from tests.test_lifespan import mock_container  # noqa: F401  (pytest fixture)
 
 TOKEN = "0x" + "7a" * 20
 COMPLETE_HIGH = {
@@ -83,7 +84,7 @@ async def verdict_api(monkeypatch):
 
 async def publish(database, scan, honeypot=None):
     publisher = VerdictPublisher(
-        database, rpc_url="https://rpc.invalid", registry_address="", recorder_key=""
+        database, rpc_url="https://rpc.invalid", registry_address=""
     )
     return await publisher.publish(4663, TOKEN, scan, honeypot_data=honeypot)
 
@@ -295,3 +296,44 @@ async def test_other_chains_never_publish_and_keep_bsc_recording(bot_scan_functi
     ns["container"].verdict_publisher.publish_fire_and_forget.assert_not_called()
     ns["onchain_recorder"].record_scan_fire_and_forget.assert_awaited_once()
     ns["base_attestor"].attest_fire_and_forget.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Single sender: only the API lifespan starts the drain
+# ---------------------------------------------------------------------------
+
+
+def test_api_lifespan_starts_the_drain_after_the_container_and_stops_it_before_shutdown(mock_container):
+    import api
+
+    order = []
+    mock_container.startup.side_effect = lambda: order.append("container startup")
+    mock_container.verdict_publisher.start.side_effect = lambda: order.append("drain start")
+    mock_container.hunter.start.side_effect = lambda: order.append("hunter start")
+    mock_container.hunter.stop.side_effect = lambda: order.append("hunter stop")
+    mock_container.verdict_publisher.stop.side_effect = lambda: order.append("drain stop")
+    mock_container.shutdown.side_effect = lambda: order.append("container shutdown")
+    with TestClient(api.app):
+        assert order == ["container startup", "drain start", "hunter start"]
+    assert order == [
+        "container startup", "drain start", "hunter start", "hunter stop", "drain stop", "container shutdown",
+    ]
+    mock_container.verdict_publisher.start.assert_called_once_with()
+    mock_container.verdict_publisher.stop.assert_called_once_with()
+
+
+def test_only_the_api_process_starts_the_drain_or_reads_the_key():
+    """The bot shares the container and the .env file, so no code path it runs may start the drain."""
+    root = Path(__file__).resolve().parent.parent
+    starters, key_readers = [], []
+    for path in root.rglob("*.py"):
+        relative = path.relative_to(root).as_posix()
+        if relative.startswith(("tests/", "sdk/", "scripts/census_4663/")) or "node_modules" in relative:
+            continue
+        source = path.read_text(encoding="utf-8")
+        if "verdict_publisher.start(" in source:
+            starters.append(relative)
+        if "ROBINHOOD_RECORDER_PRIVATE_KEY" in source:
+            key_readers.append(relative)
+    assert starters == ["api.py"]
+    assert key_readers == ["services/verdict_publisher.py"]

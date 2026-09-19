@@ -193,6 +193,7 @@ async def lifespan(app: FastAPI):
     container = ServiceContainer(settings)
     _bind_globals(container)
     await container.startup()
+    container.verdict_publisher.start()
 
     # Initialize RPC proxy if enabled
     if settings.rpc_proxy_enabled:
@@ -230,6 +231,7 @@ async def lifespan(app: FastAPI):
     logger.info("ShieldAI Firewall API started")
     yield
     await container.hunter.stop()
+    container.verdict_publisher.stop()
     await container.shutdown()
     rpc_proxy = getattr(app.state, "rpc_proxy", None)
     if rpc_proxy:
@@ -1792,9 +1794,10 @@ async def verdict_permalink(chain_id: int, address: str):
         "onchain_error": stored["onchain_error"],
         "verify": (
             "keccak256 of the UTF-8 bytes of `canonical`, exactly as served, must equal evidence_hash. "
-            "When tx_hash is set, that Robinhood Chain transaction emits "
+            "When onchain_status is confirmed, Robinhood Chain transaction tx_hash emitted "
             "VerdictRecorded(subject, verdict, evidenceHash, observedBlock, timestamp) from `registry` "
-            "with this subject, verdict_code, evidence_hash and the evidence's observed_block."
+            "with this subject, verdict_code, evidence_hash and the evidence's observed_block. "
+            "pending means queued for the chain; submitted and unconfirmed mean not yet proven on-chain."
         ),
     }
 
