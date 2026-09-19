@@ -1960,6 +1960,24 @@ class Database:
             );
         """)
         await self._db.commit()
+        await self._migrate_verdict_evidence_columns()
+
+    async def _migrate_verdict_evidence_columns(self):
+        """Add the outbox's nonce and attempts columns to a verdict_evidence table created without them."""
+        await self._db.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = await self._db.execute("PRAGMA table_info(verdict_evidence)")
+            columns = {column[1] for column in await cursor.fetchall()}
+            if "nonce" not in columns:
+                await self._db.execute("ALTER TABLE verdict_evidence ADD COLUMN nonce INTEGER")
+            if "attempts" not in columns:
+                await self._db.execute(
+                    "ALTER TABLE verdict_evidence ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0"
+                )
+            await self._db.commit()
+        except BaseException:
+            await self._db.rollback()
+            raise
 
     async def insert_verdict_evidence(
         self, chain_id: int, subject: str, verdict: str, evidence_hash: str, canonical: str,

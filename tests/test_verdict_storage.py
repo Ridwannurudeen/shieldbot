@@ -339,3 +339,61 @@ async def test_a_failed_transaction_insert_rolls_the_whole_record_back(tmp_path)
     finally:
         await database.close()
         await committed.close()
+
+# verdict_evidence as first created, before the outbox's nonce and attempts columns.
+VERDICT_EVIDENCE_WITHOUT_OUTBOX_COLUMNS = """
+    CREATE TABLE verdict_evidence (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chain_id INTEGER NOT NULL,
+        subject TEXT NOT NULL,
+        verdict TEXT NOT NULL,
+        evidence_hash TEXT NOT NULL,
+        canonical TEXT NOT NULL,
+        observed_block INTEGER NOT NULL,
+        created_at REAL NOT NULL,
+        onchain_status TEXT NOT NULL,
+        registry TEXT,
+        tx_hash TEXT,
+        onchain_error TEXT,
+        updated_at REAL NOT NULL
+    )
+"""
+
+
+@pytest.mark.asyncio
+async def test_a_verdict_table_without_the_outbox_columns_is_migrated_in_place(tmp_path):
+    path = str(tmp_path / "shieldbot.db")
+    old = sqlite3.connect(path)
+    try:
+        old.execute(VERDICT_EVIDENCE_WITHOUT_OUTBOX_COLUMNS)
+        old.execute(
+            "INSERT INTO verdict_evidence (chain_id, subject, verdict, evidence_hash, canonical, observed_block, "
+            "created_at, onchain_status, registry, updated_at) "
+            "VALUES (4663, ?, 'HIGH', ?, '{}', 1, 1.0, 'pending', ?, 1.0)",
+            (TOKEN, HASH_A, REGISTRY),
+        )
+        old.commit()
+    finally:
+        old.close()
+    first = Database(path)
+    try:
+        await first.initialize()
+    finally:
+        await first.close()
+    # A second start finds the columns in place and changes nothing.
+    database = Database(path)
+    try:
+        await database.initialize()
+        cursor = await database._db.execute("PRAGMA table_info(verdict_evidence)")
+        columns = {column[1]: column[2:5] for column in await cursor.fetchall()}
+        assert columns["nonce"] == ("INTEGER", 0, None)
+        assert columns["attempts"] == ("INTEGER", 1, "0")
+        claimed = await database.claim_next_pending_verdict(4663)
+        assert (claimed["subject"], claimed["evidence_hash"], claimed["nonce"], claimed["attempts"]) == (
+            TOKEN, HASH_A, None, 0,
+        )
+        assert await database.set_verdict_tx_hash(claimed["id"], TX_A, 7, "02aa")
+        [row] = await database.get_claimed_verdicts(4663)
+        assert (row["tx_hash"], row["nonce"], row["attempts"]) == (TX_A, 7, 1)
+    finally:
+        await database.close()
