@@ -15,6 +15,11 @@ Every followed event was checked against a verified ABI and a live log on 2026-0
 
 A token is recorded once per chain under its most specific source. ``eth_getLogs`` on this
 RPC reports ``blockTimestamp=0x0``, so timestamps come from block headers.
+
+``run`` sweeps each source on its own cursor. ``poll`` is the fast path: once the cursors agree
+and the confirmed head is close, a single ``eth_getLogs`` reads every source together with the
+Swap events of the launches being triaged. With an RpcGuard every request takes the shared 4663
+budget, and HTTP 429/5xx statuses and transport failures feed its circuit breaker.
 """
 
 import asyncio
@@ -28,6 +33,7 @@ import aiohttp
 from eth_utils import keccak
 
 from adapters.robinhood import POOL_MANAGER_ADDRESS, UNISWAP_V2_FACTORY, WETH_ADDRESS
+from services.rpc_guard import CLOSED, HALF_OPEN, BreakerOpenError, is_failure_status
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +83,12 @@ class LaunchSource:
 
 def _topic(signature: str) -> str:
     return "0x" + keccak(text=signature).hex()
+
+
+# Uniswap v4 PoolManager and V2 pair Swap events, as verified for the 4663 census
+# (scripts/census_4663/events.py). A v4 Swap's first indexed topic is the pool id.
+SWAP_V4_TOPIC = _topic("Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)")
+SWAP_V2_TOPIC = _topic("Swap(address,uint256,uint256,uint256,uint256,address)")
 
 
 SOURCES = (
@@ -209,6 +221,36 @@ def _launch_records(decoded) -> List[Dict]:
     return records
 
 
+def _split_combined(logs, start: int, end: int, pairs) -> Tuple[List, List[str]]:
+    """Split one combined eth_getLogs result into decoded source logs and swapped pools.
+
+    The query matches any requested address with any requested topic, so a pairing that is
+    neither a source event nor a Swap is legitimately possible and skipped. A log from an address
+    or topic that was never requested means the RPC answered another query, which is an error.
+    """
+    sources = {(source.address, source.topic): source for source in SOURCES}
+    addresses = {source.address for source in SOURCES} | set(pairs)
+    topics = {source.topic for source in SOURCES} | {SWAP_V4_TOPIC, SWAP_V2_TOPIC}
+    decoded, swapped = [], []
+    for log in logs:
+        topic_list = log.get("topics") if isinstance(log, dict) else None
+        if not isinstance(topic_list, list) or not topic_list:
+            raise LaunchDiscoveryError("Unexpected log")
+        address, topic = str(log.get("address", "")).lower(), str(topic_list[0]).lower()
+        if address not in addresses or topic not in topics:
+            raise LaunchDiscoveryError("Unexpected log")
+        if (address, topic) in sources:
+            source = sources[(address, topic)]
+            decoded.append((source, log, *_decode_log(source, log, start, end)))
+        elif log.get("removed"):
+            continue
+        elif topic == SWAP_V4_TOPIC and address == POOL_MANAGER_ADDRESS and len(topic_list) > 1:
+            swapped.append(_hash(topic_list[1]))
+        elif topic == SWAP_V2_TOPIC and address in pairs:
+            swapped.append(address)
+    return decoded, swapped
+
+
 def _is_rate_limited(error) -> bool:
     """Match throttling by message; error codes here also cover query size limits."""
     if not isinstance(error, dict):
@@ -220,11 +262,13 @@ def _is_rate_limited(error) -> bool:
 class LaunchDiscovery:
     """Follow 4663 launch sources with persisted per-source block cursors."""
 
-    def __init__(self, db, rpc_url: str):
+    def __init__(self, db, rpc_url: str, guard=None):
         self.db = db
         self.rpc_url = rpc_url
+        self.guard = guard
         self._session: Optional[aiohttp.ClientSession] = None
         self._last_request = 0.0
+        self._chain_checked = False
 
     async def run(self):
         """Run one bounded sweep over every source.
@@ -235,32 +279,107 @@ class LaunchDiscovery:
         """
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
             self._session = session
-            if _quantity(await self._call("eth_chainId", [])) != CHAIN_ID:
-                raise LaunchDiscoveryError("RPC is not Robinhood Chain")
-            target = _quantity(await self._call("eth_blockNumber", [])) - CONFIRMATIONS
-            decoded = []
-            progress = {}
-            for source in SOURCES:
-                cursor = await self.db.get_launch_cursor(CHAIN_ID, source.name)
-                if cursor is None:
-                    cursor = target - BACKFILL_BLOCKS
-                    await self.db.set_launch_cursor(CHAIN_ID, source.name, cursor)
-                end = min(target, cursor + MAX_BLOCKS_PER_SWEEP)
-                logs, done = await self._sweep_source(source, cursor, end)
-                decoded += logs
-                progress[source.name] = (cursor, done)
+            await self._check_chain()
+            await self._sweep(await self._confirmed_head())
 
-            records = _launch_records(decoded)
-            headers = await self._block_headers({record["block_number"] for record in records})
-            for record in records:
-                header = headers[record["block_number"]]
-                if _hash(header.get("hash")) != record.pop("block_hash"):
-                    raise LaunchDiscoveryError("Log block is no longer canonical")
-                record["block_timestamp"] = _quantity(header.get("timestamp"))
-            await self.db.upsert_discovered_launches(CHAIN_ID, records)
-            for name, (cursor, done) in progress.items():
-                if done > cursor:
-                    await self.db.set_launch_cursor(CHAIN_ID, name, done)
+    async def poll(self, pools=()) -> Dict:
+        """Run one fast-path read and return the confirmed target, new launches and swap counts.
+
+        ``pools`` are the Uniswap v4 pool ids and V2 pair addresses of launches being triaged.
+        While every source cursor agrees and the confirmed head is at most CHUNK_BLOCKS ahead, one
+        eth_getLogs reads all sources and those pools' Swap events (every v4 Swap is emitted by
+        the PoolManager, which is already a source address). Swaps are counted for ``pools`` and
+        for the pools of launches found in the same range. Otherwise, or if the RPC rejects the
+        combined query, the per-source sweep catches up and no swaps are counted. The chain id
+        is checked once per instance.
+        """
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+            self._session = session
+            if not self._chain_checked:
+                await self._check_chain()
+                self._chain_checked = True
+            target = await self._confirmed_head()
+            cursors = {await self.db.get_launch_cursor(CHAIN_ID, source.name) for source in SOURCES}
+            cursor = cursors.pop() if len(cursors) == 1 else None
+            if cursor is not None and target <= cursor:
+                return {"target": target, "launches": [], "swaps": {}}
+            if cursor is None or target - cursor > CHUNK_BLOCKS:
+                return {"target": target, "launches": await self._sweep(target), "swaps": {}}
+            pools = set(pools)
+            pairs = sorted(pool for pool in pools if len(pool) == 42)
+            try:
+                logs = await self._combined_logs(cursor + 1, target, pairs)
+            except RpcUnavailableError:
+                raise
+            except LaunchDiscoveryError as exc:
+                logger.warning("Launch discovery combined read rejected: %s", type(exc).__name__)
+                return {"target": target, "launches": await self._sweep(target), "swaps": {}}
+            decoded, swapped = _split_combined(logs, cursor + 1, target, pairs)
+            records = await self._store(decoded, {source.name: (cursor, target) for source in SOURCES})
+            pools.update(record["pool_id"] for record in records if record["pool_id"])
+            counts = {}
+            for pool in swapped:
+                if pool in pools:
+                    counts[pool] = counts.get(pool, 0) + 1
+            return {"target": target, "launches": records, "swaps": counts}
+
+    async def probe(self) -> bool:
+        """Send the breaker's half-open probe, one eth_blockNumber; True if it closed the breaker.
+
+        A probe that neither succeeds nor fails, or is cancelled, counts as failed so the breaker
+        never stays half-open.
+        """
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+            self._session = session
+            try:
+                await self._call("eth_blockNumber", [], probe=True)
+            except LaunchDiscoveryError as exc:
+                logger.warning("Launch discovery probe failed: %s", type(exc).__name__)
+            finally:
+                if self.guard.state == HALF_OPEN:
+                    self.guard.record_failure("probe inconclusive")
+        return self.guard.state == CLOSED
+
+    async def _check_chain(self):
+        if _quantity(await self._call("eth_chainId", [])) != CHAIN_ID:
+            raise LaunchDiscoveryError("RPC is not Robinhood Chain")
+
+    async def _confirmed_head(self) -> int:
+        return _quantity(await self._call("eth_blockNumber", [])) - CONFIRMATIONS
+
+    async def _sweep(self, target: int) -> List[Dict]:
+        """Sweep every source from its own cursor towards ``target`` and store what it finds."""
+        decoded = []
+        progress = {}
+        for source in SOURCES:
+            cursor = await self.db.get_launch_cursor(CHAIN_ID, source.name)
+            if cursor is None:
+                cursor = target - BACKFILL_BLOCKS
+                await self.db.set_launch_cursor(CHAIN_ID, source.name, cursor)
+            end = min(target, cursor + MAX_BLOCKS_PER_SWEEP)
+            logs, done = await self._sweep_source(source, cursor, end)
+            decoded += logs
+            progress[source.name] = (cursor, done)
+        return await self._store(decoded, progress)
+
+    async def _store(self, decoded, progress) -> List[Dict]:
+        """Confirm launch blocks against canonical headers, then record launches and move cursors.
+
+        ``progress`` maps each source to (previous cursor, last block covered without a gap). If
+        a header does not match, nothing is written and no cursor moves.
+        """
+        records = _launch_records(decoded)
+        headers = await self._block_headers({record["block_number"] for record in records})
+        for record in records:
+            header = headers[record["block_number"]]
+            if _hash(header.get("hash")) != record.pop("block_hash"):
+                raise LaunchDiscoveryError("Log block is no longer canonical")
+            record["block_timestamp"] = _quantity(header.get("timestamp"))
+        await self.db.upsert_discovered_launches(CHAIN_ID, records)
+        for name, (cursor, done) in progress.items():
+            if done > cursor:
+                await self.db.set_launch_cursor(CHAIN_ID, name, done)
+        return records
 
     async def _sweep_source(self, source: LaunchSource, cursor: int, end: int):
         """Read one source up to ``end``, halving a rejected query down to MIN_CHUNK_BLOCKS.
@@ -307,6 +426,18 @@ class LaunchDiscovery:
             raise LaunchDiscoveryError("Malformed eth_getLogs result")
         return [(source, log, *_decode_log(source, log, start, end)) for log in result]
 
+    async def _combined_logs(self, start: int, end: int, pairs):
+        query = {
+            "fromBlock": hex(start),
+            "toBlock": hex(end),
+            "address": [source.address for source in SOURCES] + list(pairs),
+            "topics": [[source.topic for source in SOURCES] + [SWAP_V4_TOPIC, SWAP_V2_TOPIC]],
+        }
+        result = await self._call("eth_getLogs", [query])
+        if not isinstance(result, list):
+            raise LaunchDiscoveryError("Malformed eth_getLogs result")
+        return result
+
     async def _block_headers(self, numbers) -> Dict[int, Dict]:
         headers = {}
         ordered = sorted(numbers)
@@ -335,24 +466,34 @@ class LaunchDiscovery:
                 headers[number] = header
         return headers
 
-    async def _call(self, method: str, params: list):
-        body = await self._request({"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+    async def _call(self, method: str, params: list, probe: bool = False):
+        body = await self._request(
+            {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}, probe=probe
+        )
         if not isinstance(body, dict) or "error" in body or body.get("result") is None:
             raise LaunchDiscoveryError(f"{method} returned no result")
         return body["result"]
 
-    async def _request(self, payload):
-        """POST with bounded exponential backoff on HTTP 429/5xx, transport and rate-limit errors."""
-        for attempt in range(MAX_ATTEMPTS):
-            wait = self._last_request + REQUEST_INTERVAL - time.monotonic()
-            if wait > 0:
-                await asyncio.sleep(wait)
-            self._last_request = time.monotonic()
+    async def _request(self, payload, probe: bool = False):
+        """POST with bounded exponential backoff on HTTP 429/5xx, transport and rate-limit errors.
+
+        With a guard, every attempt first takes one request of the shared budget, and only
+        structured outcomes reach the breaker: HTTP 429/5xx and transport exception classes are
+        failures, a 200 answer is a success. A rate-limit error recognised by its message is
+        retried but reported as neither. An open breaker ends the retries without sending, and
+        a probe is a single attempt.
+        """
+        attempts = 1 if probe else MAX_ATTEMPTS
+        for attempt in range(attempts):
+            await self._pace(probe)
             try:
                 status, body = await self._post(payload)
-            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+                self._report(type(exc).__name__)
                 retry = True
             else:
+                if is_failure_status(status):
+                    self._report(f"HTTP {status}")
                 if status != 200 and status != 429 and status < 500:
                     raise LaunchDiscoveryError(f"HTTP {status}")
                 rows = body if isinstance(body, list) else [body]
@@ -360,10 +501,31 @@ class LaunchDiscovery:
                     isinstance(row, dict) and _is_rate_limited(row.get("error")) for row in rows
                 )
                 if not retry:
+                    self._report(None)
                     return body
-            if attempt + 1 < MAX_ATTEMPTS:
+            if attempt + 1 < attempts:
                 await asyncio.sleep(2**attempt)
-        raise RpcUnavailableError(f"RPC unavailable after {MAX_ATTEMPTS} attempts")
+        raise RpcUnavailableError(f"RPC unavailable after {attempts} attempts")
+
+    async def _pace(self, probe: bool):
+        if self.guard is None:
+            wait = self._last_request + REQUEST_INTERVAL - time.monotonic()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_request = time.monotonic()
+            return
+        try:
+            await self.guard.acquire(1, probe=probe)
+        except BreakerOpenError as exc:
+            raise RpcUnavailableError("RPC breaker open") from exc
+
+    def _report(self, failure: Optional[str]):
+        if self.guard is None:
+            return
+        if failure is None:
+            self.guard.record_success()
+        else:
+            self.guard.record_failure(failure)
 
     async def _post(self, payload):
         async with self._session.post(self.rpc_url, json=payload) as response:
