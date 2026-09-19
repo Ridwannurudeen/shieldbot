@@ -18,7 +18,7 @@ _NO_SCAN_DETAIL = "Coverage details were not recorded for this scan"
 # One row per discovered launch with its latest outcome. A recheck records blocked or cleared on
 # the launch's tracked pair (keyed by the token), and a newer one supersedes the launch scan. A
 # watching pair has only been queued for a recheck, so it changes nothing.
-_LAUNCH_ROWS = """
+_LAUNCH_SELECT = """
     SELECT token_address, source, launchpad, pool_id, block_number, tx_hash, block_timestamp,
            discovered_at,
            CASE WHEN rechecked THEN recheck_status ELSE scan_status END,
@@ -30,6 +30,8 @@ _LAUNCH_ROWS = """
                    AS rechecked
         FROM discovered_launches l
         LEFT JOIN tracked_pairs p ON p.pair_address = l.token_address AND p.chain_id = l.chain_id
+"""
+_LAUNCH_ROWS = _LAUNCH_SELECT + """
         WHERE l.chain_id = ?
     )
 """
@@ -41,6 +43,17 @@ _LAUNCH_FEED_NEXT_PAGE = _LAUNCH_ROWS + """
     WHERE (block_number, token_address) < (?, ?)
     ORDER BY block_number DESC, token_address DESC
     LIMIT ?
+"""
+# Launches whose latest outcome was recorded at or after a time, found through the scan-time
+# index and the rechecked pairs rather than a scan of every discovered launch.
+_LAUNCH_OUTCOMES_SINCE = _LAUNCH_SELECT + """
+        WHERE (l.chain_id = ? AND l.scanned_at >= ?) OR (l.chain_id = ? AND l.token_address IN (
+            SELECT pair_address FROM tracked_pairs
+            WHERE chain_id = ? AND status IN ('blocked', 'cleared') AND last_checked >= ?
+        ))
+    )
+    WHERE outcome_at >= ?
+    ORDER BY outcome_at, token_address
 """
 
 
@@ -60,16 +73,24 @@ def _lift_scan_metadata(score: Dict) -> Dict:
     return score
 
 
+def _launch_outcome(stored_status, scanned_at) -> str:
+    """Name a launch's latest outcome; any status the feed does not know is unknown."""
+    if scanned_at is None:
+        return "not_scanned"
+    return stored_status if stored_status in ("blocked", "watching", "cleared") else "unknown"
+
+
 def _launch_scan(stored_status, risk_score, scanned_at, finding) -> Dict:
-    """Describe a launch's latest outcome; any status the feed does not know is unknown.
+    """Describe a launch's latest outcome.
 
     The hunter records watching and cleared only for complete scans, and a recheck clears only
     a complete scan, so both are complete. A blocked launch takes its detail from the hunter's
     finding evidence and is not shown as complete without it. An unknown scan's partial score
     is withheld so that it cannot read as a verdict.
     """
+    outcome = _launch_outcome(stored_status, scanned_at)
     scan = {
-        "outcome": "unknown",
+        "outcome": outcome,
         "status": "unknown",
         "risk_level": None,
         "risk_score": None,
@@ -77,13 +98,13 @@ def _launch_scan(stored_status, risk_score, scanned_at, finding) -> Dict:
         "flags": [],
         "scanned_at": scanned_at,
     }
-    if scanned_at is None:
-        scan.update(outcome="not_scanned", coverage_reasons={"scan": "Not scanned yet"})
-    elif stored_status in ("watching", "cleared"):
-        scan.update(outcome=stored_status, status="ok", risk_score=risk_score, coverage_reasons={})
-    elif stored_status == "blocked":
+    if outcome == "not_scanned":
+        scan["coverage_reasons"] = {"scan": "Not scanned yet"}
+    elif outcome in ("watching", "cleared"):
+        scan.update(status="ok", risk_score=risk_score, coverage_reasons={})
+    elif outcome == "blocked":
         finding_score, evidence = finding
-        scan.update(outcome="blocked", risk_score=risk_score if risk_score is not None else finding_score)
+        scan["risk_score"] = risk_score if risk_score is not None else finding_score
         if evidence is None:
             scan["coverage_reasons"] = {"scan": _NO_SCAN_DETAIL}
         else:
@@ -405,6 +426,7 @@ class Database:
         await self._migrate_tracked_pairs_chain_id()
         await self._create_launch_discovery_tables()
         await self._create_launch_feed_tables()
+        await self._create_launch_alert_tables()
 
         # Migrate: add registered_by_key column for existing DBs
         try:
@@ -2061,3 +2083,151 @@ class Database:
         except (json.JSONDecodeError, TypeError):
             evidence = None
         return row[0], evidence if isinstance(evidence, dict) else None
+
+    # --- Launch Alerts ---
+
+    async def _create_launch_alert_tables(self):
+        await self._db.executescript("""
+            CREATE TABLE IF NOT EXISTS launch_alert_subscriptions (
+                chat_id INTEGER NOT NULL,
+                chain_id INTEGER NOT NULL,
+                mode TEXT NOT NULL CHECK (mode IN ('blocked', 'all')),
+                created_at REAL NOT NULL,
+                PRIMARY KEY (chat_id, chain_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS launch_alert_outbox (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                chain_id INTEGER NOT NULL,
+                token_address TEXT NOT NULL,
+                outcome TEXT NOT NULL,
+                outcome_at REAL NOT NULL,
+                payload TEXT NOT NULL,
+                state TEXT NOT NULL DEFAULT 'pending',
+                error TEXT,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                UNIQUE (chat_id, chain_id, token_address, outcome)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_launch_alert_outbox_state
+                ON launch_alert_outbox(state, chat_id, id);
+        """)
+        await self._db.commit()
+
+    async def subscribe_launch_alerts(self, chat_id: int, chain_id: int, mode: str):
+        """Subscribe a chat to a chain's launch alerts ("blocked" or "all"), or change its mode.
+
+        A subscription covers outcomes recorded after it was first created.
+        """
+        await self._db.execute("""
+            INSERT INTO launch_alert_subscriptions (chat_id, chain_id, mode, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(chat_id, chain_id) DO UPDATE SET mode = excluded.mode
+        """, (chat_id, chain_id, mode, time.time()))
+        await self._db.commit()
+
+    async def unsubscribe_launch_alerts(self, chat_id: int, chain_id: int) -> bool:
+        """Remove a chat's subscription and cancel its queued alerts; False if it had none."""
+        cursor = await self._db.execute(
+            "DELETE FROM launch_alert_subscriptions WHERE chat_id = ? AND chain_id = ?",
+            (chat_id, chain_id),
+        )
+        await self._db.execute("""
+            UPDATE launch_alert_outbox SET state = 'cancelled', updated_at = ?
+            WHERE chat_id = ? AND chain_id = ? AND state = 'pending'
+        """, (time.time(), chat_id, chain_id))
+        await self._db.commit()
+        return cursor.rowcount == 1
+
+    async def enqueue_launch_alerts(self, chain_id: int, since: float):
+        """Queue alerts for the launch outcomes recorded at or after ``since``.
+
+        A chat gets outcomes recorded after it subscribed: every one in "all" mode, otherwise
+        only blocked ones. A chat is queued at most one alert per launch and outcome, so passes
+        over the same window, and passes after a restart, never queue an alert twice.
+        """
+        cursor = await self._db.execute(
+            "SELECT chat_id, mode, created_at FROM launch_alert_subscriptions WHERE chain_id = ? ORDER BY chat_id",
+            (chain_id,),
+        )
+        subscriptions = await cursor.fetchall()
+        if not subscriptions:
+            return
+        cursor = await self._db.execute(
+            _LAUNCH_OUTCOMES_SINCE, (chain_id, since, chain_id, chain_id, since, since)
+        )
+        alerts = []
+        now = time.time()
+        for row in await cursor.fetchall():
+            token, stored_status, outcome_at = row[0], row[8], row[10]
+            outcome = _launch_outcome(stored_status, outcome_at)
+            chats = [
+                chat_id for chat_id, mode, created_at in subscriptions
+                if created_at <= outcome_at and (mode == "all" or outcome == "blocked")
+            ]
+            if chats:
+                payload = json.dumps(await self._launch_item(chain_id, row))
+                alerts += [(chat_id, chain_id, token, outcome, outcome_at, payload, now, now) for chat_id in chats]
+        await self._db.executemany("""
+            INSERT OR IGNORE INTO launch_alert_outbox
+                (chat_id, chain_id, token_address, outcome, outcome_at, payload, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, alerts)
+        await self._db.commit()
+
+    async def get_pending_launch_alerts(
+        self, now: float, max_age: float, per_chat: int, limit: int
+    ) -> List[Dict]:
+        """Expire pending alerts older than ``max_age``, then return the oldest pending ones.
+
+        At most ``per_chat`` alerts per chat and ``limit`` in all are returned.
+        """
+        await self._db.execute("""
+            UPDATE launch_alert_outbox SET state = 'expired', updated_at = ?
+            WHERE state = 'pending' AND outcome_at < ?
+        """, (now, now - max_age))
+        await self._db.commit()
+        cursor = await self._db.execute("""
+            SELECT id, chat_id, chain_id, token_address, outcome, payload FROM (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY chat_id ORDER BY id) AS position
+                FROM launch_alert_outbox
+                WHERE state = 'pending'
+            )
+            WHERE position <= ?
+            ORDER BY id
+            LIMIT ?
+        """, (per_chat, limit))
+        return [
+            {
+                "id": r[0],
+                "chat_id": r[1],
+                "chain_id": r[2],
+                "token_address": r[3],
+                "outcome": r[4],
+                "payload": json.loads(r[5]),
+            }
+            for r in await cursor.fetchall()
+        ]
+
+    async def claim_launch_alert(self, alert_id: int) -> bool:
+        """Mark a pending alert as sending; False if it is no longer pending.
+
+        A claimed alert may have reached the chat, so it is never pending again unless it is
+        released because Telegram refused it.
+        """
+        cursor = await self._db.execute(
+            "UPDATE launch_alert_outbox SET state = 'sending', updated_at = ? WHERE id = ? AND state = 'pending'",
+            (time.time(), alert_id),
+        )
+        await self._db.commit()
+        return cursor.rowcount == 1
+
+    async def set_launch_alert_state(self, alert_id: int, state: str, error: Optional[str] = None):
+        """Record what happened to an alert, with the error class if it was not sent."""
+        await self._db.execute(
+            "UPDATE launch_alert_outbox SET state = ?, error = ?, updated_at = ? WHERE id = ?",
+            (state, error, time.time(), alert_id),
+        )
+        await self._db.commit()
