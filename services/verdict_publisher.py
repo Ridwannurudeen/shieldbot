@@ -33,8 +33,8 @@ latest nonce:
   otherwise              something is pending at N (possibly H): wait and retry
 
 Claim before send: each claimed row's sign -> store hash and nonce -> broadcast -> record outcome runs in a
-task shielded from cancellation, so stop() cannot interrupt it half-way. A row still left `sending` (the process
-died, or the database failed) is recovered when the drain starts and after any drain error. A row without a tx
+task shielded from cancellation, so stop() never cancels it half-way. A row still left `sending` (the process
+exited first, or the database failed) is recovered when the drain starts and after any drain error. A row without a tx
 hash was never signed and goes back to `pending`. A row with a tx hash is finished if one receipt lookup finds
 it mined; otherwise it goes back to `pending` too, and the check above decides whether and at which nonce it
 is re-signed, so it is never recorded twice. After MAX_SEND_ATTEMPTS it is left `unconfirmed` instead.
@@ -239,7 +239,8 @@ class VerdictPublisher:
         logger.info("Robinhood verdict registry: sending as recorder %s", self.recorder)
 
     def stop(self) -> None:
-        """Stop the drain. A send already under way is shielded and runs to completion."""
+        """Stop the drain. A send already under way is not cancelled; if the process exits first, its claim is
+        resolved by the next start()."""
         if self._drain_task is not None:
             self._drain_task.cancel()
             self._drain_task = None

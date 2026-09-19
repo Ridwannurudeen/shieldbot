@@ -135,7 +135,8 @@ cast estimate $REGISTRY "record(address,uint8,bytes32,uint64)" \
 ```
 
 The Foundry gas report measured about 117k execution gas for a first record. If the estimate is near 833,334 or
-above it, stop and raise `MAX_GAS_LIMIT` in `services/verdict_publisher.py` before configuring the server.
+above it, stop and raise `MAX_GAS_LIMIT` in `services/verdict_publisher.py` before configuring the server. If the
+node refuses the estimate because the recorder has no ETH yet, run it again after funding it in step 7.
 
 ## 6. Set or rotate the recorder (OWNER-ONLY)
 
@@ -250,9 +251,9 @@ nonce was used by another transaction, it can never be mined, so a new nonce is 
 unused, the replacement takes that same nonce, so at most one of the two can be mined; if something is pending at
 that nonce, the drain waits.
 
-Stopping the API never interrupts a send under way: sign, store hash and nonce, broadcast and record the outcome
-run to completion. A verdict still left `sending` (the process was killed, or the database failed) is resolved when
-the drain starts and after any drain error. A claim with no transaction hash was never signed, so it is queued
+Stopping the drain never cancels a send under way. If the process exits before that send finishes (or the
+database fails mid-send), the verdict stays `sending` and is resolved when the drain next starts, or after the
+next drain error. A claim with no transaction hash was never signed, so it is queued
 again. A claim with a hash is `confirmed` or `reverted` if its receipt exists; otherwise it is queued again and the
 nonce check above decides whether and at which nonce it is re-signed. After 5 attempts it is left `unconfirmed`.
 
