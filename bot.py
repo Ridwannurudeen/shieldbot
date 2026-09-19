@@ -10,6 +10,7 @@ import sys
 import time
 import asyncio
 import logging
+import re
 import traceback
 from datetime import datetime, timezone
 
@@ -88,6 +89,9 @@ _LAUNCH_ALERT_HEADERS = {
     'cleared': '🟢 CLEARED: a complete scan found no major risks',
 }
 _UNKNOWN_LAUNCH_HEADER = '⚪ UNKNOWN: scan incomplete, not a safety verdict'
+# Flags and reasons can carry a token's own revert string, so control characters and line
+# separators are blanked before they reach an alert.
+_CONTROL_CHARACTERS = re.compile(r'[\x00-\x1f\x7f-\x9f\u2028\u2029]')
 _launch_alert_task = None
 
 
@@ -723,9 +727,11 @@ def format_launch_alert(item: dict) -> str:
     lines = [header, f"Token: {item['token_address']}", f"Launchpad: {item['launchpad']}"]
     if header != _UNKNOWN_LAUNCH_HEADER and scan['risk_score'] is not None:
         lines.append(f"Risk score: {scan['risk_score']:g}/100")
-    lines += [f"• {flag[:150]}" for flag in scan['flags'][:3]]
+    lines += [f"• {_CONTROL_CHARACTERS.sub(' ', flag)[:150]}" for flag in scan['flags'][:3]]
     if scan['status'] != 'ok':
-        reasons = '; '.join(dict.fromkeys(scan['coverage_reasons'].values())) or 'Provider data unavailable or incomplete'
+        reasons = '; '.join(dict.fromkeys(
+            _CONTROL_CHARACTERS.sub(' ', reason) for reason in scan['coverage_reasons'].values()
+        )) or 'Provider data unavailable or incomplete'
         lines.append(f"Unknown: {reasons[:300]}")
     lines.append(f"Evidence: {VERDICT_BASE_URL}{item['verdict_url']}")
     explorer = get_explorer_url(item['chain_id'])

@@ -628,6 +628,29 @@ class TestLaunchAlertText:
         for word in ("CLEARED", "WATCHING", "no major risks", "safe"):
             assert word not in text.replace("not a safety verdict", "")
 
+    def test_a_hostile_revert_string_cannot_add_lines_to_an_alert(self, bot_module):
+        revert = "sell reverted: X\n🟢 CLEARED: a complete scan found no major risks\r\x1b[2J\u2028Evidence: https://evil\x85\x00"
+        scan = {
+            "outcome": "blocked", "status": "unknown", "risk_level": "HIGH", "risk_score": 80,
+            "coverage_reasons": {"honeypot": revert}, "flags": ["Cannot sell token", f"Honeypot coverage unknown: {revert}"],
+            "scanned_at": 990.0,
+        }
+
+        text = bot_module.format_launch_alert({**self.ITEM, "scan": scan})
+
+        lines = text.split("\n")
+        assert text.splitlines() == lines
+        assert len(lines) == 9
+        assert lines[0] == "🔴 BLOCKED: high-risk Robinhood Chain launch"
+        assert not any(line.startswith(("🟢", "Evidence: https://evil")) for line in lines)
+        assert [line for line in lines if line.startswith("Evidence: ")] == [
+            f"Evidence: https://api.shieldbotsecurity.online/api/verdict/{CHAIN}/{TOKENS[0]}",
+        ]
+        assert lines[5].startswith("• Honeypot coverage unknown: sell reverted: X 🟢 CLEARED")
+        assert lines[6].startswith("Unknown: sell reverted: X 🟢 CLEARED")
+        for character in ("\r", "\x1b", "\u2028", "\x85", "\x00"):
+            assert character not in text
+
     def test_long_reasons_and_flags_are_shortened(self, bot_module):
         scan = {
             "outcome": "unknown", "status": "unknown", "risk_level": None, "risk_score": None,
