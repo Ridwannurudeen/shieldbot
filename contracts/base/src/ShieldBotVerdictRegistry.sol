@@ -39,8 +39,8 @@ contract ShieldBotVerdictRegistry is Ownable2Step {
         uint64 observedBlock;
     }
 
-    /// @notice Largest `recordBatch`. A first record for a subject costs about 72k gas, and a full batch of
-    ///         new subjects measured 3.62M gas, far below the 32M per-transaction gas limit of Arbitrum chains.
+    /// @notice Largest `recordBatch`. A first record for a subject costs about 72k gas; a full batch of new
+    ///         subjects measured 3.62M gas in the Foundry gas report, which bounds any single call.
     uint256 public constant MAX_BATCH = 50;
 
     /// @notice The only address allowed to record verdicts. Rotated by the owner.
