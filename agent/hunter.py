@@ -42,11 +42,12 @@ RECHECK_MIN_INTERVAL_SECONDS = 6 * 3600
 # scans are spaced instead of running back to back. Thirty paced scans add a minute to a sweep.
 SCAN_INTERVAL_SECONDS = 2.0
 # Worst-case HTTP requests one 4663 scan sends to the RPC, retries aside, reserved from the shared
-# budget before the scan starts. Structural lookups send up to 6 (get_code twice, owner() and its
-# raw re-read, the creation transaction and its block); the buy/sell simulation up to 12 (the pool
-# lookup batch, V2 reserves, a block number and three Initialize log windows, then up to three
-# pools simulated twice each).
-SCAN_REQUEST_COST = 18
+# budget before the scan starts. Structural lookups send up to 10: get_code twice, the creation
+# transaction and its block, and owner() plus its raw re-read, each eth_call preceded by eth_chainId
+# from web3's validation middleware (once on web3 6.15.1, twice on web3 7, as measured live). The
+# buy/sell simulation sends up to 12: the pool lookup batch, V2 reserves, a block number and three
+# Initialize log windows, then up to three pools simulated twice each.
+SCAN_REQUEST_COST = 22
 
 
 class Hunter:

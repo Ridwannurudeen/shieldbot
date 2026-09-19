@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # Hard ceiling on background 4663 RPC traffic, in HTTP requests per second, retries included. The
 # public RPC is shared with the census collector, which already gets HTTP 429 at its own 4 req/s
 # ceiling. One request per second keeps ShieldBot at a quarter of that while covering discovery
-# (about 0.15 req/s) and roughly three worst-case scans a minute.
+# (about 0.15 req/s) and more than two worst-case scans a minute.
 RPC_BUDGET_RPS = 1.0
 # Consecutive failed requests that open the breaker. A single 429 is a burst the retry backoff
 # absorbs; three in a row, across at least three seconds of backoff, means the RPC keeps refusing.
