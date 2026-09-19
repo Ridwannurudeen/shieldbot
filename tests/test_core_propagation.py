@@ -755,6 +755,7 @@ async def test_mempool_poll_errors_do_not_log_secrets(mock_web3_client, caplog):
 
 
 PROVIDER_PATH_MODULES = [
+    'adapters/evm_base.py',
     'core/auth.py',
     'core/indexer.py',
     'core/registry.py',
