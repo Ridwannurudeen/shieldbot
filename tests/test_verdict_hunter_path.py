@@ -42,7 +42,8 @@ async def hunter_scan(fixture):
     container = MagicMock()
     container.risk_engine = RiskEngine()
 
-    async def run_all(ctx):
+    async def run_all(ctx, deadline=None):
+        # The merged registry passes the background deadline through; this fake ignores it.
         return [await HoneypotAnalyzer(service).analyze(ctx)]
 
     container.registry.run_all = run_all
