@@ -8,6 +8,8 @@ Runs periodic sweeps that:
 For any flagged contract: auto-watches the deployer, generates an AI threat
 narrative (when available), and stores the finding.
 
+Every hunter scan is a background scan and runs under BACKGROUND_SCAN_DEADLINE_SECONDS.
+
 Robinhood Chain (4663) work shares one RPC budget and circuit breaker (services.rpc_guard):
 every 4663 scan reserves its worst-case request count first, and while the breaker is open no
 4663 discovery or scan runs and nothing is recorded. When the fast launch watch
@@ -25,6 +27,7 @@ import traceback
 
 from agent.prompts import HAIKU_MODEL, NARRATIVE_TEMPLATE
 from core.extension_formatter import is_scan_incomplete
+from core.registry import BACKGROUND_SCAN_DEADLINE_SECONDS
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 from services.rpc_guard import CLOSED, BreakerOpenError
 
@@ -254,7 +257,9 @@ class Hunter:
             chain_id = pair.get("chain_id", 56)
             await self._reserve_scan(chain_id)
             await self.db.mark_tracked_pair_checked(pair["pair_address"])
-            result = await self.tools.scan_contract(pair["token_address"], chain_id=chain_id)
+            result = await self.tools.scan_contract(
+                pair["token_address"], chain_id=chain_id, deadline=BACKGROUND_SCAN_DEADLINE_SECONDS
+            )
             risk_score = result.get("risk_score", result.get("rug_probability"))
 
             if risk_score is not None and risk_score >= 71:
@@ -339,7 +344,9 @@ class Hunter:
         token = launch["token_address"]
         await self._reserve_scan(LAUNCH_CHAIN_ID)
         try:
-            result = await self.tools.scan_contract(token, chain_id=LAUNCH_CHAIN_ID)
+            result = await self.tools.scan_contract(
+                token, chain_id=LAUNCH_CHAIN_ID, deadline=BACKGROUND_SCAN_DEADLINE_SECONDS
+            )
         except Exception as exc:
             logger.error(
                 "Hunter: error scanning launch %s: %s\n%s", token,

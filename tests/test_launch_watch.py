@@ -9,6 +9,7 @@ import pytest_asyncio
 from agent.hunter import Hunter
 from agent.launch_watch import POLL_INTERVAL_SECONDS, TRIAGE_WINDOW_BLOCKS, LaunchWatch
 from core.database import Database
+from core.registry import BACKGROUND_SCAN_DEADLINE_SECONDS
 from services.launch_discovery import LaunchDiscovery, RpcUnavailableError
 from services.rpc_guard import BREAKER_BASE_COOLDOWN_SECONDS, BREAKER_FAILURE_THRESHOLD, OPEN, RpcGuard
 
@@ -148,7 +149,9 @@ async def test_a_launch_is_scanned_once_and_through_the_hunter_outcome_logic(db)
     await watch.cycle()
 
     assert scanned(watch) == [token(0)]
-    assert watch.hunter.tools.scan_contract.await_args.kwargs == {"chain_id": 4663}
+    assert watch.hunter.tools.scan_contract.await_args.kwargs == {
+        "chain_id": 4663, "deadline": BACKGROUND_SCAN_DEADLINE_SECONDS,
+    }
     rows = await db.get_tracked_pairs(status="watching")
     assert [(row["token_address"], row["chain_id"]) for row in rows] == [(token(0), 4663)]
     cursor = await db._db.execute("SELECT scan_status FROM discovered_launches WHERE token_address = ?", (token(0),))
@@ -171,7 +174,10 @@ async def test_queued_rechecks_alternate_with_launch_scans(db):
     await watch.cycle()
 
     assert scanned(watch) == [token(0), "0xrh1", token(1), "0xrh2", token(2)]
-    assert all(call.kwargs == {"chain_id": 4663} for call in watch.hunter.tools.scan_contract.await_args_list)
+    assert all(
+        call.kwargs == {"chain_id": 4663, "deadline": BACKGROUND_SCAN_DEADLINE_SECONDS}
+        for call in watch.hunter.tools.scan_contract.await_args_list
+    )
 
 
 # --- the breaker ---
@@ -246,7 +252,7 @@ async def test_a_throttled_poll_opens_the_breaker_and_skips_the_cycle_scans(db):
 async def test_the_sweep_and_a_watch_cycle_never_scan_the_same_launch(db):
     await db.upsert_discovered_launches(4663, [launch(index) for index in range(6)])
 
-    async def slow_scan(address, chain_id):
+    async def slow_scan(address, chain_id, deadline):
         await _real_sleep(0.01)
         return incomplete()
 
@@ -310,7 +316,7 @@ async def test_stopping_mid_scan_cancels_it_and_records_nothing(db):
     await db.upsert_discovered_launches(4663, [launch(0)])
     started = asyncio.Event()
 
-    async def hang(address, chain_id):
+    async def hang(address, chain_id, deadline):
         started.set()
         await asyncio.Event().wait()
 

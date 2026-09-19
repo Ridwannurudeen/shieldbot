@@ -2,15 +2,33 @@
 
 import asyncio
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import utils.scam_db as scam_db
+from agent.tools import AgentTools
+from analyzers.honeypot import HoneypotAnalyzer
 from core.analyzer import AnalysisContext, AnalyzerResult
 from core.extension_formatter import is_scan_incomplete
-from core.registry import RUN_ALL_DEADLINE_SECONDS, AnalyzerRegistry
+from core.registry import BACKGROUND_SCAN_DEADLINE_SECONDS, RUN_ALL_DEADLINE_SECONDS, AnalyzerRegistry
 from core.risk_engine import RiskEngine
+from services.honeypot_service import HoneypotService
+from services.robinhood_simulation import RPC_BACKOFF_SECONDS, RPC_TIMEOUT_SECONDS
 from utils.web3_client import UnsupportedChainError
+
+# Provider timeouts on the scan path, in seconds: honeypot.is per request (adapters/evm_base.py
+# check_honeypot and get_tax_info), GoPlus per request (utils/scam_db.py), explorer calls
+# (services/explorer_service.py), and the extension's firewall request abort (extension/background.js).
+HONEYPOT_IS_TIMEOUT = 10
+GOPLUS_TIMEOUT = 8
+EXPLORER_TIMEOUT = 15
+EXTENSION_ABORT = 30
+# A healthy 4663 scan's duration: the p90 of the scans measured live on 2026-09-19.
+HEALTHY_SCAN_SECONDS = 5.4
+# Timing scenarios run at this fraction of real time.
+SCALE = 0.04
+TOKEN = "0x" + "12" * 20
 
 
 def analyzer(name, weight, behaviour):
@@ -195,7 +213,65 @@ async def test_results_are_identical_to_gather_when_nothing_times_out():
     )
 
 
-def test_deadline_outlasts_single_provider_timeouts_and_beats_the_extension_abort():
-    # 15 s is the longest single provider timeout on the scan path (explorer calls); the
-    # extension abandons a firewall request after 30 s.
-    assert 15 < RUN_ALL_DEADLINE_SECONDS < 30
+def test_the_deadlines_follow_the_provider_timeout_table():
+    # Interactive: both sequential honeypot.is timeouts and the cached GoPlus fallback fit, and so
+    # does the longest single call (explorer), before the extension abandons the request.
+    assert 2 * HONEYPOT_IS_TIMEOUT < RUN_ALL_DEADLINE_SECONDS < EXTENSION_ABORT
+    assert EXPLORER_TIMEOUT < RUN_ALL_DEADLINE_SECONDS
+    # Background: one full simulator RPC timeout plus its 1 s and 2 s backoff and a healthy scan's
+    # other work, and the whole honeypot.is chain with an uncached GoPlus call.
+    assert RPC_TIMEOUT_SECONDS + 3 * RPC_BACKOFF_SECONDS + HEALTHY_SCAN_SECONDS <= BACKGROUND_SCAN_DEADLINE_SECONDS
+    assert 2 * HONEYPOT_IS_TIMEOUT + GOPLUS_TIMEOUT < BACKGROUND_SCAN_DEADLINE_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_a_hanging_honeypot_is_still_reaches_the_cached_goplus_answer_within_the_interactive_deadline():
+    async def honeypot_is_timeout(address, chain_id=56):
+        await asyncio.sleep(HONEYPOT_IS_TIMEOUT * SCALE)
+        return {
+            "is_honeypot": None, "status": "unknown",
+            "reason": "Error checking honeypot.is: TimeoutError", "field_providers": {},
+        }
+
+    web3_client = MagicMock()
+    web3_client.get_supported_chain_ids.return_value = [56]
+    web3_client.check_honeypot = AsyncMock(side_effect=honeypot_is_timeout)
+    web3_client.get_tax_info = AsyncMock(side_effect=honeypot_is_timeout)
+    # The structural analyzer's scam check has already fetched GoPlus for this token.
+    scam_db._GOPLUS_CACHE[(56, TOKEN)] = {"status": "ok", "reason": None, "data": {
+        "is_honeypot": "0", "cannot_buy": "0", "cannot_sell_all": "0",
+        "transfer_pausable": "0", "buy_tax": "0", "sell_tax": "0",
+    }}
+    try:
+        with patch("core.registry.RUN_ALL_DEADLINE_SECONDS", RUN_ALL_DEADLINE_SECONDS * SCALE):
+            (honeypot,) = await registry_of(HoneypotAnalyzer(HoneypotService(web3_client))).run_all(
+                AnalysisContext(address=TOKEN, chain_id=56)
+            )
+    finally:
+        del scam_db._GOPLUS_CACHE[(56, TOKEN)]
+
+    assert honeypot.error is None
+    assert honeypot.data["status"] == "ok"
+    assert honeypot.data["field_providers"]["is_honeypot"] == "goplus"
+    assert web3_client.check_honeypot.await_count == web3_client.get_tax_info.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_background_scan_outlasts_a_full_simulator_request_that_an_interactive_scan_cuts():
+    async def slow_simulation(ctx):
+        await asyncio.sleep(RPC_TIMEOUT_SECONDS * SCALE)
+        return clean("honeypot", 1.0, is_honeypot=False, can_sell=True, buy_tax=0, sell_tax=0)
+
+    container = MagicMock(risk_engine=RiskEngine())
+    container.registry = registry_of(analyzer("honeypot", 1.0, slow_simulation))
+    tools = AgentTools(container)
+
+    with patch("core.registry.RUN_ALL_DEADLINE_SECONDS", RUN_ALL_DEADLINE_SECONDS * SCALE):
+        interactive = await tools.scan_contract(TOKEN, chain_id=4663)
+        background = await tools.scan_contract(
+            TOKEN, chain_id=4663, deadline=BACKGROUND_SCAN_DEADLINE_SECONDS * SCALE
+        )
+
+    assert interactive["coverage_reasons"]["honeypot"] == "honeypot analysis unavailable (TimeoutError)"
+    assert "honeypot" not in background["coverage_reasons"]
+    assert background["coverage"]["honeypot"] == 1

@@ -191,7 +191,7 @@ async def test_after_the_cooldown_the_sweep_probes_once_and_resumes_only_if_it_c
 async def test_a_launch_refused_when_the_breaker_opens_mid_sweep_stays_unscanned(db, guard):
     await db.upsert_discovered_launches(4663, [launch(0), launch(1), launch(2)])
 
-    async def scan(token, chain_id):
+    async def scan(token, chain_id, deadline):
         open_breaker(guard)
         return scan_result(10, complete=False)
 
