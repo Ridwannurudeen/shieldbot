@@ -25,9 +25,10 @@ every check looks up the receipts of ALL of them in one RPC batch, so a transact
 found. Before anything is broadcast for a row that already has transactions, under the nonce lock and in the same
 batch as the nonce reads:
   a receipt for any of them    it is on-chain: the row is finished with that transaction, nothing is sent
-  latest nonce <= the row's    that nonce is still unused, so our transaction there may still be mined: send the
-    last nonce                 SAME stored bytes again (never a second transaction at one nonce), and only while
-                               the pending nonce equals it; otherwise wait
+  latest nonce <= the row's    that nonce is still unused, so our transaction there may still be mined. Only
+    last nonce                 while the pending nonce equals it (otherwise wait), send the SAME stored bytes again
+                               or, without stored bytes, a replacement AT that nonce: at most one transaction per
+                               nonce can be mined, and every hash is checked, so it never records twice
   latest nonce > every nonce   each was used by a transaction that is not ours, so none of ours can ever be mined:
     the row used               sign a new transaction at the next nonce
 The batch is one HTTP request, answered from one node's view, so a nonce it shows as used comes with the receipt of
@@ -554,12 +555,15 @@ class VerdictPublisher:
                 nonces.append(row["nonce"])
             last = max(nonces)
             if latest <= last:
-                # Nonce `last` is unused, so our transaction there may still be mined. Send those same bytes
-                # again rather than a second transaction: a row never has two different hashes at one nonce.
-                raws = [t["raw_tx"] for t in transactions if t["nonce"] == last and t["raw_tx"]]
-                if nonce != last or not raws:
+                # Nonce `last` is unused, so our transaction there may still be mined: anything sent now takes
+                # nonce `last` too, and only while nothing is pending there.
+                if nonce != last:
                     raise RecordFailed("PreviousTransactionPending")
-                return "send", bytes.fromhex(raws[-1]), last
+                raws = [t["raw_tx"] for t in transactions if t["nonce"] == last and t["raw_tx"]]
+                if raws:
+                    return "send", bytes.fromhex(raws[-1]), last
+                # Without the stored bytes, sign a replacement at nonce `last`: at most one transaction per
+                # nonce can be mined, and every hash of the row is checked, so it can never record twice.
             # Every nonce the row used is taken, and no transaction of the row is mined, so none of them can
             # ever be: a new transaction at the next nonce is safe.
         if base_fee > MAX_FEE_PER_GAS_WEI:

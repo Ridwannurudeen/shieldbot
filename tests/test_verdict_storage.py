@@ -1,6 +1,7 @@
 """Storage of published verdict evidence, keyed by (chain_id, subject) with history."""
 
 import asyncio
+import sqlite3
 import time
 
 import pytest
@@ -304,3 +305,36 @@ async def test_the_claim_query_uses_the_outbox_index(db):
     )
     plan = " ".join(row[-1] for row in await cursor.fetchall())
     assert "idx_verdict_evidence_outbox" in plan
+
+
+@pytest.mark.asyncio
+async def test_a_failed_transaction_insert_rolls_the_whole_record_back(tmp_path):
+    """The row update and the transaction insert commit together or not at all, even if a later commit follows."""
+    path = str(tmp_path / "shieldbot.db")
+    database, committed = Database(path), Database(path)
+    await database.initialize()
+    await committed.initialize()
+    try:
+        evidence_id = await insert(database, onchain_status="pending")
+        await database.claim_next_pending_verdict(4663)
+        execute = database._db.execute
+
+        async def failing_insert(sql, parameters=()):
+            if "INSERT OR IGNORE INTO verdict_transactions" in sql:
+                raise sqlite3.OperationalError("disk I/O error")
+            return await execute(sql, parameters)
+
+        database._db.execute = failing_insert
+        with pytest.raises(sqlite3.OperationalError):
+            await database.set_verdict_tx_hash(evidence_id, TX_A, 7, "02aa")
+        database._db.execute = execute
+        # Any later write on the same connection must not commit half of the failed record.
+        await insert(database, subject=OTHER, onchain_status="pending")
+        [claimed] = await committed.get_claimed_verdicts(4663)
+        assert (claimed["id"], claimed["tx_hash"], claimed["nonce"], claimed["attempts"]) == (
+            evidence_id, None, None, 0,
+        )
+        assert await committed.get_verdict_transactions([evidence_id]) == {evidence_id: []}
+    finally:
+        await database.close()
+        await committed.close()

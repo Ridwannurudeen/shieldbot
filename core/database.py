@@ -2048,17 +2048,22 @@ class Database:
         adds nothing), and the row's tx_hash and nonce show the latest one. Each call counts one attempt.
         """
         now = time.time()
-        cursor = await self._db.execute("""
-            UPDATE verdict_evidence SET tx_hash = ?, nonce = ?, attempts = attempts + 1, updated_at = ?
-            WHERE id = ? AND onchain_status = 'sending'
-        """, (tx_hash, nonce, now, evidence_id))
-        claimed = cursor.rowcount == 1
-        if claimed:
-            await self._db.execute("""
-                INSERT OR IGNORE INTO verdict_transactions (evidence_id, tx_hash, nonce, raw_tx, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, (evidence_id, tx_hash, nonce, raw_tx, now))
-        await self._db.commit()
+        # One transaction: a failure must not leave the row update behind for a later commit to land alone.
+        try:
+            cursor = await self._db.execute("""
+                UPDATE verdict_evidence SET tx_hash = ?, nonce = ?, attempts = attempts + 1, updated_at = ?
+                WHERE id = ? AND onchain_status = 'sending'
+            """, (tx_hash, nonce, now, evidence_id))
+            claimed = cursor.rowcount == 1
+            if claimed:
+                await self._db.execute("""
+                    INSERT OR IGNORE INTO verdict_transactions (evidence_id, tx_hash, nonce, raw_tx, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (evidence_id, tx_hash, nonce, raw_tx, now))
+            await self._db.commit()
+        except BaseException:
+            await self._db.rollback()
+            raise
         return claimed
 
     async def get_verdict_transactions(self, evidence_ids: List[int]) -> Dict[int, List[Dict]]:

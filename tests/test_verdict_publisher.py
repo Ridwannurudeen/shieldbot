@@ -1625,20 +1625,81 @@ async def test_a_row_with_several_transactions_resends_the_bytes_at_its_last_non
     assert [t["tx_hash"] for t in transactions] == [first, second]
 
 
-@pytest.mark.asyncio
-async def test_without_the_stored_bytes_the_drain_waits_instead_of_signing_a_second_transaction(db):
-    chain = FakeChain()
-    publisher = sender(db)
+SECOND_TOKEN = "0x" + "7b" * 20
+
+
+async def row_without_stored_bytes(db, publisher, nonce=7):
+    """A row whose earlier transaction's bytes were never stored: only its hash and nonce are known."""
     evidence_id = (await publisher.publish(4663, TOKEN, COMPLETE))["evidence_id"]
     await db.claim_next_pending_verdict(4663)
-    await db.set_verdict_tx_hash(evidence_id, "0x" + "44" * 32, 7)
+    await db.set_verdict_tx_hash(evidence_id, "0x" + "44" * 32, nonce)
     await db.update_verdict_onchain(evidence_id, "unconfirmed", tx_hash="0x" + "44" * 32)
     await db.requeue_verdict(evidence_id)
+    return evidence_id
+
+
+@pytest.mark.asyncio
+async def test_without_the_stored_bytes_a_replacement_is_signed_at_the_same_unused_nonce(db):
+    chain = FakeChain()
+    publisher = sender(db)
+    evidence_id = await row_without_stored_bytes(db, publisher)
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "done"
+    [replacement] = chain.sent
+    # Only one transaction per nonce can be mined, and both hashes are checked from now on.
+    assert decode_record(replacement)["nonce"] == 7
+    replacement_hash = "0x" + keccak(replacement).hex()
+    assert outbox_row(await db.get_latest_verdict_evidence(4663, TOKEN)) == ("confirmed", replacement_hash, None)
+    transactions = (await db.get_verdict_transactions([evidence_id]))[evidence_id]
+    assert [t["tx_hash"] for t in transactions] == ["0x" + "44" * 32, replacement_hash]
+
+
+@pytest.mark.asyncio
+async def test_without_the_stored_bytes_the_drain_waits_while_something_is_pending_at_the_nonce(db):
+    chain = FakeChain()
+    chain.nonce = 8  # something is pending at nonce 7, possibly the earlier transaction
+    publisher = sender(db)
+    await row_without_stored_bytes(db, publisher)
     with rpc_node(chain):
         assert await publisher.drain_once() == "retry"
     assert ["eth_sendRawTransaction"] not in chain.methods()
     stored = await db.get_latest_verdict_evidence(4663, TOKEN)
     assert status_and_hash(stored) == ("pending", "0x" + "44" * 32)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_transaction_insert_never_stalls_the_outbox(tmp_path, reconcile_now, caplog):
+    """The review's S13: the insert fails mid-send, nothing is broadcast, and every row is still recorded."""
+    import sqlite3
+
+    database = Database(str(tmp_path / "shieldbot.db"))
+    await database.initialize()
+    try:
+        chain = FakeChain()
+        publisher = sender(database)
+        await publisher.publish(4663, TOKEN, COMPLETE)
+        execute = database._db.execute
+        failures = [sqlite3.OperationalError("disk I/O error")]
+
+        async def failing_insert_once(sql, parameters=()):
+            if "INSERT OR IGNORE INTO verdict_transactions" in sql and failures:
+                raise failures.pop()
+            return await execute(sql, parameters)
+
+        database._db.execute = failing_insert_once
+        with rpc_node(chain):
+            assert await publisher.drain_once() == "error"
+        assert chain.sent == []
+        await publisher.publish(4663, SECOND_TOKEN, COMPLETE)
+        with rpc_node(chain):
+            assert await publisher._recover_claims() == 1
+            assert await drain_all(publisher) == ["done", "done", "idle"]
+        assert [decode_record(raw)["nonce"] for raw in chain.sent] == [7, 8]
+        for subject in (TOKEN, SECOND_TOKEN):
+            assert (await database.get_latest_verdict_evidence(4663, subject))["onchain_status"] == "confirmed"
+        assert "OperationalError" in caplog.text
+    finally:
+        await database.close()
 
 
 @pytest.mark.asyncio
