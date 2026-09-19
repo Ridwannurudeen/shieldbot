@@ -510,17 +510,94 @@ def test_buy_delivering_nothing_cannot_buy():
     assert outcome["can_sell"] is outcome["is_honeypot"] is None
 
 
-def router_swap_event(fixture):
+def router_swap_event(fixture, label="sell"):
     pool = pool_of(fixture)
     router = "0x" + "0" * 24 + "8876789976decbfcbbbe364623c63652db8c0904"
     pool_id = "0x" + keccak(encode(["address", "address", "uint24", "int24", "address"], list(pool.key))).hex()
     swap_topic = "0x" + keccak(text="Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)").hex()
     (event,) = [
         log
-        for log in calls_by_label(fixture)["sell"]["logs"]
+        for log in calls_by_label(fixture)[label]["logs"]
         if log["address"] == POOL_MANAGER and log["topics"] == [swap_topic, pool_id, router]
     ]
     return event
+
+
+def set_router_swap(fixture, label, token_amount, numeraire_amount):
+    """Rewrite the router's Swap event amounts (router side: positive = received)."""
+    event = router_swap_event(fixture, label)
+    words = [event["data"][2 + 64 * index : 2 + 64 * (index + 1)] for index in range(6)]
+    token_index = 0 if fixture["key"][0] == fixture["token"] else 1
+    words[token_index] = encode(["int128"], [token_amount]).hex()
+    words[1 - token_index] = encode(["int128"], [numeraire_amount]).hex()
+    event["data"] = "0x" + "".join(words)
+    return fixture
+
+
+def partial_fill(fixture, percent):
+    """A pool too shallow for the exact-output buy: it pays out only `percent` of the amount."""
+    fixture = copy.deepcopy(fixture)
+    paid = fixture["amount"] * percent // 100
+    set_router_swap(fixture, "buy", paid, -(10**12) * percent // 100)
+    set_uint(calls_by_label(fixture)["delivered"], paid)
+    return fixture
+
+
+@pytest.mark.parametrize("name", ["v4_native_liquidity_launcher", "v4_weth_hookless", "v4_doppler_weth"])
+@pytest.mark.parametrize("percent", [0, 60])
+def test_a_pool_too_shallow_to_fill_the_buy_is_unknown(name, percent):
+    # The deployed V4Router's exact-output swap never checks the fill, so this is a pool property.
+    outcome = evaluate(partial_fill(load(name), percent))
+    assert all(outcome[field] is None for field in FIELDS)
+    assert outcome["retry_sell_amount"] is None
+    assert f"pool paid out only {load(name)['amount'] * percent // 100} of" in outcome["reason"]
+
+
+def test_a_genuine_transfer_tax_asks_for_the_sized_follow_up():
+    fixture = load("v4_native_liquidity_launcher")
+    delivered = fixture["amount"] * 88 // 100
+    set_uint(calls_by_label(fixture)["delivered"], delivered)
+    outcome = evaluate(fixture)
+    assert outcome["buy_tax"] == 12.0
+    assert outcome["can_buy"] is True
+    assert outcome["retry_sell_amount"] == delivered
+
+
+@pytest.mark.parametrize("percent", [0, 60])
+def test_an_illiquid_pool_does_not_mask_a_live_pool(percent):
+    shallow = evaluate(partial_fill(load("v4_native_liquidity_launcher"), percent))
+    live = evaluate(load("v4_doppler_weth"))
+    result = aggregate_outcomes([shallow, live], [])
+    assert result["can_buy"] is result["can_sell"] is True
+    assert result["buy_tax"] == result["sell_tax"] == 0.0
+    assert result["is_honeypot"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_partial_fill_issues_no_follow_up_request():
+    fixture = partial_fill(load("v4_native_liquidity_launcher"), 60)
+    rpc = rpc_for(fixture)
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+    with fresh_addresses(fixture, fixture):
+        result = await simulator.simulate(fixture["token"])
+    assert len(simulation_requests(rpc)) == 1
+    assert result["can_buy"] is None and result["buy_tax"] is None
+    assert "pool paid out only" in result["reason"]
+
+
+@pytest.mark.parametrize("name", ["v4_native_liquidity_launcher", "v4_doppler_native_fee_hook", "v2_router02"])
+def test_a_buy_without_the_pool_swap_event_is_unknown(name):
+    fixture = load(name)
+    calls = calls_by_label(fixture)
+    swap_topics = {
+        "0x" + keccak(text="Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)").hex(),
+        "0x" + keccak(text="Swap(address,uint256,uint256,uint256,uint256,address)").hex(),
+    }
+    calls["buy"]["logs"] = [log for log in calls["buy"]["logs"] if log["topics"][0] not in swap_topics]
+    outcome = evaluate(fixture)
+    assert all(outcome[field] is None for field in FIELDS)
+    assert outcome["reason"] == "Malformed eth_simulateV1 buy logs"
 
 
 def test_v4_sell_tax_is_the_pool_manager_credit_from_the_router_swap_event():
@@ -1095,6 +1172,12 @@ async def test_every_found_pool_is_simulated_and_a_trap_pool_wins():
     v2["amount"] = native["amount"]
     calls = calls_by_label(v2)
     set_uint(calls["delivered"], native["amount"])
+    # Keep the pair's recorded buy Swap consistent with the rewritten amount (token is currency1).
+    v2_swap = "0x" + keccak(text="Swap(address,uint256,uint256,uint256,uint256,address)").hex()
+    (pair_swap,) = [log for log in calls["buy"]["logs"] if log["topics"][0] == v2_swap]
+    words = [pair_swap["data"][2 + 64 * index : 2 + 64 * (index + 1)] for index in range(4)]
+    words[3] = encode(["uint256"], [native["amount"]]).hex()
+    pair_swap["data"] = "0x" + "".join(words)
     trap = failed_sell(v2, error_string("TransferHelper: TRANSFER_FROM_FAILED"))
     rpc = FakeRpc(
         token,

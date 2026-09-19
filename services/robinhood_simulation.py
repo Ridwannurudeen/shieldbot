@@ -555,8 +555,18 @@ def evaluate_simulation(
         outcome["reason"] = "token balance reads failed"
         return outcome
     delivered = balances["delivered"]
-    # Exact-output buy: the pool paid out exactly `amount`, so any shortfall was taken in the token transfer.
-    outcome["buy_tax"] = tax_percent(amount, delivered)
+    bought = _pool_swap(pool, token, call["buy"].get("logs"))
+    if bought is None or bought[0] > amount:
+        outcome["reason"] = "Malformed eth_simulateV1 buy logs"
+        return outcome
+    payout = bought[0]
+    if payout < amount:
+        # The deployed V4Router never checks that an exact-output swap filled, so a pool too shallow for
+        # `amount` pays out less without reverting. That measures the pool, not the token.
+        outcome["reason"] = f"pool paid out only {payout} of {amount} token units; too illiquid to size a buy"
+        return outcome
+    # The pool paid out exactly `amount`, so any shortfall was taken in the token transfer.
+    outcome["buy_tax"] = tax_percent(payout, delivered)
     if delivered == 0:
         outcome["can_buy"] = False
         outcome["reason"] = "buy succeeded but delivered no tokens"
@@ -565,7 +575,7 @@ def evaluate_simulation(
     if delivered != sell_amount:
         # A transfer-taxed token delivers less than the pool paid out; one sized follow-up can sell
         # exactly that balance. A follow-up that is still short stays unknown.
-        if sell_amount == amount and delivered < amount:
+        if sell_amount == amount and delivered < payout:
             outcome["retry_sell_amount"] = delivered
         outcome["reason"] = (
             f"sell not sizeable in one request: bought {amount} token units but received {delivered}"
