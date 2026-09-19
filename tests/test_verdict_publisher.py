@@ -1907,9 +1907,9 @@ async def test_long_waits_on_an_earlier_transaction_raise_an_alarm(db, reconcile
     assert len(chain.sent) == 1
 
 
-@pytest.mark.parametrize("delay,refused", [(87, True), (88, False)])
+@pytest.mark.parametrize("delay,refused", [(92, True), (93, False)])
 def test_the_module_refuses_a_reconcile_delay_that_a_live_send_could_outlast(delay, refused):
-    """Claim recovery must never take a live send's row: 60 s + 2 s + 20 s without a touch, plus 5 s of margin."""
+    """Claim recovery must never take a live send's row: 60 s + 2 s + 20 s of work, plus two 5 s lock waits."""
     source = Path(vp.__file__).read_text(encoding="utf-8")
     assert source.count("RECONCILE_AFTER_SECONDS = 120") == 1
     changed = source.replace("RECONCILE_AFTER_SECONDS = 120", f"RECONCILE_AFTER_SECONDS = {delay}")

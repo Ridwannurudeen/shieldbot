@@ -95,13 +95,19 @@ RECEIPT_TIMEOUT_SECONDS = 20
 DRAIN_POLL_SECONDS = 10.0
 DRAIN_BACKOFF_SECONDS = 5.0
 DRAIN_MAX_BACKOFF_SECONDS = 300.0
+# core.database opens every connection with PRAGMA busy_timeout=5000, so one write can wait this long for the lock.
+DB_LOCK_WAIT_SECONDS = 5
 # Unresolved records are looked at again only after this long, in batches, and re-sent a bounded number of times.
-# Claim recovery uses the same age, so it must exceed the longest a live send goes without touching its row:
-# PHASE_TIMEOUT_SECONDS before storing, then PHASE_TIMEOUT_SECONDS + RECEIPT_DELAY_SECONDS + RECEIPT_TIMEOUT_SECONDS
-# (82 s) before recording the outcome. Checked here with 5 s of margin for the database writes; a raise rather than
-# an assert, so it also holds under python -O.
+# Claim recovery uses the same age, so it must exceed the longest a live send goes without touching its row. The
+# longest gap is the store's updated_at to the outcome's: PHASE_TIMEOUT_SECONDS for the broadcast, then
+# RECEIPT_DELAY_SECONDS + RECEIPT_TIMEOUT_SECONDS for the receipts (82 s). Each row's updated_at is stamped as its
+# write takes the lock, so a lock wait can shift the first stamp earlier and delay the second: count
+# DB_LOCK_WAIT_SECONDS at both ends, for 92 s. Checked here as a raise rather than an assert, so it also holds
+# under python -O.
 RECONCILE_AFTER_SECONDS = 120
-if RECONCILE_AFTER_SECONDS <= PHASE_TIMEOUT_SECONDS + RECEIPT_DELAY_SECONDS + RECEIPT_TIMEOUT_SECONDS + 5:
+if RECONCILE_AFTER_SECONDS <= (
+    PHASE_TIMEOUT_SECONDS + RECEIPT_DELAY_SECONDS + RECEIPT_TIMEOUT_SECONDS + 2 * DB_LOCK_WAIT_SECONDS
+):
     raise RuntimeError("RECONCILE_AFTER_SECONDS must exceed the longest a live send leaves its row untouched")
 RECONCILE_BATCH = 5
 MAX_SEND_ATTEMPTS = 5
