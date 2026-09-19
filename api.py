@@ -1770,6 +1770,7 @@ async def base_attestations(limit: int = 25):
 async def verdict_permalink(chain_id: int, address: str):
     """Latest published ShieldBot verdict for a token, with its evidence document and on-chain record."""
     from core.verdict_evidence import Verdict
+    from services.verdict_publisher import MAX_SEND_ATTEMPTS
 
     _validate_chain_id(chain_id)
     if not web3_client.is_valid_address(address):
@@ -1800,7 +1801,10 @@ async def verdict_permalink(chain_id: int, address: str):
             "sequencer's soft finality, final on the parent chain once the batch is posted. "
             "`reverted`: transaction tx_hash reverted and recorded nothing. "
             "`pending` and `sending`: queued for, or being sent to, the chain. "
-            "`submitted`, `unconfirmed` and `failed`: not yet proven on-chain; retried automatically. "
+            "`submitted`, `unconfirmed` and `failed`: not yet proven on-chain. Every transaction sent for this "
+            "verdict is looked up again periodically, and a mined one makes it `confirmed` or `reverted`; it is "
+            f"sent again only until {MAX_SEND_ATTEMPTS} transactions have been signed for it, and after that it "
+            "is only looked up. "
             "`off`: this verdict is stored here only and is not recorded on-chain."
         ),
     }

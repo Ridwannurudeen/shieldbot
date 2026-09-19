@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from core.config import Settings
 from core.database import Database
 from core.extension_formatter import is_scan_incomplete
-from services.verdict_publisher import VerdictPublisher
+from services.verdict_publisher import MAX_SEND_ATTEMPTS, VerdictPublisher
 from utils.web3_client import UnsupportedChainError, Web3Client
 from tests.test_lifespan import mock_container  # noqa: F401  (pytest fixture)
 
@@ -116,6 +116,10 @@ async def test_permalink_serves_the_latest_evidence_and_how_to_verify(verdict_ap
     assert "canonical" in body["verify"]
     for status in ("confirmed", "reverted", "pending", "sending", "submitted", "unconfirmed", "failed", "off"):
         assert f"`{status}`" in body["verify"]
+    # Re-sending stops at the attempt cap; after that a verdict is only looked up.
+    assert "retried automatically" not in body["verify"]
+    assert f"only until {MAX_SEND_ATTEMPTS} transactions have been signed" in body["verify"]
+    assert "only looked up" in body["verify"]
 
 
 @pytest.mark.asyncio
