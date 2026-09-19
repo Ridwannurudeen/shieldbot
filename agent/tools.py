@@ -34,7 +34,10 @@ class AgentTools:
         address = _validate_address(address)
         ctx = AnalysisContext(address=address, chain_id=chain_id)
         results = await self._container.registry.run_all(ctx)
-        return self._container.risk_engine.compute_from_results(results)
+        risk = self._container.risk_engine.compute_from_results(results)
+        # The honeypot analyzer's data rides along so a published verdict can cite the simulation behind it.
+        honeypot = next((result.data for result in results if result.name == "honeypot"), None)
+        return {**risk, "honeypot_data": honeypot}
 
     async def check_deployer(self, address: str, chain_id: int = 56) -> Optional[Dict]:
         """Look up deployer risk summary for a contract address."""
