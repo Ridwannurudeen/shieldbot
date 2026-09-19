@@ -248,14 +248,17 @@ Each verdict's `onchain_status` moves through:
 Every transaction a verdict has broadcast is kept, with its nonce and signed bytes. At start and whenever the queue
 is empty, the drain looks up the receipts of every transaction of up to 5 `submitted`, `failed` or `unconfirmed`
 verdicts that are at least 2 minutes old, in one request. A mined transaction makes the verdict `confirmed` or
-`reverted`. Otherwise the verdict is queued again, up to 5 broadcasts; after that it is still looked up every 2
-minutes, so a transaction that lands late is reported.
+`reverted`. Otherwise the verdict is queued again until it has signed 5 transactions (sending the same signed
+bytes again does not count, because it cannot record twice); after that it is still looked up every 2 minutes, so a
+transaction that lands late is reported.
 
 A verdict is never recorded twice. Before anything is broadcast again, in the same request as the nonce reads, the
 drain looks up the receipts of all of the verdict's transactions:
 - if any of them is mined, the verdict is finished with it and nothing is sent;
-- if the verdict's last nonce is still unused, the drain sends the same signed bytes again, never a second
-  transaction at that nonce (and waits while something else is pending there);
+- if the verdict's last nonce is still unused, the drain waits while something else is pending there. Otherwise
+  it sends the same signed bytes again or, when those bytes were never stored or their `maxFeePerGas` no longer
+  covers the base fee, a replacement at that same nonce at the current fee. Only one transaction per nonce can be
+  mined, and every hash is checked, so this never records twice;
 - only when every nonce the verdict used has been taken by a transaction that is not one of its own, so none of
   them can ever be mined, does it sign a new transaction at the next nonce.
 
@@ -263,7 +266,7 @@ Stopping the API waits up to 30 seconds for a send under way to record its outco
 the process is killed first, or the send takes longer, the verdict stays `sending`. The drain resolves it once it is 2
 minutes old (which gives a lagging read replica time to show a mined transaction): at start, after a drain error, and
 whenever the queue is empty. A mined transaction finishes it; otherwise it is queued again and the rules above decide
-what, if anything, is sent. After 5 broadcasts it is left `unconfirmed`.
+what, if anything, is sent. At 5 signed transactions it is left `unconfirmed`.
 
 ## 9. Smoke test and independent verification
 

@@ -27,8 +27,10 @@ batch as the nonce reads:
   a receipt for any of them    it is on-chain: the row is finished with that transaction, nothing is sent
   latest nonce <= the row's    that nonce is still unused, so our transaction there may still be mined. Only
     last nonce                 while the pending nonce equals it (otherwise wait), send the SAME stored bytes again
-                               or, without stored bytes, a replacement AT that nonce: at most one transaction per
-                               nonce can be mined, and every hash is checked, so it never records twice
+                               while their maxFeePerGas covers the base fee; without stored bytes, or when the base
+                               fee has outgrown them, sign a replacement AT that nonce at the current fee: at most
+                               one transaction per nonce can be mined, and every hash is checked, so it never
+                               records twice
   latest nonce > every nonce   each was used by a transaction that is not ours, so none of ours can ever be mined:
     the row used               sign a new transaction at the next nonce
 The batch is one HTTP request, answered from one node's view, so a nonce it shows as used comes with the receipt of
@@ -36,15 +38,16 @@ whatever used it.
 
 submitted, unconfirmed and failed rows are reconciled at start and whenever the drain is idle: once a row is
 RECONCILE_AFTER_SECONDS old, one batched lookup (at most RECONCILE_BATCH rows, every transaction of each) marks it
-confirmed or reverted, or queues it again while under MAX_SEND_ATTEMPTS broadcasts. A row at the cap is still
-looked up, every RECONCILE_AFTER_SECONDS, so a transaction that lands late is reported.
+confirmed or reverted, or queues it again while it has signed fewer than MAX_SEND_ATTEMPTS transactions (sending
+the same bytes again does not count: it cannot record twice). A row at the cap is still looked up, every
+RECONCILE_AFTER_SECONDS, so a transaction that lands late is reported.
 
 Claim before send: each claimed row's prepare -> store -> broadcast -> record outcome runs in a task shielded from
 cancellation, and stop() lets it finish (for up to STOP_TIMEOUT_SECONDS) before the database closes. A row still
 left `sending` (the process was killed, or the database failed) is recovered once it is RECONCILE_AFTER_SECONDS
 old, which gives a lagging replica time to show a mined transaction: at start, after any drain error and whenever
 the drain is idle. A mined transaction finishes it; otherwise it goes back to `pending` and the checks above
-decide what, if anything, is sent. After MAX_SEND_ATTEMPTS it is left `unconfirmed`.
+decide what, if anything, is sent. At MAX_SEND_ATTEMPTS transactions it is left `unconfirmed`.
 
 The public 4663 RPC is shared, so the drain is bounded: at most MAX_RECORDS_PER_HOUR records (rows beyond that
 wait as pending), one at a time under a nonce lock, a timeout on every request and phase, bounded retries with
@@ -62,6 +65,7 @@ from collections import deque
 from typing import Optional
 
 import aiohttp
+import rlp
 from eth_abi import encode
 from eth_account import Account
 from eth_utils import keccak, to_checksum_address
@@ -560,9 +564,10 @@ class VerdictPublisher:
                 if nonce != last:
                     raise RecordFailed("PreviousTransactionPending")
                 raws = [t["raw_tx"] for t in transactions if t["nonce"] == last and t["raw_tx"]]
-                if raws:
+                if raws and _max_fee_per_gas(bytes.fromhex(raws[-1])) >= base_fee:
                     return "send", bytes.fromhex(raws[-1]), last
-                # Without the stored bytes, sign a replacement at nonce `last`: at most one transaction per
+                # Without the stored bytes, or when the node would refuse them for a base fee above their
+                # maxFeePerGas, sign a replacement at nonce `last` at the current fee: at most one transaction per
                 # nonce can be mined, and every hash of the row is checked, so it can never record twice.
             # Every nonce the row used is taken, and no transaction of the row is mined, so none of them can
             # ever be: a new transaction at the next nonce is safe.
@@ -661,6 +666,11 @@ def _receipt_outcome(receipt) -> Optional[str]:
     """"confirmed" or "reverted" for a mined transaction's receipt, None when there is no usable receipt."""
     status = receipt.get("status") if isinstance(receipt, dict) else None
     return {"0x1": "confirmed", "0x0": "reverted"}.get(status)
+
+
+def _max_fee_per_gas(raw: bytes) -> int:
+    """maxFeePerGas of a signed EIP-1559 (type 2) transaction."""
+    return int.from_bytes(rlp.decode(raw[1:])[3], "big")
 
 
 def _quantity(value) -> Optional[int]:

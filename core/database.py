@@ -2044,22 +2044,26 @@ class Database:
     ) -> bool:
         """Record a transaction about to be broadcast for a claimed row; returns False if the row is not claimed.
 
-        Every transaction a row has ever broadcast is kept in verdict_transactions (a rebroadcast of the same bytes
-        adds nothing), and the row's tx_hash and nonce show the latest one. Each call counts one attempt.
+        Every transaction a row has ever broadcast is kept in verdict_transactions, and the row's tx_hash and nonce
+        show the latest one. Each new transaction counts one attempt; sending the same bytes again adds nothing.
         """
         now = time.time()
         # One transaction: a failure must not leave the row update behind for a later commit to land alone.
         try:
             cursor = await self._db.execute("""
-                UPDATE verdict_evidence SET tx_hash = ?, nonce = ?, attempts = attempts + 1, updated_at = ?
+                UPDATE verdict_evidence SET tx_hash = ?, nonce = ?, updated_at = ?
                 WHERE id = ? AND onchain_status = 'sending'
             """, (tx_hash, nonce, now, evidence_id))
             claimed = cursor.rowcount == 1
             if claimed:
-                await self._db.execute("""
+                cursor = await self._db.execute("""
                     INSERT OR IGNORE INTO verdict_transactions (evidence_id, tx_hash, nonce, raw_tx, created_at)
                     VALUES (?, ?, ?, ?, ?)
                 """, (evidence_id, tx_hash, nonce, raw_tx, now))
+                if cursor.rowcount == 1:
+                    await self._db.execute(
+                        "UPDATE verdict_evidence SET attempts = attempts + 1 WHERE id = ?", (evidence_id,)
+                    )
             await self._db.commit()
         except BaseException:
             await self._db.rollback()

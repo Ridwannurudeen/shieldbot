@@ -143,6 +143,13 @@ class FakeChain:
             result = hex(self.balance)
         elif method == "eth_sendRawTransaction":
             raw = bytes.fromhex(params[0][2:])
+            if decode_record(raw)["max_fee"] < self.base_fee:
+                # A node refuses a transaction that cannot pay the current base fee.
+                return {
+                    "jsonrpc": "2.0",
+                    "id": row["id"],
+                    "error": {"code": -32000, "message": "max fee per gas less than block base fee"},
+                }
             self.sent.append(raw)
             tx_hash = "0x" + keccak(raw).hex()
             if self.mine:
@@ -1024,7 +1031,8 @@ async def test_a_crash_after_storing_the_hash_but_before_the_broadcast_is_resent
     assert decode_record(replacement)["nonce"] == claimed["nonce"]
     stored = await db.get_latest_verdict_evidence(4663, TOKEN)
     assert outbox_row(stored) == ("confirmed", claimed["tx_hash"], None)
-    assert await attempts(db) == (7, 2)
+    # Sending the same bytes again is not a new attempt.
+    assert await attempts(db) == (7, 1)
 
 
 @pytest.mark.asyncio
@@ -1365,7 +1373,7 @@ async def test_a_requeued_record_takes_the_same_nonce_while_it_is_unused(db, rec
     assert "0x" + keccak(replacement).hex() == first["tx_hash"]
     assert decode_record(replacement)["nonce"] == 7
     assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "confirmed"
-    assert await attempts(db) == (7, 2)
+    assert await attempts(db) == (7, 1)
 
 
 @pytest.mark.asyncio
@@ -1620,9 +1628,78 @@ async def test_a_row_with_several_transactions_resends_the_bytes_at_its_last_non
         assert await publisher.drain_once() == "done"
     assert posted_hash(chain) == second
     assert decode_record(chain.sent[-1])["nonce"] == 8
-    assert await attempts(db) == (8, 3)
+    assert await attempts(db) == (8, 2)
     transactions = (await db.get_verdict_transactions([evidence_id]))[evidence_id]
     assert [t["tx_hash"] for t in transactions] == [first, second]
+
+
+@pytest.mark.asyncio
+async def test_a_fee_spike_replaces_the_stored_bytes_with_a_fee_bumped_transaction_at_the_same_nonce(
+    db, reconcile_now
+):
+    """The review's S14: the base fee rises above the stored transaction's maxFeePerGas while its nonce is unused."""
+    chain = FakeChain()
+    chain.raise_on["eth_sendRawTransaction"] = aiohttp.ClientConnectionError()
+    publisher = sender(db)
+    first = await record_once(db, chain, publisher)
+    assert first["onchain_status"] == "unconfirmed"
+    [stored] = (await db.get_verdict_transactions([first["id"]]))[first["id"]]
+    assert decode_record(bytes.fromhex(stored["raw_tx"]))["max_fee"] == 2 * BASE_FEE
+    chain.raise_on.clear()
+    chain.base_fee = 400_000_000  # the node now refuses the stored bytes; still below the 1 gwei cap
+    with rpc_node(chain):
+        assert await publisher._reconcile() == 1
+        assert await publisher.drain_once() == "done"
+    [replacement] = chain.sent
+    transaction = decode_record(replacement)
+    assert (transaction["nonce"], transaction["max_fee"]) == (7, 800_000_000)
+    replacement_hash = "0x" + keccak(replacement).hex()
+    assert replacement_hash != first["tx_hash"]
+    assert outbox_row(await db.get_latest_verdict_evidence(4663, TOKEN)) == ("confirmed", replacement_hash, None)
+    # Only one transaction per nonce can be mined, and both hashes are checked from now on.
+    transactions = (await db.get_verdict_transactions([first["id"]]))[first["id"]]
+    assert [t["tx_hash"] for t in transactions] == [first["tx_hash"], replacement_hash]
+    assert await attempts(db) == (7, 2)
+    assert chain.doubles() == []
+
+
+@pytest.mark.asyncio
+async def test_a_fee_spike_above_the_fee_cap_defers_the_replacement(db, reconcile_now, caplog):
+    chain = FakeChain()
+    chain.raise_on["eth_sendRawTransaction"] = aiohttp.ClientConnectionError()
+    publisher = sender(db)
+    await record_once(db, chain, publisher)
+    chain.raise_on.clear()
+    chain.base_fee = vp.MAX_FEE_PER_GAS_WEI + 1
+    chain.posts.clear()
+    with rpc_node(chain):
+        assert await publisher._reconcile() == 1
+        assert await publisher.drain_once() == "retry"
+    assert ["eth_sendRawTransaction"] not in chain.methods()
+    assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "pending"
+    assert await attempts(db) == (7, 1)
+    assert "FeeCapExceeded" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_sending_the_same_bytes_again_never_counts_toward_the_attempt_cap(db, reconcile_now):
+    chain = FakeChain()
+    chain.raise_on["eth_sendRawTransaction"] = aiohttp.ClientConnectionError()
+    publisher = sender(db)
+    first = await record_once(db, chain, publisher)
+    with rpc_node(chain):
+        for _ in range(vp.MAX_SEND_ATTEMPTS + 1):
+            assert await publisher._reconcile() == 1
+            assert await publisher.drain_once() == "done"
+            assert posted_hash(chain) == first["tx_hash"]
+    assert await attempts(db) == (7, 1)
+    chain.raise_on.clear()
+    with rpc_node(chain):
+        assert await publisher._reconcile() == 1
+        assert await publisher.drain_once() == "done"
+    [broadcast] = chain.sent
+    assert "0x" + keccak(broadcast).hex() == first["tx_hash"]
+    assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "confirmed"
 
 
 SECOND_TOKEN = "0x" + "7b" * 20

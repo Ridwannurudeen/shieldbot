@@ -225,11 +225,12 @@ async def test_unresolved_listing_honours_age_limit_and_least_recently_looked_at
 @pytest.mark.asyncio
 async def test_rows_at_the_attempt_cap_are_still_listed(db):
     evidence_id = await signed_row(db, "unconfirmed")
-    for _ in range(9):
+    for i in range(9):
+        tx_hash = "0x" + f"{i:02x}" * 32
         await db.requeue_verdict(evidence_id)
         await db.claim_next_pending_verdict(4663)
-        await db.set_verdict_tx_hash(evidence_id, TX_A, 7)
-        await db.update_verdict_onchain(evidence_id, "unconfirmed", tx_hash=TX_A)
+        await db.set_verdict_tx_hash(evidence_id, tx_hash, 7)
+        await db.update_verdict_onchain(evidence_id, "unconfirmed", tx_hash=tx_hash)
     [row] = await db.get_unresolved_verdicts(4663, time.time() + 1, limit=10)
     assert (row["id"], row["attempts"]) == (evidence_id, 10)
 
@@ -239,7 +240,7 @@ async def test_every_broadcast_transaction_is_kept_with_its_bytes(db):
     evidence_id = await insert(db, onchain_status="pending")
     await db.claim_next_pending_verdict(4663)
     assert await db.set_verdict_tx_hash(evidence_id, TX_A, 7, "02aa")
-    # The same bytes sent again add no second transaction, but count as an attempt.
+    # The same bytes sent again add no second transaction and no attempt.
     assert await db.set_verdict_tx_hash(evidence_id, TX_A, 7, "02aa")
     assert await db.set_verdict_tx_hash(evidence_id, TX_B, 8, "02bb")
     assert await db.get_verdict_transactions([evidence_id, 999]) == {
@@ -250,7 +251,7 @@ async def test_every_broadcast_transaction_is_kept_with_its_bytes(db):
         999: [],
     }
     [claimed] = await db.get_claimed_verdicts(4663)
-    assert (claimed["tx_hash"], claimed["nonce"], claimed["attempts"]) == (TX_B, 8, 3)
+    assert (claimed["tx_hash"], claimed["nonce"], claimed["attempts"]) == (TX_B, 8, 2)
 
 
 @pytest.mark.asyncio
