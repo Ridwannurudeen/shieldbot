@@ -66,12 +66,19 @@ class ContractService:
 
             # Scam DB (external APIs, not BscScan — no delay needed)
             scam_matches = await self.scam_db.check_address(address, chain_id=chain_id)
-            results['scam_matches'] = scam_matches or []
+            results['scam_matches'] = list(scam_matches or [])
+            failed_providers = getattr(scam_matches, 'failed_providers', ())
+            if failed_providers:
+                results['coverage'] = {'scam_database': False}
+                results['reason'] = 'Scam database unavailable: ' + '; '.join(failed_providers)
 
             # Ownership (RPC call, not BscScan)
             ownership = await self.web3_client.get_ownership_info(address, chain_id=chain_id)
             if ownership:
                 results['ownership_renounced'] = ownership.get('is_renounced')
+                if ownership.get('status') == 'unknown':
+                    results['coverage'] = {**results.get('coverage', {}), 'ownership_renounced': False}
+                    results['reason'] = '; '.join(filter(None, (results.get('reason'), ownership.get('reason'))))
 
             # Bytecode pattern scan (RPC call)
             bytecode_warnings = []
@@ -83,8 +90,8 @@ class ContractService:
             try:
                 bytecode = await self.web3_client.get_bytecode(address, chain_id=chain_id)
                 if bytecode is None:
-                    results['coverage'] = {'bytecode': False}
-                    results['reason'] = 'Bytecode scan unavailable'
+                    results['coverage'] = {**results.get('coverage', {}), 'bytecode': False}
+                    results['reason'] = '; '.join(filter(None, (results.get('reason'), 'Bytecode scan unavailable')))
                 elif bytecode:
                     bytecode_hex = bytecode.hex() if isinstance(bytecode, bytes) else str(bytecode)
                     for sig, pattern_name in BYTECODE_PATTERNS.items():
@@ -102,8 +109,8 @@ class ContractService:
                 raise
             except Exception as e:
                 logger.warning("Bytecode scan failed for %s: %s", address, type(e).__name__)
-                results['coverage'] = {'bytecode': False}
-                results['reason'] = 'Bytecode scan unavailable'
+                results['coverage'] = {**results.get('coverage', {}), 'bytecode': False}
+                results['reason'] = '; '.join(filter(None, (results.get('reason'), 'Bytecode scan unavailable')))
 
             results['bytecode_warnings'] = bytecode_warnings
             results['has_proxy'] = has_proxy

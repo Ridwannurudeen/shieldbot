@@ -171,7 +171,7 @@ class RiskEngine:
             if has_mint and has_proxy and ownership_renounced is False:
                 composite = max(composite, 85)
 
-            if not contract_data.get('is_contract') and honeypot_data.get('simulation_failed'):
+            if contract_data.get('is_contract') is False and honeypot_data.get('simulation_failed'):
                 composite = max(composite, 80)
 
             if honeypot_data.get('is_honeypot'):
@@ -186,7 +186,10 @@ class RiskEngine:
                 if pair_age is not None and pair_age < 24:
                     composite = min(composite + 15, 100)
 
-            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not contract_data.get('scam_matches'):
+            # A failed scam lookup or bytecode scan is not a clean one, so it earns no positive signal.
+            contract_coverage = contract_data.get('coverage', {})
+            checks_covered = contract_coverage.get('scam_database', True) and contract_coverage.get('bytecode', True)
+            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not contract_data.get('scam_matches') and checks_covered:
                 composite = max(composite - 20, 0)
 
             if contract_data.get('scam_matches'):
@@ -206,6 +209,10 @@ class RiskEngine:
             risk_level = 'LOW'
 
         if incomplete and risk_level == 'LOW':
+            risk_level = 'MEDIUM'
+
+        # A calibrated medium threshold can sit above the scam floor; a scam match is never LOW.
+        if contract_data.get('scam_matches') and risk_level == 'LOW':
             risk_level = 'MEDIUM'
 
         # --- Risk archetype ---
@@ -293,7 +300,7 @@ class RiskEngine:
                 composite = max(composite, 55)
 
             # No contract bytecode + honeypot simulation failed → destroyed scam token
-            if not contract_data.get('is_contract') and honeypot_data.get('simulation_failed'):
+            if contract_data.get('is_contract') is False and honeypot_data.get('simulation_failed'):
                 composite = max(composite, 80)
 
             # Honeypot escalation — floor at 80 if confirmed
@@ -309,9 +316,12 @@ class RiskEngine:
                 if pair_age is not None and pair_age < 24:
                     composite = min(composite + 15, 100)
 
-            # Positive signals — reduce score for renounced ownership with high liquidity
+            # Positive signals — reduce score for renounced ownership with high liquidity.
+            # A failed scam lookup or bytecode scan is not a clean one, so it earns no positive signal.
             liquidity_info = dex_data.get('liquidity_usd')
-            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not contract_data.get('scam_matches'):
+            contract_coverage = contract_data.get('coverage', {})
+            checks_covered = contract_coverage.get('scam_database', True) and contract_coverage.get('bytecode', True)
+            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not contract_data.get('scam_matches') and checks_covered:
                 composite = max(composite - 20, 0)
 
             if contract_data.get('scam_matches'):
@@ -336,6 +346,10 @@ class RiskEngine:
             risk_level = 'LOW'
 
         if incomplete and risk_level == 'LOW':
+            risk_level = 'MEDIUM'
+
+        # A calibrated medium threshold can sit above the scam floor; a scam match is never LOW.
+        if contract_data.get('scam_matches') and risk_level == 'LOW':
             risk_level = 'MEDIUM'
 
         archetype = self._determine_archetype(
@@ -439,7 +453,7 @@ class RiskEngine:
             if dex_data.get('wash_trade_flag'):
                 return 'wash_traded'
             if (contract_data.get('has_mint') and contract_data.get('has_proxy')
-                    and not contract_data.get('ownership_renounced')):
+                    and contract_data.get('ownership_renounced') is False):
                 return 'rug_pull'
         if rug_prob >= 71:
             return 'high_risk_contract'

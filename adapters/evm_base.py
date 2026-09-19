@@ -111,7 +111,15 @@ class EvmAdapter(ChainAdapter):
         return self._chain_name
 
     async def _call_with_retry(self, fn, *args, retries=3, base_delay=1.0):
-        """Wrap a synchronous web3 call with retry + executor to avoid blocking the event loop."""
+        """Wrap a synchronous web3 call with retry + executor to avoid blocking the event loop.
+
+        Only transient provider failures are retried, decided from structured error data, never
+        exception text: the HTTP status on the requests HTTPError that web3's HTTPProvider raises,
+        or the JSON-RPC "limit exceeded" code -32005 (web3 6 raises ValueError(error object),
+        web3 7 raises Web3RPCError with rpc_response). Reverts and other errors raise at once.
+        """
+        import requests
+
         if retries < 1:
             retries = 1
         loop = asyncio.get_event_loop()
@@ -121,8 +129,15 @@ class EvmAdapter(ChainAdapter):
                 return await loop.run_in_executor(None, fn, *args)
             except Exception as e:
                 last_exc = e
-                err_str = str(e)
-                is_retriable = '429' in err_str or '502' in err_str or '503' in err_str
+                if isinstance(e, requests.exceptions.HTTPError):
+                    is_retriable = e.response is not None and e.response.status_code in (429, 502, 503)
+                else:
+                    rpc_response = getattr(e, 'rpc_response', None)
+                    if isinstance(rpc_response, dict):
+                        rpc_error = rpc_response.get('error')
+                    else:
+                        rpc_error = e.args[0] if isinstance(e, ValueError) and e.args else None
+                    is_retriable = isinstance(rpc_error, dict) and rpc_error.get('code') == -32005
                 if is_retriable and attempt < retries - 1:
                     delay = base_delay * (2 ** attempt)
                     logger.warning(
@@ -254,17 +269,42 @@ class EvmAdapter(ChainAdapter):
             return {}
 
     async def get_ownership_info(self, address: str) -> Dict:
+        """Return the owner and whether it is renounced.
+
+        A reverting owner() (ContractLogicError, raised by web3 6 and 7 alike) is a definitive
+        answer: there is no Ownable owner to read, so the lookup is complete with both fields None.
+        So is an empty reply, which is how a contract whose fallback does not revert (WETH9 and
+        its WBNB copy) answers a function it lacks. web3 raises BadFunctionCallOutput for that and
+        for output that is not an address alike, so the raw reply is read again to tell them apart
+        by length. Every other failure is missing data and carries status unknown with a
+        class-only reason. OffchainLookup is a ContractLogicError subclass that asks for more
+        data rather than reverting.
+        """
+        from web3.exceptions import BadFunctionCallOutput, ContractLogicError, OffchainLookup
+
         try:
             contract = self.w3.eth.contract(
                 address=Web3.to_checksum_address(address), abi=ERC20_ABI,
             )
-            owner = await self._call_with_retry(contract.functions.owner().call)
+            try:
+                owner = await self._call_with_retry(contract.functions.owner().call)
+            except BadFunctionCallOutput:
+                # 0x8da5cb5b is the owner() selector.
+                reply = await self._call_with_retry(
+                    self.w3.eth.call, {'to': contract.address, 'data': '0x8da5cb5b'},
+                )
+                if len(reply) == 0:
+                    return {'owner': None, 'is_renounced': None}
+                raise
             zero_address = '0x0000000000000000000000000000000000000000'
             is_renounced = owner.lower() == zero_address.lower()
             return {'owner': owner, 'is_renounced': is_renounced}
         except Exception as e:
             logger.error("[%s] Error getting ownership info: %s", self._chain_name, type(e).__name__)
-            return {'owner': None, 'is_renounced': None}
+            result = {'owner': None, 'is_renounced': None}
+            if isinstance(e, ContractLogicError) and not isinstance(e, OffchainLookup):
+                return result
+            return {**result, 'status': 'unknown', 'reason': f'Ownership lookup failed ({type(e).__name__})'}
 
     async def check_honeypot(self, address: str) -> Dict:
         result = {

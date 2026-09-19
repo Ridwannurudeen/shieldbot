@@ -3,7 +3,7 @@
 Runs periodic sweeps that:
 1. Check watched deployers for new contracts
 2. Recheck contracts previously scored WARN (31-70)
-3. Scan new PancakeSwap pairs (placeholder for future implementation)
+3. Discover new Robinhood Chain launches and scan the newest ones
 
 For any flagged contract: auto-watches the deployer, generates an AI threat
 narrative (when available), and stores the finding.
@@ -18,18 +18,33 @@ import time
 import traceback
 
 from agent.prompts import HAIKU_MODEL, NARRATIVE_TEMPLATE
+from core.extension_formatter import is_scan_incomplete
+from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 
 logger = logging.getLogger(__name__)
+
+# Each scan runs every analyzer, so only the newest launches are scanned per sweep.
+LAUNCH_SCANS_PER_SWEEP = 10
+# One sweep rechecks at most this many tracked pairs, shared equally between the chains
+# that have any, so no chain can starve another.
+RECHECK_PAIRS_PER_SWEEP = 20
+# Chain 4663 scans cannot reach full coverage yet, so those pairs would otherwise be
+# rescanned every sweep forever. Six hours caps a pair at four rechecks a day.
+RECHECK_MIN_INTERVAL_SECONDS = 6 * 3600
+# Every scan makes several provider and RPC calls, and the public 4663 RPC is shared, so
+# scans are spaced instead of running back to back. Thirty paced scans add a minute to a sweep.
+SCAN_INTERVAL_SECONDS = 2.0
 
 
 class Hunter:
     """Proactive scheduled threat sweeps."""
 
-    def __init__(self, tools, db, ai_analyzer, sentinel):
+    def __init__(self, tools, db, ai_analyzer, sentinel, discovery=None):
         self.tools = tools
         self.db = db
         self.ai = ai_analyzer
         self.sentinel = sentinel
+        self.discovery = discovery
         self._task = None  # asyncio.Task for background loop
         self._running = False
 
@@ -106,7 +121,7 @@ class Hunter:
                 type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
             )
 
-        # Phase 3: scan new PancakeSwap pairs (placeholder)
+        # Phase 3: discover and scan new Robinhood Chain launches
         try:
             flagged += await self._scan_new_pairs(investigation_id)
         except Exception as exc:
@@ -161,23 +176,41 @@ class Hunter:
     # ------------------------------------------------------------------
 
     async def _recheck_warn_contracts(self, investigation_id: str):
-        """Recheck contracts previously scored WARN (31-70). Cap at 20."""
-        flagged = []
-        pairs = await self.db.get_tracked_pairs(status="watching", limit=20)
-        for pair in pairs:
-            try:
-                result = await self.tools.scan_contract(pair["token_address"])
-                risk_score = result.get("risk_score", 0)
+        """Recheck watching contracts, least recently checked first.
 
-                if risk_score >= 71:
+        Every chain holding watching pairs gets an equal share of RECHECK_PAIRS_PER_SWEEP,
+        and a pair waits RECHECK_MIN_INTERVAL_SECONDS between rechecks, so no chain starves
+        another and no pair is rescanned every sweep. Only a complete scan clears a
+        contract; an incomplete one leaves it watching.
+        """
+        flagged = []
+        chains = await self.db.get_recheck_chains("watching")
+        if not chains:
+            return flagged
+        quota = max(1, RECHECK_PAIRS_PER_SWEEP // len(chains))
+        checked_before = time.time() - RECHECK_MIN_INTERVAL_SECONDS
+        pairs = []
+        for chain in chains:
+            pairs += await self.db.get_recheck_pairs("watching", chain, quota, checked_before)
+        for index, pair in enumerate(pairs[:RECHECK_PAIRS_PER_SWEEP]):
+            if index > 0:
+                await asyncio.sleep(SCAN_INTERVAL_SECONDS)
+            try:
+                chain_id = pair.get("chain_id", 56)
+                await self.db.mark_tracked_pair_checked(pair["pair_address"])
+                result = await self.tools.scan_contract(pair["token_address"], chain_id=chain_id)
+                risk_score = result.get("risk_score", result.get("rug_probability"))
+
+                if risk_score is not None and risk_score >= 71:
                     # Upgraded to BLOCK
                     await self.db.update_tracked_pair_status(
                         pair["pair_address"], "blocked"
                     )
-                    await self.tools.auto_watch_deployer(
-                        pair.get("deployer", "unknown"),
-                        reason=f"auto: recheck upgrade {pair['token_address']} (score={risk_score})",
-                    )
+                    if pair.get("deployer"):
+                        await self.tools.auto_watch_deployer(
+                            pair["deployer"],
+                            reason=f"auto: recheck upgrade {pair['token_address']} (score={risk_score})",
+                        )
                     await self._log_finding(
                         investigation_id,
                         pair["token_address"],
@@ -185,9 +218,10 @@ class Hunter:
                         risk_score,
                         result,
                         "blocked",
+                        chain_id=chain_id,
                     )
                     flagged.append(pair["token_address"])
-                elif risk_score <= 30:
+                elif risk_score is not None and risk_score <= 30 and not is_scan_incomplete(result):
                     # Cleared
                     await self.db.update_tracked_pair_status(
                         pair["pair_address"], "cleared"
@@ -201,23 +235,67 @@ class Hunter:
         return flagged
 
     # ------------------------------------------------------------------
-    # Phase 3: New PancakeSwap pairs (placeholder)
+    # Phase 3: New Robinhood Chain launches
     # ------------------------------------------------------------------
 
     async def _scan_new_pairs(self, investigation_id: str):
-        """Placeholder for PancakeSwap pair monitoring.
+        """Discover Robinhood Chain launches, then scan the newest unscanned ones.
 
-        Full implementation will watch PancakeSwap Factory PairCreated events.
-        For now, returns empty list.
+        BSC pair monitoring is not implemented, and without a discovery service this
+        phase does nothing. Launches that are not blocked or cleared by a complete scan
+        are tracked as watching so the recheck phase revisits them on their own chain.
         """
-        return []
+        if self.discovery is None:
+            return []
+        try:
+            await self.discovery.run()
+        except Exception as exc:
+            logger.error(
+                "Hunter: launch discovery failed: %s\n%s",
+                type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+            )
+
+        flagged = []
+        launches = await self.db.get_unscanned_launches(LAUNCH_CHAIN_ID, LAUNCH_SCANS_PER_SWEEP)
+        for index, launch in enumerate(launches):
+            if index > 0:
+                await asyncio.sleep(SCAN_INTERVAL_SECONDS)
+            token = launch["token_address"]
+            try:
+                result = await self.tools.scan_contract(token, chain_id=LAUNCH_CHAIN_ID)
+            except Exception as exc:
+                logger.error(
+                    "Hunter: error scanning launch %s: %s\n%s", token,
+                    type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+                )
+                await self.db.upsert_tracked_pair(token, token_address=token, chain_id=LAUNCH_CHAIN_ID)
+                await self.db.record_launch_scan(LAUNCH_CHAIN_ID, token, "error", None)
+                continue
+
+            risk_score = result.get("risk_score", result.get("rug_probability"))
+            if risk_score is not None and risk_score >= 71:
+                status = "blocked"
+                await self._log_finding(
+                    investigation_id, token, None, risk_score, result, status, chain_id=LAUNCH_CHAIN_ID
+                )
+                flagged.append(token)
+            elif risk_score is None or is_scan_incomplete(result):
+                status = "unknown"
+            elif risk_score <= 30:
+                status = "cleared"
+            else:
+                status = "watching"
+            if status in ("unknown", "watching"):
+                await self.db.upsert_tracked_pair(token, token_address=token, chain_id=LAUNCH_CHAIN_ID)
+            await self.db.record_launch_scan(LAUNCH_CHAIN_ID, token, status, risk_score)
+        return flagged
 
     # ------------------------------------------------------------------
     # Finding logger
     # ------------------------------------------------------------------
 
     async def _log_finding(
-        self, investigation_id, address, deployer, risk_score, evidence, action
+        self, investigation_id, address, deployer, risk_score, evidence, action, chain_id=56
     ):
         """Store a finding and optionally generate AI narrative."""
         narrative = None
@@ -243,7 +321,7 @@ class Hunter:
             investigation_id=investigation_id,
             address=address,
             deployer=deployer,
-            chain_id=56,
+            chain_id=chain_id,
             risk_score=risk_score,
             narrative=narrative,
             evidence=evidence,

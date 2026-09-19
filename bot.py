@@ -143,7 +143,7 @@ All scans are recorded on BNB Chain for transparency.
 
 **How to use:**
 Send any address and I'll auto-detect what to scan!
-Use chain prefixes: `eth:0x...`, `base:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`
+Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`
 
 Commands:
 /scan — Scan a contract
@@ -185,7 +185,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 **Quick Tips:**
 • Send any address and I'll auto-detect what to scan
-• Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`
+• Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`
 • Or use /chain to switch your default chain
 • Supported: {supported_chains}
 
@@ -1004,9 +1004,12 @@ def format_scan_result(result: dict) -> str:
     emoji = risk_emoji.get(risk_level, '⚪')
     score = 'Unknown (incomplete provider coverage)' if incomplete else f"{result.get('risk_score', 'N/A')}/100"
     verified = result.get('is_verified')
-    verification = 'Unknown (verification data unavailable)' if verified is None else (
-        '✅ Contract verified' if verified else '❌ Contract not verified'
-    )
+    if result.get('is_contract') is False:
+        verification = 'Not applicable (wallet address, not a contract)'
+    else:
+        verification = 'Unknown (verification data unavailable)' if verified is None else (
+            '✅ Contract verified' if verified else '❌ Contract not verified'
+        )
 
     response = f"""
 🛡️ **Security Scan Report**

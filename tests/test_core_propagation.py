@@ -755,10 +755,13 @@ async def test_mempool_poll_errors_do_not_log_secrets(mock_web3_client, caplog):
 
 
 PROVIDER_PATH_MODULES = [
+    'adapters/evm_base.py',
+    'core/auth.py',
     'core/indexer.py',
     'core/registry.py',
     'scanner/token_scanner.py',
     'scanner/transaction_scanner.py',
+    'rpc/router.py',
     'services/cache.py',
     'services/contract_service.py',
     'services/dex_service.py',
@@ -768,12 +771,13 @@ PROVIDER_PATH_MODULES = [
     'services/guardian.py',
     'services/honeypot_service.py',
     'services/injection_scanner.py',
+    'services/launch_discovery.py',
     'services/mempool_service.py',
     'services/phishing_service.py',
     'services/rescue_service.py',
     'services/reputation.py',
+    'services/robinhood_simulation.py',
     'services/tenderly_service.py',
-    'services/tier_service.py',
     'services/token_gate_service.py',
     'services/token_sniffer_service.py',
 ]

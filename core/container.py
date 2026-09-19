@@ -43,7 +43,6 @@ from services.threat_graph import ThreatGraphService
 from services.reputation import ReputationService
 from services.guardian import GuardianService
 from services.anomaly_detector import AnomalyDetector
-from services.tier_service import TierService
 
 logger = logging.getLogger(__name__)
 
@@ -185,12 +184,14 @@ class ServiceContainer:
         )
 
         from agent.hunter import Hunter
+        from services.launch_discovery import LaunchDiscovery
 
         self.hunter = Hunter(
             tools=self.agent_tools,
             db=self.db,
             ai_analyzer=self.ai_analyzer,
             sentinel=self.sentinel,
+            discovery=LaunchDiscovery(self.db, rpc_url=settings.robinhood_rpc_url),
         )
 
         # Optional services (need async init)
@@ -220,9 +221,6 @@ class ServiceContainer:
 
         # Anomaly detection (agent behavioral baselines)
         self.anomaly_detector = AnomalyDetector(self.db)
-
-        # Premium tier management (token gating)
-        self.tier_service = TierService(rpc_url=settings.bsc_rpc_url)
 
     async def startup(self):
         """Initialize async-dependent services."""

@@ -1,8 +1,16 @@
 """Tests for ChainAdapter interface and BscAdapter."""
 
 import pytest
+import requests
 from unittest.mock import patch, MagicMock, AsyncMock
 from adapters.bsc import BscAdapter, WHITELISTED_ROUTERS, KNOWN_LOCKERS
+
+
+def _http_error(status):
+    # requests.Response.raise_for_status builds HTTPError(message, response=self).
+    response = requests.Response()
+    response.status_code = status
+    return requests.exceptions.HTTPError(f"{status} Server Error", response=response)
 
 
 class TestBscAdapterProperties:
@@ -197,7 +205,7 @@ class TestIsContract:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('error,attempts', [
-        (RuntimeError('503 Service Unavailable'), 3),
+        (_http_error(503), 3),
         (ConnectionError('connection refused'), 1),
     ])
     async def test_failed_code_lookup_is_unknown(self, error, attempts):

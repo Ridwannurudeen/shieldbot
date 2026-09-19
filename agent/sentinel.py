@@ -13,6 +13,7 @@ import traceback
 from typing import Optional
 
 from agent.prompts import HAIKU_MODEL, NARRATIVE_TEMPLATE
+from core.extension_formatter import is_scan_incomplete
 
 logger = logging.getLogger(__name__)
 
@@ -126,11 +127,20 @@ class Sentinel:
         new_contract: str,
         chain_id: int,
     ) -> None:
-        """Scan a new contract from a watched deployer and log the result."""
+        """Scan a new contract from a watched deployer and log the result.
+
+        A contract is only recorded as watched when a complete scan scored it below the
+        block threshold; an incomplete scan is recorded as unknown.
+        """
         try:
             result = await self.tools.scan_contract(new_contract, chain_id)
-            risk_score = result.get("risk_score", 0)
-            action = "blocked" if risk_score >= 71 else "watched"
+            risk_score = result.get("risk_score", result.get("rug_probability"))
+            if risk_score is not None and risk_score >= 71:
+                action = "blocked"
+            elif risk_score is None or is_scan_incomplete(result):
+                action = "unknown"
+            else:
+                action = "watched"
 
             await self.db.insert_agent_finding(
                 finding_type="deployer_flagged",

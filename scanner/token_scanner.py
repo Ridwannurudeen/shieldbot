@@ -6,6 +6,7 @@ Integrates risk_scorer for numeric scoring and AI analysis
 
 import logging
 from typing import Dict, List, Optional
+from adapters.robinhood import SIMULATION_PROVIDER
 from utils.chain_info import get_chain_name
 from utils.web3_client import UnsupportedChainError
 from utils.risk_scorer import (
@@ -269,7 +270,7 @@ class TokenScanner:
 
     async def _check_honeypot(self, address: str, result: Dict, chain_id: int = 56):
         """Check if token is a honeypot with cross-validation"""
-        if chain_id != 56:
+        if chain_id != 56 and self.web3.supports_honeypot_simulation(chain_id) is not True:
             result['is_honeypot'] = None
             result['checks']['can_sell'] = None
             result['honeypot_status'] = 'unknown'
@@ -277,7 +278,7 @@ class TokenScanner:
             result['risks'].append('Honeypot and sellability unknown: legacy check unavailable for this chain')
             return
         try:
-            honeypot_result = await self.web3.check_honeypot(address)
+            honeypot_result = await self.web3.check_honeypot(address, chain_id=chain_id)
             is_honeypot = honeypot_result.get('is_honeypot')
             result['honeypot_status'] = honeypot_result.get('status', 'ok' if is_honeypot is not None else 'unknown')
             result['honeypot_reason'] = honeypot_result.get('reason')
@@ -293,8 +294,11 @@ class TokenScanner:
             if is_honeypot:
                 is_verified = result.get('is_verified', False)
                 contract_age_days = result.get('contract_age_days', 0)
+                providers = honeypot_result.get('field_providers') or {}
+                # A third-party flag can be a false positive; our own simulation executed the sell.
+                simulated = providers.get('is_honeypot') == SIMULATION_PROVIDER
 
-                if is_verified and contract_age_days is not None and contract_age_days > 30:
+                if not simulated and is_verified and contract_age_days is not None and contract_age_days > 30:
                     logger.info(f"Honeypot API flagged {address} but contract is verified and {contract_age_days} days old - likely false positive")
                     result['is_honeypot'] = False
                     result['risks'].append("High sell restrictions detected, but contract appears legitimate (verified + established)")
@@ -318,7 +322,7 @@ class TokenScanner:
 
     async def _check_taxes(self, address: str, result: Dict, chain_id: int = 56) -> bool:
         """Check buy and sell taxes. Returns True if check succeeded."""
-        if chain_id != 56:
+        if chain_id != 56 and self.web3.supports_honeypot_simulation(chain_id) is not True:
             result['buy_tax'] = None
             result['sell_tax'] = None
             result['tax_status'] = 'unknown'
@@ -328,7 +332,7 @@ class TokenScanner:
         result['buy_tax'] = None
         result['sell_tax'] = None
         try:
-            tax_info = await self.web3.get_tax_info(address)
+            tax_info = await self.web3.get_tax_info(address, chain_id=chain_id)
 
             buy_tax = tax_info.get('buy_tax')
             sell_tax = tax_info.get('sell_tax')

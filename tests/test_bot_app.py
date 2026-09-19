@@ -1,6 +1,7 @@
 """Tests for Telegram application wiring, lifecycle hooks, and help replies."""
 
 import importlib
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -9,6 +10,11 @@ from unittest.mock import MagicMock, AsyncMock
 from types import SimpleNamespace
 from telegram import Chat, Message, MessageEntity, Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler
+
+from utils.chain_info import CHAIN_PREFIXES
+
+
+LISTED_PREFIXES = "`eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`"
 
 
 @pytest.fixture
@@ -162,7 +168,7 @@ class TestHelpCommand:
 
 **Quick Tips:**
 • Send any address and I'll auto-detect what to scan
-• Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`
+• Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`
 • Or use /chain to switch your default chain
 • Supported: BSC, Ethereum, Base, Arbitrum, Polygon, opBNB, Optimism, Robinhood Chain
 
@@ -172,3 +178,23 @@ Stay safe! 🛡️
         await bot_module.help_command(update, context)
 
         update.message.reply_text.assert_awaited_once_with(expected_text, parse_mode="Markdown")
+
+
+class TestChainPrefixHelp:
+    @staticmethod
+    async def _reply(handler):
+        update = MagicMock(spec=Update)
+        update.message.reply_text = AsyncMock()
+        await handler(update, MagicMock())
+        return update.message.reply_text.await_args.args[0]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("handler", ["start", "help_command"])
+    async def test_prefix_hint_lists_real_prefixes_for_every_chain(self, bot_module, handler):
+        text = await self._reply(getattr(bot_module, handler))
+        hints = [line for line in text.splitlines() if "chain prefixes:" in line]
+        assert len(hints) == 1
+        assert hints[0].endswith(f"Use chain prefixes: {LISTED_PREFIXES}")
+        prefixes = re.findall(r"`([a-z]+):0x\.\.\.`", hints[0])
+        assert all(prefix in CHAIN_PREFIXES for prefix in prefixes)
+        assert {CHAIN_PREFIXES[prefix] for prefix in prefixes} == set(CHAIN_PREFIXES.values())

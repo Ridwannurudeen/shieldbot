@@ -112,7 +112,7 @@ class TransactionScanner:
         data_sources['scam_db'] = await self._check_scam_database(address, result, chain_id=chain_id)
         result['coverage']['scam_database'] = data_sources['scam_db']
         if not data_sources['scam_db']:
-            result['coverage_reasons']['scam_database'] = 'scam_database unknown: provider data unavailable'
+            result['coverage_reasons'].setdefault('scam_database', 'scam_database unknown: provider data unavailable')
 
         if result['is_contract'] is None:
             result['status'] = 'unknown'
@@ -146,7 +146,7 @@ class TransactionScanner:
             'bytecode': data_sources['bytecode'],
         }
         result['coverage_reasons'] = {
-            field: f'{field} unknown: provider data unavailable'
+            field: result['coverage_reasons'].get(field, f'{field} unknown: provider data unavailable')
             for field, covered in result['coverage'].items() if not covered
         }
         result['status'] = 'unknown' if result['coverage_reasons'] else 'ok'
@@ -251,17 +251,23 @@ class TransactionScanner:
             return False
 
     async def _check_scam_database(self, address: str, result: Dict, chain_id: int = 56) -> bool:
-        """Check against known scam databases. Returns True if check succeeded."""
+        """Check against known scam databases. Returns True only if every provider answered."""
         try:
             matches = await self.scam_db.check_address(address, chain_id=chain_id)
+            failed_providers = getattr(matches, 'failed_providers', ())
 
             if matches:
-                result['scam_matches'] = matches
+                result['scam_matches'] = list(matches)
                 result['warnings'].append(f"Found {len(matches)} scam database match(es)")
                 result['checks']['scam_database_clean'] = False
             else:
-                result['checks']['scam_database_clean'] = True
+                result['checks']['scam_database_clean'] = None if failed_providers else True
 
+            if failed_providers:
+                result['coverage_reasons']['scam_database'] = (
+                    'scam_database unknown: ' + '; '.join(failed_providers)
+                )
+                return False
             return True
         except UnsupportedChainError:
             raise

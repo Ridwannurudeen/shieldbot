@@ -312,25 +312,34 @@ async def rate_limit_middleware(request: Request, call_next):
     # Check for API key authentication
     api_key = request.headers.get("x-api-key")
     if api_key and container and container.auth_manager:
-        key_info = await container.auth_manager.validate_key(api_key)
-        if not key_info:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Invalid API key"},
-            )
-        if not await container.auth_manager.check_rate_limit(key_info):
-            return JSONResponse(
-                status_code=429,
-                content={"detail": "API key rate limit exceeded"},
-            )
-        # Record usage (fire-and-forget)
-        try:
-            await container.auth_manager.record_usage(key_info["key_id"], request.url.path)
-        except Exception:
-            pass
-        # Store key info for downstream use
-        request.state.api_key_info = key_info
-        return await call_next(request)
+        from core.auth import rate_limit_headers, request_quota_scope
+
+        # Routers that check the key again for this request reuse this check instead of counting twice.
+        with request_quota_scope():
+            key_info = await container.auth_manager.validate_key(api_key)
+            if not key_info:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Invalid API key"},
+                )
+            allowed = await container.auth_manager.check_rate_limit(key_info)
+            headers = rate_limit_headers(key_info)
+            if not allowed:
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "API key rate limit exceeded"},
+                    headers=headers,
+                )
+            # The daily quota count is already committed; a failed analytics record is only logged.
+            try:
+                await container.auth_manager.record_usage(key_info["key_id"], request.url.path)
+            except Exception as e:
+                logger.error("API usage record failed: %s", type(e).__name__)
+            # Store key info for downstream use
+            request.state.api_key_info = key_info
+            response = await call_next(request)
+        response.headers.update(headers)
+        return response
 
     # Fallback: IP-based rate limiting (extension/unauthenticated)
     client_ip = _get_client_ip(request)
@@ -1626,7 +1635,8 @@ async def get_usage(request: Request):
     if not container or not container.auth_manager:
         raise HTTPException(status_code=503, detail="Auth not available")
     usage = await container.auth_manager.get_usage(key_info["key_id"])
-    return {"key_id": key_info["key_id"], "tier": key_info["tier"], "usage": usage}
+    quota = await container.auth_manager.get_quota(key_info)
+    return {"key_id": key_info["key_id"], "tier": key_info["tier"], "usage": usage, "quota": quota}
 
 
 @app.get("/api/campaign/{address}")
