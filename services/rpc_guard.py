@@ -42,9 +42,10 @@ def is_failure_status(status: int) -> bool:
 class RpcGuard:
     """Paces requests to one RPC at ``rate`` per second and opens a breaker when it keeps failing."""
 
-    def __init__(self, name: str, rate: float = RPC_BUDGET_RPS):
+    def __init__(self, name: str, rate: float = RPC_BUDGET_RPS, clock=time.monotonic):
         self.name = name
         self.rate = rate
+        self._clock = clock
         self.state = CLOSED
         self._next_slot = 0.0
         self._failures = 0
@@ -54,7 +55,7 @@ class RpcGuard:
     @property
     def probe_due(self) -> bool:
         """The breaker is open and its cooldown has passed, so one probe may go."""
-        return self.state == OPEN and time.monotonic() >= self._opened_at + self._cooldown
+        return self.state == OPEN and self._clock() >= self._opened_at + self._cooldown
 
     async def acquire(self, cost: float, probe: bool = False):
         """Wait until ``cost`` requests fit the budget.
@@ -70,7 +71,7 @@ class RpcGuard:
             self._set_state(HALF_OPEN, "probe")
         elif self.state != CLOSED:
             raise BreakerOpenError(f"{self.name} RPC breaker is {self.state}")
-        now = time.monotonic()
+        now = self._clock()
         start = max(now, self._next_slot)
         self._next_slot = start + cost / self.rate
         if start > now:
@@ -97,7 +98,7 @@ class RpcGuard:
 
     def _open(self, cause: str):
         self._failures = 0
-        self._opened_at = time.monotonic()
+        self._opened_at = self._clock()
         self._set_state(OPEN, cause)
 
     def _set_state(self, state: str, cause: str):

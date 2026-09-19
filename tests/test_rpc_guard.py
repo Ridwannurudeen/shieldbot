@@ -24,7 +24,7 @@ _real_sleep = asyncio.sleep
 
 
 class FakeClock:
-    """A frozen monotonic() for services.rpc_guard whose asyncio.sleep() only records the delay.
+    """A frozen clock for RpcGuard whose asyncio.sleep() only records the delay.
 
     Tests move ``now`` by hand. With the clock frozen, every paced request sleeps exactly until
     the slot the budget gave it.
@@ -45,11 +45,12 @@ class FakeClock:
 @pytest.fixture
 def clock():
     fake = FakeClock()
-    with (
-        patch("services.rpc_guard.time.monotonic", fake.monotonic),
-        patch("services.rpc_guard.asyncio.sleep", fake.sleep),
-    ):
+    with patch("services.rpc_guard.asyncio.sleep", fake.sleep):
         yield fake
+
+
+def guard_on(clock, rate=RPC_BUDGET_RPS):
+    return RpcGuard("Robinhood Chain", rate=rate, clock=clock.monotonic)
 
 
 def open_guard(guard):
@@ -63,7 +64,7 @@ def open_guard(guard):
 
 @pytest.mark.asyncio
 async def test_a_burst_is_spread_at_the_budget_rate(clock):
-    guard = RpcGuard("Robinhood Chain")
+    guard = guard_on(clock)
     costs = [18 if index % 10 == 0 else 1 for index in range(40)]
 
     await asyncio.gather(*(guard.acquire(cost) for cost in costs))
@@ -81,7 +82,7 @@ async def test_a_burst_is_spread_at_the_budget_rate(clock):
 
 @pytest.mark.asyncio
 async def test_an_idle_budget_grants_at_once_and_a_reservation_delays_the_next_request(clock):
-    guard = RpcGuard("Robinhood Chain", rate=2.0)
+    guard = guard_on(clock, rate=2.0)
 
     await guard.acquire(18)
     assert clock.sleeps == []
@@ -97,7 +98,7 @@ async def test_an_idle_budget_grants_at_once_and_a_reservation_delays_the_next_r
 
 
 def test_failures_below_the_threshold_do_not_open_and_a_success_resets_them(clock):
-    guard = RpcGuard("Robinhood Chain")
+    guard = guard_on(clock)
     for _ in range(BREAKER_FAILURE_THRESHOLD - 1):
         guard.record_failure("HTTP 429")
     guard.record_success()
@@ -111,7 +112,7 @@ def test_failures_below_the_threshold_do_not_open_and_a_success_resets_them(cloc
 
 @pytest.mark.asyncio
 async def test_an_open_breaker_refuses_work_without_waiting(clock):
-    guard = RpcGuard("Robinhood Chain")
+    guard = guard_on(clock)
     open_guard(guard)
 
     with pytest.raises(BreakerOpenError):
@@ -123,7 +124,7 @@ async def test_an_open_breaker_refuses_work_without_waiting(clock):
 
 @pytest.mark.asyncio
 async def test_work_waiting_for_budget_is_refused_if_the_breaker_opens_meanwhile(clock):
-    guard = RpcGuard("Robinhood Chain")
+    guard = guard_on(clock)
     await guard.acquire(18)
     waiting = asyncio.ensure_future(guard.acquire(1))
     await _real_sleep(0)
@@ -135,7 +136,7 @@ async def test_work_waiting_for_budget_is_refused_if_the_breaker_opens_meanwhile
 
 @pytest.mark.asyncio
 async def test_open_then_half_open_probe_then_closed(clock):
-    guard = RpcGuard("Robinhood Chain")
+    guard = guard_on(clock)
     open_guard(guard)
 
     clock.now += BREAKER_BASE_COOLDOWN_SECONDS - 1
@@ -158,7 +159,7 @@ async def test_open_then_half_open_probe_then_closed(clock):
 
 @pytest.mark.asyncio
 async def test_each_failed_probe_doubles_the_cooldown_up_to_the_cap(clock):
-    guard = RpcGuard("Robinhood Chain")
+    guard = guard_on(clock)
     open_guard(guard)
     cooldowns = []
     for _ in range(7):
@@ -184,7 +185,7 @@ async def test_each_failed_probe_doubles_the_cooldown_up_to_the_cap(clock):
 
 
 def test_outcomes_of_requests_already_in_flight_do_not_move_an_open_breaker(clock):
-    guard = RpcGuard("Robinhood Chain")
+    guard = guard_on(clock)
     open_guard(guard)
 
     guard.record_success()
@@ -197,7 +198,7 @@ def test_outcomes_of_requests_already_in_flight_do_not_move_an_open_breaker(cloc
 
 @pytest.mark.asyncio
 async def test_only_state_changes_are_logged_with_class_only_causes(clock, caplog):
-    guard = RpcGuard("Robinhood Chain")
+    guard = guard_on(clock)
     with caplog.at_level(logging.DEBUG, logger="services.rpc_guard"):
         guard.record_success()
         for cause in ("HTTP 429", "TimeoutError", "ClientConnectorError"):
