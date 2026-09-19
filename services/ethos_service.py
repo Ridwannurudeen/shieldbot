@@ -49,7 +49,7 @@ class EthosService:
                         return defaults
                     if resp.status != 200:
                         logger.warning("Ethos API returned %s for %s", resp.status, wallet_address)
-                        return defaults
+                        return {**defaults, 'status': 'unknown', 'reason': f'Ethos HTTP {resp.status}'}
 
                     data = await resp.json()
 
@@ -96,4 +96,4 @@ class EthosService:
 
         except Exception as e:
             logger.error("Ethos fetch failed for %s: %s", wallet_address, type(e).__name__)
-            return defaults
+            return {**defaults, 'status': 'unknown', 'reason': f'Ethos request failed ({type(e).__name__})'}

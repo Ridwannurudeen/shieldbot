@@ -33,6 +33,8 @@ class BehavioralAnalyzer(Analyzer):
     def _compute(self, d: dict) -> tuple:
         score = 0
         flags = []
+        if d.get('status') == 'unknown':
+            flags.append(f"Behavioral data unknown: {d.get('reason') or 'provider data unavailable'}")
         if d.get('severe_reputation_flag'):
             score += 50
             flags.append('Severe reputation warning')

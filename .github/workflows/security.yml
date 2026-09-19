@@ -136,3 +136,6 @@ jobs:
 
       - name: SDK build
         run: npm run build
+
+      - name: SDK unknowns test
+        run: node --test tests/unknowns.cjs
