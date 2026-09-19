@@ -1,6 +1,7 @@
 """Robinhood Chain adapter — extends shared EvmAdapter."""
 
 import os
+from typing import Dict
 
 from adapters.evm_base import EvmAdapter
 
@@ -25,11 +26,27 @@ WHITELISTED_ROUTERS = {
     UNISWAP_V4_UNIVERSAL_ROUTER.lower(): 'Uniswap V4 Universal Router',
 }
 
+SIMULATION_PROVIDER = 'eth_simulateV1'
+
+
+def _simulation_response(simulation: Dict, fields: tuple, required: tuple) -> Dict:
+    return {
+        **{field: simulation[field] for field in fields},
+        'status': 'ok' if all(simulation[field] is not None for field in required) else 'unknown',
+        'reason': simulation['reason'],
+        'simulation_block': simulation['simulation_block'],
+        'field_providers': {field: SIMULATION_PROVIDER for field in fields if simulation[field] is not None},
+    }
+
 
 class RobinhoodAdapter(EvmAdapter):
     """Robinhood Chain adapter — chain_id=4663."""
 
+    supports_honeypot_simulation = True
+
     def __init__(self, rpc_url: str = None):
+        from services.robinhood_simulation import RobinhoodSimulator
+
         rpc = rpc_url or os.getenv('ROBINHOOD_RPC_URL') or 'https://rpc.mainnet.chain.robinhood.com'
 
         super().__init__(
@@ -42,3 +59,12 @@ class RobinhoodAdapter(EvmAdapter):
             factory_address=UNISWAP_V2_FACTORY,
             whitelisted_routers=WHITELISTED_ROUTERS,
         )
+        self._simulator = RobinhoodSimulator(rpc)
+
+    async def check_honeypot(self, address: str) -> Dict:
+        simulation = await self._simulator.simulate(address)
+        return _simulation_response(simulation, ('is_honeypot', 'can_buy', 'can_sell'), ('is_honeypot',))
+
+    async def get_tax_info(self, address: str) -> Dict:
+        simulation = await self._simulator.simulate(address)
+        return _simulation_response(simulation, ('buy_tax', 'sell_tax'), ('buy_tax', 'sell_tax'))

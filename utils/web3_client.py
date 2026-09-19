@@ -126,6 +126,9 @@ class Web3Client:
     async def get_liquidity_info(self, address: str, chain_id: int = 56) -> Dict:
         return await self._get_adapter(chain_id).get_liquidity_info(address)
 
+    def supports_honeypot_simulation(self, chain_id: int) -> bool:
+        return getattr(self._get_adapter(chain_id), 'supports_honeypot_simulation', False) is True
+
     async def check_honeypot(self, address: str, chain_id: int = 56) -> Dict:
         return await self._get_adapter(chain_id).check_honeypot(address)
 
