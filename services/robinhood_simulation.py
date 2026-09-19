@@ -55,6 +55,11 @@ MAX_LOG_WINDOWS = 3
 SUPPLY_FRACTION = 1_000_000
 BUY_BUDGET_WEI = 10 * 10**18
 BALANCE_OVERRIDE_WEI = 100 * 10**18
+# A zero sell output proves a trap only when rounding cannot explain it. Swap math rounds away at
+# most a few wei, so after a buy costing at least 1 gwei a zero output means the round trip lost
+# over 99.9999999% of its value, which no legitimate fee takes. A cheaper buy (the whole supply
+# priced under 0.001 ETH, since the buy is a millionth of it) is a dust or rugged pool: unknown.
+MIN_TRAP_COST_WEI = 10**9
 RPC_ATTEMPTS = 3
 RPC_BACKOFF_SECONDS = 1.0
 RPC_TIMEOUT_SECONDS = 30
@@ -559,7 +564,7 @@ def evaluate_simulation(
     if bought is None or bought[0] > amount:
         outcome["reason"] = "Malformed eth_simulateV1 buy logs"
         return outcome
-    payout = bought[0]
+    payout, cost = bought[0], -bought[1]
     if payout < amount:
         # The deployed V4Router never checks that an exact-output swap filled, so a pool too shallow for
         # `amount` pays out less without reverting. That measures the pool, not the token.
@@ -630,6 +635,12 @@ def evaluate_simulation(
         hooked = pool.route != "v2" and pool.key[4] != NATIVE
         if sold is None or (not hooked and sold[1] > 0):
             outcome["reason"] = "Malformed eth_simulateV1 sell logs"
+            return outcome
+        if cost < MIN_TRAP_COST_WEI:
+            outcome["reason"] = (
+                f"sell of {sent} token units returned zero output, but the buy cost only {cost} wei, "
+                "too little to rule out rounding"
+            )
             return outcome
         outcome.update(
             sell_tax=sell_tax,

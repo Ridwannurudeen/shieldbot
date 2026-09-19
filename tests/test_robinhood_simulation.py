@@ -19,6 +19,7 @@ from services.robinhood_simulation import (
     LOG_WINDOW_BLOCKS,
     MAX_LOG_WINDOWS,
     MAX_POOLS,
+    MIN_TRAP_COST_WEI,
     Pool,
     RobinhoodSimulator,
     SimulationUnavailable,
@@ -551,6 +552,33 @@ def test_a_pool_too_shallow_to_fill_the_buy_is_unknown(name, percent):
     assert all(outcome[field] is None for field in FIELDS)
     assert outcome["retry_sell_amount"] is None
     assert f"pool paid out only {load(name)['amount'] * percent // 100} of" in outcome["reason"]
+
+
+@pytest.mark.parametrize("name", ["v4_doppler_weth", "v4_doppler_native_fee_hook"])
+@pytest.mark.parametrize("cost,trap", [(MIN_TRAP_COST_WEI - 1, False), (MIN_TRAP_COST_WEI, True)])
+def test_zero_output_counts_as_a_trap_only_above_the_dust_floor(name, cost, trap):
+    fixture = strip_sell_payout(load(name))
+    set_router_swap(fixture, "buy", fixture["amount"], -cost)
+    outcome = evaluate(fixture)
+    assert outcome["can_buy"] is True
+    if trap:
+        assert outcome["can_sell"] is False and outcome["is_honeypot"] is True
+        assert "zero output" in outcome["reason"]
+    else:
+        assert outcome["can_sell"] is None and outcome["is_honeypot"] is None
+        assert outcome["sell_tax"] is None
+        assert f"the buy cost only {cost} wei" in outcome["reason"]
+
+
+def test_the_recorded_buys_sit_where_expected_against_the_dust_floor():
+    # v4 buys cost 2.0e12 to 6.0e13 wei; both recorded V2 buys cost less than the floor.
+    for name in ("v4_native_liquidity_launcher", "v4_weth_hookless", "v4_doppler_weth", "v4_doppler_native_fee_hook"):
+        fixture = load(name)
+        words = router_swap_event(fixture, "buy")["data"][2:]
+        amounts = [int.from_bytes(bytes.fromhex(words[64 * i : 64 * (i + 1)]), "big", signed=True) for i in (0, 1)]
+        numeraire = amounts[1] if fixture["key"][0] == fixture["token"] else amounts[0]
+        assert -numeraire >= MIN_TRAP_COST_WEI
+    assert MIN_TRAP_COST_WEI == 10**9
 
 
 def test_a_genuine_transfer_tax_asks_for_the_sized_follow_up():
