@@ -239,14 +239,14 @@ async def test_rows_at_the_attempt_cap_are_still_listed(db):
 async def test_every_broadcast_transaction_is_kept_with_its_bytes(db):
     evidence_id = await insert(db, onchain_status="pending")
     await db.claim_next_pending_verdict(4663)
-    assert await db.set_verdict_tx_hash(evidence_id, TX_A, 7, "02aa")
+    assert await db.set_verdict_tx_hash(evidence_id, TX_A, 7, "02aa", 112_000_000)
     # The same bytes sent again add no second transaction and no attempt.
-    assert await db.set_verdict_tx_hash(evidence_id, TX_A, 7, "02aa")
-    assert await db.set_verdict_tx_hash(evidence_id, TX_B, 8, "02bb")
+    assert await db.set_verdict_tx_hash(evidence_id, TX_A, 7, "02aa", 112_000_000)
+    assert await db.set_verdict_tx_hash(evidence_id, TX_B, 8, "02bb", 800_000_000)
     assert await db.get_verdict_transactions([evidence_id, 999]) == {
         evidence_id: [
-            {"tx_hash": TX_A, "nonce": 7, "raw_tx": "02aa"},
-            {"tx_hash": TX_B, "nonce": 8, "raw_tx": "02bb"},
+            {"tx_hash": TX_A, "nonce": 7, "raw_tx": "02aa", "max_fee_per_gas": 112_000_000},
+            {"tx_hash": TX_B, "nonce": 8, "raw_tx": "02bb", "max_fee_per_gas": 800_000_000},
         ],
         999: [],
     }
@@ -359,6 +359,18 @@ VERDICT_EVIDENCE_WITHOUT_OUTBOX_COLUMNS = """
     )
 """
 
+# verdict_transactions as first created, before the signed maxFeePerGas was kept.
+VERDICT_TRANSACTIONS_WITHOUT_THE_FEE = """
+    CREATE TABLE verdict_transactions (
+        evidence_id INTEGER NOT NULL,
+        tx_hash TEXT NOT NULL,
+        nonce INTEGER NOT NULL,
+        raw_tx TEXT,
+        created_at REAL NOT NULL,
+        PRIMARY KEY (evidence_id, tx_hash)
+    )
+"""
+
 
 @pytest.mark.asyncio
 async def test_a_verdict_table_without_the_outbox_columns_is_migrated_in_place(tmp_path):
@@ -366,6 +378,12 @@ async def test_a_verdict_table_without_the_outbox_columns_is_migrated_in_place(t
     old = sqlite3.connect(path)
     try:
         old.execute(VERDICT_EVIDENCE_WITHOUT_OUTBOX_COLUMNS)
+        old.execute(VERDICT_TRANSACTIONS_WITHOUT_THE_FEE)
+        old.execute(
+            "INSERT INTO verdict_transactions (evidence_id, tx_hash, nonce, raw_tx, created_at) "
+            "VALUES (1, ?, 6, '02aa', 1.0)",
+            (TX_B,),
+        )
         old.execute(
             "INSERT INTO verdict_evidence (chain_id, subject, verdict, evidence_hash, canonical, observed_block, "
             "created_at, onchain_status, registry, updated_at) "
@@ -392,8 +410,13 @@ async def test_a_verdict_table_without_the_outbox_columns_is_migrated_in_place(t
         assert (claimed["subject"], claimed["evidence_hash"], claimed["nonce"], claimed["attempts"]) == (
             TOKEN, HASH_A, None, 0,
         )
-        assert await database.set_verdict_tx_hash(claimed["id"], TX_A, 7, "02aa")
+        assert await database.set_verdict_tx_hash(claimed["id"], TX_A, 7, "02aa", 112_000_000)
         [row] = await database.get_claimed_verdicts(4663)
         assert (row["tx_hash"], row["nonce"], row["attempts"]) == (TX_A, 7, 1)
+        # The transaction stored before the fee column keeps its row, with an unknown fee.
+        assert (await database.get_verdict_transactions([1]))[1] == [
+            {"tx_hash": TX_B, "nonce": 6, "raw_tx": "02aa", "max_fee_per_gas": None},
+            {"tx_hash": TX_A, "nonce": 7, "raw_tx": "02aa", "max_fee_per_gas": 112_000_000},
+        ]
     finally:
         await database.close()

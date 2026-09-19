@@ -245,7 +245,7 @@ Each verdict's `onchain_status` moves through:
 `confirmed` means the sequencer included the transaction (soft finality). It becomes final on the parent chain
 (Ethereum) once the sequencer posts the batch that contains it.
 
-Every transaction a verdict has broadcast is kept, with its nonce and signed bytes. At start and whenever the queue
+Every transaction a verdict has broadcast is kept, with its nonce, signed bytes and fee. At start and whenever the queue
 is empty, the drain looks up the receipts of every transaction of up to 5 `submitted`, `failed` or `unconfirmed`
 verdicts that are at least 2 minutes old, in one request. A mined transaction makes the verdict `confirmed` or
 `reverted`. Otherwise the verdict is queued again until it has signed 5 transactions (sending the same signed

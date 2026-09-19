@@ -1645,7 +1645,7 @@ async def test_a_fee_spike_replaces_the_stored_bytes_with_a_fee_bumped_transacti
     first = await record_once(db, chain, publisher)
     assert first["onchain_status"] == "unconfirmed"
     [stored] = (await db.get_verdict_transactions([first["id"]]))[first["id"]]
-    assert decode_record(bytes.fromhex(stored["raw_tx"]))["max_fee"] == 2 * BASE_FEE
+    assert stored["max_fee_per_gas"] == 2 * BASE_FEE
     chain.raise_on.clear()
     chain.base_fee = 400_000_000  # the node now refuses the stored bytes; still below the 1 gwei cap
     with rpc_node(chain):
@@ -1660,6 +1660,7 @@ async def test_a_fee_spike_replaces_the_stored_bytes_with_a_fee_bumped_transacti
     # Only one transaction per nonce can be mined, and both hashes are checked from now on.
     transactions = (await db.get_verdict_transactions([first["id"]]))[first["id"]]
     assert [t["tx_hash"] for t in transactions] == [first["tx_hash"], replacement_hash]
+    assert [t["max_fee_per_gas"] for t in transactions] == [2 * BASE_FEE, 800_000_000]
     assert await attempts(db) == (7, 2)
     assert chain.doubles() == []
 
@@ -1714,6 +1715,25 @@ async def row_without_stored_bytes(db, publisher, nonce=7):
     await db.update_verdict_onchain(evidence_id, "unconfirmed", tx_hash="0x" + "44" * 32)
     await db.requeue_verdict(evidence_id)
     return evidence_id
+
+
+@pytest.mark.asyncio
+async def test_stored_bytes_without_a_recorded_fee_are_replaced_at_the_same_nonce(db):
+    """Bytes stored before their fee was kept cannot be checked against the base fee, so they are replaced."""
+    chain = FakeChain()
+    publisher = sender(db)
+    evidence_id = (await publisher.publish(4663, TOKEN, COMPLETE))["evidence_id"]
+    await db.claim_next_pending_verdict(4663)
+    await db.set_verdict_tx_hash(evidence_id, "0x" + "44" * 32, 7, "02aa")
+    await db.update_verdict_onchain(evidence_id, "unconfirmed", tx_hash="0x" + "44" * 32)
+    await db.requeue_verdict(evidence_id)
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "done"
+    [replacement] = chain.sent
+    assert decode_record(replacement)["nonce"] == 7
+    transactions = (await db.get_verdict_transactions([evidence_id]))[evidence_id]
+    assert [t["max_fee_per_gas"] for t in transactions] == [None, 2 * BASE_FEE]
+    assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "confirmed"
 
 
 @pytest.mark.asyncio

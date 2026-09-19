@@ -1955,15 +1955,16 @@ class Database:
                 tx_hash TEXT NOT NULL,
                 nonce INTEGER NOT NULL,
                 raw_tx TEXT,
+                max_fee_per_gas INTEGER,
                 created_at REAL NOT NULL,
                 PRIMARY KEY (evidence_id, tx_hash)
             );
         """)
         await self._db.commit()
-        await self._migrate_verdict_evidence_columns()
+        await self._migrate_verdict_outbox_columns()
 
-    async def _migrate_verdict_evidence_columns(self):
-        """Add the outbox's nonce and attempts columns to a verdict_evidence table created without them."""
+    async def _migrate_verdict_outbox_columns(self):
+        """Add the outbox's columns to verdict tables created before them; a transaction's fee stays unknown."""
         await self._db.execute("BEGIN IMMEDIATE")
         try:
             cursor = await self._db.execute("PRAGMA table_info(verdict_evidence)")
@@ -1973,6 +1974,12 @@ class Database:
             if "attempts" not in columns:
                 await self._db.execute(
                     "ALTER TABLE verdict_evidence ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0"
+                )
+            cursor = await self._db.execute("PRAGMA table_info(verdict_transactions)")
+            columns = {column[1] for column in await cursor.fetchall()}
+            if "max_fee_per_gas" not in columns:
+                await self._db.execute(
+                    "ALTER TABLE verdict_transactions ADD COLUMN max_fee_per_gas INTEGER"
                 )
             await self._db.commit()
         except BaseException:
@@ -2058,7 +2065,8 @@ class Database:
                 ))
 
     async def set_verdict_tx_hash(
-        self, evidence_id: int, tx_hash: str, nonce: int, raw_tx: Optional[str] = None
+        self, evidence_id: int, tx_hash: str, nonce: int, raw_tx: Optional[str] = None,
+        max_fee_per_gas: Optional[int] = None,
     ) -> bool:
         """Record a transaction about to be broadcast for a claimed row; returns False if the row is not claimed.
 
@@ -2075,9 +2083,10 @@ class Database:
             claimed = cursor.rowcount == 1
             if claimed:
                 cursor = await self._db.execute("""
-                    INSERT OR IGNORE INTO verdict_transactions (evidence_id, tx_hash, nonce, raw_tx, created_at)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (evidence_id, tx_hash, nonce, raw_tx, now))
+                    INSERT OR IGNORE INTO verdict_transactions
+                        (evidence_id, tx_hash, nonce, raw_tx, max_fee_per_gas, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (evidence_id, tx_hash, nonce, raw_tx, max_fee_per_gas, now))
                 if cursor.rowcount == 1:
                     await self._db.execute(
                         "UPDATE verdict_evidence SET attempts = attempts + 1 WHERE id = ?", (evidence_id,)
@@ -2093,12 +2102,13 @@ class Database:
         transactions: Dict[int, List[Dict]] = {}
         for evidence_id in evidence_ids:
             cursor = await self._db.execute("""
-                SELECT tx_hash, nonce, raw_tx FROM verdict_transactions
+                SELECT tx_hash, nonce, raw_tx, max_fee_per_gas FROM verdict_transactions
                 WHERE evidence_id = ?
                 ORDER BY created_at, rowid
             """, (evidence_id,))
             transactions[evidence_id] = [
-                {"tx_hash": r[0], "nonce": r[1], "raw_tx": r[2]} for r in await cursor.fetchall()
+                {"tx_hash": r[0], "nonce": r[1], "raw_tx": r[2], "max_fee_per_gas": r[3]}
+                for r in await cursor.fetchall()
             ]
         return transactions
 

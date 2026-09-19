@@ -27,8 +27,8 @@ batch as the nonce reads:
   a receipt for any of them    it is on-chain: the row is finished with that transaction, nothing is sent
   latest nonce <= the row's    that nonce is still unused, so our transaction there may still be mined. Only
     last nonce                 while the pending nonce equals it (otherwise wait), send the SAME stored bytes again
-                               while their maxFeePerGas covers the base fee; without stored bytes, or when the base
-                               fee has outgrown them, sign a replacement AT that nonce at the current fee: at most
+                               while their stored maxFeePerGas covers the base fee; without usable stored bytes,
+                               or when the base fee has outgrown them, sign a replacement AT that nonce: at most
                                one transaction per nonce can be mined, and every hash is checked, so it never
                                records twice
   latest nonce > every nonce   each was used by a transaction that is not ours, so none of ours can ever be mined:
@@ -65,7 +65,6 @@ from collections import deque
 from typing import Optional
 
 import aiohttp
-import rlp
 from eth_abi import encode
 from eth_account import Account
 from eth_utils import keccak, to_checksum_address
@@ -477,10 +476,12 @@ class VerdictPublisher:
                     await self._db.update_verdict_onchain(evidence_id, status, tx_hash=tx_hash)
                     logger.info("Verdict record %s by an earlier transaction: tx=%s", status, tx_hash)
                     return "done"
-                _, raw, nonce = prepared
+                _, raw, nonce, max_fee = prepared
                 tx_hash = "0x" + keccak(raw).hex()
-                # Stored, with its bytes, before the broadcast, so every later check covers it.
-                if not await self._db.set_verdict_tx_hash(evidence_id, tx_hash, nonce, raw.hex()):
+                # Stored, with its bytes and fee, before the broadcast, so every later check covers it.
+                if not await self._db.set_verdict_tx_hash(
+                    evidence_id, tx_hash, nonce, raw.hex(), max_fee
+                ):
                     logger.error("Verdict record %d is no longer claimed; not broadcasting", evidence_id)
                     return "done"
                 try:
@@ -530,7 +531,7 @@ class VerdictPublisher:
         """Decide what to broadcast for a claimed row, in one RPC batch read under the nonce lock.
 
         Returns ("mined", status, tx_hash) when one of the row's earlier transactions is on-chain, or
-        ("send", raw transaction, nonce). Raises RecordFailed when nothing can be sent safely now.
+        ("send", raw transaction, nonce, maxFeePerGas). Raises RecordFailed when nothing can be sent safely now.
         """
         sender = self.recorder
         hashes = _row_hashes(row, transactions)
@@ -566,12 +567,14 @@ class VerdictPublisher:
                 # nonce `last` too, and only while nothing is pending there.
                 if nonce != last:
                     raise RecordFailed("PreviousTransactionPending")
-                raws = [t["raw_tx"] for t in transactions if t["nonce"] == last and t["raw_tx"]]
-                if raws and _max_fee_per_gas(bytes.fromhex(raws[-1])) >= base_fee:
-                    return "send", bytes.fromhex(raws[-1]), last
-                # Without the stored bytes, or when the node would refuse them for a base fee above their
-                # maxFeePerGas, sign a replacement at nonce `last` at the current fee: at most one transaction per
-                # nonce can be mined, and every hash of the row is checked, so it can never record twice.
+                stored = [t for t in transactions if t["nonce"] == last and t["raw_tx"]]
+                fee = stored[-1]["max_fee_per_gas"] if stored else None
+                if fee is not None and fee >= base_fee:
+                    return "send", bytes.fromhex(stored[-1]["raw_tx"]), last, fee
+                # Without usable stored bytes (none kept, or a fee that is unknown or below the base fee, which
+                # the node would refuse), sign a replacement at nonce `last` at the current fee: at most one
+                # transaction per nonce can be mined, and every hash of the row is checked, so it never records
+                # twice.
             # Every nonce the row used is taken, and no transaction of the row is mined, so none of them can
             # ever be: a new transaction at the next nonce is safe.
         if base_fee > MAX_FEE_PER_GAS_WEI:
@@ -596,7 +599,8 @@ class VerdictPublisher:
             }
         )
         # eth-account renamed rawTransaction to raw_transaction; HexBytes.hex() changed prefix, so use bytes.
-        return "send", bytes(getattr(signed, "raw_transaction", None) or signed.rawTransaction), nonce
+        raw = bytes(getattr(signed, "raw_transaction", None) or signed.rawTransaction)
+        return "send", raw, nonce, max_fee
 
     async def _mined(self, session, hashes: list) -> tuple:
         """One bounded batch of receipt lookups: (status, tx_hash) of a mined transaction, else (None, None)."""
@@ -669,11 +673,6 @@ def _receipt_outcome(receipt) -> Optional[str]:
     """"confirmed" or "reverted" for a mined transaction's receipt, None when there is no usable receipt."""
     status = receipt.get("status") if isinstance(receipt, dict) else None
     return {"0x1": "confirmed", "0x0": "reverted"}.get(status)
-
-
-def _max_fee_per_gas(raw: bytes) -> int:
-    """maxFeePerGas of a signed EIP-1559 (type 2) transaction."""
-    return int.from_bytes(rlp.decode(raw[1:])[3], "big")
 
 
 def _quantity(value) -> Optional[int]:
