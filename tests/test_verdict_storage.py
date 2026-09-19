@@ -1,5 +1,7 @@
 """Storage of published verdict evidence, keyed by (chain_id, subject) with history."""
 
+import asyncio
+
 import pytest
 import pytest_asyncio
 
@@ -115,3 +117,73 @@ async def test_table_creation_is_idempotent_and_keeps_rows(db):
     await insert(db)
     await db._create_tables()
     assert (await db.get_latest_verdict_evidence(4663, TOKEN))["evidence_hash"] == HASH_A
+
+
+# ---------------------------------------------------------------------------
+# On-chain outbox: claim before send
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_claim_takes_the_oldest_pending_robinhood_row(db):
+    await insert(db, onchain_status="off")
+    await insert(db, chain_id=56, onchain_status="pending")
+    first = await insert(db, onchain_status="pending", evidence_hash=HASH_A)
+    second = await insert(db, subject=OTHER, onchain_status="pending", evidence_hash=HASH_B)
+
+    claimed = await db.claim_next_pending_verdict(4663)
+    assert claimed == {
+        "id": first, "subject": TOKEN, "verdict": "UNKNOWN", "evidence_hash": HASH_A, "observed_block": 0,
+    }
+    assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "sending"
+    assert (await db.claim_next_pending_verdict(4663))["id"] == second
+    assert await db.claim_next_pending_verdict(4663) is None
+
+
+@pytest.mark.asyncio
+async def test_tx_hash_is_stored_on_the_claimed_row_before_broadcast(db):
+    evidence_id = await insert(db, onchain_status="pending")
+    await db.claim_next_pending_verdict(4663)
+    await db.set_verdict_tx_hash(evidence_id, "0x" + "44" * 32)
+    [claimed] = await db.get_claimed_verdicts(4663)
+    assert (claimed["id"], claimed["tx_hash"]) == (evidence_id, "0x" + "44" * 32)
+
+
+@pytest.mark.asyncio
+async def test_a_released_claim_is_pending_again(db):
+    evidence_id = await insert(db, onchain_status="pending")
+    await db.claim_next_pending_verdict(4663)
+    await db.release_verdict_claim(evidence_id)
+    assert await db.get_claimed_verdicts(4663) == []
+    assert (await db.claim_next_pending_verdict(4663))["id"] == evidence_id
+
+
+@pytest.mark.asyncio
+async def test_release_and_tx_hash_only_touch_claimed_rows(db):
+    evidence_id = await insert(db, onchain_status="pending")
+    await db.set_verdict_tx_hash(evidence_id, "0x" + "44" * 32)
+    await db.release_verdict_claim(evidence_id)
+    stored = await db.get_latest_verdict_evidence(4663, TOKEN)
+    assert (stored["onchain_status"], stored["tx_hash"]) == ("pending", None)
+
+
+@pytest.mark.asyncio
+async def test_two_connections_never_claim_the_same_row(tmp_path):
+    """Two processes sharing one SQLite file: every pending row is claimed exactly once."""
+    path = str(tmp_path / "shared.db")
+    first, second = Database(path), Database(path)
+    await first.initialize()
+    await second.initialize()
+    try:
+        ids = [await insert(first, subject="0x" + f"{n:040x}", onchain_status="pending") for n in range(1, 21)]
+        claimed = []
+
+        async def claimer(database):
+            while (row := await database.claim_next_pending_verdict(4663)) is not None:
+                claimed.append(row["id"])
+
+        await asyncio.gather(claimer(first), claimer(second), claimer(first), claimer(second))
+        assert sorted(claimed) == ids
+    finally:
+        await first.close()
+        await second.close()

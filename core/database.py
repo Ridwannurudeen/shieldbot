@@ -1996,3 +1996,53 @@ class Database:
             "created_at", "onchain_status", "registry", "tx_hash", "onchain_error", "updated_at",
         )
         return dict(zip(keys, row))
+
+    async def claim_next_pending_verdict(self, chain_id: int) -> Optional[Dict]:
+        """Claim the oldest row waiting to be recorded on-chain by moving it from pending to sending.
+
+        The conditional UPDATE is atomic in SQLite, so two connections, even in two processes, never claim
+        the same row.
+        """
+        while True:
+            cursor = await self._db.execute("""
+                SELECT id, subject, verdict, evidence_hash, observed_block
+                FROM verdict_evidence
+                WHERE chain_id = ? AND onchain_status = 'pending'
+                ORDER BY id
+                LIMIT 1
+            """, (chain_id,))
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            cursor = await self._db.execute("""
+                UPDATE verdict_evidence SET onchain_status = 'sending', updated_at = ?
+                WHERE id = ? AND onchain_status = 'pending'
+            """, (time.time(), row[0]))
+            await self._db.commit()
+            if cursor.rowcount == 1:
+                return dict(zip(("id", "subject", "verdict", "evidence_hash", "observed_block"), row))
+
+    async def set_verdict_tx_hash(self, evidence_id: int, tx_hash: str):
+        """Store the signed transaction's hash on a claimed row before it is broadcast."""
+        await self._db.execute("""
+            UPDATE verdict_evidence SET tx_hash = ?, updated_at = ?
+            WHERE id = ? AND onchain_status = 'sending'
+        """, (tx_hash, time.time(), evidence_id))
+        await self._db.commit()
+
+    async def release_verdict_claim(self, evidence_id: int):
+        """Return a claimed row that was never signed to the pending queue."""
+        await self._db.execute("""
+            UPDATE verdict_evidence SET onchain_status = 'pending', tx_hash = NULL, updated_at = ?
+            WHERE id = ? AND onchain_status = 'sending'
+        """, (time.time(), evidence_id))
+        await self._db.commit()
+
+    async def get_claimed_verdicts(self, chain_id: int) -> List[Dict]:
+        """Rows claimed for sending whose outcome was never recorded."""
+        cursor = await self._db.execute("""
+            SELECT id, tx_hash FROM verdict_evidence
+            WHERE chain_id = ? AND onchain_status = 'sending'
+            ORDER BY id
+        """, (chain_id,))
+        return [{"id": r[0], "tx_hash": r[1]} for r in await cursor.fetchall()]
