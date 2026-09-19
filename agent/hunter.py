@@ -283,15 +283,8 @@ class Hunter:
             risk_score = result.get("risk_score", result.get("rug_probability"))
 
             if risk_score is not None and risk_score >= 71:
-                # Upgraded to BLOCK
-                await self.db.update_tracked_pair_status(
-                    pair["pair_address"], "blocked"
-                )
-                if pair.get("deployer"):
-                    await self.tools.auto_watch_deployer(
-                        pair["deployer"],
-                        reason=f"auto: recheck upgrade {pair['token_address']} (score={risk_score})",
-                    )
+                # Upgraded to BLOCK. The finding is stored first, so a reader never sees a
+                # blocked pair without the evidence behind it.
                 await self._log_finding(
                     investigation_id,
                     pair["token_address"],
@@ -301,6 +294,14 @@ class Hunter:
                     "blocked",
                     chain_id=chain_id,
                 )
+                await self.db.update_tracked_pair_status(
+                    pair["pair_address"], "blocked"
+                )
+                if pair.get("deployer"):
+                    await self.tools.auto_watch_deployer(
+                        pair["deployer"],
+                        reason=f"auto: recheck upgrade {pair['token_address']} (score={risk_score})",
+                    )
                 blocked = True
             elif risk_score is not None and risk_score <= 30 and not is_scan_incomplete(result):
                 # Cleared
