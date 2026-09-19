@@ -19,6 +19,9 @@ _NO_SCAN_DETAIL = "Coverage details were not recorded for this scan"
 # and the finding waits on an AI narrative first, so a blocked launch's alert waits this long
 # for the evidence before it is queued without it.
 _BLOCKED_EVIDENCE_WAIT_SECONDS = 300
+# A Telegram send times out within seconds, so an alert still marked sending after this long
+# belongs to a pass that died between claiming it and recording the result.
+_LAUNCH_ALERT_SEND_TIMEOUT_SECONDS = 300
 
 # One row per discovered launch with its latest outcome. A recheck records blocked or cleared on
 # the launch's tracked pair (keyed by the token), and a newer one supersedes the launch scan. A
@@ -2224,12 +2227,17 @@ class Database:
     ) -> List[Dict]:
         """Expire pending alerts older than ``max_age``, then return the oldest pending ones.
 
-        At most ``per_chat`` alerts per chat and ``limit`` in all are returned.
+        An alert left sending by a pass that died is marked unconfirmed and never resent. At
+        most ``per_chat`` alerts per chat and ``limit`` in all are returned.
         """
         await self._db.execute("""
             UPDATE launch_alert_outbox SET state = 'expired', updated_at = ?
             WHERE state = 'pending' AND outcome_at < ?
         """, (now, now - max_age))
+        await self._db.execute("""
+            UPDATE launch_alert_outbox SET state = 'unconfirmed', error = 'Interrupted', updated_at = ?
+            WHERE state = 'sending' AND updated_at < ?
+        """, (now, now - _LAUNCH_ALERT_SEND_TIMEOUT_SECONDS))
         await self._db.commit()
         cursor = await self._db.execute("""
             SELECT id, chat_id, chain_id, token_address, outcome, payload FROM (

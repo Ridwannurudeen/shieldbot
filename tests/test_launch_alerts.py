@@ -387,6 +387,31 @@ async def test_an_alert_is_claimed_once_and_a_claimed_alert_is_never_pending_aga
 
 
 @pytest.mark.asyncio
+async def test_an_alert_left_sending_by_a_dead_pass_becomes_unconfirmed_and_is_never_resent(db):
+    await _subscribe(db, CHAT_A, "all", at=500.0)
+    await _scan(db, TOKENS[0], "blocked", 90, at=1000.0)
+    await _scan(db, TOKENS[1], "blocked", 90, at=1000.0, block=101)
+    await db.enqueue_launch_alerts(CHAIN, since=900.0)
+    stale, recent = await db.get_pending_launch_alerts(now=1000.0, max_age=3600, per_chat=5, limit=5)
+    await db.claim_launch_alert(stale["id"])
+    await db.claim_launch_alert(recent["id"])
+    await db._db.execute("UPDATE launch_alert_outbox SET updated_at = 1000.0 WHERE id = ?", (stale["id"],))
+    await db._db.execute("UPDATE launch_alert_outbox SET updated_at = 1200.0 WHERE id = ?", (recent["id"],))
+    await db._db.commit()
+
+    pending = await db.get_pending_launch_alerts(now=1301.0, max_age=3600, per_chat=5, limit=5)
+    await db.enqueue_launch_alerts(CHAIN, since=900.0)
+
+    assert pending == []
+    assert await db.get_pending_launch_alerts(now=1301.0, max_age=3600, per_chat=5, limit=5) == []
+    cursor = await db._db.execute("SELECT id, state, error FROM launch_alert_outbox ORDER BY id")
+    assert [tuple(row) for row in await cursor.fetchall()] == [
+        (stale["id"], "unconfirmed", "Interrupted"),
+        (recent["id"], "sending", None),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_alert_state_records_the_outcome_and_a_released_alert_is_pending_again(db):
     await _subscribe(db, CHAT_A, "all", at=500.0)
     await _scan(db, TOKENS[0], "blocked", 90, at=1000.0)
