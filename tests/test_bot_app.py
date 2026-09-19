@@ -1,16 +1,21 @@
 """Tests for Telegram application wiring, lifecycle hooks, and help replies."""
 
+import asyncio
 import importlib
+import logging
 import re
 import sys
 from datetime import datetime, timezone
 
 import pytest
+import pytest_asyncio
 from unittest.mock import MagicMock, AsyncMock
 from types import SimpleNamespace
 from telegram import Chat, Message, MessageEntity, Update
+from telegram.error import BadRequest, ChatMigrated, Forbidden, InvalidToken, RetryAfter, TimedOut
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler
 
+from core.database import Database
 from utils.chain_info import CHAIN_PREFIXES
 
 
@@ -59,6 +64,7 @@ class TestApplicationWiring:
         application, kwargs = polling_calls[0]
         assert kwargs == {"allowed_updates": Update.ALL_TYPES}
         assert application.post_init is bot_module.post_init
+        assert application.post_stop is bot_module.post_stop
         assert application.post_shutdown is bot_module.post_shutdown
 
         handlers = [
@@ -67,7 +73,7 @@ class TestApplicationWiring:
             for handler in group
         ]
         command_handlers = [h for h in handlers if isinstance(h, CommandHandler)]
-        assert len(command_handlers) == 10
+        assert len(command_handlers) == 12
         assert all(len(h.commands) == 1 for h in command_handlers)
         assert {
             command: handler.callback
@@ -84,6 +90,8 @@ class TestApplicationWiring:
             "campaign": bot_module.campaign_command,
             "history": bot_module.history_command,
             "report": bot_module.report_command,
+            "launchalerts": bot_module.launch_alerts_command,
+            "stopalerts": bot_module.stop_alerts_command,
         }
         callback_handlers = [h for h in handlers if isinstance(h, CallbackQueryHandler)]
         assert len(callback_handlers) == 1
@@ -107,7 +115,7 @@ class TestApplicationWiring:
         )
         assert message_handlers[0].check_update(plain_update)
         assert not message_handlers[0].check_update(command_update)
-        assert len(handlers) == 12
+        assert len(handlers) == 14
         assert bot_module.error_handler in application.error_handlers
 
 
@@ -116,11 +124,27 @@ class TestLifecycleHooks:
     async def test_post_init_starts_services_and_sets_commands(self, bot_module, monkeypatch):
         container = MagicMock(startup=AsyncMock(), shutdown=AsyncMock())
         monkeypatch.setattr(bot_module, "container", container)
+        started = asyncio.Event()
+        stopped = asyncio.Event()
+
+        async def fake_loop(bot):
+            assert bot is application.bot
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                stopped.set()
+
+        monkeypatch.setattr(bot_module, "launch_alert_loop", fake_loop)
         application = MagicMock()
         application.bot.set_my_commands = AsyncMock()
 
         await bot_module.post_init(application)
+        await asyncio.wait_for(started.wait(), 1)
+        await bot_module.post_stop(application)
 
+        assert stopped.is_set()
+        assert bot_module._launch_alert_task.cancelled()
         container.startup.assert_awaited_once_with()
         application.bot.set_my_commands.assert_awaited_once_with([
             ("start", "Welcome message & quick start"),
@@ -132,8 +156,16 @@ class TestLifecycleHooks:
             ("campaign", "Check if address is part of scam campaign"),
             ("history", "View on-chain scan history"),
             ("report", "Report a scam address"),
+            ("launchalerts", "Robinhood Chain launch alerts"),
+            ("stopalerts", "Stop launch alerts"),
             ("help", "Show all commands"),
         ])
+
+    @pytest.mark.asyncio
+    async def test_post_stop_without_a_started_loop_does_nothing(self, bot_module):
+        await bot_module.post_stop(MagicMock())
+
+        assert bot_module._launch_alert_task is None
 
     @pytest.mark.asyncio
     async def test_post_shutdown_stops_services(self, bot_module, monkeypatch):
@@ -164,6 +196,8 @@ class TestHelpCommand:
 **/campaign <address>** - Check if address is part of a scam campaign
 **/history <address>** - View on-chain scan history
 **/report <address> <reason>** - Report a scam address
+**/launchalerts** - Alert this chat to blocked Robinhood Chain launches (`/launchalerts all` for every launch)
+**/stopalerts** - Stop launch alerts
 **/help** - Show this help message
 
 **Quick Tips:**
@@ -198,3 +232,486 @@ class TestChainPrefixHelp:
         prefixes = re.findall(r"`([a-z]+):0x\.\.\.`", hints[0])
         assert all(prefix in CHAIN_PREFIXES for prefix in prefixes)
         assert {CHAIN_PREFIXES[prefix] for prefix in prefixes} == set(CHAIN_PREFIXES.values())
+
+
+# --- Robinhood Chain launch alerts ---------------------------------------------------------
+
+CHAIN = 4663
+TOKENS = ["0x" + f"{index:040x}" for index in range(1, 9)]
+CHAT_A, CHAT_B = 111, -100222
+HONEYPOT_REASON = "v2 pool 0x1c99: sell reverted: TransferHelper: TRANSFER_FROM_FAILED; Unknown fields: sell_tax"
+HONEYPOT_EVIDENCE = {
+    "rug_probability": 80,
+    "risk_level": "HIGH",
+    "critical_flags": ["Honeypot detected", "Cannot sell token", f"Honeypot coverage unknown: {HONEYPOT_REASON}"],
+    "coverage": {"structural": 1.0, "honeypot": 0.8},
+    "coverage_reasons": {"honeypot": HONEYPOT_REASON},
+    "status": "unknown",
+}
+
+
+async def _open(path):
+    database = Database(path)
+    await database.initialize()
+    return database
+
+
+async def _subscribe(db, chat_id, mode, at=500.0):
+    await db.subscribe_launch_alerts(chat_id, CHAIN, mode)
+    await db._db.execute("UPDATE launch_alert_subscriptions SET created_at = ? WHERE chat_id = ?", (at, chat_id))
+    await db._db.commit()
+
+
+async def _scan(db, token, status, score, at, block=100, evidence=None):
+    await db.upsert_discovered_launches(CHAIN, [{
+        "token_address": token, "source": "long", "launchpad": "LONG", "source_rank": 5, "pool_id": None,
+        "block_number": block, "tx_hash": "0x" + f"{block:064x}", "block_timestamp": 1_758_000_000 + block,
+    }])
+    await db.record_launch_scan(CHAIN, token, status, score)
+    await db._db.execute("UPDATE discovered_launches SET scanned_at = ? WHERE token_address = ?", (at, token))
+    await db._db.commit()
+    if evidence is not None:
+        await db.insert_agent_finding(
+            finding_type="hunter_sweep", address=token, chain_id=CHAIN,
+            risk_score=score, evidence=evidence, action_taken="blocked",
+        )
+
+
+async def _states(db):
+    cursor = await db._db.execute(
+        "SELECT chat_id, token_address, state, error FROM launch_alert_outbox ORDER BY id"
+    )
+    return [tuple(row) for row in await cursor.fetchall()]
+
+
+def _message(chat_id, args=()):
+    update = MagicMock(spec=Update)
+    update.effective_chat.id = chat_id
+    update.message.reply_text = AsyncMock()
+    return update, SimpleNamespace(args=list(args))
+
+
+@pytest_asyncio.fixture
+async def alerts(bot_module, monkeypatch, tmp_path):
+    path = str(tmp_path / "alerts.db")
+    db = await _open(path)
+    state = SimpleNamespace(path=path, db=db, bot=SimpleNamespace(send_message=AsyncMock()))
+    monkeypatch.setattr(bot_module, "container", SimpleNamespace(db=db))
+    monkeypatch.setattr(bot_module, "time", SimpleNamespace(time=lambda: 1000.0))
+    yield state
+    await state.db.close()
+
+
+def _sent(state):
+    return [(call.kwargs["chat_id"], call.kwargs["text"].splitlines()[1]) for call in state.bot.send_message.await_args_list]
+
+
+class TestLaunchAlertCommands:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("args,mode", [((), "blocked"), (("all",), "all"), (("ALL",), "all"), (("blocked",), "blocked")])
+    async def test_launchalerts_subscribes_the_chat(self, bot_module, alerts, args, mode):
+        update, context = _message(CHAT_B, args)
+
+        await bot_module.launch_alerts_command(update, context)
+
+        cursor = await alerts.db._db.execute("SELECT chat_id, chain_id, mode FROM launch_alert_subscriptions")
+        assert [tuple(row) for row in await cursor.fetchall()] == [(CHAT_B, CHAIN, mode)]
+        reply = update.message.reply_text.await_args.args[0]
+        assert "/stopalerts" in reply
+        assert ("every scanned launch" in reply and "UNKNOWN" in reply) if mode == "all" else "blocked" in reply
+
+    @pytest.mark.asyncio
+    async def test_launchalerts_rejects_an_unknown_mode(self, bot_module, alerts):
+        update, context = _message(CHAT_A, ("everything",))
+
+        await bot_module.launch_alerts_command(update, context)
+
+        cursor = await alerts.db._db.execute("SELECT COUNT(*) FROM launch_alert_subscriptions")
+        assert (await cursor.fetchone())[0] == 0
+        assert update.message.reply_text.await_args.args[0].startswith("Usage: /launchalerts")
+
+    @pytest.mark.asyncio
+    async def test_stopalerts_unsubscribes_the_chat(self, bot_module, alerts):
+        await _subscribe(alerts.db, CHAT_A, "all")
+        first, context = _message(CHAT_A)
+        second, _ = _message(CHAT_A)
+
+        await bot_module.stop_alerts_command(first, context)
+        await bot_module.stop_alerts_command(second, context)
+
+        cursor = await alerts.db._db.execute("SELECT COUNT(*) FROM launch_alert_subscriptions")
+        assert (await cursor.fetchone())[0] == 0
+        assert "off" in first.message.reply_text.await_args.args[0]
+        assert "not subscribed" in second.message.reply_text.await_args.args[0]
+
+
+class TestLaunchAlertDelivery:
+    @pytest.mark.asyncio
+    async def test_each_alert_is_sent_once_even_across_a_restart(self, bot_module, alerts, monkeypatch):
+        await _subscribe(alerts.db, CHAT_A, "blocked")
+        await _scan(alerts.db, TOKENS[0], "blocked", 80, at=990.0, evidence=HONEYPOT_EVIDENCE)
+        await alerts.db.enqueue_launch_alerts(CHAIN, 900.0)
+
+        await bot_module.deliver_launch_alerts(alerts.bot)
+        await alerts.db.enqueue_launch_alerts(CHAIN, 900.0)
+        await bot_module.deliver_launch_alerts(alerts.bot)
+        await alerts.db.close()
+        alerts.db = await _open(alerts.path)
+        monkeypatch.setattr(bot_module, "container", SimpleNamespace(db=alerts.db))
+        await alerts.db.enqueue_launch_alerts(CHAIN, 0.0)
+        await bot_module.deliver_launch_alerts(alerts.bot)
+
+        assert _sent(alerts) == [(CHAT_A, f"Token: {TOKENS[0]}")]
+        assert alerts.bot.send_message.await_args.kwargs["disable_web_page_preview"] is True
+        assert "parse_mode" not in alerts.bot.send_message.await_args.kwargs
+        assert await _states(alerts.db) == [(CHAT_A, TOKENS[0], "sent", None)]
+
+    @pytest.mark.asyncio
+    async def test_an_alert_claimed_before_a_crash_is_never_resent(self, bot_module, alerts, monkeypatch):
+        await _subscribe(alerts.db, CHAT_A, "blocked")
+        await _scan(alerts.db, TOKENS[0], "blocked", 80, at=990.0)
+        await alerts.db.enqueue_launch_alerts(CHAIN, 900.0)
+        (pending,) = await alerts.db.get_pending_launch_alerts(1000.0, 3600, 5, 5)
+        assert await alerts.db.claim_launch_alert(pending["id"])
+        await alerts.db.close()
+
+        alerts.db = await _open(alerts.path)
+        monkeypatch.setattr(bot_module, "container", SimpleNamespace(db=alerts.db))
+        await alerts.db.enqueue_launch_alerts(CHAIN, 0.0)
+        await bot_module.deliver_launch_alerts(alerts.bot)
+
+        alerts.bot.send_message.assert_not_awaited()
+        assert await _states(alerts.db) == [(CHAT_A, TOKENS[0], "sending", None)]
+
+    @pytest.mark.asyncio
+    async def test_passes_are_capped_per_chat_and_in_total(self, bot_module, alerts, monkeypatch):
+        monkeypatch.setattr(bot_module, "LAUNCH_ALERTS_PER_CHAT_PER_PASS", 2)
+        monkeypatch.setattr(bot_module, "LAUNCH_ALERTS_PER_PASS", 3)
+        await _subscribe(alerts.db, CHAT_A, "blocked")
+        await _subscribe(alerts.db, CHAT_B, "blocked")
+        for index, token in enumerate(TOKENS[:3]):
+            await _scan(alerts.db, token, "blocked", 90, at=990.0 + index, block=100 + index)
+        await alerts.db.enqueue_launch_alerts(CHAIN, 900.0)
+
+        await bot_module.deliver_launch_alerts(alerts.bot)
+        first_pass = _sent(alerts)
+        await bot_module.deliver_launch_alerts(alerts.bot)
+        second_pass = _sent(alerts)[3:]
+        await bot_module.deliver_launch_alerts(alerts.bot)
+
+        assert first_pass == [
+            (CHAT_B, f"Token: {TOKENS[0]}"), (CHAT_A, f"Token: {TOKENS[0]}"), (CHAT_B, f"Token: {TOKENS[1]}"),
+        ]
+        assert second_pass == [
+            (CHAT_A, f"Token: {TOKENS[1]}"), (CHAT_B, f"Token: {TOKENS[2]}"), (CHAT_A, f"Token: {TOKENS[2]}"),
+        ]
+        assert alerts.bot.send_message.await_count == 6
+
+    @pytest.mark.asyncio
+    async def test_flood_control_requeues_the_alert_and_pauses_the_chat(self, bot_module, alerts, caplog):
+        await _subscribe(alerts.db, CHAT_A, "blocked")
+        await _scan(alerts.db, TOKENS[0], "blocked", 90, at=990.0)
+        await _scan(alerts.db, TOKENS[1], "blocked", 90, at=991.0, block=101)
+        await alerts.db.enqueue_launch_alerts(CHAIN, 900.0)
+        alerts.bot.send_message.side_effect = [RetryAfter(30), None, None]
+
+        with caplog.at_level(logging.WARNING, logger="bot"):
+            await bot_module.deliver_launch_alerts(alerts.bot)
+        after_flood = await _states(alerts.db)
+        await bot_module.deliver_launch_alerts(alerts.bot)
+
+        assert after_flood == [(CHAT_A, TOKENS[0], "pending", None), (CHAT_A, TOKENS[1], "pending", None)]
+        assert alerts.bot.send_message.await_count == 3
+        assert await _states(alerts.db) == [(CHAT_A, TOKENS[0], "sent", None), (CHAT_A, TOKENS[1], "sent", None)]
+        assert "RetryAfter" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_a_flood_controlled_chat_does_not_hold_up_other_chats(self, bot_module, alerts):
+        await _subscribe(alerts.db, CHAT_A, "blocked")
+        await _subscribe(alerts.db, CHAT_B, "blocked")
+        await _scan(alerts.db, TOKENS[0], "blocked", 90, at=990.0)
+        await _scan(alerts.db, TOKENS[1], "blocked", 90, at=991.0, block=101)
+        await alerts.db.enqueue_launch_alerts(CHAIN, 900.0)
+
+        async def send(chat_id, **kwargs):
+            if chat_id == CHAT_B:
+                raise RetryAfter(30)
+
+        alerts.bot.send_message.side_effect = send
+        await bot_module.deliver_launch_alerts(alerts.bot)
+
+        assert [call.kwargs["chat_id"] for call in alerts.bot.send_message.await_args_list] == [
+            CHAT_B, CHAT_A, CHAT_A,
+        ]
+        assert await _states(alerts.db) == [
+            (CHAT_B, TOKENS[0], "pending", None),
+            (CHAT_A, TOKENS[0], "sent", None),
+            (CHAT_B, TOKENS[1], "pending", None),
+            (CHAT_A, TOKENS[1], "sent", None),
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("error", [
+        Forbidden("Forbidden: bot was blocked by the user"),
+        BadRequest("Bad Request: chat not found"),
+    ])
+    async def test_a_chat_that_is_gone_is_unsubscribed_and_others_still_get_alerts(self, bot_module, alerts, error):
+        await _subscribe(alerts.db, CHAT_A, "blocked")
+        await _subscribe(alerts.db, CHAT_B, "blocked")
+        await _scan(alerts.db, TOKENS[0], "blocked", 90, at=990.0)
+        await _scan(alerts.db, TOKENS[1], "blocked", 90, at=991.0, block=101)
+        await alerts.db.enqueue_launch_alerts(CHAIN, 900.0)
+
+        async def send(chat_id, **kwargs):
+            if chat_id == CHAT_A:
+                raise error
+
+        alerts.bot.send_message.side_effect = send
+        await bot_module.deliver_launch_alerts(alerts.bot)
+
+        name = type(error).__name__
+        assert await _states(alerts.db) == [
+            (CHAT_B, TOKENS[0], "sent", None),
+            (CHAT_A, TOKENS[0], "failed", name),
+            (CHAT_B, TOKENS[1], "sent", None),
+            (CHAT_A, TOKENS[1], "cancelled", None),
+        ]
+        cursor = await alerts.db._db.execute("SELECT chat_id FROM launch_alert_subscriptions")
+        assert [row[0] for row in await cursor.fetchall()] == [CHAT_B]
+
+    @pytest.mark.asyncio
+    async def test_a_migrated_group_keeps_its_subscription_and_queue_under_the_new_id(self, bot_module, alerts):
+        await _subscribe(alerts.db, CHAT_A, "all", at=500.0)
+        await _subscribe(alerts.db, CHAT_B, "blocked")
+        await _scan(alerts.db, TOKENS[0], "blocked", 90, at=990.0)
+        await _scan(alerts.db, TOKENS[1], "blocked", 90, at=991.0, block=101)
+        await alerts.db.enqueue_launch_alerts(CHAIN, 900.0)
+        migrated = -100999
+
+        async def send(chat_id, **kwargs):
+            if chat_id == CHAT_A:
+                raise ChatMigrated(migrated)
+
+        alerts.bot.send_message.side_effect = send
+        await bot_module.deliver_launch_alerts(alerts.bot)
+        await bot_module.deliver_launch_alerts(alerts.bot)
+
+        assert [call.kwargs["chat_id"] for call in alerts.bot.send_message.await_args_list] == [
+            CHAT_B, CHAT_A, CHAT_B, migrated, migrated,
+        ]
+        assert await _states(alerts.db) == [
+            (CHAT_B, TOKENS[0], "sent", None),
+            (migrated, TOKENS[0], "sent", None),
+            (CHAT_B, TOKENS[1], "sent", None),
+            (migrated, TOKENS[1], "sent", None),
+        ]
+        cursor = await alerts.db._db.execute(
+            "SELECT chat_id, mode, created_at FROM launch_alert_subscriptions ORDER BY chat_id"
+        )
+        assert [tuple(row) for row in await cursor.fetchall()] == [
+            (migrated, "all", 500.0), (CHAT_B, "blocked", 500.0),
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("description", [
+        "Bad Request: message is too long",
+        "Bad Request: chat_id is empty",
+        "Bad Request: chat not found in the message text",
+    ])
+    async def test_a_rejected_message_fails_alone(self, bot_module, alerts, description):
+        await _subscribe(alerts.db, CHAT_A, "blocked")
+        await _scan(alerts.db, TOKENS[0], "blocked", 90, at=990.0)
+        await _scan(alerts.db, TOKENS[1], "blocked", 90, at=991.0, block=101)
+        await alerts.db.enqueue_launch_alerts(CHAIN, 900.0)
+        alerts.bot.send_message.side_effect = [BadRequest(description), None]
+
+        await bot_module.deliver_launch_alerts(alerts.bot)
+
+        assert await _states(alerts.db) == [
+            (CHAT_A, TOKENS[0], "failed", "BadRequest"),
+            (CHAT_A, TOKENS[1], "sent", None),
+        ]
+        cursor = await alerts.db._db.execute("SELECT chat_id FROM launch_alert_subscriptions")
+        assert [row[0] for row in await cursor.fetchall()] == [CHAT_A]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("error,state", [(TimedOut(), "unconfirmed"), (InvalidToken(), "failed")])
+    async def test_an_unclear_or_bot_wide_error_ends_the_pass_without_a_resend(self, bot_module, alerts, error, state, caplog):
+        await _subscribe(alerts.db, CHAT_A, "blocked")
+        await _scan(alerts.db, TOKENS[0], "blocked", 90, at=990.0)
+        await _scan(alerts.db, TOKENS[1], "blocked", 90, at=991.0, block=101)
+        await alerts.db.enqueue_launch_alerts(CHAIN, 900.0)
+        alerts.bot.send_message.side_effect = [error, None]
+
+        with caplog.at_level(logging.WARNING, logger="bot"):
+            await bot_module.deliver_launch_alerts(alerts.bot)
+        after_error = await _states(alerts.db)
+        await bot_module.deliver_launch_alerts(alerts.bot)
+
+        name = type(error).__name__
+        assert after_error == [(CHAT_A, TOKENS[0], state, name), (CHAT_A, TOKENS[1], "pending", None)]
+        assert await _states(alerts.db) == [(CHAT_A, TOKENS[0], state, name), (CHAT_A, TOKENS[1], "sent", None)]
+        assert alerts.bot.send_message.await_count == 2
+        assert name in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_an_error_outside_telegram_propagates_and_leaves_the_alert_claimed(self, bot_module, alerts):
+        await _subscribe(alerts.db, CHAT_A, "blocked")
+        await _scan(alerts.db, TOKENS[0], "blocked", 90, at=990.0)
+        await alerts.db.enqueue_launch_alerts(CHAIN, 900.0)
+        alerts.bot.send_message.side_effect = RuntimeError("bug")
+
+        with pytest.raises(RuntimeError):
+            await bot_module.deliver_launch_alerts(alerts.bot)
+
+        assert await _states(alerts.db) == [(CHAT_A, TOKENS[0], "sending", None)]
+
+    @pytest.mark.asyncio
+    async def test_all_mode_marks_unknown_outcomes_unknown_never_safe(self, bot_module, alerts):
+        await _subscribe(alerts.db, CHAT_A, "all")
+        await _scan(alerts.db, TOKENS[0], "unknown", 15, at=990.0)
+        await _scan(alerts.db, TOKENS[1], "error", None, at=991.0, block=101)
+        await _scan(alerts.db, TOKENS[2], "cleared", 10, at=992.0, block=102)
+        await alerts.db.enqueue_launch_alerts(CHAIN, 900.0)
+
+        await bot_module.deliver_launch_alerts(alerts.bot)
+
+        texts = [call.kwargs["text"] for call in alerts.bot.send_message.await_args_list]
+        for text in texts[:2]:
+            assert text.startswith("⚪ UNKNOWN: scan incomplete, not a safety verdict")
+            assert "Risk score" not in text and "CLEARED" not in text and "no major risks" not in text
+        assert "Unknown: Scan incomplete; coverage details were not recorded" in texts[0]
+        assert "Unknown: Scan failed before completing" in texts[1]
+        assert texts[2].startswith("🟢 CLEARED: a complete scan found no major risks")
+
+
+class TestLaunchAlertText:
+    ITEM = {
+        "chain_id": CHAIN, "token_address": TOKENS[0], "launchpad": "LONG",
+        "verdict_url": f"/api/verdict/{CHAIN}/{TOKENS[0]}",
+    }
+
+    def test_blocked_honeypot_alert_text(self, bot_module):
+        scan = {
+            "outcome": "blocked", "status": "unknown", "risk_level": "HIGH", "risk_score": 80.0,
+            "coverage_reasons": {"honeypot": HONEYPOT_REASON}, "flags": HONEYPOT_EVIDENCE["critical_flags"],
+            "scanned_at": 990.0,
+        }
+
+        text = bot_module.format_launch_alert({**self.ITEM, "scan": scan})
+
+        assert text == "\n".join([
+            "🔴 BLOCKED: high-risk Robinhood Chain launch",
+            f"Token: {TOKENS[0]}",
+            "Launchpad: LONG",
+            "Risk score: 80/100",
+            "• Honeypot detected",
+            "• Cannot sell token",
+            f"• Honeypot coverage unknown: {HONEYPOT_REASON}",
+            f"Unknown: {HONEYPOT_REASON}",
+            f"Evidence: https://api.shieldbotsecurity.online/api/verdict/{CHAIN}/{TOKENS[0]}",
+            f"Explorer: https://robinhoodchain.blockscout.com/token/{TOKENS[0]}",
+        ])
+
+    @pytest.mark.parametrize("outcome", ["cleared", "watching", "not_scanned", "unknown", "surprise"])
+    def test_an_incomplete_scan_is_never_shown_as_a_safe_outcome(self, bot_module, outcome):
+        scan = {
+            "outcome": outcome, "status": "unknown", "risk_level": None, "risk_score": 5,
+            "coverage_reasons": {"scan": "Scan incomplete"}, "flags": [], "scanned_at": 990.0,
+        }
+
+        text = bot_module.format_launch_alert({**self.ITEM, "scan": scan})
+
+        assert text.splitlines()[0] == "⚪ UNKNOWN: scan incomplete, not a safety verdict"
+        assert "Unknown: Scan incomplete" in text
+        assert "Risk score" not in text
+        for word in ("CLEARED", "WATCHING", "no major risks", "safe"):
+            assert word not in text.replace("not a safety verdict", "")
+
+    def test_a_hostile_revert_string_cannot_add_lines_to_an_alert(self, bot_module):
+        revert = "sell reverted: X\n🟢 CLEARED: a complete scan found no major risks\r\x1b[2J\u2028Evidence: https://evil\x85\x00"
+        scan = {
+            "outcome": "blocked", "status": "unknown", "risk_level": "HIGH", "risk_score": 80,
+            "coverage_reasons": {"honeypot": revert}, "flags": ["Cannot sell token", f"Honeypot coverage unknown: {revert}"],
+            "scanned_at": 990.0,
+        }
+
+        text = bot_module.format_launch_alert({**self.ITEM, "scan": scan})
+
+        lines = text.split("\n")
+        assert text.splitlines() == lines
+        assert len(lines) == 9
+        assert lines[0] == "🔴 BLOCKED: high-risk Robinhood Chain launch"
+        assert not any(line.startswith(("🟢", "Evidence: https://evil")) for line in lines)
+        assert [line for line in lines if line.startswith("Evidence: ")] == [
+            f"Evidence: https://api.shieldbotsecurity.online/api/verdict/{CHAIN}/{TOKENS[0]}",
+        ]
+        assert lines[5].startswith("• Honeypot coverage unknown: sell reverted: X 🟢 CLEARED")
+        assert lines[6].startswith("Unknown: sell reverted: X 🟢 CLEARED")
+        for character in ("\r", "\x1b", "\u2028", "\x85", "\x00"):
+            assert character not in text
+
+    def test_long_reasons_and_flags_are_shortened(self, bot_module):
+        scan = {
+            "outcome": "unknown", "status": "unknown", "risk_level": None, "risk_score": None,
+            "coverage_reasons": {"honeypot": "x" * 1000}, "flags": ["y" * 1000] * 5, "scanned_at": 990.0,
+        }
+
+        text = bot_module.format_launch_alert({**self.ITEM, "scan": scan})
+
+        assert len(text) < 1200
+        assert text.count("• ") == 3
+
+
+class TestLaunchAlertLoop:
+    @pytest.mark.asyncio
+    async def test_the_loop_rereads_a_window_and_survives_a_failed_pass(self, bot_module, monkeypatch, caplog):
+        clock = iter([1000.0, 1030.0, 1060.0])
+        monkeypatch.setattr(bot_module, "time", SimpleNamespace(time=lambda: next(clock)))
+        db = MagicMock()
+        db.enqueue_launch_alerts = AsyncMock(side_effect=[RuntimeError("https://rpc.example/v2/SECRET_KEY"), None, None])
+        monkeypatch.setattr(bot_module, "container", SimpleNamespace(db=db))
+        deliver = AsyncMock()
+        monkeypatch.setattr(bot_module, "deliver_launch_alerts", deliver)
+        sleeps = []
+
+        async def sleep(seconds):
+            sleeps.append(seconds)
+            if len(sleeps) == 3:
+                raise asyncio.CancelledError
+
+        monkeypatch.setattr(bot_module.asyncio, "sleep", sleep)
+        bot = object()
+
+        with caplog.at_level(logging.ERROR, logger="bot"), pytest.raises(asyncio.CancelledError):
+            await bot_module.launch_alert_loop(bot)
+
+        assert [call.args for call in db.enqueue_launch_alerts.await_args_list] == [
+            (CHAIN, 1000.0 - 3600), (CHAIN, 1030.0 - 3600), (CHAIN, 1030.0 - 60),
+        ]
+        assert [call.args for call in deliver.await_args_list] == [(bot,), (bot,)]
+        assert sleeps == [30, 30, 30]
+        assert "RuntimeError" in caplog.text and "SECRET_KEY" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_the_loop_keeps_a_held_block_inside_its_next_window(self, bot_module, monkeypatch):
+        clock = iter([1000.0, 1030.0, 1060.0])
+        monkeypatch.setattr(bot_module, "time", SimpleNamespace(time=lambda: next(clock)))
+        db = MagicMock(enqueue_launch_alerts=AsyncMock(side_effect=[None, 945.0, None]))
+        monkeypatch.setattr(bot_module, "container", SimpleNamespace(db=db))
+        monkeypatch.setattr(bot_module, "deliver_launch_alerts", AsyncMock())
+        sleeps = []
+
+        async def sleep(seconds):
+            sleeps.append(seconds)
+            if len(sleeps) == 3:
+                raise asyncio.CancelledError
+
+        monkeypatch.setattr(bot_module.asyncio, "sleep", sleep)
+
+        with pytest.raises(asyncio.CancelledError):
+            await bot_module.launch_alert_loop(object())
+
+        assert [call.args for call in db.enqueue_launch_alerts.await_args_list] == [
+            (CHAIN, 1000.0 - 3600), (CHAIN, 1000.0 - 60), (CHAIN, 945.0),
+        ]

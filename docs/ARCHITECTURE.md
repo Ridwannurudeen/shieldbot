@@ -51,8 +51,8 @@
 │  BNB Chain   │ │  External    │ │  Scam        │
 │  (BSC/opBNB) │ │  APIs        │ │  Databases   │
 │              │ │              │ │              │
-│ • Contract   │ │ • BscScan    │ │ • ChainAbuse │
-│   Code       │ │ • Honeypot.is│ │ • ScamSniffer│
+│ • Contract   │ │ • BscScan    │ │ • GoPlus     │
+│   Code       │ │ • Honeypot.is│ │ • Local list │
 │ • Bytecode   │ │              │ │              │
 │ • Token Data │ │              │ │              │
 └──────────────┘ └──────────────┘ └──────────────┘
@@ -88,8 +88,7 @@ User Input → Validate Address → Detect Type → Route to Scanner → Format 
    └─ Verified by BscScan?
 
 2. Scam Database Check (Multi-source)
-   ├─ ChainAbuse.com lookup
-   ├─ ScamSniffer.io lookup
+   ├─ GoPlus Security lookup
    └─ Local blacklist check
 
 3. Age Analysis
@@ -220,16 +219,14 @@ Honeypot.is API:
 **Multi-Source Validation:**
 ```python
 Sources:
-  ├─ ChainAbuse.com (reported scams)
-  ├─ ScamSniffer.io (flagged addresses)
+  ├─ GoPlus Security (token risk flags)
   └─ Local blacklist (manually added)
 
 Check Flow:
-  1. Query ChainAbuse API
-  2. Query ScamSniffer API
-  3. Check local blacklist
-  4. Aggregate results
-  5. Return all matches
+  1. Query GoPlus Security API
+  2. Check local blacklist
+  3. Aggregate results
+  4. Return all matches
 ```
 
 ---

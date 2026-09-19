@@ -41,7 +41,6 @@ https://bscscan.com/txs?sort=age
 ### 🔴 Known Scam Addresses (Use with Caution)
 
 Check these aggregators for known scams:
-- [ChainAbuse](https://www.chainabuse.com/)
 - [ScamSniffer](https://scamsniffer.io/)
 
 Expected: HIGH risk with scam database matches
