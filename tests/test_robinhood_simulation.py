@@ -1434,6 +1434,58 @@ async def test_a_failed_follow_up_keeps_the_buy_evidence_and_stays_unknown():
 
 
 @pytest.mark.asyncio
+async def test_a_transfer_taxed_honeypot_is_proven_by_the_sized_follow_up():
+    fixture = load("v2_router02")
+    delivered = fixture["amount"] * 88 // 100
+    first = short_delivery(fixture, delivered)
+    second = short_delivery(
+        failed_sell(fixture, error_string("TransferHelper: TRANSFER_FROM_FAILED")), delivered
+    )
+    rpc = rpc_for(fixture, simulations=[replay(first), replay(second, sell_amount=delivered)])
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+    with fresh_addresses(first, second):
+        result = await simulator.simulate(fixture["token"])
+    assert len(simulation_requests(rpc)) == 2
+    assert result["is_honeypot"] is True
+    assert result["can_buy"] is True and result["can_sell"] is False
+    assert result["buy_tax"] == 12.0
+    assert 'Error("TransferHelper: TRANSFER_FROM_FAILED")' in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_a_cache_entry_expiring_mid_lookup_does_not_raise():
+    class ExpiringCache(dict):
+        """Reports the token as cached, then has no entry: a TTL expiry between the two lookups."""
+
+        def __contains__(self, key):
+            return True
+
+    fixture = load("v2_router02")
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc_for(fixture)
+    simulator._cache = ExpiringCache()
+    with fresh_addresses(fixture):
+        result = await simulator.simulate(fixture["token"])
+    assert result["can_sell"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_buy_size_that_cannot_be_encoded_is_labelled_as_such():
+    # totalSupply / 1e6 above uint128 cannot be encoded into a v4 swap's amountOut.
+    fixture = load("v4_native_liquidity_launcher")
+    rpc = rpc_for(fixture, supply=2**128 * 1_000_000, simulations=[])
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+    with fresh_addresses(fixture):
+        result = await simulator.simulate(fixture["token"])
+    assert simulation_requests(rpc) == []
+    assert all(result[field] is None for field in FIELDS)
+    assert "Simulation request could not be encoded (ValueOutOfBounds)" in result["reason"]
+    assert "RPC" not in result["reason"]
+
+
+@pytest.mark.asyncio
 async def test_a_full_delivery_issues_exactly_one_simulation_request():
     fixture = load("v2_router02")
     rpc = rpc_for(fixture)

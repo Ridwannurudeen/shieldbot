@@ -22,7 +22,7 @@ from typing import Optional
 import aiohttp
 from cachetools import TTLCache
 from eth_abi import decode, encode
-from eth_abi.exceptions import DecodingError
+from eth_abi.exceptions import DecodingError, EncodingError
 from eth_utils import keccak
 
 from adapters.robinhood import (
@@ -718,8 +718,9 @@ class RobinhoodSimulator:
 
     async def simulate(self, token: str) -> dict:
         token = token.lower()
-        if token in self._cache:
-            return self._cache[token]
+        cached = self._cache.get(token)
+        if cached is not None:
+            return cached
         flight_key = (asyncio.get_running_loop(), token)
         if flight_key not in self._inflight:
             self._inflight[flight_key] = asyncio.create_task(self._simulate(token, flight_key))
@@ -762,7 +763,10 @@ class RobinhoodSimulator:
         self, session, pool: Pool, token: str, amount: int, sell_amount: Optional[int] = None
     ) -> dict:
         buyer, receiver = _fresh_address(), _fresh_address()
-        request = build_simulation_request(pool, token, amount, buyer, receiver, sell_amount)
+        try:
+            request = build_simulation_request(pool, token, amount, buyer, receiver, sell_amount)
+        except EncodingError as e:
+            return _outcome(pool, f"Simulation request could not be encoded ({type(e).__name__})")
         try:
             rows = await self._request(session, [("eth_simulateV1", [request, "latest"])])
             error = rows[0].get("error")
