@@ -133,5 +133,13 @@ class TestLifespan:
         mock_container.hunter.start.assert_awaited_once_with()
         mock_container.hunter.stop.assert_awaited_once_with()
         mock_container.shutdown.assert_awaited_once_with()
-        loops = [call.hunter.start(), call.launch_watch.start(), call.launch_watch.stop(), call.hunter.stop()]
+        # The drain starts first and stops last: the watch and the hunter publish verdicts into it.
+        loops = [
+            call.verdict_publisher.start(),
+            call.hunter.start(),
+            call.launch_watch.start(),
+            call.launch_watch.stop(),
+            call.hunter.stop(),
+            call.verdict_publisher.stop(),
+        ]
         assert [made for made in mock_container.mock_calls if made in loops] == loops
