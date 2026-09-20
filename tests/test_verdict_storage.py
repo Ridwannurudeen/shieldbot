@@ -3,7 +3,9 @@
 import asyncio
 import sqlite3
 import time
+from contextlib import suppress
 
+import aiosqlite
 import pytest
 import pytest_asyncio
 
@@ -318,19 +320,19 @@ async def test_a_failed_transaction_insert_rolls_the_whole_record_back(tmp_path)
     try:
         evidence_id = await insert(database, onchain_status="pending")
         await database.claim_next_pending_verdict(4663)
-        execute = database._db.execute
+        execute = database._outbox.execute
 
         async def failing_insert(sql, parameters=()):
             if "INSERT OR IGNORE INTO verdict_transactions" in sql:
                 raise sqlite3.OperationalError("disk I/O error")
             return await execute(sql, parameters)
 
-        database._db.execute = failing_insert
+        database._outbox.execute = failing_insert
         with pytest.raises(sqlite3.OperationalError):
             await database.set_verdict_tx_hash(evidence_id, TX_A, 7, "02aa")
-        database._db.execute = execute
-        # Any later write on the same connection must not commit half of the failed record.
-        await insert(database, subject=OTHER, onchain_status="pending")
+        database._outbox.execute = execute
+        # Any later write on the drain's own connection must not commit half of the failed record.
+        await database.touch_verdict(evidence_id)
         [claimed] = await committed.get_claimed_verdicts(4663)
         assert (claimed["id"], claimed["tx_hash"], claimed["nonce"], claimed["attempts"]) == (
             evidence_id, None, None, 0,
@@ -418,5 +420,99 @@ async def test_a_verdict_table_without_the_outbox_columns_is_migrated_in_place(t
             {"tx_hash": TX_B, "nonce": 6, "raw_tx": "02aa", "max_fee_per_gas": None},
             {"tx_hash": TX_A, "nonce": 7, "raw_tx": "02aa", "max_fee_per_gas": 112_000_000},
         ]
+    finally:
+        await database.close()
+
+async def claimed_row(database):
+    """A verdict claimed by the drain, ready for set_verdict_tx_hash."""
+    evidence_id = await insert(database, onchain_status="pending")
+    claimed = await database.claim_next_pending_verdict(4663)
+    assert claimed["id"] == evidence_id
+    return evidence_id
+
+
+def fail_the_transaction_insert(monkeypatch, before_failing):
+    """Fail the drain's INSERT on whichever connection it uses, after awaiting `before_failing`."""
+    real_execute = aiosqlite.Connection.execute
+
+    async def execute(self, sql, parameters=()):
+        if "INSERT OR IGNORE INTO verdict_transactions" in sql:
+            await before_failing()
+            raise sqlite3.OperationalError("database is locked")
+        return await real_execute(self, sql, parameters)
+
+    monkeypatch.setattr(aiosqlite.Connection, "execute", execute)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_drain_transaction_never_discards_another_verdict_being_stored(
+    tmp_path, monkeypatch
+):
+    """The hunter publishes in the API process: the drain's rollback must not undo its insert."""
+    database = Database(str(tmp_path / "shieldbot.db"))
+    await database.initialize()
+    try:
+        evidence_id = await claimed_row(database)
+        hunter_may_insert = asyncio.Event()
+
+        async def let_the_hunter_insert():
+            hunter_may_insert.set()
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+        fail_the_transaction_insert(monkeypatch, let_the_hunter_insert)
+
+        async def drain():
+            with pytest.raises(sqlite3.OperationalError):
+                await database.set_verdict_tx_hash(evidence_id, TX_A, 7, "02aa", 112_000_000)
+
+        async def hunter():
+            await hunter_may_insert.wait()
+            return await insert(database, subject=OTHER, onchain_status="pending")
+
+        _, hunter_id = await asyncio.gather(drain(), hunter())
+        monkeypatch.undo()
+        stored = await database.get_latest_verdict_evidence(4663, OTHER)
+        assert stored is not None and stored["id"] == hunter_id
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_another_verdicts_commit_never_lands_a_hash_without_its_bytes(tmp_path, monkeypatch):
+    """The converse: a commit from elsewhere must not commit the drain's half-written row."""
+    database = Database(str(tmp_path / "shieldbot.db"))
+    await database.initialize()
+    try:
+        evidence_id = await claimed_row(database)
+        hunter_may_run, hunter_done = asyncio.Event(), asyncio.Event()
+
+        async def let_the_hunter_finish():
+            hunter_may_run.set()
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(hunter_done.wait(), 0.5)
+
+        fail_the_transaction_insert(monkeypatch, let_the_hunter_finish)
+
+        async def drain():
+            with pytest.raises(sqlite3.OperationalError):
+                await database.set_verdict_tx_hash(evidence_id, TX_A, 7, "02aa", 112_000_000)
+
+        async def hunter():
+            await hunter_may_run.wait()
+            try:
+                return await insert(database, subject=OTHER, onchain_status="pending")
+            finally:
+                hunter_done.set()
+
+        _, hunter_id = await asyncio.gather(drain(), hunter())
+        monkeypatch.undo()
+        [claimed] = await database.get_claimed_verdicts(4663)
+        assert (claimed["id"], claimed["tx_hash"], claimed["nonce"], claimed["attempts"]) == (
+            evidence_id, None, None, 0,
+        )
+        assert await database.get_verdict_transactions([evidence_id]) == {evidence_id: []}
+        stored = await database.get_latest_verdict_evidence(4663, OTHER)
+        assert stored is not None and stored["id"] == hunter_id
     finally:
         await database.close()

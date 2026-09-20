@@ -167,6 +167,9 @@ class Database:
     def __init__(self, db_path: str = "shieldbot.db"):
         self.db_path = db_path
         self._db: Optional[aiosqlite.Connection] = None
+        # The verdict drain's own connection: one aiosqlite connection carries one implicit transaction,
+        # so a rollback on the shared one would undo whatever else was being written at the time.
+        self._drain_db: Optional[aiosqlite.Connection] = None
 
     async def initialize(self):
         """Open connection and create tables."""
@@ -174,10 +177,22 @@ class Database:
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA busy_timeout=5000")
         await self._create_tables()
+        if self.db_path != ":memory:":
+            # A second connection to ":memory:" would be a different database, so only a file gets one.
+            self._drain_db = await aiosqlite.connect(self.db_path)
+            await self._drain_db.execute("PRAGMA busy_timeout=5000")
         logger.info(f"Database initialized at {self.db_path}")
+
+    @property
+    def _outbox(self) -> aiosqlite.Connection:
+        """The connection the verdict drain writes on, so its rollback never reaches another coroutine's work."""
+        return self._drain_db or self._db
 
     async def close(self):
         """Close the database connection."""
+        if self._drain_db:
+            await self._drain_db.close()
+            self._drain_db = None
         if self._db:
             await self._db.close()
             self._db = None
@@ -2382,12 +2397,12 @@ class Database:
         onchain_error: Optional[str] = None,
     ):
         """Record the on-chain outcome for one stored evidence document."""
-        await self._db.execute("""
+        await self._outbox.execute("""
             UPDATE verdict_evidence
             SET onchain_status = ?, tx_hash = ?, onchain_error = ?, updated_at = ?
             WHERE id = ?
         """, (onchain_status, tx_hash, onchain_error, time.time(), evidence_id))
-        await self._db.commit()
+        await self._outbox.commit()
 
     async def get_latest_verdict_evidence(self, chain_id: int, subject: str) -> Optional[Dict]:
         """Return the most recently published evidence for a subject, or None if never published."""
@@ -2415,7 +2430,7 @@ class Database:
         the same row.
         """
         while True:
-            cursor = await self._db.execute("""
+            cursor = await self._outbox.execute("""
                 SELECT id, subject, verdict, evidence_hash, observed_block, tx_hash, nonce, attempts
                 FROM verdict_evidence
                 WHERE chain_id = ? AND onchain_status = 'pending'
@@ -2425,11 +2440,11 @@ class Database:
             row = await cursor.fetchone()
             if row is None:
                 return None
-            cursor = await self._db.execute("""
+            cursor = await self._outbox.execute("""
                 UPDATE verdict_evidence SET onchain_status = 'sending', updated_at = ?
                 WHERE id = ? AND onchain_status = 'pending'
             """, (time.time(), row[0]))
-            await self._db.commit()
+            await self._outbox.commit()
             if cursor.rowcount == 1:
                 return dict(zip(
                     ("id", "subject", "verdict", "evidence_hash", "observed_block", "tx_hash", "nonce", "attempts"),
@@ -2448,24 +2463,24 @@ class Database:
         now = time.time()
         # One transaction: a failure must not leave the row update behind for a later commit to land alone.
         try:
-            cursor = await self._db.execute("""
+            cursor = await self._outbox.execute("""
                 UPDATE verdict_evidence SET tx_hash = ?, nonce = ?, updated_at = ?
                 WHERE id = ? AND onchain_status = 'sending'
             """, (tx_hash, nonce, now, evidence_id))
             claimed = cursor.rowcount == 1
             if claimed:
-                cursor = await self._db.execute("""
+                cursor = await self._outbox.execute("""
                     INSERT OR IGNORE INTO verdict_transactions
                         (evidence_id, tx_hash, nonce, raw_tx, max_fee_per_gas, created_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                 """, (evidence_id, tx_hash, nonce, raw_tx, max_fee_per_gas, now))
                 if cursor.rowcount == 1:
-                    await self._db.execute(
+                    await self._outbox.execute(
                         "UPDATE verdict_evidence SET attempts = attempts + 1 WHERE id = ?", (evidence_id,)
                     )
-            await self._db.commit()
+            await self._outbox.commit()
         except BaseException:
-            await self._db.rollback()
+            await self._outbox.rollback()
             raise
         return claimed
 
@@ -2486,29 +2501,29 @@ class Database:
 
     async def touch_verdict(self, evidence_id: int):
         """Mark a row as just looked at, so reconciliation looks at it again only after its delay."""
-        await self._db.execute(
+        await self._outbox.execute(
             "UPDATE verdict_evidence SET updated_at = ? WHERE id = ?", (time.time(), evidence_id)
         )
-        await self._db.commit()
+        await self._outbox.commit()
 
     async def release_verdict_claim(self, evidence_id: int):
         """Return a claimed row to the pending queue.
 
         An earlier transaction's hash and nonce are kept, so the next attempt can check whether it may still land.
         """
-        await self._db.execute("""
+        await self._outbox.execute("""
             UPDATE verdict_evidence SET onchain_status = 'pending', updated_at = ?
             WHERE id = ? AND onchain_status = 'sending'
         """, (time.time(), evidence_id))
-        await self._db.commit()
+        await self._outbox.commit()
 
     async def requeue_verdict(self, evidence_id: int):
         """Queue an unresolved record (submitted, unconfirmed or failed) for another attempt."""
-        await self._db.execute("""
+        await self._outbox.execute("""
             UPDATE verdict_evidence SET onchain_status = 'pending', updated_at = ?
             WHERE id = ? AND onchain_status IN ('submitted', 'unconfirmed', 'failed')
         """, (time.time(), evidence_id))
-        await self._db.commit()
+        await self._outbox.commit()
 
     async def get_unresolved_verdicts(self, chain_id: int, updated_before: float, limit: int) -> List[Dict]:
         """Signed records with no receipt yet, untouched since `updated_before`, least recently looked at first."""
