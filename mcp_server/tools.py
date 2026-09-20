@@ -1,4 +1,4 @@
-"""MCP tool definitions — 8 tools wrapping ShieldBot security services.
+"""MCP tool definitions — 9 tools wrapping ShieldBot security services.
 
 Each tool has a name, description, JSON Schema input definition, and an
 async handler that delegates to the ServiceContainer.
@@ -10,10 +10,15 @@ from typing import Any, Dict, List
 
 from core.analyzer import AnalysisContext
 from core.extension_formatter import format_extension_alert
+from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 
 logger = logging.getLogger(__name__)
 
 _ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
+_CHAIN_ID_DESCRIPTION = (
+    "Chain ID (default 56 = BNB Chain). Every chain ShieldBot supports is accepted, "
+    "including 4663 = Robinhood Chain; an unsupported chain ID is rejected."
+)
 
 # --- Injection detection patterns (basic regex for V3.1 stub) ---
 _INJECTION_PATTERNS = [
@@ -39,12 +44,16 @@ def _validate_address(addr: str) -> str:
 TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "scan_contract",
-        "description": "Run all ShieldBot analyzers on a contract address and return a composite risk score with flags and risk level.",
+        "description": (
+            "Run all ShieldBot analyzers on a contract address and return a composite risk score with flags and risk level. "
+            "Incomplete provider coverage is never reported as safe: the result then has status 'unknown', "
+            "verdict 'UNKNOWN', risk_display 'Unknown (incomplete provider coverage)' and coverage_reasons naming the missing data."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "address": {"type": "string", "description": "Contract address (0x...)"},
-                "chain_id": {"type": "integer", "description": "Chain ID (default 56 = BNB Chain)", "default": 56},
+                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION, "default": 56},
             },
             "required": ["address"],
         },
@@ -59,7 +68,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "to": {"type": "string", "description": "Recipient / contract address"},
                 "data": {"type": "string", "description": "Transaction calldata (hex)"},
                 "value": {"type": "string", "description": "Value in wei (default '0')", "default": "0"},
-                "chain_id": {"type": "integer", "description": "Chain ID (default 56)", "default": 56},
+                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION, "default": 56},
             },
             "required": ["from", "to", "data"],
         },
@@ -71,7 +80,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "address": {"type": "string", "description": "Contract address to check deployer for"},
-                "chain_id": {"type": "integer", "description": "Chain ID (default 56)", "default": 56},
+                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION, "default": 56},
             },
             "required": ["address"],
         },
@@ -94,7 +103,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "wallet_address": {"type": "string", "description": "Wallet address to scan"},
-                "chain_id": {"type": "integer", "description": "Chain ID (default 56)", "default": 56},
+                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION, "default": 56},
             },
             "required": ["wallet_address"],
         },
@@ -123,7 +132,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "address": {"type": "string", "description": "Address to check"},
-                "chain_id": {"type": "integer", "description": "Chain ID (default 56)", "default": 56},
+                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION, "default": 56},
                 "max_depth": {"type": "integer", "description": "Max traversal depth (default 2)", "default": 2},
             },
             "required": ["address"],
@@ -136,6 +145,28 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "limit": {"type": "integer", "description": "Number of results (default 20, max 100)", "default": 20},
+            },
+        },
+    },
+    {
+        "name": "get_robinhood_launches",
+        "description": (
+            "Read-only. List recent Robinhood Chain (chain 4663) token launches discovered by ShieldBot, newest first, "
+            "each with its latest scan outcome: blocked, watching, cleared, unknown (scan incomplete) or not_scanned. "
+            "unknown and not_scanned have status 'unknown' with coverage_reasons and are never safe. "
+            "scan.status is authoritative: 'ok' only for a complete scan; per-field coverage is present only "
+            "for blocked launches. Page with next_cursor."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "chain_id": {
+                    "type": "integer",
+                    "description": "Chain ID (default 4663 = Robinhood Chain, the only chain with launch discovery)",
+                    "default": 4663,
+                },
+                "limit": {"type": "integer", "description": "Number of results (default 20, max 100)", "default": 20},
+                "cursor": {"type": "string", "description": "next_cursor from the previous page (optional)"},
             },
         },
     },
@@ -335,6 +366,22 @@ async def handle_get_threat_feed(container, params: Dict) -> Dict:
     return {"threats": threats}
 
 
+async def handle_get_robinhood_launches(container, params: Dict) -> Dict:
+    """Recent launches with their latest scan outcome, from the query behind /api/launches."""
+    chain_id = container.web3_client.validate_chain_id(params.get("chain_id", LAUNCH_CHAIN_ID))
+    limit = min(max(params.get("limit", 20), 1), 100)
+    if chain_id != LAUNCH_CHAIN_ID:
+        return {
+            "launches": [],
+            "count": 0,
+            "chain_id": chain_id,
+            "next_cursor": None,
+            "discovery_unavailable": "Launch discovery is not available on this chain",
+        }
+    launches, next_cursor = await container.db.get_launch_feed(chain_id, limit, params.get("cursor"))
+    return {"launches": launches, "count": len(launches), "chain_id": chain_id, "next_cursor": next_cursor}
+
+
 # ---------------------------------------------------------------------------
 # Tool dispatcher
 # ---------------------------------------------------------------------------
@@ -348,6 +395,7 @@ _HANDLERS = {
     "scan_for_injection": handle_scan_for_injection,
     "query_threat_graph": handle_query_threat_graph,
     "get_threat_feed": handle_get_threat_feed,
+    "get_robinhood_launches": handle_get_robinhood_launches,
 }
 
 

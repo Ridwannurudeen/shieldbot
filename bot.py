@@ -10,10 +10,13 @@ import sys
 import time
 import asyncio
 import logging
+import re
+import traceback
 from datetime import datetime, timezone
 
 try:
     from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram.error import BadRequest, ChatMigrated, Forbidden, NetworkError, RetryAfter, TelegramError
     from telegram.ext import (
         Application,
         CommandHandler,
@@ -30,6 +33,7 @@ from core.config import Settings
 from core.container import ServiceContainer
 from core.telegram_formatter import format_full_report
 from core.extension_formatter import is_scan_incomplete
+from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 from utils.web3_client import UnsupportedChainError
 from utils.chain_info import (
     get_chain_name, get_explorer_url, get_dexscreener_slug,
@@ -66,6 +70,30 @@ risk_engine = container.risk_engine
 _scan_cache = {}
 CACHE_TTL = 300  # 5 minutes
 
+# Robinhood Chain launch alerts. The API's hunter records launch outcomes in the shared
+# database; this process queues alerts for subscribed chats there and sends them.
+LAUNCH_ALERT_POLL_SECONDS = 30
+# Telegram allows about 20 messages a minute to a group and 30 a second in all, so a pass sends
+# at most 3 alerts to a chat and 30 in all: 6 a minute per chat and 60 a minute in all.
+LAUNCH_ALERTS_PER_CHAT_PER_PASS = 3
+LAUNCH_ALERTS_PER_PASS = 30
+# A launch alert only helps near launch time, so an older one expires instead of queueing up.
+LAUNCH_ALERT_MAX_AGE_SECONDS = 3600
+# The hunter stamps an outcome just before committing it, so each pass rereads the minute
+# before the last one; the outbox never queues an alert twice.
+LAUNCH_ALERT_OVERLAP_SECONDS = 60
+VERDICT_BASE_URL = "https://api.shieldbotsecurity.online"
+_LAUNCH_ALERT_HEADERS = {
+    'blocked': '🔴 BLOCKED: high-risk Robinhood Chain launch',
+    'watching': '🟡 WATCHING: medium-risk Robinhood Chain launch',
+    'cleared': '🟢 CLEARED: a complete scan found no major risks',
+}
+_UNKNOWN_LAUNCH_HEADER = '⚪ UNKNOWN: scan incomplete, not a safety verdict'
+# Flags and reasons can carry a token's own revert string, so control characters and line
+# separators are blanked before they reach an alert.
+_CONTROL_CHARACTERS = re.compile(r'[\x00-\x1f\x7f-\x9f\u2028\u2029]')
+_launch_alert_task = None
+
 
 def _get_user_chain_id(context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get the user's selected chain_id, default BSC (56)."""
@@ -91,7 +119,8 @@ def _set_cache(address: str, scan_type: str, result: dict):
 
 
 async def post_init(application):
-    """Initialize services and register bot command menu."""
+    """Initialize services, register bot command menu, and start launch alert delivery."""
+    global _launch_alert_task
     await container.startup()
     await application.bot.set_my_commands([
         ("start", "Welcome message & quick start"),
@@ -103,8 +132,21 @@ async def post_init(application):
         ("campaign", "Check if address is part of scam campaign"),
         ("history", "View on-chain scan history"),
         ("report", "Report a scam address"),
+        ("launchalerts", "Robinhood Chain launch alerts"),
+        ("stopalerts", "Stop launch alerts"),
         ("help", "Show all commands"),
     ])
+    _launch_alert_task = asyncio.create_task(launch_alert_loop(application.bot))
+
+
+async def post_stop(application):
+    """Stop launch alert delivery before the bot and its services shut down."""
+    if _launch_alert_task is not None:
+        _launch_alert_task.cancel()
+        try:
+            await _launch_alert_task
+        except asyncio.CancelledError:
+            pass
 
 
 async def post_shutdown(application):
@@ -154,6 +196,8 @@ Commands:
 /campaign — Check scam campaign links
 /history — View on-chain scan history
 /report — Report a scam address
+/launchalerts — Robinhood Chain launch alerts
+/stopalerts — Stop launch alerts
 /help — Show all commands
 """
 
@@ -181,6 +225,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **/campaign <address>** - Check if address is part of a scam campaign
 **/history <address>** - View on-chain scan history
 **/report <address> <reason>** - Report a scam address
+**/launchalerts** - Alert this chat to blocked Robinhood Chain launches (`/launchalerts all` for every launch)
+**/stopalerts** - Stop launch alerts
 **/help** - Show this help message
 
 **Quick Tips:**
@@ -634,6 +680,157 @@ async def campaign_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text("❌ Error investigating campaign. Please try again later.")
 
 
+async def launch_alerts_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /launchalerts — alert this chat to new Robinhood Chain launch verdicts."""
+    mode = context.args[0].lower() if context.args else 'blocked'
+    if mode not in ('blocked', 'all'):
+        await update.message.reply_text(
+            "Usage: /launchalerts for blocked launches, or /launchalerts all for every scanned launch."
+        )
+        return
+    await container.db.subscribe_launch_alerts(update.effective_chat.id, LAUNCH_CHAIN_ID, mode)
+    if mode == 'all':
+        text = (
+            "🔔 Robinhood Chain launch alerts are on for every scanned launch.\n\n"
+            "Incomplete scans are marked UNKNOWN, never safe.\n"
+            "Send /launchalerts for blocked launches only, or /stopalerts to stop."
+        )
+    else:
+        text = (
+            "🔔 Robinhood Chain launch alerts are on for blocked launches: honeypots and other "
+            "high-risk tokens.\n\n"
+            "Send /launchalerts all for every scanned launch, or /stopalerts to stop."
+        )
+    await update.message.reply_text(text)
+
+
+async def stop_alerts_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /stopalerts — stop launch alerts for this chat."""
+    if await container.db.unsubscribe_launch_alerts(update.effective_chat.id, LAUNCH_CHAIN_ID):
+        await update.message.reply_text("🔕 Robinhood Chain launch alerts are off for this chat.")
+    else:
+        await update.message.reply_text(
+            "This chat is not subscribed to launch alerts. Send /launchalerts to subscribe."
+        )
+
+
+def format_launch_alert(item: dict) -> str:
+    """Plain-text alert for one launch outcome from the launch feed.
+
+    An incomplete scan is headed UNKNOWN unless it is blocked, so it never reads as safe, and
+    its partial score is not shown.
+    """
+    scan = item['scan']
+    header = _LAUNCH_ALERT_HEADERS.get(scan['outcome'])
+    if header is None or (scan['status'] != 'ok' and scan['outcome'] != 'blocked'):
+        header = _UNKNOWN_LAUNCH_HEADER
+    lines = [header, f"Token: {item['token_address']}", f"Launchpad: {item['launchpad']}"]
+    if header != _UNKNOWN_LAUNCH_HEADER and scan['risk_score'] is not None:
+        lines.append(f"Risk score: {scan['risk_score']:g}/100")
+    lines += [f"• {_CONTROL_CHARACTERS.sub(' ', flag)[:150]}" for flag in scan['flags'][:3]]
+    if scan['status'] != 'ok':
+        reasons = '; '.join(dict.fromkeys(
+            _CONTROL_CHARACTERS.sub(' ', reason) for reason in scan['coverage_reasons'].values()
+        )) or 'Provider data unavailable or incomplete'
+        lines.append(f"Unknown: {reasons[:300]}")
+    lines.append(f"Evidence: {VERDICT_BASE_URL}{item['verdict_url']}")
+    explorer = get_explorer_url(item['chain_id'])
+    if explorer:
+        lines.append(f"Explorer: {explorer}/token/{item['token_address']}")
+    return '\n'.join(lines)
+
+
+async def deliver_launch_alerts(bot):
+    """Send one pass of queued launch alerts, each at most once.
+
+    An alert is claimed before it is sent, so one that may have reached Telegram is never sent
+    again, even after a restart. Flood control returns the alert to the queue and skips that
+    chat for the rest of the pass, so other chats still get theirs. A group that migrated keeps
+    its subscription and queue under its new id. A chat that blocked the bot, or that Telegram
+    reports as not found, is unsubscribed. An unclear network error or a bot-wide error ends
+    the pass.
+    """
+    alerts = await container.db.get_pending_launch_alerts(
+        time.time(), LAUNCH_ALERT_MAX_AGE_SECONDS, LAUNCH_ALERTS_PER_CHAT_PER_PASS, LAUNCH_ALERTS_PER_PASS,
+    )
+    skipped_chats = set()
+    for alert in alerts:
+        if alert['chat_id'] in skipped_chats or not await container.db.claim_launch_alert(alert['id']):
+            continue
+        # A failed send comes back as a value, so its migration target and Telegram's
+        # description can be read; only the error class is ever logged or stored.
+        (result,) = await asyncio.gather(
+            bot.send_message(
+                chat_id=alert['chat_id'], text=format_launch_alert(alert['payload']),
+                disable_web_page_preview=True,
+            ),
+            return_exceptions=True,
+        )
+        if not isinstance(result, BaseException):
+            await container.db.set_launch_alert_state(alert['id'], 'sent')
+            continue
+        error = type(result).__name__
+        if isinstance(result, RetryAfter):
+            # Telegram refused the message, so it was not delivered and can be sent later.
+            await container.db.set_launch_alert_state(alert['id'], 'pending')
+            skipped_chats.add(alert['chat_id'])
+            logger.warning("Launch alerts to a chat paused by Telegram flood control (%s)", error)
+        elif isinstance(result, ChatMigrated):
+            # Telegram refused the message, so it and the rest of the queue follow the group.
+            await container.db.set_launch_alert_state(alert['id'], 'pending')
+            await container.db.move_launch_alert_chat(alert['chat_id'], result.new_chat_id, alert['chain_id'])
+            skipped_chats.add(alert['chat_id'])
+            logger.warning("Launch alerts moved to a migrated group (%s)", error)
+        elif isinstance(result, Forbidden) or (
+            # Telegram's description for a deleted chat or one the bot was never in.
+            isinstance(result, BadRequest) and result.message.lower() == 'chat not found'
+        ):
+            await container.db.set_launch_alert_state(alert['id'], 'failed', error)
+            await container.db.unsubscribe_launch_alerts(alert['chat_id'], alert['chain_id'])
+            logger.warning("Launch alerts stopped for an unreachable chat: %s", error)
+        elif isinstance(result, BadRequest):
+            await container.db.set_launch_alert_state(alert['id'], 'failed', error)
+            logger.warning("Launch alert rejected: %s", error)
+        elif isinstance(result, NetworkError):
+            # The message may have been delivered, so it is recorded as unconfirmed and never resent.
+            await container.db.set_launch_alert_state(alert['id'], 'unconfirmed', error)
+            logger.warning("Launch alert delivery unconfirmed: %s", error)
+            return
+        elif isinstance(result, TelegramError):
+            await container.db.set_launch_alert_state(alert['id'], 'failed', error)
+            logger.warning("Launch alert delivery failed: %s", error)
+            return
+        else:
+            raise result
+
+
+async def launch_alert_loop(bot):
+    """Queue and send launch alerts every LAUNCH_ALERT_POLL_SECONDS until cancelled.
+
+    The first pass after a start covers the last LAUNCH_ALERT_MAX_AGE_SECONDS; later passes
+    reread LAUNCH_ALERT_OVERLAP_SECONDS before the previous one, or from the oldest blocked
+    launch still held back for its evidence.
+    """
+    next_since = None
+    while True:
+        now = time.time()
+        since = now - LAUNCH_ALERT_MAX_AGE_SECONDS
+        if next_since is not None:
+            since = max(since, next_since)
+        try:
+            held = await container.db.enqueue_launch_alerts(LAUNCH_CHAIN_ID, since)
+            next_since = now - LAUNCH_ALERT_OVERLAP_SECONDS
+            if held is not None:
+                next_since = min(next_since, held)
+            await deliver_launch_alerts(bot)
+        except Exception as e:
+            logger.error(
+                "Launch alert pass failed: %s\n%s",
+                type(e).__name__, "".join(traceback.format_tb(e.__traceback__)),
+            )
+        await asyncio.sleep(LAUNCH_ALERT_POLL_SECONDS)
+
+
 async def _handle_advisor_chat(update: Update, message: str, chain_id: int = 56):
     """Route free-text messages to the AI advisor."""
     web3_client.validate_chain_id(chain_id)
@@ -757,6 +954,7 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
                 honeypot_data=honeypot_data, address=address, ai_analysis=ai_analysis,
                 token_info=token_info,
             )
+            verdict_scan, verdict_honeypot = risk_output, honeypot_data
             risk_level = 'unknown' if is_scan_incomplete(risk_output) else risk_output.get('risk_level', 'medium').lower()
 
             # Cache the composite result
@@ -780,6 +978,7 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
             if is_scan_incomplete(result):
                 result = {**result, 'status': 'unknown', 'risk_level': 'unknown', 'safety_level': 'unknown'}
             _set_cache(cache_key, 'contract', result)
+            verdict_scan, verdict_honeypot = result, None
             response = format_scan_result(result)
             risk_level = 'unknown' if is_scan_incomplete(result) else result.get('risk_level', 'medium')
 
@@ -792,6 +991,10 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
             onchain_line = "\n\U0001F517 On-chain recording scheduled\n"
         if risk_level != 'unknown' and base_attestor.is_available():
             await base_attestor.attest_fire_and_forget(address, risk_level, 'contract', source_chain_id=chain_id)
+        if chain_id == 4663:
+            container.verdict_publisher.publish_fire_and_forget(
+                chain_id, address, verdict_scan, honeypot_data=verdict_honeypot,
+            )
 
         try:
             await progress_msg.delete()
@@ -875,6 +1078,7 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
                 honeypot_data=honeypot_data, address=address, ai_analysis=ai_analysis,
                 token_info=token_info,
             )
+            verdict_scan, verdict_honeypot = risk_output, honeypot_data
             risk_level = 'unknown' if is_scan_incomplete(risk_output) else risk_output.get('risk_level', 'medium').lower()
 
             _set_cache(cache_key, 'token', {
@@ -897,6 +1101,7 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
             if is_scan_incomplete(result):
                 result = {**result, 'status': 'unknown', 'risk_level': 'unknown', 'safety_level': 'unknown'}
             _set_cache(cache_key, 'token', result)
+            verdict_scan, verdict_honeypot = result, None
             response = format_token_result(result)
             risk_level = 'unknown' if is_scan_incomplete(result) else result.get('safety_level', 'warning')
 
@@ -909,6 +1114,10 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
             onchain_line = "\n\U0001F517 On-chain recording scheduled\n"
         if risk_level != 'unknown' and base_attestor.is_available():
             await base_attestor.attest_fire_and_forget(address, risk_level, 'token', source_chain_id=chain_id)
+        if chain_id == 4663:
+            container.verdict_publisher.publish_fire_and_forget(
+                chain_id, address, verdict_scan, honeypot_data=verdict_honeypot,
+            )
 
         try:
             await progress_msg.delete()
@@ -1155,6 +1364,7 @@ def main():
         Application.builder()
         .token(token)
         .post_init(post_init)
+        .post_stop(post_stop)
         .post_shutdown(post_shutdown)
         .build()
     )
@@ -1170,6 +1380,8 @@ def main():
     application.add_handler(CommandHandler("campaign", campaign_command))
     application.add_handler(CommandHandler("history", history_command))
     application.add_handler(CommandHandler("report", report_command))
+    application.add_handler(CommandHandler("launchalerts", launch_alerts_command))
+    application.add_handler(CommandHandler("stopalerts", stop_alerts_command))
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_address))
 

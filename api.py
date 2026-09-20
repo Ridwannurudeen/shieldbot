@@ -193,6 +193,7 @@ async def lifespan(app: FastAPI):
     container = ServiceContainer(settings)
     _bind_globals(container)
     await container.startup()
+    container.verdict_publisher.start()
 
     # Initialize RPC proxy if enabled
     if settings.rpc_proxy_enabled:
@@ -226,10 +227,13 @@ async def lifespan(app: FastAPI):
     app.include_router(guard_router, prefix="/api/guardian")
 
     await container.hunter.start()
+    await container.launch_watch.start()
 
     logger.info("ShieldAI Firewall API started")
     yield
+    await container.launch_watch.stop()
     await container.hunter.stop()
+    await container.verdict_publisher.stop()
     await container.shutdown()
     rpc_proxy = getattr(app.state, "rpc_proxy", None)
     if rpc_proxy:
@@ -1764,6 +1768,50 @@ async def base_attestations(limit: int = 25):
     }
 
 
+@app.get("/api/verdict/{chain_id}/{address}")
+async def verdict_permalink(chain_id: int, address: str):
+    """Latest published ShieldBot verdict for a token, with its evidence document and on-chain record."""
+    from core.verdict_evidence import Verdict
+    from services.verdict_publisher import MAX_SEND_ATTEMPTS
+
+    _validate_chain_id(chain_id)
+    if not web3_client.is_valid_address(address):
+        raise HTTPException(status_code=400, detail="Invalid address")
+    if not container or not container.db:
+        raise HTTPException(status_code=503, detail="Database not available")
+    stored = await container.db.get_latest_verdict_evidence(chain_id, address.lower())
+    if stored is None:
+        raise HTTPException(status_code=404, detail="No verdict published for this address")
+    return {
+        "chain_id": stored["chain_id"],
+        "subject": stored["subject"],
+        "verdict": stored["verdict"],
+        "verdict_code": int(Verdict[stored["verdict"]]),
+        "evidence_hash": stored["evidence_hash"],
+        "canonical": stored["canonical"],
+        "evidence": json.loads(stored["canonical"]),
+        "published_at": stored["created_at"],
+        "onchain_status": stored["onchain_status"],
+        "registry": stored["registry"],
+        "tx_hash": stored["tx_hash"],
+        "onchain_error": stored["onchain_error"],
+        "verify": (
+            "keccak256 of the UTF-8 bytes of `canonical`, exactly as served, must equal evidence_hash. "
+            "onchain_status `confirmed`: Robinhood Chain transaction tx_hash emitted "
+            "VerdictRecorded(subject, verdict, evidenceHash, observedBlock, timestamp) from `registry` "
+            "with this subject, verdict_code, evidence_hash and the evidence's observed_block; this is the "
+            "sequencer's soft finality, final on the parent chain once the batch is posted. "
+            "`reverted`: transaction tx_hash reverted and recorded nothing. "
+            "`pending` and `sending`: queued for, or being sent to, the chain. "
+            "`submitted`, `unconfirmed` and `failed`: not yet proven on-chain. Every transaction sent for this "
+            "verdict is looked up again periodically, and a mined one makes it `confirmed` or `reverted`; it is "
+            f"sent again only until {MAX_SEND_ATTEMPTS} transactions have been signed for it, and after that it "
+            "is only looked up. "
+            "`off`: this verdict is stored here only and is not recorded on-chain."
+        ),
+    }
+
+
 @app.get("/api/admin/signups")
 async def admin_signups(request: Request):
     """List all beta signups. Requires ADMIN_SECRET header."""
@@ -2103,6 +2151,45 @@ async def threat_feed(
     if not mempool_available:
         response['mempool_unavailable'] = "Pending-transaction monitoring is not available on this chain"
     return response
+
+
+@app.get("/api/launches/{chain_id}")
+async def launch_feed(chain_id: int, limit: int = 50, cursor: str = None):
+    """Recently discovered token launches, newest first, each with its latest scan outcome.
+
+    The outcome is blocked, watching, cleared, unknown (scan incomplete) or not_scanned, with
+    its status and coverage reasons; unknown and not_scanned are never safe. scan.status is
+    authoritative: "ok" only for a complete scan. Per-field coverage is included only where the
+    hunter recorded it, for blocked launches. Each launch links its public verdict at verdict_url.
+    Query params:
+    - limit: max results (default 50, max 200)
+    - cursor: next_cursor from the previous page (optional)
+    """
+    from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
+
+    _validate_chain_id(chain_id)
+    if not container:
+        raise HTTPException(status_code=503, detail="Service not available")
+
+    limit = max(1, min(limit, 200))  # cap between 1 and 200
+    if chain_id != LAUNCH_CHAIN_ID:
+        return {
+            'launches': [],
+            'count': 0,
+            'chain_id': chain_id,
+            'next_cursor': None,
+            'discovery_unavailable': "Launch discovery is not available on this chain",
+        }
+    try:
+        launches, next_cursor = await container.db.get_launch_feed(chain_id, limit, cursor)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid cursor") from exc
+    return {
+        'launches': launches,
+        'count': len(launches),
+        'chain_id': chain_id,
+        'next_cursor': next_cursor,
+    }
 
 
 @app.get("/api/threats/subscribe")

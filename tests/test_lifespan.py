@@ -1,7 +1,7 @@
 """Integration tests for API startup, mounted routers, and shutdown."""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from fastapi.testclient import TestClient
@@ -33,6 +33,9 @@ def mock_container(monkeypatch):
     container.shutdown = AsyncMock()
     container.hunter.start = AsyncMock()
     container.hunter.stop = AsyncMock()
+    container.launch_watch.start = AsyncMock()
+    container.launch_watch.stop = AsyncMock()
+    container.verdict_publisher.stop = AsyncMock()
     container.auth_manager.validate_key = AsyncMock(
         return_value={"key_id": "lifespan-key", "tier": "free"},
     )
@@ -83,6 +86,8 @@ class TestLifespan:
             mock_container.startup.assert_awaited_once_with()
             mock_container.hunter.start.assert_awaited_once_with()
             mock_container.hunter.stop.assert_not_awaited()
+            mock_container.launch_watch.start.assert_awaited_once_with()
+            mock_container.launch_watch.stop.assert_not_awaited()
             mock_container.shutdown.assert_not_awaited()
 
             response = client.get(
@@ -128,3 +133,13 @@ class TestLifespan:
         mock_container.hunter.start.assert_awaited_once_with()
         mock_container.hunter.stop.assert_awaited_once_with()
         mock_container.shutdown.assert_awaited_once_with()
+        # The drain starts first and stops last: the watch and the hunter publish verdicts into it.
+        loops = [
+            call.verdict_publisher.start(),
+            call.hunter.start(),
+            call.launch_watch.start(),
+            call.launch_watch.stop(),
+            call.hunter.stop(),
+            call.verdict_publisher.stop(),
+        ]
+        assert [made for made in mock_container.mock_calls if made in loops] == loops

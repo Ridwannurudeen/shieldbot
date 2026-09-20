@@ -745,7 +745,7 @@ async def test_advisor_scan_failure_renders_unknown_chat(consumer_api):
 
 
 @pytest.mark.parametrize('path', ['api.py', 'bot.py', 'agent/advisor.py', 'agent/firewall.py', 'rpc/proxy.py',
-                                  'agent/hunter.py', 'agent/sentinel.py'])
+                                  'agent/hunter.py', 'agent/launch_watch.py', 'agent/sentinel.py'])
 def test_exception_text_never_reaches_replies_or_logs(path):
     import ast
     from pathlib import Path

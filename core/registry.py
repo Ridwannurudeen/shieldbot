@@ -1,12 +1,28 @@
 """Analyzer registry — collects and runs all registered analyzers."""
 
+import asyncio
 import logging
-from typing import List
+from typing import List, Optional
 
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
 from utils.web3_client import UnsupportedChainError
 
 logger = logging.getLogger(__name__)
+
+# Overall deadlines for one scan's analyzers, set from the provider timeouts on the scan path:
+# honeypot.is 10 s per request, called twice in a row (honeypot, then taxes) before the GoPlus
+# fallback (8 s, usually already cached by the structural analyzer's scam check); explorer calls
+# 15 s; DexScreener, Ethos and TokenSniffer 10 s; the 4663 buy/sell simulation 30 s per RPC
+# request, with 1 s and 2 s of rate-limit backoff.
+#
+# Interactive scans get 25 s: both honeypot.is timeouts plus the cached GoPlus answer fit, and the
+# answer still arrives before the extension abandons a firewall request at 30 s, so a hung
+# provider yields an incomplete answer instead of none.
+RUN_ALL_DEADLINE_SECONDS = 25
+# Background scans (the hunter sweep and the launch watch) have no client waiting, so they get
+# 45 s: one full 30 s simulator request, its 3 s of backoff and a healthy scan's other work (p90
+# 5.4 s measured live on 4663), or the whole honeypot.is chain with an uncached GoPlus call (28 s).
+BACKGROUND_SCAN_DEADLINE_SECONDS = 45
 
 
 class AnalyzerRegistry:
@@ -33,15 +49,30 @@ class AnalyzerRegistry:
         """Sum of all registered analyzer raw weights."""
         return sum(a.weight for a in self._analyzers)
 
-    async def run_all(self, ctx: AnalysisContext) -> List[AnalyzerResult]:
+    async def run_all(self, ctx: AnalysisContext, deadline: Optional[float] = None) -> List[AnalyzerResult]:
         """Run all analyzers and return results with normalized weights.
 
         Each result's weight is normalized so that all weights sum to 1.0,
-        regardless of how many analyzers are registered.
+        regardless of how many analyzers are registered. An analyzer still running at the
+        deadline (RUN_ALL_DEADLINE_SECONDS unless ``deadline`` is given) is cancelled and
+        reported exactly like one that raised TimeoutError: unavailable, never safe.
         """
-        import asyncio
-        tasks = [a.analyze(ctx) for a in self._analyzers]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        tasks = [asyncio.ensure_future(a.analyze(ctx)) for a in self._analyzers]
+        pending = set()
+        try:
+            if tasks:
+                _, pending = await asyncio.wait(
+                    tasks, timeout=RUN_ALL_DEADLINE_SECONDS if deadline is None else deadline
+                )
+        finally:
+            for task in tasks:
+                task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        results = [
+            asyncio.TimeoutError() if task in pending else task.exception() or task.result()
+            for task in tasks
+        ]
 
         final = []
         for analyzer, result in zip(self._analyzers, results):

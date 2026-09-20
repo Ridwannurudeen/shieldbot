@@ -178,8 +178,8 @@ KEY FACTS:
 - Open source: https://github.com/Ridwannurudeen/shieldbot
 - Free to use -- zero cost for end users
 - AI agents: Hunter (threat sweeps), Sentinel (pair monitoring), Advisor (intent routing)
-- 8 production features: Agent Firewall, MCP Server v3.1.0, Portfolio Guardian,
-  Reputation Service, Injection Scanner, Anomaly Detection, Threat Graph, Premium Tiering
+- 7 production features: Agent Firewall, MCP Server v3.1.0, Portfolio Guardian,
+  Reputation Service, Injection Scanner, Anomaly Detection, Threat Graph
 - Cross-chain attestations on Base via EAS (ShieldBotAttestor on Base mainnet)
 - Demo: https://youtu.be/NN95rom10R8
 - BNB Chain hackathon winner (Good Vibes Only, Builders Track, 3rd Place)

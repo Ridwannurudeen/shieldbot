@@ -21,7 +21,7 @@ Amount: $30,000 - $75,000 (6-month runway)
 - V3 + April 2026 hardening pass live in production (api.shieldbotsecurity.online)
 - 519 Python + 18 Solidity tests passing, CI green on every push
 - Chrome extension v3.0.1 (BNB Chain Web Store listing approved at v3.0.0; v3.0.1 awaiting upload)
-- 8 production features: Agent Firewall, MCP Server v3.1.0, Portfolio Guardian, Reputation Service, Injection Scanner, Anomaly Detection, Threat Graph, Premium Tiering
+- 7 production features: Agent Firewall, MCP Server v3.1.0, Portfolio Guardian, Reputation Service, Injection Scanner, Anomaly Detection, Threat Graph
 - 3rd Place at BNB Chain Good Vibes Only hackathon (Builders Track)
 - $SHIELDBOT community token launched on four.meme
 

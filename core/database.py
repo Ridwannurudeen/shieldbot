@@ -1,13 +1,82 @@
 """Database layer — SQLite with WAL mode for contract reputation and outcome tracking."""
 
+import asyncio
 import json
+import re
 import time
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import aiosqlite
 
+from core.extension_formatter import is_scan_incomplete
+
 logger = logging.getLogger(__name__)
+
+# Eighteen digits keep a cursor block inside SQLite's signed 64-bit integers.
+_LAUNCH_CURSOR = re.compile(r"(\d{1,18}):(0x[0-9a-f]{40})")
+_NO_SCAN_DETAIL = "Coverage details were not recorded for this scan"
+# The hunter stores the finding holding a blocked launch's evidence, after any AI narrative,
+# before it marks the launch blocked, so an alert normally finds that evidence already there.
+# This is how long an alert still waits when the evidence is missing anyway, for example a
+# finding whose store failed, before it is queued without it.
+_BLOCKED_EVIDENCE_WAIT_SECONDS = 300
+# A Telegram send times out within seconds, so an alert still marked sending after this long
+# belongs to a pass that died between claiming it and recording the result.
+_LAUNCH_ALERT_SEND_TIMEOUT_SECONDS = 300
+
+# One row per discovered launch with its latest outcome. A recheck records blocked or cleared on
+# the launch's tracked pair (keyed by the token), and a newer one supersedes the launch scan. A
+# watching pair has only been queued for a recheck, so it changes nothing.
+_LAUNCH_SELECT = """
+    SELECT token_address, source, launchpad, pool_id, block_number, tx_hash, block_timestamp,
+           discovered_at,
+           CASE WHEN rechecked THEN recheck_status ELSE scan_status END,
+           CASE WHEN rechecked THEN NULL ELSE risk_score END,
+           CASE WHEN rechecked THEN recheck_at ELSE scanned_at END AS outcome_at
+    FROM (
+        SELECT l.*, p.status AS recheck_status, p.last_checked AS recheck_at,
+               COALESCE(p.status IN ('blocked', 'cleared') AND p.last_checked >= l.scanned_at, 0)
+                   AS rechecked
+        FROM discovered_launches l
+        LEFT JOIN tracked_pairs p ON p.pair_address = l.token_address AND p.chain_id = l.chain_id
+"""
+_LAUNCH_ROWS = _LAUNCH_SELECT + """
+        WHERE l.chain_id = ?
+    )
+"""
+_LAUNCH_FEED_FIRST_PAGE = _LAUNCH_ROWS + """
+    ORDER BY block_number DESC, token_address DESC
+    LIMIT ?
+"""
+_LAUNCH_FEED_NEXT_PAGE = _LAUNCH_ROWS + """
+    WHERE (block_number, token_address) < (?, ?)
+    ORDER BY block_number DESC, token_address DESC
+    LIMIT ?
+"""
+# Launches whose latest outcome was recorded at or after a time, found through the scan-time
+# index and the rechecked pairs rather than a scan of every discovered launch. It repeats
+# _LAUNCH_SELECT as one literal because its filter holds a subquery.
+_LAUNCH_OUTCOMES_SINCE = """
+    SELECT token_address, source, launchpad, pool_id, block_number, tx_hash, block_timestamp,
+           discovered_at,
+           CASE WHEN rechecked THEN recheck_status ELSE scan_status END,
+           CASE WHEN rechecked THEN NULL ELSE risk_score END,
+           CASE WHEN rechecked THEN recheck_at ELSE scanned_at END AS outcome_at
+    FROM (
+        SELECT l.*, p.status AS recheck_status, p.last_checked AS recheck_at,
+               COALESCE(p.status IN ('blocked', 'cleared') AND p.last_checked >= l.scanned_at, 0)
+                   AS rechecked
+        FROM discovered_launches l
+        LEFT JOIN tracked_pairs p ON p.pair_address = l.token_address AND p.chain_id = l.chain_id
+        WHERE (l.chain_id = ? AND l.scanned_at >= ?) OR (l.chain_id = ? AND l.token_address IN (
+            SELECT pair_address FROM tracked_pairs
+            WHERE chain_id = ? AND status IN ('blocked', 'cleared') AND last_checked >= ?
+        ))
+    )
+    WHERE outcome_at >= ?
+    ORDER BY outcome_at, token_address
+"""
 
 
 def _lift_scan_metadata(score: Dict) -> Dict:
@@ -26,12 +95,84 @@ def _lift_scan_metadata(score: Dict) -> Dict:
     return score
 
 
+def _launch_outcome(stored_status, scanned_at) -> str:
+    """Name a launch's latest outcome; any status the feed does not know is unknown."""
+    if scanned_at is None:
+        return "not_scanned"
+    return stored_status if stored_status in ("blocked", "watching", "cleared") else "unknown"
+
+
+def _launch_scan(stored_status, risk_score, scanned_at, finding) -> Dict:
+    """Describe a launch's latest outcome; ``status`` is the authoritative completeness field.
+
+    The hunter records watching and cleared only for complete scans, and a recheck clears only
+    a complete scan, so both are complete. A blocked launch takes its detail, including
+    per-field coverage, from the hunter's finding evidence and is not shown as complete without
+    it; no other outcome has per-field coverage recorded. An unknown scan's partial score is
+    withheld so that it cannot read as a verdict.
+    """
+    outcome = _launch_outcome(stored_status, scanned_at)
+    scan = {
+        "outcome": outcome,
+        "status": "unknown",
+        "risk_level": None,
+        "risk_score": None,
+        "coverage": None,
+        "coverage_reasons": {"scan": "Scan incomplete; coverage details were not recorded"},
+        "flags": [],
+        "scanned_at": scanned_at,
+    }
+    if outcome == "not_scanned":
+        scan["coverage_reasons"] = {"scan": "Not scanned yet"}
+    elif outcome in ("watching", "cleared"):
+        scan.update(status="ok", risk_score=risk_score, coverage_reasons={})
+    elif outcome == "blocked":
+        finding_score, evidence = finding
+        scan["risk_score"] = risk_score if risk_score is not None else finding_score
+        if evidence is None:
+            scan["coverage_reasons"] = {"scan": _NO_SCAN_DETAIL}
+        else:
+            incomplete = is_scan_incomplete(evidence)
+            scan.update(
+                status="unknown" if incomplete else "ok",
+                risk_level=evidence.get("risk_level"),
+                coverage=evidence.get("coverage"),
+                coverage_reasons=evidence.get("coverage_reasons") or ({"scan": _NO_SCAN_DETAIL} if incomplete else {}),
+                flags=evidence.get("critical_flags") or [],
+            )
+    elif stored_status == "error":
+        scan["coverage_reasons"] = {"scan": "Scan failed before completing"}
+    return scan
+
+
+def _launch_item(chain_id: int, row, finding) -> Dict:
+    (token, source, launchpad, pool_id, block_number, tx_hash, block_timestamp,
+     discovered_at, stored_status, risk_score, outcome_at) = row
+    return {
+        "chain_id": chain_id,
+        "token_address": token,
+        "launchpad": launchpad,
+        "source": source,
+        "pool_id": pool_id,
+        "tx_hash": tx_hash,
+        "block_number": block_number,
+        "block_timestamp": block_timestamp,
+        "discovered_at": discovered_at,
+        "scan": _launch_scan(stored_status, risk_score, outcome_at, finding),
+        "verdict_url": f"/api/verdict/{chain_id}/{token}",
+    }
+
+
 class Database:
     """Async SQLite database for contract scores and outcome events."""
 
     def __init__(self, db_path: str = "shieldbot.db"):
         self.db_path = db_path
         self._db: Optional[aiosqlite.Connection] = None
+        # The verdict drain's own connection: one aiosqlite connection carries one implicit transaction,
+        # so a rollback on the shared one would undo whatever else was being written at the time.
+        self._drain_db: Optional[aiosqlite.Connection] = None
+        self._drain_lock = asyncio.Lock()
 
     async def initialize(self):
         """Open connection and create tables."""
@@ -41,11 +182,38 @@ class Database:
         await self._create_tables()
         logger.info(f"Database initialized at {self.db_path}")
 
+    async def _outbox(self) -> aiosqlite.Connection:
+        """The connection the verdict drain writes on, so its rollback never reaches another coroutine's work.
+
+        Opened on first use: only the process that drains ever holds it, and a write after close() never
+        reopens one. An in-memory database keeps the shared connection, because a second connection to
+        ":memory:" would be a different database.
+        """
+        if self._drain_db is None and self._db is not None and self.db_path != ":memory:":
+            async with self._drain_lock:
+                if self._drain_db is None:
+                    opened = await aiosqlite.connect(self.db_path)
+                    if self._db is None:
+                        # close() ran while this connection was opening; leaving it open would
+                        # keep aiosqlite's non-daemon worker thread alive past shutdown.
+                        await opened.close()
+                    else:
+                        await opened.execute("PRAGMA busy_timeout=5000")
+                        self._drain_db = opened
+        return self._drain_db or self._db
+
     async def close(self):
-        """Close the database connection."""
-        if self._db:
-            await self._db.close()
-            self._db = None
+        """Close the database connection.
+
+        Both handles are detached first: a write landing while a close is awaited must fail, not
+        reopen the drain's connection behind us.
+        """
+        drain, shared = self._drain_db, self._db
+        self._drain_db = self._db = None
+        if drain:
+            await drain.close()
+        if shared:
+            await shared.close()
 
     async def _create_tables(self):
         await self._db.executescript("""
@@ -331,6 +499,9 @@ class Database:
         await self._migrate_funding_value_wei()
         await self._migrate_tracked_pairs_chain_id()
         await self._create_launch_discovery_tables()
+        await self._create_launch_feed_tables()
+        await self._create_launch_alert_tables()
+        await self._create_verdict_evidence_tables()
 
         # Migrate: add registered_by_key column for existing DBs
         try:
@@ -1920,3 +2091,484 @@ class Database:
             WHERE chain_id = ? AND token_address = ?
         """, (scan_status, risk_score, time.time(), chain_id, token_address))
         await self._db.commit()
+
+    # --- Launch Feed ---
+
+    async def _create_launch_feed_tables(self):
+        await self._db.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_discovered_launches_feed
+                ON discovered_launches(chain_id, block_number DESC, token_address DESC);
+        """)
+        await self._db.commit()
+
+    async def get_launch_feed(
+        self, chain_id: int, limit: int, cursor: Optional[str] = None
+    ) -> Tuple[List[Dict], Optional[str]]:
+        """Return a page of discovered launches, newest first, each with its latest outcome.
+
+        Each launch's ``scan.status`` is authoritative: "ok" only for a complete scan. ``cursor``
+        is the ``next_cursor`` of the previous page ("block:token"). The next cursor is None on
+        the last page. A malformed cursor raises ValueError.
+        """
+        if cursor is None:
+            result = await self._db.execute(_LAUNCH_FEED_FIRST_PAGE, (chain_id, limit + 1))
+        else:
+            match = _LAUNCH_CURSOR.fullmatch(cursor) if isinstance(cursor, str) else None
+            if match is None:
+                raise ValueError("Invalid cursor")
+            result = await self._db.execute(
+                _LAUNCH_FEED_NEXT_PAGE, (chain_id, int(match.group(1)), match.group(2), limit + 1)
+            )
+        rows = await result.fetchall()
+        next_cursor = f"{rows[limit - 1][4]}:{rows[limit - 1][0]}" if len(rows) > limit else None
+        items = [_launch_item(chain_id, row, await self._launch_finding(chain_id, row)) for row in rows[:limit]]
+        return items, next_cursor
+
+    async def _launch_finding(self, chain_id: int, row):
+        """Return the hunter finding behind a blocked launch, or (None, None) for other outcomes."""
+        if row[10] is not None and row[8] == "blocked":
+            return await self._latest_hunter_finding(chain_id, row[0])
+        return None, None
+
+    async def _latest_hunter_finding(self, chain_id: int, address: str):
+        """Return the risk score and evidence of the hunter's latest finding for an address."""
+        cursor = await self._db.execute("""
+            SELECT risk_score, evidence FROM agent_findings
+            WHERE finding_type = 'hunter_sweep' AND chain_id = ? AND address = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+        """, (chain_id, address))
+        row = await cursor.fetchone()
+        if row is None:
+            return None, None
+        try:
+            evidence = json.loads(row[1]) if row[1] else None
+        except (json.JSONDecodeError, TypeError):
+            evidence = None
+        return row[0], evidence if isinstance(evidence, dict) else None
+
+    # --- Launch Alerts ---
+
+    async def _create_launch_alert_tables(self):
+        await self._db.executescript("""
+            CREATE TABLE IF NOT EXISTS launch_alert_subscriptions (
+                chat_id INTEGER NOT NULL,
+                chain_id INTEGER NOT NULL,
+                mode TEXT NOT NULL CHECK (mode IN ('blocked', 'all')),
+                created_at REAL NOT NULL,
+                PRIMARY KEY (chat_id, chain_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS launch_alert_outbox (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                chain_id INTEGER NOT NULL,
+                token_address TEXT NOT NULL,
+                outcome TEXT NOT NULL,
+                outcome_at REAL NOT NULL,
+                payload TEXT NOT NULL,
+                state TEXT NOT NULL DEFAULT 'pending',
+                error TEXT,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                UNIQUE (chat_id, chain_id, token_address, outcome)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_launch_alert_outbox_state
+                ON launch_alert_outbox(state, chat_id, id);
+        """)
+        await self._db.commit()
+
+    async def subscribe_launch_alerts(self, chat_id: int, chain_id: int, mode: str):
+        """Subscribe a chat to a chain's launch alerts ("blocked" or "all"), or change its mode.
+
+        A subscription covers outcomes recorded after it was first created.
+        """
+        await self._db.execute("""
+            INSERT INTO launch_alert_subscriptions (chat_id, chain_id, mode, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(chat_id, chain_id) DO UPDATE SET mode = excluded.mode
+        """, (chat_id, chain_id, mode, time.time()))
+        await self._db.commit()
+
+    async def unsubscribe_launch_alerts(self, chat_id: int, chain_id: int) -> bool:
+        """Remove a chat's subscription and cancel its queued alerts; False if it had none."""
+        cursor = await self._db.execute(
+            "DELETE FROM launch_alert_subscriptions WHERE chat_id = ? AND chain_id = ?",
+            (chat_id, chain_id),
+        )
+        await self._db.execute("""
+            UPDATE launch_alert_outbox SET state = 'cancelled', updated_at = ?
+            WHERE chat_id = ? AND chain_id = ? AND state = 'pending'
+        """, (time.time(), chat_id, chain_id))
+        await self._db.commit()
+        return cursor.rowcount == 1
+
+    async def move_launch_alert_chat(self, chat_id: int, new_chat_id: int, chain_id: int):
+        """Follow a group that became a supergroup: move its subscription and queued alerts.
+
+        If the new id is already subscribed, that subscription stays and the old queue is
+        cancelled.
+        """
+        cursor = await self._db.execute(
+            "UPDATE OR IGNORE launch_alert_subscriptions SET chat_id = ? WHERE chat_id = ? AND chain_id = ?",
+            (new_chat_id, chat_id, chain_id),
+        )
+        if cursor.rowcount == 1:
+            await self._db.execute("""
+                UPDATE OR IGNORE launch_alert_outbox SET chat_id = ?, updated_at = ?
+                WHERE chat_id = ? AND chain_id = ? AND state = 'pending'
+            """, (new_chat_id, time.time(), chat_id, chain_id))
+        await self.unsubscribe_launch_alerts(chat_id, chain_id)
+
+    async def enqueue_launch_alerts(self, chain_id: int, since: float) -> Optional[float]:
+        """Queue alerts for the launch outcomes recorded at or after ``since``.
+
+        A chat gets outcomes recorded after it subscribed: every one in "all" mode, otherwise
+        only blocked ones. A chat is queued at most one alert per launch and outcome, so passes
+        over the same window, and passes after a restart, never queue an alert twice.
+
+        A blocked launch whose evidence is not stored yet is held back for up to
+        _BLOCKED_EVIDENCE_WAIT_SECONDS. Returns the outcome time of the oldest one held, which
+        the caller keeps inside its next window, or None.
+        """
+        cursor = await self._db.execute(
+            "SELECT chat_id, mode, created_at FROM launch_alert_subscriptions WHERE chain_id = ? ORDER BY chat_id",
+            (chain_id,),
+        )
+        subscriptions = await cursor.fetchall()
+        if not subscriptions:
+            return None
+        cursor = await self._db.execute(
+            _LAUNCH_OUTCOMES_SINCE, (chain_id, since, chain_id, chain_id, since, since)
+        )
+        alerts = []
+        held = None
+        now = time.time()
+        for row in await cursor.fetchall():
+            token, stored_status, outcome_at = row[0], row[8], row[10]
+            outcome = _launch_outcome(stored_status, outcome_at)
+            chats = [
+                chat_id for chat_id, mode, created_at in subscriptions
+                if created_at <= outcome_at and (mode == "all" or outcome == "blocked")
+            ]
+            if not chats:
+                continue
+            finding = await self._launch_finding(chain_id, row)
+            if outcome == "blocked" and finding[1] is None and outcome_at > now - _BLOCKED_EVIDENCE_WAIT_SECONDS:
+                held = outcome_at if held is None else min(held, outcome_at)
+                continue
+            payload = json.dumps(_launch_item(chain_id, row, finding))
+            alerts += [(chat_id, chain_id, token, outcome, outcome_at, payload, now, now) for chat_id in chats]
+        await self._db.executemany("""
+            INSERT OR IGNORE INTO launch_alert_outbox
+                (chat_id, chain_id, token_address, outcome, outcome_at, payload, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, alerts)
+        await self._db.commit()
+        return held
+
+    async def get_pending_launch_alerts(
+        self, now: float, max_age: float, per_chat: int, limit: int
+    ) -> List[Dict]:
+        """Expire pending alerts older than ``max_age``, then return the oldest pending ones.
+
+        An alert left sending by a pass that died is marked unconfirmed and never resent. At
+        most ``per_chat`` alerts per chat and ``limit`` in all are returned.
+        """
+        await self._db.execute("""
+            UPDATE launch_alert_outbox SET state = 'expired', updated_at = ?
+            WHERE state = 'pending' AND outcome_at < ?
+        """, (now, now - max_age))
+        await self._db.execute("""
+            UPDATE launch_alert_outbox SET state = 'unconfirmed', error = 'Interrupted', updated_at = ?
+            WHERE state = 'sending' AND updated_at < ?
+        """, (now, now - _LAUNCH_ALERT_SEND_TIMEOUT_SECONDS))
+        await self._db.commit()
+        cursor = await self._db.execute("""
+            SELECT id, chat_id, chain_id, token_address, outcome, payload FROM (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY chat_id ORDER BY id) AS position
+                FROM launch_alert_outbox
+                WHERE state = 'pending'
+            )
+            WHERE position <= ?
+            ORDER BY id
+            LIMIT ?
+        """, (per_chat, limit))
+        return [
+            {
+                "id": r[0],
+                "chat_id": r[1],
+                "chain_id": r[2],
+                "token_address": r[3],
+                "outcome": r[4],
+                "payload": json.loads(r[5]),
+            }
+            for r in await cursor.fetchall()
+        ]
+
+    async def claim_launch_alert(self, alert_id: int) -> bool:
+        """Mark a pending alert as sending; False if it is no longer pending.
+
+        A claimed alert may have reached the chat, so it is never pending again unless it is
+        released because Telegram refused it.
+        """
+        cursor = await self._db.execute(
+            "UPDATE launch_alert_outbox SET state = 'sending', updated_at = ? WHERE id = ? AND state = 'pending'",
+            (time.time(), alert_id),
+        )
+        await self._db.commit()
+        return cursor.rowcount == 1
+
+    async def set_launch_alert_state(self, alert_id: int, state: str, error: Optional[str] = None):
+        """Record what happened to an alert, with the error class if it was not sent."""
+        await self._db.execute(
+            "UPDATE launch_alert_outbox SET state = ?, error = ?, updated_at = ? WHERE id = ?",
+            (state, error, time.time(), alert_id),
+        )
+        await self._db.commit()
+    # --- Verdict Evidence ---
+
+    async def _create_verdict_evidence_tables(self):
+        await self._db.executescript("""
+            CREATE TABLE IF NOT EXISTS verdict_evidence (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chain_id INTEGER NOT NULL,
+                subject TEXT NOT NULL,
+                verdict TEXT NOT NULL,
+                evidence_hash TEXT NOT NULL,
+                canonical TEXT NOT NULL,
+                observed_block INTEGER NOT NULL,
+                created_at REAL NOT NULL,
+                onchain_status TEXT NOT NULL,
+                registry TEXT,
+                tx_hash TEXT,
+                nonce INTEGER,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                onchain_error TEXT,
+                updated_at REAL NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_verdict_evidence_subject
+                ON verdict_evidence(chain_id, subject, id);
+
+            CREATE INDEX IF NOT EXISTS idx_verdict_evidence_outbox
+                ON verdict_evidence(chain_id, onchain_status, id);
+
+            CREATE TABLE IF NOT EXISTS verdict_transactions (
+                evidence_id INTEGER NOT NULL,
+                tx_hash TEXT NOT NULL,
+                nonce INTEGER NOT NULL,
+                raw_tx TEXT,
+                max_fee_per_gas INTEGER,
+                created_at REAL NOT NULL,
+                PRIMARY KEY (evidence_id, tx_hash)
+            );
+        """)
+        await self._db.commit()
+        await self._migrate_verdict_outbox_columns()
+
+    async def _migrate_verdict_outbox_columns(self):
+        """Add the outbox's columns to verdict tables created before them; a transaction's fee stays unknown."""
+        await self._db.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = await self._db.execute("PRAGMA table_info(verdict_evidence)")
+            columns = {column[1] for column in await cursor.fetchall()}
+            if "nonce" not in columns:
+                await self._db.execute("ALTER TABLE verdict_evidence ADD COLUMN nonce INTEGER")
+            if "attempts" not in columns:
+                await self._db.execute(
+                    "ALTER TABLE verdict_evidence ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0"
+                )
+            cursor = await self._db.execute("PRAGMA table_info(verdict_transactions)")
+            columns = {column[1] for column in await cursor.fetchall()}
+            if "max_fee_per_gas" not in columns:
+                await self._db.execute(
+                    "ALTER TABLE verdict_transactions ADD COLUMN max_fee_per_gas INTEGER"
+                )
+            await self._db.commit()
+        except BaseException:
+            await self._db.rollback()
+            raise
+
+    async def insert_verdict_evidence(
+        self, chain_id: int, subject: str, verdict: str, evidence_hash: str, canonical: str,
+        observed_block: int, onchain_status: str, registry: Optional[str] = None,
+        onchain_error: Optional[str] = None,
+    ) -> int:
+        """Store one published evidence document; earlier documents for the subject are kept."""
+        now = time.time()
+        cursor = await self._db.execute("""
+            INSERT INTO verdict_evidence
+                (chain_id, subject, verdict, evidence_hash, canonical, observed_block, created_at,
+                 onchain_status, registry, onchain_error, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            chain_id, subject, verdict, evidence_hash, canonical, observed_block, now,
+            onchain_status, registry, onchain_error, now,
+        ))
+        await self._db.commit()
+        return cursor.lastrowid
+
+    async def update_verdict_onchain(
+        self, evidence_id: int, onchain_status: str, tx_hash: Optional[str] = None,
+        onchain_error: Optional[str] = None,
+    ):
+        """Record the on-chain outcome for one stored evidence document."""
+        outbox = await self._outbox()
+        await outbox.execute("""
+            UPDATE verdict_evidence
+            SET onchain_status = ?, tx_hash = ?, onchain_error = ?, updated_at = ?
+            WHERE id = ?
+        """, (onchain_status, tx_hash, onchain_error, time.time(), evidence_id))
+        await outbox.commit()
+
+    async def get_latest_verdict_evidence(self, chain_id: int, subject: str) -> Optional[Dict]:
+        """Return the most recently published evidence for a subject, or None if never published."""
+        cursor = await self._db.execute("""
+            SELECT id, chain_id, subject, verdict, evidence_hash, canonical, observed_block, created_at,
+                   onchain_status, registry, tx_hash, onchain_error, updated_at
+            FROM verdict_evidence
+            WHERE chain_id = ? AND subject = ?
+            ORDER BY id DESC
+            LIMIT 1
+        """, (chain_id, subject))
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        keys = (
+            "id", "chain_id", "subject", "verdict", "evidence_hash", "canonical", "observed_block",
+            "created_at", "onchain_status", "registry", "tx_hash", "onchain_error", "updated_at",
+        )
+        return dict(zip(keys, row))
+
+    async def claim_next_pending_verdict(self, chain_id: int) -> Optional[Dict]:
+        """Claim the oldest row waiting to be recorded on-chain by moving it from pending to sending.
+
+        The conditional UPDATE is atomic in SQLite, so two connections, even in two processes, never claim
+        the same row.
+        """
+        outbox = await self._outbox()
+        while True:
+            cursor = await outbox.execute("""
+                SELECT id, subject, verdict, evidence_hash, observed_block, tx_hash, nonce, attempts
+                FROM verdict_evidence
+                WHERE chain_id = ? AND onchain_status = 'pending'
+                ORDER BY id
+                LIMIT 1
+            """, (chain_id,))
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            cursor = await outbox.execute("""
+                UPDATE verdict_evidence SET onchain_status = 'sending', updated_at = ?
+                WHERE id = ? AND onchain_status = 'pending'
+            """, (time.time(), row[0]))
+            await outbox.commit()
+            if cursor.rowcount == 1:
+                return dict(zip(
+                    ("id", "subject", "verdict", "evidence_hash", "observed_block", "tx_hash", "nonce", "attempts"),
+                    row,
+                ))
+
+    async def set_verdict_tx_hash(
+        self, evidence_id: int, tx_hash: str, nonce: int, raw_tx: Optional[str] = None,
+        max_fee_per_gas: Optional[int] = None,
+    ) -> bool:
+        """Record a transaction about to be broadcast for a claimed row; returns False if the row is not claimed.
+
+        Every transaction a row has ever broadcast is kept in verdict_transactions, and the row's tx_hash and nonce
+        show the latest one. Each new transaction counts one attempt; sending the same bytes again adds nothing.
+        """
+        outbox = await self._outbox()
+        now = time.time()
+        # One transaction: a failure must not leave the row update behind for a later commit to land alone.
+        try:
+            cursor = await outbox.execute("""
+                UPDATE verdict_evidence SET tx_hash = ?, nonce = ?, updated_at = ?
+                WHERE id = ? AND onchain_status = 'sending'
+            """, (tx_hash, nonce, now, evidence_id))
+            claimed = cursor.rowcount == 1
+            if claimed:
+                cursor = await outbox.execute("""
+                    INSERT OR IGNORE INTO verdict_transactions
+                        (evidence_id, tx_hash, nonce, raw_tx, max_fee_per_gas, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (evidence_id, tx_hash, nonce, raw_tx, max_fee_per_gas, now))
+                if cursor.rowcount == 1:
+                    await outbox.execute(
+                        "UPDATE verdict_evidence SET attempts = attempts + 1 WHERE id = ?", (evidence_id,)
+                    )
+            await outbox.commit()
+        except BaseException:
+            await outbox.rollback()
+            raise
+        return claimed
+
+    async def get_verdict_transactions(self, evidence_ids: List[int]) -> Dict[int, List[Dict]]:
+        """Every transaction broadcast for each row, oldest first."""
+        transactions: Dict[int, List[Dict]] = {}
+        for evidence_id in evidence_ids:
+            cursor = await self._db.execute("""
+                SELECT tx_hash, nonce, raw_tx, max_fee_per_gas FROM verdict_transactions
+                WHERE evidence_id = ?
+                ORDER BY created_at, rowid
+            """, (evidence_id,))
+            transactions[evidence_id] = [
+                {"tx_hash": r[0], "nonce": r[1], "raw_tx": r[2], "max_fee_per_gas": r[3]}
+                for r in await cursor.fetchall()
+            ]
+        return transactions
+
+    async def touch_verdict(self, evidence_id: int):
+        """Mark a row as just looked at, so reconciliation looks at it again only after its delay."""
+        outbox = await self._outbox()
+        await outbox.execute(
+            "UPDATE verdict_evidence SET updated_at = ? WHERE id = ?", (time.time(), evidence_id)
+        )
+        await outbox.commit()
+
+    async def release_verdict_claim(self, evidence_id: int):
+        """Return a claimed row to the pending queue.
+
+        An earlier transaction's hash and nonce are kept, so the next attempt can check whether it may still land.
+        """
+        outbox = await self._outbox()
+        await outbox.execute("""
+            UPDATE verdict_evidence SET onchain_status = 'pending', updated_at = ?
+            WHERE id = ? AND onchain_status = 'sending'
+        """, (time.time(), evidence_id))
+        await outbox.commit()
+
+    async def requeue_verdict(self, evidence_id: int):
+        """Queue an unresolved record (submitted, unconfirmed or failed) for another attempt."""
+        outbox = await self._outbox()
+        await outbox.execute("""
+            UPDATE verdict_evidence SET onchain_status = 'pending', updated_at = ?
+            WHERE id = ? AND onchain_status IN ('submitted', 'unconfirmed', 'failed')
+        """, (time.time(), evidence_id))
+        await outbox.commit()
+
+    async def get_unresolved_verdicts(self, chain_id: int, updated_before: float, limit: int) -> List[Dict]:
+        """Signed records with no receipt yet, untouched since `updated_before`, least recently looked at first."""
+        cursor = await self._db.execute("""
+            SELECT id, tx_hash, nonce, attempts FROM verdict_evidence
+            WHERE chain_id = ? AND onchain_status IN ('submitted', 'unconfirmed', 'failed')
+              AND tx_hash IS NOT NULL AND updated_at < ?
+            ORDER BY updated_at, id
+            LIMIT ?
+        """, (chain_id, updated_before, limit))
+        return [
+            {"id": r[0], "tx_hash": r[1], "nonce": r[2], "attempts": r[3]} for r in await cursor.fetchall()
+        ]
+
+    async def get_claimed_verdicts(self, chain_id: int, claimed_before: Optional[float] = None) -> List[Dict]:
+        """Rows claimed for sending whose outcome was never recorded, optionally only those untouched since then."""
+        cursor = await self._db.execute("""
+            SELECT id, tx_hash, nonce, attempts FROM verdict_evidence
+            WHERE chain_id = ? AND onchain_status = 'sending' AND (? IS NULL OR updated_at < ?)
+            ORDER BY id
+        """, (chain_id, claimed_before, claimed_before))
+        return [
+            {"id": r[0], "tx_hash": r[1], "nonce": r[2], "attempts": r[3]} for r in await cursor.fetchall()
+        ]

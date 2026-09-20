@@ -19,6 +19,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 GUARDED_FILES = (
     "utils/scam_db.py", "utils/onchain_recorder.py", "utils/ai_analyzer.py",
     "analyzers/signature.py", "sdk/python/shieldbot/client.py", "services/guardian.py",
+    "services/verdict_publisher.py",
 )
 ADDRESS = "0x89e5db8b5aa49aa85ac63f691524311aeb649eba"
 TEST_KEY = "utils-log-test-key"
