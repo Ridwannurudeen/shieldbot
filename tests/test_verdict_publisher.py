@@ -408,6 +408,62 @@ async def test_subject_is_stored_lowercase(db):
     assert (await db.get_latest_verdict_evidence(4663, TOKEN))["subject"] == TOKEN
 
 
+async def queued_rows(db, status="pending"):
+    cursor = await db._db.execute(
+        "SELECT COUNT(*) FROM verdict_evidence WHERE chain_id = 4663 AND onchain_status = ?", (status,)
+    )
+    return (await cursor.fetchone())[0]
+
+
+@pytest.mark.asyncio
+async def test_an_unchanged_robinhood_verdict_is_not_queued_again(db):
+    """A saturated watch rescans the same tokens: only a changed verdict is worth another record."""
+    publisher = make_publisher(db)
+    first = await publisher.publish(4663, TOKEN, COMPLETE, honeypot_data=HONEYPOT)
+    # The same scan seconds later: a later scanned_at, and a later block for the same simulation.
+    later = {**HONEYPOT, "simulation_block": HONEYPOT["simulation_block"] + 900}
+    again = await publisher.publish(4663, TOKEN, COMPLETE, honeypot_data=later)
+    assert again == first
+    assert await queued_rows(db) == 1
+    changed = await publisher.publish(4663, TOKEN, INCOMPLETE)
+    assert changed["evidence_id"] != first["evidence_id"]
+    assert changed["verdict"] != first["verdict"]
+    assert await queued_rows(db) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,queued_again", [
+    ("pending", False),
+    ("sending", False),
+    ("confirmed", False),
+    ("submitted", True),
+    ("unconfirmed", True),
+    ("failed", True),
+    ("reverted", True),
+])
+async def test_an_unchanged_verdict_is_queued_again_only_while_its_record_is_unresolved(
+    db, status, queued_again
+):
+    """A record that is queued, being sent or on-chain needs no second row; an unresolved one may never land."""
+    publisher = make_publisher(db)
+    first = await publisher.publish(4663, TOKEN, COMPLETE, honeypot_data=HONEYPOT)
+    await db.update_verdict_onchain(first["evidence_id"], status)
+    again = await publisher.publish(4663, TOKEN, COMPLETE, honeypot_data=HONEYPOT)
+    assert (again["evidence_id"] != first["evidence_id"]) == queued_again
+    assert again["onchain_status"] == ("pending" if queued_again else status)
+
+
+
+def test_the_send_cap_covers_a_saturated_launch_watch():
+    """The drain must not fall behind the watch: every scan of a changed verdict queues a record."""
+    from agent.hunter import SCAN_REQUEST_COST
+    from services.rpc_guard import RPC_BUDGET_RPS
+
+    scans_per_hour = 3600 * RPC_BUDGET_RPS / SCAN_REQUEST_COST
+    assert vp.MAX_RECORDS_PER_HOUR >= scans_per_hour
+
+
+
 @pytest.mark.asyncio
 async def test_invalid_subject_is_not_published(db):
     assert await make_publisher(db).publish(4663, "not-an-address", COMPLETE) is None

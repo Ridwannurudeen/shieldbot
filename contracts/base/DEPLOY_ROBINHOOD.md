@@ -161,22 +161,30 @@ could never be rotated again, not even after the recorder key is compromised.
 The recorder pays gas for every `record()`. The first record for a token measured 116,795 execution gas in the
 Foundry gas report; with the 21,000 base cost and calldata, a `record()` transaction is at most about 140k gas.
 The base fee on a recorded Robinhood Chain block (65,526,359) was 0.056 gwei, which makes one record about
-0.0000079 ETH. Send a small float, for example:
+0.0000079 ETH. A repeat record for a token already in the registry measured 24,740 gas, about 0.0000026 ETH.
+A saturated launch watch is mostly first records, so fund for those; for example a day and a half of one:
 
 ```bash
-cast send $RECORDER --value 0.002ether --rpc-url $RH_RPC --account robinhood-owner
+cast send $RECORDER --value 0.05ether --rpc-url $RH_RPC --account robinhood-owner
 cast balance $RECORDER --rpc-url $RH_RPC --ether
 ```
 
 Spend limits in the server (`services/verdict_publisher.py`). Only the API process sends, so they are global:
-- at most 60 records per hour; further verdicts wait in the queue as `pending`;
+- at most 180 records per hour; further verdicts wait in the queue as `pending`;
+- a scan whose verdict is unchanged is not queued again while the previous record is `pending`, `sending`
+  or `confirmed`, so rescans of the same token cost nothing;
 - a gas limit of `eth_estimateGas` + 20%, deferred above 1,000,000 gas;
 - `maxFeePerGas` = 2 x base fee, capped at 1 gwei, and deferred while the base fee itself is above 1 gwei;
 - deferred while the recorder's balance cannot cover gas limit x `maxFeePerGas`.
 
-At the full 60 records per hour and the fee above, the recorder spends about 0.0005 ETH per hour. At the caps a
-single record could cost at most 1,000,000 gas x 1 gwei = 0.001 ETH. When the recorder runs out of ETH, nothing
-is lost: verdicts stay `pending` and are recorded once it is funded again.
+The 180 per hour comes from the watch: one 4663 scan reserves 22 requests of the shared 1 request per second
+RPC budget (`services/rpc_guard.py`, `agent.hunter.SCAN_REQUEST_COST`), so at most about 163 scans an hour can
+produce a verdict, and discovery draws on the same budget, so the real number is lower. At 180 first records an
+hour and the fee above, the recorder spends about 0.0014 ETH per hour, or 0.034 ETH a day; a day of repeat
+records costs about a fifth of that. At the caps a single record could cost at most 1,000,000 gas x 1 gwei =
+0.001 ETH. The drain's own requests are outside the watch's budget: about three per record, 540 an hour, which is
+0.15 requests per second beside the watch's 1. When the recorder runs out of ETH, nothing is lost: verdicts stay
+`pending` and are recorded once it is funded again.
 
 ## 8. Configure the server
 

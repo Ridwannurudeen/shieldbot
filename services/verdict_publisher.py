@@ -60,6 +60,7 @@ The recorder key is never logged, echoed or stored.
 """
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -82,8 +83,15 @@ DEFAULT_RPC_URL = "https://rpc.mainnet.chain.robinhood.com"
 # `cast sig "record(address,uint8,bytes32,uint64)"` = 0xf160da27
 RECORD_SELECTOR = keccak(text="record(address,uint8,bytes32,uint64)")[:4]
 
-MAX_RECORDS_PER_HOUR = 60
+# One 4663 scan reserves 22 requests of the watch's shared 1 rps RPC budget (services.rpc_guard,
+# agent.hunter.SCAN_REQUEST_COST), so a saturated watch produces at most about 163 scans an hour, and an
+# unchanged verdict is not queued again. This covers that ceiling with room for the drain cycles that
+# re-send or wait, and costs the RPC about three requests each: 540 an hour, 0.15 rps beside the watch's 1.
+MAX_RECORDS_PER_HOUR = 180
 RATE_WINDOW_SECONDS = 3600
+# A verdict already queued, being sent, or on-chain is not queued a second time. An unresolved record is,
+# because reconciliation may give up on it and a new row is then the only way it is ever recorded.
+SETTLED_STATUSES = ("pending", "sending", "confirmed")
 # About 18x the 0.056 gwei base fee of a recorded 4663 block. Arbitrum chains ignore priority fees.
 MAX_FEE_PER_GAS_WEI = 10**9
 # Arbitrum Nitro's eth_estimateGas includes the L1 data fee as gas, so leave room above the ~140k execution cost.
@@ -210,6 +218,19 @@ class VerdictPublisher:
             evidence_hash = "0x" + keccak(canonical).hex()
             queued = chain_id == CHAIN_ID and self.is_onchain_enabled()
             status = "pending" if queued else "off"
+            if queued:
+                previous = await self._db.get_latest_verdict_evidence(chain_id, payload["subject"])
+                if previous is not None and _repeats(previous, payload):
+                    logger.info(
+                        "Verdict unchanged for %s: the %s record stands, nothing queued",
+                        payload["subject"], previous["onchain_status"],
+                    )
+                    return {
+                        "evidence_id": previous["id"],
+                        "evidence_hash": previous["evidence_hash"],
+                        "verdict": previous["verdict"],
+                        "onchain_status": previous["onchain_status"],
+                    }
             evidence_id = await self._db.insert_verdict_evidence(
                 chain_id=chain_id,
                 subject=payload["subject"],
@@ -700,6 +721,30 @@ class VerdictPublisher:
                 results.append(row["result"])
             return results
         raise RecordFailed("RateLimited")
+
+
+def _repeats(previous: dict, payload: dict) -> bool:
+    """True when a stored verdict says the same as this one and is queued, being sent, or on-chain."""
+    if previous["onchain_status"] not in SETTLED_STATUSES:
+        return False
+    return _verdict_only(json.loads(previous["canonical"])) == _verdict_only(payload)
+
+
+def _verdict_only(payload: dict) -> dict:
+    """An evidence document without when it was observed: two scans of an unchanged token differ only there.
+
+    `scanned_at` moves with the clock and `observed_block` (and the honeypot simulation's block) with the
+    chain, so the hashes of two identical scans differ while the verdict they carry does not.
+    """
+    stripped = {
+        key: value for key, value in payload.items() if key not in ("scanned_at", "observed_block")
+    }
+    honeypot = stripped.get("honeypot")
+    if isinstance(honeypot, dict):
+        stripped["honeypot"] = {
+            key: value for key, value in honeypot.items() if key != "simulation_block"
+        }
+    return stripped
 
 
 def _receipt_outcome(receipt) -> Optional[str]:
