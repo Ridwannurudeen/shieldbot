@@ -188,9 +188,10 @@ records costs about a fifth of that. That is the ceiling, not the bill: rechecks
 are not recorded at all, so in practice the recorder pays for first scans and for verdicts that changed.
 Those figures are L2 execution only: Robinhood Chain is an Arbitrum chain, so the L1 data fee is charged as
 extra gas and comes on top. Size the float from the `cast estimate` in step 5, which includes it. At the caps
-a single record could cost at most 1,000,000 gas x 1 gwei = 0.001 ETH. The drain's own requests are outside the watch's budget: about three per record, 540 an hour, which is
-0.15 requests per second beside the watch's 1. When the recorder runs out of ETH, nothing is lost: verdicts stay
-`pending` and are recorded once it is funded again.
+a single record could cost at most 1,000,000 gas x 1 gwei = 0.001 ETH. The drain's own requests are outside
+the watch's budget: about three per record, 540 an hour, which is 0.15 requests per second beside the watch's
+1. When the recorder runs out of ETH, nothing is lost: verdicts stay `pending` and are recorded once it is
+funded again.
 
 ## 8. Configure the server
 
