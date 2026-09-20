@@ -15,9 +15,10 @@ logger = logging.getLogger(__name__)
 # Eighteen digits keep a cursor block inside SQLite's signed 64-bit integers.
 _LAUNCH_CURSOR = re.compile(r"(\d{1,18}):(0x[0-9a-f]{40})")
 _NO_SCAN_DETAIL = "Coverage details were not recorded for this scan"
-# A recheck marks a pair blocked before the hunter stores the finding holding its evidence,
-# and the finding waits on an AI narrative first, so a blocked launch's alert waits this long
-# for the evidence before it is queued without it.
+# The hunter stores the finding holding a blocked launch's evidence, after any AI narrative,
+# before it marks the launch blocked, so an alert normally finds that evidence already there.
+# This is how long an alert still waits when the evidence is missing anyway, for example a
+# finding whose store failed, before it is queued without it.
 _BLOCKED_EVIDENCE_WAIT_SECONDS = 300
 # A Telegram send times out within seconds, so an alert still marked sending after this long
 # belongs to a pass that died between claiming it and recording the result.
