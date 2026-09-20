@@ -242,9 +242,10 @@ class VerdictPublisher:
                 registry=self.registry if queued else None,
             )
         except Exception as e:
+            # The caller only sees None, so a dropped verdict has to name itself here.
             logger.error(
-                "Verdict evidence not stored: %s\n%s",
-                type(e).__name__,
+                "Verdict for %s on chain %d not published: %s\n%s",
+                subject, chain_id, type(e).__name__,
                 "".join(traceback.format_tb(e.__traceback__)),
             )
             return None

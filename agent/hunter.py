@@ -280,6 +280,7 @@ class Hunter:
         """
         blocked = False
         published = False
+        result = None
         try:
             chain_id = pair.get("chain_id", 56)
             await self._reserve_scan(chain_id)
@@ -329,6 +330,12 @@ class Hunter:
                 "Hunter: error rechecking %s: %s\n%s", pair.get("token_address"),
                 type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
             )
+            if result is not None and not published:
+                # The rescan reached a verdict and the failure came after it, so that verdict is lost.
+                logger.warning(
+                    "Hunter: verdict for %s on chain %d not published: the recheck failed after scanning it",
+                    pair.get("token_address"), pair.get("chain_id", 56),
+                )
         return blocked
 
     # ------------------------------------------------------------------

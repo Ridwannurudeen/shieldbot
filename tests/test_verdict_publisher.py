@@ -488,7 +488,11 @@ async def test_publish_never_raises_when_storage_fails(db, caplog):
     publisher = make_publisher(db)
     db.insert_verdict_evidence = AsyncMock(side_effect=RuntimeError(f"disk full {KEY}"))
     assert await publisher.publish(4663, TOKEN, COMPLETE) is None
-    assert "RuntimeError" in caplog.text
+    # A dropped verdict names what was lost, and never the exception's text.
+    [failure] = [record for record in caplog.records if record.levelno >= logging.WARNING]
+    reported = failure.getMessage().splitlines()[0]
+    assert TOKEN in reported and "4663" in reported and "RuntimeError" in reported
+    assert "disk full" not in caplog.text and KEY not in caplog.text
     assert KEY[2:] not in caplog.text
 
 

@@ -171,15 +171,43 @@ async def test_every_4663_recheck_result_is_published_and_other_chains_never_are
 
 
 @pytest.mark.asyncio
-async def test_a_recheck_whose_scan_errors_is_never_published(db):
+async def test_a_recheck_whose_scan_errors_is_never_published(db, caplog):
     await watching(db, "0xrh", 4663)
     publisher = FakePublisher()
     hunter = make_hunter(db, publisher)
     hunter.tools.scan_contract = AsyncMock(side_effect=RuntimeError("provider down"))
 
-    await hunter._recheck_warn_contracts("sweep")
+    with caplog.at_level(logging.DEBUG):
+        await hunter._recheck_warn_contracts("sweep")
 
     assert publisher.calls == []
+    # There was no verdict to lose, so nothing reports one dropped.
+    assert dropped_verdicts(caplog) == []
+
+
+def dropped_verdicts(caplog):
+    return [
+        record.getMessage() for record in caplog.records
+        if record.levelno == logging.WARNING and "not published" in record.getMessage()
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_recheck_that_fails_after_scanning_reports_the_verdict_it_dropped(db, caplog):
+    """The scan produced a verdict, but a failure before publishing it loses it: say which one."""
+    await watching(db, "0xrh", 4663)
+    publisher = FakePublisher()
+    hunter = make_hunter(db, publisher)
+    hunter.tools.scan_contract = AsyncMock(return_value=result(10))
+    hunter.db.update_tracked_pair_status = AsyncMock(side_effect=RuntimeError("rows locked: secret detail"))
+
+    with caplog.at_level(logging.DEBUG):
+        await hunter._recheck_warn_contracts("sweep")
+
+    assert publisher.calls == []
+    [dropped] = dropped_verdicts(caplog)
+    assert "0xrh" in dropped and "4663" in dropped
+    assert "secret detail" not in caplog.text
 
 
 # --- a failing publisher ---
