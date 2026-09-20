@@ -171,8 +171,11 @@ cast balance $RECORDER --rpc-url $RH_RPC --ether
 
 Spend limits in the server (`services/verdict_publisher.py`). Only the API process sends, so they are global:
 - at most 180 records per hour; further verdicts wait in the queue as `pending`;
-- a scan whose verdict is unchanged is not queued again while the previous record is `pending`, `sending`
-  or `confirmed`, so rescans of the same token cost nothing;
+- a rescan is recorded only when it changes something: the stored evidence is compared without the block
+  and the wording of the measurement (`scanned_at`, `observed_block`, the simulation's block and its `reason`,
+  and `coverage_reasons`), so a rescan that reaches the same verdict, coverage and taxes costs nothing while
+  the previous record is `pending`, `sending` or `confirmed`. A changed measurement, and a record left
+  `submitted`, `unconfirmed`, `failed` or `reverted`, are queued again;
 - a gas limit of `eth_estimateGas` + 20%, deferred above 1,000,000 gas;
 - `maxFeePerGas` = 2 x base fee, capped at 1 gwei, and deferred while the base fee itself is above 1 gwei;
 - deferred while the recorder's balance cannot cover gas limit x `maxFeePerGas`.
@@ -181,7 +184,8 @@ The 180 per hour comes from the watch: one 4663 scan reserves 22 requests of the
 RPC budget (`services/rpc_guard.py`, `agent.hunter.SCAN_REQUEST_COST`), so at most about 163 scans an hour can
 produce a verdict, and discovery draws on the same budget, so the real number is lower. At 180 first records an
 hour and the fee above, the recorder spends about 0.0014 ETH per hour, or 0.034 ETH a day; a day of repeat
-records costs about a fifth of that. Those figures are L2 execution only: Robinhood Chain is an Arbitrum
+records costs about a fifth of that. That is the ceiling, not the bill: rechecks that find the same verdict
+are not recorded at all, so in practice the recorder pays for first scans and for verdicts that changed. Those figures are L2 execution only: Robinhood Chain is an Arbitrum
 chain, so the L1 data fee is charged as extra gas and comes on top. Size the float from the `cast estimate` in
 step 5, which includes it. At the caps a single record could cost at most 1,000,000 gas x 1 gwei =
 0.001 ETH. The drain's own requests are outside the watch's budget: about three per record, 540 an hour, which is

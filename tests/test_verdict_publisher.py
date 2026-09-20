@@ -464,6 +464,86 @@ def test_the_send_cap_covers_a_saturated_launch_watch():
 
 
 
+SIMULATIONS = Path(__file__).parent / "fixtures" / "robinhood_simulation"
+
+
+def simulated(name, block, mutate=None):
+    """A recorded eth_simulateV1 response, as the simulator and the 4663 adapter deliver it at `block`."""
+    from adapters.robinhood import _simulation_response
+    from services.robinhood_simulation import aggregate_outcomes, evaluate_simulation
+    from tests.test_robinhood_simulation import pool_of
+
+    fixture = json.loads((SIMULATIONS / f"{name}.json").read_text(encoding="utf-8"))
+    fixture["response"]["result"][0]["number"] = hex(block)
+    if mutate is not None:
+        mutate(fixture)
+    outcome = evaluate_simulation(
+        pool_of(fixture), fixture["token"], fixture["amount"], fixture["buyer"],
+        fixture["response"]["result"],
+    )
+    simulation = aggregate_outcomes([outcome], [])
+    sellability = _simulation_response(simulation, ("is_honeypot", "can_buy", "can_sell"), ("is_honeypot",))
+    taxes = _simulation_response(simulation, ("buy_tax", "sell_tax"), ("buy_tax", "sell_tax"))
+    return {
+        **sellability, **taxes,
+        "field_providers": {**sellability["field_providers"], **taxes["field_providers"]},
+    }
+
+
+def revert_the_buy(fixture):
+    from tests.test_robinhood_simulation import calls_by_label, error_string, make_revert
+
+    make_revert(calls_by_label(fixture)["buy"], error_string("TRANSFER_FAILED"))
+
+
+def scan_around(honeypot):
+    """The scan result the pipeline builds around a simulation; an unmeasured sell leaves it incomplete."""
+    if honeypot["can_sell"] is None:
+        return {**INCOMPLETE, "coverage_reasons": {"honeypot": honeypot["reason"]}}
+    return COMPLETE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fixture,mutate,verdict", [
+    ("v2_honeypot_sell_reverts", None, "HONEYPOT"),
+    ("v2_router02", None, "LOW"),
+    ("v2_router02", revert_the_buy, "UNKNOWN"),
+])
+async def test_a_rescan_that_simulates_the_same_token_again_is_queued_once(db, fixture, mutate, verdict):
+    """Two real simulations of an unchanged token differ only in the block they name, not in the verdict."""
+    publisher = make_publisher(db)
+    first_run = simulated(fixture, 65_704_949, mutate)
+    second_run = simulated(fixture, 65_705_849, mutate)
+    assert sorted(key for key in first_run if first_run[key] != second_run[key]) == [
+        "reason", "simulation_block",
+    ]
+
+    first = await publisher.publish(4663, TOKEN, scan_around(first_run), honeypot_data=first_run)
+    again = await publisher.publish(4663, TOKEN, scan_around(second_run), honeypot_data=second_run)
+
+    assert first["verdict"] == verdict
+    assert again == first
+    assert await queued_rows(db) == 1
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", [
+    {"rug_probability": 25.0},
+    {"coverage": {"structural": 1, "honeypot": 0.5}},
+    {"status": "unknown"},
+])
+async def test_a_changed_measurement_behind_the_same_verdict_is_queued_again(db, change):
+    """Only the block and the words around a measurement are ignored; the numbers it produced are not."""
+    publisher = make_publisher(db)
+    first = await publisher.publish(4663, TOKEN, COMPLETE, honeypot_data=HONEYPOT)
+    again = await publisher.publish(4663, TOKEN, {**COMPLETE, **change}, honeypot_data=HONEYPOT)
+    assert again["verdict"] == first["verdict"]
+    assert again["evidence_id"] != first["evidence_id"]
+    assert await queued_rows(db) == 2
+
+
+
 @pytest.mark.asyncio
 async def test_invalid_subject_is_not_published(db):
     assert await make_publisher(db).publish(4663, "not-an-address", COMPLETE) is None

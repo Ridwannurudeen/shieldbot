@@ -732,19 +732,28 @@ def _repeats(previous: dict, payload: dict) -> bool:
     return _verdict_only(json.loads(previous["canonical"])) == _verdict_only(payload)
 
 
-def _verdict_only(payload: dict) -> dict:
-    """An evidence document without when it was observed: two scans of an unchanged token differ only there.
+# What two runs of the same measurement move, while the verdict they reach does not:
+#   scanned_at                  the clock at the scan
+#   observed_block              the block the simulation ran at
+#   honeypot.simulation_block   the same block again
+#   honeypot.reason             names that block ("... pool ... at block N: sell reverted: ...")
+#   coverage_reasons            carries the same sentence for an incomplete scan
+# What is left decides the verdict: verdict, status, coverage, rug_probability, and the honeypot's
+# is_honeypot, can_buy, can_sell, buy_tax, sell_tax, simulation_failed and field_providers.
+_MEASUREMENT_FIELDS = ("scanned_at", "observed_block", "coverage_reasons")
+_HONEYPOT_MEASUREMENT_FIELDS = ("simulation_block", "reason")
 
-    `scanned_at` moves with the clock and `observed_block` (and the honeypot simulation's block) with the
-    chain, so the hashes of two identical scans differ while the verdict they carry does not.
-    """
+
+def _verdict_only(payload: dict) -> dict:
+    """An evidence document without how or when it was measured, so two scans of one token compare equal."""
     stripped = {
-        key: value for key, value in payload.items() if key not in ("scanned_at", "observed_block")
+        key: value for key, value in payload.items() if key not in _MEASUREMENT_FIELDS
     }
     honeypot = stripped.get("honeypot")
     if isinstance(honeypot, dict):
         stripped["honeypot"] = {
-            key: value for key, value in honeypot.items() if key != "simulation_block"
+            key: value for key, value in honeypot.items()
+            if key not in _HONEYPOT_MEASUREMENT_FIELDS
         }
     return stripped
 
