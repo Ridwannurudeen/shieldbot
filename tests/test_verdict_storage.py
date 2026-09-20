@@ -320,17 +320,18 @@ async def test_a_failed_transaction_insert_rolls_the_whole_record_back(tmp_path)
     try:
         evidence_id = await insert(database, onchain_status="pending")
         await database.claim_next_pending_verdict(4663)
-        execute = database._outbox.execute
+        outbox = await database._outbox()
+        execute = outbox.execute
 
         async def failing_insert(sql, parameters=()):
             if "INSERT OR IGNORE INTO verdict_transactions" in sql:
                 raise sqlite3.OperationalError("disk I/O error")
             return await execute(sql, parameters)
 
-        database._outbox.execute = failing_insert
+        outbox.execute = failing_insert
         with pytest.raises(sqlite3.OperationalError):
             await database.set_verdict_tx_hash(evidence_id, TX_A, 7, "02aa")
-        database._outbox.execute = execute
+        outbox.execute = execute
         # Any later write on the drain's own connection must not commit half of the failed record.
         await database.touch_verdict(evidence_id)
         [claimed] = await committed.get_claimed_verdicts(4663)
@@ -516,3 +517,27 @@ async def test_another_verdicts_commit_never_lands_a_hash_without_its_bytes(tmp_
         assert stored is not None and stored["id"] == hunter_id
     finally:
         await database.close()
+
+@pytest.mark.asyncio
+async def test_the_drains_connection_is_opened_by_the_drain_and_by_nothing_else(tmp_path):
+    """A process that only publishes, like the bot, must not hold a connection it never writes on."""
+    database = Database(str(tmp_path / "shieldbot.db"))
+    await database.initialize()
+    try:
+        assert database._drain_db is None
+        await insert(database, onchain_status="pending")
+        assert await database.get_latest_verdict_evidence(4663, TOKEN) is not None
+        assert database._drain_db is None
+        assert (await database.claim_next_pending_verdict(4663)) is not None
+        assert database._drain_db is not None
+    finally:
+        await database.close()
+    assert database._drain_db is None
+
+
+@pytest.mark.asyncio
+async def test_closing_a_database_that_never_drained_is_safe(tmp_path):
+    database = Database(str(tmp_path / "shieldbot.db"))
+    await database.initialize()
+    await database.close()
+    assert database._drain_db is None

@@ -1916,7 +1916,8 @@ async def test_a_failed_transaction_insert_never_stalls_the_outbox(tmp_path, rec
         chain = FakeChain()
         publisher = sender(database)
         await publisher.publish(4663, TOKEN, COMPLETE)
-        execute = database._outbox.execute
+        outbox = await database._outbox()
+        execute = outbox.execute
         failures = [sqlite3.OperationalError("disk I/O error")]
 
         async def failing_insert_once(sql, parameters=()):
@@ -1924,7 +1925,7 @@ async def test_a_failed_transaction_insert_never_stalls_the_outbox(tmp_path, rec
                 raise failures.pop()
             return await execute(sql, parameters)
 
-        database._outbox.execute = failing_insert_once
+        outbox.execute = failing_insert_once
         with rpc_node(chain):
             assert await publisher.drain_once() == "error"
         assert chain.sent == []
