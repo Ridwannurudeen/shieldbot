@@ -541,3 +541,16 @@ async def test_closing_a_database_that_never_drained_is_safe(tmp_path):
     await database.initialize()
     await database.close()
     assert database._drain_db is None
+
+@pytest.mark.asyncio
+async def test_a_write_after_close_never_reopens_the_drains_connection(tmp_path):
+    """The lifespan can close the database under a send that is still settling; reopening it would leak a handle."""
+    database = Database(str(tmp_path / "shieldbot.db"))
+    await database.initialize()
+    evidence_id = await insert(database, onchain_status="pending")
+    await database.claim_next_pending_verdict(4663)
+    await database.close()
+
+    with pytest.raises(AttributeError):
+        await database.update_verdict_onchain(evidence_id, "submitted")
+    assert database._drain_db is None

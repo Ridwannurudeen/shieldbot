@@ -185,10 +185,11 @@ class Database:
     async def _outbox(self) -> aiosqlite.Connection:
         """The connection the verdict drain writes on, so its rollback never reaches another coroutine's work.
 
-        Opened on first use: only the process that drains ever holds it. An in-memory database keeps the
-        shared connection, because a second connection to ":memory:" would be a different database.
+        Opened on first use: only the process that drains ever holds it, and a write after close() never
+        reopens one. An in-memory database keeps the shared connection, because a second connection to
+        ":memory:" would be a different database.
         """
-        if self._drain_db is None and self.db_path != ":memory:":
+        if self._drain_db is None and self._db is not None and self.db_path != ":memory:":
             async with self._drain_lock:
                 if self._drain_db is None:
                     self._drain_db = await aiosqlite.connect(self.db_path)
