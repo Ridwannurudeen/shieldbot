@@ -205,7 +205,8 @@ class VerdictPublisher:
         """Store the evidence for one scan; a Robinhood Chain verdict is queued for the drain.
 
         Returns the stored evidence id, hash, verdict and on-chain status, or None if nothing could be
-        stored. Never raises and never contacts the RPC.
+        stored. A 4663 verdict that repeats one already queued, being sent or on-chain is not stored again:
+        that record's summary is returned instead. Never raises and never contacts the RPC.
         """
         if not isinstance(subject, str) or not ADDRESS_RE.fullmatch(subject):
             logger.warning("Verdict not published: subject is not an address")
