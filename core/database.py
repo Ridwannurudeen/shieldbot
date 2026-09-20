@@ -192,18 +192,28 @@ class Database:
         if self._drain_db is None and self._db is not None and self.db_path != ":memory:":
             async with self._drain_lock:
                 if self._drain_db is None:
-                    self._drain_db = await aiosqlite.connect(self.db_path)
-                    await self._drain_db.execute("PRAGMA busy_timeout=5000")
+                    opened = await aiosqlite.connect(self.db_path)
+                    if self._db is None:
+                        # close() ran while this connection was opening; leaving it open would
+                        # keep aiosqlite's non-daemon worker thread alive past shutdown.
+                        await opened.close()
+                    else:
+                        await opened.execute("PRAGMA busy_timeout=5000")
+                        self._drain_db = opened
         return self._drain_db or self._db
 
     async def close(self):
-        """Close the database connection."""
-        if self._drain_db:
-            await self._drain_db.close()
-            self._drain_db = None
-        if self._db:
-            await self._db.close()
-            self._db = None
+        """Close the database connection.
+
+        Both handles are detached first: a write landing while a close is awaited must fail, not
+        reopen the drain's connection behind us.
+        """
+        drain, shared = self._drain_db, self._db
+        self._drain_db = self._db = None
+        if drain:
+            await drain.close()
+        if shared:
+            await shared.close()
 
     async def _create_tables(self):
         await self._db.executescript("""
