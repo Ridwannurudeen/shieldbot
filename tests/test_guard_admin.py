@@ -9,7 +9,9 @@ from fastapi.testclient import TestClient
 from utils.web3_client import Web3Client
 
 
-ADDRESS = "0x" + "aB" * 20
+# Lowercase: web3 6.15.1 (the pinned version) rejects mixed-case addresses that fail the
+# EIP-55 checksum, while web3 7.x accepts them. Lowercase is valid under both.
+ADDRESS = "0x" + "ab" * 20
 SUBJECT_PATH = f"/api/admin/guard-subjects/4663/{ADDRESS}"
 ADMIN_HEADERS = {"x-admin-secret": "test-admin"}
 
