@@ -5,6 +5,31 @@ does not modify ShieldBot's adapters or call competitor scanners. The coordinato
 starts the seven-day observation later; the example service is not installed by
 these commands.
 
+## Live deployment
+
+The observation census **is** now running. The paths in the examples below are
+illustrative; the deployed instance uses different ones:
+
+| | value |
+|---|---|
+| systemd unit | `rh-census-4663.service` |
+| working directory | `/opt/rh-census-4663/app` |
+| interpreter | `/opt/rh-census-4663/venv/bin/python` |
+| data directory | `/var/lib/rh-census-4663` |
+
+So the report against the live data is:
+
+```bash
+cd /opt/rh-census-4663/app
+/opt/rh-census-4663/venv/bin/python -m scripts.census_4663.report --data-dir /var/lib/rh-census-4663
+```
+
+Two practical notes. The database is large (tens of GB, ~19M event rows), so a full
+report takes far longer than a shell session usually stays open — **run it detached**
+(`nohup ... &`) and collect `report.json` / `report.md` from the data directory
+afterwards, rather than waiting on the pipe. A `COUNT(*)` over `events` is slow for
+the same reason; use `max(rowid)` when you only need an order of magnitude.
+
 ## Collector
 
 Run from the checkout root using the project's existing Python environment:
