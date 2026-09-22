@@ -2,13 +2,14 @@
 # Add nginx server block for shieldbotsecurity.online (bare domain)
 # and provision SSL cert via certbot.
 #
-# Prerequisites: DNS A record for @ -> 38.49.212.108 must be live.
-# Run: bash /opt/shieldbot/deploy/setup-bare-domain.sh
+# Prerequisites: DNS A record for @ must point to the current VPS_IP.
+# Run: VPS_IP=<current public IPv4> bash /opt/shieldbot/deploy/setup-bare-domain.sh
 
 set -euo pipefail
 
+: "${VPS_IP:?Set VPS_IP to the current public IPv4 from your VPS provider console}"
+
 DOMAIN="shieldbotsecurity.online"
-VPS_IP="38.49.212.108"
 
 echo "==> Checking DNS for ${DOMAIN}..."
 RESOLVED=$(dig +short "${DOMAIN}" A 2>/dev/null || true)
@@ -28,16 +29,16 @@ certbot certonly --nginx -d "${DOMAIN}" --non-interactive --agree-tos --register
 }
 
 echo "==> Updating nginx config..."
-cat > /etc/nginx/sites-available/shieldbot <<'NGINX'
+cat > /etc/nginx/sites-available/shieldbot <<NGINX
 # api subdomain (existing)
 server {
-    listen 38.49.212.108:80;
+    listen ${VPS_IP}:80;
     server_name api.shieldbotsecurity.online;
-    return 301 https://$server_name$request_uri;
+    return 301 https://\$server_name\$request_uri;
 }
 
 server {
-    listen 38.49.212.108:443 ssl http2;
+    listen ${VPS_IP}:443 ssl http2;
     server_name api.shieldbotsecurity.online;
 
     ssl_certificate /etc/nginx/ssl/api.shieldbotsecurity.online.crt;
@@ -50,22 +51,22 @@ server {
 
     location / {
         proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 }
 
 # bare domain
 server {
-    listen 38.49.212.108:80;
+    listen ${VPS_IP}:80;
     server_name shieldbotsecurity.online;
-    return 301 https://$server_name$request_uri;
+    return 301 https://\$server_name\$request_uri;
 }
 
 server {
-    listen 38.49.212.108:443 ssl http2;
+    listen ${VPS_IP}:443 ssl http2;
     server_name shieldbotsecurity.online;
 
     ssl_certificate /etc/letsencrypt/live/shieldbotsecurity.online/fullchain.pem;
@@ -78,10 +79,10 @@ server {
 
     location / {
         proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 }
 NGINX

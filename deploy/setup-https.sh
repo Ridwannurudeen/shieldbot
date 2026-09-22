@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Setup HTTPS via Caddy on VPS for shieldbotsecurity.online
-# Prerequisites: DNS A record for shieldbotsecurity.online -> 38.49.212.108
+# Prerequisites: DNS A record for shieldbotsecurity.online must point to the current VPS_IP.
+# Run: VPS_IP=<current public IPv4> bash /opt/shieldbot/deploy/setup-https.sh
 
 set -euo pipefail
+
+: "${VPS_IP:?Set VPS_IP to the current public IPv4 from your VPS provider console}"
+echo "==> DNS prerequisite: shieldbotsecurity.online must point to ${VPS_IP}"
 
 echo "==> Installing Caddy..."
 apt update
