@@ -1187,12 +1187,15 @@ async def firewall(req: FirewallRequest, request: Request):
         if container and container.db:
             cached = await container.db.get_contract_score(to_addr, req.chainId, max_age_seconds=300)
             if cached and cached.get('category_scores', {}).get('_scan_metadata', {}).get('coverage'):
-                policy_mode = container.settings.policy_mode if container else "BALANCED"
-                req_policy = request.headers.get("X-Policy-Mode")
-                return _build_cached_response(
-                    cached, decoded, value_bnb, req.chainId,
-                    to_addr=to_addr, policy_mode=req_policy or policy_mode,
-                )
+                policy_mode = "BALANCED"
+                if container.policy_engine:
+                    policy_mode = container.policy_engine.apply(
+                        [], {}, mode_override=request.headers.get("X-Policy-Mode"),
+                    )['policy_mode']
+                if policy_mode != "STRICT":
+                    return _build_cached_response(
+                        cached, decoded, value_bnb, req.chainId, to_addr=to_addr,
+                    )
 
         # 2c. Fast deployer history lookup (uses already-indexed data — non-blocking DB query)
         _deployer_ctx = None
@@ -2458,7 +2461,7 @@ def _coverage_fields(alert: Dict) -> Dict:
 
 def _build_cached_response(
     cached: Dict, decoded: Dict, value_bnb: float, chain_id: int = 56,
-    to_addr: str = "", policy_mode: str = "BALANCED",
+    to_addr: str = "",
 ) -> Dict:
     """Build a firewall response from a cached DB row."""
     risk_score = cached['risk_score']
@@ -2511,7 +2514,7 @@ def _build_cached_response(
         "network": _chain_id_to_name(chain_id),
         "partial": alert['status'] == 'unknown',
         "failed_sources": [],
-        "policy_mode": policy_mode,
+        "policy_mode": "BALANCED",
     }
 
 

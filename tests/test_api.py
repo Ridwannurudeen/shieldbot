@@ -367,6 +367,91 @@ async def test_firewall_routing_error_never_enters_legacy_scanner(routing_error_
     api.risk_engine.compute_from_results.assert_not_called()
 
 
+@pytest.fixture
+def cached_firewall_api(routing_error_api, monkeypatch):
+    from core.policy import PolicyEngine
+    from core.risk_engine import RiskEngine
+
+    api, services, _, _ = routing_error_api
+    services.policy_engine = PolicyEngine()
+    services.settings = SimpleNamespace(policy_mode="BALANCED")
+    services.indexer = None
+    services.db.upsert_contract_score = AsyncMock()
+    monkeypatch.setattr(api, "risk_engine", RiskEngine())
+    monkeypatch.setattr(api, "greenfield_service", None)
+    return api, services
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", ["provider unavailable", ""])
+@pytest.mark.parametrize("default_mode, override", [
+    ("BALANCED", "STRICT"), ("BALANCED", "strict"),
+    ("STRICT", None), ("STRICT", "invalid"),
+])
+async def test_strict_cached_analyzer_failure_matches_cold_scan(
+    cached_firewall_api, error, default_mode, override,
+):
+    from core.analyzer import AnalyzerResult
+    from core.policy import PolicyEngine
+
+    api, services = cached_firewall_api
+    services.policy_engine = PolicyEngine(default_mode)
+    services.settings.policy_mode = default_mode
+    results = [AnalyzerResult("honeypot", 1.0, 0, error=error, data={
+        "is_honeypot": False, "can_sell": True, "buy_tax": 0, "sell_tax": 0,
+    })]
+    services.registry.run_all.return_value = results
+    output = api.risk_engine.compute_from_results(results)
+    cached = {
+        "risk_score": output["rug_probability"], "risk_level": output["risk_level"],
+        "category_scores": {"_scan_metadata": {
+            key: output[key] for key in ("status", "coverage", "coverage_reasons")
+        }},
+    }
+    req = api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40)
+    request = SimpleNamespace(headers={"X-Policy-Mode": override} if override else {})
+    cold = await api.firewall(req, request)
+    services.db.get_contract_score.return_value = cached
+    warm = await api.firewall(req, request)
+
+    assert cold["classification"] == "BLOCK_RECOMMENDED"
+    assert warm["classification"] == cold["classification"]
+    assert warm["risk_score"] == cold["risk_score"]
+    assert warm["failed_sources"] == cold["failed_sources"] == ["honeypot"]
+    assert warm["policy_mode"] == cold["policy_mode"] == "STRICT"
+    assert warm.get("cached") is not True
+    assert services.registry.run_all.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("default_mode, override", [
+    ("BALANCED", None), ("BALANCED", "balanced"),
+    ("BALANCED", "invalid"), ("STRICT", "BALANCED"),
+])
+async def test_balanced_repeat_uses_cache_with_effective_policy(
+    cached_firewall_api, default_mode, override,
+):
+    from core.analyzer import AnalyzerResult
+    from core.policy import PolicyEngine
+
+    api, services = cached_firewall_api
+    services.policy_engine = PolicyEngine(default_mode)
+    services.settings.policy_mode = default_mode
+    services.registry.run_all.return_value = [AnalyzerResult("honeypot", 1.0, 0, data={
+        "is_honeypot": False, "can_sell": True, "buy_tax": 0, "sell_tax": 0,
+    })]
+    req = api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40)
+    request = SimpleNamespace(headers={"X-Policy-Mode": override} if override else {})
+    cold = await api.firewall(req, request)
+    services.db.get_contract_score.return_value = services.db.upsert_contract_score.call_args.kwargs
+    warm = await api.firewall(req, request)
+
+    assert warm["classification"] == cold["classification"] == "SAFE"
+    assert warm["policy_mode"] == cold["policy_mode"] == "BALANCED"
+    assert warm["cached"] is True
+    services.registry.run_all.assert_awaited_once()
+
+
 @pytest.mark.asyncio
 async def test_legacy_service_gather_preserves_routing_error(routing_error_api, monkeypatch):
     from utils.web3_client import UnsupportedChainError

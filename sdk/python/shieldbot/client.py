@@ -1,5 +1,6 @@
 """ShieldBot Python SDK — async client with local verdict caching."""
 
+import json
 import time
 import logging
 from typing import Dict, Optional
@@ -32,7 +33,7 @@ class ShieldBot:
         agent_id: str,
         base_url: str = DEFAULT_BASE_URL,
         cache_size: int = 10000,
-        cache_ttl: int = 86400,
+        cache_ttl: int = 60,
         fail_mode: str = "cached",
         timeout: float = 10.0,
     ):
@@ -55,8 +56,29 @@ class ShieldBot:
             )
         return self._http
 
-    def _cache_key(self, to: str, chain_id: int) -> str:
-        return f"{to.lower()}:{chain_id}"
+    def _cache_key(self, transaction: Dict) -> str:
+        def canonical_integer(value):
+            if type(value) is int:
+                return str(value)
+            if isinstance(value, str):
+                stripped = value.strip()
+                try:
+                    base = 16 if stripped.lower().startswith("0x") else 10
+                    return str(int(stripped, base))
+                except ValueError:
+                    pass
+            return ["raw", type(value).__name__, value]
+
+        from_addr = transaction.get("from", "")
+        to_addr = transaction.get("to", "")
+        data = transaction.get("data", "0x")
+        return json.dumps([
+            from_addr.lower() if isinstance(from_addr, str) else from_addr,
+            to_addr.lower() if isinstance(to_addr, str) else to_addr,
+            canonical_integer(transaction.get("chain_id", 56)),
+            data.lower() if isinstance(data, str) else data,
+            canonical_integer(transaction.get("value", "0")),
+        ], separators=(",", ":"), ensure_ascii=False)
 
     def _get_cached(self, key: str) -> Optional[Verdict]:
         if key in self._cache:
@@ -95,8 +117,7 @@ class ShieldBot:
             Verdict with allowed/blocked status, score, flags, and evidence.
         """
         to_addr = transaction.get("to", "")
-        chain_id = transaction.get("chain_id", 56)
-        cache_key = self._cache_key(to_addr, chain_id)
+        cache_key = self._cache_key(transaction)
 
         # Check local cache
         cached = self._get_cached(cache_key)

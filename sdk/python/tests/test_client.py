@@ -53,7 +53,7 @@ async def test_check_block_verdict(sb):
 
 @pytest.mark.asyncio
 async def test_local_cache_hit(sb):
-    """Second check for same address uses local cache."""
+    """Second check for the same transaction uses local cache."""
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
@@ -63,11 +63,132 @@ async def test_local_cache_hit(sb):
         "cached": False, "latency_ms": 100,
     }
     with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp) as mock_post:
-        await sb.check({"from": "0xA", "to": "0xSame", "chain_id": 56})
-        v2 = await sb.check({"from": "0xA", "to": "0xSame", "chain_id": 56})
+        transaction = {"from": "0xA", "to": "0xSame", "chain_id": 56, "data": "0x1234", "value": "1"}
+        await sb.check(transaction)
+        v2 = await sb.check(dict(transaction))
     # Only 1 HTTP call — second was cached
     assert mock_post.call_count == 1
     assert v2.score == 5
+
+
+@pytest.mark.asyncio
+async def test_equivalent_transaction_encodings_reuse_cache(sb):
+    response = MagicMock(status_code=200)
+    response.json.return_value = {
+        "status": "ok", "coverage": {"honeypot": 1},
+        "verdict": "ALLOW", "score": 5, "flags": [],
+    }
+    transaction = {
+        "from": "0x52908400098527886E0F7030069857D2E4169EE7",
+        "to": "0x8617E340B3D01FA5F11F306F4090FD50E238070D",
+        "chain_id": 56,
+        "data": "0xABCD", "value": "0",
+    }
+    with patch(
+        "shieldbot.client.httpx.AsyncClient.post",
+        new_callable=AsyncMock,
+        return_value=response,
+    ) as post:
+        await sb.check(transaction)
+        await sb.check({
+            **transaction,
+            "from": transaction["from"].lower(),
+            "to": transaction["to"].lower(),
+            "chain_id": "056",
+            "data": transaction["data"].lower(),
+            "value": "0x0",
+        })
+        await sb.check({
+            **transaction,
+            "from": transaction["from"].lower(),
+            "to": transaction["to"].lower(),
+            "data": transaction["data"].lower(),
+            "value": 0,
+        })
+    assert post.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_value,second_value", [
+    ("0x10", "10"),
+    ("not-a-number", "0"),
+])
+async def test_different_value_encodings_do_not_share_cache(sb, first_value, second_value):
+    allow = MagicMock(status_code=200)
+    allow.json.return_value = {
+        "status": "ok", "coverage": {"honeypot": 1},
+        "verdict": "ALLOW", "score": 5, "flags": [],
+    }
+    block = MagicMock(status_code=200)
+    block.json.return_value = {"verdict": "BLOCK", "score": 90}
+    transaction = {
+        "from": "0xAgent", "to": "0xTarget", "chain_id": 56,
+        "data": "0x1234", "value": first_value,
+    }
+    with patch(
+        "shieldbot.client.httpx.AsyncClient.post",
+        new_callable=AsyncMock,
+        side_effect=[allow, block],
+    ) as post:
+        await sb.check(transaction)
+        second = await sb.check({**transaction, "value": second_value})
+    assert post.await_count == 2
+    assert second.blocked
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,value", [
+    ("from", "0xOther"),
+    ("to", "0xOther"),
+    ("chain_id", 1),
+    ("data", "0x095ea7b3" + "0" * 24 + "1" * 40 + "f" * 64),
+    ("value", "2"),
+])
+async def test_cached_allow_does_not_authorize_different_transaction(sb, field, value):
+    transaction = {
+        "from": "0xAgent", "to": "0xTarget", "chain_id": 56,
+        "data": "0x095ea7b3" + "0" * 24 + "1" * 40 + "0" * 63 + "1",
+        "value": "1",
+    }
+    allow = MagicMock(status_code=200)
+    allow.json.return_value = {
+        "status": "ok", "coverage": {"honeypot": 1},
+        "verdict": "ALLOW", "score": 5, "flags": [],
+    }
+    block = MagicMock(status_code=200)
+    block.json.return_value = {"verdict": "BLOCK", "score": 90}
+    with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, side_effect=[allow, block]) as post:
+        first = await sb.check(transaction)
+        second = await sb.check({**transaction, field: value})
+    assert first.allowed
+    assert post.await_count == 2
+    assert second.blocked
+    await sb.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cache_ttl,expiry", [(None, 60), (2, 2), (0, 0)])
+async def test_expired_allow_is_not_used_when_api_unreachable(cache_ttl, expiry):
+    options = {} if cache_ttl is None else {"cache_ttl": cache_ttl}
+    client = ShieldBot(api_key="sb_test", agent_id="agent:1", **options)
+    transaction = {"from": "0xAgent", "to": "0xTarget", "data": "0x1234", "value": "1", "chain_id": 56}
+    response = MagicMock(status_code=200)
+    response.json.return_value = {
+        "status": "ok", "coverage": {"honeypot": 1},
+        "verdict": "ALLOW", "score": 5, "flags": [],
+    }
+    with patch("shieldbot.client.time.time", return_value=1000) as now, patch(
+        "shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock,
+        side_effect=[response, httpx.ConnectError("offline")],
+    ) as post:
+        first = await client.check(transaction)
+        now.return_value += expiry
+        second = await client.check(transaction)
+    assert first.allowed
+    assert post.await_count == 2
+    assert not second.allowed
+    assert second.analysis_unavailable
+    await client.close()
 
 
 def test_verdict_properties():

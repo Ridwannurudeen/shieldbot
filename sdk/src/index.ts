@@ -18,7 +18,7 @@ export interface ShieldBotConfig {
   timeout?: number;
   /** Local verdict cache size. Default: 10000. */
   cacheSize?: number;
-  /** Local verdict cache TTL in seconds. Default: 86400 (24h). */
+  /** Local verdict cache TTL in seconds. Default: 60 (bounds stale decisions to one minute). */
   cacheTtl?: number;
   /** Fail mode when API is unreachable: 'cached' | 'open' | 'closed'. Default: 'cached'. */
   failMode?: 'cached' | 'open' | 'closed';
@@ -247,7 +247,7 @@ export class ShieldBot {
     this.timeout = config.timeout || DEFAULT_TIMEOUT;
     this.failMode = config.failMode || 'cached';
     this.cacheSize = config.cacheSize || 10000;
-    this.cacheTtl = (config.cacheTtl || 86400) * 1000; // convert to ms
+    this.cacheTtl = (config.cacheTtl ?? 60) * 1000; // convert to ms
     this.verdictCache = new Map();
   }
 
@@ -337,9 +337,26 @@ export class ShieldBot {
       throw new ShieldBotError('agentId required for check()', 400, 'MISSING_AGENT_ID');
     }
 
-    const data = transaction.data || '0x';
-    // Use selector (10 chars) + first param (64 chars) for cache key to avoid collisions
-    const cacheKey = `${transaction.to}:${transaction.chainId || 56}:${data.slice(0, 74)}`;
+    const canonicalInteger = (value: unknown): string => {
+      if (
+        !['string', 'number', 'bigint'].includes(typeof value) ||
+        (typeof value === 'string' && value.trim() === '')
+      ) {
+        return `raw:${typeof value}:${String(value)}`;
+      }
+      try {
+        return BigInt(value as string | number | bigint).toString();
+      } catch {
+        return `raw:${typeof value}:${String(value)}`;
+      }
+    };
+    const cacheKey = JSON.stringify([
+      transaction.from?.toLowerCase(),
+      transaction.to?.toLowerCase(),
+      canonicalInteger(transaction.chainId || 56),
+      (transaction.data || '0x').toLowerCase(),
+      canonicalInteger(transaction.value ?? '0'),
+    ]);
 
     // Check local cache
     const cached = this.verdictCache.get(cacheKey);
@@ -446,9 +463,8 @@ export class ShieldBot {
   }
 
   private _handleFailMode(cacheKey: string, error: Error): Verdict {
-    // Try local cache regardless of mode
     const cached = this.verdictCache.get(cacheKey);
-    if (cached && this.failMode === 'cached') {
+    if (cached && this.failMode === 'cached' && Date.now() - cached.timestamp < this.cacheTtl) {
       return { ...cached.verdict, cached: true };
     }
 

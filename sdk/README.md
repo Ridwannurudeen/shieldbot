@@ -75,14 +75,14 @@ const shield = new ShieldBot({
   baseUrl: 'https://...',    // Custom API URL (default: production)
   timeout: 10000,            // Request timeout in ms
   cacheSize: 10000,          // Local verdict cache entries
-  cacheTtl: 86400,           // Cache TTL in seconds (24h)
+  cacheTtl: 60,              // Cache TTL in seconds (bounds stale decisions to one minute)
   failMode: 'cached',        // 'cached' | 'open' | 'closed'
 });
 ```
 
 ## Fail Modes
 
-- **`cached`** (default): Return last cached verdict if API is unreachable; with no cached verdict, return `WARN` with `analysis_unavailable: true`
+- **`cached`** (default): Return an unexpired cached verdict for the identical transaction if API is unreachable; otherwise, return `WARN` with `analysis_unavailable: true`
 - **`open`**: Allow transactions when API is down (fail-open)
 - **`closed`**: Block transactions when API is down (fail-closed)
 
