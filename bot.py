@@ -892,8 +892,8 @@ async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Check if it's a token contract
         is_token = await web3_client.is_token_contract(address, chain_id=user_chain_id)
 
-        if is_token:
-            await status_msg.edit_text(f"🔍 Detected token on {chain_name} — running safety checks...")
+        if is_token is not False:
+            await status_msg.edit_text(f"🔍 Running token safety checks on {chain_name}...")
             await check_token(update, address, chain_id=user_chain_id)
         else:
             await status_msg.edit_text(f"🔍 Running security scan on {chain_name}...")

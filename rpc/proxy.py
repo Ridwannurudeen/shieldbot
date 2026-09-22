@@ -89,7 +89,7 @@ class RPCProxy:
                 return await self._forward(upstream_rpc, payload, chain_id)
 
             # Detect token vs non-token for accurate risk assessment
-            is_token = True
+            is_token = None
             is_verified = False
             try:
                 is_token = await self._container.web3_client.is_token_contract(to_addr, chain_id=chain_id)

@@ -83,7 +83,7 @@ class IntentMismatchAnalyzer(Analyzer):
         # 4. Unknown selector — skip entirely for verified/non-token contracts
         if decoded.get('category') == 'unknown':
             is_verified = ctx.extra.get('is_verified')
-            if not ctx.is_token or is_verified:
+            if ctx.is_token is False or is_verified:
                 # Verified contracts and non-token contracts (marketplaces,
                 # bridges, governance) commonly have selectors outside our
                 # known list — this is normal, not suspicious.  No penalty.

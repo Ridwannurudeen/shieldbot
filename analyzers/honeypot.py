@@ -24,7 +24,7 @@ class HoneypotAnalyzer(Analyzer):
         # Honeypot simulation is only meaningful for ERC-20 tokens.
         # Non-token contracts (marketplaces, bridges, governance) will always
         # fail simulation or return nonsensical data — skip entirely.
-        if not ctx.is_token:
+        if ctx.is_token is False:
             return AnalyzerResult(
                 name=self.name, weight=self.weight,
                 score=0, flags=[], data={'skipped': True, 'reason': 'non-token contract'},

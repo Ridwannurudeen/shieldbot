@@ -24,7 +24,7 @@ class MarketAnalyzer(Analyzer):
         # DEX market data is only meaningful for ERC-20 tokens.
         # Non-token contracts (marketplaces, bridges, governance) have no
         # trading pairs — zero liquidity is expected, not suspicious.
-        if not ctx.is_token:
+        if ctx.is_token is False:
             return AnalyzerResult(
                 name=self.name, weight=self.weight,
                 score=0, flags=[], data={'skipped': True, 'reason': 'non-token contract'},

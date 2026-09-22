@@ -1206,7 +1206,7 @@ async def firewall(req: FirewallRequest, request: Request):
             # Detect if target is a token contract — non-tokens (marketplaces,
             # bridges, governance) should not be penalized by token-specific
             # checks (honeypot simulation, DEX liquidity, etc.)
-            is_token = True
+            is_token = None
             is_verified = None
             try:
                 is_token = await web3_client.is_token_contract(to_addr, chain_id=req.chainId)
@@ -1458,7 +1458,7 @@ async def firewall(req: FirewallRequest, request: Request):
             logger.warning(f"Composite pipeline failed for {to_addr}, falling back: {type(e).__name__}")
 
         # 4. Fallback: legacy scanner + AI firewall
-        is_token = False
+        is_token = None
         contract_scan = {}
         try:
             is_token = await web3_client.is_token_contract(to_addr, chain_id=req.chainId)
@@ -1467,7 +1467,7 @@ async def firewall(req: FirewallRequest, request: Request):
         except Exception:
             pass
 
-        if is_token:
+        if is_token is not False:
             contract_scan = await token_scanner.check_token(to_addr, chain_id=req.chainId)
         else:
             contract_scan = await tx_scanner.scan_address(to_addr, chain_id=req.chainId)

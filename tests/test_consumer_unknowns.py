@@ -87,6 +87,102 @@ async def test_fresh_response_persists_unknowns(consumer_api, incomplete_output)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('identification', [True, False, None, 'error'])
+async def test_fresh_response_preserves_token_identification(consumer_api, incomplete_output, identification):
+    api, services = consumer_api
+    api.web3_client.is_token_contract.return_value = identification
+    if identification == 'error':
+        api.web3_client.is_token_contract.side_effect = TimeoutError('RPC unavailable')
+    api.risk_engine.compute_from_results.return_value = incomplete_output
+    response = await api.firewall(
+        api.FirewallRequest(to='0x' + 'a' * 40, sender='0x' + 'b' * 40),
+        SimpleNamespace(headers={}),
+    )
+    expected = None if identification == 'error' else identification
+    assert services.registry.run_all.call_args.args[0].is_token is expected
+    assert api.risk_engine.compute_from_results.call_args.kwargs['is_token'] is expected
+    assert_unknown_response(response)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('identification', [True, False, None, 'error'])
+async def test_legacy_firewall_only_skips_token_scan_for_confirmed_non_token(
+    consumer_api, incomplete_output, monkeypatch, identification,
+):
+    api, services = consumer_api
+    services.registry.run_all.side_effect = RuntimeError('pipeline unavailable')
+    api.web3_client.is_token_contract.return_value = identification
+    if identification == 'error':
+        api.web3_client.is_token_contract.side_effect = TimeoutError('RPC unavailable')
+    scan = dict(incomplete_output, risk_score=0)
+    token_scan = AsyncMock(return_value=dict(scan))
+    contract_scan = AsyncMock(return_value=dict(scan))
+    monkeypatch.setattr(api, 'token_scanner', SimpleNamespace(check_token=token_scan))
+    monkeypatch.setattr(api, 'tx_scanner', SimpleNamespace(scan_address=contract_scan))
+    response = await api.firewall(
+        api.FirewallRequest(to='0x' + 'a' * 40, sender='0x' + 'b' * 40),
+        SimpleNamespace(headers={}),
+    )
+    assert token_scan.await_count == int(identification is not False)
+    assert contract_scan.await_count == int(identification is False)
+    assert_unknown_response(response)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('identification', [True, False, None])
+async def test_bot_only_skips_token_scan_for_confirmed_non_token(identification):
+    import ast
+    from pathlib import Path
+
+    tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
+    handler = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)
+                   and node.name == 'handle_address')
+    namespace = {
+        'Update': object, 'ContextTypes': SimpleNamespace(DEFAULT_TYPE=object),
+        'parse_chain_prefix': lambda text: (None, text),
+        '_get_user_chain_id': lambda context: 56, 'get_chain_name': lambda chain_id: 'BSC',
+        'web3_client': SimpleNamespace(is_token_contract=AsyncMock(return_value=identification)),
+        'check_token': AsyncMock(), 'scan_contract': AsyncMock(),
+    }
+    exec(compile(ast.Module(body=[handler], type_ignores=[]), 'bot.py', 'exec'), namespace)
+    status = SimpleNamespace(edit_text=AsyncMock())
+    update = SimpleNamespace(message=SimpleNamespace(
+        text='0x' + 'a' * 40, reply_text=AsyncMock(return_value=status),
+    ))
+    await namespace['handle_address'](update, SimpleNamespace(user_data={}))
+    assert namespace['check_token'].await_count == int(identification is not False)
+    assert namespace['scan_contract'].await_count == int(identification is False)
+    if identification is None:
+        assert 'Detected token' not in status.edit_text.call_args.args[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('identification', [True, False, None, 'error'])
+async def test_rpc_preserves_token_identification(mock_web3_client, identification):
+    from rpc.proxy import RPCProxy
+
+    mock_web3_client.is_token_contract = AsyncMock(return_value=identification)
+    if identification == 'error':
+        mock_web3_client.is_token_contract.side_effect = TimeoutError('RPC unavailable')
+    services = SimpleNamespace(
+        web3_client=mock_web3_client,
+        registry=SimpleNamespace(run_all=AsyncMock(return_value=[])),
+        risk_engine=MagicMock(),
+    )
+    services.risk_engine.compute_from_results.return_value = {
+        'risk_level': 'HIGH', 'rug_probability': 95,
+    }
+    response = await RPCProxy(services).handle_request(56, {
+        'jsonrpc': '2.0', 'id': 1, 'method': 'eth_sendTransaction',
+        'params': [{'to': '0x' + 'a' * 40, 'from': '0x' + 'b' * 40}],
+    })
+    expected = None if identification == 'error' else identification
+    assert services.registry.run_all.call_args.args[0].is_token is expected
+    assert services.risk_engine.compute_from_results.call_args.kwargs['is_token'] is expected
+    assert response['error']['code'] == -32003
+
+
+@pytest.mark.asyncio
 async def test_legacy_cache_row_is_rescanned(consumer_api, incomplete_output):
     api, services = consumer_api
     services.db.get_contract_score.return_value = {'risk_score': 0, 'risk_level': 'UNKNOWN'}

@@ -1,5 +1,5 @@
 import logging
-from typing import List, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from core.analyzer import AnalyzerResult
@@ -46,7 +46,7 @@ class RiskEngine:
         honeypot_data: dict,
         dex_data: dict,
         ethos_data: dict,
-        is_token: bool = True,
+        is_token: Optional[bool] = True,
     ) -> dict:
         critical_flags = []
 
@@ -156,7 +156,7 @@ class RiskEngine:
             AnalyzerResult('honeypot', WEIGHT_HONEYPOT, honeypot_score, data=honeypot_data),
         ]
         composite, category_scores, coverage, coverage_reasons, covered_weight = self._covered_scores(component_results)
-        required_unknown = is_token and coverage.get('honeypot', 0) < 1
+        required_unknown = is_token is not False and coverage.get('honeypot', 0) < 1
         incomplete = required_unknown or covered_weight < 1 - 1e-9 or any(fraction < 1 for fraction in coverage.values())
         if required_unknown:
             critical_flags.append('Sellability unknown: ' + coverage_reasons.get('honeypot', 'Incomplete honeypot data'))
@@ -167,7 +167,7 @@ class RiskEngine:
         ownership_renounced = contract_data.get('ownership_renounced', False)
         liquidity_info = dex_data.get('liquidity_usd')
 
-        if is_token:
+        if is_token is not False:
             if has_mint and has_proxy and ownership_renounced is False:
                 composite = max(composite, 85)
 
@@ -249,7 +249,7 @@ class RiskEngine:
             'status': 'unknown' if incomplete else 'ok',
         }
 
-    def compute_from_results(self, results: List["AnalyzerResult"], is_token: bool = True) -> dict:
+    def compute_from_results(self, results: List["AnalyzerResult"], is_token: Optional[bool] = True) -> dict:
         """
         Compute composite risk from a list of AnalyzerResult objects.
         Produces identical output shape to compute_composite_risk().
@@ -273,7 +273,7 @@ class RiskEngine:
         ethos_data = by_name.get("behavioral", _EMPTY_RESULT).data
 
         composite, category_scores, coverage, coverage_reasons, covered_weight = self._covered_scores(results)
-        required_unknown = is_token and coverage.get('honeypot', 0) < 1
+        required_unknown = is_token is not False and coverage.get('honeypot', 0) < 1
         incomplete = required_unknown or covered_weight < 1 - 1e-9 or any(fraction < 1 for fraction in coverage.values())
         critical_flags = [flag for result in results for flag in result.flags]
         if required_unknown:
@@ -295,7 +295,7 @@ class RiskEngine:
         is_verified = contract_data.get('is_verified', True)
         has_blacklist = contract_data.get('has_blacklist', False)
 
-        if is_token:
+        if is_token is not False:
             if has_mint and has_proxy and ownership_renounced is False:
                 composite = max(composite, 85)
 
@@ -449,11 +449,11 @@ class RiskEngine:
             composite /= weight
         return composite, scores, coverage, reasons, covered_weight
 
-    def _determine_archetype(self, contract_data, honeypot_data, dex_data, rug_prob, is_token=True):
+    def _determine_archetype(self, contract_data, honeypot_data, dex_data, rug_prob, is_token: Optional[bool] = True):
         # Token-specific archetypes only apply to ERC-20 tokens.
         # Non-token contracts should never be labelled honeypot/rug_pull
         # based on token-oriented heuristics.
-        if is_token:
+        if is_token is not False:
             if honeypot_data.get('is_honeypot') or honeypot_data.get('can_sell') is False:
                 return 'honeypot'
             if dex_data.get('wash_trade_flag'):

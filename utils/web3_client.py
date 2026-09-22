@@ -86,16 +86,27 @@ class Web3Client:
     async def is_contract(self, address: str, chain_id: int = 56) -> Optional[bool]:
         return await self._get_adapter(chain_id).is_contract(address)
 
-    async def is_token_contract(self, address: str, chain_id: int = 56) -> bool:
+    async def is_token_contract(self, address: str, chain_id: int = 56) -> Optional[bool]:
+        from web3.exceptions import BadFunctionCallOutput, ContractLogicError, OffchainLookup
+
         w3 = self.get_web3(chain_id)
         try:
             contract = w3.eth.contract(
                 address=Web3.to_checksum_address(address), abi=self.erc20_abi,
             )
-            contract.functions.symbol().call()
+            try:
+                contract.functions.symbol().call()
+            except BadFunctionCallOutput:
+                # 0x95d89b41 is the symbol() selector.
+                reply = w3.eth.call({'to': contract.address, 'data': '0x95d89b41'})
+                if len(reply) == 0:
+                    return False
+                raise
             return True
-        except Exception:
-            return False
+        except Exception as e:
+            if isinstance(e, ContractLogicError) and not isinstance(e, OffchainLookup):
+                return False
+            return None
 
     async def get_bytecode(self, address: str, chain_id: int = 56) -> Optional[str]:
         return await self._get_adapter(chain_id).get_bytecode(address)
