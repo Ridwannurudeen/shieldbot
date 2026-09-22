@@ -432,6 +432,30 @@ Verify **both contracts on all three explorers**, using the same source and `fou
 as deployment. The guard constructor takes `(REGISTRY)`; the transfer constructor takes
 `(GUARD, SUBJECT, USDG, RECIPIENT)` in that order. Use the actual deployment arguments throughout.
 
+### Verify the deployment from a clean checkout
+
+With the repository's Python requirements installed, run this from `contracts/base` using the public
+addresses above. `OWNER` and `EXPECTED_RECORDER` must be the intended **current** authority addresses:
+
+```bash
+python ../../scripts/verify_deployment.py \
+  --rpc-url "$RH_RPC" \
+  --registry "$REGISTRY" --guard "$GUARD" --transfer "$TRANSFER" \
+  --subject "$SUBJECT" --usdg "$USDG" --recipient "$RECIPIENT" \
+  --owner "$OWNER" --recorder "$EXPECTED_RECORDER" --max-age 900
+```
+
+The script uses `eth_chainId` to verify 4663, then only `eth_getCode` and read-only `eth_call` requests.
+It reads no keys, keystores or application configuration and sends no transactions. Every check prints
+PASS or FAIL, each contract's runtime size is reported, and any failed check produces a nonzero exit.
+The canonical USDG proxy is read directly from `services/robinhood_simulation.py`.
+
+A decodable `check(subject, maxAge)` denial is a successful read, not permission to transfer; an empty
+registry normally denies. The 900-second publication-age policy is useful only for actively watched
+subjects (see the policy below). Reads use `latest` sequentially, so this is not an atomic snapshot.
+Matching getters and nonempty bytecode do not authenticate contract source: complete the explorer
+source verification below and use a trusted RPC.
+
 ### Guard and transfer on Etherscan
 
 Reuse the `ETHERSCAN_V2_API_KEY` environment and chain-4663 configuration from step 4:
