@@ -465,8 +465,8 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         total = result.get('total_approvals', 0)
         high = result.get('high_risk', 0)
         medium = result.get('medium_risk', 0)
-        safe = total - high - medium
-        incomplete = result.get('status') == 'unknown'
+        lower_risk = total - high - medium
+        incomplete = is_scan_incomplete(result)
 
         response = f"🚨 **Rescue Mode — Approval Scan**\n\n"
         response += f"**Wallet:** `{address}`\n"
@@ -474,10 +474,16 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response += f"**Total Approvals:** {total}\n"
         if incomplete:
             reasons = '; '.join(dict.fromkeys(result.get('coverage_reasons', {}).values())) or 'Approval data unavailable'
-            response += f"🔴 High Risk: {high} | 🟡 Medium: {medium} | ⚪ Unconfirmed: {safe}\n"
+            response += f"🔴 High Risk: {high} | 🟡 Medium: {medium} | ⚪ Unconfirmed: {lower_risk}\n"
             response += f"⚠️ **Scan incomplete:** {reasons}\n"
         else:
-            response += f"🔴 High Risk: {high} | 🟡 Medium: {medium} | 🟢 Safe: {safe}\n"
+            response += f"🔴 High Risk: {high} | 🟡 Medium: {medium} | Lower risk: {lower_risk}\n"
+
+        response += (
+            "\n**Scope:** ERC-20 allowances found in the queried approval history; "
+            "risk labels use approval amounts and known-spender labels. "
+            "This does not audit spender contracts, NFT approvals, or off-chain signatures.\n"
+        )
 
         # Show risky approvals
         approvals = result.get('approvals', [])
@@ -507,10 +513,14 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         revoke_txs = result.get('revoke_txs', [])
         if revoke_txs:
             response += f"\n**Revoke Instructions:**\n"
-            response += f"Found {len(revoke_txs)} approval(s) to revoke.\n"
-            response += "Use [Revoke.cash](https://revoke.cash/) or submit the revoke transactions from your wallet.\n"
+            response += f"Found {len(revoke_txs)} approval(s) flagged for revocation review.\n"
+            response += (
+                "This bot has not revoked any approvals or submitted transactions. "
+                "Review the token, spender and chain in your wallet or "
+                "[Revoke.cash](https://revoke.cash/), then sign and submit any revocation yourself.\n"
+            )
         elif total > 0 and high == 0 and medium == 0 and not incomplete:
-            response += "\n✅ All approvals look safe — no action needed.\n"
+            response += "\nNo high- or medium-risk approvals found among the approvals checked.\n"
 
         try:
             await status_msg.delete()

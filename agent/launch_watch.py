@@ -18,8 +18,10 @@ So:
   recorded as discovered-but-unscanned; nothing ever marks them clean.
 - 4663 pairs the sweep finds due a recheck queue here and alternate with launch scans, so neither
   starves the other.
+- A bounded set of confirmed guard subjects is remeasured oldest-first. Launches retain at least
+  alternate scan slots, and general rechecks get a slot after at most one guard set of attempts.
 
-Every scan goes through the hunter's own outcome logic (Hunter.scan_launch, Hunter.recheck_pair).
+Every scan goes through the hunter's outcome logic, including Hunter.rescan_guard_subject.
 """
 
 import asyncio
@@ -27,6 +29,7 @@ import logging
 import time
 import traceback
 
+from core.database import GUARD_WATCH_MAX_SUBJECTS
 from services.launch_discovery import CHAIN_ID, LaunchDiscoveryError, WrongChainError
 from services.rpc_guard import BREAKER_BASE_COOLDOWN_SECONDS, BREAKER_MAX_COOLDOWN_SECONDS, BreakerOpenError
 
@@ -55,6 +58,8 @@ class LaunchWatch:
         self._swaps = {}
         self._rechecks = {}
         self._last_job = None
+        self._guard_attempted = set()
+        self._guard_jobs_since_recheck = 0
 
     @property
     def is_running(self) -> bool:
@@ -135,7 +140,17 @@ class LaunchWatch:
             pools = {row["pool_id"] for row in window}
             self._swaps = {pool: count for pool, count in self._swaps.items() if pool in pools}
             while self._clock() < deadline:
-                job = self._next_job(window)
+                guards = await self.hunter.due_guard_subjects()
+                # A failing oldest subject must not monopolize successive guard slots.
+                # Keep the round across cycles: a budget wait often ends a cycle after one scan.
+                self._guard_attempted.intersection_update(
+                    row["subject"] for row in await self.hunter.db.get_guard_subjects(CHAIN_ID)
+                )
+                untried = [row for row in guards if row["subject"] not in self._guard_attempted]
+                if guards and not untried:
+                    self._guard_attempted.clear()
+                    untried = guards
+                job = self._next_job(window, untried)
                 if job is None:
                     return
                 kind, item = job
@@ -143,9 +158,14 @@ class LaunchWatch:
                     if kind == "launch":
                         await self.hunter.scan_launch(investigation_id, item)
                         window.remove(item)
+                    elif kind == "guard":
+                        await self.hunter.rescan_guard_subject(item)
+                        self._guard_attempted.add(item["subject"])
+                        self._guard_jobs_since_recheck += 1
                     else:
                         await self.hunter.recheck_pair(investigation_id, item)
                         del self._rechecks[item["pair_address"]]
+                        self._guard_jobs_since_recheck = 0
                 except BreakerOpenError:
                     return
                 self._last_job = kind
@@ -157,12 +177,19 @@ class LaunchWatch:
         rows = await self.hunter.db.get_unscanned_launches(CHAIN_ID, CANDIDATE_LIMIT)
         return [row for row in rows if row["block_number"] > self._target - TRIAGE_WINDOW_BLOCKS]
 
-    def _next_job(self, window):
-        """The next scan: a queued recheck after a launch scan, else the busiest traded launch."""
+    def _next_job(self, window, guards=()):
+        """Give launches at least alternate slots; due guard scans precede general rechecks."""
         traded = [row for row in window if self._swaps.get(row["pool_id"], 0) > 0]
         launch = max(
             traded, key=lambda row: (self._swaps[row["pool_id"]], row["block_number"]), default=None
         )
+        if guards and (launch is None or self._last_job == "launch"):
+            # Even permanent guard failures yield a background slot after one capped
+            # set of attempts, preserving the sweep's existing recheck lane.
+            if not self._rechecks or (
+                self._last_job != "guard" and self._guard_jobs_since_recheck < GUARD_WATCH_MAX_SUBJECTS
+            ):
+                return "guard", guards[0]
         if self._rechecks and (launch is None or self._last_job == "launch"):
             return "recheck", next(iter(self._rechecks.values()))
         if launch is not None:

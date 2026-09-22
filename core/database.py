@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import re
 import time
 import logging
@@ -12,6 +13,10 @@ import aiosqlite
 from core.extension_formatter import is_scan_incomplete
 
 logger = logging.getLogger(__name__)
+
+# Chain 4663 shares 1 rps; discovery uses ~0.15. Four subjects at 22 requests
+# every 300s use 0.293 rps, leaving ~0.557 rps for launches and other work.
+GUARD_WATCH_MAX_SUBJECTS = max(0, int(os.getenv("GUARD_WATCH_MAX_SUBJECTS", "4")))
 
 # Eighteen digits keep a cursor block inside SQLite's signed 64-bit integers.
 _LAUNCH_CURSOR = re.compile(r"(\d{1,18}):(0x[0-9a-f]{40})")
@@ -2364,7 +2369,24 @@ class Database:
                 created_at REAL NOT NULL,
                 PRIMARY KEY (evidence_id, tx_hash)
             );
+
+            CREATE TABLE IF NOT EXISTS guard_subjects (
+                chain_id INTEGER NOT NULL,
+                subject TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                last_observed_at INTEGER,
+                retry_after REAL NOT NULL DEFAULT 0,
+                PRIMARY KEY (chain_id, subject)
+            );
         """)
+        # Lowering the configured cap retires excess registrations deterministically.
+        await self._db.execute("""
+            UPDATE guard_subjects SET enabled = 0
+            WHERE enabled = 1 AND rowid NOT IN (
+                SELECT rowid FROM guard_subjects WHERE enabled = 1
+                ORDER BY rowid LIMIT ?
+            )
+        """, (GUARD_WATCH_MAX_SUBJECTS,))
         await self._db.commit()
         await self._migrate_verdict_outbox_columns()
 
@@ -2416,12 +2438,106 @@ class Database:
     ):
         """Record the on-chain outcome for one stored evidence document."""
         outbox = await self._outbox()
-        await outbox.execute("""
-            UPDATE verdict_evidence
-            SET onchain_status = ?, tx_hash = ?, onchain_error = ?, updated_at = ?
-            WHERE id = ?
-        """, (onchain_status, tx_hash, onchain_error, time.time(), evidence_id))
-        await outbox.commit()
+        try:
+            await outbox.execute("""
+                UPDATE verdict_evidence
+                SET onchain_status = ?, tx_hash = ?, onchain_error = ?, updated_at = ?
+                WHERE id = ?
+            """, (onchain_status, tx_hash, onchain_error, time.time(), evidence_id))
+            if onchain_status == "confirmed":
+                cursor = await outbox.execute("""
+                    SELECT chain_id, subject, canonical FROM verdict_evidence
+                    WHERE id = ? AND chain_id = 4663 AND registry IS NOT NULL AND registry != ''
+                """, (evidence_id,))
+                row = await cursor.fetchone()
+                if row is not None:
+                    await self._admit_guard_subject(outbox, *row, reenable=False)
+            await outbox.commit()
+        except BaseException:
+            await outbox.rollback()
+            raise
+
+    async def _admit_guard_subject(
+        self, connection, chain_id: int, subject: str, canonical: str, reenable: bool
+    ) -> bool:
+        evidence = json.loads(canonical)
+        observed_at = evidence.get("observed_at")
+        if type(observed_at) is not int or not 0 < observed_at <= time.time():
+            return False
+        measured_at = None if is_scan_incomplete(evidence) else observed_at
+        cursor = await connection.execute("""
+            INSERT INTO guard_subjects (chain_id, subject, last_observed_at)
+            SELECT ?, ?, ? WHERE ? > 0 AND (
+                (SELECT COUNT(*) FROM guard_subjects WHERE enabled = 1) < ?
+                OR EXISTS (
+                    SELECT 1 FROM guard_subjects WHERE chain_id = ? AND subject = ? AND enabled = 1
+                )
+            )
+            ON CONFLICT(chain_id, subject) DO UPDATE SET
+                enabled = 1,
+                last_observed_at = CASE
+                    WHEN excluded.last_observed_at IS NULL THEN guard_subjects.last_observed_at
+                    WHEN guard_subjects.last_observed_at IS NULL THEN excluded.last_observed_at
+                    ELSE MAX(guard_subjects.last_observed_at, excluded.last_observed_at)
+                END
+            WHERE guard_subjects.enabled = 1 OR ?
+        """, (
+            chain_id, subject.lower(), measured_at, GUARD_WATCH_MAX_SUBJECTS,
+            GUARD_WATCH_MAX_SUBJECTS, chain_id, subject.lower(), reenable,
+        ))
+        return cursor.rowcount == 1
+
+    async def register_guard_subject(self, chain_id: int, subject: str) -> bool:
+        """Explicitly watch a confirmed subject, or reenable one, within the shared cap."""
+        cursor = await self._db.execute("""
+            SELECT chain_id, subject, canonical FROM verdict_evidence
+            WHERE chain_id = ? AND chain_id = 4663 AND subject = ?
+              AND onchain_status = 'confirmed' AND registry IS NOT NULL AND registry != ''
+              AND json_type(canonical, '$.observed_at') = 'integer'
+              AND json_extract(canonical, '$.observed_at') > 0
+              AND json_extract(canonical, '$.observed_at') <= ?
+            ORDER BY json_extract(canonical, '$.observed_at') DESC, id DESC LIMIT 1
+        """, (chain_id, subject.lower(), time.time()))
+        row = await cursor.fetchone()
+        if row is None:
+            return False
+        admitted = await self._admit_guard_subject(self._db, *row, reenable=True)
+        await self._db.commit()
+        return admitted
+
+    async def unregister_guard_subject(self, chain_id: int, subject: str):
+        """Persist an opt-out even when a confirmation has not arrived yet."""
+        await self._db.execute("""
+            INSERT INTO guard_subjects (chain_id, subject, enabled) VALUES (?, ?, 0)
+            ON CONFLICT(chain_id, subject) DO UPDATE SET enabled = 0
+        """, (chain_id, subject.lower()))
+        await self._db.commit()
+
+    async def get_guard_subjects(self, chain_id: int) -> List[Dict]:
+        """Active subjects ordered by their oldest successful measurement, unknown first."""
+        cursor = await self._db.execute("""
+            SELECT chain_id, subject, last_observed_at, retry_after FROM guard_subjects
+            WHERE chain_id = ? AND enabled = 1
+            ORDER BY last_observed_at, subject LIMIT ?
+        """, (chain_id, GUARD_WATCH_MAX_SUBJECTS))
+        return [
+            {"chain_id": row[0], "subject": row[1], "last_observed_at": row[2], "retry_after": row[3]}
+            for row in await cursor.fetchall()
+        ]
+
+    async def update_guard_subject_measurement(
+        self, chain_id: int, subject: str, observed_at: Optional[int], retry_after: float
+    ):
+        """Advance complete measurement time; failures only set their short retry delay."""
+        await self._db.execute("""
+            UPDATE guard_subjects SET last_observed_at = CASE
+                WHEN ? IS NULL THEN last_observed_at
+                WHEN last_observed_at IS NULL THEN ?
+                ELSE MAX(last_observed_at, ?)
+            END, retry_after = ?
+            WHERE chain_id = ? AND subject = ? AND enabled = 1
+        """, (observed_at, observed_at, observed_at, retry_after, chain_id, subject.lower()))
+        await self._db.commit()
 
     async def get_latest_verdict_evidence(self, chain_id: int, subject: str) -> Optional[Dict]:
         """Return the most recently published evidence for a subject, or None if never published."""
@@ -2441,6 +2557,48 @@ class Database:
             "created_at", "onchain_status", "registry", "tx_hash", "onchain_error", "updated_at",
         )
         return dict(zip(keys, row))
+
+    async def get_verdict_evidence(self, evidence_id: int) -> Optional[Dict]:
+        """Return one evidence document and its delivery outcome by row id."""
+        cursor = await self._db.execute("""
+            SELECT id, chain_id, subject, verdict, evidence_hash, canonical, observed_block, created_at,
+                   onchain_status, registry, tx_hash, onchain_error, updated_at
+            FROM verdict_evidence
+            WHERE id = ?
+        """, (evidence_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        keys = (
+            "id", "chain_id", "subject", "verdict", "evidence_hash", "canonical", "observed_block",
+            "created_at", "onchain_status", "registry", "tx_hash", "onchain_error", "updated_at",
+        )
+        return dict(zip(keys, row))
+
+    async def get_newest_verdict_observation(
+        self, chain_id: int, subject: str, include_deduplicated: bool = True
+    ) -> Optional[Dict]:
+        """Return the newest measured evidence, preferring denial at equal observation times.
+
+        Delivery failures and dropped rows still supersede older measurements. Legacy evidence
+        without observation provenance cannot establish an observation watermark. Excluding
+        deduplicated rows finds the recording anchor whose observation determines refresh age.
+        """
+        cursor = await self._db.execute("""
+            SELECT id FROM verdict_evidence
+            WHERE chain_id = ? AND subject = ?
+              AND (? OR onchain_status != 'deduplicated')
+              AND json_type(canonical, '$.observed_at') = 'integer'
+              AND json_extract(canonical, '$.observed_at') > 0
+              AND json_extract(canonical, '$.observed_at') <= ?
+            ORDER BY json_extract(canonical, '$.observed_at') DESC,
+                     CASE verdict WHEN 'HONEYPOT' THEN 4 WHEN 'UNKNOWN' THEN 3
+                         WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 1 ELSE 0 END DESC,
+                     id DESC
+            LIMIT 1
+        """, (chain_id, subject, include_deduplicated, time.time()))
+        row = await cursor.fetchone()
+        return await self.get_verdict_evidence(row[0]) if row else None
 
     async def claim_next_pending_verdict(self, chain_id: int) -> Optional[Dict]:
         """Claim the oldest row waiting to be recorded on-chain by moving it from pending to sending.
@@ -2550,10 +2708,10 @@ class Database:
         await outbox.commit()
 
     async def get_unresolved_verdicts(self, chain_id: int, updated_before: float, limit: int) -> List[Dict]:
-        """Signed records with no receipt yet, untouched since `updated_before`, least recently looked at first."""
+        """Signed records awaiting receipts, including dropped records that must never be resent."""
         cursor = await self._db.execute("""
             SELECT id, tx_hash, nonce, attempts FROM verdict_evidence
-            WHERE chain_id = ? AND onchain_status IN ('submitted', 'unconfirmed', 'failed')
+            WHERE chain_id = ? AND onchain_status IN ('submitted', 'unconfirmed', 'failed', 'dropped')
               AND tx_hash IS NOT NULL AND updated_at < ?
             ORDER BY updated_at, id
             LIMIT ?

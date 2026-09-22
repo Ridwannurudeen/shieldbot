@@ -237,6 +237,7 @@ class RiskEngine:
                 unique_flags.append(f)
 
         return {
+            'observed_at': min((r.data.get('observed_at', 0) for r in component_results if r.data and not r.data.get('skipped')), default=0),
             'rug_probability': rug_probability,
             'risk_level': risk_level,
             'risk_archetype': archetype,
@@ -378,6 +379,7 @@ class RiskEngine:
                 unique_flags.append(f)
 
         return {
+            'observed_at': min((r.data.get('observed_at', 0) for r in results if r.data and not r.error and not r.data.get('skipped')), default=0),
             'rug_probability': rug_probability,
             'risk_level': risk_level,
             'risk_archetype': archetype,

@@ -35,6 +35,7 @@ def _simulation_response(simulation: Dict, fields: tuple, required: tuple) -> Di
         'status': 'ok' if all(simulation[field] is not None for field in required) else 'unknown',
         'reason': simulation['reason'],
         'simulation_block': simulation['simulation_block'],
+        'observed_at': simulation.get('observed_at', 0),
         'field_providers': {field: SIMULATION_PROVIDER for field in fields if simulation[field] is not None},
     }
 

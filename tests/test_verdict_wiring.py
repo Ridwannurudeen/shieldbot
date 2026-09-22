@@ -3,6 +3,7 @@
 import ast
 import asyncio
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -332,11 +333,16 @@ def test_only_the_api_process_starts_the_drain_or_reads_the_key():
     """The bot shares the container and the .env file, so no code path it runs may start the drain."""
     root = Path(__file__).resolve().parent.parent
     starters, key_readers = [], []
-    for path in root.rglob("*.py"):
-        relative = path.relative_to(root).as_posix()
+    tracked = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "*.py"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    for relative in tracked:
         if relative.startswith(("tests/", "sdk/", "scripts/census_4663/")) or "node_modules" in relative:
             continue
-        source = path.read_text(encoding="utf-8")
+        source = (root / relative).read_text(encoding="utf-8")
         if "verdict_publisher.start(" in source:
             starters.append(relative)
         if "ROBINHOOD_RECORDER_PRIVATE_KEY" in source:

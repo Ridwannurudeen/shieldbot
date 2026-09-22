@@ -62,6 +62,16 @@ class RpcGuard:
         """The breaker is open and its cooldown has passed, so one probe may go."""
         return self.state == OPEN and self._clock() >= self._opened_at + self._cooldown
 
+    def get_stats(self) -> dict:
+        """Current reservation pressure; a positive wait means the budget is occupied."""
+        wait = max(0.0, self._next_slot - self._clock())
+        return {
+            "rate_rps": self.rate,
+            "state": self.state,
+            "wait_seconds": wait,
+            "saturated": wait > 0,
+        }
+
     async def acquire(self, cost: float, probe: bool = False):
         """Wait until ``cost`` requests fit the budget.
 

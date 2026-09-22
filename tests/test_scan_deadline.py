@@ -63,7 +63,7 @@ def hangs(events=None):
 
 
 def clean(name, weight, **data):
-    return AnalyzerResult(name=name, weight=weight, score=0, flags=[], data={"status": "ok", **data})
+    return AnalyzerResult(name=name, weight=weight, score=0, flags=[], data={"status": "ok", "observed_at": 1000, **data})
 
 
 def registry_of(*analyzers):
@@ -206,6 +206,10 @@ async def test_results_are_identical_to_gather_when_nothing_times_out():
     expected = await gather_reference(bsc_analyzers(), ctx)
     actual = await registry_of(*bsc_analyzers()).run_all(ctx)
 
+    for previous, current in zip(expected, actual):
+        if not current.error:
+            assert current.data["observed_at"] > 0
+            previous.data["observed_at"] = current.data["observed_at"]
     assert actual == expected
     engine = RiskEngine()
     assert json.dumps(engine.compute_from_results(actual), sort_keys=True) == json.dumps(

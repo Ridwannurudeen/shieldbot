@@ -1,6 +1,7 @@
 import os
 import aiohttp
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ class EthosService:
 
     async def fetch_wallet_reputation(self, wallet_address: str) -> dict:
         defaults = {
+            'observed_at': time.time(),
             'reputation_score': 50,
             'ethos_raw_score': None,
             'trust_level': 'unknown',
@@ -83,6 +85,7 @@ class EthosService:
                 scam_flags.append(f'{negative_reviews} negative reviews')
 
             return {
+                'observed_at': defaults['observed_at'],
                 'reputation_score': normalized,
                 'ethos_raw_score': raw_score,
                 'trust_level': trust_level,

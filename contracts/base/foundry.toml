@@ -16,8 +16,10 @@ remappings = [
 [rpc_endpoints]
 base = "${BASE_RPC_URL}"
 base_sepolia = "${BASE_SEPOLIA_RPC_URL}"
+robinhood = "${ROBINHOOD_RPC_URL}"
 
 [etherscan]
 # Etherscan v2 unified API: any chain's API key (BscScan/BaseScan/Etherscan) works across all chains.
 base = { key = "${ETHERSCAN_V2_API_KEY}", url = "https://api.etherscan.io/v2/api?chainid=8453", chain = 8453 }
 base_sepolia = { key = "${ETHERSCAN_V2_API_KEY}", url = "https://api.etherscan.io/v2/api?chainid=84532", chain = 84532 }
+robinhood = { key = "${ETHERSCAN_V2_API_KEY}", url = "https://api.etherscan.io/v2/api?chainid=4663", chain = 4663 }

@@ -325,7 +325,7 @@ class TestToolExecution:
         assert "not registered" in content["note"].lower()
 
     def test_check_approval_risk_stub(self, client):
-        """check_approval_risk returns stub response."""
+        """Unimplemented approval checks are unknown, never an empty clean scan."""
         resp = client.post("/mcp/messages", json={
             "jsonrpc": "2.0", "id": 8, "method": "tools/call",
             "params": {
@@ -334,8 +334,12 @@ class TestToolExecution:
             },
         }, headers=AUTH_HEADERS)
         content = json.loads(resp.json()["result"]["content"][0]["text"])
-        assert content["approvals"] == []
-        assert "V3.2" in content["risk_summary"]
+        from core.extension_formatter import is_scan_incomplete
+        assert content["approvals"] is None
+        assert content["status"] == "unknown"
+        assert content["coverage"] == {"approvals": 0}
+        assert content["coverage_reasons"]["approvals"]
+        assert is_scan_incomplete(content)
 
     def test_scan_for_injection_clean(self, client):
         """scan_for_injection with clean content returns clean=True."""
@@ -366,7 +370,7 @@ class TestToolExecution:
         assert len(content["detections"]) >= 1
 
     def test_query_threat_graph_stub(self, client):
-        """query_threat_graph returns empty stub."""
+        """Unimplemented graph queries cannot report absence of threat links."""
         resp = client.post("/mcp/messages", json={
             "jsonrpc": "2.0", "id": 11, "method": "tools/call",
             "params": {
@@ -375,9 +379,14 @@ class TestToolExecution:
             },
         }, headers=AUTH_HEADERS)
         content = json.loads(resp.json()["result"]["content"][0]["text"])
-        assert content["connected_to_cluster"] is False
-        assert content["edges"] == []
-        assert "V3.5" in content["note"]
+        from core.extension_formatter import is_scan_incomplete
+        assert content["connected_to_cluster"] is None
+        assert content["cluster_id"] is None
+        assert content["edges"] is None
+        assert content["status"] == "unknown"
+        assert content["coverage"] == {"threat_graph": 0}
+        assert content["coverage_reasons"]["threat_graph"]
+        assert is_scan_incomplete(content)
 
     def test_simulate_transaction_disabled(self, client, mock_container):
         """simulate_transaction returns error when Tenderly is disabled."""

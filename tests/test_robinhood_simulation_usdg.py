@@ -239,7 +239,7 @@ async def test_discovery_simulates_a_usdg_doppler_token_end_to_end():
     assert result["is_honeypot"] is False
     assert result["can_buy"] is result["can_sell"] is True
     assert result["buy_tax"] == result["sell_tax"] == 0.0
-    assert result["simulation_block"] == 67286521
+    assert result["simulation_block"] == rpc.head
     assert "unsupported route" not in result["reason"]
     methods = [method for calls in rpc.requests for method, _ in calls]
     assert methods.count("eth_simulateV1") == 1

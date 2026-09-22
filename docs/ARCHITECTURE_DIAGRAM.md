@@ -1,5 +1,7 @@
 # ShieldBot - Architecture Diagram
 
+These are simplified BNB architecture illustrations, not evidence that every provider is available. The extension's shipped-chain limitation and current source-tree coverage contract are described in [TECHNICAL.md](TECHNICAL.md).
+
 ## System Architecture
 
 ```mermaid
@@ -11,14 +13,14 @@ flowchart TB
     D --> E[Risk Engine]
     D --> F[AI Analyzer]
     D --> G[Calldata Decoder]
-    D --> H[Tenderly Simulator]
+    D -. optional .-> H[Tenderly Simulator]
 
     E --> I1[Contract Service]
     E --> I2[Honeypot Service]
     E --> I3[Dex Service]
     E --> I4[Ethos Service]
     H --> I5[Tenderly Service]
-    D --> I6[Greenfield Service]
+    D -. optional upload .-> I6[Greenfield Service]
 
     I1 --> K1[GoPlus API]
     I1 --> K6[BscScan API]
@@ -42,6 +44,8 @@ flowchart TB
 
 ## Transaction Flow
 
+Simplified historical BNB path. Optional services can be disabled or fail. Greenfield creates an object record on-chain and stores report bytes with a storage provider; it is separate from the Robinhood verdict registry.
+
 ```mermaid
 sequenceDiagram
     participant User
@@ -58,11 +62,11 @@ sequenceDiagram
     Extension->>API: POST /api/firewall
 
     par Parallel Data Gathering
-        API->>Services: ContractService.fetch()
-        API->>Services: HoneypotService.fetch()
-        API->>Services: DexService.fetch()
-        API->>Services: EthosService.fetch()
-        API->>Services: TenderlyService.simulate()
+        API->>Services: ContractService.fetch_contract_data()
+        API->>Services: HoneypotService.fetch_honeypot_data()
+        API->>Services: DexService.fetch_token_market_data()
+        API->>Services: EthosService.fetch_wallet_reputation()
+        API->>Services: TenderlySimulator.simulate_transaction() if enabled
     end
 
     Services->>BSC: eth_getCode, eth_call
@@ -73,15 +77,20 @@ sequenceDiagram
     RiskEngine-->>API: ShieldScore + Verdict
 
     alt High Risk (Score >= 71)
-        API->>Greenfield: Upload Forensic Report
-        Greenfield-->>API: Report URL
-        API-->>Extension: BLOCK + Report URL
-        Extension->>User: 🔴 RED MODAL (Blocked)
+        opt Greenfield enabled (upload threshold is risk >= 50)
+            API->>Greenfield: Attempt report upload
+            Greenfield-->>API: URL on success, otherwise absent
+        end
+        API-->>Extension: BLOCK recommendation + optional URL
+        Extension->>User: Red risk warning (cancel/proceed)
     else Medium Risk (31-70)
         API-->>Extension: WARN
         Extension->>User: 🟡 ORANGE OVERLAY (Proceed/Cancel)
         User->>Extension: User Decision
-    else Low Risk (0-30)
+    else Incomplete coverage
+        API-->>Extension: Unknown with coverage reasons
+        Extension->>User: Incomplete analysis; no safety decision
+    else Low Risk (0-30), complete required coverage
         API-->>Extension: ALLOW
         Extension->>dApp: Forward Transaction
         dApp->>User: MetaMask Signature Request
@@ -154,40 +163,15 @@ flowchart TB
 
 ```mermaid
 flowchart TD
-    A[Start] --> B{Is Contract?}
-    B -->|No| C[Score 0]
-    B -->|Yes| D[Fetch Data]
-
-    D --> E[Structural]
-    D --> F[Market]
-    D --> G[Behavioral]
-    D --> H[Honeypot]
-
-    E --> I[Weighted Sum]
-    F --> I
-    G --> I
-    H --> I
-
-    I --> J{Honeypot?}
-    J -->|Yes| K[Floor 80]
-    J -->|No| L{Rug Pattern?}
-
-    L -->|Yes| M[Floor 85]
-    L -->|No| N{Renounced?}
-
-    N -->|Yes| O[Reduce 20]
-    N -->|No| P[Keep Score]
-
-    K --> Q[Final Score]
-    M --> Q
-    O --> Q
-    P --> Q
-
-    Q --> R{Score >= 71?}
-    R -->|Yes| S[BLOCK]
-    R -->|No| T{Score >= 31?}
-    T -->|Yes| U[WARN]
-    T -->|No| V[ALLOW]
+    A[Start with explicit chain] --> B[Run applicable analyzers]
+    B --> C[Aggregate observed risk and coverage]
+    C --> D{Shared scan incompleteness check}
+    D -->|Incomplete| E[Unknown with coverage reasons]
+    E --> F[Preserve observed risk; never infer safe]
+    D -->|Complete| G[Apply risk and policy rules]
+    G --> S[BLOCK]
+    G --> U[WARN]
+    G --> V[ALLOW only when permitted]
 
     style S fill:#ffebee
     style U fill:#fff3e0

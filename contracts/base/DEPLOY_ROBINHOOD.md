@@ -46,6 +46,7 @@ the evidence has no simulation block.
 
 ```bash
 export RH_RPC=https://rpc.mainnet.chain.robinhood.com
+export ROBINHOOD_RPC_URL=$RH_RPC   # foundry.toml's robinhood RPC alias
 export OWNER=0x<owner address>
 export RECORDER=0x<recorder address>
 ```
@@ -55,7 +56,34 @@ export RECORDER=0x<recorder address>
 ```bash
 forge build --sizes
 forge test -vv
+forge fmt --check
+forge snapshot --check --no-match-test 'testFuzz|invariant_'
 ```
+
+The committed `.gas-snapshot` uses Foundry 1.7.1 and the 55 deterministic tests. Fuzz gas summaries varied even
+with a fixed seed, so fuzz and invariant tests run in the full `forge test` suite rather than the gas snapshot.
+The full suite passes 65 tests, including two invariants with 256 runs of 500 calls each and zero unexpected
+reverts. Test-harness gas in the snapshot is distinct from contract-call gas in `forge test --gas-report`.
+With Solidity 0.8.28, optimizer 200 and Cancun, hoisting the
+global counter update out of the loop reduced a 50-new-subject `recordBatch` from 3,617,479 to 3,606,945 reported
+gas: **10,534 saved (0.291%)**. Reproduce with:
+
+```bash
+forge test --match-test test_RecordBatch_AcceptsMaxBatch --gas-report
+```
+
+The standalone `record` report still peaks at 116,795 and has a 24,740 median across the registry unit suite
+(including reverting calls); that median is not a successful-repeat benchmark. Runtime is 2,417 bytes versus
+the original 2,394, a 23-byte increase for the renunciation guard and separate counter updates.
+
+The stateful tests exercise individual records, repeated subjects within batches, rejected batches and recorder
+rotation. The runtime test disassembles deployed bytecode, skipping PUSH operands and compiler metadata, and
+rejects CALL, CALLCODE, DELEGATECALL, STATICCALL, CREATE, CREATE2 and SELFDESTRUCT.
+
+Local Slither 0.11.5 with the CI flags `--exclude-informational --fail-high` exits 0 but reports one low-severity
+`missing-zero-check` in OpenZeppelin's `Ownable2Step.transferOwnership`. The unchanged baseline produces the same
+finding: zero deliberately cancels a pending transfer without changing the owner, as covered by the ownership
+tests. No detector is suppressed; the previously reported zero-result baseline was not reproduced locally.
 
 ## 2. Dry run against Robinhood Chain (no transaction is sent)
 
@@ -73,8 +101,8 @@ Check the output before going further:
 - `owner():` is `$OWNER` and `recorder():` is `$RECORDER`
 - it ends with `SIMULATION COMPLETE. To broadcast these transactions, add --broadcast ...`
 
-The same command against a local `anvil` (no fork, chain id 31337) was run during development and printed
-`owner(): 0xf39F...2266`, `recorder(): 0x7099...79C8` and `SIMULATION COMPLETE`; anvil's block number stayed 0.
+The script rejects any chain id other than 4663 before creating the registry. A local rehearsal must therefore
+use `anvil --chain-id 4663`; the default local chain id 31337 is deliberately rejected.
 
 ## 3. Deploy (OWNER-ONLY)
 
@@ -95,9 +123,46 @@ export REGISTRY=0x<deployed address>
 The deployment transaction hash is in `broadcast/DeployVerdictRegistry.s.sol/4663/run-latest.json`
 (the `broadcast/` directory is gitignored).
 
-## 4. Verify the source on Sourcify (chain 4663)
+## 4. Verify the source on all three explorers (chain 4663)
 
-Sourcify lists chain 4663 as supported. Verification needs no API key:
+Use the exact deployment source and compiler settings in `foundry.toml` (Solidity 0.8.28, optimizer 200 runs,
+Cancun). `$RECORDER` below must be the **initial constructor recorder**, even if it has since been rotated.
+Submit to each explorer separately: a Sourcify match does not verify the contract on Etherscan.
+
+### Etherscan
+
+Set `ETHERSCAN_V2_API_KEY` in the owner's environment. The `robinhood` entry in `foundry.toml` selects
+`https://api.etherscan.io/v2/api?chainid=4663`. Etherscan requires ABI-encoded constructor arguments:
+
+```bash
+forge verify-contract $REGISTRY src/ShieldBotVerdictRegistry.sol:ShieldBotVerdictRegistry \
+  --chain 4663 \
+  --verifier etherscan \
+  --constructor-args "$(cast abi-encode 'constructor(address)' "$RECORDER")" \
+  --watch
+```
+
+Open `https://robin.etherscan.io/address/$REGISTRY#code` and confirm the verified source and constructor argument.
+
+### Blockscout
+
+Verify on the explorer linked by ShieldBot as well, using its Etherscan-compatible API:
+
+```bash
+forge verify-contract $REGISTRY src/ShieldBotVerdictRegistry.sol:ShieldBotVerdictRegistry \
+  --chain 4663 \
+  --verifier blockscout \
+  --verifier-url https://robinhoodchain.blockscout.com/api/ \
+  --constructor-args "$(cast abi-encode 'constructor(address)' "$RECORDER")" \
+  --watch
+```
+
+Open `https://robinhoodchain.blockscout.com/address/$REGISTRY?tab=contract` and confirm that the source is verified.
+Do not treat a successful submission as a completed verification; wait for the result on all three explorers.
+
+### Sourcify
+
+Sourcify verification needs no API key or `--constructor-args`:
 
 ```bash
 forge verify-contract $REGISTRY src/ShieldBotVerdictRegistry.sol:ShieldBotVerdictRegistry \
@@ -134,9 +199,12 @@ cast estimate $REGISTRY "record(address,uint8,bytes32,uint64)" \
   --from $RECORDER --rpc-url $RH_RPC
 ```
 
-The Foundry gas report measured about 117k execution gas for a first record. If the estimate is near 833,334 or
-above it, stop and raise `MAX_GAS_LIMIT` in `services/verdict_publisher.py` before configuring the server. If the
-node refuses the estimate because the recorder has no ETH yet, run it again after funding it in step 7.
+The Foundry gas report measured 116,795 gas for the first standalone `record` on a fresh registry.
+This includes initializing the global count; the roughly 72k per new subject quoted for a warm
+batch is a different measurement, with call overhead and the global counter shared across entries.
+If the estimate is near 833,334 or above it, stop and raise `MAX_GAS_LIMIT` in `services/verdict_publisher.py`
+before configuring the server. If the node refuses the estimate because the recorder has no ETH yet, run it
+again after funding it in step 7.
 
 ## 6. Set or rotate the recorder (OWNER-ONLY)
 
@@ -153,16 +221,18 @@ The old recorder loses access in the same transaction. Then put the new recorder
 Ownership moves in two steps: the owner calls `transferOwnership(<new owner>)`, and nothing changes until the new
 owner calls `acceptOwnership()`.
 
-Never call `renounceOwnership()` (inherited from OpenZeppelin). It removes the owner permanently, so the recorder
-could never be rotated again, not even after the recorder key is compromised.
+`renounceOwnership()` is disabled by a custom-error revert. The contract enforces retaining an owner so the
+recorder can still be rotated after a compromise; use the two-step ownership transfer to change that owner.
 
 ## 7. Fund the recorder (OWNER-ONLY)
 
-The recorder pays gas for every `record()`. The first record for a token measured 116,795 execution gas in the
-Foundry gas report; with the 21,000 base cost and calldata, a `record()` transaction is at most about 140k gas.
-The base fee on a recorded Robinhood Chain block (65,526,359) was 0.056 gwei, which makes one record about
-0.0000079 ETH. A repeat record for a token already in the registry measured 24,740 gas, about 0.0000026 ETH.
-A saturated launch watch is mostly first records, so fund for those; for example a day and a half of one:
+The recorder pays gas for every `record()`. The Foundry gas report measured 116,795 gas for the first standalone
+record on a fresh registry, rather than a per-subject cost inside a warm batch. The successful overwrite in
+`test_Record_LatestIsOverwrittenAndCountsAccumulate` measured 48,299; the full-suite median of 24,740 includes
+reverting calls and must not be used to budget successful repeat records. Use `.gas-snapshot` for local regression
+checks and the live estimate in step 5, with current fees, for funding.
+A saturated launch watch is mostly first records, so fund for those. This example sends 0.05 ETH; its duration
+depends on the live estimate and recording rate:
 
 ```bash
 cast send $RECORDER --value 0.05ether --rpc-url $RH_RPC --account robinhood-owner
@@ -182,11 +252,9 @@ Spend limits in the server (`services/verdict_publisher.py`). Only the API proce
 
 The 180 per hour comes from the watch: one 4663 scan reserves 22 requests of the shared 1 request per second
 RPC budget (`services/rpc_guard.py`, `agent.hunter.SCAN_REQUEST_COST`), so at most about 163 scans an hour can
-produce a verdict, and discovery draws on the same budget, so the real number is lower. At 180 first records an
-hour and the fee above, the recorder spends about 0.0014 ETH per hour, or 0.034 ETH a day; a day of repeat
-records costs about a fifth of that. That is the ceiling, not the bill: rechecks that find the same verdict
-are not recorded at all, so in practice the recorder pays for first scans and for verdicts that changed.
-Those figures are L2 execution only: Robinhood Chain is an Arbitrum chain, so the L1 data fee is charged as
+produce a verdict, and discovery draws on the same budget, so the real number is lower. Rechecks that find the
+same verdict are not recorded at all, so in practice the recorder pays for first scans and for verdicts that changed.
+Local Foundry measurements do not include Robinhood Chain's L1 data fee. On this Arbitrum chain it is charged as
 extra gas and comes on top. Size the float from the `cast estimate` in step 5, which includes it. At the caps
 a single record could cost at most 1,000,000 gas x 1 gwei = 0.001 ETH. The drain's own requests are outside
 the watch's budget: about three per record, 540 an hour, which is 0.15 requests per second beside the watch's
@@ -309,3 +377,116 @@ cast receipt <tx_hash> --rpc-url $RH_RPC
 
 The `VerdictRecorded` log in the receipt carries the token (topic 1), the verdict code (topic 2) and the evidence
 hash (topic 3), with the observed block and timestamp in the data.
+
+## 10. Guard and guarded transfer: deployment and verification
+
+`script/DeployGuardAndTransfer.s.sol:DeployGuardAndTransfer` deploys both consumers together. The guard's
+registry and the transfer's guard, subject, USDG and recipient are immutable. Confirm the intended registry's
+verified source and deployment address before proceeding; matching a recorder address alone does not authenticate
+a registry's code. Use public addresses only:
+
+```bash
+export REGISTRY=0x<verified registry address>
+export EXPECTED_RECORDER=0x<current trusted recorder address>
+export SUBJECT=0x<subject whose verdict gates the payment>
+export USDG=0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168
+export RECIPIENT=0x<sole payment recipient>
+
+# Dry run only: no key or transaction is needed.
+forge script script/DeployGuardAndTransfer.s.sol:DeployGuardAndTransfer \
+  --rpc-url $RH_RPC --sender $OWNER
+```
+
+The script rejects chains other than 4663 with `WrongChain`. After its broadcast section, it prints both
+deployed addresses and every asserted value, then asserts the registry pin, current recorder, guard pin,
+subject, recipient, USDG pin and the canonical Paxos USDG proxy. The proxy literal matches
+`services/robinhood_simulation.py`. Require a successful dry run and inspect every printed address.
+
+These assertions execute in the script's local simulation; they are not an atomic on-chain deployment
+invariant and cannot undo transactions already included. Repeat the read-only checks below against the
+deployed contracts, including the recorder check in case it changed since simulation.
+
+**OWNER-ONLY**, after approval of the dry-run addresses:
+
+```bash
+forge script script/DeployGuardAndTransfer.s.sol:DeployGuardAndTransfer \
+  --rpc-url $RH_RPC --account robinhood-owner --sender $OWNER --broadcast
+```
+
+Save the printed `Guard deployed at` and `Transfer deployed at` addresses. Their creation transaction hashes
+are in `broadcast/DeployGuardAndTransfer.s.sol/4663/run-latest.json`.
+
+```bash
+export GUARD=0x<deployed guard address>
+export TRANSFER=0x<deployed guarded transfer address>
+
+cast call $GUARD "registry()(address)"     --rpc-url $RH_RPC   # $REGISTRY
+cast call $REGISTRY "recorder()(address)"  --rpc-url $RH_RPC   # $EXPECTED_RECORDER
+cast call $TRANSFER "guard()(address)"    --rpc-url $RH_RPC   # $GUARD
+cast call $TRANSFER "subject()(address)"  --rpc-url $RH_RPC   # $SUBJECT
+cast call $TRANSFER "recipient()(address)" --rpc-url $RH_RPC  # $RECIPIENT
+cast call $TRANSFER "usdg()(address)"     --rpc-url $RH_RPC   # canonical $USDG above
+```
+
+Verify **both contracts on all three explorers**, using the same source and `foundry.toml` compiler settings
+as deployment. The guard constructor takes `(REGISTRY)`; the transfer constructor takes
+`(GUARD, SUBJECT, USDG, RECIPIENT)` in that order. Use the actual deployment arguments throughout.
+
+### Guard and transfer on Etherscan
+
+Reuse the `ETHERSCAN_V2_API_KEY` environment and chain-4663 configuration from step 4:
+
+```bash
+forge verify-contract $GUARD src/ShieldBotVerdictGuard.sol:ShieldBotVerdictGuard \
+  --chain 4663 --verifier etherscan \
+  --constructor-args "$(cast abi-encode 'constructor(address)' "$REGISTRY")" --watch
+
+forge verify-contract $TRANSFER src/ShieldBotGuardedTransfer.sol:ShieldBotGuardedTransfer \
+  --chain 4663 --verifier etherscan \
+  --constructor-args "$(cast abi-encode 'constructor(address,address,address,address)' "$GUARD" "$SUBJECT" "$USDG" "$RECIPIENT")" --watch
+```
+
+Confirm verified source and constructor arguments at both `https://robin.etherscan.io/address/$GUARD#code`
+and `https://robin.etherscan.io/address/$TRANSFER#code`.
+
+### Guard and transfer on Blockscout
+
+```bash
+forge verify-contract $GUARD src/ShieldBotVerdictGuard.sol:ShieldBotVerdictGuard \
+  --chain 4663 --verifier blockscout --verifier-url https://robinhoodchain.blockscout.com/api/ \
+  --constructor-args "$(cast abi-encode 'constructor(address)' "$REGISTRY")" --watch
+
+forge verify-contract $TRANSFER src/ShieldBotGuardedTransfer.sol:ShieldBotGuardedTransfer \
+  --chain 4663 --verifier blockscout --verifier-url https://robinhoodchain.blockscout.com/api/ \
+  --constructor-args "$(cast abi-encode 'constructor(address,address,address,address)' "$GUARD" "$SUBJECT" "$USDG" "$RECIPIENT")" --watch
+```
+
+Confirm verified source and constructor arguments at both
+`https://robinhoodchain.blockscout.com/address/$GUARD?tab=contract` and
+`https://robinhoodchain.blockscout.com/address/$TRANSFER?tab=contract`.
+
+### Guard and transfer on Sourcify
+
+```bash
+forge verify-contract $GUARD src/ShieldBotVerdictGuard.sol:ShieldBotVerdictGuard \
+  --chain 4663 --verifier sourcify --watch
+
+forge verify-contract $TRANSFER src/ShieldBotGuardedTransfer.sol:ShieldBotGuardedTransfer \
+  --chain 4663 --verifier sourcify --watch
+
+curl -s https://sourcify.dev/server/v2/contract/4663/$GUARD
+curl -s https://sourcify.dev/server/v2/contract/4663/$TRANSFER
+# Both must report a match, as in step 4.
+```
+
+If requested, add `--creation-transaction-hash` with the creation hash for the corresponding contract.
+A submitted verification request is not a completed verification. Confirm all six results separately;
+a Sourcify match does not establish Etherscan or Blockscout verification.
+
+Before using the transfer, review the [publication-age policy and bounded watched set](VERDICT_GUARD.md)
+and [transfer behavior](GUARDED_TRANSFER.md). Use `maxAge = 600` seconds for the demo **only with
+`GUARD_WATCH_MAX_SUBJECTS=1`**, watching exactly the transfer's immutable subject. The production minimum
+is **900 seconds at the default four subjects**. Neither is an availability guarantee or observation-age
+bound. `MAX_AGE = 300` in Foundry is a test fixture, not guidance: it would deny a healthy token for
+roughly 6–30% of wall time under the coordinator's measurements. See [measured ages and structural
+denial windows](../../docs/guard-rescans.md#structural-denial-windows).

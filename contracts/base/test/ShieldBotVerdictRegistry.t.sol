@@ -161,6 +161,28 @@ contract ShieldBotVerdictRegistryTest is Test {
         assertEq(registry.owner(), owner);
     }
 
+    function test_RenounceOwnership_RevertsAndPreservesRecovery() public {
+        address newOwner = makeAddr("newOwner");
+        vm.startPrank(owner);
+        registry.transferOwnership(newOwner);
+        vm.expectRevert(ShieldBotVerdictRegistry.OwnershipRenunciationDisabled.selector);
+        registry.renounceOwnership();
+        assertEq(registry.owner(), owner);
+        assertEq(registry.pendingOwner(), newOwner);
+        registry.setRecorder(newRecorder);
+        vm.stopPrank();
+        assertEq(registry.recorder(), newRecorder);
+
+        vm.startPrank(newOwner);
+        registry.acceptOwnership();
+        vm.expectRevert(ShieldBotVerdictRegistry.OwnershipRenunciationDisabled.selector);
+        registry.renounceOwnership();
+        registry.setRecorder(recorder);
+        vm.stopPrank();
+        assertEq(registry.owner(), newOwner);
+        assertEq(registry.recorder(), recorder);
+    }
+
     // ------------------------------------------------------------------
     // record()
     // ------------------------------------------------------------------
@@ -286,6 +308,33 @@ contract ShieldBotVerdictRegistryTest is Test {
         vm.stopPrank();
         assertEq(address(registry).balance, 0);
         assertEq(registry.totalRecords(), 0);
+    }
+
+    function test_Runtime_HasNoExternalCallOrCreationOpcodes() public view {
+        bytes memory code = address(registry).code;
+        assertGt(code.length, 2);
+        // Solidity appends CBOR metadata and its two-byte big-endian length after INVALID.
+        uint256 metadataLength = (uint256(uint8(code[code.length - 2])) << 8) | uint8(code[code.length - 1]);
+        assertGt(metadataLength, 0);
+        assertLt(metadataLength + 2, code.length);
+        uint256 executableLength = code.length - metadataLength - 2;
+        assertEq(uint8(code[executableLength - 1]), 0xfe);
+        assertEq(uint8(code[executableLength]), 0xa2);
+
+        for (uint256 pc; pc < executableLength; ++pc) {
+            uint8 opcode = uint8(code[pc]);
+            // CALL, CALLCODE, DELEGATECALL, STATICCALL, CREATE, CREATE2 and SELFDESTRUCT.
+            assertFalse(
+                opcode == 0xf1 || opcode == 0xf2 || opcode == 0xf4 || opcode == 0xfa || opcode == 0xf0 || opcode == 0xf5
+                    || opcode == 0xff,
+                "Runtime contains an external-call, creation or selfdestruct opcode"
+            );
+            // PUSH1..PUSH32 operands are data, not instructions. PUSH0 has no operand.
+            if (opcode >= 0x60 && opcode <= 0x7f) {
+                pc += opcode - 0x5f;
+                assertLt(pc, executableLength);
+            }
+        }
     }
 
     // ------------------------------------------------------------------

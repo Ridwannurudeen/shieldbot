@@ -1,298 +1,68 @@
-# ShieldBot Testing Guide
+# Local test results and reproduction
 
-## Test Addresses (BSC Mainnet)
+Measured on **2026-09-22**, on `build/oh-integration`, with WP9 changes over `fff633f`. Start with [JUDGE_GUIDE.md](JUDGE_GUIDE.md) for the offline honeypot replay and real-contract transfer demonstration.
 
-Use these addresses to test ShieldBot functionality:
+## Measured results
 
-### ✅ Safe/Legitimate Contracts
+| Check | Command / scope | Result |
+|---|---|---|
+| Integrated Python baseline | `python -m pytest tests/ -q -p no:cacheprovider --ignore=tests/test_bot_app.py` | **2917 passed, 1 skipped**, 4 warnings, 111.80 s |
+| Hunter/rescan regression subset | `tests/test_guard_rescan.py tests/test_hunter.py tests/test_hunter_rpc_guard.py tests/test_hunter_verdicts.py tests/test_verdict_hunter_path.py` with `python -m pytest ... -q -p no:cacheprovider` | **93 passed**, 1 warning, 5.10 s |
+| Robinhood simulation and USDG | `python -m pytest tests/test_robinhood_simulation.py tests/test_robinhood_simulation_usdg.py -q -p no:cacheprovider` | **192 passed**, 1 warning, 2.44 s |
+| Judge-guide proven honeypot | `test_live_honeypot_is_proven_unsellable` and `test_4663_proven_honeypot_is_flagged_through_the_analyzer` in `tests/test_robinhood_simulation.py` | **2 passed**, 1 warning, 1.97 s |
+| Python SDK | `python -m pytest sdk/python/tests/ -q -p no:cacheprovider` | **21 passed**, 3.17 s; separate from baseline |
+| Foundry full suite | From `contracts/base`: `forge test --offline -vv` | **114 passed, 0 failed, 0 skipped**, 39.42 s |
+| Judge-guide transfer cases | Exact Foundry command in [the guide](JUDGE_GUIDE.md#on-chain-transfer-demonstration-offline) | **4 passed, 0 failed, 0 skipped** |
+| Contract size build | `forge build --offline --sizes` | **Exit 0**; guard runtime 1,048 B, transfer runtime 1,616 B |
+| Touched Solidity formatting | `forge fmt --check src/ShieldBotVerdictGuard.sol src/ShieldBotGuardedTransfer.sol test/ShieldBotVerdictGuard.t.sol test/ShieldBotGuardedTransfer.t.sol` | **Exit 0** |
 
-**PancakeSwap Router V2**
-```
-0x10ED43C718714eb63d5aA57B78B54704E256024E
-```
-- Verified contract ✅
-- Well-known DEX
-- Expected: LOW risk
+Real full-suite summaries:
 
-**WBNB (Wrapped BNB)**
-```
-0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c
-```
-- Verified token contract ✅
-- Native wrapper
-- Expected: SAFE token
-
-### ⚠️ High-Risk Test Cases
-
-**Unverified Contract**
-```
-# Find a recent unverified contract on BscScan
-https://bscscan.com/contractsVerified?filter=unverified
-```
-- Expected: MEDIUM/HIGH risk (unverified)
-
-**New Contract (< 7 days old)**
-```
-# Check recent contracts
-https://bscscan.com/txs?sort=age
-```
-- Expected: WARNING (too new)
-
-### 🔴 Known Scam Addresses (Use with Caution)
-
-Check these aggregators for known scams:
-- [ScamSniffer](https://scamsniffer.io/)
-
-Expected: HIGH risk with scam database matches
-
----
-
-## Testing Workflow
-
-### 1. Basic Bot Commands
-
-```bash
-# Start bot
-./run.sh
+```text
+2917 passed, 1 skipped, 4 warnings in 111.80s (0:01:51)
+Ran 7 test suites in 39.42s (71.02s CPU time): 114 tests passed, 0 failed, 0 skipped (114 total tests)
 ```
 
-In Telegram:
-1. `/start` - Should show welcome message
-2. `/help` - Should show command list
-3. `/scan 0x10ED43C718714eb63d5aA57B78B54704E256024E` - Scan PancakeSwap
-4. `/token 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c` - Check WBNB
+Both unchanged allowed-iff fuzz properties passed **10,000 runs each**. Both registry invariants passed **256 runs / 128,000 calls / zero reverts each**. The three reason-precedence regressions and fee/excess-delivery regressions failed against the old implementation before passing with the fixes. The LOW expiry/future denial tests remain unchanged and pass. New tests also cover exact credit to an already funded recipient and rejection of self-transfer with zero net credit.
 
-### 2. Auto-Detection
+Both per-contract gas snapshots were regenerated: `check_cold_registry = 6985`, `check_warm_registry = 2985`, and `transfer_low_cold = 58013`. These are local Cancun callee-gas measurements under the existing test setup, not live USDG gas or Orbit fees. The guard's registry account is warm in both measurements; its record slots are cold then warm. The transfer measurement cools all four accounts and starts with a zero recipient balance and finite allowance.
 
-Send addresses directly (no command):
-1. `0x10ED43C718714eb63d5aA57B78B54704E256024E` - Should auto-scan
-2. `0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c` - Should detect token
+Do not add subset counts to the baseline. The baseline explicitly selects `tests/`, excluding `sdk/python/tests/` even though both are default paths in `pytest.ini`. Add Foundry to PATH before running its commands: Bash `export PATH="$HOME/.foundry/bin:$PATH"`; PowerShell `$env:PATH = "$HOME/.foundry/bin;$env:PATH"`.
 
-### 3. Edge Cases
+## Static analysis across all five contracts
 
-**Invalid Address**
-```
-0x123
-```
-Expected: "Invalid address format" error
+Slither **0.11.5**, `--exclude-informational --fail-high`, with Solidity **0.8.24** for the verifier and **0.8.28** for the other four. Every invocation exited **0**.
 
-**EOA (Not a Contract)**
-```
-0x0000000000000000000000000000000000000000
-```
-Expected: "This is an EOA, not a contract"
+| Contract | Actual analyzer summary | Findings |
+|---|---|---|
+| `ShieldBotVerifier.sol` | 1 contract, 80 detectors, 0 results | None |
+| `ShieldBotAttestor.sol` | 8 contracts, 80 detectors, 3 results | LOW OpenZeppelin `missing-zero-check`; two preexisting LOW `reentrancy-events` findings in `attest` and `revoke` |
+| `ShieldBotVerdictRegistry.sol` | 4 contracts, 80 detectors, 1 result | Known LOW OpenZeppelin `missing-zero-check` |
+| `ShieldBotVerdictGuard.sol` | 5 contracts, 80 detectors, 1 result | Same known OpenZeppelin finding |
+| `ShieldBotGuardedTransfer.sol` | 12 contracts, 80 detectors, 1 result | Same known OpenZeppelin finding |
 
-**Non-Token Contract**
-```
-0x10ED43C718714eb63d5aA57B78B54704E256024E
-```
-Expected: Contract scan (not token check)
+The OpenZeppelin finding is `Ownable2Step.transferOwnership(address).newOwner` lacking a zero check; zero cancels a pending ownership transfer. No new findings were introduced. The verifier, attestor and registry sources are unchanged from `fff633f`. The all-five run does **not** support a claim that the entire project has only the OpenZeppelin finding: the attestor's two LOW event-reentrancy findings also exist. They were not suppressed or changed in WP9.
 
----
+The CI workflow now explicitly analyzes both new contracts. Local reproduction used installed native solc binaries rather than downloading/selecting compilers, with the same remaps and severity gate. Example from the repository root:
 
-## Test Scenarios
-
-### Scenario 1: Legitimate Token
-**Goal:** Verify safe token detection
-
-1. Send `/token 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c`
-2. Expected results:
-   - ✅ Token name: Wrapped BNB (WBNB)
-   - ✅ Can Buy/Sell: YES
-   - ✅ Not a honeypot
-   - Safety: SAFE
-
-### Scenario 2: Unverified Contract
-**Goal:** Catch unverified contract risk
-
-1. Find unverified contract on BscScan
-2. Send `/scan <address>`
-3. Expected results:
-   - ❌ Contract not verified
-   - ⚠️ Warning in report
-   - Risk: MEDIUM or HIGH
-
-### Scenario 3: New Contract
-**Goal:** Flag very new contracts
-
-1. Find contract created < 7 days ago
-2. Send `/scan <address>`
-3. Expected results:
-   - ⚠️ Contract is only X days old
-   - Risk: includes age warning
-
-### Scenario 4: Honeypot Token
-**Goal:** Detect honeypot scams
-
-1. Find a known honeypot on honeypot.is
-2. Send `/token <address>`
-3. Expected results:
-   - 🔴 HONEYPOT DETECTED
-   - ❌ Cannot sell
-   - Safety: DANGER
-
----
-
-## Manual Testing Checklist
-
-### Core Functionality
-- [ ] Bot starts without errors
-- [ ] `/start` shows welcome message
-- [ ] `/help` shows commands
-- [ ] `/scan` accepts addresses
-- [ ] `/token` accepts addresses
-- [ ] Auto-detection works for bare addresses
-
-### Scanner Module
-- [ ] Detects verified vs unverified contracts
-- [ ] Checks contract age
-- [ ] Queries scam databases
-- [ ] Calculates risk level correctly
-
-### Token Module
-- [ ] Gets token name/symbol/decimals
-- [ ] Checks buy/sell capability
-- [ ] Detects honeypots via API
-- [ ] Shows tax information
-- [ ] Calculates safety level
-
-### Error Handling
-- [ ] Invalid address format handled
-- [ ] API errors caught gracefully
-- [ ] Timeout handling works
-- [ ] Rate limiting handled
-
-### UI/UX
-- [ ] Messages formatted correctly
-- [ ] Buttons work (BscScan links, etc.)
-- [ ] Emoji indicators clear
-- [ ] Response time acceptable (<5s)
-
----
-
-## Automated Testing
-
-Tests live in `tests/` and use **pytest** with mocked network calls (no RPC or API keys needed).
-
-### Test Modules
-
-| File | Covers |
-|------|--------|
-| `tests/test_risk_scorer.py` | `calculate_risk_score`, `blend_scores`, `compute_confidence`, `score_level_from_int` |
-| `tests/test_ownership.py` | Tri-state ownership propagation (None/True/False) through risk engine |
-| `tests/test_calldata.py` | Calldata decoding, router whitelist, unknown selector fallback |
-
-### Running Tests
-
-```bash
-pip install pytest pytest-asyncio
-pytest tests/ -v
+```powershell
+& C:/Users/gudma/AppData/Roaming/Python/Python312/Scripts/slither.exe contracts/base/src/ShieldBotGuardedTransfer.sol --compile-force-framework solc --solc C:/Users/gudma/AppData/Roaming/svm/0.8.28/solc-0.8.28 --solc-remaps '@openzeppelin/=contracts/base/lib/openzeppelin-contracts/ forge-std/=contracts/base/lib/forge-std/src/' --exclude-informational --fail-high
 ```
 
----
+Guard and registry use the same pattern. Attestor additionally maps `@eas/=contracts/base/lib/eas-contracts/contracts/`. The verifier uses `contracts/ShieldBotVerifier.sol`, the installed 0.8.24 compiler and no remaps.
 
-## Performance Testing
+## Qualifications
 
-### Load Test
-Use `locust` or `ab` to simulate multiple concurrent users:
+The requested Python selection excludes `tests/test_bot_app.py`; Telegram is absent locally, and the separate bot import case is skipped. This is not a passing claim for the excluded Telegram suite. Real Telegram delivery, live wallets and browser behavior were not tested.
 
-```bash
-pip install locust
+Installed tools checked in this pass: Python **3.12.10**, pytest **8.3.3**, pytest-asyncio **1.3.0**, web3 **7.16.0**, eth-utils **6.0.0**, eth-abi **5.2.0**, httpx **0.28.1**, Forge **1.7.1**, Solidity **0.8.28**, Slither **0.11.5**. Several Python versions differ from `requirements.txt`; this is not a clean pinned-environment installation result. Python reports existing deprecation/configuration warnings. The touched-file formatting result does not assert an unqualified whole-checkout format pass across preexisting Windows line endings.
 
-# Create locustfile.py for Telegram bot testing
-# Run load test
-locust -f locustfile.py
-```
+No standalone TypeScript SDK suite or live-chain test was run in WP9. The existing Python tests use fabricated cryptographic fixtures, including fixture-only signing; transport is mocked. Foundry deployment-script tests run only in its local VM. No real private key, keystore, mnemonic or protected deployment-output file was accessed; no deployment, live signing, broadcast, remote-server access, push or PR was performed.
 
-### API Rate Limiting
-Monitor BscScan API calls:
-- Free tier: 5 calls/sec
-- Track your usage
-- Add caching if needed
+The coordinator's timing figures and Paxos USDG exact-delivery observation are supplied evidence, not live probes repeated in WP9. The judge-guide Python classifier and Solidity consumer examples are separate offline checks; they do not establish a deployed end-to-end publication. The earlier synthetic receipt-verifier exercise is historical and was not rerun here.
 
----
+## Manual checks still required
 
-## Integration Testing
+The owner must verify deployment addresses, source revision, a confirmed publication and the served evidence document before presenting the online judge path. Live `GET /api/stats` figures require an owner-supplied snapshot and timestamp. Familiar token names or addresses are not fixed expected-safe test cases: provider coverage can change the result.
 
-### 1. Telegram Integration
-- [ ] Bot receives messages
-- [ ] Bot sends responses
-- [ ] Buttons trigger callbacks
-- [ ] Images/media work (if added)
-
-### 2. Web3 Integration
-- [ ] RPC connection stable
-- [ ] Contract calls succeed
-- [ ] Handles network errors
-
-### 3. API Integration
-- [ ] BscScan API works
-- [ ] Honeypot.is API works
-- [ ] Scam databases accessible
-
----
-
-## Demo Preparation
-
-For hackathon submission:
-
-1. **Record demo video:**
-   - Show bot startup
-   - Test with safe contract
-   - Test with risky contract
-   - Test token safety check
-   - Show onchain proof (if implemented)
-
-2. **Prepare test script:**
-   ```
-   1. /start - "Welcome to ShieldBot!"
-   2. Send PancakeSwap address - Show LOW risk
-   3. /token WBNB - Show SAFE
-   4. Send unverified contract - Show risks
-   5. Show BscScan verification
-   ```
-
-3. **Screenshots needed:**
-   - Welcome message
-   - Scan results (safe)
-   - Scan results (risky)
-   - Token check (safe)
-   - Token check (honeypot)
-
----
-
-## Known Issues / Limitations
-
-- [ ] Free honeypot.is API has rate limits
-- [ ] BscScan free tier: 5 calls/sec
-- [ ] Some scam databases may be slow
-- [ ] Liquidity lock detection not fully implemented
-- [ ] No historical scan data stored
-
----
-
-## Pre-Deployment Checklist
-
-Before submitting to hackathon:
-
-- [ ] All tests passing
-- [ ] Bot running on VPS/server
-- [ ] Telegram bot accessible 24/7
-- [ ] GitHub repo public
-- [ ] README.md complete
-- [ ] DEPLOYMENT.md accurate
-- [ ] Demo video recorded
-- [ ] Onchain component deployed (if applicable)
-- [ ] Contract address documented
-- [ ] Submission form filled
-
----
-
-**Next Steps:**
-1. Run through all test scenarios
-2. Fix any bugs found
-3. Record demo
-4. Deploy to production
-5. Submit to hackathon!
-
-Good luck! 🛡️
+The unreleased extension chain-identification repair still needs real MetaMask, Rabby and EIP-6963 tests, including chain switching and provider errors, followed by Chrome Web Store review. It is not part of the shipped-extension claim for this submission.

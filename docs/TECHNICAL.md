@@ -1,5 +1,7 @@
 # ShieldBot - Technical Documentation
 
+Coverage and operational corrections below describe the current source tree. The original February 2026 diagrams and demo outputs are illustrative, not evidence of a deployed version or a complete scan.
+
 ## Architecture Overview
 
 ### System Design
@@ -77,12 +79,13 @@ background.js calls ShieldBot API: POST /api/firewall
 API returns verdict: {classification: "HIGH_RISK", risk_score: 85, ...}
          ↓
 background.js injects modal:
-  • HIGH_RISK → Full-screen red BLOCK modal
+  • HIGH_RISK → Red risk overlay (cancel/proceed)
   • MEDIUM_RISK → Orange warning overlay (proceed/cancel)
-  • LOW_RISK → Silent passthrough
+  LOW_RISK: Passthrough only with complete required scan coverage
+  INCOMPLETE: Unknown warning; browser proceed override remains
          ↓
 User action:
-  • BLOCK: Transaction rejected (never reaches wallet)
+  • User chooses Block: Transaction rejected (never reaches wallet)
   • WARN + Cancel: Transaction rejected
   • WARN + Proceed: Transaction forwarded to wallet
   • ALLOW: Transaction forwarded to wallet immediately
@@ -90,9 +93,29 @@ User action:
 
 **Key Technical Details**:
 - **EIP-6963 Compatible**: Detects multiple wallet providers via `eip6963:announceProvider` events
-- **Direct Provider Wrapping**: Wraps `provider.request()` at the lowest level (cannot be bypassed)
-- **Zero Wallet Permissions**: Extension never accesses private keys or user data
-- **CORS-Safe**: All API calls from background service worker (no content script CORS issues)
+- **Provider Wrapping**: Wraps discovered providers' `request()` methods; this is not a wallet-level guarantee against bypass.
+- **Transaction Metadata**: The extension reads transaction requests for analysis, but does not access wallet private keys.
+- **API Calls**: Transaction interception uses the background service worker; the side panel also calls the API directly.
+
+**Release limitation:** The previously shipped extension does not resolve the active provider chain when a dApp omits `chainId`; that path defaults to BNB Chain (56). Its result is not evidence of protection on Robinhood Chain (4663) or another omitted chain. The chain-resolution repair on this branch is unreleased. Do not claim the Web Store build has that repair or multichain protection based on this branch. Validate the unpacked build with real wallets, chain switches and unavailable providers before a separately reviewed release.
+
+### Coverage Contract and Remaining MCP Limitations
+
+For scan responses, `core.extension_formatter.is_scan_incomplete` is the shared incompleteness check. An unknown or partial result is not a safety decision; an observed risk score is not proof that missing checks passed.
+
+The MCP adapters have narrower coverage than their names may suggest:
+
+- `check_approval_risk` and `query_threat_graph` are unimplemented adapters. They return `status: "unknown"`, coverage reasons and null result fields; they do not enumerate approvals or establish absence of cluster connections.
+- `simulate_transaction` still returns an `error` with empty arrays and a zero gas estimate when Tenderly is unavailable or returns no result. Those legacy defaults are not measured zero effects or permission to execute. Successful output is also limited to the simulation provider's reported fields.
+- `check_deployer` uses the local index. `deployer: null` with an unindexed note and zero counts means missing history, not a deployer with no risky contracts.
+- `check_agent_reputation` is a block-rate heuristic over at most 1,000 local firewall records. An unregistered agent has no trust score; a registered agent with no history currently gets 100. Neither zero history nor that default 100 establishes trustworthiness.
+- `scan_for_injection` checks a fixed regex list. `clean: true` means no listed pattern matched, not that arbitrary content is safe; the returned depth label does not add a deeper analysis pass.
+
+These legacy MCP limits remain open. Consumers must not promote their empty lists, zero counts, regex result or default reputation into an authorization decision.
+
+The scan coverage contract does not cover all auxiliary browser features: phishing-error paths can return `is_phishing: false`, and the side-panel injection renderer defaults a missing score to zero and labels it "Safe". Those displays do not prove that a phishing or injection check completed. They remain separate hardening work and must not be advertised as fail-closed protection.
+
+The browser also retains user overrides: generic incomplete results, API errors and risk overlays offer "Proceed Anyway". The new chain-resolution path independently rejects unknown, mismatched or changed chains, but it does not remove those other overrides. Signature requests use a local heuristic warning instead of the transaction-analysis API, and the popup wallet-health request is explicitly BNB-only (`chain_id=56`). Do not describe this extension as an unbypassable security boundary or claim that every incomplete check prevents signing.
 
 ---
 
@@ -100,7 +123,7 @@ User action:
 
 **File**: `core/risk_engine.py`
 
-**ShieldScore Computation**:
+**ShieldScore Computation** (historical scoring sketch, not the complete authorization path):
 
 ```python
 # Category Weights
@@ -133,11 +156,11 @@ if ownership_renounced and high_liquidity:  # >$100k liquidity
 
 # Final Verdict
 if composite_score >= 71:
-    return "HIGH_RISK"  # Auto-block
+    return "HIGH_RISK"  # Risk classification, not browser enforcement
 elif composite_score >= 31:
     return "MEDIUM_RISK"  # Warning
 else:
-    return "LOW_RISK"  # Allow
+    return "LOW_RISK"  # Not authorization; coverage and policy checks still apply
 ```
 
 **Structural Score Factors** (0-100):
@@ -170,9 +193,9 @@ else:
 
 ### 3. Data Services (Parallel Intelligence)
 
-All services run **asynchronously in parallel** via `asyncio.gather()`:
+The analyzer registry schedules applicable checks concurrently. The historical direct-call sketch below omits explicit chain routing; use `bot.py` and `core/registry.py` for the current path.
 
-**Example from `bot.py`**:
+**Historical BNB-only sketch**:
 ```python
 contract_data, honeypot_data, dex_data, ethos_data, token_info = await asyncio.gather(
     contract_service.fetch_contract_data(address),
@@ -181,7 +204,7 @@ contract_data, honeypot_data, dex_data, ethos_data, token_info = await asyncio.g
     ethos_service.fetch_wallet_reputation(address),
     web3_client.get_token_info(address),
 )
-# Total execution time: ~1.5-2 seconds (not 5-7 seconds sequential)
+# This sketch is not a latency measurement.
 ```
 
 **Service Details**:
@@ -196,27 +219,26 @@ contract_data, honeypot_data, dex_data, ethos_data, token_info = await asyncio.g
 - Honeypot.is API: Buy/sell simulation
 - Tax extraction: Buy tax %, sell tax %
 - Transfer simulation: Can buy? Can sell?
-- False positive filtering: Ignores flags when taxes <50%
+- Missing buy/sell fields remain null with explicit coverage reasons; an unresolved simulation cannot establish sellability (`services/honeypot_service.py`).
 
 #### DexService (`services/dex_service.py`)
 - DexScreener API: Token market data
 - Metrics: Liquidity USD, 24h volume, FDV, pair age
 - Anomaly detection: Volume > 10x liquidity (wash trading)
-- Multi-pair aggregation: Sums volume across all pairs
+- Multi-pair aggregation: Sums volume only across the requested chain; missing volume on any selected pair leaves the total unknown
 
 #### EthosService (`services/ethos_service.py`)
 - Ethos Network API: Wallet reputation scoring
 - Scam flags, abuse history, community reviews
-- Reputation score: 0-100 (lower = more trustworthy for wallets)
+- Reputation score: normalized to 0-100; higher is more reputable. A missing profile receives a neutral default, which is not proof of trust.
 
 #### TenderlyService (`services/tenderly_service.py`)
-- Tenderly Simulation API: Pre-execution transaction simulation
-- Predicts: Success/revert, gas usage, asset deltas, subcalls
-- Detects: Reentrancy, failed internal calls, excessive gas
+- Optional Tenderly Simulation API: reports success/revert, gas usage and parsed asset deltas when configured and available
+- Warns about reported failed subcalls and more than 50 state changes. The latter is a heuristic, not proof of reentrancy; there is no excessive-gas detector in this service.
 
 #### GreenfieldService (`services/greenfield_service.py`)
-- BNB Greenfield Python SDK: On-chain storage
-- Uploads: JSON forensic reports for high-risk transactions
+- Optional BNB Greenfield SDK: creates an object record on-chain and uploads JSON bytes to a storage provider
+- The firewall attempts an upload only when the service is enabled and risk is at least 50; failure leaves the URL absent. This is separate from Robinhood verdict evidence.
 - Bucket: `shieldbot-reports`
 - Public URLs: `https://greenfield-sp.bnbchain.org/view/shieldbot-reports/reports/<id>.json`
 
@@ -259,7 +281,7 @@ a coordinated scam launch.
 **Why AI?**
 - Explains **WHY** a contract is risky (not just flags)
 - Contextualizes **COMBINATIONS** of signals (e.g., "mint + proxy + new pair = rug")
-- Reduces false positives via nuanced analysis
+- Adds contextual explanations; no measured false-positive reduction is claimed
 - Provides **educational value** (users learn security patterns)
 
 ---
@@ -347,16 +369,16 @@ shieldbot/
 1. **Only BSCSCAN_API_KEY is required** (free at [bscscan.com/myapikey](https://bscscan.com/myapikey))
 2. Run: `uvicorn api:app --host 0.0.0.0 --port 8000`
 3. Visit: `http://localhost:8000/test`
-4. All risk analysis features work with just BscScan API
+4. Available checks run with the configured providers; missing or unsupported provider coverage must remain unknown. A BscScan key alone does not provide every risk check.
 
 **Features that require optional API keys:**
-- **Telegram Bot**: Requires TELEGRAM_BOT_TOKEN → **Alternative: Use live bot [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)**
+- **Telegram Bot**: Requires TELEGRAM_BOT_TOKEN → **Historical bot link: [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot), availability unverified here**
 - **BNB Greenfield**: Requires GREENFIELD_PRIVATE_KEY → Optional, only for report uploads
 - **Tenderly Simulation**: Requires TENDERLY_API_KEY → Optional, core features work without it
 - **AI Analysis**: Requires AI_API_KEY → Optional enhancement
 
 **Easiest evaluation methods:**
-1. **Live Telegram Bot** (no setup): [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)
+1. **Historical Telegram link** (availability unverified here): [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)
 2. **Demo Video** (3 minutes): [Watch on YouTube](https://youtu.be/a-PbFsZz0Ds)
 3. **Local API** (BscScan key only): Follow setup below
 
@@ -394,19 +416,7 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-**Key Dependencies** (see `requirements.txt` for exact pins):
-```
-fastapi>=0.109.0
-uvicorn[standard]>=0.27.0
-python-telegram-bot==20.7
-web3==6.15.1
-aiohttp==3.9.3
-httpx~=0.25.2
-anthropic==0.18.1
-pydantic-settings>=2.0
-python-dotenv==1.0.1
-websockets>=13.0
-```
+**Dependencies:** `requirements.txt` is the source of truth for installed package requirements.
 
 ### 4. Configure Environment Variables
 
@@ -492,7 +502,9 @@ The video shows:
 - Real-time risk analysis with composite ShieldScore
 - BNB Greenfield forensic report storage
 
-### Expected Output Examples
+### Illustrative Output Examples
+
+These are historical mockups, not recorded scans or current schemas. The browser offers cancel/proceed overrides, including for high risk. Use [JUDGE_GUIDE.md](JUDGE_GUIDE.md) for recorded Robinhood evidence.
 
 **Extension BLOCK Verdict:**
 ```
@@ -581,23 +593,23 @@ Market Metrics:
 }
 ```
 
-### Live Telegram Bot Demo
+### Telegram Demo Commands (deployment availability unverified here)
 
 **Bot**: [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)
 
 **Commands to Try**:
 
-1. **Safe Contract Scan**:
+1. **Example Contract Scan**:
    ```
    /scan 0x10ED43C718714eb63d5aA57B78B54704E256024E
    ```
-   *(PancakeSwap Router - should return LOW RISK)*
+   *(PancakeSwap Router; inspect coverage as well as the risk result.)*
 
-2. **Safe Token Check**:
+2. **Example Token Check**:
    ```
    /token 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c
    ```
-   *(WBNB - should return LOW RISK with token name/symbol)*
+   *(WBNB; the returned result depends on current provider coverage.)*
 
 3. **View History** (if any scans recorded):
    ```
@@ -622,7 +634,7 @@ Market Metrics:
    - Click "Test BLOCK Verdict (Honeypot Token)"
    - Full-screen **red modal** appears
    - Shows risk score 85/100, critical flags
-   - Transaction cannot proceed (no wallet popup)
+   - Choosing Block rejects the transaction; the proceed override forwards it to the wallet
 
 2. **WARN Verdict**:
    - Click "Test WARN Verdict (Unverified Contract)"
@@ -642,8 +654,8 @@ Market Metrics:
 2. Connect wallet (MetaMask/Rabby)
 3. Try to swap BNB for a **known honeypot token** (e.g., `0xSCAMADDRESS`)
 4. ShieldBot intercepts → Shows BLOCK modal
-5. Try to swap BNB for **WBNB** (verified safe token)
-6. ShieldBot allows → MetaMask signature request appears
+5. Inspect a WBNB transaction separately.
+6. An allow result requires complete required coverage and a permitting policy; token familiarity alone is insufficient.
 
 ### API Demo
 
@@ -686,7 +698,7 @@ pytest tests/
 pytest tests/ --cov=. --cov-report=term-missing
 ```
 
-**Test suite** (24 test modules):
+**Selected test modules** (see [TESTING.md](TESTING.md) for measured suite results):
 - `test_api.py` — Firewall & scan API endpoints
 - `test_calldata.py` — Calldata decoder, selector detection, approval parsing
 - `test_risk_scorer.py` — Heuristic scoring, blending, confidence
@@ -694,9 +706,9 @@ pytest tests/ --cov=. --cov-report=term-missing
 - `test_rpc_proxy.py` — RPC proxy intercept, fail-closed behavior
 - `test_ownership.py` — Ownership renouncement checks
 - `test_multichain_routing.py` — Chain adapter routing
-- `test_policy.py` — Policy engine modes (STRICT/BALANCED/PERMISSIVE)
+- `test_policy.py` — Policy engine modes (STRICT/BALANCED)
 - `test_calibration.py` — Data-driven threshold calibration
-- And 15 more covering auth, DB, indexer, container, config, etc.
+- Additional modules cover provider coverage, Robinhood simulation fixtures, verdict publication, auth, persistence and other paths.
 
 ### Manual Testing Checklist
 
@@ -705,7 +717,7 @@ pytest tests/ --cov=. --cov-report=term-missing
 - [ ] Intercepts transactions on test page
 - [ ] Shows correct verdict modals (BLOCK/WARN/ALLOW)
 - [ ] Allows user to cancel WARN verdicts
-- [ ] Silent passthrough for whitelisted routers
+- [ ] Router swap tokens are analyzed; undecodable or unscanned swap paths remain unknown
 - [ ] Works with MetaMask, Rabby, and other EIP-6963 wallets
 
 **Telegram Bot**:
@@ -780,15 +792,21 @@ sudo systemctl daemon-reload
 sudo systemctl enable shieldbot-bot
 sudo systemctl start shieldbot-bot
 
-# Run FastAPI with gunicorn
-gunicorn api:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+# Run one API process, matching shieldbot-api.service
+uvicorn api:app --host 127.0.0.1 --port 8000
 ```
+
+Run exactly one API process when verdict publication is configured. The API lifespan starts the verdict outbox sender, and its nonce lock is process-local. Multiple workers or API replicas would start competing senders for the same recorder. `shieldbot-api.service` deliberately sets no `--workers`; do not add workers, reload mode, or a second API instance to this deployment.
 
 **Nginx Reverse Proxy** (for HTTPS):
 ```nginx
 server {
     listen 80;
     server_name api.shieldbot.xyz;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
 
     location / {
         proxy_pass http://127.0.0.1:8000;
@@ -800,8 +818,10 @@ server {
 
 **SSL Certificate**:
 ```bash
-sudo certbot --nginx -d api.shieldbot.xyz
+sudo certbot certonly --webroot -w /var/www/html -d api.shieldbot.xyz
 ```
+
+Serve the challenge location above before requesting the certificate, then configure TLS explicitly in the vhost. Use webroot issuance on the shared VPS; do not let Certbot rewrite its nginx listeners.
 
 ### Docker Deployment (Future)
 
@@ -821,18 +841,18 @@ CMD ["python", "bot.py"]
 
 ### Response Time Targets
 
-| Operation | Target | Current |
+| Operation | Historical target | Measurement |
 |-----------|--------|---------|
-| Extension verdict | <2s | ~1.5s |
-| Telegram /scan | <3s | ~2s |
-| API /firewall | <2s | ~1.5s |
-| Greenfield upload | <5s | ~3s |
+| Extension verdict | <2s | Not measured for this submission |
+| Telegram /scan | <3s | Not measured for this submission |
+| API /firewall | <2s | Not measured for this submission |
+| Greenfield upload | <5s | Not measured for this submission |
 
 ### Optimization Strategies
 
 1. **Parallel API Calls**: All data services run via `asyncio.gather()`
 2. **Caching**: 5-minute TTL for contract scans (Telegram bot)
-3. **Router Whitelist**: PancakeSwap, 1inch fast-path bypass
+3. **Router Recognition**: Recognized swaps analyze the decoded path tokens; router recognition does not bypass token checks
 4. **Rate Limiting**: Respects BscScan free tier (5 req/sec)
 5. **Connection Pooling**: Reuses HTTP connections via aiohttp
 
@@ -843,22 +863,22 @@ CMD ["python", "bot.py"]
 ### Extension Security
 
 - **No Private Key Access**: Extension never touches wallet private keys
-- **HTTPS Only**: All API calls over HTTPS in production
+- **Transport**: Verify the configured API URL and deployed TLS configuration; repository settings alone do not establish transport security.
 - **Content Security Policy**: Strict CSP in manifest.json
 - **No Remote Code Execution**: All logic bundled in extension
 
 ### API Security
 
-- **CORS Whitelist**: Only allows registered extension IDs
-- **Rate Limiting**: Prevents API abuse (future: implement rate limits)
-- **Input Validation**: All addresses validated via Web3.is_address()
-- **Error Handling**: Never exposes internal error messages to users
+- **CORS Allowlist**: Allows configured origins; this is not authentication
+- **Rate Limiting**: API middleware applies key quotas or an IP-based fallback
+- **Input Validation**: Review the request model and handler for the endpoint being used; this document does not claim that every input path has identical validation.
+- **Error Handling**: Inspect endpoint error responses separately; this document does not certify that every path redacts internal details.
 
 ### Data Privacy
 
-- **No User Tracking**: No analytics, cookies, or user identification
-- **No Transaction Storage**: Transactions never logged/stored
-- **On-Chain Reports**: Only high-risk transactions (opt-in via threshold)
+- **Persistent Backend State**: SQLite retains scan scores, findings, agent transaction history, chat history and identifiers, subscriptions, verdict evidence and publication outbox state (`core/database.py`).
+- **Local Extension State**: Browser storage holds settings, recent scan results, a chat identifier and recent chat messages. Removing the extension does not delete backend records.
+- **External Processing**: Configured RPC and intelligence services receive the addresses or transaction data needed by the invoked checks. Optional AI and report publication flows can send additional analysis data; a risk threshold is not user consent.
 - **Open Source**: All code auditable at https://github.com/Ridwannurudeen/shieldbot
 
 ---

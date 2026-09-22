@@ -1,6 +1,7 @@
 import aiohttp
 import logging
 import math
+import time
 
 from utils.chain_info import get_dexscreener_slug
 
@@ -14,6 +15,7 @@ class DexService:
 
     async def fetch_token_market_data(self, address: str, chain_id: int = 56) -> dict:
         defaults = {
+            'observed_at': time.time(),
             'token_name': None,
             'token_symbol': None,
             'price_usd': None,
@@ -86,7 +88,6 @@ class DexService:
 
             pair_created = pair.get('pairCreatedAt')
             if pair_created:
-                import time
                 pair_age_hours = (time.time() * 1000 - pair_created) / (1000 * 3600)
             else:
                 pair_age_hours = None
@@ -102,6 +103,7 @@ class DexService:
             ) if liquidity_usd is not None and volume_24h is not None else None
 
             result = {
+                'observed_at': defaults['observed_at'],
                 'token_name': token_name,
                 'token_symbol': token_symbol,
                 'price_usd': price_usd,

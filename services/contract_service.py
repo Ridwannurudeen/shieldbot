@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class ContractService:
         from utils.web3_client import UnsupportedChainError
 
         defaults = {
+            'observed_at': time.time(),
             'is_contract': False,
             'is_verified': None,
             'contract_age_days': None,
@@ -67,6 +69,7 @@ class ContractService:
             # Scam DB (external APIs, not BscScan — no delay needed)
             scam_matches = await self.scam_db.check_address(address, chain_id=chain_id)
             results['scam_matches'] = list(scam_matches or [])
+            results['observed_at'] = min(defaults['observed_at'], getattr(scam_matches, 'observed_at', 0))
             failed_providers = getattr(scam_matches, 'failed_providers', ())
             if failed_providers:
                 results['coverage'] = {'scam_database': False}

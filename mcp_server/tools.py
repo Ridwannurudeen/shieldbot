@@ -98,7 +98,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "check_approval_risk",
-        "description": "Scan a wallet for risky token approvals. (Stub — full implementation in V3.2 Guardian.)",
+        "description": "Approval risk checking is not implemented in MCP. Returns status 'unknown' and coverage_reasons; approvals are null, never a safety verdict.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -127,7 +127,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "query_threat_graph",
-        "description": "Check if an address is connected to known threat clusters. (Stub — full graph in V3.5.)",
+        "description": "Threat graph querying is not implemented in MCP. Returns status 'unknown' and coverage_reasons; connections are null, never a safety verdict.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -294,13 +294,16 @@ async def handle_check_agent_reputation(container, params: Dict) -> Dict:
 
 
 async def handle_check_approval_risk(container, params: Dict) -> Dict:
-    """Stub: wallet approval risk scan. Full implementation in V3.2 Guardian."""
+    """Report unavailable MCP approval coverage without claiming no approvals."""
     wallet = _validate_address(params["wallet_address"])
     return {
         "wallet_address": wallet,
         "chain_id": container.web3_client.validate_chain_id(params.get("chain_id", 56)),
-        "approvals": [],
-        "risk_summary": "Approval scanning not yet implemented. Coming in V3.2 (Guardian).",
+        "approvals": None,
+        "status": "unknown",
+        "coverage": {"approvals": 0},
+        "coverage_reasons": {"approvals": "Approval risk checking is not implemented in MCP"},
+        "risk_summary": "Unknown: approvals were not checked.",
     }
 
 
@@ -334,15 +337,18 @@ async def handle_scan_for_injection(container, params: Dict) -> Dict:
 
 
 async def handle_query_threat_graph(container, params: Dict) -> Dict:
-    """Stub: threat graph query. Full implementation in V3.5."""
+    """Report unavailable MCP graph coverage without claiming no connections."""
     address = _validate_address(params["address"])
     return {
         "address": address,
         "chain_id": container.web3_client.validate_chain_id(params.get("chain_id", 56)),
-        "connected_to_cluster": False,
+        "connected_to_cluster": None,
         "cluster_id": None,
-        "edges": [],
-        "note": "Threat graph not yet implemented. Coming in V3.5.",
+        "edges": None,
+        "status": "unknown",
+        "coverage": {"threat_graph": 0},
+        "coverage_reasons": {"threat_graph": "Threat graph querying is not implemented in MCP"},
+        "note": "Unknown: threat connections were not checked.",
     }
 
 

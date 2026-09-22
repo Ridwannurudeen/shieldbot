@@ -37,6 +37,7 @@ async def _fetch(session, address=ADDRESS, chain_id=4663):
     with (
         patch("utils.scam_db.aiohttp.ClientSession") as factory,
         patch("utils.scam_db.asyncio.sleep", new_callable=AsyncMock) as sleep,
+        patch("utils.scam_db.time.time", return_value=1000),
     ):
         factory.return_value.__aenter__ = AsyncMock(return_value=session)
         factory.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -58,7 +59,7 @@ async def test_rate_limited_reply_is_retried_with_backoff_then_cached_unknown(re
     result, sleep = await _fetch(session)
     assert session.get.call_count == 3
     assert [call.args for call in sleep.await_args_list] == [(0.5,), (1.0,)]
-    assert result == {"status": "unknown", "reason": reason, "data": {}}
+    assert result == {"status": "unknown", "reason": reason, "data": {}, "observed_at": 1000}
     # The genuine failure is still negative-cached for the 30 s window.
     cached, cached_sleep = await _fetch(session)
     assert cached == result
@@ -80,7 +81,7 @@ async def test_retry_then_success_returns_the_token_data(first):
     result, sleep = await _fetch(session)
     assert session.get.call_count == 2
     assert [call.args for call in sleep.await_args_list] == [(0.5,)]
-    assert result == {"status": "ok", "reason": None, "data": TOKEN}
+    assert result == {"status": "ok", "reason": None, "data": TOKEN, "observed_at": 1000}
 
 
 @pytest.mark.asyncio
@@ -105,7 +106,7 @@ async def test_other_replies_are_not_retried(reply, reason):
     result, sleep = await _fetch(session)
     assert session.get.call_count == 1
     sleep.assert_not_awaited()
-    assert result == {"status": "unknown", "reason": reason, "data": {}}
+    assert result == {"status": "unknown", "reason": reason, "data": {}, "observed_at": 1000}
 
 
 @pytest.mark.asyncio

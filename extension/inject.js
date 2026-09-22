@@ -58,6 +58,15 @@
   // so revoke TXs bypass ShieldAI analysis and go straight to the wallet.
   let _lastOriginalRequest = null;
 
+  function parseChainId(value) {
+    if (typeof value !== "number" &&
+        !(typeof value === "string" && /^(0x[0-9a-f]+|[0-9]+)$/i.test(value))) {
+      return null;
+    }
+    const chainId = Number(value);
+    return Number.isSafeInteger(chainId) && chainId > 0 ? chainId : null;
+  }
+
   /**
    * Wrap a provider's request method to intercept transactions.
    * Uses Object.defineProperty for compatibility with MetaMask v11+
@@ -68,6 +77,32 @@
 
     const originalRequest = provider.request.bind(provider);
     _lastOriginalRequest = originalRequest;
+    let currentChainId = null;
+    let chainRevision = 0;
+
+    if (typeof provider.on === "function") {
+      provider.on("chainChanged", (chainId) => {
+        currentChainId = parseChainId(chainId);
+        chainRevision++;
+      });
+    }
+
+    async function resolveChainId() {
+      const revision = chainRevision;
+      let timeout;
+      try {
+        const chainId = await Promise.race([
+          originalRequest({ method: "eth_chainId" }),
+          new Promise((resolve) => { timeout = setTimeout(() => resolve(null), 5000); }),
+        ]);
+        currentChainId = revision === chainRevision ? parseChainId(chainId) : null;
+      } catch (_) {
+        currentChainId = null;
+      } finally {
+        clearTimeout(timeout);
+      }
+      return currentChainId;
+    }
 
     const wrappedRequest = async function (args) {
       if (!args || !INTERCEPTED_METHODS.has(args.method)) {
@@ -117,11 +152,34 @@
         interceptData = txParams;
       }
 
+      const isTransaction = args.method === "eth_sendTransaction" || args.method === "eth_signTransaction";
+      const revision = chainRevision;
+      let chainId = null;
+      if (isTransaction) {
+        chainId = await resolveChainId();
+        if (interceptData.chainId !== undefined && parseChainId(interceptData.chainId) !== chainId) {
+          chainId = null;
+        }
+      }
+
       // Ask content script to analyze via background
-      const verdict = await requestAnalysis(args.method, interceptData);
+      const verdict = await requestAnalysis(args.method, isTransaction ? { ...interceptData, chainId } : interceptData);
+
+      if (isTransaction && chainId === null) {
+        throw new Error("Transaction blocked by ShieldAI: wallet chain is unknown or mismatched");
+      }
 
       if (verdict.action === "block") {
         throw new Error("Transaction blocked by ShieldAI Firewall");
+      }
+
+      // A verdict only covers the chain observed before analysis. Recheck even
+      // when the provider does not implement chainChanged events.
+      if (isTransaction) {
+        const latestChainId = await resolveChainId();
+        if (revision !== chainRevision || latestChainId !== chainId) {
+          throw new Error("Transaction blocked by ShieldAI: wallet chain changed; retry analysis");
+        }
       }
 
       // proceed — forward to original wallet
@@ -187,7 +245,7 @@
         from: txParams.from || "",
         value: txParams.value || "0x0",
         data: txParams.data || "0x",
-        chainId: txParams.chainId || undefined,
+        chainId: txParams.chainId,
       };
 
       // Forward typed data and sign method for EIP-712 / signature analysis

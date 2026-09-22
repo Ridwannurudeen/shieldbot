@@ -17,6 +17,7 @@ import asyncio
 import logging
 import re
 import secrets
+import time
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
@@ -746,6 +747,8 @@ class RobinhoodSimulator:
         return await asyncio.shield(self._inflight[flight_key])
 
     async def _simulate(self, token: str, flight_key: tuple) -> dict:
+        # Discovery and every pool attempt contribute evidence; retain the oldest read time.
+        observed_at = time.time()
         try:
             result = await self._run(token)
         except SimulationUnavailable as e:
@@ -756,6 +759,7 @@ class RobinhoodSimulator:
             result = aggregate_outcomes([], [f"Simulation RPC request failed ({type(e).__name__})"])
         finally:
             self._inflight.pop(flight_key, None)
+        result["observed_at"] = observed_at
         self._cache[token] = result
         return result
 
@@ -787,16 +791,24 @@ class RobinhoodSimulator:
         except EncodingError as e:
             return _outcome(pool, f"Simulation request could not be encoded ({type(e).__name__})")
         try:
-            rows = await self._request(session, [("eth_simulateV1", [request, "latest"])])
+            headers = await self._request(session, [("eth_getBlockByNumber", ["latest", False])])
+            header = headers[0].get("result")
+            source_block = _quantity(header.get("number")) if isinstance(header, dict) else None
+            if source_block is None:
+                raise SimulationUnavailable("Simulation source block header unavailable")
+            rows = await self._request(session, [("eth_simulateV1", [request, hex(source_block)])])
             error = rows[0].get("error")
             if error is not None:
                 code = error.get("code") if isinstance(error, dict) else None
                 if code == -32601 or "does not exist" in str(error).lower():
                     raise SimulationUnavailable("eth_simulateV1 unsupported by the RPC")
                 raise SimulationUnavailable(f"eth_simulateV1 failed (JSON-RPC error {code})")
-            return evaluate_simulation(
+            outcome = evaluate_simulation(
                 pool, token, amount, buyer, rows[0].get("result"), sell_amount
             )
+            # eth_simulateV1 returns synthetic blocks after the real source header.
+            outcome["block"] = source_block
+            return outcome
         except SimulationUnavailable as e:
             return _outcome(pool, e.reason)
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:

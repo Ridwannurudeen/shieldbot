@@ -6,8 +6,9 @@ import {DeployVerdictRegistry} from "../script/DeployVerdictRegistry.s.sol";
 import {ShieldBotVerdictRegistry} from "../src/ShieldBotVerdictRegistry.sol";
 
 contract DeployVerdictRegistryTest is Test {
-    /// One test function, because forge runs test functions in parallel and both steps set the same env var.
+    /// Keep env var mutations in one test because forge runs test functions in parallel.
     function test_Run_RequiresRecorderAndDeploysWithIt() public {
+        vm.chainId(4663);
         DeployVerdictRegistry script = new DeployVerdictRegistry();
 
         vm.setEnv("INITIAL_RECORDER", "");
@@ -22,5 +23,12 @@ contract DeployVerdictRegistryTest is Test {
         // The broadcasting account, not the script contract, owns the registry.
         assertEq(registry.owner(), tx.origin);
         assertEq(registry.totalRecords(), 0);
+    }
+
+    function test_Run_RejectsWrongChainBeforeReadingRecorder() public {
+        vm.chainId(8453);
+        DeployVerdictRegistry script = new DeployVerdictRegistry();
+        vm.expectRevert(abi.encodeWithSelector(DeployVerdictRegistry.WrongChain.selector, uint256(8453)));
+        script.run();
     }
 }

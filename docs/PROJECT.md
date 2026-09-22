@@ -1,5 +1,7 @@
 # ShieldBot - Project Overview
 
+This is a historical BNB hackathon overview. The roadmap, projected metrics, example scores and release-status notes below are not current deployment evidence. Current coverage limits are documented in [TECHNICAL.md](TECHNICAL.md). In particular, the previously shipped extension defaults an omitted transaction `chainId` to BNB Chain; it does not establish multichain protection in that case. The provider-chain repair on this branch is unreleased.
+
 ## 🎥 Demo Video
 
 **Watch the demo walkthrough:** [View on YouTube](https://youtu.be/NN95rom10R8)
@@ -10,51 +12,15 @@ See ShieldBot blocking honeypots in real-time, the Telegram bot displaying token
 
 ## Problem Statement
 
-**The DeFi security crisis on BNB Chain is costing users billions.**
+The original BNB-focused pitch addressed honeypots, risky approvals and contracts that users cannot assess before signing. The Robinhood submission focuses on sellability, stock-token impostors and explicit missing coverage; see [the current README](../README.md).
 
-In 2024 alone, over $2.3 billion was stolen through smart contract exploits, rug pulls, and honeypot tokens across all chains, with BNB Chain being a primary target due to its high trading volume and ease of token deployment. Current security solutions have critical gaps:
-
-### Current Solutions Fall Short
-
-1. **Post-Mortem Block Explorers** (BscScan, DexScreener)
-   - Users check AFTER buying
-   - No real-time intervention
-   - Requires manual verification knowledge
-
-2. **Centralized Token Scanners** (TokenSniffer, RugDoc)
-   - Single-point-of-failure
-   - High false positive rates
-   - No transaction interception
-   - Users still click "approve" on risky contracts
-
-3. **Wallet Warnings** (MetaMask Phishing Detection)
-   - Only flags known scam domains
-   - Cannot analyze contract bytecode in real-time
-   - No honeypot detection
-   - No simulation of transaction outcomes
-
-4. **Manual Due Diligence**
-   - Time-consuming (20+ min per token)
-   - Requires expertise (reading bytecode, checking liquidity locks)
-   - Users skip it in FOMO situations
-   - Inconsistent methodology
-
-### The Core Problem
-
-**Users need protection BEFORE transactions execute, not after losses occur.**
-
-There is no autonomous firewall that:
-- Intercepts transactions at the wallet level
-- Runs composite intelligence from multiple sources in parallel
-- Simulates transaction outcomes before execution
-- Blocks confirmed scams automatically
-- Records forensic evidence immutably on-chain
+The earlier market-loss figures, competitor comparisons and exclusivity claims have been removed because this repository does not establish them.
 
 ---
 
 ## Solution
 
-**ShieldBot is an autonomous transaction firewall for BNB Chain that protects users from honeypots, rug pulls, and malicious contracts in real-time.**
+**ShieldBot analyzes transaction and token risk before execution where its checks are available. Browser warnings can be overridden, and incomplete required coverage is not a safety decision.**
 
 ### How It Works
 
@@ -63,12 +29,12 @@ User initiates swap on PancakeSwap
          ↓
 ShieldBot intercepts via Chrome Extension (before MetaMask sees it)
          ↓
-Parallel intelligence gathering (6 sources, <2 seconds):
+Applicable intelligence checks (coverage and latency depend on chain and provider):
   • GoPlus: Contract verification, scam flags, bytecode analysis
   • Honeypot.is: Buy/sell simulation, tax detection
   • DexScreener: Liquidity depth, pair age, volume anomalies
   • Ethos Network: Wallet reputation scoring
-  • Tenderly: Pre-execution simulation (success/revert, asset deltas)
+  Optional Tenderly: Pre-execution simulation when configured and available
   • BscScan: Deployment age, transaction history
          ↓
 RiskEngine computes composite ShieldScore (0-100):
@@ -78,11 +44,12 @@ RiskEngine computes composite ShieldScore (0-100):
   • Honeypot risk (15%): Confirmed honeypot, sell tax >50%
          ↓
 Verdict determination:
-  • HIGH RISK (71+): AUTO-BLOCK with full-screen red modal
+  • HIGH RISK (71+): Red risk overlay (browser override remains)
   • MEDIUM RISK (31-70): WARNING overlay (user can proceed/cancel)
-  • LOW RISK (0-30): ALLOW silently (no friction)
+  • LOW RISK (0-30): Eligible for ALLOW only with complete required coverage
+  • INCOMPLETE: Unknown; no automatic safety decision (browser overrides remain)
          ↓
-For risky transactions: Upload forensic report to BNB Greenfield
+For risk >=50: Attempt optional Greenfield upload when enabled; failure is possible
          ↓
 Transaction proceeds/rejected based on verdict + user choice
 ```
@@ -91,12 +58,12 @@ Transaction proceeds/rejected based on verdict + user choice
 
 **Extension BLOCK in Action:**
 
-ShieldBot's most powerful feature is its ability to hard-block dangerous transactions. When analyzing a honeypot token with 99% sell tax, the extension displays a full-screen red modal showing:
+When a scan detects a honeypot or severe tax risk, the extension can display a red warning overlay showing:
 - Risk Score: 85/100 (HIGH RISK)
 - Critical flags explaining WHY it's dangerous (honeypot confirmed, cannot sell after buying, extreme sell tax)
-- The transaction is completely blocked - users cannot proceed even if they choose to
+- The user can cancel the transaction; the current risk overlay also offers a proceed override
 
-**Result:** The user's funds are protected BEFORE the transaction executes. This is fundamentally different from post-mortem block explorers or warnings that users can ignore.
+**Result:** The warning appears before the wrapped request reaches the wallet. It is not an unbypassable block or a guarantee against loss; browser overrides and auxiliary coverage gaps are listed in [TECHNICAL.md](TECHNICAL.md).
 
 **Telegram Bot Intelligence:**
 
@@ -114,11 +81,11 @@ Risk Level: LOW (5/100)
 ✓ 5+ years old, 50M+ transactions
 ```
 
-Users can scan any address in seconds without technical knowledge. The bot is live at [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot) for judges to test.
+The historical bot link is [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot). For current reproducible checks, use [JUDGE_GUIDE.md](JUDGE_GUIDE.md); this document does not verify live availability or response latency.
 
-**BNB Greenfield Immutable Storage:**
+**Optional BNB Greenfield Report Storage:**
 
-High-risk transaction reports are stored on BNB Greenfield as public, immutable JSON objects. This creates a permanent, community-verifiable database of dangerous contracts on BNB Chain. Each report includes:
+When enabled, the firewall can upload a public JSON report for risk scores of at least 50. The service creates an on-chain object record and sends the bytes to a storage provider; uploads can fail. This code path does not establish that a particular report exists or remains available. Reports include:
 - Complete risk analysis with category breakdowns
 - Timestamp and contract address
 - All critical flags and danger signals
@@ -131,26 +98,24 @@ High-risk transaction reports are stored on BNB Greenfield as public, immutable 
 1. **Real-Time Transaction Interception**
    - Chrome extension wraps wallet provider's `request()` method
    - Catches `eth_sendTransaction` BEFORE wallet signature
-   - Works with MetaMask, Rabby, Coinbase Wallet (EIP-6963 compatible)
-   - Cannot be bypassed (runs in page context, `world: MAIN`)
+   - Discovers EIP-6963 providers; the unreleased provider-chain repair still needs real MetaMask/Rabby/EIP-6963 testing
+   - Wraps discovered providers in page context; this is not a wallet-level guarantee against bypass
 
 2. **Composite ShieldScore**
    - Weighted scoring from 4 categories (structural, market, behavioral, honeypot)
    - Escalation rules for confirmed rug patterns
    - Reduction rules for verified safe contracts
-   - 75%+ confidence threshold for auto-block
+   - A risk recommendation is distinct from browser enforcement; proceed overrides remain
 
-3. **BNB Greenfield Forensic Reports**
-   - Immutable on-chain storage of high-risk transaction analysis
-   - Public URLs for community verification
-   - Tamper-proof evidence trail
-   - Enables pattern recognition across scams
+3. **Optional BNB Greenfield Forensic Reports**
+   - Object metadata is recorded on-chain; JSON bytes go to a storage provider
+   - Public URL returned only after a successful configured upload
+   - Separate from the Robinhood evidence-hash registry described in the README
 
 4. **Pre-Execution Simulation**
-   - Tenderly API simulates transaction before signing
-   - Predicts success/revert, gas usage, asset deltas
-   - Detects failed internal calls and reentrancy
-   - Shows "what will happen" before it happens
+   - Optional Tenderly API reports success/revert, gas usage and asset deltas
+   - Warns about reported failed subcalls and a large state-change count
+   - A state-change warning is not proof of reentrancy; a simulation is a point-in-time observation
 
 5. **Multi-Channel Delivery**
    - Chrome Extension: Real-time firewall for dApp users
@@ -159,68 +124,28 @@ High-risk transaction reports are stored on BNB Greenfield as public, immutable 
 
 ---
 
-## Impact
+## Impact and Metrics
 
-### User Protection
-- **Prevents losses BEFORE they occur** (not just alerts)
-- **Zero-knowledge protection**: Users don't need to understand bytecode, liquidity locks, or honeypot mechanisms
-- **Frictionless for safe transactions**: PancakeSwap, 1inch, verified DEXs pass through silently
-- **Transparent risk explanations**: AI-powered analysis explains WHY a contract is dangerous
+Risk warnings and explanations can inform a user's decision; loss prevention and false-positive reduction have not been measured here. Browser users can proceed past warnings. Recognized routers still require analysis of decoded path tokens.
 
-### Ecosystem Benefits
-- **Reduces scam success rate** → Fewer victims → Less incentive for scammers
-- **Builds trust in BNB Chain DeFi** → More users willing to explore new tokens
-- **Immutable scam database** on BNB Greenfield → Community-verifiable threat intelligence
-- **Open-source security layer** → Other projects can integrate ShieldBot API
+The former projected scan counts, loss savings, report totals and accuracy improvements are withdrawn from this overview. They were not observed traction. No production scan count is supplied here; the current README reserves a field for an owner-verified `GET /api/stats` snapshot.
 
-### Measurable Outcomes (Projected)
-- **$10M+ in losses prevented** in first year (based on blocking 1 in 500 risky swaps)
-- **50,000+ scans performed** via Telegram bot and extension
-- **5,000+ forensic reports** stored on BNB Greenfield
-- **95% reduction in false positives** vs. single-source scanners (via composite scoring)
-
-### Current Traction
-- Live Telegram bot: [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)
-- Chrome extension v1.0.3 submitted to Chrome Web Store — under review
-- Phishing blocker live (GoPlus API, 1hr cache, red banner on hit)
-- BNB Greenfield integration live (testnet)
-- Multi-source intelligence pipeline operational
+Repository code includes optional Tenderly and Greenfield clients. Their presence is not evidence that either service is enabled in a deployed backend. The extension chain repair is not scheduled for release before the submission deadline.
 
 ---
 
 ## BNB Chain Integration
 
-### Why BNB Chain?
+### Historical BNB Scope
 
-ShieldBot is purpose-built for BNB Chain because:
-
-1. **High Trading Volume**
-   - BNB Chain processes 3M+ daily transactions
-   - PancakeSwap is the 2nd largest DEX globally
-   - High activity = high scam exposure
-
-2. **Easy Token Deployment**
-   - Low gas fees enable rapid token launches
-   - Many unverified/new contracts daily
-   - Perfect environment for honeypots and rug pulls
-
-3. **BNB Greenfield Native Integration**
-   - Decentralized storage for forensic reports
-   - Lower costs than traditional storage
-   - Built-in redundancy and immutability
-   - Native to BNB ecosystem
-
-4. **opBNB Support**
-   - Layer-2 scalability for high-frequency scans
-   - Sub-cent transaction costs
-   - Future: Real-time on-chain verification contract
+The initial product targeted BSC and opBNB. The current backend chain list is in the README; adapter availability alone does not establish complete risk coverage or shipped browser coverage.
 
 ### BNB-Specific Features
 
 - **BSC Mainnet Scanning**: Contract verification via BscScan API
 - **opBNB RPC Support**: Dual-chain analysis (BSC + opBNB)
-- **BNB Greenfield Storage**: Immutable forensic reports (using greenfield-python-sdk)
-- **PancakeSwap Integration**: Whitelisted router for fast-path approval
+- **Optional BNB Greenfield Storage**: Object records plus storage-provider JSON uploads, when enabled and successful
+- **PancakeSwap Integration**: Router recognition and decoded swap-path token analysis
 - **BNB Ecosystem Data**: Liquidity lock detection (PinkLock, Unicrypt on BSC)
 
 ---
@@ -230,14 +155,14 @@ ShieldBot is purpose-built for BNB Chain because:
 ### Current Limitations
 
 **Technical Constraints:**
-- **Off-Chain Analysis Required**: Real-time performance (<2s) necessitates off-chain computation. Full on-chain verification would be too slow and expensive for per-transaction analysis.
+- **Off-Chain Analysis**: Provider data and risk computation occur off-chain. On-chain publication commits a result; it does not independently rerun the analysis.
 - **API Dependency**: Core functionality requires external API availability (GoPlus, Honeypot.is, DexScreener, etc.). Graceful fallbacks exist, but total API failure would reduce effectiveness.
 - **Browser Extension Only**: Currently supports Chrome/Brave via Manifest V3. Firefox and mobile wallet integration pending.
-- **EVM-Only**: Supports 7 EVM chains (BSC, Ethereum, Base, Arbitrum, Polygon, Optimism, opBNB). Non-EVM chains (Solana, etc.) not yet supported.
+- **Chain-Specific Coverage**: Backend chain support does not establish browser-extension coverage. Each check depends on its provider and chain; the shipped extension's omitted-chain fallback is described above.
 
 **Security & Risk:**
-- **False Negatives Possible**: Sophisticated scams using novel techniques may evade detection. Composite scoring reduces but does not eliminate this risk.
-- **Whitelisted Router Trust**: PancakeSwap and major DEX routers are fast-tracked. Compromise of these routers (unlikely but possible) would bypass ShieldBot.
+- **False Negatives Possible**: Sophisticated scams using novel techniques may evade detection. No measured false-negative reduction is claimed here.
+- **Router Coverage**: Recognized swap paths are scanned; undecodable or unscanned paths remain unknown. This does not prove that a router or its future upgrades cannot be compromised.
 - **API Key Management**: Users must secure their own API keys for optional features (Tenderly, Greenfield uploads). No centralized key management.
 - **Test Coverage**: Core features tested (API, risk scoring, calldata, ownership), but E2E extension testing requires manual verification.
 
@@ -247,14 +172,14 @@ ShieldBot is purpose-built for BNB Chain because:
 - **No Mobile Support**: Chrome extension architecture incompatible with mobile. Mobile wallet SDK integration required.
 
 **Data & Scalability:**
-- **BNB Greenfield Costs**: Storage costs scale with usage. Currently sustainable for high-risk reports only (score ≥50).
-- **No Historical Analysis**: Each scan is point-in-time. No trending or pattern detection across multiple scans of same contract.
+- **BNB Greenfield Costs**: Optional publication incurs storage and transaction costs; the firewall upload threshold is risk >=50.
+- **Point-in-Time Results**: A recorded result does not establish future sellability or future contract behavior.
 - **Centralized Bot Hosting**: Telegram bot runs on single VPS. No redundancy or load balancing yet.
 
 ### Short-Term Future Work (Next 3-6 Months)
 
 **Immediate Priorities (Q2 2026):**
-- Deploy ShieldBotVerifier.sol to opBNB Mainnet to complement the live BSC verifier
+- Proposed opBNB verifier deployment; existing deployment status must be independently verified
 - Add Firefox extension support (Manifest V3 compatible)
 - Implement caching layer for common contract queries (reduce API calls)
 - Add batch scanning API endpoint (analyze multiple addresses in one call)
@@ -283,19 +208,9 @@ ShieldBot is purpose-built for BNB Chain because:
 - Phase 3 (Q3 2026): On-chain verification contract, DAO governance, decentralized oracle
 - Phase 4 (Q4 2026): Multi-chain support (Ethereum, Polygon, Arbitrum)
 
-### Known Issues & Mitigations
+### Operational Verification
 
-**Issue:** BscScan API occasionally returns 429 (rate limit exceeded)
-**Mitigation:** Implemented 0.25s delay between calls + exponential backoff retry logic
-
-**Issue:** Extension occasionally fails to intercept transactions on page reload
-**Mitigation:** inject.js runs at document_start to ensure provider wrapping before dApp loads
-
-**Issue:** Greenfield uploads fail if wallet has insufficient BNB for gas
-**Mitigation:** Graceful fallback - report still generated and returned to user, just not stored on-chain
-
-**Issue:** Telegram bot response time >5s for first scan after idle period (cold start)
-**Mitigation:** Keep-alive ping every 10 minutes to maintain API connection pool
+Historical provider-retry, startup-timing and keep-alive claims are omitted because this document does not demonstrate them. See the relevant service implementations and current tests for error behavior; repository code alone does not establish deployed availability.
 
 ---
 
@@ -303,11 +218,11 @@ ShieldBot is purpose-built for BNB Chain because:
 
 ### Phase 1: Core Security Engine (Completed ✅)
 - [x] Chrome extension with real-time transaction interception
-- [x] Composite risk scoring from 6 data sources
+- [x] Composite risk scoring from applicable provider data; no fixed number of successful sources is implied
 - [x] Telegram bot for manual contract scans
-- [x] BNB Greenfield forensic report storage
-- [x] Tenderly transaction simulation
-- [x] AI-powered risk analysis via Claude
+- [x] Optional BNB Greenfield upload implementation; deployment not verified here
+- [x] Optional Tenderly simulation implementation; provider coverage varies
+- [x] Optional model-generated risk explanations
 
 ### Phase 2: Expansion & Hardening (Q2 2026)
 - [ ] Browser extension marketplace deployment (Chrome Web Store, Firefox Add-ons)
@@ -324,7 +239,7 @@ ShieldBot is purpose-built for BNB Chain because:
 - [ ] Open API marketplace (wallets/dApps can integrate)
 
 ### Phase 4: Expansion (Q4 2026)
-- [x] Ethereum, Base, Arbitrum, Polygon, Optimism support (shipped)
+- [x] Ethereum, Base, Arbitrum, Polygon and Optimism backend adapters exist; provider coverage differs and deployment is not established here
 - [ ] Non-EVM chain support (Solana, Sui)
 - [ ] Unified cross-chain scam database
 - [ ] Chain-agnostic ShieldScore standard
@@ -346,24 +261,15 @@ ShieldBot is purpose-built for BNB Chain because:
 
 - **License**: MIT (fully open-source)
 - **Repository**: https://github.com/Ridwannurudeen/shieldbot
-- **Live Bot**: https://t.me/shieldbot_bnb_bot
+- **Historical Bot Link (availability unverified)**: https://t.me/shieldbot_bnb_bot
 - **Architecture**: Fully documented in `/docs/TECHNICAL.md`
 - **Contributions Welcome**: Security researchers, data source integrations, ML/AI improvements
 
 ---
 
-## Differentiators vs. Existing Solutions
+## Current Evidence
 
-| Feature | ShieldBot | TokenSniffer | RugDoc | MetaMask Warnings |
-|---------|-----------|--------------|--------|-------------------|
-| Real-time interception | ✅ | ❌ | ❌ | ❌ |
-| Auto-block dangerous txs | ✅ | ❌ | ❌ | ❌ |
-| Composite scoring (6 sources) | ✅ | ❌ (1 source) | ❌ (manual) | ❌ |
-| Pre-execution simulation | ✅ | ❌ | ❌ | ❌ |
-| On-chain forensic reports | ✅ (Greenfield) | ❌ | ❌ | ❌ |
-| AI risk explanations | ✅ | ❌ | ❌ | ❌ |
-| Zero wallet permissions | ✅ | ❌ | ❌ | N/A |
-| Open-source | ✅ | ❌ | ❌ | Partial |
+See [JUDGE_GUIDE.md](JUDGE_GUIDE.md) for offline Robinhood fixture replay and independent evidence-hash verification. The former competitor feature matrix was not backed by a reproducible comparison and has been removed.
 
 ---
 
@@ -372,7 +278,7 @@ ShieldBot is purpose-built for BNB Chain because:
 - **Telegram**: [@Ggudman](https://t.me/Ggudman)
 - **Twitter**: [@Ggudman1](https://twitter.com/Ggudman1)
 - **GitHub**: [Ridwannurudeen](https://github.com/Ridwannurudeen)
-- **Live Demo Bot**: [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)
+- **Historical Demo Bot Link (availability unverified)**: [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)
 - **Repository**: https://github.com/Ridwannurudeen/shieldbot
 
 ---

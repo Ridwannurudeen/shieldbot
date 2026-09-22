@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from typing import List, Optional
 
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
@@ -57,6 +58,7 @@ class AnalyzerRegistry:
         deadline (RUN_ALL_DEADLINE_SECONDS unless ``deadline`` is given) is cancelled and
         reported exactly like one that raised TimeoutError: unavailable, never safe.
         """
+        observed_at = time.time()
         tasks = [asyncio.ensure_future(a.analyze(ctx)) for a in self._analyzers]
         pending = set()
         try:
@@ -89,6 +91,10 @@ class AnalyzerRegistry:
                     error=f"{analyzer.name} analysis unavailable ({type(result).__name__})",
                 ))
             else:
+                # Local/uncached analyzers start measuring here; providers carrying cached
+                # measurements keep their original observation time.
+                if result.data and not result.data.get('skipped'):
+                    result.data = {**result.data, 'observed_at': min(observed_at, result.data.get('observed_at', observed_at))}
                 final.append(result)
 
         # Normalize weights so they sum to 1.0

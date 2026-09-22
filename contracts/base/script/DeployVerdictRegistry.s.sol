@@ -11,7 +11,12 @@ import {ShieldBotVerdictRegistry} from "../src/ShieldBotVerdictRegistry.sol";
 ///        INITIAL_RECORDER=0x... forge script script/DeployVerdictRegistry.s.sol:DeployVerdictRegistry \
 ///          --rpc-url https://rpc.mainnet.chain.robinhood.com --sender <owner address>
 contract DeployVerdictRegistry is Script {
+    /// @notice Deployment was attempted on a chain other than Robinhood Chain (4663).
+    /// @param actualChainId The chain ID of the selected RPC.
+    error WrongChain(uint256 actualChainId);
+
     function run() external returns (ShieldBotVerdictRegistry registry) {
+        if (block.chainid != 4663) revert WrongChain(block.chainid);
         address initialRecorder = vm.envAddress("INITIAL_RECORDER");
 
         console2.log("Deploying ShieldBotVerdictRegistry");

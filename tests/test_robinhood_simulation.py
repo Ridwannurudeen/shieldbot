@@ -979,6 +979,9 @@ class FakeRpc:
         ]
 
     def answer(self, method, params):
+        if method == "eth_getBlockByNumber":
+            assert params == ["latest", False]
+            return {"result": {"number": hex(self.head)}}
         if method == "eth_blockNumber":
             return {"result": hex(self.head)}
         if method == "eth_getLogs":
@@ -990,7 +993,7 @@ class FakeRpc:
             }
         if method == "eth_simulateV1":
             expected, response = self.simulations.pop(0)
-            assert params == expected
+            assert params == [expected[0], hex(self.head)]
             return response
         target, data = params[0]["to"], params[0]["data"]
         if data == "0x" + selector("totalSupply()").hex():
@@ -1068,7 +1071,7 @@ async def test_discovery_finds_the_pool_and_runs_one_simulation(name):
     assert result["is_honeypot"] is False
     assert result["can_buy"] is result["can_sell"] is True
     assert result["buy_tax"] == result["sell_tax"] == 0.0
-    assert result["simulation_block"] == int(fixture["response"]["result"][0]["number"], 16)
+    assert result["simulation_block"] == rpc.head
     methods = [method for calls in rpc.requests for method, _ in calls]
     assert methods.count("eth_simulateV1") == 1
     assert "eth_getLogs" not in methods
@@ -1290,7 +1293,7 @@ async def test_hookless_weth_pool_found_by_the_log_scan_is_measured():
     assert result["can_buy"] is result["can_sell"] is True
     assert result["buy_tax"] == result["sell_tax"] == 0.0
     assert result["is_honeypot"] is False
-    assert result["simulation_block"] == 65704949
+    assert result["simulation_block"] == rpc.head
     assert "v4-weth pool" in result["reason"]
     assert rpc.simulations == []
 
@@ -1586,7 +1589,8 @@ async def test_adapter_shapes_match_evm_base_with_simulation_providers():
         "can_sell": True,
         "status": "ok",
         "reason": honeypot["reason"],
-        "simulation_block": 65551506,
+        "simulation_block": 65_540_000,
+        "observed_at": honeypot["observed_at"],
         "field_providers": {
             "is_honeypot": "eth_simulateV1",
             "can_buy": "eth_simulateV1",
@@ -1598,7 +1602,8 @@ async def test_adapter_shapes_match_evm_base_with_simulation_providers():
         "sell_tax": 0.0,
         "status": "ok",
         "reason": taxes["reason"],
-        "simulation_block": 65551506,
+        "simulation_block": 65_540_000,
+        "observed_at": honeypot["observed_at"],
         "field_providers": {"buy_tax": "eth_simulateV1", "sell_tax": "eth_simulateV1"},
     }
 
@@ -1894,3 +1899,89 @@ def test_web3_client_reports_simulation_support_per_adapter():
     assert client.supports_honeypot_simulation(56) is False
     with pytest.raises(UnsupportedChainError):
         client.supports_honeypot_simulation(1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", [path.stem for path in sorted(FIXTURES.glob("*.json"))])
+async def test_simulation_uses_pinned_source_header_instead_of_synthetic_result(name):
+    fixture = load(name)
+    source_block = int(fixture["response"]["result"][0]["number"], 16) - 1
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._discover = AsyncMock(return_value=(fixture["amount"], [pool_of(fixture)], []))
+    requests = []
+
+    async def request(session, calls):
+        requests.extend(calls)
+        if calls[0][0] == "eth_getBlockByNumber":
+            return [{"result": {"number": hex(source_block)}}]
+        return [fixture["response"]]
+
+    simulator._request = request
+    with fresh_addresses(fixture):
+        result = await simulator.simulate(fixture["token"])
+    expected = evaluate(fixture)
+    assert {field: result[field] for field in FIELDS} == {
+        field: expected[field] for field in FIELDS
+    }
+    assert requests[0] == ("eth_getBlockByNumber", ["latest", False])
+    assert requests[1][0] == "eth_simulateV1"
+    assert requests[1][1][1] == hex(source_block)
+    assert result["simulation_block"] == source_block
+
+
+@pytest.mark.asyncio
+async def test_cached_simulation_preserves_measurement_start_time():
+    fixture = load("v2_router02")
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc_for(fixture)
+    with fresh_addresses(fixture), patch("services.robinhood_simulation.time.time", return_value=1000):
+        measured = await simulator.simulate(fixture["token"])
+    with patch("services.robinhood_simulation.time.time", return_value=1059):
+        cached = await simulator.simulate(fixture["token"])
+    assert cached is measured
+    assert measured["observed_at"] == cached["observed_at"] == 1000
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("header", [None, {}, {"number": "latest"}, {"number": 42}])
+async def test_missing_source_header_never_simulates_against_latest(header):
+    fixture = load("v2_router02")
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._discover = AsyncMock(return_value=(fixture["amount"], [pool_of(fixture)], []))
+    simulator._request = AsyncMock(return_value=[{"result": header}])
+    with fresh_addresses(fixture):
+        result = await simulator.simulate(fixture["token"])
+    assert all(result[field] is None for field in FIELDS)
+    assert result["simulation_block"] is None
+    assert "source block header unavailable" in result["reason"]
+    assert simulator._request.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_simulation_observation_precedes_discovery_and_slow_rpc_reads():
+    fixture = load("v2_router02")
+    rpc = rpc_for(fixture)
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    with patch("services.robinhood_simulation.time.time", return_value=1000) as now:
+        async def request(session, calls):
+            now.return_value += 10
+            return await rpc(session, calls)
+
+        simulator._request = request
+        with fresh_addresses(fixture):
+            result = await simulator.simulate(fixture["token"])
+        assert result["observed_at"] == 1000
+        assert now.return_value > result["observed_at"]
+        assert result["can_sell"] is True
+
+
+@pytest.mark.asyncio
+async def test_unavailable_simulation_preserves_failed_measurement_time_in_cache():
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = AsyncMock(side_effect=SimulationUnavailable("RPC unavailable"))
+    with patch("services.robinhood_simulation.time.time", return_value=1000):
+        measured = await simulator.simulate(TOKEN)
+    with patch("services.robinhood_simulation.time.time", return_value=1059):
+        cached = await simulator.simulate(TOKEN)
+    assert measured["observed_at"] == cached["observed_at"] == 1000
+    assert simulator._request.await_count == 1

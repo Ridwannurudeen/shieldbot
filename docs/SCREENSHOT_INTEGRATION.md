@@ -1,5 +1,7 @@
 # Screenshot Integration Plan
 
+Historical screenshot layout proposal, not evidence of a deployed feature or an actual scan. Greenfield captions below are proposed copy only: publication is optional, may fail, and stores bytes with a storage provider. Do not reuse the old permanence claims. The shipped browser chain limitation and unreleased repair are documented in [TECHNICAL.md](TECHNICAL.md); use [JUDGE_GUIDE.md](JUDGE_GUIDE.md) for current reproducible evidence.
+
 ## Once Screenshots Are Ready
 
 This document shows where each screenshot will be added to the documentation.
@@ -17,10 +19,10 @@ Add this section:
 
 ### 🎬 Visual Demonstration
 
-**Real-Time Transaction Blocking:**
+**Pre-Signature Risk Warning:**
 
 ![Extension BLOCK Verdict](docs/images/extension_block.png)
-*ShieldBot intercepting and blocking a honeypot token with 99% sell tax*
+*ShieldBot warning about a honeypot token with 99% sell tax before the wrapped transaction reaches the wallet*
 
 **Telegram Bot Intelligence:**
 
@@ -50,7 +52,7 @@ Add this:
 
 ![BLOCK Verdict](images/extension_block.png)
 
-When ShieldBot detects a honeypot token, it displays a full-screen red modal that completely blocks the transaction. Users cannot proceed even if they want to - this is a hard stop that prevents losses before they occur.
+When ShieldBot detects a honeypot token, it displays a red risk warning. Users can cancel the transaction or choose the proceed override; the warning is not an unbypassable block or a guarantee against loss.
 
 **Telegram Bot Analysis:**
 
@@ -114,7 +116,7 @@ demo/
 Add visual proof screenshots to documentation
 
 Screenshots added:
-1. Extension BLOCK verdict - Shows real-time honeypot blocking
+1. Extension BLOCK verdict - Shows a honeypot warning with cancel/proceed choices
 2. Telegram bot token scan - Shows token name/symbol feature
 3. BNB Greenfield report - Shows immutable forensic storage
 
@@ -177,10 +179,10 @@ If screenshots aren't ready yet, use text placeholders:
 ### Visual Demonstration
 
 > **[Screenshot: Extension BLOCK Verdict]**
-> - Full-screen red modal blocking honeypot token
+> - Red warning overlay for a honeypot token
 > - Risk Score: 85/100 HIGH RISK
 > - Critical flags: Honeypot confirmed, 99% sell tax
-> - Cannot proceed with transaction
+> - User can cancel or choose the proceed override
 
 > **[Screenshot: Telegram Bot Token Scan]**
 > - Shows "Token: Wrapped BNB (WBNB)"
@@ -193,4 +195,4 @@ If screenshots aren't ready yet, use text placeholders:
 > - Immutable and verifiable
 ```
 
-This shows judges what exists even without the actual images.
+Placeholders are layout drafts, not proof that a feature ran. Replace them with captured evidence or omit them from a submission.

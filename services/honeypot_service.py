@@ -1,5 +1,6 @@
 import logging
 import math
+import time
 from decimal import Decimal, InvalidOperation
 
 from utils.scam_db import ScamDatabase
@@ -51,6 +52,7 @@ class HoneypotService:
         if chain_id not in self.web3_client.get_supported_chain_ids():
             raise UnsupportedChainError(f'No registered adapter for chain {chain_id}')
         data = {
+            'observed_at': time.time(),
             'is_honeypot': None,
             'honeypot_reason': None,
             'simulation_failed': False,
@@ -66,6 +68,7 @@ class HoneypotService:
         for fetch in (self.web3_client.check_honeypot, self.web3_client.get_tax_info):
             try:
                 response = await fetch(address, chain_id=chain_id)
+                data['observed_at'] = min(data['observed_at'], response.get('observed_at', data['observed_at']))
                 if response.get('reason'):
                     reasons.append(response['reason'])
                 for field in ('simulation_failed', 'low_tax_honeypot'):
@@ -104,6 +107,7 @@ class HoneypotService:
         if any(data[field] is None for field in _TRADE_FIELDS):
             try:
                 response = await ScamDatabase.fetch_token_security(address, chain_id)
+                data['observed_at'] = min(data['observed_at'], response.get('observed_at', 0))
                 mapped = map_goplus_token_security(response['data'])
                 if response['reason']:
                     reasons.append(response['reason'])

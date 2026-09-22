@@ -6,9 +6,11 @@
 
 ---
 
+This is a historical funding draft, not deployment or adoption evidence. The current source-tree scope and unreleased extension chain repair are documented in [TECHNICAL.md](TECHNICAL.md). Deployment, award and identity assertions retained below require owner verification before reuse.
+
 ## One-line pitch
 
-ShieldBot is a transaction-firewall security stack — Chrome extension, MCP server, and REST API — that intercepts wallet transactions before signing and now publishes threat attestations on Base via Ethereum Attestation Service so any L2 app can read ShieldBot's verdict.
+ShieldBot is a transaction-firewall security stack — Chrome extension, MCP server, and REST API — that analyzes wrapped wallet requests before signing, with user overrides and shipped chain-identification limits. An optional Base EAS publisher exists in the repository; configured publication can fail and is not a prerequisite for a scan response.
 
 ## Funding ask
 
@@ -16,21 +18,14 @@ ShieldBot is a transaction-firewall security stack — Chrome extension, MCP ser
 Amount: $30,000 - $75,000 (6-month runway)
 ```
 
-## Status snapshot
+## Status evidence required
 
-- V3 + April 2026 hardening pass live in production (api.shieldbotsecurity.online)
-- 519 Python + 18 Solidity tests passing, CI green on every push
-- Chrome extension v3.0.1 (BNB Chain Web Store listing approved at v3.0.0; v3.0.1 awaiting upload)
-- 7 production features: Agent Firewall, MCP Server v3.1.0, Portfolio Guardian, Reputation Service, Injection Scanner, Anomaly Detection, Threat Graph
-- 3rd Place at BNB Chain Good Vibes Only hackathon (Builders Track)
-- $SHIELDBOT community token launched on four.meme
+Current test results are recorded in [TESTING.md](TESTING.md). This draft does not establish production versions, store approval, awards, token-launch status or adoption; those claims have been omitted pending owner evidence. The extension's provider-chain repair is unreleased.
 
-## Base integration (delivered May 5 2026)
+## Base implementation (deployment unverified in this document)
 
-- **`ShieldBotAttestor` contract on Base mainnet** — wraps EAS predeploy at `0x42…0021`. Every ShieldBot scan posts a permanent attestation with schema: `address scannedAddress, uint8 riskLevel, string scanType, uint64 sourceChainId, bytes32 evidenceHash, string evidenceURI`. The `sourceChainId` field means BSC scans become verifiable on Base too — ShieldBot's threat intel reads from Base for any consumer.
+- **`ShieldBotAttestor` / EAS adapter**: `utils/base_attestor.py` requires configuration and schedules best-effort publication. Bot cache hits return before the publication call. A scan response therefore does not prove an attestation exists. The original draft has no verified attestor deployment address; do not describe it as deployed from this document.
 - **Portfolio Guardian** — extended to scan Base 8453 wallets for risky token approvals, reusing the same on-chain `eth_getLogs → eth_call` verification pipeline that runs on BSC.
-- **Same primitive Coinbase Verifications uses** — EAS schema `0xf8b05c79…0de9` (Verified Account) lives on the same EAS contract our attestations write to.
-- **Identity wallet:** `0xB2Fae83de08b285cB3D6A77Ff520F6AD669D5f33` (also holds Basename `sentinelnet.base.eth`, Coinbase Verified Account, two verified Base mainnet contracts from SentinelNet).
 
 ## What we'd build with funding
 
@@ -56,39 +51,17 @@ Amount: $30,000 - $75,000 (6-month runway)
 
 5. Verified-attestation badge on dapps — serve a tiny embeddable widget
    that reads a contract's ShieldBot attestation from EAS and renders
-   a status pill (SAFE / WARNING / DANGER). Two-line integration; lets
-   any Base dapp show "verified safe by ShieldBot" without a backend.
+   a status pill with explicit unknown/coverage information. This remains a
+   proposal; an attested label would not prove that a dapp is safe.
 ```
 
-## Traction proof
+## Traction evidence required
 
-```
-- V3 production deployment live on Contabo VPS, 99.9% uptime since Mar 2026
-- ~50 unique installs across BNB Chain Web Store + direct CRX
-- Daily Telegram backups + Prometheus-style metrics, weekly snapshots
-- Open source: github.com/Ridwannurudeen/shieldbot — 519 + 18 tests passing
-- BNB Chain Good Vibes Only hackathon — 3rd Place (Builders Track)
-- Verified Base contracts from 0xB2Fae83…D5f33: TrustGate
-  (0xE3b6069f632ab439ef5B084C769F21b4beeE3506), SentinelNetStaking
-  (0xEe1A8f34F1320D534b9a547f882762EABCB4f96d), and now ShieldBotAttestor
-- Coinbase Verified Account (EAS UID 0xa8d745…f50)
-```
+The former 99.9% uptime and approximately 50-install claims were not supported by measurements in this document and have been removed. Current first-party scan volume must come from an owner-verified `GET /api/stats` snapshot, not this draft. No adoption, uptime or loss-prevention metric is claimed here.
 
-## Why Base specifically
+## Why Base is proposed
 
-```
-1. Base is the L2 where Coinbase users land first — security UX matters
-   most where retail users transact. ShieldBot's transaction interception
-   is exactly the kind of layer Base ecosystem dapps will reuse.
-
-2. EAS as a public attestation primitive lets ShieldBot publish threat
-   intel that any Base contract or app can read on-chain — no proprietary
-   API, no auth, no rate limits. The data lives on Base permanently.
-
-3. Coinbase agentkit + ERC-8004 + Smart Wallet + x402 form a stack we
-   already build against. ShieldBot is the security primitive missing
-   from that stack.
-```
+The optional EAS adapter provides a place to publish attestations for independently readable records. Publication success, record contents and continued access must be checked for the particular deployment; this draft makes no permanence or unlimited-access claim. AgentKit and Smart Wallet support above remain proposed funding work.
 
 ## Verification
 
@@ -99,7 +72,7 @@ Amount: $30,000 - $75,000 (6-month runway)
 | GitHub | https://github.com/Ridwannurudeen/shieldbot |
 | Demo video | https://youtu.be/NN95rom10R8 |
 | Chrome Web Store | https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk |
-| Base attestor | (deployed on approval; will live at https://basescan.org/address/0x...) |
+| Base attestor | Owner must supply a verified deployment address before use |
 | Base identity wallet | https://basescan.org/address/0xB2Fae83de08b285cB3D6A77Ff520F6AD669D5f33 |
 
 ## Contact
@@ -111,9 +84,9 @@ Amount: $30,000 - $75,000 (6-month runway)
 
 ## Talking points for follow-up call
 
-1. Live demo: BNB Chain swap intercepted in real-time, threat scored, blocked
+1. Demonstrate a supported BNB request with its coverage result and browser cancel/proceed choices
 2. Live demo: Base wallet approval scan via Portfolio Guardian + revoke transaction
-3. Show EAS attestation on `base.easscan.org` written by `ShieldBotAttestor`
+3. Show an EAS attestation only after verifying its deployment and transaction
 4. Walk through x402 API design (USDC pricing per call, gas-paid signatures via Smart Wallet)
 5. AgentKit Action Provider PR plan — concrete file/test list for upstream contribution
 

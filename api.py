@@ -1720,10 +1720,15 @@ async def admin_stats(request: Request):
     if container.phishing_service:
         phishing_cache_size = len(container.phishing_service._cache)
 
+    guard_watch = None
+    if container.hunter:
+        guard_watch = await container.hunter.guard_watch_stats()
+
     return {
         "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
         **db_stats,
         "mempool": mempool,
+        "guard_watch": guard_watch,
         "phishing": {
             "domains_cached": phishing_cache_size,
         },
@@ -1889,6 +1894,35 @@ async def watch_alerts_list(request: Request, limit: int = 50):
     _require_admin(request)
     alerts = await container.db.get_deployment_alerts(limit=limit)
     return {"alerts": alerts, "count": len(alerts)}
+
+
+@app.post("/api/admin/guard-subjects/{chain_id}/{address}")
+async def guard_subject_add(chain_id: int, address: str, request: Request):
+    """Watch a subject with a confirmed verdict. Requires X-Admin-Secret."""
+    _require_admin(request)
+    if chain_id != 4663:
+        raise HTTPException(status_code=400, detail="Guard watches are only available on chain 4663")
+    _validate_chain_id(chain_id)
+    if not web3_client.is_valid_address(address):
+        raise HTTPException(status_code=400, detail="Invalid address")
+    if not await container.db.register_guard_subject(chain_id, address.lower()):
+        raise HTTPException(
+            status_code=409, detail="Guard watch cap reached or no confirmed verdict for this subject",
+        )
+    return {"ok": True, "address": address.lower(), "chain_id": chain_id}
+
+
+@app.delete("/api/admin/guard-subjects/{chain_id}/{address}")
+async def guard_subject_remove(chain_id: int, address: str, request: Request):
+    """Opt a subject out of continuous rescans. Requires X-Admin-Secret."""
+    _require_admin(request)
+    if chain_id != 4663:
+        raise HTTPException(status_code=400, detail="Guard watches are only available on chain 4663")
+    _validate_chain_id(chain_id)
+    if not web3_client.is_valid_address(address):
+        raise HTTPException(status_code=400, detail="Invalid address")
+    await container.db.unregister_guard_subject(chain_id, address.lower())
+    return {"ok": True, "address": address.lower(), "chain_id": chain_id}
 
 
 @app.get("/api/watch/nonce")
@@ -2198,7 +2232,6 @@ async def threat_subscribe_info():
     return {
         'endpoints': {
             'rest_polling': '/api/threats/feed?since=<unix_timestamp>',
-            'websocket': '/ws/threats (coming soon)',
         },
         'supported_chains': list(web3_client.get_supported_chain_ids()) if web3_client else [],
         'alert_types': [

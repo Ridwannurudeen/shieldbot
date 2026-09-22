@@ -34,11 +34,12 @@ from tests.test_robinhood_simulation import (
 from utils.scam_db import ScamDatabase
 
 NO_GOPLUS = {"status": "unknown", "reason": "GoPlus has no data", "data": {}}
+PINNED_SOURCE_BLOCK = 65_540_000
 
 
 async def hunter_scan(fixture):
     """Run AgentTools.scan_contract for a 4663 token whose simulation replays a recorded fixture."""
-    service = HoneypotService(client_with(adapter_with(rpc_for(fixture))))
+    service = HoneypotService(client_with(adapter_with(rpc_for(fixture, head=PINNED_SOURCE_BLOCK))))
     container = MagicMock()
     container.risk_engine = RiskEngine()
 
@@ -70,7 +71,7 @@ async def test_hunter_result_for_a_recorded_honeypot_is_published_as_honeypot(db
     honeypot = result["honeypot_data"]
     assert honeypot["is_honeypot"] is True
     assert honeypot["can_sell"] is False
-    assert honeypot["simulation_block"] == 65554454
+    assert honeypot["simulation_block"] == PINNED_SOURCE_BLOCK
     assert honeypot["field_providers"]["is_honeypot"] == "eth_simulateV1"
     assert verdict_for(result) is Verdict.HONEYPOT
 
@@ -80,8 +81,8 @@ async def test_hunter_result_for_a_recorded_honeypot_is_published_as_honeypot(db
     stored = await db.get_latest_verdict_evidence(4663, fixture["token"])
     evidence = json.loads(stored["canonical"])
     assert evidence["verdict"] == "HONEYPOT"
-    assert evidence["observed_block"] == stored["observed_block"] == 65554454
-    assert evidence["honeypot"]["simulation_block"] == 65554454
+    assert evidence["observed_block"] == stored["observed_block"] == PINNED_SOURCE_BLOCK
+    assert evidence["honeypot"]["simulation_block"] == PINNED_SOURCE_BLOCK
     assert evidence["honeypot"]["field_providers"]["is_honeypot"] == "eth_simulateV1"
 
 
@@ -96,7 +97,7 @@ async def test_hunter_result_for_an_unmeasured_simulation_stays_unknown():
     evidence = build_evidence(4663, fixture["token"], result, None, scanned_at=1)
     assert evidence["verdict"] == "UNKNOWN"
     # A simulation that reached a block still records it, even though it proved nothing.
-    assert evidence["observed_block"] == int(fixture["response"]["result"][0]["number"], 16)
+    assert evidence["observed_block"] == PINNED_SOURCE_BLOCK
 
 
 @pytest.mark.asyncio
@@ -104,10 +105,10 @@ async def test_hunter_result_for_a_measured_sellable_token_keeps_its_block():
     fixture = load("v4_native_liquidity_launcher")
     result = await hunter_scan(fixture)
     assert result["honeypot_data"]["is_honeypot"] is False
-    assert result["honeypot_data"]["simulation_block"] == 65551497
+    assert result["honeypot_data"]["simulation_block"] == PINNED_SOURCE_BLOCK
     assert (
         build_evidence(4663, fixture["token"], result, None, scanned_at=1)["observed_block"]
-        == 65551497
+        == PINNED_SOURCE_BLOCK
     )
 
 
@@ -172,7 +173,7 @@ async def test_scan_contract_without_a_honeypot_analyzer_sets_the_key_to_none():
     assert result == {"risk_level": "LOW", "honeypot_data": None}
 
 
-# --- BSC parity: HoneypotService output is byte-identical to the base commit ---------------------
+# --- BSC parity: existing fields are byte-identical to the base commit -------------------------
 
 
 BASE_HONEYPOT_SERVICE = Path(__file__).parent / "fixtures" / "honeypot_service_00b3c81.py.txt"
@@ -241,10 +242,16 @@ async def test_bsc_honeypot_data_is_byte_identical_to_the_base_commit(honeypot, 
         client.get_supported_chain_ids.return_value = [56]
         client.check_honeypot = AsyncMock(return_value=dict(honeypot))
         client.get_tax_info = AsyncMock(return_value=dict(taxes))
-        with patch.object(
-            ScamDatabase, "fetch_token_security", new=AsyncMock(return_value=goplus or NO_GOPLUS)
+        with (
+            patch.object(
+                ScamDatabase, "fetch_token_security", new=AsyncMock(return_value=goplus or NO_GOPLUS)
+            ),
+            patch("services.honeypot_service.time.time", return_value=1000),
         ):
             data = await service_class(client).fetch_honeypot_data("0x" + "ab" * 20, chain_id=56)
+        if service_class is HoneypotService:
+            # The legacy GoPlus fixture has no provenance, which must stay unknown.
+            assert data.pop("observed_at") == (0 if goplus else 1000)
         outputs.append(json.dumps(data))
     assert outputs[0] == outputs[1]
     assert "simulation_block" not in outputs[1]

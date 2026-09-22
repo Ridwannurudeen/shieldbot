@@ -27,10 +27,13 @@ import time
 import traceback
 
 from agent.prompts import HAIKU_MODEL, NARRATIVE_TEMPLATE
+from core.database import GUARD_WATCH_MAX_SUBJECTS
 from core.extension_formatter import is_scan_incomplete
 from core.registry import BACKGROUND_SCAN_DEADLINE_SECONDS
+from core.verdict_evidence import build_evidence
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 from services.rpc_guard import CLOSED, BreakerOpenError
+from services.verdict_publisher import VERDICT_REFRESH_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,14 @@ SCAN_INTERVAL_SECONDS = 2.0
 # live). The buy/sell simulation sends up to 12: the pool lookup batch, V2 reserves, a block number
 # and three Initialize log windows, then up to three pools simulated twice each.
 SCAN_REQUEST_COST = 22
+# Four guard subjects at five minutes cost 4 * 22 / 300 = 0.293 requests/s of the
+# shared 1 rps budget; after discovery's ~0.15 rps, ~0.557 rps remains for launches.
+# Match the publisher's 300 s unchanged-verdict threshold. Guard expiry must also
+# allow scheduling, scan and publication latency; this is a target, not an SLA.
+GUARD_RESCAN_INTERVAL_SECONDS = VERDICT_REFRESH_SECONDS
+# Failure does not consume the five-minute interval. Bound retries while other
+# subjects and launch work get their turns in the fast watch.
+GUARD_RESCAN_RETRY_SECONDS = 30
 # Bound on the optional AI narrative for a finding. The narrative is a 200-token Haiku reply that
 # normally returns in seconds; the advisor gives a 500-token interactive reply 30 s. Findings are
 # written while launch_lock may be held, so a hung call holds it for at most one launch-watch poll
@@ -129,7 +140,7 @@ class Hunter:
         if self.verdict_publisher is None or chain_id != LAUNCH_CHAIN_ID:
             return
         try:
-            await self.verdict_publisher.publish(chain_id, subject, result)
+            return await self.verdict_publisher.publish(chain_id, subject, result)
         except Exception as exc:
             logger.error(
                 "Hunter: verdict publishing failed for %s: %s\n%s", subject,
@@ -140,6 +151,98 @@ class Hunter:
         """Reserve a 4663 scan's worst-case requests; raises BreakerOpenError while the breaker is open."""
         if chain_id == LAUNCH_CHAIN_ID and self.rpc_guard is not None:
             await self.rpc_guard.acquire(SCAN_REQUEST_COST)
+
+    async def due_guard_subjects(self):
+        """The bounded guard set due a new measurement, oldest complete measurement first."""
+        if self.verdict_publisher is None:
+            return []
+        subjects = await self.db.get_guard_subjects(LAUNCH_CHAIN_ID)
+        if subjects and not self.verdict_publisher.is_onchain_enabled():
+            return []
+        now = time.time()
+        return [
+            subject for subject in subjects
+            if subject["retry_after"] <= now and (
+                subject["last_observed_at"] is None
+                or now - subject["last_observed_at"] >= GUARD_RESCAN_INTERVAL_SECONDS
+            )
+        ]
+
+    async def rescan_guard_subject(self, subject):
+        """Remeasure without tracked-pair transitions; only a newer complete scan advances time."""
+        address = subject["subject"]
+        await self._reserve_scan(LAUNCH_CHAIN_ID)
+        # A budget wait can outlive a removal or another scan's confirmation.
+        subject = next(
+            (row for row in await self.due_guard_subjects() if row["subject"] == address), None
+        )
+        if subject is None:
+            return
+        observed_at = None
+        try:
+            result = await self.tools.scan_contract(
+                subject["subject"], chain_id=LAUNCH_CHAIN_ID,
+                deadline=BACKGROUND_SCAN_DEADLINE_SECONDS,
+            )
+            published = await self._publish_verdict(LAUNCH_CHAIN_ID, subject["subject"], result)
+            evidence = build_evidence(LAUNCH_CHAIN_ID, subject["subject"], result, None)
+            measured_at = evidence.get("observed_at")
+            complete = (
+                not is_scan_incomplete(result)
+                and type(measured_at) is int
+                and 0 < measured_at <= time.time()
+                and time.time() - measured_at < GUARD_RESCAN_INTERVAL_SECONDS
+                and (subject["last_observed_at"] is None or measured_at > subject["last_observed_at"])
+            )
+            risk_score = result.get("risk_score", result.get("rug_probability")) if complete else None
+            if risk_score is None:
+                status = "unknown"
+            elif risk_score >= 71:
+                status = "blocked"
+                await self._log_finding(
+                    f"guard-rescan-{int(time.time())}", subject["subject"], None, risk_score,
+                    result, status, chain_id=LAUNCH_CHAIN_ID,
+                )
+            else:
+                status = "cleared" if risk_score <= 30 else "watching"
+            # Update an existing launch only; guard membership never uses tracked_pairs.
+            await self.db.record_launch_scan(LAUNCH_CHAIN_ID, subject["subject"], status, risk_score)
+            if complete and published is not None and published["onchain_status"] in (
+                "pending", "confirmed", "deduplicated",
+            ):
+                observed_at = measured_at
+        except BreakerOpenError:
+            raise
+        except Exception as exc:
+            logger.error(
+                "Hunter: guard rescan failed for %s: %s\n%s", subject["subject"],
+                type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+            )
+            await self.db.record_launch_scan(LAUNCH_CHAIN_ID, subject["subject"], "error", None)
+        await self.db.update_guard_subject_measurement(
+            LAUNCH_CHAIN_ID, subject["subject"], observed_at,
+            0 if observed_at is not None else time.time() + GUARD_RESCAN_RETRY_SECONDS,
+        )
+
+    async def guard_watch_stats(self):
+        """Admin snapshot of measurement ages and the existing shared RPC budget."""
+        subjects = await self.db.get_guard_subjects(LAUNCH_CHAIN_ID)
+        now = time.time()
+        for subject in subjects:
+            measured_at = subject["last_observed_at"]
+            subject["measurement_age_seconds"] = None if measured_at is None else max(0, now - measured_at)
+            subject["due"] = subject["retry_after"] <= now and (
+                measured_at is None or now - measured_at >= GUARD_RESCAN_INTERVAL_SECONDS
+            )
+        return {
+            "max_subjects": GUARD_WATCH_MAX_SUBJECTS,
+            "refresh_interval_seconds": GUARD_RESCAN_INTERVAL_SECONDS,
+            "retry_interval_seconds": GUARD_RESCAN_RETRY_SECONDS,
+            "running": self._watch_running(),
+            "subjects": subjects,
+            "due_count": sum(subject["due"] for subject in subjects),
+            "rpc_budget": self.rpc_guard.get_stats() if self.rpc_guard is not None else None,
+        }
 
     # ------------------------------------------------------------------
     # Main loop

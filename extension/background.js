@@ -231,6 +231,22 @@ async function getApiUrl() {
 }
 
 async function handleAnalyze(tx) {
+  const validChainId = typeof tx.chainId === "number" ||
+    (typeof tx.chainId === "string" && /^(0x[0-9a-f]+|[0-9]+)$/i.test(tx.chainId));
+  const chainId = validChainId ? Number(tx.chainId) : null;
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+    return {
+      status: "unknown",
+      partial: true,
+      classification: "UNKNOWN",
+      risk_level: "UNKNOWN",
+      risk_score: null,
+      coverage: { chain: false },
+      coverage_reasons: { chain: "Wallet chain unavailable, invalid, or mismatched; transaction was not analyzed." },
+      verdict: "Unknown wallet chain. Reconnect the wallet and retry; transaction blocked.",
+    };
+  }
+
   const apiUrl = await getApiUrl();
 
   // Ensure we have permission for this origin
@@ -246,7 +262,7 @@ async function handleAnalyze(tx) {
     from: tx.from || "",
     value: tx.value || "0x0",
     data: tx.data || "0x",
-    chainId: typeof tx.chainId === "string" ? parseInt(tx.chainId, 16) || 56 : (tx.chainId || 56),
+    chainId,
   };
 
   // Include typed data for signature analysis (EIP-712, Permit2, etc.)

@@ -17,6 +17,7 @@ from services.ethos_service import EthosService
 WALLET = "0x" + "b" * 40
 SECRET = "ETHOS-SECRET-9d41"
 NEUTRAL = {
+    "observed_at": 1000,
     "reputation_score": 50,
     "ethos_raw_score": None,
     "trust_level": "unknown",
@@ -59,7 +60,7 @@ def _http(status=200, payload=None, error=None):
 
 async def _fetch(status=200, payload=None, error=None):
     factory, session = _http(status, payload, error)
-    with factory as http:
+    with factory as http, patch("services.ethos_service.time.time", return_value=1000):
         http.return_value.__aenter__ = AsyncMock(return_value=session)
         http.return_value.__aexit__ = AsyncMock(return_value=False)
         return await EthosService().fetch_wallet_reputation(WALLET)
@@ -73,6 +74,7 @@ async def test_missing_profile_stays_neutral_and_covered():
 @pytest.mark.asyncio
 async def test_successful_profile_numbers_are_unchanged():
     assert await _fetch(payload=PROFILE) == {
+        "observed_at": 1000,
         "reputation_score": 50.0,
         "ethos_raw_score": 1400,
         "trust_level": "medium",

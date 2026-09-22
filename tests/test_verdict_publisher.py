@@ -7,6 +7,7 @@ controls no funds on any chain.
 import asyncio
 import json
 import logging
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -32,6 +33,7 @@ RPC = f"https://rpc.invalid/v2/{RPC_SECRET}"
 BASE_FEE = 56_209_984
 
 COMPLETE = {
+    "observed_at": int(time.time()),
     "status": "ok",
     "risk_level": "LOW",
     "rug_probability": 5.0,
@@ -39,6 +41,7 @@ COMPLETE = {
     "coverage_reasons": {},
 }
 INCOMPLETE = {
+    "observed_at": COMPLETE["observed_at"],
     "status": "unknown",
     "risk_level": "MEDIUM",
     "rug_probability": 40.0,
@@ -46,6 +49,7 @@ INCOMPLETE = {
     "coverage_reasons": {"honeypot": "sell tax unmeasured"},
 }
 HONEYPOT = {
+    "observed_at": COMPLETE["observed_at"],
     "is_honeypot": True,
     "can_sell": False,
     "sell_tax": None,
@@ -205,6 +209,7 @@ def rpc_node(chain):
 @pytest.fixture(autouse=True)
 def no_receipt_delay(monkeypatch):
     monkeypatch.setattr(vp, "RECEIPT_DELAY_SECONDS", 0)
+    monkeypatch.setattr(vp.time, "time", lambda: COMPLETE["observed_at"])
 
 
 @pytest_asyncio.fixture
@@ -482,6 +487,7 @@ def simulated(name, block, mutate=None):
         fixture["response"]["result"],
     )
     simulation = aggregate_outcomes([outcome], [])
+    simulation["observed_at"] = COMPLETE["observed_at"]
     sellability = _simulation_response(simulation, ("is_honeypot", "can_buy", "can_sell"), ("is_honeypot",))
     taxes = _simulation_response(simulation, ("buy_tax", "sell_tax"), ("buy_tax", "sell_tax"))
     return {
@@ -936,7 +942,7 @@ async def test_the_drain_loop_backs_off_exponentially_and_resets_after_a_record(
     with patch("services.verdict_publisher.asyncio.sleep", new=sleep):
         with pytest.raises(asyncio.CancelledError):
             await publisher._drain_loop()
-    assert waits == [5.0, 10.0, 20.0, 5.0, 10.0, 20.0, 40.0, 80.0, 160.0, 300.0, 300.0, 300.0]
+    assert waits == [5.0, 10.0, 20.0, 5.0, 10.0, 20.0, 40.0, 60.0, 60.0, 60.0, 60.0, 60.0]
 
 
 @pytest.mark.asyncio

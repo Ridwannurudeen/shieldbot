@@ -5,6 +5,8 @@
 
 ---
 
+This historical application draft is not a current release or deployment record. External research, agent scheduling, store versions and award assertions below need owner verification before reuse. The current coverage and shipped extension limitations are in [TECHNICAL.md](TECHNICAL.md).
+
 ## Table of Contents
 
 1. [Research Summary](#research-summary)
@@ -69,45 +71,17 @@ Based on analysis of existing members, successful applicants typically:
 - Serve the BNB Chain ecosystem directly
 - Complement rather than compete with existing members
 
-### ShieldBot's Competitive Advantage
+### ShieldBot's Proposed Contribution
 
-No current AvengerDAO member does what ShieldBot does -- **real-time transaction-level interception before signing**. The existing members are:
-- Auditors (CertiK, SlowMist, etc.) -- audit code, not transactions
-- Token scanners (GoPlus, Hashdit) -- scan contracts, not user intent
-- Analytics (Bubblemaps, BlockSec) -- post-hoc analysis
-- Wallets (TrustWallet, MathWallet) -- show warnings but don't intercept
-
-ShieldBot is the **missing piece**: an active transaction firewall that sits between the user and the blockchain, analyzing every transaction before it executes. This is a genuinely new capability for the AvengerDAO ecosystem.
+ShieldBot exposes transaction and token risk checks. Its browser wrapper can display a warning before a wrapped request reaches the wallet, but users can proceed and the shipped extension has an omitted-chain limitation. This draft does not claim exclusivity or compare current member capabilities.
 
 ---
 
 ## Application Strategy
 
-### Positioning: Both Producer AND Consumer
+A producer/consumer relationship with Meter is proposed, not implemented by this draft. Before submission, demonstrate the specific API fields offered, their missing-data semantics and any planned Meter adapter. Do not describe agent scheduling as operational without deployment evidence.
 
-ShieldBot should apply as BOTH:
-
-**As a Producer:**
-- ShieldBot's AI agents (Hunter, Sentinel) continuously scan BNB Chain for threats
-- Hunter runs 30-minute sweep cycles finding malicious contracts, honeypots, rug pulls
-- Sentinel maintains a feedback loop on tracked pairs
-- This threat intelligence data can be fed into the Meter API
-- ShieldBot already has a REST API at https://api.shieldbotsecurity.online
-
-**As a Consumer:**
-- ShieldBot can integrate AvengerDAO's Meter API ratings into its transaction analysis
-- Display AvengerDAO risk scores alongside ShieldBot's own analysis in the Chrome extension
-- Cross-reference AvengerDAO's flagged addresses with ShieldBot's real-time interception
-
-### Key Differentiators to Emphasize
-
-1. **Transaction-level, not contract-level** -- we intercept individual transactions, not just scan contracts
-2. **Pre-execution, not post-mortem** -- we block threats BEFORE the user signs
-3. **AI-powered proactive hunting** -- our agents don't wait for reports, they hunt threats
-4. **BNB Chain native** -- built specifically for BNB Chain first (hackathon winner)
-5. **Free and open source** -- zero barrier to adoption
-6. **Already live** -- V3 + Apr 30 hardening, 519 tests, CWS published, real users
-7. **Cross-chain attestations on Base EAS** -- every BSC scan also produces a permanent attestation on Base via Ethereum Attestation Service (the same primitive Coinbase Verifications uses). Threat intel becomes verifiable from any L2.
+The optional Base EAS publisher schedules best-effort calls. Bot cache hits and publication failures need not produce an attestation. A scan response is not proof of an on-chain record.
 
 ---
 
@@ -138,51 +112,21 @@ https://shieldbotsecurity.online
 ### How would you like to work with AvengerDAO? (required)
 
 ```
-ShieldBot is a real-time transaction firewall for BNB Chain -- a Chrome extension,
-Telegram bot, and REST API that intercepts and analyzes every transaction BEFORE the
-user signs it. We won 3rd Place at BNB Chain's Good Vibes Only hackathon (Builders
-Track) and are live on the Chrome Web Store with v2.0.0.
+ShieldBot exposes token and transaction risk checks through a REST API and
+Telegram bot. The browser extension warns on wrapped requests before signing
+where supported; proceed overrides remain, and the shipped version has an
+omitted-chain limitation. The provider-chain repair is unreleased.
 
-We would like to contribute to AvengerDAO as both a Producer and Consumer:
+We propose contributing observed risk and explicit coverage information to
+Meter, and evaluating Meter as an additional input. Neither connection is
+established by this draft. Missing data must not become permission to execute.
 
-AS A PRODUCER:
-ShieldBot runs three AI agents that continuously generate threat intelligence:
-- Hunter Agent: Sweeps BNB Chain every 30 minutes, identifying honeypots, rug pulls,
-  and malicious contracts through on-chain analysis
-- Sentinel Agent: Maintains a real-time feedback loop on tracked token pairs,
-  detecting liquidity removals and ownership changes as they happen
-- Advisor Agent: Routes and classifies security intents from user queries
+Optional Base EAS publication exists in the repository; configuration,
+publication success and individual records require separate verification.
+Current reproducible evidence and measured test results are in
+README.md, docs/JUDGE_GUIDE.md and docs/TESTING.md.
 
-This threat data is served via our REST API (https://api.shieldbotsecurity.online)
-and could be integrated as a new data source for the Meter API. Unlike existing
-producers that scan contracts statically, ShieldBot produces dynamic, behavioral
-threat intelligence -- flagging contracts that BECOME dangerous after deployment.
-
-AS A CONSUMER:
-We want to integrate AvengerDAO's Meter risk ratings into ShieldBot's transaction
-analysis pipeline. When a user is about to interact with a contract, ShieldBot would
-cross-reference AvengerDAO's aggregated risk score alongside our own analysis, giving
-users the most comprehensive pre-transaction security check available on BNB Chain.
-
-WHAT MAKES SHIELDBOT UNIQUE IN THE AVENGERDAO ECOSYSTEM:
-No current member provides real-time transaction interception. Auditors scan code.
-Scanners check contracts. Analytics look backward. ShieldBot is the missing layer --
-an active firewall that blocks threats at the moment of transaction, before the user
-signs. This fills a critical gap: even if every contract is scanned, users still
-interact with unscanned or newly-deployed contracts daily. ShieldBot catches those.
-
-KEY FACTS:
-- V3 + Apr 30 2026 hardening live on Chrome Web Store (v3.0.1)
-- 519 Python + 18 Solidity tests passing
-- 7 chains supported (BNB Chain primary, Base now first-class)
-- Open source: https://github.com/Ridwannurudeen/shieldbot
-- Free to use -- zero cost for end users
-- AI agents: Hunter (threat sweeps), Sentinel (pair monitoring), Advisor (intent routing)
-- 7 production features: Agent Firewall, MCP Server v3.1.0, Portfolio Guardian,
-  Reputation Service, Injection Scanner, Anomaly Detection, Threat Graph
-- Cross-chain attestations on Base via EAS (ShieldBotAttestor on Base mainnet)
-- Demo: https://youtu.be/NN95rom10R8
-- BNB Chain hackathon winner (Good Vibes Only, Builders Track, 3rd Place)
+Repository: https://github.com/Ridwannurudeen/shieldbot
 ```
 
 ### Phone (optional)
@@ -192,12 +136,8 @@ KEY FACTS:
 
 ### Comments (optional)
 ```
-ShieldBot was purpose-built for BNB Chain and won recognition at the Good Vibes Only
-hackathon. We are actively building and shipping -- v2.0.0 includes a full AI agent
-system with proactive threat hunting. We believe ShieldBot fills a critical gap in
-AvengerDAO's security stack by providing the transaction-level interception layer
-that no current member offers. Happy to schedule a call to demo the product and
-discuss integration specifics.
+We can demonstrate supported checks, their evidence and their limits. We
+would welcome a discussion of the proposed Meter producer/consumer interface.
 ```
 
 ### Files (optional)
@@ -213,10 +153,7 @@ Consider attaching:
 
 **Form URL**: https://forms.monday.com/forms/8cc0bbbd50e856eea12e15ace1a4e62b?r=use1
 
-This form is for responding to AvengerDAO's specific RFP challenges. ShieldBot is relevant to:
-- **Challenge 1 (Smart Contract Monitoring)**: Hunter agent monitors newly deployed contracts
-- **Challenge 3 (Threat Intelligence)**: Continuous on-chain threat detection
-- **Challenge 4 (Security Analytics Infrastructure)**: Fund flow analysis and malicious address clustering
+Before selecting an RFP challenge, recheck its current requirements and map each claimed capability to a reproducible demonstration. This draft does not establish deployed threat hunting, monitoring cadence or cluster coverage.
 
 ### Name of your project (required)
 ```
@@ -241,34 +178,16 @@ https://shieldbotsecurity.online
 ### Reasons to Contact (required)
 
 ```
-Responding to AvengerDAO RFP challenges -- ShieldBot addresses Challenges 1, 3, and 4:
+We propose a discussion about exposing ShieldBot's observed risk and coverage
+information to the AvengerDAO ecosystem. The specific RFP fit and Meter
+interface require joint scoping; this draft makes no deployment or
+continuous-monitoring claim.
 
-CHALLENGE 1 - SMART CONTRACT MONITORING:
-ShieldBot's Hunter agent runs automated 30-minute sweep cycles on BNB Chain, detecting
-newly deployed contracts and analyzing them for honeypot patterns, rug pull signals,
-ownership concentration, and liquidity manipulation. When a contract triggers risk
-thresholds, it is flagged in real-time and users interacting with it receive immediate
-warnings through our Chrome extension overlay.
+The repository includes reproducible recorded simulation tests and explicit
+unknown results where required checks are incomplete. Browser warnings can
+be overridden, and the shipped extension's omitted-chain limitation remains.
 
-CHALLENGE 3 - THREAT INTELLIGENCE:
-Our Sentinel agent maintains persistent monitoring on tracked token pairs, detecting:
-- Sudden liquidity removals
-- Ownership transfers or renouncement patterns
-- Unusual trading volume spikes
-- Contract upgrades or proxy changes
-This produces a continuous stream of behavioral threat intelligence that goes beyond
-static contract analysis.
-
-CHALLENGE 4 - SECURITY ANALYTICS INFRASTRUCTURE:
-ShieldBot's transaction analysis engine performs fund flow tracing, identifying related
-addresses and potential malicious clusters. Our API exposes this data at:
-https://api.shieldbotsecurity.online
-
-ShieldBot is open source (https://github.com/Ridwannurudeen/shieldbot), free to use,
-and live on the Chrome Web Store. We won 3rd Place at BNB Chain's Good Vibes Only
-hackathon (Builders Track). 519 Python + 18 Solidity tests passing, V3 + Apr 30 hardening deployed.
-Threat intel is now also published as cross-chain attestations on Base EAS for
-ecosystem-wide verifiability.
+Repository: https://github.com/Ridwannurudeen/shieldbot
 ```
 
 ---
@@ -294,11 +213,11 @@ ecosystem-wide verifiability.
 
 If the AvengerDAO team schedules a follow-up call, key points to hit:
 
-1. **Live demo of transaction interception** -- show a real swap being analyzed in real-time
-2. **Hunter agent sweep** -- show the 30-minute cycle finding threats autonomously
+1. **Supported transaction check** -- show coverage and the browser cancel/proceed choices
+2. **Agent scheduling evidence** -- show a deployed run and cadence only after verifying both
 3. **API integration proposal** -- concrete plan for feeding ShieldBot data into Meter
 4. **Meter consumption** -- how ShieldBot would display AvengerDAO risk scores
-5. **Adoption metrics** -- CWS installs, Telegram bot users, API calls
+5. **Usage evidence** -- use an owner-verified stats snapshot; do not invent installs or users
 6. **Open source commitment** -- full transparency, anyone can verify the security logic
 
 ---

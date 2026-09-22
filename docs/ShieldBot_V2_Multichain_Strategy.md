@@ -1,10 +1,12 @@
 # ShieldBot V2: Cross-Chain Security Intelligence Network
 
+Historical strategy proposal. Product pillars, API sketches, architecture choices, schedules and KPI figures below are proposed work or targets, not measured outcomes or release evidence. Read [the current README](../README.md) and [TECHNICAL.md](TECHNICAL.md) for implemented scope and the shipped extension limitation.
+
 ## Why V2
 
 ShieldBot V1 is a BNB transaction scanner. The market has well-funded players doing the same thing (GoPlus, Blockaid, De.Fi). Competing on features alone is a losing game.
 
-ShieldBot V2 must become a **security intelligence network** — a system where every user makes every other user safer, distributed through the channels users already use, and monetized through B2B infrastructure sales.
+ShieldBot V2 proposed a shared security intelligence service distributed through multiple client interfaces. Whether additional observations improve detection requires evaluation.
 
 This document covers:
 1. Strategic repositioning
@@ -30,12 +32,12 @@ This document covers:
 
 ### Why this wins
 - A scanner competes on features. A network competes on data.
-- Every transaction ShieldBot analyzes feeds the threat intelligence layer.
-- Every threat detected protects all users across all chains.
+- Proposed: retain useful observations for later analysis, subject to actual persistence and coverage.
+- Detection applies to the checked context; it does not establish coverage for other users or chains.
 - Wallets and dApps integrate ShieldBot because building this in-house is harder than paying per scan.
 
 If ShieldBot only shows warnings, users compare it to free alternatives.
-If ShieldBot delivers cross-chain threat intelligence that improves with every scan, it becomes infrastructure that others build on.
+Improvement from additional scans is a hypothesis to measure, not an established effect.
 
 ---
 
@@ -45,20 +47,13 @@ The Chrome extension is one channel. It cannot be the only channel. ShieldBot ne
 
 ### Channel A: RPC Proxy (highest leverage)
 
-ShieldBot offers a custom RPC endpoint: `https://rpc.shieldbot.io/bsc`
+The repository mounts a configurable proxy at `/rpc/{chain_id}` (`rpc/router.py`). Only requests sent through that endpoint enter its checks; a wallet or dapp can use another RPC. Compatibility must be tested with each client.
 
-Users add it to MetaMask, Trust Wallet, or any wallet as a custom network. Every transaction routes through ShieldBot transparently.
-
-Why this is the most important distribution channel:
-- Zero install friction — no extension, no app, just a URL.
-- Works on mobile (the current plan is desktop-only; most crypto users are mobile).
-- Works with every wallet, not just Chrome browsers.
-- ShieldBot controls the RPC layer and sees every tx before it hits the mempool.
-- This is the model Flashbots Protect and MEV Blocker use — proven at scale.
+`rpc/proxy.py` intercepts `eth_sendTransaction` and `eth_sendRawTransaction`; raw transactions are already signed. Contract-creation requests without a destination are forwarded without analysis. Other allowed methods are forwarded. This path is not wallet-wide or pre-signature protection for every transaction.
 
 ### Channel B: SDK for wallet and dApp developers
 
-A lightweight `shieldbot.js` SDK any wallet or dApp can embed:
+Historical proposed SDK syntax (not the installed SDK API or evidence of package publication):
 
 ```js
 import { ShieldBot } from '@shieldbot/sdk';
@@ -76,7 +71,7 @@ Target integrations:
 - Trust Wallet partnerships
 - DEX aggregator frontends
 
-Every integration multiplies ShieldBot's user base without marketing spend.
+Proposed integrations need separate implementation and adoption evidence.
 
 ### Channel C: Telegram as a scanning service
 
@@ -90,7 +85,7 @@ Why this matters:
 
 ### Channel D: Public threat dashboard and API
 
-Every scam ShieldBot blocks gets published (anonymized) to a public dashboard:
+Proposed dashboard examples, not observed publication or traffic:
 - "ShieldBot blocked 347 phishing attacks across 5 chains today."
 - Real-time feed of detected campaigns, flagged contracts, and risk trends.
 
@@ -118,7 +113,7 @@ Charging individual users $9-15/month for security has brutal conversion rates (
 - Pricing: $0.001-0.005 per scan, volume discounts.
 - At 10M scans/month = $10-50K/month.
 - This is how GoPlus and Blockaid monetize.
-- Requires: API-first design, usage metering, API keys, rate limiting, SLA guarantees.
+- Requires: API-first design, usage metering, API keys, rate limiting, service-level commitments.
 
 **Tier 2: Chain ecosystem grants (development funding)**
 - Every L1/L2 has a grants program and wants their ecosystem safe.
@@ -148,7 +143,7 @@ From day 1, the API must support:
 
 ## 4) Data flywheel
 
-The single most important strategic asset. Every scan must make ShieldBot smarter.
+Proposed data feedback loop. Any detection improvement must be measured against labeled outcomes.
 
 ### The loop
 
@@ -176,7 +171,7 @@ Every contract ShieldBot analyzes gets scored and cached:
 - When a new contract appears and gets flagged by 5 users in an hour, that is a signal.
 - Contract scores decay over time and refresh on new interactions.
 
-This shared intelligence layer means ShieldBot gets faster and more accurate with scale.
+Faster or more accurate results at scale are proposed evaluation goals, not measured benefits.
 
 **C. Community reporting**
 
@@ -194,7 +189,7 @@ Watch pending transactions to detect threats before they execute:
 - Frontrunning bots extracting MEV from the user's transaction.
 - Suspicious approval transactions appearing in the same block.
 
-This is a detection capability almost no consumer security tool offers. Combined with the RPC proxy (which sees transactions before submission), ShieldBot can warn about mempool-level threats in real time.
+This is a proposed detection capability. The RPC proxy sees only requests sent through it; a separate mempool feed would require its own coverage evaluation.
 
 ---
 
@@ -469,22 +464,9 @@ Three parallel tracks running simultaneously. Not sequential blocks.
 
 ---
 
-## 10) Competitive landscape
+## 10) Competitive evaluation
 
-| Competitor | What they do | ShieldBot V2 advantage |
-|------------|-------------|----------------------|
-| GoPlus | Token and contract scanning API | ShieldBot adds campaign-level detection, intent analysis, and rescue actions. GoPlus is data-only, no user-facing protection. |
-| Blockaid | Transaction simulation for wallets | ShieldBot adds cross-chain campaign correlation and is open source. Blockaid is closed, enterprise-only. |
-| Pocket Universe | Browser extension tx simulation | Acquired by Kerberus (Aug 2025); 200K+ user base in transition. ShieldBot fills the gap with RPC proxy, multi-chain campaign graph, and B2B API. |
-| De.Fi | Portfolio scanner and revoke tool | ShieldBot adds real-time pre-sign interception and campaign detection. De.Fi is post-facto scanning. |
-| Wallet Guard | Browser extension warnings | Acquired by MetaMask (Jul 2024), sunset Mar 2025. ShieldBot fills the gap with campaign intelligence, rescue mode, and infrastructure API. |
-
-ShieldBot wins by combining what competitors offer separately:
-1. Cross-chain detection (not just one chain).
-2. Campaign-level intelligence (not just per-transaction).
-3. Multiple distribution channels (not just extension).
-4. Infrastructure API (not just consumer product).
-5. Automated rescue response (not just warnings).
+The former competitor feature matrix and exclusivity claims have been removed. This proposal has no current reproducible comparative evaluation.
 
 ---
 
@@ -493,7 +475,7 @@ ShieldBot wins by combining what competitors offer separately:
 - **Non-EVM chains (Solana, Tron, TON):** The account model is fundamentally different. Scope as V3 after EVM multichain is proven.
 - **Guardian Circles / multisig:** Existing solutions (Safe, Squads) handle this better. Not differentiated enough.
 - **Proof-of-Safety Receipts:** Nice concept but zero user value at current stage.
-- **Mobile native app:** The RPC proxy solves mobile access without building a separate app.
+- **Mobile native app:** A configured RPC proxy could offer another access path, but mobile-wallet compatibility needs testing.
 - **Autonomous rescue execution (Tier 3):** Too risky before trust is established through Tier 1 and Tier 2. Scope for V2.5 after beta feedback.
 
 ---

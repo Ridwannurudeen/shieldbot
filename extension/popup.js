@@ -663,7 +663,7 @@ function renderDeployerAlerts(alerts, listEl) {
     return;
   }
 
-  const CHAIN_NAMES = { 56: "BSC", 1: "ETH", 137: "Polygon", 42161: "Arbitrum", 8453: "Base", 10: "Optimism", 204: "opBNB" };
+  const CHAIN_NAMES = { 56: "BSC", 1: "ETH", 137: "Polygon", 42161: "Arbitrum", 8453: "Base", 10: "Optimism", 204: "opBNB", 4663: "Robinhood Chain" };
 
   listEl.innerHTML = alerts.map((a) => {
     const chain    = CHAIN_NAMES[a.chain_id] || `Chain ${a.chain_id}`;

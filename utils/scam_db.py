@@ -58,9 +58,10 @@ class ScamMatches(list):
     Matches with a non-empty ``failed_providers`` are incomplete, never clean.
     """
 
-    def __init__(self, matches=(), failed_providers=()):
+    def __init__(self, matches=(), failed_providers=(), observed_at=0):
         super().__init__(matches)
         self.failed_providers = tuple(failed_providers)
+        self.observed_at = observed_at
 
 
 class ScamDatabase:
@@ -90,6 +91,7 @@ class ScamDatabase:
             logger.warning(f"Invalid address format passed to check_address: {address[:20]}")
             return ScamMatches(failed_providers=('Invalid address format',))
 
+        observed_at = time.time()
         matches = []
         failed_providers = []
 
@@ -106,7 +108,7 @@ class ScamDatabase:
         matches.extend(goplus_results)
         failed_providers.extend(goplus_results.failed_providers)
 
-        return ScamMatches(matches, failed_providers)
+        return ScamMatches(matches, failed_providers, min(observed_at, goplus_results.observed_at))
     
     @staticmethod
     async def fetch_token_security(address: str, chain_id: int = 56) -> dict:
@@ -126,6 +128,7 @@ class ScamDatabase:
     @staticmethod
     async def _fetch_token_security(key: tuple, flight_key: tuple) -> dict:
         chain_id, address = key
+        observed_at = time.time()
         result = {'status': 'unknown', 'reason': 'GoPlus unavailable', 'data': {}}
         try:
             url = f"https://api.gopluslabs.io/api/v1/token_security/{chain_id}?contract_addresses={address}"
@@ -161,6 +164,7 @@ class ScamDatabase:
             result['reason'] = f'GoPlus request failed ({type(e).__name__})'
         finally:
             _GOPLUS_INFLIGHT.pop(flight_key, None)
+        result['observed_at'] = observed_at
         _GOPLUS_CACHE[key] = result
         return result
 
@@ -171,7 +175,7 @@ class ScamDatabase:
         """
         response = await self.fetch_token_security(address, chain_id)
         if response['status'] != 'ok' and response['reason'] != _GOPLUS_NO_DATA:
-            return ScamMatches(failed_providers=(response['reason'],))
+            return ScamMatches(failed_providers=(response['reason'],), observed_at=response.get('observed_at', 0))
         result = response['data']
         flags = []
         if result.get('is_blacklisted') == '1':
@@ -189,8 +193,8 @@ class ScamDatabase:
                 'type': 'GoPlus Security',
                 'reason': '; '.join(flags),
                 'source': 'gopluslabs.io',
-            }])
-        return ScamMatches()
+            }], observed_at=response.get('observed_at', 0))
+        return ScamMatches(observed_at=response.get('observed_at', 0))
     
     def report_address(self, address: str, reporter_id: str) -> dict:
         """Community report with rate-limiting, whitelist protection, and multi-report threshold.

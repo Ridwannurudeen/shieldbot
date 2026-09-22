@@ -1,5 +1,7 @@
 # ShieldBot - Additional Resources
 
+Historical February 2026 demo index. Links and release-status statements below have not been revalidated for the Robinhood submission. Start with [JUDGE_GUIDE.md](JUDGE_GUIDE.md) for reproducible evidence. The shipped extension has an omitted-chain limitation; its provider-chain repair remains unreleased (see [TECHNICAL.md](TECHNICAL.md)).
+
 ## Demo Materials
 
 ### Video Demonstration
@@ -33,22 +35,22 @@ Pages: [X] slides
 
 ---
 
-## Live Demos
+## Historical Demo Links
 
 ### Telegram Bot
 - **Bot Username:** @shieldbot_bnb_bot
 - **Direct Link:** https://t.me/shieldbot_bnb_bot
-- **Status:** Live and operational
+- **Status:** Current deployment availability unverified; use the offline judge path for reproducible checks
 - **Commands to Try:**
   - `/start` - Initialize bot
-  - `/token 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c` - Scan WBNB (safe token)
+  - `/token 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c` - Scan WBNB (inspect coverage before interpreting risk)
   - `/scan 0x10ED43C718714eb63d5aA57B78B54704E256024E` - Scan PancakeSwap Router
   - `/help` - View all commands
 
 ### Chrome Extension
 - **Installation:** See `docs/TECHNICAL.md` for setup instructions
 - **Test Page:** `http://localhost:8000/test` (requires local API)
-- **Status:** Functional, requires sideloading (not yet in Chrome Web Store)
+- **Status:** Repository can be sideloaded; shipped omitted-chain limitation remains, and the provider-chain repair is unreleased
 
 ### API Endpoint
 - **Local:** `http://localhost:8000/api`
@@ -80,10 +82,10 @@ Pages: [X] slides
 
 **Key Submission Points:**
 - Real-time transaction firewall for BNB Chain
-- BNB Greenfield integration for immutable forensic reports
-- Composite intelligence from 6+ data sources
+- Optional BNB Greenfield report upload code; deployment and successful uploads are not established by this document
+- Multiple provider adapters; availability and check coverage vary by chain
 - Chrome extension + Telegram bot + REST API
-- Live and operational (10,000+ scans performed)
+- Scan volume: not supplied. Use the owner-verified `GET /api/stats` snapshot in the README when available; no adoption count is claimed here.
 
 ---
 

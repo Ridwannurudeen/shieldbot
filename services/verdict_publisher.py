@@ -11,6 +11,8 @@ processes can never race for the recorder's nonces.
 Each row moves through onchain_status:
   off          stored only (another chain, or no registry configured)
   pending      waiting for the drain
+  dropped      observation missing, stale, future-dated or superseded; never broadcast again
+  deduplicated newer unchanged measurement retained for supersession; confirmed verdict still fresh
   sending      claimed by the drain; each transaction's hash, nonce and signed bytes are stored BEFORE it is broadcast
   submitted    the node accepted the transaction; no receipt arrived within the receipt timeout
   confirmed    the receipt shows success, so VerdictRecorded was emitted. This is the sequencer's (soft) finality;
@@ -85,12 +87,18 @@ RECORD_SELECTOR = keccak(text="record(address,uint8,bytes32,uint64)")[:4]
 
 # One 4663 scan reserves 22 requests of the watch's shared 1 rps RPC budget (services.rpc_guard,
 # agent.hunter.SCAN_REQUEST_COST), so a saturated watch produces at most about 163 scans an hour, and an
-# unchanged verdict is not queued again. This covers that ceiling with room for the drain cycles that
+# unchanged confirmed verdict only refreshes periodically. This covers that ceiling with room for drain cycles that
 # re-send or wait, and costs the RPC about three requests each: 540 an hour, 0.15 rps beside the watch's 1.
 MAX_RECORDS_PER_HOUR = 180
+# Five minutes accommodates the 60 s simulation cache and normal scan/RPC latency, but
+# prevents a backlogged outbox from presenting minutes-old permission as a new observation.
+MAX_OBSERVATION_AGE_SECONDS = 300
+# Refresh unchanged evidence once its measurement has aged five minutes. A newer measurement
+# is required; reading the same cached answer again must not refresh the on-chain timestamp.
+VERDICT_REFRESH_SECONDS = 300
 RATE_WINDOW_SECONDS = 3600
-# A verdict already queued, being sent, or on-chain is not queued a second time. An unresolved record is,
-# because reconciliation may give up on it and a new row is then the only way it is ever recorded.
+# Repeated content can be suppressed against these anchors. Unresolved records need another chance;
+# a genuinely newer measurement replaces pending work or periodically refreshes confirmed evidence.
 SETTLED_STATUSES = ("pending", "sending", "confirmed")
 # About 18x the 0.056 gwei base fee of a recorded 4663 block. Arbitrum chains ignore priority fees.
 MAX_FEE_PER_GAS_WEI = 10**9
@@ -106,7 +114,7 @@ RECEIPT_DELAY_SECONDS = 2.0
 RECEIPT_TIMEOUT_SECONDS = 20
 DRAIN_POLL_SECONDS = 10.0
 DRAIN_BACKOFF_SECONDS = 5.0
-DRAIN_MAX_BACKOFF_SECONDS = 300.0
+DRAIN_MAX_BACKOFF_SECONDS = 60.0
 # core.database opens every connection with PRAGMA busy_timeout=5000, so one write can wait this long for the lock.
 DB_LOCK_WAIT_SECONDS = 5
 # Unresolved records are looked at again only after this long, in batches, and re-sent a bounded number of times.
@@ -146,6 +154,10 @@ class RecordFailed(Exception):
         super().__init__(reason)
         self.reason = reason
         self.rejected = rejected
+
+
+class ObservationDropped(Exception):
+    """The row became ineligible before a broadcast attempt; its disposition is already stored."""
 
 
 class VerdictPublisher:
@@ -205,33 +217,33 @@ class VerdictPublisher:
         """Store the evidence for one scan; a Robinhood Chain verdict is queued for the drain.
 
         Returns the stored evidence id, hash, verdict and on-chain status, or None if nothing could be
-        stored. A 4663 verdict that repeats one already queued, being sent or on-chain is not stored again:
-        that record's summary is returned instead. Never raises and never contacts the RPC.
+        stored. Reusing the same measurement returns its record. A newer unchanged measurement is retained
+        for supersession, but only refreshes a confirmed verdict after VERDICT_REFRESH_SECONDS.
+        Never raises and never contacts the RPC.
         """
         if not isinstance(subject, str) or not ADDRESS_RE.fullmatch(subject):
             logger.warning("Verdict not published: subject is not an address")
             return None
         try:
-            payload = build_evidence(
-                chain_id, subject, scan_result, honeypot_data, int(time.time())
-            )
+            payload = build_evidence(chain_id, subject, scan_result, honeypot_data)
             canonical = canonical_bytes(payload)
             evidence_hash = "0x" + keccak(canonical).hex()
             queued = chain_id == CHAIN_ID and self.is_onchain_enabled()
             status = "pending" if queued else "off"
             if queued:
-                previous = await self._db.get_latest_verdict_evidence(chain_id, payload["subject"])
+                previous = await self._db.get_newest_verdict_observation(
+                    chain_id, payload["subject"], include_deduplicated=False
+                )
                 if previous is not None and _repeats(previous, payload):
-                    logger.info(
-                        "Verdict unchanged for %s: the %s record stands, nothing queued",
-                        payload["subject"], previous["onchain_status"],
-                    )
-                    return {
-                        "evidence_id": previous["id"],
-                        "evidence_hash": previous["evidence_hash"],
-                        "verdict": previous["verdict"],
-                        "onchain_status": previous["onchain_status"],
-                    }
+                    if payload.get("observed_at", 0) <= json.loads(previous["canonical"])["observed_at"]:
+                        return {
+                            "evidence_id": previous["id"],
+                            "evidence_hash": previous["evidence_hash"],
+                            "verdict": previous["verdict"],
+                            "onchain_status": previous["onchain_status"],
+                        }
+                    if previous["onchain_status"] == "confirmed":
+                        status = "deduplicated"
             evidence_id = await self._db.insert_verdict_evidence(
                 chain_id=chain_id,
                 subject=payload["subject"],
@@ -373,11 +385,14 @@ class VerdictPublisher:
         """
         if self._account is None:
             return "idle"
-        if self._rate_wait() > 0:
-            return "capped"
         row = await self._db.claim_next_pending_verdict(CHAIN_ID)
         if row is None:
             return "idle"
+        if await self._drop_ineligible(row):
+            return "done"
+        if self._rate_wait() > 0:
+            await self._db.release_verdict_claim(row["id"])
+            return "capped"
         self._sent_at.append(time.monotonic())
         # Shielded: cancelling the drain (stop()) never interrupts prepare -> store -> broadcast -> record outcome.
         return await asyncio.shield(self._spawn(self._send_safely(row)))
@@ -456,6 +471,7 @@ class VerdictPublisher:
                 )
             requeued = 0
             for row in rows:
+                stored = await self._db.get_verdict_evidence(row["id"])
                 mined = None
                 for tx_hash in hashes[row["id"]]:
                     status = _receipt_outcome(next(receipts))
@@ -463,8 +479,13 @@ class VerdictPublisher:
                         mined = status, tx_hash
                 if mined is not None:
                     status, tx_hash = mined
-                    await self._db.update_verdict_onchain(row["id"], status, tx_hash=tx_hash)
+                    await self._db.update_verdict_onchain(
+                        row["id"], status, tx_hash=tx_hash, onchain_error=stored["onchain_error"]
+                        if stored["onchain_status"] == "dropped" else None
+                    )
                     logger.info("Verdict record %d reconciled: %s", row["id"], status)
+                elif stored["onchain_status"] == "dropped":
+                    await self._db.touch_verdict(row["id"])
                 elif row["attempts"] < MAX_SEND_ATTEMPTS:
                     await self._db.requeue_verdict(row["id"])
                     requeued += 1
@@ -497,6 +518,8 @@ class VerdictPublisher:
             timeout=aiohttp.ClientTimeout(total=RPC_TIMEOUT_SECONDS)
         ) as session:
             async with self._nonce_lock:
+                if await self._drop_ineligible(row):
+                    return "done"
                 try:
                     prepared = await asyncio.wait_for(
                         self._prepare(session, row, transactions, data), PHASE_TIMEOUT_SECONDS
@@ -516,6 +539,8 @@ class VerdictPublisher:
                     self._resends.pop(evidence_id, None)
                     logger.info("Verdict record %s by an earlier transaction: tx=%s", status, tx_hash)
                     return "done"
+                if await self._drop_ineligible(row):
+                    return "done"
                 _, raw, nonce, max_fee = prepared
                 tx_hash = "0x" + keccak(raw).hex()
                 if any(transaction["tx_hash"] == tx_hash for transaction in transactions):
@@ -528,10 +553,12 @@ class VerdictPublisher:
                     return "done"
                 try:
                     await asyncio.wait_for(
-                        self._rpc(session, [("eth_sendRawTransaction", ["0x" + raw.hex()])]),
+                        self._rpc(session, [("eth_sendRawTransaction", ["0x" + raw.hex()])], row=row),
                         PHASE_TIMEOUT_SECONDS,
                     )
                     accepted, rejected, error = True, False, None
+                except ObservationDropped:
+                    return "done"
                 except Exception as e:
                     # A JSON-RPC error is a definite refusal; anything else may have reached the node.
                     rejected = isinstance(e, RecordFailed) and e.rejected
@@ -558,6 +585,31 @@ class VerdictPublisher:
         else:
             logger.warning("Verdict record %s: %s", status, error)
         return "done"
+
+    async def _drop_ineligible(self, row: dict) -> bool:
+        stored = await self._db.get_verdict_evidence(row["id"])
+        observed_at = json.loads(stored["canonical"]).get("observed_at")
+        reason = None
+        if type(observed_at) is not int or observed_at <= 0:
+            reason = "MissingObservationTime"
+        else:
+            newest = await self._db.get_newest_verdict_observation(CHAIN_ID, row["subject"])
+            # No awaited read may separate this clock check from the broadcast decision.
+            now = time.time()
+            if observed_at > now:
+                reason = "FutureObservation"
+            elif now - observed_at > MAX_OBSERVATION_AGE_SECONDS:
+                reason = "StaleObservation"
+            elif newest is not None and newest["id"] != row["id"]:
+                reason = "SupersededObservation"
+        if reason is None:
+            return False
+        await self._db.update_verdict_onchain(
+            row["id"], "dropped", tx_hash=stored["tx_hash"], onchain_error=reason
+        )
+        self._resends.pop(row["id"], None)
+        logger.warning("Verdict record %d dropped: %s", row["id"], reason)
+        return True
 
     def _note_wait(self, reason: str) -> None:
         """Count consecutive waits on an earlier transaction and say so loudly when they go on."""
@@ -674,7 +726,7 @@ class VerdictPublisher:
                 return status, tx_hash
         return None, None
 
-    async def _rpc(self, session, calls: list) -> list:
+    async def _rpc(self, session, calls: list, row: Optional[dict] = None) -> list:
         """POST one JSON-RPC request or batch and return each result in order.
 
         HTTP 429 and JSON-RPC rate-limit errors are retried with exponential backoff; any other failure raises
@@ -690,6 +742,8 @@ class VerdictPublisher:
                     "Verdict record RPC rate limited (attempt %d/%d)", attempt, RPC_ATTEMPTS
                 )
                 await asyncio.sleep(RPC_BACKOFF_SECONDS * 2 ** (attempt - 1))
+            if row is not None and await self._drop_ineligible(row):
+                raise ObservationDropped
             async with session.post(
                 self._rpc_url, json=body if len(body) > 1 else body[0]
             ) as response:
@@ -729,18 +783,26 @@ def _repeats(previous: dict, payload: dict) -> bool:
     """True when a stored verdict says the same as this one and is queued, being sent, or on-chain."""
     if previous["onchain_status"] not in SETTLED_STATUSES:
         return False
-    return _verdict_only(json.loads(previous["canonical"])) == _verdict_only(payload)
+    stored = json.loads(previous["canonical"])
+    observed_at = stored.get("observed_at", 0)
+    if (
+        payload.get("observed_at", 0) > observed_at
+        and time.time() - observed_at >= VERDICT_REFRESH_SECONDS
+    ):
+        return False
+    return _verdict_only(stored) == _verdict_only(payload)
 
 
 # What two runs of the same measurement move, while the verdict they reach does not:
 #   scanned_at                  the clock at the scan
+#   observed_at                 the oldest contributing measurement's clock
 #   observed_block              the block the simulation ran at
 #   honeypot.simulation_block   the same block again
 #   honeypot.reason             names that block ("... pool ... at block N: sell reverted: ...")
 #   coverage_reasons            carries the same sentence for an incomplete scan
 # What is left decides the verdict: verdict, status, coverage, rug_probability, and the honeypot's
 # is_honeypot, can_buy, can_sell, buy_tax, sell_tax, simulation_failed and field_providers.
-_MEASUREMENT_FIELDS = ("scanned_at", "observed_block", "coverage_reasons")
+_MEASUREMENT_FIELDS = ("scanned_at", "observed_at", "observed_block", "coverage_reasons")
 _HONEYPOT_MEASUREMENT_FIELDS = ("simulation_block", "reason")
 
 

@@ -7,6 +7,7 @@ than re-serialise the JSON, because other languages print numbers such as 1.0 di
 """
 
 import json
+import math
 from enum import IntEnum
 from typing import Optional
 
@@ -76,7 +77,7 @@ def verdict_for(scan_result: dict, honeypot: Optional[dict] = None) -> Verdict:
 
 
 def build_evidence(
-    chain_id: int, subject: str, scan_result: dict, honeypot: Optional[dict], scanned_at: int
+    chain_id: int, subject: str, scan_result: dict, honeypot: Optional[dict], scanned_at: int = 0
 ) -> dict:
     """Build the public evidence payload for one scan of `subject`."""
     honeypot = _honeypot_of(scan_result, honeypot)
@@ -99,6 +100,21 @@ def build_evidence(
         block = honeypot.get("simulation_block")
         if type(block) is int and block >= 0:
             payload["observed_block"] = block
+    if "observed_at" in scan_result or (honeypot and "observed_at" in honeypot):
+        observations = [scan_result.get("observed_at")]
+        if honeypot:
+            observations.append(honeypot.get("observed_at"))
+        # Missing provenance cannot be repaired with enqueue time. The scan timestamp covers
+        # its component measurements; separately supplied simulation evidence can only age it.
+        observed_at = (
+            int(min(observations))
+            if all(
+                type(value) in (int, float) and math.isfinite(value) and value > 0
+                for value in observations
+            )
+            else 0
+        )
+        payload["observed_at"] = payload["scanned_at"] = observed_at
     return payload
 
 

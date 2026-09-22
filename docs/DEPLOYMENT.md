@@ -48,6 +48,8 @@ Test in Telegram:
 
 ## Production Deployment (VPS/Server)
 
+**API sender constraint:** `shieldbot-api.service` runs one uvicorn process without `--workers`. Preserve that topology: the API lifespan starts the verdict publisher, and its nonce lock is process-local. Multiple API processes, workers or replicas can compete for the same recorder. The bot examples below are not instructions to replicate the API sender.
+
 ### Option 1: systemd Service (Recommended)
 
 1. **Create service file:**
@@ -181,7 +183,7 @@ OPBNB_RPC_URL=https://opbnb-mainnet-rpc.bnbchain.org
 For high traffic:
 1. Add rate limiting
 2. Use caching (Redis) for scanned addresses
-3. Set up load balancing
+3. Do not replicate the API while its verdict sender is embedded in each API process
 4. Use webhook mode instead of polling
 
 ---

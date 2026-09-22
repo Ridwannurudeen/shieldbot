@@ -2,6 +2,8 @@
 
 This document provides the exact wording to use when completing the Chrome Web Store Developer Dashboard privacy questionnaire for ShieldAI Transaction Firewall.
 
+These are source-tree disclosures for review, not confirmation of the currently published store version. The shipped extension can analyze on BNB Chain when a dApp omits `chainId`; it does not establish Robinhood Chain or other multichain protection in that case. The chain-resolution repair is unreleased (see [TECHNICAL.md](TECHNICAL.md)).
+
 ## Privacy Practices
 
 ### Data Collection and Usage
@@ -85,15 +87,16 @@ DATA COLLECTED:
 - Transaction data (encoded smart contract function call)
 - Chain ID (blockchain network identifier, e.g., 56 for BNB Chain)
 - Current website origin for phishing checks (for example, https://example.com/)
+- Messages and text users submit to the assistant or injection scanner
+- A generated chat identifier and wallet addresses supplied to optional guardian features
 
 DATA NOT COLLECTED:
 - Private keys, seed phrases, or wallet passwords
-- Personally identifiable information (PII)
 - Page contents, form data, or full browsing history
 - User credentials or authentication data
 
 STORAGE:
-All data is stored locally in the user's browser using chrome.storage.local API. A maximum of 50 transaction scans are retained, with older scans automatically removed. Users can clear this data at any time by removing the extension.
+The browser stores settings, up to 50 transaction scan results, a generated chat identifier and up to 20 recent chat messages using chrome.storage.local. Removing the extension clears its local data, not backend records. The configured ShieldBot backend persists scan scores, findings, agent transaction history, chat messages and identifiers, subscriptions, verdict evidence and publication outbox state in SQLite. Backend retention depends on the deployed configuration and cleanup jobs; no fixed deletion period is promised here.
 
 API COMMUNICATION:
 Transaction metadata is sent to the configured API endpoint for security analysis. The extension ships with https://api.shieldbotsecurity.online as the default endpoint, and users can replace it with their own HTTPS server or localhost development server. Communication with the API uses HTTPS encryption (localhost HTTP allowed for development only).
@@ -131,6 +134,7 @@ DATA RETENTION:
 - Local scan history: Maximum 50 transactions, automatically pruned
 - Configuration settings: Persist until user changes them or removes extension
 - Transaction metadata and site origins are transmitted only to the configured API endpoint for security analysis
+- The backend can forward check inputs to configured RPC, intelligence and optional AI providers; removing the extension does not delete those providers' or the backend's records
 
 SECURITY MEASURES:
 - HTTPS enforcement for API communication (except localhost development)
@@ -151,7 +155,7 @@ SECURITY MEASURES:
 **Justification:** Required to request and verify user-approved API origin access at runtime using `chrome.permissions.request()` and `chrome.permissions.contains()`.
 
 ### `storage`
-**Justification:** Required to store user settings (API endpoint URL, firewall enabled/disabled state) and local scan history. All data is stored locally in the user's browser using chrome.storage.local.
+**Justification:** Required to store user settings (API endpoint URL, firewall enabled/disabled state), local scan history, a generated chat identifier and recent chat messages using chrome.storage.local. API-side storage is separate, as described above.
 
 ### `sidePanel`
 **Justification:** Required to open the ShieldAI assistant, wallet health, guardian alerts, and prompt-injection scanner in Chrome's side panel.
@@ -250,10 +254,10 @@ Before submitting to Chrome Web Store, ensure:
    - Transaction metadata is sent only to the configured API endpoint for analysis. The default endpoint is https://api.shieldbotsecurity.online, and users can replace it with their own HTTPS endpoint.
 
 3. **How can users verify privacy claims?**
-   - The extension is fully open source at https://github.com/Ridwannurudeen/shieldbot. Users can audit the code to verify no data is sent to third parties.
+   - The extension is fully open source at https://github.com/Ridwannurudeen/shieldbot. Users can audit extension requests and backend integrations; the configured backend can forward check inputs to external providers.
 
 4. **Is blockchain transaction data considered sensitive?**
-   - Yes, which is why we enforce HTTPS communication, store data only locally, and do not collect private keys or seed phrases. Transaction metadata (addresses, values, function calls) is necessary for security analysis.
+   - Yes. API communication uses HTTPS except for localhost development, and the extension does not collect wallet private keys or seed phrases. Transaction metadata is processed by the configured API; local and backend retention are separate.
 
 ---
 

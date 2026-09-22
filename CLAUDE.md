@@ -33,7 +33,7 @@ pytest tests/ -v
 ## Deploy
 ```bash
 git push origin main
-# Then on VPS (root@38.49.212.108):
+# Then on the VPS:
 cd /opt/shieldbot && git pull && systemctl restart shieldbot
 ```
 

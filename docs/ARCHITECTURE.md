@@ -1,5 +1,7 @@
 # ShieldBot Architecture
 
+This is the original February 2026 architecture sketch. Its component diagrams and example outputs are historical, not a current deployment inventory. The persistence and sender constraints below are current source-tree requirements; see [TECHNICAL.md](TECHNICAL.md) for coverage limits, including the unreleased extension chain-resolution fix.
+
 ## System Overview
 
 ```
@@ -260,8 +262,9 @@ Check Flow:
       Result: Not a honeypot ✓
    
    c) Trading checks:
-      Web3 call: decimals() (proxy for transfer function)
-      Result: Transfer function works ✓
+      A successful decimals() call only reads metadata.
+      Buy/sell or transfer capability requires separate execution evidence;
+      absent evidence is unknown, never proof that a transfer works.
    
    d) Ownership:
       Web3 call: owner()
@@ -272,7 +275,8 @@ Check Flow:
       Result: Buy 0%, Sell 0% ✓
 
 6. Safety level calculated:
-   └─ All checks passed → SAFE
+   └─ Only complete required checks may produce a low-risk assessment;
+      missing coverage stays unknown. Low risk is not a safety guarantee.
 
 7. Response formatted with:
    └─ Token name/symbol
@@ -282,7 +286,7 @@ Check Flow:
 8. Sent to user in Telegram
 ```
 
-**Total time: ~3-5 seconds**
+**Timing:** Illustrative flow; no latency measurement is supplied.
 
 ---
 
@@ -323,27 +327,7 @@ Future Enhancement:
 
 ## Performance Characteristics
 
-### Response Time
-- **Average:** 3-5 seconds
-- **Breakdown:**
-  - Address validation: <10ms
-  - Contract checks: 1-2s (RPC calls)
-  - API calls: 1-2s (BscScan, Honeypot.is)
-  - Scam DB queries: 500ms-1s
-  - Response formatting: <100ms
-
-### Resource Usage
-- **Memory:** ~50-100MB
-- **CPU:** <5% (idle), 10-20% (scanning)
-- **Network:** ~100KB per scan
-- **Storage:** ~10MB (code + dependencies)
-
-### Scalability
-- **Concurrent users:** 100+ (async I/O)
-- **Rate limits:**
-  - BscScan free tier: 5 calls/sec
-  - Honeypot.is: No official limit (fair use)
-  - RPC endpoints: 1000+ calls/sec
+No benchmark run is attached to this historical architecture sketch. The former latency, memory, CPU, network, concurrent-user and RPC-throughput estimates have been removed rather than presented as measurements. Provider limits and latency depend on the deployed configuration.
 
 ---
 
@@ -351,16 +335,21 @@ Future Enhancement:
 
 ### Data Handling
 ```python
-What we store:
-  └─ NOTHING - ShieldBot is stateless
+What we store (SQLite, core/database.py):
+  ├─ Contract scan scores, findings and agent firewall history
+  ├─ Chat messages and user/agent identifiers, subscriptions and reports
+  └─ Verdict evidence, transaction records and publication outbox state
 
 What we process:
-  ├─ User-provided addresses (ephemeral)
-  └─ API responses (not logged)
+  ├─ Addresses, transaction metadata and messages supplied for analysis
+  └─ RPC and intelligence-provider responses
 
 What we share:
-  └─ NOTHING - No data leaves the analysis flow
+  ├─ Check inputs with configured RPC, intelligence and optional AI services
+  └─ Reports or verdicts through configured publication services
 ```
+
+ShieldBot is stateful. Browser-local scan history and settings are additional to backend storage; clearing extension data does not erase server records. Do not promise deletion across every storage layer or a retention period that the deployed storage and cleanup jobs do not enforce.
 
 ### API Key Security
 ```python
@@ -394,6 +383,9 @@ Used by:
 ```
 
 ### Future: Production-Ready
+
+This replication sketch is not safe for the current verdict publisher. The API lifespan starts its sender, whose nonce lock is process-local. Exactly one API process may send recorder transactions; use `shieldbot-api.service` without workers or duplicate API instances until sender isolation is implemented.
+
 ```
 ┌──────────────────┐
 │  Load Balancer   │
@@ -441,20 +433,20 @@ Used by:
 
 ### ✅ Advantages
 1. **Fast:** Async operations, parallel API calls
-2. **Reliable:** Multiple data sources (no single point of failure)
-3. **Scalable:** Stateless design, easy to replicate
+2. **Multiple providers:** Checks still depend on provider availability; missing required data remains unknown
+3. **Stateful:** SQLite persistence and a single API sender constrain replication
 4. **Maintainable:** Modular structure, clear separation
-5. **Cost-Effective:** Off-chain analysis (no gas fees)
+5. **Off-chain Analysis:** Analysis itself needs no transaction; configured on-chain publication incurs gas
 
 ### 🎯 Design Principles
 1. **User First:** Simple Telegram interface
-2. **Speed Matters:** <5 second responses
+2. **Speed Matters:** Async checks; response latency is not measured here
 3. **Trust Through Transparency:** Multiple verification sources
 4. **Fail Safely:** Errors default to caution (warn user)
-5. **Privacy:** No data collection or logging
+5. **Privacy:** Disclose persisted identifiers, history and external processing
 
 ---
 
 **Architecture Version:** 1.0  
 **Last Updated:** Feb 12, 2026  
-**Status:** Production-Ready ✅
+**Status:** Historical overview with current persistence and sender corrections; not a release certification

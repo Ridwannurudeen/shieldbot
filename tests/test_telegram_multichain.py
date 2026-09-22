@@ -590,13 +590,14 @@ def test_formatter_requires_known_completion_status():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('complete', [True, False], ids=['complete', 'incomplete'])
-async def test_bot_rescue_safe_count_requires_complete_scan(bot_chain_functions, complete):
+async def test_bot_rescue_lower_risk_count_requires_complete_scan(bot_chain_functions, complete):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
     ns = bot_chain_functions
     ns['settings'] = SimpleNamespace(bscscan_api_key='', etherscan_api_key='')
     result = {'total_approvals': 3, 'high_risk': 0, 'medium_risk': 0,
-              'approvals': [], 'alerts': [], 'revoke_txs': []}
+              'approvals': [], 'alerts': [], 'revoke_txs': [],
+              'status': 'ok', 'coverage': {'allowances': True, 'balances': True, 'prices': True}}
     if not complete:
         result.update(status='unknown', coverage={'approval_prices': 0},
                       coverage_reasons={'approval_prices': 'Token price unavailable'})
@@ -606,10 +607,13 @@ async def test_bot_rescue_safe_count_requires_complete_scan(bot_chain_functions,
     context = SimpleNamespace(args=['0x' + 'b' * 40], user_data={'chain_id': 4663})
     await ns['rescue_command'](update, context)
     text = update.message.reply_text.call_args.args[0]
+    assert 'Safe: 3' not in text and 'look safe' not in text
     if complete:
-        assert 'Safe: 3' in text and 'look safe' in text
+        assert 'Lower risk: 3' in text
+        assert 'No high- or medium-risk approvals found among the approvals checked.' in text
     else:
-        assert 'Safe: 3' not in text and 'look safe' not in text
+        assert 'Unconfirmed: 3' in text
+        assert 'No high- or medium-risk approvals found' not in text
         assert 'incomplete' in text and 'Token price unavailable' in text
 
 
