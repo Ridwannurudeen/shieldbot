@@ -95,6 +95,8 @@ def format_full_report(
     scam_matches = contract_data.get('scam_matches', [])
     if scam_matches:
         lines.append(f'  Scam DB Hits: {len(scam_matches)}')
+    elif contract_data.get('coverage', {}).get('scam_database') is False:
+        lines.append('  Scam DB Hits: Unknown')
     lines.append('')
 
     # Market intelligence

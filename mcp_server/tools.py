@@ -60,7 +60,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "simulate_transaction",
-        "description": "Simulate a transaction via Tenderly to predict asset changes, approvals granted, and gas estimate before execution.",
+        "description": "Simulate a transaction via Tenderly and return success, revert reason, asset changes, warnings, and gas estimate. Approval changes are not measured and are returned as null.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -212,9 +212,12 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
     if not container.tenderly_simulator.is_enabled():
         return {
             "error": "Tenderly simulation not configured",
-            "asset_changes": [],
-            "approvals_granted": [],
-            "gas_estimate": 0,
+            "asset_changes": None,
+            "approvals_granted": None,
+            "gas_estimate": None,
+            "warnings": None,
+            "success": None,
+            "revert_reason": None,
         }
 
     result = await container.tenderly_simulator.simulate_transaction(
@@ -228,15 +231,21 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
     if result is None:
         return {
             "error": "Simulation failed",
-            "asset_changes": [],
-            "approvals_granted": [],
-            "gas_estimate": 0,
+            "asset_changes": None,
+            "approvals_granted": None,
+            "gas_estimate": None,
+            "warnings": None,
+            "success": None,
+            "revert_reason": None,
         }
 
     return {
-        "asset_changes": result.get("asset_deltas", []),
-        "approvals_granted": result.get("warnings", []),
-        "gas_estimate": result.get("gas_used", 0),
+        "asset_changes": result.get("asset_deltas"),
+        "approvals_granted": None,
+        "gas_estimate": result.get("gas_used"),
+        "warnings": result.get("warnings"),
+        "success": result.get("success"),
+        "revert_reason": result.get("revert_reason"),
     }
 
 

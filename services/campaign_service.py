@@ -5,10 +5,13 @@ contracts based on shared funders, deployers, code similarity, and temporal patt
 """
 
 import asyncio
+import json
 import logging
 import time
 from collections import defaultdict
 from typing import Dict, List, Optional, Set
+
+from core.database import _lift_scan_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -74,20 +77,27 @@ class CampaignService:
             for row in rows:
                 # Get risk score if available
                 score_cursor = await self._db._db.execute("""
-                    SELECT risk_score, risk_level, archetype
+                    SELECT risk_score, risk_level, archetype, category_scores
                     FROM contract_scores
                     WHERE address = ? AND chain_id = ?
                 """, (row[0], row[1]))
                 score_row = await score_cursor.fetchone()
+                score = _lift_scan_metadata({
+                    'risk_score': score_row[0],
+                    'risk_level': score_row[1],
+                    'archetype': score_row[2],
+                    'category_scores': json.loads(score_row[3]) if score_row[3] else {},
+                }) if score_row else None
 
                 contracts.append({
                     'contract': row[0],
                     'chain_id': row[1],
                     'tx_hash': row[2],
                     'indexed_at': row[3],
-                    'risk_score': score_row[0] if score_row else None,
-                    'risk_level': score_row[1] if score_row else None,
-                    'archetype': score_row[2] if score_row else None,
+                    'risk_score': score['risk_score'] if score and score.get('status') == 'ok' else None,
+                    'risk_level': score['risk_level'] if score else None,
+                    'archetype': score['archetype'] if score else None,
+                    'status': score.get('status') if score else None,
                 })
             return contracts
         except Exception as e:

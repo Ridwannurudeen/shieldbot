@@ -142,6 +142,56 @@ class TestFirewallFallback:
         # Restore
         api_module.web3_client.is_valid_address.return_value = True
 
+    def test_firewall_failed_scam_lookup_has_unknown_match_count(self):
+        import api as api_module
+
+        scan = {
+            "address": "0xdeadbeef",
+            "is_verified": False,
+            "is_contract": True,
+            "risk_level": "medium",
+            "risk_score": 45,
+            "confidence": 60,
+            "checks": {},
+            "warnings": [],
+            "scam_matches": [],
+            "coverage": {"scam_database": False},
+            "is_honeypot": False,
+        }
+
+        data = api_module._build_fallback_response({}, scan, None)
+        assert data["raw_checks"]["scam_matches"] is None
+        assert data["risk_score"] == 45
+
+    def test_firewall_scam_match_survives_partial_lookup_failure(self):
+        import api as api_module
+
+        scan = {
+            "address": "0xdeadbeef",
+            "is_verified": False,
+            "is_contract": True,
+            "risk_level": "medium",
+            "risk_score": 45,
+            "confidence": 60,
+            "checks": {},
+            "warnings": [],
+            "scam_matches": [
+                {
+                    "type": "Local Blacklist",
+                    "reason": "Known scam address",
+                    "source": "ShieldBot",
+                }
+            ],
+            "coverage": {"scam_database": False},
+            "is_honeypot": False,
+        }
+
+        data = api_module._build_fallback_response({}, scan, None)
+        assert data["classification"] == "BLOCK_RECOMMENDED"
+        assert data["risk_score"] >= 80
+        assert "Found 1 scam database match(es)" in data["danger_signals"]
+        assert data["raw_checks"]["scam_matches"] == 1
+
 
 class TestWebhookAuth:
     def test_webhook_accepts_header_secret(self, client, monkeypatch):

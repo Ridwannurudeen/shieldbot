@@ -226,6 +226,37 @@ async def test_ownership_and_bytecode_failures_are_both_reported(mock_web3_clien
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("bytecode_failure", [None, RuntimeError("provider unavailable")])
+async def test_unavailable_bytecode_leaves_pattern_flags_unknown(mock_web3_client, bytecode_failure):
+    if isinstance(bytecode_failure, Exception):
+        mock_web3_client.get_bytecode.side_effect = bytecode_failure
+    else:
+        mock_web3_client.get_bytecode.return_value = bytecode_failure
+    service = ContractService(mock_web3_client, MagicMock(check_address=AsyncMock(return_value=[])))
+    with patch("services.contract_service.BSCSCAN_DELAY", 0):
+        data = await service.fetch_contract_data(TOKEN, chain_id=4663)
+    assert data["coverage"]["bytecode"] is False
+    assert data["has_proxy"] is None
+    assert data["has_mint"] is None
+    assert data["has_pause"] is None
+    assert data["has_blacklist"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_contract, expected", [(False, False), (None, None)])
+async def test_wallet_bytecode_flags_reflect_contract_inspection(mock_web3_client, is_contract, expected):
+    mock_web3_client.is_contract.return_value = is_contract
+    service = ContractService(mock_web3_client, MagicMock(check_address=AsyncMock(return_value=[])))
+
+    data = await service.fetch_contract_data(TOKEN, chain_id=4663)
+
+    assert data["has_proxy"] is expected
+    assert data["has_mint"] is expected
+    assert data["has_pause"] is expected
+    assert data["has_blacklist"] is expected
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "chain_id, token",
     [

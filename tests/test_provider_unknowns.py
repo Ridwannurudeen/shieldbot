@@ -20,6 +20,63 @@ ADDRESS = '0x1111111111111111111111111111111111111111'
 FIELDS = ('is_honeypot', 'buy_tax', 'sell_tax', 'can_buy', 'can_sell')
 
 
+def test_failed_scam_lookup_renders_known_hits_and_unknown_without_hits():
+    from utils.ai_analyzer import AIAnalyzer
+
+    scan = {
+        'scam_matches': [],
+        'coverage': {'scam_database': False},
+        'risk_level': 'unknown',
+    }
+    risk = {
+        'rug_probability': 0,
+        'risk_level': 'MEDIUM',
+        'status': 'unknown',
+        'coverage': {'structural': 0},
+        'coverage_reasons': {'structural': 'Scam database unavailable'},
+    }
+    report = format_full_report(risk, scan, {}, {})
+    complete_report = format_full_report(
+        risk, {**scan, 'coverage': {'scam_database': True}}, {}, {},
+    )
+    analyzer = AIAnalyzer.__new__(AIAnalyzer)
+    hit_scan = {
+        **scan,
+        'scam_matches': [{'type': 'known_scam', 'reason': 'Reported phishing'}],
+    }
+    hit_report = format_full_report(risk, hit_scan, {}, {})
+    scan_context = analyzer._prepare_scan_context(ADDRESS, hit_scan)
+    nested_forensic = analyzer._build_forensic_context(
+        ADDRESS, {'contract': hit_scan, 'risk': risk}, 'contract',
+    )
+    flat_forensic = analyzer._build_forensic_context(
+        ADDRESS, {**hit_scan, 'risk': risk}, 'contract',
+    )
+    firewall_context = analyzer._build_firewall_context({}, hit_scan)
+
+    assert 'Scam DB Hits: Unknown' in report
+    assert 'Scam DB Hits' not in complete_report
+    assert 'Scam Database Matches: Unknown' in analyzer._prepare_scan_context(ADDRESS, scan)
+    assert 'Scam Database Matches: Unknown' in analyzer._build_forensic_context(
+        ADDRESS, {'contract': scan, 'risk': risk}, 'contract',
+    )
+    assert 'Scam Database Matches: Unknown' in analyzer._build_forensic_context(
+        ADDRESS, {**scan, 'risk': risk}, 'contract',
+    )
+    assert 'Scam DB Matches: Unknown' in analyzer._build_firewall_context({}, scan)
+    assert 'Scam DB Hits: 1' in hit_report
+    assert 'Scam DB Hits: Unknown' not in hit_report
+    assert 'Scam Database Matches: 1' in scan_context
+    assert 'Scam Database Matches: Unknown' not in scan_context
+    for forensic_context in (nested_forensic, flat_forensic):
+        assert '⚠️ SCAM DATABASE MATCHES: 1' in forensic_context
+        assert '  - known_scam: Reported phishing' in forensic_context
+        assert 'Scam Database Matches: Unknown' not in forensic_context
+    assert 'Scam DB Matches: 1' in firewall_context
+    assert '  - known_scam: Reported phishing' in firewall_context
+    assert 'Scam DB Matches: Unknown' not in firewall_context
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('failure', ['404', '500', 'timeout', 'exception', 'unsupported'])
 async def test_provider_failure_stays_unknown_through_formatters(failure):

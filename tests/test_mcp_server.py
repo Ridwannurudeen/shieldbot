@@ -403,11 +403,19 @@ class TestToolExecution:
         }, headers=AUTH_HEADERS)
         content = json.loads(resp.json()["result"]["content"][0]["text"])
         assert "not configured" in content["error"]
+        assert content["gas_estimate"] is None
+        assert content["asset_changes"] is None
+        assert content["approvals_granted"] is None
+        assert content["warnings"] is None
+        assert content["success"] is None
+        assert content["revert_reason"] is None
 
     def test_simulate_transaction_enabled(self, client, mock_container):
         """simulate_transaction returns results when Tenderly works."""
         mock_container.tenderly_simulator.is_enabled.return_value = True
         mock_container.tenderly_simulator.simulate_transaction = AsyncMock(return_value={
+            "success": True,
+            "revert_reason": None,
             "asset_deltas": [{"token": "USDT", "amount": "-100"}],
             "warnings": ["approval_to_unknown_spender"],
             "gas_used": 150000,
@@ -426,6 +434,60 @@ class TestToolExecution:
         content = json.loads(resp.json()["result"]["content"][0]["text"])
         assert len(content["asset_changes"]) == 1
         assert content["gas_estimate"] == 150000
+        assert content["success"] is True
+        assert content["revert_reason"] is None
+        assert content["warnings"] == ["approval_to_unknown_spender"]
+        assert content["approvals_granted"] is None
+
+    def test_simulate_transaction_surfaces_revert(self, client, mock_container):
+        """A reverted simulation surfaces its failure and reason."""
+        mock_container.tenderly_simulator.is_enabled.return_value = True
+        mock_container.tenderly_simulator.simulate_transaction = AsyncMock(return_value={
+            "success": False,
+            "revert_reason": "sell blocked",
+            "asset_deltas": [],
+            "warnings": ["transaction reverted"],
+            "gas_used": 150000,
+        })
+        resp = client.post("/mcp/messages", json={
+            "jsonrpc": "2.0", "id": 14, "method": "tools/call",
+            "params": {
+                "name": "simulate_transaction",
+                "arguments": {
+                    "from": "0x" + "1" * 40,
+                    "to": "0x" + "2" * 40,
+                    "data": "0x38ed1739",
+                },
+            },
+        }, headers=AUTH_HEADERS)
+        content = json.loads(resp.json()["result"]["content"][0]["text"])
+        assert content["success"] is False
+        assert content["revert_reason"] == "sell blocked"
+        assert content["warnings"] == ["transaction reverted"]
+        assert content["approvals_granted"] is None
+
+    def test_simulate_transaction_failed(self, client, mock_container):
+        """A failed simulation reports unknown measurements."""
+        mock_container.tenderly_simulator.is_enabled.return_value = True
+        resp = client.post("/mcp/messages", json={
+            "jsonrpc": "2.0", "id": 15, "method": "tools/call",
+            "params": {
+                "name": "simulate_transaction",
+                "arguments": {
+                    "from": "0x" + "1" * 40,
+                    "to": "0x" + "2" * 40,
+                    "data": "0x38ed1739",
+                },
+            },
+        }, headers=AUTH_HEADERS)
+        content = json.loads(resp.json()["result"]["content"][0]["text"])
+        assert content["error"] == "Simulation failed"
+        assert content["gas_estimate"] is None
+        assert content["asset_changes"] is None
+        assert content["approvals_granted"] is None
+        assert content["warnings"] is None
+        assert content["success"] is None
+        assert content["revert_reason"] is None
 
     def test_unknown_tool_returns_error(self, client):
         """Calling an unknown tool returns isError content."""

@@ -38,10 +38,10 @@ class ContractService:
             'contract_age_days': None,
             'scam_matches': [],
             'ownership_renounced': None,
-            'has_proxy': False,
-            'has_mint': False,
-            'has_pause': False,
-            'has_blacklist': False,
+            'has_proxy': None,
+            'has_mint': None,
+            'has_pause': None,
+            'has_blacklist': None,
             'source_code_patterns': [],
             'bytecode_warnings': [],
         }
@@ -51,7 +51,13 @@ class ContractService:
             if is_contract is None:
                 return {**defaults, 'is_contract': None, 'status': 'unknown', 'reason': 'Contract data unavailable'}
             if not is_contract:
-                return defaults
+                return {
+                    **defaults,
+                    'has_proxy': False,
+                    'has_mint': False,
+                    'has_pause': False,
+                    'has_blacklist': False,
+                }
 
             results = {'is_contract': True}
 
@@ -85,29 +91,34 @@ class ContractService:
 
             # Bytecode pattern scan (RPC call)
             bytecode_warnings = []
-            has_proxy = False
-            has_mint = False
-            has_pause = False
-            has_blacklist = False
+            has_proxy = None
+            has_mint = None
+            has_pause = None
+            has_blacklist = None
 
             try:
                 bytecode = await self.web3_client.get_bytecode(address, chain_id=chain_id)
                 if bytecode is None:
                     results['coverage'] = {**results.get('coverage', {}), 'bytecode': False}
                     results['reason'] = '; '.join(filter(None, (results.get('reason'), 'Bytecode scan unavailable')))
-                elif bytecode:
-                    bytecode_hex = bytecode.hex() if isinstance(bytecode, bytes) else str(bytecode)
-                    for sig, pattern_name in BYTECODE_PATTERNS.items():
-                        if sig in bytecode_hex:
-                            bytecode_warnings.append(pattern_name)
-                            if pattern_name == 'mint':
-                                has_mint = True
-                            elif pattern_name == 'pause':
-                                has_pause = True
-                            elif pattern_name == 'blacklist':
-                                has_blacklist = True
-                            elif pattern_name in ('proxy_upgrade', 'delegatecall'):
-                                has_proxy = True
+                else:
+                    has_proxy = False
+                    has_mint = False
+                    has_pause = False
+                    has_blacklist = False
+                    if bytecode:
+                        bytecode_hex = bytecode.hex() if isinstance(bytecode, bytes) else str(bytecode)
+                        for sig, pattern_name in BYTECODE_PATTERNS.items():
+                            if sig in bytecode_hex:
+                                bytecode_warnings.append(pattern_name)
+                                if pattern_name == 'mint':
+                                    has_mint = True
+                                elif pattern_name == 'pause':
+                                    has_pause = True
+                                elif pattern_name == 'blacklist':
+                                    has_blacklist = True
+                                elif pattern_name in ('proxy_upgrade', 'delegatecall'):
+                                    has_proxy = True
             except UnsupportedChainError:
                 raise
             except Exception as e:

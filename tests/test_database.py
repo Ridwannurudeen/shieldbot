@@ -347,3 +347,32 @@ class TestContractScoreCoverage:
             assert row["status"] == "unknown"
             assert row["coverage_reasons"] == {"coverage": "Score predates coverage tracking"}
             assert row["category_scores"] == (category_scores or {})
+
+    @pytest.mark.asyncio
+    async def test_campaign_withholds_unknown_score_and_exposes_scan_status(self, db):
+        await db._db.executemany(
+            "INSERT INTO deployers VALUES (?, ?, ?, ?, ?)",
+            [
+                ("0xunknown", 56, "0xdeployer", "0xtx1", 3),
+                ("0xcomplete", 1, "0xdeployer", "0xtx2", 2),
+                ("0xmissing", 204, "0xdeployer", "0xtx3", 1),
+            ],
+        )
+        await db.upsert_contract_score(
+            "0xunknown", 56, 0.0, "UNKNOWN", "unknown",
+            category_scores={"_scan_metadata": {"status": "unknown"}},
+        )
+        await db.upsert_contract_score(
+            "0xcomplete", 1, 42.0, "MEDIUM", "suspicious",
+            category_scores={"_scan_metadata": {"status": "ok"}},
+        )
+
+        contracts = await CampaignService(None, db)._find_cross_chain_contracts("0xdeployer")
+        by_address = {contract["contract"]: contract for contract in contracts}
+
+        assert by_address["0xunknown"]["risk_score"] is None
+        assert by_address["0xunknown"]["status"] == "unknown"
+        assert by_address["0xcomplete"]["risk_score"] == 42.0
+        assert by_address["0xcomplete"]["status"] == "ok"
+        assert by_address["0xmissing"]["risk_score"] is None
+        assert by_address["0xmissing"]["status"] is None

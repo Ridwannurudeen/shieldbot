@@ -1361,7 +1361,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 "verdict": f"{classification} — Rug probability {alert['risk_display']}",
                 "raw_checks": {
                     "is_verified": contract_data.get("is_verified"),
-                    "scam_matches": len(contract_data.get("scam_matches", [])),
+                    "scam_matches": _scam_match_count(contract_data),
                     "contract_age_days": contract_data.get("contract_age_days"),
                     "is_honeypot": honeypot_data.get("is_honeypot"),
                     "buy_tax": honeypot_data.get("buy_tax"),
@@ -2459,6 +2459,15 @@ def _coverage_fields(alert: Dict) -> Dict:
     return {key: alert[key] for key in ('status', 'coverage', 'coverage_reasons', 'risk_display')}
 
 
+def _scam_match_count(scan: Dict) -> Optional[int]:
+    matches = scan.get("scam_matches", [])
+    if matches:
+        return len(matches)
+    if scan.get("coverage", {}).get("scam_database") is False:
+        return None
+    return 0
+
+
 def _build_cached_response(
     cached: Dict, decoded: Dict, value_bnb: float, chain_id: int = 56,
     to_addr: str = "",
@@ -2522,7 +2531,7 @@ def _extract_raw_checks(scan: Dict) -> Dict:
     """Extract key raw check values for the extension."""
     return {
         "is_verified": scan.get("is_verified"),
-        "scam_matches": len(scan.get("scam_matches", [])),
+        "scam_matches": _scam_match_count(scan),
         "contract_age_days": scan.get("contract_age_days"),
         "is_honeypot": scan.get("is_honeypot"),
         "ownership_renounced": scan.get("checks", {}).get("ownership_renounced"),
@@ -2536,14 +2545,14 @@ def _extract_raw_checks(scan: Dict) -> Dict:
 def _build_fallback_response(decoded: Dict, scan: Dict, whitelisted: Optional[str]) -> Dict:
     """Build a firewall response when AI is unavailable."""
     risk_score = scan.get("risk_score", 50)
-    scam_matches = len(scan.get("scam_matches", []))
+    scam_matches = _scam_match_count(scan)
     is_honeypot = scan.get("is_honeypot")
     is_verified = scan.get("is_verified")
     is_unlimited_approval = decoded.get("is_unlimited_approval", False)
 
     danger_signals = []
 
-    if scam_matches > 0:
+    if scam_matches is not None and scam_matches > 0:
         danger_signals.append(f"Found {scam_matches} scam database match(es)")
         risk_score = max(risk_score, 80)
 
@@ -2672,7 +2681,7 @@ def _build_unverified_swap_response(
         "verdict": "CAUTION — Token safety unverifiable",
         "raw_checks": {
             "is_verified": None,
-            "scam_matches": 0,
+            "scam_matches": None,
             "contract_age_days": None,
             "is_honeypot": None,
             "ownership_renounced": None,
@@ -2866,7 +2875,7 @@ async def _analyze_router_swap(
         "verdict": f"{classification} — Rug probability {alert['risk_display']}",
         "raw_checks": {
             "is_verified": contract_data.get("is_verified"),
-            "scam_matches": len(contract_data.get("scam_matches", [])),
+            "scam_matches": _scam_match_count(contract_data),
             "contract_age_days": contract_data.get("contract_age_days"),
             "is_honeypot": honeypot_data.get("is_honeypot"),
             "buy_tax": honeypot_data.get("buy_tax"),

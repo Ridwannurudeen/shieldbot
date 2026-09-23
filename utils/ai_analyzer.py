@@ -30,6 +30,15 @@ def _get_prompt_chain_name(chain_id: Optional[int]) -> str:
     return get_chain_name(chain_id) if chain_id is not None else 'Unknown chain'
 
 
+def _scam_match_count(scan_data: Dict) -> str:
+    scam_matches = scan_data.get('scam_matches', [])
+    if scam_matches:
+        return str(len(scam_matches))
+    if scan_data.get('coverage', {}).get('scam_database') is False:
+        return 'Unknown'
+    return '0'
+
+
 class AIAnalyzer:
     """Claude AI-powered contract analysis with structured scoring.
 
@@ -338,7 +347,7 @@ Provide a clear, helpful answer in 2-3 sentences. Use simple language."""
 - Verified: {scan_results.get('is_verified', False)}
 - Risk Level: {scan_results.get('risk_level', 'unknown').upper()}
 - Contract Age: {scan_results.get('contract_age_days', 'unknown')} days
-- Scam Database Matches: {len(scan_results.get('scam_matches', []))}
+- Scam Database Matches: {_scam_match_count(scan_results)}
 - Warnings: {', '.join(scan_results.get('warnings', [])) if scan_results.get('warnings') else 'None'}
 """
 
@@ -460,11 +469,14 @@ Generate the ShieldAI forensic report now."""
                 lines.append(f"  - {f}")
 
         # Scam DB
-        scam_matches = contract_data.get('scam_matches', [])
+        scam_data = contract_data or data
+        scam_matches = scam_data.get('scam_matches', [])
         if scam_matches:
             lines.append(f"⚠️ SCAM DATABASE MATCHES: {len(scam_matches)}")
             for m in scam_matches[:3]:
                 lines.append(f"  - {m.get('type', 'unknown')}: {m.get('reason', 'N/A')}")
+        elif scam_data.get('coverage', {}).get('scam_database') is False:
+            lines.append("Scam Database Matches: Unknown")
         else:
             lines.append("Scam Database Matches: 0")
 
@@ -590,7 +602,7 @@ Return the firewall analysis JSON now."""
         lines.append(f"Is Contract: {contract_scan.get('is_contract', 'unknown')}")
         lines.append(f"Is Verified: {contract_scan.get('is_verified', False)}")
         lines.append(f"Contract Age: {contract_scan.get('contract_age_days', 'unknown')} days")
-        lines.append(f"Scam DB Matches: {len(contract_scan.get('scam_matches', []))}")
+        lines.append(f"Scam DB Matches: {_scam_match_count(contract_scan)}")
         lines.append(f"Risk Score (heuristic): {contract_scan.get('risk_score', 'N/A')}/100")
 
         # Token-specific data

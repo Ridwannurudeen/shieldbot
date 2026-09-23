@@ -106,7 +106,7 @@ For scan responses, `core.extension_formatter.is_scan_incomplete` is the shared 
 The MCP adapters have narrower coverage than their names may suggest:
 
 - `check_approval_risk` and `query_threat_graph` are unimplemented adapters. They return `status: "unknown"`, coverage reasons and null result fields; they do not enumerate approvals or establish absence of cluster connections.
-- `simulate_transaction` still returns an `error` with empty arrays and a zero gas estimate when Tenderly is unavailable or returns no result. Those legacy defaults are not measured zero effects or permission to execute. Successful output is also limited to the simulation provider's reported fields.
+- `simulate_transaction` returns an `error` with null measurements when Tenderly is unavailable or simulation fails. When simulation produces a result, it returns `success`, `revert_reason`, `asset_changes`, `warnings` and `gas_estimate`; approval changes are not measured and remain null. Output is limited to fields reported by the simulation provider.
 - `check_deployer` uses the local index. `deployer: null` with an unindexed note and zero counts means missing history, not a deployer with no risky contracts.
 - `check_agent_reputation` is a block-rate heuristic over at most 1,000 local firewall records. An unregistered agent has no trust score; a registered agent with no history currently gets 100. Neither zero history nor that default 100 establishes trustworthiness.
 - `scan_for_injection` checks a fixed regex list. `clean: true` means no listed pattern matched, not that arbitrary content is safe; the returned depth label does not add a deeper analysis pass.
