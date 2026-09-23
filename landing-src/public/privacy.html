@@ -105,7 +105,13 @@
       <li><strong>chainId</strong> — the blockchain network identifier</li>
       <li><strong>typedData</strong> — EIP-712 structured data, if applicable (e.g. Permit2 signatures)</li>
     </ul>
-    <p>This data is the minimum required to perform a meaningful security analysis. No other data is collected.</p>
+    <p>With each check the extension also sends the signing method (for signature requests) and your policy mode (Balanced or Strict). This is the minimum required for a meaningful security analysis.</p>
+    <p>Some features send data only when you use them:</p>
+    <ul>
+      <li><strong>AI chat in the side panel</strong> — the message you type</li>
+      <li><strong>Prompt injection scanner</strong> — the text you paste in</li>
+      <li><strong>Wallet Health and the deployer feed</strong> — the wallet address you enter</li>
+    </ul>
 
     <h2>3. What Data Is Stored Locally</h2>
     <p>The extension stores the following data in your browser's local storage (<code>chrome.storage.local</code>), which never leaves your device unless described otherwise:</p>
@@ -114,7 +120,7 @@
       <li>Firewall enabled/disabled state</li>
       <li>Policy mode (Balanced or Strict)</li>
       <li>The last 50 transaction scan results for the history view</li>
-      <li>The wallet address you enter in the Wallet Health scanner</li>
+      <li>The wallet addresses you enter in the Wallet Health scanner and the deployer feed</li>
     </ul>
 
     <h2>4. How We Use Transaction Data</h2>
@@ -142,12 +148,14 @@
       <li><strong>Tenderly</strong> — transaction simulation, when enabled</li>
       <li><strong>Anthropic or OpenAI</strong> — optional AI explanations, when enabled</li>
       <li><strong>BNB Greenfield</strong> — storage of forensic reports for high risk checks, when enabled</li>
+      <li><strong>Blockchain RPC providers</strong> — reading contract code and on-chain state for each supported chain</li>
+      <li><strong>EAS on Base (base.easscan.org)</strong> — reading ShieldBot's published attestations</li>
     </ul>
     <p>These services receive only the data needed for their function, such as a contract address, a transaction to simulate or a site origin. They are governed by their own privacy policies.</p>
     <p>If you join the update list on our website, we store your email address and send messages through our email provider, Resend.</p>
 
     <h2>7. Data Retention</h2>
-    <p>Scan results (contract address, chain, risk score and findings) are kept on our servers so repeat checks are faster and the public threat feed works. They do not include your IP address. If you file a false positive report, the report and your IP address are stored to prevent abuse. Messages to the Telegram bot's AI assistant are deleted after 24 hours. Like most web services, our servers may keep standard access logs for security and troubleshooting.</p>
+    <p>Scan results (contract address, chain, risk score and findings) are kept on our servers so repeat checks are faster and the public threat feed works. They do not include your IP address. If you file a false positive report, the report and your IP address are stored to prevent abuse. Messages to the AI assistant, from the extension's side panel or the Telegram bot, are stored under an identifier derived from your IP address and chat ID, and are deleted after 24 hours. Like most web services, our servers may keep standard access and application logs for security and troubleshooting.</p>
     <p>Locally stored data (history, settings) remains on your device until you uninstall the extension or clear it manually.</p>
 
     <h2>8. Security</h2>

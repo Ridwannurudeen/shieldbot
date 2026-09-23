@@ -1075,7 +1075,7 @@ const CHAIN_FILTERS = [{
   val: '4663'
 }];
 function threatKey(t) {
-  return [t.type, t.address || t.target_token || '', t.victim_tx || t.attacker_tx || '', t.detected_at || t.created_at || ''].join(':');
+  return [t.type, t.chain_id, t.address || t.target_token || '', t.victim_tx || t.attacker_tx || '', t.detected_at || t.created_at || ''].join(':');
 }
 function ThreatLogTable({
   threats,
@@ -1256,8 +1256,28 @@ function CampaignsGrid({
 
 // ─── Threat Velocity Chart ────────────────────────────────────────────────
 function ThreatVelocityChart({
-  data
+  data,
+  unavailable
 }) {
+  if (unavailable) {
+    return /*#__PURE__*/React.createElement("div", {
+      className: "glass rounded-xl p-5",
+      style: {
+        border: '1px solid #334155'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "text-sm font-semibold mb-4",
+      style: {
+        color: '#F8FAFC'
+      }
+    }, "Threat Velocity"), /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center justify-center text-sm",
+      style: {
+        height: 190,
+        color: '#475569'
+      }
+    }, "Threat feed unavailable."));
+  }
   return /*#__PURE__*/React.createElement("div", {
     className: "glass rounded-xl p-5",
     style: {
@@ -1362,7 +1382,8 @@ const BAR_COLORS = {
 };
 function ChainDistributionChart({
   data,
-  loading
+  loading,
+  unavailable
 }) {
   const haslive = data.length > 0;
   return /*#__PURE__*/React.createElement("div", {
@@ -1448,29 +1469,31 @@ function ChainDistributionChart({
       height: 190,
       color: '#475569'
     }
-  }, loading ? 'Loading…' : 'No threats in the current feed.'));
+  }, loading ? 'Loading…' : unavailable ? 'Threat feed unavailable.' : 'No threats in the current feed.'));
 }
 
 // ─── KPI Tiles Row ────────────────────────────────────────────────────────
 function KPITilesRow({
   threats,
-  mempool,
+  stats,
+  feedOk,
   loading
 }) {
   const hourly = useMemo(() => bucketByHour(threats).map(b => b.count), [threats]);
   const delta = useMemo(() => pctChange(threats), [threats]);
   const highRisk = useMemo(() => threats.filter(t => ['HIGH', 'CRITICAL'].includes((t.risk_level || t.severity || '').toUpperCase())).length, [threats]);
   const chains = useMemo(() => new Set(threats.map(t => t.chain_id)).size, [threats]);
-  // null when the mempool monitor could not be reached: shown as a dash, never a number.
-  const sandwiches = mempool ? mempool.sandwiches_detected ?? null : null;
-  const approvals = mempool ? mempool.suspicious_approvals ?? null : null;
+  // null when a source could not be reached: shown as a dash, never as a number.
+  const sandwiches = stats ? stats.sandwiches_caught ?? null : null;
+  const approvals = stats ? stats.suspicious_approvals ?? null : null;
+  const fromFeed = value => feedOk ? value : null;
   const tiles = useMemo(() => [{
     label: 'High Risk',
-    value: highRisk,
+    value: fromFeed(highRisk),
     color: '#EF4444',
     icon: '🔴',
-    sparkData: hourly,
-    pct: delta
+    sparkData: feedOk ? hourly : [],
+    pct: fromFeed(delta)
   }, {
     label: 'Sandwich Attacks',
     value: sandwiches,
@@ -1487,19 +1510,19 @@ function KPITilesRow({
     pct: null
   }, {
     label: 'Active Chains',
-    value: chains,
+    value: fromFeed(chains),
     color: '#10B981',
     icon: '🔗',
     sparkData: [],
     pct: null
   }, {
     label: 'Threats in Feed',
-    value: threats.length,
+    value: fromFeed(threats.length),
     color: '#3B82F6',
     icon: '🛡️',
-    sparkData: hourly,
-    pct: delta
-  }], [hourly, highRisk, chains, sandwiches, approvals, threats.length, delta]);
+    sparkData: feedOk ? hourly : [],
+    pct: fromFeed(delta)
+  }], [hourly, highRisk, chains, sandwiches, approvals, threats.length, delta, feedOk]);
   return /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3"
   }, loading ? Array(5).fill(0).map((_, i) => /*#__PURE__*/React.createElement(SkeletonTile, {
@@ -1760,6 +1783,7 @@ function useCountUp(target, duration = 1200) {
     }
     const start = Date.now();
     const from = shown.current;
+    let frame;
     const tick = () => {
       const elapsed = Date.now() - start;
       const progress = Math.min(elapsed / duration, 1);
@@ -1767,9 +1791,10 @@ function useCountUp(target, duration = 1200) {
       const next = Math.round(from + (target - from) * eased);
       shown.current = next;
       setDisplay(next);
-      if (progress < 1) requestAnimationFrame(tick);
+      if (progress < 1) frame = requestAnimationFrame(tick);
     };
-    requestAnimationFrame(tick);
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
   }, [target]);
   return display;
 }
@@ -1845,7 +1870,7 @@ function byNewest(a, b) {
 }
 function App() {
   const [threats, setThreats] = useState([]);
-  const [mempool, setMempool] = useState(null);
+  const [feedOk, setFeedOk] = useState(true);
   const [campaigns, setCampaigns] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1858,21 +1883,22 @@ function App() {
     try {
       // Contract detections and mempool alerts are fetched separately so that frequent
       // mempool alerts cannot push contract detections out of a shared limit.
-      const [fc, fm, s, c, p, b] = await Promise.allSettled([getJSON('/api/threats/feed?source=contracts&limit=100'), getJSON('/api/threats/feed?source=mempool&limit=100'), getJSON('/api/mempool/stats'), getJSON('/api/campaigns/top?limit=10'), getJSON('/api/stats'), getJSON('/api/base/attestations?limit=20')]);
+      // /api/stats also carries the mempool counters, so /api/mempool/stats is not fetched.
+      const results = await Promise.allSettled([getJSON('/api/threats/feed?source=contracts&limit=100'), getJSON('/api/threats/feed?source=mempool&limit=100'), getJSON('/api/campaigns/top?limit=10'), getJSON('/api/stats'), getJSON('/api/base/attestations?limit=20')]);
+      const [fc, fm, c, p, b] = results;
       const feeds = [['contract detections', fc], ['mempool alerts', fm]];
       const loaded = feeds.filter(([, x]) => x.status === 'fulfilled');
       const failed = feeds.filter(([, x]) => x.status === 'rejected');
-      if (loaded.length) {
-        setThreats(loaded.flatMap(([, x]) => x.value.threats || []).sort(byNewest));
-        setUpdated(Date.now());
-      }
+      // With no feed loaded there is nothing to count: the tiles and charts say so instead of 0.
+      setThreats(loaded.flatMap(([, x]) => x.value.threats || []).sort(byNewest));
+      setFeedOk(loaded.length > 0);
+      if (loaded.length) setUpdated(Date.now());
       setError(failed.length ? 'Failed to load ' + failed.map(([name, x]) => `${name} (${x.reason?.message || 'unknown error'})`).join(' and ') : null);
-      setMempool(s.status === 'fulfilled' ? s.value : null);
       setCampaigns(c.status === 'fulfilled' ? c.value.campaigns || [] : null);
       setStats(p.status === 'fulfilled' ? p.value : null);
       setBaseAttestations(b.status === 'fulfilled' ? b.value : NO_ATTESTATIONS);
-      const othersFailed = [s, c, p, b].some(x => x.status === 'rejected');
-      setHealth(!loaded.length ? 'offline' : failed.length || othersFailed ? 'degraded' : 'live');
+      const failures = results.filter(x => x.status === 'rejected').length;
+      setHealth(failures === 0 ? 'live' : failures === results.length ? 'offline' : 'degraded');
     } finally {
       setLoading(false);
     }
@@ -1906,17 +1932,20 @@ function App() {
     title: "Performance Overview"
   }, /*#__PURE__*/React.createElement(KPITilesRow, {
     threats: threats,
-    mempool: mempool,
+    stats: stats,
+    feedOk: feedOk,
     loading: loading
   })), /*#__PURE__*/React.createElement(Section, {
     title: "Analytics"
   }, /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-1 lg:grid-cols-2 gap-4"
   }, /*#__PURE__*/React.createElement(ThreatVelocityChart, {
-    data: velocityData
+    data: velocityData,
+    unavailable: !feedOk
   }), /*#__PURE__*/React.createElement(ChainDistributionChart, {
     data: chainData,
-    loading: loading
+    loading: loading,
+    unavailable: !feedOk
   }))), /*#__PURE__*/React.createElement(Section, {
     title: "Live Threat Feed"
   }, /*#__PURE__*/React.createElement("div", {

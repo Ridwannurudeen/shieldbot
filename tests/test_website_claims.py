@@ -45,9 +45,11 @@ def mempool_chain_count() -> int:
 def test_every_chain_count_on_the_site_matches_the_registry():
     statements = 0
     for name, text in landing_texts().items():
-        for match in re.finditer(r"\b(\d+) (?:chains|blockchains)\b", text):
-            # "N chains with a public mempool" counts mempool chains; every other count is scan chains.
-            mempool = "public" in text[match.end() : match.end() + 20]
+        for match in re.finditer(r"\b(\d+)[ -](?:chains?|blockchains)\b", text):
+            # "N chains with a public mempool" and "N-chain mempool" count mempool chains; every
+            # other count is scan chains.
+            following = text[match.end() : match.end() + 40].lstrip().lower()
+            mempool = following.startswith(("with a public", "mempool"))
             expected = mempool_chain_count() if mempool else len(chain_info())
             assert int(match.group(1)) == expected, (
                 f"{name}: {match.group(0)!r}, expected {expected}"
@@ -108,8 +110,15 @@ def _risk_bands() -> dict:
 
 
 def test_score_bands_on_the_site_match_the_classifier():
+    from core.calibration import CalibrationConfig
+
     bands = _risk_bands()
     assert set(bands) == {"SAFE", "CAUTION", "HIGH_RISK", "BLOCK_RECOMMENDED"}
+    # The risk engine's default level thresholds must agree with the bands the site states;
+    # calibration can only make the shown verdict stricter (a MEDIUM level is never SAFE).
+    defaults = CalibrationConfig()
+    assert defaults.medium_threshold == bands["CAUTION"][0]
+    assert defaults.high_threshold == bands["BLOCK_RECOMMENDED"][0]
 
     about = read(LANDING_SRC / "public" / "about.html")
     for name, badge in (
@@ -152,11 +161,15 @@ def test_dashboard_chain_tables_cover_every_scan_chain():
 def test_structured_data_is_valid_and_matches_the_visible_faq():
     html = read(LANDING_SRC / "index.html")
     faq_source = read(COMPONENTS / "FAQ.tsx")
+    entities = []
     for block in re.findall(r'<script type="application/ld\+json">(.*?)</script>', html, re.DOTALL):
         data = json.loads(block)
-        for entity in data.get("mainEntity", []):
-            assert json.dumps(entity["name"], ensure_ascii=False) in faq_source
-            assert json.dumps(entity["acceptedAnswer"]["text"], ensure_ascii=False) in faq_source
+        if data["@type"] == "FAQPage":
+            entities += data["mainEntity"]
+    assert entities, "index.html should carry FAQ structured data"
+    for entity in entities:
+        assert json.dumps(entity["name"], ensure_ascii=False) in faq_source
+        assert json.dumps(entity["acceptedAnswer"]["text"], ensure_ascii=False) in faq_source
 
 
 @pytest.mark.parametrize(
@@ -170,7 +183,9 @@ def test_built_landing_copies_the_current_public_files(name):
 
 def test_built_landing_bundle_contains_the_current_faq():
     bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
-    for question in re.findall(r'^\s+q: "([^"]+)",', read(COMPONENTS / "FAQ.tsx"), re.MULTILINE):
+    questions = re.findall(r'^\s+q: "([^"]+)",', read(COMPONENTS / "FAQ.tsx"), re.MULTILINE)
+    assert bundle and questions
+    for question in questions:
         assert question in bundle, f"landing bundle is stale: missing FAQ question {question!r}"
 
 
