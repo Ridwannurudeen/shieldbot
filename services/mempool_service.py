@@ -97,7 +97,8 @@ class MempoolMonitor:
         # Chains to monitor (only chains with txpool or pending block support)
         self._monitored_chains: Set[int] = set()
 
-        # Stats
+        # Stats: held in memory, so they restart from zero with the process.
+        self._counting_since = time.time()
         self._stats = {
             'total_pending_seen': 0,
             'sandwiches_detected': 0,
@@ -407,6 +408,7 @@ class MempoolMonitor:
         """Get monitoring statistics."""
         return {
             **self._stats,
+            'counting_since': self._counting_since,
             'monitored_chains': list(self._monitored_chains),
             'pending_count': {
                 cid: len(txs) for cid, txs in self._pending.items()

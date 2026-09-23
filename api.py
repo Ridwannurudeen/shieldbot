@@ -300,7 +300,7 @@ async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["X-XSS-Protection"] = "0"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
@@ -708,12 +708,24 @@ async def health():
     }
 
 
+# The built dashboard inlines its scripts and styles; only Google Fonts is fetched from elsewhere.
+DASHBOARD_CSP = (
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
+    "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+)
+
+
 @app.get("/dashboard")
 async def threat_dashboard():
     """Public real-time threat intelligence dashboard."""
     import os
     dashboard_path = os.path.join(os.path.dirname(__file__), "dashboard", "index.html")
-    return FileResponse(dashboard_path, media_type="text/html")
+    return FileResponse(
+        dashboard_path,
+        media_type="text/html",
+        headers={"Cache-Control": "no-cache", "Content-Security-Policy": DASHBOARD_CSP},
+    )
 
 
 @app.get("/test-phishing", response_class=HTMLResponse)
@@ -1740,7 +1752,11 @@ async def admin_stats(request: Request):
 
 @app.get("/api/stats")
 async def public_stats():
-    """Public platform statistics — safe to display on the dashboard."""
+    """Public platform statistics — safe to display on the dashboard.
+
+    A source that is not running reports null, never 0. Mempool counters live in memory and restart
+    from zero with the process; `mempool_counting_since` says when the current count began.
+    """
     db_stats = {}
     if container and container.db:
         db_stats = await container.db.get_platform_stats()
@@ -1751,13 +1767,14 @@ async def public_stats():
 
     at = db_stats.get("all_time", {})
     return {
-        "transactions_monitored": mempool.get("total_pending_seen", 0),
-        "contracts_scanned":      at.get("unique_contracts_scanned", 0),
-        "threats_detected":       at.get("threats_detected", 0),
-        "transactions_blocked":   at.get("transactions_blocked", 0),
-        "sandwiches_caught":      mempool.get("sandwiches_detected", 0),
-        "suspicious_approvals":   mempool.get("suspicious_approvals", 0),
-        "chains_protected":       len(mempool.get("monitored_chains", [])),
+        "transactions_monitored": mempool.get("total_pending_seen"),
+        "contracts_scanned":      at.get("unique_contracts_scanned"),
+        "threats_detected":       at.get("threats_detected"),
+        "transactions_blocked":   at.get("transactions_blocked"),
+        "sandwiches_caught":      mempool.get("sandwiches_detected"),
+        "suspicious_approvals":   mempool.get("suspicious_approvals"),
+        "chains_protected":       len(mempool["monitored_chains"]) if "monitored_chains" in mempool else None,
+        "mempool_counting_since": mempool.get("counting_since"),
     }
 
 
@@ -2105,7 +2122,7 @@ async def rescue_scan(wallet_address: str, chain_id: int = 56):
 
 @app.get("/api/threats/feed")
 async def threat_feed(
-    chain_id: int = None, limit: int = 50, since: float = None,
+    chain_id: int = None, limit: int = 50, since: float = None, source: str = None,
 ):
     """Real-time threat intelligence feed.
 
@@ -2114,9 +2131,13 @@ async def threat_feed(
     - chain_id: filter by chain (optional)
     - limit: max results (default 50, max 200)
     - since: unix timestamp to fetch threats after (optional)
+    - source: 'contracts' or 'mempool' returns only that source, so frequent mempool alerts
+      cannot crowd contract detections out of the limit (optional)
     """
     if chain_id is not None:
         _validate_chain_id(chain_id)
+    if source not in (None, "contracts", "mempool"):
+        raise HTTPException(status_code=400, detail="source must be 'contracts' or 'mempool'")
     if not container:
         raise HTTPException(status_code=503, detail="Service not available")
 
@@ -2125,7 +2146,9 @@ async def threat_feed(
 
     # Recent high-risk contract scans from DB
     try:
-        if chain_id is not None:
+        if source == "mempool":
+            cursor = None
+        elif chain_id is not None:
             cursor = await container.db._db.execute("""
                 SELECT address, chain_id, risk_score, risk_level, archetype, flags,
                        last_scanned_at
@@ -2143,7 +2166,7 @@ async def threat_feed(
                 ORDER BY last_scanned_at DESC
                 LIMIT ?
             """, (limit,))
-        rows = await cursor.fetchall()
+        rows = await cursor.fetchall() if cursor else []
 
         import json as _json
         for row in rows:
@@ -2167,7 +2190,7 @@ async def threat_feed(
     mempool_available = chain_id is None or supports_pending_transactions(chain_id)
     mempool_alerts = (
         container.mempool_monitor.get_alerts(chain_id=chain_id, limit=limit)
-        if mempool_available else []
+        if mempool_available and source != "contracts" else []
     )
     for alert in mempool_alerts:
         if since and alert.get('created_at', 0) < since:

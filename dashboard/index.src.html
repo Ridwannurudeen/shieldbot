@@ -107,7 +107,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useCallback, useMemo } = React;
+    const { useState, useEffect, useCallback, useMemo, useRef } = React;
     const {
       AreaChart, Area, BarChart, Bar, Cell,
       XAxis, YAxis, CartesianGrid, Tooltip,
@@ -116,21 +116,20 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────
     const API              = window.location.origin;
-    const REFRESH_MS       = 15000;
+    const REFRESH_MS       = 20000;
 
-    const CHAIN_NAMES  = { 56:'BNB', 1:'ETH', 8453:'Base', 42161:'ARB', 137:'Polygon', 10:'OP', 204:'opBNB' };
-    const CHAIN_COLORS = { 56:'#F0B90B', 1:'#627EEA', 8453:'#0052FF', 42161:'#28A0F0', 137:'#8247E5', 10:'#FF0420', 204:'#F0B90B' };
-    const EXPLORERS    = { 56:'https://bscscan.com', 1:'https://etherscan.io', 8453:'https://basescan.org', 42161:'https://arbiscan.io', 137:'https://polygonscan.com', 10:'https://optimistic.etherscan.io', 204:'https://opbnbscan.com' };
+    // Mirrors utils/chain_info.py.
+    const CHAIN_NAMES  = { 56:'BNB', 1:'ETH', 8453:'Base', 42161:'ARB', 137:'Polygon', 10:'OP', 204:'opBNB', 4663:'Robinhood' };
+    const CHAIN_COLORS = { 56:'#F0B90B', 1:'#627EEA', 8453:'#0052FF', 42161:'#28A0F0', 137:'#8247E5', 10:'#FF0420', 204:'#F0B90B', 4663:'#84CC16' };
+    const EXPLORERS    = { 56:'https://bscscan.com', 1:'https://etherscan.io', 8453:'https://basescan.org', 42161:'https://arbiscan.io', 137:'https://polygonscan.com', 10:'https://optimistic.etherscan.io', 204:'https://opbnbscan.com', 4663:'https://robinhoodchain.blockscout.com' };
 
     const SEV = {
       CRITICAL: { bg:'rgba(239,68,68,0.15)',   text:'#EF4444', border:'rgba(239,68,68,0.35)' },
       HIGH:     { bg:'rgba(245,158,11,0.15)',  text:'#F59E0B', border:'rgba(245,158,11,0.35)' },
       MEDIUM:   { bg:'rgba(59,130,246,0.15)',  text:'#3B82F6', border:'rgba(59,130,246,0.35)' },
       LOW:      { bg:'rgba(16,185,129,0.15)',  text:'#10B981', border:'rgba(16,185,129,0.35)' },
+      UNKNOWN:  { bg:'rgba(100,116,139,0.15)', text:'#94A3B8', border:'rgba(100,116,139,0.35)' },
     };
-
-    // Pre-seeded baseline so tiles never look empty on first load
-    const SEED_KPI = { total:100, highRisk:93, sandwiches:8, approvals:17944, chains:3 };
 
     // ─── Utilities ────────────────────────────────────────────────────────────
     function timeAgo(ts) {
@@ -209,8 +208,8 @@
           </div>
           <div className="flex items-end justify-between gap-2">
             <div>
-              <div className="text-2xl font-bold leading-none" style={{ color }}>
-                {typeof value === 'number' ? value.toLocaleString() : value}
+              <div className="text-2xl font-bold leading-none" style={{ color: value == null ? '#475569' : color }}>
+                {value == null ? '—' : typeof value === 'number' ? value.toLocaleString() : value}
               </div>
               <div className="text-xs mt-1.5 font-medium"
                    style={{ color: pct === null ? '#334155' : pct === 0 ? '#64748B' : isUp ? '#EF4444' : '#10B981' }}>
@@ -272,10 +271,35 @@
     }
 
     // ─── Flag Modal ───────────────────────────────────────────────────────────
-    function FlagModal({ threat, onClose }) {
+    function FlagModal({ threat, onClose, onResult }) {
+      const [reason,  setReason]  = useState('');
+      const [sending, setSending] = useState(false);
+      useEffect(() => { setReason(''); }, [threat]);
       if (!threat) return null;
       const addr = threat.address || threat.target_token || '';
       const type = (threat.type || threat.alert_type || 'unknown').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+      const canSend = Boolean(addr && threat.chain_id) && !sending;
+
+      async function submit() {
+        setSending(true);
+        try {
+          const r = await fetch(`${API}/api/report`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              address: addr, chainId: threat.chain_id,
+              report_type: 'false_positive', reason: reason.trim() || null,
+            }),
+          });
+          if (r.ok) { onResult('Report sent. Thank you.', 'success'); onClose(); }
+          else if (r.status === 429) onResult('Too many reports. Try again in a minute.', 'error');
+          else onResult(`Report not sent (HTTP ${r.status}).`, 'error');
+        } catch (e) {
+          onResult('Report not sent: network error.', 'error');
+        } finally {
+          setSending(false);
+        }
+      }
       return (
         <div className="fixed inset-0 z-50 flex items-center justify-center"
              style={{ background:'rgba(15,23,42,0.85)', backdropFilter:'blur(6px)' }}
@@ -305,13 +329,16 @@
             <textarea className="w-full rounded-lg p-3 text-sm resize-none"
                       style={{ background:'#0F172A', border:'1px solid #334155', color:'#F8FAFC',
                                outline:'none', height:80, fontFamily:'inherit' }}
+                      maxLength={1000} value={reason} onChange={e => setReason(e.target.value)}
                       placeholder="Why is this a false positive?" />
 
             <div className="flex gap-2 mt-4">
               <button onClick={onClose} className="flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors"
                       style={{ background:'#334155', color:'#94A3B8' }}>Cancel</button>
-              <button onClick={onClose} className="flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors"
-                      style={{ background:'#3B82F6', color:'#fff' }}>Submit Report</button>
+              <button onClick={submit} disabled={!canSend} className="flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                      style={{ background:'#3B82F6', color:'#fff', opacity: canSend ? 1 : 0.5 }}>
+                {sending ? 'Sending…' : 'Submit Report'}
+              </button>
             </div>
           </div>
         </div>
@@ -338,8 +365,8 @@
     // ─── Threat Row ────────────────────────────────────────────────────────────
     function ThreatRow({ t, onCopy, onFlag }) {
       const [hov, setHov] = useState(false);
-      const rawSev  = (t.risk_level || t.severity || 'MEDIUM').toUpperCase();
-      const sev     = SEV[rawSev] ? rawSev : 'MEDIUM';
+      const rawSev  = (t.risk_level || t.severity || 'UNKNOWN').toUpperCase();
+      const sev     = SEV[rawSev] ? rawSev : 'UNKNOWN';
       const sc      = SEV[sev];
       const type    = (t.type || t.alert_type || 'unknown').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
       const addr    = t.address || t.target_token || '';
@@ -436,7 +463,13 @@
       { label:'Polygon',    val:'137' },
       { label:'Optimism',   val:'10' },
       { label:'opBNB',      val:'204' },
+      { label:'Robinhood',  val:'4663' },
     ];
+
+    function threatKey(t) {
+      return [t.type, t.address || t.target_token || '', t.victim_tx || t.attacker_tx || '',
+              t.detected_at || t.created_at || ''].join(':');
+    }
 
     function ThreatLogTable({ threats, loading, error, onRetry, chain, onChain }) {
       const [toast, setToast] = useState(null);
@@ -484,14 +517,15 @@
                         : 'No threats detected. Monitoring active.'
                     }
                   </div>
-                : filtered.slice(0,100).map((t,i) => (
-                    <ThreatRow key={t.id || i} t={t} onCopy={handleCopy} onFlag={setFlag} />
+                : filtered.map(t => (
+                    <ThreatRow key={threatKey(t)} t={t} onCopy={handleCopy} onFlag={setFlag} />
                   ))
             }
           </div>
 
           {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
-          <FlagModal threat={flag} onClose={() => setFlag(null)} />
+          <FlagModal threat={flag} onClose={() => setFlag(null)}
+                     onResult={(msg, type) => setToast({ msg, type })} />
         </div>
       );
     }
@@ -513,6 +547,10 @@
         );
       }
 
+      if (campaigns === null) {
+        return <div className="text-center py-8 text-sm" style={{ color:'#475569' }}>Campaign data unavailable.</div>;
+      }
+
       if (!campaigns.length) {
         return <div className="text-center py-8 text-sm" style={{ color:'#334155' }}>No campaigns detected.</div>;
       }
@@ -520,11 +558,12 @@
       return (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {campaigns.map((c, i) => {
-            const rp  = c.risk_profile || {};
-            const hi  = (rp.HIGH || 0) + (rp.CRITICAL || 0);
+            const rp  = c.risk_profile;
+            const scored = rp && Object.keys(rp).length > 0;
+            const hi  = scored ? (rp.HIGH || 0) + (rp.CRITICAL || 0) : null;
             const tot = c.contract_count || 1;
-            const pct = Math.min(100, (hi / tot) * 100);
-            const bar = pct > 50 ? '#EF4444' : pct > 20 ? '#F59E0B' : '#10B981';
+            const pct = scored ? Math.min(100, (hi / tot) * 100) : 0;
+            const bar = !scored ? '#475569' : pct > 50 ? '#EF4444' : pct > 20 ? '#F59E0B' : '#10B981';
             return (
               <div key={i} className="rounded-xl p-4 fade-up"
                    style={{ background:'#1E293B', border:'1px solid #334155' }}>
@@ -541,7 +580,9 @@
                        style={{ width:`${pct}%`, background:bar }} />
                 </div>
                 <div className="text-xs mt-2" style={{ color:'#94A3B8' }}>
-                  <span style={{ color:bar }}>{hi} HIGH/CRIT</span> / {tot} total
+                  {scored
+                    ? <><span style={{ color:bar }}>{hi} HIGH/CRIT</span> / {tot} total</>
+                    : <span style={{ color:bar }}>Contracts not scored yet</span>}
                 </div>
               </div>
             );
@@ -586,15 +627,10 @@
     }
 
     // ─── Chain Distribution Chart ─────────────────────────────────────────────
-    const BAR_COLORS = { BNB:'#F0B90B', ETH:'#627EEA', Base:'#0052FF', ARB:'#28A0F0', Polygon:'#8247E5', OP:'#FF0420', opBNB:'#F0B90B' };
-    const FALLBACK_CHAIN_DATA = [
-      { name:'BNB', count:30 }, { name:'ETH', count:40 },
-      { name:'Base', count:15 }, { name:'Polygon', count:15 },
-    ];
+    const BAR_COLORS = { BNB:'#F0B90B', ETH:'#627EEA', Base:'#0052FF', ARB:'#28A0F0', Polygon:'#8247E5', OP:'#FF0420', opBNB:'#F0B90B', Robinhood:'#84CC16' };
 
     function ChainDistributionChart({ data }) {
       const haslive = data.length > 0;
-      const d = haslive ? data : FALLBACK_CHAIN_DATA;
       return (
         <div className="glass rounded-xl p-5" style={{ border:'1px solid #334155' }}>
           <div className="flex items-start justify-between mb-4">
@@ -609,19 +645,24 @@
                       style={{ background:'rgba(100,116,139,0.15)', color:'#64748B' }}>No data</span>
             }
           </div>
-          <ResponsiveContainer width="100%" height={190}>
-            <BarChart data={d} margin={{ top:4, right:4, left:-20, bottom:0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1E293B" vertical={false} />
-              <XAxis dataKey="name" tick={{ fill:'#475569', fontSize:11 }} tickLine={false} axisLine={false} />
-              <YAxis tick={{ fill:'#475569', fontSize:10 }} tickLine={false} axisLine={false} />
-              <Tooltip contentStyle={{ background:'#1E293B', border:'1px solid #334155',
-                                       borderRadius:8, color:'#F8FAFC', fontSize:12 }}
-                       cursor={{ fill:'rgba(255,255,255,0.03)' }} />
-              <Bar dataKey="count" name="Threats" radius={[4,4,0,0]}>
-                {d.map((e,i) => <Cell key={i} fill={BAR_COLORS[e.name] || '#3B82F6'} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          {haslive
+            ? <ResponsiveContainer width="100%" height={190}>
+                <BarChart data={data} margin={{ top:4, right:4, left:-20, bottom:0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1E293B" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fill:'#475569', fontSize:11 }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fill:'#475569', fontSize:10 }} tickLine={false} axisLine={false} />
+                  <Tooltip contentStyle={{ background:'#1E293B', border:'1px solid #334155',
+                                           borderRadius:8, color:'#F8FAFC', fontSize:12 }}
+                           cursor={{ fill:'rgba(255,255,255,0.03)' }} />
+                  <Bar dataKey="count" name="Threats" radius={[4,4,0,0]}>
+                    {data.map((e,i) => <Cell key={i} fill={BAR_COLORS[e.name] || '#3B82F6'} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            : <div className="flex items-center justify-center text-sm" style={{ height:190, color:'#475569' }}>
+                No threats in the current feed.
+              </div>
+          }
         </div>
       );
     }
@@ -632,16 +673,17 @@
       const delta      = useMemo(() => pctChange(threats), [threats]);
       const highRisk   = useMemo(() => threats.filter(t => ['HIGH','CRITICAL'].includes((t.risk_level || t.severity || '').toUpperCase())).length, [threats]);
       const chains     = useMemo(() => new Set(threats.map(t => t.chain_id)).size, [threats]);
-      const sandwiches = mempool.sandwiches_detected  ?? SEED_KPI.sandwiches;
-      const approvals  = mempool.suspicious_approvals ?? SEED_KPI.approvals;
+      // null when the mempool monitor could not be reached: shown as a dash, never a number.
+      const sandwiches = mempool ? mempool.sandwiches_detected  ?? null : null;
+      const approvals  = mempool ? mempool.suspicious_approvals ?? null : null;
 
       const tiles = useMemo(() => [
-        { label:'High Risk',           value: loading ? SEED_KPI.highRisk   : highRisk,       color:'#EF4444', icon:'🔴', sparkData: hourly,                                    pct: delta },
-        { label:'Sandwich Attacks',    value: loading ? SEED_KPI.sandwiches : sandwiches,     color:'#F59E0B', icon:'⚡', sparkData: hourly.map(v => Math.round(v * 0.08)),      pct: null  },
-        { label:'Suspicious Approvals',value: loading ? SEED_KPI.approvals  : approvals,      color:'#8B5CF6', icon:'⚠️', sparkData: hourly.map(v => v * 180),                  pct: null  },
-        { label:'Active Chains',       value: loading ? SEED_KPI.chains     : chains,         color:'#10B981', icon:'🔗', sparkData: Array(24).fill(chains),                    pct: null  },
-        { label:'Total Threats',       value: loading ? SEED_KPI.total      : threats.length, color:'#3B82F6', icon:'🛡️', sparkData: hourly,                                    pct: delta },
-      ], [hourly, highRisk, chains, sandwiches, approvals, loading, threats.length, delta]);
+        { label:'High Risk',           value: highRisk,       color:'#EF4444', icon:'🔴', sparkData: hourly, pct: delta },
+        { label:'Sandwich Attacks',    value: sandwiches,     color:'#F59E0B', icon:'⚡', sparkData: [],     pct: null  },
+        { label:'Suspicious Approvals',value: approvals,      color:'#8B5CF6', icon:'⚠️', sparkData: [],     pct: null  },
+        { label:'Active Chains',       value: chains,         color:'#10B981', icon:'🔗', sparkData: [],     pct: null  },
+        { label:'Threats in Feed',     value: threats.length, color:'#3B82F6', icon:'🛡️', sparkData: hourly, pct: delta },
+      ], [hourly, highRisk, chains, sandwiches, approvals, threats.length, delta]);
 
       return (
         <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
@@ -661,7 +703,7 @@
         if (label === 'SAFE' || label === 'LOW') return '#10B981';
         return '#94A3B8';
       };
-      const chainName = (id) => ({ 56: 'BSC', 8453: 'Base', 1: 'ETH', 42161: 'ARB', 137: 'POLY', 10: 'OP' }[id] || `chain ${id}`);
+      const chainName = (id) => CHAIN_NAMES[id] || `chain ${id}`;
       const list = data.attestations || [];
       const summary = data.summary || {};
       return (
@@ -716,9 +758,17 @@
     }
 
     // ─── Header ───────────────────────────────────────────────────────────────
-    function Header({ lastUpdated }) {
+    const HEALTH = {
+      connecting: { color:'#64748B', label:'CONNECTING' },
+      live:       { color:'#10B981', label:'LIVE' },
+      degraded:   { color:'#F59E0B', label:'PARTIAL DATA' },
+      offline:    { color:'#EF4444', label:'OFFLINE' },
+    };
+
+    function Header({ lastUpdated, health }) {
       const [glow, setGlow] = useState(true);
       useEffect(() => { const t = setInterval(() => setGlow(v => !v), 900); return () => clearInterval(t); }, []);
+      const h = HEALTH[health];
 
       return (
         <header className="glass border-b px-5 md:px-8 py-4 flex items-center justify-between flex-wrap gap-3"
@@ -731,15 +781,15 @@
               <span className="text-sm" style={{ color:'#475569' }}>Threat Dashboard</span>
               <div className="flex items-center gap-1.5">
                 <div style={{
-                  width:8, height:8, borderRadius:'50%', background:'#10B981',
-                  boxShadow: glow ? '0 0 8px #10B981' : 'none',
+                  width:8, height:8, borderRadius:'50%', background:h.color,
+                  boxShadow: glow && health === 'live' ? `0 0 8px ${h.color}` : 'none',
                   transition:'box-shadow 0.4s',
                 }} />
-                <span className="text-xs font-semibold" style={{ color:'#10B981' }}>LIVE</span>
+                <span className="text-xs font-semibold" style={{ color:h.color }}>{h.label}</span>
               </div>
             </div>
             <div className="text-xs mt-0.5" style={{ color:'#334155' }}>
-              Security Shield · Active Monitoring · Low Latency Mode
+              Contract detections and mempool alerts · refreshes every {REFRESH_MS / 1000} seconds
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -769,20 +819,23 @@
       { key:'transactions_blocked',   label:'Transactions Blocked',   color:'#F59E0B' },
       { key:'sandwiches_caught',      label:'Sandwich Attacks Caught',color:'#8B5CF6' },
       { key:'suspicious_approvals',   label:'Suspicious Approvals',   color:'#F97316' },
-      { key:'chains_protected',       label:'Chains Protected',       color:'#06B6D4' },
+      { key:'chains_protected',       label:'Mempool Chains Watched', color:'#06B6D4' },
     ];
 
     function useCountUp(target, duration = 1200) {
       const [display, setDisplay] = useState(0);
+      const shown = useRef(0);
       useEffect(() => {
-        if (!target) return;
+        if (!target) { shown.current = 0; setDisplay(0); return; }
         const start = Date.now();
-        const from = 0;
+        const from = shown.current;
         const tick = () => {
           const elapsed = Date.now() - start;
           const progress = Math.min(elapsed / duration, 1);
           const eased = 1 - Math.pow(1 - progress, 3);
-          setDisplay(Math.round(from + (target - from) * eased));
+          const next = Math.round(from + (target - from) * eased);
+          shown.current = next;
+          setDisplay(next);
           if (progress < 1) requestAnimationFrame(tick);
         };
         requestAnimationFrame(tick);
@@ -791,14 +844,14 @@
     }
 
     function StatCard({ label, value, color, loading }) {
-      const display = useCountUp(loading ? 0 : value);
+      const display = useCountUp(loading || value == null ? 0 : value);
       return (
         <div className="glass rounded-xl p-4 fade-up flex flex-col gap-1 text-center"
              style={{ border:'1px solid #1E293B', minWidth:0 }}>
           {loading
             ? <div className="skeleton mx-auto" style={{ height:28, width:72 }} />
-            : <div className="text-2xl font-bold leading-none" style={{ color }}>
-                {display.toLocaleString()}
+            : <div className="text-2xl font-bold leading-none" style={{ color: value == null ? '#475569' : color }}>
+                {value == null ? '—' : display.toLocaleString()}
               </div>
           }
           <div className="text-xs font-medium mt-1" style={{ color:'#64748B' }}>{label}</div>
@@ -807,50 +860,87 @@
     }
 
     function PlatformStatsBar({ stats, loading }) {
+      const since = stats && stats.mempool_counting_since;
       return (
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-          {STAT_ITEMS.map(s => (
-            <StatCard key={s.key} label={s.label} value={stats[s.key] || 0}
-                      color={s.color} loading={loading} />
-          ))}
+        <div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+            {STAT_ITEMS.map(s => (
+              <StatCard key={s.key} label={s.label} value={stats ? stats[s.key] : null}
+                        color={s.color} loading={loading} />
+            ))}
+          </div>
+          {!loading && (
+            <div className="text-xs mt-2" style={{ color:'#475569' }}>
+              {stats === null
+                ? 'Platform statistics are unavailable right now.'
+                : since
+                  ? `Transactions monitored, sandwich attacks and suspicious approvals are counted since ${new Date(since * 1000).toLocaleString()}, when the mempool monitor last started. The other figures are all time.`
+                  : 'A dash means that source is not reporting right now.'}
+            </div>
+          )}
         </div>
       );
     }
 
     // ─── App ──────────────────────────────────────────────────────────────────
+    const NO_ATTESTATIONS = { available: false, attestations: [], summary: {} };
+
+    // Rejects on any non-2xx status, so an error body is never shown as data.
+    function getJSON(path) {
+      return fetch(`${API}${path}`).then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      });
+    }
+
+    function byNewest(a, b) {
+      return (b.detected_at || b.created_at || 0) - (a.detected_at || a.created_at || 0);
+    }
+
     function App() {
       const [threats,   setThreats]   = useState([]);
-      const [mempool,   setMempool]   = useState({});
+      const [mempool,   setMempool]   = useState(null);
       const [campaigns, setCampaigns] = useState([]);
-      const [stats,     setStats]     = useState({});
+      const [stats,     setStats]     = useState(null);
       const [loading,   setLoading]   = useState(true);
       const [error,     setError]     = useState(null);
       const [updated,   setUpdated]   = useState(null);
+      const [health,    setHealth]    = useState('connecting');
       const [chain,     setChain]     = useState('');
 
-      const [baseAttestations, setBaseAttestations] = useState({ available: false, attestations: [], summary: {} });
+      const [baseAttestations, setBaseAttestations] = useState(NO_ATTESTATIONS);
 
       const fetchData = useCallback(async () => {
         try {
-          const [f, s, c, p, b] = await Promise.allSettled([
-            fetch(`${API}/api/threats/feed?limit=100`).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
-            fetch(`${API}/api/mempool/stats`).then(r => r.json()),
-            fetch(`${API}/api/campaigns/top?limit=10`).then(r => r.json()),
-            fetch(`${API}/api/stats`).then(r => r.json()),
-            fetch(`${API}/api/base/attestations?limit=20`).then(r => r.json()),
+          // Contract detections and mempool alerts are fetched separately so that frequent
+          // mempool alerts cannot push contract detections out of a shared limit.
+          const [fc, fm, s, c, p, b] = await Promise.allSettled([
+            getJSON('/api/threats/feed?source=contracts&limit=100'),
+            getJSON('/api/threats/feed?source=mempool&limit=100'),
+            getJSON('/api/mempool/stats'),
+            getJSON('/api/campaigns/top?limit=10'),
+            getJSON('/api/stats'),
+            getJSON('/api/base/attestations?limit=20'),
           ]);
 
-          if (f.status === 'fulfilled') { setThreats(f.value.threats || []); setError(null); }
-          else setError('Failed to load threat feed — ' + (f.reason?.message || 'unknown error'));
+          const feeds = [['contract detections', fc], ['mempool alerts', fm]];
+          const loaded = feeds.filter(([, x]) => x.status === 'fulfilled');
+          const failed = feeds.filter(([, x]) => x.status === 'rejected');
+          if (loaded.length) {
+            setThreats(loaded.flatMap(([, x]) => x.value.threats || []).sort(byNewest));
+            setUpdated(Date.now());
+          }
+          setError(failed.length
+            ? 'Failed to load ' + failed.map(([name, x]) => `${name} (${x.reason?.message || 'unknown error'})`).join(' and ')
+            : null);
 
-          if (s.status === 'fulfilled') setMempool(s.value || {});
-          if (c.status === 'fulfilled') setCampaigns(c.value.campaigns || []);
-          if (p.status === 'fulfilled') setStats(p.value || {});
-          if (b.status === 'fulfilled') setBaseAttestations(b.value || { available: false, attestations: [], summary: {} });
+          setMempool(s.status === 'fulfilled' ? s.value : null);
+          setCampaigns(c.status === 'fulfilled' ? (c.value.campaigns || []) : null);
+          setStats(p.status === 'fulfilled' ? p.value : null);
+          setBaseAttestations(b.status === 'fulfilled' ? b.value : NO_ATTESTATIONS);
 
-          setUpdated(Date.now());
-        } catch (e) {
-          setError('Network error — ' + e.message);
+          const othersFailed = [s, c, p, b].some(x => x.status === 'rejected');
+          setHealth(!loaded.length ? 'offline' : failed.length || othersFailed ? 'degraded' : 'live');
         } finally {
           setLoading(false);
         }
@@ -867,7 +957,7 @@
 
       return (
         <div style={{ minHeight:'100vh', background:'#0F172A' }}>
-          <Header lastUpdated={updated} />
+          <Header lastUpdated={updated} health={health} />
 
           <main className="px-4 md:px-8 py-6 space-y-8 mx-auto" style={{ maxWidth:1600 }}>
 
