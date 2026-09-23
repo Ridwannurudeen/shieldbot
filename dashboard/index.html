@@ -1361,7 +1361,8 @@ const BAR_COLORS = {
   Robinhood: '#84CC16'
 };
 function ChainDistributionChart({
-  data
+  data,
+  loading
 }) {
   const haslive = data.length > 0;
   return /*#__PURE__*/React.createElement("div", {
@@ -1387,7 +1388,7 @@ function ChainDistributionChart({
       background: 'rgba(240,185,11,0.15)',
       color: '#F0B90B'
     }
-  }, "Live") : /*#__PURE__*/React.createElement("span", {
+  }, "Live") : !loading && /*#__PURE__*/React.createElement("span", {
     className: "text-xs px-2.5 py-1 rounded-full font-medium",
     style: {
       background: 'rgba(100,116,139,0.15)',
@@ -1447,7 +1448,7 @@ function ChainDistributionChart({
       height: 190,
       color: '#475569'
     }
-  }, "No threats in the current feed."));
+  }, loading ? 'Loading…' : 'No threats in the current feed.'));
 }
 
 // ─── KPI Tiles Row ────────────────────────────────────────────────────────
@@ -1808,6 +1809,7 @@ function PlatformStatsBar({
   loading
 }) {
   const since = stats && stats.mempool_counting_since;
+  const anyMissing = stats && STAT_ITEMS.some(s => stats[s.key] == null);
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3"
   }, STAT_ITEMS.map(s => /*#__PURE__*/React.createElement(StatCard, {
@@ -1816,7 +1818,7 @@ function PlatformStatsBar({
     value: stats ? stats[s.key] : null,
     color: s.color,
     loading: loading
-  }))), !loading && /*#__PURE__*/React.createElement("div", {
+  }))), !loading && (stats === null || since || anyMissing) && /*#__PURE__*/React.createElement("div", {
     className: "text-xs mt-2",
     style: {
       color: '#475569'
@@ -1913,7 +1915,8 @@ function App() {
   }, /*#__PURE__*/React.createElement(ThreatVelocityChart, {
     data: velocityData
   }), /*#__PURE__*/React.createElement(ChainDistributionChart, {
-    data: chainData
+    data: chainData,
+    loading: loading
   }))), /*#__PURE__*/React.createElement(Section, {
     title: "Live Threat Feed"
   }, /*#__PURE__*/React.createElement("div", {

@@ -11,8 +11,8 @@ export default function Screenshot() {
           See It In Action
         </h2>
         <p className="text-gray-400 text-center max-w-md mx-auto mb-14">
-          Real threats, detected live. Rug pulls, sandwich attacks, flashloans —
-          caught before they cost you.
+          The live dashboard shows what ShieldBot is flagging right now: high
+          risk contracts, possible sandwich attacks and suspicious approvals.
         </p>
 
         <div className="grid md:grid-cols-2 gap-6 items-start">
@@ -51,7 +51,7 @@ export default function Screenshot() {
                       <span className="text-lg">🚫</span>
                       <span className="text-red-400 font-bold text-sm">Transaction Blocked</span>
                     </div>
-                    <div className="text-xs text-gray-400 mb-3">ShieldScore: <span className="text-red-400 font-bold">94/100</span></div>
+                    <div className="text-xs text-gray-400 mb-3">Safety: <span className="text-red-400 font-bold">6/100</span></div>
                     <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-2 text-xs text-gray-300">
                       Honeypot detected — you cannot sell this token.
                     </div>
@@ -69,10 +69,9 @@ export default function Screenshot() {
                   </div>
                 </button>
 
-                {/* LIVE badge */}
+                {/* Demo badge: this is a recorded video, not live data */}
                 <div className="absolute top-4 right-4 flex items-center gap-1.5 bg-black/60 backdrop-blur-sm border border-white/10 rounded-full px-3 py-1">
-                  <div className="w-1.5 h-1.5 rounded-full bg-neon animate-pulse" />
-                  <span className="text-xs font-semibold text-neon">LIVE</span>
+                  <span className="text-xs font-semibold text-gray-300">DEMO</span>
                 </div>
               </>
             )}
@@ -91,7 +90,7 @@ export default function Screenshot() {
             </div>
             <img
               src="/dashboard-screenshot.png"
-              alt="ShieldBot Threat Dashboard — live threat feed showing rug pull attempts, sandwich attacks, and suspicious approvals"
+              alt="ShieldBot threat dashboard on 23 September 2026 with live platform statistics, detections per hour and threats by chain"
               className="w-full h-auto block"
             />
           </motion.div>

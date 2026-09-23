@@ -60,7 +60,7 @@ export default function Footer() {
                   GitHub
                 </a>
                 <a
-                  href="https://t.me/ShieldBot_guard_bot"
+                  href="https://t.me/shieldbot_bnb_bot"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-sm text-gray-300 hover:text-neon transition-colors"
@@ -87,7 +87,7 @@ export default function Footer() {
         </div>
 
         <div className="text-center text-xs text-gray-600 mt-12">
-          &copy; 2026 ShieldBot. Built for the BNB Chain ecosystem.
+          &copy; 2026 ShieldBot. Transaction security for EVM chains, including BNB Chain and Robinhood Chain.
         </div>
       </div>
     </footer>

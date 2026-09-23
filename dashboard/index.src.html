@@ -629,7 +629,7 @@
     // ─── Chain Distribution Chart ─────────────────────────────────────────────
     const BAR_COLORS = { BNB:'#F0B90B', ETH:'#627EEA', Base:'#0052FF', ARB:'#28A0F0', Polygon:'#8247E5', OP:'#FF0420', opBNB:'#F0B90B', Robinhood:'#84CC16' };
 
-    function ChainDistributionChart({ data }) {
+    function ChainDistributionChart({ data, loading }) {
       const haslive = data.length > 0;
       return (
         <div className="glass rounded-xl p-5" style={{ border:'1px solid #334155' }}>
@@ -641,7 +641,7 @@
             {haslive
               ? <span className="text-xs px-2.5 py-1 rounded-full font-medium"
                       style={{ background:'rgba(240,185,11,0.15)', color:'#F0B90B' }}>Live</span>
-              : <span className="text-xs px-2.5 py-1 rounded-full font-medium"
+              : !loading && <span className="text-xs px-2.5 py-1 rounded-full font-medium"
                       style={{ background:'rgba(100,116,139,0.15)', color:'#64748B' }}>No data</span>
             }
           </div>
@@ -660,7 +660,7 @@
                 </BarChart>
               </ResponsiveContainer>
             : <div className="flex items-center justify-center text-sm" style={{ height:190, color:'#475569' }}>
-                No threats in the current feed.
+                {loading ? 'Loading…' : 'No threats in the current feed.'}
               </div>
           }
         </div>
@@ -861,6 +861,7 @@
 
     function PlatformStatsBar({ stats, loading }) {
       const since = stats && stats.mempool_counting_since;
+      const anyMissing = stats && STAT_ITEMS.some(s => stats[s.key] == null);
       return (
         <div>
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
@@ -869,7 +870,7 @@
                         color={s.color} loading={loading} />
             ))}
           </div>
-          {!loading && (
+          {!loading && (stats === null || since || anyMissing) && (
             <div className="text-xs mt-2" style={{ color:'#475569' }}>
               {stats === null
                 ? 'Platform statistics are unavailable right now.'
@@ -972,7 +973,7 @@
             <Section title="Analytics">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <ThreatVelocityChart data={velocityData} />
-                <ChainDistributionChart data={chainData} />
+                <ChainDistributionChart data={chainData} loading={loading} />
               </div>
             </Section>
 

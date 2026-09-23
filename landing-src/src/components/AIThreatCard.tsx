@@ -2,10 +2,10 @@ import { motion } from "framer-motion";
 
 const examples = [
   {
-    verdict: "BLOCK",
+    verdict: "BLOCK RECOMMENDED",
     verdictColor: "text-red-400",
     verdictBg: "bg-red-500/10 border-red-500/30",
-    score: 94,
+    score: 6,
     scoreColor: "text-red-400",
     threat: "Honeypot Contract",
     contract: "0x4f3a...c91b",
@@ -13,11 +13,11 @@ const examples = [
     detail: "Structural analysis detected a hidden ownership modifier that blacklists all addresses post-purchase.",
   },
   {
-    verdict: "CAUTION",
-    verdictColor: "text-yellow-400",
-    verdictBg: "bg-yellow-500/10 border-yellow-500/30",
-    score: 61,
-    scoreColor: "text-yellow-400",
+    verdict: "HIGH RISK",
+    verdictColor: "text-orange-400",
+    verdictBg: "bg-orange-500/10 border-orange-500/30",
+    score: 39,
+    scoreColor: "text-orange-400",
     threat: "Unlimited Approval",
     contract: "0xa81d...f42e",
     explanation: "You are about to grant unlimited spending rights to an unverified contract. It can drain your entire token balance at any time, now or in the future.",
@@ -30,11 +30,12 @@ export default function AIThreatCard() {
     <section className="py-24 bg-white/[0.02] border-y border-white/5">
       <div className="max-w-6xl mx-auto px-6">
         <h2 className="text-3xl md:text-4xl font-bold text-center mb-4 tracking-tight">
-          AI Explains Every Threat in Plain English
+          Every Warning Explained in Plain English
         </h2>
         <p className="text-gray-400 text-center max-w-lg mx-auto mb-14">
-          No raw bytecode. No jargon. ShieldBot tells you exactly what a contract
-          will do to your wallet — before you sign.
+          No raw bytecode. ShieldBot tells you what it found and what the
+          transaction would do, before you sign. The two cards below are
+          illustrations of the extension's warnings.
         </p>
 
         <div className="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
@@ -62,11 +63,11 @@ export default function AIThreatCard() {
                 {/* Verdict + Score */}
                 <div className="flex items-center justify-between mb-4">
                   <div className={`inline-flex items-center gap-2 text-sm font-bold px-3 py-1.5 rounded-lg border ${ex.verdictBg} ${ex.verdictColor}`}>
-                    {ex.verdict === "BLOCK" ? "🚫" : "⚠️"} {ex.verdict}
+                    {ex.verdict.startsWith("BLOCK") ? "🚫" : "⚠️"} {ex.verdict}
                   </div>
                   <div className="text-right">
                     <div className={`text-2xl font-extrabold ${ex.scoreColor}`}>{ex.score}</div>
-                    <div className="text-xs text-gray-600">ShieldScore / 100</div>
+                    <div className="text-xs text-gray-600">Safety / 100</div>
                   </div>
                 </div>
 

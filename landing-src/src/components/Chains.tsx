@@ -77,6 +77,17 @@ const chains = [
       </svg>
     ),
   },
+  {
+    // Generic chain-link mark: no third-party logo.
+    name: "Robinhood Chain",
+    color: "#84CC16",
+    logo: (
+      <svg viewBox="0 0 32 32" fill="none" className="w-6 h-6">
+        <circle cx="16" cy="16" r="16" fill="#1A2E05"/>
+        <path d="M13.5 18.5 18.5 13.5M11.2 16.2l-1.4 1.4a3.2 3.2 0 0 0 4.5 4.5l1.4-1.4M20.8 15.8l1.4-1.4a3.2 3.2 0 0 0-4.5-4.5l-1.4 1.4" stroke="#84CC16" strokeWidth="2" strokeLinecap="round"/>
+      </svg>
+    ),
+  },
 ];
 
 const container = {
@@ -97,7 +108,9 @@ export default function Chains() {
           Supported Chains
         </h2>
         <p className="text-gray-400 text-center max-w-md mx-auto mb-14">
-          Multi-chain coverage out of the box.
+          Contract scans on all 8 chains. Mempool monitoring runs on the 7
+          chains with a public mempool; Robinhood Chain has none, so it gets
+          launch scanning instead.
         </p>
 
         <motion.div

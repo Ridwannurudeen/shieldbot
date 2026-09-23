@@ -102,12 +102,12 @@ const svg = `
     <!-- Pill 2 -->
     <rect x="210" y="0" width="175" height="38" rx="19" fill="#00ff88" fill-opacity="0.1" stroke="#00ff88" stroke-width="1" stroke-opacity="0.4"/>
     <text x="297" y="24" font-family="Arial, sans-serif" font-size="14" font-weight="600"
-          fill="#00ff88" text-anchor="middle">Phishing Blocker</text>
+          fill="#00ff88" text-anchor="middle">Phishing Warnings</text>
 
     <!-- Pill 3 -->
     <rect x="400" y="0" width="200" height="38" rx="19" fill="#00ff88" fill-opacity="0.1" stroke="#00ff88" stroke-width="1" stroke-opacity="0.4"/>
     <text x="500" y="24" font-family="Arial, sans-serif" font-size="14" font-weight="600"
-          fill="#00ff88" text-anchor="middle">AI Contract Audit</text>
+          fill="#00ff88" text-anchor="middle">Honeypot Simulation</text>
   </g>
 
   <!-- Divider line -->
@@ -120,7 +120,7 @@ const svg = `
   </text>
   <text x="720" y="530" font-family="Arial, sans-serif"
         font-size="20" fill="#4b5563" text-anchor="end">
-    7 chains supported
+    8 chains incl. Robinhood Chain
   </text>
 
   <!-- Risk score badge (decorative) -->

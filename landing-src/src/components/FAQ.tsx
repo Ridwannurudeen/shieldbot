@@ -4,51 +4,55 @@ import { motion, AnimatePresence } from "framer-motion";
 const faqs = [
   {
     q: "What is ShieldBot?",
-    a: "ShieldBot is a real-time Web3 transaction security firewall. It intercepts every on-chain transaction before you sign it, runs an AI-powered risk analysis, and alerts you to threats like rug pulls, honeypots, phishing sites, and malicious smart contracts — across 7 blockchains.",
+    a: "ShieldBot is a transaction security tool for EVM chains. Its browser extension, listed on the Chrome Web Store as ShieldAI Transaction Firewall, checks transactions before you sign them. The Telegram bot, API and MCP server scan contracts and tokens on 8 chains, including Robinhood Chain.",
   },
   {
     q: "How does ShieldBot detect rug pulls and scams?",
-    a: "ShieldBot combines multiple detection layers: it scans smart contract bytecode for known exploit patterns, checks token liquidity and ownership concentration, queries real-time mempool data for suspicious activity, cross-references phishing databases, and uses Claude AI to analyze contract logic. A risk score from 0–100 is returned before you confirm any transaction.",
+    a: "It combines contract code checks (including bytecode patterns for unverified contracts), market and liquidity data, on-chain reputation, a buy and sell simulation that catches honeypots, and scam databases. Optional AI analysis adds a written summary. If one of these checks cannot run, the result says Unknown instead of Safe.",
   },
   {
     q: "Which blockchains does ShieldBot support?",
-    a: "ShieldBot currently supports BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, and Optimism — with more chains being added. All 7 chains are monitored in real time through the browser extension and Telegram bot.",
+    a: "BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, Optimism and Robinhood Chain. Contract scans work on all 8. Mempool monitoring covers the 7 chains with a public mempool; Robinhood Chain has none, so ShieldBot scans new Robinhood Chain launches instead. Coverage depends on each chain's data providers, and missing data is reported as Unknown.",
+  },
+  {
+    q: "What does ShieldBot do on Robinhood Chain?",
+    a: "It scans Robinhood Chain tokens, including a buy and sell simulation on supported pool routes, finds new launches and sends launch alerts in Telegram. An on-chain verdict registry and a freshness guard for Robinhood Chain are built and tested, and their deployment is in progress. The released browser extension does not cover Robinhood Chain yet.",
   },
   {
     q: "Is ShieldBot free to use?",
-    a: "Yes. The ShieldBot Chrome extension and Telegram bot are both free. There are no subscription fees to get real-time transaction warnings, phishing protection, and risk scoring.",
+    a: "Yes. The Chrome extension and the Telegram bot are free to install and use, and neither needs an account.",
   },
   {
     q: "Does ShieldBot store my private keys or wallet data?",
-    a: "No. ShieldBot never asks for, stores, or transmits your private keys or seed phrases. It only analyzes transaction data (contract addresses, token metadata, on-chain activity) that is already publicly visible on the blockchain.",
+    a: "No. ShieldBot never asks for, stores or sends your private keys or seed phrase. The extension sends the transaction details and the site's origin to the ShieldBot API so they can be checked.",
   },
   {
     q: "What happens when ShieldBot detects a threat?",
-    a: "If a high-risk transaction is detected, ShieldBot displays an immediate warning before you sign — showing the risk score, threat type, and a plain-English explanation of what was found. For phishing sites, a red banner appears on the page. You always retain full control and can choose to proceed or cancel.",
+    a: "Before you sign, ShieldBot shows the verdict, a safety score and a plain-English explanation of what it found. On a known phishing site, a red banner appears on the page. You always stay in control and choose whether to cancel or sign anyway.",
+  },
+  {
+    q: "What is the safety score?",
+    a: "The extension shows a safety score out of 100, where higher is safer. It is 100 minus ShieldBot's risk score. 70 or above is SAFE, 51 to 69 is CAUTION, 30 to 50 is HIGH RISK, and 29 or below is BLOCK RECOMMENDED. If a check could not run, the score shows as Unknown instead of a number.",
   },
   {
     q: "How is ShieldBot different from other crypto security tools?",
-    a: "Most security tools check transactions after the fact or only scan static token lists. ShieldBot works in real time — it intercepts transactions before signing, combines on-chain mempool data with AI contract analysis, and covers 7 chains in a single tool. It also includes a Telegram bot for users who don't use a browser extension.",
+    a: "Many tools only check a URL or a token list. ShieldBot checks the actual transaction before you sign, simulates buys and sells to catch honeypots, and tells you plainly when it could not check something. It also works through Telegram, an API and an MCP server for AI agents.",
   },
   {
     q: "How do I install ShieldBot?",
-    a: "Install the ShieldAI extension directly from the Chrome Web Store — it's free and requires no account. The Telegram bot is also available at t.me/shieldbot_bnb_bot — send any contract address or token to get an instant risk analysis.",
+    a: "Install the extension from the Chrome Web Store, where it is listed as ShieldAI Transaction Firewall. It is free and needs no account. You can also use the Telegram bot at t.me/shieldbot_bnb_bot: send a contract address to get a risk report.",
   },
   {
-    q: "What is a wallet drainer and how does ShieldAI stop it?",
-    a: "A wallet drainer exploits ERC-20 approval functions or EIP-712 permit signatures to transfer all tokens from your wallet in a single transaction. Standard phishing warnings can't detect these because they operate at the URL layer, not the transaction layer. ShieldAI intercepts at eth_sendTransaction and simulates the exact asset delta before you sign — if your full balance would leave your wallet, the transaction is blocked.",
+    q: "What is a wallet drainer and how does ShieldBot help?",
+    a: "A wallet drainer tricks you into approving a contract, or signing a permit, that can then move your tokens. ShieldBot catches the approval or signature request before you sign, explains it, and flags unlimited approvals to risky contracts. When transaction simulation is enabled, it also shows which assets would leave your wallet. You decide whether to cancel or sign.",
   },
   {
-    q: "What is ShieldScore?",
-    a: "ShieldScore is a 0–100 risk rating assigned to every transaction before you sign. 0–39 is SAFE, 40–69 is CAUTION, 70–89 is HIGH RISK, and 90–100 triggers an automatic BLOCK. The score combines bytecode fingerprinting, deployer wallet history, Tenderly simulation results, and GoPlus threat intelligence.",
+    q: "Does ShieldBot work with MetaMask?",
+    a: "ShieldBot hooks the browser's window.ethereum provider when a page loads and listens for EIP-6963 wallet announcements, so it is designed for MetaMask and other injected wallets. Testing across every wallet is still in progress.",
   },
   {
-    q: "Does ShieldAI work with MetaMask?",
-    a: "Yes. ShieldAI hooks into the browser's window.ethereum provider at page load, compatible with MetaMask, Trust Wallet, Binance Web3 Wallet, and any EIP-6963 wallet. The hook runs before any DApp code, so it intercepts all transaction requests regardless of which wallet is connected.",
-  },
-  {
-    q: "Will ShieldAI slow down my transactions?",
-    a: "The risk analysis adds approximately 1–3 seconds before the wallet signature dialog appears. SAFE transactions proceed normally after the check. Only HIGH RISK and BLOCK verdicts interrupt the signing flow, giving you the chance to review or cancel.",
+    q: "Will ShieldBot slow down my transactions?",
+    a: "A check usually takes a few seconds before your wallet's signature window opens. Every check shows its verdict: after a SAFE result you continue straight away, and after a warning you can review, cancel or sign anyway.",
   },
 ];
 

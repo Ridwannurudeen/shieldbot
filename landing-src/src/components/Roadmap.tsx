@@ -7,7 +7,7 @@ const phases = [
     status: "done",
     items: [
       "Chrome extension (phishing blocker, transaction firewall)",
-      "Telegram bot (10 commands)",
+      "Telegram bot (12 commands)",
       "REST API + TypeScript SDK",
       "7-chain mempool monitoring",
       "Live threat dashboard",
@@ -30,7 +30,7 @@ const phases = [
     title: "Growth & Moat",
     status: "done",
     items: [
-      "Deployer cluster auto-blocking",
+      "Deployer cluster risk scoring",
       "Serial scammer pattern detection",
       "Post-deployment contract monitoring",
       "Telegram threat alerts",
@@ -43,9 +43,9 @@ const phases = [
     status: "done",
     items: [
       "Agent Transaction Firewall (policy engine, daily limits)",
-      "MCP Server (8 tools, 3 resources, SSE transport)",
+      "MCP Server (9 tools, 3 resources, SSE transport)",
       "Portfolio Guardian (5-component health scoring)",
-      "TypeScript & Python SDK",
+      "TypeScript & Python SDK (source; not yet published)",
       "Reputation Oracle (composite trust scores)",
       "Prompt Injection Scanner (4-layer detection)",
       "Threat Intelligence Graph (BFS + clustering)",
@@ -53,14 +53,25 @@ const phases = [
   },
   {
     phase: "Phase 4",
-    title: "Ecosystem & Scale",
+    title: "Robinhood Chain",
     status: "active",
     items: [
-      "AvengerDAO partnership",
-      "Firefox port",
+      "Robinhood Chain scanning with honest unknowns (live)",
+      "Launch discovery and Telegram launch alerts (live)",
+      "On-chain verdict registry and freshness guard (built and tested; deploying)",
+      "Guarded USDG transfer that needs a fresh, good verdict (built and tested; deploying)",
+      "Released browser extension coverage for Robinhood Chain",
+    ],
+  },
+  {
+    phase: "Phase 5",
+    title: "Ecosystem & Scale",
+    status: "upcoming",
+    items: [
+      "Publish the TypeScript and Python SDKs",
+      "Firefox port (proposed)",
       "B2B DEX integrations",
       "Threat feed subscriptions",
-      "Multi-language support (Mandarin, Korean, Vietnamese)",
     ],
   },
 ];

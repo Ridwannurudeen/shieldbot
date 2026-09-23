@@ -6,8 +6,8 @@
 
     <!-- Primary SEO -->
     <title>ShieldBot — Real-Time Web3 Transaction Security Firewall</title>
-    <meta name="description" content="ShieldAI blocks malicious crypto transactions before your wallet signs them. Real-time honeypot detection, wallet drainer protection, phishing site blocking, and AI risk scoring on BNB Chain." />
-    <meta name="keywords" content="web3 security, crypto security, transaction firewall, rug pull detector, phishing blocker, smart contract audit, BNB Chain security, DeFi protection, blockchain security, crypto wallet protection" />
+    <meta name="description" content="ShieldBot checks crypto transactions before you sign and explains the risk in plain English. Honeypot and scam detection on 8 EVM chains, including Robinhood Chain, with Unknown shown whenever a check cannot run." />
+    <meta name="keywords" content="web3 security, crypto security, transaction firewall, rug pull detector, phishing blocker, smart contract audit, BNB Chain security, Robinhood Chain security, DeFi protection, blockchain security, crypto wallet protection" />
     <meta name="author" content="ShieldBot" />
     <link rel="canonical" href="https://shieldbotsecurity.online/" />
 
@@ -18,7 +18,7 @@
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://shieldbotsecurity.online/" />
     <meta property="og:title" content="ShieldBot — Real-Time Web3 Transaction Security Firewall" />
-    <meta property="og:description" content="ShieldAI blocks malicious crypto transactions before your wallet signs them. Honeypot detection, wallet drainer protection, and AI risk scoring on BNB Chain." />
+    <meta property="og:description" content="Checks crypto transactions before you sign and explains the risk in plain English. 8 EVM chains, including Robinhood Chain." />
     <meta property="og:image" content="https://shieldbotsecurity.online/og-image.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
@@ -30,7 +30,7 @@
     <meta name="twitter:site" content="@shieldbot_" />
     <meta name="twitter:creator" content="@shieldbot_" />
     <meta name="twitter:title" content="ShieldBot — Real-Time Web3 Transaction Security Firewall" />
-    <meta name="twitter:description" content="ShieldAI blocks malicious crypto transactions before your wallet signs them. Honeypot detection, wallet drainer protection, and AI risk scoring on BNB Chain." />
+    <meta name="twitter:description" content="Checks crypto transactions before you sign and explains the risk in plain English. 8 EVM chains, including Robinhood Chain." />
     <meta name="twitter:image" content="https://shieldbotsecurity.online/og-image.png" />
 
     <!-- Favicon -->
@@ -51,7 +51,7 @@
           "name": "What is ShieldBot?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "ShieldBot is a real-time Web3 transaction security firewall. It intercepts every on-chain transaction before you sign it, runs an AI-powered risk analysis, and alerts you to threats like rug pulls, honeypots, phishing sites, and malicious smart contracts — across 7 blockchains."
+            "text": "ShieldBot is a transaction security tool for EVM chains. Its browser extension, listed on the Chrome Web Store as ShieldAI Transaction Firewall, checks transactions before you sign them. The Telegram bot, API and MCP server scan contracts and tokens on 8 chains, including Robinhood Chain."
           }
         },
         {
@@ -59,7 +59,7 @@
           "name": "How does ShieldBot detect rug pulls and scams?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "ShieldBot combines multiple detection layers: it scans smart contract bytecode for known exploit patterns, checks token liquidity and ownership concentration, queries real-time mempool data for suspicious activity, cross-references phishing databases, and uses Claude AI to analyze contract logic. A ShieldScore safety rating from 0–100 is returned before you confirm any transaction — 90–100 is SAFE, 0–39 is BLOCK RECOMMENDED."
+            "text": "It combines contract code checks (including bytecode patterns for unverified contracts), market and liquidity data, on-chain reputation, a buy and sell simulation that catches honeypots, and scam databases. Optional AI analysis adds a written summary. If one of these checks cannot run, the result says Unknown instead of Safe."
           }
         },
         {
@@ -67,7 +67,15 @@
           "name": "Which blockchains does ShieldBot support?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "ShieldBot currently supports BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, and Optimism — with more chains being added. All 7 chains are monitored in real time through the browser extension and Telegram bot."
+            "text": "BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, Optimism and Robinhood Chain. Contract scans work on all 8. Mempool monitoring covers the 7 chains with a public mempool; Robinhood Chain has none, so ShieldBot scans new Robinhood Chain launches instead. Coverage depends on each chain's data providers, and missing data is reported as Unknown."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What does ShieldBot do on Robinhood Chain?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "It scans Robinhood Chain tokens, including a buy and sell simulation on supported pool routes, finds new launches and sends launch alerts in Telegram. An on-chain verdict registry and a freshness guard for Robinhood Chain are built and tested, and their deployment is in progress. The released browser extension does not cover Robinhood Chain yet."
           }
         },
         {
@@ -75,31 +83,15 @@
           "name": "Is ShieldBot free to use?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Yes. The ShieldBot Chrome extension and Telegram bot are both free. There are no subscription fees to get real-time transaction warnings, phishing protection, and risk scoring."
+            "text": "Yes. The Chrome extension and the Telegram bot are free to install and use, and neither needs an account."
           }
         },
         {
           "@type": "Question",
-          "name": "Does ShieldBot store my private keys or wallet data?",
+          "name": "What is the safety score?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "No. ShieldBot never asks for, stores, or transmits your private keys or seed phrases. It only analyzes transaction data (contract addresses, token metadata, on-chain activity) that is already publicly visible on the blockchain."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "What happens when ShieldBot detects a threat?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "If a high-risk transaction is detected, ShieldBot displays an immediate warning before you sign — showing the risk score, threat type, and a plain-English explanation of what was found. For phishing sites, a red banner appears on the page. You always retain full control and can choose to proceed or cancel."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "How is ShieldBot different from other crypto security tools?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Most security tools check transactions after the fact or only scan static token lists. ShieldBot works in real time — it intercepts transactions before signing, combines on-chain mempool data with AI contract analysis, and covers 7 chains in a single tool. It also includes a Telegram bot for users who don't use a browser extension."
+            "text": "The extension shows a safety score out of 100, where higher is safer. It is 100 minus ShieldBot's risk score. 70 or above is SAFE, 51 to 69 is CAUTION, 30 to 50 is HIGH RISK, and 29 or below is BLOCK RECOMMENDED. If a check could not run, the score shows as Unknown instead of a number."
           }
         },
         {
@@ -107,55 +99,7 @@
           "name": "How do I install ShieldBot?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Install the ShieldAI extension directly from the Chrome Web Store at https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk — it is free and requires no account. The Telegram bot is also available at t.me/shieldbot_bnb_bot — send any contract address or token to get an instant risk analysis."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "What is a wallet drainer and how does ShieldAI stop it?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "A wallet drainer is a malicious smart contract that exploits ERC-20 approval functions or EIP-712 permit signatures to transfer all tokens from a wallet in a single transaction. These attacks execute at the transaction layer, meaning standard phishing warnings cannot detect them. ShieldAI stops wallet drainers by intercepting the transaction at eth_sendTransaction — before your wallet receives the signature request — and simulating the exact asset delta using Tenderly. If the simulation shows your full balance leaving your wallet, ShieldAI blocks the transaction and displays a plain-English explanation."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "What is ShieldScore?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "ShieldScore is ShieldAI's 0–100 safety rating assigned to every transaction before you sign it. Higher means safer. A score of 90–100 is SAFE, 70–89 is CAUTION, 40–69 is HIGH RISK, and 0–39 triggers an automatic BLOCK RECOMMENDED. The score is calculated from four sources: contract bytecode fingerprinting for honeypot and rug pull patterns, deployer wallet history and cluster analysis, Tenderly pre-execution simulation showing asset deltas, and GoPlus Security threat intelligence for phishing and known scam addresses."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "How does transaction simulation work in ShieldAI?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "When you initiate a transaction on a DApp, ShieldAI sends it to Tenderly for simulation on a forked chain state before your wallet signs it. Tenderly executes the transaction in a sandbox and returns the exact tokens and amounts that would leave or enter your wallet. ShieldAI displays this asset delta — for example, 'You will send 2.5 BNB and receive 10,000 TOKEN' — so you can verify the outcome before signing. If the simulation shows unexpected asset loss, ShieldAI flags it as HIGH RISK or BLOCK."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "Does ShieldAI work with MetaMask?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Yes. ShieldAI hooks into the browser's window.ethereum provider at page load, which is compatible with MetaMask, Trust Wallet, Binance Web3 Wallet, and any EIP-6963 compatible wallet extension. The hook is injected into the page's MAIN world before any DApp code runs, so it intercepts all transaction requests regardless of which wallet is connected."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "What is the best Chrome extension for crypto security in 2026?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "ShieldAI Transaction Firewall is a leading Chrome extension for crypto security in 2026. Unlike extensions that only check URLs or token lists, ShieldAI intercepts at the transaction layer — hooking eth_sendTransaction before your wallet signs. It combines bytecode fingerprinting, deployer cluster analysis, Tenderly simulation, and GoPlus threat intelligence to assign a ShieldScore (0–100) to every transaction. It detects honeypots, rug pulls, wallet drainers, phishing sites, and malicious permit2 signatures in real time on BNB Chain."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "How does ShieldAI detect honeypot tokens?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "A honeypot token lets users buy but contains hidden code that blocks sell transactions. ShieldAI detects honeypots by fingerprinting the contract's compiled bytecode against a database of known honeypot patterns — even for unverified contracts that have not been audited or published on a block explorer. The bytecode check runs on every transaction before you sign, so ShieldAI can flag a honeypot before you spend any funds."
+            "text": "Install the extension from the Chrome Web Store, where it is listed as ShieldAI Transaction Firewall. It is free and needs no account. You can also use the Telegram bot at t.me/shieldbot_bnb_bot: send a contract address to get a risk report."
           }
         }
       ]
@@ -171,7 +115,7 @@
       "applicationCategory": "SecurityApplication",
       "operatingSystem": "Chrome",
       "url": "https://shieldbotsecurity.online",
-      "description": "Real-time Web3 transaction security firewall. Detects rug pulls, phishing, and malicious smart contracts before you sign.",
+      "description": "Transaction security firewall for EVM chains. Checks contracts and transactions before you sign and reports Unknown when a check cannot run.",
       "offers": {
         "@type": "Offer",
         "price": "0",
@@ -189,10 +133,10 @@
       ]
     }
     </script>
-    <script type="module" crossorigin src="/assets/index-CsnZygJz.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-D3Goufor.css">
+    <script type="module" crossorigin src="/assets/index-B3qAIVow.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BU4csldg.css">
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"></div>
   </body>
 </html>

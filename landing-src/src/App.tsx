@@ -7,6 +7,7 @@ import Features from "./components/Features";
 import AgentSecurity from "./components/AgentSecurity";
 import AIThreatCard from "./components/AIThreatCard";
 import Chains from "./components/Chains";
+import RobinhoodCensus from "./components/RobinhoodCensus";
 import Channels from "./components/Channels";
 import Roadmap from "./components/Roadmap";
 import Team from "./components/Team";
@@ -26,6 +27,7 @@ export default function App() {
       <AgentSecurity />
       <AIThreatCard />
       <Chains />
+      <RobinhoodCensus />
       <Channels />
       <Roadmap />
       <Team />

@@ -4,8 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>About ShieldAI — Web3 Transaction Firewall & Crypto Security Extension</title>
-  <meta name="description" content="ShieldAI intercepts malicious crypto transactions before your wallet signs them. Learn how honeypot detection, wallet drainer protection, transaction simulation, and phishing blocking work.">
+  <meta name="description" content="How the ShieldBot browser extension (ShieldAI Transaction Firewall) checks transactions before you sign: contract analysis, honeypot simulation, risk scores and honest Unknown results.">
   <link rel="canonical" href="https://shieldbotsecurity.online/about.html">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://shieldbotsecurity.online/about.html">
+  <meta property="og:title" content="How ShieldBot Checks a Transaction">
+  <meta property="og:description" content="Contract analysis, honeypot simulation, risk scores and honest Unknown results, before you sign.">
+  <meta property="og:image" content="https://shieldbotsecurity.online/og-image.png">
+  <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon.png">
   <link rel="shortcut icon" href="/favicon.png">
@@ -67,70 +73,6 @@
     @media (max-width: 600px) { .compare-grid { grid-template-columns: 1fr; } .hero h1 { font-size: 26px; } }
   </style>
 
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    "mainEntity": [
-      {
-        "@type": "Question",
-        "name": "What is ShieldAI Transaction Firewall?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "ShieldAI is a Chrome browser extension that acts as a transaction firewall for Web3 wallets. It intercepts blockchain transactions at the browser level before the user's wallet receives the signature request, and scores them for risk using bytecode analysis, deployer history, and pre-execution simulation. If a transaction is flagged as high risk, ShieldAI blocks it and displays a plain-English explanation of the threat."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "How does ShieldAI detect honeypot tokens?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "A honeypot token allows users to buy but contains hidden code that blocks sell transactions. ShieldAI detects honeypots by fingerprinting the contract's compiled bytecode against known honeypot patterns, even for unverified contracts. The check runs before you sign, so ShieldAI flags a honeypot before any funds are spent."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "What is a wallet drainer and how does ShieldAI stop it?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "A wallet drainer exploits ERC-20 approval functions or EIP-712 permit signatures to transfer all tokens from a wallet in one transaction. ShieldAI intercepts at eth_sendTransaction and simulates the asset delta via Tenderly before your wallet signs. If the simulation shows your full balance leaving your wallet, the transaction is blocked."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "What is ShieldScore?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "ShieldScore is a 0-100 risk rating assigned to every transaction before signing. In the current classifier, 0-30 is SAFE, 31-49 is CAUTION, 50-70 is HIGH RISK, and 71-100 is BLOCK RECOMMENDED. The score combines contract bytecode fingerprinting, deployer wallet history, Tenderly pre-execution simulation, and GoPlus Security threat intelligence."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "How does transaction simulation work in ShieldAI?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "When you initiate a transaction, ShieldAI sends it to Tenderly for simulation on a forked chain state before your wallet signs. Tenderly executes the transaction in a sandbox and returns the exact tokens and amounts that would leave or enter your wallet. ShieldAI displays this asset delta so you can verify the outcome before signing."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "Does ShieldAI work with MetaMask?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Yes. ShieldAI hooks into window.ethereum at page load, compatible with MetaMask, Trust Wallet, Binance Web3 Wallet, and any EIP-6963 wallet. The hook runs before any DApp code, intercepting all transaction requests regardless of which wallet is connected."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "How is ShieldAI different from browser phishing warnings?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Browser phishing warnings operate at the URL layer and cannot inspect transaction data or smart contract code. ShieldAI operates at the transaction layer, intercepting eth_sendTransaction, analyzing contract bytecode for honeypot and rug patterns, simulating exact asset loss, and scoring the deployer wallet's history. Browser warnings tell you a site looks suspicious. ShieldAI tells you the specific transaction will drain your wallet and shows you how much you would lose if you signed."
-        }
-      }
-    ]
-  }
-  </script>
 </head>
 <body>
 
@@ -144,7 +86,7 @@
 
     <div class="hero">
       <h1>How ShieldAI Protects Your Wallet</h1>
-      <p>ShieldAI intercepts malicious blockchain transactions before your wallet signs them — combining bytecode analysis, transaction simulation, and real-time threat intelligence into a single risk score.</p>
+      <p>ShieldAI checks blockchain transactions before your wallet signs them, combining contract analysis, a buy and sell simulation and threat intelligence into one risk score. If a check cannot run, it says Unknown instead of Safe.</p>
     </div>
 
     <div class="callout">
@@ -154,38 +96,39 @@
     <!-- BLOCK 1: What it is -->
     <h2>What ShieldAI Does</h2>
     <p>ShieldAI is a Chrome browser extension that acts as a transaction firewall for Web3 wallets. Every time you initiate a transaction on a DApp — a swap, a token purchase, an NFT mint — ShieldAI intercepts it before your wallet receives the signature request.</p>
-    <p>The transaction is scored for risk using four data sources in parallel: contract bytecode fingerprinting, deployer wallet history, Tenderly pre-execution simulation, and GoPlus Security threat intelligence. The result is a ShieldScore (0–100) with a plain-English explanation of any threats found.</p>
+    <p>The risk score combines four weighted checks: contract code (including bytecode patterns for unverified contracts), market and liquidity data, on-chain reputation, and a buy and sell simulation, together with scam databases such as GoPlus. The result is a risk score from 0 to 100 with a plain-English explanation of what was found. You always choose whether to cancel or sign.</p>
 
-    <!-- BLOCK 2: ShieldScore -->
-    <h2>ShieldScore — How Risk Is Rated</h2>
-    <p>Every transaction receives a ShieldScore before you sign it:</p>
+    <!-- BLOCK 2: Risk score -->
+    <h2>How Risk Is Rated</h2>
+    <p>Every transaction receives a risk score before you sign it. Higher means riskier:</p>
     <table class="score-table">
-      <tr><th>Score</th><th>Verdict</th><th>Action</th></tr>
-      <tr><td>0 – 30</td><td><span class="badge safe">SAFE</span></td><td>Transaction proceeds with asset delta preview</td></tr>
-      <tr><td>31 – 49</td><td><span class="badge caution">CAUTION</span></td><td>Warning shown — you choose to proceed or cancel</td></tr>
-      <tr><td>50 – 70</td><td><span class="badge high">HIGH RISK</span></td><td>Strong warning with threat details</td></tr>
-      <tr><td>71 – 100</td><td><span class="badge block">BLOCK RECOMMENDED</span></td><td>Highest-risk verdict — blocking is strongly recommended</td></tr>
+      <tr><th>Risk score</th><th>Verdict</th><th>What you see</th></tr>
+      <tr><td>0 – 30</td><td><span class="badge safe">SAFE</span></td><td>The verdict and details; you can continue</td></tr>
+      <tr><td>31 – 49</td><td><span class="badge caution">CAUTION</span></td><td>A warning; you choose to proceed or cancel</td></tr>
+      <tr><td>50 – 70</td><td><span class="badge high">HIGH RISK</span></td><td>A strong warning with threat details</td></tr>
+      <tr><td>71 – 100</td><td><span class="badge block">BLOCK RECOMMENDED</span></td><td>The highest risk verdict; blocking is strongly recommended</td></tr>
     </table>
+    <p>The extension shows this as a safety score, 100 minus the risk score, so higher is safer there. If a check could not run, the result is shown as Unknown instead of a number, and a low score with incomplete data is never shown as SAFE.</p>
 
     <!-- BLOCK 3: Wallet drainers -->
     <h2>Wallet Drainer Protection</h2>
     <p>A wallet drainer is a malicious smart contract that exploits ERC-20 approval functions or EIP-712 permit signatures to transfer all tokens from a wallet in a single transaction. Standard browser phishing warnings cannot detect these because they operate at the URL layer — the attack happens at the transaction layer.</p>
-    <p>ShieldAI stops wallet drainers by:</p>
+    <p>ShieldAI helps against wallet drainers by:</p>
     <ul>
-      <li>Intercepting at <code>eth_sendTransaction</code> before your wallet sees the request</li>
-      <li>Simulating the transaction via Tenderly to show exact asset loss before signing</li>
+      <li>Catching the transaction or signature request before your wallet shows it</li>
       <li>Analyzing EIP-712 permit and Permit2 signature requests for approval exploits</li>
-      <li>Flagging contracts whose deployer wallet has previously drained similar pools</li>
+      <li>Flagging contracts whose deployer has a history of risky deployments</li>
+      <li>Showing the exact asset change before you sign, when transaction simulation is enabled</li>
     </ul>
 
     <!-- BLOCK 4: Honeypot detection -->
     <h2>Honeypot Detection</h2>
     <p>A honeypot token allows users to buy but contains hidden code that blocks all sell transactions. The token appears to have liquidity and price action, but holders can never exit.</p>
-    <p>ShieldAI detects honeypots by fingerprinting the contract's compiled bytecode against a database of known honeypot patterns — even for unverified contracts that have not been published or audited on a block explorer. The bytecode check runs before you sign any transaction involving the contract.</p>
+    <p>ShieldAI looks for honeypots in two ways: it simulates a buy and a sell of the token, and it checks the contract's bytecode for known honeypot patterns, which works even for unverified contracts. If the sell simulation cannot run, the result is Unknown rather than Safe.</p>
 
     <!-- BLOCK 5: Transaction simulation -->
     <h2>Pre-Sign Transaction Simulation</h2>
-    <p>When you initiate a transaction, ShieldAI sends it to Tenderly for simulation on a forked chain state. Tenderly executes the transaction in a sandbox environment and returns the exact tokens and amounts that would leave or enter your wallet.</p>
+    <p>When transaction simulation is enabled, ShieldAI sends the transaction to Tenderly for simulation on a copy of the chain state. Tenderly runs it in a sandbox and returns the tokens and amounts that would leave or enter your wallet.</p>
     <p>ShieldAI displays this asset delta before the wallet signature dialog appears. For example: <em>"You will send 2.5 BNB and receive 10,000 TOKEN."</em> If the simulation shows unexpected asset loss, the transaction is flagged HIGH RISK or BLOCK.</p>
 
     <!-- BLOCK 6: Comparison -->
@@ -206,9 +149,9 @@
         <ul>
           <li>Intercepts at <code>eth_sendTransaction</code></li>
           <li>Analyzes contract bytecode for honeypot/rug patterns</li>
-          <li>Simulates exact asset delta via Tenderly before signing</li>
-          <li>Scores deployer wallet history across all past deployments</li>
-          <li>Blocks malicious permit2 and approval signature requests</li>
+          <li>Simulates the asset change before signing, when enabled</li>
+          <li>Scores deployer history across past deployments</li>
+          <li>Flags risky Permit2 and approval signature requests</li>
         </ul>
       </div>
     </div>
@@ -217,21 +160,22 @@
     <h2>What Data ShieldAI Collects</h2>
     <p>ShieldAI collects the minimum data required to perform a security scan: the transaction's recipient address, sender address, value, calldata, chainId, and any EIP-712 typed data. This data is sent to the ShieldAI API over HTTPS for risk analysis.</p>
     <ul>
-      <li>Transaction data is <strong>not linked</strong> to any browser profile, IP address, or personal identity</li>
+      <li>Scan results are stored by contract address and chain, <strong>not</strong> with your IP address</li>
       <li>Scan history (last 50 results) is stored locally in <code>chrome.storage.local</code> — never uploaded</li>
-      <li>No <code>tabs</code>, <code>scripting</code>, or <code>webRequest</code> permissions used</li>
-      <li>Transaction data retained on servers for a maximum of 30 days, then deleted</li>
+      <li>The <code>tabs</code> permission is used only to open extension pages and to read the active tab when you ask the extension to scan a page; no <code>scripting</code> or <code>webRequest</code> permissions are used</li>
+      <li>Scan results are kept on the server to speed up repeat checks; see the privacy policy for details</li>
     </ul>
     <p>Full privacy policy: <a href="/privacy.html">shieldbotsecurity.online/privacy.html</a></p>
 
     <!-- BLOCK 8: Compatibility -->
     <h2>Wallet & Chain Compatibility</h2>
-    <p>ShieldAI hooks into the browser's <code>window.ethereum</code> provider at page load, compatible with:</p>
+    <p>ShieldAI hooks into the browser's <code>window.ethereum</code> provider at page load and is designed for:</p>
     <ul>
-      <li>MetaMask, Trust Wallet, Binance Web3 Wallet</li>
-      <li>Any EIP-6963 compatible wallet extension</li>
+      <li>Wallets that inject <code>window.ethereum</code></li>
+      <li>Wallets announced through EIP-6963</li>
     </ul>
-    <p>Chains supported: BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, Optimism.</p>
+    <p>Testing across every wallet is still in progress.</p>
+    <p>Chains supported for scans: BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, Optimism and Robinhood Chain. The released browser extension does not cover Robinhood Chain yet; the API and Telegram bot do.</p>
     <p>The hook is injected into the page's MAIN world before any DApp code runs — contracts cannot detect or remove it from within a transaction.</p>
 
   </div>

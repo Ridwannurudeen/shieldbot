@@ -4,8 +4,8 @@ const agentFeatures = [
   {
     version: "V3",
     title: "Agent Transaction Firewall",
-    desc: "Pre-execution risk scoring for autonomous agents. Every transaction is checked against 6 analyzers, policy thresholds, and daily spend limits — blocking honeypots and drains before they execute.",
-    code: `const verdict = await shield.checkTransaction({
+    desc: "Risk checks for autonomous agents before they send a transaction. The policy engine applies risk thresholds and per transaction and daily spend limits, and returns ALLOW, WARN or BLOCK. Incomplete data never returns ALLOW.",
+    code: `const verdict = await shield.check({
   from: '0xAgent', to: '0xTarget',
   data: '0x...', value: '0', chainId: 56,
 });
@@ -14,7 +14,7 @@ if (verdict.blocked) stop();`,
   {
     version: "V3.1",
     title: "MCP Server",
-    desc: "Model Context Protocol server exposing 8 security tools, 3 threat resources, and 2 analysis prompts — plug ShieldBot intelligence directly into any AI agent framework via SSE transport.",
+    desc: "Model Context Protocol server exposing 9 security tools, 3 threat resources and 2 analysis prompts over SSE, including Robinhood Chain launch data for AI agents.",
     code: null,
   },
   {
@@ -26,7 +26,7 @@ if (verdict.blocked) stop();`,
   {
     version: "V3",
     title: "TypeScript & Python SDK",
-    desc: "First-class SDK for both ecosystems. Scan contracts, check agent transactions, query reputation scores, and detect prompt injections — all with built-in caching and graceful failure modes.",
+    desc: "SDKs for both ecosystems in the GitHub repository (not yet published to npm or PyPI). Scan contracts, check agent transactions, query reputation scores and scan for prompt injection. The caller enforces the returned decision.",
     code: `import { ShieldBot } from '@shieldbot/sdk';
 const shield = new ShieldBot({ apiKey: 'sb_...' });
 const scan = await shield.scan('0x...', { chainId: 56 });`,
@@ -77,7 +77,7 @@ export default function AgentSecurity() {
             <motion.div
               key={f.title}
               variants={item}
-              className="bg-white/5 backdrop-blur-md border border-neon/15 rounded-2xl p-7 group
+              className="min-w-0 bg-white/5 backdrop-blur-md border border-neon/15 rounded-2xl p-7 group
                          hover:border-neon/40 hover:-translate-y-1 hover:shadow-neon transition-all duration-300"
             >
               <div className="flex items-start justify-between mb-4">

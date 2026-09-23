@@ -20,9 +20,9 @@ export default function Hero() {
           </h1>
 
           <p className="text-gray-400 text-lg md:text-xl leading-relaxed max-w-lg mb-8">
-            ShieldBot intercepts, analyzes, and scores every transaction before
-            you sign. AI-powered protection across 7 chains — so you never
-            approve a drain again.
+            ShieldBot checks each transaction before you sign it and explains
+            the risk in plain English. It scans contracts on 8 chains, including
+            Robinhood Chain, and says Unknown when it cannot check something.
           </p>
 
           <div className="flex flex-wrap items-center gap-4">

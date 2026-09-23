@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Privacy Policy — ShieldAI Transaction Firewall</title>
+  <meta name="description" content="What the ShieldBot browser extension and API collect, what is stored, which services are queried, and how to contact us." />
+  <link rel="canonical" href="https://shieldbotsecurity.online/privacy.html" />
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon.png">
   <link rel="shortcut icon" href="/favicon.png">
@@ -82,7 +84,7 @@
 
     <div class="hero">
       <h1>Privacy Policy</h1>
-      <div class="hero-meta">Last updated: March 2026 &nbsp;&middot;&nbsp; ShieldBot Security</div>
+      <div class="hero-meta">Last updated: September 2026 &nbsp;&middot;&nbsp; ShieldBot Security</div>
     </div>
 
     <div class="callout">
@@ -122,22 +124,30 @@
       <li>Return a verdict to the extension before you sign the transaction</li>
       <li>Improve detection accuracy through aggregated, anonymised analysis</li>
     </ul>
-    <p>Transaction data is <strong>not</strong> linked to any personal identity, browser profile, or IP address in our systems. We do not store wallet addresses as user identifiers.</p>
+    <p>Scan results are stored by contract address and chain. They are <strong>not</strong> stored with your IP address, and we do not use wallet addresses as user identifiers.</p>
 
     <h2>5. Phishing Detection</h2>
-    <p>When you visit a website, the extension sends the page URL to our API to check it against phishing and threat intelligence databases. This check is cached for one hour to minimise requests. The URL is used only for the reputation check and is not stored or logged on our servers.</p>
+    <p>When you visit a website, the extension sends only the site's origin (scheme, host and port; never the path or query string) to our API, which checks it against the GoPlus phishing database. The result is cached in your browser for one hour to minimise requests. The origin is used only for this check and is not stored in our database.</p>
 
     <h2>6. Data Sharing</h2>
     <p>We do not sell, rent, or share your data with third parties for advertising or marketing purposes. To perform security analysis, we query the following external services:</p>
     <ul>
-      <li><strong>GoPlus Security</strong> — phishing URL and token risk data</li>
-      <li><strong>Tenderly</strong> — transaction simulation for asset delta preview</li>
-      <li><strong>Token Sniffer</strong> — bytecode fingerprinting for unverified contracts</li>
+      <li><strong>GoPlus Security</strong> — phishing checks and token risk data</li>
+      <li><strong>honeypot.is</strong> — buy and sell simulation for honeypot detection</li>
+      <li><strong>DexScreener</strong> — market and liquidity data</li>
+      <li><strong>Ethos</strong> — on-chain reputation data</li>
+      <li><strong>Block explorers (Etherscan, BscScan, Blockscout) and Sourcify</strong> — contract source, verification and creation data</li>
+      <li><strong>openchain.xyz</strong> — function signature lookups for decoding calldata</li>
+      <li><strong>Token Sniffer</strong> — token risk checks</li>
+      <li><strong>Tenderly</strong> — transaction simulation, when enabled</li>
+      <li><strong>Anthropic or OpenAI</strong> — optional AI explanations, when enabled</li>
+      <li><strong>BNB Greenfield</strong> — storage of forensic reports for high risk checks, when enabled</li>
     </ul>
-    <p>These services receive only the minimum data necessary for their function (e.g. a contract address or URL). They are governed by their own privacy policies.</p>
+    <p>These services receive only the data needed for their function, such as a contract address, a transaction to simulate or a site origin. They are governed by their own privacy policies.</p>
+    <p>If you join the update list on our website, we store your email address and send messages through our email provider, Resend.</p>
 
     <h2>7. Data Retention</h2>
-    <p>Transaction data submitted for analysis is retained on our servers for a maximum of 30 days for debugging and accuracy monitoring, after which it is deleted. Aggregated, non-identifiable statistics may be retained indefinitely.</p>
+    <p>Scan results (contract address, chain, risk score and findings) are kept on our servers so repeat checks are faster and the public threat feed works. They do not include your IP address. If you file a false positive report, the report and your IP address are stored to prevent abuse. Messages to the Telegram bot's AI assistant are deleted after 24 hours. Like most web services, our servers may keep standard access logs for security and troubleshooting.</p>
     <p>Locally stored data (history, settings) remains on your device until you uninstall the extension or clear it manually.</p>
 
     <h2>8. Security</h2>

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 const links = [
   { label: "Features", href: "#features" },
   { label: "Chains", href: "#chains" },
+  { label: "Robinhood Chain", href: "#robinhood-chain" },
   { label: "Dashboard", href: "/dashboard" },
   { label: "Add to Chrome", href: "https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk" },
 ];

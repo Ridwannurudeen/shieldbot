@@ -4,50 +4,50 @@ const features = [
   {
     title: "Transaction Firewall",
     badge: null,
-    desc: "Intercepts eth_sendTransaction and signature requests before your wallet signs. Blocks honeypots, drains, and malicious approvals in real time.",
+    desc: "Catches transactions and signature requests before your wallet signs them, then shows the verdict and the reasons. You stay in control: you choose to cancel or sign.",
     icon: "📡",
   },
   {
-    title: "Auto-Block High-Risk Transactions",
+    title: "Honest About Unknowns",
     badge: "CORE FEATURE",
-    desc: "When ShieldScore drops below the safety threshold, ShieldBot automatically blocks the transaction — no confirmation needed. Your assets are protected even if you miss the warning.",
-    icon: "🚫",
+    desc: "If a data source fails, the verdict says Unknown instead of Safe. An incomplete check is never shown as a clean result, and a confirmed scam match always counts against the token.",
+    icon: "❔",
   },
   {
-    title: "Zero-Friction Silent Mode",
+    title: "Contract Risk Score",
     badge: null,
-    desc: "ShieldBot stays completely silent on verified safe dApps — Uniswap, Aave, OpenSea. No popup fatigue, no interruptions. You only hear from us when something is actually wrong.",
-    icon: "🔕",
-  },
-  {
-    title: "Smart Contract Audit",
-    badge: null,
-    desc: "Composite ShieldScore from 6 analyzer categories — structural, behavioral, market, honeypot, intent, and AI reasoning — weighted into a 0–100 safety score. Higher is safer: 90–100 is SAFE, 0–39 triggers BLOCK.",
+    desc: "Combines four weighted checks (contract code, market data, on-chain reputation and a buy and sell simulation) into one score. The extension shows it as a safety score out of 100, where higher is safer.",
     icon: "📋",
   },
   {
-    title: "Phishing Blocker",
+    title: "Robinhood Chain Launch Scanner",
+    badge: "ROBINHOOD CHAIN",
+    desc: "Finds new token launches on Robinhood Chain, simulates a buy and a sell on supported pool routes, and sends alerts in Telegram with /launchalerts.",
+    icon: "🚀",
+  },
+  {
+    title: "Phishing Warnings",
     badge: null,
-    desc: "Checks every URL you visit against the GoPlus Phishing Detection API. Displays a red warning banner before you connect your wallet to a known phishing site.",
+    desc: "Checks the sites you visit against the GoPlus phishing database and shows a red warning banner on a known phishing site, before you connect your wallet.",
     icon: "🎣",
   },
   {
     title: "Wallet Shield",
     badge: null,
-    desc: "Scans your wallet's active token approvals, flags risky ones with plain-English explanations, and generates one-click revoke transactions.",
+    desc: "Scans your wallet's token approvals, explains which ones are risky, and prepares revoke transactions for you to review and sign.",
     icon: "🛡️",
   },
   {
     title: "Campaign Graph Radar",
     badge: null,
-    desc: "Traces deployer-funder links across chains to uncover coordinated scam campaigns and serial rug pullers — blocks entire networks, not just individual tokens.",
+    desc: "Links deployers and funders across chains to spot coordinated scam campaigns. A token tied to a known campaign gets a higher risk score.",
     icon: "🕸️",
   },
   {
-    title: "On-Chain Threat Intel",
-    badge: "BNB GREENFIELD",
-    desc: "Forensic reports for every high-risk transaction are stored immutably on BNB Greenfield — tamper-proof, permanently verifiable on-chain evidence that exists long after the scam is gone.",
-    icon: "🔬",
+    title: "On-Chain Verdicts",
+    badge: "ROBINHOOD CHAIN",
+    desc: "A verdict registry and a freshness guard let other contracts refuse a token unless it has a recent, good verdict. Built and tested; deployment to Robinhood Chain is in progress.",
+    icon: "🔗",
   },
 ];
 
@@ -63,7 +63,7 @@ const item = {
 
 const badgeStyle: Record<string, string> = {
   "CORE FEATURE": "bg-neon/10 border border-neon/30 text-neon",
-  "BNB GREENFIELD": "bg-yellow-500/10 border border-yellow-500/30 text-yellow-400",
+  "ROBINHOOD CHAIN": "bg-lime-500/10 border border-lime-500/30 text-lime-400",
 };
 
 export default function Features() {

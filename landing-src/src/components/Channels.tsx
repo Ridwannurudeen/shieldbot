@@ -4,9 +4,9 @@ const channels = [
   {
     icon: "🌐",
     title: "Chrome Extension",
-    desc: "Intercepts transactions directly in your browser wallet",
-    tag: "In Review",
-    tagColor: "bg-yellow-500/15 text-yellow-400",
+    desc: "Checks transactions before your browser wallet signs them",
+    tag: "Live",
+    tagColor: "bg-neon/15 text-neon",
   },
   {
     icon: "💬",
@@ -31,9 +31,9 @@ const channels = [
   },
   {
     icon: "📦",
-    title: "Python SDK",
-    desc: "Programmatic access with async support",
-    tag: "Coming Soon",
+    title: "TypeScript & Python SDKs",
+    desc: "Source in the GitHub repo; not yet on npm or PyPI",
+    tag: "In the repo",
     tagColor: "bg-blue-500/15 text-blue-400",
   },
 ];

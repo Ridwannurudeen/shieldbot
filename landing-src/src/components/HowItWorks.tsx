@@ -16,7 +16,7 @@ const steps = [
   {
     num: "03",
     title: "Protect",
-    desc: "Returns a clear verdict — SAFE, CAUTION, or BLOCK — with a plain-English explanation.",
+    desc: "Returns a verdict (SAFE, CAUTION, HIGH RISK or BLOCK RECOMMENDED, or UNKNOWN when a check could not run) with a plain-English explanation.",
     icon: "🛡️",
   },
 ];
@@ -39,8 +39,8 @@ export default function HowItWorks() {
           How It Works
         </h2>
         <p className="text-gray-400 text-center max-w-md mx-auto mb-14">
-          Three steps between you and a scam. ShieldBot analyzes every transaction in
-          under 2 seconds.
+          Three steps between you and a scam. A check usually takes a few
+          seconds.
         </p>
 
         <motion.div
