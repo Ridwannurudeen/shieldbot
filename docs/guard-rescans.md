@@ -42,16 +42,20 @@ Use **`maxAge = 600` seconds for the demo only with `GUARD_WATCH_MAX_SUBJECTS=1`
 Use **900 seconds as the production minimum at the default four watched subjects**. Neither window
 guarantees uninterrupted permission or bounds observation age; the guard measures publication age.
 
-Coordinator measurements supplied for WP9 (not repeated by this local-only validation):
+These figures are calculations, not on-chain observations. They use
+`age = I + s + d(N+1) - d(N)`, with the 300 second rescan interval plus measured scan and
+publication delays. Live scan p90 was about 5.4 seconds.
 
 | Scenario | Record age |
 |---|---:|
-| Typical healthy refresh | 320–360 s |
+| Typical healthy refresh | 320 to 360 s |
 | Healthy worst | ~437 s |
 | Four subjects bunched after restart | ~625 s |
 | One lost interval | ~740 s |
 
-`maxAge = 300` would deny a perfectly healthy token for roughly **6–30% of wall time**. The Foundry
+`maxAge = 300` would deny a healthy token for about **6 to 30 percent of wall time**. Confirm these
+calculations against live records after the registry, guard and transfer contracts are deployed on
+Robinhood Chain. The Foundry
 `MAX_AGE = 300` fixtures exercise policy boundaries; they are not configuration recommendations.
 Repeated failures, rate limits and delayed inclusion can exceed any finite operating window.
 
@@ -70,7 +74,7 @@ validation can drop stale or superseded rows before broadcast ([services/verdict
 then computes `complete` at lines 190–196. A scan overrun returning incomplete evidence can therefore
 queue UNKNOWN, which replaces earlier permission if the drain records it. The incomplete scan does
 not advance the complete-observation clock and can retry after 30 seconds, but scan, scheduling and
-publication add latency: the supplied measured scenario incurs **60–150 seconds of content denial**.
+publication add latency: the calculated scenario incurs **60 to 150 seconds of content denial**.
 Increasing `maxAge` cannot permit a fresh UNKNOWN. This is intentional fail-closed behavior, not a
 scheduler defect to hide. Choose a demo subject whose scans complete reliably. A proven honeypot
 still maps to HONEYPOT even with unrelated missing fields.

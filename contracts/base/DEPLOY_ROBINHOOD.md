@@ -241,25 +241,26 @@ cast balance $RECORDER --rpc-url $RH_RPC --ether
 
 Spend limits in the server (`services/verdict_publisher.py`). Only the API process sends, so they are global:
 - at most 180 records per hour; further verdicts wait in the queue as `pending`;
-- a rescan is recorded only when it changes something: the stored evidence is compared without the block
-  and the wording of the measurement (`scanned_at`, `observed_block`, the simulation's block and its `reason`,
-  and `coverage_reasons`), so a rescan that reaches the same verdict, coverage and taxes costs nothing while
-  the previous record is `pending`, `sending` or `confirmed`. A changed measurement, and a record left
-  `submitted`, `unconfirmed`, `failed` or `reverted`, are queued again;
+- reusing the same observation returns its existing row. After a confirmed verdict, a newer unchanged
+  observation is `deduplicated` while the confirmed observation is under the 300 second refresh interval.
+  Once it is at least 300 seconds old, a newer unchanged observation is queued and published again. Each
+  published refresh costs gas. A newer observation can supersede pending work. Changed evidence is queued;
 - a gas limit of `eth_estimateGas` + 20%, deferred above 1,000,000 gas;
 - `maxFeePerGas` = 2 x base fee, capped at 1 gwei, and deferred while the base fee itself is above 1 gwei;
 - deferred while the recorder's balance cannot cover gas limit x `maxFeePerGas`.
 
 The 180 per hour comes from the watch: one 4663 scan reserves 22 requests of the shared 1 request per second
 RPC budget (`services/rpc_guard.py`, `agent.hunter.SCAN_REQUEST_COST`), so at most about 163 scans an hour can
-produce a verdict, and discovery draws on the same budget, so the real number is lower. Rechecks that find the
-same verdict are not recorded at all, so in practice the recorder pays for first scans and for verdicts that changed.
+produce a verdict, and discovery draws on the same budget, so the real number is lower. An unchanged verdict can
+be published again after the refresh interval when a newer observation exists, so budget for those refresh
+transactions as well as first scans and changed verdicts.
 Local Foundry measurements do not include Robinhood Chain's L1 data fee. On this Arbitrum chain it is charged as
 extra gas and comes on top. Size the float from the `cast estimate` in step 5, which includes it. At the caps
 a single record could cost at most 1,000,000 gas x 1 gwei = 0.001 ETH. The drain's own requests are outside
 the watch's budget: about three per record, 540 an hour, which is 0.15 requests per second beside the watch's
-1. When the recorder runs out of ETH, nothing is lost: verdicts stay `pending` and are recorded once it is
-funded again.
+1. Insufficient funds returns an eligible row to `pending`. Before a later broadcast, the drain checks eligibility
+again. If the observation is then older than 300 seconds, it becomes `dropped` with `StaleObservation` and is not
+broadcast. Funding late does not publish old pending rows. Recovery is a fresh scan.
 
 ## 8. Configure the server
 
@@ -310,14 +311,17 @@ Restart both services. The logs show:
 - bot: `Robinhood verdict registry: verdicts queued for 0x...`, and never `sending`.
 
 With `ROBINHOOD_VERDICT_REGISTRY` missing, evidence is still stored and served at `/api/verdict/...` but nothing
-is queued. With the key missing from the API, verdicts are queued as `pending` and wait until it is added. The key
-is never logged.
+is queued. With the key missing from the API, verdicts are queued as `pending`. When the key is added, the drain
+checks each row before broadcast. An observation older than 300 seconds becomes `dropped` and is not broadcast.
+Adding the key late does not publish old pending rows. Recovery is a fresh scan. The key is never logged.
 
 Each verdict's `onchain_status` moves through:
 
 | Status | Meaning |
 |---|---|
 | `pending` | queued; the API's drain records queued verdicts oldest-first |
+| `deduplicated` | newer unchanged observation retained while the confirmed anchor remains within the refresh interval; not queued for broadcast |
+| `dropped` | observation missing, future-dated, older than 300 seconds or superseded; not broadcast again |
 | `sending` | claimed by the drain; the signed transaction's hash is stored before it is broadcast |
 | `confirmed` / `reverted` | the receipt of `tx_hash` shows success (sequencer, soft finality) / a revert |
 | `submitted` | the node accepted `tx_hash`, but no receipt arrived yet; reconciled later |
@@ -335,7 +339,7 @@ verdicts that are at least 2 minutes old, in one request. A mined transaction ma
 bytes again does not count, because it cannot record twice); after that it is still looked up every 2 minutes, so a
 transaction that lands late is reported.
 
-A verdict is never recorded twice. Before anything is broadcast again, in the same request as the nonce reads, the
+An outbox row is never recorded twice. Before anything is broadcast again, in the same request as the nonce reads, the
 drain looks up the receipts of all of the verdict's transactions:
 - if any of them is mined, the verdict is finished with it and nothing is sent;
 - if the verdict's last nonce is still unused, the drain waits while something else is pending there. Otherwise
@@ -512,5 +516,6 @@ and [transfer behavior](GUARDED_TRANSFER.md). Use `maxAge = 600` seconds for the
 `GUARD_WATCH_MAX_SUBJECTS=1`**, watching exactly the transfer's immutable subject. The production minimum
 is **900 seconds at the default four subjects**. Neither is an availability guarantee or observation-age
 bound. `MAX_AGE = 300` in Foundry is a test fixture, not guidance: it would deny a healthy token for
-roughly 6–30% of wall time under the coordinator's measurements. See [measured ages and structural
+roughly 6 to 30 percent of wall time from calculations using the 300 second cadence and measured scan and
+publication delays. Confirm the calculation against live records after deployment. See [calculated ages and structural
 denial windows](../../docs/guard-rescans.md#structural-denial-windows).

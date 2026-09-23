@@ -64,11 +64,15 @@ controls are documented in [guard-rescans.md](../../docs/guard-rescans.md).
 
 **Demo: `maxAge = 600` seconds requires `GUARD_WATCH_MAX_SUBJECTS=1`; production minimum: 900 seconds
 at the default four subjects.** The demo watches exactly the guarded transfer's single immutable subject.
-Coordinator measurements put typical healthy record age at **320–360 s**, healthy worst at **~437 s**,
-four subjects bunched after restart at **~625 s**, and one lost interval at **~740 s**. `maxAge = 300`
-would deny a perfectly healthy token for roughly **6–30% of wall time**. The Foundry `MAX_AGE = 300`
-constant is a test fixture, not operating guidance. These supplied measurements were not repeated live
-in WP9. Neither window is an availability bound: delayed inclusion and repeated failures can exceed it.
+The timing figures are calculations, not on-chain observations. They use
+`age = I + s + d(N+1) - d(N)`, with the 300 second rescan interval plus measured scan and publication
+delays. Live scan p90 was about 5.4 seconds. The resulting ages are typically **320 to 360 seconds**,
+about **437 seconds** in a healthy worst case, about **625 seconds** when four subjects bunch after a
+restart, and about **740 seconds** after one lost interval. A `maxAge` of 300 seconds would deny a healthy
+token for about **6 to 30 percent of wall time**. The Foundry `MAX_AGE = 300` constant is a test fixture,
+not operating guidance. Confirm these calculations against live records after the registry, guard and
+transfer contracts are deployed on Robinhood Chain. Neither window is an availability bound: delayed
+inclusion and repeated failures can exceed it.
 The [rescan notes](../../docs/guard-rescans.md#structural-denial-windows) explain lost pending intervals
 and UNKNOWN publication after a scan overrun; choose a demo subject whose scans complete reliably.
 

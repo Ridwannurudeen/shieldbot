@@ -1,9 +1,10 @@
 # Robinhood Chain observation census
 
 This standalone tooling observes chain **4663** without sending transactions. It
-does not modify ShieldBot's adapters or call competitor scanners. The coordinator
-starts the seven-day observation later; the example service is not installed by
-these commands.
+does not modify ShieldBot's adapters or call competitor scanners. The live collector
+is described below, and the results of the completed report window are in
+[SUBMISSION.md](SUBMISSION.md#robinhood-chain-observation-census). These commands do
+not install the example service.
 
 ## Live deployment
 

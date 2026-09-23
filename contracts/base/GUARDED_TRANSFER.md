@@ -20,11 +20,15 @@ constructor rejects zero addresses; it does not authenticate those dependencies.
 
 Use **600 seconds for the demo only with `GUARD_WATCH_MAX_SUBJECTS=1`**: `subject` is a single immutable
 address, and the demo watches exactly that address. Use **900 seconds as the production minimum at the
-default four subjects**. Coordinator measurements: healthy ages typically **320–360 s**, healthy worst
-**~437 s**, four subjects bunched after restart **~625 s**, one lost interval **~740 s**. `maxAge = 300`
-would deny a perfectly healthy token for roughly **6–30% of wall time**; Foundry's `MAX_AGE = 300` is a
-test fixture, not guidance. These supplied measurements were not repeated live in WP9. Neither window
-is a proven availability bound; repeated failures or delayed inclusion can exceed it. Only actively
+default four subjects**. The timing figures are calculations, not on-chain observations. They use
+`age = I + s + d(N+1) - d(N)`, with the 300 second rescan interval plus measured scan and publication
+delays. Live scan p90 was about 5.4 seconds. The resulting ages are typically **320 to 360 seconds**,
+about **437 seconds** in a healthy worst case, about **625 seconds** when four subjects bunch after a
+restart, and about **740 seconds** after one lost interval. A `maxAge` of 300 seconds would deny a healthy
+token for about **6 to 30 percent of wall time**; Foundry's `MAX_AGE = 300` is a test fixture, not guidance.
+Confirm these calculations against live records after the registry, guard and transfer contracts are
+deployed on Robinhood Chain. Neither window is a proven availability bound; repeated failures or delayed
+inclusion can exceed it. Only actively
 watched subjects receive recurring refreshes; see the
 [bounded watched set and exact trust model](VERDICT_GUARD.md#publication-freshness-and-the-watched-set).
 Uninterrupted permission is not promised.

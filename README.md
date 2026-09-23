@@ -30,13 +30,13 @@ The core scan path refuses to call incomplete data safe and flags dangers suppor
 
 Denial precedence is `NO_RECORD → HIGH/HONEYPOT → FUTURE_TIMESTAMP → EXPIRED → UNKNOWN`; fresh LOW/MEDIUM returns `ALLOWED`. An old honeypot still reports `HONEYPOT`, avoiding a misleading suggestion to retry after a refresh. A zero tolerance always denies.
 
-The worked consumer is [`ShieldBotGuardedTransfer`](contracts/base/GUARDED_TRANSFER.md): it pins the guard, subject, USDG token and recipient. After approval, a caller invokes `transfer(amount, maxAge)`. The guard must allow the subject before `safeTransferFrom` runs; the recipient's balance increase must then equal `amount` exactly or the entire call reverts with `ShortDelivery(requested, delivered)`. Only a successful exact credit emits `GuardedTransfer`. Fee tokens are rejected. Recipients must be EOAs or passive contracts; forwarding in a recipient hook fails the credit check.
+The worked consumer is [`ShieldBotGuardedTransfer`](contracts/base/GUARDED_TRANSFER.md): it pins the guard, subject, USDG token and recipient. After approval, a caller invokes `transfer(amount, maxAge)`. The guard must allow the subject before `safeTransferFrom` runs; the recipient's balance increase must then equal `amount` exactly or the entire call reverts with `ShortDelivery(requested, delivered)`. Only a successful exact credit emits `GuardedTransfer`. This rejects transfers that deduct a fee from the recipient's credit. A token that debits the sender by more than `amount` while crediting the recipient exactly `amount` would pass this check. Recipients must be EOAs or passive contracts; forwarding in a recipient hook fails the credit check. A Robinhood Chain simulation transferred 500,000 units of Paxos USDG and credited the recipient exactly 500,000 units.
 
 [Run the local allowed/honeypot/unknown/expired demonstration](docs/JUDGE_GUIDE.md#on-chain-transfer-demonstration-offline). It uses the real registry, guard and transfer in the Foundry test VM with a mock ERC-20; it does not establish a live deployment.
 
 ## Scope before the demo
 
-- **Repository versus release:** the browser extension's provider-bound chain-identification fix is on a branch and will **not** be released before the submission deadline. The shipped extension still has an omitted-chain identification limitation. Source tests do not establish released Robinhood coverage; real MetaMask, Rabby and EIP-6963 testing and Chrome Web Store review remain outstanding.
+- **Repository versus release:** the browser extension's provider-bound chain-identification fix is on `main` but remains unreleased. The shipped extension still has an omitted-chain identification limitation. Source tests do not establish released Robinhood coverage; real MetaMask, Rabby and EIP-6963 testing and Chrome Web Store review remain outstanding.
 - **Simulation is route-bounded:** Robinhood support covers the implemented native/WETH v4 routes, Doppler-hooked v4 routes, and WETH-quoted V2 pairs. USDG is supported only for Doppler-hooked v4 pools. Hookless USDG pools are explicitly unsupported; the V2 adapter discovers WETH pairs, not USDG pairs. No V2 USDG route is covered. The owner's observation that no V2 USDG pairs exist has not been independently rechecked in this documentation pass.
 - **Unknown is an outcome:** RPC failure, unsupported routes, insufficient liquidity, unattributed reverts or unmeasurable fields must not be read as a clean bill of health. A successful simulated round-trip describes that amount, route and recorded state, not future sellability.
 - **Coverage is partial across surfaces:** scan metadata reaches the REST, MCP, Telegram and SDK paths, but auxiliary MCP tools, phishing checks, signature heuristics and dashboard summaries do not all have equivalent coverage semantics. The dashboard is not an evidence viewer. See [the detailed limitations](docs/TECHNICAL.md).
@@ -74,9 +74,9 @@ That comparison proves document integrity against a recorder's on-chain commitme
 
 The [verdict guard](contracts/base/VERDICT_GUARD.md) enforces **publication freshness**, not observation freshness. The registry sets `Record.timestamp = block.timestamp` when the recording transaction executes. The publisher's observation-age cutoff gates broadcast only; an already broadcast transaction can land arbitrarily later, so observation age is not bounded on-chain.
 
-Use **`maxAge = 600` seconds for the demo only with `GUARD_WATCH_MAX_SUBJECTS=1`**. This is a required condition: `GuardedTransfer.subject` is a single immutable address, and the demo watches exactly that subject. Use **900 seconds as the production minimum at the default four watched subjects**. Coordinator measurements put healthy record ages at typically **320–360 s**, a healthy worst of **~437 s**, **~625 s** with four subjects bunched after restart, and **~740 s** after one lost interval. Thus `maxAge = 300` would deny a perfectly healthy token for roughly **6–30% of wall time**; Foundry's `MAX_AGE = 300` is a boundary-test fixture, not operating guidance. These supplied measurements were not re-probed during this local-only work.
+Use **`maxAge = 600` seconds for the demo only with `GUARD_WATCH_MAX_SUBJECTS=1`**. This is a required condition: `GuardedTransfer.subject` is a single immutable address, and the demo watches exactly that subject. Use **900 seconds as the production minimum at the default four watched subjects**. These figures are calculations, not on-chain observations. They use `age = I + s + d(N+1) - d(N)`, with the 300 second rescan interval plus measured scan and publication delays. Live scan p90 was about 5.4 seconds. The resulting ages are typically **320 to 360 seconds**, about **437 seconds** in a healthy worst case, about **625 seconds** when four subjects bunch after a restart, and about **740 seconds** after one lost interval. A `maxAge` of 300 seconds would deny a healthy token for about **6 to 30 percent of wall time**. Foundry's `MAX_AGE = 300` is a boundary-test fixture, not operating guidance. Confirm these calculations against live records after the registry, guard and transfer contracts are deployed on Robinhood Chain.
 
-Recurring publication covers only the bounded [watched set](docs/guard-rescans.md). Neither operating window guarantees uninterrupted permission: lost intervals, scan overruns, repeated failures and delayed inclusion can cause denials. An overrun can publish UNKNOWN and cause **60–150 s** of content denial in the measured scenario, even before expiry; choose a demo subject whose scans complete reliably.
+Recurring publication covers only the bounded [watched set](docs/guard-rescans.md). Neither operating window guarantees uninterrupted permission: lost intervals, scan overruns, repeated failures and delayed inclusion can cause denials. An overrun can publish UNKNOWN and cause **60 to 150 seconds** of content denial in the calculated scenario, even before expiry; choose a demo subject whose scans complete reliably.
 
 ### Seven recorded request/response pairs
 
@@ -111,7 +111,7 @@ Chain adapters / provider lookups / Robinhood eth_simulateV1
                          exact recipient credit
 ```
 
-The registry branch is wired to Robinhood Telegram scans and hunter scans, not every REST request. Launch discovery and its feed are 4663-specific. Backend services use FastAPI, async HTTP and SQLite; contract, market, behavioral, honeypot, intent and signature analyzers have different data requirements. Consumer policy and display behavior differ.
+The registry publication path is wired to Robinhood Telegram scans and hunter scans, not every REST request. Launch discovery and its feed are 4663-specific. Backend services use FastAPI, async HTTP and SQLite; contract, market, behavioral, honeypot, intent and signature analyzers have different data requirements. Consumer policy and display behavior differ.
 
 | Interface in the repository | Entry point and scope |
 |---|---|
@@ -150,14 +150,14 @@ python -m pytest tests/test_robinhood_simulation.py tests/test_robinhood_simulat
 python -m pytest sdk/python/tests/ -q -p no:cacheprovider
 ```
 
-Measured on **2026-09-22** in `build/oh-integration`: **2,917 passed, 1 skipped** (`python -m pytest tests/ -q -p no:cacheprovider --ignore=tests/test_bot_app.py`); Foundry **114 passed, 0 failed, 0 skipped**, including both 10,000-case permission fuzz tests. The simulation subset returned **192 passed**; the separate Python SDK suite returned **21 passed**. Size build and formatting of touched Solidity files passed. All five Slither gates exited zero; the unchanged attestor also reports two preexisting low-severity event-reentrancy findings alongside the known OpenZeppelin finding. Commands, exclusion and dependency qualifications are in [TESTING.md](docs/TESTING.md). These counts are test results, not scan volume or detection-accuracy measurements.
+Verified on **2026-09-23** at `main` revision **`27aca4d`**: the main Python suite returned **3,054 passed, 1 skipped**, excluding the bot app suite; the Python SDK returned **32 passed**; and the TypeScript SDK returned **21 passed**. CI run **35863129734** passed Foundry tests, Solidity security, Python tests and security, and the SDK audit and build. Commands, exclusions and dependency qualifications are in [TESTING.md](docs/TESTING.md). These counts are test results, not scan volume or detection-accuracy measurements.
 
 For dependency setup and the short copy/paste examples, follow [JUDGE_GUIDE.md](docs/JUDGE_GUIDE.md). No wallet, private key, deployment or broadcast is needed for the offline path.
 
 ## Submission status and measured usage
 
 - **Registry deployment:** `OWNER TODO — fill the deployment table in docs/JUDGE_GUIDE.md after deployment`.
-- **Measured usage:** `OWNER TODO — insert the live GET /api/stats response, UTC retrieval time and deployed revision`. No scan-volume figure has been supplied. Dashboard loading values and historical projections are not usage evidence.
+- **Measured usage:** the `GET /api/stats` snapshot supplied on **2026-09-22** is recorded in [SUBMISSION.md](docs/SUBMISSION.md); its time of day and the revision serving it were not supplied. Dashboard loading values and historical projections are not usage evidence.
 - **Release boundary:** this README describes this repository snapshot. Deployment, live evidence URLs and the browser-store release must be verified separately.
 
 MIT — see [LICENSE](LICENSE).
