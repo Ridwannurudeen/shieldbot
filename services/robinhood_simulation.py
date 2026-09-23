@@ -528,7 +528,7 @@ def _traces_native_transfers(call: dict) -> bool:
     )
 
 
-def _outcome(pool: Pool, reason: str, block: Optional[int] = None) -> dict:
+def _outcome(pool: Pool, reason: str, block: Optional[int] = None, simulation_failed: bool = False) -> dict:
     return {
         "retry_sell_amount": None,
         "route": pool.route,
@@ -539,6 +539,7 @@ def _outcome(pool: Pool, reason: str, block: Optional[int] = None) -> dict:
         "can_sell": None,
         "buy_tax": None,
         "sell_tax": None,
+        "simulation_failed": simulation_failed,
         "reason": reason,
     }
 
@@ -558,7 +559,7 @@ def evaluate_simulation(
         or not all(isinstance(call, dict) for call in calls)
         or number is None
     ):
-        return _outcome(pool, "Malformed eth_simulateV1 result")
+        return _outcome(pool, "Malformed eth_simulateV1 result", simulation_failed=True)
     call = dict(zip(labels, calls))
     outcome = _outcome(pool, "", number)
     for label in ("fund", "fund_approve", "fund_permit"):
@@ -576,11 +577,13 @@ def evaluate_simulation(
         if label in call
     }
     if any(value is None for value in balances.values()):
+        outcome["simulation_failed"] = True
         outcome["reason"] = "token balance reads failed"
         return outcome
     delivered = balances["delivered"]
     bought = _pool_swap(pool, token, call["buy"].get("logs"))
     if bought is None or bought[0] > amount:
+        outcome["simulation_failed"] = True
         outcome["reason"] = "Malformed eth_simulateV1 buy logs"
         return outcome
     payout, cost = bought[0], -bought[1]
@@ -591,6 +594,8 @@ def evaluate_simulation(
         return outcome
     # The pool paid out exactly `amount`, so any shortfall was taken in the token transfer.
     outcome["buy_tax"] = tax_percent(payout, delivered)
+    if outcome["buy_tax"] is None:
+        outcome["simulation_failed"] = True
     if delivered == 0:
         outcome["can_buy"] = False
         outcome["reason"] = "buy succeeded but delivered no tokens"
@@ -632,11 +637,13 @@ def evaluate_simulation(
     if not _pays_token(pool) and not _traces_native_transfers(call["buy"]):
         # The sell output of a native pool is only visible as a traceTransfers log, so without that
         # evidence a sell returning nothing is indistinguishable from an untraced transfer.
+        outcome["simulation_failed"] = True
         outcome["reason"] = "native transfer tracing unavailable; the sell output cannot be measured"
         return outcome
     output = _sell_output(pool, call["sell"].get("logs"), buyer)
     sold = _pool_swap(pool, token, call["sell"].get("logs"))
     if output is None:
+        outcome["simulation_failed"] = True
         outcome["reason"] = "Malformed eth_simulateV1 sell logs"
         return outcome
     sent = delivered - balances["after_sell"]
@@ -653,6 +660,7 @@ def evaluate_simulation(
         # hookless pool must itself have paid nothing; otherwise the trace is missing a transfer.
         hooked = pool.route != "v2" and pool.key[4] != NATIVE
         if sold is None or (not hooked and sold[1] > 0):
+            outcome["simulation_failed"] = True
             outcome["reason"] = "Malformed eth_simulateV1 sell logs"
             return outcome
         usdg = pool.numeraire == USDG
@@ -679,15 +687,24 @@ def evaluate_simulation(
             + ("" if sell_tax is not None else "; sell tax unmeasurable")
         ),
     )
+    if sell_tax is None:
+        outcome["simulation_failed"] = True
     return outcome
 
 
 def aggregate_outcomes(outcomes: list, notes: list) -> dict:
     """Combine per-pool outcomes worst-case: a proven trap is never masked by a sellable pool."""
 
+    simulation_failed = any(outcome.get("simulation_failed") is True for outcome in outcomes)
+
     def worst(field):
         values = [outcome[field] for outcome in outcomes if outcome[field] is not None]
-        return max(values) if values else None
+        value = max(values) if values else None
+        incomplete = any(
+            outcome.get("simulation_failed") is True and outcome[field] is None
+            for outcome in outcomes
+        )
+        return None if incomplete and value == 0 else value
 
     def verdict(field, bad):
         values = {outcome[field] for outcome in outcomes}
@@ -708,6 +725,7 @@ def aggregate_outcomes(outcomes: list, notes: list) -> dict:
         "can_sell": can_sell,
         "buy_tax": worst("buy_tax"),
         "sell_tax": worst("sell_tax"),
+        **({"simulation_failed": True} if simulation_failed else {}),
         "simulation_block": max(blocks) if blocks else None,
         "reason": "; ".join(parts) or "No simulation result",
     }
@@ -778,7 +796,11 @@ class RobinhoodSimulator:
                         session, pool, token, amount, outcome["retry_sell_amount"]
                     )
                     # A follow-up that could not run leaves the first attempt's buy verdict standing.
-                    outcome = sized if sized["can_buy"] is not None else outcome
+                    if sized["can_buy"] is not None:
+                        outcome = sized
+                    elif sized["simulation_failed"]:
+                        outcome["simulation_failed"] = True
+                        outcome["reason"] += f"; sized follow-up: {sized['reason']}"
                 outcomes.append(outcome)
         return aggregate_outcomes(outcomes, notes)
 
@@ -789,7 +811,9 @@ class RobinhoodSimulator:
         try:
             request = build_simulation_request(pool, token, amount, buyer, receiver, sell_amount)
         except EncodingError as e:
-            return _outcome(pool, f"Simulation request could not be encoded ({type(e).__name__})")
+            return _outcome(
+                pool, f"Simulation request could not be encoded ({type(e).__name__})", simulation_failed=True
+            )
         try:
             headers = await self._request(session, [("eth_getBlockByNumber", ["latest", False])])
             header = headers[0].get("result")
@@ -810,10 +834,12 @@ class RobinhoodSimulator:
             outcome["block"] = source_block
             return outcome
         except SimulationUnavailable as e:
-            return _outcome(pool, e.reason)
+            return _outcome(pool, e.reason, simulation_failed=True)
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.warning("Robinhood simulation request failed: %s", type(e).__name__)
-            return _outcome(pool, f"Simulation RPC request failed ({type(e).__name__})")
+            return _outcome(
+                pool, f"Simulation RPC request failed ({type(e).__name__})", simulation_failed=True
+            )
 
     async def _request(self, session, calls: list) -> list:
         """POST one JSON-RPC request or batch; retry HTTP 429 and JSON-RPC rate limits with backoff."""

@@ -14,6 +14,8 @@ from eth_utils import keccak
 
 from analyzers.honeypot import HoneypotAnalyzer
 from core.analyzer import AnalysisContext
+from core.extension_formatter import format_extension_alert
+from core.risk_engine import RiskEngine
 from services.honeypot_service import HoneypotService
 from services.robinhood_simulation import (
     LOG_WINDOW_BLOCKS,
@@ -599,6 +601,7 @@ def test_an_illiquid_pool_does_not_mask_a_live_pool(percent):
     assert result["can_buy"] is result["can_sell"] is True
     assert result["buy_tax"] == result["sell_tax"] == 0.0
     assert result["is_honeypot"] is False
+    assert result.get("simulation_failed") is not True
 
 
 @pytest.mark.asyncio
@@ -732,6 +735,7 @@ def outcome(**fields):
         "pool": "0xpool",
         "block": 10,
         "reason": "measured",
+        "simulation_failed": False,
         **{field: None for field in FIELDS},
     }
     return {**base, **fields}
@@ -786,8 +790,90 @@ def test_unknown_pools_do_not_create_verdicts():
 def test_no_outcomes_is_unknown_with_reason():
     result = aggregate_outcomes([], ["No supported pool found"])
     assert all(result[field] is None for field in FIELDS)
+    assert "simulation_failed" not in result
     assert result["simulation_block"] is None
     assert result["reason"] == "No supported pool found"
+
+
+def test_failed_pool_makes_benign_pool_incomplete_without_zero_taxes():
+    benign = outcome(
+        can_buy=True,
+        can_sell=True,
+        is_honeypot=False,
+        buy_tax=0.0,
+        sell_tax=0.0,
+    )
+    failed = outcome(pool="0xfailed", simulation_failed=True, reason="Malformed eth_simulateV1 result")
+    result = aggregate_outcomes([benign, failed], [])
+    assert result["simulation_failed"] is True
+    assert result["buy_tax"] is result["sell_tax"] is None
+
+    partial = outcome(can_buy=True, buy_tax=0.0, simulation_failed=True, reason="Malformed sell logs")
+    result = aggregate_outcomes([benign, partial], [])
+    assert result["buy_tax"] == 0.0
+    assert result["sell_tax"] is None
+
+
+def test_failed_pool_does_not_mask_a_proven_trap():
+    trap = outcome(can_buy=True, can_sell=False, is_honeypot=True, buy_tax=0.0)
+    failed = outcome(pool="0xfailed", simulation_failed=True, reason="RPC unavailable")
+    result = aggregate_outcomes([trap, failed], [])
+    assert result["simulation_failed"] is True
+    assert result["is_honeypot"] is True
+    assert result["can_sell"] is False
+
+
+def test_failed_pool_does_not_mask_a_measured_high_tax():
+    taxed = outcome(can_buy=True, can_sell=True, is_honeypot=False, buy_tax=12.0, sell_tax=80.0)
+    failed = outcome(pool="0xfailed", simulation_failed=True, reason="RPC unavailable")
+    result = aggregate_outcomes([taxed, failed], [])
+    assert result["simulation_failed"] is True
+    assert result["buy_tax"] == 12.0
+    assert result["sell_tax"] == 80.0
+
+
+def test_all_resolved_benign_pools_remain_complete():
+    result = aggregate_outcomes(
+        [
+            outcome(can_buy=True, can_sell=True, is_honeypot=False, buy_tax=0.0, sell_tax=0.0),
+            outcome(can_buy=True, can_sell=True, is_honeypot=False, buy_tax=0.0, sell_tax=0.0),
+        ],
+        [],
+    )
+    assert result.get("simulation_failed") is not True
+    assert result["buy_tax"] == result["sell_tax"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_failed_pool_stays_unknown_through_honeypot_risk_and_extension():
+    from adapters.robinhood import RobinhoodAdapter
+
+    simulation = aggregate_outcomes(
+        [
+            outcome(can_buy=True, can_sell=True, is_honeypot=False, buy_tax=0.0, sell_tax=0.0),
+            outcome(pool="0xfailed", simulation_failed=True, reason="RPC unavailable"),
+        ],
+        [],
+    )
+    simulation["observed_at"] = 1000
+    with patch("adapters.evm_base.Web3"):
+        adapter = RobinhoodAdapter()
+    adapter._simulator.simulate = AsyncMock(return_value=simulation)
+    honeypot = await adapter.check_honeypot(TOKEN)
+    taxes = await adapter.get_tax_info(TOKEN)
+    assert honeypot["status"] == taxes["status"] == "unknown"
+    assert honeypot["simulation_failed"] is taxes["simulation_failed"] is True
+    service = HoneypotService(client_with(adapter))
+    unavailable = AsyncMock(return_value={"status": "unknown", "reason": "GoPlus has no data", "data": {}})
+    with patch.object(ScamDatabase, "fetch_token_security", new=unavailable):
+        data = await service.fetch_honeypot_data(TOKEN, chain_id=4663)
+        analyzed = await HoneypotAnalyzer(service).analyze(AnalysisContext(TOKEN, chain_id=4663))
+    risk = RiskEngine().compute_from_results([analyzed])
+    extension = format_extension_alert(risk)
+    assert data["status"] == analyzed.data["status"] == risk["status"] == "unknown"
+    assert data["buy_tax"] is data["sell_tax"] is None
+    assert risk["risk_level"] != "LOW"
+    assert extension["risk_classification"] != "SAFE"
 
 
 # --- RPC transport ---------------------------------------------------------------------------
@@ -1411,6 +1497,7 @@ async def test_a_still_short_follow_up_stays_unknown_after_one_extra_request():
     assert result["can_sell"] is None
     assert result["is_honeypot"] is None
     assert result["sell_tax"] is None
+    assert result.get("simulation_failed") is not True
     assert "not sizeable in one request" in result["reason"]
 
 
@@ -1433,7 +1520,9 @@ async def test_a_failed_follow_up_keeps_the_buy_evidence_and_stays_unknown():
     assert result["buy_tax"] == 12.0
     assert result["can_sell"] is None
     assert result["is_honeypot"] is None
+    assert result["simulation_failed"] is True
     assert "not sizeable in one request" in result["reason"]
+    assert "eth_simulateV1 failed" in result["reason"]
 
 
 @pytest.mark.asyncio
