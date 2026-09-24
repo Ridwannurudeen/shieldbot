@@ -25,15 +25,22 @@ chrome.runtime.onInstalled.addListener((details) => {
 // Avoids repeated API calls when navigating across pages on the same site.
 // Chrome stops an idle service worker, so the cache is also kept in
 // chrome.storage.session, which content scripts cannot read and which lasts
-// for the browser session. Only verdicts are kept, under the host alone.
+// for the browser session. Only verdicts are kept, under the host alone. A
+// site flagged is kept flagged for an hour; one not flagged is asked about
+// again after five minutes, so a site flagged since is seen soon.
 const _phishingCache = new Map();
 const PHISHING_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const NOT_PHISHING_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_PHISHING_CACHE = 500;
 let _phishingCacheLoad = null;
 
 function loadPhishingCache() {
   _phishingCacheLoad ||= chrome.storage.session.get({ phishingCache: {} }).then(({ phishingCache }) => {
     for (const [host, entry] of Object.entries(phishingCache)) _phishingCache.set(host, entry);
+  }, (err) => {
+    // Read it again next time rather than leave this worker without checks.
+    _phishingCacheLoad = null;
+    throw err;
   });
   return _phishingCacheLoad;
 }
@@ -213,7 +220,8 @@ async function checkPhishing(url) {
       const firstKey = _phishingCache.keys().next().value;
       _phishingCache.delete(firstKey);
     }
-    _phishingCache.set(cacheKey, { is_phishing: result.is_phishing, expiresAt: Date.now() + PHISHING_CACHE_TTL_MS });
+    const ttl = result.is_phishing ? PHISHING_CACHE_TTL_MS : NOT_PHISHING_CACHE_TTL_MS;
+    _phishingCache.set(cacheKey, { is_phishing: result.is_phishing, expiresAt: Date.now() + ttl });
     chrome.storage.session.set({ phishingCache: Object.fromEntries(_phishingCache) });
     return result;
   } catch (err) {

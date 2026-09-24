@@ -1017,3 +1017,59 @@ def test_only_a_primary_press_starts_a_hold(event):
 """,
         event,
     )
+
+
+def test_a_negative_phishing_verdict_is_kept_five_minutes_and_a_positive_one_an_hour():
+    run_node(
+        BACKGROUND_HARNESS
+        + PHISHING_WORKERS
+        + r"""
+(async () => {
+  const check = startWorker();
+  answer = verdict(false);
+  await check('https://clean.example/');
+  answer = verdict(true);
+  await check('https://drainer.example/');
+  const kept = host => session.phishingCache[host].expiresAt - Date.now();
+  // A site flagged since it was checked is seen within minutes, not an hour.
+  assert(kept('clean.example') <= 5 * 60 * 1000 && kept('clean.example') > 4 * 60 * 1000, kept('clean.example'));
+  assert(kept('drainer.example') <= 60 * 60 * 1000 && kept('drainer.example') > 59 * 60 * 1000, kept('drainer.example'));
+  assert.equal(lookups.length, 2);
+  await startWorker()('https://clean.example/');
+  assert.equal(lookups.length, 2, 'a fresh negative verdict was asked for again');
+  session.phishingCache['clean.example'].expiresAt = Date.now() - 1;
+  await startWorker()('https://clean.example/');
+  assert.equal(lookups.length, 3, 'an expired negative verdict was used');
+"""
+    )
+
+
+def test_a_failed_read_of_the_session_cache_is_tried_again():
+    run_node(
+        BACKGROUND_HARNESS
+        + PHISHING_WORKERS
+        + r"""
+(async () => {
+  // chrome.storage.session.get fails once, then works.
+  let failures = 1, onMessage;
+  const flaky = {
+    get: keys => failures-- > 0 ? Promise.reject(new Error('storage unavailable')) : area(session).get(keys),
+    set: value => area(session).set(value),
+  };
+  const worker = vm.createContext({
+    chrome: {
+      runtime: {onInstalled: {addListener() {}}, onMessage: {addListener(fn) { onMessage = fn; }}},
+      storage: {local: area(local), session: flaky},
+    },
+    URL, AbortSignal, console: {warn() {}, error() {}, log() {}},
+    fetch: async url => { lookups.push(url); return answer(url); },
+  });
+  vm.runInContext(fs.readFileSync('extension/background.js', 'utf8'), worker);
+  const check = url => new Promise(resolve => onMessage({type: 'SHIELDAI_CHECK_PHISHING', url}, {}, resolve));
+  answer = verdict(true);
+  assert.equal((await check('https://drainer.example/')).result.is_phishing, null);
+  // The worker does not stay without phishing checks for its lifetime.
+  assert.equal((await check('https://drainer.example/')).result.is_phishing, true);
+  assert.equal(lookups.length, 1);
+"""
+    )

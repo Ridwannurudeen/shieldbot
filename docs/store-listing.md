@@ -226,7 +226,7 @@ Block or Reject on the warning and never sign.
 28. **Explain button** (1 minute). A SAFE verdict has no "Why is this risky?" button; a CAUTION or
    higher verdict, or an UNKNOWN one, has it.
 29. **Phishing cache** (2 minutes). Open a site, then in `chrome://serviceworker-internals` stop the
-   extension's service worker and reload the site within the hour: the service worker's network
+   extension's service worker and reload the site within five minutes: the service worker's network
    panel (Inspect on the worker) shows no second `/api/phishing` request for that host. A phishing
    site (step 5) still shows the red banner after the worker was stopped.
 

@@ -77,9 +77,10 @@ version.
   as one of them but a different middle is shown with both addresses in full, their middles marked,
   and the verdict at least High Risk. Only a Proceed the user chose adds to the list, never an
   address a page merely asked for, and the list is never sent anywhere.
-- Phishing verdicts are cached by host for an hour, in the service worker and in
-  `chrome.storage.session` (not readable by content scripts, cleared when the browser closes), so a
-  verdict outlives the worker being stopped. Only a verdict is kept, never a failed check.
+- Phishing verdicts are cached by host, a flagged site for an hour and a site not flagged for five
+  minutes, in the service worker and in `chrome.storage.session` (not readable by content scripts,
+  cleared when the browser closes), so a verdict outlives the worker being stopped. Only a verdict
+  is kept, never a failed check, and a failed read of the session cache is tried again.
 - "Why is this risky?" is offered for Caution and above and for Unknown, not on a Safe verdict.
 - Transactions and batches are bound to the wallet's current chain: it is read before the analysis
   and again before forwarding, a mismatch rejects the request, and a forwarded request that did not
