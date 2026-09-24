@@ -1558,6 +1558,10 @@ const HEALTH = {
     color: '#F59E0B',
     label: 'PARTIAL DATA'
   },
+  contracts: {
+    color: '#60A5FA',
+    label: 'CONTRACTS ONLY'
+  },
   offline: {
     color: '#F87171',
     label: 'OFFLINE'
@@ -1895,8 +1899,12 @@ function App() {
       setCampaigns(c.status === 'fulfilled' ? c.value.campaigns || [] : null);
       setStats(p.status === 'fulfilled' ? p.value : null);
       setBaseAttestations(b.status === 'fulfilled' ? b.value : NO_ATTESTATIONS);
-      const failures = results.filter(x => x.status === 'rejected').length + (mempoolReason ? 1 : 0);
-      setHealth(failures === 0 ? 'live' : failures === results.length ? 'offline' : 'degraded');
+
+      // A mempool the API runs in a separate process on purpose (background_workers_note) is a steady
+      // state, not a failure: the header says CONTRACTS ONLY. Any other unavailable source is partial data.
+      const workersExternal = p.status === 'fulfilled' && Boolean(p.value.background_workers_note);
+      const failures = results.filter(x => x.status === 'rejected').length + (mempoolReason && !workersExternal ? 1 : 0);
+      setHealth(failures === results.length ? 'offline' : failures ? 'degraded' : workersExternal ? 'contracts' : 'live');
     } finally {
       setLoading(false);
     }

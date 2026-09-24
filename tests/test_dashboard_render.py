@@ -202,7 +202,12 @@ CONTRACT = {
 
 
 def render(
-    stats=STATS, contracts=(), mempool_reply=None, report_reply=(200, {"status": "recorded"}), steps=TEXT
+    stats=STATS,
+    contracts=(),
+    mempool_reply=None,
+    campaigns_reply=(200, {"campaigns": []}),
+    report_reply=(200, {"status": "recorded"}),
+    steps=TEXT,
 ):
     node = shutil.which("node")
     if node is None:
@@ -214,7 +219,7 @@ def render(
             {"threats": list(contracts), "count": len(contracts)},
         ],
         "/api/threats/feed?source=mempool": [200, mempool_reply or {"threats": [], "count": 0}],
-        "/api/campaigns/top": [200, {"campaigns": []}],
+        "/api/campaigns/top": list(campaigns_reply),
         "/api/base/attestations": [200, {"available": False, "attestations": [], "summary": {}}],
         "/api/report": list(report_reply),
     }
@@ -272,7 +277,29 @@ def test_an_unavailable_mempool_feed_shows_its_reason_not_no_threats():
     text = render(mempool_reply=reply)
     assert f"Mempool alerts unavailable: {MEMPOOL_REASON}" in text
     assert "No threats detected" not in text
-    assert "PARTIAL DATA" in text
+
+
+UNAVAILABLE_MEMPOOL = {"threats": [], "count": 0, "chain_id": None, "mempool_unavailable": MEMPOOL_REASON}
+
+
+@pytest.mark.parametrize(
+    "workers_note, mempool_reply, campaigns_reply, label",
+    [
+        # The mempool runs in the workers process on purpose: a steady state, not a failure.
+        (True, UNAVAILABLE_MEMPOOL, (200, {"campaigns": []}), "CONTRACTS ONLY"),
+        # A fetch that fails is still partial data, with or without the workers note.
+        (True, UNAVAILABLE_MEMPOOL, (503, {"detail": "down"}), "PARTIAL DATA"),
+        (False, None, (503, {"detail": "down"}), "PARTIAL DATA"),
+        # Without the note, an unavailable mempool is a missing source.
+        (False, UNAVAILABLE_MEMPOOL, (200, {"campaigns": []}), "PARTIAL DATA"),
+        (False, None, (200, {"campaigns": []}), "LIVE"),
+    ],
+)
+def test_header_health_label(workers_note, mempool_reply, campaigns_reply, label):
+    stats = {**STATS, "background_workers_note": WORKERS_NOTE} if workers_note else STATS
+    text = render(stats, mempool_reply=mempool_reply, campaigns_reply=campaigns_reply)
+    labels = [name for name in ("LIVE", "PARTIAL DATA", "OFFLINE", "CONTRACTS ONLY") if name in text]
+    assert labels == [label]
 
 
 def test_contract_detections_still_show_beside_an_unavailable_mempool_feed():
