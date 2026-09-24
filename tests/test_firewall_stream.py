@@ -20,6 +20,7 @@ from core.registry import FIRST_VERDICT_SECONDS, AnalyzerRegistry
 from core.risk_engine import RiskEngine
 from tests.test_strict_cache import strict_api  # noqa: F401  (pytest fixture)
 from utils.scam_db import ScamDatabase
+from utils.web3_client import UnsupportedChainError
 
 TARGET = "0x" + "ab" * 20
 CALLER = "0x" + "9f" * 20
@@ -86,17 +87,18 @@ def registry(**behaviours):
 
 
 class FailingRegistry:
-    """A registry whose run_all fails once the gate opens."""
+    """A registry whose run_all raises `error` once the gate opens."""
 
-    def __init__(self, gate):
+    def __init__(self, gate, error=None):
         self.gate = gate
+        self.error = error or RuntimeError("pipeline down")
 
     def get_all(self):
         return [SimpleNamespace(name=name) for name in WEIGHTS]
 
     async def run_all(self, ctx, deadline=None, on_result=None):
         await self.gate.wait()
-        raise RuntimeError("pipeline down")
+        raise self.error
 
 
 @pytest.fixture
@@ -511,6 +513,48 @@ async def test_an_error_inside_the_stream_is_an_error_event_and_no_final(stream_
 
     assert await remaining(events) == [("error", {"status": 500, "detail": "Internal server error"})]
     assert side_effects(services)["insert_scan_evidence"] == 0
+
+
+@pytest.mark.asyncio
+async def test_an_exception_the_handler_does_not_map_still_ends_the_stream_with_an_error(stream_api, monkeypatch):
+    api, services = stream_api
+    blacklist(api)
+    timer(monkeypatch, api, FIRST_VERDICT_SECONDS / SCALE)
+    gate = asyncio.Event()
+    # _firewall_verdict re-raises an unsupported chain instead of answering 500.
+    services.registry = FailingRegistry(gate, UnsupportedChainError("Unsupported chain ID 56"))
+
+    events = events_of(api)
+    kind, _ = await next_event(events)
+    assert kind == "first"
+    gate.set()
+
+    assert await remaining(events) == [("error", {"status": 500, "detail": "Internal server error"})]
+
+
+@pytest.mark.asyncio
+async def test_a_final_that_is_not_json_ends_the_stream_with_an_error(stream_api, monkeypatch, caplog):
+    api, services = stream_api
+    blacklist(api)
+    timer(monkeypatch, api, FIRST_VERDICT_SECONDS / SCALE)
+    gate = asyncio.Event()
+
+    async def nan_sell_tax(ctx):
+        await gate.wait()
+        honeypot = result("honeypot")
+        honeypot.data["sell_tax"] = float("nan")
+        return honeypot
+
+    services.registry = registry(structural=returns("structural", [ADMIN_MATCH]), honeypot=nan_sell_tax)
+
+    events = events_of(api)
+    kind, _ = await next_event(events)
+    assert kind == "first"
+    gate.set()
+
+    # The plain route cannot render this response either (JSON has no NaN): it answers 500.
+    assert await remaining(events) == [("error", {"status": 500, "detail": "Internal server error"})]
+    assert "Firewall stream error: ValueError" in caplog.text
 
 
 @pytest.mark.asyncio

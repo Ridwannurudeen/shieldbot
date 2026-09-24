@@ -1387,8 +1387,8 @@ async def _firewall_events(req: FirewallRequest, request: Request, started: floa
 
     The scan runs in its own task, and closing this generator (a client disconnect) never cancels
     it: its side effects (the evidence document, the stored score, the threat graph, the sentinel,
-    the deployer index) still happen once, and only from the final verdict. Logs one line per
-    request with the timings.
+    the deployer index) still happen once, and only from the final verdict. A started stream always
+    ends in `final` or `error`. Logs one line per request with the timings.
     """
     progress = FirstVerdictProgress(
         (analyzer.name for analyzer in container.registry.get_all()), policy_mode,
@@ -1419,6 +1419,13 @@ async def _firewall_events(req: FirewallRequest, request: Request, started: floa
         yield _sse("final", {**final, "final": True})
     except HTTPException as exc:
         yield _sse("error", {"status": exc.status_code, "detail": exc.detail})
+    except Exception as e:
+        # The headers are sent, so a started stream ends in final or error: this is its 500. A
+        # disconnect (CancelledError, GeneratorExit) is not an Exception and goes straight to finally.
+        logger.error(
+            "Firewall stream error: %s\n%s", type(e).__name__, "".join(traceback.format_tb(e.__traceback__)),
+        )
+        yield _sse("error", {"status": 500, "detail": "Internal server error"})
     finally:
         block_known.cancel()
         logger.info("Firewall stream %s", json.dumps(timings, sort_keys=True))
