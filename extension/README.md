@@ -200,10 +200,16 @@ that stops the scripts altogether would need them unregistered through `chrome.s
   delegation check and never forwards that transaction: one the check did not judge high risk (an
   analyzer error, say) is refused as well. It also rejects a signed type 0x04 transaction sent with
   `eth_sendRawTransaction`, which it cannot decode (eth-account 0.11 in production).
-- Marketplace orders: a Blur bulk listing signs only a Merkle root of its orders, so their prices
-  cannot be read and it is Unknown; any other type under Blur Exchange's domain than its `Order` is
-  Unknown too. Typed data over 100,000 characters (a large Seaport bulk order, for example) is refused
-  by the API, and the signature is shown as Unknown with the API's error as the reason.
+- Blur listings are shown as HIGH RISK and Unknown. Blur Exchange's current listing (an `Order`
+  with `listingsRoot` and `numberOfListings`) and its older bulk listing (`Root`) sign only a Merkle
+  root of what is listed, so no price can be read, and they are judged as zero-price listings. Only
+  Blur's older single `Order` (with `side`, `price` and `fees`) is judged on its price; any other
+  type under Blur Exchange's domain is Unknown too.
+- A Seaport order is judged only when its offer includes an NFT (item type 2 to 5). An order whose
+  offer is only native coin or ERC-20 tokens (item type 0 or 1), a bid for example, is not judged
+  on what it pays back.
+- Typed data over 100,000 characters (a large Seaport bulk order, for example) is refused by the
+  API, and the signature is shown as Unknown with the API's error as the reason.
 - With the wallet on a network the API does not support, nothing can be sent or signed through the
   overlay, which offers only Block: switch networks, or switch the extension off.
 

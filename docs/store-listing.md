@@ -32,7 +32,7 @@ When a check cannot finish, for example because a data provider did not answer o
 What it covers
 • Transactions on 8 EVM chains: BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, Optimism and Robinhood Chain.
 • Wallets that give web pages a standard provider (window.ethereum or EIP-6963).
-• Signature requests are checked by the server like transactions and shown in readable form: permits, Permit2, and Seaport and Blur marketplace orders (including Seaport bulk orders) that give your NFTs away for nothing or pay someone else. A Sign-In with Ethereum message made for another site than the one asking is flagged Block Recommended, and so is every eth_sign request, which can sign a transaction. A message that is not readable text is flagged High Risk, and 32 bytes of it, which can be a hash signed in your name, Block Recommended. The text of a message you sign is never sent.
+• Signature requests are checked by the server like transactions and shown in readable form: permits, Permit2, and Seaport and Blur marketplace orders (including Seaport bulk orders) that give your NFTs away for nothing or pay someone else. Blur listings sign only a summary of what is listed, not its prices, so they are shown as High Risk. A Sign-In with Ethereum message made for another site than the one asking is flagged Block Recommended, and so is every eth_sign request, which can sign a transaction. A message that is not readable text is flagged High Risk, and 32 bytes of it, which can be a hash signed in your name, Block Recommended. The text of a message you sign is never sent.
 • EIP-7702 delegations: a transaction that hands your account to a contract is flagged Block Recommended, with the contract's address and whether it is verified and how old it is.
 • Look-alike addresses: when you send to an address that starts and ends like one you sent to before but is a different address, the warning shows both in full with the difference marked.
 • Phishing: the address of each https site you open is checked against phishing intelligence, and a warning banner appears when the site is flagged.
@@ -86,7 +86,7 @@ has passed with them.
    `chrome://extensions`, turn on Developer mode, use Load unpacked
    on the `extension` folder, and check: name "ShieldAI Transaction Firewall", version 3.1.0,
    no Errors button. Then run the smoke test below. Do not upload until its release gate (steps 8
-   to 28) has passed on both MetaMask and Rabby.
+   to 29) has passed on both MetaMask and Rabby.
 5. Developer Dashboard, Package tab: upload the zip.
 6. Store listing tab: paste the description above. Replace the screenshots with real 3.1.0 captures
    (see `extension/screenshots/CAPTURE-GUIDE.md`). Do not upload any image that shows screens the
@@ -130,7 +130,7 @@ wallet. Reject every wallet popup unless you mean to spend.
    reason line. Arrow keys move between the popup tabs. Switch the language to Tiếng Việt and 中文:
    no raw key names (such as tabFeed) appear, and the version label reads v3.1.0.
 
-**Release gate.** Steps 8 to 28 check what the automated tests cannot: how this build's request
+**Release gate.** Steps 8 to 29 check what the automated tests cannot: how this build's request
 handling (the frozen request copies, the chain it names, the wrapped prototypes, send and
 sendAsync, signatures sent for analysis, the hold on Block Recommended) and its warning work with a
 real wallet and a real page. They have not been run yet. All must pass on MetaMask and on Rabby
@@ -203,7 +203,11 @@ Block or Reject on the warning and never sign.
 23. **Marketplace listing** (3 minutes, if the test wallet holds an NFT). Start an OpenSea listing
    of one NFT, then of two at once (a bulk listing), at a normal price: neither warning says
    zero-price or that the consideration goes to other addresses. Reject in the wallet.
-24. **EIP-7702 transaction** (1 minute). In the console of a dApp page, send
+24. **Blur listing** (2 minutes, if the test wallet holds an NFT). Start a Blur listing of one NFT at
+   a normal price: the warning is HIGH RISK with a reason about the Blur order's type. That is
+   expected: Blur's listing signs only a Merkle root of what is listed, so no price can be read.
+   Reject in the wallet.
+25. **EIP-7702 transaction** (1 minute). In the console of a dApp page, send
    `ethereum.request({method: 'eth_sendTransaction', params: [{from: (await ethereum.request({method:
    'eth_accounts'}))[0], to: (await ethereum.request({method: 'eth_accounts'}))[0], authorizationList:
    [{address: '0x0000000000000000000000000000000000000001', chainId: await ethereum.request({method:
@@ -211,17 +215,17 @@ Block or Reject on the warning and never sign.
    '0x0'}]}]})`: the warning is BLOCK RECOMMENDED, headed EIP-7702 delegation, and lists
    0x000…0001 as the delegate; the server's reason says what is known of it. Press Block: the
    wallet shows nothing.
-25. **Look-alike recipient** (3 minutes). On the test dApp send a tiny amount to a second address of
+26. **Look-alike recipient** (3 minutes). On the test dApp send a tiny amount to a second address of
    your own and Proceed (Reject in the wallet is fine: the Proceed is what is remembered). Start a
    send to the same address with a few characters in its middle changed (keep the first six and
    last four): the warning shows both addresses in full with their middles marked, and at least
    HIGH RISK. Press Block. A send to the original address again shows no such warning.
-26. **Unknown network** (2 minutes). Switch the wallet to a network ShieldAI does not support (for
+27. **Unknown network** (2 minutes). Switch the wallet to a network ShieldAI does not support (for
    example Linea or zkSync Era) and start a transaction and a Personal Sign: each warning offers only
    Block (or Reject), in Balanced and Strict mode, and says why.
-27. **Explain button** (1 minute). A SAFE verdict has no "Why is this risky?" button; a CAUTION or
+28. **Explain button** (1 minute). A SAFE verdict has no "Why is this risky?" button; a CAUTION or
    higher verdict, or an UNKNOWN one, has it.
-28. **Phishing cache** (2 minutes). Open a site, then in `chrome://serviceworker-internals` stop the
+29. **Phishing cache** (2 minutes). Open a site, then in `chrome://serviceworker-internals` stop the
    extension's service worker and reload the site within the hour: the service worker's network
    panel (Inspect on the worker) shows no second `/api/phishing` request for that host. A phishing
    site (step 5) still shows the red banner after the worker was stopped.
