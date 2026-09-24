@@ -1159,8 +1159,9 @@ const provider = {
 };
 window.ethereum = provider;
 window.dispatchEvent = () => {};
+const storage = {language: 'en'};
 const chrome = {
-  storage: {local: {get(defaults, cb) { cb({...defaults, language: 'en'}); }}},
+  storage: {local: {get(defaults, cb) { cb({...defaults, ...storage}); }}},
   runtime: {
     getURL: path => 'chrome-extension://id/' + path,
     async sendMessage(message) {
@@ -1280,6 +1281,34 @@ def test_legacy_typed_data_is_shown_field_by_field_end_to_end(method):
   assert.deepEqual(plain(sent[0].params), plain([legacy, '0x' + 'b'.repeat(40)]));
 """,
         method,
+    )
+
+
+# Switched off in its settings, the extension shows no warning, but what inject.js does without
+# anyone's decision still applies: the frame and popup refusal, and the chain binding.
+@pytest.mark.parametrize("kind", ["top", "cross-origin-frame", *REACHABLE])
+def test_switching_the_extension_off_removes_the_warning_only(kind):
+    run_node(
+        FRAME_HARNESS
+        + r"""
+(async () => {
+  storage.enabled = false;
+  const tx = {to: '0x' + 'a'.repeat(40)};
+  if (reachable) {
+    await assert.rejects(provider.request({method: 'eth_sendTransaction', params: [tx]}),
+      {code: 4100, message: /embedded frame or popup/});
+    assert.equal(sent.length, 0);
+    return;
+  }
+  // No overlay: the transaction goes to the wallet, still named to the analysed chain.
+  assert.equal(await provider.request({method: 'eth_sendTransaction', params: [tx]}), 'sent');
+  assert.equal(sent[0].params[0].chainId, '0x38');
+  assert.equal(body.children.filter(el => el.shadow).length, 0, 'a warning was shown while switched off');
+  // A transaction naming another chain is still rejected.
+  await assert.rejects(provider.request({method: 'eth_sendTransaction', params: [{...tx, chainId: '0x1'}]}), /chain/);
+  assert.equal(sent.length, 1);
+""",
+        [kind, "content-first", kind in REACHABLE],
     )
 
 

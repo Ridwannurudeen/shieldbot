@@ -37,7 +37,8 @@ What it covers
 
 Settings
 • Balanced mode shows every verdict and leaves the choice to you.
-• Strict mode removes the option to continue when a check fails, the verdict is Unknown, or the verdict is Block Recommended.
+• Strict mode removes the option to continue when a check fails, the verdict is Unknown or Block Recommended, or the extension cannot read the request or its typed data.
+• Switching the extension off removes the warning, so requests go to your wallet without one. Requests from frames and popups the page can script are still rejected, and transactions are still held to your wallet's current network.
 • English, Tiếng Việt and 中文.
 
 Privacy
@@ -47,10 +48,10 @@ Privacy
 
 Limits
 • This is a warning layer, not a guarantee. Always read your wallet's own confirmation screen.
-• It checks the wallet requests a page makes through the standard provider's request method (window.ethereum or an EIP-6963 provider), in the page itself and in frames from other origins (an origin is a scheme, host and port). A page that reaches your wallet another way, such as through the wallet's own messaging or the older send and sendAsync methods, is not checked.
-• It rejects every wallet request it checks from a frame or popup that the page can script itself: a frame whose parent page has the same origin, a blank (about:blank) or srcdoc document, or a popup opened by a page of the same origin. It cannot keep its check private there. Open the dApp in its own tab instead.
-• While it is switched on, it never passes a request it checks to your wallet without showing it to you first, and a page cannot make it approve a request for you: only your own click or key press on the warning counts. If no warning appears within 60 seconds, or the page takes it away, the request is not passed to your wallet.
-• A page can still hide or cover the warning, or lay something over it to trick you into clicking (clickjacking). The extension cannot prevent that.
+• It checks the wallet requests a page makes through the standard provider's request method (window.ethereum or an EIP-6963 provider), in the page itself and in frames from other origins (an origin is a scheme, host and port). The same kinds of request sent through the older send and sendAsync methods are refused. A page that reaches your wallet another way, such as through the wallet's own messaging, is not checked.
+• It rejects every wallet request it checks from a frame or popup that the page can script itself: a frame whose parent page has the same origin, a blank (about:blank) or srcdoc document, or a popup opened by a page of the same origin. It cannot keep its check private there, and a short notice says so. Open the dApp in its own tab instead.
+• While it is switched on, it never passes a request it checks to your wallet without showing it to you first, and a page cannot make it approve a request for you: only your own click or key press on the warning counts. If no warning appears within 60 seconds, or the page takes it away, the request is rejected.
+• A page can still hide or cover the warning, or lay something over it to trick you into clicking (clickjacking). The extension makes this harder (continue and sign buttons wait half a second, and work only while the warning is fully visible) but cannot fully prevent it.
 • A batch of calls (wallet_sendCalls) is checked one call at a time, each with its own warning. How the calls work together is not analysed.
 • It runs on https pages only, in Chrome 111 or later.
 ```
@@ -77,7 +78,8 @@ has passed with them.
 4. In a clean Chrome profile (Chrome 111 or later, which the manifest now requires) open
    `chrome://extensions`, turn on Developer mode, use Load unpacked
    on the `extension` folder, and check: name "ShieldAI Transaction Firewall", version 3.1.0,
-   no Errors button. Then run the smoke test below.
+   no Errors button. Then run the smoke test below. Do not upload until its release gate (steps 8
+   to 12) has passed on both MetaMask and Rabby.
 5. Developer Dashboard, Package tab: upload the zip.
 6. Store listing tab: paste the description above. Replace the screenshots with real 3.1.0 captures
    (see `extension/screenshots/CAPTURE-GUIDE.md`). Do not upload any image that shows screens the
@@ -120,5 +122,26 @@ wallet. Reject every wallet popup unless you mean to spend.
    not PROTECTED 100. After the tests, History shows Unknown results in a grey hatched badge with a
    reason line. Arrow keys move between the popup tabs. Switch the language to Tiếng Việt and 中文:
    no raw key names (such as tabFeed) appear, and the version label reads v3.1.0.
+
+**Release gate.** Steps 8 to 12 check what the automated tests cannot: how this build's request
+handling (the copied request objects, the chain it names, the wrapped prototypes, send and
+sendAsync) works with a real wallet. They have not been run yet. All must pass on MetaMask and on
+Rabby before the package is uploaded.
+
+8. **Everyday calls** (2 minutes). On a dApp, connect the wallet, see the balance, and switch the
+   network from the dApp. All work as without the extension, with no ShieldAI warning.
+9. **Chain** (3 minutes). Start a transaction and Proceed: the wallet shows it on the network the
+   warning named. Start another, switch the network in the wallet while the warning is open, then
+   Proceed: the dApp gets a rejection saying the wallet chain changed, and the wallet shows nothing.
+10. **Same-origin popup** (2 minutes). From a dApp page, open another page of the same site in a
+   popup (for example with `window.open` in the console) and start a transaction there: it is
+   rejected with the "embedded frame or popup" message, a short notice appears, and the wallet
+   shows nothing.
+11. **Batch** (2 minutes). On a dApp or test page that sends `wallet_sendCalls` (for example the
+   EIP-5792 section of https://metamask.github.io/test-dapp/), send a batch of two calls: one
+   warning per call, in turn, and the wallet shows the batch only after both are continued.
+12. **Legacy typed data** (1 minute). Trigger `eth_signTypedData_v1` (the test dApp's Sign Typed
+   Data button): the warning lists each field's name, type and value, and Sign Anyway opens the
+   wallet.
 
 Record for each wallet: pass or fail per step, and a screenshot of any failure.
