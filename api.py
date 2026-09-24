@@ -1492,7 +1492,11 @@ async def _firewall_verdict(
         run_options = {}
         if progress is not None:
             progress.add_local_match(scam_db.local_match(to_addr, req.chainId))
-            progress.describe = partial(_first_transaction_fields, decoded, value_bnb, req.chainId, to_addr, whitelisted)
+            # Worded as the router's answer only when the router answers: a delegation takes the full path.
+            progress.describe = partial(
+                _first_transaction_fields, decoded, value_bnb, req.chainId, to_addr,
+                whitelisted if req.authorizationList is None else None,
+            )
             run_options = {"on_result": progress.add_result}
 
         # Enrich decoded calldata with token names and formatted amounts

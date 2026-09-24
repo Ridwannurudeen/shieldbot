@@ -219,11 +219,21 @@ def scan_task():
     return task
 
 
-async def post(api, **headers):
+async def post(api, body=BODY, **headers):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=api.app), base_url="http://testserver"
     ) as client:
-        return await client.post("/api/firewall", json=BODY, headers=headers)
+        return await client.post("/api/firewall", json=body, headers=headers)
+
+
+async def final_and_plain(api, body):
+    """The streamed final (without its `final` flag) and the plain response for `body`, clock fixed."""
+    with patch("time.time", return_value=NOW):
+        plain = await post(api, body)
+        streamed = await post(api, body, accept="text/event-stream")
+    kind, final = parse(streamed.text)[-1]
+    assert kind == "final" and final.pop("final") is True
+    return final, plain.json()
 
 
 @pytest.mark.asyncio
@@ -527,6 +537,91 @@ async def test_a_signature_request_has_nothing_to_show_before_its_final(stream_a
     kind, final = parse(await asyncio.wait_for(pending, TIMEOUT))[0]
     assert (kind, final["policy_mode"]) == ("final", "SIGNATURE_ONLY")
     assert await remaining(events) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sign_method, to",
+    [("eth_sign", ""), ("eth_sign", TARGET), ("personal_sign", "")],
+    ids=["eth_sign", "eth_sign-with-a-target", "personal_sign"],
+)
+async def test_a_streamed_signature_gets_only_the_signature_paths_final(
+    stream_api, monkeypatch, mock_web3_client, sign_method, to
+):
+    api, services = stream_api
+    timer(monkeypatch, api, FIRST_VERDICT_SECONDS * SCALE)
+    gate = asyncio.Event()
+    mock_web3_client.is_valid_address = MagicMock(side_effect=lambda value: value.startswith("0x") and len(value) == 42)
+
+    async def analyze(self, ctx):
+        await gate.wait()
+        return AnalyzerResult("signature", 0.1, 0, data={"sign_method": sign_method, "has_typed_data": False})
+
+    monkeypatch.setattr("analyzers.signature.SignaturePermitAnalyzer.analyze", analyze)
+    # The extension sends neither the message nor its signer.
+    body = {**BODY, "to": to, "from": "", "signMethod": sign_method}
+    events = events_of(api, body)
+    pending = asyncio.ensure_future(events.__anext__())
+    await asyncio.wait({pending}, timeout=FIRST_VERDICT_SECONDS * SCALE * 3)
+
+    # Past the timer with the analysis held, and still no first: nothing on this path is a transaction scan.
+    assert not pending.done()
+    gate.set()
+    kind, final = parse(await asyncio.wait_for(pending, TIMEOUT))[0]
+    assert await remaining(events) == []
+    assert (kind, final["policy_mode"]) == ("final", "SIGNATURE_ONLY")
+    if sign_method == "eth_sign":
+        assert (final["classification"], final["risk_score"]) == (verdicts.BLOCK_RECOMMENDED, verdicts.BLIND_SIGN_MIN)
+    services.db.get_contract_score.assert_not_awaited()
+    services.db.upsert_contract_score.assert_not_awaited()
+
+    final, plain = await final_and_plain(api, body)
+    assert final == plain
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_delegation_skips_the_cache_and_the_router_shortcut(stream_api, monkeypatch):
+    api, services = stream_api
+    timer(monkeypatch, api, FIRST_VERDICT_SECONDS * SCALE)
+    services.db.get_contract_score.return_value = SAFE_ROW
+    monkeypatch.setattr(
+        api,
+        "calldata_decoder",
+        SimpleNamespace(decode=lambda data: dict(SWAP), is_whitelisted_target=lambda *args, **kwargs: "PancakeSwap Router"),
+    )
+    gate = asyncio.Event()
+    scanned = []
+
+    def recording(name):
+        async def analyze(ctx):
+            scanned.append(ctx.address)
+            if name == "honeypot":
+                await gate.wait()
+            return result(name)
+        return analyze
+
+    services.registry = registry(**{name: recording(name) for name in WEIGHTS})
+    # An EIP-7702 swap through a trusted router, with a cached SAFE row for the router.
+    body = {**BODY, "data": "0x38ed1739", "authorizationList": [{"address": "0x" + "de" * 20}]}
+    events = events_of(api, body)
+    kind, first = await next_event(events)
+
+    # The router's own analyzers run on it, not the path tokens', and the first says so.
+    assert kind == "first"
+    assert first["pending_sources"] == ["honeypot"]
+    assert first["transaction_impact"]["recipient"] == TARGET
+    gate.set()
+    kind, final = await next_event(events)
+    assert kind == "final" and "cached" not in final
+    assert set(scanned) == {TARGET}
+    services.db.get_contract_score.assert_not_awaited()
+    # A delegation's verdict describes the delegate, so it is not stored as the router's.
+    services.db.upsert_contract_score.assert_not_awaited()
+    assert first["transaction_impact"]["recipient"] == final["transaction_impact"]["recipient"]
+
+    final, plain = await final_and_plain(api, body)
+    assert final == plain
+    assert "cached" not in plain
 
 
 @pytest.mark.asyncio
