@@ -1363,7 +1363,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 "calldata_details": _build_calldata_details(decoded),
                 "danger_signals": danger_signals,
                 "transaction_impact": {
-                    "sending": f"{value_bnb:g} {get_native_symbol(req.chainId)}" if value_bnb > 0 else "Tokens",
+                    "sending": _sending(decoded, value_bnb, req.chainId, "Tokens"),
                     "granting_access": _granting_access(decoded),
                     "recipient": to_addr,
                     "post_tx_state": f"Risk archetype: {alert['risk_archetype']}",
@@ -2333,11 +2333,10 @@ def _format_decoded_action(decoded: Dict, chain_id: int) -> str:
     params = decoded.get("params", {})
 
     if not func or func == "Native Transfer":
-        return f"Native {get_native_symbol(chain_id)} Transfer"
+        return f"Native {get_native_symbol(chain_id) or 'Coin'} Transfer"
 
     if category == "approval":
-        spender = params.get("param_0", "")
-        spender_label = decoded.get("spender_label") or _checksum_if_possible(str(spender))
+        spender_label = _approval_spender(decoded) or "an unknown spender"
         if decoded.get("is_unlimited_approval"):
             return f"UNLIMITED Approval to {spender_label}"
         if "permit" in func.lower():
@@ -2389,15 +2388,11 @@ def _build_calldata_details(decoded: Dict) -> Dict:
     fields = []
 
     if category == "approval":
-        spender = params.get("param_0", "")
-        spender_label = decoded.get("spender_label") or _checksum_if_possible(str(spender))
-        amount = params.get("param_1")
-        is_unlimited = decoded.get("is_unlimited_approval", False)
+        granted = _granting_access(decoded)
         fields = [
             {"label": "Function", "value": func},
-            {"label": "Spender", "value": spender_label},
-            {"label": "Amount", "value": "Unlimited", "danger": True} if is_unlimited else
-            {"label": "Amount", "value": str(amount) if amount is not None else "Unknown"},
+            {"label": "Spender", "value": _approval_spender(decoded) or "Unknown"},
+            {"label": "Grants", "value": granted, "danger": granted in ("UNLIMITED", "ALL tokens in the collection")},
         ]
     elif category == "transfer":
         if func == "transferFrom":
@@ -2445,8 +2440,17 @@ def _build_calldata_details(decoded: Dict) -> Dict:
     return {"category": category, "fields": fields}
 
 
-# Approval functions whose amount the decoder reads, and the parameter it lands in.
-_APPROVAL_AMOUNT_PARAM = {"approve": "param_1", "increaseAllowance": "param_1", "permit": "param_2"}
+# Where the decoder puts each approval function's spender and amount (None when
+# it does not decode it: Permit2 keeps both inside a struct).
+_APPROVAL_PARAMS = {
+    "approve": ("param_0", "param_1"),
+    "increaseAllowance": ("param_0", "param_1"),
+    "setApprovalForAll": ("param_0", None),
+    "permit": ("param_1", "param_2"),
+    "permit (DAI-style)": ("param_1", None),
+    "permit (Permit2)": (None, None),
+    "permit (Permit2 batch)": (None, None),
+}
 # Approval functions that grant or revoke with a boolean, and the label when they grant.
 _APPROVAL_FLAG_PARAM = {
     "setApprovalForAll": ("param_1", "ALL tokens in the collection"),
@@ -2454,8 +2458,32 @@ _APPROVAL_FLAG_PARAM = {
 }
 
 
+# Universal Router execute(): its commands can include a Permit2 permit.
+_UNIVERSAL_ROUTER_EXECUTE = "3593564c"
+
+
+def _approval_spender(decoded: Dict) -> Optional[str]:
+    """The approved spender: its known name, else its checksummed address, else None."""
+    param = _APPROVAL_PARAMS.get(decoded.get("function_name"), (None, None))[0]
+    spender = decoded.get("params", {}).get(param) if param else None
+    return decoded.get("spender_label") or (_checksum_if_possible(str(spender)) if spender else None)
+
+
+def _native_symbol(chain_id: int) -> str:
+    return get_native_symbol(chain_id) or "native coin"
+
+
+def _sending(decoded: Dict, value_bnb: float, chain_id: int, tokens: str) -> str:
+    """The Sending row: the native amount, nothing for a bare approval, else tokens."""
+    if value_bnb > 0:
+        return f"{value_bnb:g} {_native_symbol(chain_id)}"
+    return "Nothing (approval only)" if decoded.get("is_approval") else tokens
+
+
 def _granting_access(decoded: Dict) -> str:
     """Say what spending rights a call grants. "None" only when it grants nothing."""
+    if decoded.get("selector") == _UNIVERSAL_ROUTER_EXECUTE:
+        return "Unknown (may include a Permit2 permit)"
     if decoded.get("category", "unknown") == "unknown":
         return "Unknown"
     if not decoded.get("is_approval"):
@@ -2470,21 +2498,24 @@ def _granting_access(decoded: Dict) -> str:
         return granted if flag else "None (revokes access)"
     if decoded.get("is_unlimited_approval"):
         return "UNLIMITED"
-    amount = params.get(_APPROVAL_AMOUNT_PARAM.get(func))
+    amount_param = _APPROVAL_PARAMS.get(func, (None, None))[1]
+    amount = params.get(amount_param) if amount_param else None
     if not isinstance(amount, int):
         return "Approval, amount unknown"
-    if amount == 0:
-        return "None (amount is 0)"
     if decoded.get("formatted_amount"):
-        return f"Limited approval: {decoded['formatted_amount']}"
-    return f"Limited approval: {amount} (raw token units)"
+        return "None (amount is 0)" if amount == 0 else f"Limited approval: {decoded['formatted_amount']}"
+    if func == "approve":
+        # approve() shares its selector with ERC-721 approve(to, tokenId). Without
+        # the token's decimals the number may be an NFT id, and 0 may be token #0.
+        return f"Approval: {amount} (raw amount or NFT token id)"
+    return "None (amount is 0)" if amount == 0 else f"Limited approval: {amount} (raw token units)"
 
 
 def _build_asset_delta_fallback(decoded: Dict, value_bnb: float, chain_id: int) -> List:
     """Construct basic asset_delta from calldata when simulation is unavailable."""
     deltas = []
     if value_bnb > 0:
-        deltas.append(f"-{value_bnb:g} {get_native_symbol(chain_id)}")
+        deltas.append(f"-{value_bnb:g} {_native_symbol(chain_id)}")
     if decoded.get("is_approval"):
         deltas.append(f"Access granted: {_granting_access(decoded)}")
     return deltas
@@ -2550,7 +2581,7 @@ def _build_cached_response(
         "calldata_details": _build_calldata_details(decoded),
         "danger_signals": flags,
         "transaction_impact": {
-            "sending": f"{value_bnb:g} {get_native_symbol(chain_id)}" if value_bnb > 0 else "Tokens",
+            "sending": _sending(decoded, value_bnb, chain_id, "Tokens"),
             "granting_access": _granting_access(decoded),
             "recipient": to_addr or "Unknown",
             "post_tx_state": f"Risk archetype: {archetype}",
@@ -2718,7 +2749,7 @@ def _build_unverified_swap_response(
             f"Swap via trusted router ({whitelisted}) but {reason.lower()} — token safety unverified",
         ],
         "transaction_impact": {
-            "sending": f"{value_bnb:g} {get_native_symbol(req.chainId)}" if value_bnb > 0 else "Tokens (via router)",
+            "sending": _sending(decoded, value_bnb, req.chainId, "Tokens (via router)"),
             "granting_access": _granting_access(decoded),
             "recipient": f"{whitelisted} ({to_addr})",
             "post_tx_state": f"Swap via {whitelisted} — {reason.lower()}",
@@ -2918,7 +2949,7 @@ async def _analyze_router_swap(
         "calldata_details": _build_calldata_details(decoded),
         "danger_signals": danger_signals,
         "transaction_impact": {
-            "sending": f"{value_bnb:g} {get_native_symbol(req.chainId)}" if value_bnb > 0 else "Tokens (via router)",
+            "sending": _sending(decoded, value_bnb, req.chainId, "Tokens (via router)"),
             "granting_access": _granting_access(decoded),
             "recipient": f"{whitelisted} ({to_addr})",
             "post_tx_state": f"Swap via {whitelisted} — analyzed {best['address'][:10]}...",
@@ -3023,19 +3054,23 @@ async def _enrich_decoded(decoded: Dict, to_addr: str, chain_id: int = 56):
             decoded["token_symbol"] = token_info["symbol"]
             decoded["token_name"] = token_info["name"]
 
+            spender_param, amount_param = _APPROVAL_PARAMS.get(decoded.get("function_name"), (None, None))
+
             # Format the approval amount
-            amount = params.get("param_1")  # uint256 amount
+            amount = params.get(amount_param) if amount_param else None
             if isinstance(amount, int):
                 if amount >= UNLIMITED_THRESHOLD:
                     decoded["formatted_amount"] = f"UNLIMITED {token_info['symbol']}"
                 else:
                     decimals = token_info.get("decimals", 18)
                     human_amount = amount / (10 ** decimals)
-                    decoded["formatted_amount"] = f"{human_amount:,.4f} {token_info['symbol']}".rstrip("0").rstrip(".")
-                    decoded["formatted_amount"] += f" {token_info['symbol']}" if not decoded["formatted_amount"].endswith(token_info['symbol']) else ""
+                    number = f"{human_amount:,.4f}".rstrip("0").rstrip(".")
+                    if number == "0" and amount:
+                        number = f"{human_amount:.4g}"
+                    decoded["formatted_amount"] = f"{number} {token_info['symbol']}"
 
             # Resolve the spender address
-            spender = params.get("param_0", "")
+            spender = params.get(spender_param) if spender_param else None
             if spender:
                 spender_name = calldata_decoder.is_whitelisted_target(spender)
                 if spender_name:

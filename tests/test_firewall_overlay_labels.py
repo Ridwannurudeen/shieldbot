@@ -184,8 +184,11 @@ async def test_router_swap_names_the_chain_gas_token_and_full_router(labels_api,
     "decoded,expected",
     [
         (approve(MAX), "UNLIMITED"),
-        (approve(0), "None (amount is 0)"),
-        (approve(1234), "Limited approval: 1234 (raw token units)"),
+        # approve() shares its selector with ERC-721 approve(to, tokenId): without the
+        # token's decimals the number may be an NFT id, and 0 may be token #0.
+        (approve(0), "Approval: 0 (raw amount or NFT token id)"),
+        ({**approve(0), "formatted_amount": "0 USDT"}, "None (amount is 0)"),
+        (approve(1234), "Approval: 1234 (raw amount or NFT token id)"),
         ({**approve(1234), "formatted_amount": "0.0012 USDT"}, "Limited approval: 0.0012 USDT"),
         (
             DECODER.decode(calldata("39509351", ["address", "uint256"], [SPENDER, 7])),
@@ -233,6 +236,7 @@ async def test_router_swap_names_the_chain_gas_token_and_full_router(labels_api,
         (DECODER.decode(calldata("a9059cbb", ["address", "uint256"], [RECIPIENT, 5])), "None"),
         (DECODER.decode("0x"), "None"),
         (DECODER.decode("0xdeadbeef" + "00" * 32), "Unknown"),
+        (DECODER.decode("0x3593564c" + "00" * 96), "Unknown (may include a Permit2 permit)"),
         ({}, "Unknown"),
     ],
 )
@@ -253,11 +257,12 @@ async def test_limited_approval_is_labelled_with_its_amount_on_every_path(labels
         api.FirewallRequest(to=token, sender=SENDER, data=data, chainId=1),
         SimpleNamespace(headers={}),
     )
-    assert response["transaction_impact"]["granting_access"] == "Limited approval: 1,000.0000 TT"
+    assert response["transaction_impact"]["granting_access"] == "Limited approval: 1,000 TT"
+    assert response["transaction_impact"]["sending"] == "Nothing (approval only)"
     fallback = api._build_fallback_response(approve(1000), {"risk_score": 0}, None, 1)
     assert (
         fallback["transaction_impact"]["granting_access"]
-        == "Limited approval: 1000 (raw token units)"
+        == "Approval: 1000 (raw amount or NFT token id)"
     )
     unlimited = await api.firewall(
         api.FirewallRequest(
@@ -344,3 +349,80 @@ async def test_signature_recipient_is_the_full_checksummed_address(labels_api):
         )
     )
     assert response["transaction_impact"]["recipient"] == Web3.to_checksum_address(SPENDER)
+
+
+@pytest.mark.parametrize(
+    "amount,decimals,expected",
+    [
+        (1000 * 10**18, 18, "1,000 TT"),
+        (15 * 10**17, 18, "1.5 TT"),
+        (123456789, 6, "123.4568 TT"),
+        (5, 18, "5e-18 TT"),
+        (0, 18, "0 TT"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_approval_amount_is_formatted_without_eating_the_symbol(labels_api, amount, decimals, expected):
+    api = labels_api
+    api.web3_client.get_token_info.return_value = {"name": "Test", "symbol": "TT", "decimals": decimals}
+    decoded = approve(amount)
+    await api._enrich_decoded(decoded, "0x" + format(amount % 997 + 1000 * decimals, "040x"), chain_id=56)
+    assert decoded["formatted_amount"] == expected
+    api.web3_client.get_token_info.return_value = {"name": "Zero", "symbol": "USD0", "decimals": 6}
+    decoded = approve(10**6)
+    await api._enrich_decoded(decoded, "0x" + "7" * 40, chain_id=56)
+    assert decoded["formatted_amount"] == "1 USD0"
+
+
+def test_permit_shows_its_spender_and_grant_not_the_owner(labels_api):
+    api = labels_api
+    spender = Web3.to_checksum_address(SPENDER)
+    permit = DECODER.decode(
+        calldata(
+            "d505accf",
+            ["address", "address", "uint256", "uint256", "uint8", "bytes32", "bytes32"],
+            [SENDER, SPENDER, 5, 1, 27, b"\x00" * 32, b"\x00" * 32],
+        )
+    )
+    fields = {field["label"]: field["value"] for field in api._build_calldata_details(permit)["fields"]}
+    assert fields["Spender"] == spender
+    assert fields["Grants"] == "Limited approval: 5 (raw token units)"
+    assert api._format_decoded_action(permit, 56) == f"Gas-less Permit to {spender}"
+    dai = DECODER.decode(
+        calldata(
+            "8fcbaf0c",
+            ["address", "address", "uint256", "uint256", "bool", "uint8", "bytes32", "bytes32"],
+            [SENDER, SPENDER, 0, 1, True, 27, b"\x00" * 32, b"\x00" * 32],
+        )
+    )
+    fields = {field["label"]: field["value"] for field in api._build_calldata_details(dai)["fields"]}
+    assert fields["Spender"] == spender
+    assert fields["Grants"] == "UNLIMITED"
+    permit2 = DECODER.decode("0x2b67b570" + "00" * 12 + "11" * 20)
+    fields = {field["label"]: field["value"] for field in api._build_calldata_details(permit2)["fields"]}
+    assert fields["Spender"] == "Unknown"
+    assert api._format_decoded_action(permit2, 56) == "Gas-less Permit to an unknown spender"
+
+
+@pytest.mark.parametrize(
+    "decoded",
+    [approve(5), DECODER.decode(calldata("a22cb465", ["address", "bool"], [SPENDER, True]))],
+)
+def test_a_zero_value_approval_sends_nothing(labels_api, decoded):
+    api = labels_api
+    to = Web3.to_checksum_address(RECIPIENT)
+    cached = api._build_cached_response(
+        {"risk_score": 0, "risk_level": "LOW", "category_scores": {}}, decoded, 0, 56, to_addr=to
+    )
+    assert cached["transaction_impact"]["sending"] == "Nothing (approval only)"
+    req = api.FirewallRequest(to=to, sender=SENDER, chainId=56)
+    unverified = api._build_unverified_swap_response(req, to, decoded, "Router", 0, "token_path", "Unreadable")
+    assert unverified["transaction_impact"]["sending"] == "Nothing (approval only)"
+
+
+def test_an_unknown_chain_never_prints_none_as_the_gas_token():
+    import api
+
+    assert api._format_decoded_action(DECODER.decode("0x"), 999999) == "Native Coin Transfer"
+    assert api._build_asset_delta_fallback({}, 0.5, 999999) == ["-0.5 native coin"]
+
