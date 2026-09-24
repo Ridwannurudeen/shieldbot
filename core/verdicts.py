@@ -108,7 +108,9 @@ def stored_level(score, level) -> str:
 
 
 def describe(calibration=None) -> dict:
-    """The vocabulary and band tables as GET /api/verdicts publishes them."""
+    """The vocabulary and band tables as GET /api/verdicts publishes them. The risk-level thresholds
+    are the effective ones: stored_level raises a level to the band table's, so a calibrated threshold
+    above the table's never applies to a stored level."""
     high, medium = level_thresholds(calibration)
     return {
         "classifications": list(CLASSIFICATIONS),
@@ -116,7 +118,7 @@ def describe(calibration=None) -> dict:
         "agent_verdicts": list(AGENT_VERDICTS),
         "bands": [{"classification": name, "min_score": lowest} for name, lowest in BANDS],
         "signature_bands": [{"classification": name, "min_score": lowest} for name, lowest in SIGNATURE_BANDS],
-        "risk_level_thresholds": {HIGH: high, MEDIUM: medium},
+        "risk_level_thresholds": {HIGH: min(high, BLOCK_MIN), MEDIUM: min(medium, CAUTION_MIN)},
         "unknown": "A scan with incomplete coverage has status 'unknown' and is never classified SAFE.",
         "strict_block_score": STRICT_BLOCK_SCORE,
         "agent_firewall": {

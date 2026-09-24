@@ -33,7 +33,7 @@ SKIPPED = {
     "contracts",
 }
 SCORE_COMPARISON = re.compile(
-    r"(?:score|rug_prob\w*|probability|composite|floor)['\"]?(?:\]|,[^)]*\))?\s*(?:>=|<=|>|<)\s*\d"
+    r"(?:score|\brs\b|rug_prob\w*|probability|composite|floor)['\"]?(?:\]|,[^)]*\))?\s*(?:>=|<=|>|<)\s*\d"
 )
 CLASSIFICATION_LITERAL = re.compile(r"['\"](?:SAFE|CAUTION|HIGH_RISK|BLOCK_RECOMMENDED)['\"]")
 LEVEL_LITERAL = re.compile(r"risk_level['\"]?\]?\s*(?:=|:)\s*['\"](?:LOW|MEDIUM|HIGH)['\"]")
@@ -74,6 +74,12 @@ ALLOWED = {
         "services/greenfield_service.py",
         "Uploads forensic reports as immutable JSON objects when risk score >= 50.",
     ): "module docstring; the caller compares with verdicts.HIGH_RISK_MIN",
+    ("services/guardian.py", "if rs >= 70:"): (
+        "approval spender tiers of wallet health, a separate surface with its own words (owner decision to align)"
+    ),
+    ("services/guardian.py", 'elif rs >= 50 and risk_level not in ("critical",):'): (
+        "approval spender tiers of wallet health, a separate surface with its own words (owner decision to align)"
+    ),
     (
         "services/guardian.py",
         "elif composite >= 80:",
@@ -142,6 +148,7 @@ def test_every_allowed_line_still_exists():
 def test_the_scan_catches_a_restated_band():
     for line in (
         "if rug_prob >= 71:",
+        "if rs >= 70:",
         "risk_score = data.get('risk_score', 0) >= 50",
         'classification = "SAFE"',
         "result['risk_level'] = 'HIGH'",
@@ -184,6 +191,8 @@ def test_sdk_vocabularies_match_the_published_ones():
     typescript = (ROOT / "sdk" / "src" / "index.ts").read_text(encoding="utf-8")
     assert _ts_union(typescript, "risk_level") == set(verdicts.RISK_LEVELS)
     assert _ts_union(typescript, "verdict") == set(verdicts.AGENT_VERDICTS)
+    assert _ts_union(typescript, "classification") == set(verdicts.CLASSIFICATIONS)
+    assert "classification: string" not in typescript
     assert set(re.findall(r"verdict: '([A-Z_]+)'", typescript)) <= set(verdicts.AGENT_VERDICTS)
     models = (ROOT / "sdk" / "python" / "shieldbot" / "models.py").read_text(encoding="utf-8")
     documented = re.search(r'verdict: str  # ("[A-Z]+"(?: \| "[A-Z]+")*)', models).group(1)
@@ -221,7 +230,7 @@ async def test_the_vocabulary_endpoint_publishes_the_module(monkeypatch):
         api,
         "container",
         SimpleNamespace(
-            calibration=CalibrationConfig(high_threshold=81.0),
+            calibration=CalibrationConfig(high_threshold=81.0, medium_threshold=21.0),
             auth_manager=None,
             settings=SimpleNamespace(trusted_proxies=[]),
         ),
@@ -241,7 +250,8 @@ async def test_the_vocabulary_endpoint_publishes_the_module(monkeypatch):
     assert body["signature_bands"] == [
         {"classification": name, "min_score": low} for name, low in verdicts.SIGNATURE_BANDS
     ]
-    assert body["risk_level_thresholds"] == {"HIGH": 81.0, "MEDIUM": 31.0}
+    # The stored level is raised to the band table's, so a calibrated threshold above it does not apply.
+    assert body["risk_level_thresholds"] == {"HIGH": 71, "MEDIUM": 21.0}
     assert body["agent_firewall"]["decisions_by_classification"] == {
         key: list(value) for key, value in verdicts.AGENT_DECISIONS_BY_CLASSIFICATION.items()
     }

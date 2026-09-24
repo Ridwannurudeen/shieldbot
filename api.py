@@ -2090,8 +2090,10 @@ async def verdict_vocabulary():
     """The verdict vocabulary and band tables every ShieldBot surface uses, read-only.
 
     A score is in the first band whose min_score it reaches. risk_level_thresholds are the lowest
-    scores of risk levels HIGH and MEDIUM as this server is calibrated. agent_firewall gives the
-    agent firewall's default thresholds and the decisions each classification can meet under them.
+    scores at which a stored risk level is HIGH and MEDIUM on this server: the calibrated thresholds,
+    or the band table's where that is lower, since a stored level is raised to the band of its score.
+    agent_firewall gives the agent firewall's default thresholds and the decisions each
+    classification can meet under them.
     """
     return verdicts.describe(container.calibration if container else None)
 
