@@ -630,9 +630,12 @@ function FlagModal({
 }) {
   const [reason, setReason] = useState('');
   const [sending, setSending] = useState(false);
+  // Why the last report was not sent. It shows in the dialog: a toast would sit under the backdrop.
+  const [failure, setFailure] = useState(null);
   const dialog = useRef(null);
   useEffect(() => {
     setReason('');
+    setFailure(null);
   }, [threat]);
   // The open dialog takes focus, keeps Tab inside it, closes on Escape and returns focus to the
   // control that opened it.
@@ -664,6 +667,7 @@ function FlagModal({
   const canSend = Boolean(addr && threat.chain_id) && !sending;
   async function submit() {
     setSending(true);
+    setFailure(null);
     try {
       const r = await fetch(`${API}/api/report`, {
         method: 'POST',
@@ -680,9 +684,9 @@ function FlagModal({
       if (r.ok) {
         onResult('Report sent. Thank you.', 'success');
         onClose();
-      } else if (r.status === 429) onResult('Too many reports. Try again in a minute.', 'error');else onResult(`Report not sent (HTTP ${r.status}).`, 'error');
+      } else if (r.status === 429) setFailure('Too many reports. Try again in a minute.');else setFailure(`Report not sent (HTTP ${r.status}).`);
     } catch (e) {
-      onResult('Report not sent: network error.', 'error');
+      setFailure('Report not sent: network error.');
     } finally {
       setSending(false);
     }
@@ -770,7 +774,13 @@ function FlagModal({
     onChange: e => setReason(e.target.value),
     "aria-label": "Why is this a false positive?",
     placeholder: "Why is this a false positive?"
-  }), /*#__PURE__*/React.createElement("div", {
+  }), failure && /*#__PURE__*/React.createElement("div", {
+    role: "alert",
+    className: "text-sm mt-3",
+    style: {
+      color: '#FCA5A5'
+    }
+  }, failure), /*#__PURE__*/React.createElement("div", {
     className: "flex gap-2 mt-4"
   }, /*#__PURE__*/React.createElement("button", {
     onClick: onClose,

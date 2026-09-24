@@ -219,8 +219,10 @@
     function FlagModal({ threat, onClose, onResult }) {
       const [reason,  setReason]  = useState('');
       const [sending, setSending] = useState(false);
+      // Why the last report was not sent. It shows in the dialog: a toast would sit under the backdrop.
+      const [failure, setFailure] = useState(null);
       const dialog = useRef(null);
-      useEffect(() => { setReason(''); }, [threat]);
+      useEffect(() => { setReason(''); setFailure(null); }, [threat]);
       // The open dialog takes focus, keeps Tab inside it, closes on Escape and returns focus to the
       // control that opened it.
       useEffect(() => {
@@ -249,6 +251,7 @@
 
       async function submit() {
         setSending(true);
+        setFailure(null);
         try {
           const r = await fetch(`${API}/api/report`, {
             method: 'POST',
@@ -259,10 +262,10 @@
             }),
           });
           if (r.ok) { onResult('Report sent. Thank you.', 'success'); onClose(); }
-          else if (r.status === 429) onResult('Too many reports. Try again in a minute.', 'error');
-          else onResult(`Report not sent (HTTP ${r.status}).`, 'error');
+          else if (r.status === 429) setFailure('Too many reports. Try again in a minute.');
+          else setFailure(`Report not sent (HTTP ${r.status}).`);
         } catch (e) {
-          onResult('Report not sent: network error.', 'error');
+          setFailure('Report not sent: network error.');
         } finally {
           setSending(false);
         }
@@ -302,6 +305,8 @@
                                height:80, fontFamily:'inherit' }}
                       maxLength={1000} value={reason} onChange={e => setReason(e.target.value)}
                       aria-label="Why is this a false positive?" placeholder="Why is this a false positive?" />
+
+            {failure && <div role="alert" className="text-sm mt-3" style={{ color:'#FCA5A5' }}>{failure}</div>}
 
             <div className="flex gap-2 mt-4">
               <button onClick={onClose} className="flex-1 py-2.5 min-h-[44px] md:min-h-0 rounded-lg text-sm font-medium transition-colors"
