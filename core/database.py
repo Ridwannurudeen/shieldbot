@@ -866,6 +866,9 @@ class Database:
         unique_contracts = row[0] or 0
         total_scan_events = int(row[1] or 0)
 
+        # Known split: this counts risk_score >= 71 while the threat feed (api.py) lists risk_level 'HIGH'.
+        # The firewall's campaign boost raises a stored score without raising its stored level, so the two
+        # can disagree until both read one verdict vocabulary and band table.
         cur = await self._db.execute(
             "SELECT COUNT(*) FROM contract_scores WHERE risk_score >= 71"
         )
@@ -919,6 +922,7 @@ class Database:
             )
             scans = (await cur.fetchone())[0] or 0
 
+            # The same known split as the all-time threat count above: score >= 71, not risk_level 'HIGH'.
             cur = await self._db.execute(
                 "SELECT COUNT(*) FROM contract_scores WHERE last_scanned_at > ? AND risk_score >= 71",
                 (cutoff,)

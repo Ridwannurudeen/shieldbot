@@ -747,7 +747,7 @@
     const STAT_ITEMS = [
       { key:'transactions_monitored', label:'Transactions Monitored', span:'since monitor start', color:'#3B82F6' },
       { key:'contracts_scanned',      label:'Contracts Scanned',      span:'all time',            color:'#10B981' },
-      { key:'threats_detected',       label:'Contract Threats',       span:'all time',            color:'#EF4444' },
+      { key:'threats_detected',       label:'Contract Threats',       span:'on record',           color:'#EF4444' },
       { key:'transactions_blocked',   label:'Transactions Blocked',   span:'all time',            color:'#F59E0B' },
       { key:'sandwiches_caught',      label:'Sandwich Attacks Caught',span:'since monitor start', color:'#8B5CF6' },
       { key:'suspicious_approvals',   label:'Suspicious Approvals',   span:'since monitor start', color:'#F97316' },
@@ -841,8 +841,9 @@
             ))}
           </div>
           <div className="text-xs mt-2" style={{ color:'#475569' }}>
-            A contract threat is a contract the transaction firewall scored 71 or above; it counts in the last
-            24 h when its latest scan falls in that window. The charts and the feed below show only the newest
+            A contract threat is a contract the extension and agent firewalls scored high risk. On record means
+            its latest score, since a rescan replaces it; it counts in the last 24 h when that scan falls in the
+            window. The charts and the feed below show only the newest
             {' '}{FEED_LIMIT} contract detections and newest {FEED_LIMIT} mempool alerts, so they are not counts.
           </div>
         </div>

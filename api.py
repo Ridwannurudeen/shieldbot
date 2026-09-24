@@ -1731,8 +1731,10 @@ async def public_stats():
     per chain; `registry_records_confirmed` counts those whose record in the Robinhood Chain
     verdict registry is confirmed on-chain. `contracts_scanned` and `threats_detected` count the contracts
     the extension and agent firewalls scored; Telegram, /api/scan and launch scans do not add to them.
-    Those counts and `transactions_blocked` are all time; each `_24h` field counts the same table over
-    the last 24 hours (a contract counts when its latest scan falls in that window).
+    `contracts_scanned` and `transactions_blocked` are all time. `threats_detected` is on record now: it
+    counts the contracts whose latest score is high risk, and a rescan overwrites a contract's score.
+    Each `_24h` field counts the same table over the last 24 hours (a contract counts when its latest
+    scan falls in that window).
     `unknown_ledger` sums, per provider and per chain, how often a provider lookup was answered,
     came back unknown or failed since `counting_since` (core.unknown_ledger); it restarts with the
     process. GET /api/coverage/{chain_id} has one chain's providers in full.
@@ -2170,7 +2172,8 @@ async def threat_feed(
     limit = max(1, min(limit, 200))  # cap between 1 and 200
     threats = []
 
-    # Recent high-risk contract scans from DB
+    # Recent high-risk contract scans from DB. Known split: this lists risk_level 'HIGH' while the threat
+    # counts in core.database count risk_score >= 71, and a campaign-boosted score keeps its unboosted level.
     try:
         if source == "mempool":
             cursor = None
