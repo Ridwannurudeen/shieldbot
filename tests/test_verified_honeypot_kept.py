@@ -123,3 +123,50 @@ async def test_a_honeypot_verdict_is_never_turned_sellable_by_its_tax(sell_tax):
         data = await HoneypotService(client).fetch_honeypot_data(TOKEN, chain_id=56)
     assert data["can_sell"] is False
     assert "likely_false_positive" not in data
+
+
+def _simulated(can_sell, can_sell_provider):
+    """The Robinhood simulator's shape: a sell that went through but paid out nothing (100% tax)."""
+    client = MagicMock()
+    client.get_supported_chain_ids.return_value = [4663]
+    client.check_honeypot = AsyncMock(
+        return_value={
+            "is_honeypot": True,
+            "can_buy": True,
+            "can_sell": can_sell,
+            "field_providers": {
+                "is_honeypot": "eth_simulateV1",
+                "can_buy": "eth_simulateV1",
+                "can_sell": can_sell_provider,
+            },
+        }
+    )
+    client.get_tax_info = AsyncMock(
+        return_value={
+            "buy_tax": 0.0,
+            "sell_tax": 100.0,
+            "field_providers": {"buy_tax": "eth_simulateV1", "sell_tax": "eth_simulateV1"},
+        }
+    )
+    return client
+
+
+@pytest.mark.asyncio
+async def test_a_honeypot_verdict_overrides_a_provider_that_says_sellable():
+    with patch.object(ScamDatabase, "fetch_token_security", new=AsyncMock()):
+        data = await HoneypotService(_simulated(True, "eth_simulateV1")).fetch_honeypot_data(
+            TOKEN, chain_id=4663
+        )
+    assert data["is_honeypot"] is True
+    assert data["can_sell"] is False
+    assert data["field_providers"]["can_sell"] == "eth_simulateV1"
+
+
+@pytest.mark.asyncio
+async def test_an_unsellable_verdict_keeps_its_own_provider():
+    with patch.object(ScamDatabase, "fetch_token_security", new=AsyncMock()):
+        data = await HoneypotService(_simulated(False, "another provider")).fetch_honeypot_data(
+            TOKEN, chain_id=4663
+        )
+    assert data["can_sell"] is False
+    assert data["field_providers"]["can_sell"] == "another provider"

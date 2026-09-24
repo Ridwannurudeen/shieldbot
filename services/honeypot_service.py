@@ -100,10 +100,6 @@ class HoneypotService:
 
         if (not data['simulation_failed'] and simulation_success is not False
                 and data['is_honeypot'] is not None):
-            # A honeypot verdict is a failed sell, whatever tax was measured on the way.
-            if data['is_honeypot'] and data['can_sell'] is None:
-                data['can_sell'] = False
-                data['field_providers']['can_sell'] = data['field_providers']['is_honeypot']
             for action, tax in (('can_buy', 'buy_tax'), ('can_sell', 'sell_tax')):
                 if data[action] is None and data[tax] is not None:
                     data[action] = data[tax] < 100
@@ -125,6 +121,12 @@ class HoneypotService:
             except Exception as e:
                 logger.error('GoPlus fallback failed for %s: %s', address, type(e).__name__)
                 reasons.append(f'GoPlus fallback failed ({type(e).__name__})')
+
+        # A honeypot verdict is a failed sell, whatever tax or sellability a provider reported with it
+        # (the Robinhood simulator reports a sell that paid out nothing as sellable at 100% tax).
+        if data['is_honeypot'] is True and data['can_sell'] is not False:
+            data['can_sell'] = False
+            data['field_providers']['can_sell'] = data['field_providers']['is_honeypot']
 
         if data['simulation_failed']:
             if data['can_sell'] is True:
