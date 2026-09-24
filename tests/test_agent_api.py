@@ -202,6 +202,17 @@ def test_chat_binds_history_to_the_install_id_not_the_ip(client):
     assert advisor.chat.await_args.args[0] == bound_id
 
 
+def test_side_panel_sends_its_install_id_with_chat():
+    """The side panel's chat request carries its per-install random id, the header the server keys history by."""
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "extension" / "sidepanel.js").read_text(encoding="utf-8")
+    assert "chatUserId = crypto.randomUUID();" in source
+    chat_fetch = source[source.index("/api/agent/chat"):]
+    chat_fetch = chat_fetch[:chat_fetch.index("});")]
+    assert '"X-Install-Id": chatUserId' in chat_fetch
+
+
 @pytest.mark.parametrize("install_id", ["", "short", "x" * 129, "has space in it here", "10.0.0.1:user-ip-look"])
 def test_chat_rejects_a_malformed_install_id(client, install_id):
     import api as api_module
