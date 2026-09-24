@@ -94,7 +94,7 @@ def test_the_seed_holds_only_independently_sourced_malicious_labels():
         assert item.sources and item.labeled
         for source in item.sources:
             assert source["provider"].lower() not in SCORING_PROVIDERS
-            assert source["url"].startswith("https://") and source["retrieved"] == "2026-09-24"
+            assert source["url"].startswith("https://") and source["retrieved"] >= item.labeled
     assert {e.address for e in entries if e.category == "impostor_token"} == IMPOSTORS
 
 
