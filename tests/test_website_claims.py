@@ -242,10 +242,17 @@ def test_built_landing_copies_the_current_public_files(name):
 
 def test_built_landing_bundle_contains_the_current_faq():
     bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
-    questions = re.findall(r'^\s+q: "([^"]+)",', read(COMPONENTS / "FAQ.tsx"), re.MULTILINE)
-    assert bundle and questions
+    faq = read(COMPONENTS / "FAQ.tsx")
+    questions = re.findall(r'^\s+q: "([^"]+)",', faq, re.MULTILINE)
+    answers = re.findall(r'^\s+a: "([^"]+)",', faq, re.MULTILINE)
+    assert bundle and questions and len(answers) == len(questions)
     for question in questions:
         assert question in bundle, f"landing bundle is stale: missing FAQ question {question!r}"
+    for answer in answers:
+        assert answer in bundle, f"landing bundle is stale: missing FAQ answer {answer[:60]!r}"
+    # Every mempool chain count the built site shows (FAQ, chains section, roadmap) is the monitor's.
+    stated = re.findall(r"\b(\d+)[ -]chains?\s+(?:with a public\s+mempool|mempool)", bundle)
+    assert stated and {int(n) for n in stated} == {mempool_chain_count()}
 
 
 def test_built_dashboard_contains_the_current_source_strings():

@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
@@ -12,8 +13,9 @@ from web3 import Web3
 
 logger = logging.getLogger(__name__)
 
-# Preserve existing monitoring coverage; new chains require explicit support.
-PENDING_TRANSACTION_CHAINS = frozenset({56, 1, 8453, 42161, 137, 10, 204})
+# Chains whose RPC serves a public mempool through txpool_content. Base, Arbitrum, Optimism and
+# Robinhood Chain reject txpool calls; their sequencers keep no public mempool to watch.
+PENDING_TRANSACTION_CHAINS = frozenset({56, 1, 137, 204})
 
 
 def supports_pending_transactions(chain_id: int) -> bool:
@@ -96,6 +98,11 @@ class MempoolMonitor:
 
         # Chains to monitor (only chains with txpool or pending block support)
         self._monitored_chains: Set[int] = set()
+        # Chains whose RPC answered "pending" with a sealed block: warned about once, not asked again.
+        self._sealed_pending_chains: Set[int] = set()
+        # Monitored chains whose last poll read neither a txpool nor a genuine pending block. Their
+        # mempool is unknown, so they must not be reported as free of threats.
+        self._unobservable_chains: Set[int] = set()
 
         # Stats: held in memory, so they restart from zero with the process.
         self._counting_since = time.time()
@@ -116,6 +123,8 @@ class MempoolMonitor:
         self._monitored_chains = {
             chain_id for chain_id in requested if supports_pending_transactions(chain_id)
         }
+        # Until a chain's first poll reads something, nothing is known about its mempool.
+        self._unobservable_chains = set(self._monitored_chains)
         if not self._monitored_chains:
             return
         self._running = True
@@ -123,15 +132,16 @@ class MempoolMonitor:
         logger.info(f"MempoolMonitor started for chains: {self._monitored_chains}")
 
     async def stop(self):
-        """Stop monitoring."""
+        """Stop monitoring. A monitor that never started (the Telegram bot's) has nothing to stop."""
+        if not self._task:
+            return
         self._running = False
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-            self._task = None
+        self._task.cancel()
+        try:
+            await self._task
+        except asyncio.CancelledError:
+            pass
+        self._task = None
         logger.info("MempoolMonitor stopped")
 
     async def _monitor_loop(self):
@@ -141,8 +151,10 @@ class MempoolMonitor:
         while self._running:
             try:
                 for chain_id in self._monitored_chains:
+                    started = time.monotonic()
                     await self._poll_pending(chain_id)
                     self._prune_stale(chain_id)
+                    logger.debug("Polled chain %s in %.2f s", chain_id, time.monotonic() - started)
                 await asyncio.sleep(2)  # Poll every 2 seconds
             except asyncio.CancelledError:
                 break
@@ -164,6 +176,10 @@ class MempoolMonitor:
             if not pending_txs:
                 # Fallback: get pending block
                 pending_txs = await self._get_pending_block(w3, chain_id)
+            if pending_txs is None:
+                self._unobservable_chains.add(chain_id)
+                return
+            self._unobservable_chains.discard(chain_id)
 
             for tx in pending_txs:
                 if tx.tx_hash not in self._pending[chain_id]:
@@ -172,16 +188,23 @@ class MempoolMonitor:
                     await self._analyze_pending_tx(tx)
 
         except Exception as e:
+            self._unobservable_chains.add(chain_id)
             logger.debug("Pending poll failed for chain %s: %s", chain_id, type(e).__name__)
 
     async def _get_txpool_content(self, w3: Web3, chain_id: int) -> List[PendingTx]:
-        """Fetch pending txs via txpool_content RPC."""
+        """Fetch pending txs via txpool_content RPC.
+
+        Ethereum's txpool runs to tens of megabytes, so the fetch, the parse and the PendingTx build
+        all run in the executor; the event loop only receives the finished list.
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._read_txpool_content, w3, chain_id)
+
+    @staticmethod
+    def _read_txpool_content(w3: Web3, chain_id: int) -> List[PendingTx]:
         txs = []
         try:
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None, w3.provider.make_request, "txpool_content", []
-            )
+            result = w3.provider.make_request("txpool_content", [])
             pending = result.get("result", {}).get("pending", {})
             for sender, nonces in pending.items():
                 for nonce, tx_data in nonces.items():
@@ -198,27 +221,46 @@ class MempoolMonitor:
             pass
         return txs
 
-    async def _get_pending_block(self, w3: Web3, chain_id: int) -> List[PendingTx]:
-        """Fetch pending txs via eth_getBlockByNumber('pending')."""
+    async def _get_pending_block(self, w3: Web3, chain_id: int) -> Optional[List[PendingTx]]:
+        """Fetch pending txs via eth_getBlockByNumber('pending').
+
+        Returns None when no genuine pending block was read (the call failed, or the RPC answered
+        with a sealed block), which leaves the chain's mempool unobserved.
+        """
+        if chain_id in self._sealed_pending_chains:
+            return None
         txs = []
         try:
             loop = asyncio.get_event_loop()
             block = await loop.run_in_executor(
                 None, w3.eth.get_block, 'pending', True
             )
+            # Some RPCs (the public BNB Chain and opBNB ones) answer "pending" with a recent sealed
+            # block. A genuine pending block has no hash yet; a sealed one holds only mined
+            # transactions, which can no longer be front-run, so it is not read as a mempool.
+            if block.get("hash") is not None:
+                self._sealed_pending_chains.add(chain_id)
+                logger.warning(
+                    "Chain %s answers 'pending' with a sealed block; its pending-block fallback is skipped",
+                    chain_id,
+                )
+                return None
             for tx in (block.get("transactions") or []):
-                if isinstance(tx, dict):
+                # web3 returns each transaction as an AttributeDict, which is a Mapping but not a dict.
+                if isinstance(tx, Mapping):
                     txs.append(PendingTx(
-                        tx_hash=tx.get("hash", b"").hex() if isinstance(tx.get("hash"), bytes) else str(tx.get("hash", "")),
+                        tx_hash=Web3.to_hex(tx["hash"]) if isinstance(tx.get("hash"), bytes) else str(tx.get("hash", "")),
                         from_addr=(tx.get("from") or "").lower(),
                         to_addr=(tx.get("to") or "").lower(),
                         value=tx.get("value", 0),
                         gas_price=tx.get("gasPrice", 0),
-                        data=(tx.get("input") or "0x").hex() if isinstance(tx.get("input"), bytes) else str(tx.get("input", "0x")),
+                        # Web3.to_hex gives a 0x-prefixed string on every hexbytes version, and "0x" for the
+                        # empty input of a plain transfer.
+                        data=Web3.to_hex(tx["input"]) if isinstance(tx.get("input"), bytes) else str(tx.get("input", "0x")),
                         chain_id=chain_id,
                     ))
         except Exception:
-            pass
+            return None
         return txs
 
     async def _analyze_pending_tx(self, tx: PendingTx):
@@ -410,6 +452,7 @@ class MempoolMonitor:
             **self._stats,
             'counting_since': self._counting_since,
             'monitored_chains': list(self._monitored_chains),
+            'unobservable_chains': sorted(self._unobservable_chains),
             'pending_count': {
                 cid: len(txs) for cid, txs in self._pending.items()
             },

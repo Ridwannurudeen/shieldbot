@@ -1,5 +1,7 @@
 """Token identification failures must not bypass token analysis."""
 
+import asyncio
+import threading
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -183,3 +185,63 @@ async def test_unknown_selector_exemption_requires_confirmed_non_token_or_verifi
     exempt = is_token is False or is_verified is True
     assert result.score == (20 if not exempt and is_verified is False else 0)
     assert result.data['status'] == ('unknown' if not exempt and is_verified is None else 'ok')
+
+
+def _held_until(released, result):
+    """A provider call that returns only after a coroutine on the event loop has released it.
+
+    If the call ran on the event loop thread, that coroutine could not run, the wait would time out
+    and the call would fail.
+    """
+    def call(*args, **kwargs):
+        if not released.wait(timeout=2):
+            raise TimeoutError('the provider call held the event loop')
+        return result
+    return call
+
+
+async def _release(released):
+    released.set()
+
+
+@pytest.mark.asyncio
+async def test_symbol_lookup_leaves_the_event_loop_free(identification_client):
+    released = threading.Event()
+    w3 = identification_client.get_web3()
+    w3.eth.contract.return_value.functions.symbol.return_value.call.side_effect = _held_until(released, 'TOKEN')
+    releaser = asyncio.create_task(_release(released))
+    assert await identification_client.is_token_contract(ADDRESS) is True
+    await releaser
+
+
+@pytest.mark.asyncio
+async def test_empty_reply_check_leaves_the_event_loop_free(identification_client):
+    released = threading.Event()
+    w3 = identification_client.get_web3()
+    w3.eth.contract.return_value.functions.symbol.return_value.call.side_effect = BadFunctionCallOutput('Empty reply')
+    w3.eth.call.side_effect = _held_until(released, b'')
+    releaser = asyncio.create_task(_release(released))
+    assert await identification_client.is_token_contract(ADDRESS) is False
+    await releaser
+
+
+@pytest.mark.asyncio
+async def test_transfer_check_leaves_the_event_loop_free(identification_client):
+    released = threading.Event()
+    w3 = identification_client.get_web3()
+    w3.eth.contract.return_value.functions.decimals.return_value.call.side_effect = _held_until(released, 18)
+    releaser = asyncio.create_task(_release(released))
+    assert await identification_client.can_transfer_token(ADDRESS) is True
+    await releaser
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', [
+    ContractLogicError('execution reverted'),
+    BadFunctionCallOutput('Empty reply'),
+    TimeoutError('RPC timeout'),
+])
+async def test_transfer_check_failure_is_still_false(identification_client, failure):
+    w3 = identification_client.get_web3()
+    w3.eth.contract.return_value.functions.decimals.return_value.call.side_effect = failure
+    assert await identification_client.can_transfer_token(ADDRESS) is False

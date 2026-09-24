@@ -157,6 +157,7 @@ async def lifespan(app: FastAPI):
     container = ServiceContainer(settings)
     _bind_globals(container)
     await container.startup()
+    await container.start_mempool_monitor()
     container.verdict_publisher.start()
 
     # Initialize RPC proxy if enabled

@@ -13,6 +13,8 @@ import logging
 import re
 import traceback
 
+import aiohttp
+
 try:
     from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
     from telegram.error import BadRequest, ChatMigrated, Forbidden, NetworkError, RetryAfter, TelegramError
@@ -33,6 +35,7 @@ from core.container import ServiceContainer
 from core.telegram_formatter import format_full_report
 from core.extension_formatter import is_scan_incomplete
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
+from services.mempool_service import supports_pending_transactions
 from utils.web3_client import UnsupportedChainError
 from utils.chain_info import (
     get_chain_name, get_explorer_url, get_dexscreener_slug,
@@ -68,6 +71,13 @@ risk_engine = container.risk_engine
 # In-memory scan cache (address -> {result, timestamp})
 _scan_cache = {}
 CACHE_TTL = 300  # 5 minutes
+
+# /threats reads the API's mempool monitor. Every bot request reaches the API from one address and
+# so shares one IP rate-limit bucket there; a busy chat reuses a snapshot instead of using it up.
+MEMPOOL_CACHE_SECONDS = 15
+# ('alerts', chain filter or None) or 'stats' -> (fetched_at, response body). Stats do not depend on
+# the chain filter, so one read serves every filter.
+_mempool_cache = {}
 
 # Robinhood Chain launch alerts. The API's hunter records launch outcomes in the shared
 # database; this process queues alerts for subscribed chats there and sends them.
@@ -481,6 +491,32 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text("❌ Error scanning approvals. Please try again later.")
 
 
+async def _read_mempool_route(session, key, path, params=None):
+    """GET one API mempool route, reusing a read of it younger than MEMPOOL_CACHE_SECONDS.
+
+    A failed read raises and is not kept.
+    """
+    cached = _mempool_cache.get(key)
+    if cached and time.monotonic() - cached[0] < MEMPOOL_CACHE_SECONDS:
+        return cached[1]
+    async with session.get(f"{settings.shieldbot_api_url.rstrip('/')}{path}", params=params) as resp:
+        resp.raise_for_status()
+        body = await resp.json()
+    _mempool_cache[key] = (time.monotonic(), body)
+    return body
+
+
+async def _fetch_mempool_data(chain_id):
+    """Read mempool alerts and counters from the API, whose process runs the only mempool monitor."""
+    params = {'limit': 10}
+    if chain_id is not None:
+        params['chain_id'] = chain_id
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+        alerts = (await _read_mempool_route(session, ('alerts', chain_id), '/api/mempool/alerts', params))['alerts']
+        stats = await _read_mempool_route(session, 'stats', '/api/mempool/stats')
+    return alerts, stats
+
+
 async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /threats command — show live mempool threat alerts."""
     # Optional chain filter
@@ -496,11 +532,21 @@ async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except UnsupportedChainError as e:
             await update.message.reply_text(str(e))
             return
+        if not supports_pending_transactions(chain_id):
+            await update.message.reply_text(
+                f"Mempool monitoring is not available on {get_chain_name(chain_id)}: it has no public "
+                "mempool. Contract scans still cover it."
+            )
+            return
 
     try:
-        alerts = container.mempool_monitor.get_alerts(chain_id=chain_id, limit=10)
-        stats = container.mempool_monitor.get_stats()
+        alerts, stats = await _fetch_mempool_data(chain_id)
+    except Exception as e:
+        logger.error(f"Mempool data unavailable for /threats: {type(e).__name__}")
+        await update.message.reply_text("❌ Live mempool data is unavailable right now. Please try again later.")
+        return
 
+    try:
         response = "🔍 **Mempool Threat Monitor**\n\n"
 
         # Stats summary
@@ -510,9 +556,14 @@ async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response += f"• Frontruns detected: {stats.get('frontruns_detected', 0)}\n"
         response += f"• Suspicious approvals: {stats.get('suspicious_approvals', 0)}\n"
         monitored = stats.get('monitored_chains', [])
-        if monitored:
-            chain_names = [get_chain_name(c) for c in monitored]
-            response += f"• Monitoring: {', '.join(chain_names)}\n"
+        # A chain whose mempool the API could not read is unknown, never clear. Stats that do not
+        # say which chains were read leave every chain unknown.
+        unobservable = stats.get('unobservable_chains', monitored)
+        observed = [c for c in monitored if c not in unobservable]
+        if observed:
+            response += f"• Monitoring: {', '.join(get_chain_name(c) for c in observed)}\n"
+        if unobservable:
+            response += f"• Live data unavailable: {', '.join(get_chain_name(c) for c in unobservable)}\n"
 
         # Recent alerts
         if alerts:
@@ -527,8 +578,14 @@ async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if alert.get('attacker_addr'):
                     response += f"  Attacker: `{alert['attacker_addr'][:16]}...`\n"
         else:
-            filter_text = f" on {get_chain_name(chain_id)}" if chain_id else ""
-            response += f"\n✅ No recent threats detected{filter_text}.\n"
+            watched = [chain_id] if chain_id else monitored
+            clear = [c for c in watched if c in observed]
+            unknown = [c for c in watched if c not in observed]
+            if clear:
+                response += f"\n✅ No recent threats detected on {', '.join(get_chain_name(c) for c in clear)}.\n"
+            if unknown or not watched:
+                where = f" for {', '.join(get_chain_name(c) for c in unknown)}" if unknown else ""
+                response += f"\n⚪ Live mempool data is not available{where} right now, so no result is shown.\n"
 
         await update.message.reply_text(
             response, parse_mode='Markdown', disable_web_page_preview=True,

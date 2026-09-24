@@ -114,6 +114,7 @@ def bot_chain_functions():
     import asyncio
     from utils.web3_client import UnsupportedChainError, Web3Client
     from core.extension_formatter import is_scan_incomplete
+    from services.mempool_service import supports_pending_transactions
 
     # Load the real menu handlers without importing the optional Telegram package.
     tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
@@ -162,6 +163,8 @@ def bot_chain_functions():
         'web3_client': client,
         'get_chain_name': get_chain_name,
         'parse_chain_prefix': parse_chain_prefix,
+        'supports_pending_transactions': supports_pending_transactions,
+        '_fetch_mempool_data': AsyncMock(return_value=([], {})),
     }
     exec(compile(module, 'bot.py', 'exec'), namespace)
     return namespace
@@ -303,8 +306,7 @@ async def test_bot_threats_rejects_unknown_selection_before_query(bot_chain_func
     ns = bot_chain_functions
     update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock()))
     await ns['threats_command'](update, SimpleNamespace(args=[argument]))
-    ns['container'].mempool_monitor.get_alerts.assert_not_called()
-    ns['container'].mempool_monitor.get_stats.assert_not_called()
+    ns['_fetch_mempool_data'].assert_not_awaited()
     assert 'Unsupported' in update.message.reply_text.call_args.args[0]
 
 
@@ -649,7 +651,7 @@ async def test_bot_never_sends_or_logs_provider_error_text(bot_chain_functions, 
     error = RuntimeError('https://rpc.example/v2/SYNTHETIC_KEY_123')
     ns['settings'] = SimpleNamespace(bscscan_api_key='', etherscan_api_key='')
     ns['container'].rescue_service.scan_approvals.side_effect = error
-    ns['container'].mempool_monitor.get_alerts.side_effect = error
+    ns['_fetch_mempool_data'].side_effect = error
     ns['container'].campaign_service.get_entity_graph = AsyncMock(side_effect=error)
     ns['container'].registry.run_all.side_effect = error
     ns['container'].advisor.chat.side_effect = error

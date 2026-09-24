@@ -9,7 +9,7 @@ const phases = [
       "Chrome extension (phishing warnings, transaction firewall)",
       "Telegram bot (12 commands)",
       "REST API + TypeScript SDK",
-      "7-chain mempool monitoring",
+      "4-chain mempool monitoring",
       "Live threat dashboard",
     ],
   },

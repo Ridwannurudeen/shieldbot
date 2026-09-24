@@ -3,6 +3,7 @@ Web3 Client — thin router that delegates to chain-specific adapters.
 Preserves the original interface for backward compatibility.
 """
 
+import asyncio
 import logging
 from typing import Dict, Optional, Tuple
 from web3 import Web3
@@ -90,7 +91,9 @@ class Web3Client:
         from web3.exceptions import BadFunctionCallOutput, ContractLogicError, OffchainLookup
 
         w3 = self.get_web3(chain_id)
-        try:
+
+        # The web3 calls are synchronous, so they run in the executor and never block the event loop.
+        def identify() -> bool:
             contract = w3.eth.contract(
                 address=Web3.to_checksum_address(address), abi=self.erc20_abi,
             )
@@ -103,6 +106,9 @@ class Web3Client:
                     return False
                 raise
             return True
+
+        try:
+            return await asyncio.get_running_loop().run_in_executor(None, identify)
         except Exception as e:
             if isinstance(e, ContractLogicError) and not isinstance(e, OffchainLookup):
                 return False
@@ -122,11 +128,15 @@ class Web3Client:
 
     async def can_transfer_token(self, address: str, chain_id: int = 56) -> bool:
         w3 = self.get_web3(chain_id)
-        try:
+
+        def read_decimals():
             contract = w3.eth.contract(
                 address=Web3.to_checksum_address(address), abi=self.erc20_abi,
             )
             contract.functions.decimals().call()
+
+        try:
+            await asyncio.get_running_loop().run_in_executor(None, read_decimals)
             return True
         except Exception:
             return False

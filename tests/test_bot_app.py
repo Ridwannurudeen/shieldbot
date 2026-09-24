@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import logging
 import re
+import socket
 import sys
 from datetime import datetime, timezone
 
@@ -11,6 +12,7 @@ import pytest
 import pytest_asyncio
 from unittest.mock import MagicMock, AsyncMock
 from types import SimpleNamespace
+from aiohttp import web
 from telegram import Chat, Message, MessageEntity, Update
 from telegram.error import BadRequest, ChatMigrated, Forbidden, InvalidToken, RetryAfter, TimedOut
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler
@@ -146,6 +148,8 @@ class TestLifecycleHooks:
         assert stopped.is_set()
         assert bot_module._launch_alert_task.cancelled()
         container.startup.assert_awaited_once_with()
+        # Only the API process polls mempools; the bot reads the API's monitor.
+        container.start_mempool_monitor.assert_not_called()
         application.bot.set_my_commands.assert_awaited_once_with([
             ("start", "Welcome message & quick start"),
             ("scan", "Scan a contract for risks"),
@@ -285,6 +289,219 @@ class TestChainPrefixHelp:
         prefixes = re.findall(r"`([a-z]+):0x\.\.\.`", hints[0])
         assert all(prefix in CHAIN_PREFIXES for prefix in prefixes)
         assert {CHAIN_PREFIXES[prefix] for prefix in prefixes} == set(CHAIN_PREFIXES.values())
+
+
+# --- /threats reads the API's mempool monitor ---------------------------------------------
+
+MEMPOOL_ALERT = {
+    "alert_type": "suspicious_approval", "severity": "HIGH",
+    "description": "Unlimited token approval pending", "victim_tx": "0x" + "01" * 32,
+    "attacker_tx": None, "attacker_addr": "0x" + "11" * 20, "target_token": "0x" + "22" * 20,
+    "chain_id": 56, "created_at": 1000.0,
+}
+MEMPOOL_STATS = {
+    "total_pending_seen": 12345, "sandwiches_detected": 2, "frontruns_detected": 0,
+    "suspicious_approvals": 7, "counting_since": 900.0, "monitored_chains": [56, 1],
+    "unobservable_chains": [], "pending_count": {"56": 10, "1": 20}, "active_alerts": 1,
+}
+
+
+@pytest_asyncio.fixture
+async def mempool_api():
+    """The API's two mempool routes, served on a local port."""
+    api = SimpleNamespace(requests=[], status=200, alerts=[MEMPOOL_ALERT], stats=MEMPOOL_STATS)
+
+    async def alerts(request):
+        api.requests.append((request.path, dict(request.query)))
+        return web.json_response({"alerts": api.alerts, "count": len(api.alerts)}, status=api.status)
+
+    async def stats(request):
+        api.requests.append((request.path, dict(request.query)))
+        return web.json_response(api.stats, status=api.status)
+
+    app = web.Application()
+    app.router.add_get("/api/mempool/alerts", alerts)
+    app.router.add_get("/api/mempool/stats", stats)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    await web.TCPSite(runner, "127.0.0.1", 0).start()
+    api.url = "http://127.0.0.1:%d" % runner.addresses[0][1]
+    try:
+        yield api
+    finally:
+        await runner.cleanup()
+
+
+def _threats_update():
+    update = MagicMock(spec=Update)
+    update.message.reply_text = AsyncMock()
+    return update
+
+
+class TestThreatsCommand:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("args, query", [
+        ([], {"limit": "10"}),
+        (["56"], {"limit": "10", "chain_id": "56"}),
+    ])
+    async def test_shows_the_api_monitor_alerts_and_counters(self, bot_module, monkeypatch, mempool_api, args, query):
+        monkeypatch.setattr(bot_module, "settings", SimpleNamespace(shieldbot_api_url=mempool_api.url))
+        update = _threats_update()
+
+        await bot_module.threats_command(update, SimpleNamespace(args=args))
+
+        assert mempool_api.requests == [("/api/mempool/alerts", query), ("/api/mempool/stats", {})]
+        text = update.message.reply_text.await_args.args[0]
+        assert "• Pending txs seen: 12,345\n" in text
+        assert "• Suspicious approvals: 7\n" in text
+        assert "• Monitoring: BSC, Ethereum\n" in text
+        assert "🔴 **Suspicious Approval** (BSC)\n  Unlimited token approval pending\n" in text
+        assert not bot_module.container.mempool_monitor.mock_calls
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("args, unobservable, lines, absent", [
+        ([], [], ["• Monitoring: BSC, Ethereum\n", "✅ No recent threats detected on BSC, Ethereum.\n"],
+         ["unavailable", "not available"]),
+        ([], [56], [
+            "• Monitoring: Ethereum\n", "• Live data unavailable: BSC\n",
+            "✅ No recent threats detected on Ethereum.\n",
+            "⚪ Live mempool data is not available for BSC right now, so no result is shown.\n",
+        ], ["• Monitoring: BSC", "detected on BSC"]),
+        (["56"], [56], [
+            "• Monitoring: Ethereum\n", "• Live data unavailable: BSC\n",
+            "⚪ Live mempool data is not available for BSC right now, so no result is shown.\n",
+        ], ["No recent threats"]),
+        ([], [56, 1], [
+            "• Live data unavailable: BSC, Ethereum\n",
+            "⚪ Live mempool data is not available for BSC, Ethereum right now, so no result is shown.\n",
+        ], ["• Monitoring", "No recent threats"]),
+    ], ids=["all-observed", "one-unobservable", "filtered-to-unobservable", "none-observed"])
+    async def test_a_chain_whose_mempool_cannot_be_read_is_never_shown_as_clear(
+        self, bot_module, monkeypatch, mempool_api, args, unobservable, lines, absent,
+    ):
+        monkeypatch.setattr(bot_module, "settings", SimpleNamespace(shieldbot_api_url=mempool_api.url))
+        mempool_api.alerts = []
+        mempool_api.stats = {**MEMPOOL_STATS, "unobservable_chains": unobservable}
+        update = _threats_update()
+
+        await bot_module.threats_command(update, SimpleNamespace(args=args))
+
+        text = update.message.reply_text.await_args.args[0]
+        for line in lines:
+            assert line in text
+        for fragment in absent:
+            assert fragment not in text
+
+    @pytest.mark.asyncio
+    async def test_stats_that_do_not_say_which_chains_were_read_leave_them_all_unknown(
+        self, bot_module, monkeypatch, mempool_api,
+    ):
+        monkeypatch.setattr(bot_module, "settings", SimpleNamespace(shieldbot_api_url=mempool_api.url))
+        mempool_api.alerts = []
+        mempool_api.stats = {k: v for k, v in MEMPOOL_STATS.items() if k != "unobservable_chains"}
+        update = _threats_update()
+
+        await bot_module.threats_command(update, SimpleNamespace(args=[]))
+
+        text = update.message.reply_text.await_args.args[0]
+        assert "No recent threats" not in text
+        assert "⚪ Live mempool data is not available for BSC, Ethereum right now" in text
+
+    @pytest.mark.asyncio
+    async def test_repeated_calls_reuse_alerts_per_chain_filter_and_one_stats_read(
+        self, bot_module, monkeypatch, mempool_api,
+    ):
+        monkeypatch.setattr(bot_module, "settings", SimpleNamespace(shieldbot_api_url=mempool_api.url))
+        replies = []
+        for args in ([], [], ["56"], ["56"]):
+            update = _threats_update()
+            await bot_module.threats_command(update, SimpleNamespace(args=args))
+            replies.append(update.message.reply_text.await_args.args[0])
+
+        assert bot_module.MEMPOOL_CACHE_SECONDS == 15
+        assert mempool_api.requests == [
+            ("/api/mempool/alerts", {"limit": "10"}), ("/api/mempool/stats", {}),
+            ("/api/mempool/alerts", {"limit": "10", "chain_id": "56"}),
+        ]
+        assert replies[0] == replies[1] and replies[2] == replies[3]
+        assert "• Pending txs seen: 12,345\n" in replies[1]
+
+    @pytest.mark.asyncio
+    async def test_an_expired_snapshot_is_fetched_again(self, bot_module, monkeypatch, mempool_api):
+        monkeypatch.setattr(bot_module, "settings", SimpleNamespace(shieldbot_api_url=mempool_api.url))
+        monkeypatch.setattr(bot_module, "MEMPOOL_CACHE_SECONDS", 0)
+
+        for _ in range(2):
+            await bot_module.threats_command(_threats_update(), SimpleNamespace(args=[]))
+
+        assert [path for path, _ in mempool_api.requests] == ["/api/mempool/alerts", "/api/mempool/stats"] * 2
+
+    @pytest.mark.asyncio
+    async def test_a_failed_read_is_not_reused(self, bot_module, monkeypatch, mempool_api):
+        monkeypatch.setattr(bot_module, "settings", SimpleNamespace(shieldbot_api_url=mempool_api.url))
+        mempool_api.status = 503
+        failed = _threats_update()
+        await bot_module.threats_command(failed, SimpleNamespace(args=[]))
+        mempool_api.status = 200
+        answered = _threats_update()
+        await bot_module.threats_command(answered, SimpleNamespace(args=[]))
+
+        failed.message.reply_text.assert_awaited_once_with(
+            "❌ Live mempool data is unavailable right now. Please try again later."
+        )
+        assert "• Pending txs seen: 12,345\n" in answered.message.reply_text.await_args.args[0]
+        assert [path for path, _ in mempool_api.requests] == [
+            "/api/mempool/alerts", "/api/mempool/alerts", "/api/mempool/stats",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_trailing_slash_on_the_api_url_is_ignored(self, bot_module, monkeypatch, mempool_api):
+        monkeypatch.setattr(bot_module, "settings", SimpleNamespace(shieldbot_api_url=mempool_api.url + "/"))
+        update = _threats_update()
+
+        await bot_module.threats_command(update, SimpleNamespace(args=[]))
+
+        assert mempool_api.requests == [("/api/mempool/alerts", {"limit": "10"}), ("/api/mempool/stats", {})]
+        assert "• Pending txs seen: 12,345\n" in update.message.reply_text.await_args.args[0]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("api_up", [True, False], ids=["api-error", "api-down"])
+    async def test_says_unavailable_when_the_api_does_not_answer(self, bot_module, monkeypatch, mempool_api, api_up):
+        if api_up:
+            mempool_api.status = 503
+            url = mempool_api.url
+        else:
+            with socket.socket() as unused:
+                unused.bind(("127.0.0.1", 0))
+                url = "http://127.0.0.1:%d" % unused.getsockname()[1]
+        monkeypatch.setattr(bot_module, "settings", SimpleNamespace(shieldbot_api_url=url))
+        update = _threats_update()
+
+        await bot_module.threats_command(update, SimpleNamespace(args=[]))
+
+        update.message.reply_text.assert_awaited_once_with(
+            "❌ Live mempool data is unavailable right now. Please try again later."
+        )
+        assert not bot_module.container.mempool_monitor.mock_calls
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("chain, name", [
+        ("4663", "Robinhood Chain"), ("rh", "Robinhood Chain"),
+        ("base", "Base"), ("42161", "Arbitrum"), ("op", "Optimism"),
+    ])
+    async def test_chain_without_a_public_mempool_is_answered_without_asking_the_api(
+        self, bot_module, monkeypatch, mempool_api, chain, name,
+    ):
+        monkeypatch.setattr(bot_module, "settings", SimpleNamespace(shieldbot_api_url=mempool_api.url))
+        update = _threats_update()
+
+        await bot_module.threats_command(update, SimpleNamespace(args=[chain]))
+
+        assert mempool_api.requests == []
+        update.message.reply_text.assert_awaited_once_with(
+            f"Mempool monitoring is not available on {name}: it has no public mempool. "
+            "Contract scans still cover it."
+        )
 
 
 # --- Robinhood Chain launch alerts ---------------------------------------------------------
