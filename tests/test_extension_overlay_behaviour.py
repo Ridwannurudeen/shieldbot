@@ -530,7 +530,8 @@ def test_proceed_does_nothing_while_the_overlay_is_not_visible(kind):
   assert.deepEqual(verdicts(), []);
   assert(overlay(), 'the overlay closed');
   // The button does not just go dead: the dialog says why.
-  assert.match(byId('shieldai-covered').textContent, /covering or altering this warning/);
+  assert.match(byId('shieldai-covered').textContent,
+    /covering or altering this warning, so the button to continue is disabled until the warning is fully visible/);
   reportVisibility(true);
   userClick(byId('shieldai-proceed'));
   await flush();

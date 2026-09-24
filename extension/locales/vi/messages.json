@@ -149,7 +149,7 @@
   "overlayUnparseableTypedNote": "ShieldAI không đọc được dữ liệu có cấu trúc này nên không thể cho bạn thấy bạn sẽ ký gì. Hãy từ chối trừ khi bạn hoàn toàn tin tưởng trang web.",
   "uncheckableNotice": "ShieldAI đã từ chối một yêu cầu ví từ khung nhúng hoặc cửa sổ bật lên này vì không thể kiểm tra yêu cầu ở đây. Hãy mở dApp trong thẻ riêng.",
   "legacyRefusedNotice": "Trang web này đã dùng một phương thức ví cũ mà ShieldAI không thể kiểm tra, nên yêu cầu đã bị từ chối.",
-  "overlayCoveredNote": "Trang web đang che hoặc thay đổi cảnh báo này, nên nút Tiếp tục bị tắt cho đến khi cảnh báo hiển thị đầy đủ.",
+  "overlayCoveredNote": "Trang web đang che hoặc thay đổi cảnh báo này, nên nút để tiếp tục bị tắt cho đến khi cảnh báo hiển thị đầy đủ.",
   "phishingWarning": "Cảnh báo ShieldBot:",
   "phishingFlagged": "đã bị gắn cờ là trang web lừa đảo. Ví và tiền của bạn có thể gặp rủi ro.",
   "phishingLeavePage": "Rời trang",
