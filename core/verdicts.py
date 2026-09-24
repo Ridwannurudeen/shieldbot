@@ -119,6 +119,7 @@ def describe(calibration=None) -> dict:
         "agent_verdicts": list(AGENT_VERDICTS),
         "bands": [{"classification": name, "min_score": lowest} for name, lowest in BANDS],
         "signature_bands": [{"classification": name, "min_score": lowest} for name, lowest in SIGNATURE_BANDS],
+        "blind_sign_min": BLIND_SIGN_MIN,
         "risk_level_thresholds": {HIGH: min(high, BLOCK_MIN), MEDIUM: min(medium, CAUTION_MIN)},
         "unknown": "A scan with incomplete coverage has status 'unknown' and is never classified SAFE.",
         "strict_block_score": STRICT_BLOCK_SCORE,
