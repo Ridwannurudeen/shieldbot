@@ -242,6 +242,11 @@ contract_data, honeypot_data, dex_data, ethos_data, token_info = await asyncio.g
 - Bucket: `shieldbot-reports`
 - Public URLs: `https://greenfield-sp.bnbchain.org/view/shieldbot-reports/reports/<id>.json`
 
+#### Provider circuit breakers (`core/circuit_breaker.py`)
+- One breaker per provider and chain, for chains in `utils/chain_info.py` only; a provider whose request names no chain has one breaker. They cover GoPlus token security (`goplus_token`), GoPlus address labels (`goplus_address`), GoPlus phishing (`goplus_phishing`), Sourcify, Blockscout, Etherscan (verification and contract creation), honeypot.is, DexScreener and Token Sniffer.
+- Three failed lookups in a row (a timeout, a connection error, a reply that is not JSON, HTTP 429 or 5xx) open a breaker for 60 seconds, after which one probe goes through and an answer closes it. While it is open nothing is sent: the lookup gets the answer a timeout gives (Unknown, never clean) and counts as failed in the Unknown ledger. `/api/ready` lists every breaker used so far as `ok` or `open`; an open breaker does not make the process unready.
+- An open breaker's refusal is cached on some paths and not on others, on purpose. The GoPlus token-security and address-label lookups keep it for 30 seconds, like any failed lookup, so during an outage each address is asked at most every 30 seconds and a closed breaker is noticed up to 30 seconds late. The explorer lookups (Sourcify and Blockscout) never cache a refusal, so lookups resume as soon as the breaker closes; while Sourcify's breaker is open, no caller waits on a Sourcify lookup already in flight. Etherscan keeps no refusal either. The phishing check holds any no-verdict answer, a refusal included, for 45 seconds per domain.
+
 ---
 
 ### 4. AI Analyzer (LLM-Powered)

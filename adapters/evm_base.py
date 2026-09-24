@@ -254,9 +254,13 @@ class EvmAdapter(ChainAdapter):
         """The chain's explorer and Sourcify together: verified when either says so, unverified
         only when both say not, unknown when one could not be read and the other did not verify.
 
-        Each lookup is awaited for PROVIDER_TIMEOUT (8 s) at most and counts as unknown after it,
-        so verification takes at most about 16 s on a chain with Etherscan, and 8 s on Robinhood
-        Chain, where Sourcify and Blockscout are asked one after the other within one bound.
+        Each source is awaited for PROVIDER_TIMEOUT (8 s) at most and counts as unknown after it.
+        A direct caller such as the structural analyzer waits about 16 s at most on a chain with
+        Etherscan (Etherscan, then Sourcify) and 8 s on Robinhood Chain, where Sourcify and
+        Blockscout share one bound. Approvals and permits get one 8 s window for both sources on
+        every chain: the spender-facts step wraps this call in its own PROVIDER_TIMEOUT, so there a
+        stalled Etherscan leaves verification unknown, and Sourcify's later answer is only cached
+        for a later lookup.
         """
         # Imported here: services imports utils.web3_client, which imports this module's adapters.
         from services.counterparty_service import within_timeout
