@@ -56,7 +56,11 @@ BACKFILL_BLOCKS = 36_000
 # and swap volume is what pushes a range towards the RPC's 10,000-log limit, so anything larger
 # goes through the per-source sweep, which reads no swaps.
 COMBINED_MAX_BLOCKS = 2_000
-HEADER_BATCH = 50
+# eth_getBlockByNumber calls per batch request. The guard counts a batch as one request, but the
+# public RPC rate-limits every call in it. Measured on 2026-09-24 with batches sent about once a
+# second: batches of 50 drew HTTP 429 within a few requests, up to four in a row, enough to open
+# the breaker in the middle of a store; batches of 20 and of 10 drew none in thirty requests.
+HEADER_BATCH = 10
 MAX_ATTEMPTS = 4
 REQUEST_INTERVAL = 0.5
 QUOTE_ASSETS = frozenset({WETH_ADDRESS, "0x" + "0" * 40})
@@ -283,9 +287,9 @@ class LaunchDiscovery:
     async def run(self):
         """Run one bounded sweep over every source.
 
-        A source whose log request fails stops at its last completed chunk. If the launch
-        blocks cannot be confirmed against canonical headers, nothing is written and no
-        cursor moves.
+        A source whose log request fails stops at its last completed chunk. If a launch block
+        cannot be confirmed against its canonical header, only the launches in older blocks are
+        written and no cursor moves past that block.
         """
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
             self._session = session
@@ -379,21 +383,48 @@ class LaunchDiscovery:
     async def _store(self, decoded, progress) -> List[Dict]:
         """Confirm launch blocks against canonical headers, then record launches and move cursors.
 
-        ``progress`` maps each source to (previous cursor, last block covered without a gap). If
-        a header does not match, nothing is written and no cursor moves.
+        ``progress`` maps each source to (previous cursor, last block covered without a gap).
+        Headers are read oldest first. At the first launch block whose header cannot be read or
+        does not match, the launches in older blocks are still recorded and every cursor stops
+        short of that block, so the next read resumes there; then the error is raised. A range
+        too large to confirm in one pass therefore still moves forward instead of being reread
+        from the same cursor forever.
         """
         records = _launch_records(decoded)
-        headers = await self._block_headers({record["block_number"] for record in records})
-        for record in records:
-            header = headers[record["block_number"]]
-            if _hash(header.get("hash")) != record.pop("block_hash"):
-                raise LaunchDiscoveryError("Log block is no longer canonical")
-            record["block_timestamp"] = _quantity(header.get("timestamp"))
-        await self.db.upsert_discovered_launches(CHAIN_ID, records)
+        headers = {}
+        failure = None
+        try:
+            await self._block_headers({record["block_number"] for record in records}, headers)
+        except LaunchDiscoveryError as exc:
+            failure = exc
+        stop = None
+        for record in sorted(records, key=lambda record: record["block_number"]):
+            header = headers.get(record["block_number"])
+            if header is None:
+                stop = record["block_number"]
+                break
+            try:
+                if _hash(header.get("hash")) != record["block_hash"]:
+                    raise LaunchDiscoveryError("Log block is no longer canonical")
+                record["block_timestamp"] = _quantity(header.get("timestamp"))
+            except LaunchDiscoveryError as exc:
+                stop, failure = record["block_number"], exc
+                break
+        confirmed = [record for record in records if stop is None or record["block_number"] < stop]
+        for record in confirmed:
+            del record["block_hash"]
+        await self.db.upsert_discovered_launches(CHAIN_ID, confirmed)
         for name, (cursor, done) in progress.items():
+            if stop is not None:
+                done = min(done, stop - 1)
             if done > cursor:
                 await self.db.set_launch_cursor(CHAIN_ID, name, done)
-        return records
+        if stop is not None:
+            logger.warning(
+                "Launch discovery stopped before block %d: %s", stop, type(failure).__name__
+            )
+            raise failure
+        return confirmed
 
     async def _sweep_source(self, source: LaunchSource, cursor: int, end: int):
         """Read one source up to ``end``, halving a rejected query down to MIN_CHUNK_BLOCKS.
@@ -452,8 +483,12 @@ class LaunchDiscovery:
             raise LaunchDiscoveryError("Malformed eth_getLogs result")
         return result
 
-    async def _block_headers(self, numbers) -> Dict[int, Dict]:
-        headers = {}
+    async def _block_headers(self, numbers, headers: Dict[int, Dict]):
+        """Read the headers of ``numbers`` into ``headers``, oldest first.
+
+        Raises at the first header that cannot be read; the headers read before it stay in
+        ``headers``.
+        """
         ordered = sorted(numbers)
         for offset in range(0, len(ordered), HEADER_BATCH):
             batch = ordered[offset : offset + HEADER_BATCH]
@@ -478,7 +513,6 @@ class LaunchDiscovery:
                 if not isinstance(header, dict) or _quantity(header.get("number")) != number:
                     raise LaunchDiscoveryError("Missing or mismatched block header")
                 headers[number] = header
-        return headers
 
     async def _call(self, method: str, params: list, probe: bool = False):
         body = await self._request(
