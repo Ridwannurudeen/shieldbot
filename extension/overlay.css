@@ -203,6 +203,13 @@
   background: #b91c1c;
 }
 
+.shieldai-strict-note {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #cbd5e1;
+  margin: 10px 0 0;
+}
+
 .shieldai-btn-proceed {
   background: transparent;
   color: #94a3b8;

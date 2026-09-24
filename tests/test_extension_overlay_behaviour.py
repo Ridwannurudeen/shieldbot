@@ -174,6 +174,31 @@ def test_content_script_uses_the_default_api_when_storage_has_no_url():
     )
 
 
+@pytest.mark.parametrize("policy", ["STRICT", "BALANCED"])
+@pytest.mark.parametrize("outcome", ["error", "BLOCK_RECOMMENDED", "CAUTION", "UNKNOWN"])
+def test_strict_mode_removes_proceed_on_errors_and_block_verdicts(policy, outcome):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const [policy, outcome] = JSON.parse(process.argv[1]);
+  storage.policyMode = policy;
+  analyze = async () => outcome === 'error' ? {error: 'API error 429: Too many requests'} : {result: scan(
+    outcome === 'UNKNOWN' ? {status: 'unknown', coverage: {honeypot: 0}, coverage_reasons: {honeypot: 'No provider'}}
+      : {classification: outcome, risk_score: outcome === 'CAUTION' ? 40 : 90})};
+  await intercept('request');
+  const html = overlay().innerHTML;
+  const removed = policy === 'STRICT' && ['error', 'BLOCK_RECOMMENDED'].includes(outcome);
+  assert.equal(html.includes('id="shieldai-proceed"'), !removed);
+  assert.equal(html.includes('Strict mode is on'), removed);
+  assert(html.includes('id="shieldai-block"'));
+  document.getElementById('shieldai-block').click();
+  assert.equal(verdicts().at(-1).action, 'block');
+""",
+        [policy, outcome],
+    )
+
+
 @pytest.mark.parametrize("kind", ["analysis", "error", "signature"])
 def test_overlay_is_a_modal_dialog_that_keeps_focus_and_rejects_on_escape(kind):
     run_node(

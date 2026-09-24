@@ -93,6 +93,7 @@
       postVerdict(requestId, "proceed");
       return;
     }
+    const strict = settings.policyMode === "STRICT";
 
     // Signing requests are NOT transactions — route to dedicated overlay
     // instead of the firewall API which expects calldata + contract address.
@@ -118,15 +119,16 @@
 
       if (response.error) {
         // API error — show warning and let user decide
-        showErrorOverlay(requestId, response.error);
+        showErrorOverlay(requestId, response.error, strict);
       } else {
         // Show analysis overlay
-        showAnalysisOverlay(requestId, response.result);
+        showAnalysisOverlay(requestId, response.result, strict);
       }
     } catch (err) {
       showErrorOverlay(
         requestId,
-        err.message || "Extension communication error. Check extension settings."
+        err.message || "Extension communication error. Check extension settings.",
+        strict
       );
     }
   });
@@ -135,7 +137,7 @@
   function getSettings() {
     return new Promise((resolve) => {
       chrome.storage.local.get(
-        { enabled: true },
+        { enabled: true, policyMode: "BALANCED" },
         resolve
       );
     });
@@ -431,7 +433,7 @@
     document.getElementById("shieldai-proceed").addEventListener("click", () => sendVerdict(requestId, "proceed"));
   }
 
-  async function showAnalysisOverlay(requestId, result) {
+  async function showAnalysisOverlay(requestId, result, strict) {
     await _loadContentLang();
     removeOverlay();
 
@@ -458,6 +460,8 @@
     const badgeClass = badgeClasses[classification] || "shieldai-badge-caution";
     const label = classLabels[classification] || classification;
     const isBlock = classification === "BLOCK_RECOMMENDED";
+    // Strict mode leaves no way to send a transaction the firewall recommends blocking.
+    const canProceed = !(strict && isBlock);
 
     // Display as safety score (100 - risk) so higher = better
     const scoreDisplay = incomplete ? "Unknown (incomplete provider coverage)" :
@@ -549,10 +553,13 @@
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">
             ${_t("overlayBtnBlock")}
           </button>
+          ${canProceed ? `
           <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">
             ${_t("overlayBtnProceed")}
           </button>
+          ` : ""}
         </div>
+        ${canProceed ? "" : `<p class="shieldai-strict-note">${_t("overlayStrictNoProceed")}</p>`}
 
         <div class="shieldai-explain-row">
           <button class="shieldai-btn shieldai-btn-explain" id="shieldai-explain">
@@ -583,7 +590,9 @@
 
     // Button handlers
     document.getElementById("shieldai-block").addEventListener("click", () => sendVerdict(requestId, "block"));
-    document.getElementById("shieldai-proceed").addEventListener("click", () => sendVerdict(requestId, "proceed"));
+    if (canProceed) {
+      document.getElementById("shieldai-proceed").addEventListener("click", () => sendVerdict(requestId, "proceed"));
+    }
 
     // "Why is this risky?" handler
     document.getElementById("shieldai-explain").addEventListener("click", () => {
@@ -621,7 +630,9 @@
     });
   }
 
-  async function showErrorOverlay(requestId, errorMsg) {
+  // Shown when no analysis came back (429, 400, timeout, unreachable API). In
+  // Strict mode there is no Proceed: an unchecked transaction stays blocked.
+  async function showErrorOverlay(requestId, errorMsg, strict) {
     await _loadContentLang();
     removeOverlay();
 
@@ -640,15 +651,17 @@
         <div class="shieldai-section">
           <p>${_t("overlayCannotReach")}</p>
           <p class="shieldai-error">${escapeHtml(errorMsg)}</p>
-          <p>${_t("overlayProceedRisk")}</p>
+          <p>${strict ? _t("overlayStrictNoProceed") : _t("overlayProceedRisk")}</p>
         </div>
         <div class="shieldai-actions">
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">
             ${_t("overlayBtnBlock")}
           </button>
+          ${strict ? "" : `
           <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">
             ${_t("overlayBtnProceed")}
           </button>
+          `}
         </div>
       </div>
     `;
@@ -656,7 +669,9 @@
     mountOverlay(overlay, requestId);
 
     document.getElementById("shieldai-block").addEventListener("click", () => sendVerdict(requestId, "block"));
-    document.getElementById("shieldai-proceed").addEventListener("click", () => sendVerdict(requestId, "proceed"));
+    if (!strict) {
+      document.getElementById("shieldai-proceed").addEventListener("click", () => sendVerdict(requestId, "proceed"));
+    }
   }
 
   function escapeHtml(str) {

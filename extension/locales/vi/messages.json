@@ -138,6 +138,7 @@
   "overlayProceedRisk": "Tự chịu rủi ro.",
   "overlayPartialAnalysis": "Phân tích một phần",
   "overlayStrictBlock": "Chế độ nghiêm ngặt: khuyến nghị chặn.",
+  "overlayStrictNoProceed": "Chế độ nghiêm ngặt đang bật nên không có tùy chọn Tiếp tục. Chuyển sang Cân bằng trong cài đặt tiện ích để tự quyết định.",
   "overlayResultsIncomplete": "Kết quả có thể không đầy đủ.",
   "overlaySafety": "An toàn:",
   "phishingWarning": "Cảnh báo ShieldBot:",

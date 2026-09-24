@@ -138,6 +138,7 @@
   "overlayProceedRisk": "Proceed at your own risk.",
   "overlayPartialAnalysis": "Partial Analysis",
   "overlayStrictBlock": "Strict mode: blocking recommended.",
+  "overlayStrictNoProceed": "Strict mode is on, so there is no Proceed option. Switch to Balanced in the extension settings to decide yourself.",
   "overlayResultsIncomplete": "Results may be incomplete.",
   "overlaySafety": "Safety:",
   "phishingWarning": "ShieldBot Warning:",

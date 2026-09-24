@@ -138,6 +138,7 @@
   "overlayProceedRisk": "风险自负。",
   "overlayPartialAnalysis": "部分分析",
   "overlayStrictBlock": "严格模式：建议拦截。",
+  "overlayStrictNoProceed": "严格模式已开启，因此没有“仍然继续”选项。如需自行决定，请在扩展设置中切换到平衡模式。",
   "overlayResultsIncomplete": "结果可能不完整。",
   "overlaySafety": "安全分：",
   "phishingWarning": "ShieldBot 警告：",
