@@ -154,6 +154,18 @@ Verified on **2026-09-23** at `main` revision **`27aca4d`**: the main Python sui
 
 For dependency setup and the short copy/paste examples, follow [JUDGE_GUIDE.md](docs/JUDGE_GUIDE.md). No wallet, private key, deployment or broadcast is needed for the offline path.
 
+## ShieldBot has no token
+
+ShieldBot has no token. Any token that uses the ShieldBot name was not created by ShieldBot and is not affiliated with it. Known examples:
+
+| Chain | Symbol | Name | Token address |
+|---|---|---|---|
+| BNB Chain | SHIELDBOT | ShieldBot | `0x4904c02efa081cb7685346968bac854cdf4e7777` |
+| Robinhood Chain | SBOT | shieldbot | `0x8adba5e2f8ebe8a6f8d9f4c8151fba7ce2328900` |
+| Robinhood Chain | SHIELD | shieldbot_ | `0x7bf4c3cd40710b027282b6b85d86f75acfcbd0f1` |
+
+The two Robinhood Chain tokens were paired with NVDA in pools opened on 2026-09-15: SBOT/NVDA `0xc5183c987d5429466e271003c15d333e313e488f` and SHIELD/NVDA `0xb4a4085eec22bc088e46a615ddb2f1b327235a86` (GeckoTerminal, network `robinhood`).
+
 ## Submission status and measured usage
 
 - **Registry deployment:** `OWNER TODO — fill the deployment table in docs/JUDGE_GUIDE.md after deployment`.

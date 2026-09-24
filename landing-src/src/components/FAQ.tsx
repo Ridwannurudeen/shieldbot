@@ -23,6 +23,10 @@ const faqs = [
     a: "Yes. The Chrome extension and the Telegram bot are free to install and use, and neither needs an account.",
   },
   {
+    q: "Does ShieldBot have a token?",
+    a: "No. ShieldBot has no token. Any token that uses the ShieldBot name was not created by ShieldBot and is not affiliated with it. Known examples: SHIELDBOT on BNB Chain (0x4904c02efa081cb7685346968bac854cdf4e7777), and on Robinhood Chain SBOT, named shieldbot (0x8adba5e2f8ebe8a6f8d9f4c8151fba7ce2328900), and SHIELD, named shieldbot_ (0x7bf4c3cd40710b027282b6b85d86f75acfcbd0f1), both paired with NVDA in pools opened on 15 September 2026.",
+  },
+  {
     q: "Does ShieldBot store my private keys or wallet data?",
     a: "No. ShieldBot never asks for, stores or sends your private keys or seed phrase. The extension sends the transaction details and the site's origin to the ShieldBot API so they can be checked.",
   },
