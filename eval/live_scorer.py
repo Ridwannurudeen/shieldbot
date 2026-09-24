@@ -1,19 +1,26 @@
 """Live benchmark scorer — runs each entry through the real analysis pipeline.
 
+It records, for every entry, whether the scan completed ("ok"), reported incomplete coverage ("unknown")
+or failed ("error"), with its score, pinned to the git revision that ran it. A missing score stays
+missing; nothing is filled in. `python -m eval.cli` then computes the results offline.
+
 Usage:
-    python -m eval.live_scorer --dataset eval/data/benchmark_v1.json
-    python -m eval.live_scorer --dataset eval/data/benchmark_v1.json --output eval/data/live_scores.json
+    python -m eval.live_scorer --dataset eval/data/benchmark_v2.json
+    python -m eval.live_scorer --dataset eval/data/benchmark_v2.json --output eval/data/live_scores.json
 """
 
 import argparse
 import asyncio
+import datetime
 import json
 import logging
+import re
+import subprocess
 import sys
 import time
 
 from eval.dataset import load_dataset
-from eval.benchmark import run_benchmark
+from eval.benchmark import FORMAT_SCORES, json_sha256
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -23,41 +30,67 @@ logger = logging.getLogger(__name__)
 
 
 async def score_entries(entries, container):
-    """Score each benchmark entry using the composite analysis pipeline."""
+    """Scan each benchmark entry with the composite analysis pipeline; one record per entry."""
     from core.analyzer import AnalysisContext
 
-    scores = {}
+    records = []
     total = len(entries)
 
     for i, entry in enumerate(entries, 1):
         addr = entry.address
         chain_id = entry.chain_id
         tag = f"[{i}/{total}]"
+        record = {"chain_id": chain_id, "address": addr.lower(), "status": "error", "score": None,
+                  "risk_level": None, "reason": None}
 
         try:
             ctx = AnalysisContext(address=addr, chain_id=chain_id)
             results = await container.registry.run_all(ctx)
             risk_output = container.risk_engine.compute_from_results(results)
-
-            score = risk_output.get('rug_probability', 0)
-            level = risk_output.get('risk_level', 'LOW')
-            scores[addr.lower()] = score
-
-            mark = "!" if (entry.label == 'malicious') != (score >= 50) else " "
-            print(f"  {mark}{tag} chain={chain_id} {addr[:16]}... score={score:.1f} level={level} label={entry.label}")
+            score = risk_output.get('rug_probability')
+            record["score"] = score
+            record["risk_level"] = risk_output.get('risk_level')
+            if risk_output.get('status') == 'ok' and score is not None:
+                record["status"] = "ok"
+            else:
+                record["status"] = "unknown"
+                record["reason"] = "; ".join(
+                    f"{name}: {reason}" for name, reason in (risk_output.get('coverage_reasons') or {}).items()
+                ) or "Incomplete scan"
+            print(f"  {tag} chain={chain_id} {addr[:16]}... status={record['status']} score={score} "
+                  f"level={record['risk_level']} class={entry.category or entry.label}")
 
         except Exception as e:
             logger.error(f"{tag} Error scoring {addr}: {e}")
+            record["reason"] = type(e).__name__
             print(f"  X{tag} chain={chain_id} {addr[:16]}... ERROR: {e}")
 
+        records.append(record)
         # Small delay to avoid rate-limiting external APIs
         await asyncio.sleep(0.3)
 
-    return scores
+    return records
+
+
+def current_revision():
+    """The checked-out git revision and whether the working tree has local changes."""
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], capture_output=True, text=True, check=True,
+    ).stdout
+    return revision, bool(status.strip())
 
 
 async def main_async(args):
-    # Load dataset
+    # Pin the scores to the code that produces them before spending any API calls. A revision given by
+    # hand cannot be checked for local changes, so that stays unknown.
+    if args.revision:
+        revision, dirty = args.revision, None
+    else:
+        revision, dirty = current_revision()
+
     entries = load_dataset(args.dataset)
     print(f"Loaded {len(entries)} benchmark entries")
     print(f"Chains: {sorted(set(e.chain_id for e in entries))}")
@@ -76,59 +109,39 @@ async def main_async(args):
 
     # Score all entries
     print("Scoring entries (live API calls)...")
+    scored_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     start = time.time()
-    scores = await score_entries(entries, container)
+    records = await score_entries(entries, container)
     elapsed = time.time() - start
-    print(f"\nScoring complete in {elapsed:.1f}s ({len(scores)}/{len(entries)} scored)")
+    decided = sum(1 for record in records if record["status"] == "ok")
+    print(f"\nScoring complete in {elapsed:.1f}s ({decided}/{len(entries)} decided)")
 
-    # Save scores
-    if args.output:
-        with open(args.output, 'w') as f:
-            json.dump(scores, f, indent=2)
-        print(f"Scores saved to {args.output}")
-
-    # Run benchmark
-    print()
-    result = run_benchmark(entries, scores, threshold=args.threshold)
-
-    # Print report
-    print("=" * 60)
-    print("LIVE BENCHMARK RESULTS")
-    print("=" * 60)
-    print(f"Total entries:       {result.total}")
-    print(f"True positives:      {result.true_positives}")
-    print(f"False positives:     {result.false_positives}")
-    print(f"True negatives:      {result.true_negatives}")
-    print(f"False negatives:     {result.false_negatives}")
-    print(f"Errors:              {result.errors}")
-    print(f"---")
-    print(f"Precision:           {result.precision:.2%}")
-    print(f"Recall:              {result.recall:.2%}")
-    print(f"F1 Score:            {result.f1:.2%}")
-    print(f"False Positive Rate: {result.false_positive_rate:.2%}")
-    print("=" * 60)
-
-    # Misclassifications
-    misses = [d for d in result.details if d.get('correct') is False]
-    if misses:
-        print(f"\nMISCLASSIFICATIONS ({len(misses)}):")
-        for d in misses:
-            print(f"  chain={d['chain_id']} {d['address'][:20]}... "
-                  f"label={d['label']} score={d['score']:.1f} pred={d['predicted']} "
-                  f"cat={d.get('category', '?')}")
-
-    return 0 if result.f1 > 0 else 1
+    with open(args.output, 'w', encoding='utf-8') as f:
+        json.dump({
+            "format": FORMAT_SCORES,
+            "revision": revision,
+            "dirty": dirty,
+            "scored_at": scored_at,
+            "dataset": args.dataset,
+            "dataset_sha256": json_sha256(args.dataset),
+            "records": records,
+        }, f, indent=2)
+    print(f"Scores saved to {args.output}")
+    print(f"Results: python -m eval.cli --dataset {args.dataset} --scores {args.output}")
+    return 0
 
 
 def main():
     parser = argparse.ArgumentParser(description='ShieldBot live benchmark scorer')
-    parser.add_argument('--dataset', default='eval/data/benchmark_v1.json',
+    parser.add_argument('--dataset', default='eval/data/benchmark_v2.json',
                         help='Path to benchmark JSON file')
     parser.add_argument('--output', default='eval/data/live_scores.json',
-                        help='Path to save scores JSON')
-    parser.add_argument('--threshold', type=float, default=50.0,
-                        help='Score threshold for flagging as malicious (default: 50)')
+                        help='Path to save the recorded scores')
+    parser.add_argument('--revision',
+                        help='The 40-character git revision being scored, where this is not a git checkout')
     args = parser.parse_args()
+    if args.revision is not None and not re.fullmatch(r"[0-9a-f]{40}", args.revision):
+        parser.error("--revision must be a full 40-character lowercase git revision")
 
     return asyncio.run(main_async(args))
 
