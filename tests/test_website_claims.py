@@ -134,10 +134,19 @@ def extension_chain_ids() -> set:
 
 def test_welcome_page_chain_count_matches_the_extension():
     chains = extension_chain_ids()
-    assert chains <= set(chain_info()), "the extension names a chain the API does not scan"
+    assert chains == set(chain_info()), "popup.js CHAIN_NAMES and the API chain registry disagree"
     counts = re.findall(r"\b(\d+)\s+(?:more\s+)?(?:EVM\s+)?(?:chains?|networks)\b", welcome_text())
     assert counts, "welcome.html should state how many chains it supports"
     assert {int(count) for count in counts} == {len(chains)}
+
+
+def test_welcome_page_names_every_extension_chain():
+    subtitle = re.search(r'<p class="subtitle">(.*?)</p>', read(WELCOME), re.DOTALL).group(1)
+    listed = re.split(r",\s*|\s+and\s+", subtitle.split(":", 1)[1].strip().rstrip("."))
+    aliases = {"BNB Chain": "BSC"}
+    names = {chain_info()[chain_id]["name"] for chain_id in extension_chain_ids()}
+    assert len(listed) == len(names)
+    assert {aliases.get(name, name) for name in listed} == names
 
 
 def _risk_bands() -> dict:
