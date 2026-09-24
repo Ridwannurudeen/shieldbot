@@ -1147,8 +1147,10 @@ function ThreatVelocityChart({
   unavailable,
   capped
 }) {
-  // A capped source that reaches back less than 24 h would show its unloaded hours as zero.
-  const short = capped.filter(c => c.since > Date.now() / 1000 - 86400);
+  // A capped source that reaches back less than 24 h, or not knowably far, would show its unloaded
+  // hours as zero.
+  const short = capped.filter(c => c.since === null || c.since > Date.now() / 1000 - 86400);
+  const shortNames = short.map(c => c.name).join(' and ');
   if (unavailable || short.length) {
     return /*#__PURE__*/React.createElement("div", {
       className: "glass rounded-xl p-5",
@@ -1166,7 +1168,7 @@ function ThreatVelocityChart({
         height: 190,
         color: '#475569'
       }
-    }, unavailable ? 'Threat feed unavailable.' : `Hidden: the newest ${FEED_LIMIT} ${short.map(c => c.name).join(' and ')} reach back only to ` + `${new Date(Math.max(...short.map(c => c.since)) * 1000).toLocaleString()}, ` + 'so an hourly count for the last 24 h would show the earlier hours as zero.'));
+    }, unavailable ? 'Threat feed unavailable.' : short.some(c => c.since === null) ? `Hidden: some of the newest ${FEED_LIMIT} ${shortNames} carry no time, so how far back they ` + 'reach is unknown and an hourly count for the last 24 h could show missing hours as zero.' : `Hidden: the newest ${FEED_LIMIT} ${shortNames} reach back only to ` + `${new Date(Math.max(...short.map(c => c.since)) * 1000).toLocaleString()}, ` + 'so an hourly count for the last 24 h would show the earlier hours as zero.'));
   }
   return /*#__PURE__*/React.createElement("div", {
     className: "glass rounded-xl p-5",
@@ -1793,10 +1795,14 @@ function App() {
       setThreats(loaded.flatMap(([, x]) => x.value.threats || []).sort(byNewest));
       setFeedOk(loaded.length > 0);
       // A source that returned its limit may hold more; its oldest loaded item is as far back as it reaches.
-      setCapped(loaded.filter(([, x]) => (x.value.threats || []).length >= FEED_LIMIT).map(([name, x]) => ({
-        name,
-        since: Math.min(...x.value.threats.map(t => t.detected_at || t.created_at || 0))
-      })));
+      setCapped(loaded.filter(([, x]) => (x.value.threats || []).length >= FEED_LIMIT).map(([name, x]) => {
+        // An item without a time leaves how far back its source reaches unknown, never 1970.
+        const times = x.value.threats.map(t => t.detected_at || t.created_at);
+        return {
+          name,
+          since: times.every(Boolean) ? Math.min(...times) : null
+        };
+      }));
       if (loaded.length) setUpdated(Date.now());
       setError(failed.length ? 'Failed to load ' + failed.map(([name, x]) => `${name} (${x.reason?.message || 'unknown error'})`).join(' and ') : null);
       setCampaigns(c.status === 'fulfilled' ? c.value.campaigns || [] : null);
