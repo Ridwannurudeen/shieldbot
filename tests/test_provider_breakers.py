@@ -49,7 +49,10 @@ def http_client(
     else:
         response = MagicMock(status=status)
         response.json = AsyncMock(
-            side_effect=ValueError("Expecting value") if unreadable else None, return_value=body
+            side_effect=json.JSONDecodeError("Expecting value", "<html>", 0)
+            if unreadable
+            else None,
+            return_value=body,
         )
         session.get.return_value.__aenter__ = AsyncMock(return_value=response)
         session.get.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -314,6 +317,30 @@ async def test_a_probe_that_gets_an_answer_closes_the_breaker(monkeypatch):
     assert provider_breakers.states()["dexscreener"] == CLOSED
     assert probe["status"] == after["status"] == "ok"
     assert session.get.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_malformed_token_data_never_opens_the_market_breaker():
+    # DexScreener answered with JSON; only the token's own numbers could not be read, which is
+    # that lookup coming back Unknown, not the provider failing.
+    lookup = dexscreener()
+    client, session = http_client(200, {"pairs": [{**dexscreener_pair(), "priceUsd": "n/a"}]})
+    before = unknown_ledger.for_chain(56).get("dexscreener", {}).get("failed", 0)
+    with patch(CASES["dexscreener"].target, client):
+        results = [await lookup(i) for i in range(FAILURE_THRESHOLD + 1)]
+
+    assert provider_breakers.states()["dexscreener"] == CLOSED
+    assert session.get.call_count == FAILURE_THRESHOLD + 1
+    assert {result["status"] for result in results} == {"unknown"}
+    after = unknown_ledger.for_chain(56)["dexscreener"]["failed"]
+    assert after == before + FAILURE_THRESHOLD + 1
+
+    # Nor does a malformed token count toward the failures in a row that open it.
+    failing, _ = http_client(error=asyncio.TimeoutError())
+    with patch(CASES["dexscreener"].target, failing):
+        for i in range(FAILURE_THRESHOLD - 1):
+            await lookup(FAILURE_THRESHOLD + 1 + i)
+    assert provider_breakers.states()["dexscreener"] == CLOSED
 
 
 @pytest.mark.asyncio

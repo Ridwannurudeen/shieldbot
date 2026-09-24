@@ -1,6 +1,8 @@
 """The shared circuit breaker for external data providers (core/circuit_breaker.py)."""
 
 import asyncio
+import json
+from unittest.mock import MagicMock
 
 import aiohttp
 import pytest
@@ -80,7 +82,8 @@ def test_throttling_and_server_errors_are_failures(breakers, status):
         asyncio.TimeoutError(),
         aiohttp.ClientConnectionError(),
         aiohttp.ServerDisconnectedError(),
-        ValueError("not JSON"),
+        json.JSONDecodeError("Expecting value", "<html>", 0),
+        aiohttp.ContentTypeError(MagicMock(), (), message="unexpected mimetype: text/html"),
     ],
 )
 def test_timeouts_connection_errors_and_unreadable_replies_are_failures(breakers, error):
@@ -90,7 +93,15 @@ def test_timeouts_connection_errors_and_unreadable_replies_are_failures(breakers
 
 
 @pytest.mark.parametrize(
-    "error", [CircuitOpenError("open"), KeyError("result"), RuntimeError("bug")]
+    "error",
+    [
+        CircuitOpenError("open"),
+        KeyError("result"),
+        RuntimeError("bug"),
+        # Raised by the caller's own parsing of a reply that was read, such as float("n/a").
+        ValueError("could not convert string to float: 'n/a'"),
+        TypeError("unsupported operand type(s)"),
+    ],
 )
 def test_other_exceptions_are_not_counted(breakers, error):
     for _ in range(FAILURE_THRESHOLD):

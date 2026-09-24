@@ -13,13 +13,15 @@ through as a probe (half-open): an answer closes the breaker, a failure opens it
 OPEN_SECONDS. A probe that never reports, because its scan was cancelled at the deadline, frees
 the slot after OPEN_SECONDS.
 
-A failed lookup is a timeout, a connection error, an unreadable reply, or HTTP 429 or 5xx. Any
-other reply, a 404 or "no record" included, is the provider answering and ends a run of failures.
+A failed lookup is a timeout, a connection error, a reply that is not JSON, or HTTP 429 or 5xx.
+Any other reply, a 404 or "no record" included, is the provider answering and ends a run of
+failures, even when the caller cannot use the data in it.
 A lookup that retries is counted once, by its last attempt. Time is time.monotonic. There are no
 locks: use the breakers on the event loop only, never from a worker thread.
 """
 
 import asyncio
+import json
 import logging
 import time
 from typing import Callable, Dict, Optional, Tuple
@@ -34,9 +36,11 @@ logger = logging.getLogger(__name__)
 FAILURE_THRESHOLD = 3
 OPEN_SECONDS = 60
 
-# Exceptions that fail a lookup: aiohttp's connection, timeout and response errors, asyncio's
-# timeout, and ValueError for a reply that is not JSON.
-LOOKUP_ERRORS = (aiohttp.ClientError, asyncio.TimeoutError, ValueError)
+# Exceptions that fail a lookup: aiohttp's connection, timeout and response errors (a reply without
+# a JSON content type among them), asyncio's timeout, and a reply body that does not decode as
+# JSON. Any other ValueError, TypeError or KeyError comes from a caller's own parsing of a reply
+# that did arrive, such as float("n/a"): that lookup is Unknown, but the provider answered.
+LOOKUP_ERRORS = (aiohttp.ClientError, asyncio.TimeoutError, json.JSONDecodeError)
 
 CLOSED = "closed"
 OPEN = "open"
