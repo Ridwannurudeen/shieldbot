@@ -7,9 +7,6 @@
 (function () {
   "use strict";
 
-  if (window.__shieldai_injected) return;
-  window.__shieldai_injected = true;
-
   // Clear resource timing entries so extension URLs are not leaked
   // to page scripts via performance.getEntriesByType("resource").
   try { performance.clearResourceTimings(); } catch (_) {}
@@ -54,6 +51,10 @@
 
   const SIGN_METHODS = new Set(["personal_sign", "eth_sign"]);
 
+  // Providers already wrapped. Kept in this closure rather than as a flag on
+  // the provider, which the page could read to detect the extension.
+  const wrappedProviders = new WeakSet();
+
   // Stores the original (un-wrapped) provider.request — used by the revoke handler
   // so revoke TXs bypass ShieldAI analysis and go straight to the wallet.
   let _lastOriginalRequest = null;
@@ -72,8 +73,8 @@
    * Uses Object.defineProperty for compatibility with MetaMask v11+
    * where provider.request may be non-writable.
    */
-  function wrapProvider(provider, label) {
-    if (!provider || !provider.request || provider.__shieldai_proxied) return;
+  function wrapProvider(provider) {
+    if (!provider || !provider.request || wrappedProviders.has(provider)) return;
 
     const originalRequest = provider.request.bind(provider);
     _lastOriginalRequest = originalRequest;
@@ -112,8 +113,6 @@
       const txParams = args.params?.[0];
       if (!txParams) return originalRequest(args);
 
-      console.log("[ShieldAI] Intercepted:", args.method, txParams);
-
       let interceptData;
 
       if (TYPED_DATA_METHODS.has(args.method)) {
@@ -125,8 +124,8 @@
             typeof rawTypedData === "string"
               ? JSON.parse(rawTypedData)
               : rawTypedData;
-        } catch (e) {
-          console.warn("[ShieldAI] Failed to parse typed data:", e);
+        } catch (_) {
+          // Unparseable typed data goes to the overlay without its fields.
         }
         interceptData = {
           from: txParams,
@@ -197,14 +196,12 @@
       // Fallback to direct assignment if defineProperty fails
       try {
         provider.request = wrappedRequest;
-      } catch (e2) {
-        console.warn("[ShieldAI] Cannot wrap provider.request:", e2);
+      } catch (_) {
         return;
       }
     }
 
-    provider.__shieldai_proxied = true;
-    console.log("[ShieldAI] Firewall active — intercepting " + (label || "provider"));
+    wrappedProviders.add(provider);
   }
 
   // HMAC of a request id under the channel token: content.js sends it with
@@ -301,8 +298,8 @@
   // --- Hook window.ethereum ---
 
   function tryWrap() {
-    if (window.ethereum && !window.ethereum.__shieldai_proxied) {
-      wrapProvider(window.ethereum, "window.ethereum");
+    if (window.ethereum && !wrappedProviders.has(window.ethereum)) {
+      wrapProvider(window.ethereum);
       return true;
     }
     return false;
@@ -321,9 +318,9 @@
         },
         set(provider) {
           _pending = provider;
-          if (provider && !provider.__shieldai_proxied) {
+          if (provider && !wrappedProviders.has(provider)) {
             setTimeout(() => {
-              wrapProvider(provider, "window.ethereum (deferred)");
+              wrapProvider(provider);
               // Restore normal property so wallet detection isn't affected
               try {
                 Object.defineProperty(window, "ethereum", {
@@ -351,8 +348,8 @@
 
   window.addEventListener("eip6963:announceProvider", (event) => {
     const detail = event.detail;
-    if (detail?.provider && !detail.provider.__shieldai_proxied) {
-      wrapProvider(detail.provider, "EIP-6963: " + (detail.info?.name || "unknown"));
+    if (detail?.provider && !wrappedProviders.has(detail.provider)) {
+      wrapProvider(detail.provider);
     }
   });
 

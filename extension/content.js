@@ -6,6 +6,12 @@
 (function () {
   "use strict";
 
+  // Inject the page script once per document. This flag lives in the content
+  // script's isolated world, so unlike a flag on the page's window, the page
+  // cannot read it to learn that the extension is installed.
+  if (window.__shieldaiContentLoaded) return;
+  window.__shieldaiContentLoaded = true;
+
   // Generate a per-session channel token BEFORE inject.js loads.
   // This token is kept in the isolated content-script world and passed to
   // inject.js via its script URL — page scripts cannot read it after

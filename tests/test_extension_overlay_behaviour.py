@@ -352,6 +352,38 @@ def test_verdict_after_the_timeout_is_ignored_and_forged_verdicts_still_fail():
     )
 
 
+def test_inject_leaves_no_page_readable_marker_and_logs_nothing():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const markers = [...Object.keys(window), ...Object.keys(provider)].filter(key => /shield/i.test(key));
+  assert.deepEqual(markers, []);
+  for (const fn of windowListeners['eip6963:announceProvider']) fn({detail: {provider, info: {name: 'same'}}});
+  const {pending, requestId} = await startRequest();
+  assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').length, 1,
+    'the provider was wrapped twice');
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'proceed', _ct: 'channel-token'});
+  assert.equal(await pending, 'sent');
+  assert.deepEqual(logged, []);
+"""
+    )
+
+
+def test_content_script_injects_the_page_script_once():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  let injected = 0;
+  const createElement = document.createElement;
+  document.createElement = tag => { if (tag === 'script') injected++; return createElement(tag); };
+  vm.runInContext(fs.readFileSync('extension/content.js', 'utf8'), context);
+  assert.equal(injected, 0, 'a second run of the content script injected the page script again');
+"""
+    )
+
+
 @pytest.mark.parametrize(
     "reason,stored,expected",
     [
