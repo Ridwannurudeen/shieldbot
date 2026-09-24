@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
@@ -207,14 +208,17 @@ class MempoolMonitor:
                 None, w3.eth.get_block, 'pending', True
             )
             for tx in (block.get("transactions") or []):
-                if isinstance(tx, dict):
+                # web3 returns each transaction as an AttributeDict, which is a Mapping but not a dict.
+                if isinstance(tx, Mapping):
                     txs.append(PendingTx(
-                        tx_hash=tx.get("hash", b"").hex() if isinstance(tx.get("hash"), bytes) else str(tx.get("hash", "")),
+                        tx_hash=Web3.to_hex(tx["hash"]) if isinstance(tx.get("hash"), bytes) else str(tx.get("hash", "")),
                         from_addr=(tx.get("from") or "").lower(),
                         to_addr=(tx.get("to") or "").lower(),
                         value=tx.get("value", 0),
                         gas_price=tx.get("gasPrice", 0),
-                        data=(tx.get("input") or "0x").hex() if isinstance(tx.get("input"), bytes) else str(tx.get("input", "0x")),
+                        # Web3.to_hex gives a 0x-prefixed string on every hexbytes version, and "0x" for the
+                        # empty input of a plain transfer.
+                        data=Web3.to_hex(tx["input"]) if isinstance(tx.get("input"), bytes) else str(tx.get("input", "0x")),
                         chain_id=chain_id,
                     ))
         except Exception:
