@@ -123,14 +123,15 @@ class ExplorerService:
                                     reason=f"HTTP {response.status}",
                                     provider=provider,
                                 )
-                            # A 404 keeps its reason, so the Unknown ledger counts it as the
-                            # provider having nothing for this address.
+                            # A 404 with a readable body keeps its reason, so the Unknown ledger
+                            # counts it as the provider having nothing for this address; a body
+                            # that is not an object could not be read, and counts as failed.
                             not_found = "HTTP 404" if response.status == 404 else None
                             data = await response.json()
                             if not isinstance(data, dict):
                                 return ExplorerResult(
                                     "unknown",
-                                    reason=not_found or "Unexpected JSON shape",
+                                    reason="Unexpected JSON shape",
                                     provider=provider,
                                 )
                             api_key = params.get("apikey")

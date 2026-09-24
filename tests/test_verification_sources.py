@@ -187,6 +187,17 @@ async def test_a_stalled_explorer_is_unknown_in_bounded_time_and_sourcify_is_sti
 
 
 @pytest.mark.asyncio
+async def test_coverage_names_the_verification_sources_in_the_order_they_are_asked(monkeypatch):
+    import adapters.evm_base as evm_module
+
+    monkeypatch.setattr(evm_module, "VERIFICATION_SOURCES", ("sourcify", "etherscan"))
+    adapter = _adapter_with((True, "contract Token {}"), AsyncMock(return_value=ExplorerResult("verified")))
+    assert adapter.capabilities()["verification"] == "sourcify+etherscan"
+    assert await adapter.is_verified_contract(ADDRESS) == (True, None)
+    adapter._etherscan_verification.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_a_stalled_robinhood_chain_verification_is_unknown_in_bounded_time(monkeypatch):
     import services.counterparty_service as counterparty_module
 

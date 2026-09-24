@@ -295,6 +295,11 @@ async def test_a_creation_time_rpc_failure_is_the_rpc_s_not_etherscan_s(ledger):
 BLOCKSCOUT_CONTRACT = {"hash": TOKEN, "is_contract": True, "is_verified": True}
 
 
+def _sourcify_not_verified(chain_id):
+    # Sourcify v2's 404 body for an address with no verified contract.
+    return {"match": None, "creationMatch": None, "runtimeMatch": None, "chainId": str(chain_id), "address": TOKEN}
+
+
 @pytest.mark.asyncio
 async def test_explorer_requests_are_counted_per_provider_and_cached_answers_are_not(
     ledger, monkeypatch
@@ -302,7 +307,7 @@ async def test_explorer_requests_are_counted_per_provider_and_cached_answers_are
     from services.explorer_service import ExplorerService
 
     monkeypatch.setenv("BLOCKSCOUT_API_KEY", "test-key")
-    patcher = _aiohttp("services.explorer_service", (404, None), (200, BLOCKSCOUT_CONTRACT))
+    patcher = _aiohttp("services.explorer_service", (404, _sourcify_not_verified(4663)), (200, BLOCKSCOUT_CONTRACT))
     try:
         service = ExplorerService()
         first = await service.get_verification_status(TOKEN, 4663)
@@ -314,6 +319,27 @@ async def test_explorer_requests_are_counted_per_provider_and_cached_answers_are
         "sourcify": _counts(unknown=1),
         "blockscout": _counts(answered=1),
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reply, outcome",
+    [
+        ((404, _sourcify_not_verified(56)), "unknown"),
+        ((404, None), "failed"),
+        ((404, ValueError("not JSON")), "failed"),
+    ],
+    ids=["not-verified", "body-not-an-object", "body-not-json"],
+)
+async def test_a_sourcify_404_is_nothing_found_only_with_a_readable_body(ledger, reply, outcome):
+    from services.explorer_service import ExplorerService
+
+    patcher = _aiohttp("services.explorer_service", reply)
+    try:
+        await ExplorerService().get_sourcify_verification(TOKEN, 56)
+    finally:
+        patcher.stop()
+    assert _chain_counts(ledger, 56) == {"sourcify": _counts(**{outcome: 1})}
 
 
 @pytest.mark.asyncio

@@ -28,6 +28,9 @@ HONEYPOT_IS_UNSUPPORTED = (
     'honeypot.is unsupported for this chain; any honeypot and tax data here is GoPlus-reported, '
     'not simulated by ShieldBot'
 )
+# The sources verification asks on a chain with Etherscan, in this order; GET /api/coverage names
+# them from the same tuple.
+VERIFICATION_SOURCES = ('etherscan', 'sourcify')
 # EIP-1167 minimal proxy runtime code: a clone that delegates every call to the embedded address.
 EIP1167_RUNTIME = re.compile(r'363d3d373d3d3d363d73([0-9a-f]{40})5af43d82803e903d91602b57fd5bf3')
 
@@ -256,9 +259,10 @@ class EvmAdapter(ChainAdapter):
         """
         # Imported here: services imports utils.web3_client, which imports this module's adapters.
         from services.counterparty_service import within_timeout
-        from services.explorer_service import ExplorerResult
 
         if self._explorer_backend == 'sourcify_blockscout':
+            from services.explorer_service import ExplorerResult
+
             result = await within_timeout(
                 self._explorer_service.get_verification_status(address, self._chain_id),
                 ExplorerResult('unknown', reason='Sourcify and Blockscout timed out'),
@@ -267,23 +271,30 @@ class EvmAdapter(ChainAdapter):
                 logger.warning("[%s] Verification unknown: %s", self._chain_name, result.reason)
                 return (None, None)
             return (result.status == 'verified', None)
-        explorer, source = await within_timeout(self._etherscan_verification(address), (None, None))
-        if explorer is True:
-            return (True, source)
-        # Sourcify is asked only when the explorer did not verify the contract.
-        sourcify = await within_timeout(
-            self._explorer_service.get_sourcify_verification(address, self._chain_id),
-            ExplorerResult('unknown', reason='Sourcify timed out', provider='sourcify'),
-        )
-        if sourcify.status == 'verified':
-            return (True, None)
-        if explorer is False and sourcify.status == 'unverified':
+        lookups = {'etherscan': self._etherscan_verification, 'sourcify': self._sourcify_verification}
+        timed_out = object()
+        answers = []
+        # A source is asked only when none before it verified the contract.
+        for name in VERIFICATION_SOURCES:
+            answer = await within_timeout(lookups[name](address), timed_out)
+            verified = None if answer is timed_out else answer[0]
+            if verified is True:
+                return answer
+            answers.append('timed out' if answer is timed_out else 'unknown' if verified is None else 'unverified')
+        if all(answer == 'unverified' for answer in answers):
             return (False, None)
         logger.warning(
-            "[%s] Verification unknown: explorer %s, Sourcify %s",
-            self._chain_name, 'unverified' if explorer is False else 'unknown', sourcify.reason,
+            "[%s] Verification unknown: %s", self._chain_name,
+            ', '.join(f'{name} {answer}' for name, answer in zip(VERIFICATION_SOURCES, answers)),
         )
         return (None, None)
+
+    async def _sourcify_verification(self, address: str) -> Tuple[Optional[bool], Optional[str]]:
+        result = await self._explorer_service.get_sourcify_verification(address, self._chain_id)
+        if result.status == 'unknown':
+            logger.warning("[%s] Sourcify verification unknown: %s", self._chain_name, result.reason)
+            return (None, None)
+        return (result.status == 'verified', None)
 
     async def _etherscan_verification(self, address: str) -> Tuple[Optional[bool], Optional[str]]:
         try:
@@ -688,11 +699,11 @@ class EvmAdapter(ChainAdapter):
             'contract_age': (
                 'etherscan' if self._explorer_backend == 'etherscan' else 'blockscout' if blockscout else None
             ),
-            # Etherscan first, then Sourcify when Etherscan did not verify; on Robinhood Chain,
-            # Sourcify then Blockscout where a Blockscout request can be sent. Verified when any
-            # source says so, unverified only when every source asked says not.
+            # VERIFICATION_SOURCES in the order they are asked; on Robinhood Chain, Sourcify then
+            # Blockscout where a Blockscout request can be sent. Verified when any source says so,
+            # unverified only when every source asked says not.
             'verification': (
-                'etherscan+sourcify' if self._explorer_backend != 'sourcify_blockscout'
+                '+'.join(VERIFICATION_SOURCES) if self._explorer_backend != 'sourcify_blockscout'
                 else 'sourcify+blockscout' if blockscout else 'sourcify'
             ),
             'liquidity_lock': {'lockers': 'known' if lockers else 'unknown', 'known_lockers': lockers},
