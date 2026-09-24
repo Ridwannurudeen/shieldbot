@@ -1488,14 +1488,23 @@ async def _firewall_verdict(
         value_wei = _parse_value(req.value)
         value_bnb = value_wei / 1e18
 
+        # The target's local blacklist entry. An admin entry (block severity) is authoritative, so a
+        # trusted router it lists is judged on the full path below, where its Block floor applies; a
+        # community entry, which any three reporters can make, never takes a swap off the router path.
+        # A delegation is judged on the full path too, whatever the target.
+        local_match = scam_db.local_match(to_addr, req.chainId)
+        router_answers = bool(whitelisted) and req.authorizationList is None and not (
+            local_match and local_match['severity'] == 'block'
+        )
+
         # A streamed request hears each analyzer's result as it returns; a plain one calls run_all as before.
         run_options = {}
         if progress is not None:
-            progress.add_local_match(scam_db.local_match(to_addr, req.chainId))
-            # Worded as the router's answer only when the router answers: a delegation takes the full path.
+            progress.add_local_match(local_match)
+            # Worded as the router's answer only when the router answers.
             progress.describe = partial(
                 _first_transaction_fields, decoded, value_bnb, req.chainId, to_addr,
-                whitelisted if req.authorizationList is None else None,
+                whitelisted if router_answers else None,
             )
             run_options = {"on_result": progress.add_result}
 
@@ -1529,9 +1538,9 @@ async def _firewall_verdict(
                 typed_data=req.typedData,
             )
 
-        # 2. If target is a whitelisted router, analyze the swap path tokens instead of bypassing.
-        # A delegation is judged on the full path below, whatever the target.
-        if whitelisted and req.authorizationList is None:
+        # 2. If the target is a trusted router that answers for the swap (router_answers above), analyze
+        # the swap path tokens instead of bypassing.
+        if router_answers:
             router_response = await _analyze_router_swap(
                 req=req,
                 to_addr=to_addr,
@@ -1551,7 +1560,7 @@ async def _firewall_verdict(
         # 2b. Check cache for recent result. A row is up to five minutes old and keeps no scam matches,
         # so a target with a local blacklist entry (admin or community: both set a floor) is scanned
         # afresh: an entry added since the row was written must not be answered with the row.
-        if container and container.db and not tx_specific and scam_db.local_match(to_addr, req.chainId) is None:
+        if container and container.db and not tx_specific and local_match is None:
             cached = await container.db.get_contract_score(to_addr, req.chainId, max_age_seconds=300)
             if cached and cached.get('category_scores', {}).get('_scan_metadata', {}).get('coverage'):
                 # A full rescan costs provider calls, so only a caller with a valid API key can force one

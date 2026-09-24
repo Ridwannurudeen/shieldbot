@@ -762,6 +762,69 @@ async def test_a_router_swap_first_keys_pending_and_coverage_by_token(stream_api
     assert first["transaction_impact"]["recipient"] == f"PancakeSwap Router ({TARGET})"
 
 
+def router_swap(monkeypatch, api, services, gate=None):
+    """A swap through a trusted router on chain 1; returns the swap's body and the addresses scanned.
+    With a gate, token B's honeypot analyzer waits on it."""
+    monkeypatch.setattr(
+        api,
+        "calldata_decoder",
+        SimpleNamespace(decode=lambda data: dict(SWAP), is_whitelisted_target=lambda *args, **kwargs: "Uniswap Router"),
+    )
+    scanned = []
+
+    def analyzer_of(name):
+        async def analyze(ctx):
+            scanned.append(ctx.address)
+            if gate is not None and ctx.address == TOKEN_B and name == "honeypot":
+                await gate.wait()
+            # The router's own scan reports its blacklist entry, as check_address does.
+            entry = api.scam_db.local_match(ctx.address, ctx.chain_id) if name == "structural" else None
+            return result(name, [entry] if entry else ())
+        return analyze
+
+    services.registry = registry(**{name: analyzer_of(name) for name in WEIGHTS})
+    return {**BODY, "chainId": 1, "data": "0x38ed1739"}, scanned
+
+
+def band_rank(score):
+    return list(verdicts.CLASSIFICATIONS).index(verdicts.classify(score))
+
+
+@pytest.mark.asyncio
+async def test_an_admin_listed_router_is_judged_on_the_full_path_and_blocks(stream_api, monkeypatch):
+    api, services = stream_api
+    api.scam_db.known_scams[(None, TARGET)] = {"source": "admin", "reports": 0, "expires_at": None}
+    body, scanned = router_swap(monkeypatch, api, services)
+
+    final, plain = await final_and_plain(api, body)
+
+    # The router itself was scanned, not the path tokens, and its Block floor holds.
+    assert set(scanned) == {TARGET}
+    assert (plain["classification"], plain["risk_score"]) == (verdicts.BLOCK_RECOMMENDED, 90)
+    assert plain["transaction_impact"]["recipient"] == TARGET
+    assert final == plain
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_admin_listed_router_blocks_first_and_last(stream_api, monkeypatch):
+    api, services = stream_api
+    api.scam_db.known_scams[(None, TARGET)] = {"source": "admin", "reports": 0, "expires_at": None}
+    timer(monkeypatch, api, FIRST_VERDICT_SECONDS / SCALE)
+    gate = asyncio.Event()
+    body, scanned = router_swap(monkeypatch, api, services)
+    services.registry = registry(structural=returns("structural", [ADMIN_MATCH]), honeypot=held("honeypot", gate))
+
+    events = events_of(api, body)
+    kind, first = await next_event(events)
+    assert (kind, first["classification"], first["risk_score"]) == ("first", verdicts.BLOCK_RECOMMENDED, 90)
+    assert first["transaction_impact"]["recipient"] == TARGET
+    gate.set()
+    kind, final = await next_event(events)
+
+    assert (kind, final["classification"]) == ("final", verdicts.BLOCK_RECOMMENDED)
+    assert band_rank(first["risk_score"]) <= band_rank(final["risk_score"])
+
+
 @pytest.mark.asyncio
 async def test_an_error_inside_the_stream_is_an_error_event_and_no_final(stream_api, monkeypatch):
     api, services = stream_api
