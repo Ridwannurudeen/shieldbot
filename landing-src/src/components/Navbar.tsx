@@ -113,7 +113,7 @@ export default function Navbar() {
                 className="py-3 text-sm font-semibold text-neon"
                 onClick={() => setOpen(false)}
               >
-                Add to Chrome — Free
+                Add to Chrome
               </a>
             </div>
           </motion.div>

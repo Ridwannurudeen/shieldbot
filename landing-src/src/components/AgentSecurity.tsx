@@ -90,6 +90,7 @@ export default function AgentSecurity() {
               {f.code && (
                 <pre
                   tabIndex={0}
+                  aria-label="Code example"
                   className="bg-black/40 border border-white/10 rounded-lg p-3 text-xs text-emerald-400 font-mono overflow-x-auto whitespace-pre"
                 >
                   {f.code}

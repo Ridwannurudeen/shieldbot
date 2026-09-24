@@ -114,7 +114,7 @@ export default function Footer() {
                 >
                   Chrome Extension
                 </a>
-                <a href="/about.html" className="inline-flex items-center min-h-[44px] md:min-h-0 text-sm text-gray-300 hover:text-neon transition-colors">
+                <a href="#how-it-works" className="inline-flex items-center min-h-[44px] md:min-h-0 text-sm text-gray-300 hover:text-neon transition-colors">
                   How It Works
                 </a>
                 <a href="/privacy.html" className="inline-flex items-center min-h-[44px] md:min-h-0 text-sm text-gray-300 hover:text-neon transition-colors">
