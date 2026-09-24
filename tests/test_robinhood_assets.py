@@ -38,6 +38,7 @@ NO_MATCH = {
     "symbol": None,
     "official_address": None,
     "matched_by": None,
+    "third_party": False,
     "also": None,
     "reason": None,
     "list_size": 195,
@@ -69,17 +70,25 @@ def test_the_recorded_list_maps_every_asset_to_its_4663_contract():
             "official",
             "AAPL",
         ),
+        # The name's initials spell the ticker the symbol copies.
         (
             "0x1c2a482970ae6b6e5052a7a184c8aef19e0840be",
             "AMD",
             "Advanced Micro Dog",
-            "collision",
+            "impostor",
             "AMD",
         ),
-        ("0xf01ab9476afcaa0e0058c83cef2b4c30867abeeb", "AMD", "A Mini Dog", "collision", "AMD"),
-        ("0x982732a974738b771b07a2588f1b38a968a11e18", "TESLAHOOD", "Tesla", "collision", "TSLA"),
-        # An affixed ticker corroborated by the company name with "xStock" added.
-        ("0xd16485b15d38daa99039e2526701025ad4410582", "TSLAx", "Tesla xStock", "impostor", "TSLA"),
+        ("0xf01ab9476afcaa0e0058c83cef2b4c30867abeeb", "AMD", "A Mini Dog", "impostor", "AMD"),
+        # The company name and HOOD, Robinhood's own ticker, as the symbol, and the company as the name.
+        ("0x982732a974738b771b07a2588f1b38a968a11e18", "TESLAHOOD", "Tesla", "impostor", "TSLA"),
+        # The xStock convention of another issuer.
+        (
+            "0xd16485b15d38daa99039e2526701025ad4410582",
+            "TSLAx",
+            "Tesla xStock",
+            "collision",
+            "TSLA",
+        ),
         # The "shieldbot" token whose pool against the official NVDA opened on 2026-09-15.
         ("0x8adba5e2f8ebe8a6f8d9f4c8151fba7ce2328900", "SBOT", "shieldbot", "none", None),
         ("0xf51fb54de60f6e16252e852a5ed0e60b8307606a", "NVDAx3L", "NVDA 3x Long", "none", None),
@@ -102,11 +111,11 @@ def test_tokens_live_on_the_chain(address, symbol, name, status, official):
 
 
 def test_an_impostor_names_the_official_contract_and_how_it_matched():
-    assert check_token(OTHER, "TSLAx", "Tesla xStock", LISTED) == {
+    assert check_token(OTHER, "AMD", "Advanced Micro Dog", LISTED) == {
         **NO_MATCH,
         "status": "impostor",
-        "symbol": "TSLA",
-        "official_address": TSLA,
+        "symbol": "AMD",
+        "official_address": AMD,
         "matched_by": "symbol and name",
     }
 
@@ -117,12 +126,12 @@ def test_an_impostor_names_the_official_contract_and_how_it_matched():
         ("NVDA", "NVIDIA \N{BULLET} Robinhood Token", "NVDA"),
         ("NVDA", "NVIDIA", "NVDA"),
         ("NVDAX", "Nvidia Stock", "NVDA"),
-        ("TSLA.d", "Tesla", "TSLA"),
         ("TSLAx", "Tesla", "TSLA"),
         ("TESLA", "Tesla", "TSLA"),
         ("P", "Everpure", "P"),
         ("USDG", "Global Dollar", "USDG"),
         ("WETH", "WETH", "WETH"),
+        ("NVDA", "New Venture Dog Army", "NVDA"),
     ],
 )
 def test_a_symbol_and_name_that_both_point_at_an_official_token_are_an_impostor(
@@ -138,21 +147,26 @@ def test_a_symbol_and_name_that_both_point_at_an_official_token_are_an_impostor(
 
 
 @pytest.mark.parametrize(
-    "name",
+    "symbol, name, matched_by",
     [
-        "Tesla \N{BULLET} Robinhood Token",
-        "Robinhood Tesla",
-        "Tesla Inc. Robinhood Token",
-        "TESLA robinhood",
+        ("MOON", "Tesla \N{BULLET} Robinhood Token", "name"),
+        ("MOON", "Robinhood Tesla", "name"),
+        ("MOON", "Tesla Inc. Robinhood Token", "name"),
+        ("MOON", "TESLA robinhood", "name"),
+        ("TESLAHOOD", "Moon", "symbol"),
+        ("TSLARH", "Moon", "symbol"),
+        ("TSLAx", "Tesla xStock \N{BULLET} Robinhood Token", "symbol and name"),
     ],
 )
-def test_a_name_claiming_robinhood_and_the_company_is_an_impostor(name):
-    result = check_token(OTHER, "MOON", name, LISTED)
+def test_a_symbol_or_name_claiming_robinhood_and_the_company_is_an_impostor(
+    symbol, name, matched_by
+):
+    result = check_token(OTHER, symbol, name, LISTED)
 
     assert (result["status"], result["symbol"], result["matched_by"]) == (
         "impostor",
         "TSLA",
-        "name",
+        matched_by,
     )
 
 
@@ -163,7 +177,9 @@ def test_a_name_claiming_robinhood_and_the_company_is_an_impostor(name):
         ("\N{GREEK CAPITAL LETTER NU}VD\N{GREEK CAPITAL LETTER ALPHA}", "Moon", "NVDA"),
         ("\N{CYRILLIC CAPITAL LETTER TE}SL\N{CYRILLIC CAPITAL LETTER A}", "Moon", "TSLA"),
         ("C0IN", "Moon", "COIN"),
-        ("AAP1", "Moon", "AAPL"),
+        ("lNTC", "Moon", "INTC"),
+        ("1NTC", "Moon", "INTC"),
+        ("|NTC", "Moon", "INTC"),
         ("T5LA", "Moon", "TSLA"),
         ("NVD\N{LATIN CAPITAL LETTER A WITH ACUTE}", "Moon", "NVDA"),
         (
@@ -172,7 +188,9 @@ def test_a_name_claiming_robinhood_and_the_company_is_an_impostor(name):
             "TSLA",
         ),
         ("MOON", "\N{CYRILLIC CAPITAL LETTER TE}esla", "TSLA"),
-        ("MOON", "Te5la Holdings", "TSLA"),
+        ("MOON", "TesIa", "TSLA"),
+        ("MOON", "NVlDlA", "NVDA"),
+        ("MOON", "TE5LA HOLDINGS", "TSLA"),
     ],
 )
 def test_a_match_that_needs_look_alike_folding_is_an_impostor(symbol, name, official):
@@ -188,10 +206,8 @@ def test_a_match_that_needs_look_alike_folding_is_an_impostor(symbol, name, offi
         ("NVDA-", "Moon", "NVDA", "symbol"),
         ("N.V.D.A", "Moon", "NVDA", "symbol"),
         ("NVDAX", "Moon", "NVDA", "symbol"),
-        ("wNVDA", "Moon", "NVDA", "symbol"),
         ("tNVDA", "Moon", "NVDA", "symbol"),
         ("TSLAx", "Moon", "TSLA", "symbol"),
-        ("TSLA.d", "Moon", "TSLA", "symbol"),
         ("TESLA", "Moon", "TSLA", "symbol"),
         ("USDG", "Moon", "USDG", "symbol"),
         ("WETH", "Moon", "WETH", "symbol"),
@@ -205,10 +221,37 @@ def test_a_match_that_needs_look_alike_folding_is_an_impostor(symbol, name, offi
 def test_a_bare_ticker_or_company_name_is_a_collision(symbol, name, official, matched_by):
     result = check_token(OTHER, symbol, name, LISTED)
 
-    assert (result["status"], result["symbol"], result["matched_by"]) == (
+    assert (result["status"], result["symbol"], result["matched_by"], result["third_party"]) == (
         "collision",
         official,
         matched_by,
+        False,
+    )
+
+
+@pytest.mark.parametrize(
+    "symbol, name, official, matched_by",
+    [
+        ("TSLAx", "Tesla xStock", "TSLA", "symbol and name"),
+        ("TSLA.d", "Tesla, Inc. dShares", "TSLA", "symbol and name"),
+        ("MOON", "Tesla, Inc. dShares", "TSLA", "name"),
+        ("TSLA.d", "Tesla", "TSLA", "symbol and name"),
+        ("TSLA.d", "Moon", "TSLA", "symbol"),
+        ("wNVDA", "Nvidia", "NVDA", "symbol and name"),
+        ("wNVDA", "Moon", "NVDA", "symbol"),
+        ("MOON", "Wrapped Tesla", "TSLA", "name"),
+        ("bTSLA", "Backed Tesla", "TSLA", "name"),
+        ("TSLA", "Dinari Tesla", "TSLA", "symbol and name"),
+    ],
+)
+def test_a_third_party_issuers_convention_is_a_collision(symbol, name, official, matched_by):
+    result = check_token(OTHER, symbol, name, LISTED)
+
+    assert (result["status"], result["symbol"], result["matched_by"], result["third_party"]) == (
+        "collision",
+        official,
+        matched_by,
+        True,
     )
 
 
@@ -223,9 +266,15 @@ def test_a_bare_ticker_or_company_name_is_a_collision(symbol, name, official, ma
         ("BAT", "Moon"),
         ("XNVDAX", "Moon"),
         ("NVDAS", "Moon"),
+        ("ILY", "Moon"),
+        ("AAP1", "Moon"),
+        ("MOON", "Te5la"),
+        ("MOON", "Tesla X"),
+        ("lntc", "Moon"),
         ("MOON", "NVIDIA fan club"),
         ("MOON", "Run"),
         ("MOON", "Robinhood Token"),
+        ("MOON", "Nice Easy Trade"),
         ("", ""),
     ],
 )
@@ -479,7 +528,7 @@ async def test_symbol_and_name_are_read_in_one_batched_request(served):
 
     result = await served.service.check_onchain(OTHER, 10)
 
-    assert (result["status"], result["symbol"]) == ("collision", "AMD")
+    assert (result["status"], result["symbol"]) == ("impostor", "AMD")
     (batch,) = served.rpc_requests
     assert [(call["method"], call["params"][0]) for call in batch] == [
         ("eth_call", {"to": OTHER, "data": "0x95d89b41"}),

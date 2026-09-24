@@ -20,7 +20,7 @@ from tests.test_verdict_wiring import bot_scan_functions, update  # noqa: F401
 
 TOKEN = TOKENS[0]
 IMPOSTOR = check_token(TOKEN, "NVDA", "NVIDIA", LISTED)
-COLLISION = check_token(TOKEN, "AMD", "Advanced Micro Dog", LISTED)
+COLLISION = check_token(TOKEN, "AMD", "Moon", LISTED)
 OFFICIAL = check_token(NVDA, None, None, LISTED)
 NO_MATCH = check_token(TOKEN, "MOON", "Moon", LISTED)
 UNKNOWN = check_token(TOKEN, None, None, LISTED)
@@ -415,6 +415,11 @@ def _report(check, contract_data=None, token_info=METADATA):
             f"Official Token Check: Not the official AMD token (same ticker); official contract {AMD}; "
             f"also resembles official TSLA token, contract {TSLA}",
         ),
+        (
+            check_token(TOKEN, "TSLAx", "Tesla xStock", LISTED),
+            f"Official Token Check: Third-party TSLA token, not the Robinhood-issued contract; "
+            f"official contract {TSLA}",
+        ),
         (OFFICIAL, "Official Token Check: Official NVDA token (Robinhood)"),
         (NO_MATCH, "Official Token Check: No match among official Robinhood Chain tokens"),
         (
@@ -467,7 +472,9 @@ def test_an_official_token_is_stated_without_its_metadata():
     "metadata, status, flagged",
     [
         ({"name": "NVIDIA", "symbol": "NVDA"}, "impostor", True),
-        ({"name": "Advanced Micro Dog", "symbol": "AMD"}, "collision", False),
+        ({"name": "Advanced Micro Dog", "symbol": "AMD"}, "impostor", True),
+        ({"name": "Moon", "symbol": "AMD"}, "collision", False),
+        ({"name": "Tesla, Inc. dShares", "symbol": "TSLA.d"}, "collision", False),
     ],
 )
 async def test_a_4663_bot_scan_checks_the_token_it_read(

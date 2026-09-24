@@ -91,6 +91,8 @@ def format_full_report(
             contract = f'official contract `{impostor_check["official_address"]}`'
             if status == 'impostor':
                 detail = f'\U000026A0 Impersonates official {official} token; {contract}'
+            elif impostor_check['third_party']:
+                detail = f'Third-party {official} token, not the Robinhood-issued contract; {contract}'
             else:
                 same = 'ticker' if 'symbol' in impostor_check['matched_by'] else 'name'
                 detail = f'Not the official {official} token (same {same}); {contract}'

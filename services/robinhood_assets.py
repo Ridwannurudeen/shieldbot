@@ -8,18 +8,27 @@ list does not carry the chain's canonical WETH and USDG, so they are always adde
 A token at an official address is official. Any other token's symbol and name are compared with each
 official token's ticker and company name. A company name drops a trailing Inc., Corp., Corporation,
 Holdings, Class A, Common Stock, ETF or Trust, and a token's name may add token, stock, shares,
-robinhood, rh, x or xstock to it ("Tesla Stock", "NVIDIA • Robinhood Token"). The symbol points at
-an official token when it is the ticker, the ticker with one leading or trailing x, w or t or a
-separated suffix (NVDAX, wNVDA, TSLA.d), or the company name; the name points at it when it is the
-company name. A ticker of one or two characters takes no affix and never points on its own.
+robinhood or rh to it ("Tesla Stock", "NVIDIA • Robinhood Token"). The symbol points at an official
+token when it is the ticker; the ticker with one leading or trailing x, w or t or a separated suffix
+(NVDAX, wNVDA, TSLA.d); the ticker or company with Robinhood's name or its ticker HOOD added
+(TESLAHOOD); or the company name. The name points at it when it is the company name, and backs up a
+symbol that points at it when its initials spell the ticker (AMD, "Advanced Micro Dog"). A ticker of
+one or two characters takes no affix and never points on its own.
 
-- impostor: the symbol and the name point at the same official token; or the name says Robinhood
-  besides the company; or a pointer only matches once look-alike characters are folded (accents,
-  compatibility forms, Cyrillic and Greek letters drawn like Latin ones, 0 1 l | 5 8).
-- collision: a pointer on its own, such as the same ticker under another name.
+- impostor: the symbol and the name point at the same official token; or the symbol or name claims
+  Robinhood besides the company; or a pointer only matches once look-alike characters are folded.
+- collision: a pointer on its own, such as the same ticker under another name; or another issuer's
+  tokenised stock, marked by its convention (xStock, dShares, Backed, Dinari, Wrapped; TSLA.d, wTSLA,
+  or TSLAx named an xStock), which is reported as a third-party token.
 - none: nothing points at an official token on the complete list.
 - unknown: without the list only the canonical tokens can be matched, and without the token's
   symbol and name only its address.
+
+Folding reads accents, compatibility forms and Cyrillic and Greek letters drawn like Latin ones as
+those letters, then treats characters that pass for each other within a case as one: a lowercase l,
+an uppercase I, 1 and |; an uppercase O and 0; an uppercase S and 5; an uppercase B and 8. An
+uppercase L is never folded. An official ticker or name is compared in the case of the text it is
+held against: upper or lower case when all of its letters are, else as written.
 
 When the symbol and the name point at different official tokens the stronger match is reported, the
 symbol's first between equals, and the other one as ``also``.
@@ -67,7 +76,11 @@ CORPORATE_SUFFIXES = (
     ("etf",),
     ("trust",),
 )
-TOKEN_WORDS = frozenset({"token", "stock", "shares", "robinhood", "rh", "x", "xstock"})
+TOKEN_WORDS = frozenset({"token", "stock", "shares", "robinhood", "rh"})
+# Words other issuers of tokenised stocks name theirs with ("Tesla xStock", "Tesla, Inc. dShares").
+THIRD_PARTY_MARKERS = frozenset({"xstock", "dshares", "backed", "dinari", "wrapped"})
+# Robinhood's name and its own stock ticker, as a symbol adds them to a ticker or company.
+ROBINHOOD_MARKERS = ("robinhood", "hood", "rh")
 IMPOSTOR_FLAG = "Impersonates official {} token; official contract {}"
 SYMBOL_SELECTOR = "0x95d89b41"
 NAME_SELECTOR = "0x06fdde03"
@@ -75,39 +88,50 @@ NAME_SELECTOR = "0x06fdde03"
 _ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
 _HEX = re.compile(r"0x(?:[0-9a-fA-F]{2})*")
 _NOT_ALPHANUMERIC = re.compile(r"[^a-z0-9]+")
-# Lower-case Cyrillic and Greek letters drawn like Latin ones, and digits and marks read as letters, by code point.
-_LOOKALIKES = str.maketrans(
+# A word: letters and digits of any script, and the | that can stand for an I.
+_WORD = re.compile(r"(?:[^\W_]|\|)+")
+# Cyrillic and Greek letters drawn like Latin ones, each mapped in its own case, by code point.
+_LOOKALIKE_LETTERS = str.maketrans(
     {
         code: latin
         for latin, codes in {
-            "a": (0x0430, 0x03B1),
-            "b": (0x0432, 0x03B2, 0x38),
+            "A": (0x0410, 0x0391),
+            "B": (0x0412, 0x0392),
+            "C": (0x0421,),
+            "E": (0x0415, 0x0395),
+            "H": (0x041D, 0x0397),
+            "I": (0x0406, 0x0399),
+            "J": (0x0408,),
+            "K": (0x041A, 0x039A),
+            "M": (0x041C, 0x039C),
+            "N": (0x039D,),
+            "O": (0x041E, 0x039F),
+            "P": (0x0420, 0x03A1),
+            "S": (0x0405,),
+            "T": (0x0422, 0x03A4),
+            "X": (0x0425, 0x03A7),
+            "Y": (0x0423, 0x03A5),
+            "Z": (0x0396,),
+            "a": (0x0430,),
             "c": (0x0441,),
             "d": (0x0501,),
-            "e": (0x0435, 0x03B5),
-            "h": (0x043D, 0x03B7),
-            "i": (0x0456, 0x03B9, 0x31, 0x6C, 0x7C),
+            "e": (0x0435,),
+            "i": (0x0456,),
             "j": (0x0458,),
-            "k": (0x043A, 0x03BA),
-            "m": (0x043C, 0x03BC),
-            "n": (0x03BD,),
-            "o": (0x043E, 0x03BF, 0x30),
+            "o": (0x043E, 0x03BF),
             "p": (0x0440, 0x03C1),
             "q": (0x051B,),
-            "s": (0x0455, 0x35),
-            "t": (0x0442, 0x03C4),
+            "s": (0x0455,),
+            "v": (0x03BD,),
             "w": (0x051D,),
             "x": (0x0445, 0x03C7),
-            "y": (0x0443, 0x03C5, 0x04AF),
-            "z": (0x03B6,),
+            "y": (0x0443, 0x04AF),
         }.items()
         for code in codes
     }
 )
-_FOLDED_NAME_WORDS = (
-    tuple(tuple(word.translate(_LOOKALIKES) for word in suffix) for suffix in CORPORATE_SUFFIXES),
-    frozenset(word.translate(_LOOKALIKES) for word in TOKEN_WORDS),
-)
+# Characters that pass for each other within a case, each class written as one character.
+_CONFUSABLES = str.maketrans({"l": "1", "I": "1", "|": "1", "O": "0", "S": "5", "B": "8"})
 
 
 def parse_official_assets(payload) -> Dict[str, Tuple[str, str]]:
@@ -151,46 +175,53 @@ def parse_official_assets(payload) -> Dict[str, Tuple[str, str]]:
     return tokens
 
 
-def _words(text: str, fold: bool) -> List[str]:
-    """Lower-case alphanumeric words; ``fold`` first turns look-alike characters into the letters they imitate."""
-    if fold:
-        decomposed = unicodedata.normalize("NFD", unicodedata.normalize("NFKC", text))
-        text = (
-            "".join(char for char in decomposed if not unicodedata.combining(char))
-            .casefold()
-            .translate(_LOOKALIKES)
-        )
-    else:
-        text = text.casefold()
-    return [word for word in _NOT_ALPHANUMERIC.split(text) if word]
+def _plain(word: str) -> str:
+    """A word as it plainly reads: lower-case Latin letters and digits."""
+    return _NOT_ALPHANUMERIC.sub("", word.casefold())
 
 
-def _company(words: List[str], fold: bool) -> str:
-    """A name without the legal suffixes and token words around its company name, as one word.
+def _folded(words: List[str]) -> str:
+    """Words joined, with every look-alike character read as the one it passes for."""
+    decomposed = unicodedata.normalize("NFD", unicodedata.normalize("NFKC", "".join(words)))
+    unmarked = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return _NOT_ALPHANUMERIC.sub(
+        "", unmarked.translate(_LOOKALIKE_LETTERS).translate(_CONFUSABLES).casefold()
+    )
 
-    Folded words are compared with folded suffixes and token words ("holdings" folds to "hoidings").
-    """
-    suffixes, token_words = _FOLDED_NAME_WORDS if fold else (CORPORATE_SUFFIXES, TOKEN_WORDS)
+
+def _in_case_of(words: List[str], text: str) -> List[str]:
+    """``words`` in upper or lower case when all of ``text``'s letters are, else as written."""
+    if text.isupper():
+        return [word.upper() for word in words]
+    if text.islower():
+        return [word.lower() for word in words]
+    return words
+
+
+def _company_words(words: List[str]) -> List[str]:
+    """A name's words about its company: without legal suffixes, token words or other issuers' markers."""
+    ignored = TOKEN_WORDS | THIRD_PARTY_MARKERS
     words = list(words)
     while True:
+        plain = [_plain(word) for word in words]
         suffix = next(
             (
                 suffix
-                for suffix in suffixes
-                if len(words) > len(suffix) and tuple(words[-len(suffix) :]) == suffix
+                for suffix in CORPORATE_SUFFIXES
+                if len(words) > len(suffix) and tuple(plain[-len(suffix) :]) == suffix
             ),
             None,
         )
         if suffix is not None:
             del words[-len(suffix) :]
-        elif len(words) > 1 and words[-1] in token_words:
+        elif len(words) > 1 and plain[-1] in ignored:
             words.pop()
         else:
-            return "".join(word for word in words if word not in token_words)
+            return [word for word, plain_word in zip(words, plain) if plain_word not in ignored]
 
 
 def _symbol_points(words: List[str], ticker: str, company: str) -> Optional[str]:
-    """How a symbol's words name an official token: "ticker", "affix", "company", or None."""
+    """How a symbol's plain words name an official token: "ticker", "company", "robinhood", "affix" or None."""
     joined = "".join(words)
     if not joined:
         return None
@@ -198,6 +229,11 @@ def _symbol_points(words: List[str], ticker: str, company: str) -> Optional[str]
         return "ticker"
     if joined == company:
         return "company"
+    for base in (ticker, company):
+        if len(base) >= MIN_TICKER_LENGTH and any(
+            joined in (base + mark, mark + base) for mark in ROBINHOOD_MARKERS
+        ):
+            return "robinhood"
     if len(ticker) < MIN_TICKER_LENGTH:
         return None
     if len(joined) == len(ticker) + 1 and (
@@ -208,42 +244,81 @@ def _symbol_points(words: List[str], ticker: str, company: str) -> Optional[str]
     return "affix" if len(words) > 1 and ticker in (words[0], words[-1]) else None
 
 
+def _read_symbol(text: str) -> Dict:
+    """A symbol as written, its words, and their plain forms."""
+    words = _WORD.findall(text)
+    return {"text": text, "words": words, "plain": [_plain(word) for word in words]}
+
+
+def _read_name(text: str) -> Dict:
+    """A name as written, its company words, their plain form and initials, and the markers it carries."""
+    plain = {_plain(word) for word in _WORD.findall(text)}
+    words = _company_words(_WORD.findall(text))
+    return {
+        "text": text,
+        "words": words,
+        "plain": "".join(_plain(word) for word in words),
+        "initials": "".join(_plain(word)[:1] for word in words),
+        "markers": plain & THIRD_PARTY_MARKERS,
+        "robinhood": "robinhood" in plain,
+    }
+
+
 def _classify(
-    observed: Dict[bool, Tuple], official_symbol: str, official_name: str
-) -> Optional[Tuple[str, str]]:
-    """(status, matched_by) of a token against one official token, or None when nothing points at it."""
-    pointers = {}
-    for fold, (symbol_words, name_words) in observed.items():
-        ticker, company = (
-            "".join(_words(official_symbol, fold)),
-            _company(_words(official_name, fold), fold),
-        )
-        by_symbol = (
-            _symbol_points(symbol_words, ticker, company) if symbol_words is not None else None
-        )
-        name = _company(name_words, fold) if name_words is not None else ""
-        pointers[fold] = (by_symbol, bool(name) and name == company)
-    (raw_symbol, raw_name), (folded_symbol, folded_name) = pointers[False], pointers[True]
-    by_symbol, by_name = raw_symbol or folded_symbol, raw_name or folded_name
-    if not (by_symbol or by_name):
-        return None
-    matched_by = "symbol and name" if by_symbol and by_name else "symbol" if by_symbol else "name"
+    symbol: Optional[Dict], name: Optional[Dict], official_symbol: str, official_name: str
+):
+    """(status, matched_by, third_party) of a token against one official token, or None when nothing points at it."""
+    ticker_words = _WORD.findall(official_symbol)
+    company_words = _company_words(_WORD.findall(official_name))
+    ticker = "".join(_plain(word) for word in ticker_words)
+    company = "".join(_plain(word) for word in company_words)
+    by_symbol = None
+    if symbol is not None:
+        by_symbol = _symbol_points(symbol["plain"], ticker, company)
+        folded = _folded(symbol["words"])
+        if (
+            by_symbol is None
+            and folded
+            and folded
+            in (
+                _folded(_in_case_of(ticker_words, symbol["text"])),
+                _folded(_in_case_of(company_words, symbol["text"])),
+            )
+        ):
+            by_symbol = "look-alike"
+    by_name = None
+    if name is not None and company:
+        folded = _folded(name["words"])
+        if name["plain"] == company:
+            by_name = "company"
+        elif folded and folded == _folded(_in_case_of(company_words, name["text"])):
+            by_name = "look-alike"
+    spelled = name is not None and len(ticker) >= MIN_TICKER_LENGTH and name["initials"] == ticker
     # A short ticker is too common to point on its own.
     symbol_alone = by_symbol is not None and not (
-        by_symbol == "ticker" and len(official_symbol) < MIN_TICKER_LENGTH
+        len(ticker) < MIN_TICKER_LENGTH and by_symbol in ("ticker", "look-alike")
     )
-    says_robinhood = observed[True][1] is not None and "robinhood" in observed[True][1]
-    # Corroborated: the symbol and name agree, the name also claims Robinhood, or a pointer needed folding.
-    if (
-        (by_symbol and by_name)
-        or (by_name and says_robinhood)
-        or (symbol_alone and not raw_symbol)
-        or (by_name and not raw_name)
-    ):
-        return "impostor", matched_by
-    if symbol_alone or by_name:
-        return "collision", matched_by
-    return None
+    agree = by_symbol is not None and (by_name is not None or spelled)
+    if not (symbol_alone or by_name or agree):
+        return None
+    matched_by = "symbol and name" if agree else "symbol" if symbol_alone else "name"
+    look_alike = (symbol_alone and by_symbol == "look-alike") or by_name == "look-alike"
+    claims_robinhood = by_symbol == "robinhood" or (by_name is not None and name["robinhood"])
+    markers = name["markers"] if name is not None else set()
+    # Another issuer's convention: a marker in the name, or wTSLA, TSLA.d, or TSLAx named an xStock.
+    third_party = bool(markers) or (
+        by_symbol is not None
+        and (
+            "".join(symbol["plain"]) == "w" + ticker
+            or symbol["plain"] == [ticker, "d"]
+            or ("xstock" in markers and "".join(symbol["plain"]) == ticker + "x")
+        )
+    )
+    if look_alike or claims_robinhood:
+        return "impostor", matched_by, False
+    if third_party:
+        return "collision", matched_by, True
+    return ("impostor" if agree else "collision"), matched_by, False
 
 
 def _result(
@@ -251,6 +326,7 @@ def _result(
     symbol: Optional[str] = None,
     official_address: Optional[str] = None,
     matched_by: Optional[str] = None,
+    third_party: bool = False,
     also: Optional[Dict] = None,
     reason: Optional[str] = None,
     list_size: Optional[int] = None,
@@ -260,6 +336,7 @@ def _result(
         "symbol": symbol,
         "official_address": official_address,
         "matched_by": matched_by,
+        "third_party": third_party,
         "also": also,
         "reason": reason,
         "list_size": list_size,
@@ -275,23 +352,19 @@ def check_token(
     """Classify a 4663 token against the official tokens ``listed`` (None when the list is unavailable).
 
     ``symbol`` and ``name`` are None when they could not be read. The result's ``symbol`` is the
-    official token matched and ``list_size`` the number of official tokens it was checked against.
+    official token matched, ``third_party`` marks a collision in another issuer's convention, and
+    ``list_size`` is the number of official tokens it was checked against.
     """
     tokens = {**(listed or {}), **CANONICAL_TOKENS}
     list_size = len(listed) if listed is not None else None
     address = address.lower()
     if address in tokens:
         return _result("official", tokens[address][0], address, list_size=list_size)
-    observed = {
-        fold: (
-            _words(symbol, fold) if symbol is not None else None,
-            _words(name, fold) if name is not None else None,
-        )
-        for fold in (False, True)
-    }
+    read_symbol = _read_symbol(symbol) if symbol is not None else None
+    read_name = _read_name(name) if name is not None else None
     matches = []
     for official_address, (official_symbol, official_name) in tokens.items():
-        found = _classify(observed, official_symbol, official_name)
+        found = _classify(read_symbol, read_name, official_symbol, official_name)
         if found is not None:
             matches.append((found, official_symbol, official_address))
     if matches:
@@ -299,10 +372,16 @@ def check_token(
         matches.sort(
             key=lambda match: (match[0][0] == "impostor", "symbol" in match[0][1]), reverse=True
         )
-        ((status, matched_by), official_symbol, official_address), *others = matches
+        ((status, matched_by, third_party), official_symbol, official_address), *others = matches
         also = {"symbol": others[0][1], "official_address": others[0][2]} if others else None
         return _result(
-            status, official_symbol, official_address, matched_by, also, list_size=list_size
+            status,
+            official_symbol,
+            official_address,
+            matched_by,
+            third_party,
+            also,
+            list_size=list_size,
         )
     if listed is None:
         return _result("unknown", reason="Official Robinhood token list unavailable")
