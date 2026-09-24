@@ -2,8 +2,6 @@ import asyncio
 import logging
 import time
 
-from utils.scam_db import ScamDatabase
-
 logger = logging.getLogger(__name__)
 
 # Bytecode signatures for dangerous patterns
@@ -104,14 +102,12 @@ class ContractService:
                 results['coverage'] = {'scam_database': False}
                 results['reason'] = 'Scam database unavailable: ' + '; '.join(failed_providers)
 
-            # When the explorer did not answer, GoPlus's record for the token (already fetched for
-            # the scam check) says whether the source is open, which is the same fact.
-            if results['is_verified'] is None:
-                security = await ScamDatabase.fetch_token_security(address, chain_id)
-                open_source = security['data'].get('is_open_source') if security['status'] == 'ok' else None
-                if open_source in ('0', '1'):
-                    results['is_verified'] = open_source == '1'
-                    results['field_providers'] = {'is_verified': 'goplus'}
+            # GoPlus's token record, fetched by the scam check. When the explorer did not answer, it
+            # says whether the source is open, which is the same fact.
+            goplus = getattr(scam_matches, 'goplus_record', {})
+            if results['is_verified'] is None and goplus.get('is_open_source') in ('0', '1'):
+                results['is_verified'] = goplus['is_open_source'] == '1'
+                results['field_providers'] = {'is_verified': 'goplus'}
 
             # Ownership (RPC call, not BscScan)
             ownership = await self.web3_client.get_ownership_info(address, chain_id=chain_id)
@@ -162,6 +158,12 @@ class ContractService:
                 logger.warning("Bytecode scan failed for %s: %s", address, type(e).__name__)
                 results['coverage'] = {**results.get('coverage', {}), 'bytecode': False}
                 results['reason'] = '; '.join(filter(None, (results.get('reason'), 'Bytecode scan unavailable')))
+
+            # GoPlus also finds blacklist functions under names the selector table does not list
+            # (USDT's addBlackList); the owner power is the same whoever reports it.
+            if has_blacklist is not True and goplus.get('is_blacklisted') == '1':
+                has_blacklist = True
+                results['field_providers'] = {**results.get('field_providers', {}), 'has_blacklist': 'goplus'}
 
             results['bytecode_warnings'] = bytecode_warnings
             results['has_proxy'] = has_proxy

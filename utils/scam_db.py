@@ -60,10 +60,13 @@ class ScamMatches(list):
     Matches with a non-empty ``failed_providers`` are incomplete, never clean.
     """
 
-    def __init__(self, matches=(), failed_providers=(), observed_at=0):
+    def __init__(self, matches=(), failed_providers=(), observed_at=0, goplus_record=None):
         super().__init__(matches)
         self.failed_providers = tuple(failed_providers)
         self.observed_at = observed_at
+        # GoPlus's token record, empty when it gave none: the contract service reads facts from it
+        # that are not scam findings.
+        self.goplus_record = goplus_record or {}
 
 
 class ScamDatabase:
@@ -112,7 +115,9 @@ class ScamDatabase:
         matches.extend(goplus_results)
         failed_providers.extend(goplus_results.failed_providers)
 
-        return ScamMatches(matches, failed_providers, min(observed_at, goplus_results.observed_at))
+        return ScamMatches(
+            matches, failed_providers, min(observed_at, goplus_results.observed_at), goplus_results.goplus_record
+        )
     
     @staticmethod
     async def fetch_token_security(address: str, chain_id: int = 56) -> dict:
@@ -246,14 +251,13 @@ class ScamDatabase:
         fake_token = result.get('fake_token')
         if isinstance(fake_token, dict) and str(fake_token.get('value')) == '1':
             block_flags.append('Counterfeit of a mainstream token')
-        # A restriction that makes the token dangerous to hold: the 70 floor. is_blacklisted means
-        # the contract has a blacklist function (USDT on Ethereum has one), not that GoPlus has
-        # blacklisted the token. Not open source is the explorer's unverified finding, which
-        # structural scoring already counts. honeypot_with_same_creator describes the deployer,
-        # not the token: GoPlus sets it on Binance-Peg Dogecoin.
+        # A restriction that makes the token dangerous to hold: the 70 floor. Not scam findings:
+        # is_blacklisted means the contract has a blacklist function (USDT on Ethereum has one),
+        # an owner power the contract service passes to structural scoring; not open source is the
+        # explorer's unverified finding, which structural scoring already counts;
+        # honeypot_with_same_creator describes the deployer, and GoPlus sets it on Binance-Peg
+        # Dogecoin.
         flags = list(block_flags)
-        if result.get('is_blacklisted') == '1':
-            flags.append('Contract has a blacklist function')
         if result.get('is_honeypot') == '1':
             flags.append('Honeypot (GoPlus)')
         if result.get('cannot_sell_all') == '1':
@@ -266,8 +270,8 @@ class ScamDatabase:
                 'reason': '; '.join(flags),
                 'source': 'gopluslabs.io',
                 'severity': 'block' if block_flags else 'high',
-            }], observed_at=response.get('observed_at', 0))
-        return ScamMatches(observed_at=response.get('observed_at', 0))
+            }], observed_at=response.get('observed_at', 0), goplus_record=result)
+        return ScamMatches(observed_at=response.get('observed_at', 0), goplus_record=result)
     
     def report_address(self, address: str, reporter_id: str) -> dict:
         """Community report with rate-limiting, whitelist protection, and multi-report threshold.
