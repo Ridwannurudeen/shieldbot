@@ -219,6 +219,15 @@ def test_dashboard_chain_tables_cover_every_scan_chain():
         assert f"val:'{chain_id}'" in dashboard, f"chain filter for {chain_id}"
 
 
+def test_dashboard_names_the_url_the_site_sends_visitors_to_as_canonical():
+    nginx = read(ROOT / "deploy" / "nginx-shieldbotsecurity.conf")
+    target = re.search(r"location = /dashboard \{\s*return 301 (\S+);", nginx).group(1)
+    for page in (DASHBOARD_SRC, ROOT / "dashboard" / "index.html"):
+        html = read(page)
+        assert f'<link rel="canonical" href="{target}" />' in html, page.name
+        assert '<meta name="description" content="' in html, page.name
+
+
 def test_structured_data_is_valid_and_matches_the_visible_faq():
     html = read(LANDING_SRC / "index.html")
     faq_source = read(COMPONENTS / "FAQ.tsx")
