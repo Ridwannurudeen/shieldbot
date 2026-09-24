@@ -32,6 +32,7 @@
   const clone = structuredClone;
   const toNumber = Number;
   const isSafeInteger = Number.isSafeInteger;
+  const toRadix = uncurry(Number.prototype.toString);
   const execRegExp = uncurry(RegExp.prototype.exec);
   const Bytes = Uint8Array;
   const importKey = bindTo(crypto.subtle.importKey, crypto.subtle);
@@ -330,6 +331,9 @@
                 reject(new NativeError("Transaction blocked by ShieldAI: wallet chain changed; retry analysis"));
                 return;
               }
+              // The wallet holds the request to the analysed chain only when
+              // the request names one, so name it if the page left it out.
+              if (txParams.chainId === undefined) txParams.chainId = `0x${toRadix(chainId, 16)}`;
               // proceed — forward to original wallet
               forward();
             });

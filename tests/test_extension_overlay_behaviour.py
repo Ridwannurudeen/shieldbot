@@ -1259,6 +1259,36 @@ def test_a_signature_request_without_params_is_still_shown_first(method):
     )
 
 
+@pytest.mark.parametrize("given", ["absent", "hex", "number", "batch-absent"])
+def test_the_wallet_is_told_the_chain_that_was_analysed(given):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const given = JSON.parse(process.argv[1]);
+  vm.runInContext("Number.prototype.toString = () => '0';", context);
+  const tx = {to: '0x' + 'a'.repeat(40)};
+  if (given === 'hex') tx.chainId = '0x38';
+  if (given === 'number') tx.chainId = 56;
+  const args = given === 'batch-absent'
+    ? {method: 'wallet_sendCalls', params: [{version: '2.0.0', calls: [tx]}]}
+    : {method: 'eth_sendTransaction', params: [tx]};
+  const pending = provider.request(args);
+  await flush();
+  const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+  assert.equal(intercept.tx.chainId, 56);
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId: intercept.requestId, action: 'proceed',
+    proof: await proof(intercept.requestId, 'proceed')});
+  assert.equal(await pending, 'sent');
+  const named = sent[0].params[0].chainId;
+  assert.equal(named, given === 'hex' || given === 'number' ? tx.chainId : '0x38');
+  assert.deepEqual(Object.keys(args.params[0]).includes('chainId'), given === 'hex' || given === 'number',
+    "the page's own request object was changed");
+""",
+        given,
+    )
+
+
 def test_replaced_json_parse_cannot_change_the_typed_data_shown():
     run_node(
         INJECT_HARNESS
