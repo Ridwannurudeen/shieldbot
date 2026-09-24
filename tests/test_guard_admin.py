@@ -28,6 +28,8 @@ def guard_admin(monkeypatch):
         db=SimpleNamespace(
             get_platform_stats=AsyncMock(return_value={"all_time": {}}),
             get_launch_discovery_status=AsyncMock(return_value={}),
+            get_launch_scan_share=AsyncMock(return_value={"launches": 0, "scanned": 0}),
+            get_verdict_evidence_counts=AsyncMock(return_value={}),
             register_guard_subject=AsyncMock(return_value=True),
             unregister_guard_subject=AsyncMock(),
         ),

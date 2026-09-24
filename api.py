@@ -1725,17 +1725,31 @@ async def public_stats():
     `launch_discovery` says how far Robinhood Chain launch discovery has read, from the database
     alone: its lowest source cursor, when a sweep last moved a cursor, and the newest launch block.
     A cursor far below the chain head, or an old `last_sweep_at`, means discovery has stalled.
+    Its `scanned_share` counts the launches whose block is in the last 24 hours and how many of
+    them have any scan outcome. `evidence_documents` counts the stored verdict evidence documents
+    per chain; `registry_records_confirmed` counts those whose record in the Robinhood Chain
+    verdict registry is confirmed on-chain. `contracts_scanned` and `threats_detected` count the contracts
+    the extension and agent firewalls scored; Telegram, /api/scan and launch scans do not add to them.
     """
     from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 
     db_stats = {}
     launch_discovery = None
+    evidence_documents = registry_records_confirmed = None
     if container and container.db:
         db_stats = await container.db.get_platform_stats()
+        window_hours = 24
         launch_discovery = {
             "chain_id": LAUNCH_CHAIN_ID,
             **await container.db.get_launch_discovery_status(LAUNCH_CHAIN_ID),
+            "scanned_share": {
+                "window_hours": window_hours,
+                **await container.db.get_launch_scan_share(LAUNCH_CHAIN_ID, time.time() - window_hours * 3600),
+            },
         }
+        evidence = await container.db.get_verdict_evidence_counts()
+        evidence_documents = {chain_id: counts["documents"] for chain_id, counts in evidence.items()}
+        registry_records_confirmed = sum(counts["confirmed"] for counts in evidence.values())
 
     mempool = {}
     observable = unobservable = None
@@ -1757,6 +1771,8 @@ async def public_stats():
         "mempool_chains_unobservable": unobservable,
         "mempool_counting_since": mempool.get("counting_since"),
         "launch_discovery":       launch_discovery,
+        "evidence_documents":     evidence_documents,
+        "registry_records_confirmed": registry_records_confirmed,
     }
 
 

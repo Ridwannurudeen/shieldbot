@@ -59,6 +59,8 @@ def _db(rows=(CONTRACT_ROW,), all_time=None):
             }
         ),
         get_launch_discovery_status=AsyncMock(return_value=dict(DISCOVERY)),
+        get_launch_scan_share=AsyncMock(return_value={"launches": 5, "scanned": 2}),
+        get_verdict_evidence_counts=AsyncMock(return_value={}),
     )
 
 
@@ -140,7 +142,11 @@ def test_stats_with_no_chain_read_protect_none(dashboard_api):
 def test_stats_report_how_far_launch_discovery_has_read(dashboard_api):
     db = _db()
     body = dashboard_api(_container(db=db)).get("/api/stats").json()
-    assert body["launch_discovery"] == {"chain_id": 4663, **DISCOVERY}
+    assert body["launch_discovery"] == {
+        "chain_id": 4663,
+        **DISCOVERY,
+        "scanned_share": {"window_hours": 24, "launches": 5, "scanned": 2},
+    }
     db.get_launch_discovery_status.assert_awaited_once_with(4663)
 
 

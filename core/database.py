@@ -2608,6 +2608,18 @@ class Database:
         )
         return dict(zip(keys, row))
 
+    async def get_verdict_evidence_counts(self) -> Dict[int, Dict[str, int]]:
+        """Stored evidence documents per chain, and how many of them have a confirmed on-chain record."""
+        cursor = await self._db.execute("""
+            SELECT chain_id, COUNT(*), SUM(onchain_status = 'confirmed')
+            FROM verdict_evidence
+            GROUP BY chain_id
+        """)
+        return {
+            chain_id: {"documents": documents, "confirmed": confirmed}
+            for chain_id, documents, confirmed in await cursor.fetchall()
+        }
+
     async def get_newest_verdict_observation(
         self, chain_id: int, subject: str, include_deduplicated: bool = True
     ) -> Optional[Dict]:
