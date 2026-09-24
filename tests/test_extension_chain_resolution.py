@@ -110,8 +110,9 @@ async function proofFor(message) {
   const mac = await webcrypto.subtle.sign('HMAC', key, encoder.encode(message));
   return new Uint8Array(mac);
 }
+// A top-level https document without an opener.
 const window = {
-  ethereum: provider,
+  ethereum: provider, location: {protocol: 'https:'}, frameElement: null, opener: null,
   addEventListener(name, fn) {if (!handlers.has(name)) handlers.set(name, new Set()); handlers.get(name).add(fn);},
   removeEventListener(name, fn) {handlers.get(name)?.delete(fn);},
   dispatchEvent(event) {for (const fn of [...(handlers.get(event.type) || [])]) fn(event);},

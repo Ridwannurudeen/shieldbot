@@ -68,6 +68,25 @@
     return true;
   }
 
+  // Whether another script of this page can reach this document before the
+  // handover below completes: a frame whose parent is same-origin, an
+  // about:blank or about:srcdoc document (a frame's initial empty document is
+  // about:blank), or a popup whose opener is same-origin. Such a script could
+  // take the token, or pose as inject.js, so these documents get no handover
+  // at all: inject.js, which applies the same rule, then holds no key and
+  // rejects every wallet request it checks there.
+  function reachableByPage() {
+    if (window.location.protocol === "about:" || window.frameElement !== null) return true;
+    const opener = window.opener;
+    if (!opener) return false;
+    try {
+      return Boolean(opener.document);
+    } catch (_) {
+      // Reading a cross-origin window's document throws.
+      return false;
+    }
+  }
+
   // Hand the token to inject.js. Both are manifest content scripts that run at
   // document_start, before any page script. If inject.js is already listening
   // it takes the offer and cancels the event; otherwise it asks when it starts
@@ -78,11 +97,16 @@
       new CustomEvent("shieldai:channel", { detail: _CHANNEL_TOKEN, cancelable: true })
     );
   }
-  if (!offerToken()) {
-    document.addEventListener("shieldai:channel-request", function answer() {
+  if (!reachableByPage() && !offerToken()) {
+    const answer = () => {
       document.removeEventListener("shieldai:channel-request", answer);
       offerToken();
-    });
+    };
+    document.addEventListener("shieldai:channel-request", answer);
+    // inject.js asks at document_start or not at all. Stop listening once that
+    // has passed, so a later request, which only a page script could send,
+    // gets no answer.
+    setTimeout(() => document.removeEventListener("shieldai:channel-request", answer), 0);
   }
 
   // Request ids already seen. inject.js makes a fresh random id per request,

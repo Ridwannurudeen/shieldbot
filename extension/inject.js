@@ -42,6 +42,7 @@
   const postMessage = bindTo(window.postMessage, window);
   const addWindowListener = bindTo(window.addEventListener, window);
   const removeWindowListener = bindTo(window.removeEventListener, window);
+  const removeDocumentListener = bindTo(document.removeEventListener, document);
   const setTimer = setTimeout;
   const clearTimer = clearTimeout;
   const clearTicker = clearInterval;
@@ -53,17 +54,41 @@
   // and not kept, so no later page script can read it. null until then.
   let _channelKey = null;
 
+  // content.js hands over no token in a document another script of this page
+  // can reach before the handover completes (see reachableByPage there), and
+  // the same rule applies here: in such a document a key offered here could
+  // come from that script. So none is taken there, and every wallet request
+  // checked there is rejected.
+  function reachableByPage() {
+    if (window.location.protocol === "about:" || window.frameElement !== null) return true;
+    const opener = window.opener;
+    if (!opener) return false;
+    try {
+      return Boolean(opener.document);
+    } catch (_) {
+      // Reading a cross-origin window's document throws.
+      return false;
+    }
+  }
+  const reachable = reachableByPage();
+
   function takeToken(event) {
     const token = eventDetail(event);
     if (typeof token !== "string" || !token) return;
     event.preventDefault();
-    document.removeEventListener("shieldai:channel", takeToken);
+    removeDocumentListener("shieldai:channel", takeToken);
     _channelKey = importKey(
       "raw", encode(token), { __proto__: null, name: "HMAC", hash: "SHA-256" }, false, ["sign"]
     );
   }
-  document.addEventListener("shieldai:channel", takeToken);
-  document.dispatchEvent(new CustomEvent("shieldai:channel-request"));
+  if (!reachable) {
+    document.addEventListener("shieldai:channel", takeToken);
+    document.dispatchEvent(new CustomEvent("shieldai:channel-request"));
+    // content.js offers its token at document_start or not at all. Stop
+    // listening once that has passed, so a later offer, which only a page
+    // script could make, cannot set the key.
+    setTimer(() => removeDocumentListener("shieldai:channel", takeToken), 0);
+  }
 
   // What kind of request a method is, or null when it is not intercepted. A
   // switch rather than a Set, so no replaceable built-in decides it.
@@ -210,6 +235,11 @@
       }
 
       return new NativePromise((resolve, reject) => {
+        if (reachable) {
+          reject(new NativeError("ShieldAI cannot check wallet requests made from this embedded frame or popup. " +
+            "Open the dApp in its own tab."));
+          return;
+        }
         // Analyse and forward one copy of the request: a getter or proxy in
         // the page's own object could otherwise show the analysis one
         // transaction and hand the wallet another. Only values the request

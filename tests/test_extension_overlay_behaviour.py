@@ -130,10 +130,13 @@ const window = {
   addEventListener(type, fn) { (windowListeners[type] ||= []).push(fn); },
   removeEventListener(type, fn) { windowListeners[type] = (windowListeners[type] || []).filter(f => f !== fn); },
   postMessage(data) { posted.push(data); },
-  location: {href: 'https://dapp.example/', hostname: 'dapp.example'},
+  location: {href: 'https://dapp.example/', protocol: 'https:', hostname: 'dapp.example'},
   history: {length: 1},
 };
 window.top = window;
+// A top-level document without an opener; frame tests change these.
+window.frameElement = null;
+window.opener = null;
 function deliver(data) { for (const fn of [...(windowListeners.message || [])]) fn({source: window, data}); }
 const flush = () => new Promise(resolve => setTimeout(resolve, 60));
 // Taken now, so the tests' own proofs stay right after a test replaces page built-ins.
@@ -242,6 +245,20 @@ def test_token_is_handed_over_once_at_document_start():
   document.addEventListener('shieldai:channel', event => { second = event.detail; });
   document.dispatchEvent(new CustomEvent('shieldai:channel-request'));
   assert.equal(second, null, 'content.js answered a second request, which a page script could send');
+"""
+    )
+
+
+def test_content_script_answers_no_request_once_document_start_has_passed():
+    run_node(
+        CONTENT_HARNESS.replace("document.dispatchEvent(new CustomEvent('shieldai:channel-request'));\n", "")
+        + r"""
+(async () => {
+  // inject.js never asked at document_start. Once that has passed, a request can only come from
+  // a page script.
+  await flush();
+  document.dispatchEvent(new CustomEvent('shieldai:channel-request'));
+  assert.equal(token, null, 'content.js handed its token to a late request');
 """
     )
 
@@ -952,6 +969,126 @@ def test_inject_fails_closed_at_once_without_the_channel():
   assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').length, 0);
   assert.equal(sent.length, 0);
 """
+    )
+
+
+def test_inject_takes_no_key_once_document_start_has_passed():
+    run_node(
+        INJECT_HARNESS.replace(
+            "const accepted = !document.dispatchEvent(",
+            "const accepted = false && !document.dispatchEvent(",
+        )
+        + r"""
+(async () => {
+  // No key arrived at document_start; the zero-delay timer marks its end.
+  for (const [id, timer] of timers) if (timer.delay === 0) { timers.delete(id); timer.fn(); }
+  assert(document.dispatchEvent(new CustomEvent('shieldai:channel', {detail: 'late-token', cancelable: true})),
+    'inject.js took a key offered after document_start');
+  await assert.rejects(provider.request({method: 'eth_sendTransaction', params: [{to: '0x' + 'a'.repeat(40)}]}), /blocked/);
+  await flush();
+  assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').length, 0);
+  assert.equal(sent.length, 0);
+"""
+    )
+
+
+# Both scripts in one document, each in its own world as in a browser: content.js with the Chrome
+# APIs, inject.js with the page's. They share the window and the document. The document is the
+# kind given in argv: its URL, its parent and its opener, as the scripts see them from inside.
+FRAME_HARNESS = (
+    FAKE_DOM
+    + r"""
+const [kind, order, reachable] = JSON.parse(process.argv[1]);
+const crossOrigin = {get document() { throw new Error('Blocked a frame from accessing a cross-origin frame'); }};
+const sameOrigin = {document: {}};
+if (kind.startsWith('about-')) Object.assign(window.location, {protocol: 'about:', href: kind.replace('-', ':')});
+if (kind === 'cross-origin-frame' || kind === 'about-srcdoc') window.top = window.parent = crossOrigin;
+if (kind === 'same-origin-frame') { window.top = window.parent = sameOrigin; window.frameElement = {tagName: 'IFRAME'}; }
+if (kind === 'same-origin-opener') window.opener = sameOrigin;
+if (kind === 'cross-origin-opener') window.opener = crossOrigin;
+// Messages reach every window listener, asynchronously, as window.postMessage does.
+window.postMessage = data => { posted.push(data); setTimeout(() => deliver(data), 0); };
+const sent = [];
+const provider = {
+  on() {},
+  async request(args) { if (args.method === 'eth_chainId') return '0x38'; sent.push(args); return 'sent'; },
+};
+window.ethereum = provider;
+window.dispatchEvent = () => {};
+const chrome = {
+  storage: {local: {get(defaults, cb) { cb({...defaults, language: 'en'}); }}},
+  runtime: {
+    getURL: path => 'chrome-extension://id/' + path,
+    async sendMessage(message) {
+      return message.type === 'SHIELDAI_ANALYZE' ? {result: {status: 'ok', partial: false, classification: 'SAFE',
+        risk_score: 0, coverage: {honeypot: 1}, coverage_reasons: {}, verdict: 'SAFE', transaction_impact: {}}}
+        : {result: {is_phishing: false}};
+    },
+  },
+};
+const contentWorld = vm.createContext({
+  window, document, chrome, crypto: webcrypto, TextEncoder, TextDecoder, CustomEvent, setTimeout, clearTimeout,
+  console, Date, MutationObserver: FakeMutationObserver,
+  fetch: async url => ({json: async () => JSON.parse(fs.readFileSync(url.replace('chrome-extension://id/', 'extension/'), 'utf8'))}),
+});
+const pageWorld = vm.createContext({
+  window, document, TextEncoder, CustomEvent, structuredClone, queueMicrotask, setTimeout, clearTimeout,
+  setInterval() { return 0; }, clearInterval() {}, console,
+  Event: class { constructor(type) { this.type = type; } },
+  crypto: {subtle: webcrypto.subtle, randomUUID: () => webcrypto.randomUUID()},
+});
+// Every key content.js offers, seen by a listener that takes none of them.
+const offers = [];
+document.addEventListener('shieldai:channel', event => offers.push(event.detail));
+for (const script of order === 'content-first' ? ['content', 'inject'] : ['inject', 'content']) {
+  vm.runInContext(fs.readFileSync(`extension/${script}.js`, 'utf8'), script === 'content' ? contentWorld : pageWorld);
+}
+const overlayRoot = () => { const host = body.children.find(el => el.shadow); return host ? host.shadow : null; };
+"""
+)
+
+REACHABLE = ["same-origin-frame", "about-blank", "about-srcdoc", "same-origin-opener"]
+
+
+@pytest.mark.parametrize("order", ["content-first", "inject-first"])
+@pytest.mark.parametrize(
+    "kind", ["top", "cross-origin-frame", "cross-origin-opener", *REACHABLE]
+)
+def test_documents_the_page_can_reach_first_get_no_key_and_reject_requests(kind, order):
+    run_node(
+        FRAME_HARNESS
+        + r"""
+(async () => {
+  assert.equal(offers.length > 0, !reachable, 'content.js offered its token in the wrong kind of document');
+  // A key a page script offers right after document_start is never taken.
+  assert(document.dispatchEvent(new CustomEvent('shieldai:channel', {detail: 'page-token', cancelable: true})));
+  const intercepts = () => posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT');
+  const tx = {to: '0x' + 'a'.repeat(40)};
+  if (reachable) {
+    const message = 'ShieldAI cannot check wallet requests made from this embedded frame or popup. ' +
+      'Open the dApp in its own tab.';
+    for (const args of [
+      {method: 'eth_sendTransaction', params: [tx]},
+      {method: 'personal_sign', params: ['0x68656c6c6f', '0x' + 'b'.repeat(40)]},
+      {method: 'eth_signTypedData_v4', params: ['0x' + 'b'.repeat(40), '{}']},
+      {method: 'wallet_sendCalls', params: [{version: '2.0.0', calls: [tx]}]},
+    ]) {
+      await assert.rejects(provider.request(args), {message});
+    }
+    await flush();
+    assert.equal(intercepts().length, 0);
+    assert.equal(sent.length, 0);
+    return;
+  }
+  const pending = provider.request({method: 'eth_sendTransaction', params: [tx]});
+  for (let i = 0; i < 20 && !overlayRoot()?.getElementById('shieldai-proceed'); i++) await flush();
+  assert.equal(sent.length, 0, 'the transaction reached the wallet before the user decided');
+  assert.equal(intercepts().length, 1);
+  overlayRoot().getElementById('shieldai-proceed').dispatch('click', {isTrusted: true});
+  assert.equal(await pending, 'sent');
+  assert.equal(sent.length, 1);
+""",
+        [kind, order, kind in REACHABLE],
     )
 
 
