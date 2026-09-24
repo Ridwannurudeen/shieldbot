@@ -759,8 +759,8 @@
       const h = HEALTH[health];
 
       return (
-        <header className="glass border-b px-5 md:px-8 py-4 flex items-center justify-between flex-wrap gap-3"
-                style={{ borderColor:'#1E293B', position:'sticky', top:0, zIndex:40 }}>
+        <header className="glass border-b px-5 md:px-8 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-2 md:gap-3 md:sticky md:top-0"
+                style={{ borderColor:'#1E293B', zIndex:40 }}>
           <div>
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="flex items-center gap-3">
@@ -850,10 +850,10 @@
       return stats && stats.background_workers_note ? 'Unavailable' : '—';
     }
 
-    function StatCard({ label, span, value, color, loading, note, missing }) {
+    function StatCard({ label, span, value, color, loading, note, missing, className = '' }) {
       const display = useCountUp(loading || value == null ? 0 : value);
       return (
-        <div className="glass rounded-xl p-4 fade-up flex flex-col gap-1 text-center"
+        <div className={`glass rounded-xl p-4 fade-up flex flex-col gap-1 text-center ${className}`}
              style={{ border:'1px solid #1E293B', minWidth:0 }}>
           {loading
             ? <div className="skeleton mx-auto" style={{ height:28, width:72 }} />
@@ -883,7 +883,8 @@
             {STAT_ITEMS.map(s => (
               <StatCard key={s.key} label={s.label} span={s.span} value={stats ? stats[s.key] : null}
                         color={s.color} loading={loading} missing={missingText(stats)}
-                        note={s.key === 'chains_protected' ? mempoolNote : null} />
+                        note={s.key === 'chains_protected' ? mempoolNote : null}
+                        className={s.key === 'chains_protected' ? 'col-span-2 lg:col-span-1' : ''} />
             ))}
           </div>
           {!loading && (stats === null || since || anyMissing) && (
