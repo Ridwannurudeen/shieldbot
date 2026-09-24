@@ -9,7 +9,7 @@ import os
 import re
 import time
 import logging
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, List, Optional, Tuple
 
 import aiosqlite
@@ -290,8 +290,10 @@ class Database:
                 yield connection
                 await connection.commit()
             except BaseException:
-                with suppress(Exception):   # a rollback on a connection closed underneath must not hide the cause
+                try:
                     await connection.rollback()
+                except Exception as e:   # a rollback on a connection closed underneath must not hide the cause
+                    logger.warning("Transaction rollback failed: %s", type(e).__name__)
                 raise
 
     async def _second_connection(self, autocommit: bool = False) -> Optional[aiosqlite.Connection]:
@@ -303,12 +305,13 @@ class Database:
             opened = await aiosqlite.connect(self.db_path, isolation_level=None)
         else:
             opened = await aiosqlite.connect(self.db_path)
+        await opened.execute("PRAGMA busy_timeout=5000")
+        # Checked after the last await, so the caller stores the connection before close() can run again.
         if self._db is None:
             # close() ran while this connection was opening; leaving it open would
             # keep aiosqlite's non-daemon worker thread alive past shutdown.
             await opened.close()
             return None
-        await opened.execute("PRAGMA busy_timeout=5000")
         return opened
 
     async def close(self):

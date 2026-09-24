@@ -68,7 +68,6 @@ async def test_a_deployment_alert_cut_short_leaves_no_row_while_another_write_co
             db.record_outcome(CONTRACT, 56, 80.0, "blocked"),
             return_exceptions=True,
         )
-    await db._db.commit()
 
     assert isinstance(logged, sqlite3.OperationalError) and recorded is None
     assert await _count(db, "deployment_alerts") == 0
@@ -90,7 +89,6 @@ async def test_an_indexed_contract_whose_funder_link_fails_leaves_no_deployer_ro
             indexer._index_contract(CONTRACT, 56),
             db.record_outcome(CONTRACT, 56, 80.0, "blocked"),
         )
-    await db._db.commit()
 
     cursor = await db._db.execute("SELECT COUNT(*) FROM deployers WHERE contract_address = ?", (CONTRACT,))
     assert (await cursor.fetchone())[0] == 0
@@ -209,6 +207,29 @@ async def test_the_transaction_connection_opens_on_first_use_and_never_after_clo
         async with db.transaction():
             pass
     assert db._txn_db is None
+
+
+@pytest.mark.asyncio
+async def test_a_connection_still_opening_when_close_runs_is_closed_and_never_returned(db):
+    execute = aiosqlite.Connection.execute
+    opened = []
+
+    # close() runs while the new connection's busy timeout is being set, its last await.
+    async def closes_first(self, sql, parameters=None):
+        if sql.startswith("PRAGMA busy_timeout"):
+            opened.append(self)
+            await db.close()
+        return await execute(self, sql, parameters)
+
+    try:
+        with patch.object(aiosqlite.Connection, "execute", closes_first):
+            connection = await db._second_connection(autocommit=True)
+        assert connection is None
+        with pytest.raises(ValueError):
+            await opened[0].execute("SELECT 1")
+    finally:
+        for leftover in opened:
+            await leftover.close()
 
 
 @pytest.mark.asyncio
