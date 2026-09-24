@@ -161,6 +161,25 @@ def test_destroy_scores_as_an_owner_power_unless_ownership_is_renounced(renounce
     )
 
 
+@pytest.mark.parametrize("renounced,composite", [(False, 8), (None, 6), (True, 0)])
+def test_destroy_scores_the_same_on_the_direct_entry_point(renounced, composite):
+    # The container-less API path scores contract data itself, so it must count destroy() too.
+    contract = {
+        "is_contract": True, "is_verified": True, "contract_age_days": 400,
+        "ownership_renounced": renounced, "has_destroy": True,
+    }
+    honeypot = {"is_honeypot": False, "can_buy": True, "can_sell": True, "buy_tax": 0, "sell_tax": 0}
+    market = {"liquidity_usd": 50_000, "pair_age_hours": 100}
+    ethos = {"reputation_score": 80}
+    direct = RiskEngine().compute_composite_risk(contract, honeypot, market, ethos)
+    structural, flags = StructuralAnalyzer(MagicMock())._compute(contract, {})
+    # Structural carries 0.4 of the direct mean: destroy 15, plus 5 for an owner kept (False).
+    assert direct["rug_probability"] == composite == structural * 0.4
+    assert ("destroy() function: the owner may be able to delete the contract" in direct["critical_flags"]) is (
+        renounced is not True
+    )
+
+
 # mint(address,uint256) and upgradeTo(address) as data rather than as a dispatcher's PUSH4 operand:
 # inside a PUSH32 constant (twice, the second time as a PUSH4 opcode and operand inside it), after a
 # byte other than 0x63, and off a byte boundary (0x06 0x36 ...).

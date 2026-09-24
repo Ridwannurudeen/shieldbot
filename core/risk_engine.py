@@ -70,6 +70,9 @@ class RiskEngine:
         if contract_data.get('has_blacklist'):
             structural += 10
             critical_flags.append('Blacklist function detected')
+        if contract_data.get('has_destroy') and contract_data.get('ownership_renounced') is not True:
+            structural += 15
+            critical_flags.append('destroy() function: the owner may be able to delete the contract')
         if contract_data.get('scam_matches'):
             structural += 30
             critical_flags.append(f'Scam DB match ({len(contract_data["scam_matches"])} sources)')
