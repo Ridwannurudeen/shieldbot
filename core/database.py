@@ -293,6 +293,9 @@ class Database:
 
             CREATE INDEX IF NOT EXISTS idx_api_usage_key
                 ON api_usage(key_id, created_at);
+            -- The retention prune deletes by time alone.
+            CREATE INDEX IF NOT EXISTS idx_api_usage_created_at
+                ON api_usage(created_at);
 
             CREATE TABLE IF NOT EXISTS api_daily_usage (
                 key_id TEXT NOT NULL,

@@ -54,6 +54,12 @@ async def seed(db, now):
 
 
 @pytest.mark.asyncio
+async def test_the_usage_prune_searches_an_index_rather_than_scanning_the_table(db):
+    plan = await rows(db, "EXPLAIN QUERY PLAN DELETE FROM api_usage WHERE created_at < 0")
+    assert any("USING INDEX idx_api_usage_created_at" in row[-1] for row in plan), plan
+
+
+@pytest.mark.asyncio
 async def test_prune_deletes_only_rows_past_their_retention(db):
     now = time.time()
     await seed(db, now)
