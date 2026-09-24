@@ -83,7 +83,8 @@ KNOWN_SAFE_SPENDERS = {
         # Venus Protocol vToken markets: users approve these to supply assets
         "0xfd5840cd36d94d7229439859c0112a4185bc0255": "Venus Protocol (vUSDT)",
         "0x95c78222b3d6e262426483d42cfa53685a67ab9d": "Venus Protocol (vBUSD)",
-        "0xd50cf00b6e600dd036ba8ef475677d816d6c4281": "Radiant Capital Lending Pool",
+        # Radiant Capital's lending pool (0xd50cf00b...) is left off: since the October 2024 hack its
+        # implementation pulls approved funds (Revoke.cash's approval exploit list).
         "0xa625ab01b08ce023b2a342dbb12a16f2c8489a8f": "Alpaca Finance FairLaunch",
         "0x19609b03c976cca288fbdae5c21d4290e9a4add7": "Wombat Exchange Router",
         "0x4a364f8c717caad9a442737eb7b8a55cc6cf18d8": "Stargate Finance Router",
