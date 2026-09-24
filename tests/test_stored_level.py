@@ -87,6 +87,7 @@ async def test_campaign_boost_stores_the_level_of_the_boosted_score(firewall_api
             }
         ),
     )
+    services.threat_graph = SimpleNamespace(enrich_from_scan=AsyncMock())
 
     response = await api.firewall(
         api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40),
@@ -97,6 +98,8 @@ async def test_campaign_boost_stores_the_level_of_the_boosted_score(firewall_api
     stored = services.db.upsert_contract_score.await_args.kwargs
     assert (stored["risk_score"], stored["risk_level"]) == (85, "HIGH")
     assert response["shield_score"]["risk_level"] == "HIGH"
+    enriched = services.threat_graph.enrich_from_scan.call_args.args[2]
+    assert (enriched["rug_probability"], enriched["risk_level"]) == (85, "HIGH")
 
 
 @pytest_asyncio.fixture

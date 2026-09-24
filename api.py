@@ -1546,7 +1546,7 @@ async def firewall(req: FirewallRequest, request: Request):
             if container and hasattr(container, 'threat_graph') and describes_target:
                 _fire_and_forget(
                     container.threat_graph.enrich_from_scan(
-                        to_addr, req.chainId, risk_output,
+                        to_addr, req.chainId, {**risk_output, "rug_probability": risk_score, "risk_level": risk_level},
                     ),
                     label="threat_graph_enrich",
                 )
