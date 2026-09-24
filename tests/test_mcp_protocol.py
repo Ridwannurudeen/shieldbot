@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import mcp_server.server as server
+from tests.test_chain_routing import routing_api  # noqa: F401  (pytest fixture)
 from utils.web3_client import Web3Client
 
 AUTH_HEADERS = {"X-API-Key": "sb_testkey123456789012345678901234"}
@@ -300,18 +301,12 @@ async def test_a_request_cancelled_while_it_runs_gets_no_response(app, container
     assert sessions[0].get(session_id)["in_flight"] == {}
 
 
-@pytest.mark.asyncio
-async def test_a_client_session_over_the_sse_stream(app, container, sessions):
-    """GET /sse and POST /messages together: every response arrives on the stream, in order."""
-    container.risk_engine.compute_from_results.return_value = {
-        "rug_probability": 12,
-        "risk_level": "MEDIUM",
-        "status": "unknown",
-        "coverage": {"honeypot": 0},
-        "coverage_reasons": {"honeypot": "Provider unavailable"},
-    }
-    sent = asyncio.Queue()
-    disconnected = asyncio.Event()
+def _open_stream(app, api_key):
+    """Start GET /mcp/sse as a raw ASGI call; the stream never ends on its own, so a test client cannot read it.
+
+    Returns the app task, the queue of ASGI messages the app sends, and an event that disconnects the client.
+    """
+    sent, disconnected = asyncio.Queue(), asyncio.Event()
     requested = False
 
     async def receive():
@@ -322,7 +317,6 @@ async def test_a_client_session_over_the_sse_stream(app, container, sessions):
         await disconnected.wait()
         return {"type": "http.disconnect"}
 
-    # The stream never ends on its own, so it is driven as a raw ASGI call rather than a test client.
     scope = {
         "type": "http",
         "asgi": {"version": "3.0"},
@@ -335,25 +329,56 @@ async def test_a_client_session_over_the_sse_stream(app, container, sessions):
         "query_string": b"",
         "server": ("testserver", 80),
         "client": ("127.0.0.1", 50000),
-        "headers": [(b"host", b"testserver"), (b"x-api-key", AUTH_HEADERS["X-API-Key"].encode())],
+        "headers": [(b"host", b"testserver"), (b"x-api-key", api_key.encode())],
     }
-    stream = asyncio.create_task(app(scope, receive, sent.put))
+    return asyncio.create_task(app(scope, receive, sent.put)), sent, disconnected
 
-    async def next_event():
-        while True:
-            message = await asyncio.wait_for(sent.get(), 5)
-            if message["type"] == "http.response.body" and message.get("body"):
-                return message["body"].decode()
+
+async def _next_event(sent):
+    while True:
+        message = await asyncio.wait_for(sent.get(), 5)
+        if message["type"] == "http.response.body" and message.get("body"):
+            return message["body"].decode()
+
+
+@pytest.mark.asyncio
+async def test_a_client_disconnect_ends_the_session_behind_the_api_middleware(sessions, routing_api, monkeypatch):
+    # The API's HTTP middleware wraps the stream; the disconnect must still end it within one heartbeat.
+    import api
+
+    monkeypatch.setattr(server, "HEARTBEAT_INTERVAL", 2)
+    stream, sent, disconnected = _open_stream(api.app, "test-key")
+    start = await asyncio.wait_for(sent.get(), 5)
+    assert start["status"] == 200
+    assert (await _next_event(sent)).startswith("event: endpoint\ndata: /mcp/messages?session_id=")
+    assert sessions[0].count == 1
+
+    disconnected.set()
+    await asyncio.wait_for(stream, server.HEARTBEAT_INTERVAL)
+    assert sessions[0].count == 0
+
+
+@pytest.mark.asyncio
+async def test_a_client_session_over_the_sse_stream(app, container, sessions):
+    """GET /sse and POST /messages together: every response arrives on the stream, in order."""
+    container.risk_engine.compute_from_results.return_value = {
+        "rug_probability": 12,
+        "risk_level": "MEDIUM",
+        "status": "unknown",
+        "coverage": {"honeypot": 0},
+        "coverage_reasons": {"honeypot": "Provider unavailable"},
+    }
+    stream, sent, disconnected = _open_stream(app, AUTH_HEADERS["X-API-Key"])
 
     async def next_message():
-        event = await next_event()
+        event = await _next_event(sent)
         assert event.startswith("event: message\ndata: ")
         return json.loads(event.split("data: ", 1)[1])
 
     start = await asyncio.wait_for(sent.get(), 5)
     assert start["type"] == "http.response.start"
     assert start["status"] == 200
-    endpoint = await next_event()
+    endpoint = await _next_event(sent)
     assert endpoint.startswith("event: endpoint\ndata: /mcp/messages?session_id=")
     url = endpoint.split("data: ", 1)[1].strip()
 
