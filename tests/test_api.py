@@ -503,6 +503,39 @@ async def test_balanced_repeat_uses_cache_with_effective_policy(
 
 
 @pytest.mark.asyncio
+async def test_strict_blocks_a_provider_unknown_cold_and_warm(cached_firewall_api):
+    from core.analyzer import AnalyzerResult
+    from core.policy import PolicyEngine
+
+    api, services = cached_firewall_api
+    services.policy_engine = PolicyEngine("STRICT")
+    # The provider failed without raising: no error, status unknown.
+    results = [AnalyzerResult("honeypot", 1.0, 0, data={
+        "is_honeypot": False, "can_sell": True, "buy_tax": 0, "sell_tax": 0,
+        "status": "unknown", "reason": "honeypot.is HTTP 503",
+    })]
+    services.registry.run_all.return_value = results
+    output = api.risk_engine.compute_from_results(results)
+    cached = {
+        "risk_score": output["rug_probability"], "risk_level": output["risk_level"],
+        "category_scores": {"_scan_metadata": {
+            key: output[key] for key in ("status", "coverage", "coverage_reasons")
+        }},
+    }
+    req = api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40)
+    request = SimpleNamespace(headers={})
+    cold = await api.firewall(req, request)
+    services.db.get_contract_score.return_value = cached
+    warm = await api.firewall(req, request)
+
+    assert cold["classification"] == warm["classification"] == "BLOCK_RECOMMENDED"
+    assert cold["failed_sources"] == warm["failed_sources"] == ["honeypot"]
+    assert cold["policy_mode"] == warm["policy_mode"] == "STRICT"
+    assert warm.get("cached") is not True
+    assert services.registry.run_all.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_legacy_service_gather_preserves_routing_error(routing_error_api, monkeypatch):
     from utils.web3_client import UnsupportedChainError
 

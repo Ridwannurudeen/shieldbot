@@ -89,3 +89,41 @@ class TestPolicyModes:
         out = engine.apply(results, risk_output)
         assert out['policy_override'] == 'BLOCK_RECOMMENDED'
         assert len(out['failed_sources']) == 2
+
+
+class TestPolicyIncompleteCoverage:
+    # Providers swallow failures into unknown results: no error, coverage below 1.
+    RESULTS = [_make_result("structural", score=0), _make_result("honeypot", score=0)]
+
+    def _risk(self, coverage):
+        return {'rug_probability': 25, 'risk_level': 'MEDIUM', 'critical_flags': [], 'coverage': coverage}
+
+    def test_strict_blocks_on_incomplete_coverage(self):
+        out = PolicyEngine("STRICT").apply(self.RESULTS, self._risk({'structural': 1, 'honeypot': 0.5}))
+        assert out['partial'] is True
+        assert out['failed_sources'] == ['honeypot']
+        assert out['policy_override'] == 'BLOCK_RECOMMENDED'
+        assert out['risk_level'] == 'HIGH'
+        assert out['rug_probability'] == 80
+        assert out['critical_flags'][0] == (
+            "Policy override: 1 analyzer(s) unavailable or incomplete (honeypot)"
+        )
+
+    def test_balanced_warns_on_incomplete_coverage(self):
+        out = PolicyEngine("BALANCED").apply(self.RESULTS, self._risk({'structural': 1, 'honeypot': 0.5}))
+        assert out['partial'] is True
+        assert out['failed_sources'] == ['honeypot']
+        assert out['policy_override'] is None
+        assert out['rug_probability'] == 25
+        assert out['risk_level'] == 'MEDIUM'
+        assert out['critical_flags'] == ["Partial analysis: honeypot unavailable or incomplete"]
+
+    def test_skipped_analyzers_are_covered_not_failed(self):
+        out = PolicyEngine("STRICT").apply(self.RESULTS, self._risk({'structural': 1, 'honeypot': 1}))
+        assert out['partial'] is False
+        assert out['policy_override'] is None
+
+    def test_errored_analyzer_is_named_once(self):
+        results = [_make_result("structural", score=0), _make_result("honeypot", error="timeout")]
+        out = PolicyEngine("STRICT").apply(results, self._risk({'structural': 0.5, 'honeypot': 0}))
+        assert out['failed_sources'] == ['honeypot', 'structural']

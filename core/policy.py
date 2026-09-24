@@ -33,8 +33,8 @@ class PolicyEngine:
             mode_override: Per-request policy mode (e.g. from X-Policy-Mode header).
 
         Returns modified risk_output dict with added fields:
-          - partial: bool (whether some analyzers failed)
-          - failed_sources: list of failed analyzer names
+          - partial: bool (whether some analyzers failed or reported incomplete coverage)
+          - failed_sources: list of failed or incomplete analyzer names
           - policy_mode: current mode string
           - policy_override: str or None (if policy changed the result)
         """
@@ -45,9 +45,14 @@ class PolicyEngine:
             except ValueError:
                 pass
 
-        failed = [r for r in results if r.error is not None]
-        failed_names = [r.name for r in failed]
-        is_partial = len(failed) > 0
+        # Providers swallow their failures into unknown results, so an analyzer whose coverage is
+        # below 1 has failed as surely as one that raised. Skipped analyzers are covered.
+        failed_names = [r.name for r in results if r.error is not None]
+        failed_names += [
+            name for name, fraction in risk_output.get('coverage', {}).items()
+            if fraction < 1 and name not in failed_names
+        ]
+        is_partial = len(failed_names) > 0
 
         output = dict(risk_output)
         output['partial'] = is_partial
@@ -67,7 +72,7 @@ class PolicyEngine:
             if 'critical_flags' not in output:
                 output['critical_flags'] = []
             output['critical_flags'].insert(
-                0, f"Policy override: {len(failed)} analyzer(s) failed ({', '.join(failed_names)})"
+                0, f"Policy override: {len(failed_names)} analyzer(s) unavailable or incomplete ({', '.join(failed_names)})"
             )
         else:
             # BALANCED: warn with partial data
@@ -75,7 +80,7 @@ class PolicyEngine:
             if 'critical_flags' not in output:
                 output['critical_flags'] = []
             output['critical_flags'].append(
-                f"Partial analysis: {', '.join(failed_names)} unavailable"
+                f"Partial analysis: {', '.join(failed_names)} unavailable or incomplete"
             )
 
         return output
