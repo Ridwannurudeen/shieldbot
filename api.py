@@ -1466,8 +1466,11 @@ async def firewall(req: FirewallRequest, request: Request):
                     alert["rug_probability"] = risk_score
                     if alert['status'] == 'ok':
                         alert['risk_display'] = f'{risk_score}%'
+                    # The boosted score takes its band, as the extension draws it.
                     if risk_score >= 71:
                         classification = "BLOCK_RECOMMENDED"
+                    elif risk_score >= 50 and classification in ("SAFE", "CAUTION"):
+                        classification = "HIGH_RISK"
 
             # Shield score breakdown
             shield_score = {

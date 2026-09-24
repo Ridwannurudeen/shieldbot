@@ -139,3 +139,18 @@ async def test_a_revert_still_blocks_a_scam_database_match(firewall, surface, ma
     response = await _call(api, surface)
     assert response["risk_score"] == 70
     assert response["classification"] == "BLOCK_RECOMMENDED"
+
+
+@pytest.mark.asyncio
+async def test_a_campaign_boost_on_a_community_report_is_high_risk_not_block(firewall):
+    api, services, simulator = firewall
+    simulator.simulate_transaction.return_value = {"success": True}
+    services.registry.run_all.return_value = _results([COMMUNITY])
+    services.db.get_deployer_risk_summary.return_value = {
+        "deployer_address": "0x" + "d" * 40,
+        "total_contracts": 6,
+        "high_risk_contracts": 4,
+    }
+    response = await _call(api, "firewall")
+    assert response["risk_score"] == 65
+    assert response["classification"] == "HIGH_RISK"
