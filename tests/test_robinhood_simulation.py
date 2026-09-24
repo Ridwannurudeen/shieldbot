@@ -1955,15 +1955,18 @@ async def test_legacy_scanner_keeps_a_simulation_proven_honeypot_for_an_old_veri
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["honeypot.is", None])
-async def test_legacy_scanner_still_softens_a_third_party_flag_for_an_old_verified_token(provider):
+async def test_legacy_scanner_keeps_a_third_party_flag_for_an_old_verified_token_and_notes_the_doubt(provider):
+    # Verifying source and waiting 30 days cost a scammer nothing, so they cannot clear a failed sell.
     from scanner.token_scanner import TokenScanner
 
     scanner = TokenScanner(honeypot_web3(provider))
     result = {"checks": {"can_sell": False}, "risks": [], "is_verified": True, "contract_age_days": 400}
     await scanner._check_honeypot(TOKEN, result, chain_id=56)
-    assert result["is_honeypot"] is False
-    assert any("appears legitimate" in risk for risk in result["risks"])
-    assert "HONEYPOT DETECTED - Cannot sell after buying" not in result["risks"]
+    scanner._resolve_conflicts(result)
+    assert result["is_honeypot"] is True
+    assert "HONEYPOT DETECTED - Cannot sell after buying" in result["risks"]
+    assert any("possible false positive" in risk for risk in result["risks"])
+    assert scanner._calculate_safety_level(result) == "danger"
 
 
 @pytest.mark.asyncio

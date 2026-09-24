@@ -302,15 +302,15 @@ class TokenScanner:
                 # A third-party flag can be a false positive; our own simulation executed the sell.
                 simulated = providers.get('is_honeypot') == SIMULATION_PROVIDER
 
+                result['is_honeypot'] = True
+                result['risks'].append("HONEYPOT DETECTED - Cannot sell after buying")
+                honeypot_reason = honeypot_result.get('reason', 'Unknown')
+                result['risks'].append(f"Reason: {honeypot_reason}")
+                # Verifying source and waiting cost a scammer nothing, so they only mark the doubt.
                 if not simulated and is_verified and contract_age_days is not None and contract_age_days > 30:
-                    logger.info(f"Honeypot API flagged {address} but contract is verified and {contract_age_days} days old - likely false positive")
-                    result['is_honeypot'] = False
-                    result['risks'].append("High sell restrictions detected, but contract appears legitimate (verified + established)")
-                else:
-                    result['is_honeypot'] = True
-                    result['risks'].append("HONEYPOT DETECTED - Cannot sell after buying")
-                    honeypot_reason = honeypot_result.get('reason', 'Unknown')
-                    result['risks'].append(f"Reason: {honeypot_reason}")
+                    result['risks'].append(
+                        "Verified and established contract: possible false positive of the honeypot check"
+                    )
             else:
                 result['is_honeypot'] = False
 
