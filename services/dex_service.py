@@ -36,8 +36,12 @@ class DexService:
         }
 
         metrics = ('price_usd', 'liquidity_usd', 'volume_24h', 'price_change_24h', 'fdv', 'pair_age_hours')
+        # Every metric but the 24h price change decides the status and is in coverage. The change
+        # feeds only the volatility flag, and DexScreener leaves it out of many flat pairs: when it
+        # is missing, that flag stays unknown and the reason names it.
+        required = tuple(field for field in metrics if field != 'price_change_24h')
         defaults.update(status='unknown', reason='DexScreener data unavailable',
-                        coverage={field: False for field in metrics})
+                        coverage={field: False for field in required})
 
         try:
             slug = get_dexscreener_slug(chain_id)
@@ -138,9 +142,9 @@ class DexService:
                 'new_pair_flag': new_pair_flag,
             }
 
-            coverage = {field: result[field] is not None for field in metrics}
-            missing = [field for field, covered in coverage.items() if not covered]
-            result.update(coverage=coverage, status='unknown' if missing else 'ok',
+            coverage = {field: result[field] is not None for field in required}
+            missing = [field for field in metrics if result[field] is None]
+            result.update(coverage=coverage, status='ok' if all(coverage.values()) else 'unknown',
                           reason='Missing DexScreener fields: ' + ', '.join(missing) if missing else None)
             unknown_ledger.record('dexscreener', chain_id, 'answered')
             return result

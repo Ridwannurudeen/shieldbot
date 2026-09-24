@@ -539,6 +539,176 @@
    "pairCreatedAt": 1680352272000
   }
  ],
+ "https://api.dexscreener.com/token-pairs/v1/bsc/0x55d398326f99059fF775485246999027B3197955": [
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0x92b7807bF19b7DDdf89b706143896d05228f3121",
+   "baseToken": {
+    "address": "0x55d398326f99059fF775485246999027B3197955",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "quoteToken": {
+    "address": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+    "name": "USD Coin",
+    "symbol": "USDC"
+   },
+   "priceNative": "0.9998",
+   "priceUsd": "0.9998",
+   "volume": {
+    "h24": 11930525.58
+   },
+   "priceChange": {
+    "h24": -0.01
+   },
+   "liquidity": {
+    "usd": 30127394.66
+   },
+   "fdv": 9182974572,
+   "pairCreatedAt": 1680356177000
+  },
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0x4f31Fa980a675570939B737Ebdde0471a4Be40Eb",
+   "baseToken": {
+    "address": "0x55d398326f99059fF775485246999027B3197955",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "quoteToken": {
+    "address": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+    "name": "USD Coin",
+    "symbol": "USDC"
+   },
+   "priceNative": "0.9996",
+   "priceUsd": "0.9996",
+   "volume": {
+    "h24": 469929.52
+   },
+   "priceChange": {
+    "h24": null
+   },
+   "liquidity": {
+    "usd": 39445944.97
+   },
+   "fdv": 9180961848,
+   "pairCreatedAt": 1683112489000
+  },
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0xEc6557348085Aa57C72514D67070dC863C0a5A8c",
+   "baseToken": {
+    "address": "0x55d398326f99059fF775485246999027B3197955",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "quoteToken": {
+    "address": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+    "name": "USD Coin",
+    "symbol": "USDC"
+   },
+   "priceNative": "0.9976",
+   "priceUsd": "0.9976",
+   "volume": {
+    "h24": 33469.4
+   },
+   "priceChange": {
+    "h24": -0.2
+   },
+   "liquidity": {
+    "usd": 1811177.65
+   },
+   "fdv": 9163098221,
+   "pairCreatedAt": 1619248279000
+  },
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0x14ca9d552eD2CF0D5dFD1f89Bc6793a464e2ed16",
+   "baseToken": {
+    "address": "0xFe189E97832DA1573e4e4Ff034F4fFC3a15c7777",
+    "name": "MarsCoin",
+    "symbol": "MarsCoin"
+   },
+   "quoteToken": {
+    "address": "0x55d398326f99059fF775485246999027B3197955",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "priceNative": "0.1176",
+   "priceUsd": "0.1176",
+   "volume": {
+    "h24": 3357393.57
+   },
+   "priceChange": {
+    "h24": -4.46
+   },
+   "liquidity": {
+    "usd": 444241.56
+   },
+   "fdv": 117579492,
+   "pairCreatedAt": 1785397624000
+  },
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0xCAaF3c41a40103a23Eeaa4BbA468AF3cF5b0e0D8",
+   "baseToken": {
+    "address": "0xCae117ca6Bc8A341D2E7207F30E180f0e5618B9D",
+    "name": "ARK",
+    "symbol": "ARK"
+   },
+   "quoteToken": {
+    "address": "0x55d398326f99059fF775485246999027B3197955",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "priceNative": "6.3187",
+   "priceUsd": "6.31",
+   "volume": {
+    "h24": 3573835.67
+   },
+   "priceChange": {
+    "h24": 0.7
+   },
+   "liquidity": {
+    "usd": 57471149.27
+   },
+   "fdv": 235906641,
+   "pairCreatedAt": 1756206977000
+  },
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0x2f5ec19ab0583D3FCd9bcbcD9AB416d2858EeA38",
+   "baseToken": {
+    "address": "0x5ce033B2bFCa3Af30b3e8C8457DeaF776A8b695a",
+    "name": "BEM",
+    "symbol": "BEM"
+   },
+   "quoteToken": {
+    "address": "0x55d398326f99059fF775485246999027B3197955",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "priceNative": "59.1892",
+   "priceUsd": "59.18",
+   "volume": {
+    "h24": 615449.27
+   },
+   "priceChange": {
+    "h24": 2.47
+   },
+   "liquidity": {
+    "usd": 136643.43
+   },
+   "fdv": 13364438,
+   "pairCreatedAt": 1787320708000
+  }
+ ],
  "https://api.dexscreener.com/latest/dex/tokens/0xdbda907a02750f79cbf0414f7112eabe5091c286": {
   "schemaVersion": "1.0.0",
   "pairs": null

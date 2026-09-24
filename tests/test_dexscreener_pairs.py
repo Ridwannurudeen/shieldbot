@@ -23,6 +23,7 @@ API = "https://api.dexscreener.com"
 USDT = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
 USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 WBNB = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
+USDT_BSC = "0x55d398326f99059fF775485246999027B3197955"
 # The approved token in the landing page's honeypot capture; DexScreener lists no pair for it.
 HONEYPOT = "0xdbda907a02750f79cbf0414f7112eabe5091c286"
 
@@ -127,7 +128,7 @@ async def test_the_deepest_pool_without_a_creation_time_leaves_pair_age_unknown(
                 "price_change_24h": None,
                 "fdv": 4262511047,
                 "liquidity_usd": 37153848.31,
-                "status": "unknown",
+                "status": "ok",
             },
         ),
     ],
@@ -159,3 +160,26 @@ async def test_a_token_that_is_only_ever_the_quote_token_has_no_price(ledger):
     assert result["status"] == "unknown"
     assert result["reason"] == "Missing DexScreener fields: price_usd, price_change_24h, fdv"
     assert counts(ledger, 1) == {"answered": 1, "unknown": 0, "failed": 0}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "address, chain_id, liquidity",
+    [(USDC, 8453, 37153848.31), (USDT_BSC, 56, 57471149.27)],
+    ids=["usdc-base", "usdt-bsc"],
+)
+async def test_a_missing_24h_change_leaves_only_the_volatility_flag_unknown(
+    ledger, address, chain_id, liquidity
+):
+    # The deepest pair each stablecoin is the base token of reports no 24h change: DexScreener
+    # leaves it out of many flat pairs. It feeds only the volatility flag, which stays unknown,
+    # named in the reason, and cannot fire; every field that decides the status is known.
+    result, _ = await market(address, chain_id)
+
+    assert result["liquidity_usd"] == liquidity
+    assert result["price_change_24h"] is None
+    assert result["volatility_flag"] is None
+    assert result["reason"] == "Missing DexScreener fields: price_change_24h"
+    assert result["status"] == "ok"
+    assert all(result["coverage"].values())
+    assert counts(ledger, chain_id) == {"answered": 1, "unknown": 0, "failed": 0}
