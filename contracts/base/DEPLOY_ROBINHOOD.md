@@ -321,7 +321,7 @@ Each verdict's `onchain_status` moves through:
 |---|---|
 | `pending` | queued; the API's drain records queued verdicts oldest-first |
 | `deduplicated` | newer unchanged observation retained while the confirmed anchor remains within the refresh interval; not queued for broadcast |
-| `dropped` | observation missing, future-dated, older than 300 seconds or superseded; not broadcast again |
+| `dropped` | observation missing, future-dated, older than 300 seconds or superseded, or queued for another registry (`RegistryChanged`); not broadcast again |
 | `sending` | claimed by the drain; the signed transaction's hash is stored before it is broadcast |
 | `confirmed` / `reverted` | the receipt of `tx_hash` shows success (sequencer, soft finality) / a revert |
 | `submitted` | the node accepted `tx_hash`, but no receipt arrived yet; reconciled later |
@@ -358,6 +358,18 @@ the process is killed first, or the send takes longer, the verdict stays `sendin
 minutes old (which gives a lagging read replica time to show a mined transaction): at start, after a drain error, and
 whenever the queue is empty. A mined transaction finishes it; otherwise it is queued again and the rules above decide
 what, if anything, is sent. At 5 signed transactions it is left `unconfirmed`.
+
+**Changing the registry address** (after a redeploy): set the new address in `ROBINHOOD_VERDICT_REGISTRY` in
+`/opt/shieldbot/.env`, then restart both units (`shieldbot` and `shieldbot-bot`). Each verdict is bound to the
+registry it was queued for, and the drain only ever sends a verdict there. Any verdict still queued for the other
+address, including those the bot queues between the two restarts, becomes `dropped` with `RegistryChanged` and is
+never sent, so expect a burst of `Verdict record <id> dropped: RegistryChanged` WARNING lines in the API log right
+after the restarts. A dropped verdict is visible in that WARNING and at `GET /api/verdict/4663/<token>` (as
+`onchain_status: dropped`, `onchain_error: RegistryChanged`) until the next scan of that token stores a newer
+verdict. A verdict dropped after it had broadcast a transaction keeps its `tx_hash`, and its receipts are still
+looked up every 2 minutes: if that transaction lands, the verdict becomes `confirmed` on the old registry, which its
+`registry` field still names. Deduplication only compares verdicts queued for the new registry, so the next scan of
+each token is queued for it. Guard watch subjects carry over (see `docs/guard-rescans.md`).
 
 ## 9. Smoke test and independent verification
 
