@@ -19,6 +19,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from redis.exceptions import RedisError
 from typing import Optional, Dict, Any, List
 
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve_selector
@@ -132,9 +133,9 @@ async def lifespan(app: FastAPI):
     rate_limit_redis = None
     if settings.rate_limit_backend == "redis":
         rate_limit_redis = connect_rate_limit_redis(settings.redis_url)
-        # When Redis cannot answer, the general request limiter and the RPC proxy's let requests
-        # through (logged), so an outage does not take the scan API or users' wallets down. The
-        # abuse-sensitive limiters refuse (core/rate_limit.py).
+        # When Redis cannot answer, the general request limiter, the RPC proxy's and the API key
+        # minute window count in this process's memory (logged), so an outage takes neither the scan
+        # API nor users' wallets down. The abuse-sensitive limiters refuse (core/rate_limit.py).
         rate_limiter.use_redis(rate_limit_redis, "requests", fail_open=True)
         rpc_limiter.use_redis(rate_limit_redis, "rpc", fail_open=True)
         chat_limiter.use_redis(rate_limit_redis, "chat", fail_open=False)
@@ -143,7 +144,17 @@ async def lifespan(app: FastAPI):
         _free_key_limiter.use_redis(rate_limit_redis, "free-key", fail_open=False)
         _watch_alerts_limiter.use_redis(rate_limit_redis, "watch-alerts", fail_open=False)
         container.auth_manager.use_redis(rate_limit_redis)
-        logger.info("Rate limits kept in Redis")
+        try:
+            await rate_limit_redis.ping()
+        except RedisError as e:
+            logger.warning(
+                "Rate limits configured for Redis, but it did not answer PING (%s). Until it does, the "
+                "general, RPC proxy and API key limits count in this process's memory and the chat, "
+                "report, signup, free key and watch alert limits refuse every request",
+                type(e).__name__,
+            )
+        else:
+            logger.info("Rate limits kept in Redis")
     _background_workers = settings.background_workers
     if _background_workers == "api":
         await container.start_mempool_monitor()
@@ -551,7 +562,7 @@ async def beta_signup(req: BetaSignupRequest, request: Request):
     """Collect beta signup emails."""
     # Rate limit per IP
     client_ip = _get_client_ip(request)
-    if not await _signup_limiter.is_allowed(f"signup:{client_ip}"):
+    if not await _signup_limiter.is_allowed(client_ip):
         return JSONResponse(status_code=429, content={"detail": "Too many requests. Please try again later."})
 
     import re
@@ -1581,7 +1592,7 @@ async def community_report(req: CommunityReportRequest, request: Request):
     """Record a community report (false positive, false negative, or scam)."""
     # Rate limit per IP (rightmost = proxy-set, not spoofable)
     client_ip = _get_client_ip(request)
-    if not await _report_limiter.is_allowed(f"report:{client_ip}"):
+    if not await _report_limiter.is_allowed(client_ip):
         return JSONResponse(
             status_code=429,
             content={"detail": "Report rate limit exceeded (5/min)."},
@@ -1687,7 +1698,7 @@ async def request_free_key(req: FreeKeyRequest, request: Request):
     if not container or not container.email_service.is_enabled():
         raise HTTPException(status_code=503, detail="Self-serve keys are not enabled")
     client_ip = _get_client_ip(request)
-    if not await _free_key_limiter.is_allowed(f"free-key:{client_ip}"):
+    if not await _free_key_limiter.is_allowed(client_ip):
         return JSONResponse(status_code=429, content={"detail": "Too many requests. Please try again later."})
 
     email = req.email.strip().lower()
@@ -2162,7 +2173,7 @@ async def public_watch_alerts(request: Request):
         raise HTTPException(status_code=503, detail="Watch alerts not available")
 
     client_ip = _get_client_ip(request)
-    if not await _watch_alerts_limiter.is_allowed(f"watch-alerts:{client_ip}"):
+    if not await _watch_alerts_limiter.is_allowed(client_ip):
         return JSONResponse(
             status_code=429,
             content={"detail": "Watch alerts rate limit exceeded (10/min)."},

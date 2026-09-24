@@ -13,7 +13,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from redis.exceptions import RedisError
 
-from core.rate_limit import Hit, RedisWindow
+from core.rate_limit import RedisWindow
 
 logger = logging.getLogger(__name__)
 
@@ -92,10 +92,10 @@ class AuthManager:
     def use_redis(self, client) -> None:
         """Keep the per-minute windows in Redis, where every API process shares them.
 
-        When Redis cannot answer, the minute limit is skipped with a logged error: the daily quota,
-        which is durable and refuses when it cannot be read, still applies.
+        When Redis cannot answer, the request is counted in this process's memory window instead,
+        with a logged error. The daily quota applies either way.
         """
-        self._minute_redis = RedisWindow(client, "api-key", 60.0)
+        self._minute_redis = RedisWindow(client, "api-key", 60.0, edge_counts=False)
 
     async def create_key(self, owner: str, tier: str = "free") -> Dict:
         """Create a new API key and store hash in DB."""
@@ -164,18 +164,26 @@ class AuthManager:
             return allowed
 
         # Taken before the lock, so a Redis that hangs cannot hold up every other key's check.
-        redis_hit = await self._redis_minute_hit(key_id) if self._minute_redis is not None else None
+        redis_hit = None
+        if self._minute_redis is not None:
+            try:
+                redis_hit = await self._minute_redis.add(key_id, time.time())
+            except RedisError as e:
+                logger.error(
+                    "API key minute limit counted in this process's memory, Redis unavailable: %s",
+                    type(e).__name__,
+                )
         async with self._check_lock:
             now = time.time()
             day = int(now // 86400)
-            if self._minute_redis is None:
+            if redis_hit is None:
                 hits = [t for t in self._minute_hits.get(key_id, []) if t > now - 60]
                 self._minute_hits[key_id] = hits
                 minute_full = len(hits) >= key_info["rpm_limit"]
                 oldest = hits[0] if hits else None
             else:
-                minute_full = redis_hit is not None and redis_hit.count > key_info["rpm_limit"]
-                oldest = redis_hit.oldest if redis_hit is not None else None
+                minute_full = redis_hit.count > key_info["rpm_limit"]
+                oldest = redis_hit.oldest
             try:
                 if minute_full:
                     allowed = False
@@ -187,7 +195,7 @@ class AuthManager:
             except Exception as e:
                 logger.error("API quota store unavailable: %s", type(e).__name__)
                 allowed, used, retry_after = False, None, QUOTA_UNAVAILABLE_RETRY_AFTER
-            if allowed and self._minute_redis is None:
+            if allowed and redis_hit is None:
                 hits.append(now)
         if redis_hit is not None and not allowed:
             # As in memory, only allowed requests count: a refused request's hit is taken back out.
@@ -198,14 +206,6 @@ class AuthManager:
         if checks is not None:
             checks[key_id] = (allowed, quota)
         return allowed
-
-    async def _redis_minute_hit(self, key_id: str) -> Optional[Hit]:
-        """This request's hit in the key's Redis minute window, or None when Redis cannot answer."""
-        try:
-            return await self._minute_redis.add(key_id, time.time())
-        except RedisError as e:
-            logger.error("API key minute limit skipped, Redis unavailable: %s", type(e).__name__)
-            return None
 
     async def _count_request(self, key_id: str, day: int, daily_limit: int) -> Tuple[bool, int]:
         """Count one request for the UTC day if the key is under its daily limit, and commit.

@@ -137,22 +137,25 @@ setting unset or `memory`, nothing changes. Any other value stops the API at sta
 
 | Limiter | Limit | When Redis cannot answer |
 |---|---|---|
-| Every request without an API key (health checks aside), per IP | 30 a minute, 10 in 5 s | let through, error logged |
-| RPC proxy `/rpc/{chain_id}` without a key, per IP | 100 a minute | let through, error logged |
-| API key, per key | the key's per-minute limit | minute limit skipped, error logged; the daily quota (SQLite) still applies and refuses when it cannot be read |
+| Every request without an API key (health checks aside), per IP | 30 a minute, 10 in 5 s | counted in this API process's memory, error logged |
+| RPC proxy `/rpc/{chain_id}` without a key, per IP | 100 a minute | counted in this API process's memory, error logged |
+| API key, per key | the key's per-minute limit | minute window counted in this API process's memory, error logged; the daily quota is in SQLite and applies either way |
 | `/api/agent/chat` and `/api/agent/explain`, per IP | 50 a minute, 10 in 5 s | refused (429), error logged |
 | `/api/report`, per IP | 5 a minute, 3 in 5 s | refused (429), error logged |
 | `/api/beta-signup`, per IP | 3 a minute, 2 in 5 s | refused (429), error logged |
 | `/api/keys/free`, per IP | 3 a minute, 2 in 5 s | refused (429), error logged |
 | `/api/watch/alerts`, per IP | 10 a minute, 5 in 5 s | refused (429), error logged |
 
-The general limiters let requests through so that a Redis outage does not take the scan API, or wallets that
-use the RPC proxy, down. The others guard AI spend, email sending and writes, so they refuse. The client gives
-Redis 0.5 seconds to connect or reply, so a Redis that hangs adds at most that to a request.
+The first three fall back to counting in the API process's memory, exactly as with `memory`, so a Redis outage
+neither takes the scan API or wallets that use the RPC proxy down nor lifts their limits; while it lasts, each API
+process counts on its own. The others guard AI spend, email sending and writes, so they refuse. The client gives
+Redis 0.5 seconds to connect or reply (redis-py 5.2.1, as pinned, does not retry), so a Redis that hangs costs up
+to 0.5 seconds per limiter a request passes: up to about 1 second for a request checked by the general limiter
+and a route's own limiter.
 
 Each limiter keeps a sorted set per caller at `shieldbot:ratelimit:<limiter>:<caller>`, where the caller is the
-client IP (prefixed with the route for some limiters) or the API key's id, never the key itself. Every check
-renews the key's 60 second TTL, so an idle caller's key expires. The limiters write nothing else to Redis.
+client IP or the API key's id, never the key itself. Every check renews the key's 60 second TTL, so an idle
+caller's key expires. The limiters write nothing else to Redis.
 
 To turn it on:
 
@@ -160,7 +163,9 @@ To turn it on:
    `REDIS_URL`).
 2. Add `RATE_LIMIT_BACKEND=redis` and, if Redis is not on localhost, `REDIS_URL=redis://...` to
    `/opt/shieldbot/.env`.
-3. Restart the API. Its log says `Rate limits kept in Redis`. After a few requests,
+3. Restart the API. Its log says `Rate limits kept in Redis` once Redis answered a PING at startup. If it
+   did not, the log says `Rate limits configured for Redis, but it did not answer PING` and the limiters behave
+   as in the table until Redis answers. After a few requests,
    `redis-cli --scan --pattern 'shieldbot:ratelimit:*'` lists the callers' keys.
 
 To turn it off, remove the setting and restart the API.

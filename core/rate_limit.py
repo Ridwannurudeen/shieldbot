@@ -15,9 +15,9 @@ process shares one count per caller and a restart forgets nothing:
   processes on different hosts.
 
 When Redis cannot answer (the client gives up after TIMEOUT_SECONDS), a limiter bound with
-fail_open=True lets the request through and logs an error, so a Redis outage does not take the scan
-API down; any other limiter refuses the request, also logged. api.py's lifespan sets the policy of
-each limiter.
+fail_open=True counts the request in this process's memory instead, as with the memory backend, so
+a Redis outage neither takes the scan API down nor lifts its limits; any other limiter refuses the
+request. Both log an error. api.py's lifespan sets the policy of each limiter.
 """
 
 import logging
@@ -61,13 +61,18 @@ class Hit(NamedTuple):
 
 
 class RedisWindow:
-    """One limiter's per-caller sliding windows in Redis."""
+    """One limiter's per-caller sliding windows in Redis.
 
-    def __init__(self, client: aioredis.Redis, name: str, window: float):
+    `edge_counts` says whether a hit exactly `window` seconds old is still in the window, as in
+    RateLimiter's memory window; AuthManager's memory window has already dropped it.
+    """
+
+    def __init__(self, client: aioredis.Redis, name: str, window: float, edge_counts: bool = True):
         self.name = name
         self._client = client
         self._prefix = f"{KEY_PREFIX}{name}:"
         self._window = window
+        self._edge_counts = edge_counts
 
     async def add(self, caller: str, now: float) -> Hit:
         """Add a hit at `now` to the caller's window and count it, in one transaction.
@@ -77,7 +82,8 @@ class RedisWindow:
         key = self._prefix + caller
         member = uuid.uuid4().hex
         pipe = self._client.pipeline(transaction=True)
-        pipe.zremrangebyscore(key, "-inf", f"({now - self._window}")
+        cutoff = now - self._window
+        pipe.zremrangebyscore(key, "-inf", f"({cutoff}" if self._edge_counts else cutoff)
         pipe.zadd(key, {member: now})
         pipe.zcard(key)
         pipe.zcount(key, now - BURST_SECONDS, "+inf")
@@ -117,14 +123,30 @@ class RateLimiter:
     def use_redis(self, client: aioredis.Redis, name: str, fail_open: bool) -> None:
         """Keep this limiter's windows in Redis under `name`.
 
-        When Redis cannot answer, the request is let through if fail_open, else refused.
+        When Redis cannot answer, the request is counted in this process's memory if fail_open,
+        else refused.
         """
         self._redis = RedisWindow(client, name, self.window)
         self._fail_open = fail_open
 
     async def is_allowed(self, key: str) -> bool:
         if self._redis is not None:
-            return await self._redis_allowed(key)
+            try:
+                hit = await self._redis.add(key, time.time())
+            except RedisError as e:
+                logger.error(
+                    "Rate limiter %s: Redis unavailable (%s), request %s",
+                    self._redis.name,
+                    type(e).__name__,
+                    "counted in this process's memory" if self._fail_open else "refused",
+                )
+                if not self._fail_open:
+                    return False
+            else:
+                if hit.count > self.rpm or hit.recent > self.burst:
+                    await self._redis.remove(hit)
+                    return False
+                return True
         now = time.monotonic()
         hits = self._hits[key]
 
@@ -148,22 +170,6 @@ class RateLimiter:
         if random.random() < 0.01:
             self.cleanup()
 
-        return True
-
-    async def _redis_allowed(self, key: str) -> bool:
-        try:
-            hit = await self._redis.add(key, time.time())
-        except RedisError as e:
-            logger.error(
-                "Rate limiter %s: Redis unavailable (%s), request %s",
-                self._redis.name,
-                type(e).__name__,
-                "allowed" if self._fail_open else "refused",
-            )
-            return self._fail_open
-        if hit.count > self.rpm or hit.recent > self.burst:
-            await self._redis.remove(hit)
-            return False
         return True
 
     def cleanup(self):

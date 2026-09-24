@@ -4,7 +4,7 @@ import asyncio
 import logging
 import math
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pydantic
 import pytest
@@ -75,6 +75,10 @@ class FakeRedis:
         await self._round_trip()
         assert pattern == "*"
         return [key for key, zset in self.zsets.items() if zset]
+
+    async def ping(self):
+        await self._round_trip()
+        return True
 
     async def aclose(self):
         self.closed = True
@@ -201,11 +205,11 @@ async def test_redis_limiter_answers_like_memory(redis, clock):
     answers = []
     for offset, _ in SCRIPT:
         clock.now = start + offset
-        answers.append(await limiter.is_allowed("report:203.0.113.7"))
+        answers.append(await limiter.is_allowed("203.0.113.7"))
     assert answers == [allowed for _, allowed in SCRIPT]
     # Nothing is kept in process memory; Redis holds only the allowed hits still in the window.
     assert limiter._hits == {}
-    key = f"{KEY_PREFIX}report:report:203.0.113.7"
+    key = f"{KEY_PREFIX}report:203.0.113.7"
     assert await redis.zcard(key) == 3
 
 
@@ -256,18 +260,38 @@ async def test_concurrent_checks_never_admit_more_than_the_limit(redis, clock):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fail_open", [True, False])
-async def test_redis_down_lets_through_or_refuses_by_policy_and_logs(clock, caplog, fail_open):
+async def test_redis_down_counts_a_fail_open_limiter_in_process_memory(clock, caplog):
+    redis = FakeRedis()
+    limiter = RateLimiter(requests_per_minute=2, burst=10)
+    limiter.use_redis(redis, "requests", fail_open=True)
+    assert await limiter.is_allowed("203.0.113.7") is True
+    redis.down = True
+    with caplog.at_level(logging.ERROR, logger="core.rate_limit"):
+        answers = [await limiter.is_allowed("203.0.113.7") for _ in range(3)]
+    # The memory window starts empty: the hit Redis holds is not in it.
+    assert answers == [True, True, False]
+    assert len(caplog.records) == 3
+    for record in caplog.records:
+        assert record.levelno == logging.ERROR
+        assert "ConnectionError" in record.getMessage() and "memory" in record.getMessage()
+    # Once Redis answers again it counts there, and memory is left alone.
+    redis.down = False
+    assert await limiter.is_allowed("203.0.113.7") is True
+    assert await limiter.is_allowed("203.0.113.7") is False
+    assert limiter._hits["203.0.113.7"] == [clock.now, clock.now]
+
+
+@pytest.mark.asyncio
+async def test_redis_down_refuses_every_request_of_a_fail_closed_limiter(clock, caplog):
     redis = FakeRedis()
     redis.down = True
     limiter = RateLimiter(requests_per_minute=30, burst=10)
-    limiter.use_redis(redis, "requests" if fail_open else "report", fail_open=fail_open)
+    limiter.use_redis(redis, "report", fail_open=False)
     with caplog.at_level(logging.ERROR, logger="core.rate_limit"):
-        assert await limiter.is_allowed("203.0.113.7") is fail_open
-    [record] = caplog.records
-    assert record.levelno == logging.ERROR
-    assert "ConnectionError" in record.getMessage()
-    assert ("allowed" if fail_open else "refused") in record.getMessage()
+        assert [await limiter.is_allowed("203.0.113.7") for _ in range(3)] == [False] * 3
+    assert limiter._hits == {}
+    assert "ConnectionError" in caplog.records[0].getMessage()
+    assert "refused" in caplog.records[0].getMessage()
 
 
 @pytest.mark.asyncio
@@ -359,16 +383,36 @@ async def test_a_request_the_daily_quota_refuses_leaves_no_minute_hit(db, redis,
 
 
 @pytest.mark.asyncio
-async def test_redis_down_skips_the_minute_window_but_not_the_daily_quota(db, auth_clock, caplog):
+async def test_redis_down_counts_the_api_key_minute_window_in_process_memory(db, auth_clock, caplog):
     redis = FakeRedis()
     redis.down = True
     auth = AuthManager(db)
     auth.use_redis(redis)
-    info = await _key(db, auth, rpm_limit=1, daily_limit=2)
+    info = await _key(db, auth, rpm_limit=1, daily_limit=10)
     with caplog.at_level(logging.ERROR, logger="core.auth"):
-        answers = [await auth.check_rate_limit(dict(info)) for _ in range(3)]
-    assert answers == [True, True, False]
-    assert "ConnectionError" in caplog.text
+        assert await auth.check_rate_limit(dict(info)) is True
+        auth_clock.now += 20
+        refused = dict(info)
+        assert await auth.check_rate_limit(refused) is False
+    assert refused["quota"]["retry_after"] == 40
+    assert refused["quota"]["used_today"] == 1
+    assert "ConnectionError" in caplog.text and "memory" in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["memory", "redis"])
+async def test_a_hit_exactly_a_minute_old_leaves_the_api_key_window_in_both_backends(
+    db, redis, auth_clock, backend
+):
+    auth = AuthManager(db)
+    if backend == "redis":
+        auth.use_redis(redis)
+    info = await _key(db, auth, rpm_limit=1)
+    assert await auth.check_rate_limit(dict(info)) is True
+    auth_clock.now += 59.75
+    assert await auth.check_rate_limit(dict(info)) is False
+    auth_clock.now += 0.25
+    assert await auth.check_rate_limit(dict(info)) is True
 
 
 # ---------------------------------------------------------------------------
@@ -376,7 +420,30 @@ async def test_redis_down_skips_the_minute_window_but_not_the_daily_quota(db, au
 # ---------------------------------------------------------------------------
 
 
-def test_redis_backend_binds_every_limiter_with_its_failure_policy(mock_container, monkeypatch):  # noqa: F811
+LIMITERS = (
+    "rate_limiter",
+    "chat_limiter",
+    "_report_limiter",
+    "_signup_limiter",
+    "_free_key_limiter",
+    "_watch_alerts_limiter",
+)
+
+
+def _fresh_limiters(monkeypatch, api, rpc_limiter):
+    import rpc.router
+
+    for name in LIMITERS:
+        monkeypatch.setattr(api, name, RateLimiter(requests_per_minute=1000, burst=1000))
+    # The lifespan binds api's name for the RPC proxy's limiter; the route reads rpc.router's.
+    monkeypatch.setattr(api, "rpc_limiter", rpc_limiter)
+    monkeypatch.setattr(rpc.router, "rpc_limiter", rpc_limiter)
+
+
+RPC_CALL = {"jsonrpc": "2.0", "id": 1, "method": "eth_chainId", "params": []}
+
+
+def test_redis_backend_binds_every_limiter_with_its_failure_policy(mock_container, monkeypatch, caplog):  # noqa: F811
     import api
 
     redis = FakeRedis()
@@ -385,24 +452,26 @@ def test_redis_backend_binds_every_limiter_with_its_failure_policy(mock_containe
     monkeypatch.setattr(
         api, "connect_rate_limit_redis", lambda url: connect_calls.append(url) or redis
     )
-    for name in (
-        "rate_limiter",
-        "chat_limiter",
-        "_report_limiter",
-        "_signup_limiter",
-        "_free_key_limiter",
-        "_watch_alerts_limiter",
-        "rpc_limiter",
-    ):
-        monkeypatch.setattr(api, name, RateLimiter(requests_per_minute=1000, burst=1000))
+    _fresh_limiters(monkeypatch, api, RateLimiter(requests_per_minute=1, burst=1))
     mock_container.settings.rate_limit_backend = "redis"
-    mock_container.settings.redis_url = "redis://cache.internal:6379/2"
+    mock_container.settings.redis_url = "redis://user:secret@cache.internal:6379/2"
+    proxy = MagicMock()
+    proxy.handle_request = AsyncMock(return_value={"jsonrpc": "2.0", "id": 1, "result": "0x38"})
+    proxy.close = AsyncMock()
 
-    with TestClient(api.app) as client:
-        assert connect_calls == ["redis://cache.internal:6379/2"]
+    with caplog.at_level(logging.INFO), TestClient(api.app) as client:
+        assert connect_calls == ["redis://user:secret@cache.internal:6379/2"]
         mock_container.auth_manager.use_redis.assert_called_once_with(redis)
-        # The general request limiter lets requests through while Redis is down.
+        # PING failed at startup: the log says so and never claims the limits are kept in Redis.
+        assert "did not answer PING" in caplog.text and "ConnectionError" in caplog.text
+        assert "kept in Redis" not in caplog.text and "secret" not in caplog.text
+        # The general request limiter counts in memory while Redis is down.
         assert client.get("/mcp/health").status_code == 200
+        # So does the RPC proxy's, on its own route: its memory window here allows one call a minute.
+        api.app.state.rpc_proxy = proxy
+        assert client.post("/rpc/56", json=RPC_CALL).status_code == 200
+        assert client.post("/rpc/56", json=RPC_CALL).status_code == 429
+        proxy.handle_request.assert_awaited_once()
         # The abuse-sensitive limiters refuse.
         assert (
             client.post("/api/agent/chat", json={"message": "hi", "user_id": "u1"}).status_code
@@ -422,9 +491,30 @@ def test_redis_backend_binds_every_limiter_with_its_failure_policy(mock_containe
         assert client.post("/api/beta-signup", json={"email": "a@example.com"}).status_code == 429
         assert client.post("/api/keys/free", json={"email": "a@example.com"}).status_code == 429
         assert client.get("/api/watch/alerts").status_code == 429
-        # The RPC proxy's limiter lets requests through, so users' wallets keep working.
-        assert asyncio.run(api.rpc_limiter.is_allowed("203.0.113.7")) is True
     assert redis.closed
+
+
+def test_redis_keys_name_each_limiter_and_caller_once(mock_container, monkeypatch, caplog):  # noqa: F811
+    import api
+
+    redis = FakeRedis()
+    monkeypatch.setattr(api, "connect_rate_limit_redis", lambda url: redis)
+    _fresh_limiters(monkeypatch, api, RateLimiter(requests_per_minute=1000, burst=1000))
+    mock_container.settings.rate_limit_backend = "redis"
+    mock_container.settings.redis_url = "redis://localhost:6379/0"
+
+    with caplog.at_level(logging.INFO), TestClient(api.app, raise_server_exceptions=False) as client:
+        assert "Rate limits kept in Redis" in caplog.text
+        client.post("/api/agent/chat", json={"message": "hi", "user_id": "u1"})
+        client.post("/api/report", json={"address": "0x" + "1" * 40, "report_type": "scam"})
+        client.post("/api/beta-signup", json={"email": "a@example.com"})
+        client.post("/api/keys/free", json={"email": "a@example.com"})
+        client.get("/api/watch/alerts")
+        keys = sorted(_text(key) for key in asyncio.run(redis.keys("*")))
+    assert keys == sorted(
+        f"{KEY_PREFIX}{name}:testclient"
+        for name in ("requests", "chat", "report", "signup", "free-key", "watch-alerts")
+    )
 
 
 def test_memory_backend_creates_no_redis_client(mock_container, monkeypatch):  # noqa: F811
