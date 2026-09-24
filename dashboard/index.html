@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ShieldBot Threat Dashboard</title>
+  <meta name="description" content="ShieldBot's public threat dashboard: the newest high-risk contract detections and mempool alerts, with platform statistics and the window each count covers." />
+  <link rel="canonical" href="https://api.shieldbotsecurity.online/dashboard" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBGMTcyQSIvPjxwYXRoIGQ9Ik0xNiAzTDI3IDcuNVYxNUMyNyAyMS41IDE2IDI5IDE2IDI5QzE2IDI5IDUgMjEuNSA1IDE1VjcuNUwxNiAzWiIgZmlsbD0iIzNCODJGNiIvPjxwYXRoIGQ9Ik0xNiA3TDIzIDEwVjE1QzIzIDE5IDE2IDI0IDE2IDI0QzE2IDI0IDkgMTkgOSAxNVYxMEwxNiA3WiIgZmlsbD0iIzBGMTcyQSIvPjxwb2x5bGluZSBwb2ludHM9IjEyLDE1IDE1LDE4IDIwLDEzIiBmaWxsPSJub25lIiBzdHJva2U9IiMxMEI5ODEiIHN0cm9rZS13aWR0aD0iMi4yIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=" />
 
   <!-- Fonts -->
@@ -12,7 +14,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
   <style>
-*,:after,:before{--tw-border-spacing-x:0;--tw-border-spacing-y:0;--tw-translate-x:0;--tw-translate-y:0;--tw-rotate:0;--tw-skew-x:0;--tw-skew-y:0;--tw-scale-x:1;--tw-scale-y:1;--tw-pan-x: ;--tw-pan-y: ;--tw-pinch-zoom: ;--tw-scroll-snap-strictness:proximity;--tw-gradient-from-position: ;--tw-gradient-via-position: ;--tw-gradient-to-position: ;--tw-ordinal: ;--tw-slashed-zero: ;--tw-numeric-figure: ;--tw-numeric-spacing: ;--tw-numeric-fraction: ;--tw-ring-inset: ;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-color:rgba(59,130,246,.5);--tw-ring-offset-shadow:0 0 #0000;--tw-ring-shadow:0 0 #0000;--tw-shadow:0 0 #0000;--tw-shadow-colored:0 0 #0000;--tw-blur: ;--tw-brightness: ;--tw-contrast: ;--tw-grayscale: ;--tw-hue-rotate: ;--tw-invert: ;--tw-saturate: ;--tw-sepia: ;--tw-drop-shadow: ;--tw-backdrop-blur: ;--tw-backdrop-brightness: ;--tw-backdrop-contrast: ;--tw-backdrop-grayscale: ;--tw-backdrop-hue-rotate: ;--tw-backdrop-invert: ;--tw-backdrop-opacity: ;--tw-backdrop-saturate: ;--tw-backdrop-sepia: ;--tw-contain-size: ;--tw-contain-layout: ;--tw-contain-paint: ;--tw-contain-style: }::backdrop{--tw-border-spacing-x:0;--tw-border-spacing-y:0;--tw-translate-x:0;--tw-translate-y:0;--tw-rotate:0;--tw-skew-x:0;--tw-skew-y:0;--tw-scale-x:1;--tw-scale-y:1;--tw-pan-x: ;--tw-pan-y: ;--tw-pinch-zoom: ;--tw-scroll-snap-strictness:proximity;--tw-gradient-from-position: ;--tw-gradient-via-position: ;--tw-gradient-to-position: ;--tw-ordinal: ;--tw-slashed-zero: ;--tw-numeric-figure: ;--tw-numeric-spacing: ;--tw-numeric-fraction: ;--tw-ring-inset: ;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-color:rgba(59,130,246,.5);--tw-ring-offset-shadow:0 0 #0000;--tw-ring-shadow:0 0 #0000;--tw-shadow:0 0 #0000;--tw-shadow-colored:0 0 #0000;--tw-blur: ;--tw-brightness: ;--tw-contrast: ;--tw-grayscale: ;--tw-hue-rotate: ;--tw-invert: ;--tw-saturate: ;--tw-sepia: ;--tw-drop-shadow: ;--tw-backdrop-blur: ;--tw-backdrop-brightness: ;--tw-backdrop-contrast: ;--tw-backdrop-grayscale: ;--tw-backdrop-hue-rotate: ;--tw-backdrop-invert: ;--tw-backdrop-opacity: ;--tw-backdrop-saturate: ;--tw-backdrop-sepia: ;--tw-contain-size: ;--tw-contain-layout: ;--tw-contain-paint: ;--tw-contain-style: }/*! tailwindcss v3.4.19 | MIT License | https://tailwindcss.com*/*,:after,:before{box-sizing:border-box;border:0 solid #e5e7eb}:after,:before{--tw-content:""}:host,html{line-height:1.5;-webkit-text-size-adjust:100%;-moz-tab-size:4;-o-tab-size:4;tab-size:4;font-family:Inter,system-ui,sans-serif;font-feature-settings:normal;font-variation-settings:normal;-webkit-tap-highlight-color:transparent}body{margin:0;line-height:inherit}hr{height:0;color:inherit;border-top-width:1px}abbr:where([title]){-webkit-text-decoration:underline dotted;text-decoration:underline dotted}h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit}a{color:inherit;text-decoration:inherit}b,strong{font-weight:bolder}code,kbd,pre,samp{font-family:JetBrains Mono,monospace;font-feature-settings:normal;font-variation-settings:normal;font-size:1em}small{font-size:80%}sub,sup{font-size:75%;line-height:0;position:relative;vertical-align:baseline}sub{bottom:-.25em}sup{top:-.5em}table{text-indent:0;border-color:inherit;border-collapse:collapse}button,input,optgroup,select,textarea{font-family:inherit;font-feature-settings:inherit;font-variation-settings:inherit;font-size:100%;font-weight:inherit;line-height:inherit;letter-spacing:inherit;color:inherit;margin:0;padding:0}button,select{text-transform:none}button,input:where([type=button]),input:where([type=reset]),input:where([type=submit]){-webkit-appearance:button;background-color:transparent;background-image:none}:-moz-focusring{outline:auto}:-moz-ui-invalid{box-shadow:none}progress{vertical-align:baseline}::-webkit-inner-spin-button,::-webkit-outer-spin-button{height:auto}[type=search]{-webkit-appearance:textfield;outline-offset:-2px}::-webkit-search-decoration{-webkit-appearance:none}::-webkit-file-upload-button{-webkit-appearance:button;font:inherit}summary{display:list-item}blockquote,dd,dl,figure,h1,h2,h3,h4,h5,h6,hr,p,pre{margin:0}fieldset{margin:0}fieldset,legend{padding:0}menu,ol,ul{list-style:none;margin:0;padding:0}dialog{padding:0}textarea{resize:vertical}input::-moz-placeholder,textarea::-moz-placeholder{opacity:1;color:#9ca3af}input::placeholder,textarea::placeholder{opacity:1;color:#9ca3af}[role=button],button{cursor:pointer}:disabled{cursor:default}audio,canvas,embed,iframe,img,object,svg,video{display:block;vertical-align:middle}img,video{max-width:100%;height:auto}[hidden]:where(:not([hidden=until-found])){display:none}.visible{visibility:visible}.fixed{position:fixed}.sticky{position:sticky}.inset-0{inset:0}.bottom-6{bottom:1.5rem}.right-6{right:1.5rem}.z-50{z-index:50}.mx-4{margin-left:1rem;margin-right:1rem}.mx-auto{margin-left:auto;margin-right:auto}.mb-1{margin-bottom:.25rem}.mb-3{margin-bottom:.75rem}.mb-4{margin-bottom:1rem}.mb-5{margin-bottom:1.25rem}.ml-4{margin-left:1rem}.ml-auto{margin-left:auto}.mt-0\.5{margin-top:.125rem}.mt-1{margin-top:.25rem}.mt-2{margin-top:.5rem}.mt-3{margin-top:.75rem}.mt-4{margin-top:1rem}.flex{display:flex}.grid{display:grid}.h-full{height:100%}.w-full{width:100%}.min-w-0{min-width:0}.max-w-md{max-width:28rem}.flex-1{flex:1 1 0%}.shrink-0{flex-shrink:0}.transform{transform:translate(var(--tw-translate-x),var(--tw-translate-y)) rotate(var(--tw-rotate)) skewX(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y))}.resize-none{resize:none}.grid-cols-1{grid-template-columns:repeat(1,minmax(0,1fr))}.grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.flex-col{flex-direction:column}.flex-wrap{flex-wrap:wrap}.items-start{align-items:flex-start}.items-center{align-items:center}.justify-center{justify-content:center}.justify-between{justify-content:space-between}.gap-1{gap:.25rem}.gap-1\.5{gap:.375rem}.gap-2{gap:.5rem}.gap-3{gap:.75rem}.gap-4{gap:1rem}.space-y-2>:not([hidden])~:not([hidden]){--tw-space-y-reverse:0;margin-top:calc(.5rem*(1 - var(--tw-space-y-reverse)));margin-bottom:calc(.5rem*var(--tw-space-y-reverse))}.space-y-8>:not([hidden])~:not([hidden]){--tw-space-y-reverse:0;margin-top:calc(2rem*(1 - var(--tw-space-y-reverse)));margin-bottom:calc(2rem*var(--tw-space-y-reverse))}.overflow-hidden,.truncate{overflow:hidden}.truncate{text-overflow:ellipsis;white-space:nowrap}.break-all{word-break:break-all}.rounded{border-radius:.25rem}.rounded-2xl{border-radius:1rem}.rounded-full{border-radius:9999px}.rounded-lg{border-radius:.5rem}.rounded-md{border-radius:.375rem}.rounded-xl{border-radius:.75rem}.border{border-width:1px}.border-b{border-bottom-width:1px}.p-1\.5{padding:.375rem}.p-3{padding:.75rem}.p-4{padding:1rem}.p-5{padding:1.25rem}.p-6{padding:1.5rem}.px-2{padding-left:.5rem;padding-right:.5rem}.px-2\.5{padding-left:.625rem;padding-right:.625rem}.px-3{padding-left:.75rem;padding-right:.75rem}.px-4{padding-left:1rem;padding-right:1rem}.px-5{padding-left:1.25rem;padding-right:1.25rem}.py-0\.5{padding-top:.125rem;padding-bottom:.125rem}.py-1{padding-top:.25rem;padding-bottom:.25rem}.py-1\.5{padding-top:.375rem;padding-bottom:.375rem}.py-16{padding-top:4rem;padding-bottom:4rem}.py-2{padding-top:.5rem;padding-bottom:.5rem}.py-2\.5{padding-top:.625rem;padding-bottom:.625rem}.py-3{padding-top:.75rem;padding-bottom:.75rem}.py-4{padding-top:1rem;padding-bottom:1rem}.py-6{padding-top:1.5rem;padding-bottom:1.5rem}.py-8{padding-top:2rem;padding-bottom:2rem}.text-center{text-align:center}.font-mono{font-family:JetBrains Mono,monospace}.text-2xl{font-size:1.5rem;line-height:2rem}.text-base{font-size:1rem;line-height:1.5rem}.text-lg{font-size:1.125rem;line-height:1.75rem}.text-sm{font-size:.875rem;line-height:1.25rem}.text-xs{font-size:.75rem;line-height:1rem}.font-bold{font-weight:700}.font-medium{font-weight:500}.font-semibold{font-weight:600}.uppercase{text-transform:uppercase}.leading-none{line-height:1}.tracking-wide{letter-spacing:.025em}.tracking-widest{letter-spacing:.1em}.shadow-2xl{--tw-shadow:0 25px 50px -12px rgba(0,0,0,.25);--tw-shadow-colored:0 25px 50px -12px var(--tw-shadow-color);box-shadow:var(--tw-ring-offset-shadow,0 0 #0000),var(--tw-ring-shadow,0 0 #0000),var(--tw-shadow)}.outline{outline-style:solid}.blur{--tw-blur:blur(8px)}.blur,.filter{filter:var(--tw-blur) var(--tw-brightness) var(--tw-contrast) var(--tw-grayscale) var(--tw-hue-rotate) var(--tw-invert) var(--tw-saturate) var(--tw-sepia) var(--tw-drop-shadow)}.backdrop-filter{-webkit-backdrop-filter:var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia);backdrop-filter:var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia)}.transition{transition-property:color,background-color,border-color,text-decoration-color,fill,stroke,opacity,box-shadow,transform,filter,-webkit-backdrop-filter;transition-property:color,background-color,border-color,text-decoration-color,fill,stroke,opacity,box-shadow,transform,filter,backdrop-filter;transition-property:color,background-color,border-color,text-decoration-color,fill,stroke,opacity,box-shadow,transform,filter,backdrop-filter,-webkit-backdrop-filter;transition-timing-function:cubic-bezier(.4,0,.2,1);transition-duration:.15s}.transition-all{transition-property:all;transition-timing-function:cubic-bezier(.4,0,.2,1);transition-duration:.15s}.transition-colors{transition-property:color,background-color,border-color,text-decoration-color,fill,stroke;transition-timing-function:cubic-bezier(.4,0,.2,1)}.duration-150,.transition-colors{transition-duration:.15s}.duration-700{transition-duration:.7s}.hover\:text-white:hover{--tw-text-opacity:1;color:rgb(255 255 255/var(--tw-text-opacity,1))}@media (min-width:640px){.sm\:grid-cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}.sm\:grid-cols-4{grid-template-columns:repeat(4,minmax(0,1fr))}}@media (min-width:768px){.md\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.md\:p-5{padding:1.25rem}.md\:px-8{padding-left:2rem;padding-right:2rem}}@media (min-width:1024px){.lg\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.lg\:grid-cols-7{grid-template-columns:repeat(7,minmax(0,1fr))}}@media (min-width:1280px){.xl\:grid-cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}}
+*,:after,:before{--tw-border-spacing-x:0;--tw-border-spacing-y:0;--tw-translate-x:0;--tw-translate-y:0;--tw-rotate:0;--tw-skew-x:0;--tw-skew-y:0;--tw-scale-x:1;--tw-scale-y:1;--tw-pan-x: ;--tw-pan-y: ;--tw-pinch-zoom: ;--tw-scroll-snap-strictness:proximity;--tw-gradient-from-position: ;--tw-gradient-via-position: ;--tw-gradient-to-position: ;--tw-ordinal: ;--tw-slashed-zero: ;--tw-numeric-figure: ;--tw-numeric-spacing: ;--tw-numeric-fraction: ;--tw-ring-inset: ;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-color:rgba(59,130,246,.5);--tw-ring-offset-shadow:0 0 #0000;--tw-ring-shadow:0 0 #0000;--tw-shadow:0 0 #0000;--tw-shadow-colored:0 0 #0000;--tw-blur: ;--tw-brightness: ;--tw-contrast: ;--tw-grayscale: ;--tw-hue-rotate: ;--tw-invert: ;--tw-saturate: ;--tw-sepia: ;--tw-drop-shadow: ;--tw-backdrop-blur: ;--tw-backdrop-brightness: ;--tw-backdrop-contrast: ;--tw-backdrop-grayscale: ;--tw-backdrop-hue-rotate: ;--tw-backdrop-invert: ;--tw-backdrop-opacity: ;--tw-backdrop-saturate: ;--tw-backdrop-sepia: ;--tw-contain-size: ;--tw-contain-layout: ;--tw-contain-paint: ;--tw-contain-style: }::backdrop{--tw-border-spacing-x:0;--tw-border-spacing-y:0;--tw-translate-x:0;--tw-translate-y:0;--tw-rotate:0;--tw-skew-x:0;--tw-skew-y:0;--tw-scale-x:1;--tw-scale-y:1;--tw-pan-x: ;--tw-pan-y: ;--tw-pinch-zoom: ;--tw-scroll-snap-strictness:proximity;--tw-gradient-from-position: ;--tw-gradient-via-position: ;--tw-gradient-to-position: ;--tw-ordinal: ;--tw-slashed-zero: ;--tw-numeric-figure: ;--tw-numeric-spacing: ;--tw-numeric-fraction: ;--tw-ring-inset: ;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-color:rgba(59,130,246,.5);--tw-ring-offset-shadow:0 0 #0000;--tw-ring-shadow:0 0 #0000;--tw-shadow:0 0 #0000;--tw-shadow-colored:0 0 #0000;--tw-blur: ;--tw-brightness: ;--tw-contrast: ;--tw-grayscale: ;--tw-hue-rotate: ;--tw-invert: ;--tw-saturate: ;--tw-sepia: ;--tw-drop-shadow: ;--tw-backdrop-blur: ;--tw-backdrop-brightness: ;--tw-backdrop-contrast: ;--tw-backdrop-grayscale: ;--tw-backdrop-hue-rotate: ;--tw-backdrop-invert: ;--tw-backdrop-opacity: ;--tw-backdrop-saturate: ;--tw-backdrop-sepia: ;--tw-contain-size: ;--tw-contain-layout: ;--tw-contain-paint: ;--tw-contain-style: }/*! tailwindcss v3.4.19 | MIT License | https://tailwindcss.com*/*,:after,:before{box-sizing:border-box;border:0 solid #e5e7eb}:after,:before{--tw-content:""}:host,html{line-height:1.5;-webkit-text-size-adjust:100%;-moz-tab-size:4;-o-tab-size:4;tab-size:4;font-family:Inter,system-ui,sans-serif;font-feature-settings:normal;font-variation-settings:normal;-webkit-tap-highlight-color:transparent}body{margin:0;line-height:inherit}hr{height:0;color:inherit;border-top-width:1px}abbr:where([title]){-webkit-text-decoration:underline dotted;text-decoration:underline dotted}h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit}a{color:inherit;text-decoration:inherit}b,strong{font-weight:bolder}code,kbd,pre,samp{font-family:JetBrains Mono,monospace;font-feature-settings:normal;font-variation-settings:normal;font-size:1em}small{font-size:80%}sub,sup{font-size:75%;line-height:0;position:relative;vertical-align:baseline}sub{bottom:-.25em}sup{top:-.5em}table{text-indent:0;border-color:inherit;border-collapse:collapse}button,input,optgroup,select,textarea{font-family:inherit;font-feature-settings:inherit;font-variation-settings:inherit;font-size:100%;font-weight:inherit;line-height:inherit;letter-spacing:inherit;color:inherit;margin:0;padding:0}button,select{text-transform:none}button,input:where([type=button]),input:where([type=reset]),input:where([type=submit]){-webkit-appearance:button;background-color:transparent;background-image:none}:-moz-focusring{outline:auto}:-moz-ui-invalid{box-shadow:none}progress{vertical-align:baseline}::-webkit-inner-spin-button,::-webkit-outer-spin-button{height:auto}[type=search]{-webkit-appearance:textfield;outline-offset:-2px}::-webkit-search-decoration{-webkit-appearance:none}::-webkit-file-upload-button{-webkit-appearance:button;font:inherit}summary{display:list-item}blockquote,dd,dl,figure,h1,h2,h3,h4,h5,h6,hr,p,pre{margin:0}fieldset{margin:0}fieldset,legend{padding:0}menu,ol,ul{list-style:none;margin:0;padding:0}dialog{padding:0}textarea{resize:vertical}input::-moz-placeholder,textarea::-moz-placeholder{opacity:1;color:#9ca3af}input::placeholder,textarea::placeholder{opacity:1;color:#9ca3af}[role=button],button{cursor:pointer}:disabled{cursor:default}audio,canvas,embed,iframe,img,object,svg,video{display:block;vertical-align:middle}img,video{max-width:100%;height:auto}[hidden]:where(:not([hidden=until-found])){display:none}.fixed{position:fixed}.inset-0{inset:0}.bottom-6{bottom:1.5rem}.right-6{right:1.5rem}.z-50{z-index:50}.col-span-2{grid-column:span 2/span 2}.mx-4{margin-left:1rem;margin-right:1rem}.mx-auto{margin-left:auto;margin-right:auto}.mb-1{margin-bottom:.25rem}.mb-3{margin-bottom:.75rem}.mb-4{margin-bottom:1rem}.mb-5{margin-bottom:1.25rem}.ml-4{margin-left:1rem}.ml-auto{margin-left:auto}.mt-0\.5{margin-top:.125rem}.mt-1{margin-top:.25rem}.mt-2{margin-top:.5rem}.mt-3{margin-top:.75rem}.mt-4{margin-top:1rem}.flex{display:flex}.inline-flex{display:inline-flex}.grid{display:grid}.h-11{height:2.75rem}.h-full{height:100%}.min-h-\[44px\]{min-height:44px}.w-11{width:2.75rem}.w-full{width:100%}.min-w-0{min-width:0}.min-w-\[44px\]{min-width:44px}.max-w-md{max-width:28rem}.flex-1{flex:1 1 0%}.shrink-0{flex-shrink:0}.transform{transform:translate(var(--tw-translate-x),var(--tw-translate-y)) rotate(var(--tw-rotate)) skewX(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y))}.resize-none{resize:none}.grid-cols-1{grid-template-columns:repeat(1,minmax(0,1fr))}.grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.flex-col{flex-direction:column}.flex-wrap{flex-wrap:wrap}.items-start{align-items:flex-start}.items-center{align-items:center}.justify-end{justify-content:flex-end}.justify-center{justify-content:center}.justify-between{justify-content:space-between}.gap-1{gap:.25rem}.gap-1\.5{gap:.375rem}.gap-2{gap:.5rem}.gap-3{gap:.75rem}.gap-4{gap:1rem}.gap-x-3{-moz-column-gap:.75rem;column-gap:.75rem}.space-y-2>:not([hidden])~:not([hidden]){--tw-space-y-reverse:0;margin-top:calc(.5rem*(1 - var(--tw-space-y-reverse)));margin-bottom:calc(.5rem*var(--tw-space-y-reverse))}.space-y-8>:not([hidden])~:not([hidden]){--tw-space-y-reverse:0;margin-top:calc(2rem*(1 - var(--tw-space-y-reverse)));margin-bottom:calc(2rem*var(--tw-space-y-reverse))}.overflow-hidden,.truncate{overflow:hidden}.truncate{text-overflow:ellipsis;white-space:nowrap}.break-all{word-break:break-all}.rounded{border-radius:.25rem}.rounded-2xl{border-radius:1rem}.rounded-full{border-radius:9999px}.rounded-lg{border-radius:.5rem}.rounded-md{border-radius:.375rem}.rounded-xl{border-radius:.75rem}.border{border-width:1px}.border-b{border-bottom-width:1px}.p-3{padding:.75rem}.p-4{padding:1rem}.p-5{padding:1.25rem}.p-6{padding:1.5rem}.px-2{padding-left:.5rem;padding-right:.5rem}.px-2\.5{padding-left:.625rem;padding-right:.625rem}.px-3{padding-left:.75rem;padding-right:.75rem}.px-4{padding-left:1rem;padding-right:1rem}.px-5{padding-left:1.25rem;padding-right:1.25rem}.py-0\.5{padding-top:.125rem;padding-bottom:.125rem}.py-1{padding-top:.25rem;padding-bottom:.25rem}.py-1\.5{padding-top:.375rem;padding-bottom:.375rem}.py-16{padding-top:4rem;padding-bottom:4rem}.py-2{padding-top:.5rem;padding-bottom:.5rem}.py-2\.5{padding-top:.625rem;padding-bottom:.625rem}.py-3{padding-top:.75rem;padding-bottom:.75rem}.py-4{padding-top:1rem;padding-bottom:1rem}.py-6{padding-top:1.5rem;padding-bottom:1.5rem}.py-8{padding-top:2rem;padding-bottom:2rem}.text-center{text-align:center}.font-mono{font-family:JetBrains Mono,monospace}.text-2xl{font-size:1.5rem;line-height:2rem}.text-base{font-size:1rem;line-height:1.5rem}.text-lg{font-size:1.125rem;line-height:1.75rem}.text-sm{font-size:.875rem;line-height:1.25rem}.text-xs{font-size:.75rem;line-height:1rem}.font-bold{font-weight:700}.font-medium{font-weight:500}.font-semibold{font-weight:600}.uppercase{text-transform:uppercase}.leading-none{line-height:1}.tracking-wide{letter-spacing:.025em}.tracking-widest{letter-spacing:.1em}.shadow-2xl{--tw-shadow:0 25px 50px -12px rgba(0,0,0,.25);--tw-shadow-colored:0 25px 50px -12px var(--tw-shadow-color);box-shadow:var(--tw-ring-offset-shadow,0 0 #0000),var(--tw-ring-shadow,0 0 #0000),var(--tw-shadow)}.outline{outline-style:solid}.blur{--tw-blur:blur(8px)}.blur,.filter{filter:var(--tw-blur) var(--tw-brightness) var(--tw-contrast) var(--tw-grayscale) var(--tw-hue-rotate) var(--tw-invert) var(--tw-saturate) var(--tw-sepia) var(--tw-drop-shadow)}.backdrop-filter{-webkit-backdrop-filter:var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia);backdrop-filter:var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia)}.transition{transition-property:color,background-color,border-color,text-decoration-color,fill,stroke,opacity,box-shadow,transform,filter,-webkit-backdrop-filter;transition-property:color,background-color,border-color,text-decoration-color,fill,stroke,opacity,box-shadow,transform,filter,backdrop-filter;transition-property:color,background-color,border-color,text-decoration-color,fill,stroke,opacity,box-shadow,transform,filter,backdrop-filter,-webkit-backdrop-filter;transition-timing-function:cubic-bezier(.4,0,.2,1);transition-duration:.15s}.transition-all{transition-property:all;transition-timing-function:cubic-bezier(.4,0,.2,1);transition-duration:.15s}.transition-colors{transition-property:color,background-color,border-color,text-decoration-color,fill,stroke;transition-timing-function:cubic-bezier(.4,0,.2,1)}.duration-150,.transition-colors{transition-duration:.15s}.duration-700{transition-duration:.7s}.hover\:text-white:hover{--tw-text-opacity:1;color:rgb(255 255 255/var(--tw-text-opacity,1))}@media (min-width:640px){.sm\:grid-cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}.sm\:grid-cols-4{grid-template-columns:repeat(4,minmax(0,1fr))}}@media (min-width:768px){.md\:sticky{position:sticky}.md\:top-0{top:0}.md\:h-8{height:2rem}.md\:min-h-0{min-height:0}.md\:w-8{width:2rem}.md\:w-auto{width:auto}.md\:min-w-0{min-width:0}.md\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.md\:flex-row{flex-direction:row}.md\:flex-nowrap{flex-wrap:nowrap}.md\:items-center{align-items:center}.md\:justify-between{justify-content:space-between}.md\:gap-3{gap:.75rem}.md\:p-5{padding:1.25rem}.md\:px-8{padding-left:2rem;padding-right:2rem}}@media (min-width:1024px){.lg\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}}@media (min-width:1280px){.xl\:col-span-1{grid-column:span 1/span 1}.xl\:grid-cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}.xl\:grid-cols-7{grid-template-columns:repeat(7,minmax(0,1fr))}}
   </style>
 
   <style>
@@ -70,7 +72,10 @@
       .toast-anim  { animation: none; }
       .fade-up     { animation: none; }
       .badge-critical { animation: none; }
+      *, *::before, *::after { transition: none !important; }
     }
+
+    :focus-visible { outline: 2px solid #60A5FA; outline-offset: 2px; }
 
     /* Scrollbar */
     ::-webkit-scrollbar { width: 5px; height: 5px; }
@@ -412,6 +417,8 @@ const API = window.location.origin;
 const REFRESH_MS = 20000;
 // Items requested from each threat feed source; a source that returns this many may hold more.
 const FEED_LIMIT = 100;
+// With reduced motion, counts show their value at once, the live dot does not pulse and charts do not animate.
+const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // Mirrors utils/chain_info.py.
 const CHAIN_NAMES = {
@@ -444,29 +451,31 @@ const EXPLORERS = {
   204: 'https://opbnbscan.com',
   4663: 'https://robinhoodchain.blockscout.com'
 };
+
+// Opaque badge backgrounds, so a hovered row cannot lower the text's contrast (each is at least 4.5:1).
 const SEV = {
   CRITICAL: {
-    bg: 'rgba(239,68,68,0.15)',
-    text: '#EF4444',
+    bg: '#3D2D3C',
+    text: '#F87171',
     border: 'rgba(239,68,68,0.35)'
   },
   HIGH: {
-    bg: 'rgba(245,158,11,0.15)',
-    text: '#F59E0B',
+    bg: '#3E3B34',
+    text: '#FBBF24',
     border: 'rgba(245,158,11,0.35)'
   },
   MEDIUM: {
-    bg: 'rgba(59,130,246,0.15)',
-    text: '#3B82F6',
+    bg: '#223657',
+    text: '#60A5FA',
     border: 'rgba(59,130,246,0.35)'
   },
   LOW: {
-    bg: 'rgba(16,185,129,0.15)',
-    text: '#10B981',
+    bg: '#1C3F46',
+    text: '#34D399',
     border: 'rgba(16,185,129,0.35)'
   },
   UNKNOWN: {
-    bg: 'rgba(100,116,139,0.15)',
+    bg: '#283447',
     text: '#94A3B8',
     border: 'rgba(100,116,139,0.35)'
   }
@@ -567,12 +576,14 @@ function Toast({
     return () => clearTimeout(t);
   }, []);
   const isErr = type === 'error';
-  return /*#__PURE__*/React.createElement("div", {
+  // On the body, like the Flag dialog: inside the feed's glass panel it was placed against that panel.
+  return ReactDOM.createPortal(/*#__PURE__*/React.createElement("div", {
+    role: "status",
     className: "toast-anim fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-2xl",
     style: {
       background: '#1E293B',
       border: `1px solid ${isErr ? 'rgba(239,68,68,0.35)' : '#334155'}`,
-      color: isErr ? '#EF4444' : '#10B981',
+      color: isErr ? '#F87171' : '#10B981',
       fontSize: 13
     }
   }, isErr ? /*#__PURE__*/React.createElement("svg", {
@@ -609,7 +620,7 @@ function Toast({
     points: "20 6 9 17 4 12"
   })), /*#__PURE__*/React.createElement("span", {
     className: "font-medium"
-  }, msg));
+  }, msg)), document.body);
 }
 
 // ─── Flag Modal ───────────────────────────────────────────────────────────
@@ -620,8 +631,40 @@ function FlagModal({
 }) {
   const [reason, setReason] = useState('');
   const [sending, setSending] = useState(false);
+  // Why the last report was not sent. It shows in the dialog: a toast would sit under the backdrop.
+  const [failure, setFailure] = useState(null);
+  const dialog = useRef(null);
   useEffect(() => {
     setReason('');
+    setFailure(null);
+  }, [threat]);
+  // The open dialog makes the page behind it inert, takes focus, keeps Tab inside it, closes on
+  // Escape and returns focus to the control that opened it.
+  useEffect(() => {
+    if (!threat) return;
+    const opener = document.activeElement;
+    const page = document.getElementById('root');
+    page.inert = true;
+    dialog.current.querySelector('textarea').focus();
+    function onKey(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        const items = [...dialog.current.querySelectorAll('button:not([disabled]), textarea')];
+        const index = items.indexOf(document.activeElement);
+        const next = e.shiftKey ? (index <= 0 ? items.length : index) - 1 : (index + 1) % items.length;
+        items[next].focus();
+      }
+    }
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      // Before the focus call: an element inside an inert page cannot take focus.
+      page.inert = false;
+      opener.focus();
+    };
   }, [threat]);
   if (!threat) return null;
   const addr = threat.address || threat.target_token || '';
@@ -629,6 +672,7 @@ function FlagModal({
   const canSend = Boolean(addr && threat.chain_id) && !sending;
   async function submit() {
     setSending(true);
+    setFailure(null);
     try {
       const r = await fetch(`${API}/api/report`, {
         method: 'POST',
@@ -645,14 +689,16 @@ function FlagModal({
       if (r.ok) {
         onResult('Report sent. Thank you.', 'success');
         onClose();
-      } else if (r.status === 429) onResult('Too many reports. Try again in a minute.', 'error');else onResult(`Report not sent (HTTP ${r.status}).`, 'error');
+      } else if (r.status === 429) setFailure('Too many reports. Try again in a minute.');else setFailure(`Report not sent (HTTP ${r.status}).`);
     } catch (e) {
-      onResult('Report not sent: network error.', 'error');
+      setFailure('Report not sent: network error.');
     } finally {
       setSending(false);
     }
   }
-  return /*#__PURE__*/React.createElement("div", {
+  // Rendered on the body: inside the feed's glass panel, whose backdrop-filter contains fixed
+  // elements, the backdrop covered only that panel and the dialog could sit off screen.
+  return ReactDOM.createPortal(/*#__PURE__*/React.createElement("div", {
     className: "fixed inset-0 z-50 flex items-center justify-center",
     style: {
       background: 'rgba(15,23,42,0.85)',
@@ -660,6 +706,10 @@ function FlagModal({
     },
     onClick: onClose
   }, /*#__PURE__*/React.createElement("div", {
+    ref: dialog,
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": "flag-title",
     className: "glass rounded-2xl p-6 w-full max-w-md mx-4 fade-up",
     style: {
       border: '1px solid #334155'
@@ -667,16 +717,18 @@ function FlagModal({
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between mb-5"
-  }, /*#__PURE__*/React.createElement("span", {
+  }, /*#__PURE__*/React.createElement("h2", {
+    id: "flag-title",
     className: "font-semibold text-base",
     style: {
       color: '#F8FAFC'
     }
   }, "Flag False Positive"), /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
-    className: "transition-colors hover:text-white",
+    "aria-label": "Close",
+    className: "w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg transition-colors hover:text-white",
     style: {
-      color: '#64748B',
+      color: '#94A3B8',
       fontSize: 18,
       lineHeight: 1
     }
@@ -690,7 +742,7 @@ function FlagModal({
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-xs mb-1",
     style: {
-      color: '#64748B'
+      color: '#94A3B8'
     }
   }, "Threat Type"), /*#__PURE__*/React.createElement("div", {
     className: "text-sm font-medium",
@@ -705,12 +757,12 @@ function FlagModal({
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-xs mb-1",
     style: {
-      color: '#64748B'
+      color: '#94A3B8'
     }
   }, "Address"), /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-mono break-all",
     style: {
-      color: '#3B82F6',
+      color: '#60A5FA',
       fontFamily: 'JetBrains Mono,monospace'
     }
   }, addr || '—'))), /*#__PURE__*/React.createElement("textarea", {
@@ -719,33 +771,39 @@ function FlagModal({
       background: '#0F172A',
       border: '1px solid #334155',
       color: '#F8FAFC',
-      outline: 'none',
       height: 80,
       fontFamily: 'inherit'
     },
     maxLength: 1000,
     value: reason,
     onChange: e => setReason(e.target.value),
+    "aria-label": "Why is this a false positive?",
     placeholder: "Why is this a false positive?"
-  }), /*#__PURE__*/React.createElement("div", {
+  }), failure && /*#__PURE__*/React.createElement("div", {
+    role: "alert",
+    className: "text-sm mt-3",
+    style: {
+      color: '#FCA5A5'
+    }
+  }, failure), /*#__PURE__*/React.createElement("div", {
     className: "flex gap-2 mt-4"
   }, /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
-    className: "flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors",
+    className: "flex-1 py-2.5 min-h-[44px] md:min-h-0 rounded-lg text-sm font-medium transition-colors",
     style: {
       background: '#334155',
-      color: '#94A3B8'
+      color: '#E2E8F0'
     }
   }, "Cancel"), /*#__PURE__*/React.createElement("button", {
     onClick: submit,
     disabled: !canSend,
-    className: "flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors",
+    className: "flex-1 py-2.5 min-h-[44px] md:min-h-0 rounded-lg text-sm font-medium transition-colors",
     style: {
-      background: '#3B82F6',
+      background: '#2563EB',
       color: '#fff',
       opacity: canSend ? 1 : 0.5
     }
-  }, sending ? 'Sending…' : 'Submit Report'))));
+  }, sending ? 'Sending…' : 'Submit Report')))), document.body);
 }
 
 // ─── Error Banner ──────────────────────────────────────────────────────────
@@ -776,10 +834,10 @@ function ErrorBanner({
     d: "M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
   })), msg), /*#__PURE__*/React.createElement("button", {
     onClick: onRetry,
-    className: "ml-4 px-3 py-1 rounded-lg text-xs font-semibold transition-colors",
+    className: "ml-4 px-3 py-1 min-h-[44px] md:min-h-0 rounded-lg text-xs font-semibold transition-colors",
     style: {
       background: 'rgba(239,68,68,0.18)',
-      color: '#EF4444'
+      color: '#FCA5A5'
     }
   }, "Retry"));
 }
@@ -812,7 +870,7 @@ function ThreatRow({
     onMouseEnter: () => setHov(true),
     onMouseLeave: () => setHov(false)
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-start gap-3"
+    className: "flex flex-wrap md:flex-nowrap items-start gap-3"
   }, /*#__PURE__*/React.createElement("span", {
     className: `shrink-0 text-xs font-bold px-2 py-1 rounded-md uppercase tracking-wide text-center ${sev === 'CRITICAL' ? 'badge-critical' : ''}`,
     style: {
@@ -834,45 +892,41 @@ function ThreatRow({
     className: "text-xs px-2 py-0.5 rounded-full font-medium",
     style: {
       background: `${cColor}20`,
-      color: cColor
+      color: '#E2E8F0'
     }
   }, chain)), note && /*#__PURE__*/React.createElement("div", {
     className: "text-xs mt-0.5 truncate",
     style: {
-      color: '#475569'
+      color: '#94A3B8'
     }
   }, note), /*#__PURE__*/React.createElement("div", {
     className: "text-xs mt-0.5 font-mono",
     style: {
-      color: '#3B82F6',
+      color: '#60A5FA',
       fontFamily: 'JetBrains Mono,monospace'
     }
   }, addr ? short(addr) : '—')), /*#__PURE__*/React.createElement("div", {
     className: "text-xs shrink-0",
     style: {
-      color: '#475569'
+      color: '#94A3B8'
     }
   }, timeAgo(ts)), /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center gap-1 shrink-0 transition-all duration-150",
-    style: {
-      opacity: hov ? 1 : 0,
-      pointerEvents: hov ? 'auto' : 'none'
-    }
+    className: "flex items-center justify-end gap-1 shrink-0 w-full md:w-auto"
   }, exp && addr && /*#__PURE__*/React.createElement("a", {
     href: `${exp}/address/${addr}`,
     target: "_blank",
     rel: "noopener noreferrer",
     title: "Investigate on Explorer",
-    "aria-label": "Investigate on Explorer",
-    className: "p-1.5 rounded-lg transition-colors",
+    "aria-label": `Investigate ${short(addr)} on the explorer`,
+    className: "w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg transition-colors",
     style: {
       background: 'rgba(59,130,246,0.15)',
-      color: '#3B82F6'
+      color: '#60A5FA'
     },
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("svg", {
-    width: "12",
-    height: "12",
+    width: "14",
+    height: "14",
     fill: "none",
     stroke: "currentColor",
     strokeWidth: "2",
@@ -882,16 +936,16 @@ function ThreatRow({
     d: "M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
   }))), addr && /*#__PURE__*/React.createElement("button", {
     title: "Copy Address",
-    "aria-label": "Copy address to clipboard",
-    className: "p-1.5 rounded-lg transition-colors",
+    "aria-label": `Copy ${short(addr)} to the clipboard`,
+    className: "w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg transition-colors",
     style: {
       background: 'rgba(16,185,129,0.15)',
-      color: '#10B981'
+      color: '#34D399'
     },
     onClick: () => onCopy(addr)
   }, /*#__PURE__*/React.createElement("svg", {
-    width: "12",
-    height: "12",
+    width: "14",
+    height: "14",
     fill: "none",
     stroke: "currentColor",
     strokeWidth: "2",
@@ -907,16 +961,16 @@ function ThreatRow({
     d: "M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"
   }))), /*#__PURE__*/React.createElement("button", {
     title: "Flag False Positive",
-    "aria-label": "Flag as false positive",
-    className: "p-1.5 rounded-lg transition-colors",
+    "aria-label": `Flag ${addr ? short(addr) : type} as a false positive`,
+    className: "w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg transition-colors",
     style: {
       background: 'rgba(245,158,11,0.15)',
-      color: '#F59E0B'
+      color: '#FBBF24'
     },
     onClick: () => onFlag(t)
   }, /*#__PURE__*/React.createElement("svg", {
-    width: "12",
-    height: "12",
+    width: "14",
+    height: "14",
     fill: "none",
     stroke: "currentColor",
     strokeWidth: "2",
@@ -968,6 +1022,7 @@ function ThreatLogTable({
   threats,
   loading,
   error,
+  mempoolUnavailable,
   onRetry,
   chain,
   onChain
@@ -985,23 +1040,33 @@ function ThreatLogTable({
     }));
   }
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    role: "group",
+    "aria-label": "Filter by chain",
     className: "flex gap-2 flex-wrap mb-4"
   }, CHAIN_FILTERS.map(f => {
     const active = chain === f.val;
     return /*#__PURE__*/React.createElement("button", {
       key: f.val,
       onClick: () => onChain(f.val),
-      className: "px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150",
+      "aria-pressed": active,
+      className: "px-3 py-1.5 min-h-[44px] md:min-h-0 rounded-lg text-xs font-medium transition-all duration-150",
       style: {
         background: active ? 'rgba(59,130,246,0.18)' : '#1E293B',
         border: `1px solid ${active ? '#3B82F6' : '#334155'}`,
-        color: active ? '#3B82F6' : '#64748B'
+        color: active ? '#60A5FA' : '#94A3B8'
       }
     }, f.label);
   })), error && /*#__PURE__*/React.createElement(ErrorBanner, {
     msg: error,
     onRetry: onRetry
-  }), /*#__PURE__*/React.createElement("div", {
+  }), mempoolUnavailable && /*#__PURE__*/React.createElement("div", {
+    className: "px-4 py-3 rounded-xl mb-3 text-sm",
+    style: {
+      background: 'rgba(100,116,139,0.12)',
+      border: '1px solid #334155',
+      color: '#CBD5E1'
+    }
+  }, "Mempool alerts unavailable: ", mempoolUnavailable), /*#__PURE__*/React.createElement("div", {
     className: "flex flex-col gap-2",
     style: {
       maxHeight: 520,
@@ -1013,9 +1078,9 @@ function ThreatLogTable({
   })) : filtered.length === 0 ? /*#__PURE__*/React.createElement("div", {
     className: "text-center py-16 text-sm",
     style: {
-      color: '#334155'
+      color: '#94A3B8'
     }
-  }, error ? 'Threat data unavailable — check the error above.' : chain ? 'No threats on this chain in the current window.' : 'No threats detected. Monitoring active.') : filtered.map(t => /*#__PURE__*/React.createElement(ThreatRow, {
+  }, error ? 'Threat data unavailable — check the error above.' : mempoolUnavailable ? chain ? 'No contract detections on this chain in the current window.' : 'No contract detections in the current window.' : chain ? 'No threats on this chain in the current window.' : 'No threats detected. Monitoring active.') : filtered.map(t => /*#__PURE__*/React.createElement(ThreatRow, {
     key: threatKey(t),
     t: t,
     onCopy: handleCopy,
@@ -1073,7 +1138,7 @@ function CampaignsGrid({
     return /*#__PURE__*/React.createElement("div", {
       className: "text-center py-8 text-sm",
       style: {
-        color: '#475569'
+        color: '#94A3B8'
       }
     }, "Campaign data unavailable.");
   }
@@ -1081,7 +1146,7 @@ function CampaignsGrid({
     return /*#__PURE__*/React.createElement("div", {
       className: "text-center py-8 text-sm",
       style: {
-        color: '#334155'
+        color: '#94A3B8'
       }
     }, "No campaigns detected.");
   }
@@ -1094,6 +1159,7 @@ function CampaignsGrid({
     const tot = c.contract_count || 1;
     const pct = scored ? Math.min(100, hi / tot * 100) : 0;
     const bar = !scored ? '#475569' : pct > 50 ? '#EF4444' : pct > 20 ? '#F59E0B' : '#10B981';
+    const barText = !scored ? '#94A3B8' : pct > 50 ? '#F87171' : pct > 20 ? '#FBBF24' : '#34D399';
     return /*#__PURE__*/React.createElement("div", {
       key: i,
       className: "rounded-xl p-4 fade-up",
@@ -1104,13 +1170,13 @@ function CampaignsGrid({
     }, /*#__PURE__*/React.createElement("div", {
       className: "text-sm font-medium font-mono break-all",
       style: {
-        color: '#3B82F6',
+        color: '#60A5FA',
         fontFamily: 'JetBrains Mono,monospace'
       }
     }, (c.deployer || '').slice(0, 10), "\u2026", (c.deployer || '').slice(-6)), /*#__PURE__*/React.createElement("div", {
       className: "text-xs mt-2",
       style: {
-        color: '#64748B'
+        color: '#94A3B8'
       }
     }, c.contract_count, " contracts \xB7 ", c.chain_count, " chain(s)", c.funder ? ` · Funder: ${c.funder.slice(0, 8)}…` : ''), /*#__PURE__*/React.createElement("div", {
       className: "mt-3 rounded-full overflow-hidden",
@@ -1131,11 +1197,11 @@ function CampaignsGrid({
       }
     }, scored ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
       style: {
-        color: bar
+        color: barText
       }
     }, hi, " HIGH/CRIT"), " / ", tot, " total") : /*#__PURE__*/React.createElement("span", {
       style: {
-        color: bar
+        color: barText
       }
     }, "Contracts not scored yet")));
   }));
@@ -1157,7 +1223,7 @@ function ThreatVelocityChart({
       style: {
         border: '1px solid #334155'
       }
-    }, /*#__PURE__*/React.createElement("div", {
+    }, /*#__PURE__*/React.createElement("h3", {
       className: "text-sm font-semibold mb-4",
       style: {
         color: '#F8FAFC'
@@ -1166,7 +1232,7 @@ function ThreatVelocityChart({
       className: "flex items-center justify-center text-sm text-center px-4",
       style: {
         height: 190,
-        color: '#475569'
+        color: '#94A3B8'
       }
     }, unavailable ? 'Threat feed unavailable.' : short.some(c => c.since === null) ? `Hidden: some of the newest ${FEED_LIMIT} ${shortNames} carry no time, so how far back they ` + 'reach is unknown and an hourly count for the last 24 h could show missing hours as zero.' : `Hidden: the newest ${FEED_LIMIT} ${shortNames} reach back only to ` + `${new Date(Math.max(...short.map(c => c.since)) * 1000).toLocaleString()}, ` + 'so an hourly count for the last 24 h would show the earlier hours as zero.'));
   }
@@ -1177,7 +1243,7 @@ function ThreatVelocityChart({
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-start justify-between mb-4"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h3", {
     className: "text-sm font-semibold",
     style: {
       color: '#F8FAFC'
@@ -1185,13 +1251,13 @@ function ThreatVelocityChart({
   }, "Threat Velocity"), /*#__PURE__*/React.createElement("div", {
     className: "text-xs mt-0.5",
     style: {
-      color: '#64748B'
+      color: '#94A3B8'
     }
   }, "Detections per hour \xB7 last 24 h")), /*#__PURE__*/React.createElement("span", {
     className: "text-xs px-2.5 py-1 rounded-full font-medium",
     style: {
       background: 'rgba(59,130,246,0.15)',
-      color: '#3B82F6'
+      color: '#60A5FA'
     }
   }, "Hourly")), /*#__PURE__*/React.createElement(ResponsiveContainer, {
     width: "100%",
@@ -1225,7 +1291,7 @@ function ThreatVelocityChart({
   }), /*#__PURE__*/React.createElement(XAxis, {
     dataKey: "hour",
     tick: {
-      fill: '#475569',
+      fill: '#94A3B8',
       fontSize: 10
     },
     tickLine: false,
@@ -1233,7 +1299,7 @@ function ThreatVelocityChart({
     interval: 5
   }), /*#__PURE__*/React.createElement(YAxis, {
     tick: {
-      fill: '#475569',
+      fill: '#94A3B8',
       fontSize: 10
     },
     tickLine: false,
@@ -1257,7 +1323,8 @@ function ThreatVelocityChart({
     stroke: "#3B82F6",
     strokeWidth: 2,
     fill: "url(#velGrad)",
-    dot: false
+    dot: false,
+    isAnimationActive: !REDUCED_MOTION
   }))));
 }
 
@@ -1287,7 +1354,7 @@ function ChainDistributionChart({
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-start justify-between mb-4"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h3", {
     className: "text-sm font-semibold",
     style: {
       color: '#F8FAFC'
@@ -1295,7 +1362,7 @@ function ChainDistributionChart({
   }, "Chain Distribution"), /*#__PURE__*/React.createElement("div", {
     className: "text-xs mt-0.5",
     style: {
-      color: '#64748B'
+      color: '#94A3B8'
     }
   }, "Threats in the loaded feed, by network", cappedNote)), haslive ? capped.length ? /*#__PURE__*/React.createElement("span", {
     className: "text-xs px-2.5 py-1 rounded-full font-medium",
@@ -1313,7 +1380,7 @@ function ChainDistributionChart({
     className: "text-xs px-2.5 py-1 rounded-full font-medium",
     style: {
       background: 'rgba(100,116,139,0.15)',
-      color: '#64748B'
+      color: '#94A3B8'
     }
   }, "No data")), haslive ? /*#__PURE__*/React.createElement(ResponsiveContainer, {
     width: "100%",
@@ -1333,14 +1400,14 @@ function ChainDistributionChart({
   }), /*#__PURE__*/React.createElement(XAxis, {
     dataKey: "name",
     tick: {
-      fill: '#475569',
+      fill: '#94A3B8',
       fontSize: 11
     },
     tickLine: false,
     axisLine: false
   }), /*#__PURE__*/React.createElement(YAxis, {
     tick: {
-      fill: '#475569',
+      fill: '#94A3B8',
       fontSize: 10
     },
     tickLine: false,
@@ -1359,7 +1426,8 @@ function ChainDistributionChart({
   }), /*#__PURE__*/React.createElement(Bar, {
     dataKey: "count",
     name: "Threats",
-    radius: [4, 4, 0, 0]
+    radius: [4, 4, 0, 0],
+    isAnimationActive: !REDUCED_MOTION
   }, data.map((e, i) => /*#__PURE__*/React.createElement(Cell, {
     key: i,
     fill: BAR_COLORS[e.name] || '#3B82F6'
@@ -1367,7 +1435,7 @@ function ChainDistributionChart({
     className: "flex items-center justify-center text-sm",
     style: {
       height: 190,
-      color: '#475569'
+      color: '#94A3B8'
     }
   }, loading ? 'Loading…' : unavailable ? 'Threat feed unavailable.' : 'No threats in the current feed.'));
 }
@@ -1377,9 +1445,9 @@ function BaseAttestationsPanel({
   data
 }) {
   const riskColor = label => {
-    if (label === 'DANGER' || label === 'HIGH') return '#EF4444';
-    if (label === 'WARNING' || label === 'MEDIUM') return '#F59E0B';
-    if (label === 'SAFE' || label === 'LOW') return '#10B981';
+    if (label === 'DANGER' || label === 'HIGH') return '#FCA5A5';
+    if (label === 'WARNING' || label === 'MEDIUM') return '#FBBF24';
+    if (label === 'SAFE' || label === 'LOW') return '#34D399';
     return '#94A3B8';
   };
   const chainName = id => CHAIN_NAMES[id] || `chain ${id}`;
@@ -1391,7 +1459,7 @@ function BaseAttestationsPanel({
       border: '1px solid #334155'
     }
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex flex-wrap gap-3 mb-4 text-xs",
+    className: "flex flex-wrap items-center gap-x-3 mb-4 text-xs",
     style: {
       color: '#94A3B8'
     }
@@ -1399,8 +1467,9 @@ function BaseAttestationsPanel({
     href: `https://basescan.org/address/${data.attestor}`,
     target: "_blank",
     rel: "noreferrer",
+    className: "inline-flex items-center min-h-[44px] md:min-h-0",
     style: {
-      color: '#3B82F6',
+      color: '#60A5FA',
       fontFamily: 'JetBrains Mono,monospace'
     }
   }, (data.attestor || '').slice(0, 10), "\u2026", (data.attestor || '').slice(-6))), /*#__PURE__*/React.createElement("span", null, "Total recent: ", /*#__PURE__*/React.createElement("strong", {
@@ -1411,19 +1480,20 @@ function BaseAttestationsPanel({
     href: data.explorer || '#',
     target: "_blank",
     rel: "noreferrer",
+    className: "inline-flex items-center min-h-[44px] md:min-h-0",
     style: {
-      color: '#3B82F6'
+      color: '#60A5FA'
     }
   }, "View on EAS Scan \u2197")), list.length === 0 ? /*#__PURE__*/React.createElement("div", {
     className: "text-center py-8 text-sm",
     style: {
-      color: '#475569'
+      color: '#94A3B8'
     }
   }, "No attestations yet.") : /*#__PURE__*/React.createElement("div", {
     className: "space-y-2"
   }, list.map(a => /*#__PURE__*/React.createElement("div", {
     key: a.uid,
-    className: "flex items-center gap-3 py-2 px-3 rounded-lg",
+    className: "flex flex-wrap md:flex-nowrap items-center gap-x-3 py-2 px-3 rounded-lg",
     style: {
       background: '#1E293B',
       border: '1px solid #334155'
@@ -1447,20 +1517,20 @@ function BaseAttestationsPanel({
   }, (a.scanned_address || '').slice(0, 8), "\u2026", (a.scanned_address || '').slice(-6)), /*#__PURE__*/React.createElement("span", {
     className: "text-xs",
     style: {
-      color: '#64748B'
+      color: '#94A3B8'
     }
   }, "via ", chainName(a.source_chain_id)), /*#__PURE__*/React.createElement("span", {
     className: "text-xs ml-auto",
     style: {
-      color: '#64748B'
+      color: '#94A3B8'
     }
   }, a.timestamp ? new Date(a.timestamp * 1000).toLocaleString() : ''), /*#__PURE__*/React.createElement("a", {
     href: `https://base.easscan.org/attestation/view/${a.uid}`,
     target: "_blank",
     rel: "noreferrer",
-    className: "text-xs",
+    className: "text-xs inline-flex items-center justify-center min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0",
     style: {
-      color: '#3B82F6'
+      color: '#60A5FA'
     }
   }, "EAS \u2197")))));
 }
@@ -1468,10 +1538,10 @@ function Section({
   title,
   children
 }) {
-  return /*#__PURE__*/React.createElement("section", null, /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("section", null, /*#__PURE__*/React.createElement("h2", {
     className: "text-xs font-semibold uppercase tracking-widest mb-3",
     style: {
-      color: '#475569'
+      color: '#94A3B8'
     }
   }, title), children);
 }
@@ -1479,7 +1549,7 @@ function Section({
 // ─── Header ───────────────────────────────────────────────────────────────
 const HEALTH = {
   connecting: {
-    color: '#64748B',
+    color: '#94A3B8',
     label: 'CONNECTING'
   },
   live: {
@@ -1490,8 +1560,12 @@ const HEALTH = {
     color: '#F59E0B',
     label: 'PARTIAL DATA'
   },
+  contracts: {
+    color: '#60A5FA',
+    label: 'CONTRACTS ONLY'
+  },
   offline: {
-    color: '#EF4444',
+    color: '#F87171',
     label: 'OFFLINE'
   }
 };
@@ -1501,20 +1575,21 @@ function Header({
 }) {
   const [glow, setGlow] = useState(true);
   useEffect(() => {
+    if (REDUCED_MOTION) return;
     const t = setInterval(() => setGlow(v => !v), 900);
     return () => clearInterval(t);
   }, []);
   const h = HEALTH[health];
   return /*#__PURE__*/React.createElement("header", {
-    className: "glass border-b px-5 md:px-8 py-4 flex items-center justify-between flex-wrap gap-3",
+    className: "glass border-b px-5 md:px-8 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-2 md:gap-3 md:sticky md:top-0",
     style: {
       borderColor: '#1E293B',
-      position: 'sticky',
-      top: 0,
       zIndex: 40
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-3 flex-wrap"
+  }, /*#__PURE__*/React.createElement("h1", {
+    className: "flex items-center gap-3"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-lg font-bold",
     style: {
@@ -1522,14 +1597,14 @@ function Header({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#3B82F6'
+      color: '#60A5FA'
     }
-  }, "Shield"), "Bot"), /*#__PURE__*/React.createElement("span", {
+  }, "Shield"), "Bot"), ' ', /*#__PURE__*/React.createElement("span", {
     className: "text-sm",
     style: {
-      color: '#475569'
+      color: '#94A3B8'
     }
-  }, "Threat Dashboard"), /*#__PURE__*/React.createElement("div", {
+  }, "Threat Dashboard")), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-1.5"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1548,35 +1623,35 @@ function Header({
   }, h.label))), /*#__PURE__*/React.createElement("div", {
     className: "text-xs mt-0.5",
     style: {
-      color: '#334155'
+      color: '#94A3B8'
     }
   }, "Contract detections and mempool alerts \xB7 refreshes every ", REFRESH_MS / 1000, " seconds")), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-4"
   }, /*#__PURE__*/React.createElement("a", {
     href: "https://shieldbotsecurity.online",
+    className: "flex items-center min-h-[44px] md:min-h-0",
     style: {
-      color: '#475569',
+      color: '#94A3B8',
       fontSize: '0.75rem',
       textDecoration: 'none',
-      display: 'flex',
-      alignItems: 'center',
       gap: '0.25rem'
     },
-    onMouseOver: e => e.currentTarget.style.color = '#94A3B8',
-    onMouseOut: e => e.currentTarget.style.color = '#475569'
+    onMouseOver: e => e.currentTarget.style.color = '#E2E8F0',
+    onMouseOut: e => e.currentTarget.style.color = '#94A3B8'
   }, "\u2190 Home"), /*#__PURE__*/React.createElement("a", {
     href: "mailto:support@shieldbotsecurity.online",
+    className: "flex items-center min-h-[44px] md:min-h-0",
     style: {
-      color: '#475569',
+      color: '#94A3B8',
       fontSize: '0.75rem',
       textDecoration: 'none'
     },
-    onMouseOver: e => e.currentTarget.style.color = '#94A3B8',
-    onMouseOut: e => e.currentTarget.style.color = '#475569'
+    onMouseOver: e => e.currentTarget.style.color = '#E2E8F0',
+    onMouseOut: e => e.currentTarget.style.color = '#94A3B8'
   }, "Support"), /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-mono",
     style: {
-      color: '#334155',
+      color: '#94A3B8',
       fontFamily: 'JetBrains Mono,monospace'
     }
   }, lastUpdated ? `↻ ${timeAgo(lastUpdated / 1000)}` : 'Connecting…')));
@@ -1640,9 +1715,9 @@ function useCountUp(target, duration = 1200) {
   const [display, setDisplay] = useState(0);
   const shown = useRef(0);
   useEffect(() => {
-    if (!target) {
-      shown.current = 0;
-      setDisplay(0);
+    if (!target || REDUCED_MOTION) {
+      shown.current = target;
+      setDisplay(target);
       return;
     }
     const start = Date.now();
@@ -1662,17 +1737,28 @@ function useCountUp(target, duration = 1200) {
   }, [target]);
   return display;
 }
+
+// The counts the mempool monitor keeps in memory.
+const MEMPOOL_KEYS = ['transactions_monitored', 'sandwiches_caught', 'suspicious_approvals', 'chains_protected'];
+
+// A null count is unknown, never 0. A background_workers_note says the mempool monitor runs in a separate
+// process this API does not read, so its counts are Unavailable; any other null count is a dash.
+function missingText(stats, key) {
+  return stats && stats.background_workers_note && MEMPOOL_KEYS.includes(key) ? 'Unavailable' : '—';
+}
 function StatCard({
   label,
   span,
   value,
   color,
   loading,
-  note
+  note,
+  missing = '—',
+  className = ''
 }) {
   const display = useCountUp(loading || value == null ? 0 : value);
   return /*#__PURE__*/React.createElement("div", {
-    className: "glass rounded-xl p-4 fade-up flex flex-col gap-1 text-center",
+    className: `glass rounded-xl p-4 fade-up flex flex-col gap-1 text-center ${className}`,
     style: {
       border: '1px solid #1E293B',
       minWidth: 0
@@ -1684,19 +1770,19 @@ function StatCard({
       width: 72
     }
   }) : /*#__PURE__*/React.createElement("div", {
-    className: "text-2xl font-bold leading-none",
+    className: `${value == null ? 'text-base' : 'text-2xl'} font-bold leading-none`,
     style: {
-      color: value == null ? '#475569' : color
+      color: value == null ? '#94A3B8' : color
     }
-  }, value == null ? '—' : display.toLocaleString()), /*#__PURE__*/React.createElement("div", {
+  }, value == null ? missing : display.toLocaleString()), /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-medium mt-1",
     style: {
-      color: '#64748B'
+      color: '#CBD5E1'
     }
   }, label), /*#__PURE__*/React.createElement("div", {
     className: "text-xs",
     style: {
-      color: '#475569'
+      color: '#94A3B8'
     }
   }, span), note && /*#__PURE__*/React.createElement("div", {
     className: "text-xs",
@@ -1710,12 +1796,13 @@ function PlatformStatsBar({
   loading
 }) {
   const since = stats && stats.mempool_counting_since;
-  const anyMissing = stats && STAT_ITEMS.some(s => stats[s.key] == null);
+  const dashed = stats && STAT_ITEMS.some(s => stats[s.key] == null && missingText(stats, s.key) === '—');
+  const footnote = stats === null ? 'Platform statistics are unavailable right now.' : [stats.background_workers_note && 'Unavailable: the mempool monitor runs in a separate process that this API does not read, so its counts are unknown here, not zero.', since ? `Transactions monitored, sandwich attacks and suspicious approvals are counted since ${new Date(since * 1000).toLocaleString()}, when the mempool monitor last started.` : dashed && 'A dash means that source is not reporting right now.'].filter(Boolean).join(' ');
   // A monitored chain whose mempool could not be read is Unknown; it is not counted as watched.
   const unobservable = stats && stats.mempool_chains_unobservable || [];
   const mempoolNote = unobservable.length ? 'Unknown: ' + unobservable.map(id => CHAIN_NAMES[id] || `Chain ${id}`).join(', ') : null;
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3"
+    className: "grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-3"
   }, STAT_ITEMS.map(s => /*#__PURE__*/React.createElement(StatCard, {
     key: s.key,
     label: s.label,
@@ -1723,13 +1810,15 @@ function PlatformStatsBar({
     value: stats ? stats[s.key] : null,
     color: s.color,
     loading: loading,
-    note: s.key === 'chains_protected' ? mempoolNote : null
-  }))), !loading && (stats === null || since || anyMissing) && /*#__PURE__*/React.createElement("div", {
+    missing: missingText(stats, s.key),
+    note: s.key === 'chains_protected' ? mempoolNote : null,
+    className: s.key === 'chains_protected' ? 'col-span-2 xl:col-span-1' : ''
+  }))), !loading && footnote && /*#__PURE__*/React.createElement("div", {
     className: "text-xs mt-2",
     style: {
-      color: '#475569'
+      color: '#94A3B8'
     }
-  }, stats === null ? 'Platform statistics are unavailable right now.' : since ? `Transactions monitored, sandwich attacks and suspicious approvals are counted since ${new Date(since * 1000).toLocaleString()}, when the mempool monitor last started.` : 'A dash means that source is not reporting right now.'));
+  }, footnote));
 }
 function LastDayBar({
   stats,
@@ -1747,7 +1836,7 @@ function LastDayBar({
   }))), /*#__PURE__*/React.createElement("div", {
     className: "text-xs mt-2",
     style: {
-      color: '#475569'
+      color: '#94A3B8'
     }
   }, "A contract threat is a contract the extension and agent firewalls scored high risk. On record means its latest score, since a rescan replaces it; it counts in the last 24 h when that scan falls in the window. The charts and the feed below show only the newest", ' ', FEED_LIMIT, " contract detections and newest ", FEED_LIMIT, " mempool alerts, so they are not counts."));
 }
@@ -1777,6 +1866,7 @@ function App() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [mempoolUnavailable, setMempoolUnavailable] = useState(null);
   const [updated, setUpdated] = useState(null);
   const [health, setHealth] = useState('connecting');
   const [chain, setChain] = useState('');
@@ -1805,11 +1895,18 @@ function App() {
       }));
       if (loaded.length) setUpdated(Date.now());
       setError(failed.length ? 'Failed to load ' + failed.map(([name, x]) => `${name} (${x.reason?.message || 'unknown error'})`).join(' and ') : null);
+      // A mempool feed this API cannot read says why in mempool_unavailable: its empty list is not "no threats".
+      const mempoolReason = fm.status === 'fulfilled' ? fm.value.mempool_unavailable || null : null;
+      setMempoolUnavailable(mempoolReason);
       setCampaigns(c.status === 'fulfilled' ? c.value.campaigns || [] : null);
       setStats(p.status === 'fulfilled' ? p.value : null);
       setBaseAttestations(b.status === 'fulfilled' ? b.value : NO_ATTESTATIONS);
-      const failures = results.filter(x => x.status === 'rejected').length;
-      setHealth(failures === 0 ? 'live' : failures === results.length ? 'offline' : 'degraded');
+
+      // A mempool the API runs in a separate process on purpose (background_workers_note) is a steady
+      // state, not a failure: the header says CONTRACTS ONLY. Any other unavailable source is partial data.
+      const workersExternal = p.status === 'fulfilled' && Boolean(p.value.background_workers_note);
+      const failures = results.filter(x => x.status === 'rejected').length + (mempoolReason && !workersExternal ? 1 : 0);
+      setHealth(failures === results.length ? 'offline' : failures ? 'degraded' : workersExternal ? 'contracts' : 'live');
     } finally {
       setLoading(false);
     }
@@ -1867,12 +1964,13 @@ function App() {
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-xs mb-3",
     style: {
-      color: '#64748B'
+      color: '#94A3B8'
     }
   }, "The newest ", FEED_LIMIT, " contract detections and the newest ", FEED_LIMIT, " mempool alerts."), /*#__PURE__*/React.createElement(ThreatLogTable, {
     threats: threats,
     loading: loading,
     error: error,
+    mempoolUnavailable: mempoolUnavailable,
     onRetry: fetchData,
     chain: chain,
     onChain: setChain
