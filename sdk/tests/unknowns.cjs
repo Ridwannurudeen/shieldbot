@@ -13,8 +13,8 @@ for (const [reason, fraction] of [['Provider unavailable', 0], ['Simulation fail
     let calls = 0;
     global.fetch = async () => { calls++; return { ok: true, json: async () => payload }; };
     const sdk = new ShieldBot({ agentId: 'agent:1' });
-    const fresh = await sdk.check({ from: '0xa', to: '0xb' });
-    const cached = await sdk.check({ from: '0xa', to: '0xb' });
+    const fresh = await sdk.check({ from: '0xa', to: '0xb', chainId: 56 });
+    const cached = await sdk.check({ from: '0xa', to: '0xb', chainId: 56 });
     assert.equal(calls, 1);
     for (const result of [fresh, cached]) {
       assert.notEqual(result.verdict, 'ALLOW');
@@ -35,7 +35,7 @@ for (const [mode, decision] of [['open', 'ALLOW'], ['cached', 'WARN'], ['closed'
   test(`unavailable decision is explicit: ${mode}`, async () => {
     global.fetch = async () => { throw new Error('offline'); };
     const sdk = new ShieldBot({ agentId: 'agent:1', failMode: mode });
-    const result = await sdk.check({ from: '0xa', to: '0xb' });
+    const result = await sdk.check({ from: '0xa', to: '0xb', chainId: 56 });
     assert.equal(result.verdict, decision);
     assert.equal(result.allowed, decision === 'ALLOW');
     assert.equal(result.blocked, decision === 'BLOCK');
@@ -53,7 +53,7 @@ test('unsupported chain never becomes a fail-open verdict', async () => {
 
 test('complete scan still allows', async () => {
   global.fetch = async () => ({ ok: true, json: async () => ({ verdict: 'ALLOW', score: 5, status: 'ok', coverage: { honeypot: 1 } }) });
-  const result = await new ShieldBot({ agentId: 'agent:1' }).check({ from: '0xa', to: '0xb' });
+  const result = await new ShieldBot({ agentId: 'agent:1' }).check({ from: '0xa', to: '0xb', chainId: 56 });
   assert.equal(result.allowed, true);
   assert.equal(result.analysis_unavailable, false);
 });
@@ -61,14 +61,14 @@ test('complete scan still allows', async () => {
 
 test('explicit unknown overrides ok status', async () => {
   global.fetch = async () => ({ ok: true, json: async () => ({ verdict: 'ALLOW', score: 0, status: 'ok', coverage: { honeypot: 1 }, risk_level: 'UNKNOWN' }) });
-  const result = await new ShieldBot({ agentId: 'agent:1' }).check({ from: '0xa', to: '0xb' });
+  const result = await new ShieldBot({ agentId: 'agent:1' }).check({ from: '0xa', to: '0xb', chainId: 56 });
   assert.notEqual(result.verdict, 'ALLOW');
   assert.equal(result.status, 'unknown');
 });
 
 test('server cannot mark incomplete allow as unavailable analysis', async () => {
   global.fetch = async () => ({ ok: true, json: async () => ({ verdict: 'ALLOW', score: 0, status: 'unknown', coverage: { honeypot: 0 }, analysis_unavailable: true }) });
-  const result = await new ShieldBot({ agentId: 'agent:1' }).check({ from: '0xa', to: '0xb' });
+  const result = await new ShieldBot({ agentId: 'agent:1' }).check({ from: '0xa', to: '0xb', chainId: 56 });
   assert.equal(result.allowed, false);
   assert.equal(result.analysis_unavailable, false);
 });

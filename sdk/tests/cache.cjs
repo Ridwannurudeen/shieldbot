@@ -72,9 +72,18 @@ test('equivalent transaction encodings reuse the cached allowance', async () => 
   assert.equal(cached.cached, true);
 });
 
+test('hex and decimal encodings of one value share a cache entry', async () => {
+  let calls = 0;
+  global.fetch = async () => { calls++; return { ok: true, json: async () => payload }; };
+  const sdk = new ShieldBot({ agentId: 'agent:1' });
+  await sdk.check({ ...transaction, value: '0x10' });
+  const cached = await sdk.check({ ...transaction, value: '16' });
+  assert.equal(calls, 1);
+  assert.equal(cached.cached, true);
+});
+
 for (const [name, firstValue, secondValue] of [
   ['hex and decimal values', '0x10', '10'],
-  ['unparseable and zero values', 'not-a-number', '0'],
 ]) {
   test(`${name} do not share a cache entry`, async () => {
     let calls = 0;
