@@ -3,6 +3,14 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+from core.circuit_breaker import provider_breakers
+
+
+@pytest.fixture(autouse=True)
+def closed_provider_breakers():
+    """Every test starts with every provider breaker closed; the breakers live for the process."""
+    provider_breakers.clear()
+
 
 @pytest.fixture
 def mock_web3_client():
