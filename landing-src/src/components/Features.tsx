@@ -4,7 +4,7 @@ const features = [
   {
     title: "Transaction Firewall",
     badge: null,
-    desc: "Catches transactions and signature requests before your wallet signs them, then shows the verdict and the reasons. You stay in control: you choose to cancel or sign.",
+    desc: "Catches transactions and signature requests before your wallet signs them, then shows the verdict and the reasons. For a warning you choose to cancel or sign; a request that times out or whose wallet chain is unknown is refused.",
     icon: "📡",
   },
   {

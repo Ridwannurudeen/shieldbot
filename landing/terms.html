@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Terms of Service — ShieldAI Transaction Firewall</title>
-  <meta name="description" content="The terms for using the ShieldBot browser extension, Telegram bot, website and API: verdicts are risk signals, not guarantees, and you decide and sign every transaction." />
+  <meta name="description" content="The terms for using the ShieldBot browser extension, Telegram bot, website and API: verdicts are risk signals, not guarantees, and you sign every transaction yourself." />
   <link rel="canonical" href="https://shieldbotsecurity.online/terms.html" />
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon.png">
@@ -88,7 +88,7 @@
     </div>
 
     <div class="callout">
-      ShieldBot gives you a risk signal before you sign, not a guarantee. You decide and sign every transaction yourself, and we never ask for your private keys.
+      ShieldBot gives you a risk signal before you sign, not a guarantee. You sign every transaction yourself, and we never ask for your private keys.
     </div>
 
     <h2>1. What These Terms Cover</h2>
@@ -103,11 +103,12 @@
     <h2>4. Unknown Means a Check Could Not Be Completed</h2>
     <p>When a data source fails or a check cannot run, ShieldBot shows Unknown instead of a verdict. Unknown does not mean safe and does not mean dangerous. It means the item was not fully checked, so treat it as unchecked.</p>
 
-    <h2>5. You Decide and You Sign</h2>
-    <p>ShieldBot never holds your funds and never signs anything for you. Every transaction and signature is decided, signed and sent by you in your own wallet. When the extension shows a warning, you choose whether to cancel or continue. If you send transactions through the optional ShieldBot RPC proxy, it can refuse to forward one it rates as dangerous or cannot check.</p>
+    <h2>5. You Sign Your Own Transactions</h2>
+    <p>ShieldBot never holds your funds and never signs anything for you. Every transaction and signature is signed and sent by you in your own wallet. When the extension shows a warning, you choose whether to cancel or continue. The extension refuses a request on its own, without asking you, when the request times out after 60 seconds, when it cannot identify your wallet's chain, or when that chain changes during the check; you can then retry.</p>
+    <p>If you send transactions through the optional ShieldBot RPC proxy, it refuses to forward a transaction it rates HIGH risk or cannot decode or analyse. It forwards every other transaction, including ones whose checks were incomplete, and it forwards contract deployments without analysing them.</p>
 
     <h2>6. No Liability for Losses</h2>
-    <p>To the fullest extent the law allows, ShieldBot and the people who build it are not liable for any loss or damage from using or relying on the service, including lost funds or tokens, a verdict that turns out to be wrong, a check that did not run, or a transaction you signed or cancelled.</p>
+    <p>To the fullest extent the law allows, ShieldBot and the people who build it are not liable for any loss or damage from using or relying on the service, including lost funds or tokens, a verdict that turns out to be wrong, a check that did not run, a transaction you signed or cancelled, or a transaction ShieldBot refused or did not forward.</p>
 
     <h2>7. We Never Ask for Your Private Keys</h2>
     <p>The extension, the Telegram bot and this website never ask for your private key, seed phrase or wallet password. Anyone who asks for them in ShieldBot's name is not us. Do not share them.</p>

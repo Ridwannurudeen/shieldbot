@@ -115,8 +115,11 @@ def welcome_text() -> str:
 
 
 def test_welcome_page_does_not_claim_the_extension_blocks():
-    # The extension warns and the user decides; only the RPC proxy refuses a transaction itself.
-    claims = re.findall(r"\b(?:block(?:s|ed|ing)?|stop(?:s|ped)?)\b", welcome_text(), re.I)
+    # The extension warns and lets the user decide. It refuses a request on its own only when the request
+    # times out or the wallet chain is unknown or changes (extension/inject.js), which the page may say.
+    text = " ".join(welcome_text().split()).lower()
+    overclaims = ("stopped in their tracks", "blocks the transaction", "blocks transactions", "are blocked")
+    claims = [phrase for phrase in overclaims if phrase in text]
     assert not claims, f"welcome.html claims the extension blocks transactions: {claims}"
 
 
