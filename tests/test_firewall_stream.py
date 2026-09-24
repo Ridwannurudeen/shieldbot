@@ -865,6 +865,30 @@ async def test_a_router_swaps_streamed_final_is_its_plain_response(stream_api, m
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["delegation", "admin-listed"])
+async def test_the_legacy_fallback_denies_the_router_discount_the_router_shortcut_denies(stream_api, monkeypatch, case):
+    api, services = stream_api
+    body, _ = router_swap(monkeypatch, api, services)
+    if case == "delegation":
+        body = {**body, "authorizationList": [{"address": "0x" + "de" * 20}]}
+    else:
+        api.scam_db.known_scams[(None, TARGET)] = {"source": "admin", "reports": 0, "expires_at": None}
+    # The composite pipeline fails, so the legacy scanner's heuristic score answers.
+    gate = asyncio.Event()
+    gate.set()
+    services.registry = FailingRegistry(gate)
+    monkeypatch.setattr(
+        api, "token_scanner", SimpleNamespace(check_token=AsyncMock(return_value={"risk_score": 40, "is_verified": True})),
+    )
+
+    final, plain = await final_and_plain(api, body)
+
+    assert plain["analysis"] == "AI analysis unavailable. Showing heuristic results only."
+    assert plain["risk_score"] == 40
+    assert final == plain
+
+
+@pytest.mark.asyncio
 async def test_an_error_inside_the_stream_is_an_error_event_and_no_final(stream_api, monkeypatch):
     api, services = stream_api
     blacklist(api)

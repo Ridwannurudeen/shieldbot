@@ -1885,9 +1885,11 @@ async def _firewall_verdict(
             "whitelisted_router": whitelisted,
         }
 
+        # The trusted-router discount applies only where the router shortcut would have answered: never
+        # to a delegation or to a router an admin has listed.
         response = _build_fallback_response(
-            decoded, contract_scan, whitelisted, req.chainId, transaction_specific=tx_specific,
-            policy_mode=policy_mode,
+            decoded, contract_scan, whitelisted if router_answers else None, req.chainId,
+            transaction_specific=tx_specific, policy_mode=policy_mode,
         )
         # The AI explains a known verdict and never sets it: of its reply only the prose is kept.
         if response["status"] == "ok" and ai_analyzer and ai_analyzer.is_available():
