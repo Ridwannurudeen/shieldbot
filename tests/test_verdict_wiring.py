@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from core.config import Settings
 from core.database import Database
 from core.extension_formatter import is_scan_incomplete
+from services.robinhood_assets import with_impostor_check
 from services.verdict_publisher import MAX_SEND_ATTEMPTS, VerdictPublisher
 from utils.web3_client import UnsupportedChainError, Web3Client
 from tests.test_lifespan import mock_container  # noqa: F401  (pytest fixture)
@@ -198,6 +199,7 @@ def test_permalink_is_placed_right_after_the_base_attestations_handler():
 # ---------------------------------------------------------------------------
 
 HONEYPOT_DATA = {"is_honeypot": True, "field_providers": {"is_honeypot": "eth_simulateV1"}}
+NO_MATCH = {"status": "none", "symbol": None, "official_address": None, "reason": None}
 
 
 @pytest.fixture
@@ -220,6 +222,7 @@ def bot_scan_functions():
     services.registry.run_all = AsyncMock(
         return_value=[SimpleNamespace(name="honeypot", data=HONEYPOT_DATA)]
     )
+    services.robinhood_assets.check = AsyncMock(return_value=NO_MATCH)
     recorder = MagicMock()
     recorder.is_available.return_value = True
     recorder.record_scan_fire_and_forget = AsyncMock()
@@ -227,6 +230,7 @@ def bot_scan_functions():
     namespace = {
         "asyncio": asyncio,
         "is_scan_incomplete": is_scan_incomplete,
+        "with_impostor_check": with_impostor_check,
         "UnsupportedChainError": UnsupportedChainError,
         "logger": MagicMock(),
         "container": services,
@@ -266,7 +270,7 @@ async def test_robinhood_scans_publish_the_composite_result(bot_scan_functions, 
     publish_call.assert_called_once_with(
         4663,
         TOKEN,
-        ns["risk_engine"].compute_from_results.return_value,
+        {**ns["risk_engine"].compute_from_results.return_value, "impostor_check": NO_MATCH},
         honeypot_data=HONEYPOT_DATA,
     )
 

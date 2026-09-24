@@ -90,8 +90,8 @@ DEFAULT_RPC_URL = "https://rpc.mainnet.chain.robinhood.com"
 # `cast sig "record(address,uint8,bytes32,uint64)"` = 0xf160da27
 RECORD_SELECTOR = keccak(text="record(address,uint8,bytes32,uint64)")[:4]
 
-# One 4663 scan reserves 22 requests of the watch's shared 1 rps RPC budget (services.rpc_guard,
-# agent.hunter.SCAN_REQUEST_COST), so a saturated watch produces at most about 163 scans an hour, and an
+# One 4663 scan reserves 23 requests of the watch's shared 1 rps RPC budget (services.rpc_guard,
+# agent.hunter.SCAN_REQUEST_COST), so a saturated watch produces at most about 156 scans an hour, and an
 # unchanged confirmed verdict only refreshes periodically. This covers that ceiling with room for drain cycles that
 # re-send or wait, and costs the RPC about three requests each: 540 an hour, 0.15 rps beside the watch's 1.
 MAX_RECORDS_PER_HOUR = 180

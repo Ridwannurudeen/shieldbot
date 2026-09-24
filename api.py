@@ -31,6 +31,7 @@ from core.config import Settings
 from core.container import ServiceContainer
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
 from core.unknown_ledger import unknown_ledger
+from core.telegram_formatter import escape_markdown
 from rpc.router import rpc_router
 from rpc.proxy import RPCProxy
 
@@ -631,9 +632,15 @@ async def uptime_webhook(request: Request, secret: str = ""):
     details      = data.get("alertDetails", "")
 
     if alert_type == "1":
-        msg = f"🚨 *ShieldBot DOWN*\n`{monitor_name}` is unreachable.\nURL: `{monitor_url}`\n{details}"
+        msg = (
+            f"🚨 *ShieldBot DOWN*\n{escape_markdown(monitor_name)} is unreachable.\n"
+            f"URL: {escape_markdown(monitor_url)}\n{escape_markdown(details)}"
+        )
     elif alert_type == "2":
-        msg = f"✅ *ShieldBot Recovered*\n`{monitor_name}` is back online.\nURL: `{monitor_url}`"
+        msg = (
+            f"✅ *ShieldBot Recovered*\n{escape_markdown(monitor_name)} is back online.\n"
+            f"URL: {escape_markdown(monitor_url)}"
+        )
     else:
         return {"ok": True}
 
@@ -2399,7 +2406,9 @@ async def launch_feed(chain_id: int, limit: int = 50, cursor: str = None):
     The outcome is blocked, watching, cleared, unknown (scan incomplete) or not_scanned, with
     its status and coverage reasons; unknown and not_scanned are never safe. scan.status is
     authoritative: "ok" only for a complete scan. Per-field coverage is included only where the
-    hunter recorded it, for blocked launches. Each launch links its public verdict at verdict_url.
+    hunter recorded it, for blocked launches. impostor_check is the launch's check against
+    Robinhood's official token list (official, impostor, collision, none or unknown), or null when
+    it was never checked. Each launch links its public verdict at verdict_url.
     scanned_share counts the launches whose block is in the last 24 hours and how many of them
     have any scan outcome. Scans share one small RPC budget and only launches seen trading soon
     after launch are picked, so most launches are never scanned; this says how many were.

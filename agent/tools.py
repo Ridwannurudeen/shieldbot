@@ -5,11 +5,15 @@ No business logic lives here; all scoring, flagging, and analysis is
 delegated to the underlying services in core/ and services/.
 """
 
+import asyncio
 import logging
 import re
 from typing import Dict, List, Optional
 
 from core.analyzer import AnalysisContext
+from core.registry import RUN_ALL_DEADLINE_SECONDS
+from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
+from services.robinhood_assets import with_impostor_check
 
 logger = logging.getLogger(__name__)
 
@@ -35,15 +39,26 @@ class AgentTools:
         """Run all analyzers on a contract and return composite risk score.
 
         ``deadline`` replaces the interactive scan deadline; background scans pass
-        core.registry.BACKGROUND_SCAN_DEADLINE_SECONDS.
+        core.registry.BACKGROUND_SCAN_DEADLINE_SECONDS. A Robinhood Chain (4663) result also
+        carries its check against the official Robinhood tokens (services.robinhood_assets), made
+        alongside the analyzers and within the same deadline.
         """
         address = _validate_address(address)
         ctx = AnalysisContext(address=address, chain_id=chain_id)
-        results = await self._container.registry.run_all(ctx, deadline=deadline)
+        analysis = self._container.registry.run_all(ctx, deadline=deadline)
+        impostor_check = None
+        if chain_id == LAUNCH_CHAIN_ID:
+            check = self._container.robinhood_assets.check_onchain(
+                address, RUN_ALL_DEADLINE_SECONDS if deadline is None else deadline,
+            )
+            results, impostor_check = await asyncio.gather(analysis, check)
+        else:
+            results = await analysis
         risk = self._container.risk_engine.compute_from_results(results)
         # The honeypot analyzer's data rides along so a published verdict can cite the simulation behind it.
         honeypot = next((result.data for result in results if result.name == "honeypot"), None)
-        return {**risk, "honeypot_data": honeypot}
+        scan = {**risk, "honeypot_data": honeypot}
+        return scan if impostor_check is None else with_impostor_check(scan, impostor_check)
 
     async def check_deployer(self, address: str, chain_id: int = 56) -> Optional[Dict]:
         """Look up deployer risk summary for a contract address."""

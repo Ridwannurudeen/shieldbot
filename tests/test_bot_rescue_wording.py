@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from core.extension_formatter import is_scan_incomplete
+from core.telegram_formatter import escape_markdown
 from utils.web3_client import UnsupportedChainError
 
 
@@ -28,6 +29,7 @@ def rescue_bot():
         '_get_user_chain_id': lambda _: 4663,
         'get_chain_name': lambda _: 'Robinhood Chain',
         'is_scan_incomplete': is_scan_incomplete,
+        'escape_markdown': escape_markdown,
         'UnsupportedChainError': UnsupportedChainError,
         'logger': logging.getLogger(__name__),
     }

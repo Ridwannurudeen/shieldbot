@@ -51,7 +51,7 @@ participate in age arithmetic.
 subjects with a registry set and valid observation provenance, only while watch capacity remains.
 `GUARD_WATCH_MAX_SUBJECTS` defaults to **4**. This deliberately small, bounded set shares the RPC
 budget with discovery and launch scans; it is not chain-wide freshness coverage. Four subjects at the
-300-second rescan target consume about 0.293 requests/second of the shared 1 request/second budget.
+300-second rescan target consume about 0.307 requests/second of the shared 1 request/second budget.
 
 Inside the actively watched set, subjects are rescanned and verdicts re-published, allowing a finite
 `maxAge` to keep being satisfied when publication succeeds in time. Outside it, a subject recorded

@@ -14,8 +14,8 @@ from core.extension_formatter import is_scan_incomplete
 
 logger = logging.getLogger(__name__)
 
-# Chain 4663 shares 1 rps; discovery uses ~0.27. Four subjects at 22 requests
-# every 300s use 0.293 rps, leaving ~0.44 rps for launches and other work.
+# Chain 4663 shares 1 rps; discovery uses ~0.27. Four subjects at 23 requests
+# every 300s use 0.307 rps, leaving ~0.42 rps for launches and other work.
 GUARD_WATCH_MAX_SUBJECTS = max(0, int(os.getenv("GUARD_WATCH_MAX_SUBJECTS", "4")))
 
 # Eighteen digits keep a cursor block inside SQLite's signed 64-bit integers.
@@ -38,7 +38,8 @@ _LAUNCH_SELECT = """
            discovered_at,
            CASE WHEN rechecked THEN recheck_status ELSE scan_status END,
            CASE WHEN rechecked THEN NULL ELSE risk_score END,
-           CASE WHEN rechecked THEN recheck_at ELSE scanned_at END AS outcome_at
+           CASE WHEN rechecked THEN recheck_at ELSE scanned_at END AS outcome_at,
+           impostor_check
     FROM (
         SELECT l.*, p.status AS recheck_status, p.last_checked AS recheck_at,
                COALESCE(p.status IN ('blocked', 'cleared') AND p.last_checked >= l.scanned_at, 0)
@@ -67,7 +68,8 @@ _LAUNCH_OUTCOMES_SINCE = """
            discovered_at,
            CASE WHEN rechecked THEN recheck_status ELSE scan_status END,
            CASE WHEN rechecked THEN NULL ELSE risk_score END,
-           CASE WHEN rechecked THEN recheck_at ELSE scanned_at END AS outcome_at
+           CASE WHEN rechecked THEN recheck_at ELSE scanned_at END AS outcome_at,
+           impostor_check
     FROM (
         SELECT l.*, p.status AS recheck_status, p.last_checked AS recheck_at,
                COALESCE(p.status IN ('blocked', 'cleared') AND p.last_checked >= l.scanned_at, 0)
@@ -150,9 +152,21 @@ def _launch_scan(stored_status, risk_score, scanned_at, finding) -> Dict:
     return scan
 
 
+# How decided a launch's impostor check is: under the same rules, a stored check is only replaced by one
+# at least as decided.
+_IMPOSTOR_CHECK_RANK = {"unknown": 0, "none": 1, "collision": 2, "impostor": 3, "official": 3}
+_STORED_IMPOSTOR_CHECK_RANK = "CASE json_extract(impostor_check, '$.status') " + " ".join(
+    f"WHEN '{status}' THEN {rank}" for status, rank in _IMPOSTOR_CHECK_RANK.items()
+) + " END"
+
+
+def _impostor_check(stored) -> Optional[Dict]:
+    return json.loads(stored) if stored else None
+
+
 def _launch_item(chain_id: int, row, finding) -> Dict:
     (token, source, launchpad, pool_id, block_number, tx_hash, block_timestamp,
-     discovered_at, stored_status, risk_score, outcome_at) = row
+     discovered_at, stored_status, risk_score, outcome_at, impostor_check) = row
     return {
         "chain_id": chain_id,
         "token_address": token,
@@ -164,6 +178,7 @@ def _launch_item(chain_id: int, row, finding) -> Dict:
         "block_timestamp": block_timestamp,
         "discovered_at": discovered_at,
         "scan": _launch_scan(stored_status, risk_score, outcome_at, finding),
+        "impostor_check": _impostor_check(impostor_check),
         "verdict_url": f"/api/verdict/{chain_id}/{token}",
     }
 
@@ -2087,6 +2102,7 @@ class Database:
                 scan_status TEXT,
                 risk_score REAL,
                 scanned_at REAL,
+                impostor_check TEXT,
                 PRIMARY KEY (chain_id, token_address)
             );
 
@@ -2094,6 +2110,19 @@ class Database:
                 ON discovered_launches(chain_id, scanned_at, block_number);
         """)
         await self._db.commit()
+        await self._migrate_launch_impostor_check()
+
+    async def _migrate_launch_impostor_check(self):
+        """Add the impostor check to launch tables created before it; earlier launches have none."""
+        await self._db.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = await self._db.execute("PRAGMA table_info(discovered_launches)")
+            if not any(column[1] == "impostor_check" for column in await cursor.fetchall()):
+                await self._db.execute("ALTER TABLE discovered_launches ADD COLUMN impostor_check TEXT")
+            await self._db.commit()
+        except BaseException:
+            await self._db.rollback()
+            raise
 
     async def get_launch_cursor(self, chain_id: int, source: str) -> Optional[int]:
         """Return the last block processed for a launch source, or None before its first sweep."""
@@ -2201,6 +2230,35 @@ class Database:
         """, (scan_status, risk_score, time.time(), chain_id, token_address))
         await self._db.commit()
 
+    async def record_launch_impostor_check(self, chain_id: int, token_address: str, check: Dict):
+        """Store a launch's check against the official Robinhood tokens (services.robinhood_assets).
+
+        A check made under newer rules replaces the stored one outright, so a corrected rule corrects the
+        stored labels on the next scan; checks stored before rule versions count as rules 1. Under the
+        same rules a check never replaces a more decided one (_IMPOSTOR_CHECK_RANK), so a failed read
+        cannot turn an impostor, official or collision finding into none or unknown, and an official
+        finding is not replaced by a check made from a shorter list. One UPDATE decides and writes.
+        """
+        await self._db.execute(f"""
+            UPDATE discovered_launches SET impostor_check = :check
+            WHERE chain_id = :chain_id AND token_address = :token AND (
+                impostor_check IS NULL
+                OR COALESCE(json_extract(impostor_check, '$.rules'), 1) < :rules
+                OR (
+                    COALESCE(json_extract(impostor_check, '$.rules'), 1) = :rules
+                    AND {_STORED_IMPOSTOR_CHECK_RANK} <= :rank
+                    AND NOT (
+                        json_extract(impostor_check, '$.status') = 'official'
+                        AND :list_size < json_extract(impostor_check, '$.list_size')
+                    )
+                )
+            )
+        """, {
+            "check": json.dumps(check), "chain_id": chain_id, "token": token_address, "rules": check["rules"],
+            "rank": _IMPOSTOR_CHECK_RANK[check["status"]], "list_size": check["list_size"],
+        })
+        await self._db.commit()
+
     # --- Launch Feed ---
 
     async def _create_launch_feed_tables(self):
@@ -2230,7 +2288,9 @@ class Database:
     ) -> Tuple[List[Dict], Optional[str]]:
         """Return a page of discovered launches, newest first, each with its latest outcome.
 
-        Each launch's ``scan.status`` is authoritative: "ok" only for a complete scan. ``cursor``
+        Each launch's ``scan.status`` is authoritative: "ok" only for a complete scan. Its
+        ``impostor_check`` is its check against the official Robinhood tokens
+        (record_launch_impostor_check), or None if it was never checked. ``cursor``
         is the ``next_cursor`` of the previous page ("block:token"). The next cursor is None on
         the last page. A malformed cursor raises ValueError.
         """
@@ -2349,8 +2409,11 @@ class Database:
         """Queue alerts for the launch outcomes recorded at or after ``since``.
 
         A chat gets outcomes recorded after it subscribed: every one in "all" mode, otherwise
-        only blocked ones. A chat is queued at most one alert per launch and outcome, so passes
-        over the same window, and passes after a restart, never queue an alert twice.
+        only blocked ones and those of impostors of an official Robinhood token. An impostor's
+        outcomes other than blocked are all queued as "impostor", so a chat gets one impostor alert
+        per launch besides the blocked one. A chat is queued at most one alert per launch and
+        outcome, so passes over the same window, and passes after a restart, never queue an alert
+        twice.
 
         A blocked launch whose evidence is not stored yet is held back for up to
         _BLOCKED_EVIDENCE_WAIT_SECONDS. Returns the outcome time of the oldest one held, which
@@ -2372,9 +2435,12 @@ class Database:
         for row in await cursor.fetchall():
             token, stored_status, outcome_at = row[0], row[8], row[10]
             outcome = _launch_outcome(stored_status, outcome_at)
+            impostor_check = _impostor_check(row[11])
+            impostor = impostor_check is not None and impostor_check["status"] == "impostor"
+            key = "impostor" if impostor and outcome != "blocked" else outcome
             chats = [
                 chat_id for chat_id, mode, created_at in subscriptions
-                if created_at <= outcome_at and (mode == "all" or outcome == "blocked")
+                if created_at <= outcome_at and (mode == "all" or outcome == "blocked" or impostor)
             ]
             if not chats:
                 continue
@@ -2383,7 +2449,7 @@ class Database:
                 held = outcome_at if held is None else min(held, outcome_at)
                 continue
             payload = json.dumps(_launch_item(chain_id, row, finding))
-            alerts += [(chat_id, chain_id, token, outcome, outcome_at, payload, now, now) for chat_id in chats]
+            alerts += [(chat_id, chain_id, token, key, outcome_at, payload, now, now) for chat_id in chats]
         await self._db.executemany("""
             INSERT OR IGNORE INTO launch_alert_outbox
                 (chat_id, chain_id, token_address, outcome, outcome_at, payload, created_at, updated_at)
