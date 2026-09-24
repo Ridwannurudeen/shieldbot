@@ -7,6 +7,7 @@ which facts are known, so a rule never reads an unknown as clean.
 """
 
 import asyncio
+import copy
 import time
 from typing import Optional
 
@@ -184,12 +185,13 @@ class CounterpartyService:
             }
         key = (chain_id, lower)
         if key in _FACTS_CACHE:
-            return _FACTS_CACHE[key]
+            return copy.deepcopy(_FACTS_CACHE[key])
         # Concurrent scans of one spender share a single lookup.
         flight_key = (asyncio.get_running_loop(), key)
         if flight_key not in _FACTS_INFLIGHT:
             _FACTS_INFLIGHT[flight_key] = asyncio.create_task(self._lookup(address, chain_id, key, flight_key))
-        return await asyncio.shield(_FACTS_INFLIGHT[flight_key])
+        # Each caller gets its own copy: a caller that edits its facts must not edit the cache's.
+        return copy.deepcopy(await asyncio.shield(_FACTS_INFLIGHT[flight_key]))
 
     async def _lookup(self, address: str, chain_id: int, key: tuple, flight_key: tuple) -> dict:
         try:

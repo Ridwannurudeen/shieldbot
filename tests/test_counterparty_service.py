@@ -180,7 +180,7 @@ async def test_each_fact_is_decided_independently():
 async def test_repeat_lookup_is_served_from_the_cache():
     service, web3, scam_db = _service()
     first = await service.fetch(SPENDER, 56)
-    assert await service.fetch(SPENDER.upper().replace("0X", "0x"), 56) is first
+    assert await service.fetch(SPENDER.upper().replace("0X", "0x"), 56) == first
     assert _calls(web3, scam_db) == 4
     await service.fetch(SPENDER, 8453)
     assert _calls(web3, scam_db) == 8
@@ -190,7 +190,7 @@ async def test_repeat_lookup_is_served_from_the_cache():
 async def test_concurrent_lookups_of_one_spender_share_the_providers():
     service, web3, scam_db = _service()
     first, second = await asyncio.gather(service.fetch(SPENDER, 56), service.fetch(SPENDER, 56))
-    assert first is second
+    assert first == second
     assert _calls(web3, scam_db) == 4
     assert counterparty_module._FACTS_INFLIGHT == {}
 
@@ -209,6 +209,41 @@ async def test_a_slow_provider_leaves_only_its_fact_unknown(monkeypatch):
     assert (facts["is_contract"], facts["labels"]) == (None, None)
     assert (facts["is_verified"], facts["age_days"]) == (False, 30)
     assert facts["reason"] == "Spender facts unknown: code (RPC), labels (GoPlus timed out)"
+
+
+@pytest.mark.asyncio
+async def test_cancelling_the_first_caller_leaves_the_shared_lookup_running():
+    service, web3, _ = _service()
+    release = asyncio.Event()
+
+    async def slow_code(*args, **kwargs):
+        await release.wait()
+        return "0x6080"
+
+    web3.get_bytecode = slow_code
+    leader = asyncio.create_task(service.fetch(SPENDER, 56))
+    await asyncio.sleep(0)
+    follower = asyncio.create_task(service.fetch(SPENDER, 56))
+    await asyncio.sleep(0)
+    leader.cancel()
+    release.set()
+    facts = await follower
+    with pytest.raises(asyncio.CancelledError):
+        await leader
+    assert facts["is_contract"] is True
+    assert counterparty_module._FACTS_CACHE[(56, SPENDER)]["is_contract"] is True
+    assert counterparty_module._FACTS_INFLIGHT == {}
+
+
+@pytest.mark.asyncio
+async def test_a_caller_editing_its_facts_does_not_edit_the_cache():
+    service, _, _ = _service(labels=DRAINER)
+    first = await service.fetch(SPENDER, 56)
+    first["labels"].clear()
+    first["coverage"]["labels"] = False
+    second = await service.fetch(SPENDER, 56)
+    assert second["labels"] == ["phishing_activities", "blacklist_doubt"]
+    assert second["coverage"]["labels"] is True
 
 
 def _clock(monkeypatch, module, name, ttu):
