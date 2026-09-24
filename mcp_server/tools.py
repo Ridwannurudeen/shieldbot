@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 
 from core.analyzer import AnalysisContext
 from core.extension_formatter import format_extension_alert
+from core.verdicts import UNKNOWN
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 
 logger = logging.getLogger(__name__)
@@ -244,7 +245,7 @@ async def handle_scan_contract(container, params: Dict) -> Dict:
 
     alert = format_extension_alert(score_data)
     return {
-        "verdict": "UNKNOWN" if alert["status"] == "unknown" else score_data.get("risk_level", "UNKNOWN"),
+        "verdict": UNKNOWN if alert["status"] == "unknown" else score_data.get("risk_level", UNKNOWN),
         "score": score_data["rug_probability"],
         "flags": score_data.get("critical_flags", []),
         "status": alert["status"],
@@ -252,7 +253,7 @@ async def handle_scan_contract(container, params: Dict) -> Dict:
         "coverage_reasons": alert["coverage_reasons"],
         "confidence": score_data.get("confidence_level"),
         "risk_display": alert["risk_display"],
-        "risk_level": score_data.get("risk_level", "UNKNOWN"),
+        "risk_level": score_data.get("risk_level", UNKNOWN),
         "categories": score_data.get("category_scores", {}),
     }
 

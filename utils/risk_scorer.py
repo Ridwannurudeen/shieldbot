@@ -6,6 +6,8 @@ Calculates blended risk scores (heuristic + AI) with confidence levels
 import logging
 from typing import Dict, List, Optional, Tuple
 
+from core.verdicts import HIGH, LOW, MEDIUM, level_from_score
+
 logger = logging.getLogger(__name__)
 
 # Severity weights for heuristic scoring
@@ -15,6 +17,12 @@ SEVERITY_WEIGHTS = {
     "medium": 15,
     "low": 5,
     "info": 0
+}
+
+RECOMMENDATIONS = {
+    HIGH: "DO NOT PROCEED - Critical security issues detected.",
+    MEDIUM: "Proceed with extreme caution. Verify all details carefully.",
+    LOW: "Generally safe, but always verify independently.",
 }
 
 # Blending ratio: 60% heuristic, 40% AI (when AI is available)
@@ -38,18 +46,8 @@ def calculate_risk_score(findings: List[Dict]) -> Tuple[int, str, str]:
         total_risk += SEVERITY_WEIGHTS.get(severity, 0)
 
     risk_score = min(total_risk, 100)
-
-    if risk_score >= 71:
-        risk_level = "HIGH"
-        recommendation = "DO NOT PROCEED - Critical security issues detected."
-    elif risk_score >= 31:
-        risk_level = "MEDIUM"
-        recommendation = "Proceed with extreme caution. Verify all details carefully."
-    else:
-        risk_level = "LOW"
-        recommendation = "Generally safe, but always verify independently."
-
-    return risk_score, risk_level, recommendation
+    risk_level = level_from_score(risk_score)
+    return risk_score, risk_level, RECOMMENDATIONS[risk_level]
 
 
 def blend_scores(heuristic_score: int, ai_score: Optional[int]) -> int:
@@ -113,20 +111,12 @@ def compute_confidence(data_sources: Dict[str, bool]) -> int:
 
 def score_level_from_int(score: int) -> str:
     """Convert numeric score to risk level string."""
-    if score >= 71:
-        return "HIGH"
-    elif score >= 31:
-        return "MEDIUM"
-    return "LOW"
+    return level_from_score(score)
 
 
 def recommendation_from_score(score: int) -> str:
     """Get recommendation text from numeric score."""
-    if score >= 71:
-        return "DO NOT PROCEED - Critical security issues detected."
-    elif score >= 31:
-        return "Proceed with extreme caution. Verify all details carefully."
-    return "Generally safe, but always verify independently."
+    return RECOMMENDATIONS[level_from_score(score)]
 
 
 def findings_from_scan_result(result: Dict) -> List[Dict]:

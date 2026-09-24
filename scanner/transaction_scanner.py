@@ -6,6 +6,7 @@ Integrates risk_scorer for numeric scoring and AI analysis
 
 import logging
 from typing import Dict, List, Optional
+from core.verdicts import HIGH, level_from_score
 from services.contract_service import push4_operands
 from utils.scam_db import ScamDatabase
 from utils.chain_info import get_chain_name
@@ -201,12 +202,7 @@ class TransactionScanner:
                 logger.error("Forensic report generation failed: %s", type(e).__name__)
 
         # Override risk_level from blended score for consistency
-        if result['risk_score'] >= 71:
-            result['risk_level'] = 'high'
-        elif result['risk_score'] >= 31:
-            result['risk_level'] = 'medium'
-        else:
-            result['risk_level'] = 'low'
+        result['risk_level'] = level_from_score(result['risk_score']).lower()
         if result['status'] == 'unknown' and result['risk_level'] == 'low':
             result['risk_level'] = 'unknown'
 
@@ -218,7 +214,7 @@ class TransactionScanner:
             return
         heuristic_score, _, _ = calculate_risk_score(findings_from_scan_result(result))
         result['risk_score'] = max(result['risk_score'], heuristic_score)
-        result['risk_level'] = 'high' if result['risk_score'] >= 71 else 'medium'
+        result['risk_level'] = 'high' if level_from_score(result['risk_score']) == HIGH else 'medium'
 
     async def _check_verification(self, address: str, result: Dict, chain_id: int = 56) -> bool:
         """Check if contract is verified on BscScan. Returns True if check succeeded."""

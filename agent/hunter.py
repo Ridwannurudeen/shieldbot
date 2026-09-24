@@ -31,6 +31,7 @@ from core.database import GUARD_WATCH_MAX_SUBJECTS
 from core.extension_formatter import is_scan_incomplete
 from core.registry import BACKGROUND_SCAN_DEADLINE_SECONDS
 from core.verdict_evidence import build_evidence
+from core.verdicts import BLOCK_MIN, SAFE_MAX
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 from services.launch_discovery import LaunchDiscoveryError, WrongChainError
 from services.rpc_guard import CLOSED, BreakerOpenError
@@ -205,14 +206,14 @@ class Hunter:
             risk_score = result.get("risk_score", result.get("rug_probability")) if complete else None
             if risk_score is None:
                 status = "unknown"
-            elif risk_score >= 71:
+            elif risk_score >= BLOCK_MIN:
                 status = "blocked"
                 await self._log_finding(
                     f"guard-rescan-{int(time.time())}", subject["subject"], None, risk_score,
                     result, status, chain_id=LAUNCH_CHAIN_ID,
                 )
             else:
-                status = "cleared" if risk_score <= 30 else "watching"
+                status = "cleared" if risk_score <= SAFE_MAX else "watching"
             # Update an existing launch only; guard membership never uses tracked_pairs.
             await self.db.record_launch_scan(LAUNCH_CHAIN_ID, subject["subject"], status, risk_score)
             if complete and published is not None and published["onchain_status"] in (
@@ -411,7 +412,7 @@ class Hunter:
             await self._record_impostor_check(chain_id, pair["token_address"], result)
             risk_score = result.get("risk_score", result.get("rug_probability"))
 
-            if risk_score is not None and risk_score >= 71:
+            if risk_score is not None and risk_score >= BLOCK_MIN:
                 # Upgraded to BLOCK. The finding is stored first, so a reader never sees a
                 # blocked pair without the evidence behind it.
                 await self._log_finding(
@@ -435,7 +436,7 @@ class Hunter:
                         reason=f"auto: recheck upgrade {pair['token_address']} (score={risk_score})",
                     )
                 blocked = True
-            elif risk_score is not None and risk_score <= 30 and not is_scan_incomplete(result):
+            elif risk_score is not None and risk_score <= SAFE_MAX and not is_scan_incomplete(result):
                 # Cleared
                 await self.db.update_tracked_pair_status(
                     pair["pair_address"], "cleared"
@@ -527,14 +528,14 @@ class Hunter:
 
         await self._record_impostor_check(LAUNCH_CHAIN_ID, token, result)
         risk_score = result.get("risk_score", result.get("rug_probability"))
-        if risk_score is not None and risk_score >= 71:
+        if risk_score is not None and risk_score >= BLOCK_MIN:
             status = "blocked"
             await self._log_finding(
                 investigation_id, token, None, risk_score, result, status, chain_id=LAUNCH_CHAIN_ID
             )
         elif risk_score is None or is_scan_incomplete(result):
             status = "unknown"
-        elif risk_score <= 30:
+        elif risk_score <= SAFE_MAX:
             status = "cleared"
         else:
             status = "watching"
