@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from cachetools import TLRUCache
 
 import services.counterparty_service as counterparty_module
 import utils.scam_db as scam_module
@@ -163,6 +164,53 @@ async def test_repeat_lookup_is_served_from_the_cache():
     assert _calls(web3, scam_db) == 4
     await service.fetch(SPENDER, 8453)
     assert _calls(web3, scam_db) == 8
+
+
+def _clock(monkeypatch, module, name, ttu):
+    now = [0.0]
+    monkeypatch.setattr(module, name, TLRUCache(maxsize=1024, ttu=ttu, timer=lambda: now[0]))
+    return now
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "goplus, held",
+    [
+        ({"status": "ok", "reason": None, "data": CLEAN}, 300),
+        ({"status": "unknown", "reason": "GoPlus HTTP 429", "data": {}}, 30),
+    ],
+    ids=["complete", "incomplete"],
+)
+async def test_complete_facts_are_held_five_minutes_and_incomplete_ones_thirty_seconds(
+    monkeypatch, goplus, held
+):
+    assert counterparty_module._FACTS_CACHE.ttu is counterparty_module._facts_ttu
+    now = _clock(monkeypatch, counterparty_module, "_FACTS_CACHE", counterparty_module._facts_ttu)
+    service, web3, scam_db = _service(goplus=goplus)
+    await service.fetch(SPENDER, 56)
+    now[0] = held - 1
+    await service.fetch(SPENDER, 56)
+    assert _calls(web3, scam_db) == 4
+    now[0] = held + 1
+    await service.fetch(SPENDER, 56)
+    assert _calls(web3, scam_db) == 8
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload, held",
+    [({"code": 1, "message": "ok", "result": CLEAN}, 600), ({"code": 0, "message": "error"}, 30)],
+    ids=["answered", "unknown"],
+)
+async def test_address_labels_are_held_ten_minutes_and_unknowns_thirty_seconds(monkeypatch, payload, held):
+    assert scam_module._GOPLUS_ADDRESS_CACHE.ttu is scam_module._address_security_ttu
+    now = _clock(monkeypatch, scam_module, "_GOPLUS_ADDRESS_CACHE", scam_module._address_security_ttu)
+    result, session = await _address_security(payload)
+    now[0] = held - 1
+    assert await ScamDatabase.fetch_address_security(SPENDER) is result
+    now[0] = held + 1
+    _, again = await _address_security(payload)
+    assert session.get.call_count == again.get.call_count == 1
 
 
 def test_unknown_facts_have_no_coverage():

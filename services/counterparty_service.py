@@ -10,7 +10,7 @@ import asyncio
 import time
 from typing import Optional
 
-from cachetools import TTLCache
+from cachetools import TLRUCache
 
 # Canonical Uniswap Permit2, deployed at the same address on every EVM chain.
 PERMIT2 = "0x000000000022d473030f116ddee9f6b43ac78ba3"
@@ -36,7 +36,18 @@ THEFT_LABELS = (
     "darkweb_transactions",
 )
 
-_FACTS_CACHE = TTLCache(maxsize=1024, ttl=300)
+# Complete facts hold for five minutes, which covers a drainer campaign's repeat requests. Facts
+# with a gap are looked up again after 30 seconds, so one provider blip does not leave a spender
+# Unknown for five minutes.
+COMPLETE_FACTS_TTL = 300
+INCOMPLETE_FACTS_TTL = 30
+
+
+def _facts_ttu(key, facts, now):
+    return now + (COMPLETE_FACTS_TTL if all(facts["coverage"].values()) else INCOMPLETE_FACTS_TTL)
+
+
+_FACTS_CACHE = TLRUCache(maxsize=1024, ttu=_facts_ttu)
 
 
 def unknown_facts(address: str) -> dict:

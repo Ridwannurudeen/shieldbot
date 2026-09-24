@@ -8,7 +8,7 @@ import re
 import time
 import logging
 import aiohttp
-from cachetools import TTLCache
+from cachetools import TLRUCache, TTLCache
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,14 @@ _ETH_ADDR_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
 _GOPLUS_CACHE = TTLCache(maxsize=1024, ttl=30)
 _GOPLUS_INFLIGHT = {}
 _GOPLUS_NO_DATA = 'GoPlus has no data for this token on this chain'
-_GOPLUS_ADDRESS_CACHE = TTLCache(maxsize=1024, ttl=600)
+
+
+def _address_security_ttu(key, result, now):
+    # An address's labels change slowly; a failed lookup is retried after 30 seconds.
+    return now + (600 if result['status'] == 'ok' else 30)
+
+
+_GOPLUS_ADDRESS_CACHE = TLRUCache(maxsize=1024, ttu=_address_security_ttu)
 _GOPLUS_ADDRESS_INFLIGHT = {}
 
 # Response codes that ask for the same request again; their meaning is not
