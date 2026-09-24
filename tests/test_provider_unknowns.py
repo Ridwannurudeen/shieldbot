@@ -83,6 +83,7 @@ async def test_provider_failure_stays_unknown_through_formatters(failure):
     adapter = EvmAdapter.__new__(EvmAdapter)
     adapter._honeypot_chain_id = None if failure == 'unsupported' else 4663
     adapter._chain_name = 'Test chain'
+    adapter._honeypot_is_replies = {}
     client = Web3Client.__new__(Web3Client)
     client._adapters = {4663: adapter}
     response = MagicMock(status=int(failure) if failure.isdigit() else 200)
@@ -355,6 +356,7 @@ async def test_failed_simulation_with_clean_fallback_never_becomes_safe(renounce
     adapter = EvmAdapter.__new__(EvmAdapter)
     adapter._honeypot_chain_id = 56
     adapter._chain_name = 'BSC'
+    adapter._honeypot_is_replies = {}
     client = Web3Client.__new__(Web3Client)
     client._adapters = {56: adapter}
     response = AsyncMock(status=200)

@@ -4,6 +4,7 @@ import logging
 import asyncio
 import aiohttp
 from typing import Dict, List, Optional, Tuple
+from cachetools import TTLCache
 from web3 import Web3
 try:
     from web3.middleware import ExtraDataToPOAMiddleware as geth_poa_middleware
@@ -25,6 +26,8 @@ HONEYPOT_IS_UNSUPPORTED = (
     'honeypot.is unsupported for this chain; any honeypot and tax data here is GoPlus-reported, '
     'not simulated by ShieldBot'
 )
+# check_honeypot and get_tax_info read the same honeypot.is reply, and a scan calls them back to back.
+HONEYPOT_IS_REPLY_TTL_SECONDS = 60
 
 # 'etherscan_blockscout': verification from Etherscan, creation from Blockscout, because Etherscan's
 # free tier refuses getcontractcreation on Base and Optimism.
@@ -131,6 +134,7 @@ class EvmAdapter(ChainAdapter):
         self._factory_address = factory_address
         self._solidly_factory = solidly_factory
         self._whitelisted_routers = whitelisted_routers or {}
+        self._honeypot_is_replies = TTLCache(maxsize=1024, ttl=HONEYPOT_IS_REPLY_TTL_SECONDS)
 
     @property
     def chain_id(self) -> int:
@@ -336,6 +340,21 @@ class EvmAdapter(ChainAdapter):
                 return result
             return {**result, 'status': 'unknown', 'reason': f'Ownership lookup failed ({type(e).__name__})'}
 
+    async def _honeypot_is_reply(self, address: str) -> Tuple[int, Optional[Dict]]:
+        """(HTTP status, JSON body when 200) from honeypot.is, requested once per token.
+
+        A request that raises is not kept, so the next caller asks again.
+        """
+        key = address.lower()
+        reply = self._honeypot_is_replies.get(key)
+        if reply is None:
+            async with aiohttp.ClientSession() as session:
+                url = f"https://api.honeypot.is/v2/IsHoneypot?address={address}&chainID={self._honeypot_chain_id}"
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    reply = (resp.status, await resp.json() if resp.status == 200 else None)
+            self._honeypot_is_replies[key] = reply
+        return reply
+
     async def check_honeypot(self, address: str) -> Dict:
         result = {
             'is_honeypot': None, 'status': 'unknown',
@@ -345,55 +364,52 @@ class EvmAdapter(ChainAdapter):
             result['reason'] = HONEYPOT_IS_UNSUPPORTED
             return result
         try:
-            async with aiohttp.ClientSession() as session:
-                url = f"https://api.honeypot.is/v2/IsHoneypot?address={address}&chainID={self._honeypot_chain_id}"
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status != 200:
-                        result['reason'] = (
-                            'Token not found on honeypot.is' if resp.status == 404
-                            else f'honeypot.is HTTP {resp.status}'
-                        )
-                        return result
-                    data = await resp.json()
-                    sim_success = data.get('simulationSuccess')
-                    if isinstance(sim_success, bool):
-                        result['simulation_success'] = sim_success
-                    if sim_success is False:
-                        result['reason'] = 'Simulation failed (inconclusive)'
-                        result['simulation_failed'] = True
-                        return result
+            status, data = await self._honeypot_is_reply(address)
+            if status != 200:
+                result['reason'] = (
+                    'Token not found on honeypot.is' if status == 404
+                    else f'honeypot.is HTTP {status}'
+                )
+                return result
+            sim_success = data.get('simulationSuccess')
+            if isinstance(sim_success, bool):
+                result['simulation_success'] = sim_success
+            if sim_success is False:
+                result['reason'] = 'Simulation failed (inconclusive)'
+                result['simulation_failed'] = True
+                return result
 
-                    honeypot_result = data.get('honeypotResult') or {}
-                    is_honeypot = honeypot_result.get('isHoneypot')
-                    if not isinstance(is_honeypot, bool):
-                        return result
-                    reason = honeypot_result.get('honeypotReason') or 'honeypot.is result'
+            honeypot_result = data.get('honeypotResult') or {}
+            is_honeypot = honeypot_result.get('isHoneypot')
+            if not isinstance(is_honeypot, bool):
+                return result
+            reason = honeypot_result.get('honeypotReason') or 'honeypot.is result'
+            result.update({
+                'is_honeypot': is_honeypot, 'status': 'ok', 'reason': reason,
+                'field_providers': {'is_honeypot': 'honeypot.is'},
+            })
+            simulation = data.get('simulationResult') or {}
+            sell_tax = simulation.get('sellTax')
+            buy_tax = simulation.get('buyTax')
+            if (
+                is_honeypot and sim_success is True
+                and isinstance(sell_tax, (int, float)) and not isinstance(sell_tax, bool)
+                and isinstance(buy_tax, (int, float)) and not isinstance(buy_tax, bool)
+                and 0 <= sell_tax < 5 and 0 <= buy_tax < 5
+            ):
+                # Preserve the existing verified, low-tax false-positive rule.
+                verified, _ = await self.is_verified_contract(address)
+                if verified is True:
                     result.update({
-                        'is_honeypot': is_honeypot, 'status': 'ok', 'reason': reason,
-                        'field_providers': {'is_honeypot': 'honeypot.is'},
+                        'is_honeypot': False,
+                        'reason': f'Flagged but verified with normal taxes (buy:{float(buy_tax)}% sell:{float(sell_tax)}%)',
+                        'likely_false_positive': True,
                     })
-                    simulation = data.get('simulationResult') or {}
-                    sell_tax = simulation.get('sellTax')
-                    buy_tax = simulation.get('buyTax')
-                    if (
-                        is_honeypot and sim_success is True
-                        and isinstance(sell_tax, (int, float)) and not isinstance(sell_tax, bool)
-                        and isinstance(buy_tax, (int, float)) and not isinstance(buy_tax, bool)
-                        and 0 <= sell_tax < 5 and 0 <= buy_tax < 5
-                    ):
-                        # Preserve the existing verified, low-tax false-positive rule.
-                        verified, _ = await self.is_verified_contract(address)
-                        if verified is True:
-                            result.update({
-                                'is_honeypot': False,
-                                'reason': f'Flagged but verified with normal taxes (buy:{float(buy_tax)}% sell:{float(sell_tax)}%)',
-                                'likely_false_positive': True,
-                            })
-                        else:
-                            result.update({
-                                'reason': f'{reason} (taxes low: buy:{float(buy_tax)}% sell:{float(sell_tax)}%)',
-                                'low_tax_honeypot': True,
-                            })
+                else:
+                    result.update({
+                        'reason': f'{reason} (taxes low: buy:{float(buy_tax)}% sell:{float(sell_tax)}%)',
+                        'low_tax_honeypot': True,
+                    })
             return result
         except Exception as e:
             logger.error("[%s] Error checking honeypot: %s", self._chain_name, type(e).__name__)
@@ -409,37 +425,34 @@ class EvmAdapter(ChainAdapter):
             result['reason'] = HONEYPOT_IS_UNSUPPORTED
             return result
         try:
-            async with aiohttp.ClientSession() as session:
-                url = f"https://api.honeypot.is/v2/IsHoneypot?address={address}&chainID={self._honeypot_chain_id}"
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status != 200:
-                        result['reason'] = f'honeypot.is HTTP {resp.status}'
-                        return result
-                    data = await resp.json()
-                    if data.get('simulationSuccess') is False:
-                        result['reason'] = 'Simulation failed (inconclusive)'
-                        result['simulation_failed'] = True
-                        return result
-                    if data.get('simulationSuccess') is not True:
-                        result['reason'] = 'Simulation success unknown'
-                        return result
-                    simulation = data.get('simulationResult') or {}
-                    for field, provider_field in (('buy_tax', 'buyTax'), ('sell_tax', 'sellTax')):
-                        value = simulation.get(provider_field)
-                        if value is None or value == '' or isinstance(value, bool):
-                            continue
-                        try:
-                            value = float(value)
-                        except (TypeError, ValueError):
-                            continue
-                        if 0 <= value < float('inf'):
-                            result[field] = value
-                            result['field_providers'][field] = 'honeypot.is'
-                    if result['buy_tax'] is not None and result['sell_tax'] is not None:
-                        result['status'] = 'ok'
-                        result['reason'] = 'honeypot.is simulation taxes'
-                    else:
-                        result['reason'] = 'Missing or invalid honeypot.is tax data'
+            status, data = await self._honeypot_is_reply(address)
+            if status != 200:
+                result['reason'] = f'honeypot.is HTTP {status}'
+                return result
+            if data.get('simulationSuccess') is False:
+                result['reason'] = 'Simulation failed (inconclusive)'
+                result['simulation_failed'] = True
+                return result
+            if data.get('simulationSuccess') is not True:
+                result['reason'] = 'Simulation success unknown'
+                return result
+            simulation = data.get('simulationResult') or {}
+            for field, provider_field in (('buy_tax', 'buyTax'), ('sell_tax', 'sellTax')):
+                value = simulation.get(provider_field)
+                if value is None or value == '' or isinstance(value, bool):
+                    continue
+                try:
+                    value = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if 0 <= value < float('inf'):
+                    result[field] = value
+                    result['field_providers'][field] = 'honeypot.is'
+            if result['buy_tax'] is not None and result['sell_tax'] is not None:
+                result['status'] = 'ok'
+                result['reason'] = 'honeypot.is simulation taxes'
+            else:
+                result['reason'] = 'Missing or invalid honeypot.is tax data'
             return result
         except Exception as e:
             logger.error("[%s] Error getting tax info: %s", self._chain_name, type(e).__name__)
