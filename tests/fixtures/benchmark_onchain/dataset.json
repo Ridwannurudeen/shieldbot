@@ -1,0 +1,102 @@
+{
+  "format": "shieldbot-benchmark/2",
+  "entries": [
+    {
+      "class": "drainer_contract",
+      "chain_id": 1,
+      "address": "0xd6c7fa76d8035d4eebadf67e8853228018574bae",
+      "description": "Contract on Scam Sniffer's open list of addresses associated with phishing",
+      "labeled": "2026-09-24",
+      "sources": [
+        {
+          "provider": "scamsniffer",
+          "url": "https://github.com/scamsniffer/scam-database/blob/929fe79089d20d4f0a42ddd046012f98f3eaa519/blacklist/all.json",
+          "retrieved": "2026-09-24",
+          "evidence": "Listed under \"address\" in Scam Sniffer's open blacklist of addresses associated with phishing activities (published with a 7-day delay)"
+        },
+        {
+          "provider": "onchain",
+          "url": "https://ethereum-rpc.publicnode.com",
+          "retrieved": "2026-09-24",
+          "evidence": "eth_getCode at block 26048166 returns 706 bytes of contract code (not an EOA or an EIP-7702 delegation)"
+        }
+      ]
+    },
+    {
+      "class": "impostor_token",
+      "chain_id": 4663,
+      "address": "0xfa361daa4f3122d73f6600556a652d5b82bf9461",
+      "description": "MPWR \"Monolithic Power Systems Inc. Common Stock\" on Robinhood Chain: carries Robinhood's official MPWR ticker (0x52D50D0280AD1054b43f052bD70a49a212A1b128), and the company's name (Monolithic), at another address",
+      "labeled": "2026-09-24",
+      "sources": [
+        {
+          "provider": "robinhood",
+          "url": "https://api.robinhood.com/rhj/assets",
+          "retrieved": "2026-09-24",
+          "evidence": "Robinhood's official token list (195 assets) gives MPWR's only chain 4663 contract as 0x52D50D0280AD1054b43f052bD70a49a212A1b128; this address is not on the list"
+        },
+        {
+          "provider": "onchain",
+          "url": "https://rpc.mainnet.chain.robinhood.com",
+          "retrieved": "2026-09-24",
+          "evidence": "eth_getCode at block 71490256 returns 5150 bytes of contract code; eth_call at block 71490256: symbol() = \"MPWR\", name() = \"Monolithic Power Systems Inc. Common Stock\""
+        },
+        {
+          "provider": "geckoterminal",
+          "url": "https://api.geckoterminal.com/api/v2/networks/robinhood/tokens/0xfa361daa4f3122d73f6600556a652d5b82bf9461",
+          "retrieved": "2026-09-24",
+          "evidence": "Traded on Robinhood Chain as Monolithic Power Systems Inc. Common Stock (MPWR), about $986,296,762 in pool reserves"
+        }
+      ]
+    },
+    {
+      "class": "address_poisoning",
+      "chain_id": 8453,
+      "address": "0x7467e7913aa4802ba874dd45094f4c1c1ffe561e",
+      "counterpart": "0x74673e2f6b532c5dbca8aba4dea20e3ba80e561e",
+      "description": "Look-alike of 0x74673e2f6b532c5dbca8aba4dea20e3ba80e561e on Base: a third party sent a zero-value transfer to it from 0x64e6824a09ecc262c93833e1532488af52e8fc1e, who had just paid 0x74673e2f6b532c5dbca8aba4dea20e3ba80e561e",
+      "labeled": "2026-09-24",
+      "sources": [
+        {
+          "provider": "onchain",
+          "url": "https://mainnet.base.org",
+          "retrieved": "2026-09-24",
+          "evidence": "Transfer log at block 51735216, log index 147: token 0x833589fcd6edb6e08f4c7c32d4f71b54bda02913, from 0x64e6824a09ecc262c93833e1532488af52e8fc1e, to 0x7467e7913aa4802ba874dd45094f4c1c1ffe561e, value 0, in a transaction sent by 0x61ab0f089883e6a111bfedffd08e5cb3dab61823, not by the sender of the tokens. Earlier, Transfer log at block 51735212, log index 105: token 0x833589fcd6edb6e08f4c7c32d4f71b54bda02913, from 0x64e6824a09ecc262c93833e1532488af52e8fc1e, to 0x74673e2f6b532c5dbca8aba4dea20e3ba80e561e, value 80000000. 0x7467e7913aa4802ba874dd45094f4c1c1ffe561e has the first 4 and the last 4 hex digits of 0x74673e2f6b532c5dbca8aba4dea20e3ba80e561e"
+        },
+        {
+          "provider": "onchain",
+          "url": "https://base-rpc.publicnode.com",
+          "retrieved": "2026-09-24",
+          "evidence": "eth_getCode at block 51736863 returns no contract code (an EOA)"
+        }
+      ]
+    },
+    {
+      "class": "safe",
+      "chain_id": 1,
+      "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "description": "USDC — USD Coin on Ethereum",
+      "labeled": "2026-09-24",
+      "sources": [
+        {
+          "provider": "uniswap",
+          "url": "https://github.com/Uniswap/default-token-list/blob/20b0d0de07eca76a050f2ff36ede4858f429069e/src/tokens/mainnet.json",
+          "retrieved": "2026-09-24",
+          "evidence": "Listed as USDC (USDCoin) in Uniswap's default token list"
+        },
+        {
+          "provider": "geckoterminal",
+          "url": "https://api.geckoterminal.com/api/v2/networks/eth/tokens/0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+          "retrieved": "2026-09-24",
+          "evidence": "About $542,430,906 in pool reserves across its pools; the oldest of its top pools, WETH / USDC 0.05%, was created 2021-12-29"
+        },
+        {
+          "provider": "onchain",
+          "url": "https://ethereum-rpc.publicnode.com",
+          "retrieved": "2026-09-24",
+          "evidence": "eth_getCode at block 26048170 returns 2186 bytes of contract code; eth_call at block 26048170: symbol() = \"USDC\", name() = \"USD Coin\""
+        }
+      ]
+    }
+  ]
+}

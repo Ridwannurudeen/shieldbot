@@ -21,6 +21,7 @@ ONEINCH_V6_ROUTER = "0x111111125421ca6dc452d289314280a0f8842a65"
 UNISWAP_V3_ROUTER = "0xe592427a0aece92de3edee1f18e0157c05861564"
 PANCAKESWAP_V3_ROUTER = "0x1b81d678ffb9c0263b24a97847620c99d213eb14"
 PANCAKESWAP_SMART_ROUTER = "0x13f4ea83d0bd40e75c8222255bc855a974568dd4"
+RADIANT_BSC_LENDING_POOL = "0xd50cf00b6e600dd036ba8ef475677d816d6c4281"
 
 
 def approvals_to(spender):
@@ -85,6 +86,18 @@ async def test_a_router_address_on_another_chain_is_an_unknown_contract(chain_id
     [approval] = result["approvals"]
     assert approval["spender_label"] == "Unknown Contract"
     assert approval["risk_level"] == "HIGH"
+
+
+@pytest.mark.asyncio
+async def test_the_drained_radiant_lending_pool_is_not_a_known_spender():
+    # Revoke.cash lists it under the October 2024 Radiant Capital hack: its implementation was replaced
+    # with one that pulls approved funds, and wallets were still drained through it in 2026.
+    result, _, _ = await scan(approvals_to(RADIANT_BSC_LENDING_POOL), 56)
+
+    [approval] = result["approvals"]
+    assert approval["spender_label"] == "Unknown Contract"
+    assert approval["risk_level"] == "HIGH"
+    assert all(RADIANT_BSC_LENDING_POOL not in labels for labels in KNOWN_SAFE_SPENDERS.values())
 
 
 def test_chain_spender_addresses_are_lowercase_so_lookups_match():
