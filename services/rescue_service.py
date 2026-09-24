@@ -46,6 +46,8 @@ RESULT_CACHE_SECONDS = 120
 # Reason given when the chain's RPC could not be read. It names no provider: errors from the RPC
 # client can carry its URL.
 RPC_UNAVAILABLE_REASON = "Approval data unavailable from the chain's RPC"
+# Reason given when the RPC answered but served none of the recent approval history.
+NOTHING_READ_REASON = "No approval history could be read from the chain's RPC"
 
 UNLIMITED_THRESHOLD = 2**128
 # Approvals above this (but below UNLIMITED_THRESHOLD) are considered "large"
@@ -363,7 +365,9 @@ class RescueService:
                 all_logs, scanned_from, latest = await self._fetch_recent_approval_logs(
                     wallet, rpc_url, PUBLIC_LOG_WINDOW_BLOCKS.get(chain_id, RECENT_LOG_WINDOW_BLOCKS)
                 )
-                if scanned_from > 0:
+                if scanned_from > latest:
+                    coverage_reasons["allowances"] = NOTHING_READ_REASON
+                elif scanned_from > 0:
                     coverage_reasons["allowances"] = f"Approvals before block {scanned_from} not scanned"
                 scanned_blocks = (
                     {"from_block": scanned_from, "to_block": latest} if scanned_from <= latest else None

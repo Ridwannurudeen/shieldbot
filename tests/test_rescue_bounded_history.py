@@ -14,6 +14,7 @@ import pytest
 from services.rescue_service import (
     APPROVAL_TOPIC,
     RESULT_CACHE_SECONDS,
+    NOTHING_READ_REASON,
     RPC_UNAVAILABLE_REASON,
     RescueService,
 )
@@ -236,7 +237,7 @@ async def test_rpc_serving_no_approval_history_reads_unknown_with_nothing_scanne
     assert result["status"] == "unknown"
     assert result["coverage"]["allowances"] is False
     assert result["coverage_reasons"] == {
-        "allowances": f"Approvals before block {LATEST + 1} not scanned"
+        "allowances": NOTHING_READ_REASON
     }
     assert result["scanned_blocks"] is None
     assert result["total_value_at_risk_usd"] is None
@@ -303,7 +304,7 @@ async def test_robinhood_error_with_rate_inside_a_word_is_not_retried():
     assert [to_b for _, to_b in window_bounds(rpc)].count(LATEST) == 1
     sleep.assert_not_awaited()
     assert result["coverage_reasons"] == {
-        "allowances": f"Approvals before block {LATEST + 1} not scanned"
+        "allowances": NOTHING_READ_REASON
     }
 
 
@@ -364,7 +365,7 @@ async def test_robinhood_log_limit_error_is_not_retried_and_never_reads_clean():
     assert result["status"] == "unknown"
     assert result["coverage"]["allowances"] is False
     assert result["coverage_reasons"] == {
-        "allowances": f"Approvals before block {LATEST + 1} not scanned"
+        "allowances": NOTHING_READ_REASON
     }
 
 
