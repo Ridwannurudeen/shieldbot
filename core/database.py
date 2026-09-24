@@ -2029,6 +2029,24 @@ class Database:
         """, (chain_id, source, last_block, time.time()))
         await self._db.commit()
 
+    async def get_launch_discovery_status(self, chain_id: int) -> Dict:
+        """Report how far launch discovery has read, from its stored cursors and launches.
+
+        ``cursor`` is the lowest source cursor, the block through which every source has been
+        read; ``last_sweep_at`` is when a sweep last moved a cursor; ``last_discovered_block`` is
+        the newest launch recorded. Each is None until discovery has stored one.
+        """
+        cursor = await self._db.execute(
+            "SELECT MIN(last_block), MAX(updated_at) FROM launch_discovery_cursors WHERE chain_id = ?",
+            (chain_id,),
+        )
+        lowest, last_sweep_at = await cursor.fetchone()
+        cursor = await self._db.execute(
+            "SELECT MAX(block_number) FROM discovered_launches WHERE chain_id = ?", (chain_id,)
+        )
+        newest = (await cursor.fetchone())[0]
+        return {"cursor": lowest, "last_sweep_at": last_sweep_at, "last_discovered_block": newest}
+
     async def upsert_discovered_launches(self, chain_id: int, launches: List[Dict]):
         """Record launches idempotently, one row per token.
 

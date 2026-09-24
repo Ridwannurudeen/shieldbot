@@ -1756,10 +1756,20 @@ async def public_stats():
 
     A source that is not running reports null, never 0. Mempool counters live in memory and restart
     from zero with the process; `mempool_counting_since` says when the current count began.
+    `launch_discovery` says how far Robinhood Chain launch discovery has read, from the database
+    alone: its lowest source cursor, when a sweep last moved a cursor, and the newest launch block.
+    A cursor far below the chain head, or an old `last_sweep_at`, means discovery has stalled.
     """
+    from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
+
     db_stats = {}
+    launch_discovery = None
     if container and container.db:
         db_stats = await container.db.get_platform_stats()
+        launch_discovery = {
+            "chain_id": LAUNCH_CHAIN_ID,
+            **await container.db.get_launch_discovery_status(LAUNCH_CHAIN_ID),
+        }
 
     mempool = {}
     if container and container.mempool_monitor:
@@ -1775,6 +1785,7 @@ async def public_stats():
         "suspicious_approvals":   mempool.get("suspicious_approvals"),
         "chains_protected":       len(mempool["monitored_chains"]) if "monitored_chains" in mempool else None,
         "mempool_counting_since": mempool.get("counting_since"),
+        "launch_discovery":       launch_discovery,
     }
 
 

@@ -26,6 +26,11 @@ MEMPOOL_STATS = {
     "monitored_chains": [1, 56],
     "counting_since": 1500.0,
 }
+DISCOVERY = {
+    "cursor": 70_706_607,
+    "last_sweep_at": 1_790_217_346.4,
+    "last_discovered_block": 70_756_543,
+}
 
 
 def _container(db=None, mempool=None):
@@ -52,6 +57,7 @@ def _db(rows=(CONTRACT_ROW,), all_time=None):
                 }
             }
         ),
+        get_launch_discovery_status=AsyncMock(return_value=dict(DISCOVERY)),
     )
 
 
@@ -91,6 +97,7 @@ def test_stats_without_database_or_mempool_are_unavailable_not_zero(dashboard_ap
         "suspicious_approvals",
         "chains_protected",
         "mempool_counting_since",
+        "launch_discovery",
     ):
         assert body[key] is None, key
 
@@ -105,6 +112,13 @@ def test_stats_with_both_sources_report_values_and_counting_window(dashboard_api
     assert body["suspicious_approvals"] == 40
     assert body["chains_protected"] == 2
     assert body["mempool_counting_since"] == 1500.0
+
+
+def test_stats_report_how_far_launch_discovery_has_read(dashboard_api):
+    db = _db()
+    body = dashboard_api(_container(db=db)).get("/api/stats").json()
+    assert body["launch_discovery"] == {"chain_id": 4663, **DISCOVERY}
+    db.get_launch_discovery_status.assert_awaited_once_with(4663)
 
 
 def test_feed_default_merges_both_sources(dashboard_api):

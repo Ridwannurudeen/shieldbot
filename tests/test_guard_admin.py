@@ -27,6 +27,7 @@ def guard_admin(monkeypatch):
         auth_manager=None,
         db=SimpleNamespace(
             get_platform_stats=AsyncMock(return_value={"all_time": {}}),
+            get_launch_discovery_status=AsyncMock(return_value={}),
             register_guard_subject=AsyncMock(return_value=True),
             unregister_guard_subject=AsyncMock(),
         ),

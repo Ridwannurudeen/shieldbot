@@ -357,6 +357,36 @@ async def test_watching_or_stale_tracked_pairs_do_not_override_the_scan(db):
     assert items[TOKENS[1]]["scan"]["scanned_at"] == 3000.0
 
 
+@pytest.mark.asyncio
+async def test_discovery_status_is_empty_before_discovery_has_run(db):
+    assert await db.get_launch_discovery_status(CHAIN) == {
+        "cursor": None,
+        "last_sweep_at": None,
+        "last_discovered_block": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_discovery_status_reports_the_lowest_cursor_last_sweep_and_newest_launch(db):
+    await db.set_launch_cursor(CHAIN, "long", 900)
+    await db.set_launch_cursor(CHAIN, "uniswap_v4", 700)
+    await db.set_launch_cursor(56, "long", 5_000)
+    await db._db.execute(
+        "UPDATE launch_discovery_cursors SET updated_at = CASE source WHEN 'long' THEN 2000.0 "
+        "ELSE 1000.0 END WHERE chain_id = ?",
+        (CHAIN,),
+    )
+    await db._db.commit()
+    await db.upsert_discovered_launches(CHAIN, [_launch(TOKENS[0], 650), _launch(TOKENS[1], 880)])
+    await db.upsert_discovered_launches(56, [_launch(TOKENS[2], 4_900)])
+
+    assert await db.get_launch_discovery_status(CHAIN) == {
+        "cursor": 700,
+        "last_sweep_at": 2000.0,
+        "last_discovered_block": 880,
+    }
+
+
 # --- HTTP endpoint --------------------------------------------------------------------------
 
 
