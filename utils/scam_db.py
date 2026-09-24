@@ -386,10 +386,12 @@ class ScamDatabase:
         self._user_report_times[uid] = times
 
         # 3. Already blacklisted
-        if self._active_entry((None, addr)):
+        entry = self._active_entry((None, addr))
+        if entry:
             return {
                 "accepted": True, "reason": "Already blacklisted.",
-                "blacklisted": True, "reports": _REPORT_THRESHOLD, "needed": _REPORT_THRESHOLD,
+                "blacklisted": True, "reports": entry['reports'], "needed": _REPORT_THRESHOLD,
+                "confirmed": entry['source'] == 'admin',
             }
 
         # 4. Add to pending reports (deduplicate by reporter)
@@ -409,6 +411,7 @@ class ScamDatabase:
             return {
                 "accepted": True, "reason": "Threshold met — address blacklisted.",
                 "blacklisted": True, "reports": unique_reporters, "needed": _REPORT_THRESHOLD,
+                "confirmed": False,
             }
 
         logger.info("Report accepted for %s (%d/%d) from %s", address, unique_reporters, _REPORT_THRESHOLD, uid)

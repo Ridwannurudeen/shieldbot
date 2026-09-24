@@ -1430,6 +1430,15 @@ class Database:
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_scam_blacklist_entry
                 ON scam_blacklist(address, COALESCE(chain_id, 0));
+
+            -- The on-chain 'report' records written for an address, one per writer. Kept when the
+            -- blacklist entry is removed, so a record is never written twice.
+            CREATE TABLE IF NOT EXISTS onchain_report_records (
+                address TEXT NOT NULL,
+                writer TEXT NOT NULL,
+                recorded_at REAL NOT NULL,
+                PRIMARY KEY (address, writer)
+            );
         """)
         await self._db.commit()
 
@@ -1469,6 +1478,16 @@ class Database:
         )
         await self._db.commit()
         return cursor.rowcount > 0
+
+    async def claim_onchain_report(self, address: str, writer: str) -> bool:
+        """Claim the one on-chain 'report' record a writer may make for an address. True only the
+        first time; the claim is made before the write, so a failed write is not retried."""
+        cursor = await self._db.execute(
+            "INSERT OR IGNORE INTO onchain_report_records (address, writer, recorded_at) VALUES (?, ?, ?)",
+            (address.lower(), writer, time.time()),
+        )
+        await self._db.commit()
+        return cursor.rowcount == 1
 
     async def get_active_blacklist(self, now: float) -> List[Dict]:
         """Every blacklist entry that has not expired at `now`."""

@@ -245,30 +245,77 @@ class TestNoOnChainRecordingPromise:
         )
         recorder.get_latest_scan.assert_not_awaited()
 
-    @pytest.mark.asyncio
-    async def test_report_does_not_link_the_bsc_recorder(self, bot_module, monkeypatch):
-        address = "0x0000000000000000000000000000000000000001"
+    @staticmethod
+    async def _report(bot_module, monkeypatch, result):
         recorder = MagicMock(record_scan_fire_and_forget=AsyncMock())
         recorder.is_available.return_value = True
-        attestor = MagicMock()
-        attestor.is_available.return_value = False
-        scam_db = MagicMock()
-        scam_db.report_address = AsyncMock(return_value={"accepted": True, "blacklisted": True})
+        attestor = MagicMock(attest_fire_and_forget=AsyncMock())
+        attestor.is_available.return_value = True
         monkeypatch.setattr(bot_module, "onchain_recorder", recorder)
         monkeypatch.setattr(bot_module, "base_attestor", attestor)
-        monkeypatch.setattr(bot_module, "scam_db", scam_db)
+        monkeypatch.setattr(bot_module, "scam_db", SimpleNamespace(report_address=AsyncMock(return_value=result)))
         update = MagicMock(spec=Update)
         update.message.reply_text = AsyncMock()
         update.effective_user.id = 42
-        context = MagicMock(args=[address, "honeypot"])
+        await bot_module.report_command(update, MagicMock(args=["0x" + "0" * 39 + "1", "honeypot"]))
+        return update.message.reply_text.await_args.args[0], recorder, attestor
 
-        await bot_module.report_command(update, context)
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("reason", ["Threshold met — address blacklisted.", "Already blacklisted."])
+    async def test_a_community_blacklisting_writes_nothing_on_chain(self, bot_module, monkeypatch, reason):
+        result = {"accepted": True, "reason": reason, "blacklisted": True, "reports": 3, "needed": 3}
+        text, recorder, attestor = await self._report(bot_module, monkeypatch, result)
 
-        text = update.message.reply_text.await_args.args[0]
         assert "Address Blacklisted" in text
+        assert "This address now shows as reported by 3 users in scans. It is not confirmed as a scam." in text
+        assert "known scam" not in text
         assert "On-chain recording" not in text
         assert "bscscan.com" not in text
-        recorder.record_scan_fire_and_forget.assert_awaited_once_with(address, "high", "report")
+        recorder.record_scan_fire_and_forget.assert_not_awaited()
+        attestor.attest_fire_and_forget.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_report_of_an_admin_confirmed_address_says_it_is_confirmed(self, bot_module, monkeypatch):
+        result = {
+            "accepted": True, "reason": "Already blacklisted.", "blacklisted": True, "reports": 0, "needed": 3,
+            "confirmed": True,
+        }
+        text, recorder, attestor = await self._report(bot_module, monkeypatch, result)
+
+        assert "This address is confirmed as a scam." in text
+        assert "reported by 0 users" not in text
+        recorder.record_scan_fire_and_forget.assert_not_awaited()
+        attestor.attest_fire_and_forget.assert_not_awaited()
+
+
+COMMUNITY_MATCH = {
+    "type": "community_reports", "reason": "Reported by 3 users", "source": "ShieldBot", "severity": "medium",
+    "reports": 3,
+}
+ADMIN_MATCH = {"type": "Local Blacklist", "reason": "Confirmed scam address", "source": "ShieldBot", "severity": "block"}
+
+
+class TestScanResultNamesCommunityReports:
+    @staticmethod
+    def _scan(matches, warnings):
+        return {
+            "address": "0x" + "a" * 40, "is_contract": True, "is_verified": True, "risk_level": "medium",
+            "risk_score": 40, "status": "ok", "coverage": {"scam_database": True}, "checks": {},
+            "scam_matches": matches, "warnings": warnings,
+        }
+
+    def test_a_community_report_is_not_a_scam_database_match(self, bot_module):
+        text = bot_module.format_scan_result(self._scan([COMMUNITY_MATCH], ["Reported by 3 users"]))
+        assert "scam database match" not in text
+        assert text.count("Reported by 3 users") == 1
+
+    def test_database_matches_are_counted_apart_from_community_reports(self, bot_module):
+        text = bot_module.format_scan_result(self._scan(
+            [ADMIN_MATCH, COMMUNITY_MATCH], ["Found 1 scam database match(es)", "Reported by 3 users"],
+        ))
+        assert "Found 1 scam database match(es)" in text
+        assert "Confirmed scam address" in text
+        assert text.count("Reported by 3 users") == 1
 
 
 class TestChainPrefixHelp:

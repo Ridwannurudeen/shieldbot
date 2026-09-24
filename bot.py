@@ -35,6 +35,7 @@ from core.telegram_formatter import (
     CONTROL_CHARACTERS, describe_impostor_check, escape_markdown, escape_markdown_lines, format_full_report,
 )
 from core.extension_formatter import is_scan_incomplete
+from core.risk_engine import database_matches, medium_matches
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 from services.robinhood_assets import with_impostor_check
 from services.mempool_service import supports_pending_transactions
@@ -359,21 +360,21 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ {result['reason']}")
         return
 
+    # A crowd report writes nothing on chain: three accounts can manufacture one. Only an admin
+    # confirmation (POST /api/admin/blacklist) writes an on-chain 'report' record.
     if result["blacklisted"]:
+        status = "This address is confirmed as a scam." if result.get("confirmed") else (
+            f"This address now shows as reported by {result['reports']} users in scans. "
+            "It is not confirmed as a scam."
+        )
         response = f"""✅ **Scam Report — Address Blacklisted**
 
 **Address:** `{address}`
 **Reason:** {escape_markdown(reason)}
 **Reporter:** User {update.effective_user.id}
 
-This address has been added to our local blacklist.
-Future scans will flag it as a known scam.
+{status}
 """
-        # Record on-chain (fire-and-forget — non-blocking)
-        if onchain_recorder.is_available():
-            await onchain_recorder.record_scan_fire_and_forget(address, 'high', 'report')
-        if base_attestor.is_available():
-            await base_attestor.attest_fire_and_forget(address, 'high', 'report', source_chain_id=56)
     else:
         response = f"""📝 **Report Recorded**
 
@@ -1283,14 +1284,21 @@ def format_scan_result(result: dict) -> str:
         check_name = check.replace('_', ' ').title()
         response += f"{status_icon} {check_name}\n"
 
-    if result.get('scam_matches'):
-        response += f"\n⚠️ **Warning:** Found {len(result['scam_matches'])} scam database match(es)\n"
-        for match in result['scam_matches'][:3]:
+    scam_matches = database_matches(result.get('scam_matches'))
+    if scam_matches:
+        response += f"\n⚠️ **Warning:** Found {len(scam_matches)} scam database match(es)\n"
+        for match in scam_matches[:3]:
             response += f"• {escape_markdown(match['type'])}: {escape_markdown(match['reason'])}\n"
 
-    if result.get('warnings'):
+    # A community report is not a scam database match; it is named on its own, once.
+    reported = [match['reason'] for match in medium_matches(result.get('scam_matches'))]
+    for reason in reported:
+        response += f"\n⚠️ {escape_markdown(reason)}\n"
+
+    warnings = [warning for warning in result.get('warnings', []) if warning not in reported]
+    if warnings:
         response += "\n**Warnings:**\n"
-        for warning in result['warnings'][:5]:
+        for warning in warnings[:5]:
             response += f"• {escape_markdown(warning)}\n"
 
     # AI structured risk score

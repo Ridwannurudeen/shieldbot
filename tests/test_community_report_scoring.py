@@ -11,6 +11,7 @@ from core.analyzer import AnalyzerResult
 from core.calibration import CalibrationConfig
 from core.extension_formatter import format_extension_alert
 from core.risk_engine import RiskEngine
+from core.telegram_formatter import format_full_report
 from scanner.transaction_scanner import TransactionScanner
 from utils.ai_analyzer import _scam_match_count as ai_scam_match_count
 from utils.scam_db import ScamMatches
@@ -148,6 +149,25 @@ async def test_scan_admin_entry_is_a_scam_database_match(mock_web3_client):
     result = await _scan(mock_web3_client, [ADMIN])
     assert "Found 1 scam database match(es)" in result["warnings"]
     assert result["checks"]["scam_database_clean"] is False
+
+
+def _contract_section(report):
+    return report.split("Contract Analysis")[1].split("Market Intelligence")[0]
+
+
+@pytest.mark.parametrize(
+    "matches, hits",
+    [([COMMUNITY], None), ([ADMIN, COMMUNITY], "Scam DB Hits: 1")],
+)
+def test_full_report_counts_database_hits_apart_from_community_reports(matches, hits):
+    contract = {**CONTRACT, "scam_matches": matches, "coverage": {"scam_database": True}}
+    risk = RiskEngine().compute_composite_risk(contract, HONEYPOT, MARKET, ETHOS)
+    section = _contract_section(format_full_report(risk, contract, MARKET, ETHOS, HONEYPOT))
+    assert "Reported by 3 users" in section
+    if hits:
+        assert hits in section
+    else:
+        assert "Scam DB Hits" not in section
 
 
 def test_fallback_firewall_response_names_a_community_report_without_blocking():
