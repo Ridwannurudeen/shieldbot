@@ -51,6 +51,10 @@ _USER_REPORT_WINDOW = 86400  # 24 hours
 # A community entry lapses after 30 days unless an admin confirms it
 COMMUNITY_BLACKLIST_TTL = 30 * 86400
 
+# How often a process that runs no hunter sweep (the bot, and the API when the sweep runs in
+# workers.py) rereads the persisted blacklist: as often as the sweep prunes and reloads it.
+BLACKLIST_RELOAD_SECONDS = 1800
+
 
 def load_protected_addresses():
     """Import whitelisted routers / known-good addresses at startup."""

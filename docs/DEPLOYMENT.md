@@ -188,7 +188,9 @@ changes. Any other value stops the API at startup.
 
 The deployer indexer stays in every process: its queue is in memory and each process fills it with the contracts
 it scans itself. Verdicts the API or the bot publishes are queued in the database as before, and the drain in
-workers.py picks them up on its next poll, at most 10 seconds later when it is idle.
+workers.py picks them up on its next poll, at most 10 seconds later when it is idle. With `external` the API
+rereads the scam blacklist itself every 30 minutes, as the bot does, since the hunter sweep that reloads it runs in
+workers.py.
 
 With `external` the API holds none of the workers' memory. It says so instead of reporting zeros:
 

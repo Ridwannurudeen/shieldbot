@@ -40,6 +40,7 @@ from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 from services.robinhood_assets import with_impostor_check
 from services.mempool_service import supports_pending_transactions
 from utils.web3_client import UnsupportedChainError
+from utils.scam_db import BLACKLIST_RELOAD_SECONDS
 from utils.chain_info import (
     get_chain_name, get_explorer_url, get_dexscreener_slug,
     parse_chain_prefix,
@@ -95,9 +96,6 @@ LAUNCH_ALERT_MAX_AGE_SECONDS = 3600
 # before the last one; the outbox never queues an alert twice.
 LAUNCH_ALERT_OVERLAP_SECONDS = 60
 VERDICT_BASE_URL = "https://api.shieldbotsecurity.online"
-# The API's hunter prunes the persisted scam blacklist every 30 minutes; this process rereads it as
-# often, so admin confirmations and removals and the entries the API adds reach the bot's scans.
-BLACKLIST_RELOAD_SECONDS = 1800
 _LAUNCH_ALERT_HEADERS = {
     'blocked': '🔴 BLOCKED: high-risk Robinhood Chain launch',
     'watching': '🟡 WATCHING: medium-risk Robinhood Chain launch',

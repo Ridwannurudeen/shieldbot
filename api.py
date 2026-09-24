@@ -26,6 +26,7 @@ from typing import Optional, Dict, Any, List, Literal
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve_selector
 from utils.chain_info import get_chain_name, get_native_symbol
 from utils.web3_client import UnsupportedChainError
+from utils.scam_db import BLACKLIST_RELOAD_SECONDS
 from core.risk_engine import MEDIUM_MATCH_FLOOR, database_matches, medium_matches
 from services import rpc_guard
 from services.counterparty_service import code_kind
@@ -82,6 +83,9 @@ container: Optional[ServiceContainer] = None
 # BACKGROUND_WORKERS as the lifespan read it. With "external" the mempool monitor, the verdict drain, the
 # hunter and the launch watch run in workers.py, and this process holds none of their in-memory state.
 _background_workers = "api"
+# With "external" the hunter's sweep, which reloads the scam blacklist, runs in workers.py, so the API
+# rereads the blacklist itself in this task; None with "api".
+_blacklist_reload_task: Optional[asyncio.Task] = None
 _EXTERNAL_WORKERS_NOTE = (
     "Background work runs in the separate workers process (BACKGROUND_WORKERS=external), and this API "
     "process holds none of its in-memory state: the mempool counters and the launch watch's run state "
@@ -131,9 +135,24 @@ def _bind_globals(c: ServiceContainer):
     advisor = c.advisor
 
 
+async def _blacklist_reload_loop():
+    """Reload the persisted scam blacklist every BLACKLIST_RELOAD_SECONDS until cancelled, so entries
+    the bot or workers.py write reach this process's scans. Startup has just loaded it, so each pass
+    waits first."""
+    while True:
+        await asyncio.sleep(BLACKLIST_RELOAD_SECONDS)
+        try:
+            await container.scam_db.load_blacklist()
+        except Exception as e:
+            logger.error(
+                "Blacklist reload failed: %s\n%s",
+                type(e).__name__, "".join(traceback.format_tb(e.__traceback__)),
+            )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global container, _background_workers
+    global container, _background_workers, _blacklist_reload_task
     settings = Settings()
     container = ServiceContainer(settings)
     _bind_globals(container)
@@ -207,9 +226,18 @@ async def lifespan(app: FastAPI):
     if _background_workers == "api":
         await container.hunter.start()
         await container.launch_watch.start()
+        _blacklist_reload_task = None
+    else:
+        _blacklist_reload_task = asyncio.create_task(_blacklist_reload_loop())
 
     logger.info("ShieldAI Firewall API started")
     yield
+    if _blacklist_reload_task is not None:
+        _blacklist_reload_task.cancel()
+        try:
+            await _blacklist_reload_task
+        except asyncio.CancelledError:
+            pass
     await container.launch_watch.stop()
     await container.hunter.stop()
     await container.phishing_service.stop()
