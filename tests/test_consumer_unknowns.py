@@ -320,7 +320,7 @@ async def test_scan_endpoint_preserves_unknown_verdict(consumer_api, incomplete_
 
 
 @pytest.mark.asyncio
-async def test_confirmed_eoa_scan_and_firewall_fallback_render_safe(consumer_api, monkeypatch, mock_web3_client):
+async def test_confirmed_eoa_scan_renders_safe_and_the_degraded_fallback_caution(consumer_api, monkeypatch, mock_web3_client):
     from scanner.transaction_scanner import TransactionScanner
     api, _ = consumer_api
     mock_web3_client.is_contract.return_value = False
@@ -332,8 +332,8 @@ async def test_confirmed_eoa_scan_and_firewall_fallback_render_safe(consumer_api
     assert (response['risk_score'], response['confidence'], response['partial']) == (5, 95, False)
     assert response['risk_display'] == '5%'
     fallback = api._build_fallback_response({}, await scanner.scan_address('0x' + 'a' * 40), None, 56)
-    assert (fallback['status'], fallback['classification'], fallback['partial']) == ('ok', 'SAFE', False)
-    assert fallback['verdict'] == 'SAFE — Risk score 5/100'
+    assert (fallback['status'], fallback['classification'], fallback['partial']) == ('ok', 'CAUTION', False)
+    assert fallback['verdict'] == 'CAUTION — Risk score 5/100'
 
 
 @pytest.mark.asyncio

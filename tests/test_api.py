@@ -689,11 +689,11 @@ async def test_legacy_fallback_never_clears_a_transaction_specific_request(cache
     response = await api.firewall(
         api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40, value=value), SimpleNamespace(headers={}),
     )
-    assert response["classification"] == ("CAUTION" if specific else "SAFE")
+    # A degraded verdict is never SAFE; a transaction-specific one also says its checks did not run.
+    assert response["classification"] == "CAUTION"
     assert (TX_CHECKS_UNAVAILABLE in response["danger_signals"]) is specific
     # The verdict line must not contradict the classification, including the AI's own verdict.
-    if specific or not ai:
-        assert response["verdict"].startswith(response["classification"])
+    assert response["verdict"].startswith(response["classification"])
 
 
 @pytest.mark.asyncio

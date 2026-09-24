@@ -1304,15 +1304,17 @@ async def firewall(req: FirewallRequest, request: Request):
             if router_response:
                 return router_response
 
+        # The effective policy mode: the X-Policy-Mode header, or the server's default.
+        policy_mode = "BALANCED"
+        if container and container.policy_engine:
+            policy_mode = container.policy_engine.apply(
+                [], {}, mode_override=request.headers.get("X-Policy-Mode"),
+            )['policy_mode']
+
         # 2b. Check cache for recent result
         if container and container.db and not tx_specific:
             cached = await container.db.get_contract_score(to_addr, req.chainId, max_age_seconds=300)
             if cached and cached.get('category_scores', {}).get('_scan_metadata', {}).get('coverage'):
-                policy_mode = "BALANCED"
-                if container.policy_engine:
-                    policy_mode = container.policy_engine.apply(
-                        [], {}, mode_override=request.headers.get("X-Policy-Mode"),
-                    )['policy_mode']
                 # A full rescan costs provider calls, so only a caller with a valid API key can force one
                 # with STRICT. Anyone else is answered from the cached facts in STRICT mode.
                 if policy_mode != "STRICT" or not getattr(request.state, "api_key_info", None):
@@ -1626,6 +1628,7 @@ async def firewall(req: FirewallRequest, request: Request):
 
         response = _build_fallback_response(
             decoded, contract_scan, whitelisted, req.chainId, transaction_specific=tx_specific,
+            policy_mode=policy_mode,
         )
         # The AI explains a known verdict and never sets it: of its reply only the prose is kept.
         if response["status"] == "ok" and ai_analyzer and ai_analyzer.is_available():
@@ -2985,10 +2988,16 @@ def _extract_raw_checks(scan: Dict) -> Dict:
 # The legacy scan sees only the target, never the transaction's spender, payment or signature, so
 # it cannot clear a transaction-specific request.
 _TX_CHECKS_UNAVAILABLE = "Transaction checks unavailable: the spender, payment or signature was not analysed"
+# Nor does it check the scam database (the token scanner never asks it) or the calldata's intent, so its
+# heuristics alone never clear a transaction.
+_FULL_ANALYSIS_UNAVAILABLE = (
+    "Full analysis unavailable: heuristic results only, scam database and calldata intent not checked"
+)
 
 
 def _build_fallback_response(
     decoded: Dict, scan: Dict, whitelisted: Optional[str], chain_id: int, transaction_specific: bool = False,
+    policy_mode: str = "BALANCED",
 ) -> Dict:
     """Build a firewall response from the legacy scan when the analysis pipeline failed. The score and
     classification come from the scan's heuristics and the band table only."""
@@ -3026,11 +3035,21 @@ def _build_fallback_response(
     if whitelisted:
         risk_score = max(0, risk_score - 20)
 
+    # STRICT blocks a degraded analysis, as core.policy does an incomplete one.
+    strict = policy_mode == 'STRICT'
+    if strict:
+        risk_score = max(risk_score, verdicts.STRICT_BLOCK_SCORE)
+        danger_signals.insert(0, 'Policy override: composite analysis unavailable')
+
     alert = format_extension_alert({**scan, 'rug_probability': risk_score})
-    classification = alert['risk_classification']
-    if transaction_specific and classification == verdicts.SAFE:
+    classification = verdicts.BLOCK_RECOMMENDED if strict else alert['risk_classification']
+    action = alert['recommended_action']
+    if classification == verdicts.SAFE:
         classification = verdicts.CAUTION
-        danger_signals.append(_TX_CHECKS_UNAVAILABLE)
+        danger_signals.append(_FULL_ANALYSIS_UNAVAILABLE)
+        action = f'{_FULL_ANALYSIS_UNAVAILABLE}. Review the transaction before proceeding.'
+        if transaction_specific:
+            danger_signals.append(_TX_CHECKS_UNAVAILABLE)
 
     return {
         **_coverage_fields(alert),
@@ -3047,11 +3066,12 @@ def _build_fallback_response(
             "post_tx_state": "AI analysis unavailable — review manually",
         },
         "analysis": "AI analysis unavailable. Showing heuristic results only.",
-        "plain_english": alert['recommended_action'],
+        "plain_english": action,
         "verdict": (f"{classification} — {alert['risk_display']}" if alert['status'] == 'unknown'
                     else f"{classification} — Risk score {risk_score}/100"),
         "raw_checks": _extract_raw_checks(scan),
         "asset_delta": [],
+        "policy_mode": policy_mode,
     }
 
 
