@@ -89,6 +89,15 @@ class RPCProxy:
                 authorization_list = tx_params.get("authorizationList")
 
             if not to_addr:
+                # An EIP-7702 transaction always has a recipient, so one without is no contract
+                # creation to forward unanalysed: like any delegation not judged HIGH, it is refused.
+                if authorization_list is not None:
+                    logger.warning(f"RPC Proxy BLOCKED EIP-7702 tx with no recipient (chain={chain_id})")
+                    return self._error_response(
+                        rpc_id, -32003,
+                        "Transaction blocked by ShieldBot firewall — "
+                        "EIP-7702 delegation not forwarded (no recipient)"
+                    )
                 # Contract creation — forward without analysis
                 return await self._forward(upstream_rpc, payload, chain_id)
 

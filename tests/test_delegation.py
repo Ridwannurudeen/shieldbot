@@ -288,8 +288,8 @@ def _proxy(risk_level):
     return proxy
 
 
-def _send(authorizations):
-    params = {"to": SENDER, "from": SENDER, "value": "0x0"}
+def _send(authorizations, to=SENDER):
+    params = {"to": to, "from": SENDER, "value": "0x0"}
     if authorizations is not None:
         params["authorizationList"] = authorizations
     return {"jsonrpc": "2.0", "id": 1, "method": "eth_sendTransaction", "params": [params]}
@@ -298,11 +298,13 @@ def _send(authorizations):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("risk_level", ["LOW", "MEDIUM"])
 @pytest.mark.parametrize("authorizations", [[{"address": DELEGATE}], [], 7], ids=["list", "empty", "not-a-list"])
-async def test_the_rpc_proxy_never_forwards_a_delegation_it_did_not_judge_high(risk_level, authorizations):
+@pytest.mark.parametrize("to", [SENDER, ""], ids=["recipient", "no-recipient"])
+async def test_the_rpc_proxy_never_forwards_a_delegation_it_did_not_judge_high(risk_level, authorizations, to):
     # A delegation's floor makes the verdict HIGH; one that is not HIGH means the floor did not
-    # reach the verdict (an analyzer error, say), so the proxy refuses rather than forward it.
+    # reach the verdict (an analyzer error, say), so the proxy refuses rather than forward it. With
+    # no recipient it is not a contract creation to forward unanalysed: a type 4 transaction has one.
     proxy = _proxy(risk_level)
-    result = await proxy.handle_request(1, _send(authorizations))
+    result = await proxy.handle_request(1, _send(authorizations, to))
     assert result["error"]["code"] == -32003
     assert "EIP-7702" in result["error"]["message"]
     proxy._forward.assert_not_awaited()
