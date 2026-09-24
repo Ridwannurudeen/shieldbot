@@ -284,6 +284,9 @@ async function handleAnalyze(tx) {
     chrome.storage.local.get({ policyMode: "BALANCED" }, resolve);
   });
 
+  // The only wait on the analysis path that can be long. It must stay below
+  // content.js's DECISION_WINDOW_MS (50 s), after which a result is shown as
+  // timed out, and inject.js's 60-second fail-closed limit.
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {

@@ -622,6 +622,7 @@ def test_a_flood_of_forged_intercepts_cannot_push_out_a_real_request():
 """
     )
 
+
 @pytest.mark.parametrize("top", [True, False], ids=["top-frame", "child-frame"])
 def test_only_the_top_frame_checks_for_phishing(top):
     run_node(
@@ -637,6 +638,39 @@ def test_only_the_top_frame_checks_for_phishing(top):
 """,
         top,
     )
+
+
+def test_analysis_deadlines_nest_inside_each_other():
+    import re
+
+    content = (ROOT / "extension" / "content.js").read_text(encoding="utf-8")
+    inject = (ROOT / "extension" / "inject.js").read_text(encoding="utf-8")
+    window = int(re.search(r"DECISION_WINDOW_MS = (\d+);", content).group(1))
+    ceiling = int(re.search(r'finish\("block"\), (\d+)\)', inject).group(1))
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for extension JavaScript regression tests")
+    script = r"""
+const fs = require('fs'), vm = require('vm');
+let listener; const waits = [];
+const context = vm.createContext({
+  chrome: {runtime: {onInstalled: {addListener() {}}, onMessage: {addListener(fn) { listener = fn; }}},
+    storage: {local: {get(defaults, cb) { cb(defaults); }, set() {}}}, permissions: {contains: async () => true}},
+  URL, AbortSignal: {timeout: ms => { waits.push(ms); return null; }},
+  fetch: async () => ({ok: true, json: async () => ({status: 'ok'})}),
+});
+vm.runInContext(fs.readFileSync('extension/background.js', 'utf8'), context);
+listener({type: 'SHIELDAI_ANALYZE', tx: {to: '0x' + 'a'.repeat(40), chainId: 56}}, {}, () => {
+  console.log(JSON.stringify(waits));
+});
+"""
+    result = subprocess.run([node, "-e", script], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
+    waits = json.loads(result.stdout.strip() or "[]")
+    assert waits, result.stderr
+    # The background worker's only wait on the analysis path ends well before content.js gives
+    # up on a result, which in turn is before inject.js fails closed.
+    assert sum(waits) + 10000 <= window < ceiling, (waits, window, ceiling)
+
 
 INJECT_HARNESS = (
     FAKE_DOM
