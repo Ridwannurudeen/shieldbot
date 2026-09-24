@@ -297,13 +297,17 @@ function parseUrl(value) {
   }
 }
 
-// The text a personal_sign message signs: hex is decoded as UTF-8, as wallets
-// do, and anything else is signed as written. null when the bytes are not text.
+// The text a personal_sign message signs, read as MetaMask reads it: a string
+// of hex digits, with or without 0x, is bytes (an odd count padded with a
+// leading 0) decoded as UTF-8, and anything else is signed as written. null
+// when the bytes are not text.
 function signedText(data) {
   if (typeof data !== "string") return null;
-  if (!/^0x([0-9a-f]{2})*$/i.test(data)) return data;
-  const bytes = new Uint8Array((data.length - 2) / 2);
-  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(data.slice(2 + i * 2, 4 + i * 2), 16);
+  const digits = data.replace(/^0x/i, "");
+  if (!/^[0-9a-f]+$/i.test(digits)) return data;
+  const even = digits.length % 2 ? `0${digits}` : digits;
+  const bytes = new Uint8Array(even.length / 2);
+  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(even.slice(i * 2, i * 2 + 2), 16);
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {

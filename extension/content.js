@@ -640,14 +640,17 @@
     }
   }
 
-  // The text a signed message says, as wallets read it: hex is decoded as
-  // UTF-8 and any other string is signed as written. null when it is not
-  // readable text: not a string, hex that is not UTF-8, or text holding a
-  // control character other than a tab or a line break.
+  // The text a signed message says, read as MetaMask reads it: a string of
+  // hex digits, with or without 0x, is bytes (an odd count padded with a
+  // leading 0) decoded as UTF-8, and any other string is signed as written.
+  // null when it is not readable text: not a string, bytes that are not
+  // UTF-8, or text holding a control character other than a tab or a line
+  // break.
   function readableText(data) {
     if (typeof data !== "string") return null;
-    if (!/^0x([0-9a-f]{2})*$/i.test(data)) return data;
-    const text = hexToUtf8(data);
+    const digits = data.replace(/^0x/i, "");
+    if (!/^[0-9a-f]+$/i.test(digits)) return data;
+    const text = hexToUtf8(digits.length % 2 ? `0${digits}` : digits);
     return text !== null && !/(?![\t\n\r])\p{Cc}/u.test(text) ? text : null;
   }
 
@@ -845,7 +848,8 @@
       const display = decoded === null ? String(raw) : decoded;
       const isBinary = decoded === null && String(raw).length > 2;
       opaque = signMethod === "personal_sign" && decoded === null;
-      opaqueHash = opaque && typeof raw === "string" && /^0x[0-9a-f]{64}$/i.test(raw);
+      // 63 or 64 hex digits, with or without 0x, are the 32 bytes the wallet signs.
+      opaqueHash = opaque && typeof raw === "string" && /^(0x)?[0-9a-f]{63,64}$/i.test(raw);
 
       bodyHtml = `
         <div class="shieldai-section">

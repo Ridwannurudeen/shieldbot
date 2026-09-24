@@ -42,9 +42,13 @@ version.
   `personal_sign` message as text. What the overlay sees for itself only raises the API's verdict:
   typed data that cannot be read is shown as UNPARSEABLE TYPED DATA at High Risk or above, and
   `eth_sign`, which signs a raw hash that can be a transaction, is always Block Recommended with a
-  note saying so. A `personal_sign` message that is not readable text (hex that is not UTF-8, or
-  text with a control character other than a tab or a line break) is at least High Risk and shown
-  as hex, and one of exactly 32 such bytes, which can be a hash a contract accepts as the user's
+  note saying so. A `personal_sign` message is read as MetaMask signs it: a string of hex digits,
+  with or without `0x` or `0X`, is bytes (an odd count padded with a leading 0), and anything else
+  is the text as written, so `12345678` is four bytes and `0x` alone is text. Rabby signs hex only
+  with a lowercase `0x` prefix, so for bare hex the warning there is stricter than needed, never
+  weaker. A message that is not readable text (bytes that are not UTF-8, or text with a control
+  character other than a tab or a line break) is at least High Risk and shown as sent, and one of
+  exactly 32 such bytes, which can be a hash a contract accepts as the user's
   signature, is Block Recommended with the same kind of note; a 32-character text message is not
   raised. The text of a `personal_sign` message and the hash of an `eth_sign` request are not
   sent, nor is the signer's address for those two methods (the API judges them by their method),

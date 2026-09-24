@@ -939,6 +939,14 @@ PAYLOADS = {
     "32-char-ascii-sign-in": ("0x" + "Sign in to dapp.example now 1234".encode().hex(), "SAFE"),
     "tabs-and-line-breaks": ("0x" + "line one\nline two\ttab\r\nend".encode().hex(), "SAFE"),
     "plain-text": ("hello world", "SAFE"),
+    # MetaMask signs any string of hex digits as bytes, with or without 0x (an odd count padded with
+    # a leading 0), and anything else as written; the overlay reads the message the same way.
+    "bare-hex-32-bytes": (HASH_32_BYTES[2:], "BLOCK_RECOMMENDED"),
+    "uppercase-prefix-32-bytes": ("0X" + HASH_32_BYTES[2:], "BLOCK_RECOMMENDED"),
+    "odd-length-32-bytes": ("0x" + HASH_32_BYTES[3:], "BLOCK_RECOMMENDED"),
+    "bare-hex-text": ("hello world".encode().hex(), "SAFE"),
+    "all-digit-text-signed-as-bytes": ("12345678", "HIGH_RISK"),
+    "just-0x-signed-as-text": ("0x", "SAFE"),
 }
 
 
@@ -963,7 +971,8 @@ def test_a_personal_sign_payload_that_is_not_readable_text_is_raised(payload):
   if (expected === 'HIGH_RISK') assert(html.includes('UNREADABLE MESSAGE'), html);
   if (expected === 'SAFE') assert(!html.includes('UNREADABLE MESSAGE') && !html.includes('RAW HASH'), html);
   // What is signed is shown as the wallet signs it: text as text, anything else as hex.
-  if (!data.startsWith('0x')) assert(html.includes('hello world'), html);
+  // Text is shown as the text the wallet signs, hex-encoded or not.
+  if (['hello world', '68656c6c6f20776f726c64'].includes(data)) assert(html.includes('hello world'), html);
   if (expected !== 'SAFE') assert(html.includes(data), html);
 """,
         [data, expected],
@@ -1137,4 +1146,60 @@ def test_a_sign_in_message_whose_domain_or_layout_cannot_be_read_stays_unknown(l
   assert.equal(bodies.length, 1, 'the signature was not analysed by the API');
 """,
         [layout, UNREADABLE_LAYOUTS[layout]],
+    )
+
+
+# MetaMask signs a personal_sign message that is a string of hex digits as bytes, with or without
+# 0x or 0X, an odd count padded with a leading 0 (signature-controller normalizePersonalMessageData,
+# eth-sig-util toBuffer). A sign-in message sent that way is what the wallet signs and a backend
+# accepts, so the check reads it the same way.
+HEX_FORMS = {
+    "bare-hex": "hex(text).slice(2)",
+    "uppercase-prefix": "'0X' + hex(text).slice(2)",
+    "odd-length": "'0x' + hex('\\n' + text).slice(3)",
+}
+
+
+@pytest.mark.parametrize("form", list(HEX_FORMS))
+def test_a_sign_in_message_is_read_as_the_wallet_signs_it(form):
+    run_node(
+        BACKGROUND_HARNESS
+        + SIWE
+        + r"""
+(async () => {
+  const [form, expression] = JSON.parse(process.argv[1]);
+  let text = siwe({domain: 'wallet-login.example'});
+  const foreign = await respond(signIn(eval(expression)));
+  assert.equal(foreign.result.siwe.state, 'mismatch', JSON.stringify(foreign.result.siwe));
+  assert.equal(foreign.result.classification, 'BLOCK_RECOMMENDED');
+  assert.equal(bodies.length, 0, 'the API was asked although the verdict cannot change');
+  text = siwe();
+  const own = await respond(signIn(eval(expression)));
+  // For this site it goes to the API, whose verdict stands; an odd-length message starts with a
+  // line break, so it is not EIP-4361 and comes back Unknown.
+  assert.equal(bodies.length, 1);
+  if (form === 'odd-length') {
+    assert.equal(own.result.siwe.state, 'unreadable');
+  } else {
+    assert.equal(own.result.siwe, undefined);
+    assert.equal(own.result.classification, 'SAFE');
+  }
+""",
+        [form, HEX_FORMS[form]],
+    )
+
+
+def test_just_0x_and_other_text_are_signed_as_written():
+    run_node(
+        BACKGROUND_HARNESS
+        + SIWE
+        + r"""
+(async () => {
+  // Not a string of hex digits: signed as the text it is, so a sign-in message written out is read.
+  const {result} = await respond(signIn(siwe({domain: 'wallet-login.example'})));
+  assert.equal(result.siwe.state, 'mismatch');
+  for (const data of ['0x', 'hello']) {
+    assert.equal((await respond(signIn(data))).result.siwe, undefined);
+  }
+"""
     )
