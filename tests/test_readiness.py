@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -32,12 +34,21 @@ def database(error=None, hangs=False, queries=None):
     return SimpleNamespace(_db=SimpleNamespace(execute=execute))
 
 
-def chains(answers: dict, asked: list):
-    """A web3 client whose chains answer eth_blockNumber when ``answers[chain_id]`` is true."""
+HANGS = "hangs"
+
+
+def chains(answers: dict, asked: list, released=None, threads=None):
+    """A web3 client whose chains answer eth_blockNumber: True answers, False refuses, and HANGS
+    blocks until ``released`` is set, like an RPC that accepts the connection and never replies."""
 
     def web3_for(chain_id):
         def get_block_number():
             asked.append(chain_id)
+            if threads is not None:
+                threads.append(threading.current_thread().name)
+            if answers[chain_id] == HANGS:
+                released.wait(timeout=10)
+                raise TimeoutError(f"{SECRET_URL} read timed out")
             if not answers[chain_id]:
                 raise ConnectionError(f"{SECRET_URL} refused the connection")
             return 1234
@@ -48,6 +59,14 @@ def chains(answers: dict, asked: list):
     client.get_supported_chain_ids.return_value = list(answers)
     client.get_web3.side_effect = web3_for
     return client
+
+
+@pytest.fixture
+def released():
+    """Set at teardown, so no hung probe outlives its test."""
+    event = threading.Event()
+    yield event
+    event.set()
 
 
 @pytest.fixture
@@ -79,8 +98,48 @@ def test_ready_when_the_database_and_one_chain_answer(serve):
         "checks": {"database": "ok", "rpc": "ok", "robinhood_rpc": "ok"},
     }
     assert queries == ["SELECT 1"]
-    # Chains are asked one at a time, and the first answer ends the check.
-    assert asked == [56, 1]
+    assert 1 in asked or 8453 in asked
+
+
+def test_one_chain_answering_is_enough_while_another_hangs(serve, released):
+    asked = []
+    client = serve(database(), chains({56: HANGS, 1: True}, asked, released))
+    started = time.monotonic()
+    response = client.get("/api/ready")
+    assert time.monotonic() - started < api.READY_TIMEOUT_SECONDS
+    assert response.status_code == 200
+    assert response.json()["checks"]["rpc"] == "ok"
+    assert sorted(asked) == [1, 56]
+
+
+def test_every_chain_hanging_is_not_ready_after_the_timeout(serve, released):
+    client = serve(database(), chains({56: HANGS, 1: HANGS, 8453: HANGS}, [], released))
+    started = time.monotonic()
+    response = client.get("/api/ready")
+    assert time.monotonic() - started < api.READY_TIMEOUT_SECONDS + 1
+    assert response.status_code == 503
+    assert response.json()["checks"]["rpc"] == "failed"
+
+
+def test_the_probes_run_on_the_readiness_threads(serve):
+    threads = []
+    serve(database(), chains({56: True, 1: True}, [], threads=threads)).get("/api/ready")
+    assert threads
+    assert all(name.startswith("readiness") for name in threads)
+
+
+def test_probes_still_waiting_for_a_thread_are_cancelled(serve, released, monkeypatch):
+    # One thread, held by the hanging chain: the other chains' probes wait in the queue until the
+    # check gives up, and are then cancelled rather than sent later.
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="readiness")
+    monkeypatch.setattr(api, "_READY_EXECUTOR", executor)
+    monkeypatch.setattr(api, "READY_TIMEOUT_SECONDS", 0.2)
+    asked = []
+    client = serve(database(), chains({56: HANGS, 1: True, 8453: True}, asked, released))
+    assert client.get("/api/ready").status_code == 503
+    released.set()
+    executor.shutdown(wait=True)
+    assert asked == [56]
 
 
 def test_not_ready_when_the_database_fails(serve):
@@ -93,12 +152,14 @@ def test_not_ready_when_the_database_fails(serve):
 
 
 def test_not_ready_when_no_chain_answers(serve):
+    # Robinhood Chain's RPC would answer, but its requests are paced by the shared RPC guard,
+    # which a readiness probe must not bypass, so it is never asked.
     asked = []
-    client = serve(database(), chains({56: False, 1: False, 4663: False}, asked))
+    client = serve(database(), chains({56: False, 1: False, 4663: True}, asked))
     response = client.get("/api/ready")
     assert response.status_code == 503
     assert response.json()["checks"] == {"database": "ok", "rpc": "failed", "robinhood_rpc": "ok"}
-    assert asked == [56, 1, 4663]
+    assert sorted(asked) == [1, 56]
 
 
 def test_a_hanging_check_is_cut_at_the_timeout(serve, monkeypatch):

@@ -14,6 +14,7 @@ import random
 import re
 import traceback
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException, Request
@@ -690,6 +691,10 @@ READY_CACHE_SECONDS = 5
 READY_TIMEOUT_SECONDS = 2
 _ready_lock = asyncio.Lock()
 _ready_cache = {"body": None, "expires_at": 0.0}
+# The RPC probes' own threads, so a hung RPC never holds a worker of the default pool that scans
+# use. Eight: the seven chains probed at once, and one more for a probe still hanging from the
+# previous check (an RPC request times out after 10 s, twice the cache period).
+_READY_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="readiness")
 
 
 async def _database_answers() -> bool:
@@ -698,19 +703,39 @@ async def _database_answers() -> bool:
 
 
 async def _any_rpc_answers() -> bool:
-    """Ask each chain's RPC for eth_blockNumber in turn until one answers.
+    """Ask every chain's RPC for eth_blockNumber at once; True on the first answer.
 
-    One chain at a time, so an RPC that hangs holds at most one worker thread. Readiness is not a
-    provider lookup, so the Unknown ledger does not count it.
+    Robinhood Chain is left out: its RPC is paced by the shared RPC guard, which a probe must not
+    bypass. The probes run on _READY_EXECUTOR. Once one answers, or the check is cut at its
+    timeout, the probes still queued for a thread are cancelled; one already sending finishes at
+    the RPC request timeout. Readiness is not a provider lookup, so the Unknown ledger does not
+    count it.
     """
+    from services.launch_discovery import CHAIN_ID as ROBINHOOD_CHAIN_ID
+
     loop = asyncio.get_running_loop()
-    for chain_id in container.web3_client.get_supported_chain_ids():
-        try:
-            await loop.run_in_executor(None, container.web3_client.get_web3(chain_id).eth.get_block_number)
-            return True
-        except Exception as e:
-            logger.warning("Readiness: chain %s RPC did not answer: %s", chain_id, type(e).__name__)
-    return False
+    web3_client = container.web3_client
+    probes = {
+        loop.run_in_executor(_READY_EXECUTOR, web3_client.get_web3(chain_id).eth.get_block_number): chain_id
+        for chain_id in web3_client.get_supported_chain_ids()
+        if chain_id != ROBINHOOD_CHAIN_ID
+    }
+    try:
+        pending = set(probes)
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for probe in done:
+                if probe.exception() is not None:
+                    logger.warning(
+                        "Readiness: chain %s RPC did not answer: %s",
+                        probes[probe], type(probe.exception()).__name__,
+                    )
+            if any(probe.exception() is None for probe in done):
+                return True
+        return False
+    finally:
+        for probe in probes:
+            probe.cancel()
 
 
 async def _check_within_timeout(check) -> bool:
@@ -742,7 +767,9 @@ async def ready():
     """Readiness: 200 when this process can serve scans, 503 when it cannot.
 
     Ready means the database answers SELECT 1 and at least one chain's RPC answers eth_blockNumber,
-    each within READY_TIMEOUT_SECONDS; `checks` has each as "ok" or "failed". It also lists the
+    each within READY_TIMEOUT_SECONDS; `checks` has each as "ok" or "failed". The RPCs are asked
+    at once and the first answer is enough, so one that hangs cannot hold the check up; Robinhood
+    Chain's is not asked, as its requests go through the shared RPC guard. It also lists the
     Robinhood Chain RPC guard (`robinhood_rpc`) and every provider circuit breaker used so far
     (core.circuit_breaker, named provider or provider:chain_id) as "ok" or "open". An open breaker
     does not make the process unready: that provider's lookups come back Unknown, never clean.
