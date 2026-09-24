@@ -17,6 +17,8 @@ from eval.dataset import load_dataset
 FIXTURES = Path("tests/fixtures/benchmark_onchain")
 DATASET = FIXTURES / "dataset.json"
 REPLIES = json.loads((FIXTURES / "replies.json").read_text(encoding="utf-8"))
+# The owner of the tokens in the fixture's zero-value poisoning transfer.
+VICTIM = "0x64e6824a09ecc262c93833e1532488af52e8fc1e"
 
 
 def replay(replies, changes=None):
@@ -47,10 +49,28 @@ def replay(replies, changes=None):
 def test_the_recorded_replies_confirm_every_fact_of_the_fixture(capsys):
     assert verify.main(["--dataset", str(DATASET)], post=replay(REPLIES)) == 0
     out = capsys.readouterr().out
-    assert "4 entries, 4 with on-chain facts" in out and "0 differ" in out
+    assert "4 entries, 4 with on-chain facts: 11 facts, 0 differ, 0 could not be read" in out
     checks = [c for e in load_dataset(str(DATASET)) for c in verify.checks_for(e)[0]]
     assert {c.fact for c in checks} >= {"code", "symbol", "name"}
     assert sum(c.method == "eth_getLogs" for c in checks) == 2
+    assert [c.fact for c in checks if c.method == "eth_getTransactionByHash"] == [
+        "sender of Transfer log 51735216/147"
+    ]
+
+
+def test_a_poisoning_transfer_sent_by_someone_else_is_reported(capsys):
+    stranger = replay(REPLIES, {"eth_getTransactionByHash": {"result": {"from": "0x" + "ab" * 20}}})
+    assert verify.main(["--dataset", str(DATASET)], post=stranger) == 1
+    out = capsys.readouterr().out
+    assert out.count("DIFFERS") == 1 and "sender of Transfer log 51735216/147" in out
+    assert "0x" + "ab" * 20 in out
+
+
+def test_a_poisoning_transfer_the_owner_sent_themselves_is_reported(capsys):
+    owner = replay(REPLIES, {"eth_getTransactionByHash": {"result": {"from": VICTIM.upper().replace("0X", "0x")}}})
+    assert verify.main(["--dataset", str(DATASET)], post=owner) == 1
+    out = capsys.readouterr().out
+    assert out.count("DIFFERS") == 1 and f"{VICTIM}, the tokens' owner" in out
 
 
 def test_a_fact_that_no_longer_holds_is_reported(capsys):
@@ -69,7 +89,7 @@ def test_a_failed_read_is_never_counted_as_confirmed(capsys):
     out = capsys.readouterr().out
     # symbol() and name() of two tokens; an unanswered call is unread, never a match or a mismatch.
     assert out.count("UNREAD") == 4 and "execution reverted" in out and "DIFFERS" not in out
-    assert "10 facts, 0 differ, 4 could not be read" in out
+    assert "11 facts, 0 differ, 4 could not be read" in out
 
 
 def test_an_rpc_that_refuses_the_request_leaves_its_facts_unread(capsys):
@@ -78,7 +98,9 @@ def test_an_rpc_that_refuses_the_request_leaves_its_facts_unread(capsys):
 
     assert verify.main(["--dataset", str(DATASET)], post=refused) == 1
     out = capsys.readouterr().out
-    assert out.count("UNREAD") == 10 and "HTTP Error 403" in out
+    # The transaction behind a log that was never read is unread too, not assumed.
+    assert out.count("UNREAD") == 11 and "HTTP Error 403" in out
+    assert "its Transfer log was not found" in out
 
 
 def test_an_rpc_given_for_a_chain_reads_all_of_its_facts():
@@ -106,6 +128,18 @@ def test_a_log_that_is_gone_is_reported(capsys):
     assert capsys.readouterr().out.count("'no such log'") == 2
 
 
+def test_a_log_a_reorganisation_removed_does_not_count(capsys):
+    removed = [
+        {**reply, "result": [{**log, "removed": True} for log in reply["result"]]}
+        if reply["method"] == "eth_getLogs"
+        else reply
+        for reply in REPLIES
+    ]
+    assert verify.main(["--dataset", str(DATASET)], post=replay(removed)) == 1
+    out = capsys.readouterr().out
+    assert out.count("'no such log'") == 2 and out.count("UNREAD") == 1
+
+
 def test_an_onchain_source_without_a_readable_fact_is_reported(tmp_path, capsys):
     data = json.loads(DATASET.read_text(encoding="utf-8"))
     entry = data["entries"][0]
@@ -126,6 +160,8 @@ def test_every_committed_entry_states_a_fact_the_script_can_read():
         if entry.category == "address_poisoning":
             assert {c.fact for c in checks if c.method == "eth_getCode"} == {"code"}
             assert all(c.expected == 0 for c in checks if c.method == "eth_getCode")
+            [sender] = [c for c in checks if c.method == "eth_getTransactionByHash"]
+            assert sender.expected != sender.not_sender
 
 
 def test_no_runtime_module_imports_the_verifier():

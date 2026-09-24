@@ -8,12 +8,14 @@ evidence, in these forms; each is read again at the latest block:
   - "eth_getCode at block N returns K bytes of contract code": the address still holds K bytes of code.
   - "eth_getCode at block N returns no contract code": the address still holds none.
   - 'symbol() = "X"' and 'name() = "Y"': the token at the address still returns them.
-  - "Transfer log at block B, log index I: token T, from F, to X, value V": block B still holds that log.
+  - "Transfer log at block B, log index I: token T, from F, to X, value V": block B still holds that log
+    (a log a reorganisation removed does not count). When the text goes on "in a transaction sent by S",
+    the transaction that emitted the log was sent by S, and S is not F.
 An onchain source that states none of these is reported as unchecked, and a fact the RPC does not answer
 is reported as unread, so a fact is never counted as confirmed without being read. Free public RPCs serve
 old logs unevenly: --rpc CHAIN=URL reads a chain's facts from another RPC, such as an archive node. This
-only reads (eth_getCode, eth_call, eth_getLogs); it computes no score, and nothing that computes one
-imports it. eval/README.md says when to run it.
+only reads (eth_getCode, eth_call, eth_getLogs, eth_getTransactionByHash); it computes no score, and
+nothing that computes one imports it. eval/README.md says when to run it.
 """
 
 import argparse
@@ -41,12 +43,18 @@ _NAME = re.compile(r'name\(\) = "([^"]*)"')
 _LOG = re.compile(
     r"Transfer log at block (\d+), log index (\d+): token (0x[0-9a-fA-F]{40}), "
     r"from (0x[0-9a-fA-F]{40}), to (0x[0-9a-fA-F]{40}), value (\d+)"
+    r"(?:, in a transaction sent by (0x[0-9a-fA-F]{40}))?"
 )
+SENDER_OF = "sender of "
 
 
 @dataclass
 class Check:
-    """One on-chain fact of one entry: the JSON-RPC call that reads it and what the evidence says it returns."""
+    """One on-chain fact of one entry: the JSON-RPC call that reads it and what the evidence says it returns.
+
+    A "sender of" check reads the transaction that emitted a Transfer log, so its params (the transaction
+    hash) are only known once that log is read; ``not_sender`` is the tokens' owner, who must not have sent it.
+    """
 
     chain_id: int
     address: str
@@ -55,6 +63,7 @@ class Check:
     method: str
     params: list
     expected: object
+    not_sender: str = None
 
 
 def checks_for(entry):
@@ -84,22 +93,36 @@ def checks_for(entry):
                         match.group(1),
                     )
                 )
-        for block, index, token, sender, receiver, value in _LOG.findall(evidence):
+        senders = []
+        for block, index, token, owner, receiver, value, tx_sender in _LOG.findall(evidence):
             query = {
                 "address": token,
-                "topics": [TRANSFER_TOPIC, _topic(sender), _topic(receiver)],
+                "topics": [TRANSFER_TOPIC, _topic(owner), _topic(receiver)],
                 "fromBlock": hex(int(block)),
                 "toBlock": hex(int(block)),
             }
-            found.append(
-                (f"Transfer log {block}/{index}", "eth_getLogs", [query], (int(index), int(value)))
-            )
+            fact = f"Transfer log {block}/{index}"
+            found.append((fact, "eth_getLogs", [query], (int(index), int(value))))
+            if tx_sender:
+                senders.append(
+                    Check(
+                        entry.chain_id,
+                        entry.address,
+                        url,
+                        SENDER_OF + fact,
+                        "eth_getTransactionByHash",
+                        [],
+                        tx_sender.lower(),
+                        owner.lower(),
+                    )
+                )
         if not found:
             unchecked.append(evidence)
         checks.extend(
             Check(entry.chain_id, entry.address, url, fact, method, params, expected)
             for fact, method, params, expected in found
         )
+        checks.extend(senders)
     return checks, unchecked
 
 
@@ -116,8 +139,37 @@ def http_post(url, payload):
 
 def run_checks(checks, post=http_post):
     """(differs, unread): each check whose result is not what its evidence says, with what was read; and each
-    check its RPC did not answer, with the reason."""
-    differs, unread = [], []
+    check its RPC did not answer, with the reason.
+
+    Sender checks run second, one eth_getTransactionByHash per Transfer log that was found; the sender of a
+    log that was not found is unread.
+    """
+    differs, unread, hashes = [], [], {}
+    senders = [c for c in checks if c.fact.startswith(SENDER_OF)]
+    for check, result in _read([c for c in checks if c not in senders], post, unread):
+        if check.method == "eth_getLogs":
+            log = _matching_log(check, result)
+            if log:
+                hashes[(check.chain_id, check.address, check.fact)] = log["transactionHash"]
+        found = _observed(check, result)
+        if found != check.expected:
+            differs.append((check, found))
+    readable = []
+    for check in senders:
+        tx_hash = hashes.get((check.chain_id, check.address, check.fact[len(SENDER_OF) :]))
+        if tx_hash:
+            readable.append(replace(check, params=[tx_hash]))
+        else:
+            unread.append((check, "its Transfer log was not found"))
+    for check, result in _read(readable, post, unread):
+        found = _observed(check, result)
+        if found != check.expected:
+            differs.append((check, found))
+    return differs, unread
+
+
+def _read(checks, post, unread):
+    """(check, result) for each check its RPC answered, in batches per RPC; the rest are added to ``unread``."""
     by_url = {}
     for check in checks:
         by_url.setdefault(check.url, []).append(check)
@@ -139,10 +191,7 @@ def run_checks(checks, post=http_post):
                 if answer.get("result") is None:
                     unread.append((check, (answer.get("error") or {}).get("message", "no answer")))
                     continue
-                found = _observed(check, answer["result"])
-                if found != check.expected:
-                    differs.append((check, found))
-    return differs, unread
+                yield check, answer["result"]
 
 
 def _observed(check, result):
@@ -150,12 +199,23 @@ def _observed(check, result):
         return (len(result) - 2) // 2
     if check.method == "eth_call":
         return _decode_string(result)
+    if check.method == "eth_getTransactionByHash":
+        sender = str(result.get("from", "")).lower()
+        return f"{sender}, the tokens' owner" if sender == check.not_sender else sender
+    log = _matching_log(check, result)
+    if not log:
+        return "no such log"
+    data = log["data"]
+    return check.expected[0], int(data, 16) if data not in ("0x", "") else 0
+
+
+def _matching_log(check, logs):
+    """The log at the evidence's log index, unless a reorganisation removed it."""
     index, _ = check.expected
-    for log in result:
-        if int(log["logIndex"], 16) == index:
-            data = log["data"]
-            return index, int(data, 16) if data not in ("0x", "") else 0
-    return "no such log"
+    for log in logs:
+        if int(log["logIndex"], 16) == index and not log.get("removed"):
+            return log
+    return None
 
 
 def _decode_string(result):

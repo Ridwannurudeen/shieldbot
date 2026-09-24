@@ -150,5 +150,18 @@
       "latest"
     ],
     "result": "0x"
+  },
+  {
+    "url": "https://mainnet.base.org",
+    "method": "eth_getTransactionByHash",
+    "params": [
+      "0x9999a619969ae34ea72d2487833be7449f90c585fc560e28f13b1f545e72f890"
+    ],
+    "result": {
+      "hash": "0x9999a619969ae34ea72d2487833be7449f90c585fc560e28f13b1f545e72f890",
+      "blockNumber": "0x3156ab0",
+      "from": "0x61ab0f089883e6a111bfedffd08e5cb3dab61823",
+      "to": "0xfa4071b58d87cbc7af904f4c02f64318167655a2"
+    }
   }
 ]
