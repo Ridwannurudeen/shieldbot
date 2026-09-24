@@ -1587,6 +1587,12 @@ def test_a_request_taken_from_the_provider_prototype_is_checked_too(patch):
     await assert.rejects(pending, /blocked/);
   }
   await assert.rejects(inherited.call(undefined, tx), /blocked/);
+  // Called on the prototype itself there is no provider to check for, and the check stays put.
+  const onPrototype = inherited.call(Object.getPrototypeOf(wallet), tx);
+  onPrototype.catch(() => {});
+  await flush();
+  assert.equal(Object.getPrototypeOf(wallet).request, inherited, "a call on the prototype replaced its check");
+  await assert.rejects(onPrototype, /blocked/);
   // The user's Proceed reaches the wallet once, through the wallet's own request.
   const pending = inherited.call(wallet, tx);
   await flush();

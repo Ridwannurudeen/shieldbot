@@ -427,7 +427,8 @@
     if (typeof inherited !== "function" || inheritedRequestOf(inherited) !== undefined) return;
 
     const replacement = function (args) {
-      wrapProvider(this);
+      // Called on the prototype itself, there is no provider to check for.
+      if (this !== owner) wrapProvider(this);
       const wrapper = wrapperOf(this);
       if (wrapper === undefined) {
         return new NativePromise((resolve, reject) => {
