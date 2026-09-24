@@ -71,6 +71,8 @@ class Settings(BaseSettings):
     # Bot settings
     risk_threshold: int = 70
     cache_duration: int = 300
+    # The API the bot reads live mempool data from; on the server uvicorn listens here.
+    shieldbot_api_url: str = "http://127.0.0.1:8000"
 
     # Policy mode (STRICT or BALANCED)
     policy_mode: str = "BALANCED"

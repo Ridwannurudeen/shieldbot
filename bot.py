@@ -14,6 +14,8 @@ import re
 import traceback
 from datetime import datetime, timezone
 
+import aiohttp
+
 try:
     from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
     from telegram.error import BadRequest, ChatMigrated, Forbidden, NetworkError, RetryAfter, TelegramError
@@ -34,6 +36,7 @@ from core.container import ServiceContainer
 from core.telegram_formatter import format_full_report
 from core.extension_formatter import is_scan_incomplete
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
+from services.mempool_service import supports_pending_transactions
 from utils.web3_client import UnsupportedChainError
 from utils.chain_info import (
     get_chain_name, get_explorer_url, get_dexscreener_slug,
@@ -538,6 +541,21 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text("❌ Error scanning approvals. Please try again later.")
 
 
+async def _fetch_mempool_data(chain_id):
+    """Read mempool alerts and counters from the API, whose process runs the only mempool monitor."""
+    params = {'limit': 10}
+    if chain_id is not None:
+        params['chain_id'] = chain_id
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+        async with session.get(f"{settings.shieldbot_api_url}/api/mempool/alerts", params=params) as resp:
+            resp.raise_for_status()
+            alerts = (await resp.json())['alerts']
+        async with session.get(f"{settings.shieldbot_api_url}/api/mempool/stats") as resp:
+            resp.raise_for_status()
+            stats = await resp.json()
+    return alerts, stats
+
+
 async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /threats command — show live mempool threat alerts."""
     # Optional chain filter
@@ -553,11 +571,21 @@ async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except UnsupportedChainError as e:
             await update.message.reply_text(str(e))
             return
+        if not supports_pending_transactions(chain_id):
+            await update.message.reply_text(
+                f"Mempool monitoring is not available on {get_chain_name(chain_id)}: it has no public "
+                "mempool. Contract scans still cover it."
+            )
+            return
 
     try:
-        alerts = container.mempool_monitor.get_alerts(chain_id=chain_id, limit=10)
-        stats = container.mempool_monitor.get_stats()
+        alerts, stats = await _fetch_mempool_data(chain_id)
+    except Exception as e:
+        logger.error(f"Mempool data unavailable for /threats: {type(e).__name__}")
+        await update.message.reply_text("❌ Live mempool data is unavailable right now. Please try again later.")
+        return
 
+    try:
         response = "🔍 **Mempool Threat Monitor**\n\n"
 
         # Stats summary
