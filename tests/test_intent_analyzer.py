@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from eth_utils import keccak
 from core.analyzer import AnalysisContext
 from analyzers.intent import IntentMismatchAnalyzer
 from utils.web3_client import Web3Client
@@ -303,6 +304,75 @@ async def test_bare_analyzer_allowlists_the_chains_routers_and_permit2(calldata,
     assert (result.score, result.flags) == (5, [flag])
     assert result.data['status'] == 'ok'
     assert 'counterparty' not in result.data
+
+
+CLAIM_AIRDROP = '0x' + keccak(text='claimAirdrop()')[:4].hex()
+PAYABLE = _call('40c10f19', OWNER, 1)  # mint(address,uint256)
+
+
+async def _payable(calldata, is_verified, creation=None, **extra):
+    web3 = SimpleNamespace(get_contract_creation_info=AsyncMock(return_value=creation))
+    service = _service()
+    result = await IntentMismatchAnalyzer(web3, service).analyze(AnalysisContext(
+        address=TOKEN, chain_id=56, from_address=OWNER,
+        extra={'calldata': calldata, 'value': hex(10 ** 17), 'is_verified': is_verified, **extra},
+    ))
+    service.fetch.assert_not_awaited()
+    return result, web3.get_contract_creation_info
+
+
+@pytest.mark.asyncio
+async def test_paying_a_fresh_unverified_contract_blocks():
+    from core.risk_engine import RiskEngine
+
+    result, creation = await _payable(CLAIM_AIRDROP, False, {'age_days': 2})
+    creation.assert_awaited_once_with(TOKEN, chain_id=56)
+    assert result.data['floor'] == 85
+    assert result.data['status'] == 'ok'
+    assert result.flags[0] == f'{CLAIM_AIRDROP} sends 0.1 native value to an unverified contract 2 days old'
+    result.weight = 1
+    risk = RiskEngine().compute_from_results([result], is_token=False)
+    assert (risk['rug_probability'], risk['risk_level']) == (85, 'HIGH')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('creation, floor, target', [
+    ({'age_days': 30}, 60, 'an unverified contract'),
+    (None, 85, 'an unverified contract of unknown age'),
+    ({'age_days': None}, 85, 'an unverified contract of unknown age'),
+], ids=['old', 'no-creation-record', 'no-creation-time'])
+async def test_paying_an_unverified_contract_floors_by_age(creation, floor, target):
+    result, _ = await _payable(PAYABLE, False, creation)
+    assert result.data['floor'] == floor
+    assert result.data['status'] == 'ok'
+    assert result.flags[0] == f'mint() sends 0.1 native value to {target}'
+
+
+@pytest.mark.asyncio
+async def test_paying_a_verified_contract_has_no_floor():
+    result, creation = await _payable(PAYABLE, True, {'age_days': 900})
+    creation.assert_not_awaited()
+    assert 'floor' not in result.data
+    assert result.data['status'] == 'ok'
+    assert result.data['coverage'] == {'selector_verification': True, 'counterparty': True}
+
+
+@pytest.mark.asyncio
+async def test_paying_a_contract_of_unknown_verification_is_unknown():
+    result, creation = await _payable(PAYABLE, None)
+    creation.assert_not_awaited()
+    assert result.data['floor'] == 60
+    assert result.data['status'] == 'unknown'
+    assert result.data['coverage']['counterparty'] is False
+    assert result.flags[0] == 'mint() sends 0.1 native value to a contract of unknown verification'
+
+
+@pytest.mark.asyncio
+async def test_value_on_a_router_swap_is_not_a_payment_to_the_token():
+    swap = '0x7ff36ab5' + '0' * 256
+    result, creation = await _payable(swap, False, {'age_days': 1}, whitelisted_router='PancakeSwap V2 Router')
+    creation.assert_not_awaited()
+    assert 'floor' not in result.data
 
 
 @pytest.mark.asyncio
