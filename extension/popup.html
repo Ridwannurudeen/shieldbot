@@ -332,11 +332,6 @@
       transform: rotate(150deg); transform-origin: 100px 100px;
       transition: stroke-dasharray 1.1s cubic-bezier(.4,0,.2,1), stroke .4s;
     }
-    @keyframes guardGlow {
-      0%,100% { filter: drop-shadow(0 0 6px rgba(34,197,94,.25)); }
-      50%      { filter: drop-shadow(0 0 14px rgba(34,197,94,.55)); }
-    }
-    .gauge-arc.glow { animation: guardGlow 2.8s ease-in-out infinite; }
     .gauge-num { font-size: 36px; font-weight: 800; fill: #f8fafc; text-anchor: middle; font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
     .gauge-sub { font-size: 9.5px; fill: #334155; text-anchor: middle; font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; letter-spacing: 0.1em; text-transform: uppercase; }
 
@@ -346,13 +341,12 @@
       font-size: 11px; font-weight: 800; letter-spacing: 0.08em;
       padding: 4px 16px; border-radius: 20px;
     }
-    .cls-protected { background: rgba(34,197,94,.1);   color: #22C55E; border: 1px solid rgba(34,197,94,.22); }
     .cls-safe      { background: rgba(34,197,94,.1);   color: #22C55E; border: 1px solid rgba(34,197,94,.22); }
     .cls-caution   { background: rgba(234,179,8,.1);   color: #EAB308; border: 1px solid rgba(234,179,8,.22); }
     .cls-high      { background: rgba(249,115,22,.1);  color: #F97316; border: 1px solid rgba(249,115,22,.22); }
     .cls-block     { background: rgba(239,68,68,.1);   color: #EF4444; border: 1px solid rgba(239,68,68,.22); }
     .cls-unknown   { background: repeating-linear-gradient(135deg, rgba(148,163,184,.16) 0 6px, rgba(148,163,184,.06) 6px 12px); color: #CBD5E1; border: 1px solid rgba(148,163,184,.35); }
-    .cls-idle      { background: rgba(71,85,105,.1);   color: #475569; border: 1px solid rgba(71,85,105,.15); }
+    .cls-idle      { background: rgba(71,85,105,.1);   color: #94A3B8; border: 1px solid rgba(71,85,105,.3); }
 
     .ctr-meta { font-size: 10px; color: #334155; text-align: center; margin-bottom: 12px; font-family: 'SF Mono','Fira Code',monospace; }
 
@@ -608,7 +602,7 @@
               <div class="ctr-chip-lbl" data-i18n="statBlocked">Blocked</div>
             </div>
             <div class="ctr-chip">
-              <div class="ctr-chip-num c-safe" id="dash-stat-safe">100%</div>
+              <div class="ctr-chip-num c-safe" id="dash-stat-safe">&ndash;</div>
               <div class="ctr-chip-lbl" data-i18n="statSafeRate">Safe Rate</div>
             </div>
           </div>
@@ -619,15 +613,15 @@
           <div class="gauge-wrap">
             <svg class="gauge-svg" viewBox="0 0 200 200" width="158" height="158">
               <circle class="gauge-track" cx="100" cy="100" r="70"/>
-              <circle class="gauge-arc glow" id="dash-gauge-arc" cx="100" cy="100" r="70"/>
-              <text class="gauge-num" id="dash-gauge-num" x="100" y="107">100</text>
+              <circle class="gauge-arc" id="dash-gauge-arc" cx="100" cy="100" r="70"/>
+              <text class="gauge-num" id="dash-gauge-num" x="100" y="107">&ndash;</text>
               <text class="gauge-sub" x="100" y="126">SHIELD SCORE</text>
             </svg>
           </div>
 
           <!-- Classification -->
           <div class="cls-row">
-            <span class="cls-badge cls-protected" id="dash-cls-badge">PROTECTED</span>
+            <span class="cls-badge cls-idle" id="dash-cls-badge">&ndash;</span>
           </div>
 
           <!-- Scan meta -->

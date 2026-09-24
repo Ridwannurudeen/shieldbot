@@ -40,6 +40,7 @@
   "dashHealthScoreLbl2": "分数",
   "dashShieldAnalysis": "盾牌分析",
   "dashFirewallActive": "防火墙激活 · 监控所有交易",
+  "dashNothingChecked": "尚未检查任何交易",
   "dashCheckTxFirewall": "交易防火墙拦截所有钱包调用",
   "dashCheckPhishing": "钓鱼防护扫描访问的网址",
   "dashCheckEIP712": "EIP-712 签名分析已启用",

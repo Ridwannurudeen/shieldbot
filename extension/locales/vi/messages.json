@@ -40,6 +40,7 @@
   "dashHealthScoreLbl2": "Điểm",
   "dashShieldAnalysis": "Phân tích Shield",
   "dashFirewallActive": "Tường lửa đang hoạt động · Giám sát tất cả giao dịch",
+  "dashNothingChecked": "CHƯA KIỂM TRA GIAO DỊCH NÀO",
   "dashCheckTxFirewall": "Tường lửa giao dịch chặn tất cả lệnh gọi ví",
   "dashCheckPhishing": "Bảo vệ lừa đảo quét URL đã truy cập",
   "dashCheckEIP712": "Phân tích chữ ký EIP-712 đã bật",

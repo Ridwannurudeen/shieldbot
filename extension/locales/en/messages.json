@@ -40,6 +40,7 @@
   "dashHealthScoreLbl2": "Score",
   "dashShieldAnalysis": "Shield Analysis",
   "dashFirewallActive": "Firewall active · all transactions monitored",
+  "dashNothingChecked": "NOTHING CHECKED YET",
   "dashCheckTxFirewall": "Transaction firewall intercepting all wallet calls",
   "dashCheckPhishing": "Phishing guard scanning visited URLs",
   "dashCheckEIP712": "EIP-712 signature analysis enabled",

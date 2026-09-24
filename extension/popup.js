@@ -509,11 +509,11 @@ function renderDashStats(history) {
   const total   = history.length;
   const blocked = history.filter((h) => h.classification === "BLOCK_RECOMMENDED").length;
   const safe    = history.filter((h) => !isIncompleteScan(h) && h.classification === "SAFE").length;
-  const safeRate = total > 0 ? Math.round((safe / total) * 100) : 100;
+  const safeRate = total > 0 ? Math.round((safe / total) * 100) + "%" : "\u2013";
 
   document.getElementById("dash-stat-total").textContent   = total;
   document.getElementById("dash-stat-blocked").textContent = blocked;
-  document.getElementById("dash-stat-safe").textContent    = safeRate + "%";
+  document.getElementById("dash-stat-safe").textContent    = safeRate;
 }
 
 // ---- Center ----
@@ -527,10 +527,11 @@ function renderDashCenter(lastScan) {
   const verdictEl     = document.getElementById("dash-verdict");
 
   if (!lastScan) {
-    // Default: PROTECTED / 100
-    setGauge(gaugeArc, gaugeNum, 100, true);
-    clsBadge.textContent = "PROTECTED";
-    clsBadge.className   = "cls-badge cls-protected";
+    // Nothing has been checked yet, so there is no score to show.
+    setGauge(gaugeArc, gaugeNum, null);
+    gaugeNum.textContent = "\u2013";
+    clsBadge.textContent = t("dashNothingChecked");
+    clsBadge.className   = "cls-badge cls-idle";
     metaEl.textContent   = t("dashFirewallActive");
     protectedList.style.display = "block";
     verdictWrap.style.display   = "none";
@@ -539,7 +540,7 @@ function renderDashCenter(lastScan) {
 
   const incomplete = isIncompleteScan(lastScan);
   const safety = incomplete ? null : 100 - lastScan.risk_score;
-  setGauge(gaugeArc, gaugeNum, safety, false);
+  setGauge(gaugeArc, gaugeNum, safety);
 
   const CLS = {
     SAFE:              { cls: "cls-safe",    label: t("classSafe") },
@@ -560,7 +561,7 @@ function renderDashCenter(lastScan) {
   verdictEl.textContent = incomplete ? unknownReason(lastScan) : lastScan.verdict || t("overlayNoAnalysis");
 }
 
-function setGauge(arcEl, numEl, score, glow) {
+function setGauge(arcEl, numEl, score) {
   const circumference = 439.82;
   const totalArc      = 293.2;
   const clamped = Math.max(0, Math.min(100, score));
@@ -573,12 +574,6 @@ function setGauge(arcEl, numEl, score, glow) {
 
   numEl.textContent  = score === null ? "?" : clamped;
   numEl.style.fill   = clamped >= 80 ? "#f8fafc" : color;
-
-  if (glow) {
-    arcEl.classList.add("glow");
-  } else {
-    arcEl.classList.remove("glow");
-  }
 }
 
 // ============================================================

@@ -96,6 +96,17 @@ def run_popup(script, argument=None):
     assert "completed" in result.stdout, result.stdout + result.stderr
 
 
+def test_dashboard_says_nothing_checked_instead_of_protected_before_any_scan():
+    run_popup(r"""
+  context.renderDashCenter(null);
+  context.renderDashStats([]);
+  assert.equal(byId('dash-cls-badge').textContent, 'dashNothingChecked');
+  assert(!byId('dash-cls-badge').className.includes('cls-protected'));
+  assert.notEqual(String(byId('dash-gauge-num').textContent), '100');
+  assert.notEqual(byId('dash-stat-safe').textContent, '100%');
+""")
+
+
 def test_unknown_scans_have_their_own_state_and_reason_in_history_and_dashboard():
     run_popup(r"""
   const list = element('list');
@@ -138,4 +149,10 @@ def parse(name):
     parser = Markup()
     parser.feed((EXTENSION / name).read_text(encoding="utf-8"))
     return parser.elements
+
+
+def test_popup_markup_claims_no_protection_before_a_scan():
+    html = (EXTENSION / "popup.html").read_text(encoding="utf-8")
+    assert ">PROTECTED<" not in html
+    assert ">100%<" not in html
 
