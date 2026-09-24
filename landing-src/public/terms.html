@@ -104,7 +104,7 @@
     <p>When a data source fails or a check cannot run, ShieldBot shows Unknown instead of a verdict. Unknown does not mean safe and does not mean dangerous. It means the item was not fully checked, so treat it as unchecked.</p>
 
     <h2>5. You Sign Your Own Transactions</h2>
-    <p>ShieldBot never holds your funds and never signs anything for you. Every transaction and signature is signed and sent by you in your own wallet. When the extension shows a warning, you choose whether to cancel or continue. The extension refuses a request on its own, without asking you, when the request times out after 60 seconds, when it cannot identify your wallet's chain, or when that chain changes during the check; you can then retry.</p>
+    <p>ShieldBot never holds your funds and never signs anything for you. Every transaction and signature is signed and sent by you in your own wallet. When the extension shows a warning, you choose whether to cancel or continue. The extension refuses a request on its own, without asking you, when the request times out after 60 seconds, when it cannot identify your wallet's chain or that chain differs from the chain the transaction names, or when that chain changes during the check; you can then retry.</p>
     <p>If you send transactions through the optional ShieldBot RPC proxy, it refuses to forward a transaction it rates HIGH risk or cannot decode or analyse. It forwards every other transaction, including ones whose checks were incomplete, and it forwards contract deployments without analysing them.</p>
 
     <h2>6. No Liability for Losses</h2>

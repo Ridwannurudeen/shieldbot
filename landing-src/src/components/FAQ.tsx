@@ -32,7 +32,7 @@ const faqs = [
   },
   {
     q: "What happens when ShieldBot detects a threat?",
-    a: "Before you sign, ShieldBot shows the verdict, a safety score and a plain-English explanation of what it found. On a known phishing site, a red banner appears on the page. For a warning, you choose whether to cancel or sign anyway. The extension refuses a request on its own only when the request times out after 60 seconds, when it cannot identify your wallet's chain, or when that chain changes during the check; you can then retry.",
+    a: "Before you sign, ShieldBot shows the verdict, a safety score and a plain-English explanation of what it found. On a known phishing site, a red banner appears on the page. For a warning, you choose whether to cancel or sign anyway. The extension refuses a request on its own only when the request times out after 60 seconds, when it cannot identify your wallet's chain or that chain differs from the chain the transaction names, or when that chain changes during the check; you can then retry.",
   },
   {
     q: "What is the safety score?",
