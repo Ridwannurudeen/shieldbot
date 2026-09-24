@@ -246,8 +246,19 @@
           return;
         }
         if (reachable) {
-          reject(new NativeError("ShieldAI cannot check wallet requests made from this embedded frame or popup. " +
-            "Open the dApp in its own tab."));
+          const error = new NativeError("ShieldAI cannot check wallet requests made from this embedded frame or " +
+            "popup. Open the dApp in its own tab.");
+          // EIP-1193 4100: Unauthorized.
+          defineProperty(error, "code", {
+            __proto__: null,
+            value: 4100,
+            writable: true,
+            enumerable: true,
+            configurable: true,
+          });
+          // content.js shows the user a notice saying why, once.
+          postMessage({ type: "SHIELDAI_UNCHECKABLE" }, "*");
+          reject(error);
           return;
         }
         // Analyse and forward one copy of the request: a getter or proxy in

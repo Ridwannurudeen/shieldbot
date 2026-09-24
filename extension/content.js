@@ -97,7 +97,8 @@
       new CustomEvent("shieldai:channel", { detail: _CHANNEL_TOKEN, cancelable: true })
     );
   }
-  if (!reachableByPage() && !offerToken()) {
+  const reachable = reachableByPage();
+  if (!reachable && !offerToken()) {
     const answer = () => {
       document.removeEventListener("shieldai:channel-request", answer);
       offerToken();
@@ -107,6 +108,18 @@
     // has passed, so a later request, which only a page script could send,
     // gets no answer.
     setTimeout(() => document.removeEventListener("shieldai:channel-request", answer), 0);
+  }
+
+  // In such a document inject.js says so when it rejects a request. The
+  // message is unsigned (there is no key here), so all it does is show the
+  // user a notice, once per document; the notice has no buttons and decides
+  // nothing. Anywhere else the message is ignored.
+  if (reachable) {
+    window.addEventListener("message", function notice(event) {
+      if (event.source !== window || !event.data || event.data.type !== "SHIELDAI_UNCHECKABLE") return;
+      window.removeEventListener("message", notice);
+      showUncheckableNotice();
+    });
   }
 
   // Request ids already seen. inject.js makes a fresh random id per request,
@@ -902,6 +915,19 @@
     const div = document.createElement("div");
     div.textContent = str;
     return div.innerHTML;
+  }
+
+  // A notice that fades out on its own (see overlay.css) and lets clicks
+  // through to the page.
+  async function showUncheckableNotice() {
+    await _loadContentLang();
+    const notice = document.createElement("div");
+    notice.className = "shieldai-notice";
+    notice.setAttribute("role", "status");
+    notice.textContent = _t("uncheckableNotice");
+    const { host, root } = createShadow();
+    root.appendChild(notice);
+    (document.body || document.documentElement).appendChild(host);
   }
 
   // --- Phishing Site Check ---

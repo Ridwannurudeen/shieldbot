@@ -1063,6 +1063,7 @@ def test_documents_the_page_can_reach_first_get_no_key_and_reject_requests(kind,
   // A key a page script offers right after document_start is never taken.
   assert(document.dispatchEvent(new CustomEvent('shieldai:channel', {detail: 'page-token', cancelable: true})));
   const intercepts = () => posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT');
+  const notices = () => body.children.filter(el => el.shadow && el.shadow.children.some(child => child.className === 'shieldai-notice'));
   const tx = {to: '0x' + 'a'.repeat(40)};
   if (reachable) {
     const message = 'ShieldAI cannot check wallet requests made from this embedded frame or popup. ' +
@@ -1073,13 +1074,24 @@ def test_documents_the_page_can_reach_first_get_no_key_and_reject_requests(kind,
       {method: 'eth_signTypedData_v4', params: ['0x' + 'b'.repeat(40), '{}']},
       {method: 'wallet_sendCalls', params: [{version: '2.0.0', calls: [tx]}]},
     ]) {
-      await assert.rejects(provider.request(args), {message});
+      // EIP-1193 4100: Unauthorized.
+      await assert.rejects(provider.request(args), {message, code: 4100});
     }
     await flush();
     assert.equal(intercepts().length, 0);
     assert.equal(sent.length, 0);
+    // One notice for the document, however many requests were rejected: it informs, with no buttons.
+    assert.equal(notices().length, 1);
+    const notice = notices()[0].shadow.children.find(child => child.className === 'shieldai-notice');
+    assert.equal(notice.attrs.role, 'status');
+    assert.match(notice.textContent, /Open the dApp in its own tab/);
+    assert.equal(notice.querySelectorAll('button').length, 0);
     return;
   }
+  // Where requests are checked, the unsigned message that brings the notice is ignored.
+  deliver({type: 'SHIELDAI_UNCHECKABLE'});
+  await flush();
+  assert.equal(notices().length, 0);
   const pending = provider.request({method: 'eth_sendTransaction', params: [tx]});
   for (let i = 0; i < 20 && !overlayRoot()?.getElementById('shieldai-proceed'); i++) await flush();
   assert.equal(sent.length, 0, 'the transaction reached the wallet before the user decided');
