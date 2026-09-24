@@ -57,6 +57,7 @@ class HoneypotService:
             'honeypot_reason': None,
             'simulation_failed': False,
             'low_tax_honeypot': False,
+            'likely_false_positive': False,
             'buy_tax': None,
             'sell_tax': None,
             'can_buy': None,

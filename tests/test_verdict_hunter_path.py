@@ -252,6 +252,8 @@ async def test_bsc_honeypot_data_is_byte_identical_to_the_base_commit(honeypot, 
         if service_class is HoneypotService:
             # The legacy GoPlus fixture has no provenance, which must stay unknown.
             assert data.pop("observed_at") == (0 if goplus else 1000)
+            # Added after the base commit, as a default: none of these shapes carries the doubt.
+            assert data.pop("likely_false_positive") is False
         outputs.append(json.dumps(data))
     assert outputs[0] == outputs[1]
     assert "simulation_block" not in outputs[1]

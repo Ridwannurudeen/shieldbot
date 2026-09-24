@@ -122,7 +122,8 @@ async def test_a_honeypot_verdict_is_never_turned_sellable_by_its_tax(sell_tax):
     with patch.object(ScamDatabase, "fetch_token_security", new=AsyncMock()):
         data = await HoneypotService(client).fetch_honeypot_data(TOKEN, chain_id=56)
     assert data["can_sell"] is False
-    assert "likely_false_positive" not in data
+    assert data["likely_false_positive"] is False
+    assert "likely_false_positive" not in data["field_providers"]
 
 
 def _simulated(can_sell, can_sell_provider):
