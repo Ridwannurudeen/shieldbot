@@ -713,5 +713,180 @@
   "schemaVersion": "1.0.0",
   "pairs": null
  },
- "https://api.dexscreener.com/token-pairs/v1/bsc/0xdbda907a02750f79cbf0414f7112eabe5091c286": []
+ "https://api.dexscreener.com/token-pairs/v1/bsc/0xdbda907a02750f79cbf0414f7112eabe5091c286": [],
+ "https://api.dexscreener.com/latest/dex/tokens/0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c,0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82,0x16dEa77364B4A9Cc7bfcb9414Ccf37Ae1beBf5F5": {
+  "schemaVersion": "1.0.0",
+  "pairs": [
+   {
+    "chainId": "bsc",
+    "dexId": "pancakeswap",
+    "pairAddress": "0x7f51c8AaA6B0599aBd16674e2b17FEc7a9f674A1",
+    "baseToken": {
+     "address": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+     "name": "PancakeSwap Token",
+     "symbol": "Cake"
+    },
+    "quoteToken": {
+     "address": "0x55d398326f99059fF775485246999027B3197955",
+     "name": "Tether USD",
+     "symbol": "USDT"
+    },
+    "priceNative": "2.6858",
+    "priceUsd": "2.68",
+    "volume": {
+     "h24": 2186412.76
+    },
+    "priceChange": {
+     "h24": 5.29
+    },
+    "liquidity": {
+     "usd": 7191561.06
+    },
+    "fdv": 903952094,
+    "pairCreatedAt": 1680354384000
+   },
+   {
+    "chainId": "bsc",
+    "dexId": "uniswap",
+    "pairAddress": "0xFe4fe5B4575c036aC6D5cCcFe13660020270e27A",
+    "baseToken": {
+     "address": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+     "name": "PancakeSwap Token",
+     "symbol": "Cake"
+    },
+    "quoteToken": {
+     "address": "0x55d398326f99059fF775485246999027B3197955",
+     "name": "Tether USD",
+     "symbol": "USDT"
+    },
+    "priceNative": "2.6841",
+    "priceUsd": "2.68",
+    "volume": {
+     "h24": 1723114.06
+    },
+    "priceChange": {
+     "h24": 5.29
+    },
+    "liquidity": {
+     "usd": 5845488.48
+    },
+    "fdv": 903381937,
+    "pairCreatedAt": 1680319733000
+   },
+   {
+    "chainId": "bsc",
+    "dexId": "pancakeswap",
+    "pairAddress": "0x8e941b427B1b56D81191Bc18D6B1d86944D77076",
+    "baseToken": {
+     "address": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+     "name": "PancakeSwap Token",
+     "symbol": "Cake"
+    },
+    "quoteToken": {
+     "address": "0x5F980533B994c93631A639dEdA7892fC49995839",
+     "name": "Cosanta",
+     "symbol": "COSA"
+    },
+    "priceNative": "1.3857",
+    "priceUsd": "2.68",
+    "volume": {
+     "h24": 33.21
+    },
+    "priceChange": {
+     "h24": 6.28
+    },
+    "liquidity": {
+     "usd": 1960381.3
+    },
+    "fdv": 904278312,
+    "pairCreatedAt": 1706855672000
+   }
+  ]
+ },
+ "https://api.dexscreener.com/tokens/v1/bsc/0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c,0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82,0x16dEa77364B4A9Cc7bfcb9414Ccf37Ae1beBf5F5": [
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0x172fcD41E0913e95784454622d1c3724f546f849",
+   "baseToken": {
+    "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+    "name": "Wrapped BNB",
+    "symbol": "WBNB"
+   },
+   "quoteToken": {
+    "address": "0x55d398326f99059fF775485246999027B3197955",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "priceNative": "778.2654",
+   "priceUsd": "778.26",
+   "volume": {
+    "h24": 105753210.06
+   },
+   "priceChange": {
+    "h24": 1.28
+   },
+   "liquidity": {
+    "usd": 12488274.18
+   },
+   "fdv": 1215773559,
+   "pairCreatedAt": 1680703943000
+  },
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0xAfB2Da14056725E3BA3a30dD846B6BBbd7886c56",
+   "baseToken": {
+    "address": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+    "name": "PancakeSwap Token",
+    "symbol": "Cake"
+   },
+   "quoteToken": {
+    "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+    "name": "Wrapped BNB",
+    "symbol": "WBNB"
+   },
+   "priceNative": "0.003458",
+   "priceUsd": "2.68",
+   "volume": {
+    "h24": 2833782.34
+   },
+   "priceChange": {
+    "h24": 5.25
+   },
+   "liquidity": {
+    "usd": 1260253.56
+   },
+   "fdv": 905319298,
+   "pairCreatedAt": 1680528785000
+  },
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0x74d3ec3e2fcd00fD435882c3AFa22579454d69b8",
+   "baseToken": {
+    "address": "0x16dEa77364B4A9Cc7bfcb9414Ccf37Ae1beBf5F5",
+    "name": "Super Intelligence",
+    "symbol": "SI"
+   },
+   "quoteToken": {
+    "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+    "name": "Wrapped BNB",
+    "symbol": "WBNB"
+   },
+   "priceNative": "0.000001721",
+   "priceUsd": "0.001339",
+   "volume": {
+    "h24": 1127527.23
+   },
+   "priceChange": {
+    "h24": 55143
+   },
+   "liquidity": {
+    "usd": 111995.48
+   },
+   "fdv": 1339284,
+   "pairCreatedAt": 1790255559000
+  }
+ ]
 }
