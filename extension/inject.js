@@ -15,6 +15,7 @@
   // browser's own, and only these references are used later.
   const uncurry = Function.prototype.bind.bind(Function.prototype.call);
   const bindTo = uncurry(Function.prototype.bind);
+  const callFunction = uncurry(Function.prototype.call);
   // Promises are read with this then and a callback, never with await: await
   // looks up the promise's constructor and then, which a page can replace,
   // while the original then always calls back with the real value.
@@ -112,18 +113,32 @@
     }
   }
 
-  // Per wrapped provider, the wrapper that checks its requests, which keeps
+  // Per wrapped provider, the function that checks its requests, which keeps
   // that provider's own state. Kept in this closure rather than as a flag on
   // the provider, which the page could read to detect the extension.
   const wrappedProviders = new WeakMap();
-  const wrapperOf = bindTo(WeakMap.prototype.get, wrappedProviders);
-  const keepWrapper = bindTo(WeakMap.prototype.set, wrappedProviders);
-  const isWrapped = (provider) => wrapperOf(provider) !== undefined;
+  const checkOf = bindTo(WeakMap.prototype.get, wrappedProviders);
+  const keepCheck = bindTo(WeakMap.prototype.set, wrappedProviders);
+  const isWrapped = (provider) => checkOf(provider) !== undefined;
 
   // The wallet's own request behind each replacement put on a prototype.
   const inheritedRequests = new WeakMap();
   const inheritedRequestOf = bindTo(WeakMap.prototype.get, inheritedRequests);
   const keepInheritedRequest = bindTo(WeakMap.prototype.set, inheritedRequests);
+
+  // A prototype's request that could not be replaced (it is neither writable
+  // nor configurable), so it is not tried again. The README says that route
+  // is not covered.
+  const uncoveredRequests = new WeakSet();
+  const isUncovered = bindTo(WeakSet.prototype.has, uncoveredRequests);
+  const markUncovered = bindTo(WeakSet.prototype.add, uncoveredRequests);
+
+  // Checked copies on their way to the wallet. When the wallet's own code
+  // hands one on to a prototype's request (a subclass calling
+  // super.request(args)), it goes through unchecked rather than twice.
+  const forwardedCopies = new WeakSet();
+  const isForwarded = bindTo(WeakSet.prototype.has, forwardedCopies);
+  const markForwarded = bindTo(WeakSet.prototype.add, forwardedCopies);
 
   const CHAIN_ID_PATTERN = /^(0x[0-9a-f]+|[0-9]+)$/i;
   const ADDRESS_PATTERN = /^0x[0-9a-f]{40}$/i;
@@ -180,6 +195,8 @@
    */
   function wrapProvider(provider) {
     if (!provider || !provider.request || isWrapped(provider)) return;
+    // A prototype whose request was replaced is not a provider to wrap.
+    if (inheritedRequestOf(ownValue(provider, "request")) !== undefined) return;
 
     // A provider that inherits request from a prototype already replaced for
     // another provider gets the wallet's own request behind the replacement.
@@ -209,7 +226,9 @@
       }
     }
 
-    const wrappedRequest = function (args) {
+    // Run a request past the user and hand it to forwardTo: the wallet's own
+    // request that was called, applied to this provider.
+    const check = function (args, forwardTo) {
       return new NativePromise((resolve, reject) => {
         // The method is read once, here so that a request object that throws
         // rejects, and the wallet is handed that string rather than the page's
@@ -222,7 +241,7 @@
         }
         const kind = requestKind(method);
         if (kind === null) {
-          resolve(originalRequest(hasOwn(args, "params") ? { method, params: args.params } : { method }));
+          resolve(forwardTo(hasOwn(args, "params") ? { method, params: args.params } : { method }));
           return;
         }
         if (reachable) {
@@ -237,7 +256,8 @@
         const request = { __proto__: null, method, params: clone(ownValue(args, "params")) };
         const forward = () => {
           try {
-            resolve(originalRequest(request));
+            markForwarded(request);
+            resolve(forwardTo(request));
           } catch (error) {
             reject(error);
           }
@@ -378,9 +398,13 @@
       });
     };
 
+    const wrappedRequest = function (args) {
+      return check(args, originalRequest);
+    };
+
     // Recorded before anything below can call back into the page, which
     // could otherwise reach this code again for the same provider.
-    keepWrapper(provider, wrappedRequest);
+    keepCheck(provider, check);
     wrapInheritedRequest(provider);
     if (typeof provider.on === "function") {
       provider.on("chainChanged", (chainId) => {
@@ -409,38 +433,40 @@
     }
   }
 
-  // A page could take request from the provider's prototype and call it on
-  // the provider (Object.getPrototypeOf(ethereum).request.call(ethereum, ...)),
-  // going round the wrapper defined on the provider itself. So the request of
-  // the nearest prototype that defines one is replaced too, by one that checks
-  // the request for whichever provider it is called on, wrapping that provider
-  // first if need be. A call on anything that cannot be wrapped is rejected.
+  // A page could take request from one of the provider's prototypes and call
+  // it on the provider (Object.getPrototypeOf(ethereum).request.call(ethereum,
+  // ...)), going round the wrapper defined on the provider itself. So the
+  // request of every prototype that defines one, up to Object.prototype, is
+  // replaced too, by one that checks the request for whichever provider it is
+  // called on (wrapping that provider first if need be) and then hands it to
+  // that prototype's own request. A call on anything that cannot be wrapped,
+  // such as a prototype itself, is rejected.
   function wrapInheritedRequest(provider) {
-    let owner = getPrototypeOf(provider);
-    while (owner !== null && owner !== objectPrototype &&
-        getOwnPropertyDescriptor(owner, "request") === undefined) {
-      owner = getPrototypeOf(owner);
-    }
-    if (owner === null || owner === objectPrototype) return;
-    const inherited = getOwnPropertyDescriptor(owner, "request").value;
-    if (typeof inherited !== "function" || inheritedRequestOf(inherited) !== undefined) return;
-
-    const replacement = function (args) {
-      // Called on the prototype itself, there is no provider to check for.
-      if (this !== owner) wrapProvider(this);
-      const wrapper = wrapperOf(this);
-      if (wrapper === undefined) {
-        return new NativePromise((resolve, reject) => {
-          reject(new NativeError("Transaction blocked by ShieldAI Firewall"));
-        });
+    for (let owner = getPrototypeOf(provider); owner !== null && owner !== objectPrototype;
+      owner = getPrototypeOf(owner)) {
+      const inherited = ownValue(getOwnPropertyDescriptor(owner, "request"), "value");
+      if (typeof inherited !== "function" || inheritedRequestOf(inherited) !== undefined ||
+          isUncovered(inherited)) {
+        continue;
       }
-      return wrapper(args);
-    };
-    keepInheritedRequest(replacement, inherited);
-    try {
-      defineProperty(owner, "request", { __proto__: null, value: replacement });
-    } catch (_) {
-      // A prototype that forbids it keeps the wallet's request there.
+      const replacement = function (args) {
+        if (isForwarded(args)) return callFunction(inherited, this, args);
+        wrapProvider(this);
+        const check = checkOf(this);
+        if (check === undefined) {
+          return new NativePromise((resolve, reject) => {
+            reject(new NativeError("Transaction blocked by ShieldAI Firewall"));
+          });
+        }
+        const target = this;
+        return check(args, (copy) => callFunction(inherited, target, copy));
+      };
+      try {
+        defineProperty(owner, "request", { __proto__: null, value: replacement });
+        keepInheritedRequest(replacement, inherited);
+      } catch (_) {
+        markUncovered(inherited);
+      }
     }
   }
 

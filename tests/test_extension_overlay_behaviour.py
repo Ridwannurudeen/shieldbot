@@ -1117,6 +1117,9 @@ PATCHES = {
     "set-has": "Set.prototype.has = () => false;",
     "weakmap-get": "WeakMap.prototype.get = () => undefined;",
     "weakmap-set": "WeakMap.prototype.set = function () { return this; };",
+    "weakset-has": "WeakSet.prototype.has = () => true;",
+    "weakset-add": "WeakSet.prototype.add = function () { return this; };",
+    "function-call": "Function.prototype.call = function () { return 'forwarded'; };",
     "define-property": "Object.defineProperty = (target) => target;",
     "object-prototype-accessor": "Object.prototype.get = function () { return undefined; };",
     "function-bind": "Function.prototype.bind = function () { return async () => 'forwarded'; };",
@@ -1658,6 +1661,99 @@ def test_a_request_taken_from_the_provider_prototype_is_checked_too(patch):
   assert.equal(intercepts().length, 4, 'the forwarded request was checked a second time');
 """,
         patch,
+    )
+
+
+# Two prototype levels that both define request, the lower one reached through super.
+TWO_LEVEL_WALLET = r"""
+  class Base {
+    on() {}
+    async request(args) { if (args.method === 'eth_chainId') return '0x38'; sent.push(args); return 'base'; }
+  }
+  class Wallet extends Base {
+    async request(args) { return super.request(args); }
+  }
+  const announce = (provider) => {
+    for (const fn of windowListeners['eip6963:announceProvider']) {
+      fn(new CustomEvent('eip6963:announceProvider', {detail: {provider, info: {name: 'wallet'}}}));
+    }
+  };
+  const intercepts = () => posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT');
+  const tx = {method: 'eth_sendTransaction', params: [{to: '0x' + 'a'.repeat(40)}]};
+  // Starts a request, checks it waits for a decision, and answers it.
+  async function decideOn(start, action) {
+    const before = sent.length, shown = intercepts().length;
+    const pending = start();
+    pending.catch(() => {});
+    await flush();
+    assert.equal(sent.length, before, 'the request reached the wallet before any decision');
+    assert.equal(intercepts().length, shown + 1, 'the request was not sent for a decision');
+    const {requestId} = intercepts().at(-1);
+    deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action, proof: await proof(requestId, action)});
+    return pending;
+  }
+"""
+
+
+def test_every_request_on_the_prototype_chain_is_checked():
+    run_node(
+        INJECT_HARNESS
+        + TWO_LEVEL_WALLET
+        + r"""
+(async () => {
+  const wallet = new Wallet();
+  const originals = [Base.prototype.request, Wallet.prototype.request];
+  announce(wallet);
+  assert.notEqual(Base.prototype.request, originals[0]);
+  assert.notEqual(Wallet.prototype.request, originals[1]);
+  const routes = [
+    () => wallet.request(tx),
+    () => Wallet.prototype.request.call(wallet, tx),
+    () => Base.prototype.request.call(wallet, tx),
+  ];
+  for (const route of routes) {
+    await assert.rejects(decideOn(route, 'block'), /blocked/);
+  }
+  for (const route of routes) {
+    const before = sent.length;
+    assert.equal(await decideOn(route, 'proceed'), 'base');
+    await flush();
+    assert.equal(sent.length, before + 1);
+  }
+  // Six decisions, one per request: the checked copy the subclass hands to super is not shown again.
+  assert.equal(intercepts().length, 6);
+  // A method that is not checked goes through both levels once, without looping.
+  assert.equal(await wallet.request({method: 'eth_accounts'}), 'base');
+  assert.equal(await Wallet.prototype.request.call(wallet, {method: 'eth_accounts'}), 'base');
+  assert.equal(sent.filter(args => args.method === 'eth_accounts').length, 2);
+  // Called on a prototype, there is no provider to check for, and nothing is replaced.
+  const replaced = Wallet.prototype.request;
+  await assert.rejects(Base.prototype.request.call(Wallet.prototype, tx), /blocked/);
+  assert.equal(Wallet.prototype.request, replaced);
+"""
+    )
+
+
+def test_a_prototype_request_that_cannot_be_replaced_is_left_as_it_is():
+    run_node(
+        INJECT_HARNESS
+        + TWO_LEVEL_WALLET
+        + r"""
+(async () => {
+  Object.defineProperty(Base.prototype, 'request', {value: Base.prototype.request, writable: false, configurable: false});
+  const locked = Base.prototype.request;
+  const wallet = new Wallet();
+  announce(wallet);
+  // That route stays the wallet's own (the README says so); the others are still checked.
+  assert.equal(Base.prototype.request, locked);
+  await assert.rejects(decideOn(() => wallet.request(tx), 'block'), /blocked/);
+  await assert.rejects(decideOn(() => Wallet.prototype.request.call(wallet, tx), 'block'), /blocked/);
+  // A second provider of the same class is wrapped just the same.
+  const second = new Wallet();
+  announce(second);
+  await assert.rejects(decideOn(() => second.request(tx), 'block'), /blocked/);
+  assert.equal(sent.length, 0);
+"""
     )
 
 
