@@ -1064,6 +1064,22 @@ async def test_mcp_maps_engine_keys_and_coverage(mock_container, status, reason,
         assert result["verdict"] == "UNKNOWN"
 
 
+@pytest.mark.asyncio
+async def test_mcp_scan_contract_returns_the_engine_notes_apart_from_its_flags(mock_container):
+    from core.analyzer import AnalyzerResult
+    from core.risk_engine import RiskEngine
+    from mcp_server.tools import handle_scan_contract
+
+    note = "Top-10 holder share unknown: no readable GoPlus holder list"
+    mock_container.registry.run_all.return_value = [
+        AnalyzerResult("structural", 1.0, 0, data={"status": "ok", "notes": [note]}),
+    ]
+    mock_container.risk_engine = RiskEngine()
+    result = await handle_scan_contract(mock_container, {"address": "0x" + "a" * 40, "chain_id": 56})
+    assert result["notes"] == [note]
+    assert note not in result["flags"]
+
+
 CHAIN_TOOLS = {
     "scan_contract": {"address": "0x" + "a" * 40},
     "simulate_transaction": {"from": "0x" + "a" * 40, "to": "0x" + "b" * 40, "data": "0x"},

@@ -267,6 +267,10 @@ async def test_a_fresh_launch_without_a_holder_list_reads_as_before_apart_from_t
     assert risk["notes"] == [HOLDERS_UNKNOWN]
 
 
+def test_the_container_less_entry_point_runs_no_analyzer_and_has_no_notes():
+    assert RiskEngine().compute_composite_risk({}, {}, {}, {})["notes"] == []
+
+
 @pytest.mark.asyncio
 async def test_telegram_shows_notes_under_their_own_heading(mock_web3_client):
     structural = await _structural(mock_web3_client, NO_RECORD)
