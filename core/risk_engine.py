@@ -1,6 +1,8 @@
 import logging
 from typing import List, Optional, TYPE_CHECKING
 
+from core.verdicts import BLOCK_MIN, HIGH, LOW, MEDIUM, level_from_score
+
 if TYPE_CHECKING:
     from core.analyzer import AnalyzerResult
 
@@ -208,25 +210,17 @@ class RiskEngine:
         rug_probability = round(min(max(composite, 0), 100), 1)
 
         # --- Risk level (uses calibration thresholds when available) ---
-        high_t = self._calibration.high_threshold if self._calibration else 71
-        med_t = self._calibration.medium_threshold if self._calibration else 31
+        risk_level = level_from_score(rug_probability, self._calibration)
 
-        if rug_probability >= high_t:
-            risk_level = 'HIGH'
-        elif rug_probability >= med_t:
-            risk_level = 'MEDIUM'
-        else:
-            risk_level = 'LOW'
-
-        if incomplete and risk_level == 'LOW':
-            risk_level = 'MEDIUM'
+        if incomplete and risk_level == LOW:
+            risk_level = MEDIUM
 
         # A calibrated medium threshold can sit above the scam floor; a scam match is never LOW.
-        if contract_data.get('scam_matches') and risk_level == 'LOW':
-            risk_level = 'MEDIUM'
+        if contract_data.get('scam_matches') and risk_level == LOW:
+            risk_level = MEDIUM
 
         if floor:
-            risk_level = 'HIGH'
+            risk_level = HIGH
 
         # --- Risk archetype ---
         archetype = self._determine_archetype(
@@ -364,29 +358,21 @@ class RiskEngine:
 
         rug_probability = round(min(max(composite, 0), 100), 1)
 
-        high_t = self._calibration.high_threshold if self._calibration else 71
-        med_t = self._calibration.medium_threshold if self._calibration else 31
+        risk_level = level_from_score(rug_probability, self._calibration)
 
-        if rug_probability >= high_t:
-            risk_level = 'HIGH'
-        elif rug_probability >= med_t:
-            risk_level = 'MEDIUM'
-        else:
-            risk_level = 'LOW'
-
-        if incomplete and risk_level == 'LOW':
-            risk_level = 'MEDIUM'
+        if incomplete and risk_level == LOW:
+            risk_level = MEDIUM
 
         # A calibrated medium threshold can sit above the scam floor; a scam match is never LOW.
-        if contract_data.get('scam_matches') and risk_level == 'LOW':
-            risk_level = 'MEDIUM'
+        if contract_data.get('scam_matches') and risk_level == LOW:
+            risk_level = MEDIUM
 
-        # A fired floor is never LOW, and one at the extension's fixed BLOCK boundary (71) is HIGH
+        # A fired floor is never LOW, and one at the extension's fixed BLOCK boundary is HIGH
         # whatever the calibrated thresholds, so the RPC proxy (which blocks on HIGH) agrees.
-        if floor >= 71:
-            risk_level = 'HIGH'
-        elif floor and risk_level == 'LOW':
-            risk_level = 'MEDIUM'
+        if floor >= BLOCK_MIN:
+            risk_level = HIGH
+        elif floor and risk_level == LOW:
+            risk_level = MEDIUM
 
         archetype = self._determine_archetype(
             contract_data, honeypot_data, dex_data, rug_probability,
@@ -500,7 +486,7 @@ class RiskEngine:
             if (contract_data.get('has_mint') and contract_data.get('has_proxy')
                     and contract_data.get('ownership_renounced') is False):
                 return 'rug_pull'
-        if rug_prob >= 71:
+        if rug_prob >= BLOCK_MIN:
             return 'high_risk_contract'
         return 'legitimate'
 

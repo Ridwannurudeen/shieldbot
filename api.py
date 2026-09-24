@@ -29,6 +29,7 @@ from utils.web3_client import UnsupportedChainError
 from services import rpc_guard
 from services.counterparty_service import code_kind
 from services.mempool_service import supports_pending_transactions
+from core import verdicts
 from core.auth import TIER_LIMITS, hash_key
 from core.circuit_breaker import CLOSED, provider_breakers
 from core.config import Settings
@@ -1161,18 +1162,11 @@ async def _build_signature_only_response(req: FirewallRequest, policy_override: 
     risk_score = int(max(0, min(100, round(result.score))))
     danger_signals = list(result.flags)
 
-    if req.signMethod == "eth_sign" and risk_score < 30:
-        risk_score = 30
+    if req.signMethod == "eth_sign" and risk_score < verdicts.BLIND_SIGN_MIN:
+        risk_score = verdicts.BLIND_SIGN_MIN
         danger_signals.append("Blind eth_sign request: wallet may be signing an opaque payload")
 
-    if risk_score >= 70:
-        classification = "BLOCK_RECOMMENDED"
-    elif risk_score >= 40:
-        classification = "HIGH_RISK"
-    elif risk_score >= 15:
-        classification = "CAUTION"
-    else:
-        classification = "SAFE"
+    classification = verdicts.classify(risk_score, verdicts.SIGNATURE_BANDS)
 
     sig_type = result.data.get("sig_type", "signature")
     sign_method = req.signMethod or result.data.get("sign_method") or "signature"
@@ -1184,18 +1178,18 @@ async def _build_signature_only_response(req: FirewallRequest, policy_override: 
     policy = container.policy_engine if container and container.policy_engine else PolicyEngine()
     strict_block = not covered and policy.apply([], {}, mode_override=policy_override)['policy_mode'] == 'STRICT'
     if strict_block:
-        risk_score = max(risk_score, 80)
-        classification = 'BLOCK_RECOMMENDED'
+        risk_score = max(risk_score, verdicts.STRICT_BLOCK_SCORE)
+        classification = verdicts.BLOCK_RECOMMENDED
         danger_signals.insert(0, 'Policy override: signature analysis unavailable or incomplete')
     alert = format_extension_alert({
-        'rug_probability': risk_score, 'risk_level': 'LOW' if covered else 'UNKNOWN',
+        'rug_probability': risk_score, 'risk_level': verdicts.LOW if covered else verdicts.UNKNOWN,
         'status': 'ok' if covered else 'unknown', 'coverage': {'signature': int(covered)},
         'coverage_reasons': {} if covered else {
             'signature': result.data.get('reason') or 'Signature payload analysis unavailable or unsupported',
         },
     })
-    if not covered and classification == 'SAFE':
-        classification = 'CAUTION'
+    if not covered and classification == verdicts.SAFE:
+        classification = verdicts.CAUTION
     decoded_action = f"{sign_method} signature request"
     if sig_type and sig_type not in {"unknown", sign_method}:
         decoded_action += f" ({sig_type})"
@@ -1223,7 +1217,8 @@ async def _build_signature_only_response(req: FirewallRequest, policy_override: 
         "analysis": f"Signature-only analysis for {sign_method}",
         "plain_english": (
             alert['recommended_action'] if not covered else
-            "This signature request contains risky permission patterns. Verify the spender, token, and terms before signing." if risk_score >= 40
+            "This signature request contains risky permission patterns. Verify the spender, token, and terms before signing."
+            if classification in (verdicts.HIGH_RISK, verdicts.BLOCK_RECOMMENDED)
             else "No dangerous signature permission pattern was detected."
         ),
         "verdict": f"{classification} - Signature risk {alert['risk_display']}",
@@ -1235,7 +1230,7 @@ async def _build_signature_only_response(req: FirewallRequest, policy_override: 
             "overall": risk_score,
             "category_scores": {"signature": risk_score},
             **_coverage_fields(alert),
-            "risk_level": classification if covered else 'UNKNOWN',
+            "risk_level": classification if covered else verdicts.UNKNOWN,
             "threat_type": sig_type or "signature",
             "critical_flags": danger_signals,
             "confidence": 80 if req.typedData else 60,
@@ -1312,18 +1307,22 @@ async def firewall(req: FirewallRequest, request: Request):
             if router_response:
                 return router_response
 
+        # The effective policy mode: the X-Policy-Mode header, or the server's default.
+        policy_mode = "BALANCED"
+        if container and container.policy_engine:
+            policy_mode = container.policy_engine.apply(
+                [], {}, mode_override=request.headers.get("X-Policy-Mode"),
+            )['policy_mode']
+
         # 2b. Check cache for recent result
         if container and container.db and not tx_specific:
             cached = await container.db.get_contract_score(to_addr, req.chainId, max_age_seconds=300)
             if cached and cached.get('category_scores', {}).get('_scan_metadata', {}).get('coverage'):
-                policy_mode = "BALANCED"
-                if container.policy_engine:
-                    policy_mode = container.policy_engine.apply(
-                        [], {}, mode_override=request.headers.get("X-Policy-Mode"),
-                    )['policy_mode']
-                if policy_mode != "STRICT":
+                # A full rescan costs provider calls, so only a caller with a valid API key can force one
+                # with STRICT. Anyone else is answered from the cached facts in STRICT mode.
+                if policy_mode != "STRICT" or not getattr(request.state, "api_key_info", None):
                     return _build_cached_response(
-                        cached, decoded, value_bnb, req.chainId, to_addr=to_addr,
+                        cached, decoded, value_bnb, req.chainId, to_addr=to_addr, policy_mode=policy_mode,
                     )
 
         # 2c. Fast deployer history lookup (uses already-indexed data — non-blocking DB query)
@@ -1449,10 +1448,10 @@ async def firewall(req: FirewallRequest, request: Request):
             if simulation_result:
                 if not simulation_result.get("success") and simulation_result.get("revert_reason"):
                     danger_signals.insert(0, f"Simulation reverted: {simulation_result['revert_reason']}")
-                    # Only escalate to BLOCK if risk is already elevated (>= 30)
+                    # Only escalate to BLOCK if risk is already elevated
                     # Low-risk reverts are just bad tx params, not malicious
-                    if alert["rug_probability"] >= 30:
-                        classification = "BLOCK_RECOMMENDED"
+                    if alert["rug_probability"] >= verdicts.REVERT_BLOCK_MIN:
+                        classification = verdicts.BLOCK_RECOMMENDED
                 for w in simulation_result.get("warnings", []):
                     if w not in danger_signals:
                         danger_signals.append(w)
@@ -1467,15 +1466,18 @@ async def firewall(req: FirewallRequest, request: Request):
                     alert["rug_probability"] = risk_score
                     if alert['status'] == 'ok':
                         alert['risk_display'] = f'{risk_score}%'
-                    if risk_score >= 71:
-                        classification = "BLOCK_RECOMMENDED"
+                    if verdicts.classify(risk_score) == verdicts.BLOCK_RECOMMENDED:
+                        classification = verdicts.BLOCK_RECOMMENDED
+
+            # The level follows the final score, the campaign boost included, here and where it is stored.
+            risk_level = verdicts.stored_level(risk_score, risk_output.get("risk_level", verdicts.UNKNOWN))
 
             # Shield score breakdown
             shield_score = {
                 **_coverage_fields(alert),
                 "overall": risk_score,
                 "category_scores": risk_output.get("category_scores", {}),
-                "risk_level": risk_output.get("risk_level", "UNKNOWN"),
+                "risk_level": risk_level,
                 "threat_type": risk_output.get("risk_archetype", "unknown"),
                 "critical_flags": risk_output.get("critical_flags", []),
                 "confidence": alert["confidence"],
@@ -1529,7 +1531,7 @@ async def firewall(req: FirewallRequest, request: Request):
                         address=to_addr,
                         chain_id=req.chainId,
                         risk_score=risk_score,
-                        risk_level=risk_output.get("risk_level", "UNKNOWN"),
+                        risk_level=risk_level,
                         archetype=risk_output.get("risk_archetype"),
                         category_scores={
                             **risk_output.get("category_scores", {}),
@@ -1547,13 +1549,13 @@ async def firewall(req: FirewallRequest, request: Request):
             if container and hasattr(container, 'threat_graph') and describes_target:
                 _fire_and_forget(
                     container.threat_graph.enrich_from_scan(
-                        to_addr, req.chainId, risk_output,
+                        to_addr, req.chainId, {**risk_output, "rug_probability": risk_score, "risk_level": risk_level},
                     ),
                     label="threat_graph_enrich",
                 )
 
             # Sentinel feedback loop: auto-watch deployers of blocked contracts
-            if container and hasattr(container, 'sentinel') and classification == "BLOCK_RECOMMENDED" and describes_target:
+            if container and hasattr(container, 'sentinel') and classification == verdicts.BLOCK_RECOMMENDED and describes_target:
                 try:
                     deployer_info = await container.db.get_deployer_risk_summary(to_addr, req.chainId)
                     deployer_addr = deployer_info["deployer_address"] if deployer_info else None
@@ -1572,8 +1574,8 @@ async def firewall(req: FirewallRequest, request: Request):
             if container and container.indexer:
                 container.indexer.enqueue(to_addr, req.chainId)
 
-            # Greenfield upload for risky transactions (risk >= 50)
-            if greenfield_service and greenfield_service.is_enabled() and risk_score >= 50:
+            # Greenfield upload for risky transactions (HIGH_RISK and above)
+            if greenfield_service and greenfield_service.is_enabled() and risk_score >= verdicts.HIGH_RISK_MIN:
                 try:
                     gf_url = await greenfield_service.upload_report(
                         target_address=to_addr,
@@ -1627,26 +1629,25 @@ async def firewall(req: FirewallRequest, request: Request):
             "whitelisted_router": whitelisted,
         }
 
-        firewall_result = None
-        if not is_scan_incomplete(contract_scan) and ai_analyzer and ai_analyzer.is_available():
-            firewall_result = await ai_analyzer.generate_firewall_report(tx_data, contract_scan)
-
-        if firewall_result:
-            alert = format_extension_alert({
-                **contract_scan, 'rug_probability': firewall_result.get('risk_score', contract_scan.get('risk_score', 0)),
-            })
-            firewall_result.update(_coverage_fields(alert))
-            firewall_result["raw_checks"] = _extract_raw_checks(contract_scan)
-            firewall_result.setdefault("asset_delta", [])
-            if tx_specific and firewall_result["classification"] == "SAFE":
-                firewall_result["classification"] = "CAUTION"
-                firewall_result["danger_signals"].append(_TX_CHECKS_UNAVAILABLE)
-                firewall_result["verdict"] = f"CAUTION — {_TX_CHECKS_UNAVAILABLE}"
-            return firewall_result
-        else:
-            return _build_fallback_response(
-                decoded, contract_scan, whitelisted, req.chainId, transaction_specific=tx_specific,
+        response = _build_fallback_response(
+            decoded, contract_scan, whitelisted, req.chainId, transaction_specific=tx_specific,
+            policy_mode=policy_mode,
+        )
+        # The AI explains a known verdict and never sets it: of its reply only the prose is kept.
+        if response["status"] == "ok" and ai_analyzer and ai_analyzer.is_available():
+            explanation = await ai_analyzer.generate_firewall_report(
+                tx_data, contract_scan, response["classification"], response["risk_score"],
             )
+            if explanation:
+                response.update({
+                    key: explanation[key] for key in ("analysis", "plain_english") if isinstance(explanation.get(key), str)
+                })
+                impact = explanation.get("transaction_impact")
+                if isinstance(impact, dict):
+                    response["transaction_impact"].update({
+                        key: impact[key] for key in ("sending", "post_tx_state") if isinstance(impact.get(key), str)
+                    })
+        return response
 
     except HTTPException:
         raise
@@ -1677,7 +1678,7 @@ async def scan(req: ScanRequest):
         result['classification'] = alert['risk_classification']
         result['partial'] = alert['status'] == 'unknown' or result.get('partial', False)
         if alert['status'] == 'unknown':
-            result['risk_level'] = 'UNKNOWN'
+            result['risk_level'] = verdicts.UNKNOWN
             result['verdict'] = alert['recommended_action']
             result.pop('ai_analysis', None)
         return result
@@ -2101,6 +2102,19 @@ async def public_stats():
     return stats
 
 
+@app.get("/api/verdicts")
+async def verdict_vocabulary():
+    """The verdict vocabulary and band tables every ShieldBot surface uses, read-only.
+
+    A score is in the first band whose min_score it reaches. risk_level_thresholds are the lowest
+    scores at which a stored risk level is HIGH and MEDIUM on this server: the calibrated thresholds,
+    or the band table's where that is lower, since a stored level is raised to the band of its score.
+    agent_firewall gives the agent firewall's default thresholds and the decisions each
+    classification can meet under them.
+    """
+    return verdicts.describe(container.calibration if container else None)
+
+
 @app.get("/api/coverage/{chain_id}")
 async def chain_coverage(chain_id: int):
     """What a scan on this chain can check, from its configuration, and how its providers are answering.
@@ -2504,26 +2518,25 @@ async def threat_feed(
     limit = max(1, min(limit, 200))  # cap between 1 and 200
     threats = []
 
-    # Recent high-risk contract scans from DB. Known split: this lists risk_level 'HIGH' while the threat
-    # counts in core.database count risk_score >= 71, and a campaign-boosted score keeps its unboosted level.
+    # Recent high-risk contract scans from DB: the rows the threat counts in core.database count.
     try:
         if source == "mempool":
             cursor = None
         elif chain_id is not None:
-            cursor = await container.db._db.execute("""
+            cursor = await container.db._db.execute(f"""
                 SELECT address, chain_id, risk_score, risk_level, archetype, flags,
                        last_scanned_at
                 FROM contract_scores
-                WHERE risk_level = 'HIGH' AND chain_id = ?
+                WHERE {verdicts.THREAT_CONDITION} AND chain_id = ?
                 ORDER BY last_scanned_at DESC
                 LIMIT ?
             """, (int(chain_id), limit))
         else:
-            cursor = await container.db._db.execute("""
+            cursor = await container.db._db.execute(f"""
                 SELECT address, chain_id, risk_score, risk_level, archetype, flags,
                        last_scanned_at
                 FROM contract_scores
-                WHERE risk_level = 'HIGH'
+                WHERE {verdicts.THREAT_CONDITION}
                 ORDER BY last_scanned_at DESC
                 LIMIT ?
             """, (limit,))
@@ -2928,7 +2941,7 @@ def _scam_match_count(scan: Dict) -> Optional[int]:
 
 def _build_cached_response(
     cached: Dict, decoded: Dict, value_bnb: float, chain_id: int = 56,
-    to_addr: str = "",
+    to_addr: str = "", policy_mode: str = "BALANCED",
 ) -> Dict:
     """Build a firewall response from a cached DB row."""
     risk_score = cached['risk_score']
@@ -2938,6 +2951,12 @@ def _build_cached_response(
 
     category_scores = dict(cached.get('category_scores', {}))
     metadata = category_scores.pop('_scan_metadata', {})
+    # STRICT blocks on Unknown, as core.policy does for a fresh scan. A cached row keeps its coverage
+    # but not which fields were missing, so any Unknown in it blocks.
+    if policy_mode == 'STRICT' and is_scan_incomplete({**metadata, 'risk_level': risk_level}):
+        risk_score = max(risk_score, verdicts.STRICT_BLOCK_SCORE)
+        risk_level = verdicts.HIGH
+        flags = ['Policy override: cached analysis unavailable or incomplete', *flags]
     alert = format_extension_alert({
         **metadata, 'rug_probability': risk_score, 'risk_level': risk_level,
         'critical_flags': flags, 'risk_archetype': archetype or 'unknown',
@@ -2981,7 +3000,7 @@ def _build_cached_response(
         "network": _chain_id_to_name(chain_id),
         "partial": alert['status'] == 'unknown',
         "failed_sources": [],
-        "policy_mode": "BALANCED",
+        "policy_mode": policy_mode,
     }
 
 
@@ -3003,13 +3022,26 @@ def _extract_raw_checks(scan: Dict) -> Dict:
 # The legacy scan sees only the target, never the transaction's spender, payment or signature, so
 # it cannot clear a transaction-specific request.
 _TX_CHECKS_UNAVAILABLE = "Transaction checks unavailable: the spender, payment or signature was not analysed"
+# Nor does it check the scam database (the token scanner never asks it) or the calldata's intent, so its
+# heuristics alone never clear a transaction.
+_FULL_ANALYSIS_UNAVAILABLE = (
+    "Full analysis unavailable: heuristic results only, scam database and calldata intent not checked"
+)
 
 
 def _build_fallback_response(
     decoded: Dict, scan: Dict, whitelisted: Optional[str], chain_id: int, transaction_specific: bool = False,
+    policy_mode: str = "BALANCED",
 ) -> Dict:
-    """Build a firewall response when AI is unavailable."""
-    risk_score = scan.get("risk_score", 50)
+    """Build a firewall response from the legacy scan when the analysis pipeline failed. The score and
+    classification come from the scan's heuristics and the band table only."""
+    risk_score = scan.get("risk_score")
+    if risk_score is None:
+        # A scan with no heuristic score is Unknown, not a number made up for it.
+        scan = {**scan, 'status': 'unknown', 'coverage_reasons': {
+            **scan.get('coverage_reasons', {}), 'risk_score': 'Heuristic risk score unavailable',
+        }}
+        risk_score = 0
     scam_matches = _scam_match_count(scan)
     is_honeypot = scan.get("is_honeypot")
     is_verified = scan.get("is_verified")
@@ -3037,22 +3069,21 @@ def _build_fallback_response(
     if whitelisted:
         risk_score = max(0, risk_score - 20)
 
-    # Classify
-    if risk_score >= 80:
-        classification = "BLOCK_RECOMMENDED"
-    elif risk_score >= 60:
-        classification = "HIGH_RISK"
-    elif risk_score >= 30:
-        classification = "CAUTION"
-    else:
-        classification = "SAFE"
+    # STRICT blocks a degraded analysis, as core.policy does an incomplete one.
+    strict = policy_mode == 'STRICT'
+    if strict:
+        risk_score = max(risk_score, verdicts.STRICT_BLOCK_SCORE)
+        danger_signals.insert(0, 'Policy override: composite analysis unavailable')
 
     alert = format_extension_alert({**scan, 'rug_probability': risk_score})
-    if alert['status'] == 'unknown' and classification == 'SAFE':
-        classification = 'CAUTION'
-    if transaction_specific and classification == 'SAFE':
-        classification = 'CAUTION'
-        danger_signals.append(_TX_CHECKS_UNAVAILABLE)
+    classification = verdicts.BLOCK_RECOMMENDED if strict else alert['risk_classification']
+    action = alert['recommended_action']
+    if classification == verdicts.SAFE:
+        classification = verdicts.CAUTION
+        danger_signals.append(_FULL_ANALYSIS_UNAVAILABLE)
+        action = f'{_FULL_ANALYSIS_UNAVAILABLE}. Review the transaction before proceeding.'
+        if transaction_specific:
+            danger_signals.append(_TX_CHECKS_UNAVAILABLE)
 
     return {
         **_coverage_fields(alert),
@@ -3069,11 +3100,12 @@ def _build_fallback_response(
             "post_tx_state": "AI analysis unavailable — review manually",
         },
         "analysis": "AI analysis unavailable. Showing heuristic results only.",
-        "plain_english": alert['recommended_action'],
+        "plain_english": action,
         "verdict": (f"{classification} — {alert['risk_display']}" if alert['status'] == 'unknown'
                     else f"{classification} — Risk score {risk_score}/100"),
         "raw_checks": _extract_raw_checks(scan),
         "asset_delta": [],
+        "policy_mode": policy_mode,
     }
 
 
@@ -3122,7 +3154,7 @@ def _build_unverified_swap_response(
         "risk_display": 'Unknown (incomplete provider coverage)',
     }
     return {
-        "classification": "CAUTION",
+        "classification": verdicts.CAUTION,
         **coverage_fields,
         "risk_score": 35,
         "decoded_action": _format_decoded_action(decoded, req.chainId),
@@ -3144,7 +3176,7 @@ def _build_unverified_swap_response(
             "This transaction goes to a trusted DEX router, but the tokens in the swap "
             "path could not be checked. Verify the tokens manually before proceeding."
         ),
-        "verdict": "CAUTION — Token safety unverifiable",
+        "verdict": f"{verdicts.CAUTION} — Token safety unverifiable",
         "raw_checks": {
             "is_verified": None,
             "scam_matches": None,
@@ -3159,7 +3191,7 @@ def _build_unverified_swap_response(
             **coverage_fields,
             "overall": 35,
             "category_scores": {},
-            "risk_level": "UNKNOWN",
+            "risk_level": verdicts.UNKNOWN,
             "threat_type": "unknown",
             "critical_flags": [],
             "confidence": 30,
@@ -3272,8 +3304,8 @@ async def _analyze_router_swap(
     unknown_tokens = [item for item in token_summaries if item['status'] == 'unknown']
     if unknown_tokens or len(token_summaries) != len(candidates):
         risk_output['status'] = 'unknown'
-        if risk_output.get('risk_level') == 'LOW':
-            risk_output['risk_level'] = 'UNKNOWN'
+        if risk_output.get('risk_level') == verdicts.LOW:
+            risk_output['risk_level'] = verdicts.UNKNOWN
         risk_output['coverage_reasons'] = {
             f"{item['address']}:{source}": reason
             for item in unknown_tokens for source, reason in item['coverage_reasons'].items()
@@ -3300,8 +3332,8 @@ async def _analyze_router_swap(
     if sim_result:
         if not sim_result.get("success") and sim_result.get("revert_reason"):
             danger_signals.insert(0, f"Simulation reverted: {sim_result['revert_reason']}")
-            if alert["rug_probability"] >= 30:
-                classification = "BLOCK_RECOMMENDED"
+            if alert["rug_probability"] >= verdicts.REVERT_BLOCK_MIN:
+                classification = verdicts.BLOCK_RECOMMENDED
         for w in sim_result.get("warnings", []):
             if w not in danger_signals:
                 danger_signals.append(w)

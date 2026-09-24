@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Tuple
 import aiosqlite
 
 from core.extension_formatter import is_scan_incomplete
+from core.verdicts import CAUTION_MIN, HIGH, THREAT_CONDITION, stored_level
 
 logger = logging.getLogger(__name__)
 
@@ -571,6 +572,7 @@ class Database:
         await self._migrate_funding_value_wei()
         await self._migrate_tracked_pairs_chain_id()
         await self._migrate_reporter_ips()
+        await self._migrate_contract_score_levels()
         await self._create_launch_discovery_tables()
         await self._create_launch_feed_tables()
         await self._create_launch_alert_tables()
@@ -663,6 +665,29 @@ class Database:
             ips = [(row_id,) for row_id, reporter in await cursor.fetchall() if _is_ip_address(reporter)]
             await self._db.executemany(
                 "UPDATE community_reports SET reporter_id = NULL WHERE id = ?", ips
+            )
+            await self._db.commit()
+        except BaseException:
+            await self._db.rollback()
+            raise
+
+    async def _migrate_contract_score_levels(self):
+        """Raise every stored level below the band of its stored score, in one transaction. Rows
+        written before the level followed the final score keep the level of the unboosted or unfloored
+        score. A level is never lowered, so an incomplete scan's MEDIUM stays MEDIUM."""
+        await self._db.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = await self._db.execute(
+                "SELECT address, chain_id, risk_score, risk_level FROM contract_scores WHERE risk_score >= ?",
+                (CAUTION_MIN,),
+            )
+            raised = []
+            for address, chain_id, score, level in await cursor.fetchall():
+                level_for_score = stored_level(score, level)
+                if level_for_score != level:
+                    raised.append((level_for_score, address, chain_id))
+            await self._db.executemany(
+                "UPDATE contract_scores SET risk_level = ? WHERE address = ? AND chain_id = ?", raised
             )
             await self._db.commit()
         except BaseException:
@@ -953,11 +978,9 @@ class Database:
         unique_contracts = row[0] or 0
         total_scan_events = int(row[1] or 0)
 
-        # Known split: this counts risk_score >= 71 while the threat feed (api.py) lists risk_level 'HIGH'.
-        # The firewall's campaign boost raises a stored score without raising its stored level, so the two
-        # can disagree until both read one verdict vocabulary and band table.
+        # The threat feed (api.py) lists the same rows.
         cur = await self._db.execute(
-            "SELECT COUNT(*) FROM contract_scores WHERE risk_score >= 71"
+            f"SELECT COUNT(*) FROM contract_scores WHERE {THREAT_CONDITION}"
         )
         threats_detected = (await cur.fetchone())[0] or 0
 
@@ -1009,9 +1032,8 @@ class Database:
             )
             scans = (await cur.fetchone())[0] or 0
 
-            # The same known split as the all-time threat count above: score >= 71, not risk_level 'HIGH'.
             cur = await self._db.execute(
-                "SELECT COUNT(*) FROM contract_scores WHERE last_scanned_at > ? AND risk_score >= 71",
+                f"SELECT COUNT(*) FROM contract_scores WHERE last_scanned_at > ? AND {THREAT_CONDITION}",
                 (cutoff,)
             )
             threats = (await cur.fetchone())[0] or 0
@@ -1082,10 +1104,10 @@ class Database:
             return None
         deployer = row[0]
 
-        cursor = await self._db.execute("""
+        cursor = await self._db.execute(f"""
             SELECT
                 COUNT(DISTINCT d.contract_address),
-                COALESCE(SUM(CASE WHEN cs.risk_level = 'HIGH' THEN 1 ELSE 0 END), 0)
+                COALESCE(SUM(CASE WHEN cs.risk_level = '{HIGH}' THEN 1 ELSE 0 END), 0)
             FROM deployers d
             LEFT JOIN contract_scores cs
                 ON cs.address = d.contract_address AND cs.chain_id = d.chain_id
