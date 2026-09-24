@@ -1,6 +1,7 @@
 """Signature/Permit Analyzer — detects dangerous EIP-712 typed data signatures."""
 
 import logging
+import re
 from typing import Dict, List, Optional
 
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
@@ -24,6 +25,16 @@ SIGNATURE_TRANSFER_TYPES = (
     'PermitBatchWitnessTransferFrom',
 )
 
+# A bulk order signs a tree of orders: `tree` declared as OrderComponents[2]...[2], 1 to 24 levels.
+SEAPORT_BULK_TREE = re.compile(r'OrderComponents((?:\[2\]){1,24})')
+BLUR_DOMAIN = 'Blur Exchange'
+# What an order that pays its signer nothing, too little, or only others is flagged as.
+SEAPORT_FLAGS = {
+    'zero': 'Seaport: zero-price NFT listing (likely phishing)',
+    'elsewhere': 'Seaport: NFT listing pays the offerer nothing; its consideration goes to other addresses (likely phishing)',
+    'low': 'Seaport: suspiciously low consideration for NFT',
+}
+
 
 class SignaturePermitAnalyzer(Analyzer):
     """Analyzes EIP-712 typed data for dangerous permit/signature patterns.
@@ -32,7 +43,10 @@ class SignaturePermitAnalyzer(Analyzer):
     - EIP-2612 Permit: flags unlimited value, unknown spender, far-future deadline
     - Permit2 AllowanceTransfer (PermitSingle/PermitBatch): amount/expiration/spender
     - Permit2 SignatureTransfer (PermitTransferFrom, its batch and witness forms): pull rights
-    - Seaport OrderComponents: zero-price NFT listings
+    - Seaport OrderComponents, and each order of a BulkOrder: NFT listings that pay the offerer nothing
+      or next to nothing
+    - Blur Exchange Order: listings that pay the seller nothing once fees to others are taken; a Blur
+      bulk listing (Root) signs only a Merkle root of its orders and is Unknown
 
     Every permit's spender is judged like a calldata approval's: the chain adapter's routers and
     Permit2 are allowlisted, and any other spender's counterparty facts can set a hard floor.
@@ -98,10 +112,17 @@ class SignaturePermitAnalyzer(Analyzer):
                 sig_type = 'permit2_transfer'
                 permit = self._check_permit2_transfer(message, primary_type, types)
 
-            # Seaport OrderComponents
-            elif primary_type == 'OrderComponents':
-                sig_type = 'seaport_order'
-                s, f = self._check_seaport(message)
+            # Seaport: one order, or a bulk order's tree of them
+            elif primary_type in ('OrderComponents', 'BulkOrder'):
+                sig_type = 'seaport_order' if primary_type == 'OrderComponents' else 'seaport_bulk_order'
+                s, f, unreadable = self._check_seaport(message, primary_type, types)
+                score += s
+                flags.extend(f)
+
+            # Blur Exchange: one order, or a bulk listing's root
+            elif primary_type in ('Order', 'Root') and _domain_name(typed_data) == BLUR_DOMAIN:
+                sig_type = 'blur_order' if primary_type == 'Order' else 'blur_bulk_order'
+                s, f, unreadable = self._check_blur(message, primary_type, types)
                 score += s
                 flags.extend(f)
 
@@ -316,33 +337,53 @@ class SignaturePermitAnalyzer(Analyzer):
 
         return score, flags, spender, unlimited, True, True
 
-    def _check_seaport(self, message: Dict) -> tuple:
-        """Check Seaport OrderComponents for zero-price listings."""
-        score = 0.0
+    def _check_seaport(self, message: Dict, primary_type: str, types) -> tuple:
+        """Check a Seaport order, or every order of a bulk order: (score, flags, why its declared types
+        or tree could not be read, or None). One that cannot be read is judged as a zero-price listing."""
+        orders = [message] if primary_type == 'OrderComponents' else _bulk_orders(message, types)
+        if orders is None or not _seaport_types(types):
+            flag = 'Seaport: order type does not match Seaport; treated as a zero-price listing'
+            return 50.0, [flag], 'Typed data type does not match its order standard'
+
+        kinds = [_seaport_order_kind(order) for order in orders]
+        score = max((50.0 if kind in ('zero', 'elsewhere') else 30.0 for kind in kinds if kind), default=0.0)
         flags = []
+        for kind, flag in SEAPORT_FLAGS.items():
+            count = kinds.count(kind)
+            if count and primary_type == 'OrderComponents':
+                flags.append(flag)
+            elif count:
+                flags.append(f'{flag}, in {count} of {len(orders)} orders of a bulk order')
+        return score, flags, None
 
-        consideration = message.get('consideration', [])
-        offer = message.get('offer', [])
-
-        # Zero-price listing: offering NFT but receiving nothing meaningful
-        total_consideration = sum(
-            _parse_uint(c.get('startAmount', 0))
-            for c in consideration
-        )
-
-        has_nft_offer = any(
-            int(o.get('itemType', 0)) in (2, 3)  # ERC721 or ERC1155
-            for o in offer
-        )
-
-        if has_nft_offer and total_consideration == 0:
-            score += 50
-            flags.append('Seaport: zero-price NFT listing (likely phishing)')
-        elif has_nft_offer and total_consideration < 1000:
-            score += 30
-            flags.append('Seaport: suspiciously low consideration for NFT')
-
-        return score, flags
+    def _check_blur(self, message: Dict, primary_type: str, types) -> tuple:
+        """Check a Blur Exchange order: (score, flags, why it could not be read, or None). A sell order
+        pays its trader the price less the fees paid to others; a bulk listing (Root) signs only the
+        Merkle root of its orders, which cannot be read, and is judged as a zero-price listing."""
+        if primary_type == 'Root':
+            flag = 'Blur bulk listing: only a Merkle root of its orders is signed; treated as a zero-price listing'
+            return 50.0, [flag], 'Blur bulk listing signs only a Merkle root of its orders'
+        members = _members(types, 'Order') or {}
+        fee_members = _referenced_members(types, members, 'fees', True)
+        if not {'trader', 'side', 'price'} <= set(members) or not {'rate', 'recipient'} <= set(fee_members or {}):
+            flag = 'Blur: order type does not match Blur Exchange; treated as a zero-price listing'
+            return 50.0, [flag], 'Typed data type does not match its order standard'
+        # Side 0 is a bid: the trader pays and gives nothing away. An unreadable side is a sale.
+        if _parse_uint_or_none(message.get('side')) == 0:
+            return 0.0, [], None
+        trader = _lower(message.get('trader'))
+        price = _parse_uint_or_none(message.get('price')) or 0
+        # A fee rate that cannot be read takes the whole price.
+        rates = [_parse_uint_or_none(fee.get('rate')) for fee in message.get('fees', [])
+                 if not trader or _lower(fee.get('recipient')) != trader]
+        paid = price * max(0, 10_000 - sum(10_000 if rate is None else rate for rate in rates)) // 10_000
+        if paid == 0:
+            flag = 'Blur: zero-price listing (likely phishing)' if price == 0 else (
+                'Blur: listing pays the seller nothing; its fees take the whole price (likely phishing)')
+            return 50.0, [flag], None
+        if paid < 1000:
+            return 30.0, ['Blur: suspiciously low listing price'], None
+        return 0.0, [], None
 
 
 def _members(types, type_name: str) -> Optional[Dict[str, str]]:
@@ -366,6 +407,61 @@ def _referenced_members(types, members: Dict[str, str], name: str, array: bool) 
     if declared.endswith('[]') != array:
         return None
     return _members(types, declared.removesuffix('[]'))
+
+
+def _seaport_types(types) -> bool:
+    """Whether `types` declares Seaport's order types with every member the order checks read: only
+    declared members enter the digest a wallet signs."""
+    order = _members(types, 'OrderComponents') or {}
+    offer = _referenced_members(types, order, 'offer', True) or {}
+    consideration = _referenced_members(types, order, 'consideration', True) or {}
+    amounts = {'itemType', 'startAmount', 'endAmount'}
+    return order.get('offerer') == 'address' and amounts <= set(offer) and amounts | {'recipient'} <= set(consideration)
+
+
+def _bulk_orders(message: Dict, types) -> Optional[list]:
+    """The orders at the leaves of a Seaport bulk order's tree, or None when the declared tree type or
+    the tree's shape (nested pairs, as deep as declared) is not Seaport's."""
+    declared = _members(types, 'BulkOrder') or {}
+    match = SEAPORT_BULK_TREE.fullmatch(declared.get('tree', '')) if len(declared) == 1 else None
+    if not match:
+        return None
+    level = [message.get('tree')]
+    for _ in range(len(match.group(1)) // 3):
+        if not all(isinstance(node, list) and len(node) == 2 for node in level):
+            return None
+        level = [child for node in level for child in node]
+    return level if all(isinstance(order, dict) for order in level) else None
+
+
+def _seaport_order_kind(order: Dict) -> Optional[str]:
+    """How one Seaport order that offers NFTs pays its offerer, as a SEAPORT_FLAGS key, or None when it
+    offers no NFT or pays at least 1000 base units. Only consideration paid to the offerer pays the
+    offerer; an amount counts at the lower of its start and end, and one that cannot be read counts as
+    0. Any item type but 0 (native) and 1 (ERC-20) is taken as an NFT: 2 to 5 are ERC721, ERC1155 and
+    their by-criteria forms, with which the buyer picks any matching token of the signer's."""
+    if not any(_parse_uint_or_none(item.get('itemType')) not in (0, 1) for item in order.get('offer', [])):
+        return None
+    offerer = _lower(order.get('offerer'))
+
+    def amount(item):
+        start, end = _parse_uint_or_none(item.get('startAmount')), _parse_uint_or_none(item.get('endAmount'))
+        return 0 if start is None or end is None else min(start, end)
+
+    consideration = order.get('consideration', [])
+    paid = sum(amount(item) for item in consideration if offerer and _lower(item.get('recipient')) == offerer)
+    if paid == 0:
+        return 'elsewhere' if any(amount(item) for item in consideration) else 'zero'
+    return 'low' if paid < 1000 else None
+
+
+def _domain_name(typed_data: Dict):
+    domain = typed_data.get('domain')
+    return domain.get('name') if isinstance(domain, dict) else None
+
+
+def _lower(value) -> str:
+    return value.lower() if isinstance(value, str) else ''
 
 
 def _declared_spender(message: Dict, members: Dict[str, str]) -> str:

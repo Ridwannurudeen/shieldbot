@@ -1184,7 +1184,7 @@ async def _build_signature_only_response(req: FirewallRequest, policy_override: 
     sig_type = result.data.get("sig_type", "signature")
     sign_method = req.signMethod or result.data.get("sign_method") or "signature"
     covered = not result.error and 'Failed to parse typed data' not in danger_signals and (
-        sig_type in {'eip2612_permit', 'permit2', 'permit2_transfer', 'seaport_order'}
+        sig_type in {'eip2612_permit', 'permit2', 'permit2_transfer', 'seaport_order', 'seaport_bulk_order', 'blur_order'}
         or (not req.typedData and req.signMethod == 'personal_sign')
     ) and result.data.get('status') != 'unknown'
     # As core.policy does, STRICT turns an unavailable or incomplete analysis into a block.
