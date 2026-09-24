@@ -15,9 +15,15 @@ from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 logger = logging.getLogger(__name__)
 
 _ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
+_REPUTATION_WINDOW = 1000  # latest firewall records read per agent
+_MAX_DATA_CHARS = 200_000  # the HTTP firewall's calldata cap (api.MAX_FIREWALL_DATA_CHARS)
+_DATA_RE = re.compile(r"0[xX](?:[0-9a-fA-F]{2})*")
+# Bounded so int() never meets a huge literal: 64 hex digits or 78 decimal digits cover 2**256 - 1.
+_WEI_RE = re.compile(r"0[xX][0-9a-fA-F]{1,64}|[0-9]{1,78}")
 _CHAIN_ID_DESCRIPTION = (
-    "Chain ID (default 56 = BNB Chain). Every chain ShieldBot supports is accepted, "
-    "including 4663 = Robinhood Chain; an unsupported chain ID is rejected."
+    "Chain ID of the chain the address or transaction is on; required, there is no default. "
+    "Every chain ShieldBot supports is accepted, including 56 = BNB Chain and 4663 = Robinhood Chain; "
+    "an unsupported chain ID is rejected."
 )
 
 # --- Injection detection patterns (basic regex for V3.1 stub) ---
@@ -37,6 +43,40 @@ def _validate_address(addr: str) -> str:
     return addr.lower()
 
 
+def _require(params: Dict, name: str) -> str:
+    value = params.get(name)
+    if value is None:
+        raise ValueError(f"Missing required argument: {name}")
+    if not isinstance(value, str):
+        raise ValueError(f"Invalid argument: {name} must be a string")
+    return value
+
+
+def _page_limit(params: Dict) -> int:
+    limit = params.get("limit")
+    if limit is None:
+        return 20
+    if type(limit) is not int:
+        raise ValueError("Invalid argument: limit must be an integer")
+    return min(max(limit, 1), 100)
+
+
+def _validate_chain_id(container, chain_id) -> int:
+    if type(chain_id) is not int:
+        raise ValueError("Invalid argument: chain_id must be an integer")
+    return container.web3_client.validate_chain_id(chain_id)
+
+
+def _require_chain_id(container, params: Dict) -> int:
+    # A default chain would analyse an address from another chain on that chain, where it can look clean.
+    if params.get("chain_id") is None:
+        raise ValueError(
+            "Missing required argument: chain_id (the chain the address or transaction is on, "
+            "for example 56 = BNB Chain or 4663 = Robinhood Chain)"
+        )
+    return _validate_chain_id(container, params["chain_id"])
+
+
 # ---------------------------------------------------------------------------
 # Tool schema definitions
 # ---------------------------------------------------------------------------
@@ -53,14 +93,18 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "address": {"type": "string", "description": "Contract address (0x...)"},
-                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION, "default": 56},
+                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION},
             },
-            "required": ["address"],
+            "required": ["address", "chain_id"],
         },
     },
     {
         "name": "simulate_transaction",
-        "description": "Simulate a transaction via Tenderly and return success, revert reason, asset changes, warnings, and gas estimate. Approval changes are not measured and are returned as null.",
+        "description": (
+            "Simulate a transaction via Tenderly and return success, revert reason, asset changes, warnings, and gas estimate. "
+            "Approval changes are not measured and are returned as null, so every result has status 'unknown' with "
+            "coverage_reasons naming what is missing; when simulation is not configured or fails, the measurements are null too."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -68,26 +112,36 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "to": {"type": "string", "description": "Recipient / contract address"},
                 "data": {"type": "string", "description": "Transaction calldata (hex)"},
                 "value": {"type": "string", "description": "Value in wei (default '0')", "default": "0"},
-                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION, "default": 56},
+                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION},
             },
-            "required": ["from", "to", "data"],
+            "required": ["from", "to", "data", "chain_id"],
         },
     },
     {
         "name": "check_deployer",
-        "description": "Look up the deployer of a contract and return their deployment history and flagged contract count.",
+        "description": (
+            "Look up the deployer of a contract and return their deployment history and flagged contract count. "
+            "The index holds only contracts ShieldBot has scanned, so the counts can miss the deployer's other contracts "
+            "and the result always has status 'unknown' with coverage_reasons; a contract whose deployer is not indexed yet "
+            "has null counts, never zero."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "address": {"type": "string", "description": "Contract address to check deployer for"},
-                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION, "default": 56},
+                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION},
             },
-            "required": ["address"],
+            "required": ["address", "chain_id"],
         },
     },
     {
         "name": "check_agent_reputation",
-        "description": "Look up the trust score and transaction history for an agent registered with ShieldBot's firewall.",
+        "description": (
+            "Look up the trust score and transaction history for an agent registered with ShieldBot's firewall. "
+            "An unregistered agent, or one with no firewall history, returns status 'unknown' with coverage_reasons "
+            "and a null trust_score. Only the latest 1000 firewall records are read; an agent with that many also "
+            "returns status 'unknown', because its counts are a lower bound."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -103,9 +157,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "wallet_address": {"type": "string", "description": "Wallet address to scan"},
-                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION, "default": 56},
+                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION},
             },
-            "required": ["wallet_address"],
+            "required": ["wallet_address", "chain_id"],
         },
     },
     {
@@ -132,10 +186,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "address": {"type": "string", "description": "Address to check"},
-                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION, "default": 56},
+                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION},
                 "max_depth": {"type": "integer", "description": "Max traversal depth (default 2)", "default": 2},
             },
-            "required": ["address"],
+            "required": ["address", "chain_id"],
         },
     },
     {
@@ -179,8 +233,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
 
 async def handle_scan_contract(container, params: Dict) -> Dict:
     """Run all analyzers on a contract and return composite risk score."""
-    address = _validate_address(params["address"])
-    chain_id = container.web3_client.validate_chain_id(params.get("chain_id", 56))
+    address = _validate_address(_require(params, "address"))
+    chain_id = _require_chain_id(container, params)
 
     ctx = AnalysisContext(address=address, chain_id=chain_id)
     results = await container.registry.run_all(ctx)
@@ -203,15 +257,29 @@ async def handle_scan_contract(container, params: Dict) -> Dict:
 
 async def handle_simulate_transaction(container, params: Dict) -> Dict:
     """Simulate a transaction via Tenderly."""
-    from_addr = params["from"]
-    to_addr = params["to"]
-    data = params.get("data", "0x")
-    value = params.get("value", "0")
-    chain_id = container.web3_client.validate_chain_id(params.get("chain_id", 56))
+    from_addr = _validate_address(_require(params, "from"))
+    to_addr = _validate_address(_require(params, "to"))
+    data = _require(params, "data")
+    if len(data) > _MAX_DATA_CHARS or not _DATA_RE.fullmatch(data):
+        raise ValueError("Invalid argument: data must be 0x-prefixed hex calldata of at most 200000 characters")
+    value = params.get("value")
+    if value is None:
+        value = "0"
+    # The simulator replaces an unparseable value with 0, which would simulate a different transaction,
+    # so only a wei amount below 2**256 is accepted, and it is passed on as a decimal string.
+    wei = None
+    if isinstance(value, str) and _WEI_RE.fullmatch(value):
+        wei = int(value, 16) if value[:2].lower() == "0x" else int(value)
+    if wei is None or wei >= 2**256:
+        raise ValueError("Invalid argument: value must be a decimal or 0x-prefixed hex amount of wei below 2**256")
+    chain_id = _require_chain_id(container, params)
 
     if not container.tenderly_simulator.is_enabled():
         return {
             "error": "Tenderly simulation not configured",
+            "status": "unknown",
+            "coverage": {"simulation": 0},
+            "coverage_reasons": {"simulation": "Tenderly simulation not configured"},
             "asset_changes": None,
             "approvals_granted": None,
             "gas_estimate": None,
@@ -223,7 +291,7 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
     result = await container.tenderly_simulator.simulate_transaction(
         to_address=to_addr,
         from_address=from_addr,
-        value=value,
+        value=str(wei),
         data=data,
         chain_id=chain_id,
     )
@@ -231,6 +299,9 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
     if result is None:
         return {
             "error": "Simulation failed",
+            "status": "unknown",
+            "coverage": {"simulation": 0},
+            "coverage_reasons": {"simulation": "Simulation failed"},
             "asset_changes": None,
             "approvals_granted": None,
             "gas_estimate": None,
@@ -240,6 +311,9 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
         }
 
     return {
+        "status": "unknown",
+        "coverage": {"simulation": 1, "approvals": 0},
+        "coverage_reasons": {"approvals": "Approval changes are not measured"},
         "asset_changes": result.get("asset_deltas"),
         "approvals_granted": None,
         "gas_estimate": result.get("gas_used"),
@@ -251,21 +325,27 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
 
 async def handle_check_deployer(container, params: Dict) -> Dict:
     """Look up deployer history for a contract."""
-    address = _validate_address(params["address"])
-    chain_id = container.web3_client.validate_chain_id(params.get("chain_id", 56))
+    address = _validate_address(_require(params, "address"))
+    chain_id = _require_chain_id(container, params)
 
     summary = await container.db.get_deployer_risk_summary(address, chain_id)
     if summary is None:
         return {
             "deployer": None,
             "funded_by": None,
-            "contracts_deployed": 0,
-            "flagged_count": 0,
+            "contracts_deployed": None,
+            "flagged_count": None,
+            "status": "unknown",
+            "coverage": {"deployer": 0},
+            "coverage_reasons": {"deployer": "Deployer not yet indexed for this contract"},
             "note": "Deployer not yet indexed for this contract",
         }
 
     return {
         "deployer": summary.get("deployer_address"),
+        "status": "unknown",
+        "coverage": {"deployer": 1, "history": 0},
+        "coverage_reasons": {"history": "Only contracts ShieldBot has scanned are indexed, so the deployer's other contracts are not counted"},
         "funded_by": summary.get("funded_by"),
         "contracts_deployed": summary.get("total_contracts", 0),
         "flagged_count": summary.get("high_risk_contracts", 0),
@@ -274,40 +354,62 @@ async def handle_check_deployer(container, params: Dict) -> Dict:
 
 async def handle_check_agent_reputation(container, params: Dict) -> Dict:
     """Look up agent trust score from firewall history."""
-    agent_id = params["agent_id"]
+    agent_id = _require(params, "agent_id")
 
     policy = await container.db.get_agent_policy(agent_id)
     if not policy:
         return {
             "agent_id": agent_id,
             "trust_score": None,
-            "total_transactions": 0,
-            "block_rate": 0.0,
+            "total_transactions": None,
+            "block_rate": None,
+            "status": "unknown",
+            "coverage": {"history": 0},
+            "coverage_reasons": {"history": "Agent not registered"},
             "note": "Agent not registered",
         }
 
-    history = await container.db.get_agent_firewall_history(agent_id, limit=1000)
+    history = await container.db.get_agent_firewall_history(agent_id, limit=_REPUTATION_WINDOW)
     total = len(history)
+    if total == 0:
+        return {
+            "agent_id": agent_id,
+            "trust_score": None,
+            "total_transactions": 0,
+            "block_rate": None,
+            "status": "unknown",
+            "coverage": {"history": 0},
+            "coverage_reasons": {"history": "No firewall history for this agent"},
+        }
     blocked = sum(1 for h in history if h.get("verdict") == "BLOCK")
-    block_rate = (blocked / total) if total > 0 else 0.0
+    block_rate = blocked / total
 
     # Simple trust heuristic: 100 - block_rate*100, floored at 0
     trust_score = max(0, round(100 - block_rate * 100, 1))
 
-    return {
+    result = {
         "agent_id": agent_id,
         "trust_score": trust_score,
         "total_transactions": total,
         "block_rate": round(block_rate, 4),
     }
+    if total < _REPUTATION_WINDOW:
+        return {**result, "status": "ok", "coverage": {"history": 1}, "coverage_reasons": {}}
+    # A full window means older records were not read: the count is a lower bound.
+    return {
+        **result,
+        "status": "unknown",
+        "coverage": {"history": 0},
+        "coverage_reasons": {"history": f"Only the latest {_REPUTATION_WINDOW} firewall records are read, so total_transactions is a lower bound"},
+    }
 
 
 async def handle_check_approval_risk(container, params: Dict) -> Dict:
     """Report unavailable MCP approval coverage without claiming no approvals."""
-    wallet = _validate_address(params["wallet_address"])
+    wallet = _validate_address(_require(params, "wallet_address"))
     return {
         "wallet_address": wallet,
-        "chain_id": container.web3_client.validate_chain_id(params.get("chain_id", 56)),
+        "chain_id": _require_chain_id(container, params),
         "approvals": None,
         "status": "unknown",
         "coverage": {"approvals": 0},
@@ -318,8 +420,12 @@ async def handle_check_approval_risk(container, params: Dict) -> Dict:
 
 async def handle_scan_for_injection(container, params: Dict) -> Dict:
     """Basic regex-based prompt injection detection."""
-    content = params.get("content", "")
-    depth = params.get("depth", "fast")
+    content = _require(params, "content")
+    depth = params.get("depth")
+    if depth is None:
+        depth = "fast"
+    if depth not in ("fast", "thorough"):
+        raise ValueError("Invalid argument: depth must be 'fast' or 'thorough'")
 
     detections = []
     for pattern, label in _INJECTION_PATTERNS:
@@ -347,10 +453,10 @@ async def handle_scan_for_injection(container, params: Dict) -> Dict:
 
 async def handle_query_threat_graph(container, params: Dict) -> Dict:
     """Report unavailable MCP graph coverage without claiming no connections."""
-    address = _validate_address(params["address"])
+    address = _validate_address(_require(params, "address"))
     return {
         "address": address,
-        "chain_id": container.web3_client.validate_chain_id(params.get("chain_id", 56)),
+        "chain_id": _require_chain_id(container, params),
         "connected_to_cluster": None,
         "cluster_id": None,
         "edges": None,
@@ -363,7 +469,7 @@ async def handle_query_threat_graph(container, params: Dict) -> Dict:
 
 async def handle_get_threat_feed(container, params: Dict) -> Dict:
     """Retrieve latest flagged contracts from agent findings."""
-    limit = min(max(params.get("limit", 20), 1), 100)
+    limit = _page_limit(params)
 
     findings = await container.db.get_agent_findings(limit=limit)
 
@@ -383,8 +489,8 @@ async def handle_get_threat_feed(container, params: Dict) -> Dict:
 
 async def handle_get_robinhood_launches(container, params: Dict) -> Dict:
     """Recent launches with their latest scan outcome, from the query behind /api/launches."""
-    chain_id = container.web3_client.validate_chain_id(params.get("chain_id", LAUNCH_CHAIN_ID))
-    limit = min(max(params.get("limit", 20), 1), 100)
+    chain_id = _validate_chain_id(container, params.get("chain_id", LAUNCH_CHAIN_ID))
+    limit = _page_limit(params)
     if chain_id != LAUNCH_CHAIN_ID:
         return {
             "launches": [],

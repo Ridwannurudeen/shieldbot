@@ -187,13 +187,19 @@ def rate_limited():
 
 
 @pytest.mark.asyncio
-async def test_every_request_takes_one_request_of_the_shared_budget(db, clock):
+async def test_every_call_takes_one_request_of_the_shared_budget(db, clock):
     rpc = FastRpc()
-    await guarded(db, rpc, clock).run()
+    discovery = guarded(db, rpc, clock)
+    await discovery.run()
+    await discovery.run()
 
-    # With the clock frozen, request n waits until n / rate seconds after the first.
-    assert len(rpc.payloads) > 10
-    assert clock.sleeps == pytest.approx([n / RPC_BUDGET_RPS for n in range(1, len(rpc.payloads))])
+    # A header batch takes one request per header, since the public RPC rate-limits each call.
+    # With the clock frozen, each request waits until the calls before it fit the rate.
+    calls = [len(payload) if isinstance(payload, list) else 1 for payload in rpc.payloads]
+    assert len(rpc.payloads) > 10 and max(calls) > 1
+    assert clock.sleeps == pytest.approx(
+        [sum(calls[:n]) / RPC_BUDGET_RPS for n in range(1, len(rpc.payloads))]
+    )
 
 
 @pytest.mark.asyncio
@@ -333,6 +339,41 @@ async def test_poll_reads_every_source_and_the_triaged_swaps_in_one_request(db, 
     rows = await launches(db)
     assert {token: (rows[token]["source"], rows[token]["pool_id"], rows[token]["block_number"])
             for token in rows} == {token: (row[0], row[2], row[3]) for token, row in recent.items()}
+    assert await cursors(db) == {source.name: TARGET for source in SOURCES}
+
+
+@pytest.mark.asyncio
+async def test_a_poll_that_confirms_part_of_its_range_counts_that_part_and_resumes_after_it(db, clock):
+    await set_cursors(db, RECENT)
+    rpc = FastRpc()
+    unconfirmed = int(LOGS["doppler_create_weth"]["blockNumber"], 16)
+    missing = {unconfirmed}
+
+    async def headers_missing(payload):
+        status, body = await rpc(payload)
+        if isinstance(payload, list):
+            body = [
+                {**row, "result": None} if int(call["params"][0], 16) in missing else row
+                for call, row in zip(payload, body)
+            ]
+        return status, body
+
+    discovery = guarded(db, headers_missing, clock)
+    first = await discovery.poll(pools=[LONG_POOL, V2_PAIR])
+
+    # The launch block without a header ends the confirmed range; swaps up to it are counted.
+    assert first["target"] == unconfirmed - 1
+    assert first["swaps"] == {LONG_POOL: 1, V2_PAIR: 1}
+    confirmed = {token for token, row in EXPECTED.items() if RECENT < row[3] < unconfirmed}
+    assert {row["token_address"] for row in first["launches"]} == confirmed
+    assert await cursors(db) == {source.name: unconfirmed - 1 for source in SOURCES}
+
+    missing.clear()
+    second = await discovery.poll(pools=[LONG_POOL, V2_PAIR, GENERIC_POOL])
+
+    # The rest of the range is read once: together the two polls count every swap exactly once.
+    assert second["target"] == TARGET
+    assert second["swaps"] == {LONG_POOL: 1, GENERIC_POOL: 1}
     assert await cursors(db) == {source.name: TARGET for source in SOURCES}
 
 

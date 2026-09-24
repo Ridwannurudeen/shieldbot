@@ -266,7 +266,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       const chainId = parseInt(chainSelect.value) || 56;
       const resp = await fetch(`${apiUrl}/api/agent/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Install-Id": chatUserId },
         body: JSON.stringify({ message: text, user_id: chatUserId, chain_id: chainId }),
         signal: AbortSignal.timeout(30000),
       });

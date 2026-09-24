@@ -4,7 +4,7 @@
 
 **On-chain guarded transfers for Robinhood Chain, backed by inspectable token-risk evidence.**
 
-[Judge guide](docs/JUDGE_GUIDE.md) · [Recorded simulations](tests/fixtures/robinhood_simulation/) · [Verdict registry source](contracts/base/src/ShieldBotVerdictRegistry.sol) · [Test results](docs/TESTING.md)
+[Judge guide](docs/JUDGE_GUIDE.md) · [Recorded simulations](tests/fixtures/robinhood_simulation/) · [Verdict registry source](contracts/base/src/ShieldBotVerdictRegistry.sol) · [Deployed contracts](docs/DEPLOYMENTS.md) · [Test results](docs/TESTING.md)
 
 </div>
 
@@ -116,7 +116,8 @@ The registry publication path is wired to Robinhood Telegram scans and hunter sc
 | Interface in the repository | Entry point and scope |
 |---|---|
 | REST | `POST /api/scan`, `POST /api/firewall`: scan results and transaction analysis. |
-| Agent API | `POST /api/agent/firewall`: policy decision; unknown coverage requires owner approval rather than automatic allowance. |
+| Agent API | `POST /api/agent/firewall`: policy decision; unknown coverage, or a native value with no USD estimate (any chain but BSC and opBNB), requires owner approval rather than automatic allowance. |
+| API keys | `POST /api/keys/free`: one free-tier key (60 requests a minute, 1,000 a day) per email address, created from a single-use emailed link that expires after 30 minutes. Off, with a 503, unless the server has a Resend API key. See [TECHNICAL.md](docs/TECHNICAL.md#api-demo). |
 | Evidence | `GET /api/verdict/4663/{address}`: latest stored evidence and publication status. |
 | Launch feed | `GET /api/launches/4663`: discovered launches and available scan outcomes; not every token on the chain. |
 | MCP | [mcp_server/](mcp_server/): scan and launch tools; approval-risk and threat-graph stubs explicitly report unknown. |
@@ -167,7 +168,7 @@ Token names, symbols and pools as listed by GeckoTerminal (network `robinhood`) 
 
 ## Submission status and measured usage
 
-- **Registry deployment:** pending. The Robinhood Chain verdict registry, guard and guarded transfer are not deployed yet, so no contract address is listed.
+- **Registry deployment:** pending. The Robinhood Chain verdict registry, guard and guarded transfer are not deployed yet, so no contract address is listed. The contracts that are deployed, on Base and BNB Smart Chain, are listed with their owners and record counts in [DEPLOYMENTS.md](docs/DEPLOYMENTS.md).
 - **Measured usage:** the `GET /api/stats` snapshot supplied on **2026-09-22** is recorded in [SUBMISSION.md](docs/SUBMISSION.md); its time of day and the revision serving it were not supplied. Dashboard loading values and historical projections are not usage evidence.
 - **Release boundary:** this README describes this repository snapshot. Deployment, live evidence URLs and the browser-store release must be verified separately.
 

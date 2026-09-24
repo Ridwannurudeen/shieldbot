@@ -14,6 +14,7 @@ from utils.web3_client import Web3Client
 ADDRESS = "0x" + "ab" * 20
 SUBJECT_PATH = f"/api/admin/guard-subjects/4663/{ADDRESS}"
 ADMIN_HEADERS = {"x-admin-secret": "test-admin"}
+REGISTRY = "0x" + "c0" * 20
 
 
 @pytest.fixture
@@ -27,6 +28,9 @@ def guard_admin(monkeypatch):
         auth_manager=None,
         db=SimpleNamespace(
             get_platform_stats=AsyncMock(return_value={"all_time": {}}),
+            get_launch_discovery_status=AsyncMock(return_value={}),
+            get_launch_scan_share=AsyncMock(return_value={"launches": 0, "scanned": 0}),
+            get_verdict_evidence_counts=AsyncMock(return_value={}),
             register_guard_subject=AsyncMock(return_value=True),
             unregister_guard_subject=AsyncMock(),
         ),
@@ -38,6 +42,7 @@ def guard_admin(monkeypatch):
         })),
         mempool_monitor=None,
         phishing_service=None,
+        verdict_publisher=SimpleNamespace(registry=REGISTRY),
     )
     monkeypatch.setattr(api, "container", services)
     monkeypatch.setattr(api, "web3_client", registry)
@@ -95,7 +100,7 @@ def test_admin_can_add_and_remove_guard_subject(guard_admin):
         response = client.request(method, SUBJECT_PATH, headers=ADMIN_HEADERS)
         assert response.status_code == 200
         assert response.json() == {"ok": True, "address": ADDRESS.lower(), "chain_id": 4663}
-    services.db.register_guard_subject.assert_awaited_once_with(4663, ADDRESS.lower())
+    services.db.register_guard_subject.assert_awaited_once_with(4663, ADDRESS.lower(), REGISTRY)
     services.db.unregister_guard_subject.assert_awaited_once_with(4663, ADDRESS.lower())
 
 

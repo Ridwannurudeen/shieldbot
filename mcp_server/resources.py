@@ -19,16 +19,23 @@ RESOURCE_DEFINITIONS: List[Dict[str, Any]] = [
         "description": "Recent threats discovered by ShieldBot's autonomous agents (Hunter/Sentinel).",
         "mimeType": "application/json",
     },
+]
+
+# Parameterised resources, served by resources/templates/list and read with the value substituted.
+RESOURCE_TEMPLATE_DEFINITIONS: List[Dict[str, Any]] = [
     {
-        "uri": "shieldbot://agent/{agent_id}/health",
+        "uriTemplate": "shieldbot://agent/{agent_id}/health",
         "name": "Agent Health",
         "description": "Policy configuration and recent firewall verdicts for a registered agent.",
         "mimeType": "application/json",
     },
     {
-        "uri": "shieldbot://wallet/{address}/guardian",
+        "uriTemplate": "shieldbot://wallet/{address}/guardian",
         "name": "Wallet Guardian",
-        "description": "Wallet approval health and guardian status. (Stub — full in V3.2.)",
+        "description": (
+            "Wallet approval health and guardian status. Not implemented: returns status 'unknown' with "
+            "coverage_reasons; approvals are null, never an empty list. (Stub — full in V3.2.)"
+        ),
         "mimeType": "application/json",
     },
 ]
@@ -113,7 +120,10 @@ async def _read_wallet_guardian(container, address: str) -> Dict:
         "mimeType": "application/json",
         "text": {
             "wallet_address": address,
-            "approvals": [],
+            "approvals": None,
+            "status": "unknown",
+            "coverage": {"approvals": 0},
+            "coverage_reasons": {"approvals": "Wallet Guardian is not implemented in MCP"},
             "guardian_active": False,
             "note": "Wallet Guardian not yet implemented. Coming in V3.2.",
         },

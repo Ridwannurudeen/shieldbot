@@ -51,6 +51,8 @@ def mock_db():
     db = MagicMock()
     db.get_chat_history = AsyncMock(return_value=[])
     db.insert_chat_message = AsyncMock(return_value=None)
+    db.get_ai_tokens_used = AsyncMock(return_value=0)
+    db.add_ai_tokens_used = AsyncMock(return_value=None)
     return db
 
 
@@ -58,7 +60,7 @@ def mock_db():
 def mock_ai():
     ai = MagicMock()
     ai.is_available = MagicMock(return_value=True)
-    ai.chat = AsyncMock(return_value="AI response placeholder")
+    ai.chat_with_usage = AsyncMock(return_value=("AI response placeholder", 100))
     return ai
 
 
@@ -71,12 +73,12 @@ def mock_ai_disabled():
 
 @pytest.fixture
 def advisor(mock_tools, mock_db, mock_ai):
-    return Advisor(tools=mock_tools, db=mock_db, ai_analyzer=mock_ai)
+    return Advisor(tools=mock_tools, db=mock_db, ai_analyzer=mock_ai, daily_token_budget=1_000_000)
 
 
 @pytest.fixture
 def advisor_no_ai(mock_tools, mock_db, mock_ai_disabled):
-    return Advisor(tools=mock_tools, db=mock_db, ai_analyzer=mock_ai_disabled)
+    return Advisor(tools=mock_tools, db=mock_db, ai_analyzer=mock_ai_disabled, daily_token_budget=1_000_000)
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +183,7 @@ async def test_gather_context_general(advisor, mock_tools):
 @pytest.mark.asyncio
 async def test_chat_saves_history(advisor, mock_db, mock_ai):
     """chat() saves user message and assistant response to DB."""
-    mock_ai.chat = AsyncMock(return_value="This contract looks risky.")
+    mock_ai.chat_with_usage = AsyncMock(return_value=("This contract looks risky.", 100))
 
     result = await advisor.chat("user123", "How does ShieldBot work?")
 
@@ -200,7 +202,7 @@ async def test_chat_saves_history(advisor, mock_db, mock_ai):
 @pytest.mark.asyncio
 async def test_chat_with_contract_context(advisor, mock_db, mock_ai):
     """chat() injects contract context and returns scan_data."""
-    mock_ai.chat = AsyncMock(return_value="High risk contract detected.")
+    mock_ai.chat_with_usage = AsyncMock(return_value=("High risk contract detected.", 100))
 
     result = await advisor.chat(
         "user456", "Check 0x4904c02efa081cb7685346968bac854cdf4e7777"
@@ -211,7 +213,7 @@ async def test_chat_with_contract_context(advisor, mock_db, mock_ai):
     assert result["scan_data"]["address"] == "0x4904c02efa081cb7685346968bac854cdf4e7777"
     assert result["scan_data"]["risk_level"] == "HIGH"
     # Verify the AI was called with context in the message
-    chat_call = mock_ai.chat.call_args
+    chat_call = mock_ai.chat_with_usage.call_args
     messages = chat_call.kwargs["messages"]
     last_msg = messages[-1]["content"]
     assert "<tool_results>" in last_msg
@@ -225,12 +227,12 @@ async def test_chat_includes_history(advisor, mock_db, mock_ai):
         {"role": "user", "message": "Hello"},
         {"role": "assistant", "message": "Hi there!"},
     ])
-    mock_ai.chat = AsyncMock(return_value="Sure, what would you like to know?")
+    mock_ai.chat_with_usage = AsyncMock(return_value=("Sure, what would you like to know?", 100))
 
     result = await advisor.chat("user789", "Tell me more")
     assert result["text"] == "Sure, what would you like to know?"
 
-    chat_call = mock_ai.chat.call_args
+    chat_call = mock_ai.chat_with_usage.call_args
     messages = chat_call.kwargs["messages"]
     # History + new message = 3 messages
     assert len(messages) == 3
@@ -257,13 +259,13 @@ async def test_chat_without_ai(advisor_no_ai, mock_db):
 @pytest.mark.asyncio
 async def test_explain_scan(advisor, mock_ai):
     """explain_scan() calls Haiku with the formatted template."""
-    mock_ai.chat = AsyncMock(return_value="This contract has high risk.")
+    mock_ai.chat_with_usage = AsyncMock(return_value=("This contract has high risk.", 100))
 
     scan = {"risk_score": 85, "risk_level": "HIGH", "flags": ["Honeypot"]}
     result = await advisor.explain_scan(scan)
 
     assert result == "This contract has high risk."
-    chat_call = mock_ai.chat.call_args
+    chat_call = mock_ai.chat_with_usage.call_args
     assert chat_call.kwargs["max_tokens"] == 300
     msg_content = chat_call.kwargs["messages"][0]["content"]
     assert "risk_score" in msg_content
@@ -364,7 +366,7 @@ async def test_gather_context_all_tools_fail(advisor, mock_tools):
 @pytest.mark.asyncio
 async def test_chat_forwards_chain_id(advisor, mock_tools, mock_ai):
     """chat() forwards chain_id to _gather_context -> tools."""
-    mock_ai.chat = AsyncMock(return_value="Analysis complete.")
+    mock_ai.chat_with_usage = AsyncMock(return_value=("Analysis complete.", 100))
     await advisor.chat("user1", "Check 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", chain_id=1)
     mock_tools.scan_contract.assert_awaited_once_with(
         "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", chain_id=1,
@@ -377,7 +379,7 @@ async def test_chat_forwards_chain_id(advisor, mock_tools, mock_ai):
 @pytest.mark.asyncio
 async def test_chat_ai_exception_returns_error(advisor, mock_db, mock_ai):
     """If AI raises during chat(), returns error fallback and still saves."""
-    mock_ai.chat = AsyncMock(side_effect=RuntimeError("Anthropic API down"))
+    mock_ai.chat_with_usage = AsyncMock(side_effect=RuntimeError("Anthropic API down"))
     result = await advisor.chat("user1", "Hello")
     assert "encountered an error" in result["text"]
     assert mock_db.insert_chat_message.await_count == 2
@@ -387,7 +389,7 @@ async def test_chat_ai_exception_returns_error(advisor, mock_db, mock_ai):
 async def test_chat_scan_failure_attaches_unknown_scan_data(advisor, mock_tools, mock_db, mock_ai):
     """If scan_contract fails, scan_data marks the scan unknown so surfaces cannot show the text as safe."""
     mock_tools.scan_contract = AsyncMock(side_effect=RuntimeError("fail"))
-    mock_ai.chat = AsyncMock(return_value="Could not scan.")
+    mock_ai.chat_with_usage = AsyncMock(return_value=("Could not scan.", 100))
     result = await advisor.chat("user1", "Check 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     assert result["scan_data"]["status"] == "unknown"
     assert result["scan_data"]["coverage_reasons"] == {"scan": "Contract scan unavailable"}
@@ -397,7 +399,7 @@ async def test_chat_scan_failure_attaches_unknown_scan_data(advisor, mock_tools,
 @pytest.mark.asyncio
 async def test_chat_scan_data_fields(advisor, mock_ai):
     """scan_data includes risk_score fallback from rug_probability and all subfields."""
-    mock_ai.chat = AsyncMock(return_value="Done.")
+    mock_ai.chat_with_usage = AsyncMock(return_value=("Done.", 100))
     result = await advisor.chat("u1", "Check 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     sd = result["scan_data"]
     assert sd["risk_score"] == 72  # from rug_probability
@@ -410,7 +412,7 @@ async def test_chat_scan_data_fields(advisor, mock_ai):
 @pytest.mark.asyncio
 async def test_explain_scan_ai_exception_falls_back(advisor, mock_ai):
     """If AI raises during explain_scan, falls back to rule-based."""
-    mock_ai.chat = AsyncMock(side_effect=RuntimeError("quota exceeded"))
+    mock_ai.chat_with_usage = AsyncMock(side_effect=RuntimeError("quota exceeded"))
     result = await advisor.explain_scan({"risk_score": 85, "risk_level": "HIGH"})
     assert "85/100" in result
 
@@ -518,7 +520,7 @@ def test_firewall_context_does_not_invent_chain_id():
 async def test_explain_scan_propagates_routing_error(advisor, mock_ai):
     from utils.web3_client import UnsupportedChainError
     error = UnsupportedChainError('Chain removed')
-    mock_ai.chat.side_effect = error
+    mock_ai.chat_with_usage.side_effect = error
 
     with patch.object(advisor, '_rule_based_explanation') as fallback:
         with pytest.raises(UnsupportedChainError) as raised:
@@ -533,7 +535,7 @@ async def test_advisor_chain_context_and_result(advisor, mock_ai):
     result = await advisor.chat('u1', 'Check 0x' + 'a' * 40, chain_id=4663)
     assert result['scan_data']['chain_id'] == 4663
     assert result['scan_data']['chain_name'] == 'Robinhood Chain'
-    system = mock_ai.chat.call_args.kwargs['system']
+    system = mock_ai.chat_with_usage.call_args.kwargs['system']
     assert 'Robinhood Chain' in system
     assert '4663' in system
 
@@ -549,7 +551,7 @@ async def test_advisor_rejects_chain_before_history_and_tools(advisor, mock_db, 
     mock_tools.check_deployer.assert_not_called()
     mock_tools.check_honeypot.assert_not_called()
     mock_tools.get_market_data.assert_not_called()
-    mock_ai.chat.assert_not_called()
+    mock_ai.chat_with_usage.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -572,7 +574,7 @@ async def test_advisor_threat_routing_error_propagates(advisor, mock_tools):
 @pytest.mark.asyncio
 async def test_advisor_ai_routing_error_does_not_save_fallback(advisor, mock_db, mock_ai):
     from utils.web3_client import UnsupportedChainError
-    mock_ai.chat.side_effect = UnsupportedChainError('Chain removed')
+    mock_ai.chat_with_usage.side_effect = UnsupportedChainError('Chain removed')
     with pytest.raises(UnsupportedChainError):
         await advisor.chat('u1', 'Explain liquidity', chain_id=4663)
     mock_db.insert_chat_message.assert_not_called()

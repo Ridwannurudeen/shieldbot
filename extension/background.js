@@ -7,10 +7,16 @@
 const DEFAULT_API_URL = "https://api.shieldbotsecurity.online";
 const MAX_HISTORY = 50;
 
-// On fresh install: pre-fill API URL and open welcome tab
+// On install and on every extension update, store the default API URL unless
+// the user saved their own, so storage never lacks one after an upgrade.
+// Fresh installs also open the welcome tab.
 chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === "install" || details.reason === "update") {
+    chrome.storage.local.get({ apiUrl: "" }, ({ apiUrl }) => {
+      if (!apiUrl) chrome.storage.local.set({ apiUrl: DEFAULT_API_URL });
+    });
+  }
   if (details.reason === "install") {
-    chrome.storage.local.set({ apiUrl: "https://api.shieldbotsecurity.online" });
     chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
   }
 });
@@ -280,6 +286,9 @@ async function handleAnalyze(tx) {
     chrome.storage.local.get({ policyMode: "BALANCED" }, resolve);
   });
 
+  // The only wait on the analysis path that can be long. It must stay below
+  // content.js's DECISION_WINDOW_MS (50 s), after which a result is shown as
+  // timed out, and inject.js's 60-second fail-closed limit.
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {

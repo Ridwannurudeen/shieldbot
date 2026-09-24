@@ -235,6 +235,44 @@ async def test_robinhood_chain_needs_both_sourcify_and_blockscout_to_deny(
 
 
 @pytest.mark.asyncio
+async def test_a_timed_out_sourcify_lookup_is_still_counted_once_when_it_ends(monkeypatch):
+    import services.counterparty_service as counterparty_module
+    import services.explorer_service as explorer_module
+    from core.unknown_ledger import UnknownLedger
+
+    ledger = UnknownLedger()
+    monkeypatch.setattr(explorer_module, "unknown_ledger", ledger)
+    monkeypatch.setattr(counterparty_module, "PROVIDER_TIMEOUT", 0.05)
+    response = MagicMock(status=404)
+    response.json = AsyncMock(return_value=_sourcify(56, ADDRESS, False))
+
+    async def slow_reply():
+        await asyncio.sleep(0.2)
+        return response
+
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(side_effect=slow_reply)
+    context.__aexit__ = AsyncMock(return_value=False)
+    session = MagicMock()
+    session.get.return_value = context
+    adapter = EvmAdapter(56, "Test", "https://rpc.invalid", etherscan_api_key="test-key")
+    adapter._explorer_service = ExplorerService()
+    adapter._etherscan_verification = AsyncMock(return_value=(False, None))
+    adapter.get_bytecode = AsyncMock(return_value="0x6080")
+    with patch("aiohttp.ClientSession") as client:
+        client.return_value.__aenter__.return_value = session
+        assert await adapter.is_verified_contract(ADDRESS) == (None, None)
+        assert ledger.for_chain(56) == {}
+        await asyncio.sleep(0.4)
+    assert {k: ledger.for_chain(56)["sourcify"][k] for k in ("answered", "unknown", "failed")} == {
+        "answered": 0, "unknown": 1, "failed": 0,
+    }
+    # The late answer was cached for the next scan.
+    assert (await adapter._explorer_service.get_sourcify_verification(ADDRESS, 56)).status == "unverified"
+    assert session.get.call_count == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status, held", [(200, 300), (404, 300), (502, 30)], ids=["verified", "unverified", "unknown"])
 async def test_an_unknown_explorer_result_is_kept_only_thirty_seconds(status, held):
     import services.explorer_service as explorer_module

@@ -107,13 +107,13 @@ The MCP adapters have narrower coverage than their names may suggest:
 
 - `check_approval_risk` and `query_threat_graph` are unimplemented adapters. They return `status: "unknown"`, coverage reasons and null result fields; they do not enumerate approvals or establish absence of cluster connections.
 - `simulate_transaction` returns an `error` with null measurements when Tenderly is unavailable or simulation fails. When simulation produces a result, it returns `success`, `revert_reason`, `asset_changes`, `warnings` and `gas_estimate`; approval changes are not measured and remain null. Output is limited to fields reported by the simulation provider.
-- `check_deployer` uses the local index. `deployer: null` with an unindexed note and zero counts means missing history, not a deployer with no risky contracts.
-- `check_agent_reputation` is a block-rate heuristic over at most 1,000 local firewall records. An unregistered agent has no trust score; a registered agent with no history currently gets 100. Neither zero history nor that default 100 establishes trustworthiness.
+- `check_deployer` uses the local index. An unindexed contract returns `deployer: null`, null counts and `status: "unknown"`; a found deployer also stays `unknown`, because the index holds only contracts ShieldBot itself has scanned, so its counts are lower bounds.
+- `check_agent_reputation` is a block-rate heuristic over at most 1,000 local firewall records. An unregistered agent, or a registered agent with no history, returns a null trust score and `status: "unknown"`; a history that reaches the 1,000-record cap also stays `unknown`, because its count is a lower bound.
 - `scan_for_injection` checks a fixed regex list. `clean: true` means no listed pattern matched, not that arbitrary content is safe; the returned depth label does not add a deeper analysis pass.
 
-These legacy MCP limits remain open. Consumers must not promote their empty lists, zero counts, regex result or default reputation into an authorization decision.
+These legacy MCP limits remain open. Consumers must not promote their empty lists, lower-bound counts or regex result into an authorization decision.
 
-The scan coverage contract does not cover all auxiliary browser features. When the phishing check gets no answer from GoPlus (HTTP error, network error, malformed reply), it returns `is_phishing: null` with a `reason`, the server holds that for 45 seconds per domain, and the extension shows no banner; so a missing banner does not prove that a phishing check completed. The side-panel injection renderer defaults a missing score to zero and labels it "Safe", so that display does not prove an injection check completed either. Neither is fail-closed protection and must not be advertised as such.
+The scan coverage contract does not cover all auxiliary browser features. The phishing check has two sources: a host on MetaMask's open phishing list ([eth-phishing-detect](https://github.com/MetaMask/eth-phishing-detect), fetched when the API starts and hourly after that, with the last good copy kept when a fetch fails) is reported as phishing with `source: "metamask"` and the matched list entry, whatever GoPlus says; the list's page-level entries (a host plus a path) are not used, because checks are cached per host. Only the API process loads the list, from its startup; the bot builds a phishing service too but never starts the list, so a check made there would be GoPlus-only (the bot runs no phishing checks today). When the list does not flag the host and GoPlus gives no answer (HTTP error, network error, malformed reply), it returns `is_phishing: null` with a `reason`, the server holds that for 45 seconds per domain, and the extension shows no banner; so a missing banner does not prove that a phishing check completed. The side-panel injection renderer defaults a missing score to zero and labels it "Safe", so that display does not prove an injection check completed either. Neither is fail-closed protection and must not be advertised as such.
 
 The browser also retains user overrides: generic incomplete results, API errors and risk overlays offer "Proceed Anyway". The new chain-resolution path independently rejects unknown, mismatched or changed chains, but it does not remove those other overrides. Signature requests use a local heuristic warning instead of the transaction-analysis API, and the popup wallet-health request is explicitly BNB-only (`chain_id=56`). Do not describe this extension as an unbypassable security boundary or claim that every incomplete check prevents signing.
 
@@ -674,6 +674,17 @@ curl -X POST http://localhost:8000/api/firewall \
   }'
 ```
 
+**Free API Key** (self-serve):
+```bash
+curl -X POST http://localhost:8000/api/keys/free \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@example.com"}'
+```
+
+The server emails a link to `/api/keys/free/verify`. The link works once and expires after 30 minutes; its token is in the URL fragment, which browsers do not send, so it never appears in server or proxy logs, and the page creates the key only when you press its button, so a mail scanner that only fetches the link does not use it up. A scanner that also presses the button would create the key where nobody sees it; the address then has its one free key, and only the admin can deactivate it (`AuthManager.deactivate_key`; there is no route for it). The key is shown once on that page and only its hash is stored. Send it as the `X-API-Key` header; the free tier allows 60 requests a minute and 1,000 a day.
+
+The request answers the same 200 whether the address is new, already has a pending link or already has a key, so it does not reveal which. An address that already has an active free key gets an email saying so instead of a link; the admin must deactivate that key before a new one can be issued. Limits: one active free key per email address, one email per address per 30 minutes (nothing new is sent while one is pending), and three requests a minute per IP. Without `RESEND_API_KEY` the endpoint answers 503 "Self-serve keys are not enabled" and issues nothing. `PUBLIC_API_URL` sets the host in the emailed link (default `https://api.shieldbotsecurity.online`); it is never taken from the request.
+
 **Health Check**:
 ```bash
 curl http://localhost:8000/api/health
@@ -806,9 +817,13 @@ server {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
+
+The API takes the client address from X-Forwarded-For; without it every user shares one rate-limit bucket. `deploy/nginx-api.conf.example` is the full reference vhost, with TLS and timeouts.
 
 **SSL Certificate**:
 ```bash
@@ -865,6 +880,7 @@ CMD ["python", "bot.py"]
 
 - **CORS Allowlist**: Allows configured origins; this is not authentication
 - **Rate Limiting**: API middleware applies key quotas or an IP-based fallback
+- **AI Spend Cap**: advisor chat (API side panel and Telegram) and scan explanations share one daily token budget, `AI_DAILY_TOKEN_BUDGET` (default 1,000,000 input plus output tokens per UTC day, counted from the provider's reported usage and stored in SQLite). Once it is used, chat answers that AI chat is paused for today and explanations fall back to rule-based text. `AI_DAILY_TOKEN_BUDGET=0` pauses AI entirely, a kill switch; a negative value is refused and stops the API and bot at startup. The check runs before each call, so calls already in flight can overshoot it by their own size.
 - **Input Validation**: Review the request model and handler for the endpoint being used; this document does not claim that every input path has identical validation.
 - **Error Handling**: Inspect endpoint error responses separately; this document does not certify that every path redacts internal details.
 

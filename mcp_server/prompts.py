@@ -75,13 +75,14 @@ def _render_security_analysis(args: Dict[str, str]) -> Dict:
     if contract_addr:
         target_description += f"Contract: {contract_addr}\n"
         tool_calls.append(
-            f'1. Use the `scan_contract` tool with address="{contract_addr}" to get the risk score.\n'
-            f'2. Use the `check_deployer` tool with address="{contract_addr}" to check deployer history.'
+            f'1. Use the `scan_contract` tool with address="{contract_addr}" and its chain_id to get the risk score.\n'
+            f'2. Use the `check_deployer` tool with address="{contract_addr}" and its chain_id to check deployer history.\n'
+            f'chain_id is the chain the contract is on and has no default; ask the user if it is not clear.\n'
         )
     if tx_hash:
         target_description += f"Transaction: {tx_hash}\n"
         tool_calls.append(
-            f'3. If you have the transaction details, use `simulate_transaction` to check for hidden asset changes.'
+            f'3. If you have the transaction details, use `simulate_transaction` with its chain_id to check for hidden asset changes.'
         )
 
     if not target_description:

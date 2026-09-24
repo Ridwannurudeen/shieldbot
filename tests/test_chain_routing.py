@@ -178,14 +178,6 @@ def test_request_models_validate_explicit_and_default_chain(routing_api, model_n
 
 @pytest.mark.parametrize("path,payload", [
     ("/rpc/999999", {"jsonrpc": "2.0", "id": 1, "method": "eth_chainId", "params": []}),
-    ("/mcp/messages", {
-        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-        "params": {"name": "scan_contract", "arguments": {"address": ADDRESS, "chain_id": 999999}},
-    }),
-    ("/mcp/messages/", {
-        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-        "params": {"name": "scan_contract", "arguments": {"address": ADDRESS, "chain_id": 999999}},
-    }),
     ("/api/agent/firewall/", {
         "agent_id": "test", "transaction": {"to": ADDRESS, "from": ADDRESS, "chain_id": 999999},
     }),
@@ -196,6 +188,39 @@ def test_nested_protocol_chains_rejected_before_usage_is_recorded(routing_api, p
     assert response.status_code == 400
     assert "999999" in response.json()["detail"]
     assert services.mock_calls == []
+
+
+@pytest.mark.parametrize("tool,arguments", [
+    ("scan_contract", {"address": ADDRESS}),
+    ("simulate_transaction", {"from": ADDRESS, "to": ADDRESS, "data": "0x"}),
+    ("check_deployer", {"address": ADDRESS}),
+    ("check_approval_risk", {"wallet_address": ADDRESS}),
+    ("query_threat_graph", {"address": ADDRESS}),
+    ("get_robinhood_launches", {}),
+])
+@pytest.mark.parametrize("chain_id,error", [
+    (999999, "Unsupported chain ID 999999. Supported chain IDs: 56, 1, 204, 4663"),
+    ("56", "Invalid argument: chain_id must be an integer"),
+    (True, "Invalid argument: chain_id must be an integer"),
+])
+def test_mcp_bad_chain_is_a_tool_error_the_stream_carries(routing_api, tool, arguments, chain_id, error):
+    # An HTTP error would never reach an SSE client's stream, so the router reports it as a tool error.
+    client, registry, services = routing_api
+    response = client.post("/mcp/messages", json={
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": tool, "arguments": {**arguments, "chain_id": chain_id}},
+    }, headers={"x-api-key": "test-key"})
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["isError"] is True
+    assert json.loads(result["content"][0]["text"]) == {"error": error}
+    services.auth_manager.record_usage.assert_awaited_once()
+    services.registry.run_all.assert_not_called()
+    services.db.get_deployer_risk_summary.assert_not_called()
+    services.db.get_launch_feed.assert_not_called()
+    services.tenderly_simulator.is_enabled.assert_not_called()
+    for adapter in registry._adapters.values():
+        assert adapter.mock_calls == []
 
 
 def test_missing_chain_uses_bsc(routing_api):

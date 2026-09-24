@@ -57,8 +57,11 @@ PROVIDER_TIMEOUT = 8
 
 
 async def within_timeout(awaitable, unknown):
+    """The lookup's answer, or `unknown` after PROVIDER_TIMEOUT. Only the caller stops waiting: the
+    lookup runs on to its own provider timeout, so it still records its outcome in the Unknown
+    ledger once (and fills its cache for the next scan)."""
     try:
-        return await asyncio.wait_for(awaitable, PROVIDER_TIMEOUT)
+        return await asyncio.wait_for(asyncio.shield(awaitable), PROVIDER_TIMEOUT)
     except asyncio.TimeoutError:
         return unknown
 

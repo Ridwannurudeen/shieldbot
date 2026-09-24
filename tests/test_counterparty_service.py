@@ -429,6 +429,25 @@ async def test_address_security_failures_are_unknown(payload, status, reason):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("payload, status, outcome", [
+    ({"code": 1, "message": "ok", "result": DRAINER}, 200, "answered"),
+    ({"code": 1, "message": "ok", "result": {}}, 200, "unknown"),
+    (None, 503, "failed"),
+], ids=["answered", "no-record", "failed"])
+async def test_address_security_lookups_are_counted_once(monkeypatch, payload, status, outcome):
+    from core.unknown_ledger import UnknownLedger
+
+    ledger = UnknownLedger()
+    monkeypatch.setattr(scam_module, "unknown_ledger", ledger)
+    await _address_security(payload, status=status)
+    await ScamDatabase.fetch_address_security(SPENDER)
+    counts = ledger.for_chain(None)["goplus_address"]
+    assert {k: counts[k] for k in ("answered", "unknown", "failed")} == {
+        "answered": 0, "unknown": 0, "failed": 0, outcome: 1,
+    }
+
+
+@pytest.mark.asyncio
 async def test_address_security_rejects_an_invalid_address():
     result = await ScamDatabase.fetch_address_security("0xnot-an-address")
     assert result["status"] == "unknown"

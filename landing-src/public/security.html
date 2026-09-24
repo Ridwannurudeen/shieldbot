@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Security — ShieldAI Transaction Firewall</title>
+  <meta name="description" content="How to report a security vulnerability in ShieldBot, what is in scope, what to expect after you report, and a note on the September 2026 antivirus flags." />
+  <link rel="canonical" href="https://shieldbotsecurity.online/security.html" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon.png">
+  <link rel="shortcut icon" href="/favicon.png">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #020617;
+      color: #cbd5e1;
+      line-height: 1.7;
+      padding: 0 16px;
+    }
+    a { color: #FACC15; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .nav {
+      max-width: 760px; margin: 0 auto;
+      padding: 20px 0;
+      display: flex; align-items: center; gap: 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      margin-bottom: 48px;
+    }
+    .nav-logo { font-size: 22px; }
+    .nav-name { font-size: 15px; font-weight: 700; color: #f8fafc; }
+    .nav-back { margin-left: auto; font-size: 13px; color: #475569; }
+    .nav-back:hover { color: #FACC15; text-decoration: none; }
+
+    .wrap { max-width: 760px; margin: 0 auto; padding-bottom: 80px; }
+
+    .hero { margin-bottom: 40px; }
+    .hero h1 {
+      font-size: 32px; font-weight: 800; color: #f8fafc;
+      letter-spacing: -0.02em; margin-bottom: 10px;
+    }
+    .hero-meta { font-size: 13px; color: #334155; }
+
+    h2 {
+      font-size: 16px; font-weight: 700; color: #f8fafc;
+      margin: 36px 0 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    p { margin-bottom: 12px; font-size: 14px; color: #94a3b8; }
+    ul { margin: 8px 0 14px 20px; }
+    li { font-size: 14px; color: #94a3b8; margin-bottom: 6px; }
+    li strong { color: #cbd5e1; }
+
+    .callout {
+      background: rgba(250,204,21,0.06);
+      border: 1px solid rgba(250,204,21,0.15);
+      border-left: 3px solid #FACC15;
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin: 20px 0;
+      font-size: 13px; color: #94a3b8;
+    }
+
+    .footer {
+      max-width: 760px; margin: 48px auto 0;
+      padding-top: 24px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      font-size: 12px; color: #1e293b;
+      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    }
+  </style>
+</head>
+<body>
+
+  <nav class="nav">
+    <span class="nav-logo">&#128737;</span>
+    <span class="nav-name">ShieldAI Firewall</span>
+    <a href="/" class="nav-back">&#8592; Back to home</a>
+  </nav>
+
+  <div class="wrap">
+
+    <div class="hero">
+      <h1>Security</h1>
+      <div class="hero-meta">Last updated: September 2026 &nbsp;&middot;&nbsp; ShieldBot Security</div>
+    </div>
+
+    <div class="callout">
+      Found a security problem in ShieldBot? Email <a href="mailto:support@shieldbotsecurity.online">support@shieldbotsecurity.online</a> and please keep it private until it is fixed.
+    </div>
+
+    <h2>1. How to Report a Vulnerability</h2>
+    <p>Email <a href="mailto:support@shieldbotsecurity.online">support@shieldbotsecurity.online</a> with "Security" in the subject line. This is the contact in our <a href="/.well-known/security.txt">security.txt</a>. Please include:</p>
+    <ul>
+      <li>which part of ShieldBot is affected: the page, API endpoint, extension version or bot command</li>
+      <li>the steps to reproduce it</li>
+      <li>what an attacker could do with it</li>
+      <li>how we can reach you</li>
+    </ul>
+    <p>Never send a private key, seed phrase or wallet password, yours or anyone else's. We will never ask for one.</p>
+
+    <h2>2. What Is in Scope</h2>
+    <ul>
+      <li>This website, shieldbotsecurity.online</li>
+      <li>The API at api.shieldbotsecurity.online, including the RPC proxy and the threat dashboard</li>
+      <li>The ShieldBot browser extension, listed on the Chrome Web Store as ShieldAI Transaction Firewall</li>
+      <li>The ShieldBot Telegram bot</li>
+      <li>The MCP server and the code in our <a href="https://github.com/Ridwannurudeen/shieldbot" target="_blank" rel="noopener noreferrer">GitHub repository</a></li>
+    </ul>
+    <p>We most want to hear about ways to make ShieldBot stay silent or show SAFE for a transaction it should warn about, to read or change other people's data, to reach keys or secrets on our servers, or to make the extension act on a page without the user.</p>
+
+    <h2>3. What Is Out of Scope</h2>
+    <ul>
+      <li><strong>Denial of service and load testing.</strong> The API runs on a single server, so heavy traffic hurts every user.</li>
+      <li><strong>Social engineering</strong> of our team or users, and physical attacks.</li>
+      <li><strong>Services we use but do not run</strong>, such as wallets, block explorers and third-party data providers. Please report those to their owners.</li>
+      <li><strong>Automated scanner output</strong> with no demonstrated impact, and missing best-practice headers with no practical attack.</li>
+    </ul>
+    <p>A verdict you believe is wrong for a particular token, without a technique that tricks the checks, is a detection report rather than a vulnerability. We still want it: send the chain and the contract address to the same address.</p>
+
+    <h2>4. Testing Rules</h2>
+    <ul>
+      <li>Use your own wallets, accounts and test tokens. Do not access, change or delete anyone else's data; if you reach some by accident, stop and tell us.</li>
+      <li>Keep request volumes low and do not point automated scanners at the API.</li>
+      <li>Give us reasonable time to fix the issue before you publish anything about it.</li>
+    </ul>
+
+    <h2>5. What to Expect</h2>
+    <p>ShieldBot is run by a small team, so we cannot promise fixed response times. We read every report and will reply as soon as we can. We will tell you whether we could reproduce the issue and let you know when a fix is live.</p>
+
+    <h2>6. No Bug Bounty</h2>
+    <p>We do not run a bug bounty and do not pay for reports.</p>
+
+    <h2>7. September 2026: Antivirus Flags</h2>
+    <p>In September 2026, several antivirus vendors flagged the shieldbotsecurity.online domain as unsafe, so some browsers and security products may have warned you when you visited this site. We filed delisting requests with the vendors that flagged it. Some of them have since reviewed the site and removed the flag.</p>
+    <p>If a security product still warns you about this site, email <a href="mailto:support@shieldbotsecurity.online">support@shieldbotsecurity.online</a> with the product's name so we can follow up with its vendor.</p>
+
+  </div>
+
+  <div class="footer">
+    <span>&#169; 2026 ShieldBot Security. All rights reserved.</span>
+    <span>ShieldAI Transaction Firewall</span>
+  </div>
+
+</body>
+</html>

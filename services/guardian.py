@@ -175,7 +175,8 @@ class GuardianService:
     async def get_approvals(self, wallet_address: str, chain_id: int = 56) -> Dict:
         """Get known token approvals, risk-ranked, with the scan's coverage.
 
-        Raises RuntimeError only when the approval scan itself could not run.
+        Raises RuntimeError only when no approval scan ran: there is no rescue service, or the scan
+        failed unexpectedly. An RPC that cannot serve the approval history yields status unknown.
         """
         scan = await self._scan_approvals(wallet_address.lower(), chain_id)
         if scan is None:
@@ -313,9 +314,6 @@ class GuardianService:
             }
         except UnsupportedChainError:
             raise
-        except RuntimeError as exc:
-            logger.warning("Approval scan via rescue unavailable: %s", type(exc).__name__)
-            return None
         except Exception as exc:
             logger.error(
                 "Approval scan via rescue failed: %s\n%s",

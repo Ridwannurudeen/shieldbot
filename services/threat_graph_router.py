@@ -56,7 +56,7 @@ def create_threat_graph_router(container) -> APIRouter:
         min_connections = max(1, min_connections)  # Enforce lower bound
         return await graph.search(min_connections, min_flagged_ratio)
 
-    @router.post("/seed")
+    @router.post("/seed", include_in_schema=False)
     async def seed_graph(request: Request, min_risk_score: int = 50, limit: int = 500):
         """Seed the threat graph from existing scored contracts. Requires admin secret."""
         admin_secret = request.headers.get("X-Admin-Secret", "")

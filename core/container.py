@@ -180,6 +180,7 @@ class ServiceContainer:
             tools=self.agent_tools,
             db=self.db,
             ai_analyzer=self.ai_analyzer,
+            daily_token_budget=settings.ai_daily_token_budget,
         )
         self.sentinel = Sentinel(
             tools=self.agent_tools,

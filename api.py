@@ -6,6 +6,7 @@ Runs alongside bot.py on the VPS
 
 import hmac
 import json
+import secrets
 import time
 import asyncio
 import logging
@@ -22,13 +23,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from typing import Optional, Dict, Any, List
 
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve_selector
-from utils.chain_info import get_chain_name
+from utils.chain_info import get_chain_name, get_native_symbol
 from utils.web3_client import UnsupportedChainError
 from services.counterparty_service import code_kind
 from services.mempool_service import supports_pending_transactions
+from core.auth import TIER_LIMITS, hash_key
 from core.config import Settings
 from core.container import ServiceContainer
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
+from core.unknown_ledger import unknown_ledger
 from rpc.router import rpc_router
 from rpc.proxy import RPCProxy
 
@@ -160,6 +163,7 @@ async def lifespan(app: FastAPI):
     await container.startup()
     await container.start_mempool_monitor()
     container.verdict_publisher.start()
+    container.phishing_service.start()
 
     # Initialize RPC proxy if enabled
     if settings.rpc_proxy_enabled:
@@ -199,6 +203,7 @@ async def lifespan(app: FastAPI):
     yield
     await container.launch_watch.stop()
     await container.hunter.stop()
+    await container.phishing_service.stop()
     await container.verdict_publisher.stop()
     await container.shutdown()
     rpc_proxy = getattr(app.state, "rpc_proxy", None)
@@ -413,11 +418,8 @@ async def request_validation_middleware(request: Request, call_next):
                 transaction = body.get("transaction")
                 if isinstance(transaction, dict):
                     body_chain_ids.append(transaction.get("chain_id", 56))
-            if request_path == "/mcp/messages" and body.get("method") == "tools/call":
-                params = body.get("params")
-                arguments = params.get("arguments") if isinstance(params, dict) else None
-                if isinstance(arguments, dict) and "chain_id" in arguments:
-                    body_chain_ids.append(arguments["chain_id"])
+            # MCP tool arguments are checked by the MCP router, which reports a bad chain as a tool
+            # error on the client's SSE stream; an HTTP error here would never reach that stream.
             if any(type(chain_id) is not int for chain_id in body_chain_ids):
                 return JSONResponse(status_code=400, content={"detail": "Invalid chain ID"})
             chain_ids.extend(body_chain_ids)
@@ -511,6 +513,10 @@ class ChatRequest(ChainRequest):
     chain_id: int = Field(default=56, ge=1)
 
 
+# A random per-install token from the side panel (its chatUserId UUID), sent as X-Install-Id.
+_INSTALL_ID_RE = re.compile(r"[A-Za-z0-9_-]{16,128}")
+
+
 class ExplainRequest(BaseModel):
     scan_result: Dict[str, Any]
 
@@ -532,6 +538,9 @@ _report_limiter = RateLimiter(requests_per_minute=5, burst=3)
 
 # Beta-signup rate limiter: 3 signups/min per IP
 _signup_limiter = RateLimiter(requests_per_minute=3, burst=2)
+
+# Self-serve free key requests: 3/min per IP; the per-address limit is one unexpired link at a time
+_free_key_limiter = RateLimiter(requests_per_minute=3, burst=2)
 
 # Public watch alerts: 10 requests/min per IP
 _watch_alerts_limiter = RateLimiter(requests_per_minute=10, burst=5)
@@ -577,7 +586,7 @@ async def beta_signup(req: BetaSignupRequest, request: Request):
     )
 
 
-@app.post("/webhook/uptime")
+@app.post("/webhook/uptime", include_in_schema=False)
 async def uptime_webhook(request: Request, secret: str = ""):
     """UptimeRobot webhook — forwards status alerts to Telegram.
 
@@ -648,8 +657,10 @@ async def check_phishing(url: str, request: Request):
     """Check if a URL is a known phishing site.
 
     Called by the Chrome extension content script on every page load.
-    Verdicts are cached server-side for 1 hour per domain; when GoPlus gives no answer the
-    result is is_phishing null with a reason, held for 45 seconds per domain.
+    A host on MetaMask's open phishing list (refreshed hourly) is phishing with source "metamask";
+    otherwise GoPlus decides. GoPlus verdicts are cached server-side for 1 hour per domain; when neither
+    source flags the host and GoPlus gives no answer, the result is is_phishing null with a reason,
+    held for 45 seconds per domain.
     No API key required — rate-limited by IP via the existing middleware.
     """
     if not container or not container.phishing_service:
@@ -695,7 +706,7 @@ async def threat_dashboard():
     )
 
 
-@app.get("/test-phishing", response_class=HTMLResponse)
+@app.get("/test-phishing", response_class=HTMLResponse, include_in_schema=False)
 async def test_phishing_page():
     """Stable test page for the phishing banner.
 
@@ -729,7 +740,7 @@ async def test_phishing_page():
 </html>"""
 
 
-@app.get("/test", response_class=HTMLResponse)
+@app.get("/test", response_class=HTMLResponse, include_in_schema=False)
 async def test_page():
     """Test page for the Chrome extension — simulates wallet transactions."""
     return """<!DOCTYPE html>
@@ -1093,7 +1104,7 @@ async def _build_signature_only_response(req: FirewallRequest, policy_override: 
         "transaction_impact": {
             "sending": "No on-chain transaction",
             "granting_access": "Signature may grant token or marketplace permissions" if danger_signals else "None detected",
-            "recipient": target[:10] + "..." if _is_valid_evm_address(target) else "N/A",
+            "recipient": target if _is_valid_evm_address(target) else "N/A",
             "post_tx_state": "Signature can be submitted later by the requesting dApp or spender",
         },
         "analysis": f"Signature-only analysis for {sign_method}",
@@ -1362,13 +1373,13 @@ async def firewall(req: FirewallRequest, request: Request):
                 **_coverage_fields(alert),
                 "classification": classification,
                 "risk_score": risk_score,
-                "decoded_action": _format_decoded_action(decoded),
+                "decoded_action": _format_decoded_action(decoded, req.chainId),
                 "calldata_details": _build_calldata_details(decoded),
                 "danger_signals": danger_signals,
                 "transaction_impact": {
-                    "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens",
-                    "granting_access": "UNLIMITED" if decoded.get("is_unlimited_approval") else "None",
-                    "recipient": f"{to_addr[:10]}...",
+                    "sending": _sending(decoded, value_bnb, req.chainId, "Tokens"),
+                    "granting_access": _granting_access(decoded),
+                    "recipient": to_addr,
                     "post_tx_state": f"Risk archetype: {alert['risk_archetype']}",
                 },
                 "analysis": f"Composite risk analysis — archetype: {alert['risk_archetype']}, confidence: {alert['confidence']}%",
@@ -1388,7 +1399,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 },
                 "shield_score": shield_score,
                 "simulation": simulation_result,
-                "asset_delta": _build_asset_delta(simulation_result, decoded, value_bnb),
+                "asset_delta": _build_asset_delta(simulation_result, decoded, value_bnb, req.chainId),
                 "greenfield_url": None,
                 "chain_id": req.chainId,
                 "network": _chain_id_to_name(req.chainId),
@@ -1520,7 +1531,9 @@ async def firewall(req: FirewallRequest, request: Request):
                 firewall_result["verdict"] = f"CAUTION — {_TX_CHECKS_UNAVAILABLE}"
             return firewall_result
         else:
-            return _build_fallback_response(decoded, contract_scan, whitelisted, transaction_specific=tx_specific)
+            return _build_fallback_response(
+                decoded, contract_scan, whitelisted, req.chainId, transaction_specific=tx_specific,
+            )
 
     except HTTPException:
         raise
@@ -1692,7 +1705,7 @@ async def top_campaigns(limit: int = 20):
     return {"campaigns": campaigns, "count": len(campaigns)}
 
 
-@app.post("/api/keys")
+@app.post("/api/keys", include_in_schema=False)
 async def create_api_key(request: Request):
     """Create a new API key. Requires ADMIN_SECRET header."""
     admin_secret = request.headers.get("x-admin-secret")
@@ -1713,7 +1726,135 @@ async def create_api_key(request: Request):
     return result
 
 
-@app.get("/api/admin/stats")
+FREE_KEY_LINK_TTL_SECONDS = 1800
+
+
+class FreeKeyRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+
+
+class FreeKeyVerifyRequest(BaseModel):
+    token: str = Field(..., min_length=16, max_length=128)
+
+
+@app.post("/api/keys/free")
+async def request_free_key(req: FreeKeyRequest, request: Request):
+    """Email a single-use link that creates one free-tier API key for the address."""
+    if not container or not container.email_service.is_enabled():
+        raise HTTPException(status_code=503, detail="Self-serve keys are not enabled")
+    client_ip = _get_client_ip(request)
+    if not _free_key_limiter.is_allowed(f"free-key:{client_ip}"):
+        return JSONResponse(status_code=429, content={"detail": "Too many requests. Please try again later."})
+
+    email = req.email.strip().lower()
+    if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+        raise HTTPException(status_code=400, detail="Invalid email address")
+
+    # One answer whether the address is new, has a pending link or already has a key, so the
+    # endpoint does not reveal which. Every mail takes the address's pending slot, so an address
+    # gets at most one mail per link lifetime; while a slot is pending nothing new is sent.
+    answer = {"message": "Check your email for the next step. A link that creates a key expires in 30 minutes."}
+    token = secrets.token_urlsafe(32)
+    token_hash = hash_key(token)
+    if not await container.db.add_free_key_request(email, token_hash, time.time() + FREE_KEY_LINK_TTL_SECONDS):
+        return answer
+    if await container.auth_manager.has_active_key(email, "free"):
+        delivered = await container.email_service.send_free_key_exists_notice(email)
+    else:
+        # The token rides in the fragment, which browsers never send, so it stays out of access logs.
+        verify_url = f"{container.settings.public_api_url.rstrip('/')}/api/keys/free/verify#token={token}"
+        delivered = await container.email_service.send_free_key_verification(email, verify_url)
+    if not delivered:
+        await container.db.delete_free_key_request(token_hash)
+        raise HTTPException(status_code=503, detail="The email could not be sent. Please try again later.")
+    return answer
+
+
+@app.get("/api/keys/free/verify", response_class=HTMLResponse, include_in_schema=False)
+async def free_key_page():
+    """Page the emailed link opens. Nothing is created until the reader presses its button, so a mail
+    scanner that only fetches the link neither uses up the token nor receives the key."""
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ShieldBot free API key</title>
+  <style>
+    body { background: #0a0a0a; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 40px 16px; }
+    main { max-width: 560px; margin: 0 auto; }
+    h1 { color: #00ff88; font-size: 24px; }
+    p { line-height: 1.6; }
+    button { padding: 12px 24px; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; background: #00ff88; color: #000; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    pre { background: #111; border: 1px solid #333; border-radius: 8px; padding: 16px; font-size: 14px; white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ShieldBot free API key</h1>
+    <p id="status">Create the free-tier API key for the address this link was sent to. The key is shown once.</p>
+    <button id="create" type="button">Create my key</button>
+    <pre id="key" hidden></pre>
+  </main>
+  <script>
+    const token = new URLSearchParams(location.hash.slice(1)).get("token");
+    const status = document.getElementById("status");
+    const button = document.getElementById("create");
+    const keyBox = document.getElementById("key");
+    if (!token) {
+      status.textContent = "This link has no token. Open the link from your email again.";
+      button.hidden = true;
+    }
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        const resp = await fetch("/api/keys/free/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token }),
+        });
+        const body = await resp.json();
+        if (!resp.ok) throw new Error(body.detail || `Request failed (HTTP ${resp.status})`);
+        status.textContent = `Your free-tier key (${body.rpm_limit} requests a minute, ${body.daily_limit} a day). ` +
+          "Copy it now: it is not shown again. Send it in the X-API-Key header.";
+        keyBox.textContent = body.key;
+        keyBox.hidden = false;
+        button.hidden = true;
+      } catch (err) {
+        status.textContent = err.message;
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>"""
+
+
+@app.post("/api/keys/free/verify")
+async def verify_free_key(req: FreeKeyVerifyRequest):
+    """Use an emailed link's token once and create the address's free-tier key, shown only in this response."""
+    if not container or not container.auth_manager:
+        raise HTTPException(status_code=503, detail="Auth not available")
+    email = await container.db.claim_free_key_request(hash_key(req.token))
+    if email is None:
+        raise HTTPException(status_code=400, detail="This link is invalid, expired or already used. Request a new one.")
+    if await container.auth_manager.has_active_key(email, "free"):
+        raise HTTPException(status_code=409, detail="This email already has an active free key.")
+    created = await container.auth_manager.create_key(email, "free")
+    return JSONResponse(
+        content={
+            "key": created["key"],
+            "key_id": created["key_id"],
+            "tier": "free",
+            "rpm_limit": TIER_LIMITS["free"]["rpm"],
+            "daily_limit": TIER_LIMITS["free"]["daily"],
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.get("/api/admin/stats", include_in_schema=False)
 async def admin_stats(request: Request):
     """Platform metrics — scans, threats, blocks, chain breakdown, mempool.
 
@@ -1763,25 +1904,117 @@ async def public_stats():
 
     A source that is not running reports null, never 0. Mempool counters live in memory and restart
     from zero with the process; `mempool_counting_since` says when the current count began.
+    `chains_protected` counts only the chains whose mempool the monitor read on its last poll
+    (`mempool_chains_observable`); a monitored chain it could not read is listed in
+    `mempool_chains_unobservable`: its mempool is unknown, not protected.
+    `launch_discovery` says how far Robinhood Chain launch discovery has read, from the database
+    alone: its lowest source cursor, when a sweep last moved a cursor, and the newest launch block.
+    A cursor far below the chain head, or an old `last_sweep_at`, means discovery has stalled.
+    Its `scanned_share` counts the launches whose block is in the last 24 hours and how many of
+    them have any scan outcome. `evidence_documents` counts the stored verdict evidence documents
+    per chain; `registry_records_confirmed` counts those whose record in the Robinhood Chain
+    verdict registry is confirmed on-chain. `contracts_scanned` and `threats_detected` count the contracts
+    the extension and agent firewalls scored; Telegram, /api/scan and launch scans do not add to them.
+    `contracts_scanned` and `transactions_blocked` are all time. `threats_detected` is on record now: it
+    counts the contracts whose latest score is high risk, and a rescan overwrites a contract's score.
+    Each `_24h` field counts the same table over the last 24 hours (a contract counts when its latest
+    scan falls in that window).
+    `unknown_ledger` sums, per provider and per chain, how often a provider lookup was answered,
+    came back unknown or failed since `counting_since` (core.unknown_ledger); it restarts with the
+    process. GET /api/coverage/{chain_id} has one chain's providers in full.
     """
+    from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
+    from services.verdict_publisher import CHAIN_ID as REGISTRY_CHAIN_ID
+
     db_stats = {}
+    launch_discovery = None
+    evidence_documents = registry_records_confirmed = None
     if container and container.db:
         db_stats = await container.db.get_platform_stats()
+        window_hours = 24
+        launch_discovery = {
+            "chain_id": LAUNCH_CHAIN_ID,
+            **await container.db.get_launch_discovery_status(LAUNCH_CHAIN_ID),
+            "scanned_share": {
+                "window_hours": window_hours,
+                **await container.db.get_launch_scan_share(LAUNCH_CHAIN_ID, time.time() - window_hours * 3600),
+            },
+        }
+        evidence = await container.db.get_verdict_evidence_counts()
+        evidence_documents = {chain_id: counts["documents"] for chain_id, counts in evidence.items()}
+        registry_records_confirmed = evidence[REGISTRY_CHAIN_ID]["confirmed"] if REGISTRY_CHAIN_ID in evidence else 0
 
     mempool = {}
+    observable = unobservable = None
     if container and container.mempool_monitor:
         mempool = container.mempool_monitor.get_stats()
+        unobservable = mempool["unobservable_chains"]
+        observable = sorted(set(mempool["monitored_chains"]) - set(unobservable))
 
     at = db_stats.get("all_time", {})
+    day = db_stats.get("last_24h", {})
     return {
         "transactions_monitored": mempool.get("total_pending_seen"),
         "contracts_scanned":      at.get("unique_contracts_scanned"),
         "threats_detected":       at.get("threats_detected"),
         "transactions_blocked":   at.get("transactions_blocked"),
+        "contracts_scanned_24h":  day.get("scans"),
+        "threats_detected_24h":   day.get("threats_detected"),
+        "transactions_blocked_24h": day.get("transactions_blocked"),
         "sandwiches_caught":      mempool.get("sandwiches_detected"),
         "suspicious_approvals":   mempool.get("suspicious_approvals"),
-        "chains_protected":       len(mempool["monitored_chains"]) if "monitored_chains" in mempool else None,
+        "chains_protected":       len(observable) if observable is not None else None,
+        "mempool_chains_observable": observable,
+        "mempool_chains_unobservable": unobservable,
         "mempool_counting_since": mempool.get("counting_since"),
+        "launch_discovery":       launch_discovery,
+        "evidence_documents":     evidence_documents,
+        "registry_records_confirmed": registry_records_confirmed,
+        "unknown_ledger":         unknown_ledger.summary(),
+    }
+
+
+@app.get("/api/coverage/{chain_id}")
+async def chain_coverage(chain_id: int):
+    """What a scan on this chain can check, from its configuration, and how its providers are answering.
+
+    `capabilities`: `sell_simulation` is honeypot.is, eth_simulateV1, or goplus_reported (no sell is
+    simulated; GoPlus's own flags only); `contract_age` and `verification` name the explorer each lookup
+    asks (`contract_age` is null where no request can be sent: Robinhood Chain's creation lookup needs
+    the Blockscout gateway key, and without it verification is Sourcify alone); `liquidity_lock` says
+    whether any real locker is known (with only burn addresses known, lock status is unknown);
+    `router_allowlist` counts the swap routers configured as trusted on this chain; `public_mempool` is
+    yes when the mempool monitor read this chain on its last poll, unobservable when the chain has a
+    public mempool that was not read, and no when it has none; `approvals` says whether a rescue scan
+    reads the full approval history or only the newest `window_blocks` blocks.
+    `provider_health` is this chain's Unknown ledger (core.unknown_ledger): per provider, how many
+    lookups were answered, came back unknown or failed since `counting_since`, and the latest outcome;
+    `chain_independent` holds providers asked about no chain. A provider with no entry has not been
+    asked since the process started. Nothing here sends a request to any provider.
+    """
+    _validate_chain_id(chain_id)
+    if not container:
+        raise HTTPException(status_code=503, detail="Service not available")
+    adapter = web3_client._get_adapter(chain_id)
+    if not supports_pending_transactions(chain_id):
+        public_mempool = "no"
+    else:
+        mempool = container.mempool_monitor.get_stats() if container.mempool_monitor else None
+        observed = mempool and chain_id in set(mempool["monitored_chains"]) - set(mempool["unobservable_chains"])
+        public_mempool = "yes" if observed else "unobservable"
+    return {
+        "chain_id": chain_id,
+        "chain_name": adapter.chain_name,
+        "capabilities": {
+            **adapter.capabilities(),
+            "public_mempool": public_mempool,
+            "approvals": container.rescue_service.approval_history(chain_id),
+        },
+        "provider_health": {
+            "counting_since": unknown_ledger.counting_since,
+            "providers": unknown_ledger.for_chain(chain_id),
+            "chain_independent": unknown_ledger.for_chain(None),
+        },
     }
 
 
@@ -1844,7 +2077,7 @@ async def verdict_permalink(chain_id: int, address: str):
     }
 
 
-@app.get("/api/admin/signups")
+@app.get("/api/admin/signups", include_in_schema=False)
 async def admin_signups(request: Request):
     """List all beta signups. Requires ADMIN_SECRET header."""
     admin_secret = request.headers.get("x-admin-secret")
@@ -1885,7 +2118,7 @@ class WatchDeployerRequest(ChainRequest):
         return value if value == 0 else _validate_chain_id(value)
 
 
-@app.post("/api/admin/watch/deployer")
+@app.post("/api/admin/watch/deployer", include_in_schema=False)
 async def watch_deployer_add(req: WatchDeployerRequest, request: Request):
     """Add a deployer address to the watch list. Requires X-Admin-Secret."""
     _require_admin(request)
@@ -1897,7 +2130,7 @@ async def watch_deployer_add(req: WatchDeployerRequest, request: Request):
     return {"ok": True, "address": req.address.lower(), "chain_id": req.chain_id}
 
 
-@app.delete("/api/admin/watch/deployer/{address}")
+@app.delete("/api/admin/watch/deployer/{address}", include_in_schema=False)
 async def watch_deployer_remove(address: str, request: Request, chain_id: int = 0):
     """Remove a deployer from the watch list. Requires X-Admin-Secret."""
     if chain_id != 0:
@@ -1907,7 +2140,7 @@ async def watch_deployer_remove(address: str, request: Request, chain_id: int = 
     return {"ok": True, "address": address.lower(), "chain_id": chain_id}
 
 
-@app.get("/api/admin/watch/deployers")
+@app.get("/api/admin/watch/deployers", include_in_schema=False)
 async def watch_deployer_list(request: Request):
     """List all watched deployers. Requires X-Admin-Secret."""
     _require_admin(request)
@@ -1915,7 +2148,7 @@ async def watch_deployer_list(request: Request):
     return {"deployers": deployers, "count": len(deployers)}
 
 
-@app.get("/api/admin/watch/alerts")
+@app.get("/api/admin/watch/alerts", include_in_schema=False)
 async def watch_alerts_list(request: Request, limit: int = 50):
     """List recent deployment alerts from watched deployers. Requires X-Admin-Secret."""
     _require_admin(request)
@@ -1923,23 +2156,25 @@ async def watch_alerts_list(request: Request, limit: int = 50):
     return {"alerts": alerts, "count": len(alerts)}
 
 
-@app.post("/api/admin/guard-subjects/{chain_id}/{address}")
+@app.post("/api/admin/guard-subjects/{chain_id}/{address}", include_in_schema=False)
 async def guard_subject_add(chain_id: int, address: str, request: Request):
-    """Watch a subject with a confirmed verdict. Requires X-Admin-Secret."""
+    """Watch a subject with a verdict confirmed on the configured registry. Requires X-Admin-Secret."""
     _require_admin(request)
     if chain_id != 4663:
         raise HTTPException(status_code=400, detail="Guard watches are only available on chain 4663")
     _validate_chain_id(chain_id)
     if not web3_client.is_valid_address(address):
         raise HTTPException(status_code=400, detail="Invalid address")
-    if not await container.db.register_guard_subject(chain_id, address.lower()):
+    if not await container.db.register_guard_subject(
+        chain_id, address.lower(), container.verdict_publisher.registry,
+    ):
         raise HTTPException(
             status_code=409, detail="Guard watch cap reached or no confirmed verdict for this subject",
         )
     return {"ok": True, "address": address.lower(), "chain_id": chain_id}
 
 
-@app.delete("/api/admin/guard-subjects/{chain_id}/{address}")
+@app.delete("/api/admin/guard-subjects/{chain_id}/{address}", include_in_schema=False)
 async def guard_subject_remove(chain_id: int, address: str, request: Request):
     """Opt a subject out of continuous rescans. Requires X-Admin-Secret."""
     _require_admin(request)
@@ -1993,9 +2228,16 @@ async def agent_chat(req: ChatRequest, request: Request):
     if not chat_limiter.is_allowed(client_ip):
         raise HTTPException(429, "Rate limit exceeded")
 
-    # Bind user_id to client IP so users cannot read/poison each other's history
+    # Bind user_id to the caller so users cannot read/poison each other's history: to the install
+    # token when one is sent, which does not depend on the proxy passing the client IP, else to the IP.
     import hashlib
-    bound_user_id = hashlib.sha256(f"{client_ip}:{req.user_id}".encode()).hexdigest()[:24]
+    install_id = request.headers.get("x-install-id")
+    if install_id is None:
+        bound_user_id = hashlib.sha256(f"{client_ip}:{req.user_id}".encode()).hexdigest()[:24]
+    elif _INSTALL_ID_RE.fullmatch(install_id):
+        bound_user_id = hashlib.sha256(f"install:{install_id}:{req.user_id}".encode()).hexdigest()[:24]
+    else:
+        raise HTTPException(400, "X-Install-Id must be 16 to 128 letters, digits, '-' or '_'")
 
     try:
         result = await container.advisor.chat(bound_user_id, req.message, chain_id=req.chain_id)
@@ -2080,7 +2322,9 @@ async def rescue_scan(wallet_address: str, chain_id: int = 56):
     """Scan a wallet's active token approvals and assess risk (Rescue Mode).
 
     Returns risky approvals, Tier 1 alerts with explanations, and
-    Tier 2 pre-built revoke transactions for one-click cleanup.
+    Tier 2 pre-built revoke transactions for one-click cleanup. When the chain's RPC serves only
+    part of the approval history, or none of it, the scan answers status "unknown" with the reason
+    and the blocks it read (scanned_blocks), never an error.
     """
     _validate_chain_id(chain_id)
     if not container or not container.rescue_service:
@@ -2090,14 +2334,9 @@ async def rescue_scan(wallet_address: str, chain_id: int = 56):
         raise HTTPException(status_code=400, detail="Invalid wallet address")
 
     api_key = container.settings.bscscan_api_key
-    try:
-        result = await container.rescue_service.scan_approvals(
-            wallet_address, chain_id=chain_id, etherscan_api_key=api_key,
-        )
-    except RuntimeError as exc:
-        logger.warning(f"Approval scan unavailable for chain {chain_id}")
-        raise HTTPException(status_code=503, detail="Approval scan unavailable") from exc
-    return result
+    return await container.rescue_service.scan_approvals(
+        wallet_address, chain_id=chain_id, etherscan_api_key=api_key,
+    )
 
 
 # --- Threat Feed API ---
@@ -2126,7 +2365,8 @@ async def threat_feed(
     limit = max(1, min(limit, 200))  # cap between 1 and 200
     threats = []
 
-    # Recent high-risk contract scans from DB
+    # Recent high-risk contract scans from DB. Known split: this lists risk_level 'HIGH' while the threat
+    # counts in core.database count risk_score >= 71, and a campaign-boosted score keeps its unboosted level.
     try:
         if source == "mempool":
             cursor = None
@@ -2203,6 +2443,9 @@ async def launch_feed(chain_id: int, limit: int = 50, cursor: str = None):
     its status and coverage reasons; unknown and not_scanned are never safe. scan.status is
     authoritative: "ok" only for a complete scan. Per-field coverage is included only where the
     hunter recorded it, for blocked launches. Each launch links its public verdict at verdict_url.
+    scanned_share counts the launches whose block is in the last 24 hours and how many of them
+    have any scan outcome. Scans share one small RPC budget and only launches seen trading soon
+    after launch are picked, so most launches are never scanned; this says how many were.
     Query params:
     - limit: max results (default 50, max 200)
     - cursor: next_cursor from the previous page (optional)
@@ -2226,11 +2469,14 @@ async def launch_feed(chain_id: int, limit: int = 50, cursor: str = None):
         launches, next_cursor = await container.db.get_launch_feed(chain_id, limit, cursor)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid cursor") from exc
+    window_hours = 24
+    scanned_share = await container.db.get_launch_scan_share(chain_id, time.time() - window_hours * 3600)
     return {
         'launches': launches,
         'count': len(launches),
         'chain_id': chain_id,
         'next_cursor': next_cursor,
+        'scanned_share': {'window_hours': window_hours, **scanned_share},
     }
 
 
@@ -2308,18 +2554,17 @@ async def _get_deployer_campaign_context(contract_addr: str, chain_id: int, cont
         return None
 
 
-def _format_decoded_action(decoded: Dict) -> str:
+def _format_decoded_action(decoded: Dict, chain_id: int) -> str:
     """Convert decoded calldata into a plain English action label for the overlay."""
     func = decoded.get("function_name", "")
     category = decoded.get("category", "")
     params = decoded.get("params", {})
 
     if not func or func == "Native Transfer":
-        return "Native BNB Transfer"
+        return f"Native {get_native_symbol(chain_id) or 'Coin'} Transfer"
 
     if category == "approval":
-        spender = params.get("param_0", "")
-        spender_label = decoded.get("spender_label") or _short_addr(str(spender))
+        spender_label = _approval_spender(decoded) or "an unknown spender"
         if decoded.get("is_unlimited_approval"):
             return f"UNLIMITED Approval to {spender_label}"
         if "permit" in func.lower():
@@ -2333,9 +2578,7 @@ def _format_decoded_action(decoded: Dict) -> str:
             recipient = params.get("param_1", "")
         else:
             recipient = params.get("param_0", "")
-        r = str(recipient)
-        recipient_short = f"{r[:8]}..." if len(r) > 10 else r
-        return f"Token Transfer to {recipient_short}"
+        return f"Token Transfer to {_checksum_if_possible(str(recipient))}"
 
     if category == "swap":
         return "DEX Token Swap"
@@ -2373,15 +2616,11 @@ def _build_calldata_details(decoded: Dict) -> Dict:
     fields = []
 
     if category == "approval":
-        spender = params.get("param_0", "")
-        spender_label = decoded.get("spender_label") or _short_addr(str(spender))
-        amount = params.get("param_1")
-        is_unlimited = decoded.get("is_unlimited_approval", False)
+        granted = _granting_access(decoded)
         fields = [
             {"label": "Function", "value": func},
-            {"label": "Spender", "value": spender_label},
-            {"label": "Amount", "value": "Unlimited", "danger": True} if is_unlimited else
-            {"label": "Amount", "value": str(amount) if amount is not None else "Unknown"},
+            {"label": "Spender", "value": _approval_spender(decoded) or "Unknown"},
+            {"label": "Grants", "value": granted, "danger": granted in ("UNLIMITED", "ALL tokens in the collection")},
         ]
     elif category == "transfer":
         if func == "transferFrom":
@@ -2391,7 +2630,7 @@ def _build_calldata_details(decoded: Dict) -> Dict:
             fields = [
                 {"label": "Function", "value": func},
                 {"label": "From", "value": _short_addr(str(frm))},
-                {"label": "To", "value": _short_addr(str(to))},
+                {"label": "To", "value": _checksum_if_possible(str(to))},
                 {"label": "Amount", "value": str(amount) if amount is not None else "Unknown"},
             ]
         else:
@@ -2399,7 +2638,7 @@ def _build_calldata_details(decoded: Dict) -> Dict:
             amount = params.get("param_1")
             fields = [
                 {"label": "Function", "value": func},
-                {"label": "To", "value": _short_addr(str(to))},
+                {"label": "To", "value": _checksum_if_possible(str(to))},
                 {"label": "Amount", "value": str(amount) if amount is not None else "Unknown"},
             ]
     elif category == "swap":
@@ -2429,20 +2668,90 @@ def _build_calldata_details(decoded: Dict) -> Dict:
     return {"category": category, "fields": fields}
 
 
-def _build_asset_delta_fallback(decoded: Dict, value_bnb: float) -> List:
+# Where the decoder puts each approval function's spender and amount (None when
+# it does not decode it: Permit2 keeps both inside a struct).
+_APPROVAL_PARAMS = {
+    "approve": ("param_0", "param_1"),
+    "increaseAllowance": ("param_0", "param_1"),
+    "setApprovalForAll": ("param_0", None),
+    "permit": ("param_1", "param_2"),
+    "permit (DAI-style)": ("param_1", None),
+    "permit (Permit2)": (None, None),
+    "permit (Permit2 batch)": (None, None),
+}
+# Approval functions that grant or revoke with a boolean, and the label when they grant.
+_APPROVAL_FLAG_PARAM = {
+    "setApprovalForAll": ("param_1", "ALL tokens in the collection"),
+    "permit (DAI-style)": ("param_4", "UNLIMITED"),
+}
+
+
+# Universal Router execute(): its commands can include a Permit2 permit.
+_UNIVERSAL_ROUTER_EXECUTE = "3593564c"
+
+
+def _approval_spender(decoded: Dict) -> Optional[str]:
+    """The approved spender: its known name, else its checksummed address, else None."""
+    param = _APPROVAL_PARAMS.get(decoded.get("function_name"), (None, None))[0]
+    spender = decoded.get("params", {}).get(param) if param else None
+    return decoded.get("spender_label") or (_checksum_if_possible(str(spender)) if spender else None)
+
+
+def _native_symbol(chain_id: int) -> str:
+    return get_native_symbol(chain_id) or "native coin"
+
+
+def _sending(decoded: Dict, value_bnb: float, chain_id: int, tokens: str) -> str:
+    """The Sending row: the native amount, nothing for a bare approval, else tokens."""
+    if value_bnb > 0:
+        return f"{value_bnb:g} {_native_symbol(chain_id)}"
+    return "Nothing (approval only)" if decoded.get("is_approval") else tokens
+
+
+def _granting_access(decoded: Dict) -> str:
+    """Say what spending rights a call grants. "None" only when it grants nothing."""
+    if decoded.get("selector") == _UNIVERSAL_ROUTER_EXECUTE:
+        return "Unknown (may include a Permit2 permit)"
+    if decoded.get("category", "unknown") == "unknown":
+        return "Unknown"
+    if not decoded.get("is_approval"):
+        return "None"
+    func = decoded.get("function_name")
+    params = decoded.get("params", {})
+    if func in _APPROVAL_FLAG_PARAM:
+        param, granted = _APPROVAL_FLAG_PARAM[func]
+        flag = params.get(param)
+        if flag is None:
+            return "Approval, amount unknown"
+        return granted if flag else "None (revokes access)"
+    if decoded.get("is_unlimited_approval"):
+        return "UNLIMITED"
+    amount_param = _APPROVAL_PARAMS.get(func, (None, None))[1]
+    amount = params.get(amount_param) if amount_param else None
+    if not isinstance(amount, int):
+        return "Approval, amount unknown"
+    if decoded.get("formatted_amount"):
+        return "None (amount is 0)" if amount == 0 else f"Limited approval: {decoded['formatted_amount']}"
+    if func == "approve":
+        # approve() shares its selector with ERC-721 approve(to, tokenId). Without
+        # the token's decimals the number may be an NFT id, and 0 may be token #0.
+        return f"Approval: {amount} (raw amount or NFT token id)"
+    return "None (amount is 0)" if amount == 0 else f"Limited approval: {amount} (raw token units)"
+
+
+def _build_asset_delta_fallback(decoded: Dict, value_bnb: float, chain_id: int) -> List:
     """Construct basic asset_delta from calldata when simulation is unavailable."""
     deltas = []
     if value_bnb > 0:
-        deltas.append(f"-{value_bnb:g} BNB")
+        deltas.append(f"-{value_bnb:g} {_native_symbol(chain_id)}")
     if decoded.get("is_approval"):
-        if decoded.get("is_unlimited_approval"):
-            deltas.append("Approval: unlimited token spend")
-        else:
-            deltas.append("Approval: limited token spend")
+        deltas.append(f"Access granted: {_granting_access(decoded)}")
     return deltas
 
 
-def _build_asset_delta(simulation_result: Optional[Dict], decoded: Dict, value_bnb: float) -> List:
+def _build_asset_delta(
+    simulation_result: Optional[Dict], decoded: Dict, value_bnb: float, chain_id: int,
+) -> List:
     """Build asset_delta list for the extension response.
 
     Uses simulation deltas when available and simulation succeeded.
@@ -2457,7 +2766,7 @@ def _build_asset_delta(simulation_result: Optional[Dict], decoded: Dict, value_b
             # Do not show native BNB delta (msg.value relay fee) as if it were
             # the full picture. Show a clear notice instead.
             return ["Unable to simulate — cross-chain or complex transaction. Verify manually."]
-    return _build_asset_delta_fallback(decoded, value_bnb)
+    return _build_asset_delta_fallback(decoded, value_bnb, chain_id)
 
 
 def _coverage_fields(alert: Dict) -> Dict:
@@ -2496,13 +2805,13 @@ def _build_cached_response(
         **_coverage_fields(alert),
         "classification": classification,
         "risk_score": risk_score,
-        "decoded_action": _format_decoded_action(decoded),
+        "decoded_action": _format_decoded_action(decoded, chain_id),
         "calldata_details": _build_calldata_details(decoded),
         "danger_signals": flags,
         "transaction_impact": {
-            "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens",
-            "granting_access": "UNLIMITED" if decoded.get("is_unlimited_approval") else "None",
-            "recipient": f"{to_addr[:10]}..." if to_addr else "Unknown",
+            "sending": _sending(decoded, value_bnb, chain_id, "Tokens"),
+            "granting_access": _granting_access(decoded),
+            "recipient": to_addr or "Unknown",
             "post_tx_state": f"Risk archetype: {archetype}",
         },
         "analysis": f"Cached result (scanned {cached.get('scan_count', 1)} times)",
@@ -2521,7 +2830,7 @@ def _build_cached_response(
             "confidence": cached.get('confidence', 0),
         },
         "simulation": None,
-        "asset_delta": _build_asset_delta_fallback(decoded, value_bnb),
+        "asset_delta": _build_asset_delta_fallback(decoded, value_bnb, chain_id),
         "greenfield_url": None,
         "cached": True,
         "chain_id": chain_id,
@@ -2553,7 +2862,7 @@ _TX_CHECKS_UNAVAILABLE = "Transaction checks unavailable: the spender, payment o
 
 
 def _build_fallback_response(
-    decoded: Dict, scan: Dict, whitelisted: Optional[str], transaction_specific: bool = False,
+    decoded: Dict, scan: Dict, whitelisted: Optional[str], chain_id: int, transaction_specific: bool = False,
 ) -> Dict:
     """Build a firewall response when AI is unavailable."""
     risk_score = scan.get("risk_score", 50)
@@ -2606,14 +2915,12 @@ def _build_fallback_response(
         "partial": alert['status'] == 'unknown',
         "classification": classification,
         "risk_score": min(100, risk_score),
-        "decoded_action": _format_decoded_action(decoded),
+        "decoded_action": _format_decoded_action(decoded, chain_id),
         "calldata_details": _build_calldata_details(decoded),
         "danger_signals": danger_signals,
         "transaction_impact": {
             "sending": "Unknown (AI unavailable)",
-            "granting_access": "Unknown" if not decoded.get("is_approval") else (
-                "UNLIMITED" if is_unlimited_approval else "Limited approval"
-            ),
+            "granting_access": _granting_access(decoded),
             "recipient": scan.get("address", "Unknown"),
             "post_tx_state": "AI analysis unavailable — review manually",
         },
@@ -2674,15 +2981,15 @@ def _build_unverified_swap_response(
         "classification": "CAUTION",
         **coverage_fields,
         "risk_score": 35,
-        "decoded_action": _format_decoded_action(decoded),
+        "decoded_action": _format_decoded_action(decoded, req.chainId),
         "calldata_details": _build_calldata_details(decoded),
         "danger_signals": [
             f"Swap via trusted router ({whitelisted}) but {reason.lower()} — token safety unverified",
         ],
         "transaction_impact": {
-            "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens (via router)",
-            "granting_access": "UNLIMITED" if decoded.get("is_unlimited_approval") else "None",
-            "recipient": f"{whitelisted} ({to_addr[:10]}...)",
+            "sending": _sending(decoded, value_bnb, req.chainId, "Tokens (via router)"),
+            "granting_access": _granting_access(decoded),
+            "recipient": f"{whitelisted} ({to_addr})",
             "post_tx_state": f"Swap via {whitelisted} — {reason.lower()}",
         },
         "analysis": (
@@ -2714,7 +3021,7 @@ def _build_unverified_swap_response(
             "confidence": 30,
         },
         "simulation": None,
-        "asset_delta": _build_asset_delta_fallback(decoded, value_bnb),
+        "asset_delta": _build_asset_delta_fallback(decoded, value_bnb, req.chainId),
         "greenfield_url": None,
         "chain_id": req.chainId,
         "network": _chain_id_to_name(req.chainId),
@@ -2876,13 +3183,13 @@ async def _analyze_router_swap(
         **_coverage_fields(alert),
         "classification": classification,
         "risk_score": risk_score,
-        "decoded_action": _format_decoded_action(decoded),
+        "decoded_action": _format_decoded_action(decoded, req.chainId),
         "calldata_details": _build_calldata_details(decoded),
         "danger_signals": danger_signals,
         "transaction_impact": {
-            "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens (via router)",
-            "granting_access": "UNLIMITED" if decoded.get("is_unlimited_approval") else "None",
-            "recipient": f"{whitelisted} ({to_addr[:10]}...)",
+            "sending": _sending(decoded, value_bnb, req.chainId, "Tokens (via router)"),
+            "granting_access": _granting_access(decoded),
+            "recipient": f"{whitelisted} ({to_addr})",
             "post_tx_state": f"Swap via {whitelisted} — analyzed {best['address'][:10]}...",
         },
         "analysis": f"Trusted router detected ({whitelisted}), analyzed swap path tokens.",
@@ -2906,7 +3213,7 @@ async def _analyze_router_swap(
         "asset_delta": (
             [d["display"] for d in sim_result["asset_deltas"]]
             if sim_result and sim_result.get("asset_deltas")
-            else _build_asset_delta_fallback(decoded, value_bnb)
+            else _build_asset_delta_fallback(decoded, value_bnb, req.chainId)
         ),
         "greenfield_url": None,
         "chain_id": req.chainId,
@@ -2985,19 +3292,23 @@ async def _enrich_decoded(decoded: Dict, to_addr: str, chain_id: int = 56):
             decoded["token_symbol"] = token_info["symbol"]
             decoded["token_name"] = token_info["name"]
 
+            spender_param, amount_param = _APPROVAL_PARAMS.get(decoded.get("function_name"), (None, None))
+
             # Format the approval amount
-            amount = params.get("param_1")  # uint256 amount
+            amount = params.get(amount_param) if amount_param else None
             if isinstance(amount, int):
                 if amount >= UNLIMITED_THRESHOLD:
                     decoded["formatted_amount"] = f"UNLIMITED {token_info['symbol']}"
                 else:
                     decimals = token_info.get("decimals", 18)
                     human_amount = amount / (10 ** decimals)
-                    decoded["formatted_amount"] = f"{human_amount:,.4f} {token_info['symbol']}".rstrip("0").rstrip(".")
-                    decoded["formatted_amount"] += f" {token_info['symbol']}" if not decoded["formatted_amount"].endswith(token_info['symbol']) else ""
+                    number = f"{human_amount:,.4f}".rstrip("0").rstrip(".")
+                    if number == "0" and amount:
+                        number = f"{human_amount:.4g}"
+                    decoded["formatted_amount"] = f"{number} {token_info['symbol']}"
 
             # Resolve the spender address
-            spender = params.get("param_0", "")
+            spender = params.get(spender_param) if spender_param else None
             if spender:
                 spender_name = calldata_decoder.is_whitelisted_target(spender)
                 if spender_name:

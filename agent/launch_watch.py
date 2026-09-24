@@ -36,7 +36,8 @@ from services.rpc_guard import BREAKER_BASE_COOLDOWN_SECONDS, BREAKER_MAX_COOLDO
 logger = logging.getLogger(__name__)
 
 # Discovery runs once per interval: a launch surfaces within CONFIRMATIONS (60 s) plus about one
-# interval, and at two or three requests per poll discovery uses under 0.15 req/s of the budget.
+# interval, and at two requests per poll plus one header call per new launch block (about 3.3 at
+# the measured launch rate) discovery uses about 0.27 req/s of the budget.
 POLL_INTERVAL_SECONDS = 20
 # Fifteen minutes at 0.1 s per block. In the measurement above the latest first swap came 12.7
 # minutes after launch, and the window bounds the swaps tracked to about 150 pools.

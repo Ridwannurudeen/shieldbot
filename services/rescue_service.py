@@ -11,7 +11,10 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 import aiohttp
+from cachetools import TTLCache
 from web3 import Web3
+
+from utils.chain_info import get_dexscreener_slug
 
 logger = logging.getLogger(__name__)
 
@@ -21,82 +24,147 @@ APPROVAL_TOPIC = Web3.keccak(text="Approval(address,address,uint256)").hex()
 # ApprovalForAll event topic (ERC-721/1155)
 APPROVAL_FOR_ALL_TOPIC = Web3.keccak(text="ApprovalForAll(address,address,bool)").hex()
 
-# Robinhood Chain has no archive logs RPC, and its public Blockscout API answers server clients
-# with a Cloudflare challenge, so rescue reads only recent approval history from the public RPC:
-# 24 windows of 10,000 blocks (240,000 blocks, about 6.7 hours at the measured ~0.1 s per block).
-BOUNDED_HISTORY_CHAIN_ID = 4663
+# A chain without a configured logs RPC is read through its adapter's public RPC, which serves no
+# archive history, so rescue reads only recent approval history there: 24 windows of 10,000
+# blocks, newest first (240,000 blocks; about 6.7 hours on Robinhood Chain at ~0.1 s per block,
+# whose public Blockscout API answers server clients with a Cloudflare challenge). Measured on
+# 2026-09-24, the default public RPCs of Robinhood Chain, Arbitrum, Optimism and opBNB serve such
+# windows and Base's serves 2,000 blocks at a time; BSC's answers "limit exceeded" to any range,
+# and Ethereum's and Polygon's refuse a query without a contract address, so on those three
+# nothing is read and the scan stays unknown.
 RECENT_LOG_WINDOW_BLOCKS = 10_000
+# Public RPCs that cap an eth_getLogs range below RECENT_LOG_WINDOW_BLOCKS, by chain.
+PUBLIC_LOG_WINDOW_BLOCKS = {8453: 2_000}
 RECENT_LOG_WINDOWS = 24
 PUBLIC_RPC_CONCURRENCY = 4
 PUBLIC_RPC_ATTEMPTS = 3
 RATE_LIMIT_TERMS = ("rate limit", "rate-limit", "too many requests")
 
+# A wallet's scan result is reused this long, so repeated calls do not re-run a history scan
+# (a full archive scan sends thousands of requests), while a revoke still shows within minutes.
+RESULT_CACHE_SECONDS = 120
+# Reason given when the chain's RPC could not be read. It names no provider: errors from the RPC
+# client can carry its URL.
+RPC_UNAVAILABLE_REASON = "Approval data unavailable from the chain's RPC"
+# Reason given when the RPC answered but served none of the recent approval history.
+NOTHING_READ_REASON = "No approval history could be read from the chain's RPC"
+
 UNLIMITED_THRESHOLD = 2**128
 # Approvals above this (but below UNLIMITED_THRESHOLD) are considered "large"
 HIGH_APPROVAL = 10**24  # ~1 million tokens at 18 decimals
 
-# Known safe spenders (major DEX routers, aggregators, and lending protocols)
-# Approvals to these are lower risk than unknown contracts.
+# Known safe spenders by chain (major DEX routers, aggregators and lending protocols). Approvals to
+# these are lower risk than to unknown contracts. An address is trusted only on the chains listed:
+# the same address on another chain can hold other code or none. On 2026-09-24 every address held
+# code on each chain it is listed under (eth_getCode on that chain's public RPC). Where a contract
+# exposes one, its own getter also named the expected contract there: factory() with WETH() or
+# WETH9() for the DEX routers (and positionManager() for the PancakeSwap Smart Router),
+# defaultFactory() for Aerodrome and Velodrome, poolManager() for the Uniswap Universal Routers
+# outside Ethereum, name() and underlying() for the Venus markets, and one owner() on every chain
+# for KyberSwap and OpenOcean; the Ethereum Universal Router is in Uniswap's deploy-addresses list.
+# 1inch documents its V6 router at the same address on every chain but zkSync; on each chain
+# listed, V6 answers the same owner() as V5, whose code there is the same size as on Ethereum.
+# Addresses holding other code on a chain are left off it: PancakeSwap V2 and ApeSwap on Ethereum,
+# Uniswap V2 and the Universal Router on BSC, where Uniswap documents other addresses, and the
+# PancakeSwap Smart Router on Base (no code on Arbitrum).
 KNOWN_SAFE_SPENDERS = {
-    # --- PancakeSwap ---
-    "0x10ed43c718714eb63d5aa57b78b54704e256024e": "PancakeSwap V2",
-    "0x13f4ea83d0bd40e75c8222255bc855a974568dd4": "PancakeSwap V3 Position Manager",
-    "0x1b81d678ffb9c0263b24a97847620c99d213eb14": "PancakeSwap V3 Swap Router",
-
-    # --- Uniswap ---
-    "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": "Uniswap V2",
-    "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap V3",
-    "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad": "Uniswap Universal Router",
-
-    # --- SushiSwap ---
-    "0x1b02da8cb0d097eb8d57a175b88c7d8b47997506": "SushiSwap",
-
-    # --- 1inch ---
-    "0x111111125421ca6dc452d289314280a0f8842a65": "1inch V6",
-    "0x1111111254eeb25477b68fb85ed929f73a960582": "1inch V5",
-
-    # --- Biswap ---
-    "0x3a6d8ca21d1cf76f653a67577fa0d27453350dd8": "Biswap Router",
-
-    # --- ApeSwap ---
-    "0xcf0febd3f17cef5b47b0cd257acf6025c5bff3b7": "ApeSwap Router",
-
-    # --- KyberSwap ---
-    "0x6131b5fae19ea4f9d964eac0408e4408b66337b5": "KyberSwap Meta Aggregation Router V2",
-
-    # --- OpenOcean ---
-    "0x6352a56caadc4f1e25cd6c75970fa768a3304e64": "OpenOcean Exchange V2",
-
-    # --- MetaMask Swap Router (BSC) ---
-    "0x1a1ec25dc08e98e5e93f1104b5e5cdd298707d31": "MetaMask Swap Router",
-
-    # --- Venus Protocol (vToken contracts — users approve these to supply assets) ---
-    "0xfd5840cd36d94d7229439859c0112a4185bc0255": "Venus Protocol (vUSDT)",
-    "0x95c78222b3d6e262426483d42cfa53685a67ab9d": "Venus Protocol (vBUSD)",
-
-    # --- Radiant Capital ---
-    "0xd50cf00b6e600dd036ba8ef475677d816d6c4281": "Radiant Capital Lending Pool",
-
-    # --- Alpaca Finance ---
-    "0xa625ab01b08ce023b2a342dbb12a16f2c8489a8f": "Alpaca Finance FairLaunch",
-
-    # --- Wombat Exchange ---
-    "0x19609b03c976cca288fbdae5c21d4290e9a4add7": "Wombat Exchange Router",
-
-    # --- Stargate Finance ---
-    "0x4a364f8c717caad9a442737eb7b8a55cc6cf18d8": "Stargate Finance Router",
+    56: {
+        "0x10ed43c718714eb63d5aa57b78b54704e256024e": "PancakeSwap V2",
+        "0x13f4ea83d0bd40e75c8222255bc855a974568dd4": "PancakeSwap Smart Router",
+        "0x1b81d678ffb9c0263b24a97847620c99d213eb14": "PancakeSwap V3 Swap Router",
+        "0x1b02da8cb0d097eb8d57a175b88c7d8b47997506": "SushiSwap",
+        "0x111111125421ca6dc452d289314280a0f8842a65": "1inch V6",
+        "0x1111111254eeb25477b68fb85ed929f73a960582": "1inch V5",
+        "0x3a6d8ca21d1cf76f653a67577fa0d27453350dd8": "Biswap Router",
+        "0xcf0febd3f17cef5b47b0cd257acf6025c5bff3b7": "ApeSwap Router",
+        "0x6131b5fae19ea4f9d964eac0408e4408b66337b5": "KyberSwap Meta Aggregation Router V2",
+        "0x6352a56caadc4f1e25cd6c75970fa768a3304e64": "OpenOcean Exchange V2",
+        "0x1a1ec25dc08e98e5e93f1104b5e5cdd298707d31": "MetaMask Swap Router",
+        # Venus Protocol vToken markets: users approve these to supply assets
+        "0xfd5840cd36d94d7229439859c0112a4185bc0255": "Venus Protocol (vUSDT)",
+        "0x95c78222b3d6e262426483d42cfa53685a67ab9d": "Venus Protocol (vBUSD)",
+        "0xd50cf00b6e600dd036ba8ef475677d816d6c4281": "Radiant Capital Lending Pool",
+        "0xa625ab01b08ce023b2a342dbb12a16f2c8489a8f": "Alpaca Finance FairLaunch",
+        "0x19609b03c976cca288fbdae5c21d4290e9a4add7": "Wombat Exchange Router",
+        "0x4a364f8c717caad9a442737eb7b8a55cc6cf18d8": "Stargate Finance Router",
+    },
+    1: {
+        "0x13f4ea83d0bd40e75c8222255bc855a974568dd4": "PancakeSwap Smart Router",
+        "0x1b81d678ffb9c0263b24a97847620c99d213eb14": "PancakeSwap V3 Swap Router",
+        "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": "Uniswap V2",
+        "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap V3",
+        "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad": "Uniswap Universal Router",
+        "0x111111125421ca6dc452d289314280a0f8842a65": "1inch V6",
+        "0x1111111254eeb25477b68fb85ed929f73a960582": "1inch V5",
+        "0x6131b5fae19ea4f9d964eac0408e4408b66337b5": "KyberSwap Meta Aggregation Router V2",
+        "0x6352a56caadc4f1e25cd6c75970fa768a3304e64": "OpenOcean Exchange V2",
+    },
+    8453: {
+        "0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43": "Aerodrome Router",
+        "0x2626664c2603336e57b271c5c0b26f421741e481": "Uniswap SwapRouter02",
+        "0x6ff5693b99212da76ad316178a184ab56d299b43": "Uniswap Universal Router",
+        "0x1b81d678ffb9c0263b24a97847620c99d213eb14": "PancakeSwap V3 Swap Router",
+        "0x111111125421ca6dc452d289314280a0f8842a65": "1inch V6",
+        "0x1111111254eeb25477b68fb85ed929f73a960582": "1inch V5",
+        "0x6131b5fae19ea4f9d964eac0408e4408b66337b5": "KyberSwap Meta Aggregation Router V2",
+        "0x6352a56caadc4f1e25cd6c75970fa768a3304e64": "OpenOcean Exchange V2",
+    },
+    10: {
+        "0xa062ae8a9c5e11aaa026fc2670b0d65ccc8b2858": "Velodrome Router",
+        "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45": "Uniswap SwapRouter02",
+        "0x851116d9223fabed8e56c0e6b8ad0c31d98b3507": "Uniswap Universal Router",
+        "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap V3",
+        "0x111111125421ca6dc452d289314280a0f8842a65": "1inch V6",
+        "0x1111111254eeb25477b68fb85ed929f73a960582": "1inch V5",
+        "0x6131b5fae19ea4f9d964eac0408e4408b66337b5": "KyberSwap Meta Aggregation Router V2",
+        "0x6352a56caadc4f1e25cd6c75970fa768a3304e64": "OpenOcean Exchange V2",
+    },
+    42161: {
+        "0xc873fecbd354f5a56e00e710b90ef4201db2448d": "Camelot Router",
+        "0x1f721e2e82f6676fce4ea07a5958cf098d339e18": "Camelot V3 Swap Router",
+        "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45": "Uniswap SwapRouter02",
+        "0xa51afafe0263b40edaef0df8781ea9aa03e381a3": "Uniswap Universal Router",
+        "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap V3",
+        "0x1b02da8cb0d097eb8d57a175b88c7d8b47997506": "SushiSwap",
+        "0x1b81d678ffb9c0263b24a97847620c99d213eb14": "PancakeSwap V3 Swap Router",
+        "0x111111125421ca6dc452d289314280a0f8842a65": "1inch V6",
+        "0x1111111254eeb25477b68fb85ed929f73a960582": "1inch V5",
+        "0x6131b5fae19ea4f9d964eac0408e4408b66337b5": "KyberSwap Meta Aggregation Router V2",
+        "0x6352a56caadc4f1e25cd6c75970fa768a3304e64": "OpenOcean Exchange V2",
+    },
+    137: {
+        "0xa5e0829caced8ffdd4de3c43696c57f7d7a678ff": "QuickSwap Router",
+        "0xf5b509bb0909a69b1c207e495f687a596c168e12": "QuickSwap V3 Swap Router",
+        "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45": "Uniswap SwapRouter02",
+        "0x1095692a6237d83c6a72f3f5efedb9a670c49223": "Uniswap Universal Router",
+        "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap V3",
+        "0x1b02da8cb0d097eb8d57a175b88c7d8b47997506": "SushiSwap",
+        "0x111111125421ca6dc452d289314280a0f8842a65": "1inch V6",
+        "0x1111111254eeb25477b68fb85ed929f73a960582": "1inch V5",
+        "0x6131b5fae19ea4f9d964eac0408e4408b66337b5": "KyberSwap Meta Aggregation Router V2",
+        "0x6352a56caadc4f1e25cd6c75970fa768a3304e64": "OpenOcean Exchange V2",
+    },
 }
 
-# Stablecoins — price = $1.00 without an API call
+# Stablecoins by chain — price = $1.00 without an API call, only on the chain they live on
 STABLECOINS = {
-    "0x55d398326f99059ff775485246999027b3197955",  # BSC USDT
-    "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",  # BSC USDC
-    "0xe9e7cea3dedca5984780bafc599bd69add087d56",  # BUSD
-    "0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3",  # DAI on BSC
-    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",  # ETH USDC
-    "0xdac17f958d2ee523a2206206994597c13d831ec7",  # ETH USDT
-    "0x6b175474e89094c44da98b954eedeac495271d0f",  # DAI
+    56: {
+        "0x55d398326f99059ff775485246999027b3197955",  # BSC USDT
+        "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",  # BSC USDC
+        "0xe9e7cea3dedca5984780bafc599bd69add087d56",  # BUSD
+        "0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3",  # DAI on BSC
+    },
+    1: {
+        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",  # ETH USDC
+        "0xdac17f958d2ee523a2206206994597c13d831ec7",  # ETH USDT
+        "0x6b175474e89094c44da98b954eedeac495271d0f",  # DAI
+    },
 }
+
+
+def _known_spender(spender: str, chain_id: int) -> Optional[str]:
+    """Label of a known safe spender on ``chain_id``, or None."""
+    return KNOWN_SAFE_SPENDERS.get(chain_id, {}).get(spender)
 
 
 def _is_rate_limited(error) -> bool:
@@ -165,6 +233,15 @@ class RescueService:
         self._logs_rpcs: Dict[int, str] = rpcs
         # Kept for callers that still read it (read-only).
         self._logs_rpc = self._logs_rpcs.get(56, "")
+        self._results = TTLCache(maxsize=1024, ttl=RESULT_CACHE_SECONDS)
+
+    def approval_history(self, chain_id: int) -> Dict[str, Any]:
+        """How much approval history a scan on chain_id reads: all of it from a configured logs RPC,
+        or the newest windows from the chain's own RPC. Names no RPC, since its URL can carry a key."""
+        if chain_id in self._logs_rpcs:
+            return {"history": "full", "window_blocks": None}
+        window = PUBLIC_LOG_WINDOW_BLOCKS.get(chain_id, RECENT_LOG_WINDOW_BLOCKS)
+        return {"history": "recent", "window_blocks": window * RECENT_LOG_WINDOWS}
 
     def _rpc_for(self, chain_id: int) -> str:
         """Resolve archive RPC URL for a chain. Falls back to the registered adapter's RPC."""
@@ -190,10 +267,22 @@ class RescueService:
         - revoke_txs: list of pre-built revoke transactions (Tier 2)
         - total_value_at_risk_usd: aggregate USD value exposed (None when incomplete)
         - summary: risk summary
-        - status, coverage, coverage_reasons: "unknown" when allowances, balances or prices are incomplete
+        - status, coverage, coverage_reasons: "unknown" when the approval history read, allowances,
+          balances or prices are incomplete, including when the chain's RPC could not be read
+        - scanned_blocks: the block range whose approval history was read, or None when none was
+
+        A result is reused for RESULT_CACHE_SECONDS per wallet and chain once some approval history
+        was read. A scan that read none is not: that is often a passing timeout or rate limit, so
+        the next call tries again.
         """
         wallet = wallet_address.lower()
-        approvals, coverage_reasons = await self._fetch_approvals(wallet, chain_id)
+        cached = self._results.get((chain_id, wallet))
+        if cached is not None:
+            return cached
+        try:
+            approvals, coverage_reasons, scanned_blocks = await self._fetch_approvals(wallet, chain_id)
+        except RuntimeError:
+            approvals, coverage_reasons, scanned_blocks = [], {"allowances": RPC_UNAVAILABLE_REASON}, None
 
         alerts = []
         revoke_txs = []
@@ -231,7 +320,7 @@ class RescueService:
             if approval.value_at_risk_usd:
                 total_value_at_risk += approval.value_at_risk_usd
 
-        return {
+        result = {
             'wallet': wallet,
             'chain_id': chain_id,
             'total_approvals': len(approvals),
@@ -244,16 +333,25 @@ class RescueService:
             'status': 'unknown' if coverage_reasons else 'ok',
             'coverage': {key: key not in coverage_reasons for key in ('allowances', 'balances', 'prices')},
             'coverage_reasons': coverage_reasons,
+            'scanned_blocks': scanned_blocks,
             'scanned_at': time.time(),
         }
+        if scanned_blocks is not None:
+            self._results[(chain_id, wallet)] = result
+        return result
 
     async def _fetch_approvals(
         self, wallet: str, chain_id: int, api_key: str = ""
-    ) -> Tuple[List[ApprovalInfo], Dict[str, str]]:
+    ) -> Tuple[List[ApprovalInfo], Dict[str, str], Optional[Dict[str, int]]]:
         """Fetch and verify active token approvals, with reasons for incomplete data.
 
+        Also returns the block range whose approval history was read, or None when none was.
+        Raises RuntimeError when the chain's RPC could not be read.
+
         Pipeline:
-          1. eth_getLogs — scan ALL BSC history at CONCURRENCY=50
+          1. eth_getLogs — the whole history from a configured logs RPC at CONCURRENCY=50, or
+             the newest RECENT_LOG_WINDOWS windows from the chain's public RPC, or from the logs
+             RPC when it could not serve the whole history
           2. Deduplicate to latest event per (token, spender)
           3. eth_call allowance() — verify each pair is still non-zero on-chain
           4. eth_call balanceOf() — get wallet's token balances
@@ -268,53 +366,30 @@ class RescueService:
         if not rpc_url:
             logger.warning(f"No logs RPC configured for chain {chain_id}")
             raise RuntimeError(f"Approval scan unavailable: no logs RPC configured for chain {chain_id}")
-        public_rpc = chain_id == BOUNDED_HISTORY_CHAIN_ID
+        public_rpc = chain_id not in self._logs_rpcs
         try:
-            if public_rpc:
-                all_logs, history_reason = await self._fetch_recent_approval_logs(wallet, rpc_url)
-                if history_reason:
-                    coverage_reasons["allowances"] = history_reason
-            else:
-                async with aiohttp.ClientSession() as session:
-                    # Step 1: Get latest block
-                    async with session.post(
-                        rpc_url,
-                        json={"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
-                        timeout=aiohttp.ClientTimeout(total=5),
-                    ) as resp:
-                        bn_data = await resp.json()
-                    if "error" in bn_data or "result" not in bn_data:
-                        raise RuntimeError(f"eth_blockNumber failed: {bn_data.get('error', bn_data)}")
-                    latest = int(bn_data["result"], 16)
-
-                # Step 2: Scan ALL blocks from genesis with CONCURRENCY=50
-                # ~1680 chunks on BSC / 50 concurrent = 34 batches ≈ 10-25s
-                CHUNK_SIZE = 49_999
-                CONCURRENCY = 50
-                chunks = [
-                    (hex(b), hex(min(b + CHUNK_SIZE - 1, latest)))
-                    for b in range(0, latest + 1, CHUNK_SIZE)
-                ]
-
-                topic0 = APPROVAL_TOPIC
-                topic1 = "0x" + wallet.replace("0x", "").lower().zfill(64)
-
-                all_logs: list = []
-                async with aiohttp.ClientSession() as session:
-                    for i in range(0, len(chunks), CONCURRENCY):
-                        batch = chunks[i: i + CONCURRENCY]
-                        batch_results = await asyncio.gather(
-                            *[
-                                self._fetch_log_chunk(session, rpc_url, topic0, topic1, from_b, to_b)
-                                for from_b, to_b in batch
-                            ],
-                            return_exceptions=True,
-                        )
-                        for result in batch_results:
-                            if isinstance(result, Exception):
-                                raise result
-                            if isinstance(result, list):
-                                all_logs.extend(result)
+            all_logs = None
+            if not public_rpc:
+                try:
+                    all_logs, latest = await self._fetch_all_approval_logs(wallet, rpc_url)
+                    scanned_blocks = {"from_block": 0, "to_block": latest}
+                except UnsupportedChainError:
+                    raise
+                except Exception as e:
+                    # Read what the logs RPC can serve instead, the rate-limit-aware way.
+                    logger.warning("Full approval history unavailable: %s", type(e).__name__)
+                    public_rpc = True
+            if all_logs is None:
+                all_logs, scanned_from, latest = await self._fetch_recent_approval_logs(
+                    wallet, rpc_url, PUBLIC_LOG_WINDOW_BLOCKS.get(chain_id, RECENT_LOG_WINDOW_BLOCKS)
+                )
+                if scanned_from > latest:
+                    coverage_reasons["allowances"] = NOTHING_READ_REASON
+                elif scanned_from > 0:
+                    coverage_reasons["allowances"] = f"Approvals before block {scanned_from} not scanned"
+                scanned_blocks = (
+                    {"from_block": scanned_from, "to_block": latest} if scanned_from <= latest else None
+                )
 
             # Step 3: Keep latest event per (token, spender)
             latest_events: Dict[tuple, Dict] = {}
@@ -344,7 +419,7 @@ class RescueService:
             # Filter out already-revoked events before hitting the chain
             candidates = {k: v for k, v in latest_events.items() if v["amount"] > 0}
             if not candidates:
-                return [], coverage_reasons
+                return [], coverage_reasons, scanned_blocks
 
             # Step 4: Verify current on-chain allowances — eliminates false positives
             allowances = await self._verify_allowances(wallet, candidates, rpc_url, public_rpc)
@@ -355,7 +430,7 @@ class RescueService:
                 coverage_reasons["allowances"] = f"{history_reason}; {reason}" if history_reason else reason
             verified = {pair: allowance for pair, allowance in allowances.items() if allowance}
             if not verified:
-                return [], coverage_reasons
+                return [], coverage_reasons, scanned_blocks
 
             # Step 5: Fetch wallet balances for value-at-risk calculation
             active_tokens = list({token for (token, _) in verified.keys()})
@@ -365,7 +440,7 @@ class RescueService:
                 coverage_reasons["balances"] = f"Balance unavailable for {len(unresolved_balances)} token(s)"
 
             # Step 6: Fetch token prices (DexScreener, stablecoins hardcoded)
-            prices = await self._fetch_prices(active_tokens)
+            prices = await self._fetch_prices(active_tokens, chain_id)
             unpriced = [
                 token for token in active_tokens
                 if (token not in balances or balances[token] > 0) and token not in prices
@@ -394,9 +469,9 @@ class RescueService:
                 symbol = token_info.get("symbol", "???")
                 decimals = token_info.get("decimals", 18)
 
-                spender_label = KNOWN_SAFE_SPENDERS.get(spender, "Unknown Contract")
+                spender_label = _known_spender(spender, chain_id) or "Unknown Contract"
                 risk_level, risk_reason = self._assess_approval_risk(
-                    spender, current_allowance, spender_label
+                    spender, current_allowance, spender_label, chain_id
                 )
 
                 if current_allowance >= UNLIMITED_THRESHOLD:
@@ -447,24 +522,73 @@ class RescueService:
         approvals.sort(
             key=lambda a: (risk_order.get(a.risk_level, 3), -(a.value_at_risk_usd or 0))
         )
-        return approvals, coverage_reasons
+        return approvals, coverage_reasons, scanned_blocks
+
+    async def _fetch_all_approval_logs(self, wallet: str, rpc_url: str) -> Tuple[list, int]:
+        """Fetch Approval logs from genesis to the latest block of a logs RPC, and that block.
+
+        Raises when any chunk is unavailable, since a gap in the middle of the history cannot be
+        reported as a block range.
+        """
+        async with aiohttp.ClientSession() as session:
+            # Step 1: Get latest block
+            async with session.post(
+                rpc_url,
+                json={"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                bn_data = await resp.json()
+            if "error" in bn_data or "result" not in bn_data:
+                raise RuntimeError(f"eth_blockNumber failed: {bn_data.get('error', bn_data)}")
+            latest = int(bn_data["result"], 16)
+
+        # Step 2: Scan ALL blocks from genesis with CONCURRENCY=50
+        # ~1680 chunks on BSC / 50 concurrent = 34 batches ≈ 10-25s
+        CHUNK_SIZE = 49_999
+        CONCURRENCY = 50
+        chunks = [
+            (hex(b), hex(min(b + CHUNK_SIZE - 1, latest)))
+            for b in range(0, latest + 1, CHUNK_SIZE)
+        ]
+
+        topic0 = APPROVAL_TOPIC
+        topic1 = "0x" + wallet.replace("0x", "").lower().zfill(64)
+
+        all_logs: list = []
+        async with aiohttp.ClientSession() as session:
+            for i in range(0, len(chunks), CONCURRENCY):
+                batch = chunks[i: i + CONCURRENCY]
+                batch_results = await asyncio.gather(
+                    *[
+                        self._fetch_log_chunk(session, rpc_url, topic0, topic1, from_b, to_b)
+                        for from_b, to_b in batch
+                    ],
+                    return_exceptions=True,
+                )
+                for result in batch_results:
+                    if isinstance(result, Exception):
+                        raise result
+                    if isinstance(result, list):
+                        all_logs.extend(result)
+        return all_logs, latest
 
     async def _fetch_recent_approval_logs(
-        self, wallet: str, rpc_url: str
-    ) -> Tuple[list, Optional[str]]:
+        self, wallet: str, rpc_url: str, window_blocks: int
+    ) -> Tuple[list, int, int]:
         """Fetch Approval logs from the newest RECENT_LOG_WINDOWS block windows of a public RPC.
 
-        Windows are read newest first, PUBLIC_RPC_CONCURRENCY at a time. Scanning stops after a
-        batch in which a window stayed unavailable; logs already read are kept. Returns the logs
-        and the reason naming the history not scanned, or None when the windows reached genesis.
+        Windows of ``window_blocks`` are read newest first, PUBLIC_RPC_CONCURRENCY at a time.
+        Scanning stops after a batch in which a window stayed unavailable; the logs read before
+        that window are kept. Returns those logs, the oldest block of the history read without a
+        gap (the latest block plus one when nothing was read) and the latest block.
         """
         topics = [APPROVAL_TOPIC, "0x" + wallet.replace("0x", "").lower().zfill(64)]
         async with aiohttp.ClientSession() as session:
             latest = int(await self._public_rpc(session, rpc_url, "eth_blockNumber", []), 16)
-            oldest = max(latest - RECENT_LOG_WINDOW_BLOCKS * RECENT_LOG_WINDOWS + 1, 0)
+            oldest = max(latest - window_blocks * RECENT_LOG_WINDOWS + 1, 0)
             windows = [
-                (max(to_b - RECENT_LOG_WINDOW_BLOCKS + 1, oldest), to_b)
-                for to_b in range(latest, oldest - 1, -RECENT_LOG_WINDOW_BLOCKS)
+                (max(to_b - window_blocks + 1, oldest), to_b)
+                for to_b in range(latest, oldest - 1, -window_blocks)
             ]
             logs: list = []
             scanned_from = latest + 1
@@ -483,8 +607,9 @@ class RescueService:
                 )
                 for (from_b, to_b), result in zip(batch, results):
                     if isinstance(result, list):
-                        logs.extend(result)
+                        # Logs past a gap are left out, so the approvals match the blocks read.
                         if not gap:
+                            logs.extend(result)
                             scanned_from = from_b
                     else:
                         # Don't log `result` — aiohttp errors embed the RPC URL.
@@ -494,9 +619,7 @@ class RescueService:
                         gap = True
                 if gap:
                     break
-        if scanned_from == 0:
-            return logs, None
-        return logs, f"Approvals before block {scanned_from} not scanned"
+        return logs, scanned_from, latest
 
     async def _public_rpc(
         self, session: aiohttp.ClientSession, rpc_url: str, method: str, params: list
@@ -676,11 +799,12 @@ class RescueService:
         except Exception as e:
             raise RuntimeError("Approval state unavailable") from e
 
-    async def _fetch_prices(self, tokens: List[str]) -> Dict[str, float]:
-        """Fetch token USD prices from DexScreener (free, no API key needed).
+    async def _fetch_prices(self, tokens: List[str], chain_id: int) -> Dict[str, float]:
+        """Fetch token USD prices on ``chain_id`` from DexScreener (free, no API key needed).
 
-        Stablecoins are hardcoded to $1.00.
-        Up to 30 tokens per DexScreener request.
+        Stablecoins are hardcoded to $1.00 on their own chain. Only pairs on ``chain_id`` price a
+        token: DexScreener answers a token address with pairs from every chain, and the same
+        address elsewhere can be another token. Up to 30 tokens per DexScreener request.
         """
         from utils.web3_client import UnsupportedChainError
 
@@ -688,11 +812,12 @@ class RescueService:
 
         # Hardcode stablecoin prices
         for token in tokens:
-            if token.lower() in STABLECOINS:
+            if token.lower() in STABLECOINS.get(chain_id, ()):
                 prices[token] = 1.0
 
+        slug = get_dexscreener_slug(chain_id)
         to_fetch = [t for t in tokens if t not in prices]
-        if not to_fetch:
+        if not to_fetch or not slug:
             return prices
 
         BATCH_SIZE = 30
@@ -713,7 +838,7 @@ class RescueService:
                         batch_lower = [t.lower() for t in batch]
                         for pair in pairs:
                             base_addr = (pair.get("baseToken") or {}).get("address", "").lower()
-                            if base_addr in batch_lower:
+                            if pair.get("chainId") == slug and base_addr in batch_lower:
                                 token_pairs.setdefault(base_addr, []).append(pair)
 
                         for token in batch:
@@ -745,10 +870,10 @@ class RescueService:
         return prices
 
     def _assess_approval_risk(
-        self, spender: str, amount: int, spender_label: str
+        self, spender: str, amount: int, spender_label: str, chain_id: int
     ) -> tuple:
-        """Assess risk level for a token approval."""
-        is_known_safe = spender.lower() in KNOWN_SAFE_SPENDERS
+        """Assess risk level for a token approval on ``chain_id``."""
+        is_known_safe = _known_spender(spender.lower(), chain_id) is not None
 
         if amount >= UNLIMITED_THRESHOLD:
             if is_known_safe:

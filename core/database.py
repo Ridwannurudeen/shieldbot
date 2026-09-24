@@ -14,8 +14,8 @@ from core.extension_formatter import is_scan_incomplete
 
 logger = logging.getLogger(__name__)
 
-# Chain 4663 shares 1 rps; discovery uses ~0.15. Four subjects at 22 requests
-# every 300s use 0.293 rps, leaving ~0.557 rps for launches and other work.
+# Chain 4663 shares 1 rps; discovery uses ~0.27. Four subjects at 22 requests
+# every 300s use 0.293 rps, leaving ~0.44 rps for launches and other work.
 GUARD_WATCH_MAX_SUBJECTS = max(0, int(os.getenv("GUARD_WATCH_MAX_SUBJECTS", "4")))
 
 # Eighteen digits keep a cursor block inside SQLite's signed 64-bit integers.
@@ -507,6 +507,8 @@ class Database:
         await self._create_launch_feed_tables()
         await self._create_launch_alert_tables()
         await self._create_verdict_evidence_tables()
+        await self._create_ai_usage_tables()
+        await self._create_free_key_tables()
 
         # Migrate: add registered_by_key column for existing DBs
         try:
@@ -866,6 +868,9 @@ class Database:
         unique_contracts = row[0] or 0
         total_scan_events = int(row[1] or 0)
 
+        # Known split: this counts risk_score >= 71 while the threat feed (api.py) lists risk_level 'HIGH'.
+        # The firewall's campaign boost raises a stored score without raising its stored level, so the two
+        # can disagree until both read one verdict vocabulary and band table.
         cur = await self._db.execute(
             "SELECT COUNT(*) FROM contract_scores WHERE risk_score >= 71"
         )
@@ -919,6 +924,7 @@ class Database:
             )
             scans = (await cur.fetchone())[0] or 0
 
+            # The same known split as the all-time threat count above: score >= 71, not risk_level 'HIGH'.
             cur = await self._db.execute(
                 "SELECT COUNT(*) FROM contract_scores WHERE last_scanned_at > ? AND risk_score >= 71",
                 (cutoff,)
@@ -1278,6 +1284,86 @@ class Database:
         )
         await self._db.commit()
         return cursor.rowcount
+
+    # --- AI Token Usage ---
+
+    async def _create_ai_usage_tables(self):
+        await self._db.executescript("""
+            CREATE TABLE IF NOT EXISTS ai_token_usage (
+                utc_day INTEGER PRIMARY KEY,
+                tokens INTEGER NOT NULL
+            );
+        """)
+        await self._db.commit()
+
+    async def get_ai_tokens_used(self, utc_day: int) -> int:
+        """Tokens the advisor's AI calls used on a UTC day number."""
+        cursor = await self._db.execute(
+            "SELECT tokens FROM ai_token_usage WHERE utc_day = ?", (utc_day,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def add_ai_tokens_used(self, utc_day: int, tokens: int):
+        """Add tokens to a UTC day's count and commit."""
+        await self._db.execute("""
+            INSERT INTO ai_token_usage (utc_day, tokens) VALUES (?, ?)
+            ON CONFLICT(utc_day) DO UPDATE SET tokens = tokens + excluded.tokens
+        """, (utc_day, tokens))
+        await self._db.commit()
+
+    # --- Self-Serve Free Keys ---
+
+    async def _create_free_key_tables(self):
+        await self._db.executescript("""
+            CREATE TABLE IF NOT EXISTS free_key_requests (
+                token_hash TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                expires_at REAL NOT NULL,
+                used_at REAL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_free_key_requests_email
+                ON free_key_requests(email);
+        """)
+        await self._db.commit()
+
+    async def add_free_key_request(self, email: str, token_hash: str, expires_at: float) -> bool:
+        """Store an emailed link's token hash unless the address already has an unused, unexpired one.
+
+        Expired requests are deleted first. Returns whether the request was stored.
+        """
+        now = time.time()
+        await self._db.execute("DELETE FROM free_key_requests WHERE expires_at <= ?", (now,))
+        cursor = await self._db.execute("""
+            INSERT INTO free_key_requests (token_hash, email, created_at, expires_at)
+            SELECT ?, ?, ?, ? WHERE NOT EXISTS (
+                SELECT 1 FROM free_key_requests WHERE email = ? AND used_at IS NULL
+            )
+        """, (token_hash, email, now, expires_at, email))
+        await self._db.commit()
+        return cursor.rowcount == 1
+
+    async def delete_free_key_request(self, token_hash: str):
+        await self._db.execute("DELETE FROM free_key_requests WHERE token_hash = ?", (token_hash,))
+        await self._db.commit()
+
+    async def claim_free_key_request(self, token_hash: str) -> Optional[str]:
+        """Mark an unused, unexpired request used and return its email; None if there is none."""
+        cursor = await self._db.execute(
+            "SELECT email FROM free_key_requests WHERE token_hash = ?", (token_hash,)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        now = time.time()
+        cursor = await self._db.execute("""
+            UPDATE free_key_requests SET used_at = ?
+            WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?
+        """, (now, token_hash, now))
+        await self._db.commit()
+        return row[0] if cursor.rowcount == 1 else None
 
     # --- Tracked Pairs ---
 
@@ -2029,6 +2115,24 @@ class Database:
         """, (chain_id, source, last_block, time.time()))
         await self._db.commit()
 
+    async def get_launch_discovery_status(self, chain_id: int) -> Dict:
+        """Report how far launch discovery has read, from its stored cursors and launches.
+
+        ``cursor`` is the lowest source cursor, the block through which every source has been
+        read; ``last_sweep_at`` is when a sweep last moved a cursor; ``last_discovered_block`` is
+        the newest launch recorded. Each is None until discovery has stored one.
+        """
+        cursor = await self._db.execute(
+            "SELECT MIN(last_block), MAX(updated_at) FROM launch_discovery_cursors WHERE chain_id = ?",
+            (chain_id,),
+        )
+        lowest, last_sweep_at = await cursor.fetchone()
+        cursor = await self._db.execute(
+            "SELECT MAX(block_number) FROM discovered_launches WHERE chain_id = ?", (chain_id,)
+        )
+        newest = (await cursor.fetchone())[0]
+        return {"cursor": lowest, "last_sweep_at": last_sweep_at, "last_discovered_block": newest}
+
     async def upsert_discovered_launches(self, chain_id: int, launches: List[Dict]):
         """Record launches idempotently, one row per token.
 
@@ -2103,8 +2207,23 @@ class Database:
         await self._db.executescript("""
             CREATE INDEX IF NOT EXISTS idx_discovered_launches_feed
                 ON discovered_launches(chain_id, block_number DESC, token_address DESC);
+            CREATE INDEX IF NOT EXISTS idx_discovered_launches_scan_share
+                ON discovered_launches(chain_id, block_timestamp, scanned_at);
         """)
         await self._db.commit()
+
+    async def get_launch_scan_share(self, chain_id: int, since: float) -> Dict:
+        """Count the launches whose block is at or after ``since`` and how many of them were scanned.
+
+        A launch counts as scanned once any scan outcome was recorded for it, including an
+        incomplete or failed one.
+        """
+        cursor = await self._db.execute("""
+            SELECT COUNT(*), COUNT(scanned_at) FROM discovered_launches
+            WHERE chain_id = ? AND block_timestamp >= ?
+        """, (chain_id, since))
+        launches, scanned = await cursor.fetchone()
+        return {"launches": launches, "scanned": scanned}
 
     async def get_launch_feed(
         self, chain_id: int, limit: int, cursor: Optional[str] = None
@@ -2434,9 +2553,13 @@ class Database:
 
     async def update_verdict_onchain(
         self, evidence_id: int, onchain_status: str, tx_hash: Optional[str] = None,
-        onchain_error: Optional[str] = None,
+        onchain_error: Optional[str] = None, registry: Optional[str] = None,
     ):
-        """Record the on-chain outcome for one stored evidence document."""
+        """Record the on-chain outcome for one stored evidence document.
+
+        `registry` is the registry the caller records to: a confirmation admits its subject to the guard watch
+        only when the row was queued for that registry.
+        """
         outbox = await self._outbox()
         try:
             await outbox.execute("""
@@ -2447,8 +2570,8 @@ class Database:
             if onchain_status == "confirmed":
                 cursor = await outbox.execute("""
                     SELECT chain_id, subject, canonical FROM verdict_evidence
-                    WHERE id = ? AND chain_id = 4663 AND registry IS NOT NULL AND registry != ''
-                """, (evidence_id,))
+                    WHERE id = ? AND chain_id = 4663 AND lower(registry) = lower(?)
+                """, (evidence_id, registry))
                 row = await cursor.fetchone()
                 if row is not None:
                     await self._admit_guard_subject(outbox, *row, reenable=False)
@@ -2487,17 +2610,17 @@ class Database:
         ))
         return cursor.rowcount == 1
 
-    async def register_guard_subject(self, chain_id: int, subject: str) -> bool:
-        """Explicitly watch a confirmed subject, or reenable one, within the shared cap."""
+    async def register_guard_subject(self, chain_id: int, subject: str, registry: Optional[str]) -> bool:
+        """Explicitly watch a subject confirmed on `registry`, or reenable one, within the shared cap."""
         cursor = await self._db.execute("""
             SELECT chain_id, subject, canonical FROM verdict_evidence
             WHERE chain_id = ? AND chain_id = 4663 AND subject = ?
-              AND onchain_status = 'confirmed' AND registry IS NOT NULL AND registry != ''
+              AND onchain_status = 'confirmed' AND lower(registry) = lower(?)
               AND json_type(canonical, '$.observed_at') = 'integer'
               AND json_extract(canonical, '$.observed_at') > 0
               AND json_extract(canonical, '$.observed_at') <= ?
             ORDER BY json_extract(canonical, '$.observed_at') DESC, id DESC LIMIT 1
-        """, (chain_id, subject.lower(), time.time()))
+        """, (chain_id, subject.lower(), registry, time.time()))
         row = await cursor.fetchone()
         if row is None:
             return False
@@ -2575,19 +2698,35 @@ class Database:
         )
         return dict(zip(keys, row))
 
+    async def get_verdict_evidence_counts(self) -> Dict[int, Dict[str, int]]:
+        """Stored evidence documents per chain, and how many of them have a confirmed on-chain record."""
+        cursor = await self._db.execute("""
+            SELECT chain_id, COUNT(*), SUM(onchain_status = 'confirmed')
+            FROM verdict_evidence
+            GROUP BY chain_id
+        """)
+        return {
+            chain_id: {"documents": documents, "confirmed": confirmed}
+            for chain_id, documents, confirmed in await cursor.fetchall()
+        }
+
     async def get_newest_verdict_observation(
-        self, chain_id: int, subject: str, include_deduplicated: bool = True
+        self, chain_id: int, subject: str, include_deduplicated: bool = True,
+        registry: Optional[str] = None,
     ) -> Optional[Dict]:
         """Return the newest measured evidence, preferring denial at equal observation times.
 
         Delivery failures and dropped rows still supersede older measurements. Legacy evidence
         without observation provenance cannot establish an observation watermark. Excluding
         deduplicated rows finds the recording anchor whose observation determines refresh age.
+        Given a registry, only evidence queued for it is considered, so a record on another
+        registry never stands in for one on this registry.
         """
         cursor = await self._db.execute("""
             SELECT id FROM verdict_evidence
             WHERE chain_id = ? AND subject = ?
               AND (? OR onchain_status != 'deduplicated')
+              AND (? IS NULL OR lower(registry) = lower(?))
               AND json_type(canonical, '$.observed_at') = 'integer'
               AND json_extract(canonical, '$.observed_at') > 0
               AND json_extract(canonical, '$.observed_at') <= ?
@@ -2596,7 +2735,7 @@ class Database:
                          WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 1 ELSE 0 END DESC,
                      id DESC
             LIMIT 1
-        """, (chain_id, subject, include_deduplicated, time.time()))
+        """, (chain_id, subject, include_deduplicated, registry, registry, time.time()))
         row = await cursor.fetchone()
         return await self.get_verdict_evidence(row[0]) if row else None
 

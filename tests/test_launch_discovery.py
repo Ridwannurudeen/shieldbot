@@ -548,13 +548,17 @@ async def test_reprocessing_a_range_does_not_duplicate_launches(db):
         {number: {**header, "hash": "0x" + "ee" * 32} for number, header in HEADERS.items()},
     ],
 )
-async def test_missing_or_reorged_headers_record_nothing_and_advance_no_cursor(db, headers):
+async def test_missing_or_reorged_headers_record_nothing_and_stop_before_the_oldest_launch(
+    db, headers
+):
     rpc = FakeRpc(headers=headers)
     with pytest.raises(LaunchDiscoveryError):
         await discovery_with(db, rpc).run()
 
     assert await launches(db) == {}
-    assert await cursors(db) == {source.name: ANCHOR for source in SOURCES}
+    # Every source was read to the target and holds no launch before the oldest one.
+    oldest = min(expected[3] for expected in EXPECTED.values())
+    assert await cursors(db) == {source.name: oldest - 1 for source in SOURCES}
 
 
 @pytest.mark.asyncio

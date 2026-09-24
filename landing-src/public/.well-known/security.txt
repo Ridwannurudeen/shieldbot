@@ -1,4 +1,5 @@
 Contact: mailto:support@shieldbotsecurity.online
+Policy: https://shieldbotsecurity.online/security.html
 Expires: 2027-03-23T00:00:00.000Z
 Canonical: https://shieldbotsecurity.online/.well-known/security.txt
 Preferred-Languages: en

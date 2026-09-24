@@ -165,8 +165,8 @@ class TestConnectionLimits:
         from mcp_server.server import SSEConnectionManager
 
         mgr = SSEConnectionManager(max_connections=2)
-        mgr.create()
-        mgr.create()
+        mgr.create("k1")
+        mgr.create("k1")
         assert mgr.is_full()
         assert mgr.count == 2
 
@@ -175,7 +175,7 @@ class TestConnectionLimits:
         from mcp_server.server import SSEConnectionManager
 
         mgr = SSEConnectionManager(max_connections=2)
-        sid, _ = mgr.create()
+        sid, _ = mgr.create("k1")
         assert mgr.count == 1
         mgr.remove(sid)
         assert mgr.count == 0
@@ -271,7 +271,7 @@ class TestToolExecution:
             "jsonrpc": "2.0", "id": 4, "method": "tools/call",
             "params": {
                 "name": "check_deployer",
-                "arguments": {"address": "0x" + "b" * 40},
+                "arguments": {"address": "0x" + "b" * 40, "chain_id": 56},
             },
         }, headers=AUTH_HEADERS)
         body = resp.json()
@@ -279,6 +279,12 @@ class TestToolExecution:
         assert content["deployer"] == "0xdeployer"
         assert content["contracts_deployed"] == 5
         assert content["flagged_count"] == 1
+        # The index holds only scanned contracts, so the counts are never a complete history.
+        from core.extension_formatter import is_scan_incomplete
+        assert content["status"] == "unknown"
+        assert content["coverage"] == {"deployer": 1, "history": 0}
+        assert content["coverage_reasons"] == {"history": "Only contracts ShieldBot has scanned are indexed, so the deployer's other contracts are not counted"}
+        assert is_scan_incomplete(content)
 
     def test_check_deployer_not_indexed(self, client, mock_container):
         """check_deployer handles unindexed contracts."""
@@ -287,12 +293,19 @@ class TestToolExecution:
             "jsonrpc": "2.0", "id": 5, "method": "tools/call",
             "params": {
                 "name": "check_deployer",
-                "arguments": {"address": "0x" + "c" * 40},
+                "arguments": {"address": "0x" + "c" * 40, "chain_id": 56},
             },
         }, headers=AUTH_HEADERS)
         content = json.loads(resp.json()["result"]["content"][0]["text"])
+        from core.extension_formatter import is_scan_incomplete
         assert content["deployer"] is None
         assert "not yet indexed" in content["note"]
+        assert content["contracts_deployed"] is None
+        assert content["flagged_count"] is None
+        assert content["status"] == "unknown"
+        assert content["coverage"] == {"deployer": 0}
+        assert content["coverage_reasons"] == {"deployer": "Deployer not yet indexed for this contract"}
+        assert is_scan_incomplete(content)
 
     def test_check_agent_reputation(self, client, mock_container):
         """check_agent_reputation returns trust score."""
@@ -309,6 +322,30 @@ class TestToolExecution:
         # 1 block out of 3 = 33.3% block rate -> trust ~66.7
         assert content["trust_score"] == 66.7
         assert content["block_rate"] == 0.3333
+        from core.extension_formatter import is_scan_incomplete
+        assert content["status"] == "ok"
+        assert content["coverage"] == {"history": 1}
+        assert content["coverage_reasons"] == {}
+        assert not is_scan_incomplete(content)
+
+    def test_check_agent_reputation_over_a_full_window_is_a_lower_bound(self, client, mock_container):
+        """At the query cap the agent may have more records than were read."""
+        mock_container.db.get_agent_firewall_history = AsyncMock(
+            return_value=[{"verdict": "ALLOW"}] * 999 + [{"verdict": "BLOCK"}]
+        )
+        resp = client.post("/mcp/messages", json={
+            "jsonrpc": "2.0", "id": 6, "method": "tools/call",
+            "params": {"name": "check_agent_reputation", "arguments": {"agent_id": "agent:1"}},
+        }, headers=AUTH_HEADERS)
+        content = json.loads(resp.json()["result"]["content"][0]["text"])
+        from core.extension_formatter import is_scan_incomplete
+        assert mock_container.db.get_agent_firewall_history.call_args.kwargs["limit"] == 1000
+        assert content["total_transactions"] == 1000
+        assert content["block_rate"] == 0.001
+        assert content["status"] == "unknown"
+        assert content["coverage"] == {"history": 0}
+        assert content["coverage_reasons"] == {"history": "Only the latest 1000 firewall records are read, so total_transactions is a lower bound"}
+        assert is_scan_incomplete(content)
 
     def test_check_agent_reputation_not_registered(self, client, mock_container):
         """check_agent_reputation handles unregistered agent."""
@@ -321,8 +358,35 @@ class TestToolExecution:
             },
         }, headers=AUTH_HEADERS)
         content = json.loads(resp.json()["result"]["content"][0]["text"])
+        from core.extension_formatter import is_scan_incomplete
         assert content["trust_score"] is None
         assert "not registered" in content["note"].lower()
+        assert content["block_rate"] is None
+        assert content["total_transactions"] is None
+        assert content["status"] == "unknown"
+        assert content["coverage"] == {"history": 0}
+        assert content["coverage_reasons"] == {"history": "Agent not registered"}
+        assert is_scan_incomplete(content)
+
+    def test_check_agent_reputation_without_history_is_unknown_not_trusted(self, client, mock_container):
+        """No firewall records is no evidence, not a perfect trust score."""
+        mock_container.db.get_agent_firewall_history = AsyncMock(return_value=[])
+        resp = client.post("/mcp/messages", json={
+            "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": {
+                "name": "check_agent_reputation",
+                "arguments": {"agent_id": "agent:1"},
+            },
+        }, headers=AUTH_HEADERS)
+        content = json.loads(resp.json()["result"]["content"][0]["text"])
+        from core.extension_formatter import is_scan_incomplete
+        assert content["trust_score"] is None
+        assert content["block_rate"] is None
+        assert content["total_transactions"] == 0
+        assert content["status"] == "unknown"
+        assert content["coverage"] == {"history": 0}
+        assert content["coverage_reasons"] == {"history": "No firewall history for this agent"}
+        assert is_scan_incomplete(content)
 
     def test_check_approval_risk_stub(self, client):
         """Unimplemented approval checks are unknown, never an empty clean scan."""
@@ -330,7 +394,7 @@ class TestToolExecution:
             "jsonrpc": "2.0", "id": 8, "method": "tools/call",
             "params": {
                 "name": "check_approval_risk",
-                "arguments": {"wallet_address": "0x" + "d" * 40},
+                "arguments": {"wallet_address": "0x" + "d" * 40, "chain_id": 56},
             },
         }, headers=AUTH_HEADERS)
         content = json.loads(resp.json()["result"]["content"][0]["text"])
@@ -375,7 +439,7 @@ class TestToolExecution:
             "jsonrpc": "2.0", "id": 11, "method": "tools/call",
             "params": {
                 "name": "query_threat_graph",
-                "arguments": {"address": "0x" + "e" * 40},
+                "arguments": {"address": "0x" + "e" * 40, "chain_id": 56},
             },
         }, headers=AUTH_HEADERS)
         content = json.loads(resp.json()["result"]["content"][0]["text"])
@@ -398,11 +462,17 @@ class TestToolExecution:
                     "from": "0x" + "1" * 40,
                     "to": "0x" + "2" * 40,
                     "data": "0x38ed1739",
+                    "chain_id": 56,
                 },
             },
         }, headers=AUTH_HEADERS)
         content = json.loads(resp.json()["result"]["content"][0]["text"])
+        from core.extension_formatter import is_scan_incomplete
         assert "not configured" in content["error"]
+        assert content["status"] == "unknown"
+        assert content["coverage"] == {"simulation": 0}
+        assert content["coverage_reasons"] == {"simulation": "Tenderly simulation not configured"}
+        assert is_scan_incomplete(content)
         assert content["gas_estimate"] is None
         assert content["asset_changes"] is None
         assert content["approvals_granted"] is None
@@ -428,6 +498,7 @@ class TestToolExecution:
                     "from": "0x" + "1" * 40,
                     "to": "0x" + "2" * 40,
                     "data": "0x38ed1739",
+                    "chain_id": 56,
                 },
             },
         }, headers=AUTH_HEADERS)
@@ -438,6 +509,12 @@ class TestToolExecution:
         assert content["revert_reason"] is None
         assert content["warnings"] == ["approval_to_unknown_spender"]
         assert content["approvals_granted"] is None
+        # Approvals are never measured, so even a successful simulation is incomplete.
+        from core.extension_formatter import is_scan_incomplete
+        assert content["status"] == "unknown"
+        assert content["coverage"] == {"simulation": 1, "approvals": 0}
+        assert content["coverage_reasons"] == {"approvals": "Approval changes are not measured"}
+        assert is_scan_incomplete(content)
 
     def test_simulate_transaction_surfaces_revert(self, client, mock_container):
         """A reverted simulation surfaces its failure and reason."""
@@ -457,6 +534,7 @@ class TestToolExecution:
                     "from": "0x" + "1" * 40,
                     "to": "0x" + "2" * 40,
                     "data": "0x38ed1739",
+                    "chain_id": 56,
                 },
             },
         }, headers=AUTH_HEADERS)
@@ -465,6 +543,8 @@ class TestToolExecution:
         assert content["revert_reason"] == "sell blocked"
         assert content["warnings"] == ["transaction reverted"]
         assert content["approvals_granted"] is None
+        assert content["status"] == "unknown"
+        assert content["coverage_reasons"] == {"approvals": "Approval changes are not measured"}
 
     def test_simulate_transaction_failed(self, client, mock_container):
         """A failed simulation reports unknown measurements."""
@@ -477,11 +557,17 @@ class TestToolExecution:
                     "from": "0x" + "1" * 40,
                     "to": "0x" + "2" * 40,
                     "data": "0x38ed1739",
+                    "chain_id": 56,
                 },
             },
         }, headers=AUTH_HEADERS)
         content = json.loads(resp.json()["result"]["content"][0]["text"])
+        from core.extension_formatter import is_scan_incomplete
         assert content["error"] == "Simulation failed"
+        assert content["status"] == "unknown"
+        assert content["coverage"] == {"simulation": 0}
+        assert content["coverage_reasons"] == {"simulation": "Simulation failed"}
+        assert is_scan_incomplete(content)
         assert content["gas_estimate"] is None
         assert content["asset_changes"] is None
         assert content["approvals_granted"] is None
@@ -504,7 +590,7 @@ class TestToolExecution:
             "jsonrpc": "2.0", "id": 15, "method": "tools/call",
             "params": {
                 "name": "scan_contract",
-                "arguments": {"address": "not_an_address"},
+                "arguments": {"address": "not_an_address", "chain_id": 56},
             },
         }, headers=AUTH_HEADERS)
         body = resp.json()
@@ -518,13 +604,26 @@ class TestToolExecution:
 class TestResources:
     """Test resources/list and resources/read."""
 
-    def test_resources_list_returns_3(self, client):
-        """resources/list returns exactly 3 resources."""
+    def test_resources_list_returns_only_concrete_uris(self, client):
+        """A templated URI is not a resource a client can read as listed."""
         resp = client.post("/mcp/messages", json={
             "jsonrpc": "2.0", "id": 20, "method": "resources/list", "params": {},
         }, headers=AUTH_HEADERS)
         resources = resp.json()["result"]["resources"]
-        assert len(resources) == 3
+        assert [resource["uri"] for resource in resources] == ["shieldbot://threat-feed"]
+
+    def test_resource_templates_list(self, client):
+        """The parameterised resources are listed as URI templates."""
+        resp = client.post("/mcp/messages", json={
+            "jsonrpc": "2.0", "id": 26, "method": "resources/templates/list", "params": {},
+        }, headers=AUTH_HEADERS)
+        templates = resp.json()["result"]["resourceTemplates"]
+        assert {template["uriTemplate"] for template in templates} == {
+            "shieldbot://agent/{agent_id}/health",
+            "shieldbot://wallet/{address}/guardian",
+        }
+        for template in templates:
+            assert set(template) == {"uriTemplate", "name", "description", "mimeType"}
 
     def test_resources_list_uris(self, client):
         """Verify resource URIs."""
@@ -568,8 +667,14 @@ class TestResources:
         }, headers=AUTH_HEADERS)
         contents = resp.json()["result"]["contents"]
         data = json.loads(contents[0]["text"])
+        from core.extension_formatter import is_scan_incomplete
         assert data["guardian_active"] is False
         assert "V3.2" in data["note"]
+        assert data["approvals"] is None
+        assert data["status"] == "unknown"
+        assert data["coverage"] == {"approvals": 0}
+        assert data["coverage_reasons"]["approvals"]
+        assert is_scan_incomplete(data)
 
     def test_read_unknown_resource(self, client):
         """Reading an unknown resource returns error."""
@@ -620,6 +725,7 @@ class TestPrompts:
         text = result["messages"][0]["content"]["text"]
         assert "0x" + "a" * 40 in text
         assert "scan_contract" in text
+        assert "chain_id" in text
 
     def test_get_agent_evaluation_prompt(self, client):
         """Get agent-evaluation prompt."""
@@ -825,23 +931,23 @@ class TestSSEConnectionManager:
         from mcp_server.server import SSEConnectionManager
         mgr = SSEConnectionManager(max_connections=5)
         assert mgr.count == 0
-        sid1, q1 = mgr.create()
+        sid1, q1 = mgr.create("k1")
         assert mgr.count == 1
-        sid2, q2 = mgr.create()
+        sid2, q2 = mgr.create("k1")
         assert mgr.count == 2
         assert sid1 != sid2
 
-    def test_get_queue(self):
+    def test_get(self):
         from mcp_server.server import SSEConnectionManager
         mgr = SSEConnectionManager()
-        sid, q = mgr.create()
-        assert mgr.get_queue(sid) is q
-        assert mgr.get_queue("nonexistent") is None
+        sid, q = mgr.create("k1")
+        assert mgr.get(sid)["queue"] is q
+        assert mgr.get("nonexistent") is None
 
     def test_touch_updates_activity(self):
         from mcp_server.server import SSEConnectionManager
         mgr = SSEConnectionManager()
-        sid, _ = mgr.create()
+        sid, _ = mgr.create("k1")
         old_time = mgr._connections[sid]["last_activity"]
         time.sleep(0.01)
         mgr.touch(sid)
@@ -851,7 +957,7 @@ class TestSSEConnectionManager:
     def test_is_idle(self):
         from mcp_server.server import SSEConnectionManager, IDLE_TIMEOUT
         mgr = SSEConnectionManager()
-        sid, _ = mgr.create()
+        sid, _ = mgr.create("k1")
         assert not mgr.is_idle(sid)
         # Force activity time way in the past
         mgr._connections[sid]["last_activity"] = time.time() - IDLE_TIMEOUT - 1
@@ -865,17 +971,17 @@ class TestSSEConnectionManager:
     def test_remove(self):
         from mcp_server.server import SSEConnectionManager
         mgr = SSEConnectionManager()
-        sid, _ = mgr.create()
+        sid, _ = mgr.create("k1")
         assert mgr.count == 1
         mgr.remove(sid)
         assert mgr.count == 0
-        assert mgr.get_queue(sid) is None
+        assert mgr.get(sid) is None
 
     def test_is_full(self):
         from mcp_server.server import SSEConnectionManager
         mgr = SSEConnectionManager(max_connections=1)
         assert not mgr.is_full()
-        mgr.create()
+        mgr.create("k1")
         assert mgr.is_full()
 
 
@@ -915,26 +1021,6 @@ class TestProcessJsonRpc:
         assert result["error"]["code"] == -32601
 
 
-@pytest.mark.parametrize("tool_name,arguments", [
-    ("scan_contract", {"address": "0x" + "a" * 40}),
-    ("simulate_transaction", {"from": "0x" + "a" * 40, "to": "0x" + "b" * 40, "data": "0x"}),
-    ("check_deployer", {"address": "0x" + "a" * 40}),
-    ("check_approval_risk", {"wallet_address": "0x" + "a" * 40}),
-    ("query_threat_graph", {"address": "0x" + "a" * 40}),
-])
-def test_unknown_chain_rejected_before_mcp_services(client, mock_container, tool_name, arguments):
-    response = client.post("/mcp/messages", json={
-        "jsonrpc": "2.0", "id": 10, "method": "tools/call",
-        "params": {"name": tool_name, "arguments": {**arguments, "chain_id": 999999}},
-    }, headers=AUTH_HEADERS)
-    assert response.status_code == 400
-    assert "4663" in response.json()["error"]["message"]
-    mock_container.registry.run_all.assert_not_awaited()
-    mock_container.db.get_deployer_risk_summary.assert_not_awaited()
-    mock_container.tenderly_simulator.is_enabled.assert_not_called()
-    mock_container.tenderly_simulator.simulate_transaction.assert_not_awaited()
-
-
 @pytest.mark.asyncio
 async def test_direct_mcp_tool_rejects_unknown_chain(mock_container):
     from mcp_server.tools import execute_tool
@@ -967,7 +1053,7 @@ async def test_mcp_maps_engine_keys_and_coverage(mock_container, status, reason,
         "coverage_reasons": {"honeypot": reason} if reason else {},
         "category_scores": {"honeypot": None if reason else 0},
     }
-    result = await handle_scan_contract(mock_container, {"address": "0x" + "a" * 40})
+    result = await handle_scan_contract(mock_container, {"address": "0x" + "a" * 40, "chain_id": 56})
     assert result["score"] == score
     assert result["flags"] == ([reason] if reason else [])
     assert result["status"] == status
@@ -976,6 +1062,186 @@ async def test_mcp_maps_engine_keys_and_coverage(mock_container, status, reason,
     assert result["risk_display"] == ("Unknown (incomplete provider coverage)" if reason else "7%")
     if reason:
         assert result["verdict"] == "UNKNOWN"
+
+
+CHAIN_TOOLS = {
+    "scan_contract": {"address": "0x" + "a" * 40},
+    "simulate_transaction": {"from": "0x" + "a" * 40, "to": "0x" + "b" * 40, "data": "0x"},
+    "check_deployer": {"address": "0x" + "a" * 40},
+    "check_approval_risk": {"wallet_address": "0x" + "a" * 40},
+    "query_threat_graph": {"address": "0x" + "a" * 40},
+}
+
+
+def test_tools_that_analyse_an_address_or_transaction_require_chain_id():
+    from mcp_server.tools import TOOL_DEFINITIONS
+    tools = {tool["name"]: tool for tool in TOOL_DEFINITIONS}
+    for name in CHAIN_TOOLS:
+        schema = tools[name]["inputSchema"]
+        assert "chain_id" in schema["required"], name
+        assert "default" not in schema["properties"]["chain_id"], name
+
+
+@pytest.mark.parametrize("tool_name,arguments", CHAIN_TOOLS.items())
+def test_missing_chain_id_is_a_tool_error_not_a_bnb_chain_scan(client, mock_container, tool_name, arguments):
+    response = client.post("/mcp/messages", json={
+        "jsonrpc": "2.0", "id": 16, "method": "tools/call",
+        "params": {"name": tool_name, "arguments": arguments},
+    }, headers=AUTH_HEADERS)
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["isError"] is True
+    assert json.loads(result["content"][0]["text"])["error"].startswith("Missing required argument: chain_id")
+    mock_container.registry.run_all.assert_not_awaited()
+    mock_container.db.get_deployer_risk_summary.assert_not_awaited()
+    mock_container.tenderly_simulator.is_enabled.assert_not_called()
+
+
+FULL_ARGUMENTS = {
+    "scan_contract": {"address": "0x" + "a" * 40, "chain_id": 56},
+    "simulate_transaction": {"from": "0x" + "a" * 40, "to": "0x" + "b" * 40, "data": "0x", "chain_id": 56},
+    "check_deployer": {"address": "0x" + "a" * 40, "chain_id": 56},
+    "check_agent_reputation": {"agent_id": "agent:1"},
+    "check_approval_risk": {"wallet_address": "0x" + "a" * 40, "chain_id": 56},
+    "scan_for_injection": {"content": "hello"},
+    "query_threat_graph": {"address": "0x" + "a" * 40, "chain_id": 56},
+}
+
+
+def _tool_error(client, tool, arguments):
+    response = client.post("/mcp/messages", json={
+        "jsonrpc": "2.0", "id": 17, "method": "tools/call",
+        "params": {"name": tool, "arguments": arguments},
+    }, headers=AUTH_HEADERS)
+    result = response.json()["result"]
+    assert result["isError"] is True
+    return json.loads(result["content"][0]["text"])["error"]
+
+
+@pytest.mark.parametrize("tool,name", [
+    (tool, name) for tool, arguments in FULL_ARGUMENTS.items() for name in arguments if name != "chain_id"
+])
+def test_a_missing_or_non_string_required_argument_is_a_tool_error(client, mock_container, tool, name):
+    arguments = {key: value for key, value in FULL_ARGUMENTS[tool].items() if key != name}
+    assert _tool_error(client, tool, arguments) == f"Missing required argument: {name}"
+    assert _tool_error(client, tool, {**arguments, name: None}) == f"Missing required argument: {name}"
+    assert _tool_error(client, tool, {**arguments, name: 123}) == f"Invalid argument: {name} must be a string"
+    mock_container.registry.run_all.assert_not_awaited()
+    mock_container.db.get_deployer_risk_summary.assert_not_awaited()
+    mock_container.db.get_agent_policy.assert_not_awaited()
+    mock_container.tenderly_simulator.is_enabled.assert_not_called()
+
+
+@pytest.mark.parametrize("name", ["from", "to"])
+def test_simulate_transaction_rejects_an_invalid_address(client, mock_container, name):
+    arguments = {**FULL_ARGUMENTS["simulate_transaction"], name: "0x1234"}
+    assert _tool_error(client, "simulate_transaction", arguments) == "Invalid address: 0x1234"
+    mock_container.tenderly_simulator.is_enabled.assert_not_called()
+
+
+@pytest.mark.parametrize("value", [
+    "abc", "1.5", "0x", "0xzz", "", 10,
+    "1" * 4301, "0x" + "f" * 65, str(2**256), "0x1" + "0" * 64,
+])
+def test_simulate_transaction_rejects_a_value_that_is_not_wei(client, mock_container, value):
+    # The simulator would otherwise replace an unparseable value with 0 and simulate a different transaction.
+    arguments = {**FULL_ARGUMENTS["simulate_transaction"], "value": value}
+    assert _tool_error(client, "simulate_transaction", arguments) == (
+        "Invalid argument: value must be a decimal or 0x-prefixed hex amount of wei below 2**256"
+    )
+    mock_container.tenderly_simulator.is_enabled.assert_not_called()
+
+
+@pytest.mark.parametrize("value,passed", [
+    ("0", "0"), ("007", "7"), ("0x10", "16"), ("0X10", "16"),
+    ("0x" + "f" * 64, str(2**256 - 1)), (str(2**256 - 1), str(2**256 - 1)),
+])
+def test_simulate_transaction_passes_the_value_on_as_a_decimal(client, mock_container, value, passed):
+    mock_container.tenderly_simulator.is_enabled.return_value = True
+    client.post("/mcp/messages", json={
+        "jsonrpc": "2.0", "id": 18, "method": "tools/call",
+        "params": {"name": "simulate_transaction", "arguments": {**FULL_ARGUMENTS["simulate_transaction"], "value": value}},
+    }, headers=AUTH_HEADERS)
+    assert mock_container.tenderly_simulator.simulate_transaction.call_args.kwargs["value"] == passed
+
+
+def test_simulate_transaction_treats_a_null_value_as_zero(client, mock_container):
+    mock_container.tenderly_simulator.is_enabled.return_value = True
+    client.post("/mcp/messages", json={
+        "jsonrpc": "2.0", "id": 19, "method": "tools/call",
+        "params": {"name": "simulate_transaction", "arguments": {**FULL_ARGUMENTS["simulate_transaction"], "value": None}},
+    }, headers=AUTH_HEADERS)
+    assert mock_container.tenderly_simulator.simulate_transaction.call_args.kwargs["value"] == "0"
+
+
+def test_simulate_transaction_data_cap_matches_the_http_firewall():
+    import api
+    from mcp_server.tools import _MAX_DATA_CHARS
+    assert _MAX_DATA_CHARS == api.MAX_FIREWALL_DATA_CHARS
+
+
+@pytest.mark.parametrize("data", ["abc", "0x123", "0xzz", "", "0x" + "ab" * 100_000], ids=[
+    "no-prefix", "odd-length", "not-hex", "empty", "over-cap",
+])
+def test_simulate_transaction_rejects_data_that_is_not_bounded_hex(client, mock_container, data):
+    arguments = {**FULL_ARGUMENTS["simulate_transaction"], "data": data}
+    assert _tool_error(client, "simulate_transaction", arguments) == "Invalid argument: data must be 0x-prefixed hex calldata of at most 200000 characters"
+    mock_container.tenderly_simulator.is_enabled.assert_not_called()
+
+
+@pytest.mark.parametrize("data", ["0x", "0X38ed1739", "0x" + "ab" * 99_999], ids=["empty", "upper-prefix", "at-cap"])
+def test_simulate_transaction_accepts_bounded_hex_data(client, mock_container, data):
+    mock_container.tenderly_simulator.is_enabled.return_value = True
+    client.post("/mcp/messages", json={
+        "jsonrpc": "2.0", "id": 20, "method": "tools/call",
+        "params": {"name": "simulate_transaction", "arguments": {**FULL_ARGUMENTS["simulate_transaction"], "data": data}},
+    }, headers=AUTH_HEADERS)
+    assert mock_container.tenderly_simulator.simulate_transaction.call_args.kwargs["data"] == data
+
+
+@pytest.mark.parametrize("tool", ["get_threat_feed", "get_robinhood_launches"])
+@pytest.mark.parametrize("limit", ["10", True, 1.5, [5]])
+def test_a_limit_that_is_not_an_integer_is_a_tool_error(client, mock_container, tool, limit):
+    mock_container.db.get_launch_feed = AsyncMock(return_value=([], None))
+    assert _tool_error(client, tool, {"limit": limit}) == "Invalid argument: limit must be an integer"
+    mock_container.db.get_agent_findings.assert_not_awaited()
+    mock_container.db.get_launch_feed.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_null_limit_is_the_default(mock_container):
+    from mcp_server.tools import execute_tool
+    await execute_tool(mock_container, "get_threat_feed", {"limit": None})
+    mock_container.db.get_agent_findings.assert_awaited_once_with(limit=20)
+
+
+@pytest.mark.parametrize("depth", ["deep", 5, ["fast"]])
+def test_scan_for_injection_rejects_an_unknown_depth(client, depth):
+    arguments = {"content": "hello", "depth": depth}
+    assert _tool_error(client, "scan_for_injection", arguments) == "Invalid argument: depth must be 'fast' or 'thorough'"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("depth,expected", [(None, "fast"), ("thorough", "thorough")])
+async def test_scan_for_injection_depth_defaults_to_fast(mock_container, depth, expected):
+    from mcp_server.tools import execute_tool
+    result = await execute_tool(mock_container, "scan_for_injection", {"content": "hello", "depth": depth})
+    assert result["depth"] == expected
+
+
+def test_unknown_results_are_described_to_the_client():
+    from mcp_server.resources import RESOURCE_TEMPLATE_DEFINITIONS
+    from mcp_server.tools import TOOL_DEFINITIONS
+    tools = {tool["name"]: tool["description"] for tool in TOOL_DEFINITIONS}
+    resources = {resource["uriTemplate"]: resource["description"] for resource in RESOURCE_TEMPLATE_DEFINITIONS}
+    for description in (
+        tools["check_agent_reputation"],
+        tools["simulate_transaction"],
+        tools["check_deployer"],
+        resources["shieldbot://wallet/{address}/guardian"],
+    ):
+        assert "status 'unknown'" in description
+        assert "coverage_reasons" in description
 
 
 def test_mcp_prompt_includes_unknown():

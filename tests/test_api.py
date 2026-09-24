@@ -159,7 +159,7 @@ class TestFirewallFallback:
             "is_honeypot": False,
         }
 
-        data = api_module._build_fallback_response({}, scan, None)
+        data = api_module._build_fallback_response({}, scan, None, 56)
         assert data["raw_checks"]["scam_matches"] is None
         assert data["risk_score"] == 45
 
@@ -186,7 +186,7 @@ class TestFirewallFallback:
             "is_honeypot": False,
         }
 
-        data = api_module._build_fallback_response({}, scan, None)
+        data = api_module._build_fallback_response({}, scan, None, 56)
         assert data["classification"] == "BLOCK_RECOMMENDED"
         assert data["risk_score"] >= 80
         assert "Found 1 scam database match(es)" in data["danger_signals"]

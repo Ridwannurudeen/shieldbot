@@ -153,7 +153,7 @@ async def test_rescue_rpc_catches_propagate_routing_error(rescue_pipeline, metho
     args = {
         '_fetch_log_chunk': (session, 'https://rpc.invalid', '0x0', '0x0', '0x0', '0x1'),
         '_eth_call': (session, 'https://rpc.invalid', token, '0x0'),
-        '_fetch_prices': ([token],),
+        '_fetch_prices': ([token], 56),
     }
     with pytest.raises(UnsupportedChainError, match='unsupported'):
         await getattr(RescueService, method)(service, *args[method])
@@ -179,8 +179,13 @@ async def test_rescue_failed_required_data_cannot_return_empty_clean_scan(rescue
     service, wallet, _, _, _ = rescue_pipeline
     target = mock_web3_client if method == 'get_token_info' else service
     getattr(target, method).side_effect = RuntimeError('provider unavailable')
-    with pytest.raises(RuntimeError):
-        await service.scan_approvals(wallet)
+    result = await service.scan_approvals(wallet)
+    assert result['approvals'] == []
+    assert result['status'] == 'unknown'
+    assert result['coverage']['allowances'] is False
+    assert result['coverage_reasons'] == {'allowances': "Approval data unavailable from the chain's RPC"}
+    assert result['scanned_blocks'] is None
+    assert result['total_value_at_risk_usd'] is None
 
 
 @pytest.mark.asyncio
@@ -217,8 +222,10 @@ async def test_rescue_failed_rpc_batch_cannot_look_empty(rescue_pipeline, method
 async def test_rescue_missing_rpc_cannot_return_empty_clean_scan(rescue_pipeline):
     service, wallet, _, _, session = rescue_pipeline
     service._rpc_for = MagicMock(return_value='')
-    with pytest.raises(RuntimeError):
-        await service.scan_approvals(wallet)
+    result = await service.scan_approvals(wallet)
+    assert result['approvals'] == []
+    assert result['status'] == 'unknown'
+    assert result['scanned_blocks'] is None
     session.post.assert_not_called()
 
 
@@ -576,24 +583,30 @@ async def test_rescue_complete_scan_reports_ok_coverage(rescue_pipeline, balance
     assert result['total_value_at_risk_usd'] == 0.0
 
 
-def test_guardian_router_unavailable_approvals_return_503_without_provider_details():
+def test_guardian_router_unreadable_rpc_answers_unknown_without_provider_details():
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from services.guardian import GuardianService
     from services.guardian_router import create_guardian_router
+    from services.rescue_service import RescueService
 
-    rescue = MagicMock(scan_approvals=AsyncMock(
-        side_effect=RuntimeError('Log chunk failed for https://rpc.invalid/secret-key'),
-    ))
+    web3_client = MagicMock()
+    web3_client._get_adapter.return_value.w3.provider.endpoint_uri = 'https://rpc.invalid/secret-key'
+    session = MagicMock()
+    session.post.side_effect = RuntimeError('Log chunk failed for https://rpc.invalid/secret-key')
     container = MagicMock()
     container.auth_manager.validate_key = AsyncMock(return_value={'key_id': 'test-key'})
-    container.guardian_service = GuardianService(MagicMock(), rescue_service=rescue)
+    container.guardian_service = GuardianService(MagicMock(), rescue_service=RescueService(web3_client))
     app = FastAPI()
     app.include_router(create_guardian_router(container), prefix='/api/guardian')
-    with TestClient(app, raise_server_exceptions=False) as client:
-        response = client.get('/api/guardian/approvals/0x' + '1' * 40, headers={'X-API-Key': 'test-key'})
-    assert response.status_code == 503
-    assert response.json() == {'detail': 'Approval data unavailable'}
+    with patch('services.rescue_service.aiohttp.ClientSession') as factory:
+        factory.return_value.__aenter__.return_value = session
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.get('/api/guardian/approvals/0x' + '1' * 40, headers={'X-API-Key': 'test-key'})
+    assert response.status_code == 200
+    assert response.json()['status'] == 'unknown'
+    assert response.json()['approvals'] == []
+    assert 'secret-key' not in response.text
 
 
 @pytest.mark.asyncio

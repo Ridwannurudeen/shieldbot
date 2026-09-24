@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "ShieldAI Transaction Firewall",
+    "description": "Extension name. The name is the owner's decision: keep it exactly as written, untranslated."
+  },
+  "extDescription": {
+    "message": "在 8 条 EVM 链上签名前发出警告；检查无法完成时显示“未知”，并标记已知钓鱼网站。",
+    "description": "Extension description on the extensions page and the store. At most 132 characters. It warns; it never claims to block."
+  }
+}

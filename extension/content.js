@@ -6,12 +6,12 @@
 (function () {
   "use strict";
 
-  // Generate a per-session channel token BEFORE inject.js loads.
-  // This token is kept in the isolated content-script world and passed to
-  // inject.js via its script URL — page scripts cannot read it after
-  // document_start because the <script> element is removed immediately onload.
-  // Every verdict message must include this token; forge attempts without it
-  // are silently ignored by inject.js.
+  // Run once per document. This flag lives in the content script's isolated
+  // world, so unlike a flag on the page's window, the page cannot read it to
+  // learn that the extension is installed.
+  if (window.__shieldaiContentLoaded) return;
+  window.__shieldaiContentLoaded = true;
+
   // --- i18n mini-loader (content script context, no ES module import) ---
   let _ct18n = {};
   async function _loadContentLang() {
@@ -37,30 +37,68 @@
     return s;
   }
 
+  // Per-document secret shared with inject.js, which runs in the page's own
+  // JavaScript world. It is handed over once, below, before any page script
+  // runs, and never posted: messages on the page-visible window channel carry
+  // an HMAC made with it instead, which the page can see but cannot make.
   const _CHANNEL_TOKEN = crypto.randomUUID
     ? crypto.randomUUID()
     : Array.from(crypto.getRandomValues(new Uint8Array(16)))
         .map((b) => b.toString(16).padStart(2, "0"))
         .join("");
 
-  // Inject the page-level script — token is NOT in the URL to prevent
-  // extraction via performance.getEntriesByType("resource").
-  const script = document.createElement("script");
-  script.src = chrome.runtime.getURL("inject.js");
-  script.onload = function () {
-    // Send the channel token via one-time postMessage handshake.
-    // At document_start, no page scripts have loaded yet, so this
-    // message cannot be intercepted by malicious page code.
-    window.postMessage({ type: "__SHIELDAI_INIT__", _ct: _CHANNEL_TOKEN }, "*");
-    this.remove();
-  };
-  (document.head || document.documentElement).appendChild(script);
+  // HMAC of `${requestId}:${purpose}` under the channel token, as 32 bytes.
+  // The purpose ("intercept", "shown", "block" or "proceed") is part of the
+  // input, so a proof seen for one message cannot be replayed as another.
+  async function channelProof(requestId, purpose) {
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw", encoder.encode(_CHANNEL_TOKEN), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+    );
+    return new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(`${requestId}:${purpose}`)));
+  }
 
-  // Inject overlay CSS
-  const link = document.createElement("link");
-  link.rel = "stylesheet";
-  link.href = chrome.runtime.getURL("overlay.css");
-  (document.head || document.documentElement).appendChild(link);
+  // Compare a received proof with the expected one byte by byte, as inject.js
+  // does.
+  function sameProof(expected, received) {
+    if (typeof received !== "object" || received === null) return false;
+    for (let i = 0; i < 32; i++) {
+      if (received[i] !== expected[i]) return false;
+    }
+    return true;
+  }
+
+  // Hand the token to inject.js. Both are manifest content scripts that run at
+  // document_start, before any page script. If inject.js is already listening
+  // it takes the offer and cancels the event; otherwise it asks when it starts
+  // and this script answers that one request. No page script runs in between,
+  // so none can see or pre-empt the exchange.
+  function offerToken() {
+    return !document.dispatchEvent(
+      new CustomEvent("shieldai:channel", { detail: _CHANNEL_TOKEN, cancelable: true })
+    );
+  }
+  if (!offerToken()) {
+    document.addEventListener("shieldai:channel-request", function answer() {
+      document.removeEventListener("shieldai:channel-request", answer);
+      offerToken();
+    });
+  }
+
+  // Request ids already seen. inject.js makes a fresh random id per request,
+  // so a second intercept with a seen id is the page replaying one (perhaps
+  // with a harmless-looking payload) and is dropped. The id is recorded before
+  // the proof is checked so a replay cannot overtake the original, and removed
+  // again if the proof fails, so only proven ids stay and a page cannot flood
+  // the set to push a real one out. The oldest proven ids are dropped past the
+  // limit; by then their requests are long settled.
+  const _seenRequests = new Set();
+  const SEEN_REQUESTS_LIMIT = 100;
+
+  // inject.js fails closed 60 seconds after it posts an intercept. A result
+  // that arrives later than this is too late for the user to decide on, so it
+  // gets a timed-out screen instead of a decision overlay.
+  const DECISION_WINDOW_MS = 50000;
 
   // Listen for intercepted transactions from inject.js
   window.addEventListener("message", async (event) => {
@@ -72,18 +110,27 @@
       return;
     }
 
-    const { requestId, tx, method } = event.data;
+    const { requestId, tx, proof } = event.data;
+    if (typeof requestId !== "string" || _seenRequests.has(requestId)) return;
+    _seenRequests.add(requestId);
+    // The page can post intercepts too; only inject.js can prove this one.
+    if (!sameProof(await channelProof(requestId, "intercept"), proof)) {
+      _seenRequests.delete(requestId);
+      return;
+    }
+    if (_seenRequests.size > SEEN_REQUESTS_LIMIT) {
+      _seenRequests.delete(_seenRequests.values().next().value);
+    }
+    const received = Date.now();
 
     // Check if extension is enabled
     const settings = await getSettings();
     if (!settings.enabled) {
       // Extension disabled — auto-proceed
-      window.postMessage(
-        { type: "SHIELDAI_TX_VERDICT", requestId, action: "proceed", _ct: _CHANNEL_TOKEN },
-        "*"
-      );
+      postVerdict(requestId, "proceed");
       return;
     }
+    const strict = settings.policyMode === "STRICT";
 
     // Signing requests are NOT transactions — route to dedicated overlay
     // instead of the firewall API which expects calldata + contract address.
@@ -96,37 +143,29 @@
       return;
     }
 
-    // Show loading overlay
-    showLoadingOverlay();
+    // Show loading overlay; it must be on screen before any result replaces it
+    await showLoadingOverlay();
 
+    let response;
     try {
-      // Check if API URL is configured
-      if (!settings.apiUrl) {
-        showErrorOverlay(
-          requestId,
-          "ShieldAI Setup Required: Click the extension icon in your toolbar, enter your API server URL, and grant permission when prompted. Then try this transaction again."
-        );
-        return;
-      }
-
-      // Send to background for API analysis
-      const response = await chrome.runtime.sendMessage({
+      // Send to background for API analysis. The background worker owns the
+      // API URL and its default.
+      response = await chrome.runtime.sendMessage({
         type: "SHIELDAI_ANALYZE",
         tx,
       });
-
-      if (response.error) {
-        // API error — show warning and let user decide
-        showErrorOverlay(requestId, response.error);
-      } else {
-        // Show analysis overlay
-        showAnalysisOverlay(requestId, response.result);
-      }
     } catch (err) {
-      showErrorOverlay(
-        requestId,
-        err.message || "Extension communication error. Check extension settings."
-      );
+      response = { error: err.message || "Extension communication error. Check extension settings." };
+    }
+
+    if (Date.now() - received > DECISION_WINDOW_MS) {
+      showTimedOutOverlay(requestId);
+    } else if (response.error) {
+      // API error — show warning and let user decide
+      showErrorOverlay(requestId, response.error, strict);
+    } else {
+      // Show analysis overlay
+      showAnalysisOverlay(requestId, response.result, strict);
     }
   });
 
@@ -134,7 +173,7 @@
   function getSettings() {
     return new Promise((resolve) => {
       chrome.storage.local.get(
-        { enabled: true, apiUrl: "" },
+        { enabled: true, policyMode: "BALANCED" },
         resolve
       );
     });
@@ -142,9 +181,116 @@
 
   // --- Overlay Management ---
 
+  // The overlay and the phishing banner live in closed shadow roots. The page
+  // sees the host element in its DOM but cannot reach, click or restyle
+  // anything inside, and the stylesheet link stays out of the page's head.
+  function createShadow() {
+    const host = document.createElement("div");
+    const root = host.attachShadow({ mode: "closed" });
+    const style = document.createElement("link");
+    style.rel = "stylesheet";
+    style.href = chrome.runtime.getURL("overlay.css");
+    root.appendChild(style);
+    return { host, root };
+  }
+
+  // Host element of the overlay on screen, if any.
+  let _overlayHost = null;
+
+  // The request whose overlay is waiting for the user. inject.js stops its
+  // no-verdict timeout once it knows the overlay is on screen, so a request
+  // whose overlay goes away without a decision is rejected here.
+  let _awaitingRequestId = null;
+
+  // Verdicts carry a proof for their own action, never the token, so the page
+  // learns nothing it could use to forge or relabel a verdict.
+  function postVerdict(requestId, action) {
+    channelProof(requestId, action).then((proof) => {
+      window.postMessage({ type: "SHIELDAI_TX_VERDICT", requestId, action, proof }, "*");
+    });
+  }
+
   function removeOverlay() {
-    const existing = document.getElementById("shieldai-overlay");
-    if (existing) existing.remove();
+    if (_overlayHost) {
+      _overlayHost.remove();
+      _overlayHost = null;
+    }
+    if (_awaitingRequestId !== null) {
+      const requestId = _awaitingRequestId;
+      _awaitingRequestId = null;
+      postVerdict(requestId, "block");
+    }
+  }
+
+  function sendVerdict(requestId, action) {
+    _awaitingRequestId = null;
+    removeOverlay();
+    postVerdict(requestId, action);
+  }
+
+  // A decision button acts only on real user input: a synthetic click from a
+  // page script is an untrusted event and is ignored.
+  function onDecision(root, id, requestId, action) {
+    root.getElementById(id).addEventListener("click", (event) => {
+      if (!event.isTrusted) return;
+      sendVerdict(requestId, action);
+    });
+  }
+
+  // Show an overlay as a modal dialog in its own closed shadow root: focus
+  // moves into it and Tab stays in it. For a decision overlay, Escape rejects,
+  // and inject.js is told the user now holds the decision so it waits instead
+  // of timing out. Returns the shadow root, the only way to reach the overlay.
+  function mountOverlay(overlay, requestId) {
+    const { host, root } = createShadow();
+    root.appendChild(overlay);
+    const modal = overlay.querySelector(".shieldai-modal");
+    overlay.tabIndex = -1;
+    overlay.addEventListener("keydown", (event) => {
+      if (!event.isTrusted) return;
+      if (event.key === "Escape" && requestId) {
+        event.preventDefault();
+        sendVerdict(requestId, "block");
+      } else if (event.key === "Tab") {
+        event.preventDefault();
+        const buttons = Array.from(modal.querySelectorAll("button:not([disabled])"));
+        if (!buttons.length) return;
+        const index = buttons.indexOf(root.activeElement);
+        const next = event.shiftKey
+          ? (index <= 0 ? buttons.length : index) - 1
+          : (index + 1) % buttons.length;
+        buttons[next].focus();
+      }
+    });
+    // Focus that leaves the overlay (for example from a button that becomes
+    // disabled) returns to the dialog, so Tab and Escape keep working.
+    overlay.addEventListener("focusout", (event) => {
+      if (!overlay.contains(event.relatedTarget)) modal.focus();
+    });
+    (document.body || document.documentElement).appendChild(host);
+    _overlayHost = host;
+    // If the page removes the overlay, the user can no longer decide here:
+    // reject the request so the dApp is not left waiting.
+    const observer = new MutationObserver(() => {
+      if (host.isConnected) return;
+      observer.disconnect();
+      if (_overlayHost === host) removeOverlay();
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    modal.focus();
+    if (requestId) {
+      _awaitingRequestId = requestId;
+      channelProof(requestId, "shown").then((proof) => {
+        window.postMessage({ type: "SHIELDAI_TX_SHOWN", requestId, proof }, "*");
+      });
+    }
+    return root;
+  }
+
+  // One line saying why a result is Unknown, from its coverage reasons.
+  function unknownReason(result) {
+    return Object.values(result.coverage_reasons || {}).filter(Boolean).join("; ") ||
+      _t("unknownNoReason");
   }
 
   async function showLoadingOverlay() {
@@ -155,10 +301,10 @@
     overlay.id = "shieldai-overlay";
     overlay.className = "shieldai-overlay";
     overlay.innerHTML = `
-      <div class="shieldai-modal">
+      <div class="shieldai-modal" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" aria-busy="true" tabindex="-1">
         <div class="shieldai-header">
-          <div class="shieldai-logo">&#128737;</div>
-          <h2>${_t("overlayTitle")}</h2>
+          <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
+          <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
         <div class="shieldai-loading">
           <div class="shieldai-spinner"></div>
@@ -167,7 +313,7 @@
         </div>
       </div>
     `;
-    (document.body || document.documentElement).appendChild(overlay);
+    mountOverlay(overlay);
   }
 
   // --- Helpers ---
@@ -341,7 +487,7 @@
     }
 
     // Risk classification
-    const color = isPermitLike ? "#f97316" : "#eab308";
+    const badgeClass = isPermitLike ? "shieldai-badge-high" : "shieldai-badge-caution";
     const label = isPermitLike ? _t("overlayApprovalSig") : _t("overlaySigRequest");
     const note = isPermitLike ? _t("overlayApprovalNote") : _t("overlaySigNote");
 
@@ -349,13 +495,13 @@
     overlay.id = "shieldai-overlay";
     overlay.className = "shieldai-overlay";
     overlay.innerHTML = `
-      <div class="shieldai-modal">
+      <div class="shieldai-modal" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
         <div class="shieldai-header">
-          <div class="shieldai-logo">&#128737;</div>
-          <h2>${_t("overlayTitle")}</h2>
+          <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
+          <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
 
-        <div class="shieldai-badge" style="background:${color}">${label}</div>
+        <div class="shieldai-badge ${badgeClass}">${label}</div>
 
         <div class="shieldai-section shieldai-sig-note">
           <p>${escapeHtml(note)}</p>
@@ -370,33 +516,21 @@
       </div>
     `;
 
-    (document.body || document.documentElement).appendChild(overlay);
-
-    document.getElementById("shieldai-block").addEventListener("click", () => {
-      removeOverlay();
-      window.postMessage(
-        { type: "SHIELDAI_TX_VERDICT", requestId, action: "block", _ct: _CHANNEL_TOKEN },
-        "*"
-      );
-    });
-    document.getElementById("shieldai-proceed").addEventListener("click", () => {
-      removeOverlay();
-      window.postMessage(
-        { type: "SHIELDAI_TX_VERDICT", requestId, action: "proceed", _ct: _CHANNEL_TOKEN },
-        "*"
-      );
-    });
+    const root = mountOverlay(overlay, requestId);
+    onDecision(root, "shieldai-block", requestId, "block");
+    onDecision(root, "shieldai-proceed", requestId, "proceed");
   }
 
-  async function showAnalysisOverlay(requestId, result) {
+  async function showAnalysisOverlay(requestId, result, strict) {
     await _loadContentLang();
     removeOverlay();
 
-    const classColors = {
-      BLOCK_RECOMMENDED: "#ef4444",
-      HIGH_RISK: "#f97316",
-      CAUTION: "#eab308",
-      SAFE: "#22c55e",
+    const badgeClasses = {
+      BLOCK_RECOMMENDED: "shieldai-badge-block",
+      HIGH_RISK: "shieldai-badge-high",
+      CAUTION: "shieldai-badge-caution",
+      SAFE: "shieldai-badge-safe",
+      UNKNOWN: "shieldai-badge-unknown",
     };
 
     const classLabels = {
@@ -404,6 +538,7 @@
       HIGH_RISK: _t("classHighRisk"),
       CAUTION: _t("classCaution"),
       SAFE: _t("classSafe"),
+      UNKNOWN: _t("classUnknown"),
     };
 
     const incomplete = result.status !== "ok" || result.partial === true ||
@@ -412,9 +547,12 @@
       Object.values(result.coverage || {}).some(value => Number(value) < 1);
     const classification = incomplete && !["HIGH_RISK", "BLOCK_RECOMMENDED"].includes(result.classification)
       ? "UNKNOWN" : result.classification || "CAUTION";
-    const color = classColors[classification] || "#eab308";
+    const badgeClass = badgeClasses[classification] || "shieldai-badge-caution";
     const label = classLabels[classification] || classification;
     const isBlock = classification === "BLOCK_RECOMMENDED";
+    // Strict mode leaves no way to send a transaction the firewall recommends
+    // blocking or could not fully check.
+    const canProceed = !(strict && (isBlock || classification === "UNKNOWN"));
 
     // Display as safety score (100 - risk) so higher = better
     const scoreDisplay = incomplete ? "Unknown (incomplete provider coverage)" :
@@ -448,15 +586,16 @@
     const calldataHtml = buildCalldataSection(result.calldata_details);
 
     overlay.innerHTML = `
-      <div class="shieldai-modal ${isBlock ? "shieldai-modal-danger" : ""}">
+      <div class="shieldai-modal ${isBlock ? "shieldai-modal-danger" : ""}" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
         <div class="shieldai-header">
-          <div class="shieldai-logo">&#128737;</div>
-          <h2>${_t("overlayTitle")}</h2>
+          <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
+          <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
 
-        <div class="shieldai-badge" style="background:${color}">
-          ${escapeHtml(label)} &mdash; ${escapeHtml(scoreDisplay)}
-        </div>
+        <div class="shieldai-badge ${badgeClass}">${escapeHtml(label)}${classification === "UNKNOWN" ? "" : ` &mdash; ${escapeHtml(scoreDisplay)}`}</div>
+        ${incomplete ? `
+          <p class="shieldai-unknown-why">${_t("unknownWhy")} ${escapeHtml(unknownReason(result))}</p>
+        ` : ""}
 
         ${result.partial ? `
           <div class="shieldai-section" style="background:#78350f;border-radius:6px;padding:8px 12px;margin-bottom:8px;">
@@ -487,7 +626,7 @@
           <h3>${_t("overlayTxImpact")}</h3>
           <table class="shieldai-impact">
             <tr><td>${_t("overlaySending")}</td><td>${escapeHtml(impact.sending || "N/A")}</td></tr>
-            <tr><td>${_t("overlayGrantingAccess")}</td><td>${escapeHtml(impact.granting_access || "None")}</td></tr>
+            <tr><td>${_t("overlayGrantingAccess")}</td><td>${escapeHtml(impact.granting_access || "Unknown")}</td></tr>
             <tr><td>${_t("overlayRecipient")}</td><td class="shieldai-mono">${escapeHtml(impact.recipient || "N/A")}</td></tr>
             <tr><td>${_t("overlayAfterTx")}</td><td>${escapeHtml(impact.post_tx_state || "N/A")}</td></tr>
           </table>
@@ -508,10 +647,13 @@
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">
             ${_t("overlayBtnBlock")}
           </button>
+          ${canProceed ? `
           <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">
             ${_t("overlayBtnProceed")}
           </button>
+          ` : ""}
         </div>
+        ${canProceed ? "" : `<p class="shieldai-strict-note">${_t("overlayStrictNoProceed")}</p>`}
 
         <div class="shieldai-explain-row">
           <button class="shieldai-btn shieldai-btn-explain" id="shieldai-explain">
@@ -525,12 +667,12 @@
       </div>
     `;
 
-    (document.body || document.documentElement).appendChild(overlay);
+    const root = mountOverlay(overlay, requestId);
 
-    const calldataToggle = document.getElementById("shieldai-calldata-toggle");
+    const calldataToggle = root.getElementById("shieldai-calldata-toggle");
     if (calldataToggle) {
       calldataToggle.addEventListener("click", () => {
-        const body = document.getElementById("shieldai-calldata-body");
+        const body = root.getElementById("shieldai-calldata-body");
         const isExpanded = calldataToggle.getAttribute("aria-expanded") !== "false";
         const nextExpanded = !isExpanded;
         calldataToggle.setAttribute("aria-expanded", String(nextExpanded));
@@ -541,30 +683,17 @@
     }
 
     // Button handlers
-    document.getElementById("shieldai-block").addEventListener("click", () => {
-      removeOverlay();
-      window.postMessage(
-        { type: "SHIELDAI_TX_VERDICT", requestId, action: "block", _ct: _CHANNEL_TOKEN },
-        "*"
-      );
-    });
-
-    document
-      .getElementById("shieldai-proceed")
-      .addEventListener("click", () => {
-        removeOverlay();
-        window.postMessage(
-          { type: "SHIELDAI_TX_VERDICT", requestId, action: "proceed", _ct: _CHANNEL_TOKEN },
-          "*"
-        );
-      });
+    onDecision(root, "shieldai-block", requestId, "block");
+    if (canProceed) {
+      onDecision(root, "shieldai-proceed", requestId, "proceed");
+    }
 
     // "Why is this risky?" handler
-    document.getElementById("shieldai-explain").addEventListener("click", () => {
-      const btn = document.getElementById("shieldai-explain");
-      const responseDiv = document.getElementById("shieldai-explain-response");
-      const loadingEl = document.getElementById("shieldai-explain-loading");
-      const textEl = document.getElementById("shieldai-explain-text");
+    root.getElementById("shieldai-explain").addEventListener("click", () => {
+      const btn = root.getElementById("shieldai-explain");
+      const responseDiv = root.getElementById("shieldai-explain-response");
+      const loadingEl = root.getElementById("shieldai-explain-loading");
+      const textEl = root.getElementById("shieldai-explain-text");
 
       btn.disabled = true;
       btn.textContent = "Analyzing...";
@@ -595,7 +724,9 @@
     });
   }
 
-  async function showErrorOverlay(requestId, errorMsg) {
+  // Shown when no analysis came back (429, 400, timeout, unreachable API). In
+  // Strict mode there is no Proceed: an unchecked transaction stays blocked.
+  async function showErrorOverlay(requestId, errorMsg, strict) {
     await _loadContentLang();
     removeOverlay();
 
@@ -603,49 +734,67 @@
     overlay.id = "shieldai-overlay";
     overlay.className = "shieldai-overlay";
     overlay.innerHTML = `
-      <div class="shieldai-modal">
+      <div class="shieldai-modal" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
         <div class="shieldai-header">
-          <div class="shieldai-logo">&#128737;</div>
-          <h2>${_t("overlayTitle")}</h2>
+          <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
+          <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
-        <div class="shieldai-badge" style="background:#f97316">
+        <div class="shieldai-badge shieldai-badge-high">
           ${_t("overlayAnalysisUnavail")}
         </div>
         <div class="shieldai-section">
           <p>${_t("overlayCannotReach")}</p>
           <p class="shieldai-error">${escapeHtml(errorMsg)}</p>
-          <p>${_t("overlayProceedRisk")}</p>
+          <p>${strict ? _t("overlayStrictNoProceed") : _t("overlayProceedRisk")}</p>
         </div>
         <div class="shieldai-actions">
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">
             ${_t("overlayBtnBlock")}
           </button>
+          ${strict ? "" : `
           <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">
             ${_t("overlayBtnProceed")}
           </button>
+          `}
         </div>
       </div>
     `;
 
-    (document.body || document.documentElement).appendChild(overlay);
+    const root = mountOverlay(overlay, requestId);
+    onDecision(root, "shieldai-block", requestId, "block");
+    if (!strict) {
+      onDecision(root, "shieldai-proceed", requestId, "proceed");
+    }
+  }
 
-    document.getElementById("shieldai-block").addEventListener("click", () => {
-      removeOverlay();
-      window.postMessage(
-        { type: "SHIELDAI_TX_VERDICT", requestId, action: "block", _ct: _CHANNEL_TOKEN },
-        "*"
-      );
-    });
+  // Shown when the analysis came back too late to still decide: the request
+  // is rejected now, and the user is asked to try again.
+  async function showTimedOutOverlay(requestId) {
+    await _loadContentLang();
+    removeOverlay();
+    postVerdict(requestId, "block");
 
-    document
-      .getElementById("shieldai-proceed")
-      .addEventListener("click", () => {
-        removeOverlay();
-        window.postMessage(
-          { type: "SHIELDAI_TX_VERDICT", requestId, action: "proceed", _ct: _CHANNEL_TOKEN },
-          "*"
-        );
-      });
+    const overlay = document.createElement("div");
+    overlay.id = "shieldai-overlay";
+    overlay.className = "shieldai-overlay";
+    overlay.innerHTML = `
+      <div class="shieldai-modal" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
+        <div class="shieldai-header">
+          <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
+          <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
+        </div>
+        <div class="shieldai-badge shieldai-badge-unknown">${_t("overlayTimedOut")}</div>
+        <div class="shieldai-section">
+          <p>${_t("overlayTimedOutNote")}</p>
+        </div>
+        <div class="shieldai-actions">
+          <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-close">${_t("overlayBtnClose")}</button>
+        </div>
+      </div>
+    `;
+
+    const root = mountOverlay(overlay);
+    root.getElementById("shieldai-close").addEventListener("click", () => removeOverlay());
   }
 
   function escapeHtml(str) {
@@ -660,7 +809,7 @@
   async function runPhishingCheck() {
     try {
       const settings = await getSettings();
-      if (!settings.enabled || !settings.apiUrl) return;
+      if (!settings.enabled) return;
 
       const response = await chrome.runtime.sendMessage({
         type: "SHIELDAI_CHECK_PHISHING",
@@ -676,7 +825,6 @@
   }
 
   async function showPhishingBanner(domain) {
-    if (document.getElementById("shieldai-phishing-banner")) return;
     await _loadContentLang();
 
     const banner = document.createElement("div");
@@ -696,22 +844,23 @@
       </div>
     `;
 
+    const { host, root } = createShadow();
+    root.appendChild(banner);
     // Prepend to <html> — safe at document_start before <body> exists
-    document.documentElement.insertBefore(
-      banner,
-      document.documentElement.firstChild
-    );
+    document.documentElement.insertBefore(host, document.documentElement.firstChild);
 
-    document.getElementById("shieldai-leave").addEventListener("click", () => {
+    root.getElementById("shieldai-leave").addEventListener("click", (event) => {
+      if (!event.isTrusted) return;
       window.history.length > 1 ? window.history.back() : window.close();
     });
 
-    document
-      .getElementById("shieldai-dismiss")
-      .addEventListener("click", () => {
-        banner.remove();
-      });
+    root.getElementById("shieldai-dismiss").addEventListener("click", (event) => {
+      if (!event.isTrusted) return;
+      host.remove();
+    });
   }
 
-  runPhishingCheck();
+  // The warning is for the page in the tab; frames would only repeat the
+  // lookup against the shared API rate limit.
+  if (window.top === window) runPhishingCheck();
 })();

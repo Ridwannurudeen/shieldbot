@@ -137,7 +137,7 @@
     <img src="icons/shield128.png" alt="ShieldBot" class="logo" />
 
     <h1 data-i18n="welcomeTitle">Welcome to ShieldBot</h1>
-    <p class="subtitle">
+    <p class="subtitle" data-i18n="welcomeSubtitle">
       Checks your transactions on 8 EVM chains before you sign: BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, Optimism and Robinhood Chain.
     </p>
 
@@ -153,14 +153,14 @@
         <div class="step-icon">🧪</div>
         <div class="step-body">
           <div class="step-title" data-i18n="step2Title">Simulate</div>
-          <div class="step-desc" data-i18n="step2Desc">See exactly which tokens leave and enter your wallet — simulated on-chain before you touch the confirm button.</div>
+          <div class="step-desc" data-i18n="step2Desc">When a transaction can be simulated, see which tokens leave and enter your wallet before you confirm.</div>
         </div>
       </div>
       <div class="step">
         <div class="step-icon">🛡</div>
         <div class="step-body">
-          <div class="step-title">Warn</div>
-          <div class="step-desc">High-risk transactions get a clear warning before you sign, and you choose whether to cancel or continue. If a request times out, or your wallet's chain cannot be identified or differs from the chain the transaction names, the request is refused so you can retry. Known phishing sites are flagged when you open them.</div>
+          <div class="step-title" data-i18n="step3Title">Warn</div>
+          <div class="step-desc" data-i18n="step3Desc">High-risk transactions get a clear warning before you sign, and you choose whether to cancel or continue. If a request times out, or your wallet's chain cannot be identified or differs from the chain the transaction names, the request is refused so you can retry. Known phishing sites are flagged when you open them.</div>
         </div>
       </div>
     </div>
@@ -169,7 +169,8 @@
     <div id="statusMsg"></div>
     <div id="closeLink" data-i18n="welcomeClose">Close this tab</div>
 
-    <div class="version">ShieldBot v3.0.1 &middot; <a href="https://shieldbotsecurity.online/terms.html" target="_blank" rel="noopener noreferrer">Terms of Service</a></div>
+    <div class="version"></div>
+    <div class="version"><a href="https://shieldbotsecurity.online/terms.html" target="_blank" rel="noopener noreferrer" data-i18n="linkTerms">Terms of Service</a></div>
   </div>
 
   <script src="i18n.js"></script>
