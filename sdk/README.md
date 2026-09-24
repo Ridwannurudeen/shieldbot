@@ -79,7 +79,18 @@ Incomplete analysis is never reported as safe. Scan and firewall results carry `
 
 ## Supported chains
 
-`scan`, `firewall`, `check`, `rescue` and `queryThreatGraph` require a chain. The SDK never assumes one: without it they throw `ShieldBotError` with code `MISSING_CHAIN_ID` before sending anything. The list is exported as `SUPPORTED_CHAIN_IDS`, with the `ChainId` type.
+`scan`, `firewall`, `check`, `rescue` and `queryThreatGraph` require a chain. The SDK never assumes one: without it they throw `ShieldBotError` with code `MISSING_CHAIN_ID` before sending anything. Chain parameters take a plain `number`, such as a wallet's chain ID.
+
+The chains below are exported as `SUPPORTED_CHAIN_IDS` (type `ChainId`), and `isSupportedChainId()` checks a number against them:
+
+```typescript
+import { isSupportedChainId } from '@shieldbot/sdk';
+
+const chainId = Number(await provider.request({ method: 'eth_chainId' })); // any EIP-1193 wallet provider
+if (!isSupportedChainId(chainId)) {
+  // ShieldBot cannot analyze this chain: treat the transaction as unchecked, not as safe.
+}
+```
 
 | Chain | ID |
 |-------|-----|
@@ -92,7 +103,7 @@ Incomplete analysis is never reported as safe. Scan and firewall results carry `
 | opBNB | 204 |
 | Robinhood Chain | 4663 |
 
-The API rejects any other chain with HTTP 400, which the SDK throws as `ShieldBotError`; `check()` never turns it into a fail-mode verdict. `health()` returns the live list as `supported_chains`.
+The SDK does not reject other chains itself. The API answers a chain it does not serve with HTTP 400, which the SDK throws as `ShieldBotError`; `check()` never turns it into a fail-mode verdict. `health()` returns the live list as `supported_chains`.
 
 ## Configuration
 

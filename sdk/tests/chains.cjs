@@ -1,11 +1,20 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { ShieldBot, ShieldBotError, SUPPORTED_CHAIN_IDS } = require('../dist/index.js');
+const { ShieldBot, ShieldBotError, SUPPORTED_CHAIN_IDS, isSupportedChainId } = require('../dist/index.js');
 
 const complete = { verdict: 'ALLOW', score: 0, status: 'ok', coverage: { honeypot: 1 } };
 
 test('Robinhood Chain is a supported chain', () => {
   assert.ok(SUPPORTED_CHAIN_IDS.includes(4663));
+  assert.equal(isSupportedChainId(4663), true);
+  assert.equal(isSupportedChainId(999), false);
+});
+
+test('an unlisted chain is left to the API to reject', async () => {
+  let calls = 0;
+  global.fetch = async () => { calls++; return { ok: false, status: 400, json: async () => ({ detail: 'Unsupported chain ID 999' }) }; };
+  await assert.rejects(new ShieldBot().scan('0xb', { chainId: 999 }), error => error instanceof ShieldBotError && error.status === 400);
+  assert.equal(calls, 1);
 });
 
 for (const [name, call] of [

@@ -30,9 +30,14 @@ export const SUPPORTED_CHAIN_IDS = [56, 1, 8453, 42161, 137, 10, 204, 4663] as c
 /** 56=BSC, 1=Ethereum, 8453=Base, 42161=Arbitrum, 137=Polygon, 10=Optimism, 204=opBNB, 4663=Robinhood Chain. */
 export type ChainId = (typeof SUPPORTED_CHAIN_IDS)[number];
 
+/** True for a chain in SUPPORTED_CHAIN_IDS. The SDK does not reject other chains itself: the API answers them with 400. */
+export function isSupportedChainId(chainId: number): chainId is ChainId {
+  return (SUPPORTED_CHAIN_IDS as readonly number[]).includes(chainId);
+}
+
 export interface ScanOptions {
   /** Chain to analyze. Required: the SDK never assumes a chain, and the API rejects an unsupported one with 400. */
-  chainId: ChainId;
+  chainId: number;
 }
 
 export interface FirewallOptions extends ScanOptions {
@@ -176,7 +181,7 @@ export interface AgentTransaction {
   to: string;
   data?: string;
   value?: string;
-  chainId: ChainId;
+  chainId: number;
 }
 
 export interface Verdict {
@@ -297,7 +302,7 @@ export class ShieldBot {
   /**
    * Scan a wallet's active approvals and get revoke transactions (Rescue Mode).
    */
-  async rescue(walletAddress: string, chainId: ChainId): Promise<RescueResult> {
+  async rescue(walletAddress: string, chainId: number): Promise<RescueResult> {
     return this._get<RescueResult>(
       `/api/rescue/${walletAddress}?chain_id=${this._requireChainId(chainId, 'rescue')}`,
     );
@@ -446,7 +451,7 @@ export class ShieldBot {
   /**
    * Query the threat graph for an address.
    */
-  async queryThreatGraph(address: string, chainId: ChainId, maxDepth = 3): Promise<Record<string, unknown>> {
+  async queryThreatGraph(address: string, chainId: number, maxDepth = 3): Promise<Record<string, unknown>> {
     return this._get(
       `/api/graph/check/${address}?chain_id=${this._requireChainId(chainId, 'queryThreatGraph')}&max_depth=${maxDepth}`,
     );
@@ -461,7 +466,7 @@ export class ShieldBot {
 
   // --- Internal ---
 
-  private _requireChainId(chainId: ChainId | undefined, method: string): ChainId {
+  private _requireChainId(chainId: number | undefined, method: string): number {
     if (chainId == null) {
       throw new ShieldBotError(`chainId required for ${method}()`, 400, 'MISSING_CHAIN_ID');
     }
