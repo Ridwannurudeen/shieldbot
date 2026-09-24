@@ -1189,6 +1189,11 @@ SIGNING_METHODS = {
 
 
 def _is_signature_only_request(req: FirewallRequest) -> bool:
+    # eth_sign signs a raw hash, not a call to `to`, so it is answered here whatever `to` is: the
+    # signature path applies its floor, and the transaction path would answer it from the target's
+    # cached row or scan and store its verdict as the target's.
+    if req.signMethod == "eth_sign":
+        return True
     if req.typedData:
         return not _is_valid_evm_address(req.to)
     return (req.signMethod or "") in SIGNING_METHODS and not _is_valid_evm_address(req.to)
