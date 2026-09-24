@@ -254,13 +254,13 @@
   // not land on them. And they count only once IntersectionObserver v2 has
   // reported the dialog visible (on screen, not covered, not made transparent,
   // filtered or transformed) without a break for that half second: the time
-  // of the last report that it was not (or of its appearing) is kept. The
+  // it last became visible is kept (Infinity while it is not). The
   // whole dialog is watched, not only its buttons, so the verdict text
   // cannot be covered either; and the dialog rather than the host, which
   // has no area of its own (its content is position: fixed).
   const PROCEED_DELAY_MS = 500;
   let _dialogVisible = false;
-  let _lastNotVisibleAt = 0;
+  let _visibleSince = Infinity;
   let _visibilityObserver = null;
 
   // A dialog the page keeps out of view (not intersecting the viewport:
@@ -323,7 +323,7 @@
           root.getElementById("shieldai-covered").textContent = _t("overlayCoveredNote");
           return;
         }
-        if (Date.now() - _lastNotVisibleAt < PROCEED_DELAY_MS) return;
+        if (Date.now() - _visibleSince < PROCEED_DELAY_MS) return;
       }
       sendVerdict(requestId, action);
     });
@@ -369,12 +369,17 @@
       }, PROCEED_DELAY_MS);
     }
     _dialogVisible = false;
-    _lastNotVisibleAt = Date.now();
+    _visibleSince = Infinity;
     _visibilityObserver = new IntersectionObserver((entries) => {
       if (_overlayHost !== host) return;
       const entry = entries[entries.length - 1];
-      _dialogVisible = entry.isVisible === true;
-      if (!_dialogVisible) _lastNotVisibleAt = Date.now();
+      // The observer reports changes only, so a cover shows up as one entry
+      // when it starts and one when it ends: the half second counts from the
+      // end.
+      const visible = entry.isVisible === true;
+      if (!visible) _visibleSince = Infinity;
+      else if (!_dialogVisible) _visibleSince = Date.now();
+      _dialogVisible = visible;
       if (entry.isIntersecting !== false) {
         clearTimeout(_outOfViewTimer);
         _outOfViewTimer = null;

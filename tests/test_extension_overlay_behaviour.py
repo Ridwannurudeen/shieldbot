@@ -626,6 +626,31 @@ def test_a_dialog_kept_out_of_view_rejects_the_request():
     )
 
 
+def test_the_half_second_counts_from_when_a_cover_ends():
+    run_node(
+        REAL_DELAY_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('request');
+  await new Promise(resolve => setTimeout(resolve, 550));
+  const proceed = byId('shieldai-proceed');
+  clock += 600;
+  // IntersectionObserver reports only changes: one entry when a cover starts, one when it ends.
+  reportVisibility(false);
+  clock += 1000;
+  reportVisibility(true);
+  userClick(proceed);
+  await flush();
+  assert.deepEqual(verdicts(), [], 'a click right after a long cover ended counted');
+  clock += 500;
+  userClick(proceed);
+  await flush();
+  await assertVerdicts([['request', 'proceed']]);
+"""
+    )
+
+
 def test_block_works_while_the_dialog_is_not_visible():
     run_node(
         CONTENT_HARNESS
