@@ -48,8 +48,47 @@ def test_alerts_are_served_without_a_wallet(client):
     response = client.get("/api/watch/alerts")
 
     assert response.status_code == 200
-    assert response.json() == {"alerts": sample_alerts, "count": 1}
+    assert response.json() == {
+        "alerts": [
+            {
+                "deployer_address": "0x2222222222222222222222222222222222222222",
+                "chain_id": 56,
+                "new_contract_address": "0x3333333333333333333333333333333333333333",
+                "watch_reason": "MANUAL",
+                "created_at": 1234567890.0,
+            }
+        ],
+        "count": 1,
+    }
     api_module.container.db.get_deployment_alerts.assert_awaited_once_with(limit=50)
+
+
+def test_free_text_watch_reasons_stay_private(client):
+    """Admin notes and agent reasons are free text; only the fixed reason codes are public."""
+    import api as api_module
+
+    alert = {
+        "id": 8,
+        "deployer_address": "0x2222222222222222222222222222222222222222",
+        "chain_id": 1,
+        "new_contract_address": "0x3333333333333333333333333333333333333333",
+        "telegram_sent": True,
+        "created_at": 1234567890.0,
+    }
+    api_module.container.db.get_deployment_alerts = AsyncMock(
+        return_value=[
+            {**alert, "watch_reason": "SERIAL_SCAMMER"},
+            {**alert, "watch_reason": "tip from a private chat about this deployer"},
+            {**alert, "watch_reason": None},
+        ]
+    )
+
+    alerts = client.get("/api/watch/alerts").json()["alerts"]
+
+    assert [a["watch_reason"] for a in alerts] == ["SERIAL_SCAMMER", None, None]
+    assert all(set(a) == {
+        "deployer_address", "chain_id", "new_contract_address", "watch_reason", "created_at",
+    } for a in alerts)
 
 
 def test_released_extension_query_still_gets_alerts(client):

@@ -1909,6 +1909,10 @@ async def guard_subject_remove(chain_id: int, address: str, request: Request):
     return {"ok": True, "address": address.lower(), "chain_id": chain_id}
 
 
+# Reason codes the code itself assigns; admin-entered and agent-written reasons are free text and stay private.
+_PUBLIC_WATCH_REASONS = {"MANUAL", "SERIAL_SCAMMER"}
+
+
 @app.get("/api/watch/alerts")
 async def public_watch_alerts(request: Request):
     """List recent deployment alerts from watched deployers."""
@@ -1922,7 +1926,16 @@ async def public_watch_alerts(request: Request):
             content={"detail": "Watch alerts rate limit exceeded (10/min)."},
         )
 
-    alerts = await container.db.get_deployment_alerts(limit=50)
+    alerts = [
+        {
+            "deployer_address": alert["deployer_address"],
+            "chain_id": alert["chain_id"],
+            "new_contract_address": alert["new_contract_address"],
+            "watch_reason": alert["watch_reason"] if alert["watch_reason"] in _PUBLIC_WATCH_REASONS else None,
+            "created_at": alert["created_at"],
+        }
+        for alert in await container.db.get_deployment_alerts(limit=50)
+    ]
     return {"alerts": alerts, "count": len(alerts)}
 
 
