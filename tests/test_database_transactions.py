@@ -50,6 +50,11 @@ async def _count(db, table):
     return (await cursor.fetchone())[0]
 
 
+async def _until(predicate):
+    while not predicate():
+        await asyncio.sleep(0.01)
+
+
 # --- a write cut short -------------------------------------------------------------------------
 
 
@@ -91,6 +96,58 @@ async def test_an_indexed_contract_whose_funder_link_fails_leaves_no_deployer_ro
     assert (await cursor.fetchone())[0] == 0
     assert await _count(db, "funder_links") == 0
     assert await _count(db, "outcome_events") == 1
+
+
+# --- a transaction cut short at BEGIN or COMMIT -------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_transaction_cancelled_while_begin_waits_for_the_lock_leaves_none_open(db):
+    await db.add_watched_deployer(DEPLOYER, 56)
+    other = await aiosqlite.connect(db.db_path)
+    try:
+        # Another connection holds the write lock, so the transaction's BEGIN IMMEDIATE waits for it.
+        await other.execute("BEGIN IMMEDIATE")
+        alert = asyncio.create_task(db.log_deployment_alert(DEPLOYER, 56, CONTRACT))
+        # transaction() takes its lock just before it queues BEGIN, so once the lock is held the task awaits BEGIN.
+        await asyncio.wait_for(_until(db._txn_lock.locked), 5)
+        alert.cancel()
+        await other.rollback()
+        (cancelled,) = await asyncio.gather(alert, return_exceptions=True)
+    finally:
+        await other.close()
+    # The connection runs its calls in order, so this returns only after the BEGIN queued before it has run.
+    await db._txn_db.execute("SELECT 1")
+
+    assert isinstance(cancelled, asyncio.CancelledError)
+    assert not db._txn_db.in_transaction
+    await db.log_deployment_alert(DEPLOYER, 56, CONTRACT)
+    await db.record_outcome(CONTRACT, 56, 80.0, "blocked")
+    assert await _count(db, "deployment_alerts") == 1
+    assert await _count(db, "outcome_events") == 1
+
+
+@pytest.mark.asyncio
+async def test_a_commit_that_fails_rolls_back_and_the_next_transaction_commits(db):
+    await db.add_watched_deployer(DEPLOYER, 56)
+    async with db.transaction():
+        pass
+    commit = db._txn_db.commit
+    failures = [sqlite3.OperationalError("disk I/O error")]
+
+    async def fails_once():
+        if failures:
+            raise failures.pop()
+        await commit()
+
+    with patch.object(db._txn_db, "commit", fails_once):
+        with pytest.raises(sqlite3.OperationalError, match="disk I/O error"):
+            await db.log_deployment_alert(DEPLOYER, 56, CONTRACT)
+        assert not db._txn_db.in_transaction
+        await db.log_deployment_alert(DEPLOYER, 56, CONTRACT)
+
+    assert await _count(db, "deployment_alerts") == 1
+    assert (await db.is_watched_deployer(DEPLOYER, 56))["alert_count"] == 1
 
 
 # --- load and nesting --------------------------------------------------------------------------

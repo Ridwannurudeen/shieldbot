@@ -284,15 +284,15 @@ class Database:
         """
         connection = await self._transaction_connection()
         async with self._txn_lock:
-            if connection is not self._db:
-                await connection.execute("BEGIN IMMEDIATE")
             try:
+                if connection is not self._db:
+                    await connection.execute("BEGIN IMMEDIATE")
                 yield connection
+                await connection.commit()
             except BaseException:
                 with suppress(Exception):   # a rollback on a connection closed underneath must not hide the cause
                     await connection.rollback()
                 raise
-            await connection.commit()
 
     async def _second_connection(self, autocommit: bool = False) -> Optional[aiosqlite.Connection]:
         """Another connection to the database file, or None if close() ran while it was opening.
