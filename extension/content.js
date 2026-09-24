@@ -860,5 +860,7 @@
     });
   }
 
-  runPhishingCheck();
+  // The warning is for the page in the tab; frames would only repeat the
+  // lookup against the shared API rate limit.
+  if (window.top === window) runPhishingCheck();
 })();

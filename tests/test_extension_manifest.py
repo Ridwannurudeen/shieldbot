@@ -125,6 +125,12 @@ def test_page_script_is_a_main_world_content_script():
     for entry in (isolated, main):
         assert entry["run_at"] == "document_start"
         assert entry["matches"] == MANIFEST["host_permissions"]
+        # A page could otherwise call the wallet from a child frame, including an about:blank or
+        # srcdoc one, where no content script ran. match_origin_as_fallback (Chrome 99) needs the
+        # "/*" path the pattern already has.
+        assert entry["all_frames"] is True
+        assert entry["match_origin_as_fallback"] is True
+        assert all(pattern.endswith("/*") for pattern in entry["matches"])
     # Manifest content scripts can only name the MAIN world from Chrome 111.
     assert int(MANIFEST["minimum_chrome_version"]) >= 111
     # inject.js is no longer loaded through a page <script>, so pages cannot fetch it to probe for us.

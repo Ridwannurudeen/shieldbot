@@ -622,6 +622,22 @@ def test_a_flood_of_forged_intercepts_cannot_push_out_a_real_request():
 """
     )
 
+@pytest.mark.parametrize("top", [True, False], ids=["top-frame", "child-frame"])
+def test_only_the_top_frame_checks_for_phishing(top):
+    run_node(
+        CONTENT_HARNESS.replace("let phishing = false,", "let phishing = true,").replace(
+            "window.top = window;", "window.top = JSON.parse(process.argv[1]) ? window : {};"
+        )
+        + r"""
+(async () => {
+  await flush();
+  const top = JSON.parse(process.argv[1]);
+  assert.equal(phishingChecks, top ? 1 : 0);
+  assert.equal(Boolean(html.children.find(el => el.shadow)), top);
+""",
+        top,
+    )
+
 INJECT_HARNESS = (
     FAKE_DOM
     + r"""
