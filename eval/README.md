@@ -80,8 +80,10 @@ Considered and left out: Forta's labelled datasets. Their README says the labels
   first word of 3 or more letters (`Microsoft`, `Palo`, `Lam`), and its address is not on Robinhood's list.
   A name in Robinhood's own "Company • Robinhood Token" form (possibly a Robinhood deployment missing from
   the list) or with another issuer's marker (Backpack, xStock, dShares, Dinari, Backed, Ondo) is left out.
-  At most 2 per ticker, those with the most GeckoTerminal reserves first. The label records that a token
-  carries an official ticker and company name at another address; it asserts nothing about intent.
+  At most 2 per ticker, those with the most GeckoTerminal reserves first. The 3 seed impostors were
+  labelled under the class definition alone (an official ticker as symbol at another address, or the
+  company as name) and are kept; their evidence has no `eth_getCode` fact. The label records that a token
+  carries an official ticker or company name at another address; it asserts nothing about intent.
 - `safe`:
   - the 20 v1 blue chips, re-read on chain;
   - 63 Uniswap contracts from its deployment docs (V2 factory and router, V3 factory, position manager,
