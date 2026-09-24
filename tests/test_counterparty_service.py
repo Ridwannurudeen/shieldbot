@@ -1,5 +1,6 @@
 """Counterparty facts: wallet or contract, verification, age and GoPlus address labels."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -164,6 +165,31 @@ async def test_repeat_lookup_is_served_from_the_cache():
     assert _calls(web3, scam_db) == 4
     await service.fetch(SPENDER, 8453)
     assert _calls(web3, scam_db) == 8
+
+
+@pytest.mark.asyncio
+async def test_concurrent_lookups_of_one_spender_share_the_providers():
+    service, web3, scam_db = _service()
+    first, second = await asyncio.gather(service.fetch(SPENDER, 56), service.fetch(SPENDER, 56))
+    assert first is second
+    assert _calls(web3, scam_db) == 4
+    assert counterparty_module._FACTS_INFLIGHT == {}
+
+
+@pytest.mark.asyncio
+async def test_a_slow_provider_leaves_only_its_fact_unknown(monkeypatch):
+    monkeypatch.setattr(counterparty_module, "PROVIDER_TIMEOUT", 0.05)
+
+    async def hang(*args, **kwargs):
+        await asyncio.sleep(60)
+
+    service, web3, scam_db = _service(verified=False, age=30)
+    web3.get_bytecode = hang
+    scam_db.fetch_address_security = hang
+    facts = await asyncio.wait_for(service.fetch(SPENDER, 56), 5)
+    assert (facts["is_contract"], facts["labels"]) == (None, None)
+    assert (facts["is_verified"], facts["age_days"]) == (False, 30)
+    assert facts["reason"] == "Spender facts unknown: code (RPC), labels (GoPlus timed out)"
 
 
 def _clock(monkeypatch, module, name, ttu):

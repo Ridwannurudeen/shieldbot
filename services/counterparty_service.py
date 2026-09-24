@@ -48,6 +48,18 @@ def _facts_ttu(key, facts, now):
 
 
 _FACTS_CACHE = TLRUCache(maxsize=1024, ttu=_facts_ttu)
+_FACTS_INFLIGHT = {}
+
+# Each provider answers within this or counts as unknown, so a slow explorer or RPC leaves one
+# fact Unknown instead of running the intent analyzer past the registry's 25-second deadline.
+PROVIDER_TIMEOUT = 8
+
+
+async def _within_timeout(awaitable, unknown):
+    try:
+        return await asyncio.wait_for(awaitable, PROVIDER_TIMEOUT)
+    except asyncio.TimeoutError:
+        return unknown
 
 
 def unknown_facts(address: str) -> dict:
@@ -161,12 +173,27 @@ class CounterpartyService:
         key = (chain_id, lower)
         if key in _FACTS_CACHE:
             return _FACTS_CACHE[key]
+        # Concurrent scans of one spender share a single lookup.
+        flight_key = (asyncio.get_running_loop(), key)
+        if flight_key not in _FACTS_INFLIGHT:
+            _FACTS_INFLIGHT[flight_key] = asyncio.create_task(self._lookup(address, chain_id, key, flight_key))
+        return await asyncio.shield(_FACTS_INFLIGHT[flight_key])
 
+    async def _lookup(self, address: str, chain_id: int, key: tuple, flight_key: tuple) -> dict:
+        try:
+            return await self._facts(address, chain_id, key)
+        finally:
+            _FACTS_INFLIGHT.pop(flight_key, None)
+
+    async def _facts(self, address: str, chain_id: int, key: tuple) -> dict:
+        lower = address.lower()
+        observed_at = time.time()
+        timed_out = {"status": "unknown", "reason": "GoPlus timed out", "data": {}}
         code, verification, creation, security = await asyncio.gather(
-            self._web3.get_bytecode(address, chain_id=chain_id),
-            self._web3.is_verified_contract(address, chain_id=chain_id),
-            self._web3.get_contract_creation_info(address, chain_id=chain_id),
-            self._scam_db.fetch_address_security(address),
+            _within_timeout(self._web3.get_bytecode(address, chain_id=chain_id), None),
+            _within_timeout(self._web3.is_verified_contract(address, chain_id=chain_id), (None, None)),
+            _within_timeout(self._web3.get_contract_creation_info(address, chain_id=chain_id), None),
+            _within_timeout(self._scam_db.fetch_address_security(address), timed_out),
         )
         # web3 6 returns the code hex with 0x, web3 7 without.
         code_hex = None if code is None else code.lower().removeprefix("0x")
