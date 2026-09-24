@@ -42,7 +42,8 @@ class ArbitrumAdapter(EvmAdapter):
             chain_name_value="Arbitrum",
             rpc_url=rpc,
             etherscan_api_key=api_key,
-            honeypot_chain_id=42161,
+            # honeypot.is answers HTTP 400 Invalid chain here; sellability comes from GoPlus.
+            honeypot_chain_id=None,
             known_lockers=KNOWN_LOCKERS,
             quote_tokens=QUOTE_TOKENS,
             factory_address=SUSHISWAP_V2_FACTORY,

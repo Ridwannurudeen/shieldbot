@@ -20,6 +20,12 @@ logger = logging.getLogger(__name__)
 # web3 7 from waiting its 30 s default. Both versions accept HTTPProvider(request_kwargs=...).
 RPC_REQUEST_TIMEOUT_SECONDS = 10
 
+# Without honeypot.is no sell is simulated; HoneypotService falls back to GoPlus's own flags.
+HONEYPOT_IS_UNSUPPORTED = (
+    'honeypot.is unsupported for this chain; any honeypot and tax data here is GoPlus-reported, '
+    'not simulated by ShieldBot'
+)
+
 EXPLORER_BACKENDS = {
     1: 'etherscan', 56: 'etherscan', 8453: 'etherscan',
     42161: 'etherscan', 137: 'etherscan', 10: 'etherscan', 204: 'etherscan',
@@ -317,7 +323,7 @@ class EvmAdapter(ChainAdapter):
             'reason': 'No honeypot data returned', 'field_providers': {},
         }
         if self._honeypot_chain_id is None:
-            result['reason'] = 'honeypot.is unsupported for this chain'
+            result['reason'] = HONEYPOT_IS_UNSUPPORTED
             return result
         try:
             async with aiohttp.ClientSession() as session:
@@ -381,7 +387,7 @@ class EvmAdapter(ChainAdapter):
             'reason': 'No tax data returned', 'field_providers': {},
         }
         if self._honeypot_chain_id is None:
-            result['reason'] = 'honeypot.is unsupported for this chain'
+            result['reason'] = HONEYPOT_IS_UNSUPPORTED
             return result
         try:
             async with aiohttp.ClientSession() as session:
