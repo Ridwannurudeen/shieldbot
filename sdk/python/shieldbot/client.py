@@ -1,6 +1,7 @@
 """ShieldBot Python SDK — async client with local verdict caching."""
 
 import json
+import re
 import time
 import logging
 from typing import Dict, Optional
@@ -22,6 +23,18 @@ class ShieldBotError(Exception):
         super().__init__(f"ShieldBot API error {status_code}: {message}")
 
 DEFAULT_BASE_URL = "https://api.shieldbotsecurity.online"
+
+_WEI_PATTERN = re.compile(r"0[xX][0-9a-fA-F]+|[0-9]+")
+
+
+def _decimal_wei(value) -> str:
+    """Return a wei amount as a decimal string; anything but a non-negative integer is rejected."""
+    if type(value) is int and value >= 0:
+        return str(value)
+    if isinstance(value, str) and _WEI_PATTERN.fullmatch(value.strip()):
+        text = value.strip()
+        return str(int(text, 16) if text[:2].lower() == "0x" else int(text))
+    raise ValueError("value must be a non-negative integer amount of wei (int, decimal or 0x hex string)")
 
 
 class ShieldBot:
@@ -111,16 +124,19 @@ class ShieldBot:
         """Check a transaction against the agent firewall.
 
         Args:
-            transaction: Dict with keys: from, to, data (optional), value (optional), chain_id (required).
+            transaction: Dict with keys: from, to, data (optional), value (optional wei as an int,
+                decimal or 0x hex string; sent as a decimal string), chain_id (required).
 
         Returns:
             Verdict with allowed/blocked status, score, flags, and evidence.
 
         Raises:
-            ValueError: before any request when chain_id is missing; the SDK never assumes a chain.
+            ValueError: before any request when chain_id is missing (the SDK never assumes a chain)
+                or value is not a non-negative integer amount of wei.
         """
         if transaction.get("chain_id") is None:
             raise ValueError("chain_id is required")
+        transaction = {**transaction, "value": _decimal_wei(transaction.get("value", "0"))}
         to_addr = transaction.get("to", "")
         cache_key = self._cache_key(transaction)
 
