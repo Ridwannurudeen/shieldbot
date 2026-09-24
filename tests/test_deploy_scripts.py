@@ -449,6 +449,8 @@ def test_cutover_deploys_in_order_and_touches_only_its_two_units(server):
 
 def test_cutover_is_idempotent(server):
     assert server.run("--cutover", server.target)[0] == 0
+    # Each cutover backs up into a directory named to the second; a fast machine finishes both in one second.
+    time.sleep(1 - time.time() % 1)
     code, out, err = server.run("--cutover", server.target)
     assert code == 0, err + out
     assert "already deployed" in out
