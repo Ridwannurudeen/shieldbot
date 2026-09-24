@@ -125,6 +125,14 @@ def test_unknown_scans_have_their_own_state_and_reason_in_history_and_dashboard(
 """)
 
 
+def test_popup_version_label_comes_from_the_manifest():
+    run_popup(r"""
+  await ready();
+  const version = 'v' + context.chrome.runtime.getManifest().version;
+  assert.deepEqual(versions.map(el => el.textContent), [version, version]);
+""")
+
+
 def test_popup_tabs_follow_the_tab_pattern_from_the_keyboard():
     run_popup(r"""
   await ready();
@@ -203,3 +211,11 @@ def test_popup_markup_claims_no_protection_before_a_scan():
     assert ">PROTECTED<" not in html
     assert ">100%<" not in html
 
+
+def test_popup_does_not_hard_code_its_version():
+    assert "v3.0.0" not in (EXTENSION / "popup.html").read_text(encoding="utf-8")
+
+
+def test_contract_monitoring_row_has_its_own_fallback_text():
+    row = next(element for element in parse("popup.html") if element.get("data-i18n") == "dashContractMonitor")
+    assert row["text"].strip() == "Contract Monitoring"

@@ -78,6 +78,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     await initI18n();
     applyTranslations();
   }
+  const version = "v" + chrome.runtime.getManifest().version;
+  document.querySelectorAll(".version, .dh-version").forEach((el) => { el.textContent = version; });
   if (_isFullPage) {
     document.body.classList.add("expanded");
     const btn = document.getElementById("expandBtn");
