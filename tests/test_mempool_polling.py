@@ -17,10 +17,16 @@ TOKEN = "0x" + "22" * 20
 APPROVE_UNLIMITED = "0x095ea7b3" + "00" * 12 + "11" * 20 + "ff" * 32
 
 
-def _pending_block():
-    """A pending block as web3 returns it: AttributeDicts carrying HexBytes hashes and inputs."""
+def _pending_block(sealed=False):
+    """A pending block as web3 returns it: AttributeDicts carrying HexBytes hashes and inputs.
+
+    A genuine pending block has no hash and no miner yet. Some RPCs answer "pending" with the latest
+    sealed block instead, which carries both.
+    """
     return AttributeDict.recursive(
         {
+            "hash": HexBytes(b"\xbb" * 32) if sealed else None,
+            "miner": "0x" + "33" * 20 if sealed else None,
             "transactions": [
                 {
                     "hash": HexBytes(b"\x01" * 32),
@@ -101,6 +107,21 @@ async def test_pending_block_fallback_feeds_the_analysis():
     assert [(a["alert_type"], a["severity"], a["victim_tx"]) for a in alerts] == [
         ("suspicious_approval", "HIGH", "0x" + "01" * 32),
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_sealed_block_answered_for_pending_is_skipped_with_one_warning_per_chain(caplog):
+    w3 = MagicMock()
+    w3.eth.get_block.return_value = _pending_block(sealed=True)
+    monitor = MempoolMonitor(MagicMock())
+
+    with caplog.at_level(logging.WARNING, logger="services.mempool_service"):
+        assert await monitor._get_pending_block(w3, 56) == []
+        assert await monitor._get_pending_block(w3, 56) == []
+        assert await monitor._get_pending_block(w3, 204) == []
+
+    warned = [r.args[0] for r in caplog.records if r.levelno == logging.WARNING]
+    assert warned == [56, 204]
 
 
 @pytest.mark.asyncio
