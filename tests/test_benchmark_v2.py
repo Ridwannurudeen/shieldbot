@@ -88,7 +88,8 @@ def record(address, status="ok", score=None, chain_id=1):
 def test_the_dataset_holds_every_class_minimum_with_about_40_percent_safe():
     data = json.loads(Path(V2).read_text(encoding="utf-8"))
     entries = load_dataset(V2)
-    assert len(entries) == len(data["entries"]) >= 500
+    # A stale entry stays in the file and is left out when it loads.
+    assert 500 <= len(entries) <= len(data["entries"])
     counts = {name: sum(1 for e in entries if e.category == name) for name in CLASSES}
     assert all(counts[name] >= minimum for name, minimum in MINIMUMS.items()), counts
     assert 0.35 <= counts["safe"] / len(entries) <= 0.45
