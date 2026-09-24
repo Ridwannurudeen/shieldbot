@@ -546,11 +546,12 @@ async def _fetch_mempool_data(chain_id):
     params = {'limit': 10}
     if chain_id is not None:
         params['chain_id'] = chain_id
+    api_url = settings.shieldbot_api_url.rstrip('/')
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-        async with session.get(f"{settings.shieldbot_api_url}/api/mempool/alerts", params=params) as resp:
+        async with session.get(f"{api_url}/api/mempool/alerts", params=params) as resp:
             resp.raise_for_status()
             alerts = (await resp.json())['alerts']
-        async with session.get(f"{settings.shieldbot_api_url}/api/mempool/stats") as resp:
+        async with session.get(f"{api_url}/api/mempool/stats") as resp:
             resp.raise_for_status()
             stats = await resp.json()
     return alerts, stats

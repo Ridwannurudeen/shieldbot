@@ -306,6 +306,16 @@ class TestThreatsCommand:
         assert not bot_module.container.mempool_monitor.mock_calls
 
     @pytest.mark.asyncio
+    async def test_a_trailing_slash_on_the_api_url_is_ignored(self, bot_module, monkeypatch, mempool_api):
+        monkeypatch.setattr(bot_module, "settings", SimpleNamespace(shieldbot_api_url=mempool_api.url + "/"))
+        update = _threats_update()
+
+        await bot_module.threats_command(update, SimpleNamespace(args=[]))
+
+        assert mempool_api.requests == [("/api/mempool/alerts", {"limit": "10"}), ("/api/mempool/stats", {})]
+        assert "• Pending txs seen: 12,345\n" in update.message.reply_text.await_args.args[0]
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("api_up", [True, False], ids=["api-error", "api-down"])
     async def test_says_unavailable_when_the_api_does_not_answer(self, bot_module, monkeypatch, mempool_api, api_up):
         if api_up:
