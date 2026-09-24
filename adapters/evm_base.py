@@ -249,21 +249,28 @@ class EvmAdapter(ChainAdapter):
     async def _verification(self, address: str) -> Tuple[Optional[bool], Optional[str]]:
         """The chain's explorer and Sourcify together: verified when either says so, unverified
         only when both say not, unknown when one could not be read and the other did not verify.
+
+        Each lookup is awaited for PROVIDER_TIMEOUT (8 s) at most and counts as unknown after it,
+        so verification takes at most about 16 s on a chain with Etherscan, and 8 s on Robinhood
+        Chain, where Sourcify and Blockscout are asked one after the other within one bound.
         """
+        # Imported here: services imports utils.web3_client, which imports this module's adapters.
+        from services.counterparty_service import within_timeout
+        from services.explorer_service import ExplorerResult
+
         if self._explorer_backend == 'sourcify_blockscout':
-            result = await self._explorer_service.get_verification_status(address, self._chain_id)
+            result = await within_timeout(
+                self._explorer_service.get_verification_status(address, self._chain_id),
+                ExplorerResult('unknown', reason='Sourcify and Blockscout timed out'),
+            )
             if result.status == 'unknown':
                 logger.warning("[%s] Verification unknown: %s", self._chain_name, result.reason)
                 return (None, None)
             return (result.status == 'verified', None)
-        from services.counterparty_service import within_timeout
-        from services.explorer_service import ExplorerResult
-
-        explorer, source = await self._etherscan_verification(address)
+        explorer, source = await within_timeout(self._etherscan_verification(address), (None, None))
         if explorer is True:
             return (True, source)
-        # Sourcify is asked only when the explorer did not verify the contract, and within the
-        # providers' time limit, so a stalled Sourcify leaves the answer Unknown in bounded time.
+        # Sourcify is asked only when the explorer did not verify the contract.
         sourcify = await within_timeout(
             self._explorer_service.get_sourcify_verification(address, self._chain_id),
             ExplorerResult('unknown', reason='Sourcify timed out', provider='sourcify'),

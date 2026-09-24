@@ -168,6 +168,37 @@ async def test_a_stalled_sourcify_leaves_the_answer_unknown_in_bounded_time(monk
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sourcify, expected",
+    [(ExplorerResult("verified"), (True, None)), (ExplorerResult("unverified"), (None, None))],
+    ids=["sourcify-verifies", "sourcify-denies"],
+)
+async def test_a_stalled_explorer_is_unknown_in_bounded_time_and_sourcify_is_still_asked(
+    monkeypatch, sourcify, expected
+):
+    import services.counterparty_service as counterparty_module
+
+    monkeypatch.setattr(counterparty_module, "PROVIDER_TIMEOUT", 0.05)
+    lookup = AsyncMock(return_value=sourcify)
+    adapter = _adapter_with((False, None), lookup)
+    adapter._etherscan_verification = AsyncMock(side_effect=_hang)
+    assert await asyncio.wait_for(adapter.is_verified_contract(ADDRESS), 1) == expected
+    lookup.assert_awaited_once_with(ADDRESS, 56)
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_robinhood_chain_verification_is_unknown_in_bounded_time(monkeypatch):
+    import services.counterparty_service as counterparty_module
+
+    monkeypatch.setattr(counterparty_module, "PROVIDER_TIMEOUT", 0.05)
+    adapter = EvmAdapter(4663, "Robinhood Chain", "https://rpc.invalid")
+    assert adapter._explorer_backend == "sourcify_blockscout"
+    adapter._explorer_service = MagicMock(get_verification_status=AsyncMock(side_effect=_hang))
+    adapter.get_bytecode = AsyncMock(return_value="0x6080")
+    assert await asyncio.wait_for(adapter.is_verified_contract(ADDRESS), 1) == (None, None)
+
+
+@pytest.mark.asyncio
 async def test_an_unreadable_code_leaves_the_clone_check_out():
     adapter = _adapter_with((False, None), AsyncMock(return_value=ExplorerResult("unverified")), code=None)
     assert await adapter.is_verified_contract(ADDRESS) == (False, None)
