@@ -684,13 +684,21 @@ const provider = {
 window.ethereum = provider;
 window.dispatchEvent = () => {};
 const context = vm.createContext({
-  window, document, crypto: {subtle: webcrypto.subtle, randomUUID: webcrypto.randomUUID.bind(webcrypto)},
-  TextEncoder, CustomEvent, structuredClone, queueMicrotask,
+  window, document, TextEncoder, CustomEvent, structuredClone, queueMicrotask,
   Event: class { constructor(type) { this.type = type; } },
   console: new Proxy({}, {get: (_, name) => (...args) => logged.push([name, ...args])}),
   setTimeout(fn, delay) { const id = ++nextTimer; timers.set(id, {fn, delay}); return id; },
   clearTimeout(id) { timers.delete(id); }, setInterval() { return 0; }, clearInterval() {},
 });
+// In a browser, crypto's promises belong to the page's world, so a page that replaces its
+// Promise built-ins reaches them too. Make them the context's promises here as well.
+context.crypto = vm.runInContext(`(host) => ({
+  subtle: {
+    importKey: (...args) => Promise.resolve(host.subtle.importKey(...args)),
+    sign: (...args) => Promise.resolve(host.subtle.sign(...args)),
+  },
+  randomUUID: () => host.randomUUID(),
+})`, context)(webcrypto);
 vm.runInContext(fs.readFileSync('extension/inject.js', 'utf8'), context);
 // Play content.js's side of the handoff: here inject.js started first and is listening.
 const accepted = !document.dispatchEvent(new CustomEvent('shieldai:channel', {detail: 'channel-token', cancelable: true}));
@@ -890,6 +898,13 @@ PATCHES = {
         "  return then.call(this, typeof ok === 'function' ? (value) => ok(value && value.byteLength === 32 ? new Uint8Array(32).buffer : value) : ok, fail);"
         "};"
         "Promise.prototype.constructor = function Page(executor) { return new Promise(executor); };"
+    ),
+    # The promise a native then returns is built by the constructor the page puts on
+    # Promise.prototype, so anything read from it (rather than from the callback) can be forged.
+    "promise-species": (
+        "Promise.prototype.constructor = class Page extends Promise {"
+        "  constructor(executor) { super((resolve, reject) => executor(() => resolve(new Uint8Array(32).buffer), reject)); }"
+        "};"
     ),
 }
 
