@@ -1214,7 +1214,8 @@ async def _build_signature_only_response(req: FirewallRequest, policy_override: 
         "analysis": f"Signature-only analysis for {sign_method}",
         "plain_english": (
             alert['recommended_action'] if not covered else
-            "This signature request contains risky permission patterns. Verify the spender, token, and terms before signing." if risk_score >= 40
+            "This signature request contains risky permission patterns. Verify the spender, token, and terms before signing."
+            if classification in (verdicts.HIGH_RISK, verdicts.BLOCK_RECOMMENDED)
             else "No dangerous signature permission pattern was detected."
         ),
         "verdict": f"{classification} - Signature risk {alert['risk_display']}",
@@ -2079,6 +2080,17 @@ async def public_stats():
         "registry_records_confirmed": registry_records_confirmed,
         "unknown_ledger":         unknown_ledger.summary(),
     }
+
+
+@app.get("/api/verdicts")
+async def verdict_vocabulary():
+    """The verdict vocabulary and band tables every ShieldBot surface uses, read-only.
+
+    A score is in the first band whose min_score it reaches. risk_level_thresholds are the lowest
+    scores of risk levels HIGH and MEDIUM as this server is calibrated. agent_firewall gives the
+    agent firewall's default thresholds and the decisions each classification can meet under them.
+    """
+    return verdicts.describe(container.calibration if container else None)
 
 
 @app.get("/api/coverage/{chain_id}")

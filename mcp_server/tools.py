@@ -10,7 +10,7 @@ from typing import Any, Dict, List
 
 from core.analyzer import AnalysisContext
 from core.extension_formatter import format_extension_alert
-from core.verdicts import UNKNOWN
+from core.verdicts import HIGH, LOW, MEDIUM, UNKNOWN
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 
 logger = logging.getLogger(__name__)
@@ -441,9 +441,9 @@ async def handle_scan_for_injection(container, params: Dict) -> Dict:
 
     clean = len(detections) == 0
     if detections:
-        risk_level = "HIGH" if len(detections) >= 3 else "MEDIUM"
+        risk_level = HIGH if len(detections) >= 3 else MEDIUM
     else:
-        risk_level = "LOW"
+        risk_level = LOW
 
     return {
         "clean": clean,

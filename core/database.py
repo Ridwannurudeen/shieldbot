@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Tuple
 import aiosqlite
 
 from core.extension_formatter import is_scan_incomplete
-from core.verdicts import CAUTION_MIN, THREAT_CONDITION, stored_level
+from core.verdicts import CAUTION_MIN, HIGH, THREAT_CONDITION, stored_level
 
 logger = logging.getLogger(__name__)
 
@@ -1077,10 +1077,10 @@ class Database:
             return None
         deployer = row[0]
 
-        cursor = await self._db.execute("""
+        cursor = await self._db.execute(f"""
             SELECT
                 COUNT(DISTINCT d.contract_address),
-                COALESCE(SUM(CASE WHEN cs.risk_level = 'HIGH' THEN 1 ELSE 0 END), 0)
+                COALESCE(SUM(CASE WHEN cs.risk_level = '{HIGH}' THEN 1 ELSE 0 END), 0)
             FROM deployers d
             LEFT JOIN contract_scores cs
                 ON cs.address = d.contract_address AND cs.chain_id = d.chain_id

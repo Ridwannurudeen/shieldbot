@@ -79,10 +79,16 @@ def classify(score, bands=BANDS) -> str:
     return bands[-1][0]
 
 
+def level_thresholds(calibration=None) -> tuple:
+    """The lowest scores of risk levels HIGH and MEDIUM, calibrated when a calibration is given."""
+    if calibration:
+        return calibration.high_threshold, calibration.medium_threshold
+    return BLOCK_MIN, CAUTION_MIN
+
+
 def level_from_score(score, calibration=None) -> str:
     """The risk level of a score, at the calibrated thresholds when a calibration is given."""
-    high = calibration.high_threshold if calibration else BLOCK_MIN
-    medium = calibration.medium_threshold if calibration else CAUTION_MIN
+    high, medium = level_thresholds(calibration)
     if score >= high:
         return HIGH
     if score >= medium:
@@ -99,3 +105,25 @@ def stored_level(score, level) -> str:
     if level not in _LEVEL_RANK:
         return band if band == HIGH else level
     return band if _LEVEL_RANK[band] > _LEVEL_RANK[level] else level
+
+
+def describe(calibration=None) -> dict:
+    """The vocabulary and band tables as GET /api/verdicts publishes them."""
+    high, medium = level_thresholds(calibration)
+    return {
+        "classifications": list(CLASSIFICATIONS),
+        "risk_levels": list(RISK_LEVELS),
+        "agent_verdicts": list(AGENT_VERDICTS),
+        "bands": [{"classification": name, "min_score": lowest} for name, lowest in BANDS],
+        "signature_bands": [{"classification": name, "min_score": lowest} for name, lowest in SIGNATURE_BANDS],
+        "risk_level_thresholds": {HIGH: high, MEDIUM: medium},
+        "unknown": "A scan with incomplete coverage has status 'unknown' and is never classified SAFE.",
+        "strict_block_score": STRICT_BLOCK_SCORE,
+        "agent_firewall": {
+            "auto_allow_below": AGENT_ALLOW_BELOW,
+            "auto_block_above": AGENT_BLOCK_ABOVE,
+            "decisions_by_classification": {
+                name: list(decisions) for name, decisions in AGENT_DECISIONS_BY_CLASSIFICATION.items()
+            },
+        },
+    }
