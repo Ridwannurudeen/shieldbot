@@ -4,7 +4,7 @@
 
 **On-chain guarded transfers for Robinhood Chain, backed by inspectable token-risk evidence.**
 
-[Judge guide](docs/JUDGE_GUIDE.md) · [Recorded simulations](tests/fixtures/robinhood_simulation/) · [Verdict registry source](contracts/base/src/ShieldBotVerdictRegistry.sol) · [Test results](docs/TESTING.md)
+[Judge guide](docs/JUDGE_GUIDE.md) · [Recorded simulations](tests/fixtures/robinhood_simulation/) · [Verdict registry source](contracts/base/src/ShieldBotVerdictRegistry.sol) · [Deployed contracts](docs/DEPLOYMENTS.md) · [Test results](docs/TESTING.md)
 
 </div>
 
@@ -167,7 +167,7 @@ Token names, symbols and pools as listed by GeckoTerminal (network `robinhood`) 
 
 ## Submission status and measured usage
 
-- **Registry deployment:** pending. The Robinhood Chain verdict registry, guard and guarded transfer are not deployed yet, so no contract address is listed.
+- **Registry deployment:** pending. The Robinhood Chain verdict registry, guard and guarded transfer are not deployed yet, so no contract address is listed. The contracts that are deployed, on Base and BNB Smart Chain, are listed with their owners and record counts in [DEPLOYMENTS.md](docs/DEPLOYMENTS.md).
 - **Measured usage:** the `GET /api/stats` snapshot supplied on **2026-09-22** is recorded in [SUBMISSION.md](docs/SUBMISSION.md); its time of day and the revision serving it were not supplied. Dashboard loading values and historical projections are not usage evidence.
 - **Release boundary:** this README describes this repository snapshot. Deployment, live evidence URLs and the browser-store release must be verified separately.
 
