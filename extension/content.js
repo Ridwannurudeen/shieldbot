@@ -200,6 +200,11 @@
         buttons[next].focus();
       }
     });
+    // Focus that leaves the overlay (for example from a button that becomes
+    // disabled) returns to the dialog, so Tab and Escape keep working.
+    overlay.addEventListener("focusout", (event) => {
+      if (!overlay.contains(event.relatedTarget)) modal.focus();
+    });
     (document.body || document.documentElement).appendChild(overlay);
     modal.focus();
     if (requestId) {

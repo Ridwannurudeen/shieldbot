@@ -66,6 +66,7 @@ class El {
     return all.filter(el => el.tagName === tag && !(selector.includes(':not([disabled])') && el.disabled));
   }
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
+  contains(el) { return el === this || this.descendants().includes(el); }
 }
 const body = new El('body'), head = new El('head');
 const document = {
@@ -235,6 +236,28 @@ def test_overlay_is_a_modal_dialog_that_keeps_focus_and_rejects_on_escape(kind):
   assert.equal(overlay(), null);
 """,
         kind,
+    )
+
+
+def test_focus_that_leaves_the_overlay_returns_to_the_dialog():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('request');
+  const modal = overlay().querySelector('.shieldai-modal');
+  const explain = document.getElementById('shieldai-explain');
+  explain.focus();
+  explain.click();
+  assert(explain.disabled, 'the explain button should disable itself');
+  overlay().dispatch('focusout', {target: explain, relatedTarget: null});
+  assert.equal(document.activeElement, modal, 'focus was lost when the focused button was disabled');
+  const block = document.getElementById('shieldai-block');
+  block.focus();
+  overlay().dispatch('focusout', {target: explain, relatedTarget: block});
+  assert.equal(document.activeElement, block, 'focus moving inside the dialog must stay where it went');
+"""
     )
 
 
