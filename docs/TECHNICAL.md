@@ -865,6 +865,7 @@ CMD ["python", "bot.py"]
 
 - **CORS Allowlist**: Allows configured origins; this is not authentication
 - **Rate Limiting**: API middleware applies key quotas or an IP-based fallback
+- **AI Spend Cap**: advisor chat (API side panel and Telegram) and scan explanations share one daily token budget, `AI_DAILY_TOKEN_BUDGET` (default 1,000,000 input plus output tokens per UTC day, counted from the provider's reported usage and stored in SQLite). Once it is used, chat answers that AI chat is paused for today and explanations fall back to rule-based text. The check runs before each call, so calls already in flight can overshoot it by their own size.
 - **Input Validation**: Review the request model and handler for the endpoint being used; this document does not claim that every input path has identical validation.
 - **Error Handling**: Inspect endpoint error responses separately; this document does not certify that every path redacts internal details.
 

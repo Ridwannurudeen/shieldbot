@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from utils.chain_info import get_chain_name
@@ -24,14 +25,24 @@ _THREAT_RE = re.compile(
     re.IGNORECASE,
 )
 
+AI_CHAT_PAUSED = (
+    "AI chat is paused for today because the daily AI budget is used up. "
+    "It resumes at 00:00 UTC."
+)
+
+
+def _utc_day() -> int:
+    return int(time.time() // 86400)
+
 
 class Advisor:
     """Intent-routing advisor backed by Claude for ShieldBot chat."""
 
-    def __init__(self, tools, db, ai_analyzer):
+    def __init__(self, tools, db, ai_analyzer, daily_token_budget: int):
         self.tools = tools
         self.db = db
         self.ai = ai_analyzer
+        self.daily_token_budget = daily_token_budget
         self.sonnet_model = SONNET_MODEL
         self.haiku_model = HAIKU_MODEL
 
@@ -154,10 +165,12 @@ class Advisor:
                 "AI analysis is currently unavailable. "
                 "Please try again later or check your API key configuration."
             )
+        elif await self._ai_budget_spent():
+            response_text = AI_CHAT_PAUSED
         else:
             try:
-                response_text = await asyncio.wait_for(
-                    self.ai.chat(
+                response_text, tokens = await asyncio.wait_for(
+                    self.ai.chat_with_usage(
                         model=self.sonnet_model,
                         messages=messages,
                         system=(
@@ -181,6 +194,8 @@ class Advisor:
                     "I encountered an error processing your request. "
                     "Please try again."
                 )
+            else:
+                await self.db.add_ai_tokens_used(_utc_day(), tokens)
 
         # Persist both sides of the conversation
         await self.db.insert_chat_message(user_id, "user", message)
@@ -217,9 +232,9 @@ class Advisor:
     async def explain_scan(self, scan_result: dict) -> str:
         """Generate a plain-English explanation of a scan result.
 
-        Uses Haiku for speed. Falls back to rule-based if AI is disabled.
+        Uses Haiku for speed. Falls back to rule-based if AI is disabled or today's budget is spent.
         """
-        if not self.ai.is_available():
+        if not self.ai.is_available() or await self._ai_budget_spent():
             return self._rule_based_explanation(scan_result)
 
         prompt = EXPLAIN_SCAN_TEMPLATE.format(
@@ -227,7 +242,7 @@ class Advisor:
         )
 
         try:
-            return await self.ai.chat(
+            explanation, tokens = await self.ai.chat_with_usage(
                 model=self.haiku_model,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=300,
@@ -237,10 +252,16 @@ class Advisor:
         except Exception as e:
             logger.error("Advisor explain_scan failed: %s", type(e).__name__)
             return self._rule_based_explanation(scan_result)
+        await self.db.add_ai_tokens_used(_utc_day(), tokens)
+        return explanation
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    async def _ai_budget_spent(self) -> bool:
+        """Whether today's AI token budget, shared by chat and explanations, is used up."""
+        return await self.db.get_ai_tokens_used(_utc_day()) >= self.daily_token_budget
 
     @staticmethod
     def _rule_based_explanation(scan_result: dict) -> str:

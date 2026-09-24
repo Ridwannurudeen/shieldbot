@@ -7,7 +7,7 @@ import os
 import json
 import logging
 import anthropic
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 try:
     import openai as _openai_mod
@@ -74,6 +74,17 @@ class AIAnalyzer:
         system: str = None,
         max_tokens: int = 500,
     ) -> str:
+        """Response text of chat_with_usage()."""
+        text, _ = await self.chat_with_usage(model, messages, system=system, max_tokens=max_tokens)
+        return text
+
+    async def chat_with_usage(
+        self,
+        model: str,
+        messages: List[Dict],
+        system: str = None,
+        max_tokens: int = 500,
+    ) -> Tuple[str, int]:
         """Unified chat method — tries Anthropic first, falls back to OpenAI.
 
         Args:
@@ -83,7 +94,7 @@ class AIAnalyzer:
             max_tokens: Max response tokens.
 
         Returns:
-            Response text string.
+            Response text string and the tokens the provider reports for the call (input plus output).
 
         Raises:
             RuntimeError: If no AI provider is available.
@@ -94,7 +105,7 @@ class AIAnalyzer:
             if system:
                 kwargs["system"] = system
             response = await self.client.messages.create(**kwargs)
-            return response.content[0].text
+            return response.content[0].text, response.usage.input_tokens + response.usage.output_tokens
 
         # Fallback to OpenAI
         if self._openai_client:
@@ -108,7 +119,7 @@ class AIAnalyzer:
                 max_tokens=max_tokens,
                 messages=oai_messages,
             )
-            return response.choices[0].message.content
+            return response.choices[0].message.content, response.usage.total_tokens
 
         raise RuntimeError("No AI provider available")
 

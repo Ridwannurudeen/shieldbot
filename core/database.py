@@ -507,6 +507,7 @@ class Database:
         await self._create_launch_feed_tables()
         await self._create_launch_alert_tables()
         await self._create_verdict_evidence_tables()
+        await self._create_ai_usage_tables()
 
         # Migrate: add registered_by_key column for existing DBs
         try:
@@ -1278,6 +1279,33 @@ class Database:
         )
         await self._db.commit()
         return cursor.rowcount
+
+    # --- AI Token Usage ---
+
+    async def _create_ai_usage_tables(self):
+        await self._db.executescript("""
+            CREATE TABLE IF NOT EXISTS ai_token_usage (
+                utc_day INTEGER PRIMARY KEY,
+                tokens INTEGER NOT NULL
+            );
+        """)
+        await self._db.commit()
+
+    async def get_ai_tokens_used(self, utc_day: int) -> int:
+        """Tokens the advisor's AI calls used on a UTC day number."""
+        cursor = await self._db.execute(
+            "SELECT tokens FROM ai_token_usage WHERE utc_day = ?", (utc_day,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def add_ai_tokens_used(self, utc_day: int, tokens: int):
+        """Add tokens to a UTC day's count and commit."""
+        await self._db.execute("""
+            INSERT INTO ai_token_usage (utc_day, tokens) VALUES (?, ?)
+            ON CONFLICT(utc_day) DO UPDATE SET tokens = tokens + excluded.tokens
+        """, (utc_day, tokens))
+        await self._db.commit()
 
     # --- Tracked Pairs ---
 
