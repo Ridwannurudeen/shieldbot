@@ -860,13 +860,16 @@
       return display;
     }
 
+    // The counts the mempool monitor keeps in memory.
+    const MEMPOOL_KEYS = ['transactions_monitored', 'sandwiches_caught', 'suspicious_approvals', 'chains_protected'];
+
     // A null count is unknown, never 0. A background_workers_note says the mempool monitor runs in a separate
-    // process this API does not read, so its counts are Unavailable; otherwise a dash means not reporting.
-    function missingText(stats) {
-      return stats && stats.background_workers_note ? 'Unavailable' : '—';
+    // process this API does not read, so its counts are Unavailable; any other null count is a dash.
+    function missingText(stats, key) {
+      return stats && stats.background_workers_note && MEMPOOL_KEYS.includes(key) ? 'Unavailable' : '—';
     }
 
-    function StatCard({ label, span, value, color, loading, note, missing, className = '' }) {
+    function StatCard({ label, span, value, color, loading, note, missing = '—', className = '' }) {
       const display = useCountUp(loading || value == null ? 0 : value);
       return (
         <div className={`glass rounded-xl p-4 fade-up flex flex-col gap-1 text-center ${className}`}
@@ -887,7 +890,16 @@
 
     function PlatformStatsBar({ stats, loading }) {
       const since = stats && stats.mempool_counting_since;
-      const anyMissing = stats && STAT_ITEMS.some(s => stats[s.key] == null);
+      const dashed = stats && STAT_ITEMS.some(s => stats[s.key] == null && missingText(stats, s.key) === '—');
+      const footnote = stats === null
+        ? 'Platform statistics are unavailable right now.'
+        : [
+            stats.background_workers_note
+              && 'Unavailable: the mempool monitor runs in a separate process that this API does not read, so its counts are unknown here, not zero.',
+            since
+              ? `Transactions monitored, sandwich attacks and suspicious approvals are counted since ${new Date(since * 1000).toLocaleString()}, when the mempool monitor last started.`
+              : dashed && 'A dash means that source is not reporting right now.',
+          ].filter(Boolean).join(' ');
       // A monitored chain whose mempool could not be read is Unknown; it is not counted as watched.
       const unobservable = (stats && stats.mempool_chains_unobservable) || [];
       const mempoolNote = unobservable.length
@@ -898,21 +910,13 @@
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
             {STAT_ITEMS.map(s => (
               <StatCard key={s.key} label={s.label} span={s.span} value={stats ? stats[s.key] : null}
-                        color={s.color} loading={loading} missing={missingText(stats)}
+                        color={s.color} loading={loading} missing={missingText(stats, s.key)}
                         note={s.key === 'chains_protected' ? mempoolNote : null}
                         className={s.key === 'chains_protected' ? 'col-span-2 lg:col-span-1' : ''} />
             ))}
           </div>
-          {!loading && (stats === null || since || anyMissing) && (
-            <div className="text-xs mt-2" style={{ color:'#94A3B8' }}>
-              {stats === null
-                ? 'Platform statistics are unavailable right now.'
-                : stats.background_workers_note
-                  ? 'Unavailable: the mempool monitor runs in a separate process that this API does not read, so its counts are unknown here, not zero.'
-                  : since
-                  ? `Transactions monitored, sandwich attacks and suspicious approvals are counted since ${new Date(since * 1000).toLocaleString()}, when the mempool monitor last started.`
-                  : 'A dash means that source is not reporting right now.'}
-            </div>
+          {!loading && footnote && (
+            <div className="text-xs mt-2" style={{ color:'#94A3B8' }}>{footnote}</div>
           )}
         </div>
       );
@@ -924,7 +928,7 @@
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {DAY_ITEMS.map(s => (
               <StatCard key={s.key} label={s.label} span={s.span} value={stats ? stats[s.key] : null}
-                        color={s.color} loading={loading} missing={missingText(stats)} />
+                        color={s.color} loading={loading} />
             ))}
           </div>
           <div className="text-xs mt-2" style={{ color:'#94A3B8' }}>

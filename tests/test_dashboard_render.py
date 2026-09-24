@@ -248,6 +248,18 @@ def test_mempool_counts_the_api_cannot_read_show_unavailable_not_zero():
     assert "the mempool monitor runs in a separate process" in text
 
 
+def test_with_a_workers_note_other_null_counts_keep_the_dash():
+    stats = {**STATS, **dict.fromkeys(MEMPOOL_FIELDS), "mempool_counting_since": None}
+    stats.update(contracts_scanned=None, transactions_blocked_24h=None, background_workers_note=WORKERS_NOTE)
+    text = render(stats)
+    assert "UnavailableTransactions Monitored" in text
+    assert "—Contracts Scanned" in text
+    assert "UnavailableContracts Scanned" not in text
+    assert "—Transactions Blockedlast 24 h" in text
+    assert "Unavailable: the mempool monitor runs in a separate process" in text
+    assert "A dash means that source is not reporting right now." in text
+
+
 def test_null_counts_without_a_workers_note_keep_the_dash():
     text = render({**STATS, "transactions_monitored": None, "mempool_counting_since": None})
     assert "—Transactions Monitored" in text
