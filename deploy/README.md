@@ -61,6 +61,8 @@ NO-GO when:
 - the recorder key (`ROBINHOOD_RECORDER_PRIVATE_KEY`) is set in the shared `/opt/shieldbot/.env`, the bot unit
   loads `recorder.env` or sets the key, or the running bot process has the key in its environment (or its
   environment cannot be read). Only the API may hold that key: `contracts/base/DEPLOY_ROBINHOOD.md`, section 8.
+- `BACKGROUND_WORKERS=external` is set in the shared `.env` and the API unit still loads `recorder.env` or sets
+  the key: the workers unit holds it then (`docs/DEPLOYMENT.md`)
 - the commit does not exist after `git fetch`, or is on no `origin` branch (a commit made only on the server)
 
 It also names the origin branches holding the commit, how far it is ahead of the deployed one and whether

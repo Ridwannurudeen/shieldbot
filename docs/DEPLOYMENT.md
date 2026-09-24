@@ -244,12 +244,26 @@ Check: the API log says `Background work runs in workers.py (BACKGROUND_WORKERS=
 with the registry configured, `Robinhood verdict registry: sending as recorder 0x...`; `/api/stats` carries
 `background_workers_note`.
 
-**Deploys.** `deploy/deploy.sh` stops, backs up and starts only `shieldbot` and `shieldbot-bot`. It does not know
-the workers unit, and its recorder key check looks only at the shared `.env` and the bot, not at whether the API
-unit still loads the key. A cutover or rollback with the workers running would copy the database under a process
-that has it open and leave the workers on the old code.
-Until the script manages the unit, run `systemctl stop shieldbot-workers` before `--cutover` or `--rollback` and
-`systemctl start shieldbot-workers` after it finishes, whether it deployed or rolled back.
+**Deploys.** `deploy/deploy.sh` stops, backs up and starts only `shieldbot` and `shieldbot-bot`; it does not know
+the workers unit. A cutover or rollback with the workers running would copy the database under a process that has
+it open and leave the workers on the old code. Until the script manages the unit, run
+`systemctl stop shieldbot-workers` before `--cutover` or `--rollback` and `systemctl start shieldbot-workers`
+after it finishes, whether it deployed or rolled back. With `BACKGROUND_WORKERS=external` in the shared `.env`,
+`--check` also says NO-GO while the API unit still loads `recorder.env` or sets the key.
+
+**Rolling back past this feature.** A commit older than the workers split has no `workers.py` and ignores the
+setting: after a `--rollback` (or a cutover) to one, the API starts the background work itself again, but sends no
+verdicts while its unit lacks the recorder key. Move everything back, as root:
+
+```bash
+systemctl disable --now shieldbot-workers   # the old commit has no workers.py to run
+systemctl edit shieldbot-workers            # delete the EnvironmentFile=/etc/shieldbot/recorder.env line
+systemctl edit shieldbot                    # add it back: [Service] and EnvironmentFile=/etc/shieldbot/recorder.env
+# then delete the line BACKGROUND_WORKERS=external from /opt/shieldbot/.env, and restart the API
+systemctl restart shieldbot
+```
+
+With the registry configured, the API log says `Robinhood verdict registry: sending as recorder 0x...` again.
 
 To turn it off: `systemctl disable --now shieldbot-workers`, move the recorder key file back to the API unit,
 remove the setting from `/opt/shieldbot/.env` and restart the API.

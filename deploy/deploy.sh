@@ -87,14 +87,14 @@ units_settled() {
 
 # ---------------------------------------------------------------- preflight (read-only)
 preflight() {
-  local head rc=0 bot_unit db_kib refs ref branches
+  local head rc=0 api_unit bot_unit db_kib refs ref branches
   head=$(git -C "$APP" rev-parse HEAD)
 
   say "Current state"
   echo "deployed : $head"
   echo "api      : $(systemctl is-active "$API_UNIT" || true)"
   echo "bot      : $(systemctl is-active "$BOT_UNIT" || true)"
-  systemctl cat "$API_UNIT" >/dev/null 2>&1 || fail "unit $API_UNIT not found"
+  api_unit=$(systemctl cat "$API_UNIT" 2>/dev/null) || fail "unit $API_UNIT not found"
   bot_unit=$(systemctl cat "$BOT_UNIT" 2>/dev/null) || fail "unit $BOT_UNIT not found"
   [ -x "$PY" ] || fail "no Python at $PY"
 
@@ -131,6 +131,13 @@ preflight() {
   fi
   echo "shared .env and the $BOT_UNIT unit are clean"
   bot_process_clean || fail "the running bot process check did not pass"
+  # With BACKGROUND_WORKERS=external the workers unit runs the drain and holds the key instead (docs/DEPLOYMENT.md).
+  if [ -f "$APP/.env" ] && grep -qiE "^[[:space:]]*(export[[:space:]]+)?BACKGROUND_WORKERS[[:space:]]*=[[:space:]]*[\"']?external[\"']?[[:space:]]*(#.*)?$" "$APP/.env"; then
+    if grep -q -e recorder.env -e "$RECORDER_KEY" <<<"$api_unit"; then
+      fail "BACKGROUND_WORKERS=external, but the $API_UNIT unit loads recorder.env or sets $RECORDER_KEY: only the workers unit may"
+    fi
+    echo "BACKGROUND_WORKERS=external: the $API_UNIT unit does not load the recorder key"
+  fi
 
   say "Target commit"
   # --prune drops remote branches deleted on origin, so a stale one cannot vouch for the commit.
