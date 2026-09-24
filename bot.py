@@ -12,7 +12,6 @@ import asyncio
 import logging
 import re
 import traceback
-from datetime import datetime, timezone
 
 try:
     from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -130,7 +129,6 @@ async def post_init(application):
         ("rescue", "Scan wallet for risky approvals"),
         ("threats", "Live mempool threat alerts"),
         ("campaign", "Check if address is part of scam campaign"),
-        ("history", "View on-chain scan history"),
         ("report", "Report a scam address"),
         ("launchalerts", "Robinhood Chain launch alerts"),
         ("stopalerts", "Stop launch alerts"),
@@ -180,9 +178,6 @@ Send me a token address, and I'll analyze:
 • Mempool threats — live sandwich & frontrun detection
 • Campaign radar — link addresses to coordinated scam campaigns
 
-**📜 On-Chain History**
-All scans are recorded on BNB Chain for transparency.
-
 **How to use:**
 Send any address and I'll auto-detect what to scan!
 Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`
@@ -194,7 +189,6 @@ Commands:
 /rescue — Scan wallet for risky approvals
 /threats — Live mempool threat alerts
 /campaign — Check scam campaign links
-/history — View on-chain scan history
 /report — Report a scam address
 /launchalerts — Robinhood Chain launch alerts
 /stopalerts — Stop launch alerts
@@ -223,7 +217,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **/rescue <wallet>** - Scan wallet for risky token approvals
 **/threats** - Live mempool threat alerts
 **/campaign <address>** - Check if address is part of a scam campaign
-**/history <address>** - View on-chain scan history
 **/report <address> <reason>** - Report a scam address
 **/launchalerts** - Alert this chat to blocked Robinhood Chain launches (`/launchalerts all` for every launch)
 **/stopalerts** - Stop launch alerts
@@ -316,60 +309,11 @@ async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /history command - query on-chain scan records"""
-    if not context.args:
-        await update.message.reply_text(
-            "❌ Please provide an address.\n\n"
-            "Usage: `/history <address>`",
-            parse_mode='Markdown'
-        )
-        return
-
-    address = context.args[0]
-
-    if not web3_client.is_valid_address(address):
-        await update.message.reply_text("❌ Invalid address format.")
-        return
-
-    status_msg = await update.message.reply_text("📜 Querying on-chain scan history...")
-
-    try:
-        scan_data = await onchain_recorder.get_latest_scan(address)
-
-        if not scan_data:
-            await status_msg.edit_text(
-                f"📜 **On-Chain History**\n\n"
-                f"**Address:** `{address}`\n\n"
-                f"No on-chain scan records found for this address.\n"
-                f"Use `/scan` or `/token` to scan it first!",
-                parse_mode='Markdown'
-            )
-            return
-
-        # Format timestamp
-        ts = scan_data.get('timestamp', 0)
-        scan_time = datetime.fromtimestamp(ts, tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC') if ts > 0 else 'Unknown'
-
-        risk_emoji = {'LOW': '🟢', 'MEDIUM': '🟡', 'HIGH': '🔴', 'SAFE': '✅', 'WARNING': '⚠️', 'DANGER': '🔴'}
-        risk = scan_data.get('risk_level', 'UNKNOWN')
-        emoji = risk_emoji.get(risk, '⚪')
-
-        response = f"""📜 **On-Chain Scan History**
-
-**Address:** `{address}`
-**Last Scan:** {scan_time}
-**Risk Level:** {emoji} {risk}
-**Scan Type:** {scan_data.get('scan_type', 'unknown')}
-**Total Scans:** {scan_data.get('scan_count', 0)}
-
-🔗 [View on BscScan](https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795#events)
-"""
-
-        await status_msg.edit_text(response, parse_mode='Markdown', disable_web_page_preview=True)
-
-    except Exception as e:
-        logger.error(f"Error in /history: {type(e).__name__}")
-        await status_msg.edit_text("❌ Error querying history. Please try again later.")
+    """Handle /history command - on-chain scan history is not available"""
+    # Still registered so chats with a cached command menu get a plain answer instead of silence.
+    await update.message.reply_text(
+        "On-chain scan history is not available. Use /scan or /token to check an address."
+    )
 
 
 async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -410,7 +354,6 @@ Future scans will flag it as a known scam.
         # Record on-chain (fire-and-forget — non-blocking)
         if onchain_recorder.is_available():
             await onchain_recorder.record_scan_fire_and_forget(address, 'high', 'report')
-            response += "\n🔗 On-chain recording scheduled — [view contract](https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795#events)"
         if base_attestor.is_available():
             await base_attestor.attest_fire_and_forget(address, 'high', 'report', source_chain_id=56)
     else:
@@ -995,10 +938,8 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
         keyboard = _scan_buttons(address, chain_id)
 
         # Record on-chain (fire-and-forget — non-blocking)
-        onchain_line = ""
         if risk_level != 'unknown' and onchain_recorder.is_available():
             await onchain_recorder.record_scan_fire_and_forget(address, risk_level, 'contract')
-            onchain_line = "\n\U0001F517 On-chain recording scheduled\n"
         if risk_level != 'unknown' and base_attestor.is_available():
             await base_attestor.attest_fire_and_forget(address, risk_level, 'contract', source_chain_id=chain_id)
         if chain_id == 4663:
@@ -1012,7 +953,7 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
             pass
 
         await update.message.reply_text(
-            response + onchain_line,
+            response,
             parse_mode='Markdown',
             reply_markup=keyboard,
             disable_web_page_preview=True
@@ -1118,10 +1059,8 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
         keyboard = _token_buttons(address, chain_id)
 
         # Record on-chain (fire-and-forget — non-blocking)
-        onchain_line = ""
         if risk_level != 'unknown' and onchain_recorder.is_available():
             await onchain_recorder.record_scan_fire_and_forget(address, risk_level, 'token')
-            onchain_line = "\n\U0001F517 On-chain recording scheduled\n"
         if risk_level != 'unknown' and base_attestor.is_available():
             await base_attestor.attest_fire_and_forget(address, risk_level, 'token', source_chain_id=chain_id)
         if chain_id == 4663:
@@ -1135,7 +1074,7 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
             pass
 
         await update.message.reply_text(
-            response + onchain_line,
+            response,
             parse_mode='Markdown',
             reply_markup=keyboard,
             disable_web_page_preview=True

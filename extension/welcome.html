@@ -128,6 +128,8 @@
       font-size: 11px;
       color: #334155;
     }
+
+    .version a { color: #64748b; }
   </style>
 </head>
 <body>
@@ -135,8 +137,8 @@
     <img src="icons/shield128.png" alt="ShieldBot" class="logo" />
 
     <h1 data-i18n="welcomeTitle">Welcome to ShieldBot</h1>
-    <p class="subtitle" data-i18n="welcomeSubtitle">
-      Real-time transaction protection for BNB Chain and 6 more EVM networks. One click and you're covered.
+    <p class="subtitle">
+      Checks your transactions on 8 EVM chains before you sign: BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, Optimism and Robinhood Chain.
     </p>
 
     <div class="steps">
@@ -157,8 +159,8 @@
       <div class="step">
         <div class="step-icon">🛡</div>
         <div class="step-body">
-          <div class="step-title" data-i18n="step3Title">Block</div>
-          <div class="step-desc" data-i18n="step3Desc">High-risk transactions are stopped in their tracks. Phishing sites are flagged the moment you land on them.</div>
+          <div class="step-title">Warn</div>
+          <div class="step-desc">High-risk transactions get a clear warning before you sign, and you choose whether to cancel or continue. If a request times out, or your wallet's chain cannot be identified or differs from the chain the transaction names, the request is refused so you can retry. Known phishing sites are flagged when you open them.</div>
         </div>
       </div>
     </div>
@@ -167,7 +169,7 @@
     <div id="statusMsg"></div>
     <div id="closeLink" data-i18n="welcomeClose">Close this tab</div>
 
-    <div class="version">ShieldBot v3.0.1</div>
+    <div class="version">ShieldBot v3.0.1 &middot; <a href="https://shieldbotsecurity.online/terms.html" target="_blank" rel="noopener noreferrer">Terms of Service</a></div>
   </div>
 
   <script src="i18n.js"></script>

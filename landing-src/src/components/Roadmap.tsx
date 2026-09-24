@@ -6,7 +6,7 @@ const phases = [
     title: "Foundation",
     status: "done",
     items: [
-      "Chrome extension (phishing blocker, transaction firewall)",
+      "Chrome extension (phishing warnings, transaction firewall)",
       "Telegram bot (12 commands)",
       "REST API + TypeScript SDK",
       "7-chain mempool monitoring",
@@ -32,7 +32,6 @@ const phases = [
     items: [
       "Deployer cluster risk scoring",
       "Serial scammer pattern detection",
-      "Post-deployment contract monitoring",
       "Telegram threat alerts",
       "Watched deployer registry",
     ],
@@ -70,6 +69,7 @@ const phases = [
     items: [
       "Publish the TypeScript and Python SDKs",
       "Firefox port (proposed)",
+      "Post-deployment contract monitoring",
       "B2B DEX integrations",
       "Threat feed subscriptions",
     ],

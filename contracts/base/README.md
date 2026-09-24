@@ -38,7 +38,7 @@ Threat-attestation contract for ShieldBot scans, posted to the Ethereum Attestat
 address scannedAddress, uint8 riskLevel, string scanType, uint64 sourceChainId, bytes32 evidenceHash, string evidenceURI
 ```
 
-`sourceChainId` lets ShieldBot publish cross-chain attestations — e.g. attest on Base about a contract on BSC, so the BSC scan history becomes Base-verifiable.
+`sourceChainId` records the chain of the scanned address, so an attestation on Base can describe a contract on BSC or another chain.
 
 ## Setup
 

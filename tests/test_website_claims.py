@@ -1,8 +1,8 @@
 """The public website must not drift from the code it describes.
 
-These checks tie the landing page, the about page and the dashboard to the facts they state (chain
-counts, tool counts, score bands, chain tables) and fail when a source changes without the site, or
-when the committed builds fall behind their sources.
+These checks tie the landing page, the about page, the dashboard and the extension's welcome page to
+the facts they state (chain counts, tool counts, score bands, chain tables, roadmap status) and fail
+when a source changes without the site, or when the committed builds fall behind their sources.
 """
 
 import json
@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 LANDING_SRC = ROOT / "landing-src"
 COMPONENTS = LANDING_SRC / "src" / "components"
 DASHBOARD_SRC = ROOT / "dashboard" / "index.src.html"
+WELCOME = ROOT / "extension" / "welcome.html"
 
 
 def read(path: Path) -> str:
@@ -88,6 +89,64 @@ def test_mcp_and_bot_counts_match_the_code():
 
     commands = len(re.findall(r'CommandHandler\("', read(ROOT / "bot.py")))
     assert f"Telegram bot ({commands} commands)" in roadmap
+
+
+def test_roadmap_marks_nothing_complete_that_is_still_open():
+    roadmap = read(COMPONENTS / "Roadmap.tsx")
+    done = [
+        item
+        for items in re.findall(r'status: "done",\s*items: \[(.*?)\]', roadmap, re.DOTALL)
+        for item in re.findall(r'"([^"]+)"', items)
+    ]
+    still_open = re.findall(r"^- \[ \] \*\*([^*]+)\*\*", read(ROOT / "ROADMAP.md"), re.MULTILINE)
+    assert done and still_open
+    for item in done:
+        assert not re.search(r"\b(?:deploying|proposed|planned|upcoming|in progress)\b", item, re.I)
+        for title in still_open:
+            assert title.lower() not in item.lower(), (
+                f"Roadmap.tsx marks {item!r} Complete; ROADMAP.md leaves {title!r} open"
+            )
+
+
+def welcome_text() -> str:
+    """The visible text of the extension's welcome page, without its styles and scripts."""
+    html = re.sub(r"<(style|script)\b.*?</\1>", " ", read(WELCOME), flags=re.DOTALL)
+    return re.sub(r"<[^>]+>", " ", html)
+
+
+def test_welcome_page_does_not_claim_the_extension_blocks():
+    # The extension warns and lets the user decide. It refuses a request on its own only when the request
+    # times out or the wallet chain is unknown or changes (extension/inject.js), which the page may say.
+    text = " ".join(welcome_text().split()).lower()
+    overclaims = ("stopped in their tracks", "blocks the transaction", "blocks transactions", "are blocked")
+    claims = [phrase for phrase in overclaims if phrase in text]
+    assert not claims, f"welcome.html claims the extension blocks transactions: {claims}"
+
+
+def extension_chain_ids() -> set:
+    """The chains the extension names in popup.js CHAIN_NAMES.
+
+    inject.js and background.js keep no chain list: they pass any wallet chain id to /api/firewall.
+    """
+    table = re.search(r"const CHAIN_NAMES = \{([^}]*)\}", read(ROOT / "extension" / "popup.js")).group(1)
+    return {int(chain_id) for chain_id in re.findall(r"\b(\d+):", table)}
+
+
+def test_welcome_page_chain_count_matches_the_extension():
+    chains = extension_chain_ids()
+    assert chains == set(chain_info()), "popup.js CHAIN_NAMES and the API chain registry disagree"
+    counts = re.findall(r"\b(\d+)\s+(?:more\s+)?(?:EVM\s+)?(?:chains?|networks)\b", welcome_text())
+    assert counts, "welcome.html should state how many chains it supports"
+    assert {int(count) for count in counts} == {len(chains)}
+
+
+def test_welcome_page_names_every_extension_chain():
+    subtitle = re.search(r'<p class="subtitle">(.*?)</p>', read(WELCOME), re.DOTALL).group(1)
+    listed = re.split(r",\s*|\s+and\s+", subtitle.split(":", 1)[1].strip().rstrip("."))
+    aliases = {"BNB Chain": "BSC"}
+    names = {chain_info()[chain_id]["name"] for chain_id in extension_chain_ids()}
+    assert len(listed) == len(names)
+    assert {aliases.get(name, name) for name in listed} == names
 
 
 def _risk_bands() -> dict:
@@ -173,7 +232,7 @@ def test_structured_data_is_valid_and_matches_the_visible_faq():
 
 
 @pytest.mark.parametrize(
-    "name", ["about.html", "privacy.html", "sitemap.xml", ".well-known/security.txt"]
+    "name", ["about.html", "privacy.html", "terms.html", "sitemap.xml", ".well-known/security.txt"]
 )
 def test_built_landing_copies_the_current_public_files(name):
     source = read(LANDING_SRC / "public" / name).replace("\r\n", "\n")

@@ -780,7 +780,6 @@ PROVIDER_PATH_MODULES = [
     'services/robinhood_simulation.py',
     'services/rpc_guard.py',
     'services/tenderly_service.py',
-    'services/token_gate_service.py',
     'services/token_sniffer_service.py',
     'services/verdict_publisher.py',
 ]

@@ -154,7 +154,6 @@ class TestLifecycleHooks:
             ("rescue", "Scan wallet for risky approvals"),
             ("threats", "Live mempool threat alerts"),
             ("campaign", "Check if address is part of scam campaign"),
-            ("history", "View on-chain scan history"),
             ("report", "Report a scam address"),
             ("launchalerts", "Robinhood Chain launch alerts"),
             ("stopalerts", "Stop launch alerts"),
@@ -194,7 +193,6 @@ class TestHelpCommand:
 **/rescue <wallet>** - Scan wallet for risky token approvals
 **/threats** - Live mempool threat alerts
 **/campaign <address>** - Check if address is part of a scam campaign
-**/history <address>** - View on-chain scan history
 **/report <address> <reason>** - Report a scam address
 **/launchalerts** - Alert this chat to blocked Robinhood Chain launches (`/launchalerts all` for every launch)
 **/stopalerts** - Stop launch alerts
@@ -212,6 +210,61 @@ Stay safe! 🛡️
         await bot_module.help_command(update, context)
 
         update.message.reply_text.assert_awaited_once_with(expected_text, parse_mode="Markdown")
+
+
+class TestNoOnChainRecordingPromise:
+    """The BSC recorder holds a handful of records, so the bot must not promise on-chain history."""
+
+    @pytest.mark.asyncio
+    async def test_start_does_not_promise_on_chain_history(self, bot_module):
+        update = MagicMock(spec=Update)
+        update.message.reply_text = AsyncMock()
+
+        await bot_module.start(update, MagicMock())
+
+        text = update.message.reply_text.await_args.args[0]
+        assert "recorded on BNB Chain" not in text
+        assert "/history" not in text
+
+    @pytest.mark.asyncio
+    async def test_history_says_on_chain_history_is_not_available(self, bot_module, monkeypatch):
+        recorder = MagicMock(get_latest_scan=AsyncMock())
+        monkeypatch.setattr(bot_module, "onchain_recorder", recorder)
+        update = MagicMock(spec=Update)
+        update.message.reply_text = AsyncMock()
+        context = MagicMock(args=["0x0000000000000000000000000000000000000001"])
+
+        await bot_module.history_command(update, context)
+
+        update.message.reply_text.assert_awaited_once_with(
+            "On-chain scan history is not available. Use /scan or /token to check an address."
+        )
+        recorder.get_latest_scan.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_report_does_not_link_the_bsc_recorder(self, bot_module, monkeypatch):
+        address = "0x0000000000000000000000000000000000000001"
+        recorder = MagicMock(record_scan_fire_and_forget=AsyncMock())
+        recorder.is_available.return_value = True
+        attestor = MagicMock()
+        attestor.is_available.return_value = False
+        scam_db = MagicMock()
+        scam_db.report_address.return_value = {"accepted": True, "blacklisted": True}
+        monkeypatch.setattr(bot_module, "onchain_recorder", recorder)
+        monkeypatch.setattr(bot_module, "base_attestor", attestor)
+        monkeypatch.setattr(bot_module, "scam_db", scam_db)
+        update = MagicMock(spec=Update)
+        update.message.reply_text = AsyncMock()
+        update.effective_user.id = 42
+        context = MagicMock(args=[address, "honeypot"])
+
+        await bot_module.report_command(update, context)
+
+        text = update.message.reply_text.await_args.args[0]
+        assert "Address Blacklisted" in text
+        assert "On-chain recording" not in text
+        assert "bscscan.com" not in text
+        recorder.record_scan_fire_and_forget.assert_awaited_once_with(address, "high", "report")
 
 
 class TestChainPrefixHelp:

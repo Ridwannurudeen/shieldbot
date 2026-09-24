@@ -120,7 +120,7 @@ function initCompact() {
       tab.classList.add("active");
       document.getElementById("tab-" + tab.dataset.tab).classList.add("active");
       if (tab.dataset.tab === "history") loadAndRenderHistory(historyList);
-      if (tab.dataset.tab === "feed") initFeedTab();
+      if (tab.dataset.tab === "feed") loadDeployerFeed();
     });
   });
 
@@ -573,52 +573,17 @@ function setGauge(arcEl, numEl, score, glow) {
 }
 
 // ============================================================
-// FEED TAB — $SHIELDBOT holder deployer alerts
+// FEED TAB — deployer alerts
 // ============================================================
 
-let _feedBtnInit = false;
+async function loadDeployerFeed() {
+  const feedErr  = document.getElementById("feedError");
+  const feedLoad = document.getElementById("feedLoading");
+  const feedList = document.getElementById("feedList");
 
-function initFeedTab() {
-  const feedAddr   = document.getElementById("feedAddress");
-  const feedBtn    = document.getElementById("feedLoadBtn");
-  const feedErr    = document.getElementById("feedError");
-  const feedLoad   = document.getElementById("feedLoading");
-  const feedLocked = document.getElementById("feedLocked");
-  const feedList   = document.getElementById("feedList");
-
-  if (!feedAddr || !feedBtn) return;
-
-  // Add button listener only once — prevents stacking on repeated tab clicks
-  if (!_feedBtnInit) {
-    _feedBtnInit = true;
-    feedBtn.addEventListener("click", () => {
-      const addr = feedAddr.value.trim();
-      feedErr.style.display = "none";
-      if (!addr || !/^0x[a-fA-F0-9]{40}$/i.test(addr)) {
-        feedErr.textContent = t("msgErrInvalidWallet");
-        feedErr.style.display = "block";
-        return;
-      }
-      chrome.storage.local.set({ feedWallet: addr });
-      loadDeployerFeed(addr, { feedErr, feedLoad, feedLocked, feedList });
-    });
-  }
-
-  // Auto-load from saved wallet each time tab is opened
-  chrome.storage.local.get({ healthWallet: "", feedWallet: "" }, (d) => {
-    const saved = d.feedWallet || d.healthWallet;
-    if (saved) {
-      feedAddr.value = saved;
-      loadDeployerFeed(saved, { feedErr, feedLoad, feedLocked, feedList });
-    }
-  });
-}
-
-async function loadDeployerFeed(wallet, { feedErr, feedLoad, feedLocked, feedList }) {
-  feedErr.style.display    = "none";
-  feedLocked.style.display = "none";
-  feedList.innerHTML       = "";
-  feedLoad.style.display   = "block";
+  feedErr.style.display  = "none";
+  feedList.innerHTML     = "";
+  feedLoad.style.display = "block";
 
   try {
     const { apiUrl } = await new Promise((r) =>
@@ -627,17 +592,9 @@ async function loadDeployerFeed(wallet, { feedErr, feedLoad, feedLocked, feedLis
 
     const ctrl = new AbortController();
     const to   = setTimeout(() => ctrl.abort(), 10000);
-    const resp = await fetch(
-      `${apiUrl}/api/watch/alerts?wallet=${encodeURIComponent(wallet)}`,
-      { signal: ctrl.signal }
-    );
+    const resp = await fetch(`${apiUrl}/api/watch/alerts`, { signal: ctrl.signal });
     clearTimeout(to);
     feedLoad.style.display = "none";
-
-    if (resp.status === 403) {
-      feedLocked.style.display = "block";
-      return;
-    }
 
     if (!resp.ok) {
       feedErr.textContent = `API error ${resp.status}`;
