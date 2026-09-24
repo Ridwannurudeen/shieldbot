@@ -1,5 +1,6 @@
 """Mempool polling: how pending transactions are read, parsed and handed to the analysis."""
 
+import asyncio
 import logging
 import threading
 from unittest.mock import AsyncMock, MagicMock
@@ -167,18 +168,23 @@ async def test_stop_logs_only_for_a_monitor_that_was_started(caplog):
 
 
 @pytest.mark.asyncio
-async def test_each_chain_poll_logs_its_duration(monkeypatch, caplog):
+async def test_each_chain_poll_logs_its_duration(caplog):
     monitor = MempoolMonitor(MagicMock())
     monitor._running = True
     monitor._monitored_chains = {56, 1}
-    monitor._poll_pending = AsyncMock()
+    cycle_polled = asyncio.Event()
 
-    async def stop_after_one_cycle(seconds):
-        monitor._running = False
+    async def poll(chain_id):
+        if monitor._poll_pending.await_count == len(monitor._monitored_chains):
+            cycle_polled.set()
 
-    monkeypatch.setattr("services.mempool_service.asyncio.sleep", stop_after_one_cycle)
+    monitor._poll_pending = AsyncMock(side_effect=poll)
     with caplog.at_level(logging.DEBUG, logger="services.mempool_service"):
-        await monitor._monitor_loop()
+        loop_task = asyncio.create_task(monitor._monitor_loop())
+        await asyncio.wait_for(cycle_polled.wait(), 5)
+        # The loop logged the last chain and is now in its real 2 s sleep, which ends on cancel.
+        loop_task.cancel()
+        await loop_task
 
     polled = [r for r in caplog.records if r.msg == "Polled chain %s in %.2f s"]
     assert sorted(r.args[0] for r in polled) == [1, 56]
