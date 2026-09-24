@@ -2,7 +2,7 @@
  * ShieldBot SDK — Web3 security intelligence for wallets and dApps.
  *
  * Usage:
- *   import { ShieldBot } from 'shieldbot-sdk';
+ *   import { ShieldBot } from '@shieldbot/sdk';
  *   const shield = new ShieldBot({ apiKey: 'sb_...' });
  *   const result = await shield.scan('0x...', { chainId: 56 });
  */
@@ -24,9 +24,15 @@ export interface ShieldBotConfig {
   failMode?: 'cached' | 'open' | 'closed';
 }
 
+/** Chains the ShieldBot API analyzes. `health()` returns the live list as `supported_chains`. */
+export const SUPPORTED_CHAIN_IDS = [56, 1, 8453, 42161, 137, 10, 204, 4663] as const;
+
+/** 56=BSC, 1=Ethereum, 8453=Base, 42161=Arbitrum, 137=Polygon, 10=Optimism, 204=opBNB, 4663=Robinhood Chain. */
+export type ChainId = (typeof SUPPORTED_CHAIN_IDS)[number];
+
 export interface ScanOptions {
-  /** Chain ID (56=BSC, 1=ETH, 8453=Base, 42161=Arb, 137=Poly, 10=OP, 204=opBNB). */
-  chainId?: number;
+  /** Chain to analyze. Required: the SDK never assumes a chain, and the API rejects an unsupported one with 400. */
+  chainId: ChainId;
 }
 
 export interface FirewallOptions extends ScanOptions {
@@ -170,7 +176,7 @@ export interface AgentTransaction {
   to: string;
   data?: string;
   value?: string;
-  chainId?: number;
+  chainId: ChainId;
 }
 
 export interface Verdict {
@@ -254,24 +260,24 @@ export class ShieldBot {
   /**
    * Scan a contract or token address for risks.
    */
-  async scan(address: string, options: ScanOptions = {}): Promise<ScanResult> {
-    const chainId = options.chainId || 56;
+  async scan(address: string, options: ScanOptions): Promise<ScanResult> {
     return this._post<ScanResult>('/api/scan', {
       address,
-      chainId,
+      chainId: this._requireChainId(options?.chainId, 'scan'),
     });
   }
 
   /**
    * Run the full firewall analysis on a pending transaction.
    */
-  async firewall(toAddress: string, options: FirewallOptions = {}): Promise<FirewallResult> {
+  async firewall(toAddress: string, options: FirewallOptions): Promise<FirewallResult> {
+    const chainId = this._requireChainId(options?.chainId, 'firewall');
     return this._post<FirewallResult>('/api/firewall', {
       to: toAddress,
       from: options.from || '',
       data: options.data || '0x',
       value: options.value || '0x0',
-      chainId: options.chainId || 56,
+      chainId,
     });
   }
 
@@ -291,9 +297,9 @@ export class ShieldBot {
   /**
    * Scan a wallet's active approvals and get revoke transactions (Rescue Mode).
    */
-  async rescue(walletAddress: string, chainId = 56): Promise<RescueResult> {
+  async rescue(walletAddress: string, chainId: ChainId): Promise<RescueResult> {
     return this._get<RescueResult>(
-      `/api/rescue/${walletAddress}?chain_id=${chainId}`,
+      `/api/rescue/${walletAddress}?chain_id=${this._requireChainId(chainId, 'rescue')}`,
     );
   }
 
@@ -321,7 +327,7 @@ export class ShieldBot {
   /**
    * Check API health status.
    */
-  async health(): Promise<{ status: string; chains: number[] }> {
+  async health(): Promise<{ status: string; service: string; supported_chains: number[] }> {
     return this._get('/api/health');
   }
 
@@ -336,6 +342,7 @@ export class ShieldBot {
     if (!this.agentId) {
       throw new ShieldBotError('agentId required for check()', 400, 'MISSING_AGENT_ID');
     }
+    const chainId = this._requireChainId(transaction.chainId, 'check');
 
     const canonicalInteger = (value: unknown): string => {
       if (
@@ -353,7 +360,7 @@ export class ShieldBot {
     const cacheKey = JSON.stringify([
       transaction.from?.toLowerCase(),
       transaction.to?.toLowerCase(),
-      canonicalInteger(transaction.chainId || 56),
+      canonicalInteger(chainId),
       (transaction.data || '0x').toLowerCase(),
       canonicalInteger(transaction.value ?? '0'),
     ]);
@@ -372,7 +379,7 @@ export class ShieldBot {
           to: transaction.to,
           data: transaction.data || '0x',
           value: transaction.value || '0',
-          chain_id: transaction.chainId || 56,
+          chain_id: chainId,
         },
       });
 
@@ -438,8 +445,10 @@ export class ShieldBot {
   /**
    * Query the threat graph for an address.
    */
-  async queryThreatGraph(address: string, maxDepth = 3): Promise<Record<string, unknown>> {
-    return this._get(`/api/graph/check/${address}?max_depth=${maxDepth}`);
+  async queryThreatGraph(address: string, chainId: ChainId, maxDepth = 3): Promise<Record<string, unknown>> {
+    return this._get(
+      `/api/graph/check/${address}?chain_id=${this._requireChainId(chainId, 'queryThreatGraph')}&max_depth=${maxDepth}`,
+    );
   }
 
   /**
@@ -450,6 +459,13 @@ export class ShieldBot {
   }
 
   // --- Internal ---
+
+  private _requireChainId(chainId: ChainId | undefined, method: string): ChainId {
+    if (chainId == null) {
+      throw new ShieldBotError(`chainId required for ${method}()`, 400, 'MISSING_CHAIN_ID');
+    }
+    return chainId;
+  }
 
   private _cacheVerdict(key: string, verdict: Verdict): void {
     // Evict oldest if at capacity
