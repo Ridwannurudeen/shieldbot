@@ -279,10 +279,11 @@ function unknownChain(reason) {
 // be the host of the frame that asked, which the browser gives this worker as
 // the message's sender; the page has no say in it. The claim is read loosely,
 // so line endings, a character before it, a scheme, a port or a path cannot
-// hide it, and checked first, whatever follows. The rest is then parsed
-// strictly, as the reference parser reads it: every field in its order and
-// form, and nothing else, and the URI's host must be the frame's host too.
-// The address's EIP-55 checksum is not required: the standard says SHOULD.
+// hide it, and checked first, whatever follows. The rest is then parsed in
+// the standard's layout, every field in its order and form and nothing else,
+// and the URI's host must be the frame's host too. URIs must be URLs a browser
+// can parse, which is stricter than the reference parser; the address's
+// EIP-55 checksum is not required: the standard says SHOULD.
 const SIWE_HEADER = " wants you to sign in with your Ethereum account:";
 const SIWE_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/i;
 const SIWE_UNREADABLE = "The message looks like Sign-In with Ethereum but does not follow EIP-4361, " +
@@ -319,8 +320,10 @@ function signedText(data) {
 function parseSiwe(text) {
   const lines = text.split("\n");
   if (!/^0x[0-9a-f]{40}$/i.test(lines[1] || "") || lines[2] !== "") return null;
-  // An optional statement of one line, between blank lines.
-  let at = lines[3] === "" ? 4 : lines[4] === "" ? 5 : -1;
+  // After the blank line, either no statement (a blank line, then the URI) or
+  // a statement of one line and a blank line. An empty statement is an empty
+  // line, as siwe's toMessage() writes it: the address, four line feeds, URI.
+  let at = lines[3] === "" && lines[4] !== "" ? 4 : lines[4] === "" ? 5 : -1;
   if (at < 0) return null;
   const take = (prefix, valid) => {
     const line = lines[at] || "";

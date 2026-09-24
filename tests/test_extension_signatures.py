@@ -398,7 +398,7 @@ const signIn = (text, extra = {}) => ({type: 'SHIELDAI_ANALYZE', tx: {signMethod
 
 @pytest.mark.parametrize(
     "message",
-    ["hex", "plain-text", "no-statement", "no-resources", "port-443", "optional-fields", "did-uri"],
+    ["hex", "plain-text", "no-statement", "empty-statement", "no-resources", "port-443", "optional-fields", "did-uri"],
 )
 def test_a_sign_in_message_for_the_requesting_page_goes_to_the_api(message):
     run_node(
@@ -410,6 +410,8 @@ def test_a_sign_in_message_for_the_requesting_page_goes_to_the_api(message):
     hex: siwe(),
     'plain-text': siwe(),
     'no-statement': siwe({statement: null}),
+    // siwe's toMessage() writes an empty statement as an empty line: the address, four line feeds, URI.
+    'empty-statement': siwe({statement: ''}),
     'no-resources': siwe({tail: ''}),
     'port-443': siwe({domain: 'DApp.Example:443'}),
     'optional-fields': siwe({tail: '\nExpiration Time: 2031-09-30T16:25:24.000Z\nNot Before: 2021-09-30T16:25:24+02:00\nRequest ID: some-id@1\nResources:'}),
@@ -872,16 +874,16 @@ def test_a_delegation_is_block_recommended_and_names_the_delegate(policy, outcom
     )
 
 
-# Tails EIP-4361 does not allow. A page can add one to any sign-in message; the site the message is
-# for is still on its first line.
-MALFORMED_TAILS = ["empty-uri-host", "bad-resource", "trailing-newline", "extra-field", "empty-statement"]
+# Tails the strict parse does not read. A trailing newline and an extra field are not EIP-4361; a URI
+# or resource of "http://" is RFC 3986 but no URL a browser can parse. A page can add any of them to
+# a sign-in message; the domain it claims is read before them.
+MALFORMED_TAILS = ["empty-uri-host", "bad-resource", "trailing-newline", "extra-field"]
 MALFORMED = r"""
 const malformed = (kind, domain) => ({
   'empty-uri-host': siwe({domain, uri: 'http://'}),
   'bad-resource': siwe({domain, tail: '\nResources:\n- http://'}),
   'trailing-newline': siwe({domain}) + '\n',
   'extra-field': siwe({domain, tail: '\nSession: 7'}),
-  'empty-statement': siwe({domain, statement: ''}),
 })[kind];
 """
 
@@ -1100,6 +1102,7 @@ FOREIGN_LAYOUTS = {
     "scheme": "siwe({domain: 'https://wallet-login.example'})",
     "path": "siwe({domain: 'wallet-login.example/login'})",
     "port": "siwe({domain: 'dapp.example:8443'})",
+    "empty-statement": "siwe({domain: 'wallet-login.example', statement: ''})",
     "line-separator": "siwe({domain: 'wallet-login.example'}).replace('account:\\n', 'account:\\u2028')",
     "zero-width-space": "siwe({domain: '\\u200bwallet-login.example'})",
     "byte-order-mark": "'\\ufeff' + siwe({domain: 'wallet-login.example'})",
