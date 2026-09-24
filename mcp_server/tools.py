@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 _ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 _REPUTATION_WINDOW = 1000  # latest firewall records read per agent
+_MAX_DATA_CHARS = 200_000  # the HTTP firewall's calldata cap (api.MAX_FIREWALL_DATA_CHARS)
+_DATA_RE = re.compile(r"0[xX](?:[0-9a-fA-F]{2})*")
 # Bounded so int() never meets a huge literal: 64 hex digits or 78 decimal digits cover 2**256 - 1.
 _WEI_RE = re.compile(r"0[xX][0-9a-fA-F]{1,64}|[0-9]{1,78}")
 _CHAIN_ID_DESCRIPTION = (
@@ -48,6 +50,15 @@ def _require(params: Dict, name: str) -> str:
     if not isinstance(value, str):
         raise ValueError(f"Invalid argument: {name} must be a string")
     return value
+
+
+def _page_limit(params: Dict) -> int:
+    limit = params.get("limit")
+    if limit is None:
+        return 20
+    if type(limit) is not int:
+        raise ValueError("Invalid argument: limit must be an integer")
+    return min(max(limit, 1), 100)
 
 
 def _validate_chain_id(container, chain_id) -> int:
@@ -249,7 +260,11 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
     from_addr = _validate_address(_require(params, "from"))
     to_addr = _validate_address(_require(params, "to"))
     data = _require(params, "data")
-    value = params.get("value", "0")
+    if len(data) > _MAX_DATA_CHARS or not _DATA_RE.fullmatch(data):
+        raise ValueError("Invalid argument: data must be 0x-prefixed hex calldata of at most 200000 characters")
+    value = params.get("value")
+    if value is None:
+        value = "0"
     # The simulator replaces an unparseable value with 0, which would simulate a different transaction,
     # so only a wei amount below 2**256 is accepted, and it is passed on as a decimal string.
     wei = None
@@ -406,7 +421,11 @@ async def handle_check_approval_risk(container, params: Dict) -> Dict:
 async def handle_scan_for_injection(container, params: Dict) -> Dict:
     """Basic regex-based prompt injection detection."""
     content = _require(params, "content")
-    depth = params.get("depth", "fast")
+    depth = params.get("depth")
+    if depth is None:
+        depth = "fast"
+    if depth not in ("fast", "thorough"):
+        raise ValueError("Invalid argument: depth must be 'fast' or 'thorough'")
 
     detections = []
     for pattern, label in _INJECTION_PATTERNS:
@@ -450,7 +469,7 @@ async def handle_query_threat_graph(container, params: Dict) -> Dict:
 
 async def handle_get_threat_feed(container, params: Dict) -> Dict:
     """Retrieve latest flagged contracts from agent findings."""
-    limit = min(max(params.get("limit", 20), 1), 100)
+    limit = _page_limit(params)
 
     findings = await container.db.get_agent_findings(limit=limit)
 
@@ -471,7 +490,7 @@ async def handle_get_threat_feed(container, params: Dict) -> Dict:
 async def handle_get_robinhood_launches(container, params: Dict) -> Dict:
     """Recent launches with their latest scan outcome, from the query behind /api/launches."""
     chain_id = _validate_chain_id(container, params.get("chain_id", LAUNCH_CHAIN_ID))
-    limit = min(max(params.get("limit", 20), 1), 100)
+    limit = _page_limit(params)
     if chain_id != LAUNCH_CHAIN_ID:
         return {
             "launches": [],

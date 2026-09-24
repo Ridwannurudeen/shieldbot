@@ -1165,6 +1165,70 @@ def test_simulate_transaction_passes_the_value_on_as_a_decimal(client, mock_cont
     assert mock_container.tenderly_simulator.simulate_transaction.call_args.kwargs["value"] == passed
 
 
+def test_simulate_transaction_treats_a_null_value_as_zero(client, mock_container):
+    mock_container.tenderly_simulator.is_enabled.return_value = True
+    client.post("/mcp/messages", json={
+        "jsonrpc": "2.0", "id": 19, "method": "tools/call",
+        "params": {"name": "simulate_transaction", "arguments": {**FULL_ARGUMENTS["simulate_transaction"], "value": None}},
+    }, headers=AUTH_HEADERS)
+    assert mock_container.tenderly_simulator.simulate_transaction.call_args.kwargs["value"] == "0"
+
+
+def test_simulate_transaction_data_cap_matches_the_http_firewall():
+    import api
+    from mcp_server.tools import _MAX_DATA_CHARS
+    assert _MAX_DATA_CHARS == api.MAX_FIREWALL_DATA_CHARS
+
+
+@pytest.mark.parametrize("data", ["abc", "0x123", "0xzz", "", "0x" + "ab" * 100_000], ids=[
+    "no-prefix", "odd-length", "not-hex", "empty", "over-cap",
+])
+def test_simulate_transaction_rejects_data_that_is_not_bounded_hex(client, mock_container, data):
+    arguments = {**FULL_ARGUMENTS["simulate_transaction"], "data": data}
+    assert _tool_error(client, "simulate_transaction", arguments) == "Invalid argument: data must be 0x-prefixed hex calldata of at most 200000 characters"
+    mock_container.tenderly_simulator.is_enabled.assert_not_called()
+
+
+@pytest.mark.parametrize("data", ["0x", "0X38ed1739", "0x" + "ab" * 99_999], ids=["empty", "upper-prefix", "at-cap"])
+def test_simulate_transaction_accepts_bounded_hex_data(client, mock_container, data):
+    mock_container.tenderly_simulator.is_enabled.return_value = True
+    client.post("/mcp/messages", json={
+        "jsonrpc": "2.0", "id": 20, "method": "tools/call",
+        "params": {"name": "simulate_transaction", "arguments": {**FULL_ARGUMENTS["simulate_transaction"], "data": data}},
+    }, headers=AUTH_HEADERS)
+    assert mock_container.tenderly_simulator.simulate_transaction.call_args.kwargs["data"] == data
+
+
+@pytest.mark.parametrize("tool", ["get_threat_feed", "get_robinhood_launches"])
+@pytest.mark.parametrize("limit", ["10", True, 1.5, [5]])
+def test_a_limit_that_is_not_an_integer_is_a_tool_error(client, mock_container, tool, limit):
+    mock_container.db.get_launch_feed = AsyncMock(return_value=([], None))
+    assert _tool_error(client, tool, {"limit": limit}) == "Invalid argument: limit must be an integer"
+    mock_container.db.get_agent_findings.assert_not_awaited()
+    mock_container.db.get_launch_feed.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_null_limit_is_the_default(mock_container):
+    from mcp_server.tools import execute_tool
+    await execute_tool(mock_container, "get_threat_feed", {"limit": None})
+    mock_container.db.get_agent_findings.assert_awaited_once_with(limit=20)
+
+
+@pytest.mark.parametrize("depth", ["deep", 5, ["fast"]])
+def test_scan_for_injection_rejects_an_unknown_depth(client, depth):
+    arguments = {"content": "hello", "depth": depth}
+    assert _tool_error(client, "scan_for_injection", arguments) == "Invalid argument: depth must be 'fast' or 'thorough'"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("depth,expected", [(None, "fast"), ("thorough", "thorough")])
+async def test_scan_for_injection_depth_defaults_to_fast(mock_container, depth, expected):
+    from mcp_server.tools import execute_tool
+    result = await execute_tool(mock_container, "scan_for_injection", {"content": "hello", "depth": depth})
+    assert result["depth"] == expected
+
+
 def test_unknown_results_are_described_to_the_client():
     from mcp_server.resources import RESOURCE_TEMPLATE_DEFINITIONS
     from mcp_server.tools import TOOL_DEFINITIONS
