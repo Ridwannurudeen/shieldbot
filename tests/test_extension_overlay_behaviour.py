@@ -1023,6 +1023,21 @@ def test_the_wallet_gets_the_method_that_was_checked():
     )
 
 
+def test_a_replaced_error_constructor_cannot_stop_a_rejection():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  vm.runInContext("Error = function () { throw new TypeError('page Error'); };", context);
+  const {pending, requestId} = await startRequest();
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'block', proof: await proof(requestId, 'block')});
+  await assert.rejects(pending, /blocked/);
+  await assert.rejects(provider.request({method: 1}), /string method/);
+  assert.equal(sent.length, 0);
+"""
+    )
+
+
 def test_replaced_json_parse_cannot_change_the_typed_data_shown():
     run_node(
         INJECT_HARNESS

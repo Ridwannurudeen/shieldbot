@@ -20,6 +20,7 @@
   // while the original then always calls back with the real value.
   const then = uncurry(Promise.prototype.then);
   const NativePromise = Promise;
+  const NativeError = Error;
   const defineProperty = Object.defineProperty;
   const getPrototypeOf = Object.getPrototypeOf;
   const getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
@@ -178,7 +179,7 @@
       const method = ownValue(args, "method");
       if (typeof method !== "string") {
         return new NativePromise((resolve, reject) => {
-          reject(new Error("ShieldAI rejected a wallet request without a string method"));
+          reject(new NativeError("ShieldAI rejected a wallet request without a string method"));
         });
       }
       const kind = requestKind(method);
@@ -251,11 +252,11 @@
         const analyze = (chainId) => {
           requestAnalysis(method, isTransaction ? { ...interceptData, chainId } : interceptData, (action) => {
             if (isTransaction && chainId === null) {
-              reject(new Error("Transaction blocked by ShieldAI: wallet chain is unknown or mismatched"));
+              reject(new NativeError("Transaction blocked by ShieldAI: wallet chain is unknown or mismatched"));
               return;
             }
             if (action !== "proceed") {
-              reject(new Error("Transaction blocked by ShieldAI Firewall"));
+              reject(new NativeError("Transaction blocked by ShieldAI Firewall"));
               return;
             }
             if (!isTransaction) {
@@ -266,7 +267,7 @@
             // even when the provider does not implement chainChanged events.
             resolveChainId((latestChainId) => {
               if (revision !== chainRevision || latestChainId !== chainId) {
-                reject(new Error("Transaction blocked by ShieldAI: wallet chain changed; retry analysis"));
+                reject(new NativeError("Transaction blocked by ShieldAI: wallet chain changed; retry analysis"));
                 return;
               }
               // proceed — forward to original wallet
@@ -332,7 +333,7 @@
       const wrapper = wrapperOf(this);
       if (wrapper === undefined) {
         return new NativePromise((resolve, reject) => {
-          reject(new Error("Transaction blocked by ShieldAI Firewall"));
+          reject(new NativeError("Transaction blocked by ShieldAI Firewall"));
         });
       }
       return wrapper(args);
