@@ -339,7 +339,9 @@ class RiskEngine:
                 critical_flags.append(label + coverage_reasons.get('honeypot', 'No honeypot data'))
         # An analyzer's notes name what an add-only signal could not measure (data['notes']). The gap
         # changes no score and no status, so it is information, not a danger signal: notes have their
-        # own list and never enter critical_flags.
+        # own list and never enter critical_flags. Contract: only an analyzer writes data['notes']
+        # (structural and market do); no provider's data carries that key, so every result's notes
+        # are its analyzer's.
         notes = [note for result in results if not result.error for note in result.data.get('notes', ())]
 
         # --- Escalation overrides ---
