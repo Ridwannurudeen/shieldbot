@@ -10,6 +10,14 @@ import aiohttp
 from cachetools import TTLCache
 
 
+# Public Blockscout instances that answer without an API key; other chains go through the keyed
+# PRO gateway. optimism.blockscout.com redirects here, and requests do not follow redirects.
+BLOCKSCOUT_INSTANCES = {
+    8453: "https://base.blockscout.com",
+    10: "https://explorer.optimism.io",
+}
+
+
 @dataclass(frozen=True)
 class ExplorerResult:
     status: str
@@ -112,6 +120,11 @@ class ExplorerService:
     async def _blockscout(
         self, path: str, chain_id: int, params: dict | None = None
     ) -> ExplorerResult:
+        instance = BLOCKSCOUT_INSTANCES.get(chain_id)
+        if instance:
+            return await self._request(
+                "blockscout", f"{instance}/api/v2/{path}", params or {}
+            )
         api_key = os.getenv("BLOCKSCOUT_API_KEY", "")
         if not api_key:
             return ExplorerResult(

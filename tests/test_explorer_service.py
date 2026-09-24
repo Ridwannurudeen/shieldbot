@@ -475,7 +475,7 @@ def test_constructor_preserves_existing_honeypot_provider(chain_id):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("chain_id", [56, 8453])
+@pytest.mark.parametrize("chain_id", [56, 42161])
 async def test_existing_etherscan_creation_request_and_result_unchanged(http, chain_id):
     http[0]({"status": "1", "result": [{"contractCreator": FUNDER, "txHash": TX_HASH}]})
     adapter = EvmAdapter(

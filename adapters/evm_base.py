@@ -26,9 +26,11 @@ HONEYPOT_IS_UNSUPPORTED = (
     'not simulated by ShieldBot'
 )
 
+# 'etherscan_blockscout': verification from Etherscan, creation from Blockscout, because Etherscan's
+# free tier refuses getcontractcreation on Base and Optimism.
 EXPLORER_BACKENDS = {
-    1: 'etherscan', 56: 'etherscan', 8453: 'etherscan',
-    42161: 'etherscan', 137: 'etherscan', 10: 'etherscan', 204: 'etherscan',
+    1: 'etherscan', 56: 'etherscan', 8453: 'etherscan_blockscout',
+    42161: 'etherscan', 137: 'etherscan', 10: 'etherscan_blockscout', 204: 'etherscan',
     4663: 'sourcify_blockscout',
 }
 
@@ -216,7 +218,7 @@ class EvmAdapter(ChainAdapter):
 
     async def get_contract_creation_info(self, address: str) -> Optional[Dict]:
         try:
-            if self._explorer_backend == 'sourcify_blockscout':
+            if self._explorer_backend in ('sourcify_blockscout', 'etherscan_blockscout'):
                 result = await self._explorer_service.get_contract_creation_info(address, self._chain_id)
                 if result.status == 'unknown':
                     logger.warning("[%s] Creation unknown: %s", self._chain_name, result.reason)
