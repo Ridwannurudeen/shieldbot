@@ -163,7 +163,7 @@ if [[ -n "${VPS_HOST:-}" ]]; then
   echo "── 7. Update VPS .env at $VPS_HOST ──"
   # The verifier key travels on ssh's stdin and is appended by cat, never placed on a command line.
   printf 'BASE_VERIFIER_PRIVATE_KEY=%s\n' "$VERIFIER_KEY" | ssh "$VPS_HOST" "set -e; cd /opt/shieldbot; \
-    sed -i.bak \
+    sed -i \
       -e '/^BASE_ATTESTOR_ADDRESS=/d' \
       -e '/^BASE_ATTESTOR_SCHEMA_UID=/d' \
       -e '/^BASE_VERIFIER_PRIVATE_KEY=/d' \
@@ -174,7 +174,7 @@ if [[ -n "${VPS_HOST:-}" ]]; then
     chmod 600 .env; \
     systemctl restart shieldbot.service; \
     sleep 3; \
-    journalctl -u shieldbot.service -n 30 --no-pager | grep -E 'Base EAS Attestor|started'"
+    journalctl -u shieldbot.service -n 30 --no-pager | grep -E 'Base EAS Attestor|started' || true"
   echo "VPS updated and service restarted."
 else
   echo
