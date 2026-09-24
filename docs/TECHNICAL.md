@@ -674,6 +674,17 @@ curl -X POST http://localhost:8000/api/firewall \
   }'
 ```
 
+**Free API Key** (self-serve):
+```bash
+curl -X POST http://localhost:8000/api/keys/free \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@example.com"}'
+```
+
+The server emails a link to `/api/keys/free/verify`. The link works once and expires after 30 minutes; its token is in the URL fragment, which browsers do not send, so it never appears in server or proxy logs, and the page creates the key only when you press its button, so mail scanners that open links cannot use it up. The key is shown once on that page and only its hash is stored. Send it as the `X-API-Key` header; the free tier allows 60 requests a minute and 1,000 a day.
+
+Limits: one active free key per email address, one unexpired link per address at a time, and three requests a minute per IP. Without `RESEND_API_KEY` the endpoint answers 503 "Self-serve keys are not enabled" and issues nothing. `PUBLIC_API_URL` sets the host in the emailed link (default `https://api.shieldbotsecurity.online`); it is never taken from the request.
+
 **Health Check**:
 ```bash
 curl http://localhost:8000/api/health
