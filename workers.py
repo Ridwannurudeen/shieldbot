@@ -13,9 +13,9 @@ belongs in its unit's environment, not the API's (docs/DEPLOYMENT.md). Run exact
 
 SIGTERM or SIGINT stops the work in reverse order, closes the container and exits 0. If any of the work ends on
 its own, which only a failure does, the rest is stopped the same way and the exit status is 1, so systemd's
-Restart=always starts it again (if that failure is raised again while its loop is stopped, the process exits with
-the traceback, also non-zero). A setting that does not allow it to run exits MISCONFIGURED, which the unit example
-tells systemd not to restart.
+Restart=always starts it again. A service whose stop fails is logged and the others are still stopped, the verdict
+drain and the container included; the exit status is then 1 as well. A setting that does not allow it to run exits
+MISCONFIGURED, which the unit example tells systemd not to restart.
 """
 
 import asyncio
@@ -40,7 +40,7 @@ MISCONFIGURED = 3
 
 async def run(container: ServiceContainer, stop: asyncio.Event) -> int:
     """Start the background work and wait for `stop` or for any of it to end, then stop it all and close the
-    container. Returns the exit status: 0 after `stop`, 1 when background work ended on its own."""
+    container. Returns the exit status: 0 after `stop`, 1 when background work ended on its own or a stop failed."""
     await container.startup()
     await container.start_mempool_monitor()
     container.verdict_publisher.start()
@@ -73,11 +73,20 @@ async def run(container: ServiceContainer, stop: asyncio.Event) -> int:
             "cancelled" if task.cancelled() else type(error).__name__ if error else "returned",
         )
     logger.info("ShieldBot workers stopping")
-    await container.launch_watch.stop()
-    await container.hunter.stop()
-    await container.verdict_publisher.stop()
-    await container.shutdown()
-    return 1 if ended else 0
+    failed = False
+    # A loop that ended with an error raises it again when stopped; the rest must still be stopped.
+    for name, stop_service in (
+        ("launch watch", container.launch_watch.stop),
+        ("hunter", container.hunter.stop),
+        ("verdict drain", container.verdict_publisher.stop),
+        ("service container", container.shutdown),
+    ):
+        try:
+            await stop_service()
+        except Exception as e:
+            logger.error("ShieldBot workers: stopping the %s failed (%s)", name, type(e).__name__)
+            failed = True
+    return 1 if ended or failed else 0
 
 
 async def main() -> int:

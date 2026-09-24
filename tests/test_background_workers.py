@@ -287,6 +287,30 @@ async def test_workers_stop_and_exit_non_zero_when_background_work_ends_on_its_o
 
 
 @pytest.mark.asyncio
+async def test_a_service_whose_stop_fails_does_not_keep_the_others_running(caplog):
+    import workers
+    from agent.hunter import Hunter
+
+    container = _worker_container()
+    # A real hunter whose loop died with an error: its stop() raises that error again.
+    hunter = Hunter(tools=MagicMock(), db=MagicMock(), ai_analyzer=MagicMock(), sentinel=MagicMock())
+
+    async def sweep_crashes():
+        raise RuntimeError("sweep crashed")
+
+    hunter._task = asyncio.create_task(sweep_crashes())
+    hunter.start = AsyncMock()
+    container.hunter = hunter
+    with caplog.at_level(logging.ERROR, logger="workers"):
+        status = await asyncio.wait_for(workers.run(container, asyncio.Event()), 5)
+    assert status == 1
+    container.launch_watch.stop.assert_awaited_once_with()
+    container.verdict_publisher.stop.assert_awaited_once_with()
+    container.shutdown.assert_awaited_once_with()
+    assert "stopping the hunter failed (RuntimeError)" in caplog.text
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("setting", ["api", "both"])
 async def test_workers_refuse_to_run_unless_the_setting_is_external(monkeypatch, caplog, setting):
     import workers
