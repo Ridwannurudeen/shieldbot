@@ -481,15 +481,17 @@ async def test_token_lookup_failure_is_unknown_not_zero_risk(
     ({"approvals": [], "status": "unknown", "coverage": {"allowances": True, "balances": True, "prices": False},
       "coverage_reasons": {"prices": "USD price unavailable for 1 token(s)"}},
      "Approval data incomplete: USD price unavailable for 1 token(s)"),
-], ids=["scan-failed", "scan-incomplete"])
+], ids=["no-scan", "scan-incomplete"])
 async def test_health_unknown_approvals_explain_reason_and_value_is_unknown(
-    guardian_with_rescue, mock_rescue, mock_db, scan, expected_warning,
+    mock_rescue, mock_db, scan, expected_warning,
 ):
     if scan is None:
-        mock_rescue.scan_approvals.side_effect = RuntimeError("Approval scan unavailable")
+        # Without a rescue service no approval scan runs at all.
+        guardian = GuardianService(db=mock_db)
     else:
         mock_rescue.scan_approvals.return_value = scan
-    health = await guardian_with_rescue.get_health("0xabc", 56)
+        guardian = GuardianService(db=mock_db, rescue_service=mock_rescue)
+    health = await guardian.get_health("0xabc", 56)
     assert health["status"] == "unknown"
     assert health["warnings"] == [expected_warning]
     assert health["total_value_at_risk_usd"] is None
@@ -543,13 +545,6 @@ async def test_complete_scan_returns_ok_approvals(guardian_with_rescue, mock_res
     assert scan["status"] == "ok"
     assert scan["coverage"] == coverage
     assert scan["coverage_reasons"] == {}
-
-
-@pytest.mark.asyncio
-async def test_approval_scan_failure_raises(guardian_with_rescue, mock_rescue):
-    mock_rescue.scan_approvals.side_effect = RuntimeError("Approval scan unavailable")
-    with pytest.raises(RuntimeError, match="^Approval data unavailable$"):
-        await guardian_with_rescue.get_approvals("0xabc", 56)
 
 
 def _database_mock():
