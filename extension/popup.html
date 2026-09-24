@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <style>
@@ -47,15 +47,17 @@
     .toggle .slider::before { content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; background: #f8fafc; border-radius: 50%; transition: transform 0.2s; }
     .toggle input:checked + .slider { background: #3b82f6; }
     .toggle input:checked + .slider::before { transform: translateX(20px); }
+    .toggle input:focus-visible + .slider { outline: 2px solid #60a5fa; outline-offset: 2px; }
 
     .btn { width: 100%; padding: 8px; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; margin-top: 8px; }
-    .btn-save { background: #3b82f6; color: #fff; }
-    .btn-save:hover { background: #2563eb; }
+    .btn-save { background: #2563eb; color: #fff; }
+    .btn-save:hover { background: #1d4ed8; }
     .saved-msg { text-align: center; font-size: 12px; color: #22c55e; margin-top: 6px; opacity: 0; transition: opacity 0.3s; }
     .saved-msg.show { opacity: 1; }
 
     .tabs { display: flex; margin-bottom: 12px; border-bottom: 1px solid #1e293b; }
-    .tab { flex: 1; padding: 8px 0; text-align: center; font-size: 13px; font-weight: 500; color: #64748b; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; }
+    .tab { flex: 1; padding: 8px 0; text-align: center; font-size: 13px; font-weight: 500; font-family: inherit; color: #94a3b8; cursor: pointer; background: none; border: 0; border-bottom: 2px solid transparent; transition: all 0.2s; }
+    .tab:focus-visible { outline: 2px solid #60a5fa; outline-offset: -2px; }
     .tab.active { color: #3b82f6; border-bottom-color: #3b82f6; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
@@ -63,10 +65,10 @@
     .history-list { max-height: 260px; overflow-y: auto; }
     .history-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: #1e293b; border-radius: 6px; margin-bottom: 6px; }
     .history-badge { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; color: #fff; white-space: nowrap; flex-shrink: 0; }
-    .badge-safe { background: #22c55e; }
-    .badge-caution { background: #eab308; color: #000; }
-    .badge-high { background: #f97316; }
-    .badge-block { background: #ef4444; }
+    .badge-safe { background: #22c55e; color: #0f172a; }
+    .badge-caution { background: #eab308; color: #0f172a; }
+    .badge-high { background: #f97316; color: #0f172a; }
+    .badge-block { background: #dc2626; color: #fff; }
     /* Unknown: neutral hatched grey, so it reads as neither safe nor a warning */
     .badge-unknown { background: repeating-linear-gradient(135deg, #475569 0 4px, #3f4b5e 4px 8px); color: #f8fafc; }
     .history-info { flex: 1; min-width: 0; }
@@ -232,7 +234,7 @@
     .feed-item:nth-child(7) { animation-delay: .28s; }
     .feed-item:nth-child(8) { animation-delay: .32s; }
 
-    .feed-badge { font-size: 8px; font-weight: 800; padding: 2px 5px; border-radius: 3px; color: #fff; flex-shrink: 0; letter-spacing: 0.04em; }
+    .feed-badge { font-size: 8px; font-weight: 800; padding: 2px 5px; border-radius: 3px; flex-shrink: 0; letter-spacing: 0.04em; }
     .feed-info { flex: 1; min-width: 0; }
     .feed-addr { font-size: 10px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: 'SF Mono', 'Fira Code', monospace; }
     .feed-time { font-size: 9px; color: #334155; margin-top: 1px; }
@@ -446,17 +448,17 @@
     <div class="status-dot yellow" id="statusDot"></div>
     <span class="status-text" id="statusText">Checking connection...</span>
   </div>
-  <div class="tabs">
-    <div class="tab active" data-tab="settings" data-i18n="tabSettings">Settings</div>
-    <div class="tab" data-tab="history" data-i18n="tabHistory">History</div>
-    <div class="tab" data-tab="health" data-i18n="tabHealth">Health</div>
-    <div class="tab" data-tab="feed" data-i18n="tabFeed">Feed</div>
+  <div class="tabs" role="tablist">
+    <button type="button" class="tab active" id="tab-settings-button" role="tab" aria-selected="true" aria-controls="tab-settings" data-tab="settings" data-i18n="tabSettings">Settings</button>
+    <button type="button" class="tab" id="tab-history-button" role="tab" aria-selected="false" aria-controls="tab-history" tabindex="-1" data-tab="history" data-i18n="tabHistory">History</button>
+    <button type="button" class="tab" id="tab-health-button" role="tab" aria-selected="false" aria-controls="tab-health" tabindex="-1" data-tab="health" data-i18n="tabHealth">Health</button>
+    <button type="button" class="tab" id="tab-feed-button" role="tab" aria-selected="false" aria-controls="tab-feed" tabindex="-1" data-tab="feed" data-i18n="tabFeed">Feed</button>
   </div>
   <button class="btn" id="askBtn" style="background:#1e293b;border:1px solid #334155;color:#94a3b8;margin-bottom:12px;width:100%;padding:10px;border-radius:6px;cursor:pointer;font-size:13px;">
     &#128737; Ask ShieldBot AI
   </button>
 
-  <div class="tab-content active" id="tab-settings">
+  <div class="tab-content active" id="tab-settings" role="tabpanel" aria-labelledby="tab-settings-button">
     <div style="background:#1e293b;padding:10px;border-radius:6px;margin-bottom:12px;border-left:3px solid #22c55e;">
       <div style="font-size:11px;color:#94a3b8;line-height:1.4;" data-i18n="readyBanner">ShieldAI is ready — no setup needed. Pre-configured to our hosted server.</div>
     </div>
@@ -465,8 +467,8 @@
       <input type="text" id="apiUrl" placeholder="https://api.shieldbotsecurity.online">
     </div>
     <div class="toggle-row">
-      <span class="toggle-label" data-i18n="labelEnableFirewall">Enable Firewall</span>
-      <label class="toggle"><input type="checkbox" id="enabled" checked><span class="slider"></span></label>
+      <span class="toggle-label" id="enabledLabel" data-i18n="labelEnableFirewall">Enable Firewall</span>
+      <label class="toggle"><input type="checkbox" id="enabled" aria-labelledby="enabledLabel" checked><span class="slider"></span></label>
     </div>
     <div class="field" style="margin-top:8px;">
       <label data-i18n="labelPolicyMode">Policy Mode</label>
@@ -476,7 +478,7 @@
       </div>
     </div>
     <div class="field" style="margin-top:8px;">
-      <label data-i18n="labelLanguage">Language</label>
+      <label for="langSelect" data-i18n="labelLanguage">Language</label>
       <select id="langSelect" style="width:100%;padding:8px 10px;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#f8fafc;font-size:13px;outline:none;">
         <option value="en">English</option>
         <option value="zh">中文</option>
@@ -487,11 +489,11 @@
     <div class="saved-msg" id="savedMsg" data-i18n="msgSaved">Settings saved</div>
   </div>
 
-  <div class="tab-content" id="tab-history">
+  <div class="tab-content" id="tab-history" role="tabpanel" aria-labelledby="tab-history-button">
     <div class="history-list" id="historyList"><div class="history-empty">No scans yet</div></div>
   </div>
 
-  <div class="tab-content" id="tab-health">
+  <div class="tab-content" id="tab-health" role="tabpanel" aria-labelledby="tab-health-button">
     <div class="field"><label data-i18n="labelYourWallet">Your Wallet Address</label><input type="text" id="healthAddress" placeholder="0x..."></div>
     <button class="btn btn-save" id="healthScanBtn" data-i18n="btnScanApprovals">Scan Approvals</button>
     <div style="font-size:11px;color:#475569;text-align:center;margin-top:4px;" data-i18n="healthScanSubtext">BNB Chain (BSC) · Full history scan</div>
@@ -504,7 +506,7 @@
     </div>
   </div>
 
-  <div class="tab-content" id="tab-feed">
+  <div class="tab-content" id="tab-feed" role="tabpanel" aria-labelledby="tab-feed-button">
     <div class="field">
       <label data-i18n="labelFeedWallet">Your Wallet Address</label>
       <input type="text" id="feedAddress" placeholder="0x...">
@@ -722,8 +724,8 @@
             <input type="text" class="s-input" id="dash-apiUrl" placeholder="https://api.shieldbotsecurity.online">
           </div>
           <div class="s-toggle-row">
-            <span class="s-toggle-lbl" data-i18n="labelEnableFirewall">Enable Firewall</span>
-            <label class="toggle"><input type="checkbox" id="dash-enabled" checked><span class="slider"></span></label>
+            <span class="s-toggle-lbl" id="dash-enabledLabel" data-i18n="labelEnableFirewall">Enable Firewall</span>
+            <label class="toggle"><input type="checkbox" id="dash-enabled" aria-labelledby="dash-enabledLabel" checked><span class="slider"></span></label>
           </div>
           <div class="s-field">
             <span class="s-label" data-i18n="labelPolicyMode">Policy Mode</span>
@@ -741,8 +743,8 @@
             </div>
           </div>
           <div class="s-field">
-            <span class="s-label" data-i18n="labelLanguage">Language</span>
-            <select id="dash-langSelect" class="s-input">
+            <span class="s-label" id="dash-langLabel" data-i18n="labelLanguage">Language</span>
+            <select id="dash-langSelect" class="s-input" aria-labelledby="dash-langLabel">
               <option value="en">English</option>
               <option value="zh">中文</option>
               <option value="vi">Tiếng Việt</option>

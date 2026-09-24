@@ -119,14 +119,34 @@ function initCompact() {
     window.close();
   });
 
-  document.querySelectorAll(".tab").forEach((tab) => {
+  const tabs = Array.from(document.querySelectorAll(".tab"));
+  tabs.forEach((tab, index) => {
     tab.addEventListener("click", () => {
-      document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+      tabs.forEach((t) => {
+        t.classList.remove("active");
+        t.setAttribute("aria-selected", "false");
+        t.tabIndex = -1;
+      });
       document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
       tab.classList.add("active");
+      tab.setAttribute("aria-selected", "true");
+      tab.tabIndex = 0;
       document.getElementById("tab-" + tab.dataset.tab).classList.add("active");
       if (tab.dataset.tab === "history") loadAndRenderHistory(historyList);
       if (tab.dataset.tab === "feed") initFeedTab();
+    });
+    // Arrow keys, Home and End move between tabs and open the one they reach.
+    tab.addEventListener("keydown", (event) => {
+      const target = {
+        ArrowRight: (index + 1) % tabs.length,
+        ArrowLeft: (index - 1 + tabs.length) % tabs.length,
+        Home: 0,
+        End: tabs.length - 1,
+      }[event.key];
+      if (target === undefined) return;
+      event.preventDefault();
+      tabs[target].focus();
+      tabs[target].click();
     });
   });
 

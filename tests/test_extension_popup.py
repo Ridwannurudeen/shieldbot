@@ -125,6 +125,25 @@ def test_unknown_scans_have_their_own_state_and_reason_in_history_and_dashboard(
 """)
 
 
+def test_popup_tabs_follow_the_tab_pattern_from_the_keyboard():
+    run_popup(r"""
+  await ready();
+  tabs[0].focus();
+  tabs[0].dispatch('keydown', {key: 'ArrowRight'});
+  assert.equal(document.activeElement, tabs[1]);
+  assert.deepEqual(tabs.map(tab => tab.getAttribute('aria-selected')), ['false', 'true', 'false', 'false']);
+  assert.deepEqual(tabs.map(tab => tab.tabIndex), [-1, 0, -1, -1]);
+  tabs[1].dispatch('keydown', {key: 'ArrowLeft'});
+  tabs[0].dispatch('keydown', {key: 'ArrowLeft'});
+  assert.equal(document.activeElement, tabs[3]);
+  tabs[3].dispatch('keydown', {key: 'Home'});
+  assert.equal(document.activeElement, tabs[0]);
+  tabs[0].dispatch('keydown', {key: 'End'});
+  assert.equal(document.activeElement, tabs[3]);
+  assert.equal(tabs[3].getAttribute('aria-selected'), 'true');
+""")
+
+
 class Markup(HTMLParser):
     def __init__(self):
         super().__init__()
@@ -149,6 +168,34 @@ def parse(name):
     parser = Markup()
     parser.feed((EXTENSION / name).read_text(encoding="utf-8"))
     return parser.elements
+
+
+@pytest.mark.parametrize("name", ["popup.html", "sidepanel.html"])
+def test_pages_declare_their_language(name):
+    assert parse(name)[0]["tag"] == "html" and parse(name)[0].get("lang") == "en"
+
+
+def test_popup_tabs_and_controls_have_accessible_names():
+    elements = parse("popup.html")
+    by_id = {element["id"]: element for element in elements if element.get("id")}
+    tablist = [element for element in elements if element.get("role") == "tablist"]
+    assert len(tablist) == 1
+    tabs = [element for element in elements if element.get("role") == "tab"]
+    assert [tab["tag"] for tab in tabs] == ["button"] * 4
+    assert [tab["aria-selected"] for tab in tabs] == ["true", "false", "false", "false"]
+    for tab in tabs:
+        panel = by_id[tab["aria-controls"]]
+        assert panel["role"] == "tabpanel" and panel["aria-labelledby"] == tab["id"]
+    for control in ("enabled", "dash-enabled", "dash-langSelect"):
+        label = by_id[by_id[control]["aria-labelledby"]]
+        assert label.get("text", "").strip(), control
+    assert any(
+        element["tag"] == "label" and element.get("for") == "langSelect" for element in elements
+    )
+    chain = next(
+        element for element in parse("sidepanel.html") if element.get("id") == "chainSelect"
+    )
+    assert chain.get("aria-label")
 
 
 def test_popup_markup_claims_no_protection_before_a_scan():

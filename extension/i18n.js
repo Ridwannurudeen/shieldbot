@@ -63,6 +63,7 @@
   }
 
   function applyTranslations() {
+    document.documentElement.lang = _lang;
     document.querySelectorAll("[data-i18n]").forEach((el) => {
       el.textContent = t(el.dataset.i18n);
     });
