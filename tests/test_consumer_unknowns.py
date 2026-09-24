@@ -732,7 +732,8 @@ const [stored, chainId] = JSON.parse(process.argv[1]);
 function element() {return {innerHTML: '', textContent: '', style: {}};}
 const requested = [];
 const context = {
-  URLSearchParams, location: {search: ''}, t: key => key, escapeHtml: String,
+  URLSearchParams, location: {search: ''}, escapeHtml: String,
+  t: (key, values) => values ? `${key}:${values.status}` : key,
   AbortController, setTimeout, clearTimeout,
   document: {addEventListener() {}, createElement: element, getElementById: element},
   chrome: {runtime: {sendMessage() {}}, storage: {local: {get(defaults, done) { done({...defaults, ...stored}); }, set() {}}}},
@@ -748,7 +749,7 @@ const ctx = {compact: true, scoreNumEl: element(), statsEl: element(), approvals
   assert.deepEqual(requested, [`https://api.shieldbotsecurity.online/api/rescue/0x${'a'.repeat(40)}?chain_id=${chainId}`]);
   assert.notEqual(ctx.errorEl.style.display, 'block');
   assert.equal(ctx.scoreNumEl.textContent, '?');
-  assert(ctx.approvalsEl.innerHTML.includes('Unknown: Approval scan unavailable (HTTP 503)'));
+  assert(ctx.approvalsEl.innerHTML.includes('Unknown: healthScanUnavailable:503'));
   assert.equal(ctx.resultEl.style.display, 'block');
 })().catch((error) => { console.error(error); process.exit(1); });
 '''
@@ -758,6 +759,10 @@ const ctx = {compact: true, scoreNumEl: element(), statsEl: element(), approvals
         encoding='utf-8', check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    root = Path(__file__).resolve().parents[1] / 'extension' / 'locales'
+    for language in ('en', 'vi', 'zh'):
+        messages = json.loads((root / language / 'messages.json').read_text(encoding='utf-8'))
+        assert '(HTTP {status})' in messages['healthScanUnavailable'], language
 
 
 @pytest.mark.parametrize('surface', ['popup-compact', 'popup-dashboard', 'sidepanel-guardian'])

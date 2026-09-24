@@ -141,5 +141,6 @@
   "classCaution": "THẬN TRỌNG",
   "classSafe": "AN TOÀN",
   "overlayBtnWhy": "Tại sao điều này rủi ro?",
-  "askShieldBotAI": "Hỏi ShieldBot AI"
+  "askShieldBotAI": "Hỏi ShieldBot AI",
+  "healthScanUnavailable": "Không thể quét phê duyệt (HTTP {status})"
 }

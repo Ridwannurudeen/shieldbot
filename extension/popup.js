@@ -280,7 +280,7 @@ async function runHealthScan(addr, ctx) {
     ctx.loadingEl.style.display = "none";
     if (resp.status >= 500) {
       // The server could not scan: the wallet's approvals are unknown, not clean.
-      renderHealthData({ status: "unknown", coverage_reasons: { scan: `Approval scan unavailable (HTTP ${resp.status})` } }, ctx);
+      renderHealthData({ status: "unknown", coverage_reasons: { scan: t("healthScanUnavailable", { status: resp.status }) } }, ctx);
       return;
     }
     if (!resp.ok) throw new Error(`API error ${resp.status}`);
