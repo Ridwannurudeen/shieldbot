@@ -172,18 +172,25 @@ class SignaturePermitAnalyzer(Analyzer):
         score = 0.0
         flags = []
 
-        value = _parse_uint(message.get('value', 0))
         spender = (message.get('spender') or '').lower()
         deadline = _parse_uint(message.get('deadline', 0))
-        # A DAI-style permit has no amount: allowed true grants the spender everything and allowed
-        # false revokes. An EIP-2612 permit for a value of 0 is a revoke too.
+        # A DAI-style permit has no amount: only allowed false revokes, and anything else grants the
+        # spender everything. An EIP-2612 permit revokes only for a value that reads as 0; a value
+        # that cannot be read (a float, a negative, an object) is judged as the largest grant.
+        unreadable = False
         if 'allowed' in message:
-            granted = unlimited = message.get('allowed') is True
+            granted = unlimited = message['allowed'] is not False
         else:
-            granted, unlimited = 'value' not in message or value > 0, value >= UNLIMITED_THRESHOLD
+            value = _parse_uint_or_none(message.get('value'))
+            unreadable = value is None
+            granted = value != 0
+            unlimited = unreadable or value >= UNLIMITED_THRESHOLD
 
         # Unlimited value
-        if unlimited:
+        if unreadable:
+            score += 30
+            flags.append('Permit: amount could not be read; treated as unlimited')
+        elif unlimited:
             score += 30
             flags.append('Permit: unlimited token approval')
 
@@ -239,10 +246,14 @@ class SignaturePermitAnalyzer(Analyzer):
         permitted = message.get('permitted', [])
         if 'Batch' not in primary_type:
             permitted = [permitted]
-        unlimited = any(_parse_uint(item.get('amount', 0)) >= UNLIMITED_THRESHOLD for item in permitted)
+        amounts = [_parse_uint_or_none(item.get('amount')) for item in permitted]
+        unlimited = any(amount is None or amount >= UNLIMITED_THRESHOLD for amount in amounts)
         deadline = _parse_uint(message.get('deadline', 0))
 
-        if unlimited:
+        if None in amounts:
+            score += 20
+            flags.append('Permit2 transfer: amount could not be read; treated as unlimited')
+        elif unlimited:
             score += 20
             flags.append('Permit2 transfer: unlimited amount')
         if len(permitted) >= 3:
@@ -284,6 +295,26 @@ class SignaturePermitAnalyzer(Analyzer):
             flags.append('Seaport: suspiciously low consideration for NFT')
 
         return score, flags
+
+
+def _parse_uint_or_none(value) -> Optional[int]:
+    """A uint256 from typed data, or None when the value cannot be read as one.
+
+    Only an int or a decimal or 0x-hex string holding a non-negative integer is readable: JSON
+    numbers such as 1e30 arrive as floats, and bool counts as int in Python but not here. An amount
+    that cannot be read must never read as 0, which would make it a revoke.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, str):
+        try:
+            number = int(value, 16) if value[:2] in ('0x', '0X') else int(value, 10)
+        except ValueError:
+            return None
+        return number if number >= 0 else None
+    return None
 
 
 def _parse_uint(value) -> int:

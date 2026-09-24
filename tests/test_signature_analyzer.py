@@ -239,7 +239,9 @@ async def test_dai_permit_with_allowed_true_is_unlimited():
 @pytest.mark.parametrize('message', [
     {'holder': '0x' + 'a' * 40, 'spender': SPENDER, 'nonce': '0', 'expiry': '0', 'allowed': False},
     {'owner': '0x' + 'a' * 40, 'spender': SPENDER, 'value': '0', 'nonce': '0', 'deadline': '1'},
-], ids=['dai-allowed-false', 'eip2612-zero-value'])
+    {'owner': '0x' + 'a' * 40, 'spender': SPENDER, 'value': '0x0', 'nonce': '0', 'deadline': '1'},
+    {'owner': '0x' + 'a' * 40, 'spender': SPENDER, 'value': 0, 'nonce': '0', 'deadline': '1'},
+], ids=['dai-allowed-false', 'eip2612-zero-value', 'eip2612-hex-zero', 'eip2612-int-zero'])
 async def test_a_revoke_permit_judges_no_spender(message):
     service = _service(_facts(is_contract=False, is_verified=None, age_days=None))
     result = await _analyze(SignaturePermitAnalyzer(service), {'primaryType': 'Permit', 'domain': {}, 'message': message})
@@ -247,6 +249,45 @@ async def test_a_revoke_permit_judges_no_spender(message):
     assert result.score == 0
     assert 'floor' not in result.data
     assert result.data.get('status', 'ok') == 'ok'
+
+
+UNREADABLE = 'Permit: amount could not be read; treated as unlimited'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('field, value, flag', [
+    # A JSON 1e30 arrives as a float; none of these is a readable non-negative integer.
+    ('value', 1e30, UNREADABLE),
+    ('value', {'hex': '0x' + 'f' * 64}, UNREADABLE),
+    ('value', '-5', UNREADABLE),
+    ('value', '1.5', UNREADABLE),
+    ('value', '1e30', UNREADABLE),
+    ('value', True, UNREADABLE),
+    # Only allowed False revokes a DAI-style permit; anything else grants everything.
+    ('allowed', 'false', 'Permit: unlimited token approval'),
+    ('allowed', None, 'Permit: unlimited token approval'),
+], ids=['float', 'object', 'negative', 'fraction', 'exponent', 'bool', 'dai-string-false', 'dai-null'])
+async def test_an_unreadable_permit_amount_is_the_largest_grant(field, value, flag):
+    message = {'owner': '0x' + 'a' * 40, 'spender': SPENDER, 'nonce': '0', 'deadline': '1', field: value}
+    service = _service(_facts(is_verified=False, age_days=90))
+    result = await _analyze(SignaturePermitAnalyzer(service), {'primaryType': 'Permit', 'domain': {}, 'message': message})
+    service.fetch.assert_awaited_once()
+    # Unverified spender, unlimited grant: 85, not the SAFE of a revoke.
+    assert result.data['floor'] == 85
+    assert result.score == 85
+    assert flag in result.flags
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('amount', [1e30, '-1', 'lots'], ids=['float', 'negative', 'text'])
+async def test_an_unreadable_signature_transfer_amount_is_unlimited(amount):
+    typed = _typed('PermitTransferFrom', {
+        'permitted': {'token': '0x' + 'c' * 40, 'amount': amount},
+        'spender': SPENDER, 'nonce': '0', 'deadline': str(int(time.time()) + 1800),
+    })
+    result = await _analyze(SignaturePermitAnalyzer(_service(_facts(is_verified=False, age_days=90))), typed)
+    assert result.data['floor'] == 85
+    assert 'Permit2 transfer: amount could not be read; treated as unlimited' in result.flags
 
 
 @pytest.mark.asyncio

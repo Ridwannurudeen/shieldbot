@@ -489,6 +489,20 @@ async def test_firewall_passes_the_policy_header_to_the_signature_only_path(cons
 
 
 @pytest.mark.asyncio
+async def test_a_float_permit_amount_is_not_a_safe_revoke(consumer_api):
+    # typedData is a Dict, so a JSON 1e30 arrives as a float.
+    api, services = consumer_api
+    services.counterparty_service = _spender_service(is_verified=False, age_days=90)
+    req = api.FirewallRequest(to='', sender='0x' + 'b' * 40, signMethod='eth_signTypedData_v4', typedData={
+        'primaryType': 'Permit', 'message': {'spender': '0x' + '5' * 40, 'value': 1e30, 'deadline': '1'},
+    })
+    response = await api._build_signature_only_response(req)
+    assert response['classification'] == 'BLOCK_RECOMMENDED'
+    assert response['risk_score'] == 85
+    services.counterparty_service.fetch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_signature_with_unknown_spender_facts_is_unknown(consumer_api):
     api, services = consumer_api
     services.counterparty_service = _spender_service(
