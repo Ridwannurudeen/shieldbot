@@ -1490,9 +1490,12 @@ async def firewall(req: FirewallRequest, request: Request):
             firewall_result.update(_coverage_fields(alert))
             firewall_result["raw_checks"] = _extract_raw_checks(contract_scan)
             firewall_result.setdefault("asset_delta", [])
+            if tx_specific and firewall_result["classification"] == "SAFE":
+                firewall_result["classification"] = "CAUTION"
+                firewall_result["danger_signals"].append(_TX_CHECKS_UNAVAILABLE)
             return firewall_result
         else:
-            return _build_fallback_response(decoded, contract_scan, whitelisted)
+            return _build_fallback_response(decoded, contract_scan, whitelisted, transaction_specific=tx_specific)
 
     except HTTPException:
         raise
@@ -2519,7 +2522,14 @@ def _extract_raw_checks(scan: Dict) -> Dict:
     }
 
 
-def _build_fallback_response(decoded: Dict, scan: Dict, whitelisted: Optional[str]) -> Dict:
+# The legacy scan sees only the target, never the transaction's spender, payment or signature, so
+# it cannot clear a transaction-specific request.
+_TX_CHECKS_UNAVAILABLE = "Transaction checks unavailable: the spender, payment or signature was not analysed"
+
+
+def _build_fallback_response(
+    decoded: Dict, scan: Dict, whitelisted: Optional[str], transaction_specific: bool = False,
+) -> Dict:
     """Build a firewall response when AI is unavailable."""
     risk_score = scan.get("risk_score", 50)
     scam_matches = _scam_match_count(scan)
@@ -2562,6 +2572,9 @@ def _build_fallback_response(decoded: Dict, scan: Dict, whitelisted: Optional[st
     alert = format_extension_alert({**scan, 'rug_probability': risk_score})
     if alert['status'] == 'unknown' and classification == 'SAFE':
         classification = 'CAUTION'
+    if transaction_specific and classification == 'SAFE':
+        classification = 'CAUTION'
+        danger_signals.append(_TX_CHECKS_UNAVAILABLE)
 
     return {
         **_coverage_fields(alert),

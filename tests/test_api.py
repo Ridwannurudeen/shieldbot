@@ -535,6 +535,33 @@ async def test_strict_blocks_a_provider_unknown_cold_and_warm(cached_firewall_ap
     assert services.registry.run_all.await_count == 2
 
 
+CLEAN_SCAN = {"risk_score": 0, "status": "ok", "coverage": {"is_verified": 1}, "is_verified": True}
+TX_CHECKS_UNAVAILABLE = "Transaction checks unavailable: the spender, payment or signature was not analysed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ai", [False, True], ids=["heuristic", "ai"])
+@pytest.mark.parametrize("specific", [False, True], ids=["transfer", "approval"])
+async def test_legacy_fallback_never_clears_a_transaction_specific_request(cached_firewall_api, ai, specific):
+    api, services = cached_firewall_api
+    services.registry.run_all.side_effect = RuntimeError("pipeline down")
+    api.token_scanner.check_token.return_value = dict(CLEAN_SCAN)
+    api.ai_analyzer = SimpleNamespace(
+        is_available=lambda: ai,
+        generate_firewall_report=AsyncMock(return_value={
+            "classification": "SAFE", "risk_score": 5, "danger_signals": [], "verdict": "Looks fine",
+        }),
+    )
+    api.calldata_decoder.decode.return_value = dict(APPROVE if specific else TRANSFER)
+    response = await api.firewall(
+        api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40), SimpleNamespace(headers={}),
+    )
+    assert response["classification"] == ("CAUTION" if specific else "SAFE")
+    assert (TX_CHECKS_UNAVAILABLE in response["danger_signals"]) is specific
+    if not ai:
+        assert response["verdict"].startswith(response["classification"])
+
+
 APPROVE = {
     "selector": "095ea7b3", "function_name": "approve", "signature": "approve(address,uint256)",
     "category": "approval", "risk": "high", "params": {"param_0": "0x" + "c" * 40, "param_1": 2 ** 256 - 1},

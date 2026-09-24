@@ -200,7 +200,9 @@ class RiskEngine:
                 composite = max(composite, 70)
 
         # A block-severity scam match (GoPlus labels the token a scam) is a BLOCK on every target type.
-        floor = 90 if any(match.get('severity') == 'block' for match in contract_data.get('scam_matches') or []) else 0
+        floor = 90 if any(
+            isinstance(match, dict) and match.get('severity') == 'block' for match in contract_data.get('scam_matches') or []
+        ) else 0
         composite = max(composite, floor)
 
         rug_probability = round(min(max(composite, 0), 100), 1)
@@ -354,7 +356,9 @@ class RiskEngine:
         # pay-to-claim contract) holds whatever the weighted mean and the discount say, and so does
         # a block-severity scam match (GoPlus labels the token a scam).
         floor = max((result.data.get('floor') or 0 for result in results if not result.error), default=0)
-        if any(match.get('severity') == 'block' for match in contract_data.get('scam_matches') or []):
+        if any(
+            isinstance(match, dict) and match.get('severity') == 'block' for match in contract_data.get('scam_matches') or []
+        ):
             floor = max(floor, 90)
         composite = max(composite, floor)
 

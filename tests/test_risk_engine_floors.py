@@ -198,6 +198,15 @@ def test_high_severity_scam_match_keeps_the_70_floor(entrypoint, is_token):
 
 
 @pytest.mark.parametrize("entrypoint", ["direct", "registry"])
+@pytest.mark.parametrize("is_token", [True, False])
+def test_a_scam_match_that_is_not_a_dict_keeps_the_70_floor(entrypoint, is_token):
+    # Older callers pass matches as plain strings; they carry no severity.
+    risk = _scam_risk(entrypoint, is_token, "Known scam address")
+    assert risk["rug_probability"] == (70 if is_token or entrypoint == "registry" else 12)
+    assert risk["risk_level"] == "MEDIUM"
+
+
+@pytest.mark.parametrize("entrypoint", ["direct", "registry"])
 @pytest.mark.parametrize("has_proxy", [False, True])
 def test_confirmed_honeypot_floors_at_80_whatever_the_liquidity(entrypoint, has_proxy):
     # A verified, renounced token with deep liquidity and low taxes that cannot be sold.
