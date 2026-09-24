@@ -1,28 +1,29 @@
 import { motion } from "framer-motion";
-import ShieldVisual from "./ShieldVisual";
 
 export default function Hero() {
   return (
-    <section className="relative pt-32 pb-20 md:pt-40 md:pb-28 overflow-hidden">
+    <section className="relative pt-28 pb-16 md:pt-32 md:pb-20 overflow-hidden">
       {/* Radial glow behind hero */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-[radial-gradient(circle,rgba(0,255,136,0.06)_0%,transparent_70%)] pointer-events-none" />
 
-      <div className="max-w-6xl mx-auto px-6 grid md:grid-cols-2 gap-12 items-center">
+      <div className="relative max-w-6xl mx-auto px-4 sm:px-6 grid md:grid-cols-[minmax(0,1fr)_minmax(0,490px)] gap-10 md:gap-12 items-start">
         {/* Left — Copy */}
         <motion.div
-          initial={{ x: -60, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          transition={{ duration: 0.7, ease: "easeOut" }}
+          initial={{ y: 20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+          className="md:pt-12"
         >
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.1] mb-6">
-            YOUR ON-CHAIN{" "}
-            <span className="text-neon">FIREWALL</span>
+            Know before you sign.{" "}
+            <span className="text-neon">And know when we don't.</span>
           </h1>
 
-          <p className="text-gray-400 text-lg md:text-xl leading-relaxed max-w-lg mb-8">
-            ShieldBot checks each transaction before you sign it and explains
-            the risk in plain English. It scans contracts on 8 chains, including
-            Robinhood Chain, and says Unknown when it cannot check something.
+          <p className="text-gray-300 text-lg md:text-xl leading-relaxed max-w-xl mb-8">
+            ShieldBot is the security layer that says what it checked. Every
+            verdict carries its coverage, and a check that cannot run reads
+            Unknown, never Safe. Strict mode blocks anything Unknown; Balanced
+            mode warns and leaves the choice to you.
           </p>
 
           <div className="flex flex-wrap items-center gap-4">
@@ -30,56 +31,61 @@ export default function Hero() {
               href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 bg-neon text-navy font-bold text-base px-8 py-3.5 rounded-lg hover:shadow-neon transition-all hover:-translate-y-0.5"
+              className="inline-flex items-center gap-2 bg-neon text-navy font-bold text-base px-6 sm:px-8 py-3.5 rounded-lg hover:shadow-neon transition-all hover:-translate-y-0.5"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <circle cx="12" cy="12" r="4"/>
                 <path d="M12 2a10 10 0 0 1 8.66 5H12a5 5 0 0 0-4.58 3H3.34A10 10 0 0 1 12 2z" opacity=".6"/>
                 <path d="M12 22A10 10 0 0 1 3.34 17H7.42A5 5 0 0 0 12 19.92V22z" opacity=".6"/>
                 <path d="M22 12a10 10 0 0 1-5.34 8.9l-2.08-3.6A5 5 0 0 0 17 12h5z" opacity=".6"/>
               </svg>
-              Add to Chrome — Free
+              Add to Chrome
             </a>
             <a
-              href="https://t.me/shieldbot_bnb_bot"
+              href="https://api.shieldbotsecurity.online/docs"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 border border-white/20 text-gray-300 font-semibold text-base px-6 py-3.5 rounded-lg hover:border-white/40 hover:text-white transition-all"
+              className="inline-flex items-center gap-2 border border-white/20 text-gray-200 font-semibold text-base px-6 py-3.5 rounded-lg hover:border-white/40 hover:text-white transition-all"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.248-1.97 9.289c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L7.08 14.784l-2.968-.924c-.645-.204-.657-.645.136-.953l11.57-4.461c.537-.194 1.006.131.744.802z"/>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M8 6l-6 6 6 6M16 6l6 6-6 6"/>
               </svg>
-              Try Telegram Bot
+              API docs
             </a>
           </div>
 
-          {/* Trust disclaimer */}
-          <div className="flex items-center gap-2 mt-5">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-            </svg>
-            <span className="text-xs text-gray-500">
-              ShieldBot <span className="text-gray-300 font-medium">never</span> asks for your private keys or seed phrase.
-            </span>
-          </div>
-
-          {/* Chrome extension badge */}
-          <div className="inline-flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-4 py-2 mt-3">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="#9CA3AF">
-              <circle cx="12" cy="12" r="4"/>
-              <path d="M12 2a10 10 0 0 1 8.66 5H12a5 5 0 0 0-4.58 3H3.34A10 10 0 0 1 12 2z" opacity=".5"/>
-              <path d="M12 22A10 10 0 0 1 3.34 17H7.42A5 5 0 0 0 12 19.92V22z" opacity=".5"/>
-              <path d="M22 12a10 10 0 0 1-5.34 8.9l-2.08-3.6A5 5 0 0 0 17 12h5z" opacity=".5"/>
-            </svg>
-            <span className="text-xs text-gray-500">Chrome Extension — <span className="text-neon font-medium">Live on Web Store</span></span>
-          </div>
+          <p className="text-sm text-gray-400 mt-5">
+            Free, no account. ShieldBot{" "}
+            <span className="text-gray-200 font-medium">never</span> asks for
+            your private keys or seed phrase.
+          </p>
         </motion.div>
 
-        {/* Right — Shield visual */}
-        <div className="hidden md:block">
-          <ShieldVisual />
-        </div>
+        {/* Right — the real extension overlay (landing-src/scripts/capture-hero-overlay.py) */}
+        <figure>
+          <picture>
+            <source
+              media="(max-width: 767px)"
+              srcSet="/hero-overlay-mobile.webp"
+              width={390}
+              height={496}
+            />
+            <img
+              src="/hero-overlay.webp"
+              width={490}
+              height={904}
+              alt="The ShieldBot extension's warning dialog for a request that approves unlimited spending of a BNB Chain token. The verdict badge reads BLOCK RECOMMENDED — Unknown (incomplete provider coverage), with the line: Why: Structural data unknown: contract_age_days; No DexScreener pairs on requested chain (bsc). The danger signals include Honeypot detected."
+              className="w-full h-auto rounded-2xl ring-1 ring-white/10 shadow-[0_25px_50px_rgba(0,0,0,0.5)] max-md:rounded-b-none max-md:[mask-image:linear-gradient(to_bottom,#000_94%,transparent)]"
+            />
+          </picture>
+          <figcaption className="text-sm text-gray-400 mt-4 leading-relaxed">
+            The extension's 3.1.0 overlay (listed on the Chrome Web Store as
+            ShieldAI Transaction Firewall; the 3.1.0 update is pending), fed the
+            API's reply for this request on 24 September 2026. It recommends
+            blocking a detected honeypot and names the two checks it could not
+            run.
+          </figcaption>
+        </figure>
       </div>
     </section>
   );

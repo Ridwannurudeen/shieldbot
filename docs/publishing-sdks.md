@@ -91,7 +91,7 @@ Then upload for real with `python -m twine upload dist/*` and repeat the check w
 ## After publishing
 
 - Replace the "Install" sections of `sdk/README.md` and `sdk/python/README.md` with the registry commands.
-- Update the website copy that says the SDKs are not on npm or PyPI yet: `landing-src/src/components/Channels.tsx` and `landing-src/src/components/AgentSecurity.tsx`, then rebuild `landing/`.
+- Update the website copy that says the SDKs are not on npm or PyPI yet: `landing-src/src/components/HowItWorks.tsx` and `landing-src/src/components/AgentSecurity.tsx`, then rebuild `landing/`.
 
 ## MCP server
 

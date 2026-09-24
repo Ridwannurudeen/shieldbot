@@ -48,7 +48,7 @@ export default function RobinhoodCensus() {
           ))}
         </motion.div>
 
-        <p className="text-xs text-gray-500 text-center max-w-3xl mx-auto mt-8 leading-relaxed">
+        <p className="text-xs text-gray-400 text-center max-w-3xl mx-auto mt-8 leading-relaxed">
           Observed from 14 to 22 September 2026. These figures describe the
           chain, not ShieldBot scans. A token is counted when it first appears
           in a liquidity pool, not when it is deployed, and missing evidence is
@@ -57,7 +57,7 @@ export default function RobinhoodCensus() {
             href="https://github.com/Ridwannurudeen/shieldbot/blob/main/docs/census-4663.md"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-gray-400 underline hover:text-neon"
+            className="text-gray-200 underline hover:text-neon"
           >
             Method and limits
           </a>

@@ -1,8 +1,8 @@
 """The public website must not drift from the code it describes.
 
 These checks tie the landing page, the about page, the dashboard and the extension's welcome page to
-the facts they state (chain counts, tool counts, score bands, chain tables, roadmap status) and fail
-when a source changes without the site, or when the committed builds fall behind their sources.
+the facts they state (chain counts, tool counts, score bands, chain tables, per-chain coverage) and
+fail when a source changes without the site, or when the committed builds fall behind their sources.
 """
 
 import json
@@ -72,42 +72,79 @@ def test_chains_section_lists_every_scan_chain():
     assert "Robinhood Chain" in names
 
 
-def test_mcp_and_bot_counts_match_the_code():
+def test_chains_section_coverage_matches_the_code():
+    from adapters.arbitrum import ArbitrumAdapter
+    from adapters.base_chain import BaseChainAdapter
+    from adapters.bsc import BscAdapter
+    from adapters.eth import EthAdapter
+    from adapters.opbnb import OpBNBAdapter
+    from adapters.optimism import OptimismAdapter
+    from adapters.polygon import PolygonAdapter
+    from adapters.robinhood import RobinhoodAdapter
+    from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
+    from services.mempool_service import supports_pending_transactions
+
+    adapters = {
+        adapter.chain_id: adapter
+        for adapter in (
+            cls(rpc_url="https://rpc.invalid")
+            for cls in (
+                ArbitrumAdapter,
+                BaseChainAdapter,
+                BscAdapter,
+                EthAdapter,
+                OpBNBAdapter,
+                OptimismAdapter,
+                PolygonAdapter,
+                RobinhoodAdapter,
+            )
+        )
+    }
+    assert set(adapters) == set(chain_info())
+    aliases = {"BSC": "BNB Chain"}
+    ids = {aliases.get(info["name"], info["name"]): chain_id for chain_id, info in chain_info().items()}
+    rows = re.findall(
+        r'name: "([^"]+)",\s*simulation: ("[^"]+"|null),\s*mempool: (true|false),\s*launches: (true|false),',
+        read(COMPONENTS / "Chains.tsx"),
+    )
+    # Web3Client.supports_honeypot_simulation reads the same flag; without honeypot.is or it, no
+    # sell is simulated (adapters/evm_base.py HONEYPOT_IS_UNSUPPORTED).
+    simulator = {
+        chain_id: "ShieldBot"
+        if getattr(adapter, "supports_honeypot_simulation", False) is True
+        else "honeypot.is"
+        if adapter._honeypot_chain_id is not None
+        else None
+        for chain_id, adapter in adapters.items()
+    }
+    assert len(rows) == len(chain_info())
+    for name, simulation, mempool, launches in rows:
+        assert json.loads(simulation) == simulator[ids[name]], name
+        assert (mempool == "true") == supports_pending_transactions(ids[name]), name
+        assert (launches == "true") == (ids[name] == LAUNCH_CHAIN_ID), name
+
+    def listed(provider):
+        names = [name for name, chain_id in ids.items() if simulator[chain_id] == provider]
+        return " and ".join([", ".join(names[:-1]), names[-1]]) if len(names) > 1 else names[0]
+
+    prose = " ".join(read(COMPONENTS / "Chains.tsx").split())
+    assert (
+        f"honeypot.is simulates a buy and a sell on {listed('honeypot.is')}, and ShieldBot runs its "
+        f"own on supported {listed('ShieldBot')} pool routes."
+    ) in prose
+
+
+def test_mcp_counts_match_the_code():
     from mcp_server.prompts import PROMPT_DEFINITIONS
     from mcp_server.resources import RESOURCE_DEFINITIONS, RESOURCE_TEMPLATE_DEFINITIONS
     from mcp_server.tools import TOOL_DEFINITIONS
 
     agent = read(COMPONENTS / "AgentSecurity.tsx")
-    roadmap = read(COMPONENTS / "Roadmap.tsx")
     # MCP lists parameterised resources as templates; the site counts both as resources.
     resources = len(RESOURCE_DEFINITIONS) + len(RESOURCE_TEMPLATE_DEFINITIONS)
     assert f"{len(TOOL_DEFINITIONS)} security tools" in agent
     assert f"{resources} threat resources" in agent
     assert f"{len(PROMPT_DEFINITIONS)} analysis prompts" in agent
-    assert (
-        f"MCP Server ({len(TOOL_DEFINITIONS)} tools, {resources} resources"
-        in roadmap
-    )
-
-    commands = len(re.findall(r'CommandHandler\("', read(ROOT / "bot.py")))
-    assert f"Telegram bot ({commands} commands)" in roadmap
-
-
-def test_roadmap_marks_nothing_complete_that_is_still_open():
-    roadmap = read(COMPONENTS / "Roadmap.tsx")
-    done = [
-        item
-        for items in re.findall(r'status: "done",\s*items: \[(.*?)\]', roadmap, re.DOTALL)
-        for item in re.findall(r'"([^"]+)"', items)
-    ]
-    still_open = re.findall(r"^- \[ \] \*\*([^*]+)\*\*", read(ROOT / "ROADMAP.md"), re.MULTILINE)
-    assert done and still_open
-    for item in done:
-        assert not re.search(r"\b(?:deploying|proposed|planned|upcoming|in progress)\b", item, re.I)
-        for title in still_open:
-            assert title.lower() not in item.lower(), (
-                f"Roadmap.tsx marks {item!r} Complete; ROADMAP.md leaves {title!r} open"
-            )
 
 
 def welcome_text() -> str:
@@ -231,6 +268,67 @@ def test_structured_data_is_valid_and_matches_the_visible_faq():
     for entity in entities:
         assert json.dumps(entity["name"], ensure_ascii=False) in faq_source
         assert json.dumps(entity["acceptedAnswer"]["text"], ensure_ascii=False) in faq_source
+
+
+def test_hero_image_describes_its_recorded_api_reply():
+    # landing-src/scripts/capture-hero-overlay.py renders the extension's overlay from this reply.
+    reply = json.loads(read(LANDING_SRC / "scripts" / "hero-overlay-response.json"))
+    hero = read(COMPONENTS / "Hero.tsx")
+    messages = json.loads(read(ROOT / "extension" / "locales" / "en" / "messages.json"))
+    # The overlay's rules in extension/content.js, applied below to the recorded reply.
+    content = " ".join(read(ROOT / "extension" / "content.js").split())
+    for rule in (
+        'const incomplete = result.status !== "ok" || result.partial === true || '
+        'result.risk_level === "UNKNOWN" || result.classification === "UNKNOWN" || '
+        "!Number.isFinite(result.risk_score) || "
+        "Object.values(result.coverage || {}).some(value => Number(value) < 1);",
+        "const classification = incomplete && "
+        '!["HIGH_RISK", "BLOCK_RECOMMENDED"].includes(result.classification) '
+        '? "UNKNOWN" : result.classification || "CAUTION";',
+        'const scoreDisplay = incomplete ? "Unknown (incomplete provider coverage)" : '
+        '`${_t("overlaySafety")} ${100 - result.risk_score}/100`;',
+        '${escapeHtml(label)}${classification === "UNKNOWN" ? "" : ` &mdash; ${escapeHtml(scoreDisplay)}`}',
+        'return Object.values(result.coverage_reasons || {}).filter(Boolean).join("; ") || '
+        '_t("unknownNoReason");',
+    ):
+        assert rule in content, rule
+
+    score = reply.get("risk_score")
+    incomplete = (
+        reply["status"] != "ok"
+        or reply.get("partial") is True
+        or reply.get("risk_level") == "UNKNOWN"
+        or reply.get("classification") == "UNKNOWN"
+        or type(score) not in (int, float)
+        or any(float(value) < 1 for value in (reply.get("coverage") or {}).values())
+    )
+    shown = reply.get("classification") or "CAUTION"
+    if incomplete and shown not in ("HIGH_RISK", "BLOCK_RECOMMENDED"):
+        shown = "UNKNOWN"
+    label = messages[
+        {
+            "BLOCK_RECOMMENDED": "classBlock",
+            "HIGH_RISK": "classHighRisk",
+            "CAUTION": "classCaution",
+            "SAFE": "classSafe",
+            "UNKNOWN": "classUnknown",
+        }[shown]
+    ]
+    if shown != "UNKNOWN":
+        score_display = (
+            "Unknown (incomplete provider coverage)"
+            if incomplete
+            else f"{messages['overlaySafety']} {100 - score}/100"
+        )
+        label = f"{label} — {score_display}"
+    assert f"The verdict badge reads {label}" in hero
+    if incomplete:
+        reasons = "; ".join(filter(None, reply["coverage_reasons"].values()))
+        assert f"{messages['unknownWhy']} {reasons or messages['unknownNoReason']}" in hero
+    for name in ("hero-overlay.webp", "hero-overlay-mobile.webp"):
+        assert f'"/{name}"' in hero
+        source = (LANDING_SRC / "public" / name).read_bytes()
+        assert (ROOT / "landing" / name).read_bytes() == source, f"landing/{name} is stale"
 
 
 @pytest.mark.parametrize(
