@@ -48,10 +48,10 @@ Privacy
 
 Limits
 • This is a warning layer, not a guarantee. Always read your wallet's own confirmation screen.
-• It checks the wallet requests a page makes through the standard provider's request method (window.ethereum or an EIP-6963 provider), in the page itself and in frames from other origins (an origin is a scheme, host and port). The same kinds of request sent through the older send and sendAsync methods are refused. A page that reaches your wallet another way, such as through the wallet's own messaging, is not checked.
+• It checks the wallet requests a page makes through the standard provider's request method (window.ethereum or an EIP-6963 provider), in the page itself and in frames from other origins (an origin is a scheme, host and port). The same kinds of request sent through the older send and sendAsync methods are refused, and a short notice says so. A page that reaches your wallet another way, such as through the wallet's own messaging, is not checked.
 • It rejects every wallet request it checks from a frame or popup that the page can script itself: a frame whose parent page has the same origin, a blank (about:blank) or srcdoc document, or a popup opened by a page of the same origin. It cannot keep its check private there, and a short notice says so. Open the dApp in its own tab instead.
-• While it is switched on, it never passes a request it checks to your wallet without showing it to you first, and a page cannot make it approve a request for you: only your own click or key press on the warning counts. If no warning appears within 60 seconds, or the page takes it away, the request is rejected.
-• A page can still hide or cover the warning, or lay something over it to trick you into clicking (clickjacking). The extension makes this harder (continue and sign buttons wait half a second, and work only while the warning is fully visible) but cannot fully prevent it.
+• While it is switched on, it never passes a request it checks to your wallet without showing it to you first, and a page cannot make it approve a request for you: only your own click or key press on the warning counts. If no warning appears within 60 seconds, or the page takes it away or keeps it out of view for 10 seconds, the request is rejected.
+• A page can still hide or cover the warning, or lay something over it to trick you into clicking (clickjacking). The extension makes this harder (continue and sign buttons wait half a second, and work only once the warning has been fully visible for that long) but cannot fully prevent it. If the page covers or alters the warning, those buttons do nothing and the warning says why.
 • A batch of calls (wallet_sendCalls) is checked one call at a time, each with its own warning. How the calls work together is not analysed.
 • It runs on https pages only, in Chrome 111 or later.
 ```
@@ -79,7 +79,7 @@ has passed with them.
    `chrome://extensions`, turn on Developer mode, use Load unpacked
    on the `extension` folder, and check: name "ShieldAI Transaction Firewall", version 3.1.0,
    no Errors button. Then run the smoke test below. Do not upload until its release gate (steps 8
-   to 12) has passed on both MetaMask and Rabby.
+   to 17) has passed on both MetaMask and Rabby.
 5. Developer Dashboard, Package tab: upload the zip.
 6. Store listing tab: paste the description above. Replace the screenshots with real 3.1.0 captures
    (see `extension/screenshots/CAPTURE-GUIDE.md`). Do not upload any image that shows screens the
@@ -123,10 +123,11 @@ wallet. Reject every wallet popup unless you mean to spend.
    reason line. Arrow keys move between the popup tabs. Switch the language to Tiếng Việt and 中文:
    no raw key names (such as tabFeed) appear, and the version label reads v3.1.0.
 
-**Release gate.** Steps 8 to 12 check what the automated tests cannot: how this build's request
+**Release gate.** Steps 8 to 17 check what the automated tests cannot: how this build's request
 handling (the copied request objects, the chain it names, the wrapped prototypes, send and
-sendAsync) works with a real wallet. They have not been run yet. All must pass on MetaMask and on
-Rabby before the package is uploaded.
+sendAsync) and its warning work with a real wallet and a real page. They have not been run yet.
+All must pass on MetaMask and on Rabby before the package is uploaded. If the copies handed to the
+wallet are ever frozen (an owner decision), run them again.
 
 8. **Everyday calls** (2 minutes). On a dApp, connect the wallet, see the balance, and switch the
    network from the dApp. All work as without the extension, with no ShieldAI warning.
@@ -143,5 +144,22 @@ Rabby before the package is uploaded.
 12. **Legacy typed data** (1 minute). Trigger `eth_signTypedData_v1` (the test dApp's Sign Typed
    Data button): the warning lists each field's name, type and value, and Sign Anyway opens the
    wallet.
+13. **send and sendAsync** (2 minutes). In the console of a dApp page, `ethereum.sendAsync({id: 1,
+   jsonrpc: '2.0', method: 'eth_chainId'}, console.log)` answers the chain id, and a batch
+   `ethereum.sendAsync([{id: 1, jsonrpc: '2.0', method: 'eth_chainId'}, {id: 2, jsonrpc: '2.0',
+   method: 'eth_blockNumber'}], console.log)` answers both. With `eth_sendTransaction` in the
+   payload instead, the callback gets an error, a notice appears, and the wallet shows nothing.
+14. **document.open()** (1 minute). Start a transaction, and while the warning is open run
+   `document.open(); document.write('replaced'); document.close()` in the console: the dApp's
+   request is rejected and the wallet shows nothing.
+15. **Covered warning** (2 minutes). Start a transaction, and in the console lay an element over
+   the warning that lets clicks through: `const c = document.createElement('div');
+   c.style.cssText = 'position:fixed;inset:0;z-index:2147483647;pointer-events:none;background:rgba(0,0,0,.01)';
+   document.body.append(c)`. Proceed does nothing and the warning says the page is covering it.
+   Remove the element (`c.remove()`), wait a second, and Proceed works.
+16. **Block Recommended** (1 minute). On a warning that says BLOCK RECOMMENDED (its border pulses),
+   Proceed still works in Balanced mode: the pulse does not count as the page covering it.
+17. **Cross-origin frame** (2 minutes). Open a dApp that runs inside a frame from another site (or
+   embed one on a test page): the warning appears in the frame, and Proceed works there.
 
 Record for each wallet: pass or fail per step, and a screenshot of any failure.
