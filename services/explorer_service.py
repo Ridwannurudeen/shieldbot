@@ -5,6 +5,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 import aiohttp
 from cachetools import TTLCache
@@ -47,12 +48,16 @@ def _redact_api_key(value, api_key: str):
 
 
 class ExplorerService:
-    """Cache provider responses for five minutes; share one PRO rate limiter."""
+    """Cache provider responses for five minutes; pace each Blockscout host on its own.
+
+    The PRO gateway and the public instances have separate rate limits, so a slow or rate-limited
+    instance must not hold up the gateway's lookups, or the other way round.
+    """
 
     def __init__(self):
         self._cache = TTLCache(maxsize=2048, ttl=300)
-        self._blockscout_lock = asyncio.Lock()
-        self._last_request = 0.0
+        self._blockscout_locks: dict[str, asyncio.Lock] = {}
+        self._last_request: dict[str, float] = {}
 
     async def _request(self, provider: str, url: str, params: dict) -> ExplorerResult:
         cache_key = (
@@ -63,6 +68,7 @@ class ExplorerService:
         )
         if cache_key in self._cache:
             return self._cache[cache_key]
+        host = urlsplit(url).hostname
 
         async def fetch():
             try:
@@ -71,10 +77,12 @@ class ExplorerService:
                 ) as session:
                     for attempt in range(3):
                         if provider == "blockscout":
-                            delay = 0.21 - (time.monotonic() - self._last_request)
+                            delay = 0.21 - (
+                                time.monotonic() - self._last_request.get(host, 0.0)
+                            )
                             if delay > 0:
                                 await asyncio.sleep(delay)
-                            self._last_request = time.monotonic()
+                            self._last_request[host] = time.monotonic()
                         # Redirects are not followed, not even to the same host: the gateway
                         # request carries the API key in its query string, the only redirect
                         # seen (optimism.blockscout.com) changes host, and an unfollowed one
@@ -112,7 +120,7 @@ class ExplorerService:
                 )
 
         if provider == "blockscout":
-            async with self._blockscout_lock:
+            async with self._blockscout_locks.setdefault(host, asyncio.Lock()):
                 if cache_key in self._cache:
                     return self._cache[cache_key]
                 result = await fetch()

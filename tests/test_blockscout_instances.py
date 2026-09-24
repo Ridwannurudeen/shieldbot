@@ -4,6 +4,7 @@ Etherscan's free tier refuses getcontractcreation on chains 8453 and 10 and the 
 gateway answers 402 without a key, so contract age there was Unknown on every scan.
 """
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -95,6 +96,43 @@ async def test_robinhood_still_needs_the_pro_gateway_key(http):
     result = await ExplorerService().get_contract_creation_info(ADDRESS, 4663)
     assert result.status == "unknown" and "BLOCKSCOUT_API_KEY" in result.reason
     http[1].get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_each_blockscout_host_is_paced_on_its_own(http):
+    respond, session = http
+    respond(RECORDED[8453])
+    clock = [10.0]
+    starts = {}
+
+    def get(url, **kwargs):
+        starts.setdefault(url.split("/")[2], []).append(clock[0])
+        return session.get.return_value
+
+    session.get.side_effect = get
+
+    async def sleep(delay):
+        clock[0] += delay
+
+    service = ExplorerService()
+    with (
+        patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}),
+        patch("services.explorer_service.time.monotonic", side_effect=lambda: clock[0]),
+        patch("services.explorer_service.asyncio.sleep", side_effect=sleep),
+    ):
+        await asyncio.gather(
+            *(
+                service.get_contract_creation_info("0x" + f"{i:040x}", chain_id)
+                for i in range(3)
+                for chain_id in (4663, 8453, 10)
+            )
+        )
+    assert set(starts) == {"api.blockscout.com", "base.blockscout.com", "explorer.optimism.io"}
+    for host_starts in starts.values():
+        assert len(host_starts) == 3
+        assert all(b - a >= 0.209 for a, b in zip(host_starts, host_starts[1:]))
+    # No host waits behind another host's requests.
+    assert all(host_starts[0] == 10.0 for host_starts in starts.values())
 
 
 def _adapter(adapter_class, creation):
