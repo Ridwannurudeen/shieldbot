@@ -628,8 +628,33 @@ function FlagModal({
 }) {
   const [reason, setReason] = useState('');
   const [sending, setSending] = useState(false);
+  const dialog = useRef(null);
   useEffect(() => {
     setReason('');
+  }, [threat]);
+  // The open dialog takes focus, keeps Tab inside it, closes on Escape and returns focus to the
+  // control that opened it.
+  useEffect(() => {
+    if (!threat) return;
+    const opener = document.activeElement;
+    dialog.current.querySelector('textarea').focus();
+    function onKey(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        const items = [...dialog.current.querySelectorAll('button:not([disabled]), textarea')];
+        const index = items.indexOf(document.activeElement);
+        const next = e.shiftKey ? (index <= 0 ? items.length : index) - 1 : (index + 1) % items.length;
+        items[next].focus();
+      }
+    }
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      opener.focus();
+    };
   }, [threat]);
   if (!threat) return null;
   const addr = threat.address || threat.target_token || '';
@@ -660,7 +685,9 @@ function FlagModal({
       setSending(false);
     }
   }
-  return /*#__PURE__*/React.createElement("div", {
+  // Rendered on the body: inside the feed's glass panel, whose backdrop-filter contains fixed
+  // elements, the backdrop covered only that panel and the dialog could sit off screen.
+  return ReactDOM.createPortal(/*#__PURE__*/React.createElement("div", {
     className: "fixed inset-0 z-50 flex items-center justify-center",
     style: {
       background: 'rgba(15,23,42,0.85)',
@@ -668,6 +695,10 @@ function FlagModal({
     },
     onClick: onClose
   }, /*#__PURE__*/React.createElement("div", {
+    ref: dialog,
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": "flag-title",
     className: "glass rounded-2xl p-6 w-full max-w-md mx-4 fade-up",
     style: {
       border: '1px solid #334155'
@@ -675,14 +706,16 @@ function FlagModal({
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between mb-5"
-  }, /*#__PURE__*/React.createElement("span", {
+  }, /*#__PURE__*/React.createElement("h2", {
+    id: "flag-title",
     className: "font-semibold text-base",
     style: {
       color: '#F8FAFC'
     }
   }, "Flag False Positive"), /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
-    className: "transition-colors hover:text-white",
+    "aria-label": "Close",
+    className: "w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg transition-colors hover:text-white",
     style: {
       color: '#94A3B8',
       fontSize: 18,
@@ -727,19 +760,19 @@ function FlagModal({
       background: '#0F172A',
       border: '1px solid #334155',
       color: '#F8FAFC',
-      outline: 'none',
       height: 80,
       fontFamily: 'inherit'
     },
     maxLength: 1000,
     value: reason,
     onChange: e => setReason(e.target.value),
+    "aria-label": "Why is this a false positive?",
     placeholder: "Why is this a false positive?"
   }), /*#__PURE__*/React.createElement("div", {
     className: "flex gap-2 mt-4"
   }, /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
-    className: "flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors",
+    className: "flex-1 py-2.5 min-h-[44px] md:min-h-0 rounded-lg text-sm font-medium transition-colors",
     style: {
       background: '#334155',
       color: '#E2E8F0'
@@ -747,13 +780,13 @@ function FlagModal({
   }, "Cancel"), /*#__PURE__*/React.createElement("button", {
     onClick: submit,
     disabled: !canSend,
-    className: "flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors",
+    className: "flex-1 py-2.5 min-h-[44px] md:min-h-0 rounded-lg text-sm font-medium transition-colors",
     style: {
       background: '#2563EB',
       color: '#fff',
       opacity: canSend ? 1 : 0.5
     }
-  }, sending ? 'Sending…' : 'Submit Report'))));
+  }, sending ? 'Sending…' : 'Submit Report')))), document.body);
 }
 
 // ─── Error Banner ──────────────────────────────────────────────────────────

@@ -217,7 +217,29 @@
     function FlagModal({ threat, onClose, onResult }) {
       const [reason,  setReason]  = useState('');
       const [sending, setSending] = useState(false);
+      const dialog = useRef(null);
       useEffect(() => { setReason(''); }, [threat]);
+      // The open dialog takes focus, keeps Tab inside it, closes on Escape and returns focus to the
+      // control that opened it.
+      useEffect(() => {
+        if (!threat) return;
+        const opener = document.activeElement;
+        dialog.current.querySelector('textarea').focus();
+        function onKey(e) {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            onClose();
+          } else if (e.key === 'Tab') {
+            e.preventDefault();
+            const items = [...dialog.current.querySelectorAll('button:not([disabled]), textarea')];
+            const index = items.indexOf(document.activeElement);
+            const next = e.shiftKey ? (index <= 0 ? items.length : index) - 1 : (index + 1) % items.length;
+            items[next].focus();
+          }
+        }
+        document.addEventListener('keydown', onKey);
+        return () => { document.removeEventListener('keydown', onKey); opener.focus(); };
+      }, [threat]);
       if (!threat) return null;
       const addr = threat.address || threat.target_token || '';
       const type = (threat.type || threat.alert_type || 'unknown').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
@@ -243,16 +265,20 @@
           setSending(false);
         }
       }
-      return (
+      // Rendered on the body: inside the feed's glass panel, whose backdrop-filter contains fixed
+      // elements, the backdrop covered only that panel and the dialog could sit off screen.
+      return ReactDOM.createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center"
              style={{ background:'rgba(15,23,42,0.85)', backdropFilter:'blur(6px)' }}
              onClick={onClose}>
-          <div className="glass rounded-2xl p-6 w-full max-w-md mx-4 fade-up"
+          <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="flag-title"
+               className="glass rounded-2xl p-6 w-full max-w-md mx-4 fade-up"
                style={{ border:'1px solid #334155' }}
                onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
-              <span className="font-semibold text-base" style={{ color:'#F8FAFC' }}>Flag False Positive</span>
-              <button onClick={onClose} className="transition-colors hover:text-white"
+              <h2 id="flag-title" className="font-semibold text-base" style={{ color:'#F8FAFC' }}>Flag False Positive</h2>
+              <button onClick={onClose} aria-label="Close"
+                      className="w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg transition-colors hover:text-white"
                       style={{ color:'#94A3B8', fontSize:18, lineHeight:1 }}>✕</button>
             </div>
 
@@ -271,20 +297,21 @@
 
             <textarea className="w-full rounded-lg p-3 text-sm resize-none"
                       style={{ background:'#0F172A', border:'1px solid #334155', color:'#F8FAFC',
-                               outline:'none', height:80, fontFamily:'inherit' }}
+                               height:80, fontFamily:'inherit' }}
                       maxLength={1000} value={reason} onChange={e => setReason(e.target.value)}
-                      placeholder="Why is this a false positive?" />
+                      aria-label="Why is this a false positive?" placeholder="Why is this a false positive?" />
 
             <div className="flex gap-2 mt-4">
-              <button onClick={onClose} className="flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors"
+              <button onClick={onClose} className="flex-1 py-2.5 min-h-[44px] md:min-h-0 rounded-lg text-sm font-medium transition-colors"
                       style={{ background:'#334155', color:'#E2E8F0' }}>Cancel</button>
-              <button onClick={submit} disabled={!canSend} className="flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors"
+              <button onClick={submit} disabled={!canSend} className="flex-1 py-2.5 min-h-[44px] md:min-h-0 rounded-lg text-sm font-medium transition-colors"
                       style={{ background:'#2563EB', color:'#fff', opacity: canSend ? 1 : 0.5 }}>
                 {sending ? 'Sending…' : 'Submit Report'}
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       );
     }
 
