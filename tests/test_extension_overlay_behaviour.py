@@ -1450,6 +1450,7 @@ PATCHES = {
     "weakset-has": "WeakSet.prototype.has = () => true;",
     "weakset-add": "WeakSet.prototype.add = function () { return this; };",
     "function-call": "Function.prototype.call = function () { return 'forwarded'; };",
+    "function-to-string": "Function.prototype.toString = () => 'function () { [native code] }';",
     "define-property": "Object.defineProperty = (target) => target;",
     "object-prototype-accessor": "Object.prototype.get = function () { return undefined; };",
     "function-bind": "Function.prototype.bind = function () { return async () => 'forwarded'; };",
@@ -2163,6 +2164,34 @@ def test_every_request_on_the_prototype_chain_is_checked():
   const replaced = Wallet.prototype.request;
   await assert.rejects(Base.prototype.request.call(Wallet.prototype, tx), /blocked/);
   assert.equal(Wallet.prototype.request, replaced);
+"""
+    )
+
+
+def test_the_prototype_walk_stops_at_a_platform_function():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  // A class chain with a platform function (native code) between two levels of wallet code.
+  class Top { async request(args) { sent.push(args); return 'top'; } send() {} }
+  class Platform extends Top {}
+  Platform.prototype.request = Array.prototype.push;
+  Platform.prototype.send = Array.prototype.join;
+  class Wallet extends Platform {
+    on() {}
+    async request(args) { if (args.method === 'eth_chainId') return '0x38'; sent.push(args); return 'wallet'; }
+  }
+  const originals = {top: Top.prototype.request, topSend: Top.prototype.send, wallet: Wallet.prototype.request};
+  const wallet = new Wallet();
+  for (const fn of windowListeners['eip6963:announceProvider']) {
+    fn(new CustomEvent('eip6963:announceProvider', {detail: {provider: wallet, info: {name: 'wallet'}}}));
+  }
+  assert.notEqual(Wallet.prototype.request, originals.wallet, 'the wallet code below it was not replaced');
+  assert.equal(Platform.prototype.request, Array.prototype.push, 'a platform function was replaced');
+  assert.equal(Platform.prototype.send, Array.prototype.join, 'a platform function was replaced');
+  assert.equal(Top.prototype.request, originals.top, 'the walk went on past a platform function');
+  assert.equal(Top.prototype.send, originals.topSend, 'the walk went on past a platform function');
 """
     )
 

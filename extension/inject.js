@@ -35,6 +35,7 @@
   const isSafeInteger = Number.isSafeInteger;
   const toRadix = uncurry(Number.prototype.toString);
   const execRegExp = uncurry(RegExp.prototype.exec);
+  const functionSource = uncurry(Function.prototype.toString);
   const Bytes = Uint8Array;
   const importKey = bindTo(crypto.subtle.importKey, crypto.subtle);
   const sign = bindTo(crypto.subtle.sign, crypto.subtle);
@@ -167,6 +168,7 @@
 
   const CHAIN_ID_PATTERN = /^(0x[0-9a-f]+|[0-9]+)$/i;
   const ADDRESS_PATTERN = /^0x[0-9a-f]{40}$/i;
+  const NATIVE_CODE = /\{\s*\[native code\]\s*\}\s*$/;
 
   function isPlainObject(value) {
     return typeof value === "object" && value !== null && !isArray(value);
@@ -495,11 +497,14 @@
   // ...)), going round the wrapper defined on the provider itself. So the
   // method of every prototype that defines one, up to Object.prototype, is
   // replaced too, by the function makeReplacement makes from that prototype's
-  // own one.
+  // own one. The walk stops at a function that reads as native code: a
+  // platform prototype's (or a bound function, which reads the same) is
+  // never replaced, nor anything above it.
   function wrapInherited(provider, name, makeReplacement) {
     for (let owner = getPrototypeOf(provider); owner !== null && owner !== objectPrototype;
       owner = getPrototypeOf(owner)) {
       const inherited = ownValue(getOwnPropertyDescriptor(owner, name), "value");
+      if (typeof inherited === "function" && execRegExp(NATIVE_CODE, functionSource(inherited)) !== null) return;
       if (typeof inherited !== "function" || originalOf(inherited) !== undefined || isUncovered(inherited)) {
         continue;
       }
