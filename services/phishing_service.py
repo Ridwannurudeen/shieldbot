@@ -1,6 +1,7 @@
 import time
 import logging
 import aiohttp
+from cachetools import TTLCache
 from urllib.parse import quote, urlparse
 
 logger = logging.getLogger(__name__)
@@ -8,6 +9,7 @@ logger = logging.getLogger(__name__)
 GOPLUS_PHISHING_URL = "https://api.gopluslabs.io/api/v1/phishing_site"
 CACHE_TTL = 3600  # Cache results for 1 hour per domain
 NO_VERDICT_TTL = 45  # During a GoPlus outage, ask about each domain at most this often
+CACHE_MAXSIZE = 10_000  # Domains held at once; when full, expired then least recently used go first
 
 
 class PhishingService:
@@ -18,8 +20,8 @@ class PhishingService:
     """
 
     def __init__(self):
-        # domain -> (result_dict, expires_at)
-        self._cache: dict[str, tuple[dict, float]] = {}
+        # domain -> (result_dict, expires_at); bounded so an outage cannot grow it without limit
+        self._cache = TTLCache(maxsize=CACHE_MAXSIZE, ttl=CACHE_TTL)
 
     async def check_url(self, url: str) -> dict:
         """Return phishing verdict for a URL.
@@ -59,8 +61,9 @@ class PhishingService:
             cache_key = domain.split(":")[0]
 
             # Check in-memory cache
-            if cache_key in self._cache:
-                result, expires_at = self._cache[cache_key]
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                result, expires_at = cached
                 if time.time() < expires_at:
                     return {**result, "cached": True}
 

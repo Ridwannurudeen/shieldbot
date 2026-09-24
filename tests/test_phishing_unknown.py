@@ -89,6 +89,21 @@ async def test_no_answer_is_no_verdict_held_for_45_seconds(payload, status, erro
 
 
 @pytest.mark.asyncio
+async def test_an_outage_cannot_grow_the_cache_past_its_bound():
+    client, session = _goplus({}, 503)
+    try:
+        with patch("services.phishing_service.CACHE_MAXSIZE", 5):
+            service = PhishingService()
+        for index in range(12):
+            result = await service.check_url(f"https://site{index}.example/")
+            assert result["is_phishing"] is None
+    finally:
+        client.stop()
+    assert len(service._cache) == 5
+    assert session.get.call_count == 12
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("raw,verdict", [(0, False), (1, True), ("0", False), ("1", True)])
 async def test_goplus_answers_are_verdicts_and_are_cached(raw, verdict):
     client, session = _goplus({"code": 1, "message": "OK", "result": {"phishing_site": raw}})
