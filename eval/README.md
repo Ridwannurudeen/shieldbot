@@ -153,9 +153,9 @@ python -m eval.verify_onchain --dataset eval/data/benchmark_v2.json
 It re-reads every fact the `onchain` sources state (code size, `symbol()` and `name()`, Transfer logs, and
 for each poisoning transfer the transaction's sender, which must not be the tokens' owner), prints each
 one that differs or that the RPC would not answer, and exits non-zero if there is any. On 2026-09-24 it
-read 1,377 facts for all 650 entries: none differed. `1rpc.io/matic` then rate-limited the 10 Polygon
-transaction reads (HTTP 410 and 429), and with `--rpc 137=https://polygon-bor-rpc.publicnode.com` all
-1,377 were read and none differed. Run it before
+read 1,377 facts for all 650 entries: none differed. `1rpc.io/matic` refused the 10 Polygon transaction
+reads (HTTP 410, 429, then "You've reached the usage limit for your current plan"); with
+`--rpc 137=https://polygon-bor-rpc.publicnode.com` all 1,377 were read and none differed. Run it before
 recording scores, and mark an entry whose facts no longer hold as stale. Free RPCs refuse old logs:
 publicnode calls a `getLogs` a few thousand blocks back an archive request. The poisoning logs therefore
 cite RPCs that served old logs on 2026-09-24 (`rpc.mevblocker.io`, `rpc-bsc.48.club`, `mainnet.base.org`,
