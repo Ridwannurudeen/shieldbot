@@ -16,7 +16,7 @@ except ImportError:
 
 from utils.firewall_prompt import FIREWALL_SYSTEM_PROMPT
 from utils.chain_info import get_chain_name
-from core.risk_engine import database_matches
+from core.risk_engine import database_matches, medium_matches
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,12 @@ def _get_prompt_chain_name(chain_id: Optional[int]) -> str:
     return get_chain_name(chain_id) if chain_id is not None else 'Unknown chain'
 
 
+# How the prompts name a community report: it is neither a scam database match nor a scan warning.
+_COMMUNITY_REPORT_LABEL = "Community reports, unconfirmed, not a scam database match"
+
+
 def _scam_match_count(scan_data: Dict) -> str:
-    # A community report is not a scam database match; the scan's flags or warnings name it.
+    # A community report is not a scam database match; the prompts give it a labelled line of its own.
     scam_matches = database_matches(scan_data.get('scam_matches'))
     if scam_matches:
         return str(len(scam_matches))
@@ -356,12 +360,15 @@ Provide a clear, helpful answer in 2-3 sentences. Use simple language."""
 
     def _prepare_scan_context(self, address: str, scan_results: Dict) -> str:
         """Format scan results for Claude context"""
+        reported = [match['reason'] for match in medium_matches(scan_results.get('scam_matches'))]
+        warnings = [warning for warning in scan_results.get('warnings', []) if warning not in reported]
+        community = ''.join(f"- {_COMMUNITY_REPORT_LABEL}: {reason}\n" for reason in reported)
         return f"""
 - Verified: {scan_results.get('is_verified', False)}
 - Risk Level: {scan_results.get('risk_level', 'unknown').upper()}
 - Contract Age: {scan_results.get('contract_age_days', 'unknown')} days
 - Scam Database Matches: {_scam_match_count(scan_results)}
-- Warnings: {', '.join(scan_results.get('warnings', [])) if scan_results.get('warnings') else 'None'}
+{community}- Warnings: {', '.join(warnings) if warnings else 'None'}
 """
 
     def _prepare_token_context(self, address: str, token_info: Dict, safety_results: Dict) -> str:
@@ -616,6 +623,9 @@ Return the firewall analysis JSON now."""
         lines.append(f"Is Verified: {contract_scan.get('is_verified', False)}")
         lines.append(f"Contract Age: {contract_scan.get('contract_age_days', 'unknown')} days")
         lines.append(f"Scam DB Matches: {_scam_match_count(contract_scan)}")
+        reported = [match['reason'] for match in medium_matches(contract_scan.get('scam_matches'))]
+        for reason in reported:
+            lines.append(f"{_COMMUNITY_REPORT_LABEL}: {reason}")
         lines.append(f"Risk Score (heuristic): {contract_scan.get('risk_score', 'N/A')}/100")
 
         # Token-specific data
@@ -630,7 +640,7 @@ Return the firewall analysis JSON now."""
         if ownership is not None:
             lines.append(f"Ownership Renounced: {ownership}")
 
-        warnings = contract_scan.get('warnings', [])
+        warnings = [warning for warning in contract_scan.get('warnings', []) if warning not in reported]
         if warnings:
             lines.append("Warnings:")
             for w in warnings[:8]:

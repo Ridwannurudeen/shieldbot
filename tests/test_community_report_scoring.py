@@ -13,6 +13,7 @@ from core.extension_formatter import format_extension_alert
 from core.risk_engine import RiskEngine
 from core.telegram_formatter import format_full_report
 from scanner.transaction_scanner import TransactionScanner
+from utils.ai_analyzer import AIAnalyzer
 from utils.ai_analyzer import _scam_match_count as ai_scam_match_count
 from utils.scam_db import ScamMatches
 
@@ -223,6 +224,37 @@ def test_fallback_firewall_response_names_a_community_report_without_blocking():
     assert "Reported by 3 users" in data["danger_signals"]
     assert not any("scam database" in signal for signal in data["danger_signals"])
     assert data["raw_checks"]["scam_matches"] == 0
+
+
+COMMUNITY_LINE = "Community reports, unconfirmed, not a scam database match: Reported by 3 users"
+
+
+@pytest.mark.parametrize("builder", ["firewall", "scan"])
+def test_the_ai_prompts_label_a_community_report_and_keep_it_out_of_warnings(builder):
+    analyzer = AIAnalyzer.__new__(AIAnalyzer)
+    scan = {
+        "is_verified": True,
+        "risk_level": "medium",
+        "warnings": ["Reported by 3 users"],
+        "scam_matches": [COMMUNITY],
+        "coverage": {"scam_database": True},
+    }
+    if builder == "firewall":
+        build = lambda data: analyzer._build_firewall_context({}, data)  # noqa: E731
+        no_warnings = "Warnings:"
+    else:
+        build = lambda data: analyzer._prepare_scan_context(ADDRESS, data)  # noqa: E731
+        no_warnings = "Warnings: Reported"
+    context = build(scan)
+    assert COMMUNITY_LINE in context
+    assert context.count("Reported by 3 users") == 1
+    assert no_warnings not in context
+
+    # Other warnings stay under Warnings; the community report still does not.
+    context = build({**scan, "warnings": ["Contract source code is not verified", "Reported by 3 users"]})
+    assert COMMUNITY_LINE in context
+    assert context.count("Reported by 3 users") == 1
+    assert "Contract source code is not verified" in context.split("Warnings:")[1]
 
 
 def test_raw_checks_count_only_database_matches():
