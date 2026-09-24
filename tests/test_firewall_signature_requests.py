@@ -69,7 +69,8 @@ async def test_eth_sign_is_block_recommended_whatever_its_target(consumer_api, t
 @pytest.mark.asyncio
 @pytest.mark.parametrize("sign_method", ["personal_sign", "eth_sign"])
 async def test_a_signature_with_typed_data_it_does_not_recognise_is_labelled_by_its_method(consumer_api, sign_method):  # noqa: F811
-    # The label is the only thing the method changes: an eth_sign is not reported as a personal_sign.
+    # The signature type names the method that was asked for: an eth_sign is not reported as a
+    # personal_sign, and its verdict is still the eth_sign floor.
     api, _ = consumer_api
     req = api.FirewallRequest(
         to="", sender="0x" + "b" * 40, signMethod=sign_method,
