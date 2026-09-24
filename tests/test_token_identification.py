@@ -176,7 +176,7 @@ def test_unknown_token_identification_requires_honeypot_even_if_other_results_ar
 @pytest.mark.parametrize('is_token', [None, False, True])
 @pytest.mark.parametrize('is_verified', [None, False, True])
 async def test_unknown_selector_exemption_requires_confirmed_non_token_or_verification(is_token, is_verified):
-    result = await IntentMismatchAnalyzer().analyze(AnalysisContext(
+    result = await IntentMismatchAnalyzer(Web3Client()).analyze(AnalysisContext(
         ADDRESS, is_token=is_token,
         extra={'calldata': '0xdeadbeef', 'is_verified': is_verified},
     ))
