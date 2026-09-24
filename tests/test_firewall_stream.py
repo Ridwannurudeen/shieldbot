@@ -553,6 +553,10 @@ async def test_a_router_swap_first_keys_pending_and_coverage_by_token(stream_api
     assert kind == "final"
     assert set(final["coverage"]) == {f"{token}:{name}" for token in (TOKEN_A, TOKEN_B) for name in WEIGHTS}
     assert first["risk_score"] <= final["risk_score"]
+    # Worded as the router swap's final is.
+    for field in ("sending", "recipient"):
+        assert first["transaction_impact"][field] == final["transaction_impact"][field]
+    assert first["transaction_impact"]["recipient"] == f"PancakeSwap Router ({TARGET})"
 
 
 @pytest.mark.asyncio

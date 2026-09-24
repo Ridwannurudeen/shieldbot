@@ -1365,15 +1365,18 @@ def _sse(event: str, data: Dict) -> str:
     return f"event: {event}\ndata: {JSONResponse(jsonable_encoder(data)).body.decode('utf-8')}\n\n"
 
 
-def _first_transaction_fields(decoded: Dict, value_bnb: float, chain_id: int, to_addr: str) -> Dict:
-    """The fields of an interim verdict that describe the request, worded as the final response's."""
+def _first_transaction_fields(
+    decoded: Dict, value_bnb: float, chain_id: int, to_addr: str, whitelisted: Optional[str],
+) -> Dict:
+    """The fields of an interim verdict that describe the request, worded as the final response's
+    (a trusted router's as _analyze_router_swap words them)."""
     return {
         "decoded_action": _format_decoded_action(decoded, chain_id),
         "calldata_details": _build_calldata_details(decoded),
         "transaction_impact": {
-            "sending": _sending(decoded, value_bnb, chain_id, "Tokens"),
+            "sending": _sending(decoded, value_bnb, chain_id, "Tokens (via router)" if whitelisted else "Tokens"),
             "granting_access": _granting_access(decoded),
-            "recipient": to_addr,
+            "recipient": f"{whitelisted} ({to_addr})" if whitelisted else to_addr,
             "post_tx_state": IN_PROGRESS,
         },
         "chain_id": chain_id,
@@ -1472,7 +1475,7 @@ async def _firewall_verdict(
         run_options = {}
         if progress is not None:
             progress.add_local_match(scam_db.local_match(to_addr, req.chainId))
-            progress.describe = partial(_first_transaction_fields, decoded, value_bnb, req.chainId, to_addr)
+            progress.describe = partial(_first_transaction_fields, decoded, value_bnb, req.chainId, to_addr, whitelisted)
             run_options = {"on_result": progress.add_result}
 
         # Enrich decoded calldata with token names and formatted amounts
