@@ -2167,7 +2167,9 @@ async def launch_feed(chain_id: int, limit: int = 50, cursor: str = None):
     The outcome is blocked, watching, cleared, unknown (scan incomplete) or not_scanned, with
     its status and coverage reasons; unknown and not_scanned are never safe. scan.status is
     authoritative: "ok" only for a complete scan. Per-field coverage is included only where the
-    hunter recorded it, for blocked launches. Each launch links its public verdict at verdict_url.
+    hunter recorded it, for blocked launches. impostor_check is the launch's check against
+    Robinhood's official token list (official, impostor, collision, none or unknown), or null when
+    it was never checked. Each launch links its public verdict at verdict_url.
     Query params:
     - limit: max results (default 50, max 200)
     - cursor: next_cursor from the previous page (optional)
