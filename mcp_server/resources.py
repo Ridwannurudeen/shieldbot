@@ -28,7 +28,10 @@ RESOURCE_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "uri": "shieldbot://wallet/{address}/guardian",
         "name": "Wallet Guardian",
-        "description": "Wallet approval health and guardian status. (Stub — full in V3.2.)",
+        "description": (
+            "Wallet approval health and guardian status. Not implemented: returns status 'unknown' with "
+            "coverage_reasons; approvals are null, never an empty list. (Stub — full in V3.2.)"
+        ),
         "mimeType": "application/json",
     },
 ]
@@ -113,7 +116,10 @@ async def _read_wallet_guardian(container, address: str) -> Dict:
         "mimeType": "application/json",
         "text": {
             "wallet_address": address,
-            "approvals": [],
+            "approvals": None,
+            "status": "unknown",
+            "coverage": {"approvals": 0},
+            "coverage_reasons": {"approvals": "Wallet Guardian is not implemented in MCP"},
             "guardian_active": False,
             "note": "Wallet Guardian not yet implemented. Coming in V3.2.",
         },

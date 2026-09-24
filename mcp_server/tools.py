@@ -71,7 +71,11 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "simulate_transaction",
-        "description": "Simulate a transaction via Tenderly and return success, revert reason, asset changes, warnings, and gas estimate. Approval changes are not measured and are returned as null.",
+        "description": (
+            "Simulate a transaction via Tenderly and return success, revert reason, asset changes, warnings, and gas estimate. "
+            "Approval changes are not measured and are returned as null. When simulation is not configured or fails, "
+            "the result has status 'unknown', coverage_reasons naming why, and null measurements."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -86,7 +90,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "check_deployer",
-        "description": "Look up the deployer of a contract and return their deployment history and flagged contract count.",
+        "description": (
+            "Look up the deployer of a contract and return their deployment history and flagged contract count. "
+            "A contract whose deployer is not indexed yet returns status 'unknown' with coverage_reasons and null counts, never zero."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -223,6 +230,9 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
     if not container.tenderly_simulator.is_enabled():
         return {
             "error": "Tenderly simulation not configured",
+            "status": "unknown",
+            "coverage": {"simulation": 0},
+            "coverage_reasons": {"simulation": "Tenderly simulation not configured"},
             "asset_changes": None,
             "approvals_granted": None,
             "gas_estimate": None,
@@ -242,6 +252,9 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
     if result is None:
         return {
             "error": "Simulation failed",
+            "status": "unknown",
+            "coverage": {"simulation": 0},
+            "coverage_reasons": {"simulation": "Simulation failed"},
             "asset_changes": None,
             "approvals_granted": None,
             "gas_estimate": None,
@@ -270,8 +283,11 @@ async def handle_check_deployer(container, params: Dict) -> Dict:
         return {
             "deployer": None,
             "funded_by": None,
-            "contracts_deployed": 0,
-            "flagged_count": 0,
+            "contracts_deployed": None,
+            "flagged_count": None,
+            "status": "unknown",
+            "coverage": {"deployer": 0},
+            "coverage_reasons": {"deployer": "Deployer not yet indexed for this contract"},
             "note": "Deployer not yet indexed for this contract",
         }
 

@@ -291,8 +291,15 @@ class TestToolExecution:
             },
         }, headers=AUTH_HEADERS)
         content = json.loads(resp.json()["result"]["content"][0]["text"])
+        from core.extension_formatter import is_scan_incomplete
         assert content["deployer"] is None
         assert "not yet indexed" in content["note"]
+        assert content["contracts_deployed"] is None
+        assert content["flagged_count"] is None
+        assert content["status"] == "unknown"
+        assert content["coverage"] == {"deployer": 0}
+        assert content["coverage_reasons"] == {"deployer": "Deployer not yet indexed for this contract"}
+        assert is_scan_incomplete(content)
 
     def test_check_agent_reputation(self, client, mock_container):
         """check_agent_reputation returns trust score."""
@@ -403,7 +410,12 @@ class TestToolExecution:
             },
         }, headers=AUTH_HEADERS)
         content = json.loads(resp.json()["result"]["content"][0]["text"])
+        from core.extension_formatter import is_scan_incomplete
         assert "not configured" in content["error"]
+        assert content["status"] == "unknown"
+        assert content["coverage"] == {"simulation": 0}
+        assert content["coverage_reasons"] == {"simulation": "Tenderly simulation not configured"}
+        assert is_scan_incomplete(content)
         assert content["gas_estimate"] is None
         assert content["asset_changes"] is None
         assert content["approvals_granted"] is None
@@ -485,7 +497,12 @@ class TestToolExecution:
             },
         }, headers=AUTH_HEADERS)
         content = json.loads(resp.json()["result"]["content"][0]["text"])
+        from core.extension_formatter import is_scan_incomplete
         assert content["error"] == "Simulation failed"
+        assert content["status"] == "unknown"
+        assert content["coverage"] == {"simulation": 0}
+        assert content["coverage_reasons"] == {"simulation": "Simulation failed"}
+        assert is_scan_incomplete(content)
         assert content["gas_estimate"] is None
         assert content["asset_changes"] is None
         assert content["approvals_granted"] is None
@@ -572,8 +589,14 @@ class TestResources:
         }, headers=AUTH_HEADERS)
         contents = resp.json()["result"]["contents"]
         data = json.loads(contents[0]["text"])
+        from core.extension_formatter import is_scan_incomplete
         assert data["guardian_active"] is False
         assert "V3.2" in data["note"]
+        assert data["approvals"] is None
+        assert data["status"] == "unknown"
+        assert data["coverage"] == {"approvals": 0}
+        assert data["coverage_reasons"]["approvals"]
+        assert is_scan_incomplete(data)
 
     def test_read_unknown_resource(self, client):
         """Reading an unknown resource returns error."""
@@ -1014,6 +1037,20 @@ def test_missing_chain_id_is_a_tool_error_not_a_bnb_chain_scan(client, mock_cont
     mock_container.registry.run_all.assert_not_awaited()
     mock_container.db.get_deployer_risk_summary.assert_not_awaited()
     mock_container.tenderly_simulator.is_enabled.assert_not_called()
+
+
+def test_unknown_results_are_described_to_the_client():
+    from mcp_server.resources import RESOURCE_DEFINITIONS
+    from mcp_server.tools import TOOL_DEFINITIONS
+    tools = {tool["name"]: tool["description"] for tool in TOOL_DEFINITIONS}
+    resources = {resource["uri"]: resource["description"] for resource in RESOURCE_DEFINITIONS}
+    for description in (
+        tools["simulate_transaction"],
+        tools["check_deployer"],
+        resources["shieldbot://wallet/{address}/guardian"],
+    ):
+        assert "status 'unknown'" in description
+        assert "coverage_reasons" in description
 
 
 def test_mcp_prompt_includes_unknown():
