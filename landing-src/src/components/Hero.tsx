@@ -20,8 +20,10 @@ export default function Hero() {
           </h1>
 
           <p className="text-gray-300 text-lg md:text-xl leading-relaxed max-w-xl mb-8">
-            ShieldBot is the fail-closed security layer that says what it
-            checked. Every verdict carries its coverage.
+            ShieldBot is the security layer that says what it checked. Every
+            verdict carries its coverage, and a check that cannot run reads
+            Unknown, never Safe. Strict mode blocks anything Unknown; Balanced
+            mode warns and leaves the choice to you.
           </p>
 
           <div className="flex flex-wrap items-center gap-4">
