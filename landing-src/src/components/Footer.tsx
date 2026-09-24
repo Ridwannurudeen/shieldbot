@@ -47,6 +47,9 @@ export default function Footer() {
                 <a href="/terms.html" className="text-sm text-gray-300 hover:text-neon transition-colors">
                   Terms of Service
                 </a>
+                <a href="/security.html" className="text-sm text-gray-300 hover:text-neon transition-colors">
+                  Security
+                </a>
               </div>
             </div>
             <div>

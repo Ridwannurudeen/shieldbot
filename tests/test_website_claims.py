@@ -232,12 +232,30 @@ def test_structured_data_is_valid_and_matches_the_visible_faq():
 
 
 @pytest.mark.parametrize(
-    "name", ["about.html", "privacy.html", "terms.html", "sitemap.xml", ".well-known/security.txt"]
+    "name",
+    [
+        "about.html",
+        "privacy.html",
+        "terms.html",
+        "security.html",
+        "sitemap.xml",
+        ".well-known/security.txt",
+    ],
 )
 def test_built_landing_copies_the_current_public_files(name):
     source = read(LANDING_SRC / "public" / name).replace("\r\n", "\n")
     built = read(ROOT / "landing" / name).replace("\r\n", "\n")
     assert built == source, f"landing/{name} is stale: run `npm run build` in landing-src"
+
+
+def test_security_policy_is_published_linked_and_listed():
+    security_txt = read(LANDING_SRC / "public" / ".well-known" / "security.txt")
+    policy = re.search(r"^Policy: https://shieldbotsecurity\.online/(\S+)$", security_txt, re.MULTILINE)
+    assert policy, "security.txt should name the security policy page"
+    page = policy.group(1)
+    assert (LANDING_SRC / "public" / page).is_file()
+    assert f'href="/{page}"' in read(COMPONENTS / "Footer.tsx")
+    assert f"<loc>https://shieldbotsecurity.online/{page}</loc>" in read(LANDING_SRC / "public" / "sitemap.xml")
 
 
 def test_built_landing_bundle_contains_the_current_faq():
