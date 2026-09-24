@@ -12,9 +12,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import pytest_asyncio
 from eth_utils import keccak
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from web3 import Web3
 
+from agent.firewall import create_agent_firewall_router
 from analyzers.structural import HOLDERS_UNKNOWN, StructuralAnalyzer
 from core.analyzer import AnalyzerResult
 from core.database import SCAN_EVIDENCE_RETENTION_DAYS, Database
@@ -483,7 +485,58 @@ def test_a_clean_launch_with_no_holder_list_has_no_danger_signal_and_one_note(
     cached = _firewall(client).json()
     assert cached["cached"] is True
     assert cached["danger_signals"] == []
+    assert HOLDERS_UNKNOWN not in cached["shield_score"]["critical_flags"]
     assert cached["notes"] == [HOLDERS_UNKNOWN]
+
+
+def test_a_cache_hit_on_a_row_the_agent_firewall_wrote_keeps_its_notes(evidence_api):
+    api, client, database = evidence_api
+    results = _results()
+    results[0].data["notes"] = [HOLDERS_UNKNOWN]
+    agent_services = SimpleNamespace(
+        db=database,
+        cache=SimpleNamespace(get_verdict=AsyncMock(return_value=None), set_verdict=AsyncMock()),
+        auth_manager=SimpleNamespace(
+            validate_key=AsyncMock(
+                return_value={
+                    "key_id": "k1",
+                    "owner": "test",
+                    "tier": "agent",
+                    "rpm_limit": 500,
+                    "daily_limit": 50000,
+                }
+            ),
+            check_rate_limit=AsyncMock(return_value=True),
+        ),
+        registry=SimpleNamespace(run_all=AsyncMock(return_value=results)),
+        risk_engine=RiskEngine(),
+        web3_client=SimpleNamespace(is_token_contract=AsyncMock(return_value=True)),
+        tenderly_simulator=SimpleNamespace(is_enabled=lambda: False),
+    )
+    agent_app = FastAPI()
+    agent_app.include_router(create_agent_firewall_router(agent_services), prefix="/api/agent")
+    agent = TestClient(agent_app)
+    headers = {"X-API-Key": "sb_testkey"}
+    registered = agent.post(
+        "/api/agent/register",
+        json={"agent_id": "notes_agent", "owner_address": CALLER, "policy": {}},
+        headers=headers,
+    )
+    assert registered.status_code == 200
+    checked = agent.post(
+        "/api/agent/firewall",
+        json={
+            "agent_id": "notes_agent",
+            "transaction": {"from": CALLER, "to": TARGET, "data": "0x", "value": "0", "chain_id": 56},
+        },
+        headers=headers,
+    )
+    assert checked.status_code == 200
+
+    cached = _firewall(client).json()
+    assert cached["cached"] is True
+    assert cached["notes"] == [HOLDERS_UNKNOWN]
+    assert HOLDERS_UNKNOWN not in cached["danger_signals"]
 
 
 def test_a_failed_store_leaves_the_verdict_and_no_url(evidence_api, monkeypatch):

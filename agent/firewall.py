@@ -298,6 +298,7 @@ def create_agent_firewall_router(container) -> APIRouter:
                 "status": "unknown" if is_scan_incomplete(risk_output) else risk_output.get("status", "unknown"),
                 "coverage": risk_output.get("coverage", {}),
                 "coverage_reasons": risk_output.get("coverage_reasons", {}),
+                "notes": risk_output.get("notes", []),
             }
             # The level follows the final score, the simulation floors included, wherever it is stored or returned.
             risk_output = {**risk_output, "risk_level": stored_level(risk_score, risk_output.get("risk_level", UNKNOWN))}
