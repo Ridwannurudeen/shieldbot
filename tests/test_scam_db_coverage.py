@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import utils.scam_db as scam_module
-from analyzers.structural import StructuralAnalyzer
+from analyzers.structural import HOLDERS_UNKNOWN, StructuralAnalyzer
 from core.analyzer import AnalysisContext, AnalyzerResult
 from core.risk_engine import RiskEngine
 from scanner.transaction_scanner import TransactionScanner
@@ -127,7 +127,10 @@ async def test_contract_service_clean_address_with_goplus_no_record_is_covered(m
     assert factory.call_count == 1
     assert structural.data["scam_matches"] == []
     assert "scam_database" not in structural.data["coverage"]
-    assert structural.data["status"] == "ok"
+    # With no token record there is no holder list either: that, and only that, is unknown.
+    assert structural.data["coverage"]["top10_holder_percent"] is False
+    assert structural.data["status"] == "unknown"
+    assert structural.data["reason"] == HOLDERS_UNKNOWN
 
 
 def _incomplete(matches=()):
@@ -219,9 +222,12 @@ async def test_contract_service_incomplete_lookup_without_matches_is_unknown(moc
         assert risk["status"] == "unknown"
         assert risk["risk_level"] != "LOW"
         assert risk["coverage"]["structural"] < 1
-        assert (
-            risk["coverage_reasons"]["structural"] == "Scam database unavailable: GoPlus HTTP 503"
-        )
+    assert direct["coverage_reasons"]["structural"] == "Scam database unavailable: GoPlus HTTP 503"
+    # The failed lookup also leaves the token's holder list unknown, which only the analyzer reads.
+    assert (
+        registry["coverage_reasons"]["structural"]
+        == "Scam database unavailable: GoPlus HTTP 503; " + HOLDERS_UNKNOWN
+    )
 
 
 @pytest.mark.asyncio

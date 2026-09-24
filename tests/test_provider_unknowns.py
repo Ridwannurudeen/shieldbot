@@ -536,7 +536,7 @@ async def test_structural_tristate_coverage_and_penalty(verified, age, score):
 
     service = MagicMock()
     service.fetch_contract_data = AsyncMock(return_value={
-        'is_contract': True, 'is_verified': verified, 'contract_age_days': age,
+        'is_contract': True, 'is_verified': verified, 'contract_age_days': age, 'top10_holder_percent': 5.0,
     })
     sniffer = MagicMock()
     sniffer.is_enabled.return_value = True
@@ -609,7 +609,7 @@ async def test_structural_preserves_explicit_service_unknown():
 
     service = MagicMock()
     service.fetch_contract_data = AsyncMock(return_value={
-        'is_contract': True, 'is_verified': True, 'contract_age_days': 100,
+        'is_contract': True, 'is_verified': True, 'contract_age_days': 100, 'top10_holder_percent': 5.0,
         'status': 'unknown', 'reason': 'Bytecode provider unavailable',
     })
     result = await StructuralAnalyzer(service).analyze(AnalysisContext(ADDRESS))

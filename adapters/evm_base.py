@@ -699,6 +699,10 @@ class EvmAdapter(ChainAdapter):
     def get_whitelisted_routers(self) -> Dict[str, str]:
         return dict(self._whitelisted_routers)
 
+    def get_known_lockers(self) -> Dict[str, str]:
+        """Return {lowercase_address: locker_name} for this chain, burn addresses included."""
+        return dict(self._known_lockers)
+
     def capabilities(self) -> Dict:
         """What this chain's configuration lets a scan check, for GET /api/coverage/{chain_id}.
 

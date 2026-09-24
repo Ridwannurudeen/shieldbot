@@ -5,6 +5,14 @@ from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
 
 logger = logging.getLogger(__name__)
 
+# Top-10 holder share (percent of supply; burn, locked, pool and locker holders left out) that adds
+# structural points. GoPlus data of 2026-09-24: 17 of the 20 benchmark safes read 3-66% and cbETH
+# 91.5% (bridge and staking contracts); the two routers list no holders. Of the 14 benchmark
+# honeypots, 7 read 71-100% and 4 of them 90% or more.
+HOLDER_SHARE_ELEVATED = 70
+HOLDER_SHARE_HIGH = 90
+HOLDERS_UNKNOWN = 'Top-10 holder share unknown: no readable GoPlus holder list'
+
 
 class StructuralAnalyzer(Analyzer):
     """Analyzes contract structure: verification, age, mint/proxy/pause/blacklist, scam DB.
@@ -34,6 +42,12 @@ class StructuralAnalyzer(Analyzer):
         if data.get('is_contract') is not False:
             data['coverage']['is_verified'] = data.get('is_verified') is not None
             data['coverage']['contract_age_days'] = data.get('contract_age_days') is not None
+            # Holder concentration describes a token. A missing holder list is unknown, never a token
+            # whose supply is spread out.
+            if ctx.is_token is not False:
+                data['coverage']['top10_holder_percent'] = data.get('top10_holder_percent') is not None
+                if not data['coverage']['top10_holder_percent']:
+                    data['reason'] = '; '.join(filter(None, (data.get('reason'), HOLDERS_UNKNOWN)))
         data['status'] = 'unknown' if data.get('status') == 'unknown' or not all(data['coverage'].values()) else 'ok'
         if data['status'] == 'unknown':
             missing = ', '.join(field for field, covered in data['coverage'].items() if not covered)
@@ -108,4 +122,10 @@ class StructuralAnalyzer(Analyzer):
             flags.append(f"Scam DB match ({len(d['scam_matches'])} sources)")
         if d.get("ownership_renounced") is False:
             score += 5
+        share = d.get("top10_holder_percent")
+        if d.get("coverage", {}).get("top10_holder_percent") and share >= HOLDER_SHARE_ELEVATED:
+            score += 20 if share >= HOLDER_SHARE_HIGH else 10
+            flags.append(
+                f"Top 10 holders own {share}% of supply (burn, locked, pool and locker addresses excluded)"
+            )
         return min(score, 100), flags

@@ -5,6 +5,11 @@ data, is_token True. This replays recorded provider inputs through the real anal
 engine and compares the result with the output of the engine before the redesign (`expected` in
 the fixture): pinned at e820c2e, then at fix/audit-integration b400015, whose bytecode scan reads
 1inch V5's 83197ef0 as destroy() rather than delegatecall (same score, different flag).
+
+The top-10 holder signal changes three entries, recorded per field in `changed_by_holder_signal`:
+cbETH's holders own 91.54% of supply (bridge and staking contracts), which adds 20 structural
+points (4.8 to 11.2), and the two routers list no holders, which the scan reports as unknown
+(both were unknown already). No entry changes class.
 """
 
 import json
@@ -14,6 +19,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from adapters import base_chain, bsc, eth
 from analyzers import (
     BehavioralAnalyzer,
     HoneypotAnalyzer,
@@ -23,6 +29,7 @@ from analyzers import (
     StructuralAnalyzer,
 )
 from core.analyzer import AnalysisContext
+from core.extension_formatter import format_extension_alert
 from core.registry import AnalyzerRegistry
 from core.risk_engine import RiskEngine
 from services.contract_service import ContractService
@@ -36,6 +43,8 @@ FIXTURE = json.loads(
 # under 7 days.
 EXPLORER_VERIFICATION = (True, None)
 EXPLORER_CREATION = {"age_days": 1000}
+# Each chain's known lockers, as its adapter lists them; the holder share leaves them out.
+KNOWN_LOCKERS = {56: bsc.KNOWN_LOCKERS, 1: eth.KNOWN_LOCKERS, 8453: base_chain.KNOWN_LOCKERS}
 FIELDS = (
     "rug_probability",
     "risk_level",
@@ -56,6 +65,7 @@ async def _score(entry):
         is_verified_contract=AsyncMock(return_value=EXPLORER_VERIFICATION),
         get_contract_creation_info=AsyncMock(return_value=EXPLORER_CREATION),
         get_ownership_info=AsyncMock(return_value=entry["ownership"]),
+        _get_adapter=lambda chain_id: SimpleNamespace(get_known_lockers=lambda: KNOWN_LOCKERS[chain_id]),
         # Each recorded selector as a dispatcher's PUSH4 operand, which is how the scan finds it.
         get_bytecode=AsyncMock(
             return_value=None if patterns is None else "0x" + "".join("63" + sig for sig in patterns)
@@ -106,4 +116,16 @@ def test_fixture_covers_every_safe_benchmark_entry():
     "entry", FIXTURE["entries"], ids=[e["description"] for e in FIXTURE["entries"]]
 )
 async def test_safe_entry_scores_as_before(entry):
-    assert await _score(entry) == entry["expected"]
+    assert await _score(entry) == {**entry["expected"], **entry.get("changed_by_holder_signal", {})}
+
+
+def _class(risk):
+    return format_extension_alert(risk)["risk_classification"], risk["risk_level"], risk["status"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "entry", FIXTURE["entries"], ids=[e["description"] for e in FIXTURE["entries"]]
+)
+async def test_the_holder_signal_changes_no_safe_entrys_class(entry):
+    assert _class(await _score(entry)) == _class(entry["expected"])
