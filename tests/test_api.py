@@ -464,7 +464,10 @@ async def test_strict_cached_analyzer_failure_matches_cold_scan(
         }},
     }
     req = api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40)
-    request = SimpleNamespace(headers={"X-Policy-Mode": override} if override else {})
+    # An authenticated caller: its STRICT request skips the cache (tests/test_strict_cache.py has the others).
+    request = SimpleNamespace(
+        headers={"X-Policy-Mode": override} if override else {}, state=SimpleNamespace(api_key_info={"key_id": "k1"}),
+    )
     cold = await api.firewall(req, request)
     services.db.get_contract_score.return_value = cached
     warm = await api.firewall(req, request)
@@ -528,7 +531,7 @@ async def test_strict_blocks_a_provider_unknown_cold_and_warm(cached_firewall_ap
         }},
     }
     req = api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40)
-    request = SimpleNamespace(headers={})
+    request = SimpleNamespace(headers={}, state=SimpleNamespace(api_key_info={"key_id": "k1"}))
     cold = await api.firewall(req, request)
     services.db.get_contract_score.return_value = cached
     warm = await api.firewall(req, request)

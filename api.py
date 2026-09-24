@@ -1312,9 +1312,11 @@ async def firewall(req: FirewallRequest, request: Request):
                     policy_mode = container.policy_engine.apply(
                         [], {}, mode_override=request.headers.get("X-Policy-Mode"),
                     )['policy_mode']
-                if policy_mode != "STRICT":
+                # A full rescan costs provider calls, so only a caller with a valid API key can force one
+                # with STRICT. Anyone else is answered from the cached facts in STRICT mode.
+                if policy_mode != "STRICT" or not getattr(request.state, "api_key_info", None):
                     return _build_cached_response(
-                        cached, decoded, value_bnb, req.chainId, to_addr=to_addr,
+                        cached, decoded, value_bnb, req.chainId, to_addr=to_addr, policy_mode=policy_mode,
                     )
 
         # 2c. Fast deployer history lookup (uses already-indexed data — non-blocking DB query)
@@ -2892,7 +2894,7 @@ def _scam_match_count(scan: Dict) -> Optional[int]:
 
 def _build_cached_response(
     cached: Dict, decoded: Dict, value_bnb: float, chain_id: int = 56,
-    to_addr: str = "",
+    to_addr: str = "", policy_mode: str = "BALANCED",
 ) -> Dict:
     """Build a firewall response from a cached DB row."""
     risk_score = cached['risk_score']
@@ -2902,6 +2904,12 @@ def _build_cached_response(
 
     category_scores = dict(cached.get('category_scores', {}))
     metadata = category_scores.pop('_scan_metadata', {})
+    # STRICT blocks on Unknown, as core.policy does for a fresh scan. A cached row keeps its coverage
+    # but not which fields were missing, so any Unknown in it blocks.
+    if policy_mode == 'STRICT' and is_scan_incomplete({**metadata, 'risk_level': risk_level}):
+        risk_score = max(risk_score, verdicts.STRICT_BLOCK_SCORE)
+        risk_level = verdicts.HIGH
+        flags = ['Policy override: cached analysis unavailable or incomplete', *flags]
     alert = format_extension_alert({
         **metadata, 'rug_probability': risk_score, 'risk_level': risk_level,
         'critical_flags': flags, 'risk_archetype': archetype or 'unknown',
@@ -2945,7 +2953,7 @@ def _build_cached_response(
         "network": _chain_id_to_name(chain_id),
         "partial": alert['status'] == 'unknown',
         "failed_sources": [],
-        "policy_mode": "BALANCED",
+        "policy_mode": policy_mode,
     }
 
 
