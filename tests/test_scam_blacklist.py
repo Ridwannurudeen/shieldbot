@@ -272,18 +272,10 @@ def admin_api(monkeypatch):
 
     registry = Web3Client.__new__(Web3Client)
     registry._adapters = {chain_id: MagicMock(chain_id=chain_id) for chain_id in (56, 1)}
-    claimed = set()
-
-    async def claim_onchain_report(address, writer):
-        if (address, writer) in claimed:
-            return False
-        claimed.add((address, writer))
-        return True
-
     services = SimpleNamespace(
         settings=SimpleNamespace(admin_secret="test-admin", trusted_proxies=[]),
         auth_manager=None,
-        db=SimpleNamespace(claim_onchain_report=AsyncMock(side_effect=claim_onchain_report)),
+        db=SimpleNamespace(),
         scam_db=SimpleNamespace(
             confirm_scam=AsyncMock(return_value=True),
             remove_from_blacklist=AsyncMock(return_value=True),
@@ -335,67 +327,17 @@ def test_admin_confirms_an_entry(admin_api):
     services.scam_db.confirm_scam.assert_awaited_once_with(ADDRESS, 56, "drainer")
 
 
-MIXED_CASE = "0x" + "1" * 39 + "A"
-
-
-def test_admin_confirmation_writes_each_on_chain_record_at_most_once(admin_api):
+@pytest.mark.parametrize("confirmed", [True, False])
+def test_an_admin_confirmation_writes_nothing_on_chain(admin_api, confirmed):
+    # Only the bot sends from the recorder and attestor wallets, so the API never does.
     _, client, services = admin_api
-    for address, chain_id in ((MIXED_CASE, 56), (MIXED_CASE.lower(), 56), (MIXED_CASE, 1)):
-        response = client.post(
-            "/api/admin/blacklist",
-            headers=ADMIN_HEADERS,
-            json={"address": address, "chainId": chain_id},
+    services.scam_db.confirm_scam.return_value = confirmed
+    for chain_id in (56, 1):
+        client.post(
+            "/api/admin/blacklist", headers=ADMIN_HEADERS, json={"address": ADDRESS, "chainId": chain_id}
         )
-        assert response.status_code == 200
-    services.onchain_recorder.record_scan_fire_and_forget.assert_awaited_once_with(
-        MIXED_CASE.lower(),
-        "high",
-        "report",
-    )
-    services.base_attestor.attest_fire_and_forget.assert_awaited_once_with(
-        MIXED_CASE.lower(),
-        "high",
-        "report",
-        source_chain_id=56,
-    )
-
-
-def test_an_unavailable_writer_is_not_claimed(admin_api):
-    _, client, services = admin_api
-    services.onchain_recorder.is_available.return_value = False
-    client.post("/api/admin/blacklist", headers=ADMIN_HEADERS, json={"address": ADDRESS})
-    services.onchain_recorder.record_scan_fire_and_forget.assert_not_awaited()
-    services.onchain_recorder.is_available.return_value = True
-    client.post("/api/admin/blacklist", headers=ADMIN_HEADERS, json={"address": ADDRESS})
-    services.onchain_recorder.record_scan_fire_and_forget.assert_awaited_once_with(
-        ADDRESS, "high", "report"
-    )
-    services.base_attestor.attest_fire_and_forget.assert_awaited_once()
-
-
-def test_a_refused_confirmation_writes_nothing_on_chain(admin_api):
-    _, client, services = admin_api
-    services.scam_db.confirm_scam.return_value = False
-    client.post("/api/admin/blacklist", headers=ADMIN_HEADERS, json={"address": ADDRESS})
-    services.db.claim_onchain_report.assert_not_awaited()
     services.onchain_recorder.record_scan_fire_and_forget.assert_not_awaited()
     services.base_attestor.attest_fire_and_forget.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_an_on_chain_claim_is_permanent(db_path):
-    db, scam_db = await _open(db_path)
-    try:
-        assert await db.claim_onchain_report(ADDRESS, "bsc_recorder") is True
-        assert await db.claim_onchain_report(ADDRESS, "bsc_recorder") is False
-        assert await db.claim_onchain_report(ADDRESS, "base_attestor") is True
-        # Removing and confirming the entry again never repeats a record.
-        assert await scam_db.confirm_scam(ADDRESS, None, "reviewed")
-        assert await scam_db.remove_from_blacklist(ADDRESS, None)
-        assert await scam_db.confirm_scam(ADDRESS, None, "reviewed again")
-        assert await db.claim_onchain_report(ADDRESS, "bsc_recorder") is False
-    finally:
-        await db.close()
 
 
 @pytest.mark.asyncio

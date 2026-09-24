@@ -2340,16 +2340,8 @@ async def blacklist_confirm(req: BlacklistConfirmRequest, request: Request):
         raise HTTPException(status_code=400, detail="Invalid address")
     if not await container.scam_db.confirm_scam(req.address, req.chainId, req.reason):
         raise HTTPException(status_code=409, detail="This address is a known legitimate contract and cannot be blacklisted")
-    # Only an admin confirmation writes an on-chain 'report' record, never a crowd report, and each
-    # writer records an address once.
-    address = req.address.lower()
-    if container.onchain_recorder.is_available() and await container.db.claim_onchain_report(address, "bsc_recorder"):
-        await container.onchain_recorder.record_scan_fire_and_forget(address, "high", "report")
-    if container.base_attestor.is_available() and await container.db.claim_onchain_report(address, "base_attestor"):
-        await container.base_attestor.attest_fire_and_forget(
-            address, "high", "report", source_chain_id=req.chainId or 56,
-        )
-    return {"ok": True, "address": address, "chain_id": req.chainId, "source": "admin"}
+    # Off chain only: the bot is the one process that sends from the recorder and attestor wallets.
+    return {"ok": True, "address": req.address.lower(), "chain_id": req.chainId, "source": "admin"}
 
 
 @app.delete("/api/admin/blacklist/{address}", include_in_schema=False)
