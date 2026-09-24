@@ -37,7 +37,7 @@ What it covers
 
 Settings
 • Balanced mode shows every verdict and leaves the choice to you.
-• Strict mode removes the option to continue when a check fails or the verdict is Block Recommended.
+• Strict mode removes the option to continue when a check fails, the verdict is Unknown, or the verdict is Block Recommended.
 • English, Tiếng Việt and 中文.
 
 Privacy
@@ -46,8 +46,8 @@ Privacy
 • The default server is api.shieldbotsecurity.online. You can point the extension at your own server in its settings.
 
 Limits
-• This is a warning layer, not a guarantee. Always read your wallet's own confirmation screen.
-• It runs on https pages only.
+• This is a warning layer, not a guarantee. A site built to evade it can hide or cover its warning, or send wallet requests where the extension cannot see them, so always read your wallet's own confirmation screen.
+• It runs on https pages only, in Chrome 111 or later.
 ```
 
 Do not add claims the 3.1.0 extension does not make good on: no "blocks", no simulation or asset
@@ -69,7 +69,8 @@ has passed with them.
    python -c "import pathlib, zipfile; root = pathlib.Path('extension'); z = zipfile.ZipFile('shieldbot-extension-v3.1.0.zip', 'w', zipfile.ZIP_DEFLATED); [z.write(p, p.relative_to(root).as_posix()) for p in sorted(root.rglob('*')) if p.is_file() and 'screenshots' not in p.relative_to(root).parts]; z.close()"
    ```
 
-4. In a clean Chrome profile open `chrome://extensions`, turn on Developer mode, use Load unpacked
+4. In a clean Chrome profile (Chrome 111 or later, which the manifest now requires) open
+   `chrome://extensions`, turn on Developer mode, use Load unpacked
    on the `extension` folder, and check: name "ShieldAI Transaction Firewall", version 3.1.0,
    no Errors button. Then run the smoke test below.
 5. Developer Dashboard, Package tab: upload the zip.
