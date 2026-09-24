@@ -21,15 +21,25 @@ APPROVAL_TOPIC = Web3.keccak(text="Approval(address,address,uint256)").hex()
 # ApprovalForAll event topic (ERC-721/1155)
 APPROVAL_FOR_ALL_TOPIC = Web3.keccak(text="ApprovalForAll(address,address,bool)").hex()
 
-# Robinhood Chain has no archive logs RPC, and its public Blockscout API answers server clients
-# with a Cloudflare challenge, so rescue reads only recent approval history from the public RPC:
-# 24 windows of 10,000 blocks (240,000 blocks, about 6.7 hours at the measured ~0.1 s per block).
-BOUNDED_HISTORY_CHAIN_ID = 4663
+# A chain without a configured logs RPC is read through its adapter's public RPC, which serves no
+# archive history, so rescue reads only recent approval history there: 24 windows of 10,000
+# blocks, newest first (240,000 blocks; about 6.7 hours on Robinhood Chain at ~0.1 s per block,
+# whose public Blockscout API answers server clients with a Cloudflare challenge). Measured on
+# 2026-09-24, the default public RPCs of Robinhood Chain, Arbitrum, Optimism and opBNB serve such
+# windows and Base's serves 2,000 blocks at a time; BSC's answers "limit exceeded" to any range,
+# and Ethereum's and Polygon's refuse a query without a contract address, so on those three
+# nothing is read and the scan stays unknown.
 RECENT_LOG_WINDOW_BLOCKS = 10_000
+# Public RPCs that cap an eth_getLogs range below RECENT_LOG_WINDOW_BLOCKS, by chain.
+PUBLIC_LOG_WINDOW_BLOCKS = {8453: 2_000}
 RECENT_LOG_WINDOWS = 24
 PUBLIC_RPC_CONCURRENCY = 4
 PUBLIC_RPC_ATTEMPTS = 3
 RATE_LIMIT_TERMS = ("rate limit", "rate-limit", "too many requests")
+
+# Reason given when the chain's RPC could not be read. It names no provider: errors from the RPC
+# client can carry its URL.
+RPC_UNAVAILABLE_REASON = "Approval data unavailable from the chain's RPC"
 
 UNLIMITED_THRESHOLD = 2**128
 # Approvals above this (but below UNLIMITED_THRESHOLD) are considered "large"
@@ -190,10 +200,15 @@ class RescueService:
         - revoke_txs: list of pre-built revoke transactions (Tier 2)
         - total_value_at_risk_usd: aggregate USD value exposed (None when incomplete)
         - summary: risk summary
-        - status, coverage, coverage_reasons: "unknown" when allowances, balances or prices are incomplete
+        - status, coverage, coverage_reasons: "unknown" when the approval history read, allowances,
+          balances or prices are incomplete, including when the chain's RPC could not be read
+        - scanned_blocks: the block range whose approval history was read, or None when none was
         """
         wallet = wallet_address.lower()
-        approvals, coverage_reasons = await self._fetch_approvals(wallet, chain_id)
+        try:
+            approvals, coverage_reasons, scanned_blocks = await self._fetch_approvals(wallet, chain_id)
+        except RuntimeError:
+            approvals, coverage_reasons, scanned_blocks = [], {"allowances": RPC_UNAVAILABLE_REASON}, None
 
         alerts = []
         revoke_txs = []
@@ -244,16 +259,21 @@ class RescueService:
             'status': 'unknown' if coverage_reasons else 'ok',
             'coverage': {key: key not in coverage_reasons for key in ('allowances', 'balances', 'prices')},
             'coverage_reasons': coverage_reasons,
+            'scanned_blocks': scanned_blocks,
             'scanned_at': time.time(),
         }
 
     async def _fetch_approvals(
         self, wallet: str, chain_id: int, api_key: str = ""
-    ) -> Tuple[List[ApprovalInfo], Dict[str, str]]:
+    ) -> Tuple[List[ApprovalInfo], Dict[str, str], Optional[Dict[str, int]]]:
         """Fetch and verify active token approvals, with reasons for incomplete data.
 
+        Also returns the block range whose approval history was read, or None when none was.
+        Raises RuntimeError when the chain's RPC could not be read.
+
         Pipeline:
-          1. eth_getLogs — scan ALL BSC history at CONCURRENCY=50
+          1. eth_getLogs — the whole history from a configured logs RPC at CONCURRENCY=50, or
+             the newest RECENT_LOG_WINDOWS windows from the chain's public RPC
           2. Deduplicate to latest event per (token, spender)
           3. eth_call allowance() — verify each pair is still non-zero on-chain
           4. eth_call balanceOf() — get wallet's token balances
@@ -268,12 +288,17 @@ class RescueService:
         if not rpc_url:
             logger.warning(f"No logs RPC configured for chain {chain_id}")
             raise RuntimeError(f"Approval scan unavailable: no logs RPC configured for chain {chain_id}")
-        public_rpc = chain_id == BOUNDED_HISTORY_CHAIN_ID
+        public_rpc = chain_id not in self._logs_rpcs
         try:
             if public_rpc:
-                all_logs, history_reason = await self._fetch_recent_approval_logs(wallet, rpc_url)
-                if history_reason:
-                    coverage_reasons["allowances"] = history_reason
+                all_logs, scanned_from, latest = await self._fetch_recent_approval_logs(
+                    wallet, rpc_url, PUBLIC_LOG_WINDOW_BLOCKS.get(chain_id, RECENT_LOG_WINDOW_BLOCKS)
+                )
+                if scanned_from > 0:
+                    coverage_reasons["allowances"] = f"Approvals before block {scanned_from} not scanned"
+                scanned_blocks = (
+                    {"from_block": scanned_from, "to_block": latest} if scanned_from <= latest else None
+                )
             else:
                 async with aiohttp.ClientSession() as session:
                     # Step 1: Get latest block
@@ -315,6 +340,7 @@ class RescueService:
                                 raise result
                             if isinstance(result, list):
                                 all_logs.extend(result)
+                scanned_blocks = {"from_block": 0, "to_block": latest}
 
             # Step 3: Keep latest event per (token, spender)
             latest_events: Dict[tuple, Dict] = {}
@@ -344,7 +370,7 @@ class RescueService:
             # Filter out already-revoked events before hitting the chain
             candidates = {k: v for k, v in latest_events.items() if v["amount"] > 0}
             if not candidates:
-                return [], coverage_reasons
+                return [], coverage_reasons, scanned_blocks
 
             # Step 4: Verify current on-chain allowances — eliminates false positives
             allowances = await self._verify_allowances(wallet, candidates, rpc_url, public_rpc)
@@ -355,7 +381,7 @@ class RescueService:
                 coverage_reasons["allowances"] = f"{history_reason}; {reason}" if history_reason else reason
             verified = {pair: allowance for pair, allowance in allowances.items() if allowance}
             if not verified:
-                return [], coverage_reasons
+                return [], coverage_reasons, scanned_blocks
 
             # Step 5: Fetch wallet balances for value-at-risk calculation
             active_tokens = list({token for (token, _) in verified.keys()})
@@ -447,24 +473,25 @@ class RescueService:
         approvals.sort(
             key=lambda a: (risk_order.get(a.risk_level, 3), -(a.value_at_risk_usd or 0))
         )
-        return approvals, coverage_reasons
+        return approvals, coverage_reasons, scanned_blocks
 
     async def _fetch_recent_approval_logs(
-        self, wallet: str, rpc_url: str
-    ) -> Tuple[list, Optional[str]]:
+        self, wallet: str, rpc_url: str, window_blocks: int
+    ) -> Tuple[list, int, int]:
         """Fetch Approval logs from the newest RECENT_LOG_WINDOWS block windows of a public RPC.
 
-        Windows are read newest first, PUBLIC_RPC_CONCURRENCY at a time. Scanning stops after a
-        batch in which a window stayed unavailable; logs already read are kept. Returns the logs
-        and the reason naming the history not scanned, or None when the windows reached genesis.
+        Windows of ``window_blocks`` are read newest first, PUBLIC_RPC_CONCURRENCY at a time.
+        Scanning stops after a batch in which a window stayed unavailable; logs already read are
+        kept. Returns the logs, the oldest block of the history read without a gap (the latest
+        block plus one when nothing was read) and the latest block.
         """
         topics = [APPROVAL_TOPIC, "0x" + wallet.replace("0x", "").lower().zfill(64)]
         async with aiohttp.ClientSession() as session:
             latest = int(await self._public_rpc(session, rpc_url, "eth_blockNumber", []), 16)
-            oldest = max(latest - RECENT_LOG_WINDOW_BLOCKS * RECENT_LOG_WINDOWS + 1, 0)
+            oldest = max(latest - window_blocks * RECENT_LOG_WINDOWS + 1, 0)
             windows = [
-                (max(to_b - RECENT_LOG_WINDOW_BLOCKS + 1, oldest), to_b)
-                for to_b in range(latest, oldest - 1, -RECENT_LOG_WINDOW_BLOCKS)
+                (max(to_b - window_blocks + 1, oldest), to_b)
+                for to_b in range(latest, oldest - 1, -window_blocks)
             ]
             logs: list = []
             scanned_from = latest + 1
@@ -494,9 +521,7 @@ class RescueService:
                         gap = True
                 if gap:
                     break
-        if scanned_from == 0:
-            return logs, None
-        return logs, f"Approvals before block {scanned_from} not scanned"
+        return logs, scanned_from, latest
 
     async def _public_rpc(
         self, session: aiohttp.ClientSession, rpc_url: str, method: str, params: list

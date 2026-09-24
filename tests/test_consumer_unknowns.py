@@ -615,17 +615,23 @@ async def test_real_advisor_chat_keeps_text_only_for_complete_scan(consumer_api,
 
 
 @pytest.mark.asyncio
-async def test_rescue_unavailable_approval_scan_returns_503_without_raw_error(consumer_api):
-    from fastapi import HTTPException
+async def test_rescue_unreachable_rpc_answers_unknown_without_raw_error(consumer_api):
+    from unittest.mock import patch
+    from services.rescue_service import RescueService
     api, services = consumer_api
     services.settings.bscscan_api_key = ''
-    services.rescue_service = SimpleNamespace(scan_approvals=AsyncMock(
-        side_effect=RuntimeError('Session is closed: https://rpc.example/secret-key'),
-    ))
-    with pytest.raises(HTTPException) as exc:
-        await api.rescue_scan('0x' + 'b' * 40, chain_id=4663)
-    assert exc.value.status_code == 503
-    assert exc.value.detail == 'Approval scan unavailable'
+    api.web3_client._get_adapter.return_value.w3.provider.endpoint_uri = 'https://rpc.example/secret-key'
+    services.rescue_service = RescueService(api.web3_client)
+    with patch('services.rescue_service.aiohttp.ClientSession') as factory:
+        factory.return_value.__aenter__.return_value.post.side_effect = RuntimeError(
+            'Session is closed: https://rpc.example/secret-key'
+        )
+        response = await api.rescue_scan('0x' + 'b' * 40, chain_id=4663)
+    assert response['status'] == 'unknown'
+    assert response['approvals'] == []
+    assert response['scanned_blocks'] is None
+    assert response['coverage_reasons'] == {'allowances': "Approval data unavailable from the chain's RPC"}
+    assert 'secret-key' not in str(response)
 
 
 @pytest.mark.asyncio

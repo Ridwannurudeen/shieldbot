@@ -2109,7 +2109,9 @@ async def rescue_scan(wallet_address: str, chain_id: int = 56):
     """Scan a wallet's active token approvals and assess risk (Rescue Mode).
 
     Returns risky approvals, Tier 1 alerts with explanations, and
-    Tier 2 pre-built revoke transactions for one-click cleanup.
+    Tier 2 pre-built revoke transactions for one-click cleanup. When the chain's RPC serves only
+    part of the approval history, or none of it, the scan answers status "unknown" with the reason
+    and the blocks it read (scanned_blocks), never an error.
     """
     _validate_chain_id(chain_id)
     if not container or not container.rescue_service:
@@ -2119,14 +2121,9 @@ async def rescue_scan(wallet_address: str, chain_id: int = 56):
         raise HTTPException(status_code=400, detail="Invalid wallet address")
 
     api_key = container.settings.bscscan_api_key
-    try:
-        result = await container.rescue_service.scan_approvals(
-            wallet_address, chain_id=chain_id, etherscan_api_key=api_key,
-        )
-    except RuntimeError as exc:
-        logger.warning(f"Approval scan unavailable for chain {chain_id}")
-        raise HTTPException(status_code=503, detail="Approval scan unavailable") from exc
-    return result
+    return await container.rescue_service.scan_approvals(
+        wallet_address, chain_id=chain_id, etherscan_api_key=api_key,
+    )
 
 
 # --- Threat Feed API ---

@@ -1,4 +1,8 @@
-"""Rescue approval history on Robinhood Chain (4663) is a bounded, rate-limit-aware window."""
+"""Rescue approval history through a public RPC is a bounded, rate-limit-aware window.
+
+Robinhood Chain (4663) was the first chain read this way; every chain without a configured logs
+RPC now is.
+"""
 
 import asyncio
 import logging
@@ -97,7 +101,8 @@ def chain_handler(logs=None, allowance=None, block_number=None):
     return handle
 
 
-async def scan(handler, chain_id=4663):
+def rescue_service():
+    """A service without logs RPCs, so every chain is read through its adapter's public RPC."""
     web3_client = MagicMock()
     web3_client._get_adapter.return_value.w3.provider.endpoint_uri = RPC_URL
     web3_client.get_token_info = AsyncMock(
@@ -105,6 +110,11 @@ async def scan(handler, chain_id=4663):
     )
     service = RescueService(web3_client)
     service._fetch_prices = AsyncMock(return_value={TOKEN: 1.0})
+    return service
+
+
+async def scan(handler, chain_id=4663, service=None):
+    service = service or rescue_service()
     rpc = FakeRpc(handler)
     sleep = AsyncMock()
     with (
@@ -145,6 +155,56 @@ async def test_robinhood_scans_bounded_recent_window_and_marks_allowances_incomp
     assert result["coverage_reasons"] == {
         "allowances": f"Approvals before block {WINDOW_START} not scanned"
     }
+    assert result["scanned_blocks"] == {"from_block": WINDOW_START, "to_block": LATEST}
+    assert result["total_value_at_risk_usd"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [56, 1, 137, 42161, 10, 204])
+async def test_chains_without_a_logs_rpc_read_the_same_bounded_recent_windows(chain_id):
+    result, rpc, sleep = await scan(chain_handler(), chain_id)
+
+    windows = window_bounds(rpc)
+    assert len(windows) == 24
+    assert windows[0][1] == LATEST and windows[-1][0] == WINDOW_START
+    assert all(to_b - from_b + 1 == 10_000 for from_b, to_b in windows)
+    assert rpc.max_in_flight == 4
+    assert rpc.urls == {RPC_URL}
+    assert result["chain_id"] == chain_id
+    assert [a["risk_level"] for a in result["approvals"]] == ["HIGH"]
+    assert result["status"] == "unknown"
+    assert result["coverage_reasons"] == {
+        "allowances": f"Approvals before block {WINDOW_START} not scanned"
+    }
+    assert result["scanned_blocks"] == {"from_block": WINDOW_START, "to_block": LATEST}
+
+
+@pytest.mark.asyncio
+async def test_base_public_rpc_windows_fit_its_2000_block_range():
+    result, rpc, sleep = await scan(chain_handler(), 8453)
+
+    windows = window_bounds(rpc)
+    assert len(windows) == 24
+    assert all(to_b - from_b + 1 == 2_000 for from_b, to_b in windows)
+    assert result["scanned_blocks"] == {"from_block": LATEST - 48_000 + 1, "to_block": LATEST}
+
+
+@pytest.mark.asyncio
+async def test_rpc_serving_no_approval_history_reads_unknown_with_nothing_scanned():
+    limit_exceeded = (
+        200,
+        {"jsonrpc": "2.0", "id": 1, "error": {"code": -32005, "message": "limit exceeded"}},
+    )
+    result, rpc, sleep = await scan(chain_handler(logs=lambda to_b: limit_exceeded), 56)
+
+    assert len(window_bounds(rpc)) == 4
+    assert result["approvals"] == []
+    assert result["status"] == "unknown"
+    assert result["coverage"]["allowances"] is False
+    assert result["coverage_reasons"] == {
+        "allowances": f"Approvals before block {LATEST + 1} not scanned"
+    }
+    assert result["scanned_blocks"] is None
     assert result["total_value_at_risk_usd"] is None
 
 
@@ -262,16 +322,25 @@ async def test_robinhood_unavailable_allowance_is_unknown_and_reasons_combine():
 
 
 @pytest.mark.asyncio
-async def test_robinhood_unavailable_block_number_raises_without_scanning():
+async def test_unavailable_block_number_reads_unknown_without_scanning(caplog):
     methods = []
 
     def handle(payload):
         methods.append(payload["method"])
         return RATE_LIMITED
 
-    with pytest.raises(RuntimeError, match="Approval scan unavailable"):
-        await scan(handle)
+    with caplog.at_level(logging.DEBUG):
+        result, rpc, sleep = await scan(handle)
+
     assert methods == ["eth_blockNumber"] * 3
+    assert result["approvals"] == []
+    assert result["status"] == "unknown"
+    assert result["coverage_reasons"] == {
+        "allowances": "Approval data unavailable from the chain's RPC"
+    }
+    assert result["scanned_blocks"] is None
+    assert "SECRET_KEY_4663" not in caplog.text
+    assert "SECRET_KEY_4663" not in str(result)
 
 
 @pytest.mark.asyncio
@@ -304,3 +373,4 @@ async def test_bsc_rescue_keeps_full_history_chunks_concurrency_and_archive_rpc(
     assert rpc.urls == {"https://archive.invalid"}
     assert result["status"] == "ok"
     assert result["coverage_reasons"] == {}
+    assert result["scanned_blocks"] == {"from_block": 0, "to_block": latest}

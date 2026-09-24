@@ -179,8 +179,13 @@ async def test_rescue_failed_required_data_cannot_return_empty_clean_scan(rescue
     service, wallet, _, _, _ = rescue_pipeline
     target = mock_web3_client if method == 'get_token_info' else service
     getattr(target, method).side_effect = RuntimeError('provider unavailable')
-    with pytest.raises(RuntimeError):
-        await service.scan_approvals(wallet)
+    result = await service.scan_approvals(wallet)
+    assert result['approvals'] == []
+    assert result['status'] == 'unknown'
+    assert result['coverage']['allowances'] is False
+    assert result['coverage_reasons'] == {'allowances': "Approval data unavailable from the chain's RPC"}
+    assert result['scanned_blocks'] is None
+    assert result['total_value_at_risk_usd'] is None
 
 
 @pytest.mark.asyncio
@@ -217,8 +222,10 @@ async def test_rescue_failed_rpc_batch_cannot_look_empty(rescue_pipeline, method
 async def test_rescue_missing_rpc_cannot_return_empty_clean_scan(rescue_pipeline):
     service, wallet, _, _, session = rescue_pipeline
     service._rpc_for = MagicMock(return_value='')
-    with pytest.raises(RuntimeError):
-        await service.scan_approvals(wallet)
+    result = await service.scan_approvals(wallet)
+    assert result['approvals'] == []
+    assert result['status'] == 'unknown'
+    assert result['scanned_blocks'] is None
     session.post.assert_not_called()
 
 
