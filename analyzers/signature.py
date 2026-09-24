@@ -173,9 +173,11 @@ class SignaturePermitAnalyzer(Analyzer):
         value = _parse_uint(message.get('value', 0))
         spender = (message.get('spender') or '').lower()
         deadline = _parse_uint(message.get('deadline', 0))
+        # A DAI-style permit has no amount: allowed true grants the spender everything.
+        unlimited = value >= UNLIMITED_THRESHOLD or message.get('allowed') is True
 
         # Unlimited value
-        if value >= UNLIMITED_THRESHOLD:
+        if unlimited:
             score += 30
             flags.append('Permit: unlimited token approval')
 
@@ -186,7 +188,7 @@ class SignaturePermitAnalyzer(Analyzer):
             score += 10
             flags.append('Permit: far-future deadline (>1 year)')
 
-        return score, flags, spender, value >= UNLIMITED_THRESHOLD
+        return score, flags, spender, unlimited
 
     def _check_permit2(self, message: Dict, primary_type: str) -> tuple:
         """Check a Permit2 AllowanceTransfer: (score, flags, spender, unlimited)."""

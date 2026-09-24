@@ -225,6 +225,18 @@ async def test_unlimited_eip2612_permit_to_an_unverified_contract_is_blocked():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('allowed, floor', [(True, 85), (False, 60)])
+async def test_dai_permit_with_allowed_true_is_unlimited(allowed, floor):
+    # DAI's permit has no amount: allowed true grants the spender everything.
+    typed = {'primaryType': 'Permit', 'domain': {'name': 'Dai Stablecoin'}, 'message': {
+        'holder': '0x' + 'a' * 40, 'spender': SPENDER, 'nonce': '0', 'expiry': '0', 'allowed': allowed,
+    }}
+    result = await _analyze(SignaturePermitAnalyzer(_service(_facts(is_verified=False, age_days=90))), typed)
+    assert result.data['floor'] == floor
+    assert ('Permit: unlimited token approval' in result.flags) is allowed
+
+
+@pytest.mark.asyncio
 async def test_unknown_spender_facts_are_unknown_not_clean():
     typed = _typed("PermitSingle", {
         "details": {"token": "0x" + "c" * 40, "amount": "1000", "expiration": "0", "nonce": "0"},
