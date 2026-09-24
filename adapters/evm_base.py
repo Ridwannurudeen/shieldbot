@@ -13,6 +13,7 @@ except ImportError:
 from datetime import datetime, timezone
 
 from core.chain_adapter import ChainAdapter
+from core.circuit_breaker import provider_breakers
 from core.unknown_ledger import unknown_ledger
 
 logger = logging.getLogger(__name__)
@@ -223,6 +224,7 @@ class EvmAdapter(ChainAdapter):
                 return (None, None)
             return (result.status == 'verified', None)
         try:
+            provider_breakers.check('etherscan', self._chain_id)
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
                 params = {
                     'chainid': self._chain_id,
@@ -233,10 +235,12 @@ class EvmAdapter(ChainAdapter):
                 }
                 async with session.get(self.etherscan_api_url, params=params) as resp:
                     if resp.status != 200:
+                        provider_breakers.record_status('etherscan', self._chain_id, resp.status)
                         unknown_ledger.record('etherscan', self._chain_id, 'failed')
                         logger.warning("[%s] Verification unknown: HTTP %s", self._chain_name, resp.status)
                         return (None, None)
                     data = await resp.json()
+                    provider_breakers.record_status('etherscan', self._chain_id, resp.status)
                     if (
                         isinstance(data, dict) and data.get('status') == '1'
                         and isinstance(data.get('result'), list) and len(data['result']) == 1
@@ -251,6 +255,7 @@ class EvmAdapter(ChainAdapter):
             logger.warning("[%s] Verification unknown: missing source response", self._chain_name)
             return (None, None)
         except Exception as e:
+            provider_breakers.record_error('etherscan', self._chain_id, e)
             unknown_ledger.record('etherscan', self._chain_id, 'failed')
             logger.error("[%s] Error checking verification: %s", self._chain_name, type(e).__name__)
             return (None, None)
@@ -273,6 +278,7 @@ class EvmAdapter(ChainAdapter):
                 except Exception as e:
                     logger.warning("[%s] Creation time unknown: %s", self._chain_name, type(e).__name__)
                 return creation_info
+            provider_breakers.check('etherscan', self._chain_id)
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
                 params = {
                     'chainid': self._chain_id,
@@ -283,10 +289,12 @@ class EvmAdapter(ChainAdapter):
                 }
                 async with session.get(self.etherscan_api_url, params=params) as resp:
                     if resp.status != 200:
+                        provider_breakers.record_status('etherscan', self._chain_id, resp.status)
                         unknown_ledger.record('etherscan', self._chain_id, 'failed')
                         logger.warning("[%s] Creation unknown: HTTP %s", self._chain_name, resp.status)
                         return None
                     data = await resp.json()
+                    provider_breakers.record_status('etherscan', self._chain_id, resp.status)
                     if data['status'] == '1' and data['result']:
                         result = data['result'][0]
                         tx_hash = result.get('txHash')
@@ -310,6 +318,7 @@ class EvmAdapter(ChainAdapter):
             # Before Etherscan has answered, an error is its request or reply failing; after, it comes from
             # the creation time's RPC reads, which count as rpc.
             if self._explorer_backend == 'etherscan' and not etherscan_answered:
+                provider_breakers.record_error('etherscan', self._chain_id, e)
                 unknown_ledger.record('etherscan', self._chain_id, 'failed')
             logger.error("[%s] Error getting creation info: %s", self._chain_name, type(e).__name__)
             return None
@@ -372,21 +381,25 @@ class EvmAdapter(ChainAdapter):
     async def _honeypot_is_reply(self, address: str) -> Tuple[int, Optional[Dict]]:
         """(HTTP status, JSON body when 200) from honeypot.is, requested once per token.
 
-        A request that raises is not kept, so the next caller asks again.
+        A request that raises is not kept, so the next caller asks again. While the breaker is open
+        nothing is sent: CircuitOpenError is raised, and callers report it like any failed request.
         """
         key = address.lower()
         reply = self._honeypot_is_replies.get(key)
         if reply is None:
             try:
+                provider_breakers.check('honeypot.is', self._chain_id)
                 async with aiohttp.ClientSession() as session:
                     url = f"https://api.honeypot.is/v2/IsHoneypot?address={address}&chainID={self._honeypot_chain_id}"
                     async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                         reply = (resp.status, await resp.json() if resp.status == 200 else None)
-            except Exception:
+            except Exception as e:
+                provider_breakers.record_error('honeypot.is', self._chain_id, e)
                 unknown_ledger.record('honeypot.is', self._chain_id, 'failed')
                 raise
             self._honeypot_is_replies[key] = reply
             status, data = reply
+            provider_breakers.record_status('honeypot.is', self._chain_id, status)
             unknown_ledger.record('honeypot.is', self._chain_id, (
                 'answered' if isinstance(data, dict) and data.get('simulationSuccess') is True
                 else 'unknown' if status == 404 or isinstance(data, dict) else 'failed'

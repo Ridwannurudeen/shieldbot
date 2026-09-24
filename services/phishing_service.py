@@ -4,6 +4,7 @@ import aiohttp
 from cachetools import TTLCache
 from urllib.parse import quote, urlparse
 
+from core.circuit_breaker import provider_breakers
 from core.unknown_ledger import unknown_ledger
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,7 @@ class PhishingService:
                     return {**result, "cached": True}
 
             # Call GoPlus phishing API
+            provider_breakers.check("goplus_phishing")
             encoded_url = quote(url, safe="")
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -78,12 +80,14 @@ class PhishingService:
                     headers={"Accept": "application/json"},
                 ) as resp:
                     if resp.status != 200:
+                        provider_breakers.record_status("goplus_phishing", None, resp.status)
                         unknown_ledger.record("goplus_phishing", None, "failed")
                         logger.warning(
                             "GoPlus phishing API returned %s for %s", resp.status, domain
                         )
                         return self._no_verdict(cache_key, f"GoPlus HTTP {resp.status}")
                     data = await resp.json()
+                    provider_breakers.record_status("goplus_phishing", None, resp.status)
 
             result_data = data.get("result") if isinstance(data, dict) and data.get("code") == 1 else None
             # GoPlus returns "phishing_site": 1 (integer) or "is_phishing_site": "1" (string)
@@ -112,10 +116,12 @@ class PhishingService:
             return result
 
         except aiohttp.ClientError as e:
+            provider_breakers.record_error("goplus_phishing", None, e)
             unknown_ledger.record("goplus_phishing", None, "failed")
             logger.warning("GoPlus phishing check network error for %s: %s", url, type(e).__name__)
             return self._no_verdict(cache_key, f"GoPlus request failed ({type(e).__name__})")
         except Exception as e:
+            provider_breakers.record_error("goplus_phishing", None, e)
             unknown_ledger.record("goplus_phishing", None, "failed")
             logger.error("Phishing check failed for %s: %s", url, type(e).__name__)
             return self._no_verdict(cache_key, f"Phishing check failed ({type(e).__name__})")

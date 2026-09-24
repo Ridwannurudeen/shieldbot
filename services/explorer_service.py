@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 import aiohttp
 from cachetools import TTLCache
 
+from core.circuit_breaker import CircuitOpenError, provider_breakers
 from core.unknown_ledger import unknown_ledger
 
 
@@ -72,6 +73,12 @@ class ExplorerService:
         )
         if cache_key in self._cache:
             return self._cache[cache_key]
+        # An open breaker's answer is not cached, so lookups resume as soon as it closes.
+        try:
+            provider_breakers.check(provider, chain_id)
+        except CircuitOpenError as exc:
+            unknown_ledger.record(provider, chain_id, "failed")
+            return ExplorerResult("unknown", reason=type(exc).__name__, provider=provider)
         host = urlsplit(url).hostname
 
         async def fetch():
@@ -102,12 +109,14 @@ class ExplorerService:
                                 await asyncio.sleep(2**attempt)
                                 continue
                             if response.status != 200:
+                                provider_breakers.record_status(provider, chain_id, response.status)
                                 return ExplorerResult(
                                     "unknown",
                                     reason=f"HTTP {response.status}",
                                     provider=provider,
                                 )
                             data = await response.json()
+                            provider_breakers.record_status(provider, chain_id, response.status)
                             if not isinstance(data, dict):
                                 return ExplorerResult(
                                     "unknown",
@@ -119,6 +128,7 @@ class ExplorerService:
                                 data = _redact_api_key(data, api_key)
                             return ExplorerResult("known", data=data, provider=provider)
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+                provider_breakers.record_error(provider, chain_id, exc)
                 return ExplorerResult(
                     "unknown", reason=type(exc).__name__, provider=provider
                 )

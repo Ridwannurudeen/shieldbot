@@ -2,6 +2,8 @@ import time
 import logging
 import aiohttp
 
+from core.circuit_breaker import provider_breakers
+
 logger = logging.getLogger(__name__)
 
 CACHE_TTL = 3600  # 1 hour
@@ -63,15 +65,19 @@ class TokenSnifferService:
         params = {"apikey": self._api_key, "include_metrics": "1"}
 
         try:
+            provider_breakers.check("token_sniffer", chain_id)
             session = await self._get_session()
             async with session.get(url, params=params) as resp:
                 if resp.status == 429:
+                    provider_breakers.record_status("token_sniffer", chain_id, resp.status)
                     logger.warning("Token Sniffer rate limit hit for %s", address)
                     return {}
                 if resp.status != 200:
+                    provider_breakers.record_status("token_sniffer", chain_id, resp.status)
                     logger.warning("Token Sniffer returned %s for %s", resp.status, address)
                     return {}
                 raw = await resp.json()
+                provider_breakers.record_status("token_sniffer", chain_id, resp.status)
 
             result = {
                 "score": raw.get("score"),
@@ -82,9 +88,11 @@ class TokenSnifferService:
             return result
 
         except aiohttp.ClientError as e:
+            provider_breakers.record_error("token_sniffer", chain_id, e)
             logger.warning("Token Sniffer network error for %s: %s", address, type(e).__name__)
             return {}
         except Exception as e:
+            provider_breakers.record_error("token_sniffer", chain_id, e)
             logger.error("Token Sniffer fetch failed for %s: %s", address, type(e).__name__)
             return {}
 
