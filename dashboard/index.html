@@ -638,11 +638,13 @@ function FlagModal({
     setReason('');
     setFailure(null);
   }, [threat]);
-  // The open dialog takes focus, keeps Tab inside it, closes on Escape and returns focus to the
-  // control that opened it.
+  // The open dialog makes the page behind it inert, takes focus, keeps Tab inside it, closes on
+  // Escape and returns focus to the control that opened it.
   useEffect(() => {
     if (!threat) return;
     const opener = document.activeElement;
+    const page = document.getElementById('root');
+    page.inert = true;
     dialog.current.querySelector('textarea').focus();
     function onKey(e) {
       if (e.key === 'Escape') {
@@ -659,6 +661,8 @@ function FlagModal({
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('keydown', onKey);
+      // Before the focus call: an element inside an inert page cannot take focus.
+      page.inert = false;
       opener.focus();
     };
   }, [threat]);

@@ -100,6 +100,9 @@ class Document extends Node {
     this.body = this.documentElement.appendChild(this.createElement('body'));
     this.root = this.body.appendChild(this.createElement('div'));
     this.activeElement = this.body;
+    // React checks for the input event with 'oninput' in document; without it, it falls back to an
+    // old-IE polyfill that fails on key presses.
+    this.oninput = null;
   }
   createElement(tag) { return new Element(this, tag); }
   createElementNS(ns, tag) { return new Element(this, tag, ns); }
@@ -312,5 +315,24 @@ def test_a_sent_report_closes_the_dialog_and_toasts_on_the_body():
         "alertInDialog": False,
         "toast": "Report sent. Thank you.",
         "toastOnBody": True,
+    }
+
+
+def test_the_page_behind_the_open_dialog_is_inert_and_escape_hands_focus_back():
+    steps = """
+      const flag = byLabel('Flag ');
+      flag.focus();
+      await click(flag);
+      const open = {inert: document.root.inert === true, focus: document.activeElement.getAttribute('aria-label')};
+      await press('Escape');
+      return {
+        open,
+        closed: {dialog: Boolean(byRole('dialog')), inert: document.root.inert === true, focusBack: document.activeElement === flag},
+      };
+    """
+    result = render(contracts=[CONTRACT], steps=steps)
+    assert result == {
+        "open": {"inert": True, "focus": "Why is this a false positive?"},
+        "closed": {"dialog": False, "inert": False, "focusBack": True},
     }
 
