@@ -28,7 +28,7 @@ Nothing was ever published, but code built from earlier copies of this repositor
 - `scan`, `firewall`, `check`, `rescue` and `queryThreatGraph` require a chain and throw `MISSING_CHAIN_ID` without one. They used to fall back to BNB Chain (56).
 - `queryThreatGraph(address, chainId, maxDepth?)` takes the chain as a new second argument, so `maxDepth` moved to third. It used to send no chain at all, which the API treated as BNB Chain.
 - `health()` is typed with `supported_chains`, the field the API actually returns, instead of `chains`.
-- `check()` and `firewall()` send `value` as decimal wei and throw `INVALID_VALUE` for anything that is not a non-negative integer. They used to forward it unchanged.
+- `check()` and `firewall()` send `value` as decimal wei and throw `INVALID_VALUE` for anything that is not an integer from 0 to 2^256 - 1. They used to forward it unchanged.
 - `rescue()` results are typed with `status`, `coverage`, `coverage_reasons`, `scanned_blocks` and `total_value_at_risk_usd`, and `rescue()` throws `SCAN_UNAVAILABLE` when the scan read nothing, instead of returning an empty approval list.
 
 ## API key
@@ -81,7 +81,7 @@ if (!verdict.allowed) {
 | `getThreats({ chainId?, limit?, since? })` | `GET /api/threats/feed` | optional |
 | `health()` | `GET /api/health` | no |
 
-`value` for `check()` and `firewall()` is wei as a decimal or `0x` hex string (default `0`). The SDK sends it as a decimal string and throws `ShieldBotError` with code `INVALID_VALUE` before any request for anything that is not a non-negative integer, so the API never prices an unreadable value as zero. The API answers `check()` with 404 until the agent is registered with the same API key; a different key gets 403.
+`value` for `check()` and `firewall()` is wei as a decimal or `0x` hex string; omitted or `null` means `0`. The SDK sends it as a decimal string and throws `ShieldBotError` with code `INVALID_VALUE` before any request for anything that is not an integer from 0 to 2^256 - 1, so the API never prices an unreadable value as zero. The API answers `check()` with 404 until the agent is registered with the same API key; a different key gets 403.
 
 ## Unknown results
 

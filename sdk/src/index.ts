@@ -248,6 +248,7 @@ export { ShieldBotError };
 
 const DEFAULT_BASE_URL = 'https://api.shieldbotsecurity.online';
 const DEFAULT_TIMEOUT = 10_000;
+const MAX_WEI = 2n ** 256n - 1n;
 
 export class ShieldBot {
   private baseUrl: string;
@@ -487,18 +488,19 @@ export class ShieldBot {
   }
 
   private _weiValue(value: unknown, method: string): string {
-    if (value === undefined) {
+    if (value === undefined || value === null) {
       return '0';
     }
     const text = typeof value === 'string' ? value.trim() : '';
-    const valid =
-      typeof value === 'bigint' ? value >= 0n
-        : typeof value === 'number' ? Number.isSafeInteger(value) && value >= 0
-          : /^(0x[0-9a-f]+|[0-9]+)$/i.test(text);
-    if (!valid) {
-      throw new ShieldBotError(`value for ${method}() must be a non-negative integer amount of wei`, 400, 'INVALID_VALUE');
+    const parseable =
+      typeof value === 'bigint' ||
+      (typeof value === 'number' && Number.isSafeInteger(value)) ||
+      /^(0x[0-9a-f]+|[0-9]+)$/i.test(text);
+    const wei = parseable ? BigInt(typeof value === 'string' ? text : (value as number | bigint)) : -1n;
+    if (wei < 0n || wei > MAX_WEI) {
+      throw new ShieldBotError(`value for ${method}() must be an integer amount of wei from 0 to 2^256 - 1`, 400, 'INVALID_VALUE');
     }
-    return BigInt(typeof value === 'string' ? text : (value as number | bigint)).toString();
+    return wei.toString();
   }
 
   private _cacheVerdict(key: string, verdict: Verdict): void {
