@@ -72,6 +72,57 @@ def test_chains_section_lists_every_scan_chain():
     assert "Robinhood Chain" in names
 
 
+def test_chains_section_coverage_matches_the_code():
+    from adapters.arbitrum import ArbitrumAdapter
+    from adapters.base_chain import BaseChainAdapter
+    from adapters.bsc import BscAdapter
+    from adapters.eth import EthAdapter
+    from adapters.opbnb import OpBNBAdapter
+    from adapters.optimism import OptimismAdapter
+    from adapters.polygon import PolygonAdapter
+    from adapters.robinhood import RobinhoodAdapter
+    from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
+    from services.mempool_service import supports_pending_transactions
+
+    adapters = {
+        adapter.chain_id: adapter
+        for adapter in (
+            cls(rpc_url="https://rpc.invalid")
+            for cls in (
+                ArbitrumAdapter,
+                BaseChainAdapter,
+                BscAdapter,
+                EthAdapter,
+                OpBNBAdapter,
+                OptimismAdapter,
+                PolygonAdapter,
+                RobinhoodAdapter,
+            )
+        )
+    }
+    assert set(adapters) == set(chain_info())
+    aliases = {"BSC": "BNB Chain"}
+    ids = {aliases.get(info["name"], info["name"]): chain_id for chain_id, info in chain_info().items()}
+    rows = re.findall(
+        r'name: "([^"]+)",\s*simulation: ("[^"]+"|null),\s*mempool: (true|false),\s*launches: (true|false),',
+        read(COMPONENTS / "Chains.tsx"),
+    )
+    assert len(rows) == len(chain_info())
+    for name, simulation, mempool, launches in rows:
+        adapter = adapters[ids[name]]
+        # Web3Client.supports_honeypot_simulation reads the same flag; without honeypot.is or it,
+        # no sell is simulated (adapters/evm_base.py HONEYPOT_IS_UNSUPPORTED).
+        if getattr(adapter, "supports_honeypot_simulation", False) is True:
+            expected = "ShieldBot"
+        elif adapter._honeypot_chain_id is not None:
+            expected = "honeypot.is"
+        else:
+            expected = None
+        assert json.loads(simulation) == expected, name
+        assert (mempool == "true") == supports_pending_transactions(ids[name]), name
+        assert (launches == "true") == (ids[name] == LAUNCH_CHAIN_ID), name
+
+
 def test_mcp_counts_match_the_code():
     from mcp_server.prompts import PROMPT_DEFINITIONS
     from mcp_server.resources import RESOURCE_DEFINITIONS, RESOURCE_TEMPLATE_DEFINITIONS
