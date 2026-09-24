@@ -204,9 +204,9 @@ Block or Reject on the warning and never sign.
    of one NFT, then of two at once (a bulk listing), at a normal price: neither warning says
    zero-price or that the consideration goes to other addresses. Reject in the wallet.
 24. **Blur listing** (2 minutes, if the test wallet holds an NFT). Start a Blur listing of one NFT at
-   a normal price: the warning is HIGH RISK with a reason about the Blur order's type. That is
-   expected: Blur's listing signs only a Merkle root of what is listed, so no price can be read.
-   Reject in the wallet.
+   a normal price: the warning is HIGH RISK and says the Blur listing signs only a root of its
+   listings, so its items and price cannot be read before signing. That is expected. Reject in the
+   wallet.
 25. **EIP-7702 transaction** (1 minute). In the console of a dApp page, send
    `ethereum.request({method: 'eth_sendTransaction', params: [{from: (await ethereum.request({method:
    'eth_accounts'}))[0], to: (await ethereum.request({method: 'eth_accounts'}))[0], authorizationList:

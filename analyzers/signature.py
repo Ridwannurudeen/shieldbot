@@ -46,7 +46,8 @@ class SignaturePermitAnalyzer(Analyzer):
     - Seaport OrderComponents, and each order of a BulkOrder: NFT listings that pay the offerer nothing
       or next to nothing
     - Blur Exchange Order: listings that pay the seller nothing once fees to others are taken; a Blur
-      bulk listing (Root) signs only a Merkle root of its orders and is Unknown
+      listing that signs only a root of its listings (an Order with listingsRoot, or a bulk Root) is
+      Unknown
 
     Every permit's spender is judged like a calldata approval's: the chain adapter's routers and
     Permit2 are allowlisted, and any other spender's counterparty facts can set a hard floor.
@@ -358,12 +359,13 @@ class SignaturePermitAnalyzer(Analyzer):
 
     def _check_blur(self, message: Dict, primary_type: str, types) -> tuple:
         """Check a Blur Exchange order: (score, flags, why it could not be read, or None). A sell order
-        pays its trader the price less the fees paid to others; a bulk listing (Root) signs only the
-        Merkle root of its orders, which cannot be read, and is judged as a zero-price listing."""
-        if primary_type == 'Root':
-            flag = 'Blur bulk listing: only a Merkle root of its orders is signed; treated as a zero-price listing'
-            return 50.0, [flag], 'Blur bulk listing signs only a Merkle root of its orders'
+        pays its trader the price less the fees paid to others. A listing that signs only a root of its
+        listings (Blur's current Order, with listingsRoot, and its bulk Root) cannot be read and is
+        judged as a zero-price listing."""
         members = _members(types, 'Order') or {}
+        if primary_type == 'Root' or 'listingsRoot' in members:
+            reason = 'Blur listing signs only a root of its listings, so its items and price cannot be read before signing'
+            return 50.0, [f'{reason}; treated as a zero-price listing'], reason
         fee_members = _referenced_members(types, members, 'fees', True)
         if not {'trader', 'side', 'price'} <= set(members) or not {'rate', 'recipient'} <= set(fee_members or {}):
             flag = 'Blur: order type does not match Blur Exchange; treated as a zero-price listing'

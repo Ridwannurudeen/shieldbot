@@ -388,3 +388,45 @@ async def test_the_api_answers_a_blur_bulk_listing_as_unknown(consumer_api):  # 
     )
     response = await api._build_signature_only_response(req)
     assert_unknown_response(response)
+
+
+# Blur Exchange's current listing, as its V2 contract and MetaMask's test dApp lay it out.
+BLUR_LISTING_TYPES = {
+    "Order": _struct(
+        ("trader", "address"), ("collection", "address"), ("listingsRoot", "bytes32"),
+        ("numberOfListings", "uint256"), ("expirationTime", "uint256"), ("assetType", "uint8"),
+        ("makerFee", "FeeRate"), ("salt", "uint256"), ("orderType", "uint8"), ("nonce", "uint256"),
+    ),
+    "FeeRate": _struct(("recipient", "address"), ("rate", "uint16")),
+}
+BLUR_LISTING = {
+    "trader": SIGNER, "collection": NFT, "listingsRoot": "0x" + "1" * 64, "numberOfListings": "1",
+    "expirationTime": "9999999999", "assetType": "0", "makerFee": {"recipient": "0x" + "0" * 40, "rate": "0"},
+    "salt": "1", "orderType": "1", "nonce": "0",
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("typed", [
+    _blur(BLUR_LISTING, types=BLUR_LISTING_TYPES),
+    _blur({"root": "0x" + "1" * 64}, "Root", {"Root": _struct(("root", "bytes32"))}),
+], ids=["listing", "bulk-listing"])
+async def test_a_blur_listing_says_its_items_and_price_cannot_be_read(typed):
+    # An ordinary Blur listing: the reason says why it cannot be judged, not that it is malformed.
+    result = await _analyze(typed)
+    assert result.score == 50
+    assert result.data["status"] == "unknown"
+    assert result.data["coverage"]["typed_data"] is False
+    for text in (result.flags[0], result.data["reason"]):
+        assert "signs only a root of its listings" in text, text
+        assert "cannot be read before signing" in text, text
+        assert "does not match" not in text, text
+
+
+@pytest.mark.asyncio
+async def test_a_blur_order_of_another_type_still_says_it_does_not_match():
+    result = await _analyze(_blur(_blur_order(), types={"Order": BLUR_TYPES["Order"]}))
+    assert result.score == 50
+    assert result.data["status"] == "unknown"
+    assert "does not match Blur Exchange" in result.flags[0]
+    assert "root of its listings" not in result.flags[0]

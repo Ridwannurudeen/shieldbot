@@ -205,9 +205,10 @@ that stops the scripts altogether would need them unregistered through `chrome.s
   `eth_sendRawTransaction`, which it cannot decode (eth-account 0.11 in production).
 - Blur listings are shown as HIGH RISK and Unknown. Blur Exchange's current listing (an `Order`
   with `listingsRoot` and `numberOfListings`) and its older bulk listing (`Root`) sign only a Merkle
-  root of what is listed, so no price can be read, and they are judged as zero-price listings. Only
-  Blur's older single `Order` (with `side`, `price` and `fees`) is judged on its price; any other
-  type under Blur Exchange's domain is Unknown too.
+  root of what is listed, so no price can be read, and they are judged as zero-price listings; the
+  warning says "Blur listing signs only a root of its listings, so its items and price cannot be
+  read before signing". Only Blur's older single `Order` (with `side`, `price` and `fees`) is judged
+  on its price; any other type under Blur Exchange's domain is Unknown too.
 - A Seaport order is judged only when its offer includes an NFT (item type 2 to 5). An order whose
   offer is only native coin or ERC-20 tokens (item type 0 or 1), a bid for example, is not judged
   on what it pays back.
