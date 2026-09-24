@@ -17,6 +17,8 @@ _ETH_ADDR_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
 _GOPLUS_CACHE = TTLCache(maxsize=1024, ttl=30)
 _GOPLUS_INFLIGHT = {}
 _GOPLUS_NO_DATA = 'GoPlus has no data for this token on this chain'
+_GOPLUS_ADDRESS_CACHE = TTLCache(maxsize=1024, ttl=600)
+_GOPLUS_ADDRESS_INFLIGHT = {}
 
 # Response codes that ask for the same request again; their meaning is not
 # documented anywhere we can read offline, so the reason stays neutral.
@@ -168,6 +170,63 @@ class ScamDatabase:
             _GOPLUS_INFLIGHT.pop(flight_key, None)
         result['observed_at'] = observed_at
         _GOPLUS_CACHE[key] = result
+        return result
+
+    @staticmethod
+    async def fetch_address_security(address: str) -> dict:
+        """GoPlus malicious-address labels, shared across concurrent scans.
+
+        GoPlus accepts a chain but returns the same labels for every chain, so none is sent.
+        """
+        if not _ETH_ADDR_RE.fullmatch(address):
+            return {'status': 'unknown', 'reason': 'Invalid address', 'data': {}}
+        key = address.lower()
+        if key in _GOPLUS_ADDRESS_CACHE:
+            return _GOPLUS_ADDRESS_CACHE[key]
+        flight_key = (asyncio.get_running_loop(), key)
+        if flight_key not in _GOPLUS_ADDRESS_INFLIGHT:
+            _GOPLUS_ADDRESS_INFLIGHT[flight_key] = asyncio.create_task(
+                ScamDatabase._fetch_address_security(key, flight_key)
+            )
+        return await asyncio.shield(_GOPLUS_ADDRESS_INFLIGHT[flight_key])
+
+    @staticmethod
+    async def _fetch_address_security(address: str, flight_key: tuple) -> dict:
+        observed_at = time.time()
+        result = {'status': 'unknown', 'reason': 'GoPlus unavailable', 'data': {}}
+        try:
+            url = f"https://api.gopluslabs.io/api/v1/address_security/{address}"
+            async with aiohttp.ClientSession() as session:
+                for attempt in range(_GOPLUS_ATTEMPTS):
+                    if attempt:
+                        await asyncio.sleep(_GOPLUS_BACKOFF * (2 ** (attempt - 1)))
+                    retriable = False
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                        if resp.status != 200:
+                            result = {'status': 'unknown', 'reason': f'GoPlus HTTP {resp.status}', 'data': {}}
+                            retriable = resp.status == 429
+                        else:
+                            payload = await resp.json()
+                            code = payload.get('code') if isinstance(payload, dict) else None
+                            record = payload.get('result') if isinstance(payload, dict) else None
+                            if code in _GOPLUS_RETRY_CODES:
+                                result = {'status': 'unknown', 'reason': f'GoPlus returned code {code}', 'data': {}}
+                                retriable = True
+                            elif code != 1:
+                                result = {'status': 'unknown', 'reason': 'GoPlus returned an unsuccessful response', 'data': {}}
+                            elif not isinstance(record, dict) or not record:
+                                result = {'status': 'unknown', 'reason': 'GoPlus returned no address record', 'data': {}}
+                            else:
+                                result = {'status': 'ok', 'reason': None, 'data': record}
+                    if not retriable:
+                        break
+        except Exception as e:
+            logger.error("Error fetching GoPlus address security: %s", type(e).__name__)
+            result['reason'] = f'GoPlus request failed ({type(e).__name__})'
+        finally:
+            _GOPLUS_ADDRESS_INFLIGHT.pop(flight_key, None)
+        result['observed_at'] = observed_at
+        _GOPLUS_ADDRESS_CACHE[address] = result
         return result
 
     async def _check_goplus(self, address: str, chain_id: int = 56) -> ScamMatches:

@@ -1,0 +1,227 @@
+"""Counterparty facts: wallet or contract, verification, age and GoPlus address labels."""
+
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+import services.counterparty_service as counterparty_module
+import utils.scam_db as scam_module
+from services.counterparty_service import PERMIT2, CounterpartyService, unknown_facts
+from utils.scam_db import ScamDatabase
+
+SPENDER = "0x" + "5" * 40
+ROUTER = "0x10ed43c718714eb63d5aa57b78b54704e256024e"
+CLEAN = {"phishing_activities": "0", "blacklist_doubt": "0", "data_source": "", "gas_abuse": "0"}
+# Recorded 2026-09-24 for the Inferno Drainer fee address 0x0000db5c...0000.
+DRAINER = {
+    "phishing_activities": "1",
+    "blacklist_doubt": "1",
+    "stealing_attack": "0",
+    "number_of_malicious_contracts_created": "0",
+    "gas_abuse": "0",
+    "data_source": "SlowMist,GoPlus",
+}
+
+
+@pytest.fixture(autouse=True)
+def caches():
+    counterparty_module._FACTS_CACHE.clear()
+    scam_module._GOPLUS_ADDRESS_CACHE.clear()
+    yield
+    counterparty_module._FACTS_CACHE.clear()
+    scam_module._GOPLUS_ADDRESS_CACHE.clear()
+
+
+def _service(code="0x6080", verified=True, age=400, labels=None, goplus=None):
+    adapter = SimpleNamespace(get_whitelisted_routers=lambda: {ROUTER: "PancakeSwap V2 Router"})
+    web3 = SimpleNamespace(
+        _get_adapter=MagicMock(return_value=adapter),
+        get_bytecode=AsyncMock(return_value=code),
+        is_verified_contract=AsyncMock(return_value=(verified, None)),
+        get_contract_creation_info=AsyncMock(
+            return_value=None if age is None else {"age_days": age}
+        ),
+    )
+    security = goplus or {"status": "ok", "reason": None, "data": labels or CLEAN}
+    scam_db = SimpleNamespace(fetch_address_security=AsyncMock(return_value=security))
+    return CounterpartyService(web3, scam_db), web3, scam_db
+
+
+def _calls(web3, scam_db):
+    return (
+        web3.get_bytecode.await_count
+        + web3.is_verified_contract.await_count
+        + web3.get_contract_creation_info.await_count
+        + scam_db.fetch_address_security.await_count
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "address, name",
+    [(ROUTER, "PancakeSwap V2 Router"), (PERMIT2.upper().replace("0X", "0x"), "Permit2")],
+)
+async def test_allowlisted_spender_needs_no_lookup(address, name):
+    service, web3, scam_db = _service()
+    assert service.allowlisted_name(address, 56) == name
+    facts = await service.fetch(address, 56)
+    assert facts["allowlisted"] == name
+    assert all(facts["coverage"].values())
+    assert facts["reason"] is None
+    assert _calls(web3, scam_db) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", ["", "0x"], ids=["web3-7", "web3-6"])
+async def test_empty_code_is_a_fully_covered_wallet(code):
+    service, _, _ = _service(code=code, verified=None, age=None)
+    facts = await service.fetch(SPENDER, 56)
+    assert facts["is_contract"] is False
+    assert facts["delegated"] is False
+    assert facts["is_verified"] is None
+    assert facts["age_days"] is None
+    assert facts["labels"] == []
+    assert all(facts["coverage"].values())
+    assert facts["reason"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", ["", "0x"], ids=["web3-7", "web3-6"])
+async def test_eip7702_delegation_is_a_wallet(prefix):
+    # vitalik.eth's code on 2026-09-24: the delegation designator and a 20-byte delegate.
+    code = prefix + "ef0100" + "5a7fc11397e9a8ad41bf10bf13f22b0a63f96f6d"
+    service, _, _ = _service(code=code, verified=False, age=None)
+    facts = await service.fetch(SPENDER, 1)
+    assert facts["is_contract"] is True
+    assert facts["delegated"] is True
+    assert facts["is_verified"] is None
+    assert all(facts["coverage"].values())
+
+
+@pytest.mark.asyncio
+async def test_contract_facts():
+    service, _, _ = _service(code="0x6080604052", verified=False, age=2)
+    facts = await service.fetch(SPENDER, 56)
+    assert (facts["is_contract"], facts["delegated"]) == (True, False)
+    assert (facts["is_verified"], facts["age_days"]) == (False, 2)
+    assert all(facts["coverage"].values())
+
+
+@pytest.mark.asyncio
+async def test_goplus_theft_labels_are_read_and_others_ignored():
+    record = {
+        **DRAINER,
+        "number_of_malicious_contracts_created": "2",
+        "contract_address": "1",
+        "gas_abuse": "1",
+        "fake_kyc": "1",
+    }
+    service, _, _ = _service(labels=record)
+    facts = await service.fetch(SPENDER, 56)
+    assert facts["labels"] == [
+        "phishing_activities",
+        "blacklist_doubt",
+        "number_of_malicious_contracts_created",
+    ]
+    assert facts["label_source"] == "SlowMist,GoPlus"
+    assert facts["coverage"]["labels"] is True
+
+
+@pytest.mark.asyncio
+async def test_goplus_outage_leaves_labels_unknown_with_a_class_only_reason():
+    service, _, _ = _service(
+        goplus={"status": "unknown", "reason": "GoPlus HTTP 429", "data": {}},
+    )
+    facts = await service.fetch(SPENDER, 56)
+    assert facts["labels"] is None
+    assert facts["coverage"] == {"code": True, "verification": True, "age": True, "labels": False}
+    assert facts["reason"] == "Spender facts unknown: labels (GoPlus HTTP 429)"
+
+
+@pytest.mark.asyncio
+async def test_each_fact_is_decided_independently():
+    service, _, _ = _service(code=None, verified=True, age=None)
+    facts = await service.fetch(SPENDER, 56)
+    assert facts["is_contract"] is None
+    assert facts["is_verified"] is True
+    assert facts["coverage"] == {"code": False, "verification": True, "age": False, "labels": True}
+    assert facts["reason"] == "Spender facts unknown: code (RPC), age (explorer)"
+
+
+@pytest.mark.asyncio
+async def test_repeat_lookup_is_served_from_the_cache():
+    service, web3, scam_db = _service()
+    first = await service.fetch(SPENDER, 56)
+    assert await service.fetch(SPENDER.upper().replace("0X", "0x"), 56) is first
+    assert _calls(web3, scam_db) == 4
+    await service.fetch(SPENDER, 8453)
+    assert _calls(web3, scam_db) == 8
+
+
+def test_unknown_facts_have_no_coverage():
+    facts = unknown_facts(SPENDER)
+    assert not any(facts["coverage"].values())
+    assert facts["reason"].startswith("Spender facts unknown")
+
+
+def _goplus_http(*payloads, status=200):
+    responses = []
+    for payload in payloads:
+        response = MagicMock(status=status)
+        response.json = AsyncMock(return_value=payload)
+        responses.append(response)
+    session = MagicMock()
+    session.get.return_value.__aenter__ = AsyncMock(side_effect=responses)
+    session.get.return_value.__aexit__ = AsyncMock(return_value=False)
+    factory = patch("utils.scam_db.aiohttp.ClientSession")
+    return factory, session
+
+
+async def _address_security(*payloads, status=200):
+    factory, session = _goplus_http(*payloads, status=status)
+    with factory as http, patch("utils.scam_db._GOPLUS_BACKOFF", 0):
+        http.return_value.__aenter__ = AsyncMock(return_value=session)
+        http.return_value.__aexit__ = AsyncMock(return_value=False)
+        result = await ScamDatabase.fetch_address_security(SPENDER)
+    return result, session
+
+
+@pytest.mark.asyncio
+async def test_address_security_reads_the_record_without_a_chain():
+    result, session = await _address_security({"code": 1, "message": "ok", "result": DRAINER})
+    assert (result["status"], result["data"]) == ("ok", DRAINER)
+    assert session.get.call_args.args[0] == (
+        f"https://api.gopluslabs.io/api/v1/address_security/{SPENDER}"
+    )
+    assert await ScamDatabase.fetch_address_security(SPENDER) is result
+
+
+@pytest.mark.asyncio
+async def test_address_security_retries_rate_limits():
+    result, session = await _address_security(
+        {"code": 4029, "message": "too many requests"},
+        {"code": 1, "message": "ok", "result": CLEAN},
+    )
+    assert result["status"] == "ok"
+    assert session.get.call_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload, status, reason",
+    [
+        (None, 503, "GoPlus HTTP 503"),
+        ({"code": 0, "message": "error"}, 200, "GoPlus returned an unsuccessful response"),
+        ({"code": 1, "message": "ok", "result": {}}, 200, "GoPlus returned no address record"),
+    ],
+)
+async def test_address_security_failures_are_unknown(payload, status, reason):
+    result, _ = await _address_security(payload, status=status)
+    assert (result["status"], result["reason"], result["data"]) == ("unknown", reason, {})
+
+
+@pytest.mark.asyncio
+async def test_address_security_rejects_an_invalid_address():
+    result = await ScamDatabase.fetch_address_security("0xnot-an-address")
+    assert result["status"] == "unknown"
