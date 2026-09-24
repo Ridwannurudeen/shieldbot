@@ -378,15 +378,19 @@
             signMethod: method,
           };
         } else if (kind === "sign") {
-          // personal_sign: params[0] is message, params[1] is address
-          // eth_sign: params[0] is address, params[1] is message
-          const isPersonal = method === "personal_sign";
+          // personal_sign takes [message, address] and eth_sign [address,
+          // message]. MetaMask also takes personal_sign's the other way round
+          // when the first is an address and the second is not, and signs the
+          // second, so that order is read as it reads it.
+          const second = ownValue(request.params, 1);
+          const isAddress = (value) => typeof value === "string" && execRegExp(ADDRESS_PATTERN, value) !== null;
+          const messageFirst = method === "personal_sign" && !(isAddress(txParams) && !isAddress(second));
           interceptData = {
             __proto__: null,
-            from: isPersonal ? (ownValue(request.params, 1) || "") : txParams,
+            from: messageFirst ? (second || "") : txParams,
             to: "",
             value: "0x0",
-            data: isPersonal ? txParams : (ownValue(request.params, 1) || "0x"),
+            data: messageFirst ? txParams : (second || "0x"),
             signMethod: method,
           };
         }

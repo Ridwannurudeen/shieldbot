@@ -501,6 +501,32 @@ def test_a_message_that_looks_like_sign_in_but_is_not_eip_4361_is_unknown(varian
     )
 
 
+@pytest.mark.parametrize(
+    "order", ["message-first", "address-first", "two-addresses"],
+)
+def test_personal_sign_params_are_read_in_the_order_the_wallet_signs_them(order):
+    # MetaMask signs [message, address], and also [address, message] when the first is an address
+    # and the second is not; the analysis and the sign-in check must see the message it signs.
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const order = JSON.parse(process.argv[1]);
+  const address = '0x' + 'b'.repeat(40);
+  const message = '0x' + Buffer.from('wallet-login.test wants you to sign in', 'utf8').toString('hex');
+  const other = '0x' + 'c'.repeat(40);
+  const params = {'message-first': [message, address], 'address-first': [address, message], 'two-addresses': [address, other]}[order];
+  provider.request({method: 'personal_sign', params}).catch(() => {});
+  await flush();
+  const {tx} = posted.filter(m => m.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+  const [data, from] = {'message-first': [message, address], 'address-first': [message, address], 'two-addresses': [address, other]}[order];
+  assert.equal(tx.data, data);
+  assert.equal(tx.from, from);
+""",
+        order,
+    )
+
+
 def test_a_personal_sign_message_that_is_not_a_sign_in_is_left_to_the_api():
     run_node(
         BACKGROUND_HARNESS
