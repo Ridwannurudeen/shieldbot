@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 # retries included, takes one request; a scan reserves its no-retry worst case. The public RPC is
 # shared with the census collector, which already gets HTTP 429 at its own 4 req/s ceiling. One
 # request per second keeps ShieldBot at a quarter of that while covering discovery (about
-# 0.3 req/s: two requests per 20 s poll plus one header per new launch block, about three) and
-# about two worst-case scans a minute.
+# 0.27 req/s: per 20 s poll, two requests plus one header call per new launch block, about 3.3 at
+# the measured 0.0166 launch blocks per block) and about two worst-case scans a minute.
 RPC_BUDGET_RPS = 1.0
 # Consecutive failed requests that open the breaker. A single 429 is a burst the retry backoff
 # absorbs; three in a row, across at least three seconds of backoff, means the RPC keeps refusing.
