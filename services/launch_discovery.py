@@ -282,7 +282,7 @@ class LaunchDiscovery:
         self.rpc_url = rpc_url
         self.guard = guard
         self._session: Optional[aiohttp.ClientSession] = None
-        self._last_request = 0.0
+        self._next_request = 0.0
         self._chain_checked = False
         self._combined_failed = False
 
@@ -575,10 +575,10 @@ class LaunchDiscovery:
 
     async def _pace(self, calls: int, probe: bool):
         if self.guard is None:
-            wait = self._last_request + REQUEST_INTERVAL - time.monotonic()
+            wait = self._next_request - time.monotonic()
             if wait > 0:
                 await asyncio.sleep(wait)
-            self._last_request = time.monotonic()
+            self._next_request = time.monotonic() + calls * REQUEST_INTERVAL
             return
         try:
             await self.guard.acquire(calls, probe=probe)

@@ -19,6 +19,7 @@ from services.launch_discovery import (
     CONFIRMATIONS,
     HEADER_BATCH,
     MAX_BLOCKS_PER_SWEEP,
+    REQUEST_INTERVAL,
     SOURCES,
     LaunchDiscovery,
     RpcUnavailableError,
@@ -159,6 +160,24 @@ async def test_far_behind_sweep_reads_its_headers_within_the_rpc_call_rate(db):
     assert len(polled["launches"]) == len(LAUNCH_BLOCKS)
     assert await recorded(db) == {token_of(number) for number in LAUNCH_BLOCKS}
     assert await cursors(db) == {source.name: TARGET for source in SOURCES}
+
+
+@pytest.mark.asyncio
+async def test_without_a_guard_a_request_waits_one_interval_per_call_of_the_one_before(db):
+    discovery = LaunchDiscovery(db, rpc_url="https://rpc.invalid")
+    now = [100.0]
+    sleeps = []
+
+    async def sleep(seconds):
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    with patch("time.monotonic", lambda: now[0]), patch("asyncio.sleep", sleep):
+        await discovery._pace(HEADER_BATCH, probe=False)
+        await discovery._pace(1, probe=False)
+        await discovery._pace(1, probe=False)
+
+    assert sleeps == [HEADER_BATCH * REQUEST_INTERVAL, REQUEST_INTERVAL]
 
 
 @pytest.mark.asyncio
