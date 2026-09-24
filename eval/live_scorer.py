@@ -61,9 +61,9 @@ async def score_entries(entries, container):
                   f"level={record['risk_level']} class={entry.category or entry.label}")
 
         except Exception as e:
-            logger.error(f"{tag} Error scoring {addr}: {e}")
+            logger.error(f"{tag} Error scoring {addr}: {type(e).__name__}")
             record["reason"] = type(e).__name__
-            print(f"  X{tag} chain={chain_id} {addr[:16]}... ERROR: {e}")
+            print(f"  X{tag} chain={chain_id} {addr[:16]}... ERROR: {type(e).__name__}")
 
         records.append(record)
         # Small delay to avoid rate-limiting external APIs
@@ -73,12 +73,12 @@ async def score_entries(entries, container):
 
 
 def current_revision():
-    """The checked-out git revision and whether the working tree has local changes."""
+    """The checked-out git revision and whether tracked files have local changes."""
     revision = subprocess.run(
         ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True,
     ).stdout.strip()
     status = subprocess.run(
-        ["git", "status", "--porcelain"], capture_output=True, text=True, check=True,
+        ["git", "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True, check=True,
     ).stdout
     return revision, bool(status.strip())
 

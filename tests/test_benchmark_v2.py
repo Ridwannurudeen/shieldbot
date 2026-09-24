@@ -5,6 +5,7 @@ The recorded scores here are written by the tests for the tests; they are not me
 
 import asyncio
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -12,7 +13,7 @@ import pytest
 import eval.cli as cli
 import eval.live_scorer as live_scorer
 from eval.benchmark import FORMAT_RESULTS, FORMAT_SCORES, build_results, json_sha256, load_scores
-from eval.dataset import CLASSES, FORMAT_V2, SCORING_PROVIDERS, load_dataset
+from eval.dataset import CLASSES, FORMAT_V2, LABEL_PROVIDERS, load_dataset
 
 V2 = "eval/data/benchmark_v2.json"
 REVISION = "0123456789abcdef0123456789abcdef01234567"
@@ -74,7 +75,7 @@ def record(address, status="ok", score=None, chain_id=1):
 
 
 def test_the_seed_holds_only_independently_sourced_malicious_labels():
-    data = json.loads(open(V2, encoding="utf-8").read())
+    data = json.loads(Path(V2).read_text(encoding="utf-8"))
     entries = load_dataset(V2)
     assert len(entries) == len(data["entries"]) == 38
     counts = {name: sum(1 for e in entries if e.category == name) for name in CLASSES}
@@ -93,7 +94,7 @@ def test_the_seed_holds_only_independently_sourced_malicious_labels():
             continue
         assert item.sources and item.labeled
         for source in item.sources:
-            assert source["provider"].lower() not in SCORING_PROVIDERS
+            assert source["provider"] in LABEL_PROVIDERS
             assert source["url"].startswith("https://") and source["retrieved"] >= item.labeled
     assert {e.address for e in entries if e.category == "impostor_token"} == IMPOSTORS
 
@@ -121,10 +122,16 @@ def test_the_seed_safes_are_the_v1_safes():
         (entry(chain_id="1"), "chain_id"),
         (entry(labeled="24 September 2026"), "labeled"),
         (entry(sources=[]), "at least one source"),
-        (entry(sources=[{**SOURCE, "provider": "GoPlus"}]), "provider ShieldBot scores with"),
+        (entry(sources=[{**SOURCE, "provider": "GoPlus"}]), "not an accepted label provider"),
         (
             entry(sources=[SOURCE, {**SOURCE, "provider": "honeypot.is"}]),
-            "provider ShieldBot scores with",
+            "not an accepted label provider",
+        ),
+        (entry(sources=[{**SOURCE, "provider": "chainabuse"}]), "not an accepted label provider"),
+        (entry(sources=[{**SOURCE, "provider": None}]), "every source needs a provider"),
+        (
+            entry(**{"class": "safe"}, sources=[{**SOURCE, "provider": "goplus"}]),
+            "not an accepted label provider",
         ),
         (entry(sources=[{**SOURCE, "retrieved": None}]), "retrieved date"),
         (entry(sources=[{**SOURCE, "url": "http://example.com"}]), "https url"),
@@ -136,6 +143,13 @@ def test_the_seed_safes_are_the_v1_safes():
 def test_a_dataset_that_breaks_the_rules_is_refused(tmp_path, item, message):
     with pytest.raises(ValueError, match=message):
         load_dataset(write_dataset(tmp_path, [item]))
+
+
+def test_label_providers_are_accepted_in_any_case(tmp_path):
+    entries = load_dataset(
+        write_dataset(tmp_path, [entry(sources=[{**SOURCE, "provider": "ScamSniffer"}])])
+    )
+    assert [e.sources[0]["provider"] for e in entries] == ["ScamSniffer"]
 
 
 def test_an_address_listed_twice_on_one_chain_is_refused(tmp_path):
@@ -275,6 +289,16 @@ def test_results_are_per_class_pinned_to_the_revision_and_never_count_unknown_as
         ({"dataset_sha256": None}, "does not name the dataset"),
         ({"records": [record(DRAINER, score=None)]}, "malformed record"),
         ({"records": [record(DRAINER, status="clean", score=10)]}, "malformed record"),
+        ({"records": [record(DRAINER, score=float("nan"))]}, "malformed record"),
+        ({"records": [record(DRAINER, score=float("inf"))]}, "malformed record"),
+        ({"records": [record(DRAINER, status="unknown", score=float("-inf"))]}, "malformed record"),
+        ({"records": [record(DRAINER, score=True)]}, "malformed record"),
+        ({"records": [{**record(DRAINER, score=90), "chain_id": "1"}]}, "malformed record"),
+        ({"records": [{"status": "ok", "score": 90}]}, "malformed record"),
+        (
+            {"records": [record(DRAINER, score=90), record(DRAINER.upper().replace("0X", "0x"), score=10)]},
+            "recorded twice",
+        ),
     ],
 )
 def test_scores_that_are_not_pinned_or_well_formed_are_refused(tmp_path, changes, message):
@@ -319,7 +343,21 @@ def test_the_cli_writes_the_results_file(tmp_path, capsys):
 # ---------------------------------------------------------------------------
 
 
-def test_the_live_scorer_records_unknown_and_failed_scans_without_inventing_scores(monkeypatch):
+def test_the_revision_ignores_untracked_files(monkeypatch):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(stdout=REVISION + "\n" if command[1] == "rev-parse" else "")
+
+    monkeypatch.setattr(live_scorer.subprocess, "run", run)
+    assert live_scorer.current_revision() == (REVISION, False)
+    assert calls[1] == ["git", "status", "--porcelain", "--untracked-files=no"]
+
+
+def test_the_live_scorer_records_unknown_and_failed_scans_without_inventing_scores(
+    monkeypatch, caplog, capsys
+):
     real_sleep = asyncio.sleep
     monkeypatch.setattr(live_scorer.asyncio, "sleep", lambda seconds: real_sleep(0))
     outputs = {
@@ -335,7 +373,7 @@ def test_the_live_scorer_records_unknown_and_failed_scans_without_inventing_scor
 
     async def run_all(ctx):
         if ctx.address == "0x" + "04" * 20:
-            raise TimeoutError("scan deadline")
+            raise TimeoutError("scan deadline SECRET-PROVIDER-TEXT")
         return ctx.address
 
     container = SimpleNamespace(
@@ -360,3 +398,6 @@ def test_the_live_scorer_records_unknown_and_failed_scans_without_inventing_scor
         ("unknown", None, "LOW", "Incomplete scan"),
         ("error", None, None, "TimeoutError"),
     ]
+    # A failed scan is reported by exception class only, never by its text.
+    assert "SECRET-PROVIDER-TEXT" not in caplog.text
+    assert "SECRET-PROVIDER-TEXT" not in capsys.readouterr().out

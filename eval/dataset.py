@@ -3,8 +3,9 @@
 Two formats load into the same entries:
   v1 (eval/data/benchmark_v1.json): a label, "malicious" or "safe", and a category; no sources.
   v2 (FORMAT_V2, eval/data/benchmark_v2.json): one class from CLASSES per entry, the date its label was
-     confirmed, and for every malicious label at least one source, none of them a provider ShieldBot
-     scores with, each with its URL and the date it was retrieved. eval/README.md describes the format.
+     confirmed, and for every malicious label at least one source; every source is from an accepted
+     label provider (LABEL_PROVIDERS) and gives its URL and the date it was retrieved. eval/README.md
+     describes the format.
 An entry marked stale (its label no longer holds) is left out when a dataset is loaded.
 """
 
@@ -24,12 +25,11 @@ CLASSES = (
     "fake_claim",
     "safe",
 )
-# Providers whose answers feed ShieldBot's score. A label taken from one of them would grade ShieldBot
-# against its own inputs, so no malicious v2 label may cite them.
-SCORING_PROVIDERS = frozenset({
-    "goplus", "honeypot.is", "tokensniffer", "dexscreener", "ethos", "tenderly", "etherscan",
-    "blockscout", "shieldbot",
-})
+# The only providers a v2 source may name, compared without regard to case. None of them is read by
+# anything that computes ShieldBot's score (GoPlus, honeypot.is, TokenSniffer, DexScreener, Ethos,
+# Tenderly, Etherscan, Blockscout), so a label from them does not grade ShieldBot against its own
+# inputs. Add a provider only after checking that. "onchain" is a direct RPC read.
+LABEL_PROVIDERS = frozenset({"onchain", "scamsniffer", "robinhood", "geckoterminal"})
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
 
@@ -100,11 +100,14 @@ def _load_v2(data: dict) -> List[BenchmarkEntry]:
                 and isinstance(source.get('evidence'), str) and source['evidence']
             ):
                 raise ValueError(f"{where}: every source needs a provider, an https url, a retrieved date and evidence")
+            if source['provider'].lower() not in LABEL_PROVIDERS:
+                raise ValueError(
+                    f"{where}: {source['provider']} is not an accepted label provider "
+                    f"({', '.join(sorted(LABEL_PROVIDERS))})"
+                )
         malicious = item['class'] != 'safe'
         if malicious and not sources:
             raise ValueError(f"{where}: a malicious label needs at least one source")
-        if malicious and any(source['provider'].lower() in SCORING_PROVIDERS for source in sources):
-            raise ValueError(f"{where}: a malicious label cannot cite a provider ShieldBot scores with")
         counterpart = item.get('counterpart')
         if item['class'] == 'address_poisoning' and not (
             isinstance(counterpart, str) and _ADDRESS.fullmatch(counterpart)

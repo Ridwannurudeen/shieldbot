@@ -30,7 +30,11 @@ rates to mean much: with 3 impostor tokens, one miss moves that class's recall b
 The drainer entries are every contract among the first 120 addresses of Scam Sniffer's list on
 2026-09-24 (`eth_getCode` on Ethereum at block 26,046,855; EOAs and EIP-7702 delegations left out).
 Scam Sniffer describes the list as "addresses associated with phishing activities", published with a
-7-day delay; the class records that the listed address is a contract.
+7-day delay; the class records that the listed address is a contract. Whether GoPlus's blacklist takes
+in Scam Sniffer's list cannot be established from public information, so this class's independence from
+GoPlus is asserted, not proven. Most of these contracts are not tokens, and the token checks cannot
+complete on them, so most are expected to score unknown: that shows as this class's unknown rate, not as
+missed recall.
 
 ## Classes and the evidence each needs
 
@@ -57,17 +61,19 @@ A malicious label must rest on evidence that ShieldBot's score does not already 
 `eval/dataset.py` enforces these when a v2 file is loaded and refuses the file if any entry breaks them:
 
 - Every entry has a `class`, a `chain_id`, an `address` and a `labeled` date (`YYYY-MM-DD`).
-- Every malicious entry has at least one source, and every source has a `provider`, an `https` `url`, a
-  `retrieved` date and the `evidence` it gives. No source may be a provider ShieldBot scores with:
-  goplus, honeypot.is, tokensniffer, dexscreener, ethos, tenderly, etherscan, blockscout or shieldbot
-  (`SCORING_PROVIDERS`). Provider `onchain` means a direct RPC read.
+- Every malicious entry has at least one source. Every source has a `provider`, an `https` `url`, a
+  `retrieved` date and the `evidence` it gives, and its provider must be on the accepted list
+  (`LABEL_PROVIDERS`, compared without regard to case): `onchain` (a direct RPC read), `scamsniffer`,
+  `robinhood` and `geckoterminal`. Any other provider is refused. None of these is read by anything that
+  computes ShieldBot's score (GoPlus, honeypot.is, TokenSniffer, DexScreener, Ethos, Tenderly, Etherscan,
+  Blockscout); add a provider to the list only after checking that.
 - An `address_poisoning` entry needs its `counterpart`. An address appears at most once per chain.
 - An entry whose label no longer holds gets `"stale": {"date": ..., "reason": ...}`. It stays in the file
   and is left out when the file is loaded. v1 marks two honeypots this way.
 
-ShieldBot's Robinhood Chain impostor check, where it is deployed, reads the same official Robinhood list.
-It labels a scan and does not change the score, so the score measured here stays independent of it; a
-future metric of the impostor label itself would not be.
+Robinhood's asset list is not a scoring input: nothing that computes a ShieldBot score reads it, so
+`impostor_token` labels are independent of the score. A label derived from that list (for example an
+impostor flag on a scan) would not be independent, and is not what this benchmark measures.
 
 ## Recording scores and computing results
 
@@ -80,7 +86,8 @@ future metric of the impostor label itself would not be.
    Each entry gets `status` `ok` (the scan completed), `unknown` (the scan reported incomplete coverage)
    or `error` (it failed), with its `score` and `risk_level` when the scan gave them. Nothing is filled
    in for a missing score. The file (`shieldbot-scores/1`) names the git revision that ran
-   (`git rev-parse HEAD`), whether the tree had local changes, when it ran, and the dataset's hash.
+   (`git rev-parse HEAD`), whether tracked files had local changes (untracked files do not count), when
+   it ran, and the dataset's hash.
    Where the code is not a git checkout, pass `--revision <40-character revision>`; local changes are
    then recorded as unknown (`null`).
 
@@ -91,9 +98,10 @@ future metric of the impostor label itself would not be.
        --out eval/results/<YYYY-MM-DD>-<revision>.json
    ```
 
-   Create `eval/results/` first if it does not exist. The command refuses to run without `--scores`,
-   refuses scores that do not name a revision, and refuses scores recorded against a different dataset
-   file. The same inputs always give the same file.
+   Create `eval/results/` first if it does not exist. The command refuses to run without `--scores`, and
+   refuses scores that do not name a revision, that hold a malformed record (a missing or non-finite
+   score where the scan completed, for example) or the same address twice on one chain, or that were
+   recorded against a different dataset file. The same inputs always give the same file.
 
 The results file (`shieldbot-benchmark-results/1`) carries `scored_at` and `revision` from the scores,
 `dirty`, the dataset's path and hash, the scores' hash, the `threshold`, an `overall` block, one block

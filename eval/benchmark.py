@@ -3,6 +3,7 @@
 import hashlib
 import json
 import logging
+import math
 import re
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -19,6 +20,7 @@ FORMAT_RESULTS = "shieldbot-benchmark-results/1"
 # error: the scan failed. Only ok records are decided.
 RECORD_STATUSES = ("ok", "unknown", "error")
 _REVISION = re.compile(r"[0-9a-f]{40}")
+_ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
 
 
 def json_sha256(path: str) -> str:
@@ -47,14 +49,27 @@ def load_scores(path: str) -> dict:
     if not isinstance(data.get('dataset_sha256'), str):
         raise ValueError(f"{path} does not name the dataset it scored")
     records = {}
-    for record in data.get('records', []):
-        score = record.get('score')
-        if record.get('status') not in RECORD_STATUSES or (
-            record['status'] == 'ok' and type(score) not in (int, float)
+    for index, record in enumerate(data.get('records', [])):
+        if not (
+            isinstance(record, dict)
+            and type(record.get('chain_id')) is int
+            and isinstance(record.get('address'), str) and _ADDRESS.fullmatch(record['address'])
+            and record.get('status') in RECORD_STATUSES
+            and _valid_score(record.get('score'), record['status'])
         ):
-            raise ValueError(f"{path}: malformed record for {record.get('address')}")
-        records[(record['chain_id'], record['address'].lower())] = record
+            raise ValueError(f"{path}: malformed record {index}")
+        key = (record['chain_id'], record['address'].lower())
+        if key in records:
+            raise ValueError(f"{path}: {record['address']} on chain {record['chain_id']} is recorded twice")
+        records[key] = record
     return {**data, 'records': records}
+
+
+def _valid_score(score, status: str) -> bool:
+    """A finite number, or absent where the scan did not complete."""
+    if score is None:
+        return status != 'ok'
+    return type(score) in (int, float) and math.isfinite(score)
 
 
 def _ratio(numerator: int, denominator: int) -> Optional[float]:
