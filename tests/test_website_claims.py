@@ -107,20 +107,31 @@ def test_chains_section_coverage_matches_the_code():
         r'name: "([^"]+)",\s*simulation: ("[^"]+"|null),\s*mempool: (true|false),\s*launches: (true|false),',
         read(COMPONENTS / "Chains.tsx"),
     )
+    # Web3Client.supports_honeypot_simulation reads the same flag; without honeypot.is or it, no
+    # sell is simulated (adapters/evm_base.py HONEYPOT_IS_UNSUPPORTED).
+    simulator = {
+        chain_id: "ShieldBot"
+        if getattr(adapter, "supports_honeypot_simulation", False) is True
+        else "honeypot.is"
+        if adapter._honeypot_chain_id is not None
+        else None
+        for chain_id, adapter in adapters.items()
+    }
     assert len(rows) == len(chain_info())
     for name, simulation, mempool, launches in rows:
-        adapter = adapters[ids[name]]
-        # Web3Client.supports_honeypot_simulation reads the same flag; without honeypot.is or it,
-        # no sell is simulated (adapters/evm_base.py HONEYPOT_IS_UNSUPPORTED).
-        if getattr(adapter, "supports_honeypot_simulation", False) is True:
-            expected = "ShieldBot"
-        elif adapter._honeypot_chain_id is not None:
-            expected = "honeypot.is"
-        else:
-            expected = None
-        assert json.loads(simulation) == expected, name
+        assert json.loads(simulation) == simulator[ids[name]], name
         assert (mempool == "true") == supports_pending_transactions(ids[name]), name
         assert (launches == "true") == (ids[name] == LAUNCH_CHAIN_ID), name
+
+    def listed(provider):
+        names = [name for name, chain_id in ids.items() if simulator[chain_id] == provider]
+        return " and ".join([", ".join(names[:-1]), names[-1]]) if len(names) > 1 else names[0]
+
+    prose = " ".join(read(COMPONENTS / "Chains.tsx").split())
+    assert (
+        f"honeypot.is simulates a buy and a sell on {listed('honeypot.is')}, and ShieldBot runs its "
+        f"own on supported {listed('ShieldBot')} pool routes."
+    ) in prose
 
 
 def test_mcp_counts_match_the_code():
