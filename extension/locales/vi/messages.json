@@ -145,6 +145,8 @@
   "overlayUnknownStructure": "CẤU TRÚC KHÔNG XÁC ĐỊNH",
   "overlayUnknownStructureNote": "ShieldAI không đọc được yêu cầu này nên không thể kiểm tra nó. Hãy từ chối trừ khi bạn biết chính xác nó làm gì.",
   "overlayBatchCall": "Lệnh gọi {index}/{count} trong một lô. Mỗi lệnh gọi được kiểm tra riêng, và lô chỉ được gửi nếu bạn tiếp tục ở mọi lệnh gọi.",
+  "overlayUnparseableTyped": "DỮ LIỆU CÓ CẤU TRÚC KHÔNG ĐỌC ĐƯỢC",
+  "overlayUnparseableTypedNote": "ShieldAI không đọc được dữ liệu có cấu trúc này nên không thể cho bạn thấy bạn sẽ ký gì. Hãy từ chối trừ khi bạn hoàn toàn tin tưởng trang web.",
   "phishingWarning": "Cảnh báo ShieldBot:",
   "phishingFlagged": "đã bị gắn cờ là trang web lừa đảo. Ví và tiền của bạn có thể gặp rủi ro.",
   "phishingLeavePage": "Rời trang",

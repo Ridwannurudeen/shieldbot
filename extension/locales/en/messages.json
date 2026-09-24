@@ -145,6 +145,8 @@
   "overlayUnknownStructure": "UNKNOWN STRUCTURE",
   "overlayUnknownStructureNote": "ShieldAI could not read this request, so it could not check it. Reject it unless you know exactly what it does.",
   "overlayBatchCall": "Call {index} of {count} in a batch. Each call is checked on its own, and the batch is sent only if you continue on every call.",
+  "overlayUnparseableTyped": "UNPARSEABLE TYPED DATA",
+  "overlayUnparseableTypedNote": "ShieldAI could not read this typed data, so it cannot show what you would be signing. Reject it unless you trust the site completely.",
   "phishingWarning": "ShieldBot Warning:",
   "phishingFlagged": "has been flagged as a phishing site. Your wallet and funds may be at risk.",
   "phishingLeavePage": "Leave Page",

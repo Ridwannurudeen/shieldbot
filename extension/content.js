@@ -346,6 +346,17 @@
     }
   }
 
+  // Typed data the overlay can show: a plain object whose domain and message,
+  // when present, are plain objects and whose primaryType, when present, is a
+  // string.
+  function isReadableTypedData(typedData) {
+    const isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    return isObject(typedData) &&
+      (typedData.domain === undefined || isObject(typedData.domain)) &&
+      (typedData.message === undefined || isObject(typedData.message)) &&
+      (typedData.primaryType === undefined || typeof typedData.primaryType === "string");
+  }
+
   function shortAddr(addr) {
     if (!addr || addr.length < 10) return addr || "";
     return addr.slice(0, 6) + "..." + addr.slice(-4);
@@ -444,11 +455,14 @@
     const isTyped = ["eth_signTypedData_v4", "eth_signTypedData_v3", "eth_signTypedData", "eth_signTypedData_v1"]
       .includes(signMethod);
     const isPersonal = signMethod === "personal_sign" || signMethod === "eth_sign";
+    // Typed data that cannot be read is shown as such, at High: the user
+    // cannot see what they would sign.
+    const unparseable = isTyped && !isReadableTypedData(tx.typedData);
 
     let bodyHtml = "";
     let isPermitLike = false;
 
-    if (isTyped && tx.typedData) {
+    if (isTyped && !unparseable) {
       const td = tx.typedData;
       const domain = td.domain || {};
       const primaryType = td.primaryType || "Unknown";
@@ -505,9 +519,11 @@
     }
 
     // Risk classification
-    const badgeClass = isPermitLike ? "shieldai-badge-high" : "shieldai-badge-caution";
-    const label = isPermitLike ? _t("overlayApprovalSig") : _t("overlaySigRequest");
-    const note = isPermitLike ? _t("overlayApprovalNote") : _t("overlaySigNote");
+    const badgeClass = isPermitLike || unparseable ? "shieldai-badge-high" : "shieldai-badge-caution";
+    const label = unparseable ? _t("overlayUnparseableTyped")
+      : isPermitLike ? _t("overlayApprovalSig") : _t("overlaySigRequest");
+    const note = unparseable ? _t("overlayUnparseableTypedNote")
+      : isPermitLike ? _t("overlayApprovalNote") : _t("overlaySigNote");
 
     const overlay = document.createElement("div");
     overlay.id = "shieldai-overlay";

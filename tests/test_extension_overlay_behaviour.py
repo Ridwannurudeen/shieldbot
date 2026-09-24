@@ -683,6 +683,37 @@ def test_removing_the_whole_document_rejects_the_request():
     )
 
 
+@pytest.mark.parametrize(
+    "typed",
+    ["array", "string", "null", "missing", "number-primary-type", "string-message", "null-domain"],
+)
+def test_typed_data_that_cannot_be_read_is_shown_as_unparseable_at_high(typed):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const typedData = {
+    array: [{type: 'string', name: 'Message', value: 'Hi'}],
+    string: 'not typed data',
+    null: null,
+    missing: undefined,
+    'number-primary-type': {primaryType: 7, domain: {}, message: {}},
+    'string-message': {primaryType: 'Permit', domain: {}, message: 'spender'},
+    'null-domain': {primaryType: 'Permit', domain: null, message: {}},
+  }[JSON.parse(process.argv[1])];
+  await intercept('request', {signMethod: 'eth_signTypedData_v4', typedData}, 'eth_signTypedData_v4');
+  assert(overlay(), 'no overlay was shown');
+  const html = overlay().innerHTML;
+  assert(html.includes('UNPARSEABLE TYPED DATA'), html);
+  assert(overlay().querySelector('.shieldai-badge').className.includes('shieldai-badge-high'));
+  userClick(byId('shieldai-block'));
+  await flush();
+  await assertVerdicts([['request', 'block']]);
+""",
+        typed,
+    )
+
+
 def test_a_flood_of_forged_intercepts_cannot_push_out_a_real_request():
     run_node(
         CONTENT_HARNESS
