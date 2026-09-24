@@ -290,6 +290,48 @@ async def test_an_unreadable_signature_transfer_amount_is_unlimited(amount):
     assert 'Permit2 transfer: amount could not be read; treated as unlimited' in result.flags
 
 
+def _single(amount):
+    return _typed('PermitSingle', {
+        'details': {'token': '0x' + 'c' * 40, 'amount': amount, 'expiration': '0', 'nonce': '0'},
+        'spender': SPENDER, 'sigDeadline': '0',
+    })
+
+
+def _batch(*amounts):
+    return _typed('PermitBatch', {
+        'details': [{'token': '0x' + 'c' * 40, 'amount': a, 'expiration': '0', 'nonce': '0'} for a in amounts],
+        'spender': SPENDER, 'sigDeadline': '0',
+    })
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('typed', [_single('0'), _single(0), _single('0x0'), _batch('0', 0, '0x00')],
+                         ids=['single-zero', 'single-int-zero', 'single-hex-zero', 'batch-all-zero'])
+async def test_a_permit2_allowance_revoke_judges_no_spender(typed):
+    service = _service(_facts(is_contract=False, is_verified=None, age_days=None))
+    result = await _analyze(SignaturePermitAnalyzer(service), typed)
+    service.fetch.assert_not_awaited()
+    assert 'floor' not in result.data
+    assert result.score == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('typed, floor, flag', [
+    (_single('1000'), 60, None),
+    (_single(1e30), 85, 'Permit2: amount could not be read; treated as unlimited'),
+    (_single('-1'), 85, 'Permit2: amount could not be read; treated as unlimited'),
+    (_batch('0', '1000'), 60, None),
+    (_batch('0', 1.5), 85, 'Permit2 Batch: amount for token #2 could not be read; treated as unlimited'),
+], ids=['single-limited', 'single-float', 'single-negative', 'batch-one-grant', 'batch-unreadable'])
+async def test_a_permit2_allowance_grant_judges_the_spender(typed, floor, flag):
+    service = _service(_facts(is_verified=False, age_days=90))
+    result = await _analyze(SignaturePermitAnalyzer(service), typed)
+    service.fetch.assert_awaited_once()
+    assert result.data['floor'] == floor
+    if flag:
+        assert flag in result.flags
+
+
 @pytest.mark.asyncio
 async def test_unknown_spender_facts_are_unknown_not_clean():
     typed = _typed("PermitSingle", {

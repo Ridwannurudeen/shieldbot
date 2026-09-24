@@ -209,13 +209,19 @@ class SignaturePermitAnalyzer(Analyzer):
         flags = []
         spender = (message.get('spender') or '').lower()
 
+        # An amount that reads as 0 revokes the spender's allowance; one that cannot be read is
+        # judged as the largest grant.
         if primary_type == 'PermitSingle':
             details = message.get('details', {})
-            amount = _parse_uint(details.get('amount', 0))
+            amount = _parse_uint_or_none(details.get('amount'))
             expiration = _parse_uint(details.get('expiration', 0))
-            unlimited = amount >= UNLIMITED_THRESHOLD
+            granted = amount != 0
+            unlimited = amount is None or amount >= UNLIMITED_THRESHOLD
 
-            if unlimited:
+            if amount is None:
+                score += 25
+                flags.append('Permit2: amount could not be read; treated as unlimited')
+            elif unlimited:
                 score += 25
                 flags.append('Permit2: unlimited amount')
 
@@ -226,17 +232,22 @@ class SignaturePermitAnalyzer(Analyzer):
                 flags.append('Permit2: far-future expiration')
 
         else:
-            details_list = message.get('details', [])
+            amounts = [_parse_uint_or_none(detail.get('amount')) for detail in message.get('details', [])]
+            # A batch revokes only when every amount reads as 0; an empty batch is judged anyway.
+            granted = not amounts or any(amount != 0 for amount in amounts)
             unlimited = False
 
-            for i, detail in enumerate(details_list):
-                amount = _parse_uint(detail.get('amount', 0))
-                if amount >= UNLIMITED_THRESHOLD:
+            for i, amount in enumerate(amounts):
+                if amount is None:
+                    unlimited = True
+                    score += 15
+                    flags.append(f'Permit2 Batch: amount for token #{i+1} could not be read; treated as unlimited')
+                elif amount >= UNLIMITED_THRESHOLD:
                     unlimited = True
                     score += 15
                     flags.append(f'Permit2 Batch: unlimited amount for token #{i+1}')
 
-        return score, flags, spender, unlimited, True
+        return score, flags, spender, unlimited, granted
 
     def _check_permit2_transfer(self, message: Dict, primary_type: str) -> tuple:
         """Check a Permit2 SignatureTransfer: (score, flags, spender, unlimited, granted)."""
