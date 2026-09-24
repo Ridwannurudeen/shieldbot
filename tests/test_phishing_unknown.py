@@ -63,12 +63,17 @@ def _goplus(payload=None, status=200, error=None):
         ([], 200, None, "GoPlus returned no phishing verdict"),
     ],
 )
-async def test_no_answer_is_no_verdict_and_is_not_cached(payload, status, error, reason):
+async def test_no_answer_is_no_verdict_held_for_45_seconds(payload, status, error, reason):
     client, session = _goplus(payload, status, error)
+    clock = [1000.0]
     try:
-        service = PhishingService()
-        first = await service.check_url(URL)
-        second = await service.check_url(URL)
+        with patch("services.phishing_service.time.time", side_effect=lambda: clock[0]):
+            service = PhishingService()
+            first = await service.check_url(URL)
+            clock[0] += 44
+            held = await service.check_url("https://example.com/other-page")
+            clock[0] += 2
+            asked_again = await service.check_url(URL)
     finally:
         client.stop()
     assert first == {
@@ -78,9 +83,9 @@ async def test_no_answer_is_no_verdict_and_is_not_cached(payload, status, error,
         "cached": False,
         "reason": reason,
     }
-    assert second == first
+    assert held == {**first, "cached": True}
+    assert asked_again == first
     assert session.get.call_count == 2
-    assert service._cache == {}
 
 
 @pytest.mark.asyncio

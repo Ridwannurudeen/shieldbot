@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 GOPLUS_PHISHING_URL = "https://api.gopluslabs.io/api/v1/phishing_site"
 CACHE_TTL = 3600  # Cache results for 1 hour per domain
+NO_VERDICT_TTL = 45  # During a GoPlus outage, ask about each domain at most this often
 
 
 class PhishingService:
@@ -33,20 +34,14 @@ class PhishingService:
             }
 
         is_phishing None means no verdict: GoPlus could not be asked or gave no answer. It is
-        never cached, so the next check asks again.
+        held for NO_VERDICT_TTL seconds per domain, not CACHE_TTL, and then asked again.
         """
-        no_verdict = {
-            "is_phishing": None,
-            "confidence": None,
-            "source": None,
-            "cached": False,
-        }
-
+        cache_key = None
         try:
             parsed = urlparse(url)
             domain = parsed.netloc.lower()
             if not domain:
-                return {**no_verdict, "reason": "URL has no host"}
+                return self._no_verdict(None, "URL has no host")
 
             # Test trigger — only active when SHIELDBOT_TEST_MODE=1 env var is set.
             # Prevents griefing attacks via shared URLs with the test parameter.
@@ -81,7 +76,7 @@ class PhishingService:
                         logger.warning(
                             "GoPlus phishing API returned %s for %s", resp.status, domain
                         )
-                        return {**no_verdict, "reason": f"GoPlus HTTP {resp.status}"}
+                        return self._no_verdict(cache_key, f"GoPlus HTTP {resp.status}")
                     data = await resp.json()
 
             result_data = data.get("result") if isinstance(data, dict) and data.get("code") == 1 else None
@@ -91,7 +86,7 @@ class PhishingService:
             if isinstance(result_data, dict):
                 raw = result_data.get("phishing_site", result_data.get("is_phishing_site"))
             if raw not in (0, 1, "0", "1"):
-                return {**no_verdict, "reason": "GoPlus returned no phishing verdict"}
+                return self._no_verdict(cache_key, "GoPlus returned no phishing verdict")
             is_phishing = int(raw) == 1
 
             result = {
@@ -110,7 +105,20 @@ class PhishingService:
 
         except aiohttp.ClientError as e:
             logger.warning("GoPlus phishing check network error for %s: %s", url, type(e).__name__)
-            return {**no_verdict, "reason": f"GoPlus request failed ({type(e).__name__})"}
+            return self._no_verdict(cache_key, f"GoPlus request failed ({type(e).__name__})")
         except Exception as e:
             logger.error("Phishing check failed for %s: %s", url, type(e).__name__)
-            return {**no_verdict, "reason": f"Phishing check failed ({type(e).__name__})"}
+            return self._no_verdict(cache_key, f"Phishing check failed ({type(e).__name__})")
+
+    def _no_verdict(self, cache_key, reason: str) -> dict:
+        """A no-verdict answer, held briefly for its domain so an outage is not re-asked per page."""
+        result = {
+            "is_phishing": None,
+            "confidence": None,
+            "source": None,
+            "cached": False,
+            "reason": reason,
+        }
+        if cache_key:
+            self._cache[cache_key] = (result, time.time() + NO_VERDICT_TTL)
+        return result
