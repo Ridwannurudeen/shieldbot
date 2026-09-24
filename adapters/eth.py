@@ -7,7 +7,8 @@ from adapters.evm_base import EvmAdapter
 # Ethereum Constants
 KNOWN_LOCKERS = {
     '0x663A5C229c09b049E36dCc11a9B0d4a8Eb9db214'.lower(): 'Unicrypt',
-    '0xDba68f07d1b7Ca219f78ae8582C213d975c25cAf'.lower(): 'Team Finance',
+    '0xDba68f07d1b7Ca219f78ae8582C213d975c25cAf'.lower(): 'UNCX Token Vesting',
+    '0xE2fE530C047f2d85298b07D9333C05737f1435fB'.lower(): 'Team Finance',
     '0x71B5759d73262FBb223956913ecF4ecC51057641'.lower(): 'PinkLock',
     '0x0000000000000000000000000000000000000000': 'Burn Address',
     '0x000000000000000000000000000000000000dEaD'.lower(): 'Dead Address',

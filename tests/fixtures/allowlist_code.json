@@ -1,0 +1,299 @@
+{
+  "checked_on": "2026-09-24",
+  "addresses": [
+    {
+      "chain_id": 56,
+      "address": "0x10ed43c718714eb63d5aa57b78b54704e256024e",
+      "kind": "router",
+      "label": "PancakeSwap V2 Router",
+      "code_size": 21936
+    },
+    {
+      "chain_id": 56,
+      "address": "0x13f4ea83d0bd40e75c8222255bc855a974568dd4",
+      "kind": "router",
+      "label": "PancakeSwap V3 Smart Router",
+      "code_size": 24316
+    },
+    {
+      "chain_id": 56,
+      "address": "0x1a0a18ac4becddbd6389559687d1a73d8927e416",
+      "kind": "router",
+      "label": "PancakeSwap Universal Router",
+      "code_size": 16684
+    },
+    {
+      "chain_id": 56,
+      "address": "0xd9c500dff816a1da21a48a732d3498bf09dc9aeb",
+      "kind": "router",
+      "label": "PancakeSwap Universal Router 2",
+      "code_size": 24350
+    },
+    {
+      "chain_id": 56,
+      "address": "0x1111111254eeb25477b68fb85ed929f73a960582",
+      "kind": "router",
+      "label": "1inch V5 Router",
+      "code_size": 22484
+    },
+    {
+      "chain_id": 56,
+      "address": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "kind": "router",
+      "label": "1inch V6 Router",
+      "code_size": 24294
+    },
+    {
+      "chain_id": 56,
+      "address": "0x407993575c91ce7643a4d4ccacc9a98c36ee1bbe",
+      "kind": "locker",
+      "label": "PinkLock",
+      "code_size": 20622
+    },
+    {
+      "chain_id": 56,
+      "address": "0xc765bddb93b0d1c1a88282ba0fa6b2d00e3e0c83",
+      "kind": "locker",
+      "label": "Unicrypt",
+      "code_size": 22351
+    },
+    {
+      "chain_id": 204,
+      "address": "0x8cfe327cec66d1c090dd72bd0ff11d690c33a2eb",
+      "kind": "router",
+      "label": "PancakeSwap V2 Router",
+      "code_size": 17885
+    },
+    {
+      "chain_id": 204,
+      "address": "0x1b81d678ffb9c0263b24a97847620c99d213eb14",
+      "kind": "router",
+      "label": "PancakeSwap V3 Router",
+      "code_size": 12154
+    },
+    {
+      "chain_id": 204,
+      "address": "0x678aa4bf4e210cf2166753e054d5b7c31cc7fa86",
+      "kind": "router",
+      "label": "PancakeSwap V3 Smart Router",
+      "code_size": 24316
+    },
+    {
+      "chain_id": 1,
+      "address": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "kind": "router",
+      "label": "Uniswap V2 Router",
+      "code_size": 21943
+    },
+    {
+      "chain_id": 1,
+      "address": "0xe592427a0aece92de3edee1f18e0157c05861564",
+      "kind": "router",
+      "label": "Uniswap V3 Router",
+      "code_size": 12070
+    },
+    {
+      "chain_id": 1,
+      "address": "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+      "kind": "router",
+      "label": "Uniswap V3 Router 02",
+      "code_size": 24497
+    },
+    {
+      "chain_id": 1,
+      "address": "0xef1c6e67703c7bd7107eed8303fbe6ec2554bf6b",
+      "kind": "router",
+      "label": "Uniswap Universal Router",
+      "code_size": 17465
+    },
+    {
+      "chain_id": 1,
+      "address": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
+      "kind": "router",
+      "label": "Uniswap Universal Router V2",
+      "code_size": 17958
+    },
+    {
+      "chain_id": 1,
+      "address": "0x1111111254eeb25477b68fb85ed929f73a960582",
+      "kind": "router",
+      "label": "1inch V5 Router",
+      "code_size": 22484
+    },
+    {
+      "chain_id": 1,
+      "address": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "kind": "router",
+      "label": "1inch V6 Router",
+      "code_size": 24294
+    },
+    {
+      "chain_id": 1,
+      "address": "0x663a5c229c09b049e36dcc11a9b0d4a8eb9db214",
+      "kind": "locker",
+      "label": "Unicrypt",
+      "code_size": 21788
+    },
+    {
+      "chain_id": 1,
+      "address": "0xdba68f07d1b7ca219f78ae8582c213d975c25caf",
+      "kind": "locker",
+      "label": "UNCX Token Vesting",
+      "code_size": 15648
+    },
+    {
+      "chain_id": 1,
+      "address": "0xe2fe530c047f2d85298b07d9333c05737f1435fb",
+      "kind": "locker",
+      "label": "Team Finance",
+      "code_size": 2240
+    },
+    {
+      "chain_id": 1,
+      "address": "0x71b5759d73262fbb223956913ecf4ecc51057641",
+      "kind": "locker",
+      "label": "PinkLock",
+      "code_size": 20622
+    },
+    {
+      "chain_id": 8453,
+      "address": "0x2626664c2603336e57b271c5c0b26f421741e481",
+      "kind": "router",
+      "label": "Uniswap V3 Router (Base)",
+      "code_size": 24497
+    },
+    {
+      "chain_id": 8453,
+      "address": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
+      "kind": "router",
+      "label": "Uniswap Universal Router",
+      "code_size": 17958
+    },
+    {
+      "chain_id": 8453,
+      "address": "0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43",
+      "kind": "router",
+      "label": "Aerodrome Router",
+      "code_size": 23581
+    },
+    {
+      "chain_id": 8453,
+      "address": "0x327df1e6de05895d2ab08513aadd9313fe505d86",
+      "kind": "router",
+      "label": "BaseSwap Router",
+      "code_size": 21928
+    },
+    {
+      "chain_id": 8453,
+      "address": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "kind": "router",
+      "label": "1inch V6 Router",
+      "code_size": 24151
+    },
+    {
+      "chain_id": 42161,
+      "address": "0xe592427a0aece92de3edee1f18e0157c05861564",
+      "kind": "router",
+      "label": "Uniswap V3 Router",
+      "code_size": 12070
+    },
+    {
+      "chain_id": 42161,
+      "address": "0x1b02da8cb0d097eb8d57a175b88c7d8b47997506",
+      "kind": "router",
+      "label": "SushiSwap Router",
+      "code_size": 17762
+    },
+    {
+      "chain_id": 42161,
+      "address": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
+      "kind": "router",
+      "label": "Uniswap Universal Router",
+      "code_size": 17958
+    },
+    {
+      "chain_id": 42161,
+      "address": "0xc873fecbd354f5a56e00e710b90ef4201db2448d",
+      "kind": "router",
+      "label": "Camelot Router",
+      "code_size": 14739
+    },
+    {
+      "chain_id": 42161,
+      "address": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "kind": "router",
+      "label": "1inch V6 Router",
+      "code_size": 24294
+    },
+    {
+      "chain_id": 137,
+      "address": "0xa5e0829caced8ffdd4de3c43696c57f7d7a678ff",
+      "kind": "router",
+      "label": "QuickSwap Router",
+      "code_size": 21943
+    },
+    {
+      "chain_id": 137,
+      "address": "0xe592427a0aece92de3edee1f18e0157c05861564",
+      "kind": "router",
+      "label": "Uniswap V3 Router",
+      "code_size": 12070
+    },
+    {
+      "chain_id": 137,
+      "address": "0x1b02da8cb0d097eb8d57a175b88c7d8b47997506",
+      "kind": "router",
+      "label": "SushiSwap Router",
+      "code_size": 17762
+    },
+    {
+      "chain_id": 137,
+      "address": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "kind": "router",
+      "label": "1inch V6 Router",
+      "code_size": 24294
+    },
+    {
+      "chain_id": 10,
+      "address": "0xe592427a0aece92de3edee1f18e0157c05861564",
+      "kind": "router",
+      "label": "Uniswap V3 Router",
+      "code_size": 12070
+    },
+    {
+      "chain_id": 10,
+      "address": "0xa062ae8a9c5e11aaa026fc2670b0d65ccc8b2858",
+      "kind": "router",
+      "label": "Velodrome V2 Router",
+      "code_size": 24479
+    },
+    {
+      "chain_id": 10,
+      "address": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
+      "kind": "router",
+      "label": "Uniswap Universal Router",
+      "code_size": 17958
+    },
+    {
+      "chain_id": 10,
+      "address": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "kind": "router",
+      "label": "1inch V6 Router",
+      "code_size": 24151
+    },
+    {
+      "chain_id": 4663,
+      "address": "0x89e5db8b5aa49aa85ac63f691524311aeb649eba",
+      "kind": "router",
+      "label": "Uniswap V2 Router02",
+      "code_size": 21902
+    },
+    {
+      "chain_id": 4663,
+      "address": "0x8876789976decbfcbbbe364623c63652db8c0904",
+      "kind": "router",
+      "label": "Uniswap V4 Universal Router",
+      "code_size": 24546
+    }
+  ]
+}

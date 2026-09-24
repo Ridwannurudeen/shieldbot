@@ -8,7 +8,6 @@ from adapters.evm_base import EvmAdapter
 KNOWN_LOCKERS = {
     '0x407993575c91ce7643a4d4cCACc9A98c36eE1BBE'.lower(): 'PinkLock',
     '0xC765bddB93b0D1c1A88282BA0fa6B2d00E3e0c83'.lower(): 'Unicrypt',
-    '0x663A5C229c09b049E36dCc11a9B0d4a8Eb9db214'.lower(): 'DxLock',
     '0x0000000000000000000000000000000000000000': 'Burn Address',
     '0x000000000000000000000000000000000000dEaD'.lower(): 'Dead Address',
 }
