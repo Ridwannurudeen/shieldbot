@@ -573,7 +573,7 @@ async def beta_signup(req: BetaSignupRequest, request: Request):
     )
 
 
-@app.post("/webhook/uptime")
+@app.post("/webhook/uptime", include_in_schema=False)
 async def uptime_webhook(request: Request, secret: str = ""):
     """UptimeRobot webhook — forwards status alerts to Telegram.
 
@@ -691,7 +691,7 @@ async def threat_dashboard():
     )
 
 
-@app.get("/test-phishing", response_class=HTMLResponse)
+@app.get("/test-phishing", response_class=HTMLResponse, include_in_schema=False)
 async def test_phishing_page():
     """Stable test page for the phishing banner.
 
@@ -725,7 +725,7 @@ async def test_phishing_page():
 </html>"""
 
 
-@app.get("/test", response_class=HTMLResponse)
+@app.get("/test", response_class=HTMLResponse, include_in_schema=False)
 async def test_page():
     """Test page for the Chrome extension — simulates wallet transactions."""
     return """<!DOCTYPE html>
@@ -1648,7 +1648,7 @@ async def top_campaigns(limit: int = 20):
     return {"campaigns": campaigns, "count": len(campaigns)}
 
 
-@app.post("/api/keys")
+@app.post("/api/keys", include_in_schema=False)
 async def create_api_key(request: Request):
     """Create a new API key. Requires ADMIN_SECRET header."""
     admin_secret = request.headers.get("x-admin-secret")
@@ -1669,7 +1669,7 @@ async def create_api_key(request: Request):
     return result
 
 
-@app.get("/api/admin/stats")
+@app.get("/api/admin/stats", include_in_schema=False)
 async def admin_stats(request: Request):
     """Platform metrics — scans, threats, blocks, chain breakdown, mempool.
 
@@ -1811,7 +1811,7 @@ async def verdict_permalink(chain_id: int, address: str):
     }
 
 
-@app.get("/api/admin/signups")
+@app.get("/api/admin/signups", include_in_schema=False)
 async def admin_signups(request: Request):
     """List all beta signups. Requires ADMIN_SECRET header."""
     admin_secret = request.headers.get("x-admin-secret")
@@ -1852,7 +1852,7 @@ class WatchDeployerRequest(ChainRequest):
         return value if value == 0 else _validate_chain_id(value)
 
 
-@app.post("/api/admin/watch/deployer")
+@app.post("/api/admin/watch/deployer", include_in_schema=False)
 async def watch_deployer_add(req: WatchDeployerRequest, request: Request):
     """Add a deployer address to the watch list. Requires X-Admin-Secret."""
     _require_admin(request)
@@ -1864,7 +1864,7 @@ async def watch_deployer_add(req: WatchDeployerRequest, request: Request):
     return {"ok": True, "address": req.address.lower(), "chain_id": req.chain_id}
 
 
-@app.delete("/api/admin/watch/deployer/{address}")
+@app.delete("/api/admin/watch/deployer/{address}", include_in_schema=False)
 async def watch_deployer_remove(address: str, request: Request, chain_id: int = 0):
     """Remove a deployer from the watch list. Requires X-Admin-Secret."""
     if chain_id != 0:
@@ -1874,7 +1874,7 @@ async def watch_deployer_remove(address: str, request: Request, chain_id: int = 
     return {"ok": True, "address": address.lower(), "chain_id": chain_id}
 
 
-@app.get("/api/admin/watch/deployers")
+@app.get("/api/admin/watch/deployers", include_in_schema=False)
 async def watch_deployer_list(request: Request):
     """List all watched deployers. Requires X-Admin-Secret."""
     _require_admin(request)
@@ -1882,7 +1882,7 @@ async def watch_deployer_list(request: Request):
     return {"deployers": deployers, "count": len(deployers)}
 
 
-@app.get("/api/admin/watch/alerts")
+@app.get("/api/admin/watch/alerts", include_in_schema=False)
 async def watch_alerts_list(request: Request, limit: int = 50):
     """List recent deployment alerts from watched deployers. Requires X-Admin-Secret."""
     _require_admin(request)
@@ -1890,7 +1890,7 @@ async def watch_alerts_list(request: Request, limit: int = 50):
     return {"alerts": alerts, "count": len(alerts)}
 
 
-@app.post("/api/admin/guard-subjects/{chain_id}/{address}")
+@app.post("/api/admin/guard-subjects/{chain_id}/{address}", include_in_schema=False)
 async def guard_subject_add(chain_id: int, address: str, request: Request):
     """Watch a subject with a confirmed verdict. Requires X-Admin-Secret."""
     _require_admin(request)
@@ -1906,7 +1906,7 @@ async def guard_subject_add(chain_id: int, address: str, request: Request):
     return {"ok": True, "address": address.lower(), "chain_id": chain_id}
 
 
-@app.delete("/api/admin/guard-subjects/{chain_id}/{address}")
+@app.delete("/api/admin/guard-subjects/{chain_id}/{address}", include_in_schema=False)
 async def guard_subject_remove(chain_id: int, address: str, request: Request):
     """Opt a subject out of continuous rescans. Requires X-Admin-Secret."""
     _require_admin(request)
