@@ -535,6 +535,61 @@ async def test_strict_blocks_a_provider_unknown_cold_and_warm(cached_firewall_ap
     assert services.registry.run_all.await_count == 2
 
 
+APPROVE = {
+    "selector": "095ea7b3", "function_name": "approve", "signature": "approve(address,uint256)",
+    "category": "approval", "risk": "high", "params": {"param_0": "0x" + "c" * 40, "param_1": 2 ** 256 - 1},
+    "is_approval": True, "is_unlimited_approval": True, "raw": "0x095ea7b3",
+}
+CLAIM = {
+    "selector": "4e71d92d", "function_name": "claim", "signature": "claim()", "category": "claim",
+    "risk": "medium", "params": {}, "is_approval": False, "is_unlimited_approval": False, "raw": "0x4e71d92d",
+}
+TRANSFER = {
+    "selector": "a9059cbb", "function_name": "transfer", "signature": "transfer(address,uint256)",
+    "category": "transfer", "risk": "medium", "params": {"param_0": "0x" + "d" * 40, "param_1": 1},
+    "is_approval": False, "is_unlimited_approval": False, "raw": "0xa9059cbb",
+}
+PERMIT = {
+    "primaryType": "Permit",
+    "domain": {"name": "Token"},
+    "message": {"spender": "0x" + "c" * 40, "value": str(2 ** 256 - 1), "deadline": "1"},
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decoded, typed_data, reads, writes, watches", [
+    (APPROVE, None, 0, 0, 0),
+    (CLAIM, None, 0, 1, 1),
+    ({"selector": None}, PERMIT, 0, 0, 0),
+    (TRANSFER, None, 1, 1, 1),
+], ids=["approval", "claim", "typed-data", "transfer"])
+async def test_transaction_verdicts_and_the_target_row(
+    cached_firewall_api, decoded, typed_data, reads, writes, watches,
+):
+    from core.analyzer import AnalyzerResult
+
+    api, services = cached_firewall_api
+    services.sentinel = SimpleNamespace(on_scan_blocked=AsyncMock())
+    services.registry.run_all.return_value = [
+        AnalyzerResult("honeypot", 0.5, 0, data={
+            "is_honeypot": False, "can_sell": True, "buy_tax": 0, "sell_tax": 0,
+        }),
+        AnalyzerResult("intent", 0.5, 0, flags=["Approval to a wallet address, not a contract (drainer pattern)"],
+                       data={"status": "ok", "floor": 100}),
+    ]
+    api.calldata_decoder.decode.return_value = dict(decoded)
+    req = api.FirewallRequest(
+        to="0x" + "a" * 40, sender="0x" + "b" * 40, typedData=typed_data,
+        signMethod="eth_signTypedData_v4" if typed_data else None,
+    )
+    response = await api.firewall(req, SimpleNamespace(headers={}))
+
+    assert response["classification"] == "BLOCK_RECOMMENDED"
+    assert services.db.get_contract_score.await_count == reads
+    assert services.db.upsert_contract_score.await_count == writes
+    assert services.sentinel.on_scan_blocked.call_count == watches
+
+
 @pytest.mark.asyncio
 async def test_legacy_service_gather_preserves_routing_error(routing_error_api, monkeypatch):
     from utils.web3_client import UnsupportedChainError

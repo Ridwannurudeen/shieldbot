@@ -1181,6 +1181,15 @@ async def firewall(req: FirewallRequest, request: Request):
         # Enrich decoded calldata with token names and formatted amounts
         await _enrich_decoded(decoded, to_addr, chain_id=req.chainId)
 
+        # contract_scores holds one verdict per target. An approval's, a claim's or a signature's
+        # verdict also depends on this transaction (the spender, the value, the typed data), so a
+        # row cached from another transaction never answers one. A spender's floor describes the
+        # spender, not the target, so approval and typed-data verdicts are not written to the
+        # target's row either, and do not put the target's deployer on the watch list. A claim's
+        # floor describes the target, so its row is kept.
+        tx_specific = decoded.get('category') in ('approval', 'claim') or bool(req.typedData)
+        describes_target = not (decoded.get('category') == 'approval' or req.typedData)
+
         # 2. If target is a whitelisted router, analyze the swap path tokens instead of bypassing
         if whitelisted:
             router_response = await _analyze_router_swap(
@@ -1196,7 +1205,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 return router_response
 
         # 2b. Check cache for recent result
-        if container and container.db:
+        if container and container.db and not tx_specific:
             cached = await container.db.get_contract_score(to_addr, req.chainId, max_age_seconds=300)
             if cached and cached.get('category_scores', {}).get('_scan_metadata', {}).get('coverage'):
                 policy_mode = "BALANCED"
@@ -1396,7 +1405,7 @@ async def firewall(req: FirewallRequest, request: Request):
             }
 
             # Persist contract score to DB
-            if container and container.db:
+            if container and container.db and describes_target:
                 try:
                     await container.db.upsert_contract_score(
                         address=to_addr,
@@ -1426,7 +1435,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 )
 
             # Sentinel feedback loop: auto-watch deployers of blocked contracts
-            if container and hasattr(container, 'sentinel') and classification == "BLOCK_RECOMMENDED":
+            if container and hasattr(container, 'sentinel') and classification == "BLOCK_RECOMMENDED" and describes_target:
                 try:
                     deployer_info = await container.db.get_deployer_risk_summary(to_addr, req.chainId)
                     deployer_addr = deployer_info["deployer_address"] if deployer_info else None
