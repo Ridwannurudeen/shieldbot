@@ -1,5 +1,6 @@
 """Admin and test routes are left out of the public API schema and still answer."""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -26,6 +27,16 @@ PUBLIC_PATHS = (
     "/api/coverage/{chain_id}",
     "/api/health",
 )
+
+
+def _admin_container():
+    return SimpleNamespace(
+        settings=SimpleNamespace(admin_secret="s", trusted_proxies=[]),
+        auth_manager=None,
+        db=None,
+        mempool_monitor=None,
+        phishing_service=None,
+    )
 
 
 @pytest.fixture
@@ -57,12 +68,22 @@ def test_hidden_routes_are_still_served():
     assert served == HIDDEN_PATHS
 
 
-def test_hidden_admin_route_still_checks_the_admin_secret(monkeypatch):
+@pytest.mark.parametrize("headers", [{}, {"x-admin-secret": "wrong"}], ids=["no-secret", "wrong-secret"])
+def test_hidden_admin_route_refuses_a_missing_or_wrong_secret(monkeypatch, headers):
     import api
 
-    monkeypatch.setattr(api, "container", None)
-    response = TestClient(api.app).get("/api/admin/stats")
+    monkeypatch.setattr(api, "container", _admin_container())
+    response = TestClient(api.app).get("/api/admin/stats", headers=headers)
+    assert response.status_code == 403
+
+
+def test_hidden_admin_route_accepts_the_secret_and_then_needs_its_database(monkeypatch):
+    import api
+
+    monkeypatch.setattr(api, "container", _admin_container())
+    response = TestClient(api.app).get("/api/admin/stats", headers={"x-admin-secret": "s"})
     assert response.status_code == 503
+    assert response.json()["detail"] == "Database not available"
 
 
 def test_graph_seed_is_not_in_the_schema_and_still_answers():
