@@ -308,6 +308,15 @@ class Hunter:
                 type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
             )
 
+        # Housekeeping: usage records past their retention and expired free key link requests
+        try:
+            await self.db.prune_retention()
+        except Exception as exc:
+            logger.error(
+                "Hunter: retention pruning failed: %s\n%s",
+                type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+            )
+
         logger.info(
             "Hunter sweep %s complete: %d flagged", investigation_id, len(flagged)
         )

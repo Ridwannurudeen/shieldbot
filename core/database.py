@@ -32,6 +32,9 @@ _BLOCKED_EVIDENCE_WAIT_SECONDS = 300
 # A Telegram send times out within seconds, so an alert still marked sending after this long
 # belongs to a pass that died between claiming it and recording the result.
 _LAUNCH_ALERT_SEND_TIMEOUT_SECONDS = 300
+# Days of API key usage rows and daily AI token counts kept. Quotas and the AI budget read only the
+# current UTC day, and /api/usage reads the last 30 days.
+USAGE_RETENTION_DAYS = 90
 
 # One row per discovered launch with its latest outcome. A recheck records blocked or cleared on
 # the launch's tracked pair (keyed by the token), and a newer one supersedes the launch scan. A
@@ -1321,6 +1324,25 @@ class Database:
         )
         await self._db.commit()
         return cursor.rowcount
+
+    async def prune_retention(self) -> Dict[str, int]:
+        """Delete usage records older than USAGE_RETENTION_DAYS and expired free key link requests.
+
+        Returns the rows deleted per table.
+        """
+        now = time.time()
+        oldest_day = int(now // 86400) - USAGE_RETENTION_DAYS
+        deleted = {}
+        for table, sql, cutoff in (
+            ("api_usage", "DELETE FROM api_usage WHERE created_at < ?", now - USAGE_RETENTION_DAYS * 86400),
+            ("api_daily_usage", "DELETE FROM api_daily_usage WHERE utc_day < ?", oldest_day),
+            ("ai_token_usage", "DELETE FROM ai_token_usage WHERE utc_day < ?", oldest_day),
+            ("free_key_requests", "DELETE FROM free_key_requests WHERE expires_at <= ?", now),
+        ):
+            cursor = await self._db.execute(sql, (cutoff,))
+            deleted[table] = cursor.rowcount
+        await self._db.commit()
+        return deleted
 
     # --- AI Token Usage ---
 
