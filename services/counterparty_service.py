@@ -55,7 +55,7 @@ _FACTS_INFLIGHT = {}
 PROVIDER_TIMEOUT = 8
 
 
-async def _within_timeout(awaitable, unknown):
+async def within_timeout(awaitable, unknown):
     try:
         return await asyncio.wait_for(awaitable, PROVIDER_TIMEOUT)
     except asyncio.TimeoutError:
@@ -202,10 +202,10 @@ class CounterpartyService:
         observed_at = time.time()
         timed_out = {"status": "unknown", "reason": "GoPlus timed out", "data": {}}
         code, verification, creation, security = await asyncio.gather(
-            _within_timeout(self._web3.get_bytecode(address, chain_id=chain_id), None),
-            _within_timeout(self._web3.is_verified_contract(address, chain_id=chain_id), (None, None)),
-            _within_timeout(self._web3.get_contract_creation_info(address, chain_id=chain_id), None),
-            _within_timeout(self._scam_db.fetch_address_security(address), timed_out),
+            within_timeout(self._web3.get_bytecode(address, chain_id=chain_id), None),
+            within_timeout(self._web3.is_verified_contract(address, chain_id=chain_id), (None, None)),
+            within_timeout(self._web3.get_contract_creation_info(address, chain_id=chain_id), None),
+            within_timeout(self._scam_db.fetch_address_security(address), timed_out),
         )
         is_contract, delegated = code_kind(code)
         # A wallet has no source to verify and no creation to date.

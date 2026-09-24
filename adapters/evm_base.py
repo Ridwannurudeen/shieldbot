@@ -28,6 +28,9 @@ HONEYPOT_IS_UNSUPPORTED = (
 )
 # check_honeypot and get_tax_info read the same honeypot.is reply, and a scan calls them back to back.
 HONEYPOT_IS_REPLY_TTL_SECONDS = 60
+# The structural analyzer, the payment rule and the spender lookup can all ask for one contract's
+# creation within a scan, and a creation does not change.
+CREATION_INFO_TTL_SECONDS = 300
 # Burned LP counts as locked, but these addresses cannot hold a lock, so a chain whose only known
 # "lockers" they are cannot tell unlocked liquidity from liquidity held by an unlisted locker.
 BURN_ADDRESSES = {
@@ -141,6 +144,8 @@ class EvmAdapter(ChainAdapter):
         self._solidly_factory = solidly_factory
         self._whitelisted_routers = whitelisted_routers or {}
         self._honeypot_is_replies = TTLCache(maxsize=1024, ttl=HONEYPOT_IS_REPLY_TTL_SECONDS)
+        self._creation_infos = TTLCache(maxsize=1024, ttl=CREATION_INFO_TTL_SECONDS)
+        self._creation_inflight = {}
 
     @property
     def chain_id(self) -> int:
@@ -244,6 +249,30 @@ class EvmAdapter(ChainAdapter):
             return (None, None)
 
     async def get_contract_creation_info(self, address: str) -> Optional[Dict]:
+        """Creation info, one lookup per contract shared by concurrent callers and kept for five
+        minutes. Only an answer with an age is kept, so a failed or undated lookup is asked again.
+        """
+        key = (self._chain_id, address.lower())
+        if key in self._creation_infos:
+            return dict(self._creation_infos[key])
+        flight_key = (asyncio.get_running_loop(), key)
+        if flight_key not in self._creation_inflight:
+            self._creation_inflight[flight_key] = asyncio.create_task(
+                self._lookup_creation_info(address, key, flight_key)
+            )
+        info = await asyncio.shield(self._creation_inflight[flight_key])
+        return dict(info) if info else info
+
+    async def _lookup_creation_info(self, address: str, key: tuple, flight_key: tuple) -> Optional[Dict]:
+        try:
+            info = await self._fetch_creation_info(address)
+        finally:
+            self._creation_inflight.pop(flight_key, None)
+        if info and info.get('age_days') is not None:
+            self._creation_infos[key] = info
+        return info
+
+    async def _fetch_creation_info(self, address: str) -> Optional[Dict]:
         try:
             if self._explorer_backend in ('sourcify_blockscout', 'etherscan_blockscout'):
                 result = await self._explorer_service.get_contract_creation_info(address, self._chain_id)

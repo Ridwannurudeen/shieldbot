@@ -392,6 +392,25 @@ async def test_paying_a_wallet_has_no_payment_floor(calldata):
 
 
 @pytest.mark.asyncio
+async def test_a_slow_creation_lookup_leaves_the_age_unknown(monkeypatch):
+    import asyncio
+
+    import services.counterparty_service as counterparty_module
+
+    monkeypatch.setattr(counterparty_module, 'PROVIDER_TIMEOUT', 0.05)
+
+    async def hang(*args, **kwargs):
+        await asyncio.sleep(60)
+
+    analyzer = IntentMismatchAnalyzer(SimpleNamespace(get_contract_creation_info=hang), _service())
+    result = await asyncio.wait_for(analyzer.analyze(AnalysisContext(
+        address=TOKEN, chain_id=56, extra={'calldata': PAYABLE, 'value': hex(10 ** 17), 'is_verified': False},
+    )), 5)
+    assert result.data['floor'] == 60
+    assert result.data['status'] == 'unknown'
+
+
+@pytest.mark.asyncio
 async def test_value_on_a_router_swap_is_not_a_payment_to_the_token():
     swap = '0x7ff36ab5' + '0' * 256
     result, creation = await _payable(swap, False, {'age_days': 1}, whitelisted_router='PancakeSwap V2 Router')

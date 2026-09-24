@@ -4,7 +4,7 @@ import logging
 from typing import List
 
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
-from services.counterparty_service import UnavailableCounterparty, approval_grant, judge_spender
+from services.counterparty_service import UnavailableCounterparty, approval_grant, judge_spender, within_timeout
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD
 
 logger = logging.getLogger(__name__)
@@ -179,7 +179,9 @@ class IntentMismatchAnalyzer(Analyzer):
             return (60, f'{sends} the contract', None) if claim else (None, None, None)
         if claim:
             return 85, f'{sends} an unverified contract', None
-        creation = await self._web3_client.get_contract_creation_info(ctx.address, chain_id=ctx.chain_id)
+        creation = await within_timeout(
+            self._web3_client.get_contract_creation_info(ctx.address, chain_id=ctx.chain_id), None
+        )
         age = creation.get('age_days') if creation else None
         if age is None:
             # It may be a fresh deployment (85), but nothing says so: the older contract's floor
