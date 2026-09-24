@@ -49,7 +49,7 @@ export default function Screenshot() {
                   <div className="bg-[#0A0F1E] border border-red-500/40 rounded-xl p-4 w-56 shadow-2xl">
                     <div className="flex items-center gap-2 mb-3">
                       <span className="text-lg">🚫</span>
-                      <span className="text-red-400 font-bold text-sm">Transaction Blocked</span>
+                      <span className="text-red-400 font-bold text-sm">Block Recommended</span>
                     </div>
                     <div className="text-xs text-gray-400 mb-3">Safety: <span className="text-red-400 font-bold">6/100</span></div>
                     <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-2 text-xs text-gray-300">

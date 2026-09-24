@@ -1,8 +1,8 @@
 """The public website must not drift from the code it describes.
 
-These checks tie the landing page, the about page and the dashboard to the facts they state (chain
-counts, tool counts, score bands, chain tables) and fail when a source changes without the site, or
-when the committed builds fall behind their sources.
+These checks tie the landing page, the about page, the dashboard and the extension's welcome page to
+the facts they state (chain counts, tool counts, score bands, chain tables, roadmap status) and fail
+when a source changes without the site, or when the committed builds fall behind their sources.
 """
 
 import json
@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 LANDING_SRC = ROOT / "landing-src"
 COMPONENTS = LANDING_SRC / "src" / "components"
 DASHBOARD_SRC = ROOT / "dashboard" / "index.src.html"
+WELCOME = ROOT / "extension" / "welcome.html"
 
 
 def read(path: Path) -> str:
@@ -88,6 +89,41 @@ def test_mcp_and_bot_counts_match_the_code():
 
     commands = len(re.findall(r'CommandHandler\("', read(ROOT / "bot.py")))
     assert f"Telegram bot ({commands} commands)" in roadmap
+
+
+def test_roadmap_marks_nothing_complete_that_is_still_open():
+    roadmap = read(COMPONENTS / "Roadmap.tsx")
+    done = [
+        item
+        for items in re.findall(r'status: "done",\s*items: \[(.*?)\]', roadmap, re.DOTALL)
+        for item in re.findall(r'"([^"]+)"', items)
+    ]
+    still_open = re.findall(r"^- \[ \] \*\*([^*]+)\*\*", read(ROOT / "ROADMAP.md"), re.MULTILINE)
+    assert done and still_open
+    for item in done:
+        assert not re.search(r"\b(?:deploying|proposed|planned|upcoming|in progress)\b", item, re.I)
+        for title in still_open:
+            assert title.lower() not in item.lower(), (
+                f"Roadmap.tsx marks {item!r} Complete; ROADMAP.md leaves {title!r} open"
+            )
+
+
+def welcome_text() -> str:
+    """The visible text of the extension's welcome page, without its styles and scripts."""
+    html = re.sub(r"<(style|script)\b.*?</\1>", " ", read(WELCOME), flags=re.DOTALL)
+    return re.sub(r"<[^>]+>", " ", html)
+
+
+def test_welcome_page_does_not_claim_the_extension_blocks():
+    # The extension warns and the user decides; only the RPC proxy refuses a transaction itself.
+    claims = re.findall(r"\b(?:block(?:s|ed|ing)?|stop(?:s|ped)?)\b", welcome_text(), re.I)
+    assert not claims, f"welcome.html claims the extension blocks transactions: {claims}"
+
+
+def test_welcome_page_chain_count_matches_the_registry():
+    counts = re.findall(r"\b(\d+)\s+(?:more\s+)?(?:EVM\s+)?(?:chains?|networks)\b", welcome_text())
+    assert counts, "welcome.html should state how many chains it supports"
+    assert {int(count) for count in counts} == {len(chain_info())}
 
 
 def _risk_bands() -> dict:
