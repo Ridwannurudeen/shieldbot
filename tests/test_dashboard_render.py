@@ -299,3 +299,18 @@ def test_a_failed_report_says_so_inside_the_open_dialog(status, message):
     result = render(contracts=[CONTRACT], report_reply=(status, {"detail": "no"}), steps=FLAG_AND_SUBMIT)
     assert result == {"dialog": True, "alert": message, "alertInDialog": True, "toast": None}
 
+
+def test_a_sent_report_closes_the_dialog_and_toasts_on_the_body():
+    steps = FLAG_AND_SUBMIT.replace(
+        "toast: toast && toast.textContent,",
+        "toast: toast && toast.textContent, toastOnBody: Boolean(toast) && toast.parentNode === document.body,",
+    )
+    result = render(contracts=[CONTRACT], steps=steps)
+    assert result == {
+        "dialog": False,
+        "alert": None,
+        "alertInDialog": False,
+        "toast": "Report sent. Thank you.",
+        "toastOnBody": True,
+    }
+

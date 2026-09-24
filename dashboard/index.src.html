@@ -198,7 +198,8 @@
     function Toast({ msg, type = 'success', onDone }) {
       useEffect(() => { const t = setTimeout(onDone, 2200); return () => clearTimeout(t); }, []);
       const isErr = type === 'error';
-      return (
+      // On the body, like the Flag dialog: inside the feed's glass panel it was placed against that panel.
+      return ReactDOM.createPortal(
         <div role="status" className="toast-anim fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-2xl"
              style={{ background:'#1E293B', border:`1px solid ${isErr ? 'rgba(239,68,68,0.35)' : '#334155'}`,
                       color: isErr ? '#F87171' : '#10B981', fontSize:13 }}>
@@ -211,7 +212,8 @@
               </svg>
           }
           <span className="font-medium">{msg}</span>
-        </div>
+        </div>,
+        document.body,
       );
     }
 
