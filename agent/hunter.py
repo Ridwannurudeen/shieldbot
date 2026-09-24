@@ -32,7 +32,7 @@ from core.extension_formatter import is_scan_incomplete
 from core.registry import BACKGROUND_SCAN_DEADLINE_SECONDS
 from core.verdict_evidence import build_evidence
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
-from services.launch_discovery import LaunchDiscoveryError
+from services.launch_discovery import LaunchDiscoveryError, WrongChainError
 from services.rpc_guard import CLOSED, BreakerOpenError
 from services.verdict_publisher import VERDICT_REFRESH_SECONDS
 
@@ -462,6 +462,9 @@ class Hunter:
                 return []
             try:
                 await self.discovery.run()
+            except WrongChainError as exc:
+                # Nothing an RPC for another chain reports can be used; the launch watch pauses on it.
+                logger.error("Hunter: launch discovery RPC is not Robinhood Chain: %s", type(exc).__name__)
             except LaunchDiscoveryError as exc:
                 # An RPC read that failed or a block it could not confirm: discovery kept what it
                 # confirmed and resumes from there next sweep.
