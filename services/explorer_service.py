@@ -73,15 +73,12 @@ class ExplorerService:
         )
         if cache_key in self._cache:
             return self._cache[cache_key]
-        # An open breaker's answer is not cached, so lookups resume as soon as it closes.
-        try:
-            provider_breakers.check(provider, chain_id)
-        except CircuitOpenError as exc:
-            unknown_ledger.record(provider, chain_id, "failed")
-            return ExplorerResult("unknown", reason=type(exc).__name__, provider=provider)
         host = urlsplit(url).hostname
 
         async def fetch():
+            # Checked here, inside the host's lock for Blockscout, so a lookup queued behind the
+            # one that opened the breaker sends nothing. It raises CircuitOpenError.
+            provider_breakers.check(provider, chain_id)
             try:
                 async with aiohttp.ClientSession(
                     timeout=aiohttp.ClientTimeout(total=15)
@@ -133,18 +130,22 @@ class ExplorerService:
                     "unknown", reason=type(exc).__name__, provider=provider
                 )
 
-        if provider == "blockscout":
-            lock = self._blockscout_locks.get(host)
-            if lock is None:
-                lock = self._blockscout_locks[host] = asyncio.Lock()
-            async with lock:
-                if cache_key in self._cache:
-                    return self._cache[cache_key]
+        try:
+            if provider == "blockscout":
+                lock = self._blockscout_locks.get(host)
+                if lock is None:
+                    lock = self._blockscout_locks[host] = asyncio.Lock()
+                async with lock:
+                    if cache_key in self._cache:
+                        return self._cache[cache_key]
+                    result = await fetch()
+                    self._cache[cache_key] = result
+            else:
                 result = await fetch()
                 self._cache[cache_key] = result
-        else:
-            result = await fetch()
-            self._cache[cache_key] = result
+        except CircuitOpenError as exc:
+            # Not cached, so lookups resume as soon as the breaker closes; counted as failed below.
+            result = ExplorerResult("unknown", reason=type(exc).__name__, provider=provider)
         unknown_ledger.record(
             provider,
             chain_id,

@@ -82,6 +82,12 @@ def sourcify():
     return lambda i: service.get_verification_status(address(i), 4663)
 
 
+def blockscout():
+    # Base has a public Blockscout instance, and its contract creation lookup asks Blockscout alone.
+    service = ExplorerService()
+    return lambda i: service.get_contract_creation_info(address(i), 8453)
+
+
 def etherscan_verification():
     adapter = etherscan_adapter()
     return lambda i: adapter.is_verified_contract(address(i))
@@ -137,6 +143,13 @@ CASES = {
         sourcify,
         "sourcify:4663",
         ("sourcify", 4663),
+        (404, None),
+    ),
+    "blockscout": Case(
+        "services.explorer_service.aiohttp.ClientSession",
+        blockscout,
+        "blockscout:8453",
+        ("blockscout", 8453),
         (404, None),
     ),
     "etherscan_verification": Case(
@@ -301,6 +314,33 @@ async def test_a_probe_that_gets_an_answer_closes_the_breaker(monkeypatch):
     assert provider_breakers.states()["dexscreener"] == CLOSED
     assert probe["status"] == after["status"] == "ok"
     assert session.get.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_a_blockscout_lookup_queued_on_the_host_lock_sends_nothing_once_the_breaker_opens():
+    lookup = blockscout()
+
+    async def times_out_after_a_moment(*args):
+        await asyncio.sleep(0.05)
+        raise asyncio.TimeoutError()
+
+    client, session = http_client(200)
+    session.get.return_value.__aenter__ = AsyncMock(side_effect=times_out_after_a_moment)
+    before = unknown_ledger.for_chain(8453).get("blockscout", {}).get("failed", 0)
+    with patch(CASES["blockscout"].target, client):
+        for i in range(FAILURE_THRESHOLD - 1):
+            await lookup(i)
+        # The first of these opens the breaker while the second waits for the host's lock.
+        first, second = await asyncio.gather(
+            lookup(FAILURE_THRESHOLD), lookup(FAILURE_THRESHOLD + 1)
+        )
+
+    assert provider_breakers.states()["blockscout:8453"] == OPEN
+    assert session.get.call_count == FAILURE_THRESHOLD
+    assert first.reason == "TimeoutError"
+    assert second.reason == "CircuitOpenError"
+    after = unknown_ledger.for_chain(8453)["blockscout"]["failed"]
+    assert after == before + FAILURE_THRESHOLD + 1
 
 
 def analyzer(name: str, weight: float, data: dict):
