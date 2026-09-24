@@ -2232,6 +2232,9 @@ async def launch_feed(chain_id: int, limit: int = 50, cursor: str = None):
     its status and coverage reasons; unknown and not_scanned are never safe. scan.status is
     authoritative: "ok" only for a complete scan. Per-field coverage is included only where the
     hunter recorded it, for blocked launches. Each launch links its public verdict at verdict_url.
+    scanned_share counts the launches whose block is in the last 24 hours and how many of them
+    have any scan outcome. Scans share one small RPC budget and only launches seen trading soon
+    after launch are picked, so most launches are never scanned; this says how many were.
     Query params:
     - limit: max results (default 50, max 200)
     - cursor: next_cursor from the previous page (optional)
@@ -2255,11 +2258,14 @@ async def launch_feed(chain_id: int, limit: int = 50, cursor: str = None):
         launches, next_cursor = await container.db.get_launch_feed(chain_id, limit, cursor)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid cursor") from exc
+    window_hours = 24
+    scanned_share = await container.db.get_launch_scan_share(chain_id, time.time() - window_hours * 3600)
     return {
         'launches': launches,
         'count': len(launches),
         'chain_id': chain_id,
         'next_cursor': next_cursor,
+        'scanned_share': {'window_hours': window_hours, **scanned_share},
     }
 
 

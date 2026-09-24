@@ -2121,8 +2121,23 @@ class Database:
         await self._db.executescript("""
             CREATE INDEX IF NOT EXISTS idx_discovered_launches_feed
                 ON discovered_launches(chain_id, block_number DESC, token_address DESC);
+            CREATE INDEX IF NOT EXISTS idx_discovered_launches_scan_share
+                ON discovered_launches(chain_id, block_timestamp, scanned_at);
         """)
         await self._db.commit()
+
+    async def get_launch_scan_share(self, chain_id: int, since: float) -> Dict:
+        """Count the launches whose block is at or after ``since`` and how many of them were scanned.
+
+        A launch counts as scanned once any scan outcome was recorded for it, including an
+        incomplete or failed one.
+        """
+        cursor = await self._db.execute("""
+            SELECT COUNT(*), COUNT(scanned_at) FROM discovered_launches
+            WHERE chain_id = ? AND block_timestamp >= ?
+        """, (chain_id, since))
+        launches, scanned = await cursor.fetchone()
+        return {"launches": launches, "scanned": scanned}
 
     async def get_launch_feed(
         self, chain_id: int, limit: int, cursor: Optional[str] = None

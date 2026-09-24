@@ -1,5 +1,6 @@
 """Public Robinhood Chain launch feed: the shared query and GET /api/launches/{chain_id}."""
 
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -387,6 +388,21 @@ async def test_discovery_status_reports_the_lowest_cursor_last_sweep_and_newest_
     }
 
 
+@pytest.mark.asyncio
+async def test_scan_share_counts_launches_since_a_block_time_and_those_scanned(db):
+    since = 1_758_000_000 + 200
+    await db.upsert_discovered_launches(
+        CHAIN, [_launch(token, 190 + 10 * index) for index, token in enumerate(TOKENS[:5])]
+    )
+    await db.upsert_discovered_launches(56, [_launch(TOKENS[5], 300)])
+    await _scan(db, TOKENS[0], "cleared", 10, at=1000.0)
+    await _scan(db, TOKENS[2], "unknown", None, at=1001.0)
+    await _scan(db, TOKENS[3], "error", None, at=1002.0)
+
+    # Blocks 200 to 230 are in the window; block 190 is older and chain 56 is another chain.
+    assert await db.get_launch_scan_share(CHAIN, since) == {"launches": 4, "scanned": 2}
+
+
 # --- HTTP endpoint --------------------------------------------------------------------------
 
 
@@ -427,7 +443,7 @@ async def test_endpoint_shape_and_pagination(feed_api):
     )
 
     assert first.status_code == second.status_code == 200
-    assert set(body) == {"launches", "count", "chain_id", "next_cursor"}
+    assert set(body) == {"launches", "count", "chain_id", "next_cursor", "scanned_share"}
     assert body["chain_id"] == CHAIN and body["count"] == 2
     assert [item["scan"]["outcome"] for item in body["launches"]] == ["blocked", "unknown"]
     assert body["launches"][0]["verdict_url"] == f"/api/verdict/{CHAIN}/{TOKENS[2]}"
@@ -436,8 +452,27 @@ async def test_endpoint_shape_and_pagination(feed_api):
         "count": 1,
         "chain_id": CHAIN,
         "next_cursor": None,
+        "scanned_share": body["scanned_share"],
     }
     assert second.json()["launches"][0]["scan"]["outcome"] == "not_scanned"
+
+
+@pytest.mark.asyncio
+async def test_endpoint_says_how_many_launches_of_the_last_day_were_scanned(feed_api):
+    db = feed_api.db
+    now = int(time.time())
+    recent = [
+        dict(_launch(token, 100 + index), block_timestamp=now - 60)
+        for index, token in enumerate(TOKENS[:3])
+    ]
+    old = dict(_launch(TOKENS[3], 90), block_timestamp=now - 2 * 86400)
+    await db.upsert_discovered_launches(CHAIN, recent + [old])
+    await _scan(db, TOKENS[0], "unknown", None, at=1000.0)
+    await _scan(db, TOKENS[3], "cleared", 5, at=1001.0)
+
+    response = await feed_api.client.get(f"/api/launches/{CHAIN}", params={"limit": 1})
+
+    assert response.json()["scanned_share"] == {"window_hours": 24, "launches": 3, "scanned": 1}
 
 
 @pytest.mark.asyncio
@@ -473,7 +508,10 @@ async def test_endpoint_never_renders_incomplete_items_as_complete(feed_api):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("requested,expected", [(1000, 200), (0, 1), (-5, 1), (7, 7)])
 async def test_endpoint_bounds_the_page_size(feed_api, requested, expected):
-    feed_api.services.db = MagicMock(get_launch_feed=AsyncMock(return_value=([], None)))
+    feed_api.services.db = MagicMock(
+        get_launch_feed=AsyncMock(return_value=([], None)),
+        get_launch_scan_share=AsyncMock(return_value={"launches": 0, "scanned": 0}),
+    )
 
     response = await feed_api.client.get(f"/api/launches/{CHAIN}", params={"limit": requested})
 
@@ -549,7 +587,10 @@ async def test_endpoint_is_rate_limited_like_the_threat_feed(feed_api, monkeypat
     monkeypatch.setattr(
         feed_api.api, "rate_limiter", feed_api.api.RateLimiter(requests_per_minute=2, burst=10)
     )
-    feed_api.services.db = MagicMock(get_launch_feed=AsyncMock(return_value=([], None)))
+    feed_api.services.db = MagicMock(
+        get_launch_feed=AsyncMock(return_value=([], None)),
+        get_launch_scan_share=AsyncMock(return_value={"launches": 0, "scanned": 0}),
+    )
     feed_api.services.db._db.execute = AsyncMock(
         return_value=SimpleNamespace(fetchall=AsyncMock(return_value=[]))
     )
