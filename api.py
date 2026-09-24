@@ -507,6 +507,10 @@ class ChatRequest(ChainRequest):
     chain_id: int = Field(default=56, ge=1)
 
 
+# A random per-install token from the side panel (its chatUserId UUID), sent as X-Install-Id.
+_INSTALL_ID_RE = re.compile(r"[A-Za-z0-9_-]{16,128}")
+
+
 class ExplainRequest(BaseModel):
     scan_result: Dict[str, Any]
 
@@ -1960,9 +1964,16 @@ async def agent_chat(req: ChatRequest, request: Request):
     if not chat_limiter.is_allowed(client_ip):
         raise HTTPException(429, "Rate limit exceeded")
 
-    # Bind user_id to client IP so users cannot read/poison each other's history
+    # Bind user_id to the caller so users cannot read/poison each other's history: to the install
+    # token when one is sent, which does not depend on the proxy passing the client IP, else to the IP.
     import hashlib
-    bound_user_id = hashlib.sha256(f"{client_ip}:{req.user_id}".encode()).hexdigest()[:24]
+    install_id = request.headers.get("x-install-id")
+    if install_id is None:
+        bound_user_id = hashlib.sha256(f"{client_ip}:{req.user_id}".encode()).hexdigest()[:24]
+    elif _INSTALL_ID_RE.fullmatch(install_id):
+        bound_user_id = hashlib.sha256(f"install:{install_id}:{req.user_id}".encode()).hexdigest()[:24]
+    else:
+        raise HTTPException(400, "X-Install-Id must be 16 to 128 letters, digits, '-' or '_'")
 
     try:
         result = await container.advisor.chat(bound_user_id, req.message, chain_id=req.chain_id)
