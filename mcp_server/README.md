@@ -15,7 +15,7 @@ Production URL: `https://api.shieldbotsecurity.online/mcp/sse`
 How the transport behaves (`server.py`):
 
 - A request's response is pushed to its session's stream and also returned in the POST body (HTTP 200), so a client without a stream can read it from the body. A POST with no `session_id` gets the body only. A `session_id` that is unknown or whose stream has closed gets 404, and a session opened with a different API key gets 403.
-- A notification (a message with no `id`, such as `notifications/initialized` or `notifications/cancelled`) is never answered: the POST returns 202 with an empty body and nothing is sent on the stream. Cancellation is ignored; a running request cannot be interrupted.
+- A notification (a message with no `id`, such as `notifications/initialized` or `notifications/cancelled`) is never answered: the POST returns 202 with an empty body and nothing is sent on the stream. A `notifications/cancelled` for a request still running on the same session drops that request's response: its POST also returns 202 and nothing goes on the stream. The work itself runs to completion.
 - A message with no `id` is dropped silently even when it is invalid (wrong `jsonrpc`, missing or unknown method), because a notification can never be answered.
 - A JSON array (a batch) or any other non-object body is answered with an Invalid Request error (-32600).
 - The stream sends a `: heartbeat` comment every 30 seconds while idle and closes after 30 minutes without a message; a client that disconnects is noticed sooner. Heartbeats do not count as activity. One API key can hold at most 5 open streams (the 6th gets HTTP 429) and the server at most 50 (the 51st gets 503); idle sessions are dropped before either limit is checked.

@@ -1,7 +1,9 @@
 """MCP protocol conformance (2024-11-05, HTTP+SSE): handshake, ping and notifications."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -48,9 +50,14 @@ def sessions(monkeypatch):
 
 
 @pytest.fixture
-def client(container, sessions):
+def app(container, sessions):
     app = FastAPI()
     app.include_router(server.create_mcp_router(container), prefix="/mcp")
+    return app
+
+
+@pytest.fixture
+def client(app):
     return TestClient(app)
 
 
@@ -247,6 +254,49 @@ def test_idle_sessions_are_swept_before_the_capacity_check(client, sessions):
 
     assert client.get("/mcp/sse?handshake_only=1", headers=AUTH_HEADERS).status_code == 200
     assert manager.count == 0
+
+
+@pytest.mark.asyncio
+async def test_a_request_cancelled_while_it_runs_gets_no_response(app, container, sessions):
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def slow_scan(ctx):
+        started.set()
+        await release.wait()
+        return []
+
+    container.registry.run_all = AsyncMock(side_effect=slow_scan)
+    container.risk_engine.compute_from_results.return_value = {"rug_probability": 0, "status": "ok", "coverage": {}}
+    session_id, queue = sessions[0].create("k1")
+    url = f"/mcp/messages?session_id={session_id}"
+    call = {
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "tools/call",
+        "params": {"name": "scan_contract", "arguments": {"address": "0x" + "a" * 40, "chain_id": 56}},
+    }
+
+    def cancel(request_id):
+        return {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": request_id}}
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as http:
+        running = asyncio.create_task(http.post(url, json=call, headers=AUTH_HEADERS))
+        await asyncio.wait_for(started.wait(), 5)
+        assert (await http.post(url, json=cancel(9), headers=AUTH_HEADERS)).status_code == 202
+        release.set()
+        response = await asyncio.wait_for(running, 5)
+
+        assert response.status_code == 202
+        assert response.content == b""
+        assert queue.empty()
+
+        # Cancelling an id that is not running changes nothing, and a finished id is not remembered.
+        assert (await http.post(url, json=cancel(10), headers=AUTH_HEADERS)).status_code == 202
+        for request_id in (9, 10):
+            ping = {"jsonrpc": "2.0", "id": request_id, "method": "ping"}
+            assert (await http.post(url, json=ping, headers=AUTH_HEADERS)).status_code == 200
+            assert queue.get_nowait() == {"jsonrpc": "2.0", "id": request_id, "result": {}}
+    assert sessions[0].get(session_id)["in_flight"] == {}
 
 
 def test_a_session_quiet_for_ten_minutes_is_not_idle():

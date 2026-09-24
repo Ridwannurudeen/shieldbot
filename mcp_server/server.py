@@ -62,7 +62,8 @@ class SSEConnectionManager:
 
     def __init__(self, max_connections: int = MAX_SSE_CONNECTIONS):
         self._max = max_connections
-        # session_id -> {queue, key_id, created_at, last_activity}
+        # session_id -> {queue, key_id, in_flight, created_at, last_activity}
+        # in_flight maps each running request id to whether it has been cancelled.
         self._connections: Dict[str, Dict] = {}
 
     @property
@@ -82,6 +83,7 @@ class SSEConnectionManager:
         self._connections[session_id] = {
             "queue": queue,
             "key_id": key_id,
+            "in_flight": {},
             "created_at": time.time(),
             "last_activity": time.time(),
         }
@@ -253,8 +255,8 @@ async def process_jsonrpc(container, body: Dict) -> Optional[Dict]:
     """Process a JSON-RPC 2.0 message and return the response dict, or None for a notification.
 
     A message without an id is a notification, which must never be answered. The ones MCP clients
-    send need no action: notifications/initialized carries no data, and notifications/cancelled
-    may be ignored because a request here cannot be interrupted once it is running.
+    send need no action here: notifications/initialized carries no data, and the transport handles
+    notifications/cancelled by dropping the cancelled request's response.
     """
     if not isinstance(body, dict):
         return _jsonrpc_error(None, INVALID_REQUEST, "Expected a JSON-RPC request object")
@@ -402,8 +404,24 @@ def create_mcp_router(container) -> APIRouter:
                 await session["queue"].put(error_resp)
             return error_resp
 
-        response = await process_jsonrpc(container, body)
+        request_id = body.get("id") if isinstance(body, dict) else None
+        tracked = session is not None and isinstance(request_id, (str, int))
+        if tracked:
+            session["in_flight"][request_id] = False
+        try:
+            response = await process_jsonrpc(container, body)
+        finally:
+            cancelled = tracked and session["in_flight"].pop(request_id, False)
+
         if response is None:
+            if session is not None and body.get("method") == "notifications/cancelled":
+                params = body.get("params")
+                cancelled_id = params.get("requestId") if isinstance(params, dict) else None
+                if isinstance(cancelled_id, (str, int)) and cancelled_id in session["in_flight"]:
+                    session["in_flight"][cancelled_id] = True
+            return Response(status_code=202)
+        # A cancelled request gets no response, as the MCP cancellation spec asks.
+        if cancelled:
             return Response(status_code=202)
 
         # If a session is active, push the response to the SSE stream
