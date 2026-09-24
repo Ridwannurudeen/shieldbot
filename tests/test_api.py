@@ -576,6 +576,93 @@ async def test_an_undeclared_allowed_key_is_not_a_revoke_on_the_main_firewall_pa
     counterparty.fetch.assert_awaited_once_with(spender, 56)
 
 
+def _struct(*members):
+    return [{"name": name, "type": kind} for name, kind in members]
+
+
+SIGNED_SPENDER = "0x" + "5" * 40
+EIP2612 = _struct(("owner", "address"), ("spender", "address"), ("value", "uint256"), ("nonce", "uint256"), ("deadline", "uint256"))
+PERMIT_MESSAGE = {"owner": "0x" + "b" * 40, "spender": SIGNED_SPENDER, "value": "1", "nonce": "0", "deadline": "1"}
+TOKEN_PERMISSIONS = {"TokenPermissions": _struct(("token", "address"), ("amount", "uint256"))}
+
+
+@pytest.fixture
+def diluting_firewall_api(cached_firewall_api):
+    """The main firewall path with a clean, fully covered target analyzer carrying most of the weight
+    beside the real signature analyzer, whose spender is a known verified contract."""
+    from analyzers.signature import SignaturePermitAnalyzer
+    from core.analyzer import Analyzer, AnalyzerResult
+    from core.registry import AnalyzerRegistry
+
+    class CleanTarget(Analyzer):
+        name = "behavioral"
+        weight = 0.9
+
+        async def analyze(self, ctx):
+            return AnalyzerResult(self.name, self.weight, 0, data={"status": "ok"})
+
+    api, services = cached_firewall_api
+    services.web3_client.is_token_contract = AsyncMock(return_value=False)
+    counterparty = SimpleNamespace(
+        allowlisted_name=lambda address, chain_id: None,
+        fetch=AsyncMock(return_value={
+            "address": SIGNED_SPENDER, "allowlisted": None, "is_contract": True, "delegated": False,
+            "is_verified": True, "age_days": 400, "labels": [], "label_source": "",
+            "coverage": {"code": True, "verification": True, "age": True, "labels": True},
+            "reason": None, "observed_at": 0,
+        }),
+    )
+    registry = AnalyzerRegistry()
+    registry.register(CleanTarget())
+    registry.register(SignaturePermitAnalyzer(counterparty))
+    services.registry = registry
+
+    async def firewall(typed):
+        return await api.firewall(
+            api.FirewallRequest(
+                to="0x" + "a" * 40, sender="0x" + "b" * 40, typedData=typed, signMethod="eth_signTypedData_v4",
+            ),
+            SimpleNamespace(headers={}),
+        )
+
+    return firewall
+
+
+@pytest.mark.asyncio
+async def test_a_readable_small_permit_to_a_verified_spender_is_safe_on_the_main_firewall_path(diluting_firewall_api):
+    response = await diluting_firewall_api(
+        {"types": {"Permit": EIP2612}, "primaryType": "Permit", "message": PERMIT_MESSAGE},
+    )
+    assert response["classification"] == "SAFE"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("typed", [
+    {"primaryType": "Permit", "message": PERMIT_MESSAGE},
+    {"types": {"Permit": EIP2612 + _struct(("allowed", "bool"))}, "primaryType": "Permit", "message": PERMIT_MESSAGE},
+    {"types": {
+        "PermitDetails": _struct(("token", "address"), ("expiration", "uint48"), ("nonce", "uint48")),
+        "PermitSingle": _struct(("details", "PermitDetails"), ("spender", "address"), ("sigDeadline", "uint256")),
+    }, "primaryType": "PermitSingle", "message": {
+        "details": {"token": "0x" + "c" * 40, "amount": "1", "expiration": "0", "nonce": "0"},
+        "spender": SIGNED_SPENDER, "sigDeadline": "0",
+    }},
+    {"types": {**TOKEN_PERMISSIONS, "PermitTransferFrom": _struct(
+        ("permitted", "TokenPermissions[]"), ("spender", "address"), ("nonce", "uint256"), ("deadline", "uint256"),
+    )}, "primaryType": "PermitTransferFrom", "message": {
+        "permitted": {"token": "0x" + "c" * 40, "amount": "1"}, "spender": SIGNED_SPENDER, "nonce": "0", "deadline": "1",
+    }},
+    {"types": {"Permit": EIP2612}, "primaryType": "Permit", "message": "not an object"},
+], ids=["permit-without-types", "permit-declaring-value-and-allowed", "permit2-without-amount",
+        "permit2-transfer-declared-as-a-batch", "unparseable"])
+async def test_typed_data_whose_type_cannot_be_read_is_never_safe_on_the_main_firewall_path(diluting_firewall_api, typed):
+    # The signature analyzer carries a tenth of the weight: counted as fully covered, its score
+    # would be diluted by the clean target to SAFE.
+    response = await diluting_firewall_api(typed)
+    assert response["classification"] != "SAFE"
+    assert response["status"] == "unknown"
+
+
 CLEAN_SCAN = {"risk_score": 0, "status": "ok", "coverage": {"is_verified": 1}, "is_verified": True}
 TX_CHECKS_UNAVAILABLE = "Transaction checks unavailable: the spender, payment or signature was not analysed"
 

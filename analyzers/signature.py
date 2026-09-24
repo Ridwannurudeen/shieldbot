@@ -66,6 +66,8 @@ class SignaturePermitAnalyzer(Analyzer):
         permit = None
         spender_data = {}
         floor = None
+        # Why the typed data could not be read, if it could not.
+        unreadable = None
 
         try:
             # Parse the typed data structure
@@ -113,7 +115,9 @@ class SignaturePermitAnalyzer(Analyzer):
                 sig_type = primary_type or sign_method or 'unknown'
 
             if permit:
-                s, f, spender, unlimited, granted = permit
+                s, f, spender, unlimited, granted, readable = permit
+                if not readable:
+                    unreadable = 'Typed data type does not match its permit standard'
                 score += s
                 flags.extend(f)
                 # A revoke gives the spender nothing, so there is no spender to judge.
@@ -128,6 +132,7 @@ class SignaturePermitAnalyzer(Analyzer):
             logger.error("Error analyzing typed data: %s", type(e).__name__)
             flags.append('Failed to parse typed data')
             score = 15  # Mild suspicion on parse failure
+            unreadable = f'Typed data could not be analysed ({type(e).__name__})'
 
         # The signature-only path has no engine, so the floor is applied here as well as declared.
         score = min(max(score, floor or 0), 100)
@@ -142,6 +147,13 @@ class SignaturePermitAnalyzer(Analyzer):
                 'has_typed_data': True,
                 'sig_type': sig_type,
                 **spender_data,
+                # Typed data that could not be read leaves the signature unknown, so on the main
+                # firewall path the risk engine cannot count it as covered and dilute it to SAFE.
+                **({} if unreadable is None else {
+                    'status': 'unknown',
+                    'coverage': {**spender_data.get('coverage', {}), 'typed_data': False},
+                    'reason': '; '.join(filter(None, (unreadable, spender_data.get('reason')))),
+                }),
                 **({'floor': floor} if floor else {}),
             },
         )
@@ -172,7 +184,8 @@ class SignaturePermitAnalyzer(Analyzer):
         return points, flags, floor, data
 
     def _check_permit(self, message: Dict, types) -> tuple:
-        """Check EIP-2612 Permit for dangerous patterns: (score, flags, spender, unlimited, granted)."""
+        """Check EIP-2612 Permit for dangerous patterns: (score, flags, spender, unlimited, granted,
+        whether its declared type could be read)."""
         score = 0.0
         flags = []
 
@@ -213,10 +226,11 @@ class SignaturePermitAnalyzer(Analyzer):
             score += 10
             flags.append('Permit: far-future deadline (>1 year)')
 
-        return score, flags, spender, unlimited, granted
+        return score, flags, spender, unlimited, granted, not mismatch
 
     def _check_permit2(self, message: Dict, primary_type: str, types) -> tuple:
-        """Check a Permit2 AllowanceTransfer: (score, flags, spender, unlimited, granted)."""
+        """Check a Permit2 AllowanceTransfer: (score, flags, spender, unlimited, granted, whether its
+        declared type could be read)."""
         score = 0.0
         flags = []
         members = _members(types, primary_type) or {}
@@ -224,7 +238,7 @@ class SignaturePermitAnalyzer(Analyzer):
         detail_members = _referenced_members(types, members, 'details', primary_type == 'PermitBatch')
         if detail_members is None or 'amount' not in detail_members or 'spender' not in members:
             flags.append('Permit2: type does not match Permit2; treated as unlimited')
-            return 25.0, flags, spender, True, True
+            return 25.0, flags, spender, True, True, False
 
         # An amount that reads as 0 revokes the spender's allowance; one that cannot be read is
         # judged as the largest grant.
@@ -264,10 +278,11 @@ class SignaturePermitAnalyzer(Analyzer):
                     score += 15
                     flags.append(f'Permit2 Batch: unlimited amount for token #{i+1}')
 
-        return score, flags, spender, unlimited, granted
+        return score, flags, spender, unlimited, granted, True
 
     def _check_permit2_transfer(self, message: Dict, primary_type: str, types) -> tuple:
-        """Check a Permit2 SignatureTransfer: (score, flags, spender, unlimited, granted)."""
+        """Check a Permit2 SignatureTransfer: (score, flags, spender, unlimited, granted, whether its
+        declared type could be read)."""
         score = 0.0
         flags = []
         members = _members(types, primary_type) or {}
@@ -275,7 +290,7 @@ class SignaturePermitAnalyzer(Analyzer):
         token_members = _referenced_members(types, members, 'permitted', 'Batch' in primary_type)
         if token_members is None or 'amount' not in token_members or 'spender' not in members:
             flags.append('Permit2 transfer: type does not match Permit2; treated as unlimited')
-            return 20.0, flags, spender, True, True
+            return 20.0, flags, spender, True, True, False
         permitted = message.get('permitted', [])
         if 'Batch' not in primary_type:
             permitted = [permitted]
@@ -299,7 +314,7 @@ class SignaturePermitAnalyzer(Analyzer):
             score += 10
             flags.append('Permit2 transfer: far-future deadline (>1 year)')
 
-        return score, flags, spender, unlimited, True
+        return score, flags, spender, unlimited, True, True
 
     def _check_seaport(self, message: Dict) -> tuple:
         """Check Seaport OrderComponents for zero-price listings."""

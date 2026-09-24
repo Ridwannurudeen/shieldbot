@@ -444,6 +444,38 @@ async def test_a_permit2_type_without_its_declared_amount_is_the_largest_grant(t
     assert flag in result.flags
 
 
+PERMIT_TO_SPENDER = {'owner': '0x' + 'a' * 40, 'spender': SPENDER, 'value': '1', 'nonce': '0', 'deadline': '1'}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('typed, reason', [
+    (_permit(PERMIT_TO_SPENDER, None), 'Typed data type does not match its permit standard'),
+    (_permit(PERMIT_TO_SPENDER, BOTH_TYPES), 'Typed data type does not match its permit standard'),
+    (_permit(PERMIT_TO_SPENDER, NEITHER_TYPES), 'Typed data type does not match its permit standard'),
+    (_typed('PermitSingle', {
+        'details': {'token': '0x' + 'c' * 40, 'amount': '1', 'expiration': '0', 'nonce': '0'},
+        'spender': SPENDER, 'sigDeadline': '0',
+    }, _without(PERMIT2_TYPES, 'PermitDetails', 'amount')), 'Typed data type does not match its permit standard'),
+    (_typed('PermitTransferFrom', {
+        'permitted': {'token': '0x' + 'c' * 40, 'amount': '1'}, 'spender': SPENDER, 'nonce': '0', 'deadline': '1',
+    }, _without(PERMIT2_TYPES, 'PermitTransferFrom', 'spender')), 'Typed data type does not match its permit standard'),
+    (_permit(['not', 'an', 'object']), 'Typed data could not be analysed (ValueError)'),
+], ids=['permit-without-types', 'permit-both-declared', 'permit-neither-declared', 'permit2-without-amount',
+        'permit2-transfer-without-spender', 'message-not-an-object'])
+async def test_typed_data_whose_type_cannot_be_read_is_unknown_not_covered(typed, reason):
+    result = await _analyze(SignaturePermitAnalyzer(_service(_facts())), typed)
+    assert result.data['status'] == 'unknown'
+    assert result.data['coverage']['typed_data'] is False
+    assert result.data['reason'] == reason
+
+
+@pytest.mark.asyncio
+async def test_a_readable_permit_to_a_known_spender_is_covered():
+    result = await _analyze(SignaturePermitAnalyzer(_service(_facts())), _permit(PERMIT_TO_SPENDER))
+    assert result.data['status'] == 'ok'
+    assert result.data['coverage'] == {'counterparty': True}
+
+
 @pytest.mark.asyncio
 async def test_unknown_spender_facts_are_unknown_not_clean():
     typed = _typed("PermitSingle", {
