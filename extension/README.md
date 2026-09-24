@@ -35,10 +35,44 @@ version.
 - `content.js` runs in the extension's isolated world and shows the warning in a closed shadow root.
   The two scripts share a per-document key, handed over once at document_start, and every message
   between them carries an HMAC proof made with it; the key itself is never posted.
-- Transactions are sent to the API (`/api/firewall`, through `background.js`) for analysis.
-  Signature requests are shown in the browser only. MetaMask's legacy typed-data form (a list of
-  fields, for `eth_signTypedData` and `_v1`) is shown field by field; typed data that cannot be read
-  is shown as UNPARSEABLE TYPED DATA at High.
+- Transactions and signature requests are sent to the API (`/api/firewall`, through
+  `background.js`) for analysis, and the overlay shows the API's verdict. A signature's overlay also
+  shows what would be signed: MetaMask's legacy typed-data form (a list of fields, for
+  `eth_signTypedData` and `_v1`) field by field, EIP-712 typed data by domain and message, and a
+  `personal_sign` message as text. What the overlay sees for itself only raises the API's verdict:
+  typed data that cannot be read is shown as UNPARSEABLE TYPED DATA at High Risk or above, and
+  `eth_sign`, which signs a raw hash that can be a transaction, is always Block Recommended with a
+  note saying so. The text of a `personal_sign` message and the hash of an `eth_sign` request are not
+  sent (the API judges those methods by their method), and the legacy list of fields is not sent as
+  typed data (the API answers a signature without typed data as Unknown).
+- A signature is analysed on the wallet's current chain, read once when the request is made. It is
+  not bound to that chain: the wallet receives it as the page sent it. When the chain cannot be read,
+  the signature is not analysed, the overlay offers only Reject, and the request is rejected.
+- Sign-In with Ethereum (EIP-4361): `background.js` parses a `personal_sign` message that says it is
+  a sign-in message as strictly as the standard's reference parser (every field in its order and
+  form, nothing else), and compares its `domain`, and its `URI`'s host when the URI has one, with the
+  host of the frame that asked. That host comes from Chrome, as the sender of the content script's
+  message; the page has no say in it, and the API receives no page origin with a firewall call, so
+  the check is made here. A mismatch is Block Recommended without asking the API, and the overlay
+  names both domains. A message that says it is a sign-in message but does not follow EIP-4361 goes
+  to the API and comes back Unknown.
+- EIP-7702: a transaction with an `authorizationList` (type 0x04) is Block Recommended and its
+  overlay lists each delegate address in full, with or without the API. The API adds whether each
+  delegate is a verified contract and how old it is: every delegation is Block Recommended (90 for a
+  verified contract live seven days or more with no theft label, 100 for anything else), and facts
+  that cannot be looked up leave the verdict Unknown. Only each authorization's address is sent,
+  never its signature. An authorization list that is not a non-empty list of objects makes the
+  request UNKNOWN STRUCTURE.
+- Look-alike recipients (address poisoning): `content.js` keeps, in `chrome.storage.local` only, the
+  last 100 recipients the user proceeded with (the recipient of a native send, or of an ERC-20
+  `transfer` or `transferFrom`). A later recipient with the same first and last four hex characters
+  as one of them but a different middle is shown with both addresses in full, their middles marked,
+  and the verdict at least High Risk. Only a Proceed the user chose adds to the list, never an
+  address a page merely asked for, and the list is never sent anywhere.
+- Phishing verdicts are cached by host for an hour, in the service worker and in
+  `chrome.storage.session` (not readable by content scripts, cleared when the browser closes), so a
+  verdict outlives the worker being stopped. Only a verdict is kept, never a failed check.
+- "Why is this risky?" is offered for Caution and above and for Unknown, not on a Safe verdict.
 - Transactions and batches are bound to the wallet's current chain: it is read before the analysis
   and again before forwarding, a mismatch rejects the request, and a forwarded request that did not
   name a chain gets the analysed one as `chainId`.
@@ -62,7 +96,17 @@ second limit below is the case where they did not.
   removes the extension's message listeners, so later checked requests in that document fail
   closed only when the 60-second timer runs out. Strict mode leaves no Proceed or Sign Anyway
   button when the analysis failed, the verdict is Unknown or Block Recommended, the structure is
-  unknown, or typed data cannot be read.
+  unknown, or typed data cannot be read. A verdict the overlay raised itself (a look-alike
+  recipient) keeps Strict mode's reading of the API's verdict: an Unknown stays without Proceed.
+- When the wallet's chain cannot be read, does not match the request, or is one the API does not
+  support (it refuses it as `Unsupported chain ID`), the overlay offers only Block, in Balanced and
+  in Strict mode, and says why. This holds for transactions, signatures and a `wallet_sendCalls`
+  batch with a call on another chain.
+- On a Block Recommended overlay in Balanced mode, Proceed or Sign Anyway counts only when held down
+  for 1.5 seconds, with the pointer or with Enter or Space, by real input: a click does nothing,
+  letting go early cancels, and a fill shows the progress. The half-second delay and visibility rule
+  below apply when the hold starts, and the dialog must stay visible until it ends. Block and Reject
+  stay a single click.
 - A page cannot make it approve a request on the user's behalf: only real input (a trusted click or
   key press) on the warning decides, and a verdict counts only with a proof the page cannot make.
 - It rejects every request it checks from a document that the page can script before the key
@@ -80,7 +124,8 @@ Switching the extension off in its settings removes the warning and the analysis
 checked kinds then go to the wallet without being shown. `inject.js` still runs, and what it does
 without anyone's decision still applies: requests from frames and popups the page can script are
 rejected, transactions and batches are still bound to the wallet's chain (a mismatch or an unknown
-chain is rejected, and the chain is named in the forwarded request), requests without a string
+chain is rejected, and the chain is named in the forwarded request), a signature is rejected when
+the wallet does not say which chain it is on, requests without a string
 method are rejected, and checked methods sent through `send` or `sendAsync` are refused. A switch
 that stops the scripts altogether would need them unregistered through `chrome.scripting` (and the
 `scripting` permission); that is an owner decision.
@@ -129,11 +174,45 @@ that stops the scripts altogether would need them unregistered through `chrome.s
   site.
 - The calls of a batch are analysed one by one; how they work together, and any batch
   capabilities such as a paymaster, are not analysed.
+- EIP-7702 authorizations a wallet signs by itself are not seen: no standard request method signs
+  one (some SDKs propose `wallet_signAuthorization` or `eth_signAuthorization`, which no major wallet
+  implements; MetaMask also refuses a page's `authorizationList`). Only a transaction that carries an
+  `authorizationList` through the checked methods is checked.
+- Sign-In with Ethereum: the scheme a message may name and its address's EIP-55 checksum (which the
+  standard only recommends) are not checked, and a URI without a host (a `did:` URI, for example)
+  leaves the domain as the only thing compared. The check runs in the extension only: the API, SDK
+  and MCP callers get no domain check.
+- The look-alike check knows only recipients the user proceeded with in this browser profile: a
+  first send to a poisoned address is not warned about, a send made in the wallet's own screens is
+  not recorded, and a Proceed on one call of a batch the user then blocks is recorded. Only native
+  sends and ERC-20 `transfer` and `transferFrom` recipients are compared.
+- The RPC proxy (`rpc/proxy.py`) does not check for look-alike recipients: nothing gives it a
+  sender's recent recipients cheaply and reliably (native sends leave no logs, and explorer lists
+  need a key per chain). It passes an `eth_sendTransaction`'s `authorizationList` to the same
+  delegation check, and it rejects a signed type 0x04 transaction sent with
+  `eth_sendRawTransaction`, which it cannot decode (eth-account 0.11 in production).
+- Marketplace orders: a Blur bulk listing signs only a Merkle root of its orders, so their prices
+  cannot be read and it is Unknown; any other type under Blur Exchange's domain than its `Order` is
+  Unknown too. Typed data over 100,000 characters (a large Seaport bulk order, for example) is refused
+  by the API and shown as unavailable.
+- With the wallet on a network the API does not support, nothing can be sent or signed through the
+  overlay, which offers only Block: switch networks, or switch the extension off.
+
+## Translations awaiting review
+
+The Vietnamese and Chinese texts of these keys in `extension/locales/vi` and `extension/locales/zh`
+were written without a native speaker and need the owner's review before release:
+`overlayEthSign`, `overlayEthSignNote`, `overlayChainNoProceed`, `siweMismatch`, `siweUnreadable`,
+`overlayBtnHoldProceed`, `overlayBtnHoldSign`, `overlayHoldNote`, `overlayLookalikeTitle`,
+`overlayLookalikeNote`, `overlayLookalikeNew`, `overlayLookalikePast`, `overlayDelegationTitle`,
+`overlayDelegationNote`, `overlayDelegate`, `overlayDelegateUnreadable`.
 
 ## Tests
 
 `tests/test_extension_overlay_behaviour.py` runs `inject.js` and `content.js` in Node's `vm` against
-DOM and Chrome doubles; `tests/test_extension_chain_resolution.py`, `tests/test_extension_manifest.py`
+DOM and Chrome doubles; `tests/test_extension_signatures.py` covers signatures, sign-in messages,
+delegations, look-alike recipients, the hold, the unknown-chain rule and the phishing cache there and
+in `background.js`; `tests/test_extension_chain_resolution.py`, `tests/test_extension_manifest.py`
 and `tests/test_extension_i18n.py` cover chain binding, the manifest and the translations. They need
 Node.js on the PATH. None of them runs a real wallet: the release gate in `docs/store-listing.md`
 does.

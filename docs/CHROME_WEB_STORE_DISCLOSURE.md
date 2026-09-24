@@ -23,7 +23,7 @@ These are source-tree disclosures for review, not confirmation of the currently 
 - Website content (limited to Web3 transaction data and site origin for phishing checks)
 
 **Justification:**
-The extension intercepts blockchain transaction data (recipient address, sender address, value, encoded function data, and chain ID) to perform security analysis and risk assessment before the user signs the transaction.
+The extension intercepts blockchain transaction data (recipient address, sender address, value, encoded function data, and chain ID) to perform security analysis and risk assessment before the user signs the transaction. For a signature request it sends the signing method and any EIP-712 typed data, never the text of a message or a hash to sign; for an EIP-7702 transaction, each delegate's address, never the signed authorization.
 When phishing protection is enabled, the extension also checks the current site origin (scheme, host, and port only) against phishing intelligence. Full paths, query strings, and page contents are not sent.
 
 ---
@@ -93,7 +93,7 @@ DATA NOT COLLECTED:
 - User credentials or authentication data
 
 STORAGE:
-The browser stores settings, up to 50 transaction scan results, a generated chat identifier and up to 20 recent chat messages using chrome.storage.local. Removing the extension clears its local data, not backend records. The configured ShieldBot backend persists scan scores, findings, agent transaction history, chat messages and identifiers, subscriptions, verdict evidence and publication outbox state in SQLite. Backend retention depends on the deployed configuration and cleanup jobs; no fixed deletion period is promised here.
+The browser stores settings, up to 50 transaction scan results, up to 100 recipient addresses the user chose to send to (for the look-alike address check; never sent anywhere), a generated chat identifier and up to 20 recent chat messages using chrome.storage.local, and phishing results by host for the browser session using chrome.storage.session. Removing the extension clears its local data, not backend records. The configured ShieldBot backend persists scan scores, findings, agent transaction history, chat messages and identifiers, subscriptions, verdict evidence and publication outbox state in SQLite. Backend retention depends on the deployed configuration and cleanup jobs; no fixed deletion period is promised here.
 
 API COMMUNICATION:
 Transaction metadata is sent to the configured API endpoint for security analysis. The extension ships with https://api.shieldbotsecurity.online as the default endpoint, and users can replace it with their own HTTPS server or localhost development server. Communication with the API uses HTTPS encryption (localhost HTTP allowed for development only).
@@ -152,7 +152,7 @@ SECURITY MEASURES:
 **Justification:** Required to request and verify user-approved API origin access at runtime using `chrome.permissions.request()` and `chrome.permissions.contains()`.
 
 ### `storage`
-**Justification:** Required to store user settings (API endpoint URL, firewall enabled/disabled state), local scan history, a generated chat identifier and recent chat messages using chrome.storage.local. API-side storage is separate, as described above.
+**Justification:** Required to store user settings (API endpoint URL, firewall enabled/disabled state), local scan history, the recipients the user chose to send to (for the look-alike address check), a generated chat identifier and recent chat messages using chrome.storage.local, and phishing results for the browser session using chrome.storage.session. API-side storage is separate, as described above.
 
 ### `sidePanel`
 **Justification:** Required to open the ShieldAI assistant, wallet health, guardian alerts, and prompt-injection scanner in Chrome's side panel.

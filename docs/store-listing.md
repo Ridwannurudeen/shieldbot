@@ -32,17 +32,21 @@ When a check cannot finish, for example because a data provider did not answer o
 What it covers
 • Transactions on 8 EVM chains: BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, Optimism and Robinhood Chain.
 • Wallets that give web pages a standard provider (window.ethereum or EIP-6963).
-• Signature requests are shown in readable form, and typed data that looks like a spending approval (a permit) is flagged. Signatures are checked in your browser only; they are not sent to the server.
+• Signature requests are checked by the server like transactions and shown in readable form: permits, Permit2, and Seaport and Blur marketplace orders (including Seaport bulk orders) that give your NFTs away for nothing or pay someone else. A Sign-In with Ethereum message made for another site than the one asking is flagged Block Recommended, and so is every eth_sign request, which can sign a transaction. The text of a message you sign is never sent.
+• EIP-7702 delegations: a transaction that hands your account to a contract is flagged Block Recommended, with the contract's address and whether it is verified and how old it is.
+• Look-alike addresses: when you send to an address that starts and ends like one you sent to before but is a different address, the warning shows both in full with the difference marked.
 • Phishing: the address of each https site you open is checked against phishing intelligence, and a warning banner appears when the site is flagged.
 
 Settings
-• Balanced mode shows every verdict and leaves the choice to you.
+• Balanced mode shows every verdict and leaves the choice to you. On a Block Recommended warning, the button to continue must be held down for 1.5 seconds.
+• When your wallet's network cannot be read or is not supported, the only option is Block.
 • Strict mode removes the option to continue when a check fails, the verdict is Unknown or Block Recommended, or the extension cannot read the request or its typed data.
 • Switching the extension off removes the warning, so requests go to your wallet without one. Requests from frames and popups the page can script are still rejected, the kinds of request it checks are still refused when they come through the older send and sendAsync methods, and transactions are still held to your wallet's current network.
 • English, Tiếng Việt and 中文.
 
 Privacy
-• Sent for analysis: the transaction's recipient, sender, value, call data and chain ID, and the origin (scheme, host and port) of the sites you visit, for the phishing check.
+• Sent for analysis: the transaction's recipient, sender, value, call data and chain ID; for a signature request, the signing method and any EIP-712 typed data, never the text or hash you sign; for an EIP-7702 transaction, each delegate's address; and the origin (scheme, host and port) of the sites you visit, for the phishing check.
+• Kept only in your browser: the last 100 addresses you chose to send to, for the look-alike check, and phishing results for the current browser session.
 • Never collected: private keys, seed phrases, passwords or page content.
 • The default server is api.shieldbotsecurity.online. You can point the extension at your own server in its settings.
 
@@ -53,12 +57,15 @@ Limits
 • While it is switched on, it never passes a request it checks to your wallet without showing it to you first, and a page cannot make it approve a request for you: only your own click or key press on the warning counts, and your wallet receives exactly the request you approved. This covers the ways listed above; a page that reaches your wallet through the wallet's own internal methods or messaging is not checked at all. If no warning appears within 60 seconds, or the page takes it away, or keeps it out of view for 10 seconds while you are on the tab, the request is rejected.
 • A page can still hide or cover the warning, or lay something over it to trick you into clicking (clickjacking). The extension makes this harder (continue and sign buttons wait half a second after the warning appears, and work only once the warning has been fully visible for half a second since it last became visible) but cannot fully prevent it. If the page covers or alters the warning, those buttons do nothing and the warning says why. A page that makes the warning invisible without moving it away leaves the request waiting; nothing is sent. A page-wide filter from another extension (for example a dark-mode filter) can keep the continue button unavailable on that site.
 • A batch of calls (wallet_sendCalls) is checked one call at a time, each with its own warning. How the calls work together is not analysed.
+• A delegation (EIP-7702) your wallet signs in its own screens, and a send you make from the wallet itself, are not seen. The look-alike check only knows addresses you sent to through a page in this browser.
 • It runs on https pages only, in Chrome 111 or later.
 ```
 
 Do not add claims the 3.1.0 extension does not make good on: no "blocks", no simulation or asset
-change claims (they depend on a server-side Tenderly key that is not confirmed), no "Permit2
-analysis", no wallet approval scanning (the Health tab's approval scan returned 503 in production on
+change claims (they depend on a server-side Tenderly key that is not confirmed), no claim that
+signatures are analysed beyond what the text above says (the server reads permits, Permit2, Seaport
+and Blur orders; any other typed data is Unknown), no wallet approval scanning (the Health tab's
+approval scan returned 503 in production on
 BNB Chain, Ethereum and Base on 23 September), and no wallet names until the smoke test in section 3
 has passed with them.
 
@@ -79,7 +86,7 @@ has passed with them.
    `chrome://extensions`, turn on Developer mode, use Load unpacked
    on the `extension` folder, and check: name "ShieldAI Transaction Firewall", version 3.1.0,
    no Errors button. Then run the smoke test below. Do not upload until its release gate (steps 8
-   to 19) has passed on both MetaMask and Rabby.
+   to 28) has passed on both MetaMask and Rabby.
 5. Developer Dashboard, Package tab: upload the zip.
 6. Store listing tab: paste the description above. Replace the screenshots with real 3.1.0 captures
    (see `extension/screenshots/CAPTURE-GUIDE.md`). Do not upload any image that shows screens the
@@ -123,10 +130,12 @@ wallet. Reject every wallet popup unless you mean to spend.
    reason line. Arrow keys move between the popup tabs. Switch the language to Tiếng Việt and 中文:
    no raw key names (such as tabFeed) appear, and the version label reads v3.1.0.
 
-**Release gate.** Steps 8 to 19 check what the automated tests cannot: how this build's request
+**Release gate.** Steps 8 to 28 check what the automated tests cannot: how this build's request
 handling (the frozen request copies, the chain it names, the wrapped prototypes, send and
-sendAsync) and its warning work with a real wallet and a real page. They have not been run yet.
-All must pass on MetaMask and on Rabby before the package is uploaded.
+sendAsync, signatures sent for analysis, the hold on Block Recommended) and its warning work with a
+real wallet and a real page. They have not been run yet. All must pass on MetaMask and on Rabby
+before the package is uploaded. Where a step asks for a request that should be refused, press
+Block or Reject on the warning and never sign.
 
 8. **Everyday calls** (2 minutes). On a dApp, connect the wallet, see the balance, and switch the
    network from the dApp. All work as without the extension, with no ShieldAI warning.
@@ -159,8 +168,12 @@ All must pass on MetaMask and on Rabby before the package is uploaded.
    (the same element with `background:#fff` and without `pointer-events:none`): press Tab until
    Proceed has focus and press Enter; nothing reaches the wallet. Remove the cover, wait a second,
    and Proceed works.
-16. **Block Recommended** (1 minute). On a warning that says BLOCK RECOMMENDED (its border pulses),
-   Proceed still works in Balanced mode: the pulse does not count as the page covering it.
+16. **Block Recommended** (2 minutes). On a warning that says BLOCK RECOMMENDED (its border
+   pulses; step 22 gives one), in Balanced mode the continue button reads "Hold to Proceed Anyway"
+   (or "Hold to Sign Anyway") and a note under it says how. A click does nothing; holding it for
+   about a second and letting go does nothing and the fill empties; holding it for 1.5 seconds
+   continues. Repeat with Tab to the button and Enter held down. The pulse does not count as the
+   page covering it. In Strict mode there is no continue button. Block is a single click.
 17. **Cross-origin frame** (2 minutes). Open a dApp that runs inside a frame from another site (or
    embed one on a test page): the warning appears in the frame, and Proceed works there.
 18. **Frozen requests** (with steps 8, 9, 11 and 12). The wallet receives a frozen copy of each
@@ -170,5 +183,44 @@ All must pass on MetaMask and on Rabby before the package is uploaded.
 19. **Hidden tab** (2 minutes). Start a transaction, switch to another tab for 15 seconds and come
    back: the warning is still there and Proceed works. Repeat with the dApp in a cross-origin frame
    (step 17).
+20. **Signatures reach the server** (2 minutes). Repeat step 3 (a Permit2 signature on Uniswap): the
+   warning now has a verdict badge from the server (Safe, Caution or higher, or Unknown with a
+   reason) above APPROVAL SIGNATURE and the fields. On the test dApp, the Personal Sign button shows
+   the message text and a verdict. With the API endpoint set as in step 6, the same requests show
+   UNKNOWN with the reason, Sign Anyway in Balanced mode and only Reject in Strict mode.
+21. **Sign-In with Ethereum** (2 minutes). Sign in on a dApp that offers Sign-In with Ethereum (the
+   test dApp's SIWE button, or any site whose login message says "wants you to sign in with your
+   Ethereum account"): the warning is not Block Recommended, and Sign Anyway opens the wallet. If
+   the test dApp has a sign-in button for a bad domain, its warning is BLOCK RECOMMENDED and names
+   both domains; press Reject.
+22. **eth_sign** (1 minute). In the console of a dApp page, `ethereum.request({method: 'eth_sign',
+   params: [(await ethereum.request({method: 'eth_accounts'}))[0], '0x' + '00'.repeat(32)]})`: the
+   warning is BLOCK RECOMMENDED, headed RAW HASH SIGNATURE, and says the hash can be a transaction.
+   Press Reject. (A wallet that no longer supports eth_sign refuses it afterwards anyway.)
+23. **Marketplace listing** (3 minutes, if the test wallet holds an NFT). Start an OpenSea listing
+   of one NFT, then of two at once (a bulk listing), at a normal price: neither warning says
+   zero-price or that the consideration goes to other addresses. Reject in the wallet.
+24. **EIP-7702 transaction** (1 minute). In the console of a dApp page, send
+   `ethereum.request({method: 'eth_sendTransaction', params: [{from: (await ethereum.request({method:
+   'eth_accounts'}))[0], to: (await ethereum.request({method: 'eth_accounts'}))[0], authorizationList:
+   [{address: '0x0000000000000000000000000000000000000001', chainId: await ethereum.request({method:
+   'eth_chainId'}), nonce: '0x0', r: '0x' + '1'.repeat(64), s: '0x' + '1'.repeat(64), yParity:
+   '0x0'}]}]})`: the warning is BLOCK RECOMMENDED, headed EIP-7702 delegation, and lists
+   0x000…0001 as the delegate; the server's reason says what is known of it. Press Block: the
+   wallet shows nothing.
+25. **Look-alike recipient** (3 minutes). On the test dApp send a tiny amount to a second address of
+   your own and Proceed (Reject in the wallet is fine: the Proceed is what is remembered). Start a
+   send to the same address with a few characters in its middle changed (keep the first six and
+   last four): the warning shows both addresses in full with their middles marked, and at least
+   HIGH RISK. Press Block. A send to the original address again shows no such warning.
+26. **Unknown network** (2 minutes). Switch the wallet to a network ShieldAI does not support (for
+   example Linea or zkSync Era) and start a transaction and a Personal Sign: each warning offers only
+   Block (or Reject), in Balanced and Strict mode, and says why.
+27. **Explain button** (1 minute). A SAFE verdict has no "Why is this risky?" button; a CAUTION or
+   higher verdict, or an UNKNOWN one, has it.
+28. **Phishing cache** (2 minutes). Open a site, then in `chrome://serviceworker-internals` stop the
+   extension's service worker and reload the site within the hour: the service worker's network
+   panel (Inspect on the worker) shows no second `/api/phishing` request for that host. A phishing
+   site (step 5) still shows the red banner after the worker was stopped.
 
 Record for each wallet: pass or fail per step, and a screenshot of any failure.
