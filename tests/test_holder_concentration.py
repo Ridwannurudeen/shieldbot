@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from adapters.bsc import KNOWN_LOCKERS, BscAdapter
-from analyzers.structural import StructuralAnalyzer
+from analyzers.structural import HOLDERS_UNKNOWN, StructuralAnalyzer
 from core.analyzer import AnalysisContext, AnalyzerResult
 from core.risk_engine import RiskEngine
 from services.contract_service import ContractService, top_holder_share
@@ -170,42 +170,72 @@ async def test_contract_service_excludes_the_chain_lockers(mock_web3_client):
     structural = await _structural(mock_web3_client, record(MIXED, MIXED_DEX))
     mock_web3_client._get_adapter.assert_called_once_with(56)
     assert structural.data["top10_holder_percent"] == 28.0
-    assert structural.data["coverage"]["top10_holder_percent"] is True
+    assert "top10_holder_percent" not in structural.data["coverage"]
     assert structural.data["status"] == "ok"
+
+
+def _covered(name, weight):
+    return AnalyzerResult(name, weight, 0, data={"status": "ok", "coverage": {"field": True}})
+
+
+def _with_covered_others(structural):
+    others = [_covered("market", 0.25), _covered("behavioral", 0.2), _covered("honeypot", 0.15)]
+    return [replace(structural, weight=0.4), *others]
+
+
+NO_RECORD = {
+    "status": "unknown",
+    "reason": "GoPlus has no data for this token on this chain",
+    "data": {},
+}
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "goplus",
+    "goplus, status",
     [
-        record(None),
-        {
-            "status": "unknown",
-            "reason": "GoPlus has no data for this token on this chain",
-            "data": {},
-        },
-        {"status": "unknown", "reason": "GoPlus HTTP 500", "data": {}},
+        (record(None), "ok"),
+        (NO_RECORD, "ok"),
+        ({"status": "unknown", "reason": "GoPlus HTTP 500", "data": {}}, "unknown"),
     ],
     ids=["no-holders", "no-record", "goplus-failed"],
 )
-async def test_a_missing_holder_list_is_unknown_never_unconcentrated(mock_web3_client, goplus):
+async def test_a_missing_holder_list_is_named_not_a_coverage_gap(mock_web3_client, goplus, status):
     structural = await _structural(mock_web3_client, goplus)
     mock_web3_client._get_adapter.assert_not_called()
     assert structural.data["top10_holder_percent"] is None
-    assert structural.data["coverage"]["top10_holder_percent"] is False
-    assert structural.data["status"] == "unknown"
-    assert "Top-10 holder share unknown" in structural.data["reason"]
-    assert not any("holders own" in flag for flag in structural.flags)
+    # Named, and it adds nothing: an add-only signal's absence cannot make a token read safer.
+    assert HOLDERS_UNKNOWN in structural.flags
+    assert structural.score == StructuralAnalyzer(None)._compute(structural.data, {})[0]
+    assert "top10_holder_percent" not in structural.data["coverage"]
+    assert "Top-10" not in (structural.data.get("reason") or "")
+    # Only the scam lookup's own failure leaves the verdict unknown.
+    assert structural.data["status"] == status
+    risk = RiskEngine().compute_from_results(_with_covered_others(structural))
+    assert risk["status"] == status
+    assert HOLDERS_UNKNOWN in risk["critical_flags"]
 
-    risk = RiskEngine().compute_from_results([structural])
-    assert risk["coverage"]["structural"] < 1
-    assert risk["status"] == "unknown"
+
+@pytest.mark.asyncio
+async def test_a_fresh_launch_without_a_holder_list_reads_as_before_apart_from_the_flag(
+    mock_web3_client,
+):
+    mock_web3_client.is_verified_contract.return_value = (False, None)
+    mock_web3_client.get_contract_creation_info.return_value = {"age_days": 0}
+    mock_web3_client.get_ownership_info.return_value = {"owner": WHALE, "is_renounced": False}
+    structural = await _structural(mock_web3_client, NO_RECORD)
+    # _compute is the structural scoring without the holder signal, as before this branch.
+    score, flags = StructuralAnalyzer(None)._compute(structural.data, {})
+    assert (structural.score, structural.flags) == (score, flags + [HOLDERS_UNKNOWN])
+    assert set(structural.data["coverage"]) == {"is_verified", "contract_age_days"}
+    assert structural.data["status"] == "ok"
 
 
 @pytest.mark.asyncio
 async def test_the_signal_does_not_apply_to_a_non_token(mock_web3_client):
     structural = await _structural(mock_web3_client, record(None), is_token=False)
     assert "top10_holder_percent" not in structural.data["coverage"]
+    assert HOLDERS_UNKNOWN not in structural.flags
     assert structural.data["status"] == "ok"
 
 
@@ -214,14 +244,9 @@ async def test_a_safe_blue_chip_is_unchanged(mock_web3_client):
     listed = await _structural(mock_web3_client, record(CAKE_HOLDERS))
     assert listed.data["top10_holder_percent"] == 3.31
     assert listed.data["status"] == "ok"
-    assert not any("holders own" in flag for flag in listed.flags)
-    # The same token scored before the signal existed: a complete scan with no holder data at all.
-    unlisted = StructuralAnalyzer(None)._compute({**listed.data, "coverage": {}}, {})
-    assert (listed.score, listed.flags) == unlisted
-
-
-def _covered(name, weight):
-    return AnalyzerResult(name, weight, 0, data={"status": "ok", "coverage": {"field": True}})
+    assert not any("holders own" in flag or "holder share" in flag for flag in listed.flags)
+    # The same token scored without the holder signal.
+    assert (listed.score, listed.flags) == StructuralAnalyzer(None)._compute(listed.data, {})
 
 
 @pytest.mark.asyncio
@@ -241,12 +266,7 @@ async def test_a_concentrated_token_is_raised_with_a_visible_reason(mock_web3_cl
     )
     assert (reason in concentrated.flags) is bool(points)
 
-    others = [_covered("market", 0.25), _covered("behavioral", 0.2), _covered("honeypot", 0.15)]
-    before = RiskEngine().compute_from_results(
-        [replace(spread, weight=0.4), *others]
-    )
-    after = RiskEngine().compute_from_results(
-        [replace(concentrated, weight=0.4), *others]
-    )
+    before = RiskEngine().compute_from_results(_with_covered_others(spread))
+    after = RiskEngine().compute_from_results(_with_covered_others(concentrated))
     assert after["rug_probability"] == pytest.approx(before["rug_probability"] + points * 0.4)
     assert (reason in after["critical_flags"]) is bool(points)

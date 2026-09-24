@@ -38,11 +38,7 @@ def _results():
                 "is_verified": True,
                 "contract_age_days": 400,
                 "top10_holder_percent": 12.5,
-                "coverage": {
-                    "is_verified": True,
-                    "contract_age_days": True,
-                    "top10_holder_percent": True,
-                },
+                "coverage": {"is_verified": True, "contract_age_days": True},
                 "status": "ok",
             },
         ),
@@ -179,7 +175,10 @@ def test_a_firewall_verdict_links_its_stored_evidence(evidence_api):
         body["policy_mode"],
     )
     assert set(doc["analyzers"]) == {"structural", "market", "behavioral", "honeypot"}
-    assert doc["analyzers"]["structural"]["fields"]["top10_holder_percent"] == "answered"
+    assert doc["analyzers"]["structural"]["fields"] == {
+        "is_verified": "answered",
+        "contract_age_days": "answered",
+    }
     assert doc["analyzers"]["honeypot"]["field_providers"] == {"is_honeypot": "eth_simulateV1"}
     assert doc["observed_block"] == 777
     assert doc["transaction"]["function"] == "approve"

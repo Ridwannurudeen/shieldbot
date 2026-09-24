@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 # honeypots, 7 read 71-100% and 4 of them 90% or more.
 HOLDER_SHARE_ELEVATED = 70
 HOLDER_SHARE_HIGH = 90
+# The flag that names a token's missing holder list. The signal only adds risk, so its absence is
+# named rather than counted as a coverage gap: core/policy.py's required coverage decides status.
 HOLDERS_UNKNOWN = 'Top-10 holder share unknown: no readable GoPlus holder list'
 
 
@@ -42,12 +44,6 @@ class StructuralAnalyzer(Analyzer):
         if data.get('is_contract') is not False:
             data['coverage']['is_verified'] = data.get('is_verified') is not None
             data['coverage']['contract_age_days'] = data.get('contract_age_days') is not None
-            # Holder concentration describes a token. A missing holder list is unknown, never a token
-            # whose supply is spread out.
-            if ctx.is_token is not False:
-                data['coverage']['top10_holder_percent'] = data.get('top10_holder_percent') is not None
-                if not data['coverage']['top10_holder_percent']:
-                    data['reason'] = '; '.join(filter(None, (data.get('reason'), HOLDERS_UNKNOWN)))
         data['status'] = 'unknown' if data.get('status') == 'unknown' or not all(data['coverage'].values()) else 'ok'
         if data['status'] == 'unknown':
             missing = ', '.join(field for field, covered in data['coverage'].items() if not covered)
@@ -65,6 +61,17 @@ class StructuralAnalyzer(Analyzer):
             sniffer_data = await self._sniffer.fetch(ctx.address, chain_id=ctx.chain_id)
 
         score, flags = self._compute(data, sniffer_data)
+        # Holder concentration describes a token. A missing holder list is named and adds nothing,
+        # never read as a token whose supply is spread out.
+        if ctx.is_token is not False and data.get('is_contract') is not False:
+            share = data.get('top10_holder_percent')
+            if share is None:
+                flags.append(HOLDERS_UNKNOWN)
+            elif share >= HOLDER_SHARE_ELEVATED:
+                score = min(score + (20 if share >= HOLDER_SHARE_HIGH else 10), 100)
+                flags.append(
+                    f"Top 10 holders own {share}% of supply (burn, locked, pool and locker addresses excluded)"
+                )
         return AnalyzerResult(
             name=self.name,
             weight=self.weight,
@@ -122,10 +129,4 @@ class StructuralAnalyzer(Analyzer):
             flags.append(f"Scam DB match ({len(d['scam_matches'])} sources)")
         if d.get("ownership_renounced") is False:
             score += 5
-        share = d.get("top10_holder_percent")
-        if d.get("coverage", {}).get("top10_holder_percent") and share >= HOLDER_SHARE_ELEVATED:
-            score += 20 if share >= HOLDER_SHARE_HIGH else 10
-            flags.append(
-                f"Top 10 holders own {share}% of supply (burn, locked, pool and locker addresses excluded)"
-            )
         return min(score, 100), flags

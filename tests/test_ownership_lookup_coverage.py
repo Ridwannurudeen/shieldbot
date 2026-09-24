@@ -16,7 +16,6 @@ from core.analyzer import AnalysisContext, AnalyzerResult
 from core.extension_formatter import format_extension_alert
 from core.risk_engine import RiskEngine
 from services.contract_service import ContractService
-from utils.scam_db import ScamMatches
 
 
 TEST_KEY = "ownership-lookup-key"
@@ -24,9 +23,6 @@ RPC_URL = f"https://rpc.invalid/v2/{TEST_KEY}"
 TOKEN = "0x1111111111111111111111111111111111111111"
 OWNER = Web3.to_checksum_address("0x" + "0" * 38 + "aa")
 UNKNOWN = {"owner": None, "is_renounced": None}
-# A clean scam lookup whose GoPlus record lists a spread-out holder base, so holder concentration
-# is known and these tests measure ownership alone.
-LISTED = {"holders": [{"address": "0x" + "55" * 20, "percent": "0.05", "is_locked": 0}]}
 # A contract with code whose non-reverting fallback answers owner() with no data, as WETH9 does.
 WETH9_CODE = "0x6060604052361561"
 
@@ -171,7 +167,7 @@ ETHOS = {"reputation_score": 80}
 async def _contract_risk(mock_web3_client, ownership):
     mock_web3_client.get_bytecode.return_value = MINT_AND_PROXY
     mock_web3_client.get_ownership_info.return_value = ownership
-    scam_db = MagicMock(check_address=AsyncMock(return_value=ScamMatches(goplus_record=LISTED)))
+    scam_db = MagicMock(check_address=AsyncMock(return_value=[]))
     service = ContractService(mock_web3_client, scam_db)
     with patch("services.contract_service.BSCSCAN_DELAY", 0):
         data = await service.fetch_contract_data(TOKEN, chain_id=4663)
@@ -277,9 +273,7 @@ async def test_weth9_shaped_token_scan_stays_ok(mock_web3_client, chain_id, toke
         return await adapter.get_ownership_info(address)
 
     mock_web3_client.get_ownership_info = ownership
-    service = ContractService(
-        mock_web3_client, MagicMock(check_address=AsyncMock(return_value=ScamMatches(goplus_record=LISTED)))
-    )
+    service = ContractService(mock_web3_client, MagicMock(check_address=AsyncMock(return_value=[])))
     with (
         _node({"result": "0x"}, code=WETH9_CODE),
         patch("time.sleep"),

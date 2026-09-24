@@ -1086,27 +1086,11 @@
    "bytecode_patterns": [],
    "chain_id": 56,
    "changed_by_holder_signal": {
-    "category_scores": {
-     "behavioral": 0,
-     "honeypot": null,
-     "intent": 0,
-     "market": null,
-     "signature": 0,
-     "structural": null
-    },
-    "coverage": {
-     "behavioral": 1,
-     "honeypot": 0.0,
-     "intent": 1,
-     "market": 0.0,
-     "signature": 1,
-     "structural": 0.6666666666666666
-    },
-    "coverage_reasons": {
-     "honeypot": "Token not found on honeypot.is; honeypot.is HTTP 404; GoPlus has no data for this token on this chain; Unknown fields: is_honeypot, buy_tax, sell_tax, can_buy, can_sell",
-     "market": "No DexScreener pairs on requested chain (bsc)",
-     "structural": "Top-10 holder share unknown: no readable GoPlus holder list"
-    }
+    "critical_flags": [
+     "Top-10 holder share unknown: no readable GoPlus holder list",
+     "Market data unknown: No DexScreener pairs on requested chain (bsc)",
+     "Sellability unknown: Token not found on honeypot.is; honeypot.is HTTP 404; GoPlus has no data for this token on this chain; Unknown fields: is_honeypot, buy_tax, sell_tax, can_buy, can_sell"
+    ]
    },
    "description": "PancakeSwap V2 Router",
    "ethos": {
@@ -1219,19 +1203,12 @@
    ],
    "chain_id": 56,
    "changed_by_holder_signal": {
-    "coverage": {
-     "behavioral": 1,
-     "honeypot": 0.2,
-     "intent": 1,
-     "market": 0.0,
-     "signature": 1,
-     "structural": 0.6666666666666666
-    },
-    "coverage_reasons": {
-     "honeypot": "Token not found on honeypot.is; honeypot.is HTTP 404; Unknown fields: is_honeypot, buy_tax, sell_tax, can_sell",
-     "market": "No DexScreener pairs on requested chain (bsc)",
-     "structural": "Top-10 holder share unknown: no readable GoPlus holder list"
-    }
+    "critical_flags": [
+     "destroy() function: the owner may be able to delete the contract",
+     "Top-10 holder share unknown: no readable GoPlus holder list",
+     "Market data unknown: No DexScreener pairs on requested chain (bsc)",
+     "Sellability unknown: Token not found on honeypot.is; honeypot.is HTTP 404; Unknown fields: is_honeypot, buy_tax, sell_tax, can_sell"
+    ]
    },
    "description": "1inch V5 Router",
    "ethos": {
