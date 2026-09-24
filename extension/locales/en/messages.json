@@ -166,5 +166,7 @@
   "healthScanUnavailable": "Approval scan unavailable (HTTP {status})",
   "overlayEthSign": "RAW HASH SIGNATURE (eth_sign)",
   "overlayEthSignNote": "eth_sign signs a raw hash, and that hash can be a transaction: signing it can let this site move everything in your wallet. No ordinary site needs it.",
-  "overlayChainNoProceed": "ShieldAI could not confirm which network this request is for: the wallet's network could not be read, does not match the request, or is not supported. There is no option to continue. Switch the wallet to a supported network and try again."
+  "overlayChainNoProceed": "ShieldAI could not confirm which network this request is for: the wallet's network could not be read, does not match the request, or is not supported. There is no option to continue. Switch the wallet to a supported network and try again.",
+  "siweMismatch": "This sign-in message is for {domain}, but the page asking you to sign it is {origin}. A page that asks you to sign in to another site is likely phishing.",
+  "siweUnreadable": "This message looks like Sign-In with Ethereum but does not follow its standard (EIP-4361), so the site it signs you in to cannot be checked."
 }

@@ -36,7 +36,7 @@ const context = vm.createContext({
     storage: {local: area(local), session: area(session)},
     permissions: {contains: async () => true},
   },
-  URL, AbortSignal, console: {warn() {}, error() {}, log() {}},
+  URL, AbortSignal, TextDecoder, console: {warn() {}, error() {}, log() {}},
   fetch: async (url, options) => {
     if (options && options.body) bodies.push(JSON.parse(options.body));
     return answer(url, options);
@@ -380,4 +380,157 @@ def test_a_failed_phishing_check_is_never_kept_as_a_verdict(failure):
   assert.equal(lookups.length, 2, 'the failed check was not asked again');
 """,
         failure,
+    )
+
+
+# A Sign-In with Ethereum message as EIP-4361 lays it out, for a domain and URI.
+SIWE = r"""
+const siwe = ({domain = 'dapp.example', uri = 'https://dapp.example/login', statement = 'Sign in to the app.',
+  tail = '\nResources:\n- ipfs://bafybeiemxf5abjwjbikoz4mc3a3dla6ual3jsgpdr4cjr3oz3evfyavhwq/'} = {}) =>
+  `${domain} wants you to sign in with your Ethereum account:\n0x${'1234567890'.repeat(4)}\n\n` +
+  (statement === null ? '' : `${statement}\n`) +
+  `\nURI: ${uri}\nVersion: 1\nChain ID: 1\nNonce: 32891756\nIssued At: 2021-09-30T16:25:24Z${tail}`;
+const hex = text => '0x' + Buffer.from(text, 'utf8').toString('hex');
+const signIn = (text, extra = {}) => ({type: 'SHIELDAI_ANALYZE', tx: {signMethod: 'personal_sign', data: text, chainId: 1, ...extra}});
+"""
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["hex", "plain-text", "no-statement", "no-resources", "port-443", "optional-fields", "did-uri"],
+)
+def test_a_sign_in_message_for_the_requesting_page_goes_to_the_api(message):
+    run_node(
+        BACKGROUND_HARNESS
+        + SIWE
+        + r"""
+(async () => {
+  const text = {
+    hex: siwe(),
+    'plain-text': siwe(),
+    'no-statement': siwe({statement: null}),
+    'no-resources': siwe({tail: ''}),
+    'port-443': siwe({domain: 'DApp.Example:443'}),
+    'optional-fields': siwe({tail: '\nExpiration Time: 2031-09-30T16:25:24.000Z\nNot Before: 2021-09-30T16:25:24+02:00\nRequest ID: some-id@1\nResources:'}),
+    'did-uri': siwe({uri: 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'}),
+  }[JSON.parse(process.argv[1])];
+  const response = await respond(signIn(JSON.parse(process.argv[1]) === 'hex' ? hex(text) : text));
+  assert.equal(bodies.length, 1, 'the sign-in message was not analysed by the API');
+  assert.equal(response.result.classification, 'SAFE');
+  assert.equal(response.result.status, 'ok');
+  assert.notEqual((response.result.siwe || {}).state, 'mismatch');
+""",
+        message,
+    )
+
+
+@pytest.mark.parametrize("field", ["domain", "uri", "userinfo", "subdomain", "encoded-hex"])
+def test_a_sign_in_message_for_another_site_is_block_recommended(field):
+    run_node(
+        BACKGROUND_HARNESS
+        + SIWE
+        + r"""
+(async () => {
+  const field = JSON.parse(process.argv[1]);
+  const text = {
+    domain: siwe({domain: 'wallet-login.example'}),
+    uri: siwe({uri: 'https://wallet-login.example/login'}),
+    userinfo: siwe({domain: 'wallet-login.example@dapp.example'}),
+    subdomain: siwe({domain: 'app.dapp.example', uri: 'https://app.dapp.example/'}),
+    'encoded-hex': siwe({domain: 'wallet-login.example'}),
+  }[field];
+  // The page claims to be the site in the message; only the frame's origin, which the browser
+  // gives the extension, counts.
+  const response = await respond(signIn(field === 'encoded-hex' ? hex(text) : text, {origin: 'https://wallet-login.example'}));
+  assert.equal(bodies.length, 0, 'the API was asked although the verdict cannot change');
+  const {result} = response;
+  assert.equal(result.classification, 'BLOCK_RECOMMENDED');
+  assert.equal(result.siwe.state, 'mismatch');
+  assert.equal(result.siwe.origin, 'dapp.example');
+  assert.equal(result.siwe.domain, {domain: 'wallet-login.example', uri: 'wallet-login.example',
+    userinfo: 'wallet-login.example@dapp.example', subdomain: 'app.dapp.example', 'encoded-hex': 'wallet-login.example'}[field]);
+""",
+        field,
+    )
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "two-blank-lines",
+        "version-2",
+        "short-nonce",
+        "bad-issued-at",
+        "trailing-newline",
+        "crlf",
+        "unknown-field",
+        "relative-uri",
+        "statement-on-two-lines",
+        "short-address",
+        "not-first-line",
+    ],
+)
+def test_a_message_that_looks_like_sign_in_but_is_not_eip_4361_is_unknown(variant):
+    run_node(
+        BACKGROUND_HARNESS
+        + SIWE
+        + r"""
+(async () => {
+  const text = {
+    'two-blank-lines': siwe({statement: null}).replace('\n\n\nURI', '\n\nURI'),
+    'version-2': siwe().replace('Version: 1', 'Version: 2'),
+    'short-nonce': siwe().replace('Nonce: 32891756', 'Nonce: 1234'),
+    'bad-issued-at': siwe().replace('2021-09-30T16:25:24Z', 'yesterday'),
+    'trailing-newline': siwe() + '\n',
+    crlf: siwe().replace(/\n/g, '\r\n'),
+    'unknown-field': siwe({tail: '\nSession: 7'}),
+    'relative-uri': siwe({uri: '/login'}),
+    'statement-on-two-lines': siwe({statement: 'Sign in\nplease.'}),
+    'short-address': siwe().replace('0x' + '1234567890'.repeat(4), '0x1234'),
+    'not-first-line': 'Hello!\n' + siwe({domain: 'wallet-login.example'}),
+  }[JSON.parse(process.argv[1])];
+  const {result} = await respond(signIn(text));
+  assert.equal(bodies.length, 1, 'the signature was not analysed by the API');
+  assert.equal(result.status, 'unknown');
+  assert.notEqual(result.classification, 'SAFE');
+  assert.equal(result.siwe.state, 'unreadable');
+  assert.equal(result.coverage.siwe, 0);
+  assert.match(result.coverage_reasons.siwe, /EIP-4361/);
+""",
+        variant,
+    )
+
+
+def test_a_personal_sign_message_that_is_not_a_sign_in_is_left_to_the_api():
+    run_node(
+        BACKGROUND_HARNESS
+        + SIWE
+        + r"""
+(async () => {
+  for (const data of [hex('hello'), 'hello', '0xff00ff']) {
+    const {result} = await respond(signIn(data));
+    assert.equal(result.classification, 'SAFE');
+    assert.equal(result.siwe, undefined);
+  }
+  assert.equal(bodies.length, 3);
+"""
+    )
+
+
+@pytest.mark.parametrize("policy", ["STRICT", "BALANCED"])
+def test_the_overlay_names_both_domains_of_a_sign_in_mismatch(policy):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  storage.policyMode = JSON.parse(process.argv[1]);
+  analyze = async () => ({result: {status: 'ok', partial: false, classification: 'BLOCK_RECOMMENDED', risk_score: 100,
+    coverage: {siwe: 1}, coverage_reasons: {}, siwe: {state: 'mismatch', domain: 'wallet-login.example', origin: 'dapp.example'}}});
+  await intercept('request', {signMethod: 'personal_sign', data: '0x00', chainId: 1}, 'personal_sign');
+  const html = overlay().innerHTML;
+  assert(overlay().querySelector('.shieldai-badge').className.includes('shieldai-badge-block'), html);
+  assert(html.includes('This sign-in message is for wallet-login.example, but the page asking you to sign it is dapp.example'), html);
+  assert.equal(html.includes('id="shieldai-proceed"'), storage.policyMode !== 'STRICT');
+""",
+        policy,
     )

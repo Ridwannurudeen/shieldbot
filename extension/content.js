@@ -720,7 +720,12 @@
     const chainUnknown = Boolean(result) && (result.coverage || {}).chain === false;
     const canSign = !chainUnknown &&
       !(strict && (unparseable || classification === "UNKNOWN" || classification === "BLOCK_RECOMMENDED"));
-    const signalsHtml = ((result && result.danger_signals) || [])
+    // What background.js found in a Sign-In with Ethereum message leads.
+    const signIn = (result && result.siwe) || {};
+    const signInSignals = signIn.state === "mismatch"
+      ? [_t("siweMismatch", { domain: signIn.domain, origin: signIn.origin })]
+      : signIn.state === "unreadable" ? [_t("siweUnreadable")] : [];
+    const signalsHtml = [...signInSignals, ...((result && result.danger_signals) || [])]
       .map((s) => `<li>${escapeHtml(s)}</li>`)
       .join("");
 
