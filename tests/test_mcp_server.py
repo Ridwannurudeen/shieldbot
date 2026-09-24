@@ -580,13 +580,26 @@ class TestToolExecution:
 class TestResources:
     """Test resources/list and resources/read."""
 
-    def test_resources_list_returns_3(self, client):
-        """resources/list returns exactly 3 resources."""
+    def test_resources_list_returns_only_concrete_uris(self, client):
+        """A templated URI is not a resource a client can read as listed."""
         resp = client.post("/mcp/messages", json={
             "jsonrpc": "2.0", "id": 20, "method": "resources/list", "params": {},
         }, headers=AUTH_HEADERS)
         resources = resp.json()["result"]["resources"]
-        assert len(resources) == 3
+        assert [resource["uri"] for resource in resources] == ["shieldbot://threat-feed"]
+
+    def test_resource_templates_list(self, client):
+        """The parameterised resources are listed as URI templates."""
+        resp = client.post("/mcp/messages", json={
+            "jsonrpc": "2.0", "id": 26, "method": "resources/templates/list", "params": {},
+        }, headers=AUTH_HEADERS)
+        templates = resp.json()["result"]["resourceTemplates"]
+        assert {template["uriTemplate"] for template in templates} == {
+            "shieldbot://agent/{agent_id}/health",
+            "shieldbot://wallet/{address}/guardian",
+        }
+        for template in templates:
+            assert set(template) == {"uriTemplate", "name", "description", "mimeType"}
 
     def test_resources_list_uris(self, client):
         """Verify resource URIs."""
@@ -1113,10 +1126,10 @@ def test_simulate_transaction_rejects_a_value_that_is_not_wei(client, mock_conta
 
 
 def test_unknown_results_are_described_to_the_client():
-    from mcp_server.resources import RESOURCE_DEFINITIONS
+    from mcp_server.resources import RESOURCE_TEMPLATE_DEFINITIONS
     from mcp_server.tools import TOOL_DEFINITIONS
     tools = {tool["name"]: tool["description"] for tool in TOOL_DEFINITIONS}
-    resources = {resource["uri"]: resource["description"] for resource in RESOURCE_DEFINITIONS}
+    resources = {resource["uriTemplate"]: resource["description"] for resource in RESOURCE_TEMPLATE_DEFINITIONS}
     for description in (
         tools["check_agent_reputation"],
         tools["simulate_transaction"],

@@ -74,16 +74,18 @@ def test_chains_section_lists_every_scan_chain():
 
 def test_mcp_and_bot_counts_match_the_code():
     from mcp_server.prompts import PROMPT_DEFINITIONS
-    from mcp_server.resources import RESOURCE_DEFINITIONS
+    from mcp_server.resources import RESOURCE_DEFINITIONS, RESOURCE_TEMPLATE_DEFINITIONS
     from mcp_server.tools import TOOL_DEFINITIONS
 
     agent = read(COMPONENTS / "AgentSecurity.tsx")
     roadmap = read(COMPONENTS / "Roadmap.tsx")
+    # MCP lists parameterised resources as templates; the site counts both as resources.
+    resources = len(RESOURCE_DEFINITIONS) + len(RESOURCE_TEMPLATE_DEFINITIONS)
     assert f"{len(TOOL_DEFINITIONS)} security tools" in agent
-    assert f"{len(RESOURCE_DEFINITIONS)} threat resources" in agent
+    assert f"{resources} threat resources" in agent
     assert f"{len(PROMPT_DEFINITIONS)} analysis prompts" in agent
     assert (
-        f"MCP Server ({len(TOOL_DEFINITIONS)} tools, {len(RESOURCE_DEFINITIONS)} resources"
+        f"MCP Server ({len(TOOL_DEFINITIONS)} tools, {resources} resources"
         in roadmap
     )
 

@@ -24,7 +24,7 @@ How the transport behaves (`server.py`):
 
 - `initialize` always answers `protocolVersion: "2024-11-05"`, whatever version the client asks for; the client decides whether to continue.
 - Declared capabilities: `tools`, `resources` and `prompts`, with no sub-capabilities (no `listChanged`, no `subscribe`).
-- Methods handled: `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`. Anything else is Method not found (-32601). A request whose `method` is not a string is Invalid Request (-32600); `params` that is not an object, or a `name`, `uri` or `arguments` of the wrong type inside it, is Invalid params (-32602). Not implemented: `resources/subscribe`, `resources/templates/list`, `logging/setLevel`, `completion/complete`.
+- Methods handled: `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list`, `prompts/get`. Anything else is Method not found (-32601). A request whose `method` is not a string is Invalid Request (-32600); `params` that is not an object, or a `name`, `uri` or `arguments` of the wrong type inside it, is Invalid params (-32602). Not implemented: `resources/subscribe`, `logging/setLevel`, `completion/complete`.
 - A tool that fails validation (a missing or non-string required argument, which the error names; bad address; missing, non-integer or unsupported `chain_id`; unknown tool name) returns a result with `isError: true` and `{"error": "..."}` as its text, delivered on the stream like any other result, and no analysis runs.
 
 ## Authentication
@@ -67,13 +67,13 @@ A tool call:
 
 ## Resources (3)
 
-| URI | Content |
-|-----|---------|
-| `shieldbot://threat-feed` | The 50 latest agent findings. |
-| `shieldbot://agent/{agent_id}/health` | Policy and the 20 latest firewall verdicts of a registered agent. |
-| `shieldbot://wallet/{address}/guardian` | Not implemented: always `status: "unknown"` with null `approvals`. |
+| URI | Listed by | Content |
+|-----|-----------|---------|
+| `shieldbot://threat-feed` | `resources/list` | The 50 latest agent findings. |
+| `shieldbot://agent/{agent_id}/health` | `resources/templates/list` | Policy and the 20 latest firewall verdicts of a registered agent. |
+| `shieldbot://wallet/{address}/guardian` | `resources/templates/list` | Not implemented: always `status: "unknown"` with null `approvals`. |
 
-The two templated URIs are listed by `resources/list` as they are; substitute the value before calling `resources/read`.
+The two parameterised resources are URI templates (`uriTemplate`); substitute the value before calling `resources/read`.
 
 ## Prompts (2)
 

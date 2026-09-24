@@ -20,7 +20,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 
 from mcp_server.tools import TOOL_DEFINITIONS, execute_tool
-from mcp_server.resources import RESOURCE_DEFINITIONS, read_resource
+from mcp_server.resources import RESOURCE_DEFINITIONS, RESOURCE_TEMPLATE_DEFINITIONS, read_resource
 from mcp_server.prompts import PROMPT_DEFINITIONS, get_prompt
 
 logger = logging.getLogger(__name__)
@@ -180,6 +180,10 @@ async def _handle_resources_list(container, params: Dict) -> Dict:
     return {"resources": RESOURCE_DEFINITIONS}
 
 
+async def _handle_resource_templates_list(container, params: Dict) -> Dict:
+    return {"resourceTemplates": RESOURCE_TEMPLATE_DEFINITIONS}
+
+
 async def _handle_resources_read(container, params: Dict) -> Dict:
     uri = params.get("uri")
     if not isinstance(uri, str) or not uri:
@@ -227,6 +231,7 @@ _METHODS = {
     "tools/list": _handle_tools_list,
     "tools/call": _handle_tools_call,
     "resources/list": _handle_resources_list,
+    "resources/templates/list": _handle_resource_templates_list,
     "resources/read": _handle_resources_read,
     "prompts/list": _handle_prompts_list,
     "prompts/get": _handle_prompts_get,
