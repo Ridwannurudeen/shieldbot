@@ -15,6 +15,7 @@ FACTORY = "0x" + "ef" * 20
 PAIR = "0x" + "12" * 20
 LOCKER = "0x" + "34" * 20
 ZERO = "0x0000000000000000000000000000000000000000"
+DEAD = "0x000000000000000000000000000000000000dead"
 
 
 async def _direct(fn, *args):
@@ -25,15 +26,22 @@ def _call(value=None, error=None):
     return MagicMock(call=MagicMock(return_value=value, side_effect=error))
 
 
-def _wire(adapter, pair_lookup=lambda *args: _call(PAIR), balance_error=None):
-    """Answer the factory lookup with pair_lookup(*args); the pair has 1000 LP, 600 in LOCKER."""
+def _wire(
+    adapter,
+    pair_lookup=lambda *args: _call(PAIR),
+    balance_error=None,
+    total_supply=1000,
+    holdings=None,
+):
+    """Answer the factory lookup with pair_lookup(*args); the pair's LP sits in `holdings`."""
+    holdings = {LOCKER: 600} if holdings is None else holdings
     adapter._call_with_retry = _direct
     factory, pair = MagicMock(), MagicMock()
     factory.functions.getPair.side_effect = pair_lookup
     factory.functions.getPool.side_effect = pair_lookup
-    pair.functions.totalSupply.return_value = _call(1000)
+    pair.functions.totalSupply.return_value = _call(total_supply)
     pair.functions.balanceOf.side_effect = lambda holder: _call(
-        600 if holder.lower() == LOCKER else 0, balance_error
+        holdings.get(holder.lower(), 0), balance_error
     )
     adapter.w3 = MagicMock()
     adapter.w3.eth.contract.side_effect = lambda address, abi: pair if abi is PAIR_ABI else factory
@@ -92,6 +100,52 @@ async def test_unreadable_lock_is_unknown(case, reason):
         "status": "unknown",
         "reason": reason,
     }
+
+
+@pytest.mark.asyncio
+async def test_an_empty_pair_is_unknown():
+    adapter = _bsc(factory_address=FACTORY)
+    _wire(adapter, total_supply=0)
+    result = await adapter.get_liquidity_info(TOKEN)
+    assert result == {
+        "is_locked": None,
+        "lock_percentage": None,
+        "pair": PAIR,
+        "status": "unknown",
+        "reason": "Pair has no liquidity",
+    }
+
+
+@pytest.mark.asyncio
+async def test_burn_addresses_alone_cannot_show_that_liquidity_is_not_locked():
+    adapter = _bsc(factory_address=FACTORY)
+    adapter._known_lockers = {ZERO: "Burn Address", DEAD: "Dead Address"}
+    _wire(adapter, holdings={DEAD: 300})
+    result = await adapter.get_liquidity_info(TOKEN)
+    assert result == {
+        "is_locked": None,
+        "lock_percentage": None,
+        "pair": PAIR,
+        "status": "unknown",
+        "reason": "No liquidity lockers known for this chain",
+    }
+
+
+@pytest.mark.asyncio
+async def test_burned_liquidity_over_the_threshold_is_locked_without_lockers():
+    adapter = _bsc(factory_address=FACTORY)
+    adapter._known_lockers = {ZERO: "Burn Address", DEAD: "Dead Address"}
+    _wire(adapter, holdings={DEAD: 900, ZERO: 1})
+    result = await adapter.get_liquidity_info(TOKEN)
+    assert result["is_locked"] is True and result["lock_percentage"] == 90.1
+
+
+@pytest.mark.asyncio
+async def test_a_chain_with_a_contract_locker_still_reports_not_locked():
+    adapter = _bsc(factory_address=FACTORY)
+    _wire(adapter, holdings={DEAD: 300})
+    result = await adapter.get_liquidity_info(TOKEN)
+    assert result["is_locked"] is False and result["lock_percentage"] == 0
 
 
 @pytest.mark.asyncio

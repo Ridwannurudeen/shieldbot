@@ -28,6 +28,12 @@ HONEYPOT_IS_UNSUPPORTED = (
 )
 # check_honeypot and get_tax_info read the same honeypot.is reply, and a scan calls them back to back.
 HONEYPOT_IS_REPLY_TTL_SECONDS = 60
+# Burned LP counts as locked, but these addresses cannot hold a lock, so a chain whose only known
+# "lockers" they are cannot tell unlocked liquidity from liquidity held by an unlisted locker.
+BURN_ADDRESSES = {
+    '0x0000000000000000000000000000000000000000',
+    '0x000000000000000000000000000000000000dead',
+}
 
 # 'etherscan_blockscout': verification from Etherscan, creation from Blockscout, because Etherscan's
 # free tier refuses getcontractcreation on Base and Optimism.
@@ -505,7 +511,7 @@ class EvmAdapter(ChainAdapter):
             )
             total_supply = await self._call_with_retry(pair_contract.functions.totalSupply().call)
             if total_supply == 0:
-                return {'is_locked': False, 'lock_percentage': 0, 'pair': pair_address}
+                return {**unknown, 'pair': pair_address, 'reason': 'Pair has no liquidity'}
 
             locked_amount = 0
             locker_details = []
@@ -526,6 +532,8 @@ class EvmAdapter(ChainAdapter):
 
             lock_percentage = round((locked_amount / total_supply) * 100, 2) if total_supply > 0 else 0
             is_locked = lock_percentage > 50
+            if not is_locked and not set(self._known_lockers) - BURN_ADDRESSES:
+                return {**unknown, 'pair': pair_address, 'reason': 'No liquidity lockers known for this chain'}
 
             return {
                 'is_locked': is_locked,

@@ -21,6 +21,7 @@ from adapters.arbitrum import ArbitrumAdapter
 from adapters.base_chain import BaseChainAdapter
 from adapters.bsc import BscAdapter
 from adapters.eth import EthAdapter
+from adapters.evm_base import BURN_ADDRESSES
 from adapters.opbnb import OpBNBAdapter
 from adapters.optimism import OptimismAdapter
 from adapters.polygon import PolygonAdapter
@@ -36,10 +37,6 @@ ADAPTERS = (
     OptimismAdapter,
     RobinhoodAdapter,
 )
-BURN_ADDRESSES = {
-    "0x0000000000000000000000000000000000000000",
-    "0x000000000000000000000000000000000000dead",
-}
 # Public RPCs refuse bursts: mainnet.base.org answered 429 to back-to-back calls.
 REQUEST_SPACING_SECONDS = 1.0
 
