@@ -98,26 +98,26 @@ class DeployerIndexer:
 
             # Store deployer
             now = time.time()
-            await self._db._db.execute("""
-                INSERT OR IGNORE INTO deployers
-                    (contract_address, chain_id, deployer_address, deploy_tx_hash, indexed_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, (address.lower(), chain_id, deployer.lower(), tx_hash, now))
-
-            # Try to find funder (first incoming tx to deployer)
-            if funder_info:
-                await self._db._db.execute("""
-                    INSERT OR IGNORE INTO funder_links
-                        (deployer_address, chain_id, funder_address, funding_value_wei, indexed_at)
+            async with self._db.transaction() as connection:
+                await connection.execute("""
+                    INSERT OR IGNORE INTO deployers
+                        (contract_address, chain_id, deployer_address, deploy_tx_hash, indexed_at)
                     VALUES (?, ?, ?, ?, ?)
-                """, (
-                    deployer.lower(), chain_id,
-                    funder_info['funder'].lower(),
-                    str(funder_info['value']),
-                    now,
-                ))
+                """, (address.lower(), chain_id, deployer.lower(), tx_hash, now))
 
-            await self._db._db.commit()
+                # Try to find funder (first incoming tx to deployer)
+                if funder_info:
+                    await connection.execute("""
+                        INSERT OR IGNORE INTO funder_links
+                            (deployer_address, chain_id, funder_address, funding_value_wei, indexed_at)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (
+                        deployer.lower(), chain_id,
+                        funder_info['funder'].lower(),
+                        str(funder_info['value']),
+                        now,
+                    ))
+
             logger.info(f"Indexed deployer for {address}: {deployer}")
 
             # Check if this deployer is watched — send alert if so

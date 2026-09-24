@@ -1,7 +1,11 @@
 """Launch alert subscriptions and the durable outbox the Telegram bot polls (no Telegram needed)."""
 
+import asyncio
+import sqlite3
 from types import SimpleNamespace
+from unittest.mock import patch
 
+import aiosqlite
 import pytest
 import pytest_asyncio
 
@@ -121,6 +125,41 @@ async def test_unsubscribe_removes_the_chat_and_cancels_its_queue(db):
         (CHAT_B, TOKENS[0], "unknown", "pending"),
         (CHAT_A, TOKENS[0], "unknown", "cancelled"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_an_unsubscribe_cut_short_is_not_committed_by_another_write(db):
+    await _subscribe(db, CHAT_A, "all", at=500.0)
+    await _subscribe(db, CHAT_B, "all", at=500.0)
+    await _scan(db, TOKENS[0], "unknown", None, at=1000.0)
+    await db.enqueue_launch_alerts(CHAIN, since=900.0)
+    (b_alert,) = [
+        alert
+        for alert in await db.get_pending_launch_alerts(now=1000.0, max_age=3600, per_chat=5, limit=5)
+        if alert["chat_id"] == CHAT_B
+    ]
+    execute = aiosqlite.Connection.execute
+
+    # Patched on the class, so the cancel fails on whichever connection the unsubscribe writes on.
+    async def locked_at_the_cancel(self, sql, parameters=None):
+        if "SET state = 'cancelled'" in sql:
+            raise sqlite3.OperationalError("database is locked")
+        return await execute(self, sql, parameters)
+
+    with patch.object(aiosqlite.Connection, "execute", locked_at_the_cancel):
+        # Another coroutine's write commits while the unsubscribe is between its two statements.
+        unsubscribed, recorded = await asyncio.gather(
+            db.unsubscribe_launch_alerts(CHAT_A, CHAIN),
+            db.set_launch_alert_state(b_alert["id"], "sent"),
+            return_exceptions=True,
+        )
+    await db._db.commit()
+
+    assert isinstance(unsubscribed, sqlite3.OperationalError) and recorded is None
+    subscribed = {row[0] for row in await _subscriptions(db)}
+    assert CHAT_A in subscribed
+    cursor = await db._db.execute("SELECT DISTINCT chat_id FROM launch_alert_outbox WHERE state = 'pending'")
+    assert {row[0] for row in await cursor.fetchall()} <= subscribed
 
 
 @pytest.mark.asyncio

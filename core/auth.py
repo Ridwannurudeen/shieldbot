@@ -109,7 +109,7 @@ class AuthManager:
 
         # No explicit BEGIN: one INSERT of a new row is atomic on its own, and an explicit
         # transaction fails while another request's metering holds the shared connection's
-        # implicit transaction open.
+        # implicit transaction open. A write of several statements uses Database.transaction().
         await self.db._db.execute("""
             INSERT INTO api_keys (key_id, key_hash, owner, tier, rpm_limit, daily_limit, is_active, created_at)
             VALUES (?, ?, ?, ?, ?, ?, 1, ?)

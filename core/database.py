@@ -9,7 +9,8 @@ import os
 import re
 import time
 import logging
-from typing import Dict, List, Optional, Tuple
+from contextlib import asynccontextmanager
+from typing import AsyncIterator, Dict, List, Optional, Tuple
 
 import aiosqlite
 
@@ -225,6 +226,12 @@ class Database:
         # One lease call at a time on that connection: calls that overlap share its implicit transaction, so one
         # call's rollback would undo another's upsert.
         self._lease_calls = asyncio.Lock()
+        # transaction()'s own connection, in autocommit mode: each write transaction is an explicit BEGIN IMMEDIATE
+        # ... COMMIT, so no other coroutine's commit publishes half of it.
+        self._txn_db: Optional[aiosqlite.Connection] = None
+        self._txn_open = asyncio.Lock()
+        # One transaction at a time on that connection.
+        self._txn_lock = asyncio.Lock()
 
     async def initialize(self):
         """Open connection and create tables."""
@@ -256,25 +263,65 @@ class Database:
                     self._lease_db = await self._second_connection()
         return self._lease_db or self._db
 
-    async def _second_connection(self) -> Optional[aiosqlite.Connection]:
-        """Another connection to the database file, or None if close() ran while it was opening."""
-        opened = await aiosqlite.connect(self.db_path)
+    async def _transaction_connection(self) -> aiosqlite.Connection:
+        """transaction()'s connection, opened on first use like the drain's; an in-memory database keeps the shared
+        one, as the drain's does. After close() it raises ValueError and never reopens one."""
+        if self._txn_db is None and self._db is not None and self.db_path != ":memory:":
+            async with self._txn_open:
+                if self._txn_db is None:
+                    self._txn_db = await self._second_connection(autocommit=True)
+        connection = self._txn_db or self._db
+        if connection is None:
+            raise ValueError("Connection closed")
+        return connection
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[aiosqlite.Connection]:
+        """One write transaction, BEGIN IMMEDIATE ... COMMIT, rolled back on any exception, one at a time.
+
+        Await nothing but the yielded connection inside the block: a write on the shared connection would
+        wait for this transaction's lock, and a nested transaction() would wait for itself.
+        """
+        connection = await self._transaction_connection()
+        async with self._txn_lock:
+            try:
+                if connection is not self._db:
+                    await connection.execute("BEGIN IMMEDIATE")
+                yield connection
+                await connection.commit()
+            except BaseException:
+                try:
+                    await connection.rollback()
+                except Exception as e:   # a rollback on a connection closed underneath must not hide the cause
+                    logger.warning("Transaction rollback failed: %s", type(e).__name__)
+                raise
+
+    async def _second_connection(self, autocommit: bool = False) -> Optional[aiosqlite.Connection]:
+        """Another connection to the database file, or None if close() ran while it was opening.
+
+        An autocommit connection opens no implicit transaction, so it writes in one only after an explicit BEGIN.
+        """
+        if autocommit:
+            opened = await aiosqlite.connect(self.db_path, isolation_level=None)
+        else:
+            opened = await aiosqlite.connect(self.db_path)
+        await opened.execute("PRAGMA busy_timeout=5000")
+        # Checked after the last await, so the caller stores the connection before close() can run again.
         if self._db is None:
             # close() ran while this connection was opening; leaving it open would
             # keep aiosqlite's non-daemon worker thread alive past shutdown.
             await opened.close()
             return None
-        await opened.execute("PRAGMA busy_timeout=5000")
         return opened
 
     async def close(self):
         """Close the database connection.
 
         Every handle is detached first: a write landing while a close is awaited must fail, not
-        reopen the drain's or the lease's connection behind us.
+        reopen the drain's, the lease's or transaction()'s connection behind us.
         """
-        drain, lease, shared = self._drain_db, self._lease_db, self._db
-        self._drain_db = self._lease_db = self._db = None
+        drain, lease, txn, shared = self._drain_db, self._lease_db, self._txn_db, self._db
+        self._drain_db = self._lease_db = self._txn_db = self._db = None
         # A connection that fails to close must not leave the others open.
         try:
             if drain:
@@ -284,8 +331,12 @@ class Database:
                 if lease:
                     await lease.close()
             finally:
-                if shared:
-                    await shared.close()
+                try:
+                    if txn:
+                        await txn.close()
+                finally:
+                    if shared:
+                        await shared.close()
 
     async def _create_tables(self):
         await self._db.executescript("""
@@ -1243,17 +1294,17 @@ class Database:
     ) -> int:
         """Log an alert for a watched deployer deploying a new contract. Returns the new row id."""
         now = time.time()
-        cursor = await self._db.execute("""
-            INSERT INTO deployment_alerts
-                (deployer_address, chain_id, new_contract_address, watch_reason, telegram_sent, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (deployer.lower(), chain_id, contract_address.lower(), reason, telegram_sent, now))
-        await self._db.execute("""
-            UPDATE watched_deployers
-            SET alert_count = alert_count + 1, last_alert_at = ?
-            WHERE deployer_address = ? AND (chain_id = ? OR chain_id = 0)
-        """, (now, deployer.lower(), chain_id))
-        await self._db.commit()
+        async with self.transaction() as connection:
+            cursor = await connection.execute("""
+                INSERT INTO deployment_alerts
+                    (deployer_address, chain_id, new_contract_address, watch_reason, telegram_sent, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (deployer.lower(), chain_id, contract_address.lower(), reason, telegram_sent, now))
+            await connection.execute("""
+                UPDATE watched_deployers
+                SET alert_count = alert_count + 1, last_alert_at = ?
+                WHERE deployer_address = ? AND (chain_id = ? OR chain_id = 0)
+            """, (now, deployer.lower(), chain_id))
         return cursor.lastrowid
 
     async def get_deployment_alerts(self, limit: int = 50) -> List[Dict]:
@@ -2600,15 +2651,22 @@ class Database:
 
     async def unsubscribe_launch_alerts(self, chat_id: int, chain_id: int) -> bool:
         """Remove a chat's subscription and cancel its queued alerts; False if it had none."""
-        cursor = await self._db.execute(
+        async with self.transaction() as connection:
+            unsubscribed = await self._unsubscribe_launch_alerts(connection, chat_id, chain_id)
+        return unsubscribed
+
+    async def _unsubscribe_launch_alerts(
+        self, connection: aiosqlite.Connection, chat_id: int, chain_id: int
+    ) -> bool:
+        """The unsubscribe's two statements, inside the caller's transaction."""
+        cursor = await connection.execute(
             "DELETE FROM launch_alert_subscriptions WHERE chat_id = ? AND chain_id = ?",
             (chat_id, chain_id),
         )
-        await self._db.execute("""
+        await connection.execute("""
             UPDATE launch_alert_outbox SET state = 'cancelled', updated_at = ?
             WHERE chat_id = ? AND chain_id = ? AND state = 'pending'
         """, (time.time(), chat_id, chain_id))
-        await self._db.commit()
         return cursor.rowcount == 1
 
     async def move_launch_alert_chat(self, chat_id: int, new_chat_id: int, chain_id: int):
@@ -2617,16 +2675,19 @@ class Database:
         If the new id is already subscribed, that subscription stays and the old queue is
         cancelled.
         """
-        cursor = await self._db.execute(
-            "UPDATE OR IGNORE launch_alert_subscriptions SET chat_id = ? WHERE chat_id = ? AND chain_id = ?",
-            (new_chat_id, chat_id, chain_id),
-        )
-        if cursor.rowcount == 1:
-            await self._db.execute("""
-                UPDATE OR IGNORE launch_alert_outbox SET chat_id = ?, updated_at = ?
-                WHERE chat_id = ? AND chain_id = ? AND state = 'pending'
-            """, (new_chat_id, time.time(), chat_id, chain_id))
-        await self.unsubscribe_launch_alerts(chat_id, chain_id)
+        # One transaction, running the unsubscribe's statements rather than the public method, which would
+        # wait for this transaction's lock.
+        async with self.transaction() as connection:
+            cursor = await connection.execute(
+                "UPDATE OR IGNORE launch_alert_subscriptions SET chat_id = ? WHERE chat_id = ? AND chain_id = ?",
+                (new_chat_id, chat_id, chain_id),
+            )
+            if cursor.rowcount == 1:
+                await connection.execute("""
+                    UPDATE OR IGNORE launch_alert_outbox SET chat_id = ?, updated_at = ?
+                    WHERE chat_id = ? AND chain_id = ? AND state = 'pending'
+                """, (new_chat_id, time.time(), chat_id, chain_id))
+            await self._unsubscribe_launch_alerts(connection, chat_id, chain_id)
 
     async def enqueue_launch_alerts(self, chain_id: int, since: float) -> Optional[float]:
         """Queue alerts for the launch outcomes recorded at or after ``since``.
