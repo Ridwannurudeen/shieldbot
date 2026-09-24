@@ -28,6 +28,7 @@ from services.mempool_service import supports_pending_transactions
 from core.config import Settings
 from core.container import ServiceContainer
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
+from core.telegram_formatter import escape_markdown
 from rpc.router import rpc_router
 from rpc.proxy import RPCProxy
 
@@ -622,9 +623,15 @@ async def uptime_webhook(request: Request, secret: str = ""):
     details      = data.get("alertDetails", "")
 
     if alert_type == "1":
-        msg = f"🚨 *ShieldBot DOWN*\n`{monitor_name}` is unreachable.\nURL: `{monitor_url}`\n{details}"
+        msg = (
+            f"🚨 *ShieldBot DOWN*\n{escape_markdown(monitor_name)} is unreachable.\n"
+            f"URL: {escape_markdown(monitor_url)}\n{escape_markdown(details)}"
+        )
     elif alert_type == "2":
-        msg = f"✅ *ShieldBot Recovered*\n`{monitor_name}` is back online.\nURL: `{monitor_url}`"
+        msg = (
+            f"✅ *ShieldBot Recovered*\n{escape_markdown(monitor_name)} is back online.\n"
+            f"URL: {escape_markdown(monitor_url)}"
+        )
     else:
         return {"ok": True}
 

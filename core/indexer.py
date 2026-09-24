@@ -7,6 +7,7 @@ import time
 from typing import Optional
 
 from adapters.evm_base import _get_explorer_backend
+from core.telegram_formatter import escape_markdown
 from services.explorer_service import _is_address, explorer_service
 from utils.web3_client import UnsupportedChainError
 
@@ -162,7 +163,7 @@ class DeployerIndexer:
             f"\U0001f6a8 *Watched Deployer Alert*\n"
             f"Deployer `{deployer[:10]}...{deployer[-6:]}` deployed a new contract on {chain_name}.\n"
             f"Contract: `{new_contract}`\n"
-            f"Watch reason: {reason} | Severity: {severity}"
+            f"Watch reason: {escape_markdown(reason)} | Severity: {escape_markdown(severity)}"
         )
         try:
             import aiohttp

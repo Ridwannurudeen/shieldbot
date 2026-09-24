@@ -7,8 +7,9 @@ from core.extension_formatter import is_scan_incomplete
 # Replies are sent with Telegram's legacy Markdown, where these characters start an entity.
 _MARKUP = re.compile(r'([_*`\[])')
 # Token names are the token's own text, and flags and reasons can carry its revert strings, so
-# control characters and line separators are blanked before they reach a message.
-CONTROL_CHARACTERS = re.compile(r'[\x00-\x1f\x7f-\x9f\u2028\u2029]')
+# control characters, line separators, and the zero-width and bidirectional controls that can hide or
+# reorder text are blanked before they reach a message.
+CONTROL_CHARACTERS = re.compile(r'[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2066-\u2069]')
 
 
 def escape_markdown(value) -> str:
@@ -24,10 +25,12 @@ def escape_markdown(value) -> str:
 def escape_markdown_lines(text: str) -> str:
     """Escape multi-line AI text line by line, keeping its line breaks.
 
-    The model is asked for ** bold, which legacy Markdown renders as nothing, so it is dropped
-    rather than shown as asterisks.
+    The model is asked for ** bold, which legacy Markdown renders as nothing, and ` code spans, so
+    both are dropped rather than shown as markup characters.
     """
-    return '\n'.join(escape_markdown(line) for line in text.replace('**', '').split('\n'))
+    return '\n'.join(
+        escape_markdown(line) for line in text.replace('**', '').replace('`', '').split('\n')
+    )
 
 
 def format_full_report(

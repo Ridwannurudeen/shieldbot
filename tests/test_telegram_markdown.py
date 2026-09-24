@@ -13,6 +13,7 @@ import pytest
 from telegram import Update
 
 from core.telegram_formatter import format_full_report
+from tests.test_api import client  # noqa: F401
 from tests.test_bot_app import MEMPOOL_ALERT, MEMPOOL_STATS, bot_module, mempool_api  # noqa: F401
 
 HOSTILE = "*_[evil](http://x)"
@@ -156,8 +157,8 @@ def test_scan_and_token_reports_show_untrusted_values_literally(complete):
     assert f"  • {HOSTILE}" in rendered
     assert f"  Trust: {HOSTILE}" in rendered
     if complete:
-        # The model's ** bold renders as nothing, as before; its other text is shown as written.
-        assert f"Risk Score: 90/100\n{HOSTILE}\nSee `set_fee`" in rendered
+        # The model's ** bold and code spans render as plain text; its other text is shown as written.
+        assert f"Risk Score: 90/100\n{HOSTILE}\nSee set_fee" in rendered
     else:
         assert f"  Honeypot: 90/100 ({HOSTILE})" in rendered
 
@@ -437,3 +438,105 @@ async def test_a_token_button_with_an_address_that_is_not_one_is_rejected(entry_
     )
 
     _assert_rejected(entry_points, query.message.reply_text)
+
+
+def test_bidi_and_zero_width_controls_are_blanked():
+    name = "Evil\N{RIGHT-TO-LEFT OVERRIDE}Name\N{ZERO WIDTH SPACE}X\N{LEFT-TO-RIGHT ISOLATE}Y"
+
+    rendered = assert_literal(_report(True, token_info={"name": name, "symbol": "EVL"}))
+
+    assert "Token: Evil Name X Y (EVL)" in rendered
+
+
+# --- Operator alerts sent with Markdown ----------------------------------------------------------
+
+
+@pytest.mark.parametrize("alert_type", ["1", "2"])
+def test_uptime_alerts_show_monitor_text_literally(client, monkeypatch, alert_type):
+    import httpx
+
+    import api as api_module
+
+    sent = []
+
+    class Telegram:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, json):
+            sent.append(json)
+
+    monkeypatch.setattr(httpx, "AsyncClient", Telegram)
+    monkeypatch.setattr(
+        api_module,
+        "container",
+        SimpleNamespace(
+            settings=SimpleNamespace(
+                webhook_secret="s",
+                webhook_allow_query_secret=False,
+                telegram_bot_token="t",
+                telegram_alert_chat_id="1",
+            )
+        ),
+    )
+
+    response = client.post(
+        "/webhook/uptime",
+        data={
+            "alertType": alert_type,
+            "monitorFriendlyName": HOSTILE,
+            "monitorURL": f"https://status.example/{HOSTILE}",
+            "alertDetails": HOSTILE,
+        },
+        headers={"x-webhook-secret": "s"},
+    )
+
+    assert response.status_code == 200
+    (message,) = sent
+    assert message["parse_mode"] == "Markdown"
+    assert_literal(message["text"], HOSTILE)
+
+
+@pytest.mark.asyncio
+async def test_watch_alerts_show_the_watch_record_literally(monkeypatch):
+    import aiohttp
+
+    from core.indexer import DeployerIndexer
+
+    sent = []
+
+    class Response:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def post(self, url, json, timeout):
+            sent.append(json)
+            return Response()
+
+    monkeypatch.setattr(aiohttp, "ClientSession", Session)
+    indexer = DeployerIndexer(
+        MagicMock(),
+        MagicMock(),
+        SimpleNamespace(telegram_bot_token="t", telegram_alert_chat_id="1"),
+    )
+
+    assert await indexer._send_watch_alert(
+        ADDRESS, 56, ADDRESS, {"watch_reason": HOSTILE, "risk_severity": HOSTILE}
+    )
+    assert sent[0]["parse_mode"] == "Markdown"
+    assert_literal(sent[0]["text"], HOSTILE)
