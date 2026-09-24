@@ -89,8 +89,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "simulate_transaction",
         "description": (
             "Simulate a transaction via Tenderly and return success, revert reason, asset changes, warnings, and gas estimate. "
-            "Approval changes are not measured and are returned as null. When simulation is not configured or fails, "
-            "the result has status 'unknown', coverage_reasons naming why, and null measurements."
+            "Approval changes are not measured and are returned as null, so every result has status 'unknown' with "
+            "coverage_reasons naming what is missing; when simulation is not configured or fails, the measurements are null too."
         ),
         "inputSchema": {
             "type": "object",
@@ -108,7 +108,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "check_deployer",
         "description": (
             "Look up the deployer of a contract and return their deployment history and flagged contract count. "
-            "A contract whose deployer is not indexed yet returns status 'unknown' with coverage_reasons and null counts, never zero."
+            "The index holds only contracts ShieldBot has scanned, so the counts can miss the deployer's other contracts "
+            "and the result always has status 'unknown' with coverage_reasons; a contract whose deployer is not indexed yet "
+            "has null counts, never zero."
         ),
         "inputSchema": {
             "type": "object",
@@ -287,6 +289,9 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
         }
 
     return {
+        "status": "unknown",
+        "coverage": {"simulation": 1, "approvals": 0},
+        "coverage_reasons": {"approvals": "Approval changes are not measured"},
         "asset_changes": result.get("asset_deltas"),
         "approvals_granted": None,
         "gas_estimate": result.get("gas_used"),
@@ -316,6 +321,9 @@ async def handle_check_deployer(container, params: Dict) -> Dict:
 
     return {
         "deployer": summary.get("deployer_address"),
+        "status": "unknown",
+        "coverage": {"deployer": 1, "history": 0},
+        "coverage_reasons": {"history": "Only contracts ShieldBot has scanned are indexed, so the deployer's other contracts are not counted"},
         "funded_by": summary.get("funded_by"),
         "contracts_deployed": summary.get("total_contracts", 0),
         "flagged_count": summary.get("high_risk_contracts", 0),

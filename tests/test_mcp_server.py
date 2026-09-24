@@ -279,6 +279,12 @@ class TestToolExecution:
         assert content["deployer"] == "0xdeployer"
         assert content["contracts_deployed"] == 5
         assert content["flagged_count"] == 1
+        # The index holds only scanned contracts, so the counts are never a complete history.
+        from core.extension_formatter import is_scan_incomplete
+        assert content["status"] == "unknown"
+        assert content["coverage"] == {"deployer": 1, "history": 0}
+        assert content["coverage_reasons"] == {"history": "Only contracts ShieldBot has scanned are indexed, so the deployer's other contracts are not counted"}
+        assert is_scan_incomplete(content)
 
     def test_check_deployer_not_indexed(self, client, mock_container):
         """check_deployer handles unindexed contracts."""
@@ -479,6 +485,12 @@ class TestToolExecution:
         assert content["revert_reason"] is None
         assert content["warnings"] == ["approval_to_unknown_spender"]
         assert content["approvals_granted"] is None
+        # Approvals are never measured, so even a successful simulation is incomplete.
+        from core.extension_formatter import is_scan_incomplete
+        assert content["status"] == "unknown"
+        assert content["coverage"] == {"simulation": 1, "approvals": 0}
+        assert content["coverage_reasons"] == {"approvals": "Approval changes are not measured"}
+        assert is_scan_incomplete(content)
 
     def test_simulate_transaction_surfaces_revert(self, client, mock_container):
         """A reverted simulation surfaces its failure and reason."""
@@ -507,6 +519,8 @@ class TestToolExecution:
         assert content["revert_reason"] == "sell blocked"
         assert content["warnings"] == ["transaction reverted"]
         assert content["approvals_granted"] is None
+        assert content["status"] == "unknown"
+        assert content["coverage_reasons"] == {"approvals": "Approval changes are not measured"}
 
     def test_simulate_transaction_failed(self, client, mock_container):
         """A failed simulation reports unknown measurements."""

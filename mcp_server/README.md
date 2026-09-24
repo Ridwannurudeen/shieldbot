@@ -39,8 +39,8 @@ Every tool result is JSON in a single `text` content item.
 | Tool | Required arguments | Notes |
 |------|--------------------|-------|
 | `scan_contract` | `address`, `chain_id` | All analyzers and the risk engine. Incomplete coverage gives `status: "unknown"`, `verdict: "UNKNOWN"`, `risk_display: "Unknown (incomplete provider coverage)"` and `coverage_reasons`. |
-| `simulate_transaction` | `from`, `to`, `data`, `chain_id` | Tenderly simulation. `from` and `to` must be addresses; the optional `value` is wei as a decimal or `0x` hex string (default `"0"`), and anything else is a tool error rather than a simulation with value 0. Approval changes are not measured (`approvals_granted` is always null). When Tenderly is not configured or the simulation fails: `status: "unknown"`, `coverage_reasons.simulation`, null measurements. |
-| `check_deployer` | `address`, `chain_id` | Local deployer index. An unindexed contract gives `status: "unknown"` with null counts. Counts span every chain the deployer is indexed on, and `flagged_count` counts only contracts with a stored HIGH score, so a contract never scored is not counted. `funded_by` is always null. |
+| `simulate_transaction` | `from`, `to`, `data`, `chain_id` | Tenderly simulation. `from` and `to` must be addresses; the optional `value` is wei as a decimal or `0x` hex string (default `"0"`), and anything else is a tool error rather than a simulation with value 0. Approval changes are not measured (`approvals_granted` is always null), so every result is `status: "unknown"` with `coverage_reasons.approvals`. When Tenderly is not configured or the simulation fails, `coverage_reasons.simulation` says so and every measurement is null. |
+| `check_deployer` | `address`, `chain_id` | Local deployer index. Always `status: "unknown"`: see below. An unindexed contract has null counts. Counts span every chain the deployer is indexed on, and `flagged_count` counts only contracts with a stored HIGH score. `funded_by` is always null. |
 | `check_agent_reputation` | `agent_id` | Block rate over at most 1,000 local firewall records. An unregistered agent, or one with no firewall history, gives `status: "unknown"` with null `trust_score` and `block_rate`. |
 | `check_approval_risk` | `wallet_address`, `chain_id` | Not implemented: always `status: "unknown"` with null `approvals`. |
 | `scan_for_injection` | `content` | A fixed regex list. `clean: true` means no listed pattern matched, not that the text is safe. |
@@ -49,6 +49,13 @@ Every tool result is JSON in a single `text` content item.
 | `get_robinhood_launches` | none | Robinhood Chain (4663) launches with their latest scan outcome; `chain_id` defaults to 4663, the only chain with launch discovery. `unknown` and `not_scanned` launches are never safe. Page with `next_cursor`. |
 
 `chain_id` has no default on the address and transaction tools: a call without it is a tool error, and so is a chain the API does not support. Supported chains are the ones the API registers an adapter for, including 56 (BNB Chain) and 4663 (Robinhood Chain).
+
+Two tools never answer `status: "ok"`, even when they succeed, because part of what they report is never measured:
+
+- `simulate_transaction` does not measure approval changes, so a clean simulation says nothing about approvals it grants.
+- `check_deployer` reads an index that holds only contracts ShieldBot has scanned. The deployer's other contracts are not in it, so `contracts_deployed` and `flagged_count` are lower bounds, and a `flagged_count` of 0 does not mean the deployer has no flagged contracts.
+
+Adverse findings from either still stand: a reverted simulation, an outgoing asset change or a non-zero `flagged_count` is real.
 
 A tool call:
 
