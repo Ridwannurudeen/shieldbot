@@ -9,8 +9,10 @@ Trusted labels are:
 
 The proposal file gives the proposed HIGH and MEDIUM thresholds (none when the labels are too few),
 the labels in each 10-point score bin, the precision and recall of the current and proposed thresholds,
-the current thresholds, and where the labels came from, with the outcome rows counted per API key. The
-owner reviews it and edits core/calibration_config.json by hand (docs/TECHNICAL.md).
+the current thresholds, and where the labels came from, with the outcome rows counted per API key. A
+threshold the labels put too low is raised to its minimum (THRESHOLD_CEILINGS), listed under `clamped`
+with the reason, and the proposal is flagged for review (`needs_owner_review`). The owner reviews it
+and edits core/calibration_config.json by hand (docs/TECHNICAL.md).
 
 Usage:
     python scripts/calibrate.py --db /opt/shieldbot/shieldbot.db --out calibration-proposal.json
@@ -29,12 +31,28 @@ from pathlib import Path
 # Allow imports from project root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.calibration import MIN_LABELS, load_calibration, propose_thresholds, score_bins
+from core.calibration import MIN_LABELS, confidence_boost, load_calibration, propose_thresholds, score_bins
+from core.risk_engine import MEDIUM_MATCH_FLOOR
 from eval.benchmark import json_sha256, load_scores
 from eval.dataset import load_dataset
 
 FORMAT_PROPOSAL = "shieldbot-calibration-proposal/1"
 LIVE_CONFIG = str(Path(__file__).resolve().parent.parent / "core" / "calibration_config.json")
+# A proposed threshold at or below its ceiling is raised to one point above it.
+THRESHOLD_CEILINGS = (
+    (
+        "high_threshold",
+        MEDIUM_MATCH_FLOOR,
+        f"At or below {MEDIUM_MATCH_FLOOR}, the score community reports set on their own, three reports "
+        "would make a target HIGH, which the RPC proxy blocks.",
+    ),
+    (
+        "medium_threshold",
+        30,
+        "At or below 30, a score under the extension's CAUTION band (31) would be MEDIUM, which the "
+        "extension reports as missing data.",
+    ),
+)
 
 
 def benchmark_labels(dataset_path: str, scores_path: str) -> list:
@@ -99,6 +117,15 @@ def build_proposal(
     benchmark = benchmark_labels(dataset_path, scores_path) if scores_path else []
     labels = benchmark + [(score, label) for score, label, _ in outcomes]
     proposed = propose_thresholds(labels, current)
+    clamped = []
+    if proposed is not None:
+        for field, ceiling, why in THRESHOLD_CEILINGS:
+            learned = getattr(proposed, field)
+            if learned <= ceiling:
+                setattr(proposed, field, float(ceiling + 1))
+                clamped.append({"field": field, "learned": learned, "proposed": float(ceiling + 1), "reason": why})
+        if clamped:
+            proposed.confidence_boost = confidence_boost(labels, proposed.high_threshold, proposed.medium_threshold)
 
     if proposed is not None:
         reason = None
@@ -125,6 +152,8 @@ def build_proposal(
             "confidence_boost": proposed.confidence_boost,
         },
         "reason": reason,
+        "clamped": clamped,
+        "needs_owner_review": bool(clamped),
         "labels": {
             "total": len(labels),
             "safe": counts["safe"],
@@ -189,6 +218,10 @@ def main(argv=None):
             f"Proposed HIGH {proposal['proposed']['high_threshold']:g}, MEDIUM {proposal['proposed']['medium_threshold']:g} "
             f"(current {proposal['current']['high_threshold']:g}, {proposal['current']['medium_threshold']:g})"
         )
+    for clamp in proposal["clamped"]:
+        print(f"Clamped {clamp['field']} from {clamp['learned']:g} to {clamp['proposed']:g}: {clamp['reason']}")
+    if proposal["needs_owner_review"]:
+        print("Flagged for owner review: the labels asked for a threshold below its minimum")
     print(f"Proposal written to {args.out}; the live config is unchanged")
     return 0
 

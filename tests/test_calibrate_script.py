@@ -98,6 +98,41 @@ async def test_the_live_config_is_untouched(tmp_path, db_path):
     assert LIVE_CONFIG.read_bytes() == before
 
 
+@pytest.mark.asyncio
+async def test_thresholds_the_community_ceiling_could_reach_are_clamped_for_review(
+    tmp_path, db_path
+):
+    path, database = db_path
+    # Scams scored 35 and safes scored 5 would teach HIGH 30 and MEDIUM 20.
+    await _record(database, 35.0, "scam", "key:sb_partner", 15)
+    await _record(database, 5.0, "safe", "key:sb_partner", 10)
+    proposal = _run(tmp_path, path)
+    assert (proposal["proposed"]["high_threshold"], proposal["proposed"]["medium_threshold"]) == (
+        41.0,
+        31.0,
+    )
+    assert [(c["field"], c["learned"], c["proposed"]) for c in proposal["clamped"]] == [
+        ("high_threshold", 30.0, 41.0),
+        ("medium_threshold", 20.0, 31.0),
+    ]
+    assert all(c["reason"] for c in proposal["clamped"])
+    assert proposal["needs_owner_review"] is True
+    # The metrics and the boost describe the clamped pair that would be applied.
+    assert proposal["metrics"]["proposed"]["high"]["threshold"] == 41.0
+    assert proposal["metrics"]["proposed"]["high"]["recall"] == 0.0
+    assert proposal["proposed"]["confidence_boost"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_a_proposal_above_the_ceilings_is_not_clamped(tmp_path, db_path):
+    path, database = db_path
+    await _record(database, 95.0, "scam", "key:sb_partner", 15)
+    await _record(database, 10.0, "safe", "key:sb_partner", 15)
+    proposal = _run(tmp_path, path)
+    assert proposal["clamped"] == []
+    assert proposal["needs_owner_review"] is False
+
+
 def _benchmark(tmp_path, records):
     entries = [
         {"class": "safe", "chain_id": 56, "address": "0x" + "a" * 40, "labeled": "2026-09-24"},

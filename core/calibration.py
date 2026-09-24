@@ -89,14 +89,20 @@ def propose_thresholds(labels: List[Tuple[float, str]], current: CalibrationConf
         min(current.medium_threshold, high - 10),
     )
 
+    return CalibrationConfig(
+        high_threshold=float(high),
+        medium_threshold=float(medium),
+        weight_overrides=dict(current.weight_overrides),
+        confidence_boost=confidence_boost(labels, high, medium),
+    )
+
+
+def confidence_boost(labels: List[Tuple[float, str]], high: float, medium: float) -> float:
+    """The confidence boost for a pair of thresholds: it grows with the share of labels they classify
+    correctly (scam at or above HIGH, safe below MEDIUM) above 80%, up to 10."""
     correct = sum(
         1 for score, label in labels
         if (score >= high and label == 'scam') or (score < medium and label == 'safe')
     )
     accuracy = correct / len(labels)
-    return CalibrationConfig(
-        high_threshold=float(high),
-        medium_threshold=float(medium),
-        weight_overrides=dict(current.weight_overrides),
-        confidence_boost=min((accuracy - 0.8) * 50, 10.0) if accuracy > 0.8 else 0.0,
-    )
+    return min((accuracy - 0.8) * 50, 10.0) if accuracy > 0.8 else 0.0
