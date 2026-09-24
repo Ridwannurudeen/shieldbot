@@ -923,3 +923,62 @@ def test_a_sign_in_message_for_this_site_with_a_malformed_tail_stays_unknown(tai
 """,
         tail,
     )
+
+
+# personal_sign payloads, hex unless named otherwise. The API calls every personal_sign covered and
+# SAFE; what the overlay can read for itself raises that. Bytes that are not readable text hide
+# what is signed, and 32 of them can be a hash a contract accepts through toEthSignedMessageHash.
+HASH_32_BYTES = "0x" + "9c22ff5f21f0b81b" * 4
+PAYLOADS = {
+    "32-byte-hash": (HASH_32_BYTES, "BLOCK_RECOMMENDED"),
+    "40-bytes-not-utf8": ("0x" + "ff" * 40, "HIGH_RISK"),
+    "control-character": ("0x" + "hello\u0007world".encode().hex(), "HIGH_RISK"),
+    "nul-character": ("0x" + "sign\u0000in".encode().hex(), "HIGH_RISK"),
+    "32-char-ascii-sign-in": ("0x" + "Sign in to dapp.example now 1234".encode().hex(), "SAFE"),
+    "tabs-and-line-breaks": ("0x" + "line one\nline two\ttab\r\nend".encode().hex(), "SAFE"),
+    "plain-text": ("hello world", "SAFE"),
+}
+
+
+@pytest.mark.parametrize("payload", list(PAYLOADS))
+def test_a_personal_sign_payload_that_is_not_readable_text_is_raised(payload):
+    data, expected = PAYLOADS[payload]
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const [data, expected] = JSON.parse(process.argv[1]);
+  analyze = async () => ({result: scan({})});
+  await intercept('request', {signMethod: 'personal_sign', data, chainId: 56}, 'personal_sign');
+  const html = overlay().innerHTML;
+  const badge = {BLOCK_RECOMMENDED: 'shieldai-badge-block', HIGH_RISK: 'shieldai-badge-high', SAFE: 'shieldai-badge-safe'}[expected];
+  assert(overlay().querySelector('.shieldai-badge').className.includes(badge), html);
+  if (expected === 'BLOCK_RECOMMENDED') {
+    assert(html.includes('RAW HASH SIGNATURE'), html);
+    assert(html.includes('32 bytes that are not text'), html);
+    assert(html.includes('Hold to Sign Anyway'), 'Balanced mode does not ask for a hold');
+  }
+  if (expected === 'HIGH_RISK') assert(html.includes('UNREADABLE MESSAGE'), html);
+  if (expected === 'SAFE') assert(!html.includes('UNREADABLE MESSAGE') && !html.includes('RAW HASH'), html);
+  // What is signed is shown as the wallet signs it: text as text, anything else as hex.
+  if (!data.startsWith('0x')) assert(html.includes('hello world'), html);
+  if (expected !== 'SAFE') assert(html.includes(data), html);
+""",
+        [data, expected],
+    )
+
+
+def test_strict_mode_removes_sign_anyway_on_a_32_byte_hash():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  storage.policyMode = 'STRICT';
+  analyze = async () => ({result: scan({})});
+  await intercept('request', {signMethod: 'personal_sign', data: '0x' + '9c'.repeat(32), chainId: 56}, 'personal_sign');
+  const html = overlay().innerHTML;
+  assert(overlay().querySelector('.shieldai-badge').className.includes('shieldai-badge-block'), html);
+  assert(!html.includes('id="shieldai-proceed"'), html);
+  assert(html.includes('Strict mode is on'), html);
+"""
+    )

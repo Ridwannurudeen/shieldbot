@@ -637,6 +637,17 @@
     }
   }
 
+  // The text a signed message says, as wallets read it: hex is decoded as
+  // UTF-8 and any other string is signed as written. null when it is not
+  // readable text: not a string, hex that is not UTF-8, or text holding a
+  // control character other than a tab or a line break.
+  function readableText(data) {
+    if (typeof data !== "string") return null;
+    if (!/^0x([0-9a-f]{2})*$/i.test(data)) return data;
+    const text = hexToUtf8(data);
+    return text !== null && !/(?![\t\n\r])\p{Cc}/u.test(text) ? text : null;
+  }
+
   // Typed data the overlay can show: a plain object whose domain and message,
   // when present, are plain objects and whose primaryType, when present, is a
   // string.
@@ -764,6 +775,11 @@
 
     let bodyHtml = "";
     let isPermitLike = false;
+    // A personal_sign whose message is not readable text hides what is
+    // signed, and 32 bytes of it can be a hash (an order's, a permit's) that a
+    // contract accepts through toEthSignedMessageHash, as eth_sign's can.
+    let opaque = false;
+    let opaqueHash = false;
 
     if (legacyFields) {
       const rows = tx.typedData.map((field) => {
@@ -819,11 +835,14 @@
         </div>
       `;
     } else if (isPersonal) {
-      // Decode hex message to readable text
+      // The message as the wallet signs it; one that is not readable text is
+      // shown as it was sent.
       const raw = tx.data || "";
-      const decoded = hexToUtf8(raw);
-      const display = decoded || raw;
-      const isBinary = !decoded && raw.length > 2;
+      const decoded = readableText(raw);
+      const display = decoded === null ? String(raw) : decoded;
+      const isBinary = decoded === null && String(raw).length > 2;
+      opaque = signMethod === "personal_sign" && decoded === null;
+      opaqueHash = opaque && typeof raw === "string" && /^0x[0-9a-f]{64}$/i.test(raw);
 
       bodyHtml = `
         <div class="shieldai-section">
@@ -835,13 +854,16 @@
 
     // The verdict is the API's, and Unknown when the API could not be
     // reached. What the overlay sees for itself only raises it: typed data it
-    // cannot read is at least High Risk, and eth_sign, which signs a raw hash
-    // that can be a transaction, is always Block Recommended.
+    // cannot read, and a personal_sign message that is not readable text, are
+    // at least High Risk; eth_sign, which signs a raw hash that can be a
+    // transaction, and a personal_sign of 32 bytes that are not text, are
+    // Block Recommended.
     const result = response.result;
     const { incomplete, classification: verdict } = result
       ? verdictOf(result) : { incomplete: true, classification: "UNKNOWN" };
     const ethSign = signMethod === "eth_sign";
-    const classification = ethSign ? "BLOCK_RECOMMENDED" : unparseable ? atLeast(verdict, "HIGH_RISK") : verdict;
+    const classification = ethSign || opaqueHash ? atLeast(verdict, "BLOCK_RECOMMENDED")
+      : unparseable || opaque ? atLeast(verdict, "HIGH_RISK") : verdict;
     const why = response.error ? `${_t("overlayCannotReach")} ${response.error}` : incomplete ? unknownReason(result) : "";
     // A signature whose chain could not be read, or is not supported, was
     // not analysed, and inject.js rejects it: there is no Sign Anyway.
@@ -858,9 +880,11 @@
       .map((s) => `<li>${escapeHtml(s)}</li>`)
       .join("");
 
-    const label = ethSign ? _t("overlayEthSign") : unparseable ? _t("overlayUnparseableTyped")
+    const label = ethSign ? _t("overlayEthSign") : opaqueHash ? _t("overlayHashMessage")
+      : opaque ? _t("overlayOpaqueMessage") : unparseable ? _t("overlayUnparseableTyped")
       : isPermitLike ? _t("overlayApprovalSig") : _t("overlaySigRequest");
-    const note = ethSign ? _t("overlayEthSignNote") : unparseable ? _t("overlayUnparseableTypedNote")
+    const note = ethSign ? _t("overlayEthSignNote") : opaqueHash ? _t("overlayHashMessageNote")
+      : opaque ? _t("overlayOpaqueMessageNote") : unparseable ? _t("overlayUnparseableTypedNote")
       : isPermitLike ? _t("overlayApprovalNote") : _t("overlaySigNote");
 
     const overlay = document.createElement("div");

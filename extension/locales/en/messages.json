@@ -179,5 +179,9 @@
   "overlayDelegationTitle": "EIP-7702 delegation",
   "overlayDelegationNote": "This transaction hands your account to the contract below: its code would run as your account and could move everything in it. Continue only if you chose this contract yourself.",
   "overlayDelegate": "Delegate",
-  "overlayDelegateUnreadable": "(address cannot be read)"
+  "overlayDelegateUnreadable": "(address cannot be read)",
+  "overlayHashMessage": "RAW HASH SIGNATURE (personal_sign)",
+  "overlayHashMessageNote": "This asks you to sign 32 bytes that are not text. They can be the hash of an order, a permit or a transaction that a contract will accept as signed by you. No ordinary site needs this.",
+  "overlayOpaqueMessage": "UNREADABLE MESSAGE",
+  "overlayOpaqueMessageNote": "This message is not readable text, so you cannot see what you would be signing. Reject it unless you know exactly what it is."
 }

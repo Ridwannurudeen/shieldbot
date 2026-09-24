@@ -32,7 +32,7 @@ When a check cannot finish, for example because a data provider did not answer o
 What it covers
 • Transactions on 8 EVM chains: BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, Optimism and Robinhood Chain.
 • Wallets that give web pages a standard provider (window.ethereum or EIP-6963).
-• Signature requests are checked by the server like transactions and shown in readable form: permits, Permit2, and Seaport and Blur marketplace orders (including Seaport bulk orders) that give your NFTs away for nothing or pay someone else. A Sign-In with Ethereum message made for another site than the one asking is flagged Block Recommended, and so is every eth_sign request, which can sign a transaction. The text of a message you sign is never sent.
+• Signature requests are checked by the server like transactions and shown in readable form: permits, Permit2, and Seaport and Blur marketplace orders (including Seaport bulk orders) that give your NFTs away for nothing or pay someone else. A Sign-In with Ethereum message made for another site than the one asking is flagged Block Recommended, and so is every eth_sign request, which can sign a transaction. A message that is not readable text is flagged High Risk, and 32 bytes of it, which can be a hash signed in your name, Block Recommended. The text of a message you sign is never sent.
 • EIP-7702 delegations: a transaction that hands your account to a contract is flagged Block Recommended, with the contract's address and whether it is verified and how old it is.
 • Look-alike addresses: when you send to an address that starts and ends like one you sent to before but is a different address, the warning shows both in full with the difference marked.
 • Phishing: the address of each https site you open is checked against phishing intelligence, and a warning banner appears when the site is flagged.
@@ -196,7 +196,10 @@ Block or Reject on the warning and never sign.
 22. **eth_sign** (1 minute). In the console of a dApp page, `ethereum.request({method: 'eth_sign',
    params: [(await ethereum.request({method: 'eth_accounts'}))[0], '0x' + '00'.repeat(32)]})`: the
    warning is BLOCK RECOMMENDED, headed RAW HASH SIGNATURE, and says the hash can be a transaction.
-   Press Reject. (A wallet that no longer supports eth_sign refuses it afterwards anyway.)
+   Press Reject. (A wallet that no longer supports eth_sign refuses it afterwards anyway.) Then
+   `ethereum.request({method: 'personal_sign', params: ['0x' + '9c'.repeat(32), (await
+   ethereum.request({method: 'eth_accounts'}))[0]]})`: BLOCK RECOMMENDED, headed RAW HASH SIGNATURE
+   (personal_sign); press Reject. The test dApp's Personal Sign button (readable text) is not raised.
 23. **Marketplace listing** (3 minutes, if the test wallet holds an NFT). Start an OpenSea listing
    of one NFT, then of two at once (a bulk listing), at a normal price: neither warning says
    zero-price or that the consideration goes to other addresses. Reject in the wallet.

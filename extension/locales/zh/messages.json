@@ -179,5 +179,9 @@
   "overlayDelegationTitle": "EIP-7702 委托",
   "overlayDelegationNote": "此交易会把您的账户交给下方的合约：该合约的代码将以您的账户身份运行，并可能转走其中的全部资产。只有在您亲自选择了此合约时才继续。",
   "overlayDelegate": "委托对象",
-  "overlayDelegateUnreadable": "（无法读取地址）"
+  "overlayDelegateUnreadable": "（无法读取地址）",
+  "overlayHashMessage": "原始哈希签名 (personal_sign)",
+  "overlayHashMessageNote": "此请求要求您签署 32 个不是文本的字节。它们可能是某个订单、授权 (permit) 或交易的哈希，合约会将其视为由您签署。正常网站不需要这样做。",
+  "overlayOpaqueMessage": "无法读取的消息",
+  "overlayOpaqueMessageNote": "此消息不是可读文本，因此您无法看到自己将要签署的内容。除非您确切知道它是什么，否则请拒绝。"
 }
