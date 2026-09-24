@@ -56,7 +56,7 @@ SCAN_INTERVAL_SECONDS = 2.0
 # and three Initialize log windows, then up to three pools simulated twice each.
 SCAN_REQUEST_COST = 22
 # Four guard subjects at five minutes cost 4 * 22 / 300 = 0.293 requests/s of the
-# shared 1 rps budget; after discovery's ~0.15 rps, ~0.557 rps remains for launches.
+# shared 1 rps budget; after discovery's ~0.3 rps, ~0.4 rps remains for launches.
 # Match the publisher's 300 s unchanged-verdict threshold. Guard expiry must also
 # allow scheduling, scan and publication latency; this is a target, not an SLA.
 GUARD_RESCAN_INTERVAL_SECONDS = VERDICT_REFRESH_SECONDS

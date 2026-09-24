@@ -187,13 +187,19 @@ def rate_limited():
 
 
 @pytest.mark.asyncio
-async def test_every_request_takes_one_request_of_the_shared_budget(db, clock):
+async def test_every_call_takes_one_request_of_the_shared_budget(db, clock):
     rpc = FastRpc()
-    await guarded(db, rpc, clock).run()
+    discovery = guarded(db, rpc, clock)
+    await discovery.run()
+    await discovery.run()
 
-    # With the clock frozen, request n waits until n / rate seconds after the first.
-    assert len(rpc.payloads) > 10
-    assert clock.sleeps == pytest.approx([n / RPC_BUDGET_RPS for n in range(1, len(rpc.payloads))])
+    # A header batch takes one request per header, since the public RPC rate-limits each call.
+    # With the clock frozen, each request waits until the calls before it fit the rate.
+    calls = [len(payload) if isinstance(payload, list) else 1 for payload in rpc.payloads]
+    assert len(rpc.payloads) > 10 and max(calls) > 1
+    assert clock.sleeps == pytest.approx(
+        [sum(calls[:n]) / RPC_BUDGET_RPS for n in range(1, len(rpc.payloads))]
+    )
 
 
 @pytest.mark.asyncio

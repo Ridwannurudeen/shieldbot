@@ -18,8 +18,8 @@ RPC reports ``blockTimestamp=0x0``, so timestamps come from block headers.
 
 ``run`` sweeps each source on its own cursor. ``poll`` is the fast path: once the cursors agree
 and the confirmed head is close, a single ``eth_getLogs`` reads every source together with the
-Swap events of the launches being triaged. With an RpcGuard every request takes the shared 4663
-budget, and HTTP 429/5xx statuses and transport failures feed its circuit breaker.
+Swap events of the launches being triaged. With an RpcGuard every JSON-RPC call takes one request
+of the shared 4663 budget, and HTTP 429/5xx statuses and transport failures feed its circuit breaker.
 """
 
 import asyncio
@@ -56,10 +56,11 @@ BACKFILL_BLOCKS = 36_000
 # and swap volume is what pushes a range towards the RPC's 10,000-log limit, so anything larger
 # goes through the per-source sweep, which reads no swaps.
 COMBINED_MAX_BLOCKS = 2_000
-# eth_getBlockByNumber calls per batch request. The guard counts a batch as one request, but the
-# public RPC rate-limits every call in it. Measured on 2026-09-24 with batches sent about once a
-# second: batches of 50 drew HTTP 429 within a few requests, up to four in a row, enough to open
-# the breaker in the middle of a store; batches of 20 and of 10 drew none in thirty requests.
+# eth_getBlockByNumber calls per batch request. The public RPC rate-limits every call in a batch,
+# so a batch takes one request of the guard's budget per call. Measured on 2026-09-24 with batches
+# sent about once a second: batches of 50 drew HTTP 429 within a few requests, up to four in a
+# row, enough to open the breaker in the middle of a store; batches of 20 and of 10 drew none in
+# thirty requests.
 HEADER_BATCH = 10
 MAX_ATTEMPTS = 4
 REQUEST_INTERVAL = 0.5
@@ -525,15 +526,16 @@ class LaunchDiscovery:
     async def _request(self, payload, probe: bool = False):
         """POST with bounded exponential backoff on HTTP 429/5xx, transport and rate-limit errors.
 
-        With a guard, every attempt first takes one request of the shared budget, and only
-        structured outcomes reach the breaker: HTTP 429/5xx and transport exception classes are
+        With a guard, every attempt first takes one request of the shared budget per JSON-RPC call
+        it carries, and only structured outcomes reach the breaker: HTTP 429/5xx and transport exception classes are
         failures, a 200 answer is a success. A rate-limit error recognised by its message is
         retried but reported as neither. An open breaker ends the retries without sending, and
         a probe is a single attempt.
         """
         attempts = 1 if probe else MAX_ATTEMPTS
+        calls = len(payload) if isinstance(payload, list) else 1
         for attempt in range(attempts):
-            await self._pace(probe)
+            await self._pace(calls, probe)
             try:
                 status, body = await self._post(payload)
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
@@ -555,7 +557,7 @@ class LaunchDiscovery:
                 await asyncio.sleep(2**attempt)
         raise RpcUnavailableError(f"RPC unavailable after {attempts} attempts")
 
-    async def _pace(self, probe: bool):
+    async def _pace(self, calls: int, probe: bool):
         if self.guard is None:
             wait = self._last_request + REQUEST_INTERVAL - time.monotonic()
             if wait > 0:
@@ -563,7 +565,7 @@ class LaunchDiscovery:
             self._last_request = time.monotonic()
             return
         try:
-            await self.guard.acquire(1, probe=probe)
+            await self.guard.acquire(calls, probe=probe)
         except BreakerOpenError as exc:
             raise RpcUnavailableError("RPC breaker open") from exc
 

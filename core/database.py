@@ -14,8 +14,8 @@ from core.extension_formatter import is_scan_incomplete
 
 logger = logging.getLogger(__name__)
 
-# Chain 4663 shares 1 rps; discovery uses ~0.15. Four subjects at 22 requests
-# every 300s use 0.293 rps, leaving ~0.557 rps for launches and other work.
+# Chain 4663 shares 1 rps; discovery uses ~0.3. Four subjects at 22 requests
+# every 300s use 0.293 rps, leaving ~0.4 rps for launches and other work.
 GUARD_WATCH_MAX_SUBJECTS = max(0, int(os.getenv("GUARD_WATCH_MAX_SUBJECTS", "4")))
 
 # Eighteen digits keep a cursor block inside SQLite's signed 64-bit integers.

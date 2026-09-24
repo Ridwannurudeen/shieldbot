@@ -17,12 +17,13 @@ from core.database import Database
 from services.launch_discovery import (
     CHAIN_ID,
     CONFIRMATIONS,
+    HEADER_BATCH,
     MAX_BLOCKS_PER_SWEEP,
     SOURCES,
     LaunchDiscovery,
     LaunchDiscoveryError,
 )
-from services.rpc_guard import CLOSED, RpcGuard
+from services.rpc_guard import CLOSED, RPC_BUDGET_RPS, RpcGuard
 
 _real_sleep = asyncio.sleep
 
@@ -144,11 +145,17 @@ async def test_far_behind_sweep_reads_its_headers_within_the_rpc_call_rate(db):
     rpc = CatchupRpc(clock)
     discovery = LaunchDiscovery(db, rpc_url="https://rpc.invalid", guard=guard)
     discovery._post = rpc
-    # The guard's pacing and the retry backoff both wait through asyncio.sleep.
-    with patch("asyncio.sleep", clock.sleep):
+    started = clock.now
+    with (
+        patch("services.launch_discovery.asyncio.sleep", clock.sleep),
+        patch("services.rpc_guard.asyncio.sleep", clock.sleep),
+    ):
         polled = await discovery.poll()
 
     assert rpc.rejected == 0
+    # The guard grants one request per call at its rate, with a burst of one reservation.
+    calls = sum(rpc.calls_by_second.values())
+    assert calls <= RPC_BUDGET_RPS * (clock.now - started) + HEADER_BATCH
     assert guard.state == CLOSED
     assert len(polled["launches"]) == len(LAUNCH_BLOCKS)
     assert await recorded(db) == {token_of(number) for number in LAUNCH_BLOCKS}
