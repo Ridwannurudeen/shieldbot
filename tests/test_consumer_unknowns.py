@@ -1130,13 +1130,13 @@ async def test_api_error_logs_never_include_provider_error_text(consumer_api, mo
     services.db.record_community_report = AsyncMock(side_effect=error)
     monkeypatch.setattr(api, 'token_scanner', SimpleNamespace(check_token=AsyncMock(side_effect=error)))
     monkeypatch.setattr(api, 'tx_scanner', SimpleNamespace(scan_address=AsyncMock(side_effect=error)))
-    request = SimpleNamespace(client=SimpleNamespace(host='leak-' + endpoint), headers={},
+    request = SimpleNamespace(client=SimpleNamespace(host='leak-' + endpoint), headers={}, state=SimpleNamespace(),
                               json=AsyncMock(return_value={'content': 'hello'}))
     calls = {
         'firewall': lambda: api.firewall(api.FirewallRequest(to='0x' + 'a' * 40, sender='0x' + 'b' * 40), request),
         'scan': lambda: api.scan(api.ScanRequest(address='0x' + 'a' * 40)),
         'scan_injection': lambda: api.scan_injection(request),
-        'outcome': lambda: api.report_outcome(api.OutcomeRequest(address='0x' + 'a' * 40, user_decision='proceed')),
+        'outcome': lambda: api.report_outcome(api.OutcomeRequest(address='0x' + 'a' * 40, user_decision='proceed'), request),
         'community_report': lambda: api.community_report(api.CommunityReportRequest(
             address='0x' + 'a' * 40, report_type='scam'), request),
         'agent_chat': lambda: api.agent_chat(api.ChatRequest(message='hello', user_id='test'), request),

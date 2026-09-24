@@ -21,7 +21,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Literal
 
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve_selector
 from utils.chain_info import get_chain_name, get_native_symbol
@@ -500,9 +500,9 @@ class OutcomeRequest(ChainRequest):
     address: str = Field(..., min_length=1, max_length=64)
     chainId: int = Field(default=56, ge=1, le=10_000_000)
     risk_score_at_scan: Optional[float] = Field(default=None, ge=0, le=100)
-    user_decision: str = Field(..., min_length=1, max_length=16)  # "proceed", "block", "ignore"
-    outcome: Optional[str] = Field(default=None, max_length=16)  # "safe", "scam", "unknown"
-    tx_hash: Optional[str] = Field(default=None, max_length=80)
+    user_decision: Literal["proceed", "block", "ignore"]
+    outcome: Optional[Literal["safe", "scam", "unknown"]] = None
+    tx_hash: Optional[str] = Field(default=None, pattern=r"^0x[0-9a-fA-F]{64}$")
 
 
 class CommunityReportRequest(ChainRequest):
@@ -540,6 +540,9 @@ class ExplainRequest(BaseModel):
 
 # Report rate limiter: 5 reports/min per IP
 _report_limiter = RateLimiter(requests_per_minute=5, burst=3)
+
+# Outcome rate limiter for callers without an API key: 10 outcomes/min per IP
+_outcome_limiter = RateLimiter(requests_per_minute=10, burst=5)
 
 # Beta-signup rate limiter: 3 signups/min per IP
 _signup_limiter = RateLimiter(requests_per_minute=3, burst=2)
@@ -1724,8 +1727,24 @@ async def scan_injection(request: Request):
 
 
 @app.post("/api/outcome")
-async def report_outcome(req: OutcomeRequest):
-    """Record a user decision/outcome for a scanned contract (extension reports back)."""
+async def report_outcome(req: OutcomeRequest, request: Request):
+    """Record a user decision/outcome for a scanned contract.
+
+    Anyone may call this, so each row records who sent it: 'key:<key_id>' for a valid API key, or
+    'client'. No score reads these rows; scripts/calibrate.py reads only the API key rows, into a
+    proposal the owner reviews.
+    """
+    # A valid API key is already held to its own quota by the middleware.
+    key_info = getattr(request.state, "api_key_info", None)
+    if key_info is None and not _outcome_limiter.is_allowed(f"outcome:{_get_client_ip(request)}"):
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Outcome rate limit exceeded (10/min)."},
+        )
+
+    if not web3_client or not web3_client.is_valid_address(req.address):
+        raise HTTPException(status_code=400, detail="Invalid address")
+
     try:
         if container and container.db:
             await container.db.record_outcome(
@@ -1735,6 +1754,7 @@ async def report_outcome(req: OutcomeRequest):
                 user_decision=req.user_decision,
                 outcome=req.outcome,
                 tx_hash=req.tx_hash,
+                source=f"key:{key_info['key_id']}" if key_info else "client",
             )
         return {"status": "recorded"}
     except Exception as e:

@@ -543,6 +543,7 @@ class Database:
         await self._db.commit()
         await self._migrate_funding_value_wei()
         await self._migrate_tracked_pairs_chain_id()
+        await self._migrate_outcome_source()
         await self._migrate_reporter_ips()
         await self._create_launch_discovery_tables()
         await self._create_launch_feed_tables()
@@ -619,6 +620,21 @@ class Database:
             if not any(column[1] == "chain_id" for column in await cursor.fetchall()):
                 await self._db.execute(
                     "ALTER TABLE tracked_pairs ADD COLUMN chain_id INTEGER NOT NULL DEFAULT 56"
+                )
+            await self._db.commit()
+        except BaseException:
+            await self._db.rollback()
+            raise
+
+    async def _migrate_outcome_source(self):
+        """Record who sent each outcome event. Rows from before this column came from a route anyone
+        can call, so they are 'client' rows."""
+        await self._db.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = await self._db.execute("PRAGMA table_info(outcome_events)")
+            if not any(column[1] == "source" for column in await cursor.fetchall()):
+                await self._db.execute(
+                    "ALTER TABLE outcome_events ADD COLUMN source TEXT NOT NULL DEFAULT 'client'"
                 )
             await self._db.commit()
         except BaseException:
@@ -748,14 +764,18 @@ class Database:
         user_decision: str = None,
         outcome: str = None,
         tx_hash: str = None,
+        source: str = "client",
     ):
-        """Record a user decision or outcome event."""
+        """Record a user decision or outcome event.
+
+        source is 'key:<key_id>' when a valid API key sent it, otherwise 'client'.
+        """
         now = time.time()
         await self._db.execute("""
             INSERT INTO outcome_events
-                (address, chain_id, risk_score_at_scan, user_decision, outcome, tx_hash, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (address.lower(), chain_id, risk_score_at_scan, user_decision, outcome, tx_hash, now))
+                (address, chain_id, risk_score_at_scan, user_decision, outcome, tx_hash, source, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (address.lower(), chain_id, risk_score_at_scan, user_decision, outcome, tx_hash, source, now))
         await self._db.commit()
 
     # --- Community Reports ---
@@ -1020,7 +1040,7 @@ class Database:
     async def get_outcomes(self, address: str, chain_id: int = 56, limit: int = 50) -> List[Dict]:
         """Get outcome events for an address."""
         cursor = await self._db.execute("""
-            SELECT risk_score_at_scan, user_decision, outcome, tx_hash, created_at
+            SELECT risk_score_at_scan, user_decision, outcome, tx_hash, source, created_at
             FROM outcome_events
             WHERE address = ? AND chain_id = ?
             ORDER BY created_at DESC
@@ -1033,7 +1053,8 @@ class Database:
                 'user_decision': r[1],
                 'outcome': r[2],
                 'tx_hash': r[3],
-                'created_at': r[4],
+                'source': r[4],
+                'created_at': r[5],
             }
             for r in rows
         ]
