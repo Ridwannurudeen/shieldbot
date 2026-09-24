@@ -248,6 +248,7 @@ async def handle_scan_contract(container, params: Dict) -> Dict:
         "verdict": UNKNOWN if alert["status"] == "unknown" else score_data.get("risk_level", UNKNOWN),
         "score": score_data["rug_probability"],
         "flags": score_data.get("critical_flags", []),
+        "notes": score_data.get("notes", []),
         "status": alert["status"],
         "coverage": score_data.get("coverage", {}),
         "coverage_reasons": alert["coverage_reasons"],

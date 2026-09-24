@@ -5,8 +5,9 @@ import itertools
 import json
 import re
 import time
+from dataclasses import replace
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -14,9 +15,12 @@ from eth_utils import keccak
 from fastapi.testclient import TestClient
 from web3 import Web3
 
+from analyzers.structural import HOLDERS_UNKNOWN, StructuralAnalyzer
 from core.analyzer import AnalyzerResult
 from core.database import SCAN_EVIDENCE_RETENTION_DAYS, Database
 from core.risk_engine import RiskEngine
+from services.contract_service import ContractService
+from utils.scam_db import ScamDatabase
 
 TARGET = "0x" + "ab" * 20
 CALLER = "0x9f8E7d6C5b4A39281706f5E4d3C2b1A09f8E7d6C"
@@ -336,6 +340,15 @@ def test_a_router_swap_records_the_analyzers_of_every_path_token(evidence_api, m
             ),
         ),
     )
+
+    def results(ctx):
+        # GoPlus lists no holders for the second token.
+        found = _results()
+        if ctx.address == PATH[1]:
+            found[0].data["notes"] = [HOLDERS_UNKNOWN]
+        return found
+
+    api.container.registry.run_all.side_effect = results
     response = client.post(
         "/api/firewall",
         json={
@@ -362,6 +375,9 @@ def test_a_router_swap_records_the_analyzers_of_every_path_token(evidence_api, m
         body["shield_score"]["risk_level"],
     )
     assert doc["transaction"] is None
+    # Each path token's notes, named by token as the coverage is.
+    assert body["notes"] == doc["notes"] == [f"{PATH[1]}: {HOLDERS_UNKNOWN}"]
+    assert not any(HOLDERS_UNKNOWN in signal for signal in body["danger_signals"])
 
 
 def test_the_legacy_fallback_records_what_it_reports_and_no_analyzers(evidence_api, monkeypatch):
@@ -388,6 +404,7 @@ def test_the_legacy_fallback_records_what_it_reports_and_no_analyzers(evidence_a
     body, stored = _stored(client, response)
     doc = stored["evidence"]
     assert "shield_score" not in body
+    assert body["notes"] == doc["notes"] == []
     assert (doc["target"], doc["classification"], doc["risk_score"]) == (
         TARGET,
         body["classification"],
@@ -428,6 +445,45 @@ def test_a_scan_links_its_stored_evidence(evidence_api, monkeypatch):
         body["classification"],
     )
     assert (doc["risk_level"], doc["analyzers"], doc["transaction"]) == ("low", None, None)
+    assert body["notes"] == doc["notes"] == []
+
+
+NO_RECORD = {
+    "status": "unknown",
+    "reason": "GoPlus has no data for this token on this chain",
+    "data": {},
+}
+
+
+def test_a_clean_launch_with_no_holder_list_has_no_danger_signal_and_one_note(
+    evidence_api, mock_web3_client
+):
+    api, client, _ = evidence_api
+    mock_web3_client.get_contract_creation_info.return_value = {"age_days": 10}
+    structural = StructuralAnalyzer(ContractService(mock_web3_client, ScamDatabase()))
+
+    async def run_all(ctx):
+        with (
+            patch.object(ScamDatabase, "fetch_token_security", new=AsyncMock(return_value=NO_RECORD)),
+            patch("services.contract_service.BSCSCAN_DELAY", 0),
+        ):
+            found = await structural.analyze(ctx)
+        return [replace(found, weight=0.4), *_results()[1:]]
+
+    api.container.registry.run_all.side_effect = run_all
+    response = _firewall(client)
+    assert response.status_code == 200
+    body, stored = _stored(client, response)
+    assert (body["classification"], body["status"]) == ("SAFE", "ok")
+    assert body["danger_signals"] == []
+    assert body["shield_score"]["critical_flags"] == []
+    assert body["notes"] == stored["evidence"]["notes"] == [HOLDERS_UNKNOWN]
+
+    # The cached answer keeps the note it was scored with.
+    cached = _firewall(client).json()
+    assert cached["cached"] is True
+    assert cached["danger_signals"] == []
+    assert cached["notes"] == [HOLDERS_UNKNOWN]
 
 
 def test_a_failed_store_leaves_the_verdict_and_no_url(evidence_api, monkeypatch):

@@ -93,6 +93,7 @@ def format_full_report(
     archetype = risk_output.get('risk_archetype', 'unknown')
     confidence = risk_output.get('confidence_level', 0)
     flags = risk_output.get('critical_flags', [])
+    notes = risk_output.get('notes', [])
     scores = risk_output.get('category_scores', {})
     incomplete = is_scan_incomplete(risk_output) or bool(
         honeypot_data and honeypot_data.get('simulation_failed')
@@ -150,6 +151,13 @@ def format_full_report(
         lines.append('*\U000026A0 Critical Flags:*')
         for flag in flags:
             lines.append(f'  \u2022 {escape_markdown(flag)}')
+        lines.append('')
+
+    # Notes name a check that could not run and only adds risk: information, not a danger signal.
+    if notes:
+        lines.append('*\u2139 Notes:*')
+        for note in notes:
+            lines.append(f'  \u2022 {escape_markdown(note)}')
         lines.append('')
 
     # Category scores

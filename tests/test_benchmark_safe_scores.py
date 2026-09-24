@@ -6,10 +6,10 @@ engine and compares the result with the output of the engine before the redesign
 the fixture): pinned at e820c2e, then at fix/audit-integration b400015, whose bytecode scan reads
 1inch V5's 83197ef0 as destroy() rather than delegatecall (same score, different flag).
 
-The top-10 holder signal changes three entries, recorded per field in `changed_by_holder_signal`:
+The top-10 holder signal changes one entry, recorded per field in `changed_by_holder_signal`:
 cbETH's holders own 91.54% of supply (bridge and staking contracts), which adds 20 structural
-points (4.8 to 11.2), and the two routers list no holders, which only adds the flag that names
-the missing list (their score and coverage are unchanged). No entry changes class.
+points (4.8 to 11.2). The two routers list no holders, which only adds a note (the engine's `notes`,
+not a pinned field). No entry changes class.
 """
 
 import json

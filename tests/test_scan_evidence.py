@@ -34,6 +34,7 @@ RESPONSE = {
     "policy_mode": "BALANCED",
     "shield_score": {"risk_level": "MEDIUM"},
     "danger_signals": [f"Approval from {CALLER}"],
+    "notes": ["Top-10 holder share unknown: no readable GoPlus holder list"],
     "transaction_impact": {"recipient": TARGET},
 }
 
@@ -70,6 +71,7 @@ def test_the_document_carries_the_verdict_and_its_coverage():
     assert doc["coverage"] == RESPONSE["coverage"]
     assert doc["coverage_reasons"] == RESPONSE["coverage_reasons"]
     assert doc["failed_sources"] == ["honeypot"]
+    assert doc["notes"] == ["Top-10 holder share unknown: no readable GoPlus holder list"]
     assert doc["policy_mode"] == "BALANCED"
     assert doc["observed_block"] == 123
     assert doc["analyzers"] == {"structural": {"status": "ok"}}

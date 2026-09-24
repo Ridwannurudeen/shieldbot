@@ -80,6 +80,8 @@ export interface ScanResult {
   partial?: boolean;
   failed_sources?: string[];
   policy_mode?: string;
+  /** Checks that could not run and only add risk: information, not danger signals. */
+  notes?: string[];
   /** keccak256 of the verdict's canonical evidence document. */
   evidence_hash?: string;
   /** Where the evidence document is shown (GET /evidence/{hash}; JSON at /api/evidence/{hash}); null when it could not be stored. Kept 90 days. */

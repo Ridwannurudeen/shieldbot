@@ -1270,6 +1270,7 @@ async def _build_signature_only_response(
         "partial": not covered,
         "failed_sources": [] if covered else ["signature"],
         "policy_mode": "STRICT" if strict_block else "SIGNATURE_ONLY",
+        "notes": [],
     }
 
 
@@ -1573,6 +1574,7 @@ async def _firewall_verdict(req: FirewallRequest, request: Request, trail: Dict)
                 "failed_sources": risk_output.get("failed_sources", []),
                 "policy_mode": risk_output.get("policy_mode", "BALANCED"),
                 "campaign_context": _deployer_ctx,
+                "notes": risk_output.get("notes", []),
             }
 
             # Persist contract score to DB
@@ -1586,7 +1588,7 @@ async def _firewall_verdict(req: FirewallRequest, request: Request, trail: Dict)
                         archetype=risk_output.get("risk_archetype"),
                         category_scores={
                             **risk_output.get("category_scores", {}),
-                            '_scan_metadata': _coverage_fields(alert),
+                            '_scan_metadata': {**_coverage_fields(alert), 'notes': risk_output.get('notes', [])},
                         },
                         flags=risk_output.get("critical_flags"),
                         confidence=alert.get("confidence"),
@@ -1755,6 +1757,7 @@ async def scan(req: ScanRequest):
         result.update(_coverage_fields(alert))
         result['classification'] = alert['risk_classification']
         result['partial'] = alert['status'] == 'unknown' or result.get('partial', False)
+        result['notes'] = []
         if alert['status'] == 'unknown':
             result['risk_level'] = verdicts.UNKNOWN
             result['verdict'] = alert['recommended_action']
@@ -3126,6 +3129,7 @@ def _build_cached_response(
         "partial": alert['status'] == 'unknown',
         "failed_sources": [],
         "policy_mode": policy_mode,
+        "notes": metadata.get('notes', []),
     }
 
 
@@ -3231,6 +3235,7 @@ def _build_fallback_response(
         "raw_checks": _extract_raw_checks(scan),
         "asset_delta": [],
         "policy_mode": policy_mode,
+        "notes": [],
     }
 
 
@@ -3329,6 +3334,7 @@ def _build_unverified_swap_response(
         "partial": True,
         "failed_sources": [source],
         "policy_mode": "BALANCED",
+        "notes": [],
     }
 
 
@@ -3377,6 +3383,7 @@ async def _analyze_router_swap(
     token_summaries = []
     outcomes = {}
     all_results = []
+    notes = []
 
     for token in candidates:
         if not web3_client.is_valid_address(token):
@@ -3430,6 +3437,7 @@ async def _analyze_router_swap(
             for name, outcome in analyzer_outcomes(analyzer_results, risk_output).items()
         })
         all_results += analyzer_results
+        notes += [f"{token_addr}: {note}" for note in risk_output.get("notes", [])]
 
         if not best or risk_output.get("rug_probability", 0) > best["risk_output"].get("rug_probability", 0):
             best = {"address": token_addr, "risk_output": risk_output, "results": analyzer_results}
@@ -3537,6 +3545,7 @@ async def _analyze_router_swap(
         "partial": alert['status'] == 'unknown' or risk_output.get("partial", False),
         "failed_sources": risk_output.get("failed_sources", []),
         "policy_mode": risk_output.get("policy_mode", "BALANCED"),
+        "notes": notes,
     }
 
 

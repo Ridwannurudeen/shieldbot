@@ -1085,13 +1085,6 @@
    "address": "0x10ED43C718714eb63d5aA57B78B54704E256024E",
    "bytecode_patterns": [],
    "chain_id": 56,
-   "changed_by_holder_signal": {
-    "critical_flags": [
-     "Market data unknown: No DexScreener pairs on requested chain (bsc)",
-     "Sellability unknown: Token not found on honeypot.is; honeypot.is HTTP 404; GoPlus has no data for this token on this chain; Unknown fields: is_honeypot, buy_tax, sell_tax, can_buy, can_sell",
-     "Top-10 holder share unknown: no readable GoPlus holder list"
-    ]
-   },
    "description": "PancakeSwap V2 Router",
    "ethos": {
     "ethos_raw_score": null,
@@ -1202,14 +1195,6 @@
     "83197ef0"
    ],
    "chain_id": 56,
-   "changed_by_holder_signal": {
-    "critical_flags": [
-     "destroy() function: the owner may be able to delete the contract",
-     "Market data unknown: No DexScreener pairs on requested chain (bsc)",
-     "Sellability unknown: Token not found on honeypot.is; honeypot.is HTTP 404; Unknown fields: is_honeypot, buy_tax, sell_tax, can_sell",
-     "Top-10 holder share unknown: no readable GoPlus holder list"
-    ]
-   },
    "description": "1inch V5 Router",
    "ethos": {
     "ethos_raw_score": null,

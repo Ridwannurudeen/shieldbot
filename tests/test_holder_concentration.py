@@ -1,4 +1,4 @@
-"""Top-10 holder concentration from GoPlus: one structural signal, Unknown when the list is missing."""
+"""Top-10 holder concentration from GoPlus: one structural signal, and a note when the list is missing."""
 
 from dataclasses import replace
 from unittest.mock import AsyncMock, patch
@@ -9,6 +9,7 @@ from adapters.bsc import KNOWN_LOCKERS, BscAdapter
 from analyzers.structural import HOLDERS_UNKNOWN, StructuralAnalyzer
 from core.analyzer import AnalysisContext, AnalyzerResult
 from core.risk_engine import RiskEngine
+from core.telegram_formatter import escape_markdown, format_full_report
 from services.contract_service import ContractService, top_holder_share
 from utils.scam_db import ScamDatabase
 
@@ -214,11 +215,14 @@ async def test_a_missing_holder_list_is_named_not_a_coverage_gap(mock_web3_clien
     assert structural.data["status"] == status
     risk = RiskEngine().compute_from_results(_with_covered_others(structural))
     assert risk["status"] == status
-    assert risk["critical_flags"][-1] == HOLDERS_UNKNOWN
+    # A note is information, not a danger signal: it has its own list.
+    assert risk["notes"] == [HOLDERS_UNKNOWN]
+    assert HOLDERS_UNKNOWN not in risk["critical_flags"]
 
 
 @pytest.mark.asyncio
-async def test_the_missing_list_note_never_pushes_a_risk_reason_off_the_overlay(mock_web3_client):
+async def test_the_missing_list_note_stays_out_of_the_danger_flags(mock_web3_client):
+    mock_web3_client.is_verified_contract.return_value = (False, None)
     structural = await _structural(mock_web3_client, NO_RECORD)
     honeypot = AnalyzerResult(
         "honeypot",
@@ -229,12 +233,16 @@ async def test_the_missing_list_note_never_pushes_a_risk_reason_off_the_overlay(
     )
     others = [_covered("market", 0.25), _covered("behavioral", 0.2), honeypot]
     risk = RiskEngine().compute_from_results([replace(structural, weight=0.4), *others])
-    assert risk["critical_flags"][:2] == ["Honeypot detected", "Cannot sell token"]
-    assert risk["critical_flags"][-1] == HOLDERS_UNKNOWN
+    assert risk["critical_flags"] == [
+        "Contract not verified",
+        "Honeypot detected",
+        "Cannot sell token",
+    ]
+    assert risk["notes"] == [HOLDERS_UNKNOWN]
 
 
 @pytest.mark.asyncio
-async def test_a_fresh_launch_without_a_holder_list_reads_as_before_apart_from_the_flag(
+async def test_a_fresh_launch_without_a_holder_list_reads_as_before_apart_from_the_note(
     mock_web3_client,
 ):
     mock_web3_client.is_verified_contract.return_value = (False, None)
@@ -242,11 +250,31 @@ async def test_a_fresh_launch_without_a_holder_list_reads_as_before_apart_from_t
     mock_web3_client.get_ownership_info.return_value = {"owner": WHALE, "is_renounced": False}
     structural = await _structural(mock_web3_client, NO_RECORD)
     # _compute is the structural scoring without the holder signal, as before this branch.
-    score, flags = StructuralAnalyzer(None)._compute(structural.data, {})
-    assert (structural.score, structural.flags) == (score, flags)
+    assert StructuralAnalyzer(None)._compute(structural.data, {}) == (
+        structural.score,
+        structural.flags,
+    )
+    assert structural.score == 50
+    assert structural.flags == ["Contract not verified", "Contract age: 0 days"]
     assert structural.data["notes"] == [HOLDERS_UNKNOWN]
     assert set(structural.data["coverage"]) == {"is_verified", "contract_age_days"}
     assert structural.data["status"] == "ok"
+
+    risk = RiskEngine().compute_from_results(_with_covered_others(structural))
+    assert (risk["status"], risk["coverage"]["structural"]) == ("ok", 1.0)
+    assert risk["rug_probability"] == 20.0
+    assert risk["critical_flags"] == ["Contract not verified", "Contract age: 0 days"]
+    assert risk["notes"] == [HOLDERS_UNKNOWN]
+
+
+@pytest.mark.asyncio
+async def test_telegram_shows_notes_under_their_own_heading(mock_web3_client):
+    structural = await _structural(mock_web3_client, NO_RECORD)
+    risk = RiskEngine().compute_from_results(_with_covered_others(structural))
+    lines = format_full_report(risk, structural.data, {}, {}, {}, address=TOKEN).splitlines()
+    assert not any("Critical Flags" in line for line in lines)
+    heading = lines.index("*ℹ Notes:*")
+    assert lines[heading + 1] == "  • " + escape_markdown(HOLDERS_UNKNOWN)
 
 
 @pytest.mark.asyncio

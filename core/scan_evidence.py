@@ -190,6 +190,7 @@ def build_scan_evidence(
         "coverage": response.get("coverage") or {},
         "coverage_reasons": response.get("coverage_reasons") or {},
         "failed_sources": response.get("failed_sources"),
+        "notes": response.get("notes"),
         "analyzers": analyzers,
         "policy_mode": response.get("policy_mode"),
         "observed_block": observed_block,
