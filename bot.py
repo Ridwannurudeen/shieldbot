@@ -370,13 +370,20 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ {result['reason']}")
         return
 
-    # A crowd report writes nothing on chain: three accounts can manufacture one. Only an admin
-    # confirmation (POST /api/admin/blacklist) writes an on-chain 'report' record.
+    # A report writes nothing on chain: three accounts can manufacture a blacklisting.
     if result["blacklisted"]:
-        status = "This address is confirmed as a scam." if result.get("confirmed") else (
-            f"This address now shows as reported by {result['reports']} users in scans. "
-            "It is not confirmed as a scam."
-        )
+        if result.get("confirmed"):
+            status = "This address is confirmed as a scam."
+        elif result.get("already_listed"):
+            status = (
+                f"This address is already reported by {result['reports']} users in scans. "
+                "It is not confirmed as a scam."
+            )
+        else:
+            status = (
+                f"This address now shows as reported by {result['reports']} users in scans. "
+                "It is not confirmed as a scam."
+            )
         response = f"""✅ **Scam Report — Address Blacklisted**
 
 **Address:** `{address}`

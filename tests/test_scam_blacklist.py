@@ -65,6 +65,7 @@ async def test_community_entry_survives_a_restart(db_path):
     db, scam_db = await _open(db_path)
     result = await _report_three_times(scam_db)
     assert (result["accepted"], result["blacklisted"], result["reports"]) == (True, True, 3)
+    assert result["already_listed"] is False
     assert await _lookup(scam_db) == [COMMUNITY_MATCH]
     await db.close()
 
@@ -349,6 +350,7 @@ async def test_a_report_of_a_listed_address_gives_its_count_and_whether_an_admin
         await _report_three_times(scam_db)
         repeat = await scam_db.report_address(ADDRESS, "user-9", 56)
         assert (repeat["blacklisted"], repeat["reports"], repeat["confirmed"]) == (True, 3, False)
+        assert repeat["already_listed"] is True
         other = "0x" + "22" * 20
         assert await scam_db.confirm_scam(other, None, "drainer")
         confirmed = await scam_db.report_address(other, "user-9", 56)
@@ -396,12 +398,12 @@ def test_admin_removes_an_entry(admin_api):
 
 
 @pytest.mark.asyncio
-async def test_the_remove_route_validates_the_chain_itself(admin_api):
+@pytest.mark.parametrize("headers, status", [({}, 403), ({"x-admin-secret": "test-admin"}, 400)])
+async def test_the_remove_route_checks_the_secret_then_the_chain(admin_api, headers, status):
     api, _, services = admin_api
-    request = SimpleNamespace(headers={"x-admin-secret": "test-admin"})
     with pytest.raises(api.HTTPException) as refused:
-        await api.blacklist_remove(ADDRESS, request, chain_id=999999)
-    assert refused.value.status_code == 400
+        await api.blacklist_remove(ADDRESS, SimpleNamespace(headers=headers), chain_id=999999)
+    assert refused.value.status_code == status
     services.scam_db.remove_from_blacklist.assert_not_awaited()
 
 

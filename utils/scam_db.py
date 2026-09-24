@@ -394,7 +394,7 @@ class ScamDatabase:
             return {
                 "accepted": True, "reason": "Already blacklisted.",
                 "blacklisted": True, "reports": entry['reports'], "needed": _REPORT_THRESHOLD,
-                "confirmed": entry['source'] == 'admin',
+                "confirmed": entry['source'] == 'admin', "already_listed": True,
             }
 
         # 4. Add to pending reports (deduplicate by reporter). A report older than an entry's lifetime
@@ -417,7 +417,7 @@ class ScamDatabase:
             return {
                 "accepted": True, "reason": "Threshold met — address blacklisted.",
                 "blacklisted": True, "reports": unique_reporters, "needed": _REPORT_THRESHOLD,
-                "confirmed": False,
+                "confirmed": False, "already_listed": False,
             }
 
         logger.info("Report accepted for %s (%d/%d) from %s", address, unique_reporters, _REPORT_THRESHOLD, uid)

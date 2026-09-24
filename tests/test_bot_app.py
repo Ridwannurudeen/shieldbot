@@ -295,13 +295,21 @@ class TestNoOnChainRecordingPromise:
         return update.message.reply_text.await_args.args[0], recorder, attestor
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("reason", ["Threshold met — address blacklisted.", "Already blacklisted."])
-    async def test_a_community_blacklisting_writes_nothing_on_chain(self, bot_module, monkeypatch, reason):
-        result = {"accepted": True, "reason": reason, "blacklisted": True, "reports": 3, "needed": 3}
+    @pytest.mark.parametrize("already_listed, sentence", [
+        (False, "This address now shows as reported by 3 users in scans. It is not confirmed as a scam."),
+        (True, "This address is already reported by 3 users in scans. It is not confirmed as a scam."),
+    ])
+    async def test_a_community_blacklisting_writes_nothing_on_chain(
+        self, bot_module, monkeypatch, already_listed, sentence,
+    ):
+        result = {
+            "accepted": True, "reason": "", "blacklisted": True, "reports": 3, "needed": 3, "confirmed": False,
+            "already_listed": already_listed,
+        }
         text, recorder, attestor = await self._report(bot_module, monkeypatch, result)
 
         assert "Address Blacklisted" in text
-        assert "This address now shows as reported by 3 users in scans. It is not confirmed as a scam." in text
+        assert sentence in text
         assert "known scam" not in text
         assert "On-chain recording" not in text
         assert "bscscan.com" not in text
