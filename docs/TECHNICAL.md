@@ -611,12 +611,7 @@ Market Metrics:
    ```
    *(WBNB; the returned result depends on current provider coverage.)*
 
-3. **View History** (if any scans recorded):
-   ```
-   /history 0x10ED43C718714eb63d5aA57B78B54704E256024E
-   ```
-
-4. **Report Scam**:
+3. **Report Scam**:
    ```
    /report 0xSCAMADDRESS
    ```
@@ -724,7 +719,6 @@ pytest tests/ --cov=. --cov-report=term-missing
 - [ ] Responds to /start, /help commands
 - [ ] /scan returns risk analysis for contracts
 - [ ] /token shows token name, symbol, and risk score
-- [ ] /history retrieves on-chain scan records
 - [ ] Handles invalid addresses gracefully
 - [ ] Response time <3 seconds for scans
 
