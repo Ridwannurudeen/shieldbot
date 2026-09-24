@@ -24,6 +24,7 @@ MEMPOOL_STATS = {
     "frontruns_detected": 0,
     "suspicious_approvals": 40,
     "monitored_chains": [1, 56],
+    "unobservable_chains": [],
     "counting_since": 1500.0,
 }
 DISCOVERY = {
@@ -58,6 +59,8 @@ def _db(rows=(CONTRACT_ROW,), all_time=None):
             }
         ),
         get_launch_discovery_status=AsyncMock(return_value=dict(DISCOVERY)),
+        get_launch_scan_share=AsyncMock(return_value={"launches": 5, "scanned": 2}),
+        get_verdict_evidence_counts=AsyncMock(return_value={}),
     )
 
 
@@ -96,6 +99,8 @@ def test_stats_without_database_or_mempool_are_unavailable_not_zero(dashboard_ap
         "sandwiches_caught",
         "suspicious_approvals",
         "chains_protected",
+        "mempool_chains_observable",
+        "mempool_chains_unobservable",
         "mempool_counting_since",
         "launch_discovery",
     ):
@@ -111,13 +116,37 @@ def test_stats_with_both_sources_report_values_and_counting_window(dashboard_api
     assert body["sandwiches_caught"] == 3
     assert body["suspicious_approvals"] == 40
     assert body["chains_protected"] == 2
+    assert body["mempool_chains_observable"] == [1, 56]
+    assert body["mempool_chains_unobservable"] == []
     assert body["mempool_counting_since"] == 1500.0
+
+
+def test_stats_count_only_chains_whose_mempool_was_read(dashboard_api):
+    mempool = _mempool()
+    mempool.get_stats.return_value = {**MEMPOOL_STATS, "unobservable_chains": [56]}
+    body = dashboard_api(_container(mempool=mempool)).get("/api/stats").json()
+    assert body["chains_protected"] == 1
+    assert body["mempool_chains_observable"] == [1]
+    assert body["mempool_chains_unobservable"] == [56]
+
+
+def test_stats_with_no_chain_read_protect_none(dashboard_api):
+    mempool = _mempool()
+    mempool.get_stats.return_value = {**MEMPOOL_STATS, "unobservable_chains": [1, 56]}
+    body = dashboard_api(_container(mempool=mempool)).get("/api/stats").json()
+    assert body["chains_protected"] == 0
+    assert body["mempool_chains_observable"] == []
+    assert body["mempool_chains_unobservable"] == [1, 56]
 
 
 def test_stats_report_how_far_launch_discovery_has_read(dashboard_api):
     db = _db()
     body = dashboard_api(_container(db=db)).get("/api/stats").json()
-    assert body["launch_discovery"] == {"chain_id": 4663, **DISCOVERY}
+    assert body["launch_discovery"] == {
+        "chain_id": 4663,
+        **DISCOVERY,
+        "scanned_share": {"window_hours": 24, "launches": 5, "scanned": 2},
+    }
     db.get_launch_discovery_status.assert_awaited_once_with(4663)
 
 

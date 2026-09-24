@@ -30,6 +30,7 @@ from core.auth import TIER_LIMITS, hash_key
 from core.config import Settings
 from core.container import ServiceContainer
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
+from core.unknown_ledger import unknown_ledger
 from rpc.router import rpc_router
 from rpc.proxy import RPCProxy
 
@@ -582,7 +583,7 @@ async def beta_signup(req: BetaSignupRequest, request: Request):
     )
 
 
-@app.post("/webhook/uptime")
+@app.post("/webhook/uptime", include_in_schema=False)
 async def uptime_webhook(request: Request, secret: str = ""):
     """UptimeRobot webhook — forwards status alerts to Telegram.
 
@@ -700,7 +701,7 @@ async def threat_dashboard():
     )
 
 
-@app.get("/test-phishing", response_class=HTMLResponse)
+@app.get("/test-phishing", response_class=HTMLResponse, include_in_schema=False)
 async def test_phishing_page():
     """Stable test page for the phishing banner.
 
@@ -734,7 +735,7 @@ async def test_phishing_page():
 </html>"""
 
 
-@app.get("/test", response_class=HTMLResponse)
+@app.get("/test", response_class=HTMLResponse, include_in_schema=False)
 async def test_page():
     """Test page for the Chrome extension — simulates wallet transactions."""
     return """<!DOCTYPE html>
@@ -1657,7 +1658,7 @@ async def top_campaigns(limit: int = 20):
     return {"campaigns": campaigns, "count": len(campaigns)}
 
 
-@app.post("/api/keys")
+@app.post("/api/keys", include_in_schema=False)
 async def create_api_key(request: Request):
     """Create a new API key. Requires ADMIN_SECRET header."""
     admin_secret = request.headers.get("x-admin-secret")
@@ -1806,7 +1807,7 @@ async def verify_free_key(req: FreeKeyVerifyRequest):
     )
 
 
-@app.get("/api/admin/stats")
+@app.get("/api/admin/stats", include_in_schema=False)
 async def admin_stats(request: Request):
     """Platform metrics — scans, threats, blocks, chain breakdown, mempool.
 
@@ -1856,36 +1857,117 @@ async def public_stats():
 
     A source that is not running reports null, never 0. Mempool counters live in memory and restart
     from zero with the process; `mempool_counting_since` says when the current count began.
+    `chains_protected` counts only the chains whose mempool the monitor read on its last poll
+    (`mempool_chains_observable`); a monitored chain it could not read is listed in
+    `mempool_chains_unobservable`: its mempool is unknown, not protected.
     `launch_discovery` says how far Robinhood Chain launch discovery has read, from the database
     alone: its lowest source cursor, when a sweep last moved a cursor, and the newest launch block.
     A cursor far below the chain head, or an old `last_sweep_at`, means discovery has stalled.
+    Its `scanned_share` counts the launches whose block is in the last 24 hours and how many of
+    them have any scan outcome. `evidence_documents` counts the stored verdict evidence documents
+    per chain; `registry_records_confirmed` counts those whose record in the Robinhood Chain
+    verdict registry is confirmed on-chain. `contracts_scanned` and `threats_detected` count the contracts
+    the extension and agent firewalls scored; Telegram, /api/scan and launch scans do not add to them.
+    `contracts_scanned` and `transactions_blocked` are all time. `threats_detected` is on record now: it
+    counts the contracts whose latest score is high risk, and a rescan overwrites a contract's score.
+    Each `_24h` field counts the same table over the last 24 hours (a contract counts when its latest
+    scan falls in that window).
+    `unknown_ledger` sums, per provider and per chain, how often a provider lookup was answered,
+    came back unknown or failed since `counting_since` (core.unknown_ledger); it restarts with the
+    process. GET /api/coverage/{chain_id} has one chain's providers in full.
     """
     from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
+    from services.verdict_publisher import CHAIN_ID as REGISTRY_CHAIN_ID
 
     db_stats = {}
     launch_discovery = None
+    evidence_documents = registry_records_confirmed = None
     if container and container.db:
         db_stats = await container.db.get_platform_stats()
+        window_hours = 24
         launch_discovery = {
             "chain_id": LAUNCH_CHAIN_ID,
             **await container.db.get_launch_discovery_status(LAUNCH_CHAIN_ID),
+            "scanned_share": {
+                "window_hours": window_hours,
+                **await container.db.get_launch_scan_share(LAUNCH_CHAIN_ID, time.time() - window_hours * 3600),
+            },
         }
+        evidence = await container.db.get_verdict_evidence_counts()
+        evidence_documents = {chain_id: counts["documents"] for chain_id, counts in evidence.items()}
+        registry_records_confirmed = evidence[REGISTRY_CHAIN_ID]["confirmed"] if REGISTRY_CHAIN_ID in evidence else 0
 
     mempool = {}
+    observable = unobservable = None
     if container and container.mempool_monitor:
         mempool = container.mempool_monitor.get_stats()
+        unobservable = mempool["unobservable_chains"]
+        observable = sorted(set(mempool["monitored_chains"]) - set(unobservable))
 
     at = db_stats.get("all_time", {})
+    day = db_stats.get("last_24h", {})
     return {
         "transactions_monitored": mempool.get("total_pending_seen"),
         "contracts_scanned":      at.get("unique_contracts_scanned"),
         "threats_detected":       at.get("threats_detected"),
         "transactions_blocked":   at.get("transactions_blocked"),
+        "contracts_scanned_24h":  day.get("scans"),
+        "threats_detected_24h":   day.get("threats_detected"),
+        "transactions_blocked_24h": day.get("transactions_blocked"),
         "sandwiches_caught":      mempool.get("sandwiches_detected"),
         "suspicious_approvals":   mempool.get("suspicious_approvals"),
-        "chains_protected":       len(mempool["monitored_chains"]) if "monitored_chains" in mempool else None,
+        "chains_protected":       len(observable) if observable is not None else None,
+        "mempool_chains_observable": observable,
+        "mempool_chains_unobservable": unobservable,
         "mempool_counting_since": mempool.get("counting_since"),
         "launch_discovery":       launch_discovery,
+        "evidence_documents":     evidence_documents,
+        "registry_records_confirmed": registry_records_confirmed,
+        "unknown_ledger":         unknown_ledger.summary(),
+    }
+
+
+@app.get("/api/coverage/{chain_id}")
+async def chain_coverage(chain_id: int):
+    """What a scan on this chain can check, from its configuration, and how its providers are answering.
+
+    `capabilities`: `sell_simulation` is honeypot.is, eth_simulateV1, or goplus_reported (no sell is
+    simulated; GoPlus's own flags only); `contract_age` and `verification` name the explorer each lookup
+    asks (`contract_age` is null where no request can be sent: Robinhood Chain's creation lookup needs
+    the Blockscout gateway key, and without it verification is Sourcify alone); `liquidity_lock` says
+    whether any real locker is known (with only burn addresses known, lock status is unknown);
+    `router_allowlist` counts the swap routers configured as trusted on this chain; `public_mempool` is
+    yes when the mempool monitor read this chain on its last poll, unobservable when the chain has a
+    public mempool that was not read, and no when it has none; `approvals` says whether a rescue scan
+    reads the full approval history or only the newest `window_blocks` blocks.
+    `provider_health` is this chain's Unknown ledger (core.unknown_ledger): per provider, how many
+    lookups were answered, came back unknown or failed since `counting_since`, and the latest outcome;
+    `chain_independent` holds providers asked about no chain. A provider with no entry has not been
+    asked since the process started. Nothing here sends a request to any provider.
+    """
+    _validate_chain_id(chain_id)
+    if not container:
+        raise HTTPException(status_code=503, detail="Service not available")
+    adapter = web3_client._get_adapter(chain_id)
+    if not supports_pending_transactions(chain_id):
+        public_mempool = "no"
+    else:
+        mempool = container.mempool_monitor.get_stats() if container.mempool_monitor else None
+        observed = mempool and chain_id in set(mempool["monitored_chains"]) - set(mempool["unobservable_chains"])
+        public_mempool = "yes" if observed else "unobservable"
+    return {
+        "chain_id": chain_id,
+        "chain_name": adapter.chain_name,
+        "capabilities": {
+            **adapter.capabilities(),
+            "public_mempool": public_mempool,
+            "approvals": container.rescue_service.approval_history(chain_id),
+        },
+        "provider_health": {
+            "counting_since": unknown_ledger.counting_since,
+            "providers": unknown_ledger.for_chain(chain_id),
+            "chain_independent": unknown_ledger.for_chain(None),
+        },
     }
 
 
@@ -1948,7 +2030,7 @@ async def verdict_permalink(chain_id: int, address: str):
     }
 
 
-@app.get("/api/admin/signups")
+@app.get("/api/admin/signups", include_in_schema=False)
 async def admin_signups(request: Request):
     """List all beta signups. Requires ADMIN_SECRET header."""
     admin_secret = request.headers.get("x-admin-secret")
@@ -1989,7 +2071,7 @@ class WatchDeployerRequest(ChainRequest):
         return value if value == 0 else _validate_chain_id(value)
 
 
-@app.post("/api/admin/watch/deployer")
+@app.post("/api/admin/watch/deployer", include_in_schema=False)
 async def watch_deployer_add(req: WatchDeployerRequest, request: Request):
     """Add a deployer address to the watch list. Requires X-Admin-Secret."""
     _require_admin(request)
@@ -2001,7 +2083,7 @@ async def watch_deployer_add(req: WatchDeployerRequest, request: Request):
     return {"ok": True, "address": req.address.lower(), "chain_id": req.chain_id}
 
 
-@app.delete("/api/admin/watch/deployer/{address}")
+@app.delete("/api/admin/watch/deployer/{address}", include_in_schema=False)
 async def watch_deployer_remove(address: str, request: Request, chain_id: int = 0):
     """Remove a deployer from the watch list. Requires X-Admin-Secret."""
     if chain_id != 0:
@@ -2011,7 +2093,7 @@ async def watch_deployer_remove(address: str, request: Request, chain_id: int = 
     return {"ok": True, "address": address.lower(), "chain_id": chain_id}
 
 
-@app.get("/api/admin/watch/deployers")
+@app.get("/api/admin/watch/deployers", include_in_schema=False)
 async def watch_deployer_list(request: Request):
     """List all watched deployers. Requires X-Admin-Secret."""
     _require_admin(request)
@@ -2019,7 +2101,7 @@ async def watch_deployer_list(request: Request):
     return {"deployers": deployers, "count": len(deployers)}
 
 
-@app.get("/api/admin/watch/alerts")
+@app.get("/api/admin/watch/alerts", include_in_schema=False)
 async def watch_alerts_list(request: Request, limit: int = 50):
     """List recent deployment alerts from watched deployers. Requires X-Admin-Secret."""
     _require_admin(request)
@@ -2027,7 +2109,7 @@ async def watch_alerts_list(request: Request, limit: int = 50):
     return {"alerts": alerts, "count": len(alerts)}
 
 
-@app.post("/api/admin/guard-subjects/{chain_id}/{address}")
+@app.post("/api/admin/guard-subjects/{chain_id}/{address}", include_in_schema=False)
 async def guard_subject_add(chain_id: int, address: str, request: Request):
     """Watch a subject with a confirmed verdict. Requires X-Admin-Secret."""
     _require_admin(request)
@@ -2043,7 +2125,7 @@ async def guard_subject_add(chain_id: int, address: str, request: Request):
     return {"ok": True, "address": address.lower(), "chain_id": chain_id}
 
 
-@app.delete("/api/admin/guard-subjects/{chain_id}/{address}")
+@app.delete("/api/admin/guard-subjects/{chain_id}/{address}", include_in_schema=False)
 async def guard_subject_remove(chain_id: int, address: str, request: Request):
     """Opt a subject out of continuous rescans. Requires X-Admin-Secret."""
     _require_admin(request)
@@ -2234,7 +2316,8 @@ async def threat_feed(
     limit = max(1, min(limit, 200))  # cap between 1 and 200
     threats = []
 
-    # Recent high-risk contract scans from DB
+    # Recent high-risk contract scans from DB. Known split: this lists risk_level 'HIGH' while the threat
+    # counts in core.database count risk_score >= 71, and a campaign-boosted score keeps its unboosted level.
     try:
         if source == "mempool":
             cursor = None

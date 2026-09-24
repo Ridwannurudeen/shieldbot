@@ -10,6 +10,8 @@ from urllib.parse import urlsplit
 import aiohttp
 from cachetools import TTLCache
 
+from core.unknown_ledger import unknown_ledger
+
 
 # Public Blockscout instances that answer without an API key; other chains go through the keyed
 # PRO gateway. optimism.blockscout.com redirects here, and requests do not follow redirects, so the
@@ -59,7 +61,9 @@ class ExplorerService:
         self._blockscout_locks: dict[str, asyncio.Lock] = {}
         self._last_request: dict[str, float] = {}
 
-    async def _request(self, provider: str, url: str, params: dict) -> ExplorerResult:
+    async def _request(
+        self, provider: str, url: str, params: dict, chain_id: int
+    ) -> ExplorerResult:
         cache_key = (
             url,
             tuple(
@@ -131,25 +135,37 @@ class ExplorerService:
         else:
             result = await fetch()
             self._cache[cache_key] = result
+        unknown_ledger.record(
+            provider,
+            chain_id,
+            "answered" if result.status == "known"
+            else "unknown" if result.reason == "HTTP 404"
+            else "failed",
+        )
         return result
+
+    def can_reach_blockscout(self, chain_id: int) -> bool:
+        """Whether a Blockscout request can be sent for chain_id: a public instance serves it, or the
+        PRO gateway's BLOCKSCOUT_API_KEY is set."""
+        return chain_id in BLOCKSCOUT_INSTANCES or bool(os.getenv("BLOCKSCOUT_API_KEY", ""))
 
     async def _blockscout(
         self, path: str, chain_id: int, params: dict | None = None
     ) -> ExplorerResult:
+        if not self.can_reach_blockscout(chain_id):
+            return ExplorerResult(
+                "unknown", reason="BLOCKSCOUT_API_KEY is missing", provider="blockscout"
+            )
         instance = BLOCKSCOUT_INSTANCES.get(chain_id)
         if instance:
             return await self._request(
-                "blockscout", f"{instance}/api/v2/{path}", params or {}
-            )
-        api_key = os.getenv("BLOCKSCOUT_API_KEY", "")
-        if not api_key:
-            return ExplorerResult(
-                "unknown", reason="BLOCKSCOUT_API_KEY is missing", provider="blockscout"
+                "blockscout", f"{instance}/api/v2/{path}", params or {}, chain_id
             )
         return await self._request(
             "blockscout",
             f"https://api.blockscout.com/{chain_id}/api/v2/{path}",
-            {**(params or {}), "apikey": api_key},
+            {**(params or {}), "apikey": os.getenv("BLOCKSCOUT_API_KEY")},
+            chain_id,
         )
 
     async def get_verification_status(
@@ -162,6 +178,7 @@ class ExplorerService:
             "sourcify",
             f"https://sourcify.dev/server/v2/contract/{chain_id}/{address}",
             {},
+            chain_id,
         )
         if sourcify.status == "known":
             data = sourcify.data

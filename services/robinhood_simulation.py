@@ -31,11 +31,13 @@ from eth_utils import keccak
 from adapters.robinhood import (
     PERMIT2_ADDRESS,
     POOL_MANAGER_ADDRESS,
+    SIMULATION_PROVIDER,
     UNISWAP_V2_FACTORY,
     UNISWAP_V2_ROUTER,
     UNISWAP_V4_UNIVERSAL_ROUTER,
     WETH_ADDRESS,
 )
+from core.unknown_ledger import unknown_ledger
 
 logger = logging.getLogger(__name__)
 
@@ -772,9 +774,15 @@ class RobinhoodSimulator:
         except SimulationUnavailable as e:
             logger.warning("Robinhood simulation unavailable: %s", type(e).__name__)
             result = aggregate_outcomes([], [e.reason])
+            unknown_ledger.record(SIMULATION_PROVIDER, 4663, "failed")
         except Exception as e:
             logger.error("Robinhood simulation failed: %s", type(e).__name__)
             result = aggregate_outcomes([], [f"Simulation RPC request failed ({type(e).__name__})"])
+            unknown_ledger.record(SIMULATION_PROVIDER, 4663, "failed")
+        else:
+            # It ran; a pool that could not be simulated, or no supported pool, leaves the sell unknown.
+            decided = result["is_honeypot"] is not None and not result.get("simulation_failed")
+            unknown_ledger.record(SIMULATION_PROVIDER, 4663, "answered" if decided else "unknown")
         finally:
             self._inflight.pop(flight_key, None)
         result["observed_at"] = observed_at

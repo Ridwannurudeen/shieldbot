@@ -13,6 +13,7 @@ except ImportError:
 from datetime import datetime, timezone
 
 from core.chain_adapter import ChainAdapter
+from core.unknown_ledger import unknown_ledger
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +160,7 @@ class EvmAdapter(ChainAdapter):
         web3 7 raises Web3RPCError with rpc_response). Reverts and other errors raise at once.
         """
         import requests
+        from web3.exceptions import BadFunctionCallOutput, ContractLogicError
 
         if retries < 1:
             retries = 1
@@ -166,7 +168,7 @@ class EvmAdapter(ChainAdapter):
         last_exc = None
         for attempt in range(retries):
             try:
-                return await loop.run_in_executor(None, fn, *args)
+                result = await loop.run_in_executor(None, fn, *args)
             except Exception as e:
                 last_exc = e
                 if isinstance(e, requests.exceptions.HTTPError):
@@ -186,7 +188,13 @@ class EvmAdapter(ChainAdapter):
                     )
                     await asyncio.sleep(delay)
                 elif not is_retriable:
+                    answered = isinstance(e, (BadFunctionCallOutput, ContractLogicError))
+                    unknown_ledger.record('rpc', self._chain_id, 'answered' if answered else 'failed')
                     raise
+            else:
+                unknown_ledger.record('rpc', self._chain_id, 'answered')
+                return result
+        unknown_ledger.record('rpc', self._chain_id, 'failed')
         raise last_exc
 
     async def is_contract(self, address: str) -> Optional[bool]:
@@ -225,6 +233,7 @@ class EvmAdapter(ChainAdapter):
                 }
                 async with session.get(self.etherscan_api_url, params=params) as resp:
                     if resp.status != 200:
+                        unknown_ledger.record('etherscan', self._chain_id, 'failed')
                         logger.warning("[%s] Verification unknown: HTTP %s", self._chain_name, resp.status)
                         return (None, None)
                     data = await resp.json()
@@ -234,16 +243,20 @@ class EvmAdapter(ChainAdapter):
                         and isinstance(data['result'][0], dict)
                         and isinstance(data['result'][0].get('SourceCode'), str)
                     ):
+                        unknown_ledger.record('etherscan', self._chain_id, 'answered')
                         source_code = data['result'][0]['SourceCode']
                         is_verified = len(source_code) > 0
                         return (is_verified, source_code if is_verified else None)
+            unknown_ledger.record('etherscan', self._chain_id, 'failed')
             logger.warning("[%s] Verification unknown: missing source response", self._chain_name)
             return (None, None)
         except Exception as e:
+            unknown_ledger.record('etherscan', self._chain_id, 'failed')
             logger.error("[%s] Error checking verification: %s", self._chain_name, type(e).__name__)
             return (None, None)
 
     async def get_contract_creation_info(self, address: str) -> Optional[Dict]:
+        etherscan_answered = False
         try:
             if self._explorer_backend in ('sourcify_blockscout', 'etherscan_blockscout'):
                 result = await self._explorer_service.get_contract_creation_info(address, self._chain_id)
@@ -270,12 +283,15 @@ class EvmAdapter(ChainAdapter):
                 }
                 async with session.get(self.etherscan_api_url, params=params) as resp:
                     if resp.status != 200:
+                        unknown_ledger.record('etherscan', self._chain_id, 'failed')
                         logger.warning("[%s] Creation unknown: HTTP %s", self._chain_name, resp.status)
                         return None
                     data = await resp.json()
                     if data['status'] == '1' and data['result']:
                         result = data['result'][0]
                         tx_hash = result.get('txHash')
+                        etherscan_answered = True
+                        unknown_ledger.record('etherscan', self._chain_id, 'answered')
                         tx = await self._call_with_retry(self.w3.eth.get_transaction, tx_hash)
                         block = await self._call_with_retry(self.w3.eth.get_block, tx['blockNumber'])
                         creation_time = datetime.fromtimestamp(block['timestamp'], tz=timezone.utc)
@@ -286,8 +302,15 @@ class EvmAdapter(ChainAdapter):
                             'creation_time': creation_time.isoformat(),
                             'age_days': age_days,
                         }
+            # Etherscan answers "No data found" for an address it holds no creation record for.
+            no_record = data['status'] == '0' and data.get('message') == 'No data found'
+            unknown_ledger.record('etherscan', self._chain_id, 'unknown' if no_record else 'failed')
             return None
         except Exception as e:
+            # Before Etherscan has answered, an error is its request or reply failing; after, it comes from
+            # the creation time's RPC reads, which count as rpc.
+            if self._explorer_backend == 'etherscan' and not etherscan_answered:
+                unknown_ledger.record('etherscan', self._chain_id, 'failed')
             logger.error("[%s] Error getting creation info: %s", self._chain_name, type(e).__name__)
             return None
 
@@ -354,11 +377,20 @@ class EvmAdapter(ChainAdapter):
         key = address.lower()
         reply = self._honeypot_is_replies.get(key)
         if reply is None:
-            async with aiohttp.ClientSession() as session:
-                url = f"https://api.honeypot.is/v2/IsHoneypot?address={address}&chainID={self._honeypot_chain_id}"
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    reply = (resp.status, await resp.json() if resp.status == 200 else None)
+            try:
+                async with aiohttp.ClientSession() as session:
+                    url = f"https://api.honeypot.is/v2/IsHoneypot?address={address}&chainID={self._honeypot_chain_id}"
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                        reply = (resp.status, await resp.json() if resp.status == 200 else None)
+            except Exception:
+                unknown_ledger.record('honeypot.is', self._chain_id, 'failed')
+                raise
             self._honeypot_is_replies[key] = reply
+            status, data = reply
+            unknown_ledger.record('honeypot.is', self._chain_id, (
+                'answered' if isinstance(data, dict) and data.get('simulationSuccess') is True
+                else 'unknown' if status == 404 or isinstance(data, dict) else 'failed'
+            ))
         return reply
 
     async def check_honeypot(self, address: str) -> Dict:
@@ -548,3 +580,29 @@ class EvmAdapter(ChainAdapter):
 
     def get_whitelisted_routers(self) -> Dict[str, str]:
         return dict(self._whitelisted_routers)
+
+    def capabilities(self) -> Dict:
+        """What this chain's configuration lets a scan check, for GET /api/coverage/{chain_id}.
+
+        sell_simulation is goplus_reported where no sell is simulated and honeypot and tax fields come
+        from GoPlus's own flags. A Blockscout source is named only where a Blockscout request can be
+        sent; without one, contract_age is None (no other source is asked) and verification falls back
+        to Sourcify alone. Liquidity lock status is unknown on a chain whose only known lockers are burn
+        addresses: an unlocked pool cannot be told from one held by an unlisted locker.
+        """
+        lockers = [name for address, name in self._known_lockers.items() if address not in BURN_ADDRESSES]
+        blockscout = self._explorer_service.can_reach_blockscout(self._chain_id)
+        return {
+            'sell_simulation': 'honeypot.is' if self._honeypot_chain_id is not None else 'goplus_reported',
+            'contract_age': (
+                'etherscan' if self._explorer_backend == 'etherscan' else 'blockscout' if blockscout else None
+            ),
+            'verification': (
+                'etherscan' if self._explorer_backend != 'sourcify_blockscout'
+                else 'sourcify+blockscout' if blockscout else 'sourcify'
+            ),
+            'liquidity_lock': {'lockers': 'known' if lockers else 'unknown', 'known_lockers': lockers},
+            'router_allowlist': {
+                'present': bool(self._whitelisted_routers), 'routers': len(self._whitelisted_routers),
+            },
+        }

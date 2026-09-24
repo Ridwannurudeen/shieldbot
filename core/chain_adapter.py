@@ -56,3 +56,7 @@ class ChainAdapter(ABC):
     @abstractmethod
     def get_whitelisted_routers(self) -> Dict[str, str]:
         """Return {lowercase_address: router_name} for this chain."""
+
+    @abstractmethod
+    def capabilities(self) -> Dict:
+        """What this chain's configuration lets a scan check, for GET /api/coverage/{chain_id}."""

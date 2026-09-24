@@ -868,6 +868,9 @@ class Database:
         unique_contracts = row[0] or 0
         total_scan_events = int(row[1] or 0)
 
+        # Known split: this counts risk_score >= 71 while the threat feed (api.py) lists risk_level 'HIGH'.
+        # The firewall's campaign boost raises a stored score without raising its stored level, so the two
+        # can disagree until both read one verdict vocabulary and band table.
         cur = await self._db.execute(
             "SELECT COUNT(*) FROM contract_scores WHERE risk_score >= 71"
         )
@@ -921,6 +924,7 @@ class Database:
             )
             scans = (await cur.fetchone())[0] or 0
 
+            # The same known split as the all-time threat count above: score >= 71, not risk_level 'HIGH'.
             cur = await self._db.execute(
                 "SELECT COUNT(*) FROM contract_scores WHERE last_scanned_at > ? AND risk_score >= 71",
                 (cutoff,)
@@ -2689,6 +2693,18 @@ class Database:
             "created_at", "onchain_status", "registry", "tx_hash", "onchain_error", "updated_at",
         )
         return dict(zip(keys, row))
+
+    async def get_verdict_evidence_counts(self) -> Dict[int, Dict[str, int]]:
+        """Stored evidence documents per chain, and how many of them have a confirmed on-chain record."""
+        cursor = await self._db.execute("""
+            SELECT chain_id, COUNT(*), SUM(onchain_status = 'confirmed')
+            FROM verdict_evidence
+            GROUP BY chain_id
+        """)
+        return {
+            chain_id: {"documents": documents, "confirmed": confirmed}
+            for chain_id, documents, confirmed in await cursor.fetchall()
+        }
 
     async def get_newest_verdict_observation(
         self, chain_id: int, subject: str, include_deduplicated: bool = True
