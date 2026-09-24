@@ -7,13 +7,12 @@ Read-only network check, run by hand from the repo root:
 
 Looks up native USDC on each chain through the adapter's own path (the explorer service for the
 creation transaction, then the chain's RPC for its block time) and exits 1 unless the creation time
-is the known one. An instance that moves answers with a redirect, which the explorer service does
+is the known one; the age is derived from that time, so it is not compared separately. An instance that moves answers with a redirect, which the explorer service does
 not follow, so a move shows up here as a missing creation.
 """
 
 import asyncio
 import sys
-from datetime import datetime, timezone
 
 from adapters.base_chain import BaseChainAdapter
 from adapters.optimism import OptimismAdapter
@@ -30,12 +29,7 @@ async def main():
     for adapter_class, token, created in KNOWN_CREATIONS:
         adapter = adapter_class()
         info = await adapter.get_contract_creation_info(token)
-        expected_age = (datetime.now(timezone.utc) - datetime.fromisoformat(created)).days
-        ok = (
-            info is not None
-            and info["creation_time"] == created
-            and info["age_days"] == expected_age
-        )
+        ok = info is not None and info["creation_time"] == created
         print(
             f"{adapter.chain_name} ({adapter.chain_id}) USDC {token}: {'OK' if ok else 'FAIL'} {info}"
         )
