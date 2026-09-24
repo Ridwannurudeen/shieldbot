@@ -6,7 +6,7 @@ Owner steps. Nothing in this document has been done: no package is published, no
 
 | Package | Source | Planned name | Registry today |
 |---------|--------|--------------|----------------|
-| TypeScript SDK | `sdk/` (`package.json`) | `@shieldbot/sdk` 3.0.0 | npm: 404, never published |
+| TypeScript SDK | `sdk/` (`package.json`) | `@shieldbot/sdk` 3.1.0 | npm: 404, never published |
 | Python SDK | `sdk/python/` (`setup.py`) | `shieldbot` 3.0.0 | PyPI: 404 on `/pypi/shieldbot/json` and `/simple/shieldbot/` |
 
 Both packages build cleanly: `npm pack --dry-run` in `sdk/` lists `LICENSE`, `README.md`, `package.json` and `dist/index.{js,mjs,d.ts,d.mts}`; `python -m build` in `sdk/python/` produces a wheel that contains only the `shieldbot` package and its license, and `twine check` passes on both files. Until you publish, both READMEs tell people to install from the repository.
@@ -27,7 +27,7 @@ Renaming touches:
 
 - `"name"` in `sdk/package.json`, and both `"name"` entries in `sdk/package-lock.json` (the top-level one and `packages[""]`); running `npm install` in `sdk/` after editing `package.json` rewrites them.
 - Every `@shieldbot/sdk` in `sdk/README.md`: the "after publication" install line and the imports.
-- The tarball name in the `sdk/README.md` install steps (`shieldbot-sdk-3.0.0.tgz`). `npm pack` derives it from the package name: `shieldbot-sdk` keeps it, `@gudman/shieldbot-sdk` gives `gudman-shieldbot-sdk-3.0.0.tgz`.
+- The tarball name in the `sdk/README.md` install steps (`shieldbot-sdk-3.1.0.tgz`). `npm pack` derives it from the package name: `shieldbot-sdk` keeps it, `@gudman/shieldbot-sdk` gives `gudman-shieldbot-sdk-3.1.0.tgz`.
 - The usage comment at the top of `sdk/src/index.ts`.
 - The SDK snippet in `landing-src/src/components/AgentSecurity.tsx`, and then the built site: the committed bundle in `landing/assets/` carries the package name, so rebuild `landing/` (`npm run build` in `landing-src`) and deploy it before or together with the publish.
 

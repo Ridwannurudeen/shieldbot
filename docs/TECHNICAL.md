@@ -113,6 +113,26 @@ The MCP adapters have narrower coverage than their names may suggest:
 
 These legacy MCP limits remain open. Consumers must not promote their empty lists, lower-bound counts or regex result into an authorization decision.
 
+### Streamed Firewall Verdicts (fast first verdict)
+
+`POST /api/firewall` with `Accept: text/event-stream` answers with server-sent events instead of one JSON body (`api.py` `_firewall_events`, `core/first_verdict.py`). Every required check (verification, age, the scam lookup, sellability, the counterparty) is an external call that rarely finishes within a few seconds from cold, so an early answer can honestly be only a hard floor already known or Unknown. The stream therefore has at most three kinds of event, each `event: <kind>` and one `data:` line of JSON:
+
+- `first`, the interim verdict. It is sent as soon as a floor reaches `BLOCK_RECOMMENDED` (an admin blacklist entry for the target, read locally before any provider answers; an analyzer's declared floor; a block-severity scam match), otherwise `FIRST_VERDICT_SECONDS` (3, `core/registry.py`) after the handler starts, and only while the scan is still running. The clock starts with the handler, not with the analyzers, because the handler's own lookups (token info, bytecode, `is_token`, verification) come first. A scan that finishes sooner sends no `first`, and neither does a signature request, which has nothing decoded to show. The interim verdict always has `status: "unknown"` and is never `SAFE`. It is scored by the hard floors known so far and never by a partial weighted mean: the engine applies each floor to the final score with `max()`, so while the same evidence holds the interim band is never above the final one, while a partial mean could read HIGH_RISK and then be diluted to SAFE. With no floor it is `CAUTION` with `risk_score` 0 and `risk_display` "Unknown (analysis in progress)". It has the plain response's transaction fields, `coverage` for the analyzers that have returned, `coverage_reasons.pending`, `pending_sources`, `elapsed_ms`, `partial: true` and `final: false`, and no `evidence_hash`, `evidence_url` or `cached`.
+- `final`, exactly the plain response (the same score, status, evidence hash and every other field), plus `final: true`. The plain response itself is unchanged and never carries `final`.
+- `error`, `{"status": <HTTP status>, "detail": ...}`, in place of the final when the handler fails after the stream has started. A bad `to` address is still refused with a plain 400 before the stream begins.
+
+STRICT sends no interim verdict: a request whose policy mode is STRICT (the `X-Policy-Mode` header or the server's default) gets the plain JSON response whatever it accepts. `GET /api/verdicts` publishes the contract as `first_verdict` (`seconds`, `status`, `never`, `policy_modes`).
+
+The scan runs in its own task, and a client that disconnects does not cancel it: the evidence document, the stored score and level, the threat graph enrichment, the sentinel's deployer watch and the deployer index happen once, from the final verdict only, never from the interim one. The response sets `Cache-Control: no-cache` and `X-Accel-Buffering: no`, as the MCP SSE route does, so nginx passes the events through unbuffered without a configuration change (unless a vhost sets `proxy_ignore_headers X-Accel-Buffering`). `tests/test_firewall_stream.py` drives the real ASGI app and its middleware chain and fails if anything on that path buffers the stream.
+
+```bash
+curl -N -X POST http://localhost:8000/api/firewall \
+  -H "Content-Type: application/json" -H "Accept: text/event-stream" \
+  -d '{"to": "0x10ED43C718714eb63d5aA57B78B54704E256024E", "from": "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD61", "data": "0x", "chainId": 56}'
+```
+
+Measuring. Each streamed request logs one line at INFO (logger `api`): `Firewall stream {"chain_id": 56, "final_at_ms": ..., "first_at_ms": ..., "first_kind": "unknown", "pending_at_first": ["honeypot"]}`, where `first_kind` is `block`, `unknown` or `none` (no interim sent) and `final_at_ms` is null when the client left before the final or the stream ended with an `error`. The timings in the tests run at scaled time; nothing has been measured live. To measure on the server, send streamed requests for a mix of targets (a cached one, a cold token, a wallet, an approval, a router swap) on the chains you serve, then read the lines with `journalctl -u shieldbot-api --since <start> | grep 'Firewall stream'` and compare `first_at_ms` and `final_at_ms` percentiles and the share of each `first_kind` per chain.
+
 ### Evidence Documents for API Verdicts
 
 Every `/api/firewall` and `/api/scan` response carries `evidence_hash` and `evidence_url` (`core/scan_evidence.py`, `api.py` `_with_evidence`). The document uses the Robinhood Chain registry's canonical form: `canonical_bytes` (sorted keys, compact separators, UTF-8, no NaN) and `evidence_hash` = keccak256 of those bytes (`core/verdict_evidence.py`). It is ShieldBot's own record and is never recorded on a chain; its `schema` key (`shieldbot-scan-evidence`, `schema_version` 1) is absent from registry documents, so one can never be read as the other.
