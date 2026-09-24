@@ -589,6 +589,39 @@ def test_content_script_runs_once_and_injects_nothing_into_the_page():
     )
 
 
+def test_removing_the_overlay_rejects_the_request():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('request');
+  overlayRoot().host.remove();
+  await flush();
+  await assertVerdicts([['request', 'block']]);
+"""
+    )
+
+
+def test_a_flood_of_forged_intercepts_cannot_push_out_a_real_request():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('real', {to: '0x' + 'd'.repeat(40), chainId: 56});
+  for (let i = 0; i < 300; i++) {
+    deliver({type: 'SHIELDAI_TX_INTERCEPT', requestId: 'forged-' + i, method: 'eth_sendTransaction',
+      tx: {to: '0x' + 'e'.repeat(40)}, proof: new Uint8Array(32)});
+  }
+  await flush();
+  deliver({type: 'SHIELDAI_TX_INTERCEPT', requestId: 'real', method: 'eth_sendTransaction',
+    tx: {to: '0x' + 'e'.repeat(40), chainId: 56}, proof: await proofFor(token, 'real:intercept')});
+  await flush();
+  assert.equal(analyses.length, 1, 'a replay got through after the flood');
+"""
+    )
+
 INJECT_HARNESS = (
     FAKE_DOM
     + r"""

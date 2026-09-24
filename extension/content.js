@@ -88,8 +88,12 @@
   // Request ids already seen. inject.js makes a fresh random id per request,
   // so a second intercept with a seen id is the page replaying one (perhaps
   // with a harmless-looking payload) and is dropped. The id is recorded before
-  // the proof is checked so a replay cannot overtake the original.
+  // the proof is checked so a replay cannot overtake the original, and removed
+  // again if the proof fails, so only proven ids stay and a page cannot flood
+  // the set to push a real one out. The oldest proven ids are dropped past the
+  // limit; by then their requests are long settled.
   const _seenRequests = new Set();
+  const SEEN_REQUESTS_LIMIT = 100;
 
   // inject.js fails closed 60 seconds after it posts an intercept. A result
   // that arrives later than this is too late for the user to decide on, so it
@@ -110,7 +114,13 @@
     if (typeof requestId !== "string" || _seenRequests.has(requestId)) return;
     _seenRequests.add(requestId);
     // The page can post intercepts too; only inject.js can prove this one.
-    if (!sameProof(await channelProof(requestId, "intercept"), proof)) return;
+    if (!sameProof(await channelProof(requestId, "intercept"), proof)) {
+      _seenRequests.delete(requestId);
+      return;
+    }
+    if (_seenRequests.size > SEEN_REQUESTS_LIMIT) {
+      _seenRequests.delete(_seenRequests.values().next().value);
+    }
     const received = Date.now();
 
     // Check if extension is enabled
@@ -259,6 +269,14 @@
     });
     (document.body || document.documentElement).appendChild(host);
     _overlayHost = host;
+    // If the page removes the overlay, the user can no longer decide here:
+    // reject the request so the dApp is not left waiting.
+    const observer = new MutationObserver(() => {
+      if (host.isConnected) return;
+      observer.disconnect();
+      if (_overlayHost === host) removeOverlay();
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
     modal.focus();
     if (requestId) {
       _awaitingRequestId = requestId;
