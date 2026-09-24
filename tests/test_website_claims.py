@@ -263,12 +263,57 @@ def test_hero_image_describes_its_recorded_api_reply():
     # landing-src/scripts/capture-hero-overlay.py renders the extension's overlay from this reply.
     reply = json.loads(read(LANDING_SRC / "scripts" / "hero-overlay-response.json"))
     hero = read(COMPONENTS / "Hero.tsx")
-    # content.js shows UNKNOWN for an incomplete reply unless it is HIGH_RISK or BLOCK_RECOMMENDED.
-    assert reply["status"] != "ok"
-    assert reply["classification"] not in ("HIGH_RISK", "BLOCK_RECOMMENDED")
-    assert "UNKNOWN" in hero
-    for reason in reply["coverage_reasons"].values():
-        assert f"Why: {reason}" in hero
+    messages = json.loads(read(ROOT / "extension" / "locales" / "en" / "messages.json"))
+    # The overlay's rules in extension/content.js, applied below to the recorded reply.
+    content = " ".join(read(ROOT / "extension" / "content.js").split())
+    for rule in (
+        'const incomplete = result.status !== "ok" || result.partial === true || '
+        'result.risk_level === "UNKNOWN" || result.classification === "UNKNOWN" || '
+        "!Number.isFinite(result.risk_score) || "
+        "Object.values(result.coverage || {}).some(value => Number(value) < 1);",
+        "const classification = incomplete && "
+        '!["HIGH_RISK", "BLOCK_RECOMMENDED"].includes(result.classification) '
+        '? "UNKNOWN" : result.classification || "CAUTION";',
+        'const scoreDisplay = incomplete ? "Unknown (incomplete provider coverage)" : '
+        '`${_t("overlaySafety")} ${100 - result.risk_score}/100`;',
+        '${escapeHtml(label)}${classification === "UNKNOWN" ? "" : ` &mdash; ${escapeHtml(scoreDisplay)}`}',
+        'return Object.values(result.coverage_reasons || {}).filter(Boolean).join("; ") || '
+        '_t("unknownNoReason");',
+    ):
+        assert rule in content, rule
+
+    score = reply.get("risk_score")
+    incomplete = (
+        reply["status"] != "ok"
+        or reply.get("partial") is True
+        or reply.get("risk_level") == "UNKNOWN"
+        or reply.get("classification") == "UNKNOWN"
+        or type(score) not in (int, float)
+        or any(float(value) < 1 for value in (reply.get("coverage") or {}).values())
+    )
+    shown = reply.get("classification") or "CAUTION"
+    if incomplete and shown not in ("HIGH_RISK", "BLOCK_RECOMMENDED"):
+        shown = "UNKNOWN"
+    label = messages[
+        {
+            "BLOCK_RECOMMENDED": "classBlock",
+            "HIGH_RISK": "classHighRisk",
+            "CAUTION": "classCaution",
+            "SAFE": "classSafe",
+            "UNKNOWN": "classUnknown",
+        }[shown]
+    ]
+    if shown != "UNKNOWN":
+        score_display = (
+            "Unknown (incomplete provider coverage)"
+            if incomplete
+            else f"{messages['overlaySafety']} {100 - score}/100"
+        )
+        label = f"{label} — {score_display}"
+    assert f"The verdict badge reads {label}" in hero
+    if incomplete:
+        reasons = "; ".join(filter(None, reply["coverage_reasons"].values()))
+        assert f"{messages['unknownWhy']} {reasons or messages['unknownNoReason']}" in hero
     for name in ("hero-overlay.webp", "hero-overlay-mobile.webp"):
         assert f'"/{name}"' in hero
         source = (LANDING_SRC / "public" / name).read_bytes()

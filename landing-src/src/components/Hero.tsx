@@ -66,21 +66,22 @@ export default function Hero() {
               media="(max-width: 767px)"
               srcSet="/hero-overlay-mobile.webp"
               width={390}
-              height={416}
+              height={496}
             />
             <img
               src="/hero-overlay.webp"
               width={490}
-              height={837}
-              alt="The ShieldBot extension's warning over a test page, for a request that approves unlimited spending of a BNB Chain token. The verdict badge reads UNKNOWN, with the line: Why: Structural data unknown: contract_age_days."
-              className="w-full h-auto rounded-2xl ring-1 ring-white/10 shadow-[0_25px_50px_rgba(0,0,0,0.5)] max-md:rounded-b-none max-md:[mask-image:linear-gradient(to_bottom,#000_80%,transparent)]"
+              height={904}
+              alt="The ShieldBot extension's warning dialog for a request that approves unlimited spending of a BNB Chain token. The verdict badge reads BLOCK RECOMMENDED — Unknown (incomplete provider coverage), with the line: Why: Structural data unknown: contract_age_days; No DexScreener pairs on requested chain (bsc). The danger signals include Honeypot detected."
+              className="w-full h-auto rounded-2xl ring-1 ring-white/10 shadow-[0_25px_50px_rgba(0,0,0,0.5)] max-md:rounded-b-none max-md:[mask-image:linear-gradient(to_bottom,#000_94%,transparent)]"
             />
           </picture>
           <figcaption className="text-sm text-gray-400 mt-4 leading-relaxed">
-            The real extension (on the Chrome Web Store as ShieldAI Transaction
-            Firewall), fed the API's reply for this request on 24 September
-            2026. It could not read the contract's age, so it says Unknown
-            instead of Safe.
+            The extension's 3.1.0 overlay (listed on the Chrome Web Store as
+            ShieldAI Transaction Firewall; the 3.1.0 update is pending), fed the
+            API's reply for this request on 24 September 2026. It recommends
+            blocking a detected honeypot and names the two checks it could not
+            run.
           </figcaption>
         </figure>
       </div>

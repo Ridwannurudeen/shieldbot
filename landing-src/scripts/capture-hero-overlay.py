@@ -3,7 +3,7 @@
 The extension in ../../extension is loaded unpacked into Playwright's bundled Chromium. A test page
 with a stub wallet sends the transaction in hero-overlay-request.json; the extension's
 POST /api/firewall is answered with hero-overlay-response.json, the verbatim reply of
-https://api.shieldbotsecurity.online/api/firewall to that same request on 2026-09-24 at 11:29 UTC.
+https://api.shieldbotsecurity.online/api/firewall to that same request on 2026-09-24 at 12:28 UTC.
 No other API request is answered, so the capture never reaches the network.
 
 Writes ../public/hero-overlay.webp (desktop) and ../public/hero-overlay-mobile.webp.
@@ -29,7 +29,7 @@ PAGE_URL = "https://dapp.example/"
 API = "https://api.shieldbotsecurity.online"
 
 # (output file, viewport width, CSS pixels of the dialog to keep from its top; None keeps it all)
-SHOTS = [("hero-overlay.webp", 1280, None), ("hero-overlay-mobile.webp", 390, 416)]
+SHOTS = [("hero-overlay.webp", 1280, None), ("hero-overlay-mobile.webp", 390, 496)]
 
 PAGE = """<!DOCTYPE html>
 <html lang="en"><head><title>Test dApp</title>
