@@ -7,7 +7,13 @@ import pytest
 
 import services.counterparty_service as counterparty_module
 import utils.scam_db as scam_module
-from services.counterparty_service import PERMIT2, CounterpartyService, unknown_facts
+from services.counterparty_service import (
+    PERMIT2,
+    CounterpartyService,
+    UnavailableCounterparty,
+    judge_spender,
+    unknown_facts,
+)
 from utils.scam_db import ScamDatabase
 
 SPENDER = "0x" + "5" * 40
@@ -163,6 +169,65 @@ def test_unknown_facts_have_no_coverage():
     facts = unknown_facts(SPENDER)
     assert not any(facts["coverage"].values())
     assert facts["reason"].startswith("Spender facts unknown")
+
+
+@pytest.mark.asyncio
+async def test_unavailable_counterparty_allowlists_only_permit2():
+    unavailable = UnavailableCounterparty()
+    assert unavailable.allowlisted_name(PERMIT2, 8453) == "Permit2"
+    assert unavailable.allowlisted_name(ROUTER, 56) is None
+    assert (await unavailable.fetch(SPENDER, 56))["coverage"]["code"] is False
+
+
+def _known(**overrides):
+    return {
+        **unknown_facts(SPENDER),
+        "is_contract": True,
+        "delegated": False,
+        "is_verified": True,
+        "age_days": 400,
+        "labels": [],
+        **overrides,
+    }
+
+
+WALLET_FLAG = "Approval to a wallet address, not a contract (drainer pattern)"
+DELEGATED_FLAG = "Approval to an EIP-7702 delegated wallet, not a protocol contract"
+LABEL_FLAG = "Spender flagged by GoPlus: phishing_activities, blacklist_doubt (SlowMist,GoPlus)"
+LABELS = {"labels": ["phishing_activities", "blacklist_doubt"], "label_source": "SlowMist,GoPlus"}
+
+
+@pytest.mark.parametrize(
+    "facts, unlimited, expected",
+    [
+        # Wallets and labelled addresses never need an allowance.
+        (_known(is_contract=False, is_verified=None, age_days=None), True, (100, WALLET_FLAG, False)),
+        (_known(is_contract=False, is_verified=None, age_days=None), False, (100, WALLET_FLAG, False)),
+        (_known(delegated=True, is_verified=None, age_days=None), False, (100, DELEGATED_FLAG, False)),
+        (_known(**LABELS), False, (100, LABEL_FLAG, False)),
+        # Unverified contracts.
+        (_known(is_verified=False, age_days=2), False, (85, "Spender contract is unverified and 2 days old", False)),
+        (_known(is_verified=False, age_days=30), True, (85, "Spender contract is unverified", False)),
+        (_known(is_verified=False, age_days=30), False, (60, "Spender contract is unverified", False)),
+        (_known(is_verified=False, age_days=None), True, (85, "Spender contract is unverified", False)),
+        # A limited grant to an unverified contract of unknown age could still be under 7 days.
+        (_known(is_verified=False, age_days=None), False, (60, "Spender contract is unverified", True)),
+        # Verified contracts.
+        (_known(age_days=3), True, (60, "Spender contract is 3 days old", False)),
+        (_known(age_days=3), False, (None, None, False)),
+        (_known(), True, (None, None, False)),
+        (_known(age_days=None), True, (None, None, True)),
+        (_known(age_days=None), False, (None, None, False)),
+        # Unknown facts: a rule fires only on facts that are known.
+        (_known(is_contract=None), True, (None, None, True)),
+        (_known(is_verified=None), True, (None, None, True)),
+        (_known(labels=None), False, (None, None, True)),
+        (_known(is_contract=False, is_verified=None, age_days=None, labels=None), True, (100, WALLET_FLAG, True)),
+        (_known(is_contract=None, **LABELS), True, (100, LABEL_FLAG, True)),
+    ],
+)
+def test_judge_spender_table(facts, unlimited, expected):
+    assert judge_spender(facts, unlimited) == expected
 
 
 def _goplus_http(*payloads, status=200):

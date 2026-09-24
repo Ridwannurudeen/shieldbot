@@ -1,9 +1,47 @@
 """Tests for SignaturePermitAnalyzer."""
 
 import time
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 from core.analyzer import AnalysisContext
 from analyzers.signature import SignaturePermitAnalyzer
+from services.counterparty_service import PERMIT2
+
+UNIVERSAL_ROUTER = "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"
+SPENDER = "0x" + "5" * 40
+MAX = str((1 << 256) - 1)
+
+
+def _facts(**overrides):
+    return {
+        "address": SPENDER, "allowlisted": None, "is_contract": True, "delegated": False,
+        "is_verified": True, "age_days": 400, "labels": [], "label_source": "",
+        "coverage": {"code": True, "verification": True, "age": True, "labels": True},
+        "reason": None, "observed_at": 0, **overrides,
+    }
+
+
+def _service(facts=None):
+    """A counterparty service whose chain adapter lists the Universal Router."""
+    def allowlisted_name(address, chain_id):
+        lower = address.lower()
+        if lower == UNIVERSAL_ROUTER.lower():
+            return "Uniswap Universal Router"
+        return "Permit2" if lower == PERMIT2 else None
+    return SimpleNamespace(allowlisted_name=allowlisted_name, fetch=AsyncMock(return_value=facts))
+
+
+def _typed(primary_type, message):
+    return {"primaryType": primary_type, "domain": {"name": "Permit2"}, "message": message}
+
+
+async def _analyze(analyzer, typed_data, chain_id=1):
+    return await analyzer.analyze(AnalysisContext(
+        address="0x" + "a" * 40, chain_id=chain_id,
+        extra={"typed_data": typed_data, "sign_method": "eth_signTypedData_v4"},
+    ))
 
 
 @pytest.fixture
@@ -37,8 +75,10 @@ async def test_max_uint_permit_to_unknown(analyzer):
 
 
 @pytest.mark.asyncio
-async def test_permit2_to_uniswap_safe(analyzer):
+async def test_permit2_to_uniswap_safe():
     """Permit2 to Uniswap Universal Router should be lower risk."""
+    service = _service()
+    analyzer = SignaturePermitAnalyzer(service)
     typed_data = {
         "primaryType": "PermitSingle",
         "domain": {"name": "Permit2"},
@@ -59,8 +99,9 @@ async def test_permit2_to_uniswap_safe(analyzer):
         extra={'typed_data': typed_data, 'sign_method': 'eth_signTypedData_v4'},
     )
     result = await analyzer.analyze(ctx)
-    # Known spender, reasonable amount — should be low
-    assert result.score < 30
+    # The chain adapter lists the Universal Router, so there is nothing to look up or add.
+    assert result.score == 0
+    service.fetch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -126,3 +167,95 @@ async def test_signature_propagates_unsupported_chain(analyzer, monkeypatch):
             extra={'typed_data': {'primaryType': 'Permit'}},
         ))
     assert raised.value is failure
+
+
+BATCH_TO_WALLET = _typed("PermitBatchTransferFrom", {
+    "permitted": [{"token": "0x" + c * 40, "amount": MAX} for c in "cde"],
+    "spender": SPENDER, "nonce": "0", "deadline": str(int(time.time()) + 1800),
+})
+
+
+@pytest.mark.asyncio
+async def test_signature_transfer_batch_to_a_wallet_is_blocked():
+    service = _service(_facts(is_contract=False, is_verified=None, age_days=None))
+    result = await _analyze(SignaturePermitAnalyzer(service), BATCH_TO_WALLET)
+    assert result.score == 100
+    assert result.data["floor"] == 100
+    assert result.data["sig_type"] == "permit2_transfer"
+    assert result.data["status"] == "ok"
+    assert result.flags[0] == "Approval to a wallet address, not a contract (drainer pattern)"
+    service.fetch.assert_awaited_once_with(SPENDER, 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("primary_type", ["PermitTransferFrom", "PermitWitnessTransferFrom"])
+async def test_signature_transfer_to_a_verified_protocol_is_caution(primary_type):
+    typed = _typed(primary_type, {
+        "permitted": {"token": "0x" + "c" * 40, "amount": "1000"},
+        "spender": SPENDER, "nonce": "0", "deadline": str(int(time.time()) + 1800),
+        **({"witness": {"orderHash": "0x" + "0" * 64}} if "Witness" in primary_type else {}),
+    })
+    result = await _analyze(SignaturePermitAnalyzer(_service(_facts())), typed)
+    # A pull right to a verified, old contract outside the allowlist: the SignatureTransfer base.
+    assert result.score == 30
+    assert "floor" not in result.data
+    assert result.data["status"] == "ok"
+    assert result.flags == [f"Permit: spender {SPENDER[:10]}... is not a known protocol (verified contract)"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value, expected", [(MAX, 40), ("1000", 10)])
+async def test_eip2612_permit_to_a_verified_protocol(value, expected):
+    typed = {"primaryType": "Permit", "domain": {"name": "Token"}, "message": {
+        "spender": SPENDER, "value": value, "deadline": str(int(time.time()) + 1800),
+    }}
+    result = await _analyze(SignaturePermitAnalyzer(_service(_facts())), typed)
+    assert result.score == expected
+
+
+@pytest.mark.asyncio
+async def test_unlimited_eip2612_permit_to_an_unverified_contract_is_blocked():
+    typed = {"primaryType": "Permit", "domain": {"name": "Token"}, "message": {
+        "spender": SPENDER, "value": MAX, "deadline": str(int(time.time()) + 1800),
+    }}
+    result = await _analyze(SignaturePermitAnalyzer(_service(_facts(is_verified=False))), typed)
+    assert result.score == 85
+    assert result.data["floor"] == 85
+    assert result.flags[0] == "Spender contract is unverified"
+
+
+@pytest.mark.asyncio
+async def test_unknown_spender_facts_are_unknown_not_clean():
+    typed = _typed("PermitSingle", {
+        "details": {"token": "0x" + "c" * 40, "amount": "1000", "expiration": "0", "nonce": "0"},
+        "spender": SPENDER, "sigDeadline": "0",
+    })
+    unknown = _facts(is_contract=None, labels=None, reason="Spender facts unknown: code (RPC), labels (GoPlus HTTP 429)",
+                     coverage={"code": False, "verification": True, "age": True, "labels": False})
+    result = await _analyze(SignaturePermitAnalyzer(_service(unknown)), typed)
+    assert result.score == 25
+    assert result.flags == [f"Permit: approval to unknown spender {SPENDER[:10]}..."]
+    assert result.data["status"] == "unknown"
+    assert result.data["coverage"] == {"counterparty": False}
+    assert result.data["reason"] == unknown["reason"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [8453, 42161])
+async def test_chain_adapter_router_is_allowlisted(chain_id):
+    from adapters.arbitrum import ArbitrumAdapter
+    from adapters.base_chain import BaseChainAdapter
+    from services.counterparty_service import CounterpartyService
+    from utils.web3_client import Web3Client
+
+    client = Web3Client()
+    client.register_adapter(BaseChainAdapter())
+    client.register_adapter(ArbitrumAdapter())
+    typed = _typed("PermitSingle", {
+        "details": {"token": "0x" + "c" * 40, "amount": MAX, "expiration": "0", "nonce": "0"},
+        "spender": UNIVERSAL_ROUTER, "sigDeadline": "0",
+    })
+    result = await _analyze(SignaturePermitAnalyzer(CounterpartyService(client, None)), typed, chain_id)
+    # Only the unlimited amount counts: no lookup, no spender points.
+    assert result.score == 25
+    assert "status" not in result.data

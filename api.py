@@ -1065,7 +1065,7 @@ async def _build_signature_only_response(req: FirewallRequest) -> Dict:
             "calldata": req.data,
         },
     )
-    result = await SignaturePermitAnalyzer().analyze(ctx)
+    result = await SignaturePermitAnalyzer(container.counterparty_service if container else None).analyze(ctx)
     risk_score = int(max(0, min(100, round(result.score))))
     danger_signals = list(result.flags)
 
@@ -1085,13 +1085,15 @@ async def _build_signature_only_response(req: FirewallRequest) -> Dict:
     sig_type = result.data.get("sig_type", "signature")
     sign_method = req.signMethod or result.data.get("sign_method") or "signature"
     covered = not result.error and 'Failed to parse typed data' not in danger_signals and (
-        sig_type in {'eip2612_permit', 'permit2', 'seaport_order'}
+        sig_type in {'eip2612_permit', 'permit2', 'permit2_transfer', 'seaport_order'}
         or (not req.typedData and req.signMethod == 'personal_sign')
-    )
+    ) and result.data.get('status') != 'unknown'
     alert = format_extension_alert({
         'rug_probability': risk_score, 'risk_level': 'LOW' if covered else 'UNKNOWN',
         'status': 'ok' if covered else 'unknown', 'coverage': {'signature': int(covered)},
-        'coverage_reasons': {} if covered else {'signature': 'Signature payload analysis unavailable or unsupported'},
+        'coverage_reasons': {} if covered else {
+            'signature': result.data.get('reason') or 'Signature payload analysis unavailable or unsupported',
+        },
     })
     if not covered and classification == 'SAFE':
         classification = 'CAUTION'

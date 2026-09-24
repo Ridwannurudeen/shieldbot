@@ -4,6 +4,7 @@ import logging
 from typing import Dict, List, Optional
 
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
+from services.counterparty_service import UnavailableCounterparty, judge_spender
 from utils.web3_client import UnsupportedChainError
 
 logger = logging.getLogger(__name__)
@@ -15,11 +16,13 @@ UNLIMITED_THRESHOLD = 10**30
 # Far-future deadline: > 1 year from now (seconds)
 FAR_FUTURE_SECONDS = 365 * 24 * 3600
 
-# Known safe Permit2 spenders (Uniswap ecosystem)
-KNOWN_PERMIT2_SPENDERS = {
-    "0x000000000022d473030f116ddee9f6b43ac78ba3".lower(): "Uniswap Permit2",
-    "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD".lower(): "Uniswap Universal Router",
-}
+# Permit2 SignatureTransfer: the spender pulls the tokens as soon as it submits the signature.
+SIGNATURE_TRANSFER_TYPES = (
+    'PermitTransferFrom',
+    'PermitBatchTransferFrom',
+    'PermitWitnessTransferFrom',
+    'PermitBatchWitnessTransferFrom',
+)
 
 
 class SignaturePermitAnalyzer(Analyzer):
@@ -27,9 +30,16 @@ class SignaturePermitAnalyzer(Analyzer):
 
     Parses typed data from ctx.extra['typed_data'] for:
     - EIP-2612 Permit: flags unlimited value, unknown spender, far-future deadline
-    - Permit2 (PermitSingle/PermitBatch): amount/expiration/spender
+    - Permit2 AllowanceTransfer (PermitSingle/PermitBatch): amount/expiration/spender
+    - Permit2 SignatureTransfer (PermitTransferFrom, its batch and witness forms): pull rights
     - Seaport OrderComponents: zero-price NFT listings
+
+    Every permit's spender is judged like a calldata approval's: the chain adapter's routers and
+    Permit2 are allowlisted, and any other spender's counterparty facts can set a hard floor.
     """
+
+    def __init__(self, counterparty_service=None):
+        self._counterparty = counterparty_service or UnavailableCounterparty()
 
     @property
     def name(self) -> str:
@@ -53,6 +63,9 @@ class SignaturePermitAnalyzer(Analyzer):
         score = 0.0
         flags: List[str] = []
         sig_type = 'unknown'
+        permit = None
+        spender_data = {}
+        floor = None
 
         try:
             # Parse the typed data structure
@@ -67,16 +80,17 @@ class SignaturePermitAnalyzer(Analyzer):
             # EIP-2612 Permit
             if primary_type == 'Permit':
                 sig_type = 'eip2612_permit'
-                s, f = self._check_permit(message, domain)
-                score += s
-                flags.extend(f)
+                permit = self._check_permit(message, domain)
 
-            # Permit2 — PermitSingle or PermitBatch
+            # Permit2 AllowanceTransfer — PermitSingle or PermitBatch
             elif primary_type in ('PermitSingle', 'PermitBatch'):
                 sig_type = 'permit2'
-                s, f = self._check_permit2(message, primary_type)
-                score += s
-                flags.extend(f)
+                permit = self._check_permit2(message, primary_type)
+
+            # Permit2 SignatureTransfer
+            elif primary_type in SIGNATURE_TRANSFER_TYPES:
+                sig_type = 'permit2_transfer'
+                permit = self._check_permit2_transfer(message, primary_type)
 
             # Seaport OrderComponents
             elif primary_type == 'OrderComponents':
@@ -94,6 +108,14 @@ class SignaturePermitAnalyzer(Analyzer):
             else:
                 sig_type = primary_type or sign_method or 'unknown'
 
+            if permit:
+                s, f, spender, unlimited = permit
+                score += s
+                flags.extend(f)
+                s, f, floor, spender_data = await self._judge_spender(spender, unlimited, sig_type, ctx.chain_id)
+                score += s
+                flags = f + flags if floor else flags + f
+
         except UnsupportedChainError:
             raise
         except Exception as e:
@@ -101,7 +123,8 @@ class SignaturePermitAnalyzer(Analyzer):
             flags.append('Failed to parse typed data')
             score = 15  # Mild suspicion on parse failure
 
-        score = min(score, 100)
+        # The signature-only path has no engine, so the floor is applied here as well as declared.
+        score = min(max(score, floor or 0), 100)
 
         return AnalyzerResult(
             name=self.name,
@@ -112,11 +135,38 @@ class SignaturePermitAnalyzer(Analyzer):
                 'sign_method': sign_method,
                 'has_typed_data': True,
                 'sig_type': sig_type,
+                **spender_data,
+                **({'floor': floor} if floor else {}),
             },
         )
 
+    async def _judge_spender(self, spender: str, unlimited: bool, sig_type: str, chain_id: int) -> tuple:
+        """Score a permit's spender: (points, flags, floor or None, result data)."""
+        if not spender:
+            return 15, ['Permit: missing spender address'], None, {}
+        if self._counterparty.allowlisted_name(spender, chain_id):
+            return 0, [], None, {}
+        facts = await self._counterparty.fetch(spender, chain_id)
+        floor, floor_flag, unknown = judge_spender(facts, unlimited)
+        # A SignatureTransfer moves the tokens at once, so any spender outside the allowlist is
+        # riskier than an allowance's.
+        points = 30 if sig_type == 'permit2_transfer' else 25 if unknown else 10
+        if floor:
+            flags = [floor_flag] + ([facts['reason']] if unknown else [])
+        elif unknown:
+            flags = [f'Permit: approval to unknown spender {spender[:10]}...']
+        else:
+            flags = [f'Permit: spender {spender[:10]}... is not a known protocol (verified contract)']
+        data = {
+            'status': 'unknown' if unknown else 'ok',
+            'coverage': {'counterparty': not unknown},
+            'reason': facts['reason'] if unknown else None,
+            'counterparty': facts,
+        }
+        return points, flags, floor, data
+
     def _check_permit(self, message: Dict, domain: Dict) -> tuple:
-        """Check EIP-2612 Permit for dangerous patterns."""
+        """Check EIP-2612 Permit for dangerous patterns: (score, flags, spender, unlimited)."""
         score = 0.0
         flags = []
 
@@ -129,14 +179,6 @@ class SignaturePermitAnalyzer(Analyzer):
             score += 30
             flags.append('Permit: unlimited token approval')
 
-        # Unknown spender
-        if spender and spender not in KNOWN_PERMIT2_SPENDERS:
-            score += 25
-            flags.append(f'Permit: approval to unknown spender {spender[:10]}...')
-        elif not spender:
-            score += 15
-            flags.append('Permit: missing spender address')
-
         # Far-future deadline
         import time
         now = int(time.time())
@@ -144,26 +186,23 @@ class SignaturePermitAnalyzer(Analyzer):
             score += 10
             flags.append('Permit: far-future deadline (>1 year)')
 
-        return score, flags
+        return score, flags, spender, value >= UNLIMITED_THRESHOLD
 
     def _check_permit2(self, message: Dict, primary_type: str) -> tuple:
-        """Check Uniswap Permit2 for dangerous patterns."""
+        """Check a Permit2 AllowanceTransfer: (score, flags, spender, unlimited)."""
         score = 0.0
         flags = []
+        spender = (message.get('spender') or '').lower()
 
         if primary_type == 'PermitSingle':
             details = message.get('details', {})
-            spender = (message.get('spender') or '').lower()
             amount = _parse_uint(details.get('amount', 0))
             expiration = _parse_uint(details.get('expiration', 0))
+            unlimited = amount >= UNLIMITED_THRESHOLD
 
-            if amount >= UNLIMITED_THRESHOLD:
+            if unlimited:
                 score += 25
                 flags.append('Permit2: unlimited amount')
-
-            if spender not in KNOWN_PERMIT2_SPENDERS:
-                score += 20
-                flags.append(f'Permit2: unknown spender {spender[:10]}...')
 
             import time
             now = int(time.time())
@@ -171,21 +210,44 @@ class SignaturePermitAnalyzer(Analyzer):
                 score += 10
                 flags.append('Permit2: far-future expiration')
 
-        elif primary_type == 'PermitBatch':
+        else:
             details_list = message.get('details', [])
-            spender = (message.get('spender') or '').lower()
-
-            if spender not in KNOWN_PERMIT2_SPENDERS:
-                score += 25
-                flags.append(f'Permit2 Batch: unknown spender {spender[:10]}...')
+            unlimited = False
 
             for i, detail in enumerate(details_list):
                 amount = _parse_uint(detail.get('amount', 0))
                 if amount >= UNLIMITED_THRESHOLD:
+                    unlimited = True
                     score += 15
                     flags.append(f'Permit2 Batch: unlimited amount for token #{i+1}')
 
-        return score, flags
+        return score, flags, spender, unlimited
+
+    def _check_permit2_transfer(self, message: Dict, primary_type: str) -> tuple:
+        """Check a Permit2 SignatureTransfer: (score, flags, spender, unlimited)."""
+        score = 0.0
+        flags = []
+        spender = (message.get('spender') or '').lower()
+        permitted = message.get('permitted', [])
+        if 'Batch' not in primary_type:
+            permitted = [permitted]
+        unlimited = any(_parse_uint(item.get('amount', 0)) >= UNLIMITED_THRESHOLD for item in permitted)
+        deadline = _parse_uint(message.get('deadline', 0))
+
+        if unlimited:
+            score += 20
+            flags.append('Permit2 transfer: unlimited amount')
+        if len(permitted) >= 3:
+            score += 15
+            flags.append(f'Permit2 transfer: {len(permitted)} tokens in one signature')
+
+        import time
+        now = int(time.time())
+        if deadline > 0 and (deadline - now) > FAR_FUTURE_SECONDS:
+            score += 10
+            flags.append('Permit2 transfer: far-future deadline (>1 year)')
+
+        return score, flags, spender, unlimited
 
     def _check_seaport(self, message: Dict) -> tuple:
         """Check Seaport OrderComponents for zero-price listings."""

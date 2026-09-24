@@ -36,6 +36,7 @@ def consumer_api(monkeypatch, mock_web3_client):
         web3_client=mock_web3_client, db=db,
         registry=SimpleNamespace(run_all=AsyncMock(return_value=[])),
         policy_engine=None, indexer=None, settings=SimpleNamespace(policy_mode='BALANCED'),
+        counterparty_service=None,
     )
     monkeypatch.setattr(api, 'container', services)
     monkeypatch.setattr(api, 'web3_client', mock_web3_client)
@@ -419,6 +420,50 @@ async def test_supported_signature_preserves_covered_safe(consumer_api):
     assert response['classification'] == 'SAFE'
     assert response['status'] == 'ok'
     assert response['coverage'] == {'signature': 1}
+
+
+def _spender_service(**facts):
+    return SimpleNamespace(
+        allowlisted_name=lambda address, chain_id: None,
+        fetch=AsyncMock(return_value={
+            'address': '0x' + '5' * 40, 'allowlisted': None, 'is_contract': True, 'delegated': False,
+            'is_verified': True, 'age_days': 400, 'labels': [], 'label_source': '',
+            'coverage': {'code': True, 'verification': True, 'age': True, 'labels': True},
+            'reason': None, 'observed_at': 0, **facts,
+        }),
+    )
+
+
+def _transfer_request(api):
+    return api.FirewallRequest(to='', sender='0x' + 'b' * 40, signMethod='eth_signTypedData_v4', typedData={
+        'primaryType': 'PermitTransferFrom', 'message': {
+            'permitted': {'token': '0x' + 'c' * 40, 'amount': '1000'},
+            'spender': '0x' + '5' * 40, 'nonce': '0', 'deadline': '1',
+        },
+    })
+
+
+@pytest.mark.asyncio
+async def test_signature_transfer_to_a_verified_protocol_is_covered_caution(consumer_api):
+    api, services = consumer_api
+    services.counterparty_service = _spender_service()
+    response = await api._build_signature_only_response(_transfer_request(api))
+    assert response['classification'] == 'CAUTION'
+    assert response['risk_score'] == 30
+    assert response['status'] == 'ok'
+    assert response['raw_checks']['signature']['sig_type'] == 'permit2_transfer'
+
+
+@pytest.mark.asyncio
+async def test_signature_with_unknown_spender_facts_is_unknown(consumer_api):
+    api, services = consumer_api
+    services.counterparty_service = _spender_service(
+        is_contract=None, labels=None, reason='Spender facts unknown: code (RPC), labels (GoPlus HTTP 429)',
+    )
+    response = await api._build_signature_only_response(_transfer_request(api))
+    assert_unknown_response(response)
+    assert response['risk_score'] == 30
+    assert response['coverage_reasons']['signature'].startswith('Spender facts unknown: code (RPC)')
 
 
 @pytest.mark.parametrize('surface', ['compact', 'feed', 'center', 'stats', 'content', 'content-explain', 'sidepanel', 'sidepanel-message', 'history'])

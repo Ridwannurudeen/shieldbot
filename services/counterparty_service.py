@@ -56,6 +56,41 @@ def unknown_facts(address: str) -> dict:
     }
 
 
+def judge_spender(facts: dict, unlimited: bool) -> tuple:
+    """Hard floor for granting a non-allowlisted spender a token allowance.
+
+    Returns (floor or None, the floor's flag or None, unknown). A rule fires only on facts that
+    are known; unknown is True when a fact the verdict depends on is not, so the caller reports
+    the verdict as incomplete instead of clean. Legitimate protocols verify their contracts, so
+    an unverified spender is refused outright for an unlimited grant; a wallet or a labelled
+    address never needs an allowance.
+    """
+    labels, age, verified = facts["labels"], facts["age_days"], facts["is_verified"]
+    unknown = labels is None or facts["is_contract"] is None
+    if labels:
+        source = f" ({facts['label_source']})" if facts["label_source"] else ""
+        return 100, f"Spender flagged by GoPlus: {', '.join(labels)}{source}", unknown
+    if facts["is_contract"] is False:
+        return 100, "Approval to a wallet address, not a contract (drainer pattern)", unknown
+    if facts["delegated"]:
+        return 100, "Approval to an EIP-7702 delegated wallet, not a protocol contract", unknown
+    if facts["is_contract"] is None or verified is None:
+        return None, None, True
+    if verified is False:
+        if age is not None and age < 7:
+            return 85, f"Spender contract is unverified and {age} days old", unknown
+        # A limited grant to an unverified contract of unknown age might be one under 7 days (85).
+        floor = 85 if unlimited else 60
+        return floor, "Spender contract is unverified", unknown or (not unlimited and age is None)
+    if not unlimited:
+        return None, None, unknown
+    if age is None:
+        return None, None, True
+    if age < 7:
+        return 60, f"Spender contract is {age} days old", unknown
+    return None, None, unknown
+
+
 class CounterpartyService:
     """Looks up counterparty facts, cached for five minutes per chain and address."""
 
@@ -142,3 +177,14 @@ class CounterpartyService:
         }
         _FACTS_CACHE[key] = facts
         return facts
+
+
+class UnavailableCounterparty:
+    """Stands in where no lookup is wired (bare analyzers, the container-less API): only Permit2
+    is allowlisted and every fact is unknown."""
+
+    def allowlisted_name(self, address: str, chain_id: int) -> Optional[str]:
+        return "Permit2" if address.lower() == PERMIT2 else None
+
+    async def fetch(self, address: str, chain_id: int) -> dict:
+        return unknown_facts(address)
