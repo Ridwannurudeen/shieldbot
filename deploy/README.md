@@ -30,7 +30,7 @@ NO-GO when:
 - the `shieldbot` or `shieldbot-bot` unit, or the venv's Python, is missing
 - the database is missing, or `/root` lacks twice its size in free space for the backup
 - a tracked file in `/opt/shieldbot` was edited on the server
-- the recorder key (`ROBINHOOD_RECORDER_PRIVATE_KEY`) is in the shared `/opt/shieldbot/.env`, the bot unit
+- the recorder key (`ROBINHOOD_RECORDER_PRIVATE_KEY`) is set in the shared `/opt/shieldbot/.env`, the bot unit
   loads `recorder.env` or sets the key, or the running bot process has the key in its environment (or its
   environment cannot be read). Only the API may hold that key: `contracts/base/DEPLOY_ROBINHOOD.md`, section 8.
 - the commit is not on origin after `git fetch`

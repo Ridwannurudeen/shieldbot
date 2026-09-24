@@ -105,9 +105,10 @@ preflight() {
   echo "clean"
 
   say "Only the API can see the recorder key"
-  # Both units load the shared .env, and the bot must never hold the key.
+  # Both units load the shared .env, and the bot must never hold the key. A comment naming it (as in
+  # .env.example) is not an assignment.
   if [ -f "$APP/.env" ]; then
-    grep -q "$RECORDER_KEY" "$APP/.env" || rc=$?
+    grep -qE "^[[:space:]]*(export[[:space:]]+)?$RECORDER_KEY[[:space:]]*=" "$APP/.env" || rc=$?
     case $rc in
       0) fail "$RECORDER_KEY is in the shared $APP/.env, which the bot reads" ;;
       1) ;;

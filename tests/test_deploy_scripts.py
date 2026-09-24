@@ -266,13 +266,22 @@ def test_check_is_read_only_and_says_go(server):
 
 
 @pytest.mark.parametrize(
-    "where", ["shared .env", "unit loads recorder.env", "unit sets the key", "bot process"]
+    "where",
+    [
+        "shared .env",
+        "shared .env, exported",
+        "unit loads recorder.env",
+        "unit sets the key",
+        "bot process",
+    ],
 )
 def test_check_refuses_when_the_bot_can_see_the_recorder_key(server, where):
     secret = "0x" + "5e" * 32
     unit = server.state / "unit-shieldbot-bot"
     if where == "shared .env":
         (server.app / ".env").write_text(f"{KEY}={secret}\n", encoding="utf-8")
+    elif where == "shared .env, exported":
+        (server.app / ".env").write_text(f"A=1\n  export {KEY} = {secret}\n", encoding="utf-8")
     elif where == "unit loads recorder.env":
         unit.write_text(
             unit.read_text() + "EnvironmentFile=/etc/shieldbot/recorder.env\n", encoding="utf-8"
@@ -286,6 +295,16 @@ def test_check_refuses_when_the_bot_can_see_the_recorder_key(server, where):
     assert "NO-GO" in err
     assert "rollback point" not in out
     assert secret not in out + err
+
+
+def test_check_accepts_a_shared_env_that_only_mentions_the_key_in_a_comment(server):
+    # .env.example documents the key in a comment; a .env copied from it holds no key.
+    (server.app / ".env").write_text(
+        f"# {KEY} is deliberately NOT set here.\nTELEGRAM_BOT_TOKEN=unused\n", encoding="utf-8"
+    )
+    code, out, err = server.run("--check", server.target)
+    assert code == 0, err
+    assert "rollback point" in out
 
 
 def test_check_fails_closed_when_the_bot_environment_cannot_be_read(server):
