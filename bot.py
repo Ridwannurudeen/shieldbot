@@ -310,6 +310,7 @@ async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /history command - on-chain scan history is not available"""
+    # Still registered so chats with a cached command menu get a plain answer instead of silence.
     await update.message.reply_text(
         "On-chain scan history is not available. Use /scan or /token to check an address."
     )
