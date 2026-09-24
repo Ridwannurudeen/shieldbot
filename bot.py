@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-ShieldBot - Your BNB Chain Shield
-Telegram bot for pre-transaction scanning and token safety checks
+ShieldBot Telegram bot
+Pre-transaction scanning and token safety checks on every supported chain
 Features: AI risk scoring, on-chain recording, caching, progress indicators
 """
 
@@ -167,13 +167,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = """
 🛡️ **Welcome to ShieldBot!**
 
-Your AI-powered multi-chain security assistant. I can help you:
+I check contracts and tokens before you sign, and I say what I checked. When data is missing I answer Unknown instead of guessing Safe. I build on GoPlus, honeypot.is and others; I do not replace them.
+
+I can help you:
 
 **📡 Pre-Transaction Scan**
 Send me a contract address or transaction data, and I'll check:
 • Scam database matches
 • Contract verification status
-• AI-powered risk scoring
+• Risk scoring that names any check it could not run
 • Bytecode & source code analysis
 
 **🔍 Token Safety Check**
@@ -207,7 +209,7 @@ Commands:
 
     keyboard = [
         [InlineKeyboardButton("📖 GitHub", url="https://github.com/Ridwannurudeen/shieldbot")],
-        [InlineKeyboardButton("🔗 BNB Chain", url="https://www.bnbchain.org/")]
+        [InlineKeyboardButton("🌐 Website", url="https://shieldbotsecurity.online")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
