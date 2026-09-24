@@ -1040,6 +1040,8 @@ function ThreatLogTable({
     }));
   }
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    role: "group",
+    "aria-label": "Filter by chain",
     className: "flex gap-2 flex-wrap mb-4"
   }, CHAIN_FILTERS.map(f => {
     const active = chain === f.val;

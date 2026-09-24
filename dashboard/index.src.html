@@ -471,7 +471,7 @@
       return (
         <div>
           {/* Chain filter pills */}
-          <div className="flex gap-2 flex-wrap mb-4">
+          <div role="group" aria-label="Filter by chain" className="flex gap-2 flex-wrap mb-4">
             {CHAIN_FILTERS.map(f => {
               const active = chain === f.val;
               return (
