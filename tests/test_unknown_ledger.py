@@ -403,8 +403,8 @@ PAIR = {
 @pytest.mark.parametrize(
     "reply, outcome",
     [
-        ((200, {"pairs": [PAIR]}), "answered"),
-        ((200, {"pairs": None}), "unknown"),
+        ((200, [PAIR]), "answered"),
+        ((200, []), "unknown"),
         ((429, None), "failed"),
         (aiohttp.ClientConnectionError(), "failed"),
     ],

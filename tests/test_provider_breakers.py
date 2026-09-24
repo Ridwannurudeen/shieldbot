@@ -181,7 +181,7 @@ CASES = {
         dexscreener,
         "dexscreener",
         ("dexscreener", 56),
-        (200, {"pairs": None}),
+        (200, []),
     ),
     "token_sniffer": Case(
         "services.token_sniffer_service.aiohttp.ClientSession",
@@ -309,7 +309,7 @@ async def test_a_probe_that_gets_an_answer_closes_the_breaker(monkeypatch):
     assert provider_breakers.states()["dexscreener"] == OPEN
 
     clock.return_value += OPEN_SECONDS
-    answering, session = http_client(200, {"pairs": [dexscreener_pair()]})
+    answering, session = http_client(200, [dexscreener_pair()])
     with patch(CASES["dexscreener"].target, answering):
         probe = await lookup(FAILURE_THRESHOLD)
         after = await lookup(FAILURE_THRESHOLD + 1)
@@ -324,7 +324,7 @@ async def test_malformed_token_data_never_opens_the_market_breaker():
     # DexScreener answered with JSON; only the token's own numbers could not be read, which is
     # that lookup coming back Unknown, not the provider failing.
     lookup = dexscreener()
-    client, session = http_client(200, {"pairs": [{**dexscreener_pair(), "priceUsd": "n/a"}]})
+    client, session = http_client(200, [{**dexscreener_pair(), "priceUsd": "n/a"}])
     before = unknown_ledger.for_chain(56).get("dexscreener", {}).get("failed", 0)
     with patch(CASES["dexscreener"].target, client):
         results = [await lookup(i) for i in range(FAILURE_THRESHOLD + 1)]
@@ -429,7 +429,7 @@ async def classify(token: str) -> dict:
 
 @pytest.mark.asyncio
 async def test_a_scan_with_the_market_breaker_open_is_never_safe():
-    answering, _ = http_client(200, {"pairs": [dexscreener_pair()]})
+    answering, _ = http_client(200, [dexscreener_pair()])
     with patch(CASES["dexscreener"].target, answering):
         # The same scan with DexScreener answering is SAFE, so only the open breaker changes it.
         assert (await classify(address(100)))["risk_classification"] == "SAFE"

@@ -9,7 +9,10 @@ from utils.chain_info import get_dexscreener_slug
 
 logger = logging.getLogger(__name__)
 
-DEX_API_URL = "https://api.dexscreener.com/latest/dex/tokens/{address}"
+# The token's pools on one chain. The unscoped latest/dex/tokens route answers with at most 30
+# pairs from every chain, so where the same address exists on another chain (PulseChain copied
+# Ethereum's state), those pairs can crowd out the requested chain's.
+DEX_API_URL = "https://api.dexscreener.com/token-pairs/v1/{chain}/{address}"
 
 
 class DexService:
@@ -41,11 +44,11 @@ class DexService:
             if not slug:
                 defaults['reason'] = f'DexScreener unsupported for chain {chain_id}'
                 return defaults
-            # One breaker for every chain: the request names only the token.
+            # One breaker for every chain: DexScreener is one service, whichever chain is asked.
             provider_breakers.check('dexscreener')
             async with aiohttp.ClientSession() as session:
                 async with session.get(
-                    DEX_API_URL.format(address=address),
+                    DEX_API_URL.format(chain=slug, address=address),
                     timeout=aiohttp.ClientTimeout(total=10)
                 ) as resp:
                     if resp.status != 200:
@@ -58,7 +61,7 @@ class DexService:
                     data = await resp.json()
                     provider_breakers.record_status('dexscreener', None, resp.status)
 
-            pairs = [p for p in (data.get('pairs') or []) if p.get('chainId') == slug]
+            pairs = [p for p in data if p.get('chainId') == slug]
             if not pairs:
                 unknown_ledger.record('dexscreener', chain_id, 'unknown')
                 defaults['reason'] = f'No DexScreener pairs on requested chain ({slug})'
