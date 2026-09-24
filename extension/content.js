@@ -565,6 +565,22 @@
     });
   }
 
+  // An EIP-7702 transaction's delegates, from the request itself: its
+  // account's code would become theirs.
+  function delegationSection(tx) {
+    if (!Array.isArray(tx.authorizationList)) return "";
+    const rows = tx.authorizationList.map((authorization) => {
+      const address = typeof authorization.address === "string" ? authorization.address : _t("overlayDelegateUnreadable");
+      return `<tr><td>${_t("overlayDelegate")}</td><td class="shieldai-mono">${escapeHtml(address)}</td></tr>`;
+    }).join("");
+    return `
+      <div class="shieldai-section shieldai-delegation" role="alert">
+        <h3>${_t("overlayDelegationTitle")}</h3>
+        <p>${_t("overlayDelegationNote")}</p>
+        <table class="shieldai-impact">${rows}</table>
+      </div>`;
+  }
+
   // Both addresses in full, the middle of each marked, so the difference shows.
   function lookalikeSection(recipient, past) {
     if (!past) return "";
@@ -899,8 +915,10 @@
     removeOverlay();
 
     const { incomplete, classification: verdict } = verdictOf(result);
-    // A look-alike recipient is at least High Risk, whatever the API found.
-    const classification = lookalike ? atLeast(verdict, "HIGH_RISK") : verdict;
+    // An EIP-7702 delegation is Block Recommended, and a look-alike recipient
+    // at least High Risk, whatever the API found.
+    const classification = Array.isArray(tx.authorizationList) ? "BLOCK_RECOMMENDED"
+      : lookalike ? atLeast(verdict, "HIGH_RISK") : verdict;
     const badgeClass = BADGE_CLASSES[classification] || "shieldai-badge-caution";
     const label = classLabel(classification);
     const isBlock = classification === "BLOCK_RECOMMENDED";
@@ -956,6 +974,7 @@
           <p class="shieldai-unknown-why">${_t("unknownWhy")} ${escapeHtml(unknownReason(result))}</p>
         ` : ""}
         ${batchNote(tx)}
+        ${delegationSection(tx)}
         ${lookalikeSection(recipient, lookalike)}
 
         ${result.partial ? `
@@ -1104,20 +1123,24 @@
   async function showErrorOverlay(requestId, errorMsg, strict, tx, recipient, lookalike) {
     await _loadContentLang();
     removeOverlay();
+    // An EIP-7702 delegation is Block Recommended without the API too.
+    const delegation = Array.isArray(tx.authorizationList);
+    const hold = delegation && !strict;
 
     const overlay = document.createElement("div");
     overlay.id = "shieldai-overlay";
     overlay.className = "shieldai-overlay";
     overlay.innerHTML = `
-      <div class="shieldai-modal" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
+      <div class="shieldai-modal ${delegation ? "shieldai-modal-danger" : ""}" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
         <div class="shieldai-header">
           <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
-        <div class="shieldai-badge shieldai-badge-high">
-          ${_t("overlayAnalysisUnavail")}
+        <div class="shieldai-badge ${delegation ? "shieldai-badge-block" : "shieldai-badge-high"}">
+          ${delegation ? _t("classBlock") : _t("overlayAnalysisUnavail")}
         </div>
         ${batchNote(tx)}
+        ${delegationSection(tx)}
         ${lookalikeSection(recipient, lookalike)}
         <div class="shieldai-section">
           <p>${_t("overlayCannotReach")}</p>
@@ -1128,20 +1151,28 @@
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">
             ${_t("overlayBtnBlock")}
           </button>
-          ${strict ? "" : `
+          ${strict ? "" : hold ? `
+          <button class="shieldai-btn shieldai-btn-proceed shieldai-btn-hold" id="shieldai-proceed" aria-describedby="shieldai-hold-note">
+            ${_t("overlayBtnHoldProceed")}
+          </button>
+          ` : `
           <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">
             ${_t("overlayBtnProceed")}
           </button>
           `}
         </div>
+        ${hold ? `<p class="shieldai-hold-note" id="shieldai-hold-note">${_t("overlayHoldNote")}</p>` : ""}
         ${COVERED_NOTE}
       </div>
     `;
 
     const root = mountOverlay(overlay, requestId);
+    const remember = recipient ? () => rememberRecipient(recipient) : null;
     onDecision(root, "shieldai-block", requestId, "block");
-    if (!strict) {
-      onDecision(root, "shieldai-proceed", requestId, "proceed", recipient ? () => rememberRecipient(recipient) : null);
+    if (hold) {
+      onHold(root, requestId, remember);
+    } else if (!strict) {
+      onDecision(root, "shieldai-proceed", requestId, "proceed", remember);
     }
   }
 

@@ -313,13 +313,16 @@
   margin: 10px 0 0;
 }
 
-/* A recipient that looks like one sent to before: both in full, middles marked. */
-.shieldai-lookalike {
+/* A recipient that looks like one sent to before (both in full, middles marked),
+   and an EIP-7702 delegation's delegates. */
+.shieldai-lookalike,
+.shieldai-delegation {
   border: 1px solid #dc2626;
   border-radius: 8px;
   padding: 8px 12px;
 }
-.shieldai-lookalike .shieldai-mono {
+.shieldai-lookalike .shieldai-mono,
+.shieldai-delegation .shieldai-mono {
   word-break: break-all;
 }
 .shieldai-diff {

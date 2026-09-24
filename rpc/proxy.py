@@ -78,12 +78,15 @@ class RPCProxy:
                 from_addr = tx_fields.get("from", "")
                 value = tx_fields.get("value", "0x0")
                 data = tx_fields.get("data", "0x")
+                # A signed EIP-7702 (type 4) transaction is not decoded, so it is blocked above.
+                authorization_list = None
             else:
                 tx_params = params[0] if params else {}
                 to_addr = tx_params.get("to", "")
                 from_addr = tx_params.get("from", "")
                 value = tx_params.get("value", "0x0")
                 data = tx_params.get("data", "0x")
+                authorization_list = tx_params.get("authorizationList")
 
             if not to_addr:
                 # Contract creation — forward without analysis
@@ -123,7 +126,10 @@ class RPCProxy:
                 chain_id=chain_id,
                 from_address=from_addr,
                 is_token=is_token,
-                extra={'calldata': data, 'value': value, 'is_verified': is_verified, 'is_contract': is_contract},
+                extra={
+                    'calldata': data, 'value': value, 'is_verified': is_verified, 'is_contract': is_contract,
+                    'authorization_list': authorization_list,
+                },
             )
 
             analyzer_results = await self._container.registry.run_all(ctx)

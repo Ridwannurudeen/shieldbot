@@ -416,6 +416,11 @@ async function handleAnalyze(tx, sender) {
   if (signMethod) {
     body.signMethod = signMethod;
   }
+  // An EIP-7702 transaction's delegates: only each authorization's address is
+  // sent, never its signature.
+  if (Array.isArray(tx.authorizationList)) {
+    body.authorizationList = tx.authorizationList.map((authorization) => ({ address: authorization.address }));
+  }
 
   // Get policy mode setting
   const settings = await new Promise((resolve) => {

@@ -320,12 +320,21 @@
         };
         const txParams = ownFieldsOnly(ownValue(request.params, 0));
         const calls = kind === "calls" ? ownValue(txParams, "calls") : undefined;
+        const authorizations = kind === "transaction" ? ownValue(txParams, "authorizationList") : undefined;
 
         // A transaction must be an object, and a wallet_sendCalls batch an
-        // object whose calls are a non-empty list of objects. Anything else
-        // cannot be analysed: the user is told so and decides.
+        // object whose calls are a non-empty list of objects. An EIP-7702
+        // transaction's authorization list, when there is one, must be a
+        // non-empty list of objects. Anything else cannot be analysed: the user
+        // is told so and decides.
         let structured = true;
-        if (kind === "transaction") structured = isPlainObject(txParams);
+        if (kind === "transaction") {
+          structured = isPlainObject(txParams) &&
+            (authorizations === undefined || (isArray(authorizations) && authorizations.length > 0));
+          for (let index = 0; structured && authorizations !== undefined && index < authorizations.length; index++) {
+            structured = isPlainObject(ownFieldsOnly(ownValue(authorizations, index)));
+          }
+        }
         if (kind === "calls") {
           structured = isPlainObject(txParams) && isArray(calls) && calls.length > 0;
           for (let index = 0; structured && index < calls.length; index++) {
@@ -403,6 +412,7 @@
             chainId,
             callIndex: isCall ? index + 1 : undefined,
             callCount: isCall ? count : undefined,
+            authorizationList: isCall ? undefined : authorizations,
           };
         };
         const revision = chainRevision;
@@ -723,6 +733,7 @@
     }
     if (txParams.unknownStructure) txPayload.unknownStructure = true;
     if (txParams.wrongChain) txPayload.wrongChain = true;
+    if (txParams.authorizationList) txPayload.authorizationList = txParams.authorizationList;
 
     withProof(requestId, "intercept", (proof) => {
       postMessage(

@@ -175,5 +175,9 @@
   "overlayLookalikeTitle": "Người nhận trông giống",
   "overlayLookalikeNote": "Người nhận này trông giống một địa chỉ bạn từng gửi đến, nhưng là một địa chỉ khác. Kẻ lừa đảo tạo ra các địa chỉ có phần đầu và phần cuối giống nhau để bạn sao chép nhầm. Hãy so sánh từng ký tự trước khi tiếp tục.",
   "overlayLookalikeNew": "Đang gửi đến",
-  "overlayLookalikePast": "Đã từng gửi đến"
+  "overlayLookalikePast": "Đã từng gửi đến",
+  "overlayDelegationTitle": "Ủy quyền EIP-7702",
+  "overlayDelegationNote": "Giao dịch này trao tài khoản của bạn cho hợp đồng bên dưới: mã của nó sẽ chạy như tài khoản của bạn và có thể chuyển mọi thứ trong đó. Chỉ tiếp tục nếu chính bạn đã chọn hợp đồng này.",
+  "overlayDelegate": "Bên được ủy quyền",
+  "overlayDelegateUnreadable": "(không đọc được địa chỉ)"
 }

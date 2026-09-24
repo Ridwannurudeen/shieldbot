@@ -471,6 +471,8 @@ class FirewallRequest(ChainRequest):
     chainId: int = Field(default=56, ge=1, le=10_000_000)
     typedData: Optional[Dict] = None
     signMethod: Optional[str] = Field(default=None, max_length=64)
+    # An EIP-7702 (type 0x04) transaction's authorizations; the analysis reads each one's address.
+    authorizationList: Optional[List[Dict]] = Field(default=None, max_length=16)
 
     @model_validator(mode="after")
     def validate_signing_chain(self):
@@ -1297,16 +1299,21 @@ async def firewall(req: FirewallRequest, request: Request):
         # list. Neither is another call's payment floor: it comes from one user's payment, and the
         # contract's other requests (a transfer, a zero-value call) must not be served it. A
         # claim's floor, paid or not, describes the target, so its row is kept. A plain native
-        # send has no payment rule and its recipient is the row, so it stays cacheable.
+        # send has no payment rule and its recipient is the row, so it stays cacheable. An EIP-7702
+        # delegation's floor describes the delegate, never the target.
         paying = value_wei > 0 and decoded.get('selector') is not None
-        tx_specific = decoded.get('category') in ('approval', 'claim') or bool(req.typedData) or paying
+        tx_specific = (
+            decoded.get('category') in ('approval', 'claim') or bool(req.typedData) or paying
+            or req.authorizationList is not None
+        )
         describes_target = not (
             decoded.get('category') == 'approval' or req.typedData
-            or (paying and decoded.get('category') != 'claim')
+            or (paying and decoded.get('category') != 'claim') or req.authorizationList is not None
         )
 
-        # 2. If target is a whitelisted router, analyze the swap path tokens instead of bypassing
-        if whitelisted:
+        # 2. If target is a whitelisted router, analyze the swap path tokens instead of bypassing.
+        # A delegation is judged on the full path below, whatever the target.
+        if whitelisted and req.authorizationList is None:
             router_response = await _analyze_router_swap(
                 req=req,
                 to_addr=to_addr,
@@ -1378,6 +1385,7 @@ async def firewall(req: FirewallRequest, request: Request):
                     'sign_method': req.signMethod,
                     'is_verified': is_verified,
                     'is_contract': is_contract,
+                    'authorization_list': req.authorizationList,
                 },
             )
 

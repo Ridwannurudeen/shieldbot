@@ -768,3 +768,77 @@ def test_a_lookalike_of_a_real_send_is_warned_about_end_to_end():
   assert.deepEqual(plain(storage.sentRecipients), [past]);
 """
     )
+
+
+# A signed EIP-7702 authorization as viem hands it to eth_sendTransaction.
+AUTHORIZATION = r"""
+const delegate = '0x' + '7'.repeat(40);
+const authorization = {address: delegate, chainId: '0x38', nonce: '0x0', r: '0x' + '1'.repeat(64), s: '0x' + '2'.repeat(64), yParity: '0x0'};
+"""
+
+
+def test_a_type_4_transaction_carries_its_authorizations_to_the_analysis():
+    run_node(
+        INJECT_HARNESS
+        + AUTHORIZATION
+        + r"""
+(async () => {
+  const intercepts = () => posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT');
+  provider.request({method: 'eth_sendTransaction', params: [{to: '0x' + 'b'.repeat(40), type: '0x4',
+    authorizationList: [authorization]}]}).catch(() => {});
+  await flush();
+  assert.deepEqual(plain(intercepts().at(-1).tx.authorizationList), [authorization]);
+  // An authorization list that cannot be read is shown as a request of unknown structure.
+  for (const list of ['0x' + '7'.repeat(40), [], [delegate], {0: authorization}]) {
+    provider.request({method: 'eth_sendTransaction', params: [{to: '0x' + 'b'.repeat(40), authorizationList: list}]}).catch(() => {});
+    await flush();
+    assert.equal(intercepts().at(-1).tx.unknownStructure, true, JSON.stringify(list));
+  }
+  // A transaction without one carries none.
+  provider.request({method: 'eth_sendTransaction', params: [{to: '0x' + 'b'.repeat(40)}]}).catch(() => {});
+  await flush();
+  assert.equal('authorizationList' in intercepts().at(-1).tx, false);
+"""
+    )
+
+
+def test_background_sends_only_each_delegate_address():
+    run_node(
+        BACKGROUND_HARNESS
+        + AUTHORIZATION
+        + r"""
+(async () => {
+  await respond({type: 'SHIELDAI_ANALYZE', tx: {to: '0x' + 'b'.repeat(40), chainId: 56, authorizationList: [authorization]}});
+  // The signed authorization itself never leaves the browser.
+  assert.deepEqual(bodies[0].authorizationList, [{address: delegate}]);
+"""
+    )
+
+
+@pytest.mark.parametrize("policy", ["STRICT", "BALANCED"])
+@pytest.mark.parametrize("outcome", ["SAFE", "error"])
+def test_a_delegation_is_block_recommended_and_names_the_delegate(policy, outcome):
+    run_node(
+        CONTENT_HARNESS
+        + AUTHORIZATION
+        + r"""
+(async () => {
+  const [policy, outcome] = JSON.parse(process.argv[1]);
+  storage.policyMode = policy;
+  const signal = `EIP-7702 delegation hands your account to ${delegate}, a verified contract, 400 days old`;
+  analyze = async () => outcome === 'error' ? {error: 'timeout'} : {result: scan({danger_signals: [signal]})};
+  await intercept('request', {to: '0x' + 'b'.repeat(40), chainId: 56, authorizationList: [authorization]});
+  const html = overlay().innerHTML;
+  assert(overlay().querySelector('.shieldai-badge').className.includes('shieldai-badge-block'), html);
+  assert(html.includes('BLOCK RECOMMENDED'), html);
+  assert(html.includes(delegate), 'the delegate address is not shown');
+  assert(html.includes('hands your account to the contract below'), html);
+  if (outcome === 'SAFE') assert(html.includes(signal), 'the delegate facts from the API are not shown');
+  if (policy === 'STRICT') {
+    assert(!html.includes('id="shieldai-proceed"'), html);
+  } else {
+    assert(html.includes('Hold to Proceed Anyway'), html);
+  }
+""",
+        [policy, outcome],
+    )
