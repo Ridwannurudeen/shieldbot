@@ -513,14 +513,14 @@
   // ...)), going round the wrapper defined on the provider itself. So the
   // method of every prototype that defines one, up to Object.prototype, is
   // replaced too, by the function makeReplacement makes from that prototype's
-  // own one. The walk stops at a function that reads as native code: a
-  // platform prototype's (or a bound function, which reads the same) is
-  // never replaced, nor anything above it.
+  // own one. A function that reads as native code is skipped: a platform
+  // prototype's is never replaced (nor a bound function or a Proxy around a
+  // function, which read the same), while wallet code above it still is.
   function wrapInherited(provider, name, makeReplacement) {
     for (let owner = getPrototypeOf(provider); owner !== null && owner !== objectPrototype;
       owner = getPrototypeOf(owner)) {
       const inherited = ownValue(getOwnPropertyDescriptor(owner, name), "value");
-      if (typeof inherited === "function" && execRegExp(NATIVE_CODE, functionSource(inherited)) !== null) return;
+      if (typeof inherited === "function" && execRegExp(NATIVE_CODE, functionSource(inherited)) !== null) continue;
       if (typeof inherited !== "function" || originalOf(inherited) !== undefined || isUncovered(inherited)) {
         continue;
       }

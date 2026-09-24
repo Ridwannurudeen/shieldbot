@@ -2305,7 +2305,7 @@ def test_every_request_on_the_prototype_chain_is_checked():
     )
 
 
-def test_the_prototype_walk_stops_at_a_platform_function():
+def test_the_prototype_walk_skips_platform_functions():
     run_node(
         INJECT_HARNESS
         + r"""
@@ -2327,8 +2327,9 @@ def test_the_prototype_walk_stops_at_a_platform_function():
   assert.notEqual(Wallet.prototype.request, originals.wallet, 'the wallet code below it was not replaced');
   assert.equal(Platform.prototype.request, Array.prototype.push, 'a platform function was replaced');
   assert.equal(Platform.prototype.send, Array.prototype.join, 'a platform function was replaced');
-  assert.equal(Top.prototype.request, originals.top, 'the walk went on past a platform function');
-  assert.equal(Top.prototype.send, originals.topSend, 'the walk went on past a platform function');
+  // Wallet code above the platform level is still replaced.
+  assert.notEqual(Top.prototype.request, originals.top, 'the walk stopped at a platform function');
+  assert.notEqual(Top.prototype.send, originals.topSend, 'the walk stopped at a platform function');
 """
     )
 
