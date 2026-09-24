@@ -109,9 +109,17 @@ export interface MempoolAlert {
 export interface RescueResult {
   wallet: string;
   chain_id: number;
+  /** 'unknown' when approval history, allowances, balances or prices are incomplete: the lists below are then not a clean bill of health. */
+  status: 'ok' | 'unknown';
+  coverage: Record<string, boolean>;
+  coverage_reasons: Record<string, string>;
+  /** Block range whose approval history was read. rescue() throws SCAN_UNAVAILABLE instead of returning a result that read nothing. */
+  scanned_blocks: { from_block: number; to_block: number } | null;
   total_approvals: number;
   high_risk: number;
   medium_risk: number;
+  /** Null when the scan is incomplete. */
+  total_value_at_risk_usd: number | null;
   approvals: ApprovalInfo[];
   alerts: RescueAlert[];
   revoke_txs: RevokeTx[];
@@ -303,9 +311,14 @@ export class ShieldBot {
    * Scan a wallet's active approvals and get revoke transactions (Rescue Mode).
    */
   async rescue(walletAddress: string, chainId: number): Promise<RescueResult> {
-    return this._get<RescueResult>(
+    const result = await this._get<RescueResult>(
       `/api/rescue/${walletAddress}?chain_id=${this._requireChainId(chainId, 'rescue')}`,
     );
+    if (result.status === 'unknown' && result.scanned_blocks == null) {
+      const reasons = Object.values(result.coverage_reasons || {}).join('; ') || 'no blocks were read';
+      throw new ShieldBotError(`Approval scan unavailable: ${reasons}`, 503, 'SCAN_UNAVAILABLE');
+    }
+    return result;
   }
 
   /**

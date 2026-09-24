@@ -29,6 +29,7 @@ Nothing was ever published, but code built from earlier copies of this repositor
 - `queryThreatGraph(address, chainId, maxDepth?)` takes the chain as a new second argument, so `maxDepth` moved to third. It used to send no chain at all, which the API treated as BNB Chain.
 - `health()` is typed with `supported_chains`, the field the API actually returns, instead of `chains`.
 - `check()` and `firewall()` send `value` as decimal wei and throw `INVALID_VALUE` for anything that is not a non-negative integer. They used to forward it unchanged.
+- `rescue()` results are typed with `status`, `coverage`, `coverage_reasons`, `scanned_blocks` and `total_value_at_risk_usd`, and `rescue()` throws `SCAN_UNAVAILABLE` when the scan read nothing, instead of returning an empty approval list.
 
 ## API key
 
@@ -85,6 +86,15 @@ if (!verdict.allowed) {
 ## Unknown results
 
 Incomplete analysis is never reported as safe. Scan and firewall results carry `status`, `coverage`, `coverage_reasons` and `risk_display`; when `status` is `'unknown'` the result is not a clean bill of health. `check()` also downgrades an ALLOW to WARN when the API reports incomplete coverage, and marks the verdict `status: 'unknown'`.
+
+`rescue()` results carry `status`, `coverage`, `coverage_reasons`, `scanned_blocks` (the block range whose approval history was read) and `total_value_at_risk_usd`. When `status` is not `'ok'` the scan is incomplete: an empty `approvals` list does not mean the wallet has no risky approvals, and `total_value_at_risk_usd` is `null`. A partial scan is returned so you can show what was found and why the rest is missing. When nothing could be read, `rescue()` throws `ShieldBotError` with code `SCAN_UNAVAILABLE` (status 503) instead of returning an empty result.
+
+```typescript
+const rescue = await shield.rescue('0xWallet', 56);
+if (rescue.status !== 'ok') {
+  console.log('Incomplete approval scan:', rescue.coverage_reasons, rescue.scanned_blocks);
+}
+```
 
 ## Supported chains
 
