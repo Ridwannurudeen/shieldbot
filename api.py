@@ -28,6 +28,7 @@ from services.mempool_service import supports_pending_transactions
 from core.config import Settings
 from core.container import ServiceContainer
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
+from core.unknown_ledger import unknown_ledger
 from rpc.router import rpc_router
 from rpc.proxy import RPCProxy
 
@@ -1732,6 +1733,9 @@ async def public_stats():
     the extension and agent firewalls scored; Telegram, /api/scan and launch scans do not add to them.
     Those counts and `transactions_blocked` are all time; each `_24h` field counts the same table over
     the last 24 hours (a contract counts when its latest scan falls in that window).
+    `unknown_ledger` sums, per provider and per chain, how often a provider request was answered,
+    came back unknown or failed since `counting_since` (core.unknown_ledger); it restarts with the
+    process.
     """
     from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 
@@ -1779,6 +1783,7 @@ async def public_stats():
         "launch_discovery":       launch_discovery,
         "evidence_documents":     evidence_documents,
         "registry_records_confirmed": registry_records_confirmed,
+        "unknown_ledger":         unknown_ledger.summary(),
     }
 
 

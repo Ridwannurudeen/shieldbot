@@ -3,6 +3,7 @@ import logging
 import math
 import time
 
+from core.unknown_ledger import unknown_ledger
 from utils.chain_info import get_dexscreener_slug
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class DexService:
                     timeout=aiohttp.ClientTimeout(total=10)
                 ) as resp:
                     if resp.status != 200:
+                        unknown_ledger.record('dexscreener', chain_id, 'failed')
                         logger.warning("DexScreener returned %s for %s", resp.status, address)
                         defaults['reason'] = f'DexScreener HTTP {resp.status}'
                         return defaults
@@ -53,6 +55,7 @@ class DexService:
 
             pairs = [p for p in (data.get('pairs') or []) if p.get('chainId') == slug]
             if not pairs:
+                unknown_ledger.record('dexscreener', chain_id, 'unknown')
                 defaults['reason'] = f'No DexScreener pairs on requested chain ({slug})'
                 return defaults
 
@@ -122,9 +125,11 @@ class DexService:
             missing = [field for field, covered in coverage.items() if not covered]
             result.update(coverage=coverage, status='unknown' if missing else 'ok',
                           reason='Missing DexScreener fields: ' + ', '.join(missing) if missing else None)
+            unknown_ledger.record('dexscreener', chain_id, 'answered')
             return result
 
         except Exception as e:
+            unknown_ledger.record('dexscreener', chain_id, 'failed')
             logger.error("DexScreener fetch failed for %s: %s", address, type(e).__name__)
             defaults['reason'] = f'DexScreener fetch failed: {type(e).__name__}'
             return defaults

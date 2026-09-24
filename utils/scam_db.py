@@ -10,6 +10,8 @@ import logging
 import aiohttp
 from cachetools import TTLCache
 
+from core.unknown_ledger import unknown_ledger
+
 logger = logging.getLogger(__name__)
 
 _ETH_ADDR_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
@@ -165,6 +167,10 @@ class ScamDatabase:
         finally:
             _GOPLUS_INFLIGHT.pop(flight_key, None)
         result['observed_at'] = observed_at
+        unknown_ledger.record('goplus_token', chain_id, (
+            'answered' if result['status'] == 'ok'
+            else 'unknown' if result['reason'] == _GOPLUS_NO_DATA else 'failed'
+        ))
         _GOPLUS_CACHE[key] = result
         return result
 

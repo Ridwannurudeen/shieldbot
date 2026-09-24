@@ -13,6 +13,7 @@ except ImportError:
 from datetime import datetime, timezone
 
 from core.chain_adapter import ChainAdapter
+from core.unknown_ledger import unknown_ledger
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +160,7 @@ class EvmAdapter(ChainAdapter):
         web3 7 raises Web3RPCError with rpc_response). Reverts and other errors raise at once.
         """
         import requests
+        from web3.exceptions import BadFunctionCallOutput, ContractLogicError
 
         if retries < 1:
             retries = 1
@@ -166,7 +168,7 @@ class EvmAdapter(ChainAdapter):
         last_exc = None
         for attempt in range(retries):
             try:
-                return await loop.run_in_executor(None, fn, *args)
+                result = await loop.run_in_executor(None, fn, *args)
             except Exception as e:
                 last_exc = e
                 if isinstance(e, requests.exceptions.HTTPError):
@@ -186,7 +188,13 @@ class EvmAdapter(ChainAdapter):
                     )
                     await asyncio.sleep(delay)
                 elif not is_retriable:
+                    answered = isinstance(e, (BadFunctionCallOutput, ContractLogicError))
+                    unknown_ledger.record('rpc', self._chain_id, 'answered' if answered else 'failed')
                     raise
+            else:
+                unknown_ledger.record('rpc', self._chain_id, 'answered')
+                return result
+        unknown_ledger.record('rpc', self._chain_id, 'failed')
         raise last_exc
 
     async def is_contract(self, address: str) -> Optional[bool]:
@@ -225,6 +233,7 @@ class EvmAdapter(ChainAdapter):
                 }
                 async with session.get(self.etherscan_api_url, params=params) as resp:
                     if resp.status != 200:
+                        unknown_ledger.record('etherscan', self._chain_id, 'failed')
                         logger.warning("[%s] Verification unknown: HTTP %s", self._chain_name, resp.status)
                         return (None, None)
                     data = await resp.json()
@@ -234,12 +243,15 @@ class EvmAdapter(ChainAdapter):
                         and isinstance(data['result'][0], dict)
                         and isinstance(data['result'][0].get('SourceCode'), str)
                     ):
+                        unknown_ledger.record('etherscan', self._chain_id, 'answered')
                         source_code = data['result'][0]['SourceCode']
                         is_verified = len(source_code) > 0
                         return (is_verified, source_code if is_verified else None)
+            unknown_ledger.record('etherscan', self._chain_id, 'failed')
             logger.warning("[%s] Verification unknown: missing source response", self._chain_name)
             return (None, None)
         except Exception as e:
+            unknown_ledger.record('etherscan', self._chain_id, 'failed')
             logger.error("[%s] Error checking verification: %s", self._chain_name, type(e).__name__)
             return (None, None)
 
@@ -270,10 +282,12 @@ class EvmAdapter(ChainAdapter):
                 }
                 async with session.get(self.etherscan_api_url, params=params) as resp:
                     if resp.status != 200:
+                        unknown_ledger.record('etherscan', self._chain_id, 'failed')
                         logger.warning("[%s] Creation unknown: HTTP %s", self._chain_name, resp.status)
                         return None
                     data = await resp.json()
                     if data['status'] == '1' and data['result']:
+                        unknown_ledger.record('etherscan', self._chain_id, 'answered')
                         result = data['result'][0]
                         tx_hash = result.get('txHash')
                         tx = await self._call_with_retry(self.w3.eth.get_transaction, tx_hash)
@@ -286,8 +300,12 @@ class EvmAdapter(ChainAdapter):
                             'creation_time': creation_time.isoformat(),
                             'age_days': age_days,
                         }
+            unknown_ledger.record('etherscan', self._chain_id, 'failed')
             return None
         except Exception as e:
+            # Only the Etherscan request raises aiohttp errors; the creation time's RPC reads count as rpc.
+            if isinstance(e, (aiohttp.ClientError, asyncio.TimeoutError)):
+                unknown_ledger.record('etherscan', self._chain_id, 'failed')
             logger.error("[%s] Error getting creation info: %s", self._chain_name, type(e).__name__)
             return None
 
@@ -354,11 +372,20 @@ class EvmAdapter(ChainAdapter):
         key = address.lower()
         reply = self._honeypot_is_replies.get(key)
         if reply is None:
-            async with aiohttp.ClientSession() as session:
-                url = f"https://api.honeypot.is/v2/IsHoneypot?address={address}&chainID={self._honeypot_chain_id}"
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    reply = (resp.status, await resp.json() if resp.status == 200 else None)
+            try:
+                async with aiohttp.ClientSession() as session:
+                    url = f"https://api.honeypot.is/v2/IsHoneypot?address={address}&chainID={self._honeypot_chain_id}"
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                        reply = (resp.status, await resp.json() if resp.status == 200 else None)
+            except Exception:
+                unknown_ledger.record('honeypot.is', self._chain_id, 'failed')
+                raise
             self._honeypot_is_replies[key] = reply
+            status, data = reply
+            unknown_ledger.record('honeypot.is', self._chain_id, (
+                'answered' if isinstance(data, dict) and data.get('simulationSuccess') is True
+                else 'unknown' if status == 404 or isinstance(data, dict) else 'failed'
+            ))
         return reply
 
     async def check_honeypot(self, address: str) -> Dict:

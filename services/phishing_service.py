@@ -4,6 +4,8 @@ import aiohttp
 from cachetools import TTLCache
 from urllib.parse import quote, urlparse
 
+from core.unknown_ledger import unknown_ledger
+
 logger = logging.getLogger(__name__)
 
 GOPLUS_PHISHING_URL = "https://api.gopluslabs.io/api/v1/phishing_site"
@@ -76,6 +78,7 @@ class PhishingService:
                     headers={"Accept": "application/json"},
                 ) as resp:
                     if resp.status != 200:
+                        unknown_ledger.record("goplus_phishing", None, "failed")
                         logger.warning(
                             "GoPlus phishing API returned %s for %s", resp.status, domain
                         )
@@ -89,8 +92,10 @@ class PhishingService:
             if isinstance(result_data, dict):
                 raw = result_data.get("phishing_site", result_data.get("is_phishing_site"))
             if raw not in (0, 1, "0", "1"):
+                unknown_ledger.record("goplus_phishing", None, "unknown")
                 return self._no_verdict(cache_key, "GoPlus returned no phishing verdict")
             is_phishing = int(raw) == 1
+            unknown_ledger.record("goplus_phishing", None, "answered")
 
             result = {
                 "is_phishing": is_phishing,
@@ -107,9 +112,11 @@ class PhishingService:
             return result
 
         except aiohttp.ClientError as e:
+            unknown_ledger.record("goplus_phishing", None, "failed")
             logger.warning("GoPlus phishing check network error for %s: %s", url, type(e).__name__)
             return self._no_verdict(cache_key, f"GoPlus request failed ({type(e).__name__})")
         except Exception as e:
+            unknown_ledger.record("goplus_phishing", None, "failed")
             logger.error("Phishing check failed for %s: %s", url, type(e).__name__)
             return self._no_verdict(cache_key, f"Phishing check failed ({type(e).__name__})")
 
