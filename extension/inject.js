@@ -153,12 +153,17 @@
   const isUncovered = bindTo(WeakSet.prototype.has, uncoveredFunctions);
   const markUncovered = bindTo(WeakSet.prototype.add, uncoveredFunctions);
 
-  // Checked copies on their way to the wallet. When the wallet's own code
-  // hands one on to a prototype's request (a subclass calling
-  // super.request(args)), it goes through unchecked rather than twice.
-  const forwardedCopies = new WeakSet();
-  const isForwarded = bindTo(WeakSet.prototype.has, forwardedCopies);
-  const markForwarded = bindTo(WeakSet.prototype.add, forwardedCopies);
+  // A checked copy on its way to the wallet, with the provider it was checked
+  // for, only while the call that hands it over has not returned. When the
+  // wallet's own code passes it on to a prototype's request of that provider
+  // in that time (a subclass calling super.request(args) before its first
+  // await), it goes through rather than being checked twice. Anywhere else,
+  // or later, the copy is just another request: a page that keeps one,
+  // changes it and hands it to a provider gets it checked again.
+  const forwardedCopies = new WeakMap();
+  const forwardedFor = bindTo(WeakMap.prototype.get, forwardedCopies);
+  const markForwarded = bindTo(WeakMap.prototype.set, forwardedCopies);
+  const unmarkForwarded = bindTo(WeakMap.prototype.delete, forwardedCopies);
 
   const CHAIN_ID_PATTERN = /^(0x[0-9a-f]+|[0-9]+)$/i;
   const ADDRESS_PATTERN = /^0x[0-9a-f]{40}$/i;
@@ -286,11 +291,13 @@
         // holds itself are read from the copy.
         const request = { __proto__: null, method, params: clone(ownValue(args, "params")) };
         const forward = () => {
+          markForwarded(request, provider);
           try {
-            markForwarded(request);
             resolve(forwardTo(request));
           } catch (error) {
             reject(error);
+          } finally {
+            unmarkForwarded(request);
           }
         };
         const txParams = ownFieldsOnly(ownValue(request.params, 0));
@@ -512,7 +519,8 @@
   // that cannot be wrapped, such as a prototype itself, is rejected.
   function requestReplacement(inherited) {
     return function (args) {
-      if (isForwarded(args)) return callFunction(inherited, this, args);
+      const forwardedTo = forwardedFor(args);
+      if (forwardedTo !== undefined && forwardedTo === this) return callFunction(inherited, this, args);
       wrapProvider(this);
       const check = checkOf(this);
       if (check === undefined) {

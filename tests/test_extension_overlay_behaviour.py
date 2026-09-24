@@ -1337,6 +1337,7 @@ PATCHES = {
     "set-has": "Set.prototype.has = () => false;",
     "weakmap-get": "WeakMap.prototype.get = () => undefined;",
     "weakmap-set": "WeakMap.prototype.set = function () { return this; };",
+    "weakmap-delete": "WeakMap.prototype.delete = () => false;",
     "weakset-has": "WeakSet.prototype.has = () => true;",
     "weakset-add": "WeakSet.prototype.add = function () { return this; };",
     "function-call": "Function.prototype.call = function () { return 'forwarded'; };",
@@ -1957,6 +1958,65 @@ TWO_LEVEL_WALLET = r"""
     return pending;
   }
 """
+
+
+# A copy that was checked and handed to one provider must not pass unchecked anywhere else, or
+# later: kept and changed, then given to the wallet's prototype request, it is checked again.
+@pytest.mark.parametrize("how", ["kept-by-a-page-provider", "replayed-inside-a-page-provider", "echoed-in-an-error"])
+def test_a_checked_copy_cannot_be_replayed_unchecked(how):
+    run_node(
+        INJECT_HARNESS
+        + TWO_LEVEL_WALLET
+        + r"""
+(async () => {
+  const how = JSON.parse(process.argv[1]);
+  const drainer = '0x' + 'd'.repeat(40);
+  const benign = {method: 'personal_sign', params: ['0x68656c6c6f', '0x' + 'b'.repeat(40)]};
+  const change = (copy) => { copy.method = 'eth_sendTransaction'; copy.params = [{to: drainer}]; };
+  let kept, replay;
+  const wallet = new Wallet();
+  if (how === 'echoed-in-an-error') {
+    // A wallet whose own request rejects with the request it was given as error.data.
+    Base.prototype.request = async function (args) {
+      if (args.method === 'eth_chainId') return '0x38';
+      if (args.method === 'personal_sign') { const error = new Error('rejected'); error.data = args; throw error; }
+      sent.push(args);
+      return 'base';
+    };
+  }
+  announce(wallet);
+  const pageProvider = {
+    on() {},
+    request(args) {
+      kept = args;
+      if (how === 'replayed-inside-a-page-provider') {
+        change(args);
+        replay = Wallet.prototype.request.call(wallet, args);
+        replay.catch(() => {});
+      }
+      return Promise.resolve('page');
+    },
+  };
+  announce(pageProvider);
+  const target = how === 'echoed-in-an-error' ? wallet : pageProvider;
+  const outcome = await decideOn(() => target.request(benign), 'proceed').then(() => null, error => error);
+  if (how === 'echoed-in-an-error') kept = outcome.data;
+  if (how !== 'replayed-inside-a-page-provider') {
+    change(kept);
+    replay = Wallet.prototype.request.call(wallet, kept);
+    replay.catch(() => {});
+  }
+  await flush();
+  assert.equal(sent.length, 0, 'the replayed copy reached the wallet unchecked');
+  const intercept = intercepts().at(-1);
+  assert.equal(intercept.tx.to, drainer, 'the replayed copy was not sent for a decision');
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId: intercept.requestId, action: 'block',
+    proof: await proof(intercept.requestId, 'block')});
+  await assert.rejects(replay, /blocked/);
+  assert.equal(sent.length, 0);
+""",
+        how,
+    )
 
 
 def test_every_request_on_the_prototype_chain_is_checked():
