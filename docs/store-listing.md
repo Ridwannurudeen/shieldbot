@@ -46,7 +46,12 @@ Privacy
 • The default server is api.shieldbotsecurity.online. You can point the extension at your own server in its settings.
 
 Limits
-• This is a warning layer, not a guarantee. A site built to evade it can hide or cover its warning, or send wallet requests where the extension cannot see them, so always read your wallet's own confirmation screen.
+• This is a warning layer, not a guarantee. Always read your wallet's own confirmation screen.
+• It checks the wallet requests a page makes through the standard provider's request method (window.ethereum or an EIP-6963 provider), in the page itself and in frames from other origins (an origin is a scheme, host and port). A page that reaches your wallet another way, such as through the wallet's own messaging or the older send and sendAsync methods, is not checked.
+• It rejects every wallet request it checks from a frame or popup that the page can script itself: a frame whose parent page has the same origin, a blank (about:blank) or srcdoc document, or a popup opened by a page of the same origin. It cannot keep its check private there. Open the dApp in its own tab instead.
+• While it is switched on, it never passes a request it checks to your wallet without showing it to you first, and a page cannot make it approve a request for you: only your own click or key press on the warning counts. If no warning appears within 60 seconds, or the page takes it away, the request is not passed to your wallet.
+• A page can still hide or cover the warning, or lay something over it to trick you into clicking (clickjacking). The extension cannot prevent that.
+• A batch of calls (wallet_sendCalls) is checked one call at a time, each with its own warning. How the calls work together is not analysed.
 • It runs on https pages only, in Chrome 111 or later.
 ```
 
@@ -62,11 +67,11 @@ has passed with them.
 2. Confirm `extension/manifest.json` says `"version": "3.1.0"`. The store refuses a package whose
    version is not higher than the published 3.0.1.
 3. Build the package from the `extension` folder, leaving out `screenshots/` (capture notes, not
-   extension code). `manifest.json` must sit at the root of the zip. This command, run from the
-   repository root, writes it with forward-slash entry names on any system:
+   extension code) and `README.md`. `manifest.json` must sit at the root of the zip. This command,
+   run from the repository root, writes it with forward-slash entry names on any system:
 
    ```
-   python -c "import pathlib, zipfile; root = pathlib.Path('extension'); z = zipfile.ZipFile('shieldbot-extension-v3.1.0.zip', 'w', zipfile.ZIP_DEFLATED); [z.write(p, p.relative_to(root).as_posix()) for p in sorted(root.rglob('*')) if p.is_file() and 'screenshots' not in p.relative_to(root).parts]; z.close()"
+   python -c "import pathlib, zipfile; root = pathlib.Path('extension'); z = zipfile.ZipFile('shieldbot-extension-v3.1.0.zip', 'w', zipfile.ZIP_DEFLATED); [z.write(p, p.relative_to(root).as_posix()) for p in sorted(root.rglob('*')) if p.is_file() and 'screenshots' not in p.relative_to(root).parts and p.relative_to(root).as_posix() != 'README.md']; z.close()"
    ```
 
 4. In a clean Chrome profile (Chrome 111 or later, which the manifest now requires) open
