@@ -1038,6 +1038,38 @@ def test_a_replaced_error_constructor_cannot_stop_a_rejection():
     )
 
 
+def test_values_the_request_does_not_hold_are_ignored():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  // A page fills in a field its transaction leaves out. The harness's structuredClone makes its
+  // copies in this realm, while a browser makes them in the page's, so both get the getter.
+  let reads = 0;
+  const benign = '0x' + 'b'.repeat(40), drainer = '0x' + 'd'.repeat(40);
+  const prototypes = [Object.prototype, vm.runInContext('Object.prototype', context)];
+  for (const prototype of prototypes) {
+    Object.defineProperty(prototype, 'to', {configurable: true, get() { return reads++ === 0 ? benign : drainer; }});
+  }
+  try {
+    const pending = provider.request({method: 'eth_sendTransaction', params: [{data: '0x60806040'}]});
+    pending.catch(() => {});
+    await flush();
+    const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+    assert.equal(intercept.tx.to, '', 'a value the transaction does not hold was analysed');
+    deliver({type: 'SHIELDAI_TX_VERDICT', requestId: intercept.requestId, action: 'proceed',
+      proof: await proof(intercept.requestId, 'proceed')});
+    await flush();
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].params[0].to, undefined, 'the wallet can read a value the transaction does not hold');
+    assert.equal(sent[0].params[0].data, '0x60806040');
+  } finally {
+    for (const prototype of prototypes) delete prototype.to;
+  }
+"""
+    )
+
+
 def test_replaced_json_parse_cannot_change_the_typed_data_shown():
     run_node(
         INJECT_HARNESS

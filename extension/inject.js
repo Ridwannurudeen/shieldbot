@@ -26,6 +26,8 @@
   const getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
   const objectPrototype = Object.prototype;
   const hasOwn = Object.hasOwn;
+  const setPrototypeOf = Object.setPrototypeOf;
+  const isArray = Array.isArray;
   const parseJSON = JSON.parse;
   const clone = structuredClone;
   const toNumber = Number;
@@ -99,6 +101,14 @@
   // through to prototypes, which the page can fill.
   function ownValue(object, key) {
     return typeof object === "object" && object !== null && hasOwn(object, key) ? object[key] : undefined;
+  }
+
+  // Take the prototype off an object in the copy of a request, so a field it
+  // lacks reads as undefined, for the wallet as for the analysis, instead of
+  // as whatever the page put on Object.prototype.
+  function ownFieldsOnly(value) {
+    if (typeof value === "object" && value !== null && !isArray(value)) setPrototypeOf(value, null);
+    return value;
   }
 
   function parseChainId(value) {
@@ -192,8 +202,9 @@
       return new NativePromise((resolve, reject) => {
         // Analyse and forward one copy of the request: a getter or proxy in
         // the page's own object could otherwise show the analysis one
-        // transaction and hand the wallet another.
-        const request = clone({ method, params: args.params });
+        // transaction and hand the wallet another. Only values the request
+        // holds itself are read from the copy.
+        const request = { __proto__: null, method, params: clone(ownValue(args, "params")) };
         const forward = () => {
           try {
             resolve(originalRequest(request));
@@ -201,7 +212,7 @@
             reject(error);
           }
         };
-        const txParams = request.params?.[0];
+        const txParams = ownFieldsOnly(ownValue(request.params, 0));
         if (!txParams) {
           forward();
           return;
@@ -211,7 +222,7 @@
 
         if (kind === "typed") {
           // EIP-712: params[0] is address, params[1] is typed data JSON
-          const rawTypedData = request.params?.[1];
+          const rawTypedData = ownFieldsOnly(ownValue(request.params, 1));
           let parsedTypedData = null;
           try {
             parsedTypedData =
@@ -222,6 +233,7 @@
             // Unparseable typed data goes to the overlay without its fields.
           }
           interceptData = {
+            __proto__: null,
             from: txParams,
             to: "",
             value: "0x0",
@@ -234,10 +246,11 @@
           // eth_sign: params[0] is address, params[1] is message
           const isPersonal = method === "personal_sign";
           interceptData = {
-            from: isPersonal ? (request.params?.[1] || "") : txParams,
+            __proto__: null,
+            from: isPersonal ? (ownValue(request.params, 1) || "") : txParams,
             to: "",
             value: "0x0",
-            data: isPersonal ? txParams : (request.params?.[1] || "0x"),
+            data: isPersonal ? txParams : (ownValue(request.params, 1) || "0x"),
             signMethod: method,
           };
         } else {
@@ -250,7 +263,7 @@
 
         // Ask content script to analyze via background
         const analyze = (chainId) => {
-          requestAnalysis(method, isTransaction ? { ...interceptData, chainId } : interceptData, (action) => {
+          requestAnalysis(method, isTransaction ? { __proto__: null, ...interceptData, chainId } : interceptData, (action) => {
             if (isTransaction && chainId === null) {
               reject(new NativeError("Transaction blocked by ShieldAI: wallet chain is unknown or mismatched"));
               return;
