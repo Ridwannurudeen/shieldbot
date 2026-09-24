@@ -83,7 +83,7 @@ class LaunchWatch:
                 await task
             except asyncio.CancelledError:
                 pass
-        logger.info("Launch watch stopped")
+            logger.info("Launch watch stopped")
 
     def queue_rechecks(self, pairs):
         """Queue 4663 watching pairs the sweep found due a recheck; each pair is queued once."""

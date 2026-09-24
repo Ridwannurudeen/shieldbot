@@ -13,7 +13,6 @@ import logging
 import random
 import re
 import traceback
-from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
@@ -21,6 +20,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from redis.exceptions import RedisError
 from typing import Optional, Dict, Any, List
 
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve_selector
@@ -35,9 +35,10 @@ from core.config import Settings
 from core.container import ServiceContainer
 from core.database import reporter_hash
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
+from core.rate_limit import RateLimiter, connect as connect_rate_limit_redis
 from core.unknown_ledger import unknown_ledger
 from core.telegram_formatter import escape_markdown
-from rpc.router import rpc_router
+from rpc.router import rpc_limiter, rpc_router
 from rpc.proxy import RPCProxy
 
 logging.basicConfig(
@@ -69,56 +70,25 @@ def _fire_and_forget(coro, label: str = "background"):
     return task
 
 
-class RateLimiter:
-    """In-memory sliding window rate limiter per IP."""
-
-    def __init__(self, requests_per_minute: int = 30, burst: int = 10):
-        self.rpm = requests_per_minute
-        self.burst = burst
-        self.window = 60.0  # seconds
-        self._hits: Dict[str, list] = defaultdict(list)
-
-    def is_allowed(self, key: str) -> bool:
-        now = time.monotonic()
-        hits = self._hits[key]
-
-        # Prune expired entries
-        cutoff = now - self.window
-        while hits and hits[0] < cutoff:
-            hits.pop(0)
-
-        if len(hits) >= self.rpm:
-            return False
-
-        # Burst check: no more than `burst` requests in 5 seconds
-        burst_cutoff = now - 5.0
-        recent = sum(1 for t in hits if t >= burst_cutoff)
-        if recent >= self.burst:
-            return False
-
-        hits.append(now)
-
-        # Probabilistic cleanup to prevent unbounded memory growth
-        if random.random() < 0.01:
-            self.cleanup()
-
-        return True
-
-    def cleanup(self):
-        """Remove stale IPs (call periodically if needed)."""
-        now = time.monotonic()
-        cutoff = now - self.window * 2
-        stale = [k for k, v in self._hits.items() if not v or v[-1] < cutoff]
-        for k in stale:
-            del self._hits[k]
-
-
 rate_limiter = RateLimiter(requests_per_minute=30, burst=10)
 chat_limiter = RateLimiter(requests_per_minute=50, burst=10)
 
 
 # Service container (initialized on startup)
 container: Optional[ServiceContainer] = None
+
+# BACKGROUND_WORKERS as the lifespan read it. With "external" the mempool monitor, the verdict drain, the
+# hunter and the launch watch run in workers.py, and this process holds none of their in-memory state.
+_background_workers = "api"
+_EXTERNAL_WORKERS_NOTE = (
+    "Background work runs in the separate workers process (BACKGROUND_WORKERS=external), and this API "
+    "process holds none of its in-memory state: the mempool counters and the launch watch's run state "
+    "are null here, not zero. The Unknown ledger here counts this process's own lookups only."
+)
+_EXTERNAL_MEMPOOL_DETAIL = (
+    "The mempool monitor runs in the separate workers process (BACKGROUND_WORKERS=external); "
+    "this API process does not hold its alerts or counters."
+)
 
 # Convenience accessors — set after container startup
 web3_client = None
@@ -161,14 +131,44 @@ def _bind_globals(c: ServiceContainer):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global container
+    global container, _background_workers
     settings = Settings()
     container = ServiceContainer(settings)
     _bind_globals(container)
     await container.startup()
-    await container.start_mempool_monitor()
-    container.verdict_publisher.start()
+    rate_limit_redis = None
+    if settings.rate_limit_backend == "redis":
+        rate_limit_redis = connect_rate_limit_redis(settings.redis_url)
+        # When Redis cannot answer, the general request limiter, the RPC proxy's and the API key
+        # minute window count in this process's memory (logged), so an outage takes neither the scan
+        # API nor users' wallets down. The abuse-sensitive limiters refuse (core/rate_limit.py).
+        rate_limiter.use_redis(rate_limit_redis, "requests", fail_open=True)
+        rpc_limiter.use_redis(rate_limit_redis, "rpc", fail_open=True)
+        chat_limiter.use_redis(rate_limit_redis, "chat", fail_open=False)
+        _report_limiter.use_redis(rate_limit_redis, "report", fail_open=False)
+        _signup_limiter.use_redis(rate_limit_redis, "signup", fail_open=False)
+        _free_key_limiter.use_redis(rate_limit_redis, "free-key", fail_open=False)
+        _watch_alerts_limiter.use_redis(rate_limit_redis, "watch-alerts", fail_open=False)
+        container.auth_manager.use_redis(rate_limit_redis)
+        try:
+            await rate_limit_redis.ping()
+        except RedisError as e:
+            logger.warning(
+                "Rate limits configured for Redis, but it did not answer PING (%s). Until it does, the "
+                "general, RPC proxy and API key limits count in this process's memory and the chat, "
+                "report, signup, free key and watch alert limits refuse every request",
+                type(e).__name__,
+            )
+        else:
+            logger.info("Rate limits kept in Redis")
+    # The API serves phishing checks itself, so MetaMask's list refreshes here whichever process runs the work.
     container.phishing_service.start()
+    _background_workers = settings.background_workers
+    if _background_workers == "api":
+        await container.start_mempool_monitor()
+        container.verdict_publisher.start()
+    else:
+        logger.info("Background work runs in workers.py (BACKGROUND_WORKERS=external)")
 
     # Initialize RPC proxy if enabled
     if settings.rpc_proxy_enabled:
@@ -201,8 +201,9 @@ async def lifespan(app: FastAPI):
     guard_router = create_guardian_router(container)
     app.include_router(guard_router, prefix="/api/guardian")
 
-    await container.hunter.start()
-    await container.launch_watch.start()
+    if _background_workers == "api":
+        await container.hunter.start()
+        await container.launch_watch.start()
 
     logger.info("ShieldAI Firewall API started")
     yield
@@ -214,6 +215,8 @@ async def lifespan(app: FastAPI):
     rpc_proxy = getattr(app.state, "rpc_proxy", None)
     if rpc_proxy:
         await rpc_proxy.close()
+    if rate_limit_redis is not None:
+        await rate_limit_redis.aclose()
     logger.info("ShieldAI Firewall API shutting down")
 
 
@@ -328,7 +331,7 @@ async def rate_limit_middleware(request: Request, call_next):
     if random.random() < 0.01:
         rate_limiter.cleanup()
 
-    if not rate_limiter.is_allowed(client_ip):
+    if not await rate_limiter.is_allowed(client_ip):
         logger.warning(f"Rate limit exceeded for {client_ip}")
         return JSONResponse(
             status_code=429,
@@ -568,7 +571,7 @@ async def beta_signup(req: BetaSignupRequest, request: Request):
     """Collect beta signup emails."""
     # Rate limit per IP
     client_ip = _get_client_ip(request)
-    if not _signup_limiter.is_allowed(f"signup:{client_ip}"):
+    if not await _signup_limiter.is_allowed(client_ip):
         return JSONResponse(status_code=429, content={"detail": "Too many requests. Please try again later."})
 
     import re
@@ -1747,7 +1750,7 @@ async def community_report(req: CommunityReportRequest, request: Request):
     """Record a community report (false positive, false negative, or scam)."""
     # Rate limit per IP (rightmost = proxy-set, not spoofable)
     client_ip = _get_client_ip(request)
-    if not _report_limiter.is_allowed(f"report:{client_ip}"):
+    if not await _report_limiter.is_allowed(client_ip):
         return JSONResponse(
             status_code=429,
             content={"detail": "Report rate limit exceeded (5/min)."},
@@ -1853,7 +1856,7 @@ async def request_free_key(req: FreeKeyRequest, request: Request):
     if not container or not container.email_service.is_enabled():
         raise HTTPException(status_code=503, detail="Self-serve keys are not enabled")
     client_ip = _get_client_ip(request)
-    if not _free_key_limiter.is_allowed(f"free-key:{client_ip}"):
+    if not await _free_key_limiter.is_allowed(client_ip):
         return JSONResponse(status_code=429, content={"detail": "Too many requests. Please try again later."})
 
     email = req.email.strip().lower()
@@ -1985,7 +1988,9 @@ async def admin_stats(request: Request):
 
     # Mempool stats (in-memory counters)
     mempool = {}
-    if container.mempool_monitor:
+    if _background_workers == "external":
+        mempool = None
+    elif container.mempool_monitor:
         mempool = container.mempool_monitor.get_stats()
 
     # Phishing cache size (server-side, in-memory)
@@ -1996,8 +2001,11 @@ async def admin_stats(request: Request):
     guard_watch = None
     if container.hunter:
         guard_watch = await container.hunter.guard_watch_stats()
+        if _background_workers == "external":
+            # The launch watch and its RPC budget run in workers.py; this process's copies are idle.
+            guard_watch.update(running=None, rpc_budget=None)
 
-    return {
+    stats = {
         "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
         **db_stats,
         "mempool": mempool,
@@ -2006,6 +2014,9 @@ async def admin_stats(request: Request):
             "domains_cached": phishing_cache_size,
         },
     }
+    if _background_workers == "external":
+        stats["background_workers_note"] = _EXTERNAL_WORKERS_NOTE
+    return stats
 
 
 @app.get("/api/stats")
@@ -2032,6 +2043,9 @@ async def public_stats():
     `unknown_ledger` sums, per provider and per chain, how often a provider lookup was answered,
     came back unknown or failed since `counting_since` (core.unknown_ledger); it restarts with the
     process. GET /api/coverage/{chain_id} has one chain's providers in full.
+    With BACKGROUND_WORKERS=external the mempool monitor runs in workers.py: every mempool field is
+    null, `unknown_ledger` counts this process's lookups only (not the hunter's or the launch
+    watch's), and `background_workers_note` says so.
     """
     from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
     from services.verdict_publisher import CHAIN_ID as REGISTRY_CHAIN_ID
@@ -2056,14 +2070,14 @@ async def public_stats():
 
     mempool = {}
     observable = unobservable = None
-    if container and container.mempool_monitor:
+    if container and container.mempool_monitor and _background_workers == "api":
         mempool = container.mempool_monitor.get_stats()
         unobservable = mempool["unobservable_chains"]
         observable = sorted(set(mempool["monitored_chains"]) - set(unobservable))
 
     at = db_stats.get("all_time", {})
     day = db_stats.get("last_24h", {})
-    return {
+    stats = {
         "transactions_monitored": mempool.get("total_pending_seen"),
         "contracts_scanned":      at.get("unique_contracts_scanned"),
         "threats_detected":       at.get("threats_detected"),
@@ -2082,6 +2096,9 @@ async def public_stats():
         "registry_records_confirmed": registry_records_confirmed,
         "unknown_ledger":         unknown_ledger.summary(),
     }
+    if _background_workers == "external":
+        stats["background_workers_note"] = _EXTERNAL_WORKERS_NOTE
+    return stats
 
 
 @app.get("/api/coverage/{chain_id}")
@@ -2101,6 +2118,8 @@ async def chain_coverage(chain_id: int):
     lookups were answered, came back unknown or failed since `counting_since`, and the latest outcome;
     `chain_independent` holds providers asked about no chain. A provider with no entry has not been
     asked since the process started. Nothing here sends a request to any provider.
+    With BACKGROUND_WORKERS=external this process reads no mempool, so `public_mempool` is never yes,
+    and `provider_health` counts this process's lookups only; `background_workers_note` says so.
     """
     _validate_chain_id(chain_id)
     if not container:
@@ -2109,10 +2128,13 @@ async def chain_coverage(chain_id: int):
     if not supports_pending_transactions(chain_id):
         public_mempool = "no"
     else:
-        mempool = container.mempool_monitor.get_stats() if container.mempool_monitor else None
+        mempool = (
+            container.mempool_monitor.get_stats()
+            if container.mempool_monitor and _background_workers == "api" else None
+        )
         observed = mempool and chain_id in set(mempool["monitored_chains"]) - set(mempool["unobservable_chains"])
         public_mempool = "yes" if observed else "unobservable"
-    return {
+    coverage = {
         "chain_id": chain_id,
         "chain_name": adapter.chain_name,
         "capabilities": {
@@ -2126,6 +2148,9 @@ async def chain_coverage(chain_id: int):
             "chain_independent": unknown_ledger.for_chain(None),
         },
     }
+    if _background_workers == "external":
+        coverage["background_workers_note"] = _EXTERNAL_WORKERS_NOTE
+    return coverage
 
 
 @app.get("/api/base/attestations")
@@ -2308,7 +2333,7 @@ async def public_watch_alerts(request: Request):
         raise HTTPException(status_code=503, detail="Watch alerts not available")
 
     client_ip = _get_client_ip(request)
-    if not _watch_alerts_limiter.is_allowed(f"watch-alerts:{client_ip}"):
+    if not await _watch_alerts_limiter.is_allowed(client_ip):
         return JSONResponse(
             status_code=429,
             content={"detail": "Watch alerts rate limit exceeded (10/min)."},
@@ -2335,7 +2360,7 @@ async def agent_chat(req: ChatRequest, request: Request):
         raise HTTPException(503, "Agent not available")
 
     client_ip = _get_client_ip(request)
-    if not chat_limiter.is_allowed(client_ip):
+    if not await chat_limiter.is_allowed(client_ip):
         raise HTTPException(429, "Rate limit exceeded")
 
     # Bind user_id to the caller so users cannot read/poison each other's history: to the install
@@ -2379,7 +2404,7 @@ async def agent_explain(req: ExplainRequest, request: Request):
         raise HTTPException(503, "Agent not available")
 
     client_ip = _get_client_ip(request)
-    if not chat_limiter.is_allowed(client_ip):
+    if not await chat_limiter.is_allowed(client_ip):
         raise HTTPException(429, "Rate limit exceeded")
 
     try:
@@ -2408,6 +2433,8 @@ async def mempool_alerts(request: Request, chain_id: int = None, limit: int = 50
             raise HTTPException(status_code=400, detail="Pending-transaction monitoring is not available on this chain")
     if not container or not container.mempool_monitor:
         raise HTTPException(status_code=503, detail="Mempool monitor not available")
+    if _background_workers == "external":
+        raise HTTPException(status_code=503, detail=_EXTERNAL_MEMPOOL_DETAIL)
     limit = max(1, min(limit, 200))
     alerts = container.mempool_monitor.get_alerts(chain_id=chain_id, limit=limit)
     return {"alerts": alerts, "count": len(alerts)}
@@ -2422,6 +2449,8 @@ async def mempool_stats(request: Request, chain_id: int = None):
             raise HTTPException(status_code=400, detail="Pending-transaction monitoring is not available on this chain")
     if not container or not container.mempool_monitor:
         raise HTTPException(status_code=503, detail="Mempool monitor not available")
+    if _background_workers == "external":
+        raise HTTPException(status_code=503, detail=_EXTERNAL_MEMPOOL_DETAIL)
     return container.mempool_monitor.get_stats()
 
 
@@ -2520,9 +2549,10 @@ async def threat_feed(
 
     # Mempool alerts
     mempool_available = chain_id is None or supports_pending_transactions(chain_id)
+    mempool_external = _background_workers == "external"
     mempool_alerts = (
         container.mempool_monitor.get_alerts(chain_id=chain_id, limit=limit)
-        if mempool_available and source != "contracts" else []
+        if mempool_available and not mempool_external and source != "contracts" else []
     )
     for alert in mempool_alerts:
         if since and alert.get('created_at', 0) < since:
@@ -2542,6 +2572,8 @@ async def threat_feed(
     }
     if not mempool_available:
         response['mempool_unavailable'] = "Pending-transaction monitoring is not available on this chain"
+    elif mempool_external and source != "contracts":
+        response['mempool_unavailable'] = _EXTERNAL_MEMPOOL_DETAIL
     return response
 
 

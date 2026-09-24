@@ -116,7 +116,7 @@ class Hunter:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        logger.info("Hunter stopped")
+            logger.info("Hunter stopped")
 
     @property
     def is_running(self) -> bool:

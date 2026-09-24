@@ -1,6 +1,6 @@
 """Centralized configuration via Pydantic Settings."""
 
-from typing import List, Optional
+from typing import List, Literal, Optional
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
@@ -87,6 +87,9 @@ class Settings(BaseSettings):
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
+    # Where the rate limiters count: "memory" (each process on its own, forgotten on restart) or
+    # "redis" (at redis_url, shared by every API process). See core/rate_limit.py.
+    rate_limit_backend: Literal["memory", "redis"] = "memory"
 
     # Calibration
     calibration_config_path: str = "core/calibration_config.json"
@@ -112,6 +115,11 @@ class Settings(BaseSettings):
 
     # RPC Proxy
     rpc_proxy_enabled: bool = True
+
+    # Where the background work runs (mempool monitor, verdict drain, hunter, launch watch): "api"
+    # starts it in the API process; "external" leaves it to workers.py, run as a service of its own.
+    # Both processes must read the same value. See docs/DEPLOYMENT.md.
+    background_workers: Literal["api", "external"] = "api"
 
     model_config = {
         "env_file": ".env",
