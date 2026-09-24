@@ -131,7 +131,7 @@ const context = vm.createContext({
   setInterval() { return 0; }, clearInterval() {},
   crypto: {randomUUID: () => String(++requestNumber), subtle: webcrypto.subtle}, Event: class {constructor(type) {this.type = type;}},
   setTimeout(fn, delay) {if (scenario === 'timeout' && delay < 60000) queueMicrotask(fn); return 1;},
-  clearTimeout() {}, queueMicrotask,
+  clearTimeout() {}, queueMicrotask, MutationObserver: class { observe() {} },
 });
 vm.runInContext(fs.readFileSync('extension/inject.js', 'utf8'), context);
 // content.js hands inject.js the channel token at document_start.

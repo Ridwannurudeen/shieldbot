@@ -812,7 +812,7 @@ const provider = {
 window.ethereum = provider;
 window.dispatchEvent = () => {};
 const context = vm.createContext({
-  window, document, TextEncoder, CustomEvent, structuredClone, queueMicrotask,
+  window, document, TextEncoder, CustomEvent, structuredClone, queueMicrotask, MutationObserver: FakeMutationObserver,
   Event: class { constructor(type) { this.type = type; } },
   console: new Proxy({}, {get: (_, name) => (...args) => logged.push([name, ...args])}),
   setTimeout(fn, delay) { const id = ++nextTimer; timers.set(id, {fn, delay}); return id; },
@@ -917,6 +917,25 @@ def test_forged_verdicts_are_ignored(forgery):
   assert.equal(sent.length, 0);
 """,
         forgery,
+    )
+
+
+def test_replacing_the_root_element_rejects_a_request_waiting_on_the_overlay():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const {pending, requestId} = await startRequest();
+  deliver({type: 'SHIELDAI_TX_SHOWN', requestId, proof: await proof(requestId, 'shown')});
+  await flush();
+  assert(!fireFailClosedTimer(), 'the overlay was shown, so the fail-closed timer should have stopped');
+  // What document.open() does: the root element goes, taking the extension's listeners with it,
+  // so the Block content.js then posts would never arrive.
+  html.remove();
+  document.documentElement = new El('html');
+  await assert.rejects(pending, /blocked/);
+  assert.equal(sent.length, 0);
+"""
     )
 
 
@@ -1033,6 +1052,7 @@ const contentWorld = vm.createContext({
 });
 const pageWorld = vm.createContext({
   window, document, TextEncoder, CustomEvent, structuredClone, queueMicrotask, setTimeout, clearTimeout,
+  MutationObserver: FakeMutationObserver,
   setInterval() { return 0; }, clearInterval() {}, console,
   Event: class { constructor(type) { this.type = type; } },
   crypto: {subtle: webcrypto.subtle, randomUUID: () => webcrypto.randomUUID()},

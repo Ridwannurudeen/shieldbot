@@ -44,6 +44,8 @@
   const addWindowListener = bindTo(window.addEventListener, window);
   const removeWindowListener = bindTo(window.removeEventListener, window);
   const removeDocumentListener = bindTo(document.removeEventListener, document);
+  const NativeMutationObserver = MutationObserver;
+  const observeMutations = uncurry(MutationObserver.prototype.observe);
   const setTimer = setTimeout;
   const clearTimer = clearTimeout;
   const clearTicker = clearInterval;
@@ -90,6 +92,23 @@
     // script could make, cannot set the key.
     setTimer(() => removeDocumentListener("shieldai:channel", takeToken), 0);
   }
+
+  // Requests waiting for a verdict, by id, with the function that ends each.
+  const pendingRequests = new Map();
+  const keepPending = bindTo(Map.prototype.set, pendingRequests);
+  const dropPending = bindTo(Map.prototype.delete, pendingRequests);
+  const forEachPending = bindTo(Map.prototype.forEach, pendingRequests);
+
+  // document.open() takes the extension's listeners away with the document,
+  // so the Block content.js posts for a request whose overlay went with it
+  // would never arrive. When the root element is replaced, every request
+  // waiting for a verdict is rejected instead.
+  let rootElement = document.documentElement;
+  observeMutations(new NativeMutationObserver(() => {
+    if (document.documentElement === rootElement) return;
+    rootElement = document.documentElement;
+    forEachPending((finish) => finish("block"));
+  }), document, { __proto__: null, childList: true });
 
   // What kind of request a method is, or null when it is not intercepted. A
   // switch rather than a Set, so no replaceable built-in decides it.
@@ -602,6 +621,7 @@
     const finish = (action) => {
       if (decided) return;
       decided = true;
+      dropPending(requestId);
       clearTimer(timeout);
       removeWindowListener("message", handleMessage);
       decide(action);
@@ -638,6 +658,7 @@
     // proves the overlay is showing, so a user reading it is never cut off.
     const timeout = setTimer(() => finish("block"), 60000);
 
+    keepPending(requestId, finish);
     addWindowListener("message", handleMessage);
 
     const txPayload = {
