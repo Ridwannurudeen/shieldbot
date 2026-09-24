@@ -904,6 +904,8 @@ For frequently queried clusters (top 100 by query count), maintain an in-memory 
 
 ## Token Gating & Pricing
 
+> Superseded: the $SHIELDBOT token gate described here has been removed, and ShieldBot does not issue a token (see the README section "ShieldBot does not issue a token").
+
 ### Tier Structure
 
 | Tier | Rate Limit | Features | Price |
