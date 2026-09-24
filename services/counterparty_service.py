@@ -8,10 +8,13 @@ which facts are known, so a rule never reads an unknown as clean.
 
 import asyncio
 import copy
+import logging
 import time
 from typing import Optional
 
 from cachetools import TLRUCache
+
+logger = logging.getLogger(__name__)
 
 # Canonical Uniswap Permit2, deployed at the same address on every EVM chain.
 PERMIT2 = "0x000000000022d473030f116ddee9f6b43ac78ba3"
@@ -56,12 +59,33 @@ _FACTS_INFLIGHT = {}
 PROVIDER_TIMEOUT = 8
 
 
+# Every lookup within_timeout started, held until it ends: the event loop holds tasks only weakly,
+# and a lookup whose caller stopped waiting has no other holder.
+_UNFINISHED = set()
+
+
+def _lookup_ended(task):
+    _UNFINISHED.discard(task)
+    if not task.cancelled() and task.exception() is not None:
+        logger.warning("Provider lookup ended with %s", type(task.exception()).__name__)
+
+
 async def within_timeout(awaitable, unknown):
-    """The lookup's answer, or `unknown` after PROVIDER_TIMEOUT. Only the caller stops waiting: the
-    lookup runs on to its own provider timeout, so it still records its outcome in the Unknown
-    ledger once (and fills its cache for the next scan)."""
+    """The lookup's answer, or `unknown` after PROVIDER_TIMEOUT.
+
+    Only the caller stops waiting. The lookup runs on until its own limits end it: 8 s per GoPlus
+    request, 15 s per Etherscan, Sourcify or Blockscout request and 10 s per RPC read. A chain of
+    them runs for about the sum: verification with its clone check about 50 s, a creation lookup
+    with its two RPC reads about 35 s, and longer when a rate-limited provider is asked again. It
+    records its outcome in the Unknown ledger once, and a lookup with a cache fills it for the next
+    scan: Sourcify and Blockscout replies, GoPlus address labels and contract creations. Etherscan's
+    verification reply and bytecode reads have no cache.
+    """
+    task = asyncio.ensure_future(awaitable)
+    _UNFINISHED.add(task)
+    task.add_done_callback(_lookup_ended)
     try:
-        return await asyncio.wait_for(asyncio.shield(awaitable), PROVIDER_TIMEOUT)
+        return await asyncio.wait_for(asyncio.shield(task), PROVIDER_TIMEOUT)
     except asyncio.TimeoutError:
         return unknown
 

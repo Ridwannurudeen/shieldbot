@@ -1,12 +1,14 @@
 """Counterparty facts: wallet or contract, verification, age and GoPlus address labels."""
 
 import asyncio
+import gc
 import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import pytest_asyncio
 from cachetools import TLRUCache
 
 import services.counterparty_service as counterparty_module
@@ -233,6 +235,56 @@ async def test_cancelling_the_first_caller_leaves_the_shared_lookup_running():
     assert facts["is_contract"] is True
     assert counterparty_module._FACTS_CACHE[(56, SPENDER)]["is_contract"] is True
     assert counterparty_module._FACTS_INFLIGHT == {}
+
+
+@pytest_asyncio.fixture
+async def loop_reports():
+    """What the event loop reports, such as a task destroyed while pending."""
+    loop = asyncio.get_running_loop()
+    reports = []
+    loop.set_exception_handler(lambda loop, context: reports.append(context["message"]))
+    yield reports
+    loop.set_exception_handler(None)
+
+
+@pytest.mark.asyncio
+async def test_a_lookup_its_caller_stopped_waiting_for_is_kept_until_it_ends(monkeypatch, loop_reports):
+    monkeypatch.setattr(counterparty_module, "PROVIDER_TIMEOUT", 0.05)
+
+    async def waits_on_a_reply_nothing_else_holds():
+        await asyncio.get_running_loop().create_future()
+
+    before = set(counterparty_module._UNFINISHED)
+    assert await counterparty_module.within_timeout(waits_on_a_reply_nothing_else_holds(), "unknown") == "unknown"
+    # The event loop holds tasks weakly: an unheld lookup would be destroyed while still pending.
+    await asyncio.sleep(0)
+    gc.collect()
+    assert loop_reports == []
+    (lookup,) = counterparty_module._UNFINISHED - before
+    lookup.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await lookup
+    assert lookup not in counterparty_module._UNFINISHED
+
+
+@pytest.mark.asyncio
+async def test_a_lookup_that_fails_after_its_caller_stopped_waiting_is_logged_by_type(
+    monkeypatch, caplog, loop_reports
+):
+    monkeypatch.setattr(counterparty_module, "PROVIDER_TIMEOUT", 0.05)
+
+    async def fails_late():
+        await asyncio.sleep(0.1)
+        raise RuntimeError("provider detail")
+
+    before = set(counterparty_module._UNFINISHED)
+    assert await counterparty_module.within_timeout(fails_late(), "unknown") == "unknown"
+    await asyncio.sleep(0.2)
+    gc.collect()
+    assert loop_reports == []
+    assert "Provider lookup ended with RuntimeError" in caplog.text
+    assert "provider detail" not in caplog.text
+    assert counterparty_module._UNFINISHED - before == set()
 
 
 @pytest.mark.asyncio
