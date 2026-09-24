@@ -211,17 +211,22 @@ that reads `api` beside a running workers.py would run a second drain. workers.p
 reads `external`, but it cannot see what the API reads.
 
 If two drains do run on the database, only the holder of the sender lease (the `sender_leases` table) stores and
-broadcasts verdict transactions. The holder renews the lease every 15 seconds, and each send takes it again after
-signing and before storing the transaction; a drain that finds the lease held by another discards what it signed
-and puts the row back in the queue. The other drain logs
+broadcasts verdict transactions. The holder renews the lease every 15 seconds. After signing, each send takes the
+lease again and goes on only if the lease is its own and still has a lock wait (5 seconds) and the 60 second
+broadcast phase to run; otherwise it discards what it signed, puts the row back in the queue, and the drain stops
+claiming rows until it has taken the lease again. So a send that went on can finish its broadcast before any other
+drain can hold the lease. The other drain logs
 `Robinhood verdict registry: not sending, <host:pid:id> holds the sender lease until ...` and asks again when that
 lease expires. It can take over only after the holder has gone 90 seconds without taking the lease: after a crash,
 or when its renewals keep failing, in which case the holder stops claiming rows before the lease can run out. A
-send already signed when its drain loses the lease can finish its broadcast within its 60 second phase timeout,
-which is shorter than the 90 second lease it took just before, so the next holder cannot broadcast while it is
-open. A clean stop releases the lease at once, unless a send is still under way. The holder's id names its host and
-process id. The drains compare the lease's expiry with their own clocks, so drains on different hosts need
-synchronised clocks.
+clean stop releases the lease at once, unless a send is still under way. The holder's id names its host and process
+id. The drains compare the lease's expiry with their own clocks, so drains on different hosts need synchronised
+clocks.
+
+The lease also applies with the default `BACKGROUND_WORKERS=api`, where the API is the only drain. After a clean
+stop or `systemctl restart` it sends again at once. After a crash (a kill, an out-of-memory stop, a power loss)
+the lease still names the dead process, so the restarted API stores and broadcasts no verdict until that lease
+expires: up to 90 seconds. Verdicts queued meanwhile wait as `pending` and go out after it.
 
 To turn it on, as root:
 

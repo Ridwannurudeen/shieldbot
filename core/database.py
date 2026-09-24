@@ -182,6 +182,9 @@ class Database:
         # transaction the drain has open.
         self._lease_db: Optional[aiosqlite.Connection] = None
         self._lease_lock = asyncio.Lock()
+        # One lease call at a time on that connection: calls that overlap share its implicit transaction, so one
+        # call's rollback would undo another's upsert.
+        self._lease_calls = asyncio.Lock()
 
     async def initialize(self):
         """Open connection and create tables."""
@@ -232,12 +235,17 @@ class Database:
         """
         drain, lease, shared = self._drain_db, self._lease_db, self._db
         self._drain_db = self._lease_db = self._db = None
-        if drain:
-            await drain.close()
-        if lease:
-            await lease.close()
-        if shared:
-            await shared.close()
+        # A connection that fails to close must not leave the others open.
+        try:
+            if drain:
+                await drain.close()
+        finally:
+            try:
+                if lease:
+                    await lease.close()
+            finally:
+                if shared:
+                    await shared.close()
 
     async def _create_tables(self):
         await self._db.executescript("""
@@ -2856,36 +2864,41 @@ class Database:
         """, (time.time(), evidence_id))
         await outbox.commit()
 
-    async def take_sender_lease(self, name: str, holder: str, seconds: float) -> Tuple[str, float]:
+    async def take_sender_lease(self, name: str, holder: str, seconds: float) -> Tuple[Optional[str], float]:
         """Take or renew the named lease for `holder` for `seconds`, unless another holder's lease is still live.
 
         One conditional upsert, atomic in SQLite, so however many processes ask at once, one holds the lease.
-        Returns the lease's holder and expiry (Unix time) after the attempt. Runs on the lease's own connection,
-        so it never commits or rolls back a transaction the drain has open.
+        Returns the lease's holder and expiry (Unix time) after the attempt, or (None, now) if the lease was
+        released before it could be read back. Runs on the lease's own connection, one call at a time, so it never
+        commits or rolls back a transaction the drain or another lease call has open.
         """
         connection = await self._lease()
-        now = time.time()
-        # A failure or a cancellation between the upsert and its commit must not leave the write lock held.
-        try:
-            await connection.execute("""
-                INSERT INTO sender_leases (name, holder, expires_at, renewed_at) VALUES (?, ?, ?, ?)
-                ON CONFLICT (name) DO UPDATE SET
-                    holder = excluded.holder, expires_at = excluded.expires_at, renewed_at = excluded.renewed_at
-                WHERE sender_leases.holder = excluded.holder OR sender_leases.expires_at <= excluded.renewed_at
-            """, (name, holder, now + seconds, now))
-            await connection.commit()
-        except BaseException:
-            await connection.rollback()
-            raise
-        cursor = await connection.execute("SELECT holder, expires_at FROM sender_leases WHERE name = ?", (name,))
-        row = await cursor.fetchone()
-        return row[0], row[1]
+        async with self._lease_calls:
+            now = time.time()
+            # A failure or a cancellation between the upsert and its commit must not leave the write lock held.
+            try:
+                await connection.execute("""
+                    INSERT INTO sender_leases (name, holder, expires_at, renewed_at) VALUES (?, ?, ?, ?)
+                    ON CONFLICT (name) DO UPDATE SET
+                        holder = excluded.holder, expires_at = excluded.expires_at, renewed_at = excluded.renewed_at
+                    WHERE sender_leases.holder = excluded.holder OR sender_leases.expires_at <= excluded.renewed_at
+                """, (name, holder, now + seconds, now))
+                await connection.commit()
+            except BaseException:
+                await connection.rollback()
+                raise
+            cursor = await connection.execute(
+                "SELECT holder, expires_at FROM sender_leases WHERE name = ?", (name,)
+            )
+            row = await cursor.fetchone()
+        return (row[0], row[1]) if row else (None, now)
 
     async def release_sender_lease(self, name: str, holder: str):
         """Give up the named lease if `holder` holds it, on the lease's own connection."""
         connection = await self._lease()
-        await connection.execute("DELETE FROM sender_leases WHERE name = ? AND holder = ?", (name, holder))
-        await connection.commit()
+        async with self._lease_calls:
+            await connection.execute("DELETE FROM sender_leases WHERE name = ? AND holder = ?", (name, holder))
+            await connection.commit()
 
     async def requeue_verdict(self, evidence_id: int):
         """Queue an unresolved record (submitted, unconfirmed or failed) for another attempt."""
