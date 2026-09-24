@@ -48,15 +48,17 @@ version.
 - A signature is analysed on the wallet's current chain, read once when the request is made. It is
   not bound to that chain: the wallet receives it as the page sent it. When the chain cannot be read,
   the signature is not analysed, the overlay offers only Reject, and the request is rejected.
-- Sign-In with Ethereum (EIP-4361): `background.js` parses a `personal_sign` message that says it is
-  a sign-in message as strictly as the standard's reference parser (every field in its order and
-  form, nothing else), and compares its `domain`, and its `URI`'s host when the URI has one, with the
-  host of the frame that asked. That host comes from Chrome, as the sender of the content script's
-  message; the page has no say in it, and the API receives no page origin with a firewall call, so
-  the check is made here. A mismatch is Block Recommended without asking the API, and the overlay
-  names both domains. A message that says it is a sign-in message but does not follow EIP-4361 goes
-  to the API and comes back Unknown. A `personal_sign` whose first parameter is an address and whose
-  second is not is read as MetaMask signs it, message second; otherwise the message is first.
+- Sign-In with Ethereum (EIP-4361): for a `personal_sign` message that says it is a sign-in message,
+  `background.js` first compares the domain on its first line with the host of the frame that asked,
+  whatever the rest of the message looks like. That host comes from Chrome, as the sender of the
+  content script's message; the page has no say in it, and the API receives no page origin with a
+  firewall call, so the check is made here. When the domain matches, the rest is parsed as strictly
+  as the standard's reference parser (every field in its order and form, nothing else), and the
+  `URI`'s host, when it has one, is compared too. A mismatch is Block Recommended without asking the
+  API, and the overlay names both domains. A message whose first line cannot be read, or whose first
+  line is for this site but whose rest does not follow EIP-4361, goes to the API and comes back
+  Unknown. A `personal_sign` whose first parameter is an address and whose second is not is read as
+  MetaMask signs it, message second; otherwise the message is first.
 - EIP-7702: a transaction with an `authorizationList` (type 0x04) is Block Recommended and its
   overlay lists each delegate address in full, with or without the API. The API adds whether each
   delegate is a verified contract and how old it is: every delegation is Block Recommended (90 for a

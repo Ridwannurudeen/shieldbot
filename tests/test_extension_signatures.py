@@ -868,3 +868,58 @@ def test_a_delegation_is_block_recommended_and_names_the_delegate(policy, outcom
 """,
         [policy, outcome],
     )
+
+
+# Tails EIP-4361 does not allow. A page can add one to any sign-in message; the site the message is
+# for is still on its first line.
+MALFORMED_TAILS = ["empty-uri-host", "bad-resource", "trailing-newline", "extra-field", "empty-statement"]
+MALFORMED = r"""
+const malformed = (kind, domain) => ({
+  'empty-uri-host': siwe({domain, uri: 'http://'}),
+  'bad-resource': siwe({domain, tail: '\nResources:\n- http://'}),
+  'trailing-newline': siwe({domain}) + '\n',
+  'extra-field': siwe({domain, tail: '\nSession: 7'}),
+  'empty-statement': siwe({domain, statement: ''}),
+})[kind];
+"""
+
+
+@pytest.mark.parametrize("tail", MALFORMED_TAILS)
+def test_a_sign_in_message_for_another_site_is_blocked_whatever_its_tail(tail):
+    run_node(
+        BACKGROUND_HARNESS
+        + SIWE
+        + MALFORMED
+        + r"""
+(async () => {
+  const text = malformed(JSON.parse(process.argv[1]), 'wallet-login.example');
+  for (const data of [text, hex(text)]) {
+    const {result} = await respond(signIn(data));
+    assert.equal(result.classification, 'BLOCK_RECOMMENDED');
+    assert.equal(result.siwe.state, 'mismatch');
+    assert.equal(result.siwe.domain, 'wallet-login.example');
+    assert.equal(result.siwe.origin, 'dapp.example');
+  }
+  assert.equal(bodies.length, 0, 'the API was asked although the verdict cannot change');
+""",
+        tail,
+    )
+
+
+@pytest.mark.parametrize("tail", MALFORMED_TAILS)
+def test_a_sign_in_message_for_this_site_with_a_malformed_tail_stays_unknown(tail):
+    run_node(
+        BACKGROUND_HARNESS
+        + SIWE
+        + MALFORMED
+        + r"""
+(async () => {
+  const {result} = await respond(signIn(malformed(JSON.parse(process.argv[1]), 'dapp.example')));
+  assert.equal(bodies.length, 1, 'the signature was not analysed by the API');
+  assert.equal(result.siwe.state, 'unreadable');
+  assert.equal(result.status, 'unknown');
+  assert.notEqual(result.classification, 'SAFE');
+  assert.notEqual(result.classification, 'BLOCK_RECOMMENDED');
+""",
+        tail,
+    )

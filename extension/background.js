@@ -267,11 +267,12 @@ function unknownChain(reason) {
   };
 }
 
-// Sign-In with Ethereum (EIP-4361). A personal_sign message that says it is
-// one is parsed strictly, as the reference parser reads it: every field in its
-// order and form, and nothing else. Its domain and its URI's host must be the
-// host of the frame that asked, which the browser gives this worker as the
-// message's sender; the page has no say in it. The address's EIP-55 checksum
+// Sign-In with Ethereum (EIP-4361). The domain on a sign-in message's first
+// line must be the host of the frame that asked, which the browser gives this
+// worker as the message's sender; the page has no say in it. That is checked
+// first, whatever follows. The rest is then parsed strictly, as the reference
+// parser reads it: every field in its order and form, and nothing else, and
+// the URI's host must be the frame's host too. The address's EIP-55 checksum
 // is not required: the standard says SHOULD.
 const SIWE_HEADER = " wants you to sign in with your Ethereum account:";
 const SIWE_FIRST_LINE = /^(?:[a-z][a-z0-9+.-]*:\/\/)?([^\s/?#]+) wants you to sign in with your Ethereum account:$/i;
@@ -302,11 +303,10 @@ function signedText(data) {
   }
 }
 
-// The domain and URI of a message laid out as EIP-4361 says, or null.
+// The URI of a message laid out as EIP-4361 says after its first line, or null.
 function parseSiwe(text) {
   const lines = text.split("\n");
-  const first = SIWE_FIRST_LINE.exec(lines[0]);
-  if (!first || !/^0x[0-9a-f]{40}$/i.test(lines[1] || "") || lines[2] !== "") return null;
+  if (!/^0x[0-9a-f]{40}$/i.test(lines[1] || "") || lines[2] !== "") return null;
   // An optional statement of one line, between blank lines.
   let at = lines[3] === "" ? 4 : lines[4] === "" ? 5 : -1;
   if (at < 0) return null;
@@ -337,27 +337,28 @@ function parseSiwe(text) {
     at++;
     while ((lines[at] || "").startsWith("- ") && isUri(lines[at].slice(2))) at++;
   }
-  return at === lines.length ? { domain: first[1], uri } : null;
+  return at === lines.length ? uri : null;
 }
 
 // What a personal_sign message says about the site it signs in to: null when
-// it is not a sign-in message, state "unreadable" when it says it is one but
-// is not laid out as EIP-4361, and otherwise whether its domain and its URI's
-// host are the host of origin, the frame that asked.
+// it is not a sign-in message; "mismatch" when the domain on its first line, or
+// its URI's host, is not the host of origin, the frame that asked; "unreadable"
+// when it says it is one but its first line cannot be read, or its first line
+// is for this site and the rest is not laid out as EIP-4361; "match" otherwise.
 function judgeSignIn(data, origin) {
   const text = signedText(data);
   if (text === null || !text.includes(SIWE_HEADER)) return null;
-  const message = parseSiwe(text);
-  const domain = message && parseUrl(`https://${message.domain}`);
+  const first = SIWE_FIRST_LINE.exec(text.split("\n")[0]);
+  const domain = first && parseUrl(`https://${first[1]}`);
   if (!domain) return { state: "unreadable" };
-  const uri = parseUrl(message.uri);
   const page = parseUrl(origin);
   const host = page ? page.host : "";
-  const claimed = domain.username || domain.password || domain.host !== host ? message.domain
-    : uri.host && uri.host !== host ? uri.host : null;
-  return claimed === null
-    ? { state: "match", domain: message.domain }
-    : { state: "mismatch", domain: claimed, origin: host || String(origin) };
+  const mismatch = (claimed) => ({ state: "mismatch", domain: claimed, origin: host || String(origin) });
+  if (domain.username || domain.password || domain.host !== host) return mismatch(first[1]);
+  const uri = parseSiwe(text);
+  if (uri === null) return { state: "unreadable" };
+  const uriHost = parseUrl(uri).host;
+  return uriHost && uriHost !== host ? mismatch(uriHost) : { state: "match", domain: first[1] };
 }
 
 async function handleAnalyze(tx, sender) {
