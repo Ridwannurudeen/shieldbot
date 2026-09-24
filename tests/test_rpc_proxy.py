@@ -19,6 +19,8 @@ def mock_container():
     container.web3_client = Web3Client.__new__(Web3Client)
     container.web3_client._adapters = {56: adapter, 1: adapter, 8453: adapter}
 
+    container.web3_client.get_bytecode = AsyncMock(return_value="0x6080604052")
+
     # Mock registry
     container.registry.run_all = AsyncMock(return_value=[])
 
@@ -263,6 +265,34 @@ async def test_failed_verification_lookup_reaches_the_analyzers_as_unknown(proxy
     })
     ctx = mock_container.registry.run_all.await_args.args[0]
     assert ctx.extra["is_verified"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code, is_contract, verified", [
+    ("0x6080604052", True, True),
+    ("0x", False, False),
+    ("ef0100" + "5" * 40, False, False),
+    (None, None, True),
+], ids=["contract", "wallet", "delegated-wallet", "code-unknown"])
+async def test_the_proxy_tells_the_analyzers_whether_the_target_is_a_contract(
+    proxy, mock_container, code, is_contract, verified,
+):
+    mock_container.web3_client.get_bytecode = AsyncMock(return_value=code)
+    mock_container.web3_client.is_token_contract = AsyncMock(return_value=False)
+    mock_container.web3_client.is_verified_contract = AsyncMock(return_value=(False, None))
+    proxy._forward = AsyncMock(return_value={"jsonrpc": "2.0", "id": 1, "result": "0xabc"})
+    await proxy.handle_request(56, {
+        "jsonrpc": "2.0", "id": 1, "method": "eth_sendTransaction",
+        "params": [{"to": "0x" + "a" * 40, "from": "0x" + "b" * 40, "data": "0x40c10f19", "value": "0x1"}],
+    })
+    ctx = mock_container.registry.run_all.await_args.args[0]
+    assert ctx.extra["is_contract"] is is_contract
+    mock_container.web3_client.get_bytecode.assert_awaited_once_with("0x" + "a" * 40, chain_id=56)
+    if verified:
+        mock_container.web3_client.is_verified_contract.assert_awaited_once_with("0x" + "a" * 40, chain_id=56, code=code)
+    else:
+        mock_container.web3_client.is_verified_contract.assert_not_awaited()
+        assert ctx.extra["is_verified"] is None
 
 
 SYNTHETIC_RPC_KEY = "SYNTHETIC-RPC-KEY-4f2c9e"

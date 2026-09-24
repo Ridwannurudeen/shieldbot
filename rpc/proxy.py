@@ -7,6 +7,7 @@ import aiohttp
 import rlp
 from eth_account import Account
 
+from services.counterparty_service import code_kind
 from utils.web3_client import UnsupportedChainError
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,12 @@ class RPCProxy:
                 # Contract creation — forward without analysis
                 return await self._forward(upstream_rpc, payload, chain_id)
 
+            # The target's code, read once, as the firewall does. A wallet (no code, or an EIP-7702
+            # delegation) has no source to verify and takes payments with no contract to judge.
+            code = await self._container.web3_client.get_bytecode(to_addr, chain_id=chain_id)
+            has_code, delegated = code_kind(code)
+            is_contract = None if has_code is None else has_code and not delegated
+
             # Detect token vs non-token for accurate risk assessment
             is_token = None
             is_verified = None
@@ -97,13 +104,16 @@ class RPCProxy:
                 raise
             except Exception:
                 pass
-            try:
-                verified_result = await self._container.web3_client.is_verified_contract(to_addr, chain_id=chain_id)
-                is_verified = verified_result[0] if isinstance(verified_result, tuple) else bool(verified_result)
-            except UnsupportedChainError:
-                raise
-            except Exception:
-                pass
+            if is_contract is not False:
+                try:
+                    verified_result = await self._container.web3_client.is_verified_contract(
+                        to_addr, chain_id=chain_id, code=code,
+                    )
+                    is_verified = verified_result[0] if isinstance(verified_result, tuple) else bool(verified_result)
+                except UnsupportedChainError:
+                    raise
+                except Exception:
+                    pass
 
             # Run the analyzer pipeline
             from core.analyzer import AnalysisContext
@@ -113,7 +123,7 @@ class RPCProxy:
                 chain_id=chain_id,
                 from_address=from_addr,
                 is_token=is_token,
-                extra={'calldata': data, 'value': value, 'is_verified': is_verified},
+                extra={'calldata': data, 'value': value, 'is_verified': is_verified, 'is_contract': is_contract},
             )
 
             analyzer_results = await self._container.registry.run_all(ctx)
