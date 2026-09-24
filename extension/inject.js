@@ -24,6 +24,7 @@
   const getPrototypeOf = Object.getPrototypeOf;
   const getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
   const objectPrototype = Object.prototype;
+  const hasOwn = Object.hasOwn;
   const parseJSON = JSON.parse;
   const clone = structuredClone;
   const toNumber = Number;
@@ -92,6 +93,12 @@
   const keepInheritedRequest = bindTo(WeakMap.prototype.set, inheritedRequests);
 
   const CHAIN_ID_PATTERN = /^(0x[0-9a-f]+|[0-9]+)$/i;
+
+  // A property the object holds itself. A plain read of one it lacks falls
+  // through to prototypes, which the page can fill.
+  function ownValue(object, key) {
+    return typeof object === "object" && object !== null && hasOwn(object, key) ? object[key] : undefined;
+  }
 
   function parseChainId(value) {
     if (typeof value !== "number" &&
@@ -165,10 +172,20 @@
     }
 
     const wrappedRequest = function (args) {
-      const method = args ? args.method : undefined;
+      // The method is read once, and the wallet is handed that string rather
+      // than the page's object, which could answer the wallet's own read of
+      // method with another one.
+      const method = ownValue(args, "method");
+      if (typeof method !== "string") {
+        return new NativePromise((resolve, reject) => {
+          reject(new Error("ShieldAI rejected a wallet request without a string method"));
+        });
+      }
       const kind = requestKind(method);
       if (kind === null) {
-        return originalRequest(args);
+        const forwarded = { __proto__: null, method };
+        if (hasOwn(args, "params")) forwarded.params = args.params;
+        return originalRequest(forwarded);
       }
 
       return new NativePromise((resolve, reject) => {

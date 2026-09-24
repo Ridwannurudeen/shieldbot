@@ -981,6 +981,48 @@ def test_the_wallet_gets_the_request_that_was_analysed():
     )
 
 
+@pytest.mark.parametrize("method", ["object", "number", "missing", "inherited"])
+def test_a_request_without_a_string_method_is_rejected(method):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const params = [{to: '0x' + 'a'.repeat(40)}];
+  const args = {
+    // A wallet that turns the method into a string would send the transaction unchecked.
+    object: {method: {toString: () => 'eth_sendTransaction'}, params},
+    number: {method: 1, params},
+    missing: {params},
+    inherited: Object.assign(Object.create({method: 'eth_sendTransaction'}), {params}),
+  }[JSON.parse(process.argv[1])];
+  await assert.rejects(provider.request(args), /string method/);
+  await flush();
+  assert.equal(sent.length, 0);
+  assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').length, 0);
+""",
+        method,
+    )
+
+
+def test_the_wallet_gets_the_method_that_was_checked():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  let reads = 0;
+  const params = [{to: '0x' + 'a'.repeat(40)}];
+  const args = {get method() { return reads++ === 0 ? 'eth_chainId' : 'eth_sendTransaction'; }, params};
+  assert.equal(await provider.request(args), '0x38');
+  assert.equal(sent.length, 0, 'the wallet read a different method than the one checked');
+  // Other methods go through as the page gave them, with params only when it gave some.
+  assert.equal(await provider.request({method: 'eth_getBalance', params: ['0x' + 'b'.repeat(40), 'latest']}), 'sent');
+  assert.equal(await provider.request({method: 'eth_accounts'}), 'sent');
+  assert.deepEqual(plain(sent), [{method: 'eth_getBalance', params: ['0x' + 'b'.repeat(40), 'latest']}, {method: 'eth_accounts'}]);
+  assert(!('params' in sent[1]));
+"""
+    )
+
+
 def test_replaced_json_parse_cannot_change_the_typed_data_shown():
     run_node(
         INJECT_HARNESS
