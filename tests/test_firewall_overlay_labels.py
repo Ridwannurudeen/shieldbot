@@ -233,6 +233,7 @@ async def test_router_swap_names_the_chain_gas_token_and_full_router(labels_api,
         (DECODER.decode(calldata("a9059cbb", ["address", "uint256"], [RECIPIENT, 5])), "None"),
         (DECODER.decode("0x"), "None"),
         (DECODER.decode("0xdeadbeef" + "00" * 32), "Unknown"),
+        ({}, "Unknown"),
     ],
 )
 def test_granting_access_says_what_the_call_grants(decoded, expected):
@@ -304,7 +305,7 @@ async def test_recipient_is_the_full_checksummed_address(labels_api):
     assert unverified["transaction_impact"]["recipient"] == f"Router ({checksummed})"
 
 
-def test_token_transfer_recipient_is_never_shortened(labels_api):
+def test_transfer_recipient_and_approval_spender_are_never_shortened(labels_api):
     api = labels_api
     checksummed = Web3.to_checksum_address(RECIPIENT)
     transfer = DECODER.decode(calldata("a9059cbb", ["address", "uint256"], [RECIPIENT, 5]))
@@ -320,6 +321,12 @@ def test_token_transfer_recipient_is_never_shortened(labels_api):
         field["label"]: field["value"] for field in api._build_calldata_details(moved)["fields"]
     }
     assert fields["To"] == checksummed
+    spender = Web3.to_checksum_address(SPENDER)
+    fields = {
+        field["label"]: field["value"] for field in api._build_calldata_details(approve(5))["fields"]
+    }
+    assert fields["Spender"] == spender
+    assert api._format_decoded_action(approve(5), 56) == f"Token Approval to {spender}"
 
 
 @pytest.mark.asyncio

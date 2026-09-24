@@ -2337,7 +2337,7 @@ def _format_decoded_action(decoded: Dict, chain_id: int) -> str:
 
     if category == "approval":
         spender = params.get("param_0", "")
-        spender_label = decoded.get("spender_label") or _short_addr(str(spender))
+        spender_label = decoded.get("spender_label") or _checksum_if_possible(str(spender))
         if decoded.get("is_unlimited_approval"):
             return f"UNLIMITED Approval to {spender_label}"
         if "permit" in func.lower():
@@ -2390,7 +2390,7 @@ def _build_calldata_details(decoded: Dict) -> Dict:
 
     if category == "approval":
         spender = params.get("param_0", "")
-        spender_label = decoded.get("spender_label") or _short_addr(str(spender))
+        spender_label = decoded.get("spender_label") or _checksum_if_possible(str(spender))
         amount = params.get("param_1")
         is_unlimited = decoded.get("is_unlimited_approval", False)
         fields = [
@@ -2456,7 +2456,7 @@ _APPROVAL_FLAG_PARAM = {
 
 def _granting_access(decoded: Dict) -> str:
     """Say what spending rights a call grants. "None" only when it grants nothing."""
-    if decoded.get("category") == "unknown":
+    if decoded.get("category", "unknown") == "unknown":
         return "Unknown"
     if not decoded.get("is_approval"):
         return "None"
