@@ -42,19 +42,19 @@ REVERT = {"success": False, "revert_reason": "PancakeRouter: EXPIRED"}
 TOKEN = "0x" + "c" * 40
 
 
-def _results(scam_matches):
-    contract = {**CONTRACT, "scam_matches": scam_matches}
+def _results(scam_matches, market=0, behavioral=0, honeypot=0, renounced=None, liquidity=50000):
+    contract = {**CONTRACT, "ownership_renounced": renounced, "scam_matches": scam_matches}
     structural, flags = StructuralAnalyzer(None)._compute(contract, {})
     return [
         AnalyzerResult("structural", WEIGHTS["structural"], structural, flags=flags, data=contract),
         AnalyzerResult(
-            "market", WEIGHTS["market"], 0, data={"liquidity_usd": 50000, "pair_age_hours": 100}
+            "market", WEIGHTS["market"], market, data={"liquidity_usd": liquidity, "pair_age_hours": 100}
         ),
-        AnalyzerResult("behavioral", WEIGHTS["behavioral"], 0, data={"reputation_score": 80}),
+        AnalyzerResult("behavioral", WEIGHTS["behavioral"], behavioral, data={"reputation_score": 80}),
         AnalyzerResult(
             "honeypot",
             WEIGHTS["honeypot"],
-            0,
+            honeypot,
             data={
                 "is_honeypot": False,
                 "can_buy": True,
@@ -139,6 +139,31 @@ async def test_a_revert_still_blocks_a_scam_database_match(firewall, surface, ma
     response = await _call(api, surface)
     assert response["risk_score"] == 70
     assert response["classification"] == "BLOCK_RECOMMENDED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["firewall", "swap"])
+@pytest.mark.parametrize("matches", [[], [COMMUNITY]])
+async def test_a_community_report_does_not_mask_a_revert_on_a_risky_target(firewall, surface, matches):
+    api, services, _ = firewall
+    # The target scores 35 on its own: 20 market, 3 behavioral and 12 honeypot points.
+    services.registry.run_all.return_value = _results(matches, market=100, behavioral=18.75, honeypot=100)
+    response = await _call(api, surface)
+    assert response["risk_score"] == (40 if matches else 35)
+    assert response["classification"] == "BLOCK_RECOMMENDED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["firewall", "swap"])
+async def test_a_community_report_does_not_cause_a_revert_block_by_withholding_the_discount(firewall, surface):
+    api, services, _ = firewall
+    # 32 points on their own, less the 20-point discount for renounced ownership and deep liquidity: 12.
+    services.registry.run_all.return_value = _results(
+        [COMMUNITY], market=100, honeypot=100, renounced=True, liquidity=5_000_000
+    )
+    response = await _call(api, surface)
+    assert response["risk_score"] == 40
+    assert response["classification"] != "BLOCK_RECOMMENDED"
 
 
 @pytest.mark.asyncio

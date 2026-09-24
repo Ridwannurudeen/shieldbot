@@ -228,7 +228,8 @@ class RiskEngine:
             # A failed scam lookup or bytecode scan is not a clean one, so it earns no positive signal.
             contract_coverage = contract_data.get('coverage', {})
             checks_covered = contract_coverage.get('scam_database', True) and contract_coverage.get('bytecode', True)
-            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not contract_data.get('scam_matches') and checks_covered:
+            # A community report does not withhold the discount: its only effect is its floor below.
+            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not hard_matches and checks_covered:
                 composite = max(composite - 20, 0)
 
             if hard_matches:
@@ -239,7 +240,12 @@ class RiskEngine:
         # target type and never adds more.
         floor = 90 if any(
             isinstance(match, dict) and match.get('severity') == 'block' for match in scam_matches or []
-        ) else MEDIUM_MATCH_FLOOR if medium_matches(scam_matches) else 0
+        ) else 0
+        # The score without the community floor: the firewall's revert rule reads it, so a crowd
+        # signal can neither cause that escalation nor mask it.
+        score_before_community_floor = round(min(max(composite, floor, 0), 100), 1)
+        if medium_matches(scam_matches):
+            floor = max(floor, MEDIUM_MATCH_FLOOR)
         composite = max(composite, floor)
 
         rug_probability = round(min(max(composite, 0), 100), 1)
@@ -298,6 +304,7 @@ class RiskEngine:
             'coverage_reasons': coverage_reasons,
             'status': 'unknown' if incomplete else 'ok',
             'transaction_floor': floor or None,
+            'score_before_community_floor': score_before_community_floor,
         }
 
     def compute_from_results(self, results: List["AnalyzerResult"], is_token: Optional[bool] = True) -> dict:
@@ -375,11 +382,12 @@ class RiskEngine:
 
             # Positive signals — reduce score for renounced ownership with high liquidity.
             # A failed scam lookup or bytecode scan is not a clean one, so it earns no positive signal.
-            # The signal describes the token, so it never discounts the transaction's own share.
+            # The signal describes the token, so it never discounts the transaction's own share. A
+            # community report does not withhold it: its only effect is its floor below.
             liquidity_info = dex_data.get('liquidity_usd')
             contract_coverage = contract_data.get('coverage', {})
             checks_covered = contract_coverage.get('scam_database', True) and contract_coverage.get('bytecode', True)
-            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not contract_data.get('scam_matches') and checks_covered:
+            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not hard_matches and checks_covered:
                 composite = max(composite - 20, tx_share)
 
             if hard_matches:
@@ -400,7 +408,10 @@ class RiskEngine:
             isinstance(match, dict) and match.get('severity') == 'block' for match in contract_data.get('scam_matches') or []
         ):
             floor = max(floor, 90)
-        elif medium_matches(contract_data.get('scam_matches')):
+        # The score without the community floor: the firewall's revert rule reads it, so a crowd
+        # signal can neither cause that escalation nor mask it.
+        score_before_community_floor = round(min(max(composite, floor, 0), 100), 1)
+        if medium_matches(contract_data.get('scam_matches')):
             floor = max(floor, MEDIUM_MATCH_FLOOR)
         composite = max(composite, floor)
 
@@ -463,6 +474,7 @@ class RiskEngine:
             'coverage_reasons': coverage_reasons,
             'status': 'unknown' if incomplete else 'ok',
             'transaction_floor': floor or None,
+            'score_before_community_floor': score_before_community_floor,
         }
 
     def _covered_scores(self, results):

@@ -267,7 +267,7 @@ def test_covered_cache_keeps_safe(consumer_api):
 async def test_failed_transaction_simulation_is_incomplete(consumer_api, surface):
     api, services = consumer_api
     api.risk_engine.compute_from_results.return_value = {
-        'rug_probability': 0, 'risk_level': 'LOW', 'status': 'ok',
+        'rug_probability': 0, 'score_before_community_floor': 0, 'risk_level': 'LOW', 'status': 'ok',
         'coverage': {'honeypot': 1}, 'coverage_reasons': {},
     }
     api.tenderly_simulator.is_enabled = lambda: True

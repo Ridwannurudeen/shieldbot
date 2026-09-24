@@ -104,6 +104,18 @@ def test_community_report_adds_nothing_above_its_floor():
 
 
 @pytest.mark.parametrize("entrypoint, is_token", TARGETS)
+def test_the_score_before_the_community_floor_is_exposed(entrypoint, is_token):
+    reported = _risk(entrypoint, is_token, [COMMUNITY])
+    assert (reported["rug_probability"], reported["score_before_community_floor"]) == (40, 0)
+    risky = {**CONTRACT, "is_verified": False, "contract_age_days": 3}
+    unreported = _risk(entrypoint, is_token, [], contract=risky)
+    assert unreported["score_before_community_floor"] == unreported["rug_probability"]
+    # A block-severity match is not a crowd signal: its floor is in the score before the community floor.
+    confirmed = _risk(entrypoint, is_token, [ADMIN, COMMUNITY])
+    assert confirmed["score_before_community_floor"] == confirmed["rug_probability"] >= 90
+
+
+@pytest.mark.parametrize("entrypoint, is_token", TARGETS)
 def test_admin_confirmed_entry_blocks_alone(entrypoint, is_token):
     risk = _risk(entrypoint, is_token, [ADMIN])
     assert risk["rug_probability"] >= 90
