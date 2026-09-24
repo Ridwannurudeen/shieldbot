@@ -391,6 +391,22 @@ async def test_a_client_session_over_the_sse_stream(app, container, sessions):
     assert sessions[0].count == 0
 
 
+def test_a_session_whose_stream_is_not_read_is_dropped(client, sessions):
+    manager = sessions[0]
+    session_id, queue = manager.create("k1")
+    for _ in range(server.MAX_QUEUED_MESSAGES):
+        queue.put_nowait({"jsonrpc": "2.0", "id": 0, "result": {}})
+    url = f"/mcp/messages?session_id={session_id}"
+
+    response = client.post(url, json=PING, headers=AUTH_HEADERS)
+
+    assert response.status_code == 200
+    assert response.json() == {"jsonrpc": "2.0", "id": 1, "result": {}}
+    assert queue.qsize() == server.MAX_QUEUED_MESSAGES
+    assert manager.get(session_id) is None
+    assert client.post(url, json=PING, headers=AUTH_HEADERS).status_code == 404
+
+
 def test_a_session_quiet_for_ten_minutes_is_not_idle():
     manager = server.SSEConnectionManager()
     session_id, _ = manager.create("k1")

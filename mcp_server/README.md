@@ -19,6 +19,7 @@ How the transport behaves (`server.py`):
 - A message with no `id` is dropped silently even when it is invalid (wrong `jsonrpc`, missing or unknown method), because a notification can never be answered.
 - A JSON array (a batch) or any other non-object body is answered with an Invalid Request error (-32600).
 - The stream sends a `: heartbeat` comment every 30 seconds while idle and closes after 30 minutes without a message; a client that disconnects is noticed sooner. Heartbeats do not count as activity. One API key can hold at most 5 open streams (the 6th gets HTTP 429) and the server at most 50 (the 51st gets 503); idle sessions are dropped before either limit is checked.
+- A session holds at most 100 messages its stream has not yet delivered. A client that stops reading its stream loses the session when the 101st arrives: that POST still gets its response in the body, and later POSTs to the session get 404.
 
 ## Protocol
 

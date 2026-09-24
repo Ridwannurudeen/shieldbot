@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 MAX_SSE_CONNECTIONS = 50
 MAX_SSE_CONNECTIONS_PER_KEY = 5
+MAX_QUEUED_MESSAGES = 100  # per session; a client that stops reading its stream is dropped
 HEARTBEAT_INTERVAL = 30  # seconds
 IDLE_TIMEOUT = 1800  # 30 minutes; a dead peer is caught sooner by is_disconnected()
 
@@ -79,7 +80,7 @@ class SSEConnectionManager:
     def create(self, key_id: str) -> tuple:
         """Create a new SSE session owned by an API key. Returns (session_id, queue)."""
         session_id = str(uuid.uuid4())
-        queue: asyncio.Queue = asyncio.Queue()
+        queue: asyncio.Queue = asyncio.Queue(maxsize=MAX_QUEUED_MESSAGES)
         self._connections[session_id] = {
             "queue": queue,
             "key_id": key_id,
@@ -317,6 +318,14 @@ def create_mcp_router(container) -> APIRouter:
             raise HTTPException(status_code=403, detail="Invalid API key")
         return key_info
 
+    def _push(session_id: str, session: Dict, message: Dict) -> None:
+        """Queue a message for the session's stream, dropping a session whose client stopped reading it."""
+        try:
+            session["queue"].put_nowait(message)
+        except asyncio.QueueFull:
+            logger.warning("SSE session %s dropped: its stream is not being read", session_id)
+            sse_manager.remove(session_id)
+
     @router.get("/sse")
     async def sse_stream(request: Request):
         """SSE event stream endpoint. Sends server->client events."""
@@ -401,7 +410,7 @@ def create_mcp_router(container) -> APIRouter:
             error_resp = _jsonrpc_error(None, PARSE_ERROR, "Invalid JSON")
             # If session exists, push error to SSE stream too
             if session:
-                await session["queue"].put(error_resp)
+                _push(session_id, session, error_resp)
             return error_resp
 
         request_id = body.get("id") if isinstance(body, dict) else None
@@ -426,7 +435,7 @@ def create_mcp_router(container) -> APIRouter:
 
         # If a session is active, push the response to the SSE stream
         if session:
-            await session["queue"].put(response)
+            _push(session_id, session, response)
 
         # Also return inline for clients that prefer request/response
         return response
