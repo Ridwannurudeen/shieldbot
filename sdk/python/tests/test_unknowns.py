@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from shieldbot.client import ShieldBot
+from shieldbot.client import ShieldBot, ShieldBotError
 from shieldbot.models import Verdict
 
 
@@ -22,8 +22,8 @@ async def test_incomplete_verdict_preserves_metadata_in_cache(reason, fraction):
     response = MagicMock(status_code=200)
     response.json.return_value = payload
     with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response) as post:
-        fresh = await client.check({"to": "0xtarget"})
-        cached = await client.check({"to": "0xtarget"})
+        fresh = await client.check({"to": "0xtarget", "chain_id": 56})
+        cached = await client.check({"to": "0xtarget", "chain_id": 56})
     assert post.await_count == 1
     for verdict in [fresh, cached]:
         assert not verdict.allowed
@@ -44,7 +44,7 @@ async def test_incomplete_verdict_preserves_metadata_in_cache(reason, fraction):
 async def test_unavailable_decision_is_explicit(fail_mode, decision):
     client = ShieldBot(api_key="test", agent_id="agent:1", fail_mode=fail_mode)
     with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, side_effect=httpx.ConnectError("offline")):
-        result = await client.check({"to": "0xtarget"})
+        result = await client.check({"to": "0xtarget", "chain_id": 56})
     assert result.verdict == decision
     assert result.allowed is (decision == "ALLOW")
     assert result.analysis_unavailable is True
@@ -82,7 +82,21 @@ async def test_server_cannot_mark_incomplete_allow_as_unavailable_analysis():
         "analysis_unavailable": True,
     }
     with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response):
-        result = await client.check({"to": "0xtarget"})
+        result = await client.check({"to": "0xtarget", "chain_id": 56})
     assert not result.allowed
     assert result.analysis_unavailable is False
+    await client.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_mode", ["open", "cached", "closed"])
+async def test_missing_chain_is_rejected_before_any_request(fail_mode):
+    client = ShieldBot(api_key="test", agent_id="agent:1", fail_mode=fail_mode)
+    response = MagicMock(status_code=200)
+    response.json.return_value = {"verdict": "ALLOW", "score": 0, "status": "ok", "coverage": {"honeypot": 1}}
+    with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response) as post:
+        with pytest.raises(ShieldBotError) as error:
+            await client.check({"from": "0xagent", "to": "0xtarget"})
+    assert error.value.status_code == 400
+    post.assert_not_awaited()
     await client.close()

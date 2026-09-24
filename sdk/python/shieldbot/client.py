@@ -75,7 +75,7 @@ class ShieldBot:
         return json.dumps([
             from_addr.lower() if isinstance(from_addr, str) else from_addr,
             to_addr.lower() if isinstance(to_addr, str) else to_addr,
-            canonical_integer(transaction.get("chain_id", 56)),
+            canonical_integer(transaction["chain_id"]),
             data.lower() if isinstance(data, str) else data,
             canonical_integer(transaction.get("value", "0")),
         ], separators=(",", ":"), ensure_ascii=False)
@@ -111,11 +111,16 @@ class ShieldBot:
         """Check a transaction against the agent firewall.
 
         Args:
-            transaction: Dict with keys: from, to, data (optional), value (optional), chain_id.
+            transaction: Dict with keys: from, to, data (optional), value (optional), chain_id (required).
 
         Returns:
             Verdict with allowed/blocked status, score, flags, and evidence.
+
+        Raises:
+            ShieldBotError: 400 before any request when chain_id is missing; the SDK never assumes a chain.
         """
+        if transaction.get("chain_id") is None:
+            raise ShieldBotError(400, "chain_id is required")
         to_addr = transaction.get("to", "")
         cache_key = self._cache_key(transaction)
 
