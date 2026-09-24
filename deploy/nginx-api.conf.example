@@ -1,0 +1,65 @@
+# REFERENCE ONLY, NOT A DROP-IN. The live API vhost is /etc/nginx/sites-available/shieldbot on the server and is
+# not in this repository. Compare it with this file; do not copy this over it. Certificate paths, listeners and
+# anything else the server already relies on stay as they are there. See deploy/README.md.
+#
+# How the API finds the client address, and why X-Forwarded-For is the header that matters:
+# - uvicorn (0.40.0, pinned in requirements.txt) runs with proxy headers on and trusts X-Forwarded-For from
+#   127.0.0.1 by default (FORWARDED_ALLOW_IPS). It replaces the connecting address with the rightmost entry that
+#   is not a trusted proxy, before api.py sees the request.
+# - api.py and rpc/router.py (_get_client_ip) then apply the same rule with TRUSTED_PROXY_IPS: the forwarded
+#   chain is honoured only when the connection comes from a listed proxy, and the nearest address that is not a
+#   listed proxy is the client. The code default is empty (core/config.py), which honours no forwarded chain;
+#   .env.example sets 127.0.0.1. Either way api.py starts from the address uvicorn already took from
+#   X-Forwarded-For.
+# - $proxy_add_x_forwarded_for appends the address nginx sees to whatever the client sent. A client can put fake
+#   addresses in front, but the last entry is always nginx's own view, and that is the one both layers use.
+#   Never forward $http_x_forwarded_for on its own: that lets clients choose their address.
+# - Without X-Forwarded-For every request arrives from 127.0.0.1 and all users share one rate-limit bucket.
+#   Neither uvicorn nor the app reads X-Real-IP; it is set here only for logs and tools that expect it.
+# - If a CDN or another proxy is ever put in front of nginx, its addresses must be added to TRUSTED_PROXY_IPS and
+#   FORWARDED_ALLOW_IPS (and to set_real_ip_from in nginx), or every user will share that proxy's address.
+#
+# Headers this vhost must NOT add: the app sets CORS (CORSMiddleware in api.py) and its security headers,
+# including Strict-Transport-Security (security_headers_middleware). Adding them in nginx sends each twice, and a
+# second Access-Control-Allow-Origin makes browsers reject the response.
+
+server {
+    listen 80;
+    server_name api.shieldbotsecurity.online;
+
+    # Webroot certificate renewal, as used on the shared VPS; certbot must not rewrite the listeners.
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name api.shieldbotsecurity.online;
+
+    # Use the certificate paths from the live vhost.
+    ssl_certificate /etc/letsencrypt/live/api.shieldbotsecurity.online/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.shieldbotsecurity.online/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # uvicorn listens on this machine, so a slow connect means it is down: fail fast with a 502.
+        proxy_connect_timeout 5s;
+        # A scan stops its analyzers at 25 s (RUN_ALL_DEADLINE_SECONDS in core/registry.py), the extension gives
+        # up at 30 s and the AI chat waits up to 30 s for the model (agent/advisor.py). 60 s leaves headroom
+        # without holding dead connections open for long.
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}

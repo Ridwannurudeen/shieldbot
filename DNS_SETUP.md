@@ -77,12 +77,13 @@ Once DNS is configured:
 3. Should return: `<CURRENT_VPS_PUBLIC_IPV4>`
 4. Proceed to Caddy installation
 
-Both setup scripts require `VPS_IP` in the environment and stop if it is unset or empty.
-Replace the placeholder before running either script on the intended server:
+For nginx, no script writes the configuration: compare the server's vhost with the reference in
+`deploy/nginx-api.conf.example` (see `deploy/README.md`).
+
+The Caddy setup script requires `VPS_IP` in the environment and stops if it is unset or empty.
+Replace the placeholder before running it on the intended server:
 
 ```bash
 export VPS_IP='<CURRENT_VPS_PUBLIC_IPV4>'
-# Choose the setup script for your server:
-bash deploy/setup-bare-domain.sh  # nginx
-# or: bash deploy/setup-https.sh  # Caddy
+bash deploy/setup-https.sh  # Caddy
 ```
