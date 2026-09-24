@@ -1970,6 +1970,23 @@ async def test_legacy_scanner_keeps_a_third_party_flag_for_an_old_verified_token
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("verified", [True, False])
+async def test_legacy_scanner_reports_a_honeypot_in_one_cannot_sell_line(verified):
+    from scanner.token_scanner import TokenScanner
+
+    scanner = TokenScanner(honeypot_web3("honeypot.is"))
+    result = {"checks": {}, "risks": [], "is_verified": verified, "contract_age_days": 400}
+    await scanner._check_honeypot(TOKEN, result, chain_id=56)
+    scanner._resolve_conflicts(result)
+    assert result["checks"]["can_sell"] is False
+    assert [risk for risk in result["risks"] if "cannot sell" in risk.lower()] == [
+        "HONEYPOT DETECTED - Cannot sell after buying"
+    ]
+    assert result["risks"][1] == "Reason: sell reverted: the token refused the transfer to the pool"
+    assert sum("possible false positive" in risk for risk in result["risks"]) == (1 if verified else 0)
+
+
+@pytest.mark.asyncio
 async def test_legacy_scanner_flags_a_simulation_honeypot_that_is_new_or_unverified():
     from scanner.token_scanner import TokenScanner
 

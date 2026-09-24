@@ -221,10 +221,9 @@ class TokenScanner:
 
     def _resolve_conflicts(self, result: Dict):
         """Resolve conflicts between different checks"""
+        # _check_honeypot, the only place is_honeypot turns True, already reported it in the risks.
         if result.get('is_honeypot'):
             result['checks']['can_sell'] = False
-            if "Token transfers may be restricted" not in str(result.get('risks', [])):
-                result['risks'].append("Honeypot detected - You cannot sell this token after buying")
 
     async def _check_ownership(self, address: str, result: Dict, chain_id: int = 56):
         """Check contract ownership status"""
