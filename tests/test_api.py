@@ -321,6 +321,10 @@ class TestSignatureFirewall:
         api_module.web3_client.to_checksum_address.side_effect = lambda addr: addr
 
         typed_data = {
+            "types": {"Permit": [{"name": name, "type": kind} for name, kind in (
+                ("owner", "address"), ("spender", "address"), ("value", "uint256"), ("nonce", "uint256"),
+                ("deadline", "uint256"),
+            )]},
             "primaryType": "Permit",
             "domain": {"name": "RiskyToken", "verifyingContract": "0x" + "c" * 40},
             "message": {
@@ -534,6 +538,42 @@ async def test_strict_blocks_a_provider_unknown_cold_and_warm(cached_firewall_ap
     assert cold["policy_mode"] == warm["policy_mode"] == "STRICT"
     assert warm.get("cached") is not True
     assert services.registry.run_all.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_an_undeclared_allowed_key_is_not_a_revoke_on_the_main_firewall_path(cached_firewall_api):
+    from analyzers.signature import SignaturePermitAnalyzer
+    from core.registry import AnalyzerRegistry
+
+    api, services = cached_firewall_api
+    spender = "0x" + "5" * 40
+    counterparty = SimpleNamespace(
+        allowlisted_name=lambda address, chain_id: None,
+        fetch=AsyncMock(return_value={
+            "address": spender, "allowlisted": None, "is_contract": True, "delegated": False,
+            "is_verified": False, "age_days": 90, "labels": [], "label_source": "",
+            "coverage": {"code": True, "verification": True, "age": True, "labels": True},
+            "reason": None, "observed_at": 0,
+        }),
+    )
+    registry = AnalyzerRegistry()
+    registry.register(SignaturePermitAnalyzer(counterparty))
+    services.registry = registry
+    permit_type = [{"name": name, "type": kind} for name, kind in (
+        ("owner", "address"), ("spender", "address"), ("value", "uint256"), ("nonce", "uint256"), ("deadline", "uint256"),
+    )]
+    # The wallet signs the declared EIP-2612 type, value MAX; allowed is not in the digest.
+    typed = {"types": {"Permit": permit_type}, "primaryType": "Permit", "domain": {"name": "Token"}, "message": {
+        "owner": "0x" + "b" * 40, "spender": spender, "value": str(2**256 - 1), "nonce": "0", "deadline": "1",
+        "allowed": False,
+    }}
+    response = await api.firewall(
+        api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40, typedData=typed, signMethod="eth_signTypedData_v4"),
+        SimpleNamespace(headers={}),
+    )
+    assert response["classification"] == "BLOCK_RECOMMENDED"
+    assert response["risk_score"] == 85
+    counterparty.fetch.assert_awaited_once_with(spender, 56)
 
 
 CLEAN_SCAN = {"risk_score": 0, "status": "ok", "coverage": {"is_verified": 1}, "is_verified": True}

@@ -74,23 +74,27 @@ class SignaturePermitAnalyzer(Analyzer):
                 typed_data = json.loads(typed_data)
 
             primary_type = typed_data.get('primaryType', '')
-            domain = typed_data.get('domain', {})
             message = typed_data.get('message', {})
+            if not isinstance(message, dict):
+                raise ValueError('typed data message is not an object')
+            # Only the members the declared types name enter the digest a wallet signs, so the
+            # permit checks read the message through them.
+            types = typed_data.get('types')
 
             # EIP-2612 Permit
             if primary_type == 'Permit':
                 sig_type = 'eip2612_permit'
-                permit = self._check_permit(message, domain)
+                permit = self._check_permit(message, types)
 
             # Permit2 AllowanceTransfer — PermitSingle or PermitBatch
             elif primary_type in ('PermitSingle', 'PermitBatch'):
                 sig_type = 'permit2'
-                permit = self._check_permit2(message, primary_type)
+                permit = self._check_permit2(message, primary_type, types)
 
             # Permit2 SignatureTransfer
             elif primary_type in SIGNATURE_TRANSFER_TYPES:
                 sig_type = 'permit2_transfer'
-                permit = self._check_permit2_transfer(message, primary_type)
+                permit = self._check_permit2_transfer(message, primary_type, types)
 
             # Seaport OrderComponents
             elif primary_type == 'OrderComponents':
@@ -167,19 +171,24 @@ class SignaturePermitAnalyzer(Analyzer):
         }
         return points, flags, floor, data
 
-    def _check_permit(self, message: Dict, domain: Dict) -> tuple:
+    def _check_permit(self, message: Dict, types) -> tuple:
         """Check EIP-2612 Permit for dangerous patterns: (score, flags, spender, unlimited, granted)."""
         score = 0.0
         flags = []
 
-        spender = (message.get('spender') or '').lower()
-        deadline = _parse_uint(message.get('deadline', 0))
-        # A DAI-style permit has no amount: only allowed false revokes, and anything else grants the
-        # spender everything. An EIP-2612 permit revokes only for a value that reads as 0; a value
-        # that cannot be read (a float, a negative, an object) is judged as the largest grant.
+        members = _members(types, 'Permit') or {}
+        spender = _declared_spender(message, members)
+        deadline = _parse_uint(message.get('deadline', 0)) if 'deadline' in members else 0
+        # The declared type picks the rule. value without allowed is EIP-2612: a value that reads as
+        # 0 revokes, and one that cannot be read (a float, a negative, an object) is judged as the
+        # largest grant. allowed without value is DAI's: only allowed false revokes. Any other type,
+        # or one with no spender member, cannot be read and is judged as the largest grant.
         unreadable = False
-        if 'allowed' in message:
-            granted = unlimited = message['allowed'] is not False
+        mismatch = 'spender' not in members or ('value' in members) == ('allowed' in members)
+        if mismatch:
+            granted = unlimited = True
+        elif 'allowed' in members:
+            granted = unlimited = message.get('allowed') is not False
         else:
             value = _parse_uint_or_none(message.get('value'))
             unreadable = value is None
@@ -187,7 +196,10 @@ class SignaturePermitAnalyzer(Analyzer):
             unlimited = unreadable or value >= UNLIMITED_THRESHOLD
 
         # Unlimited value
-        if unreadable:
+        if mismatch:
+            score += 30
+            flags.append('Permit: type does not match EIP-2612 or DAI; treated as unlimited')
+        elif unreadable:
             score += 30
             flags.append('Permit: amount could not be read; treated as unlimited')
         elif unlimited:
@@ -203,18 +215,23 @@ class SignaturePermitAnalyzer(Analyzer):
 
         return score, flags, spender, unlimited, granted
 
-    def _check_permit2(self, message: Dict, primary_type: str) -> tuple:
+    def _check_permit2(self, message: Dict, primary_type: str, types) -> tuple:
         """Check a Permit2 AllowanceTransfer: (score, flags, spender, unlimited, granted)."""
         score = 0.0
         flags = []
-        spender = (message.get('spender') or '').lower()
+        members = _members(types, primary_type) or {}
+        spender = _declared_spender(message, members)
+        detail_members = _referenced_members(types, members, 'details', primary_type == 'PermitBatch')
+        if detail_members is None or 'amount' not in detail_members or 'spender' not in members:
+            flags.append('Permit2: type does not match Permit2; treated as unlimited')
+            return 25.0, flags, spender, True, True
 
         # An amount that reads as 0 revokes the spender's allowance; one that cannot be read is
         # judged as the largest grant.
         if primary_type == 'PermitSingle':
             details = message.get('details', {})
             amount = _parse_uint_or_none(details.get('amount'))
-            expiration = _parse_uint(details.get('expiration', 0))
+            expiration = _parse_uint(details.get('expiration', 0)) if 'expiration' in detail_members else 0
             granted = amount != 0
             unlimited = amount is None or amount >= UNLIMITED_THRESHOLD
 
@@ -249,17 +266,22 @@ class SignaturePermitAnalyzer(Analyzer):
 
         return score, flags, spender, unlimited, granted
 
-    def _check_permit2_transfer(self, message: Dict, primary_type: str) -> tuple:
+    def _check_permit2_transfer(self, message: Dict, primary_type: str, types) -> tuple:
         """Check a Permit2 SignatureTransfer: (score, flags, spender, unlimited, granted)."""
         score = 0.0
         flags = []
-        spender = (message.get('spender') or '').lower()
+        members = _members(types, primary_type) or {}
+        spender = _declared_spender(message, members)
+        token_members = _referenced_members(types, members, 'permitted', 'Batch' in primary_type)
+        if token_members is None or 'amount' not in token_members or 'spender' not in members:
+            flags.append('Permit2 transfer: type does not match Permit2; treated as unlimited')
+            return 20.0, flags, spender, True, True
         permitted = message.get('permitted', [])
         if 'Batch' not in primary_type:
             permitted = [permitted]
         amounts = [_parse_uint_or_none(item.get('amount')) for item in permitted]
         unlimited = any(amount is None or amount >= UNLIMITED_THRESHOLD for amount in amounts)
-        deadline = _parse_uint(message.get('deadline', 0))
+        deadline = _parse_uint(message.get('deadline', 0)) if 'deadline' in members else 0
 
         if None in amounts:
             score += 20
@@ -306,6 +328,34 @@ class SignaturePermitAnalyzer(Analyzer):
             flags.append('Seaport: suspiciously low consideration for NFT')
 
         return score, flags
+
+
+def _members(types, type_name: str) -> Optional[Dict[str, str]]:
+    """The members an EIP-712 struct type declares, {name: type}, or None when `types` does not
+    declare the type properly. A message key the type does not declare is not in the signed digest."""
+    fields = types.get(type_name) if isinstance(types, dict) else None
+    if not isinstance(fields, list) or not fields:
+        return None
+    members = {}
+    for field in fields:
+        if not (isinstance(field, dict) and isinstance(field.get('name'), str) and isinstance(field.get('type'), str)):
+            return None
+        members[field['name']] = field['type']
+    return members
+
+
+def _referenced_members(types, members: Dict[str, str], name: str, array: bool) -> Optional[Dict[str, str]]:
+    """The members of the struct type that member `name` declares, a list of them when `array`;
+    None when the member, its type or its shape is not what the permit's type declares."""
+    declared = members.get(name, '')
+    if declared.endswith('[]') != array:
+        return None
+    return _members(types, declared.removesuffix('[]'))
+
+
+def _declared_spender(message: Dict, members: Dict[str, str]) -> str:
+    spender = message.get('spender') if 'spender' in members else None
+    return spender.lower() if isinstance(spender, str) else ''
 
 
 def _parse_uint_or_none(value) -> Optional[int]:

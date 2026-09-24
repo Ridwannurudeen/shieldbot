@@ -379,6 +379,22 @@ async def test_missing_swap_analyzers_does_not_fall_back_to_router(consumer_api)
     assert_unknown_response(response)
 
 
+def _struct(*members):
+    return [{'name': name, 'type': kind} for name, kind in members]
+
+
+# The types a wallet signs with: only declared members enter the EIP-712 digest.
+EIP2612_TYPES = {'Permit': _struct(
+    ('owner', 'address'), ('spender', 'address'), ('value', 'uint256'), ('nonce', 'uint256'), ('deadline', 'uint256'),
+)}
+TRANSFER_TYPES = {
+    'TokenPermissions': _struct(('token', 'address'), ('amount', 'uint256')),
+    'PermitTransferFrom': _struct(
+        ('permitted', 'TokenPermissions'), ('spender', 'address'), ('nonce', 'uint256'), ('deadline', 'uint256'),
+    ),
+}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('sign_method,typed_data', [
     ('eth_signTypedData_v4', {'primaryType': 'UnknownType', 'message': {}}),
@@ -412,7 +428,7 @@ async def test_supported_signature_preserves_covered_safe(consumer_api):
     api, _ = consumer_api
     req = api.FirewallRequest(to='', sender='0x' + 'b' * 40,
         signMethod='eth_signTypedData_v4', typedData={
-            'primaryType': 'Permit', 'message': {
+            'types': EIP2612_TYPES, 'primaryType': 'Permit', 'message': {
                 'spender': '0x000000000022d473030f116ddee9f6b43ac78ba3', 'value': '1', 'deadline': '1',
             },
         })
@@ -436,7 +452,7 @@ def _spender_service(**facts):
 
 def _transfer_request(api):
     return api.FirewallRequest(to='', sender='0x' + 'b' * 40, signMethod='eth_signTypedData_v4', typedData={
-        'primaryType': 'PermitTransferFrom', 'message': {
+        'types': TRANSFER_TYPES, 'primaryType': 'PermitTransferFrom', 'message': {
             'permitted': {'token': '0x' + 'c' * 40, 'amount': '1000'},
             'spender': '0x' + '5' * 40, 'nonce': '0', 'deadline': '1',
         },
@@ -494,7 +510,25 @@ async def test_a_float_permit_amount_is_not_a_safe_revoke(consumer_api):
     api, services = consumer_api
     services.counterparty_service = _spender_service(is_verified=False, age_days=90)
     req = api.FirewallRequest(to='', sender='0x' + 'b' * 40, signMethod='eth_signTypedData_v4', typedData={
-        'primaryType': 'Permit', 'message': {'spender': '0x' + '5' * 40, 'value': 1e30, 'deadline': '1'},
+        'types': EIP2612_TYPES, 'primaryType': 'Permit',
+        'message': {'spender': '0x' + '5' * 40, 'value': 1e30, 'deadline': '1'},
+    })
+    response = await api._build_signature_only_response(req)
+    assert response['classification'] == 'BLOCK_RECOMMENDED'
+    assert response['risk_score'] == 85
+    services.counterparty_service.fetch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_an_undeclared_allowed_key_is_not_a_revoke_on_the_signature_only_path(consumer_api):
+    # The wallet signs the declared EIP-2612 type, value MAX; allowed is not in the digest.
+    api, services = consumer_api
+    services.counterparty_service = _spender_service(is_verified=False, age_days=90)
+    req = api.FirewallRequest(to='', sender='0x' + 'b' * 40, signMethod='eth_signTypedData_v4', typedData={
+        'types': EIP2612_TYPES, 'primaryType': 'Permit', 'message': {
+            'owner': '0x' + 'b' * 40, 'spender': '0x' + '5' * 40, 'value': str(2 ** 256 - 1), 'nonce': '0',
+            'deadline': '1', 'allowed': False,
+        },
     })
     response = await api._build_signature_only_response(req)
     assert response['classification'] == 'BLOCK_RECOMMENDED'

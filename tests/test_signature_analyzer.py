@@ -14,6 +14,44 @@ SPENDER = "0x" + "5" * 40
 MAX = str((1 << 256) - 1)
 
 
+def _struct(*members):
+    return [{"name": name, "type": kind} for name, kind in members]
+
+
+# The types a wallet signs with: only members declared here enter the EIP-712 digest.
+EIP2612_TYPES = {"Permit": _struct(
+    ("owner", "address"), ("spender", "address"), ("value", "uint256"), ("nonce", "uint256"), ("deadline", "uint256"),
+)}
+DAI_TYPES = {"Permit": _struct(
+    ("holder", "address"), ("spender", "address"), ("nonce", "uint256"), ("expiry", "uint256"), ("allowed", "bool"),
+)}
+PERMIT2_TYPES = {
+    "PermitDetails": _struct(("token", "address"), ("amount", "uint160"), ("expiration", "uint48"), ("nonce", "uint48")),
+    "PermitSingle": _struct(("details", "PermitDetails"), ("spender", "address"), ("sigDeadline", "uint256")),
+    "PermitBatch": _struct(("details", "PermitDetails[]"), ("spender", "address"), ("sigDeadline", "uint256")),
+    "TokenPermissions": _struct(("token", "address"), ("amount", "uint256")),
+    "PermitTransferFrom": _struct(
+        ("permitted", "TokenPermissions"), ("spender", "address"), ("nonce", "uint256"), ("deadline", "uint256"),
+    ),
+    "PermitBatchTransferFrom": _struct(
+        ("permitted", "TokenPermissions[]"), ("spender", "address"), ("nonce", "uint256"), ("deadline", "uint256"),
+    ),
+    "PermitWitnessTransferFrom": _struct(
+        ("permitted", "TokenPermissions"), ("spender", "address"), ("nonce", "uint256"), ("deadline", "uint256"),
+        ("witness", "Witness"),
+    ),
+    "PermitBatchWitnessTransferFrom": _struct(
+        ("permitted", "TokenPermissions[]"), ("spender", "address"), ("nonce", "uint256"), ("deadline", "uint256"),
+        ("witness", "Witness"),
+    ),
+    "Witness": _struct(("orderHash", "bytes32")),
+}
+
+
+def _permit(message, types=EIP2612_TYPES):
+    return {"types": types, "primaryType": "Permit", "domain": {"name": "Token"}, "message": message}
+
+
 def _facts(**overrides):
     return {
         "address": SPENDER, "allowlisted": None, "is_contract": True, "delegated": False,
@@ -33,8 +71,8 @@ def _service(facts=None):
     return SimpleNamespace(allowlisted_name=allowlisted_name, fetch=AsyncMock(return_value=facts))
 
 
-def _typed(primary_type, message):
-    return {"primaryType": primary_type, "domain": {"name": "Permit2"}, "message": message}
+def _typed(primary_type, message, types=PERMIT2_TYPES):
+    return {"types": types, "primaryType": primary_type, "domain": {"name": "Permit2"}, "message": message}
 
 
 async def _analyze(analyzer, typed_data, chain_id=1):
@@ -53,6 +91,7 @@ def analyzer():
 async def test_max_uint_permit_to_unknown(analyzer):
     """MAX_UINT permit to unknown spender should score high."""
     typed_data = {
+        "types": EIP2612_TYPES,
         "primaryType": "Permit",
         "domain": {"name": "TestToken", "version": "1"},
         "message": {
@@ -80,6 +119,7 @@ async def test_permit2_to_uniswap_safe():
     service = _service()
     analyzer = SignaturePermitAnalyzer(service)
     typed_data = {
+        "types": PERMIT2_TYPES,
         "primaryType": "PermitSingle",
         "domain": {"name": "Permit2"},
         "message": {
@@ -206,18 +246,14 @@ async def test_signature_transfer_to_a_verified_protocol_is_caution(primary_type
 @pytest.mark.asyncio
 @pytest.mark.parametrize("value, expected", [(MAX, 40), ("1000", 10)])
 async def test_eip2612_permit_to_a_verified_protocol(value, expected):
-    typed = {"primaryType": "Permit", "domain": {"name": "Token"}, "message": {
-        "spender": SPENDER, "value": value, "deadline": str(int(time.time()) + 1800),
-    }}
+    typed = _permit({"spender": SPENDER, "value": value, "deadline": str(int(time.time()) + 1800)})
     result = await _analyze(SignaturePermitAnalyzer(_service(_facts())), typed)
     assert result.score == expected
 
 
 @pytest.mark.asyncio
 async def test_unlimited_eip2612_permit_to_an_unverified_contract_is_blocked():
-    typed = {"primaryType": "Permit", "domain": {"name": "Token"}, "message": {
-        "spender": SPENDER, "value": MAX, "deadline": str(int(time.time()) + 1800),
-    }}
+    typed = _permit({"spender": SPENDER, "value": MAX, "deadline": str(int(time.time()) + 1800)})
     result = await _analyze(SignaturePermitAnalyzer(_service(_facts(is_verified=False))), typed)
     assert result.score == 85
     assert result.data["floor"] == 85
@@ -227,9 +263,9 @@ async def test_unlimited_eip2612_permit_to_an_unverified_contract_is_blocked():
 @pytest.mark.asyncio
 async def test_dai_permit_with_allowed_true_is_unlimited():
     # DAI's permit has no amount: allowed true grants the spender everything.
-    typed = {'primaryType': 'Permit', 'domain': {'name': 'Dai Stablecoin'}, 'message': {
+    typed = _permit({
         'holder': '0x' + 'a' * 40, 'spender': SPENDER, 'nonce': '0', 'expiry': '0', 'allowed': True,
-    }}
+    }, DAI_TYPES)
     result = await _analyze(SignaturePermitAnalyzer(_service(_facts(is_verified=False, age_days=90))), typed)
     assert result.data['floor'] == 85
     assert 'Permit: unlimited token approval' in result.flags
@@ -244,7 +280,8 @@ async def test_dai_permit_with_allowed_true_is_unlimited():
 ], ids=['dai-allowed-false', 'eip2612-zero-value', 'eip2612-hex-zero', 'eip2612-int-zero'])
 async def test_a_revoke_permit_judges_no_spender(message):
     service = _service(_facts(is_contract=False, is_verified=None, age_days=None))
-    result = await _analyze(SignaturePermitAnalyzer(service), {'primaryType': 'Permit', 'domain': {}, 'message': message})
+    types = DAI_TYPES if 'allowed' in message else EIP2612_TYPES
+    result = await _analyze(SignaturePermitAnalyzer(service), _permit(message, types))
     service.fetch.assert_not_awaited()
     assert result.score == 0
     assert 'floor' not in result.data
@@ -270,7 +307,8 @@ UNREADABLE = 'Permit: amount could not be read; treated as unlimited'
 async def test_an_unreadable_permit_amount_is_the_largest_grant(field, value, flag):
     message = {'owner': '0x' + 'a' * 40, 'spender': SPENDER, 'nonce': '0', 'deadline': '1', field: value}
     service = _service(_facts(is_verified=False, age_days=90))
-    result = await _analyze(SignaturePermitAnalyzer(service), {'primaryType': 'Permit', 'domain': {}, 'message': message})
+    types = DAI_TYPES if field == 'allowed' else EIP2612_TYPES
+    result = await _analyze(SignaturePermitAnalyzer(service), _permit(message, types))
     service.fetch.assert_awaited_once()
     # Unverified spender, unlimited grant: 85, not the SAFE of a revoke.
     assert result.data['floor'] == 85
@@ -330,6 +368,80 @@ async def test_a_permit2_allowance_grant_judges_the_spender(typed, floor, flag):
     assert result.data['floor'] == floor
     if flag:
         assert flag in result.flags
+
+
+MISMATCH = 'Permit: type does not match EIP-2612 or DAI; treated as unlimited'
+BOTH_TYPES = {"Permit": EIP2612_TYPES["Permit"] + _struct(("allowed", "bool"))}
+NEITHER_TYPES = {"Permit": _struct(("owner", "address"), ("spender", "address"), ("nonce", "uint256"))}
+
+
+@pytest.mark.asyncio
+async def test_an_undeclared_allowed_key_does_not_turn_an_eip2612_permit_into_a_revoke():
+    # The wallet signs the declared EIP-2612 type: value MAX. The extra allowed key is not in the
+    # digest, so it must not select DAI's rule and read as a revoke.
+    message = {'owner': '0x' + 'a' * 40, 'spender': SPENDER, 'value': MAX, 'nonce': '0', 'deadline': '1',
+               'allowed': False}
+    service = _service(_facts(is_verified=False, age_days=90))
+    result = await _analyze(SignaturePermitAnalyzer(service), _permit(message))
+    service.fetch.assert_awaited_once_with(SPENDER, 1)
+    assert result.data['floor'] == 85
+    assert 'Permit: unlimited token approval' in result.flags
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('types', [BOTH_TYPES, NEITHER_TYPES], ids=['both-declared', 'neither-declared'])
+async def test_a_permit_type_that_is_neither_eip2612_nor_dai_is_the_largest_grant(types):
+    message = {'owner': '0x' + 'a' * 40, 'spender': SPENDER, 'value': '0', 'nonce': '0', 'allowed': False}
+    service = _service(_facts(is_verified=False, age_days=90))
+    result = await _analyze(SignaturePermitAnalyzer(service), _permit(message, types))
+    service.fetch.assert_awaited_once_with(SPENDER, 1)
+    assert result.data['floor'] == 85
+    assert MISMATCH in result.flags
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('types', [None, {}, {"Permit": "not a list"}, {"Permit": [{"name": "spender"}]}],
+                         ids=['missing', 'empty', 'malformed', 'member-without-type'])
+async def test_a_permit_without_declared_types_is_the_largest_grant_with_no_readable_spender(types):
+    message = {'owner': '0x' + 'a' * 40, 'spender': SPENDER, 'value': '0', 'nonce': '0', 'deadline': '1'}
+    typed = _permit(message, types)
+    if types is None:
+        del typed['types']
+    service = _service(_facts(is_verified=False, age_days=90))
+    result = await _analyze(SignaturePermitAnalyzer(service), typed)
+    # No declared spender member: the signed spender cannot be read, so there is none to look up.
+    service.fetch.assert_not_awaited()
+    assert MISMATCH in result.flags
+    assert 'Permit: missing spender address' in result.flags
+    assert result.score >= 40
+
+
+def _without(types, struct, member):
+    return {**types, struct: [field for field in types[struct] if field["name"] != member]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('typed, flag', [
+    (_typed('PermitSingle', {
+        'details': {'token': '0x' + 'c' * 40, 'amount': '0', 'expiration': '0', 'nonce': '0'},
+        'spender': SPENDER, 'sigDeadline': '0',
+    }, _without(PERMIT2_TYPES, 'PermitDetails', 'amount')), 'Permit2: type does not match Permit2; treated as unlimited'),
+    (_typed('PermitBatch', {
+        'details': [{'token': '0x' + 'c' * 40, 'amount': '0', 'expiration': '0', 'nonce': '0'}],
+        'spender': SPENDER, 'sigDeadline': '0',
+    }, {**PERMIT2_TYPES, 'PermitBatch': PERMIT2_TYPES['PermitSingle']}),
+     'Permit2: type does not match Permit2; treated as unlimited'),
+    (_typed('PermitTransferFrom', {
+        'permitted': {'token': '0x' + 'c' * 40, 'amount': '1000'}, 'spender': SPENDER, 'nonce': '0', 'deadline': '1',
+    }, _without(PERMIT2_TYPES, 'TokenPermissions', 'amount')),
+     'Permit2 transfer: type does not match Permit2; treated as unlimited'),
+], ids=['single-without-amount', 'batch-declared-single', 'transfer-without-amount'])
+async def test_a_permit2_type_without_its_declared_amount_is_the_largest_grant(typed, flag):
+    service = _service(_facts(is_verified=False, age_days=90))
+    result = await _analyze(SignaturePermitAnalyzer(service), typed)
+    service.fetch.assert_awaited_once_with(SPENDER, 1)
+    assert result.data['floor'] == 85
+    assert flag in result.flags
 
 
 @pytest.mark.asyncio
