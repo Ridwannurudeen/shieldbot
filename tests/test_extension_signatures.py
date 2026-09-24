@@ -577,7 +577,7 @@ async function blockOverlay(kind) {
   return byId('shieldai-proceed');
 }
 const press = (button, how) => how === 'pointer'
-  ? button.dispatch('pointerdown', {isTrusted: true})
+  ? button.dispatch('pointerdown', {isTrusted: true, button: 0, isPrimary: true})
   : button.dispatch('keydown', {key: how, isTrusted: true});
 const release = (button, how) => how === 'pointer'
   ? button.dispatch('pointerup', {isTrusted: true})
@@ -981,4 +981,38 @@ def test_strict_mode_removes_sign_anyway_on_a_32_byte_hash():
   assert(!html.includes('id="shieldai-proceed"'), html);
   assert(html.includes('Strict mode is on'), html);
 """
+    )
+
+
+@pytest.mark.parametrize(
+    "event",
+    ["right-button", "middle-button", "second-touch", "repeated-key"],
+)
+def test_only_a_primary_press_starts_a_hold(event):
+    run_node(
+        CONTENT_HARNESS
+        + HOLD
+        + r"""
+(async () => {
+  const event = JSON.parse(process.argv[1]);
+  const proceed = await blockOverlay('transaction');
+  if (event === 'repeated-key') {
+    // A key already held when the button took focus repeats; only a new press starts a hold.
+    proceed.dispatch('keydown', {key: 'Enter', repeat: true, isTrusted: true});
+  } else {
+    proceed.dispatch('pointerdown', {isTrusted: true, ...{
+      'right-button': {button: 2, isPrimary: true},
+      'middle-button': {button: 1, isPrimary: true},
+      'second-touch': {button: 0, isPrimary: false},
+    }[event]});
+  }
+  assert(!proceed.classList.contains('shieldai-holding'), 'the press started a hold');
+  for (let i = 0; i < 3; i++) await flush();
+  assert.deepEqual(verdicts(), []);
+  // A primary press still works.
+  press(proceed, 'pointer');
+  await heldVerdict();
+  await assertVerdicts([['request', 'proceed']]);
+""",
+        event,
     )

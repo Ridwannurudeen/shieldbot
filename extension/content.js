@@ -339,8 +339,9 @@
   }
 
   // Proceed on a Block Recommended overlay counts only when held down for
-  // HOLD_TO_CONFIRM_MS, with the pointer or with Enter or Space, by real
-  // input; a click alone does nothing and letting go early cancels. The
+  // HOLD_TO_CONFIRM_MS, with the primary pointer's main button or with a new
+  // press of Enter or Space, by real input; a click alone does nothing, and
+  // letting go early cancels. The
   // click's rules apply when the hold starts, and the dialog must stay visible
   // until it ends.
   function onHold(root, requestId, afterProceed) {
@@ -373,7 +374,9 @@
       }, HOLD_TO_CONFIRM_MS);
     };
     const holdKey = (event) => event.key === "Enter" || event.key === " ";
-    button.addEventListener("pointerdown", start);
+    button.addEventListener("pointerdown", (event) => {
+      if (event.button === 0 && event.isPrimary) start(event);
+    });
     button.addEventListener("keydown", (event) => {
       if (holdKey(event) && !event.repeat) start(event);
     });
