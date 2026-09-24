@@ -73,10 +73,14 @@
         return "transaction";
       case "eth_signTypedData_v4":
       case "eth_signTypedData_v3":
+      case "eth_signTypedData":
+      case "eth_signTypedData_v1":
         return "typed";
       case "personal_sign":
       case "eth_sign":
         return "sign";
+      case "wallet_sendCalls":
+        return "calls";
       default:
         return null;
     }
@@ -96,6 +100,11 @@
   const keepInheritedRequest = bindTo(WeakMap.prototype.set, inheritedRequests);
 
   const CHAIN_ID_PATTERN = /^(0x[0-9a-f]+|[0-9]+)$/i;
+  const ADDRESS_PATTERN = /^0x[0-9a-f]{40}$/i;
+
+  function isPlainObject(value) {
+    return typeof value === "object" && value !== null && !isArray(value);
+  }
 
   // A property the object holds itself. A plain read of one it lacks falls
   // through to prototypes, which the page can fill.
@@ -107,7 +116,7 @@
   // lacks reads as undefined, for the wallet as for the analysis, instead of
   // as whatever the page put on Object.prototype.
   function ownFieldsOnly(value) {
-    if (typeof value === "object" && value !== null && !isArray(value)) setPrototypeOf(value, null);
+    if (isPlainObject(value)) setPrototypeOf(value, null);
     return value;
   }
 
@@ -213,16 +222,32 @@
           }
         };
         const txParams = ownFieldsOnly(ownValue(request.params, 0));
-        if (!txParams) {
-          forward();
-          return;
+        const calls = kind === "calls" ? ownValue(txParams, "calls") : undefined;
+
+        // A transaction must be an object, and a wallet_sendCalls batch an
+        // object whose calls are a non-empty list of objects. Anything else
+        // cannot be analysed: the user is told so and decides.
+        let structured = true;
+        if (kind === "transaction") structured = isPlainObject(txParams);
+        if (kind === "calls") {
+          structured = isPlainObject(txParams) && isArray(calls) && calls.length > 0;
+          for (let index = 0; structured && index < calls.length; index++) {
+            structured = isPlainObject(ownFieldsOnly(ownValue(calls, index)));
+          }
         }
 
         let interceptData;
 
-        if (kind === "typed") {
-          // EIP-712: params[0] is address, params[1] is typed data JSON
-          const rawTypedData = ownFieldsOnly(ownValue(request.params, 1));
+        if (!structured) {
+          interceptData = { __proto__: null, unknownStructure: true };
+        } else if (kind === "typed") {
+          // eth_signTypedData_v3 and _v4 take [address, data]. The older
+          // eth_signTypedData and _v1 take [data, address] in MetaMask and
+          // [address, data] in some other wallets, so the data is taken to be
+          // the parameter that is not the address.
+          const second = ownValue(request.params, 1);
+          const dataFirst = !(typeof txParams === "string" && execRegExp(ADDRESS_PATTERN, txParams) !== null);
+          const rawTypedData = ownFieldsOnly(dataFirst ? txParams : second);
           let parsedTypedData = null;
           try {
             parsedTypedData =
@@ -234,7 +259,7 @@
           }
           interceptData = {
             __proto__: null,
-            from: txParams,
+            from: dataFirst ? second : txParams,
             to: "",
             value: "0x0",
             data: "0x",
@@ -253,23 +278,45 @@
             data: isPersonal ? txParams : (ownValue(request.params, 1) || "0x"),
             signMethod: method,
           };
-        } else {
-          // eth_sendTransaction / eth_signTransaction — standard tx object
-          interceptData = txParams;
         }
 
-        const isTransaction = kind === "transaction";
+        // Transactions and batches are analysed on the wallet's chain. A
+        // batch is shown one call at a time, and each call is its own
+        // decision; the batch goes to the wallet only once all are proceeded.
+        const isTransaction = structured && (kind === "transaction" || kind === "calls");
+        const count = structured && kind === "calls" ? calls.length : 1;
+        const payloadAt = (index, chainId) => {
+          if (!isTransaction) return interceptData;
+          if (kind === "transaction") return { __proto__: null, ...txParams, chainId };
+          const call = ownValue(calls, index);
+          return {
+            __proto__: null,
+            to: call.to,
+            from: txParams.from,
+            value: call.value,
+            data: call.data,
+            chainId,
+            callIndex: index + 1,
+            callCount: count,
+          };
+        };
         const revision = chainRevision;
 
         // Ask content script to analyze via background
         const analyze = (chainId) => {
-          requestAnalysis(method, isTransaction ? { __proto__: null, ...interceptData, chainId } : interceptData, (action) => {
-            if (isTransaction && chainId === null) {
-              reject(new NativeError("Transaction blocked by ShieldAI: wallet chain is unknown or mismatched"));
-              return;
-            }
-            if (action !== "proceed") {
-              reject(new NativeError("Transaction blocked by ShieldAI Firewall"));
+          const decide = (index) => {
+            if (index < count) {
+              requestAnalysis(method, payloadAt(index, chainId), (action) => {
+                if (isTransaction && chainId === null) {
+                  reject(new NativeError("Transaction blocked by ShieldAI: wallet chain is unknown or mismatched"));
+                  return;
+                }
+                if (action !== "proceed") {
+                  reject(new NativeError("Transaction blocked by ShieldAI Firewall"));
+                  return;
+                }
+                decide(index + 1);
+              });
               return;
             }
             if (!isTransaction) {
@@ -286,7 +333,8 @@
               // proceed — forward to original wallet
               forward();
             });
-          });
+          };
+          decide(0);
         };
 
         if (!isTransaction) {
@@ -294,7 +342,7 @@
           return;
         }
         resolveChainId((chainId) => {
-          if (interceptData.chainId !== undefined && parseChainId(interceptData.chainId) !== chainId) {
+          if (txParams.chainId !== undefined && parseChainId(txParams.chainId) !== chainId) {
             analyze(null);
             return;
           }
@@ -414,6 +462,7 @@
     addWindowListener("message", handleMessage);
 
     const txPayload = {
+      __proto__: null,
       to: txParams.to || "",
       from: txParams.from || "",
       value: txParams.value || "0x0",
@@ -424,6 +473,11 @@
     // Forward typed data and sign method for EIP-712 / signature analysis
     if (txParams.typedData) txPayload.typedData = txParams.typedData;
     if (txParams.signMethod) txPayload.signMethod = txParams.signMethod;
+    if (txParams.callCount) {
+      txPayload.callIndex = txParams.callIndex;
+      txPayload.callCount = txParams.callCount;
+    }
+    if (txParams.unknownStructure) txPayload.unknownStructure = true;
 
     withProof(requestId, "intercept", (proof) => {
       postMessage(

@@ -555,6 +555,61 @@ def test_unknown_result_has_its_own_badge_and_reason(state):
     )
 
 
+@pytest.mark.parametrize("policy", ["STRICT", "BALANCED"])
+def test_a_request_that_cannot_be_read_is_shown_as_unknown_structure(policy):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  storage.policyMode = JSON.parse(process.argv[1]);
+  await intercept('request', {unknownStructure: true}, 'wallet_sendCalls');
+  assert.equal(analyses.length, 0, 'a request that could not be read was sent for analysis');
+  const html = overlay().innerHTML;
+  assert(html.includes('UNKNOWN STRUCTURE'), html);
+  assert(overlay().querySelector('.shieldai-badge').className.includes('shieldai-badge-high'));
+  assert.equal(html.includes('id="shieldai-proceed"'), storage.policyMode !== 'STRICT');
+  assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_SHOWN').length, 1);
+  assert.deepEqual(verdicts(), []);
+  userClick(byId(storage.policyMode === 'STRICT' ? 'shieldai-block' : 'shieldai-proceed'));
+  await flush();
+  await assertVerdicts([['request', storage.policyMode === 'STRICT' ? 'block' : 'proceed']]);
+""",
+        policy,
+    )
+
+
+@pytest.mark.parametrize("outcome", ["analysis", "error"])
+def test_a_batch_call_overlay_says_which_call_it_is(outcome):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => JSON.parse(process.argv[1]) === 'error' ? {error: 'timeout'} : {result: scan({})};
+  await intercept('request', {to: '0x' + 'a'.repeat(40), chainId: 56, callIndex: 2, callCount: 3}, 'wallet_sendCalls');
+  assert.equal(analyses.length, 1);
+  assert(overlay().innerHTML.includes('Call 2 of 3 in a batch'), overlay().innerHTML);
+  await intercept('single');
+  assert(!overlay().innerHTML.includes('in a batch'));
+""",
+        outcome,
+    )
+
+
+@pytest.mark.parametrize("method", ["eth_signTypedData", "eth_signTypedData_v1"])
+def test_legacy_typed_data_is_shown_as_a_signature(method):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const method = JSON.parse(process.argv[1]);
+  await intercept('request', {signMethod: method, typedData: {primaryType: 'Permit', domain: {}, message: {spender: '0x' + 'e'.repeat(40)}}}, method);
+  assert.equal(analyses.length, 0, 'a signature was sent to the transaction firewall');
+  assert(overlay().innerHTML.includes('APPROVAL SIGNATURE'), overlay().innerHTML);
+""",
+        method,
+    )
+
+
 def test_phishing_banner_is_shielded_and_needs_a_real_click():
     run_node(
         CONTENT_HARNESS.replace("let phishing = false,", "let phishing = true,")
@@ -1067,6 +1122,140 @@ def test_values_the_request_does_not_hold_are_ignored():
     for (const prototype of prototypes) delete prototype.to;
   }
 """
+    )
+
+
+@pytest.mark.parametrize("method", ["eth_signTypedData", "eth_signTypedData_v1"])
+@pytest.mark.parametrize("order", ["data-first", "address-first"])
+def test_legacy_typed_data_requests_are_checked(method, order):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const [method, order] = JSON.parse(process.argv[1]);
+  const address = '0x' + 'b'.repeat(40);
+  // MetaMask takes [data, address] for the legacy methods; some wallets take [address, data].
+  const legacy = [{type: 'string', name: 'Message', value: 'Hi'}];
+  const typed = JSON.stringify({primaryType: 'Permit', domain: {}, message: {spender: '0x' + 'e'.repeat(40)}});
+  const params = order === 'data-first' ? [legacy, address] : [address, typed];
+  const pending = provider.request({method, params});
+  pending.catch(() => {});
+  await flush();
+  assert.equal(sent.length, 0, 'the signature request reached the wallet before any decision');
+  const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+  assert.equal(intercept.tx.signMethod, method);
+  if (order === 'data-first') assert.deepEqual(plain(intercept.tx.typedData), legacy);
+  else assert.equal(intercept.tx.typedData.primaryType, 'Permit');
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId: intercept.requestId, action: 'proceed',
+    proof: await proof(intercept.requestId, 'proceed')});
+  assert.equal(await pending, 'sent');
+  assert.deepEqual(plain(sent[0].params), plain(params));
+""",
+        [method, order],
+    )
+
+
+@pytest.mark.parametrize("decision", ["proceed-all", "block-first", "block-second", "wrong-chain"])
+def test_each_call_of_a_batch_is_decided_before_the_batch_is_sent(decision):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const decision = JSON.parse(process.argv[1]);
+  const from = '0x' + 'f'.repeat(40), first = '0x' + 'a'.repeat(40), second = '0x' + 'c'.repeat(40);
+  const calls = [{to: first, data: '0x095ea7b3', value: '0x0'}, {to: second, data: '0xa9059cbb'}];
+  const batch = {version: '2.0.0', from, chainId: decision === 'wrong-chain' ? '0x1' : '0x38', atomicRequired: true, calls};
+  const pending = provider.request({method: 'wallet_sendCalls', params: [batch]});
+  pending.catch(() => {});
+  const intercepts = () => posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT');
+  for (const [index, call] of calls.entries()) {
+    await flush();
+    assert.equal(sent.length, 0, 'the batch reached the wallet before every call was decided');
+    assert.equal(intercepts().length, index + 1);
+    const {requestId, method, tx} = intercepts().at(-1);
+    assert.equal(method, 'wallet_sendCalls');
+    assert.deepEqual(plain(tx), {to: call.to, from, value: call.value || '0x0', data: call.data,
+      chainId: decision === 'wrong-chain' ? null : 56, callIndex: index + 1, callCount: 2});
+    const action = decision === 'block-first' && index === 0 || decision === 'block-second' && index === 1 ? 'block' : 'proceed';
+    deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action, proof: await proof(requestId, action)});
+    if (action === 'block' || decision === 'wrong-chain') break;
+  }
+  if (decision === 'proceed-all') {
+    assert.equal(await pending, 'sent');
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].method, 'wallet_sendCalls');
+    assert.deepEqual(plain(sent[0].params[0].calls), calls);
+  } else {
+    await assert.rejects(pending, decision === 'wrong-chain' ? /chain/ : /blocked/);
+    await flush();
+    assert.equal(sent.length, 0);
+    assert.equal(intercepts().length, decision === 'block-second' ? 2 : 1, 'a call was shown after the batch was rejected');
+  }
+""",
+        decision,
+    )
+
+
+@pytest.mark.parametrize(
+    "method,params",
+    [
+        ("wallet_sendCalls", []),
+        ("wallet_sendCalls", ["0xdeadbeef"]),
+        ("wallet_sendCalls", [{"calls": []}]),
+        ("wallet_sendCalls", [{"calls": "0xdeadbeef"}]),
+        ("wallet_sendCalls", [{"calls": [{"to": "0x" + "a" * 40}, 1]}]),
+        ("eth_sendTransaction", []),
+        ("eth_sendTransaction", ["0xdeadbeef"]),
+    ],
+    ids=["no-batch", "batch-not-object", "no-calls", "calls-not-list", "call-not-object",
+         "no-transaction", "transaction-not-object"],
+)
+def test_a_request_that_cannot_be_read_is_never_forwarded_unseen(method, params):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const [method, params] = JSON.parse(process.argv[1]);
+  const intercepts = () => posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT');
+  for (const action of ['block', 'proceed']) {
+    const pending = provider.request({method, params});
+    pending.catch(() => {});
+    await flush();
+    assert.equal(sent.length, 0, 'the request reached the wallet before any decision');
+    const {requestId, tx} = intercepts().at(-1);
+    assert.equal(tx.unknownStructure, true);
+    deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action, proof: await proof(requestId, action)});
+    if (action === 'block') {
+      await assert.rejects(pending, /blocked/);
+      assert.equal(sent.length, 0);
+    } else {
+      assert.equal(await pending, 'sent');
+      assert.deepEqual(plain(sent), [{method, params}]);
+    }
+  }
+""",
+        [method, params],
+    )
+
+
+@pytest.mark.parametrize("method", ["personal_sign", "eth_signTypedData_v4"])
+def test_a_signature_request_without_params_is_still_shown_first(method):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const method = JSON.parse(process.argv[1]);
+  const pending = provider.request({method, params: []});
+  pending.catch(() => {});
+  await flush();
+  assert.equal(sent.length, 0, 'the request reached the wallet before any decision');
+  const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+  assert.equal(intercept.tx.signMethod, method);
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId: intercept.requestId, action: 'block',
+    proof: await proof(intercept.requestId, 'block')});
+  await assert.rejects(pending, /blocked/);
+""",
+        method,
     )
 
 

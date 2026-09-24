@@ -137,9 +137,16 @@
     const SIGN_ONLY_METHODS = new Set([
       "personal_sign", "eth_sign",
       "eth_signTypedData_v4", "eth_signTypedData_v3",
+      "eth_signTypedData", "eth_signTypedData_v1",
     ]);
     if (tx.signMethod && SIGN_ONLY_METHODS.has(tx.signMethod)) {
       showSignatureOverlay(requestId, tx);
+      return;
+    }
+    // inject.js could not read the request's structure, so there is nothing
+    // to analyse: the user is told so and decides.
+    if (tx.unknownStructure === true) {
+      showUnknownStructureOverlay(requestId, strict);
       return;
     }
 
@@ -162,10 +169,10 @@
       showTimedOutOverlay(requestId);
     } else if (response.error) {
       // API error — show warning and let user decide
-      showErrorOverlay(requestId, response.error, strict);
+      showErrorOverlay(requestId, response.error, strict, tx);
     } else {
       // Show analysis overlay
-      showAnalysisOverlay(requestId, response.result, strict);
+      showAnalysisOverlay(requestId, response.result, strict, tx);
     }
   });
 
@@ -291,6 +298,15 @@
   function unknownReason(result) {
     return Object.values(result.coverage_reasons || {}).filter(Boolean).join("; ") ||
       _t("unknownNoReason");
+  }
+
+  // For one call of a wallet_sendCalls batch, which call it is. inject.js
+  // shows the calls one after another and sends the batch only when the user
+  // continues on every one.
+  function batchNote(tx) {
+    if (!tx.callCount) return "";
+    const note = _t("overlayBatchCall", { index: tx.callIndex, count: tx.callCount });
+    return `<div class="shieldai-section shieldai-sig-note"><p>${escapeHtml(note)}</p></div>`;
   }
 
   async function showLoadingOverlay() {
@@ -424,7 +440,8 @@
     removeOverlay();
 
     const signMethod = tx.signMethod || "personal_sign";
-    const isTyped = signMethod === "eth_signTypedData_v4" || signMethod === "eth_signTypedData_v3";
+    const isTyped = ["eth_signTypedData_v4", "eth_signTypedData_v3", "eth_signTypedData", "eth_signTypedData_v1"]
+      .includes(signMethod);
     const isPersonal = signMethod === "personal_sign" || signMethod === "eth_sign";
 
     let bodyHtml = "";
@@ -521,7 +538,7 @@
     onDecision(root, "shieldai-proceed", requestId, "proceed");
   }
 
-  async function showAnalysisOverlay(requestId, result, strict) {
+  async function showAnalysisOverlay(requestId, result, strict, tx) {
     await _loadContentLang();
     removeOverlay();
 
@@ -596,6 +613,7 @@
         ${incomplete ? `
           <p class="shieldai-unknown-why">${_t("unknownWhy")} ${escapeHtml(unknownReason(result))}</p>
         ` : ""}
+        ${batchNote(tx)}
 
         ${result.partial ? `
           <div class="shieldai-section" style="background:#78350f;border-radius:6px;padding:8px 12px;margin-bottom:8px;">
@@ -726,7 +744,7 @@
 
   // Shown when no analysis came back (429, 400, timeout, unreachable API). In
   // Strict mode there is no Proceed: an unchecked transaction stays blocked.
-  async function showErrorOverlay(requestId, errorMsg, strict) {
+  async function showErrorOverlay(requestId, errorMsg, strict, tx) {
     await _loadContentLang();
     removeOverlay();
 
@@ -742,9 +760,51 @@
         <div class="shieldai-badge shieldai-badge-high">
           ${_t("overlayAnalysisUnavail")}
         </div>
+        ${batchNote(tx)}
         <div class="shieldai-section">
           <p>${_t("overlayCannotReach")}</p>
           <p class="shieldai-error">${escapeHtml(errorMsg)}</p>
+          <p>${strict ? _t("overlayStrictNoProceed") : _t("overlayProceedRisk")}</p>
+        </div>
+        <div class="shieldai-actions">
+          <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">
+            ${_t("overlayBtnBlock")}
+          </button>
+          ${strict ? "" : `
+          <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">
+            ${_t("overlayBtnProceed")}
+          </button>
+          `}
+        </div>
+      </div>
+    `;
+
+    const root = mountOverlay(overlay, requestId);
+    onDecision(root, "shieldai-block", requestId, "block");
+    if (!strict) {
+      onDecision(root, "shieldai-proceed", requestId, "proceed");
+    }
+  }
+
+  // Shown for a request inject.js could not read (a transaction that is not
+  // an object, or a wallet_sendCalls batch without a list of call objects),
+  // so nothing in it was checked. In Strict mode there is no Proceed.
+  async function showUnknownStructureOverlay(requestId, strict) {
+    await _loadContentLang();
+    removeOverlay();
+
+    const overlay = document.createElement("div");
+    overlay.id = "shieldai-overlay";
+    overlay.className = "shieldai-overlay";
+    overlay.innerHTML = `
+      <div class="shieldai-modal" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
+        <div class="shieldai-header">
+          <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
+          <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
+        </div>
+        <div class="shieldai-badge shieldai-badge-high">${_t("overlayUnknownStructure")}</div>
+        <div class="shieldai-section">
+          <p>${_t("overlayUnknownStructureNote")}</p>
           <p>${strict ? _t("overlayStrictNoProceed") : _t("overlayProceedRisk")}</p>
         </div>
         <div class="shieldai-actions">

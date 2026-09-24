@@ -513,7 +513,7 @@ load('background', 'function saveToHistory');
     context.renderDashStats([scan]);
     assert.equal(nodes.get('dash-stat-safe').textContent, complete ? '100%' : '0%');
   } else if (surface === 'content' || surface === 'content-explain') {
-    await context.showAnalysisOverlay('request', scan);
+    await context.showAnalysisOverlay('request', scan, false, {to: '0x' + 'a'.repeat(40), chainId: 56});
     html = appended.at(-1).innerHTML;
     assert.equal(html.includes('100/100'), complete);
     assert.equal(html.includes('SAFE'), complete);
