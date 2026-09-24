@@ -111,7 +111,12 @@ def stored_level(score, level) -> str:
 def describe(calibration=None) -> dict:
     """The vocabulary and band tables as GET /api/verdicts publishes them. The risk-level thresholds
     are the effective ones: stored_level raises a level to the band table's, so a calibrated threshold
-    above the table's never applies to a stored level."""
+    above the table's never applies to a stored level. first_verdict is the streamed firewall's
+    interim verdict (core/first_verdict.py): when it comes at the latest, and what it never is."""
+    # Imported here: core.registry loads the chain client, and core.policy imports this module.
+    from core.policy import PolicyMode
+    from core.registry import FIRST_VERDICT_SECONDS
+
     high, medium = level_thresholds(calibration)
     return {
         "classifications": list(CLASSIFICATIONS),
@@ -123,6 +128,12 @@ def describe(calibration=None) -> dict:
         "risk_level_thresholds": {HIGH: min(high, BLOCK_MIN), MEDIUM: min(medium, CAUTION_MIN)},
         "unknown": "A scan with incomplete coverage has status 'unknown' and is never classified SAFE.",
         "strict_block_score": STRICT_BLOCK_SCORE,
+        "first_verdict": {
+            "seconds": FIRST_VERDICT_SECONDS,
+            "status": "unknown",
+            "never": [SAFE],
+            "policy_modes": [PolicyMode.BALANCED.value],
+        },
         "agent_firewall": {
             "auto_allow_below": AGENT_ALLOW_BELOW,
             "auto_block_above": AGENT_BLOCK_ABOVE,

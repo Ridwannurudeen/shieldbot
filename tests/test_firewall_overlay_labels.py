@@ -16,6 +16,7 @@ from core.analyzer import AnalyzerResult
 from core.risk_engine import RiskEngine
 from utils.calldata_decoder import CalldataDecoder
 from utils.chain_info import CHAIN_INFO, get_native_symbol
+from utils.scam_db import ScamDatabase
 
 DECODER = CalldataDecoder()
 SENDER = "0x" + "b" * 40
@@ -82,6 +83,7 @@ def labels_api(monkeypatch, mock_web3_client):
     )
     monkeypatch.setattr(api, "container", services)
     monkeypatch.setattr(api, "web3_client", mock_web3_client)
+    monkeypatch.setattr(api, "scam_db", ScamDatabase())
     monkeypatch.setattr(
         api,
         "calldata_decoder",

@@ -47,6 +47,17 @@ export interface FirewallOptions extends ScanOptions {
   data?: string;
   /** Value in wei, as a decimal or 0x hex string. Sent as decimal wei; anything else throws INVALID_VALUE. */
   value?: string;
+  /**
+   * Asks for the streamed answer (Accept: text/event-stream) and is called with the interim verdict
+   * if the API sends one before the final. firewall() still resolves with the final verdict. Without
+   * it, firewall() makes the plain request.
+   */
+  onFirst?: (first: FirstVerdict) => void;
+  /**
+   * With onFirst: milliseconds to wait for the response and then for each next event before the
+   * request is aborted (TIMEOUT). It replaces `timeout` for a streamed request. Default: 30000.
+   */
+  finalTimeout?: number;
 }
 
 export interface RiskScore {
@@ -98,6 +109,23 @@ export interface FirewallResult extends ScanResult {
   analysis?: string;
   plain_english?: string;
   verdict: string;
+  /** True on the final verdict of a streamed request (onFirst); absent on a plain request. */
+  final?: boolean;
+}
+
+/**
+ * The interim verdict of a streamed firewall() call, sent while the analysis still runs. It is always
+ * Unknown and never SAFE: its score and classification come only from hard floors already known,
+ * such as a blacklisted target, so it can warn early but never clears a transaction.
+ */
+export interface FirstVerdict extends Omit<FirewallResult, 'status' | 'classification' | 'final'> {
+  status: 'unknown';
+  classification: Exclude<FirewallResult['classification'], 'SAFE'>;
+  final: false;
+  /** The analyzers still running when it was sent. */
+  pending_sources: string[];
+  /** Milliseconds from the start of the API's handler to this verdict. */
+  elapsed_ms: number;
 }
 
 export interface MempoolAlert {
@@ -252,8 +280,14 @@ class ShieldBotError extends Error {
 
 export { ShieldBotError };
 
+/** Carries an exception thrown by the caller's onFirst through _request's error mapping unchanged. */
+class ListenerError {
+  constructor(public error: unknown) {}
+}
+
 const DEFAULT_BASE_URL = 'https://api.shieldbotsecurity.online';
 const DEFAULT_TIMEOUT = 10_000;
+const DEFAULT_FINAL_TIMEOUT = 30_000;
 const MAX_WEI = 2n ** 256n - 1n;
 
 export class ShieldBot {
@@ -289,15 +323,26 @@ export class ShieldBot {
 
   /**
    * Run the full firewall analysis on a pending transaction.
+   *
+   * With `onFirst` the answer is streamed: `onFirst` gets the interim verdict (always Unknown,
+   * never SAFE) if the API sends one before the final, and the promise resolves with the final
+   * verdict, `final: true`. The API sends no interim verdict under a STRICT policy.
    */
   async firewall(toAddress: string, options: FirewallOptions): Promise<FirewallResult> {
     const chainId = this._requireChainId(options?.chainId, 'firewall');
-    return this._post<FirewallResult>('/api/firewall', {
+    const body = {
       to: toAddress,
       from: options.from || '',
       data: options.data || '0x',
       value: this._weiValue(options.value, 'firewall'),
       chainId,
+    };
+    if (!options.onFirst) {
+      return this._post<FirewallResult>('/api/firewall', body);
+    }
+    return this._request<FirewallResult>('POST', '/api/firewall', body, {
+      onFirst: options.onFirst,
+      timeout: options.finalTimeout ?? DEFAULT_FINAL_TIMEOUT,
     });
   }
 
@@ -592,17 +637,22 @@ export class ShieldBot {
     method: string,
     path: string,
     body?: Record<string, unknown>,
+    stream?: { onFirst: (first: FirstVerdict) => void; timeout: number },
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
+    if (stream) {
+      headers['Accept'] = 'text/event-stream';
+    }
     if (this.apiKey) {
       headers['X-API-Key'] = this.apiKey;
     }
 
+    const timeout = stream ? stream.timeout : this.timeout;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeout);
+    let timer = setTimeout(() => controller.abort(), timeout);
 
     try {
       const response = await fetch(url, {
@@ -626,8 +676,16 @@ export class ShieldBot {
         );
       }
 
+      // A STRICT policy, or a server that does not stream, answers a streamed request with plain JSON.
+      if (stream && (response.headers.get('content-type') || '').startsWith('text/event-stream')) {
+        return (await this._readStream(response, stream.onFirst, () => {
+          clearTimeout(timer);
+          timer = setTimeout(() => controller.abort(), timeout);
+        })) as T;
+      }
       return (await response.json()) as T;
     } catch (error) {
+      if (error instanceof ListenerError) throw error.error;
       if (error instanceof ShieldBotError) throw error;
       if ((error as Error).name === 'AbortError') {
         throw new ShieldBotError('Request timed out', 408, 'TIMEOUT');
@@ -639,6 +697,73 @@ export class ShieldBot {
       );
     } finally {
       clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Reads a streamed firewall response: `first` goes to onFirst, `final` resolves, and `error`
+   * throws a ShieldBotError with the API's status. onEvent runs on every event. Lines may end in
+   * LF, CRLF or CR, and an event's `data:` lines are joined with LF.
+   */
+  private async _readStream(
+    response: Response,
+    onFirst: (first: FirstVerdict) => void,
+    onEvent: () => void,
+  ): Promise<FirewallResult> {
+    const reader = response.body!.getReader();
+    try {
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let event = '';
+      let data: string[] = [];
+      for (;;) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        // A CR that ends the text so far may be half of a CRLF, so it waits for the next chunk.
+        if (done && buffer.endsWith('\r')) {
+          buffer += '\n';
+        }
+        const lines = buffer.split(/\r\n|\n|\r(?!$)/);
+        buffer = lines.pop() as string;
+        for (const line of lines) {
+          if (line.startsWith('event:')) {
+            event = line.slice(6).trim();
+          } else if (line.startsWith('data:')) {
+            data.push(line.slice(line.startsWith('data: ') ? 6 : 5));
+          } else if (line === '') {
+            // An empty line ends an event, dispatched if it has data; the next one starts afresh.
+            const name = event;
+            const text = data.join('\n');
+            const dispatch = data.length > 0;
+            event = '';
+            data = [];
+            if (!dispatch) {
+              continue;
+            }
+            onEvent();
+            const payload = JSON.parse(text);
+            if (name === 'first') {
+              try {
+                onFirst(payload as FirstVerdict);
+              } catch (error) {
+                throw new ListenerError(error);
+              }
+            } else if (name === 'final') {
+              return payload as FirewallResult;
+            } else if (name === 'error') {
+              throw new ShieldBotError(`ShieldBot API error: ${payload.detail || `HTTP ${payload.status}`}`, payload.status);
+            }
+          }
+        }
+        if (done) {
+          throw new Error('the stream ended without a final verdict');
+        }
+      }
+    } finally {
+      // Release the connection however reading ends: the final, an error event, onFirst throwing,
+      // data that is not JSON or an early end. On a stream that already failed (an abort), cancel()
+      // rejects with that same failure, which is then the reason reading stopped.
+      await reader.cancel();
     }
   }
 }

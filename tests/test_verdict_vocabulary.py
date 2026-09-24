@@ -14,6 +14,7 @@ import pytest
 
 from agent.policy_engine import AgentPolicyEngine
 from core import verdicts
+from core.registry import FIRST_VERDICT_SECONDS
 
 ROOT = Path(__file__).resolve().parents[1]
 # Tests restate bands on purpose; the SDKs are separate packages checked below; the rest is not Python
@@ -260,3 +261,10 @@ async def test_the_vocabulary_endpoint_publishes_the_module(monkeypatch):
         key: list(value) for key, value in verdicts.AGENT_DECISIONS_BY_CLASSIFICATION.items()
     }
     assert body["strict_block_score"] == verdicts.STRICT_BLOCK_SCORE
+    # The streamed firewall's interim verdict: Unknown, never SAFE, and never sent under STRICT.
+    assert body["first_verdict"] == {
+        "seconds": FIRST_VERDICT_SECONDS,
+        "status": "unknown",
+        "never": [verdicts.SAFE],
+        "policy_modes": ["BALANCED"],
+    }

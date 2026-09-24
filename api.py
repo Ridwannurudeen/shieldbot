@@ -15,10 +15,12 @@ import re
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from functools import partial
 from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, RedirectResponse
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from redis.exceptions import RedisError
 from typing import Optional, Dict, Any, List, Literal
@@ -38,7 +40,9 @@ from core.config import Settings
 from core.container import ServiceContainer
 from core.database import SCAN_EVIDENCE_RETENTION_DAYS, reporter_hash
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
+from core.first_verdict import IN_PROGRESS, FirstVerdictProgress, build_first_verdict
 from core.rate_limit import RateLimiter, connect as connect_rate_limit_redis
+from core.registry import FIRST_VERDICT_SECONDS
 from core.scan_evidence import (
     analyzer_outcomes, build_scan_evidence, oldest_simulation_block, render_evidence_page, transaction_evidence,
 )
@@ -72,7 +76,9 @@ def _fire_and_forget(coro, label: str = "background"):
             return
         exc = t.exception()
         if exc:
-            logger.error("Fire-and-forget task '%s' failed: %s", label, type(exc).__name__)
+            # An HTTPException names its status, so a refused request reads apart from a server error.
+            failure = f"{type(exc).__name__} {exc.status_code}" if isinstance(exc, HTTPException) else type(exc).__name__
+            logger.error("Fire-and-forget task '%s' failed: %s", label, failure)
     task.add_done_callback(_done_cb)
     return task
 
@@ -1330,18 +1336,133 @@ async def firewall(req: FirewallRequest, request: Request):
     Main firewall endpoint — intercepts a pending transaction,
     analyzes calldata + target contract, and returns a security verdict.
     Every verdict carries evidence_hash and evidence_url (see _with_evidence).
+
+    A request with Accept: text/event-stream gets server-sent events instead (_firewall_events):
+    `first`, an interim verdict that is always Unknown and never SAFE, then `final`, the plain
+    response with final: true, or `error`. STRICT sends no interim verdict, so a STRICT request (the
+    X-Policy-Mode header or the server's default) gets the plain JSON response whatever it accepts.
     """
+    if request.headers.get("accept", "").startswith("text/event-stream"):
+        started = time.monotonic()
+        policy_mode = _policy_mode(request)
+        if policy_mode != "STRICT":
+            # A bad request is refused before the stream's headers go out.
+            if not _is_signature_only_request(req) and not web3_client.is_valid_address(req.to):
+                raise HTTPException(status_code=400, detail="Invalid 'to' address")
+            return StreamingResponse(
+                _firewall_events(req, request, started, policy_mode),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+    return await _firewall_response(req, request)
+
+
+async def _firewall_response(
+    req: FirewallRequest, request: Request, progress: Optional[FirstVerdictProgress] = None,
+) -> Dict:
+    """The firewall's verdict with its stored evidence: the plain response, and the stream's final."""
     trail = {}
-    response = await _firewall_verdict(req, request, trail)
+    response = await _firewall_verdict(req, request, trail, progress)
     return await _with_evidence(
         response, "/api/firewall", req.chainId, caller=_checksum_if_possible(req.sender), **trail,
     )
 
 
-async def _firewall_verdict(req: FirewallRequest, request: Request, trail: Dict) -> Dict:
+def _policy_mode(request: Request) -> str:
+    """The effective policy mode: the X-Policy-Mode header, or the server's default."""
+    if container and container.policy_engine:
+        return container.policy_engine.apply(
+            [], {}, mode_override=request.headers.get("X-Policy-Mode"),
+        )['policy_mode']
+    return "BALANCED"
+
+
+def _sse(event: str, data: Dict) -> str:
+    """One server-sent event whose data is the JSON body the plain route would send for `data`."""
+    return f"event: {event}\ndata: {JSONResponse(jsonable_encoder(data)).body.decode('utf-8')}\n\n"
+
+
+def _first_transaction_fields(
+    decoded: Dict, value_bnb: float, chain_id: int, to_addr: str, whitelisted: Optional[str],
+) -> Dict:
+    """The fields of an interim verdict that describe the request, worded as the final response's
+    (a trusted router's as _analyze_router_swap words them)."""
+    return {
+        "decoded_action": _format_decoded_action(decoded, chain_id),
+        "calldata_details": _build_calldata_details(decoded),
+        "transaction_impact": {
+            "sending": _sending(decoded, value_bnb, chain_id, "Tokens (via router)" if whitelisted else "Tokens"),
+            "granting_access": _granting_access(decoded),
+            "recipient": f"{whitelisted} ({to_addr})" if whitelisted else to_addr,
+            "post_tx_state": IN_PROGRESS,
+        },
+        "chain_id": chain_id,
+        "network": _chain_id_to_name(chain_id),
+    }
+
+
+async def _firewall_events(req: FirewallRequest, request: Request, started: float, policy_mode: str):
+    """The streamed firewall's events. `first` comes as soon as a Block-level floor is known, else
+    FIRST_VERDICT_SECONDS after the handler started (`started`, a time.monotonic() reading), and only
+    while the scan is still running; a scan that finishes first, or a request with nothing decoded
+    yet (a signature request never has anything), sends only `final`.
+
+    The scan runs in its own task, and closing this generator (a client disconnect) never cancels
+    it: its side effects (the evidence document, the stored score, the threat graph, the sentinel,
+    the deployer index) still happen once, and only from the final verdict. A started stream always
+    ends in `final` or `error`. Logs one line per request with the timings.
+    """
+    progress = FirstVerdictProgress(
+        [analyzer.name for analyzer in container.registry.get_all()] if container and container.registry else [],
+        policy_mode,
+    )
+    scan = _fire_and_forget(_firewall_response(req, request, progress), label="firewall_stream_scan")
+    block_known = asyncio.ensure_future(progress.block_known.wait())
+    timings = {
+        "chain_id": req.chainId, "first_at_ms": None, "first_kind": "none", "pending_at_first": None,
+        "final_at_ms": None,
+    }
+    try:
+        await asyncio.wait(
+            (scan, block_known),
+            timeout=max(0.0, started + FIRST_VERDICT_SECONDS - time.monotonic()),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if not scan.done() and progress.describe:
+            elapsed_ms = round((time.monotonic() - started) * 1000)
+            first = build_first_verdict(progress, progress.describe(), elapsed_ms)
+            timings.update(
+                first_at_ms=elapsed_ms,
+                first_kind="block" if progress.block_known.is_set() else "unknown",
+                pending_at_first=first["pending_sources"],
+            )
+            yield _sse("first", first)
+        final = await asyncio.shield(scan)
+        timings["final_at_ms"] = round((time.monotonic() - started) * 1000)
+        yield _sse("final", {**final, "final": True})
+    except HTTPException as exc:
+        yield _sse("error", {"status": exc.status_code, "detail": exc.detail})
+    except Exception as e:
+        # The headers are sent, so a started stream ends in final or error: this is its 500. A
+        # disconnect (CancelledError, GeneratorExit) is not an Exception and goes straight to finally.
+        logger.error(
+            "Firewall stream error: %s\n%s", type(e).__name__, "".join(traceback.format_tb(e.__traceback__)),
+        )
+        yield _sse("error", {"status": 500, "detail": "Internal server error"})
+    finally:
+        block_known.cancel()
+        logger.info("Firewall stream %s", json.dumps(timings, sort_keys=True))
+
+
+async def _firewall_verdict(
+    req: FirewallRequest, request: Request, trail: Dict, progress: Optional[FirstVerdictProgress] = None,
+) -> Dict:
     """The firewall's verdict. Each path records in `trail` what its evidence document needs:
     target, target_token, transaction (transaction-specific verdicts only), analyzers,
-    observed_block and, for a verdict served from contract_scores, cached_scan_at."""
+    observed_block and, for a verdict served from contract_scores, cached_scan_at.
+
+    A streamed request passes `progress`, which hears the target's local blacklist match and each
+    analyzer's result as it returns. Nothing else changes: the verdict is the plain route's."""
     try:
         to_addr = req.to
         from_addr = req.sender
@@ -1366,6 +1487,29 @@ async def _firewall_verdict(req: FirewallRequest, request: Request, trail: Dict)
         # Resolve value
         value_wei = _parse_value(req.value)
         value_bnb = value_wei / 1e18
+
+        # The target's local blacklist entry. An admin entry (block severity) is authoritative, so a
+        # trusted router it lists is judged on the full path below, where its Block floor applies; a
+        # community entry, which any three reporters can make, never takes a swap off the router path.
+        # A delegation is judged on the full path too, whatever the target.
+        local_match = scam_db.local_match(to_addr, req.chainId)
+        router_answers = bool(whitelisted) and req.authorizationList is None and not (
+            local_match and local_match['severity'] == 'block'
+        )
+
+        # A streamed request hears each analyzer's result as it returns; a plain one calls run_all as before.
+        run_options = {}
+        if progress is not None:
+            # The router shortcut judges only the path tokens, so the entry of a target it answers for
+            # (a community one) never reaches the final and must not raise the first above it.
+            if not router_answers:
+                progress.add_local_match(local_match)
+            # Worded as the router's answer only when the router answers.
+            progress.describe = partial(
+                _first_transaction_fields, decoded, value_bnb, req.chainId, to_addr,
+                whitelisted if router_answers else None,
+            )
+            run_options = {"on_result": progress.add_result}
 
         # Enrich decoded calldata with token names and formatted amounts
         await _enrich_decoded(decoded, to_addr, chain_id=req.chainId)
@@ -1397,9 +1541,9 @@ async def _firewall_verdict(req: FirewallRequest, request: Request, trail: Dict)
                 typed_data=req.typedData,
             )
 
-        # 2. If target is a whitelisted router, analyze the swap path tokens instead of bypassing.
-        # A delegation is judged on the full path below, whatever the target.
-        if whitelisted and req.authorizationList is None:
+        # 2. If the target is a trusted router that answers for the swap (router_answers above), analyze
+        # the swap path tokens instead of bypassing.
+        if router_answers:
             router_response = await _analyze_router_swap(
                 req=req,
                 to_addr=to_addr,
@@ -1409,19 +1553,17 @@ async def _firewall_verdict(req: FirewallRequest, request: Request, trail: Dict)
                 value_bnb=value_bnb,
                 policy_override=request.headers.get("X-Policy-Mode"),
                 trail=trail,
+                progress=progress,
             )
             if router_response:
                 return router_response
 
-        # The effective policy mode: the X-Policy-Mode header, or the server's default.
-        policy_mode = "BALANCED"
-        if container and container.policy_engine:
-            policy_mode = container.policy_engine.apply(
-                [], {}, mode_override=request.headers.get("X-Policy-Mode"),
-            )['policy_mode']
+        policy_mode = _policy_mode(request)
 
-        # 2b. Check cache for recent result
-        if container and container.db and not tx_specific:
+        # 2b. Check cache for recent result. A row is up to five minutes old and keeps no scam matches,
+        # so a target with a local blacklist entry (admin or community: both set a floor) is scanned
+        # afresh: an entry added since the row was written must not be answered with the row.
+        if container and container.db and not tx_specific and local_match is None:
             cached = await container.db.get_contract_score(to_addr, req.chainId, max_age_seconds=300)
             if cached and cached.get('category_scores', {}).get('_scan_metadata', {}).get('coverage'):
                 # A full rescan costs provider calls, so only a caller with a valid API key can force one
@@ -1489,10 +1631,10 @@ async def _firewall_verdict(req: FirewallRequest, request: Request, trail: Dict)
                     value=req.value, data=req.data, chain_id=req.chainId,
                 )
                 analyzer_results, simulation_result = await asyncio.gather(
-                    container.registry.run_all(ctx), sim_task,
+                    container.registry.run_all(ctx, **run_options), sim_task,
                 )
             elif container and container.registry:
-                analyzer_results = await container.registry.run_all(ctx)
+                analyzer_results = await container.registry.run_all(ctx, **run_options)
                 simulation_result = None
             else:
                 # Fallback: no container (e.g. tests), use old 4-service gather
@@ -1743,9 +1885,11 @@ async def _firewall_verdict(req: FirewallRequest, request: Request, trail: Dict)
             "whitelisted_router": whitelisted,
         }
 
+        # The trusted-router discount applies only where the router shortcut would have answered: never
+        # to a delegation or to a router an admin has listed.
         response = _build_fallback_response(
-            decoded, contract_scan, whitelisted, req.chainId, transaction_specific=tx_specific,
-            policy_mode=policy_mode,
+            decoded, contract_scan, whitelisted if router_answers else None, req.chainId,
+            transaction_specific=tx_specific, policy_mode=policy_mode,
         )
         # The AI explains a known verdict and never sets it: of its reply only the prose is kept.
         if response["status"] == "ok" and ai_analyzer and ai_analyzer.is_available():
@@ -2266,7 +2410,10 @@ async def verdict_vocabulary():
     scores at which a stored risk level is HIGH and MEDIUM on this server: the calibrated thresholds,
     or the band table's where that is lower, since a stored level is raised to the band of its score.
     agent_firewall gives the agent firewall's default thresholds and the decisions each
-    classification can meet under them.
+    classification can meet under them. first_verdict describes the interim event of a streamed
+    POST /api/firewall (Accept: text/event-stream): sent at most `seconds` after the handler starts,
+    always status 'unknown', never a classification in `never`, and only under the listed policy
+    modes.
     """
     return verdicts.describe(container.calibration if container else None)
 
@@ -3475,11 +3622,13 @@ async def _analyze_router_swap(
     value_bnb: float,
     policy_override: Optional[str] = None,
     trail: Optional[Dict] = None,
+    progress: Optional[FirstVerdictProgress] = None,
 ) -> Optional[Dict]:
     """Analyze swap path tokens when interacting with a trusted router.
 
     When it returns a verdict from the tokens' analyzers, it records their outcomes, keyed
     "token:analyzer" like the response's coverage, and the observed block in `trail`.
+    A streamed request's `progress` hears each token's results, keyed token:analyzer as well.
     """
     if not container or not container.registry or not risk_engine:
         return _build_unverified_swap_response(
@@ -3545,7 +3694,11 @@ async def _analyze_router_swap(
             },
         )
 
-        analyzer_results = await container.registry.run_all(ctx)
+        run_options = {}
+        if progress is not None:
+            progress.expect(token_addr, [analyzer.name for analyzer in container.registry.get_all()])
+            run_options = {"on_result": partial(progress.add_result, token=token_addr)}
+        analyzer_results = await container.registry.run_all(ctx, **run_options)
         risk_output = risk_engine.compute_from_results(analyzer_results, is_token=True)
 
         # Apply policy mode (handles partial failures)

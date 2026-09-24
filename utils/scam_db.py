@@ -310,6 +310,11 @@ class ScamDatabase:
             return entry
         return None
 
+    def local_match(self, address: str, chain_id: int) -> Optional[dict]:
+        """The local blacklist's scam match for an address on a chain, or None: the part of
+        check_address that asks no provider, so a caller can read it before GoPlus answers."""
+        return self._blacklist_match(address.lower(), chain_id)
+
     def _blacklist_match(self, address: str, chain_id: int) -> Optional[dict]:
         """The local blacklist's scam match for an address on a chain, or None.
 

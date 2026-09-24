@@ -358,6 +358,7 @@ class TestSignatureFirewall:
 @pytest.fixture
 def routing_error_api(monkeypatch):
     import api
+    from utils.scam_db import ScamDatabase
     from utils.web3_client import Web3Client
 
     registry = Web3Client.__new__(Web3Client)
@@ -390,6 +391,7 @@ def routing_error_api(monkeypatch):
     monkeypatch.setattr(api, "tenderly_simulator", simulator)
     monkeypatch.setattr(api, "ai_analyzer", SimpleNamespace(is_available=lambda: False))
     monkeypatch.setattr(api, "risk_engine", MagicMock())
+    monkeypatch.setattr(api, "scam_db", ScamDatabase())
     monkeypatch.setattr(api, "_token_cache", {})
     return api, services, scanner, token_scanner
 

@@ -12,6 +12,7 @@ from analyzers.behavioral import BehavioralAnalyzer
 from core.analyzer import AnalysisContext, AnalyzerResult
 from core.risk_engine import RiskEngine
 from services.ethos_service import EthosService
+from utils.scam_db import ScamDatabase
 
 
 WALLET = "0x" + "b" * 40
@@ -203,6 +204,7 @@ def fallback_firewall(monkeypatch):
     web3.get_bytecode = AsyncMock(return_value="0x6080")
     monkeypatch.setattr(api, "container", None)
     monkeypatch.setattr(api, "web3_client", web3)
+    monkeypatch.setattr(api, "scam_db", ScamDatabase())
     monkeypatch.setattr(
         api,
         "calldata_decoder",

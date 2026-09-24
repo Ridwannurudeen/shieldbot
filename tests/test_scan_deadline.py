@@ -201,10 +201,16 @@ def bsc_analyzers():
 
 
 @pytest.mark.asyncio
-async def test_results_are_identical_to_gather_when_nothing_times_out():
+@pytest.mark.parametrize("with_on_result", [False, True])
+async def test_results_are_identical_to_gather_when_nothing_times_out(with_on_result):
     ctx = AnalysisContext(address="0xabc", chain_id=56)
     expected = await gather_reference(bsc_analyzers(), ctx)
-    actual = await registry_of(*bsc_analyzers()).run_all(ctx)
+    received = []
+    registry = registry_of(*bsc_analyzers())
+    if with_on_result:
+        actual = await registry.run_all(ctx, on_result=received.append)
+    else:
+        actual = await registry.run_all(ctx)
 
     for previous, current in zip(expected, actual):
         if not current.error:
@@ -215,6 +221,68 @@ async def test_results_are_identical_to_gather_when_nothing_times_out():
     assert json.dumps(engine.compute_from_results(actual), sort_keys=True) == json.dumps(
         engine.compute_from_results(expected), sort_keys=True
     )
+    # Every analyzer that returned was reported, as the same object; the failed one was not.
+    if with_on_result:
+        assert sorted(result.name for result in received) == ["honeypot", "market", "structural"]
+        assert all(any(result is final for final in actual) for result in received)
+
+
+@pytest.mark.asyncio
+async def test_on_result_hears_only_the_analyzers_that_returned(short_deadline):
+    fast = clean("structural", 0.5)
+    received = []
+
+    results = await registry_of(
+        analyzer("structural", 0.5, returns(fast)),
+        analyzer("market", 0.2, raises(RuntimeError("provider down"))),
+        analyzer("honeypot", 0.3, hangs()),
+    ).run_all(AnalysisContext(address="0xabc", chain_id=56), on_result=received.append)
+
+    assert received == [fast]
+    assert [result.error for result in results] == [
+        None,
+        "market analysis unavailable (RuntimeError)",
+        "honeypot analysis unavailable (TimeoutError)",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_listener_that_raises_never_turns_a_result_unavailable(caplog):
+    ctx = AnalysisContext(address="0xabc", chain_id=56)
+    expected = await registry_of(*bsc_analyzers()).run_all(ctx)
+
+    def broken(result):
+        raise RuntimeError("listener down")
+
+    actual = await registry_of(*bsc_analyzers()).run_all(ctx, on_result=broken)
+
+    for previous, current in zip(expected, actual):
+        if not current.error:
+            previous.data["observed_at"] = current.data["observed_at"]
+    assert actual == expected
+    assert [result.error for result in actual].count(None) == 3
+    assert "on_result failed for analyzer structural: RuntimeError" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_on_result_is_called_while_other_analyzers_still_run():
+    release = asyncio.Event()
+    fast = clean("structural", 0.5)
+    heard = asyncio.Event()
+
+    async def slow(ctx):
+        await release.wait()
+        return clean("honeypot", 0.5)
+
+    scan = asyncio.ensure_future(registry_of(
+        analyzer("structural", 0.5, returns(fast)),
+        analyzer("honeypot", 0.5, slow),
+    ).run_all(AnalysisContext(address="0xabc", chain_id=56), on_result=lambda result: heard.set()))
+
+    await asyncio.wait_for(heard.wait(), 1)
+    assert not scan.done()
+    release.set()
+    assert [result.name for result in await scan] == ["structural", "honeypot"]
 
 
 def test_the_deadlines_follow_the_provider_timeout_table():

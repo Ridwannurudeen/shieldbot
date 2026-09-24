@@ -116,6 +116,7 @@ async def evidence_api(monkeypatch, mock_web3_client):
         SimpleNamespace(decode=_decode, is_whitelisted_target=lambda *args, **kwargs: None),
     )
     monkeypatch.setattr(api, "risk_engine", RiskEngine())
+    monkeypatch.setattr(api, "scam_db", ScamDatabase())
     monkeypatch.setattr(api, "tenderly_simulator", SimpleNamespace(is_enabled=lambda: False))
     monkeypatch.setattr(api, "greenfield_service", None)
     monkeypatch.setattr(api, "ai_analyzer", SimpleNamespace(is_available=lambda: False))

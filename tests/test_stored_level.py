@@ -10,6 +10,7 @@ import pytest_asyncio
 
 from core.database import Database
 from core.verdicts import stored_level
+from utils.scam_db import ScamDatabase
 
 TOKENS = ["0x" + f"{index:040x}" for index in range(1, 7)]
 
@@ -52,6 +53,7 @@ def firewall_api(monkeypatch, mock_web3_client):
     )
     monkeypatch.setattr(api, "container", services)
     monkeypatch.setattr(api, "web3_client", mock_web3_client)
+    monkeypatch.setattr(api, "scam_db", ScamDatabase())
     monkeypatch.setattr(
         api,
         "calldata_decoder",

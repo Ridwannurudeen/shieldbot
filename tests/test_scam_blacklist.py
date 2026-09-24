@@ -236,6 +236,23 @@ async def test_a_chain_scoped_entry_matches_only_its_chain(db_path):
 
 
 @pytest.mark.asyncio
+async def test_the_local_match_is_the_blacklist_entry_check_address_reports(db_path):
+    db, scam_db = await _open(db_path)
+    try:
+        assert scam_db.local_match(ADDRESS, 56) is None
+        await _report_three_times(scam_db)
+        assert scam_db.local_match(ADDRESS, 56) == COMMUNITY_MATCH
+        assert scam_db.local_match(ADDRESS, 1) is None
+        assert await scam_db.confirm_scam(ADDRESS, None, "drainer everywhere")
+        assert scam_db.local_match(ADDRESS, 56) == ADMIN_MATCH
+        assert scam_db.local_match(ADDRESS, 137) == ADMIN_MATCH
+        assert await _lookup(scam_db, chain_id=137) == [scam_db.local_match(ADDRESS, 137)]
+        assert scam_db.local_match(PROTECTED, 56) is None
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_hunter_sweep_prunes_the_blacklist():
     scam_db = SimpleNamespace(prune_blacklist=AsyncMock())
     db = MagicMock(prune_old_chats=AsyncMock(), prune_retention=AsyncMock())

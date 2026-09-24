@@ -7,6 +7,7 @@ import pytest
 
 from core.analyzer import AnalyzerResult
 from core.risk_engine import RiskEngine
+from utils.scam_db import ScamDatabase
 
 
 @pytest.fixture(params=[False, True], ids=['missing-provider', 'failed-simulation'])
@@ -40,6 +41,7 @@ def consumer_api(monkeypatch, mock_web3_client):
     )
     monkeypatch.setattr(api, 'container', services)
     monkeypatch.setattr(api, 'web3_client', mock_web3_client)
+    monkeypatch.setattr(api, 'scam_db', ScamDatabase())
     monkeypatch.setattr(api, 'calldata_decoder', SimpleNamespace(
         decode=lambda _: {'selector': None}, is_whitelisted_target=lambda *args, **kwargs: None,
     ))
