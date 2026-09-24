@@ -83,7 +83,7 @@ class RpcGuard:
         windows of at least one reservation, and a burst of up to one reservation is allowed.
         Raises BreakerOpenError at once unless the breaker is closed, except for the single probe
         allowed once the cooldown has passed, and again if the breaker opened while this call was
-        waiting.
+        waiting; then nothing is sent, so the reservation goes back to the budget.
         """
         if probe:
             if not self.probe_due:
@@ -97,6 +97,7 @@ class RpcGuard:
         if start > now:
             await asyncio.sleep(start - now)
         if not probe and self.state != CLOSED:
+            self._next_slot -= cost / self.rate
             raise BreakerOpenError(f"{self.name} RPC breaker is {self.state}")
 
     def record_success(self):
