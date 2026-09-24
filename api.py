@@ -1391,7 +1391,8 @@ async def _firewall_events(req: FirewallRequest, request: Request, started: floa
     ends in `final` or `error`. Logs one line per request with the timings.
     """
     progress = FirstVerdictProgress(
-        (analyzer.name for analyzer in container.registry.get_all()), policy_mode,
+        [analyzer.name for analyzer in container.registry.get_all()] if container and container.registry else [],
+        policy_mode,
     )
     scan = _fire_and_forget(_firewall_response(req, request, progress), label="firewall_stream_scan")
     block_known = asyncio.ensure_future(progress.block_known.wait())

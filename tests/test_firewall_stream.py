@@ -276,6 +276,28 @@ async def test_a_request_without_the_stream_header_is_answered_as_before(stream_
 
 
 @pytest.mark.asyncio
+async def test_a_server_without_an_analyzer_registry_still_streams(stream_api, monkeypatch):
+    api, services = stream_api
+    services.registry = None
+    # Without a registry the handler falls back to the four services directly, as it always has.
+    for name, method, data in (
+        ("contract_service", "fetch_contract_data", result("structural").data),
+        ("honeypot_service", "fetch_honeypot_data", result("honeypot").data),
+        ("dex_service", "fetch_token_market_data", result("market").data),
+        ("ethos_service", "fetch_wallet_reputation", {"reputation_score": 50, "status": "ok"}),
+    ):
+        monkeypatch.setattr(api, name, SimpleNamespace(**{method: AsyncMock(return_value=data)}))
+
+    with patch("time.time", return_value=NOW):
+        plain = await post(api)
+        streamed = await post(api, accept="text/event-stream")
+
+    kind, final = parse(streamed.text)[-1]
+    assert kind == "final" and final.pop("final") is True
+    assert final == plain.json()
+
+
+@pytest.mark.asyncio
 async def test_side_effects_come_only_from_the_final(stream_api, monkeypatch):
     api, services = stream_api
     blacklist(api)
