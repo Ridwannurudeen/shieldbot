@@ -61,7 +61,7 @@ def assert_unknown_response(response):
 def test_fallback_preserves_unknowns(consumer_api, incomplete_output):
     api, _ = consumer_api
     scan = dict(incomplete_output, risk_score=0, is_honeypot=None, is_verified=None)
-    response = api._build_fallback_response({}, scan, None)
+    response = api._build_fallback_response({}, scan, None, 56)
     assert_unknown_response(response)
     assert response['raw_checks']['is_honeypot'] is None
     assert response['raw_checks']['is_verified'] is None
@@ -328,7 +328,7 @@ async def test_confirmed_eoa_scan_and_firewall_fallback_render_safe(consumer_api
     assert (response['status'], response['risk_level'], response['classification']) == ('ok', 'low', 'SAFE')
     assert (response['risk_score'], response['confidence'], response['partial']) == (5, 95, False)
     assert response['risk_display'] == '5%'
-    fallback = api._build_fallback_response({}, await scanner.scan_address('0x' + 'a' * 40), None)
+    fallback = api._build_fallback_response({}, await scanner.scan_address('0x' + 'a' * 40), None, 56)
     assert (fallback['status'], fallback['classification'], fallback['partial']) == ('ok', 'SAFE', False)
     assert fallback['verdict'] == 'SAFE — Risk score 5/100'
 
