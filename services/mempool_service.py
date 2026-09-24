@@ -142,8 +142,10 @@ class MempoolMonitor:
         while self._running:
             try:
                 for chain_id in self._monitored_chains:
+                    started = time.monotonic()
                     await self._poll_pending(chain_id)
                     self._prune_stale(chain_id)
+                    logger.debug("Polled chain %s in %.2f s", chain_id, time.monotonic() - started)
                 await asyncio.sleep(2)  # Poll every 2 seconds
             except asyncio.CancelledError:
                 break

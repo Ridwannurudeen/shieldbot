@@ -1,7 +1,8 @@
 """Mempool polling: how pending transactions are read, parsed and handed to the analysis."""
 
+import logging
 import threading
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from hexbytes import HexBytes
@@ -109,3 +110,22 @@ async def test_txpool_content_is_parsed_and_built_off_the_event_loop(monkeypatch
         ("0x" + "04" * 32, SENDER.lower(), TOKEN, 16, 5, APPROVE_UNLIMITED, 1),
     ]
     assert built_on and threading.get_ident() not in built_on
+
+
+@pytest.mark.asyncio
+async def test_each_chain_poll_logs_its_duration(monkeypatch, caplog):
+    monitor = MempoolMonitor(MagicMock())
+    monitor._running = True
+    monitor._monitored_chains = {56, 1}
+    monitor._poll_pending = AsyncMock()
+
+    async def stop_after_one_cycle(seconds):
+        monitor._running = False
+
+    monkeypatch.setattr("services.mempool_service.asyncio.sleep", stop_after_one_cycle)
+    with caplog.at_level(logging.DEBUG, logger="services.mempool_service"):
+        await monitor._monitor_loop()
+
+    polled = [r for r in caplog.records if r.msg == "Polled chain %s in %.2f s"]
+    assert sorted(r.args[0] for r in polled) == [1, 56]
+    assert all(r.levelno == logging.DEBUG and r.args[1] >= 0 for r in polled)
