@@ -39,6 +39,8 @@ class AgentPolicyEngine:
     - Explicit allowlist/blocklist override everything.
     - Incomplete provider coverage turns any ALLOW into WARN (owner approval).
     - Spending limits and slippage caps are hard gates.
+    - A transaction value with no USD price (None) cannot be shown to be under the spending
+      limits, so it also turns any ALLOW into WARN.
     """
 
     def _get(self, policy: dict, key: str):
@@ -50,7 +52,7 @@ class AgentPolicyEngine:
         policy: Dict,
         risk_score: float,
         target_address: str,
-        tx_value_usd: float = 0,
+        tx_value_usd: Optional[float] = 0,
         daily_spend_usd: float = 0,
         simulated_slippage: float = None,
         status: Optional[str] = None,
@@ -75,6 +77,12 @@ class AgentPolicyEngine:
             reason = "; ".join(dict.fromkeys((coverage_reasons or {}).values())) or "Provider data unavailable or incomplete"
             checks["coverage"] = f"warn — incomplete coverage: {reason}"
 
+        value_unknown = tx_value_usd is None
+        if value_unknown:
+            checks["spending_limit"] = "warn — transaction value in USD unknown"
+            checks["daily_limit"] = "warn — transaction value in USD unknown"
+        uncertain = (["coverage"] if incomplete else []) + (["spending_limit", "daily_limit"] if value_unknown else [])
+
         # 1. Explicit lists (highest priority)
         always_allow = [a.lower() for a in (self._get(policy, "always_allow") or [])]
         always_block = [a.lower() for a in (self._get(policy, "always_block") or [])]
@@ -88,9 +96,9 @@ class AgentPolicyEngine:
 
         if target_lower in always_allow:
             checks["contract_list"] = "pass — allowlist match"
-            if incomplete:
+            if uncertain:
                 return PolicyVerdict(
-                    verdict="WARN", checks=checks, failed_checks=["coverage"],
+                    verdict="WARN", checks=checks, failed_checks=uncertain,
                     needs_owner_approval=True,
                 )
             return PolicyVerdict(
@@ -99,20 +107,21 @@ class AgentPolicyEngine:
 
         checks["contract_list"] = "pass — no list match"
 
-        # 2. Spending limits (hard gates)
-        max_per_tx = self._get(policy, "max_spend_per_tx_usd")
-        if tx_value_usd > max_per_tx:
-            checks["spending_limit"] = f"fail — ${tx_value_usd:.2f} > ${max_per_tx:.2f} limit"
-            failed.append("spending_limit")
-        else:
-            checks["spending_limit"] = f"pass — ${tx_value_usd:.2f} <= ${max_per_tx:.2f}"
+        # 2. Spending limits (hard gates); an unknown value keeps the warnings set above
+        if not value_unknown:
+            max_per_tx = self._get(policy, "max_spend_per_tx_usd")
+            if tx_value_usd > max_per_tx:
+                checks["spending_limit"] = f"fail — ${tx_value_usd:.2f} > ${max_per_tx:.2f} limit"
+                failed.append("spending_limit")
+            else:
+                checks["spending_limit"] = f"pass — ${tx_value_usd:.2f} <= ${max_per_tx:.2f}"
 
-        max_daily = self._get(policy, "max_spend_daily_usd")
-        if (daily_spend_usd + tx_value_usd) > max_daily:
-            checks["daily_limit"] = f"fail — ${daily_spend_usd + tx_value_usd:.2f} > ${max_daily:.2f} daily limit"
-            failed.append("daily_limit")
-        else:
-            checks["daily_limit"] = f"pass — ${daily_spend_usd + tx_value_usd:.2f} <= ${max_daily:.2f}"
+            max_daily = self._get(policy, "max_spend_daily_usd")
+            if (daily_spend_usd + tx_value_usd) > max_daily:
+                checks["daily_limit"] = f"fail — ${daily_spend_usd + tx_value_usd:.2f} > ${max_daily:.2f} daily limit"
+                failed.append("daily_limit")
+            else:
+                checks["daily_limit"] = f"pass — ${daily_spend_usd + tx_value_usd:.2f} <= ${max_daily:.2f}"
 
         # 3. Slippage cap
         max_slip = self._get(policy, "max_slippage")
@@ -137,9 +146,9 @@ class AgentPolicyEngine:
 
         if risk_score < allow_below:
             checks["risk_threshold"] = f"pass — score {risk_score} < {allow_below}"
-            if incomplete:
+            if uncertain:
                 return PolicyVerdict(
-                    verdict="WARN", checks=checks, failed_checks=["coverage"],
+                    verdict="WARN", checks=checks, failed_checks=uncertain,
                     needs_owner_approval=True,
                 )
             return PolicyVerdict(
@@ -156,6 +165,6 @@ class AgentPolicyEngine:
         # Middle range → ask owner
         checks["risk_threshold"] = f"warn — score {risk_score} in [{allow_below}, {block_above}]"
         return PolicyVerdict(
-            verdict="WARN", checks=checks, failed_checks=["coverage"] if incomplete else [],
+            verdict="WARN", checks=checks, failed_checks=uncertain,
             needs_owner_approval=True,
         )

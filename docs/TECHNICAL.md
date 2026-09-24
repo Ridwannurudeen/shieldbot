@@ -674,6 +674,17 @@ curl -X POST http://localhost:8000/api/firewall \
   }'
 ```
 
+**Free API Key** (self-serve):
+```bash
+curl -X POST http://localhost:8000/api/keys/free \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@example.com"}'
+```
+
+The server emails a link to `/api/keys/free/verify`. The link works once and expires after 30 minutes; its token is in the URL fragment, which browsers do not send, so it never appears in server or proxy logs, and the page creates the key only when you press its button, so a mail scanner that only fetches the link does not use it up. A scanner that also presses the button would create the key where nobody sees it; the address then has its one free key, and only the admin can deactivate it (`AuthManager.deactivate_key`; there is no route for it). The key is shown once on that page and only its hash is stored. Send it as the `X-API-Key` header; the free tier allows 60 requests a minute and 1,000 a day.
+
+The request answers the same 200 whether the address is new, already has a pending link or already has a key, so it does not reveal which. An address that already has an active free key gets an email saying so instead of a link; the admin must deactivate that key before a new one can be issued. Limits: one active free key per email address, one email per address per 30 minutes (nothing new is sent while one is pending), and three requests a minute per IP. Without `RESEND_API_KEY` the endpoint answers 503 "Self-serve keys are not enabled" and issues nothing. `PUBLIC_API_URL` sets the host in the emailed link (default `https://api.shieldbotsecurity.online`); it is never taken from the request.
+
 **Health Check**:
 ```bash
 curl http://localhost:8000/api/health
@@ -869,6 +880,7 @@ CMD ["python", "bot.py"]
 
 - **CORS Allowlist**: Allows configured origins; this is not authentication
 - **Rate Limiting**: API middleware applies key quotas or an IP-based fallback
+- **AI Spend Cap**: advisor chat (API side panel and Telegram) and scan explanations share one daily token budget, `AI_DAILY_TOKEN_BUDGET` (default 1,000,000 input plus output tokens per UTC day, counted from the provider's reported usage and stored in SQLite). Once it is used, chat answers that AI chat is paused for today and explanations fall back to rule-based text. `AI_DAILY_TOKEN_BUDGET=0` pauses AI entirely, a kill switch; a negative value is refused and stops the API and bot at startup. The check runs before each call, so calls already in flight can overshoot it by their own size.
 - **Input Validation**: Review the request model and handler for the endpoint being used; this document does not claim that every input path has identical validation.
 - **Error Handling**: Inspect endpoint error responses separately; this document does not certify that every path redacts internal details.
 

@@ -601,9 +601,10 @@ async def test_real_advisor_chat_keeps_text_only_for_complete_scan(consumer_api,
         scan_contract=AsyncMock(return_value=scan), check_deployer=AsyncMock(return_value={}),
         check_honeypot=AsyncMock(return_value=honeypot), get_market_data=AsyncMock(return_value={}),
     )
-    db = SimpleNamespace(get_chat_history=AsyncMock(return_value=[]), insert_chat_message=AsyncMock())
-    ai = SimpleNamespace(is_available=lambda: True, chat=AsyncMock(return_value='Advisor analysis text'))
-    services.advisor = Advisor(tools, db, ai)
+    db = SimpleNamespace(get_chat_history=AsyncMock(return_value=[]), insert_chat_message=AsyncMock(),
+        get_ai_tokens_used=AsyncMock(return_value=0), add_ai_tokens_used=AsyncMock())
+    ai = SimpleNamespace(is_available=lambda: True, chat_with_usage=AsyncMock(return_value=('Advisor analysis text', 100)))
+    services.advisor = Advisor(tools, db, ai, daily_token_budget=1_000_000)
     response = await api.agent_chat(api.ChatRequest(message='check 0x' + 'a' * 40, user_id='test'),
         SimpleNamespace(client=SimpleNamespace(host='advisor-' + str(complete)), headers={}))
     assert response['scan_data']['status'] == ('ok' if complete else 'unknown')
@@ -888,9 +889,10 @@ async def test_advisor_scan_failure_renders_unknown_chat(consumer_api):
         scan_contract=AsyncMock(side_effect=RuntimeError(secret)), check_deployer=AsyncMock(return_value={}),
         check_honeypot=AsyncMock(return_value={}), get_market_data=AsyncMock(return_value={}),
     )
-    db = SimpleNamespace(get_chat_history=AsyncMock(return_value=[]), insert_chat_message=AsyncMock())
-    ai = SimpleNamespace(is_available=lambda: True, chat=AsyncMock(return_value='SAFE: this token looks fine'))
-    services.advisor = Advisor(tools, db, ai)
+    db = SimpleNamespace(get_chat_history=AsyncMock(return_value=[]), insert_chat_message=AsyncMock(),
+        get_ai_tokens_used=AsyncMock(return_value=0), add_ai_tokens_used=AsyncMock())
+    ai = SimpleNamespace(is_available=lambda: True, chat_with_usage=AsyncMock(return_value=('SAFE: this token looks fine', 100)))
+    services.advisor = Advisor(tools, db, ai, daily_token_budget=1_000_000)
     response = await api.agent_chat(api.ChatRequest(message='check 0x' + 'a' * 40, user_id='test'),
         SimpleNamespace(client=SimpleNamespace(host='advisor-scan-failure'), headers={}))
     assert 'Unknown' in response['response']

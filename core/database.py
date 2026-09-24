@@ -507,6 +507,8 @@ class Database:
         await self._create_launch_feed_tables()
         await self._create_launch_alert_tables()
         await self._create_verdict_evidence_tables()
+        await self._create_ai_usage_tables()
+        await self._create_free_key_tables()
 
         # Migrate: add registered_by_key column for existing DBs
         try:
@@ -1278,6 +1280,86 @@ class Database:
         )
         await self._db.commit()
         return cursor.rowcount
+
+    # --- AI Token Usage ---
+
+    async def _create_ai_usage_tables(self):
+        await self._db.executescript("""
+            CREATE TABLE IF NOT EXISTS ai_token_usage (
+                utc_day INTEGER PRIMARY KEY,
+                tokens INTEGER NOT NULL
+            );
+        """)
+        await self._db.commit()
+
+    async def get_ai_tokens_used(self, utc_day: int) -> int:
+        """Tokens the advisor's AI calls used on a UTC day number."""
+        cursor = await self._db.execute(
+            "SELECT tokens FROM ai_token_usage WHERE utc_day = ?", (utc_day,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def add_ai_tokens_used(self, utc_day: int, tokens: int):
+        """Add tokens to a UTC day's count and commit."""
+        await self._db.execute("""
+            INSERT INTO ai_token_usage (utc_day, tokens) VALUES (?, ?)
+            ON CONFLICT(utc_day) DO UPDATE SET tokens = tokens + excluded.tokens
+        """, (utc_day, tokens))
+        await self._db.commit()
+
+    # --- Self-Serve Free Keys ---
+
+    async def _create_free_key_tables(self):
+        await self._db.executescript("""
+            CREATE TABLE IF NOT EXISTS free_key_requests (
+                token_hash TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                expires_at REAL NOT NULL,
+                used_at REAL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_free_key_requests_email
+                ON free_key_requests(email);
+        """)
+        await self._db.commit()
+
+    async def add_free_key_request(self, email: str, token_hash: str, expires_at: float) -> bool:
+        """Store an emailed link's token hash unless the address already has an unused, unexpired one.
+
+        Expired requests are deleted first. Returns whether the request was stored.
+        """
+        now = time.time()
+        await self._db.execute("DELETE FROM free_key_requests WHERE expires_at <= ?", (now,))
+        cursor = await self._db.execute("""
+            INSERT INTO free_key_requests (token_hash, email, created_at, expires_at)
+            SELECT ?, ?, ?, ? WHERE NOT EXISTS (
+                SELECT 1 FROM free_key_requests WHERE email = ? AND used_at IS NULL
+            )
+        """, (token_hash, email, now, expires_at, email))
+        await self._db.commit()
+        return cursor.rowcount == 1
+
+    async def delete_free_key_request(self, token_hash: str):
+        await self._db.execute("DELETE FROM free_key_requests WHERE token_hash = ?", (token_hash,))
+        await self._db.commit()
+
+    async def claim_free_key_request(self, token_hash: str) -> Optional[str]:
+        """Mark an unused, unexpired request used and return its email; None if there is none."""
+        cursor = await self._db.execute(
+            "SELECT email FROM free_key_requests WHERE token_hash = ?", (token_hash,)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        now = time.time()
+        cursor = await self._db.execute("""
+            UPDATE free_key_requests SET used_at = ?
+            WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?
+        """, (now, token_hash, now))
+        await self._db.commit()
+        return row[0] if cursor.rowcount == 1 else None
 
     # --- Tracked Pairs ---
 

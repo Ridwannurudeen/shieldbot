@@ -180,3 +180,43 @@ def test_chat_no_advisor_returns_503(client):
         assert resp.status_code == 503
     finally:
         api_module.container = saved
+
+
+INSTALL_ID = "3f2c9a1e-8b7d-4c6e-9f10-2a4b6c8d0e12"
+
+
+def test_chat_binds_history_to_the_install_id_not_the_ip(client):
+    """With X-Install-Id the history key no longer depends on the client IP or the proxy setup."""
+    import api as api_module
+    import asyncio
+    import hashlib
+    from types import SimpleNamespace
+
+    advisor = api_module.container.advisor
+    client.post("/api/agent/chat", json={"message": "hi", "user_id": "u1"}, headers={"X-Install-Id": INSTALL_ID})
+    bound_id = hashlib.sha256(f"install:{INSTALL_ID}:u1".encode()).hexdigest()[:24]
+    advisor.chat.assert_awaited_once_with(bound_id, "hi", chain_id=56)
+
+    request = SimpleNamespace(client=SimpleNamespace(host="203.0.113.9"), headers={"x-install-id": INSTALL_ID})
+    asyncio.run(api_module.agent_chat(api_module.ChatRequest(message="hi", user_id="u1"), request))
+    assert advisor.chat.await_args.args[0] == bound_id
+
+
+def test_side_panel_sends_its_install_id_with_chat():
+    """The side panel's chat request carries its per-install random id, the header the server keys history by."""
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "extension" / "sidepanel.js").read_text(encoding="utf-8")
+    assert "chatUserId = crypto.randomUUID();" in source
+    chat_fetch = source[source.index("/api/agent/chat"):]
+    chat_fetch = chat_fetch[:chat_fetch.index("});")]
+    assert '"X-Install-Id": chatUserId' in chat_fetch
+
+
+@pytest.mark.parametrize("install_id", ["", "short", "x" * 129, "has space in it here", "10.0.0.1:user-ip-look"])
+def test_chat_rejects_a_malformed_install_id(client, install_id):
+    import api as api_module
+
+    resp = client.post("/api/agent/chat", json={"message": "hi", "user_id": "u1"}, headers={"X-Install-Id": install_id})
+    assert resp.status_code == 400
+    api_module.container.advisor.chat.assert_not_called()

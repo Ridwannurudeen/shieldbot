@@ -104,6 +104,14 @@ class AuthManager:
 
         return {"key": raw_key, "key_id": key_id, "owner": owner, "tier": tier}
 
+    async def has_active_key(self, owner: str, tier: str) -> bool:
+        """Whether an active key of this tier exists for the owner."""
+        cursor = await self.db._db.execute(
+            "SELECT 1 FROM api_keys WHERE owner = ? AND tier = ? AND is_active = 1 LIMIT 1",
+            (owner, tier),
+        )
+        return await cursor.fetchone() is not None
+
     async def validate_key(self, raw_key: str) -> Optional[Dict]:
         """Validate an API key. Returns key info dict or None."""
         if not raw_key or not raw_key.startswith(KEY_PREFIX):
