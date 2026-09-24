@@ -107,7 +107,7 @@
       <li><strong>typedData</strong> — EIP-712 structured data, if applicable (e.g. Permit2 signatures)</li>
       <li><strong>authorizationList</strong> — for an EIP-7702 transaction, the address of each contract it would delegate your account to (never the signed authorization)</li>
     </ul>
-    <p>With each check the extension also sends the signing method (for signature requests) and your policy mode (Balanced or Strict). For a <code>personal_sign</code> or <code>eth_sign</code> request, the text of the message or the hash you would sign is not sent. This is the minimum required for a meaningful security analysis.</p>
+    <p>With each check the extension also sends the signing method (for signature requests) and your policy mode (Balanced or Strict). For a <code>personal_sign</code> or <code>eth_sign</code> request, neither the text of the message or the hash you would sign nor your wallet address is sent. This is the minimum required for a meaningful security analysis.</p>
     <p>Some features send data only when you use them:</p>
     <ul>
       <li><strong>AI chat in the side panel</strong> — the message you type</li>

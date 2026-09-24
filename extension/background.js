@@ -397,13 +397,14 @@ async function handleAnalyze(tx, sender) {
 
   const endpoint = `${apiUrl}/api/firewall`;
 
+  // A message or hash to sign, and its signer, stay in the browser: the API
+  // judges personal_sign and eth_sign by their method and reads neither.
+  const byMethod = signMethod === "personal_sign" || signMethod === "eth_sign";
   const body = {
     to: tx.to || "",
-    from: tx.from || "",
+    from: byMethod ? "" : tx.from || "",
     value: tx.value || "0x0",
-    // A message or hash to sign stays in the browser: the API judges
-    // personal_sign and eth_sign by their method and does not read them.
-    data: signMethod === "personal_sign" || signMethod === "eth_sign" ? "0x" : tx.data || "0x",
+    data: byMethod ? "0x" : tx.data || "0x",
     chainId,
   };
 

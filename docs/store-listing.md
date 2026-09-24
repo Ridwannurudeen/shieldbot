@@ -45,7 +45,7 @@ Settings
 • English, Tiếng Việt and 中文.
 
 Privacy
-• Sent for analysis: the transaction's recipient, sender, value, call data and chain ID; for a signature request, the signing method and any EIP-712 typed data, never the text or hash you sign; for an EIP-7702 transaction, each delegate's address; and the origin (scheme, host and port) of the sites you visit, for the phishing check.
+• Sent for analysis: the transaction's recipient, sender, value, call data and chain ID; for a signature request, the signing method and any EIP-712 typed data, never the text or hash you sign (and for those, not your address either); for an EIP-7702 transaction, each delegate's address; and the origin (scheme, host and port) of the sites you visit, for the phishing check.
 • Kept only in your browser: the last 100 addresses you chose to send to, for the look-alike check, and phishing results for the current browser session.
 • Never collected: private keys, seed phrases, passwords or page content.
 • The default server is api.shieldbotsecurity.online. You can point the extension at your own server in its settings.

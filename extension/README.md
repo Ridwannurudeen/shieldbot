@@ -47,8 +47,9 @@ version.
   as hex, and one of exactly 32 such bytes, which can be a hash a contract accepts as the user's
   signature, is Block Recommended with the same kind of note; a 32-character text message is not
   raised. The text of a `personal_sign` message and the hash of an `eth_sign` request are not
-  sent (the API judges those methods by their method), and the legacy list of fields is not sent as
-  typed data (the API answers a signature without typed data as Unknown).
+  sent, nor is the signer's address for those two methods (the API judges them by their method),
+  and the legacy list of fields is not sent as typed data (the API answers a signature without
+  typed data as Unknown).
 - A signature is analysed on the wallet's current chain, read once when the request is made. It is
   not bound to that chain: the wallet receives it as the page sent it. When the chain cannot be read,
   the signature is not analysed, the overlay offers only Reject, and the request is rejected.

@@ -164,7 +164,8 @@ def test_background_sends_signatures_without_their_message_bodies():
   assert.equal(bodies.length, 4, 'a signature did not reach the API');
   for (const body of bodies) {
     assert.equal(body.to, '');
-    assert.equal(body.from, from);
+    // The API never reads the signer of a personal_sign or eth_sign, so no address is sent.
+    assert.equal(body.from, ['personal_sign', 'eth_sign'].includes(body.signMethod) ? '' : from);
     assert.equal(body.chainId, 56);
     // Neither a message nor a hash to sign leaves the browser; the API does not read them.
     assert.equal(body.data, '0x');

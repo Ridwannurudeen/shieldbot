@@ -38,3 +38,20 @@ async def test_eth_sign_is_block_recommended_and_says_it_can_sign_a_transaction(
     assert any("can be a transaction" in signal for signal in response["danger_signals"])
     # Nothing about the hash can be checked, so the verdict stays incomplete.
     assert_unknown_response(response)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sign_method", ["personal_sign", "eth_sign"])
+async def test_a_signature_without_a_signer_address_is_accepted_and_judged_as_before(consumer_api, sign_method):  # noqa: F811
+    # The extension sends no signer for personal_sign and eth_sign; the request model takes an
+    # empty "from" and the verdict does not depend on it.
+    api, _ = consumer_api
+    req = api.FirewallRequest.model_validate({"to": "", "from": "", "signMethod": sign_method, "chainId": 56})
+    assert req.sender == ""
+    response = await api._build_signature_only_response(req)
+    with_signer = await api._build_signature_only_response(
+        api.FirewallRequest(to="", sender="0x" + "b" * 40, signMethod=sign_method)
+    )
+    assert response["classification"] == with_signer["classification"]
+    assert response["risk_score"] == with_signer["risk_score"]
+    assert response["status"] == with_signer["status"]

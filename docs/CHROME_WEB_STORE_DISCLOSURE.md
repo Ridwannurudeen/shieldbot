@@ -23,7 +23,7 @@ These are source-tree disclosures for review, not confirmation of the currently 
 - Website content (limited to Web3 transaction data and site origin for phishing checks)
 
 **Justification:**
-The extension intercepts blockchain transaction data (recipient address, sender address, value, encoded function data, and chain ID) to perform security analysis and risk assessment before the user signs the transaction. For a signature request it sends the signing method and any EIP-712 typed data, never the text of a message or a hash to sign; for an EIP-7702 transaction, each delegate's address, never the signed authorization.
+The extension intercepts blockchain transaction data (recipient address, sender address, value, encoded function data, and chain ID) to perform security analysis and risk assessment before the user signs the transaction. For a signature request it sends the signing method and any EIP-712 typed data, never the text of a message or a hash to sign (nor, for those, the signer's address); for an EIP-7702 transaction, each delegate's address, never the signed authorization.
 When phishing protection is enabled, the extension also checks the current site origin (scheme, host, and port only) against phishing intelligence. Full paths, query strings, and page contents are not sent.
 
 ---
