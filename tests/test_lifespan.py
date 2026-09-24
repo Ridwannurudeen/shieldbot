@@ -36,6 +36,7 @@ def mock_container(monkeypatch):
     container.launch_watch.start = AsyncMock()
     container.launch_watch.stop = AsyncMock()
     container.verdict_publisher.stop = AsyncMock()
+    container.phishing_service.stop = AsyncMock()
     container.auth_manager.validate_key = AsyncMock(
         return_value={"key_id": "lifespan-key", "tier": "free"},
     )
@@ -89,6 +90,8 @@ class TestLifespan:
             mock_container.hunter.stop.assert_not_awaited()
             mock_container.launch_watch.start.assert_awaited_once_with()
             mock_container.launch_watch.stop.assert_not_awaited()
+            mock_container.phishing_service.start.assert_called_once_with()
+            mock_container.phishing_service.stop.assert_not_awaited()
             mock_container.shutdown.assert_not_awaited()
 
             response = client.get(
@@ -133,6 +136,7 @@ class TestLifespan:
         mock_container.startup.assert_awaited_once_with()
         mock_container.hunter.start.assert_awaited_once_with()
         mock_container.hunter.stop.assert_awaited_once_with()
+        mock_container.phishing_service.stop.assert_awaited_once_with()
         mock_container.shutdown.assert_awaited_once_with()
         # The drain starts first and stops last: the watch and the hunter publish verdicts into it.
         loops = [

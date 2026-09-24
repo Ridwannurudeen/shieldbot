@@ -6,6 +6,12 @@ subject while capacity remains. Pending, off-chain and failed records do not adm
 Existing historical confirmations can be registered explicitly; startup does not fill the set
 arbitrarily from old records.
 
+Admission, automatic or explicit, needs a verdict confirmed on the configured registry
+(`ROBINHOOD_VERDICT_REGISTRY`). After the registry address changes, subjects admitted under the old
+registry stay in the watch on purpose: their rescans publish to the new registry, so they qualify on it
+again as soon as a rescan is confirmed there. A confirmation that arrives late for a transaction sent to
+the old registry never admits a new subject.
+
 `GUARD_WATCH_MAX_SUBJECTS` in `core/database.py` defaults to **4**, overridden by the environment
 variable of the same name. Zero disables the set. Lowering it and restarting disables excess
 members; increasing it does not silently reenable them. `GUARD_RESCAN_INTERVAL_SECONDS` in
@@ -26,8 +32,9 @@ displayed as the latest scan. Guard membership never depends on `tracked_pairs` 
 
 Administrative operations use the existing `X-Admin-Secret` authentication:
 
-- `POST /api/admin/guard-subjects/4663/{address}` registers or reenables a subject with a confirmed
-  verdict. HTTP 409 means capacity is exhausted or no qualifying confirmed verdict exists.
+- `POST /api/admin/guard-subjects/4663/{address}` registers or reenables a subject with a verdict
+  confirmed on the configured registry. HTTP 409 means capacity is exhausted or no qualifying
+  confirmed verdict exists.
 - `DELETE /api/admin/guard-subjects/4663/{address}` persists an opt-out. Later confirmations do not
   re-add it. A queued rescan checks membership again after its budget wait.
 - `GET /api/admin/stats` includes `guard_watch`: members, each last complete measurement's age

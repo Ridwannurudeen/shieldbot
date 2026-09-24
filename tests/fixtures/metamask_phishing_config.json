@@ -1,0 +1,40 @@
+{
+  "version": 2,
+  "tolerance": 1,
+  "fuzzylist": [
+    "cryptokitties.co",
+    "etherscan.io",
+    "launchpad.ethereum.org",
+    "makerfoundation.com",
+    "metamask.io",
+    "myetherwallet.com",
+    "opensea.io",
+    "satoshilabs.com"
+  ],
+  "whitelist": [
+    "opensea.com",
+    "relay.walletconnect.org",
+    "walletconnect.org",
+    "cryptokitties.co",
+    "etherscan.com",
+    "etherscan.io",
+    "launchpad.ethereum.org",
+    "makerfoundation.com",
+    "metamask.io",
+    "metamask.com",
+    "myetherwallet.com",
+    "opensea.io",
+    "revoke.cash",
+    "satoshilabs.com",
+    "127.0.0.1",
+    "localhost"
+  ],
+  "blacklist": [
+    "poly-mark.xyz",
+    "openseoa.app",
+    "opensea.support",
+    "www.opensea.uno",
+    "xn--phntom-jta.com",
+    "sites.google.com/view/connect-ledger-wallet"
+  ]
+}

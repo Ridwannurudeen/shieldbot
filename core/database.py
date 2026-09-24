@@ -2553,9 +2553,13 @@ class Database:
 
     async def update_verdict_onchain(
         self, evidence_id: int, onchain_status: str, tx_hash: Optional[str] = None,
-        onchain_error: Optional[str] = None,
+        onchain_error: Optional[str] = None, registry: Optional[str] = None,
     ):
-        """Record the on-chain outcome for one stored evidence document."""
+        """Record the on-chain outcome for one stored evidence document.
+
+        `registry` is the registry the caller records to: a confirmation admits its subject to the guard watch
+        only when the row was queued for that registry.
+        """
         outbox = await self._outbox()
         try:
             await outbox.execute("""
@@ -2566,8 +2570,8 @@ class Database:
             if onchain_status == "confirmed":
                 cursor = await outbox.execute("""
                     SELECT chain_id, subject, canonical FROM verdict_evidence
-                    WHERE id = ? AND chain_id = 4663 AND registry IS NOT NULL AND registry != ''
-                """, (evidence_id,))
+                    WHERE id = ? AND chain_id = 4663 AND lower(registry) = lower(?)
+                """, (evidence_id, registry))
                 row = await cursor.fetchone()
                 if row is not None:
                     await self._admit_guard_subject(outbox, *row, reenable=False)
@@ -2606,17 +2610,17 @@ class Database:
         ))
         return cursor.rowcount == 1
 
-    async def register_guard_subject(self, chain_id: int, subject: str) -> bool:
-        """Explicitly watch a confirmed subject, or reenable one, within the shared cap."""
+    async def register_guard_subject(self, chain_id: int, subject: str, registry: Optional[str]) -> bool:
+        """Explicitly watch a subject confirmed on `registry`, or reenable one, within the shared cap."""
         cursor = await self._db.execute("""
             SELECT chain_id, subject, canonical FROM verdict_evidence
             WHERE chain_id = ? AND chain_id = 4663 AND subject = ?
-              AND onchain_status = 'confirmed' AND registry IS NOT NULL AND registry != ''
+              AND onchain_status = 'confirmed' AND lower(registry) = lower(?)
               AND json_type(canonical, '$.observed_at') = 'integer'
               AND json_extract(canonical, '$.observed_at') > 0
               AND json_extract(canonical, '$.observed_at') <= ?
             ORDER BY json_extract(canonical, '$.observed_at') DESC, id DESC LIMIT 1
-        """, (chain_id, subject.lower(), time.time()))
+        """, (chain_id, subject.lower(), registry, time.time()))
         row = await cursor.fetchone()
         if row is None:
             return False
@@ -2707,18 +2711,22 @@ class Database:
         }
 
     async def get_newest_verdict_observation(
-        self, chain_id: int, subject: str, include_deduplicated: bool = True
+        self, chain_id: int, subject: str, include_deduplicated: bool = True,
+        registry: Optional[str] = None,
     ) -> Optional[Dict]:
         """Return the newest measured evidence, preferring denial at equal observation times.
 
         Delivery failures and dropped rows still supersede older measurements. Legacy evidence
         without observation provenance cannot establish an observation watermark. Excluding
         deduplicated rows finds the recording anchor whose observation determines refresh age.
+        Given a registry, only evidence queued for it is considered, so a record on another
+        registry never stands in for one on this registry.
         """
         cursor = await self._db.execute("""
             SELECT id FROM verdict_evidence
             WHERE chain_id = ? AND subject = ?
               AND (? OR onchain_status != 'deduplicated')
+              AND (? IS NULL OR lower(registry) = lower(?))
               AND json_type(canonical, '$.observed_at') = 'integer'
               AND json_extract(canonical, '$.observed_at') > 0
               AND json_extract(canonical, '$.observed_at') <= ?
@@ -2727,7 +2735,7 @@ class Database:
                          WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 1 ELSE 0 END DESC,
                      id DESC
             LIMIT 1
-        """, (chain_id, subject, include_deduplicated, time.time()))
+        """, (chain_id, subject, include_deduplicated, registry, registry, time.time()))
         row = await cursor.fetchone()
         return await self.get_verdict_evidence(row[0]) if row else None
 

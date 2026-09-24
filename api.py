@@ -162,6 +162,7 @@ async def lifespan(app: FastAPI):
     await container.startup()
     await container.start_mempool_monitor()
     container.verdict_publisher.start()
+    container.phishing_service.start()
 
     # Initialize RPC proxy if enabled
     if settings.rpc_proxy_enabled:
@@ -201,6 +202,7 @@ async def lifespan(app: FastAPI):
     yield
     await container.launch_watch.stop()
     await container.hunter.stop()
+    await container.phishing_service.stop()
     await container.verdict_publisher.stop()
     await container.shutdown()
     rpc_proxy = getattr(app.state, "rpc_proxy", None)
@@ -654,8 +656,10 @@ async def check_phishing(url: str, request: Request):
     """Check if a URL is a known phishing site.
 
     Called by the Chrome extension content script on every page load.
-    Verdicts are cached server-side for 1 hour per domain; when GoPlus gives no answer the
-    result is is_phishing null with a reason, held for 45 seconds per domain.
+    A host on MetaMask's open phishing list (refreshed hourly) is phishing with source "metamask";
+    otherwise GoPlus decides. GoPlus verdicts are cached server-side for 1 hour per domain; when neither
+    source flags the host and GoPlus gives no answer, the result is is_phishing null with a reason,
+    held for 45 seconds per domain.
     No API key required — rate-limited by IP via the existing middleware.
     """
     if not container or not container.phishing_service:
@@ -2111,14 +2115,16 @@ async def watch_alerts_list(request: Request, limit: int = 50):
 
 @app.post("/api/admin/guard-subjects/{chain_id}/{address}", include_in_schema=False)
 async def guard_subject_add(chain_id: int, address: str, request: Request):
-    """Watch a subject with a confirmed verdict. Requires X-Admin-Secret."""
+    """Watch a subject with a verdict confirmed on the configured registry. Requires X-Admin-Secret."""
     _require_admin(request)
     if chain_id != 4663:
         raise HTTPException(status_code=400, detail="Guard watches are only available on chain 4663")
     _validate_chain_id(chain_id)
     if not web3_client.is_valid_address(address):
         raise HTTPException(status_code=400, detail="Invalid address")
-    if not await container.db.register_guard_subject(chain_id, address.lower()):
+    if not await container.db.register_guard_subject(
+        chain_id, address.lower(), container.verdict_publisher.registry,
+    ):
         raise HTTPException(
             status_code=409, detail="Guard watch cap reached or no confirmed verdict for this subject",
         )
