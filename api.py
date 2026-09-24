@@ -1154,13 +1154,17 @@ async def firewall(req: FirewallRequest, request: Request):
         # Enrich decoded calldata with token names and formatted amounts
         await _enrich_decoded(decoded, to_addr, chain_id=req.chainId)
 
-        # contract_scores holds one verdict per target. An approval's, a claim's or a signature's
-        # verdict also depends on this transaction (the spender, the value, the typed data), so a
-        # row cached from another transaction never answers one. A spender's floor describes the
-        # spender, not the target, so approval and typed-data verdicts are not written to the
-        # target's row either, and do not put the target's deployer on the watch list. A claim's
-        # floor describes the target, so its row is kept.
-        tx_specific = decoded.get('category') in ('approval', 'claim') or bool(req.typedData)
+        # contract_scores holds one verdict per target. An approval's, a claim's, a signature's or
+        # a paying call's verdict also depends on this transaction (the spender, the value, the
+        # typed data), so a row cached from another transaction never answers one. A spender's
+        # floor describes the spender, not the target, so approval and typed-data verdicts are not
+        # written to the target's row either, and do not put the target's deployer on the watch
+        # list. A claim's or a payment's floor describes the target, so its row is kept. A plain
+        # native send has no payment rule and its recipient is the row, so it stays cacheable.
+        tx_specific = (
+            decoded.get('category') in ('approval', 'claim') or bool(req.typedData)
+            or (value_wei > 0 and decoded.get('selector') is not None)
+        )
         describes_target = not (decoded.get('category') == 'approval' or req.typedData)
 
         # 2. If target is a whitelisted router, analyze the swap path tokens instead of bypassing

@@ -541,8 +541,9 @@ TX_CHECKS_UNAVAILABLE = "Transaction checks unavailable: the spender, payment or
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("ai", [False, True], ids=["heuristic", "ai"])
-@pytest.mark.parametrize("specific", [False, True], ids=["transfer", "approval"])
-async def test_legacy_fallback_never_clears_a_transaction_specific_request(cached_firewall_api, ai, specific):
+@pytest.mark.parametrize("specific, value", [(False, "0"), (True, "0"), (True, hex(10**17))],
+                         ids=["transfer", "approval", "payable"])
+async def test_legacy_fallback_never_clears_a_transaction_specific_request(cached_firewall_api, ai, specific, value):
     api, services = cached_firewall_api
     services.registry.run_all.side_effect = RuntimeError("pipeline down")
     api.token_scanner.check_token.return_value = dict(CLEAN_SCAN)
@@ -552,9 +553,9 @@ async def test_legacy_fallback_never_clears_a_transaction_specific_request(cache
             "classification": "SAFE", "risk_score": 5, "danger_signals": [], "verdict": "Looks fine",
         }),
     )
-    api.calldata_decoder.decode.return_value = dict(APPROVE if specific else TRANSFER)
+    api.calldata_decoder.decode.return_value = dict(TRANSFER if not specific else PAYABLE if int(value, 0) else APPROVE)
     response = await api.firewall(
-        api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40), SimpleNamespace(headers={}),
+        api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40, value=value), SimpleNamespace(headers={}),
     )
     assert response["classification"] == ("CAUTION" if specific else "SAFE")
     assert (TX_CHECKS_UNAVAILABLE in response["danger_signals"]) is specific
@@ -576,6 +577,11 @@ TRANSFER = {
     "category": "transfer", "risk": "medium", "params": {"param_0": "0x" + "d" * 40, "param_1": 1},
     "is_approval": False, "is_unlimited_approval": False, "raw": "0xa9059cbb",
 }
+PAYABLE = {
+    "selector": "40c10f19", "function_name": "mint", "signature": "mint(address,uint256)", "category": "supply",
+    "risk": "high", "params": {"param_0": "0x" + "b" * 40, "param_1": 1},
+    "is_approval": False, "is_unlimited_approval": False, "raw": "0x40c10f19",
+}
 PERMIT = {
     "primaryType": "Permit",
     "domain": {"name": "Token"},
@@ -584,14 +590,17 @@ PERMIT = {
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("decoded, typed_data, reads, writes, watches", [
-    (APPROVE, None, 0, 0, 0),
-    (CLAIM, None, 0, 1, 1),
-    ({"selector": None}, PERMIT, 0, 0, 0),
-    (TRANSFER, None, 1, 1, 1),
-], ids=["approval", "claim", "typed-data", "transfer"])
+@pytest.mark.parametrize("decoded, typed_data, value, reads, writes, watches", [
+    (APPROVE, None, "0", 0, 0, 0),
+    (CLAIM, None, "0", 0, 1, 1),
+    ({"selector": None}, PERMIT, "0", 0, 0, 0),
+    (TRANSFER, None, "0", 1, 1, 1),
+    # A call that pays the target is judged on this payment, so no earlier row answers it; the
+    # payment floor describes the target, so its row is kept.
+    (PAYABLE, None, hex(10**17), 0, 1, 1),
+], ids=["approval", "claim", "typed-data", "transfer", "payable"])
 async def test_transaction_verdicts_and_the_target_row(
-    cached_firewall_api, decoded, typed_data, reads, writes, watches,
+    cached_firewall_api, decoded, typed_data, value, reads, writes, watches,
 ):
     from core.analyzer import AnalyzerResult
 
@@ -606,7 +615,7 @@ async def test_transaction_verdicts_and_the_target_row(
     ]
     api.calldata_decoder.decode.return_value = dict(decoded)
     req = api.FirewallRequest(
-        to="0x" + "a" * 40, sender="0x" + "b" * 40, typedData=typed_data,
+        to="0x" + "a" * 40, sender="0x" + "b" * 40, typedData=typed_data, value=value,
         signMethod="eth_signTypedData_v4" if typed_data else None,
     )
     response = await api.firewall(req, SimpleNamespace(headers={}))
