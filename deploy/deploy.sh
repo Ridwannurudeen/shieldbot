@@ -9,7 +9,6 @@
 # Only the shieldbot (API) and shieldbot-bot units are ever stopped or started.
 
 set -Eeuo pipefail
-umask 077
 
 APP=/opt/shieldbot
 VENV=$APP/venv
@@ -256,7 +255,9 @@ on_error() {
 cutover() {
   preflight "$1"
   OLD=$(git -C "$APP" rev-parse HEAD)
-  mkdir -m 700 "$BACKUP"
+  # The backup holds user data, so its directory is created root-only. The umask is narrowed for that alone:
+  # the files git checkout and pip install write must stay readable by the units' own user.
+  (umask 077 && mkdir "$BACKUP")
   echo "$OLD" > "$BACKUP/ROLLBACK_COMMIT"
 
   # From here on any failure puts the old commit and database back.

@@ -230,6 +230,15 @@ def first(calls: list, prefix: str) -> int:
     return next(i for i, call in enumerate(calls) if call.startswith(prefix))
 
 
+def test_deploy_does_not_narrow_the_umask_for_the_whole_run():
+    # deploy.sh runs as root while the units run as their own user. Under a restrictive umask, git checkout and
+    # pip install would write code the API and bot cannot read, and the rollback would do the same to the old
+    # code. These tests run as a single user, so only the source can show it. A umask scoped to a subshell,
+    # as for the backup directory, is fine.
+    source = (ROOT / "deploy" / "deploy.sh").read_text(encoding="utf-8")
+    assert not [line for line in source.splitlines() if line.strip().startswith("umask")]
+
+
 @pytest.mark.parametrize(
     "args",
     [
@@ -340,6 +349,9 @@ def test_cutover_deploys_in_order_and_touches_only_its_two_units(server):
     assert rows(backup / "shieldbot.db") == [1]
     assert not list(backup.glob("*.partial"))
     assert not (backup / "env.bak").exists()
+    if os.name == "posix":
+        # Windows reports no real modes. The backup holds user data and is root-only.
+        assert backup.stat().st_mode & 0o777 == 0o700
     assert rows(server.db) == [1, 99]
 
     calls = server.calls()
