@@ -32,6 +32,33 @@ WEIGHTS = {"structural": 0.40, "market": 0.25, "behavioral": 0.20, "honeypot": 0
 ADMIN_MATCH = {"type": "Local Blacklist", "reason": "Confirmed scam address", "source": "ShieldBot", "severity": "block"}
 GOPLUS_BLOCK = {"type": "GoPlus Security", "reason": "Airdrop scam token", "source": "gopluslabs.io", "severity": "block"}
 GOPLUS_HIGH = {"type": "GoPlus Security", "reason": "Owner can change balance", "source": "gopluslabs.io", "severity": "high"}
+COMMUNITY_MATCH = {
+    "type": "community_reports",
+    "reason": "Reported by 3 users",
+    "source": "ShieldBot",
+    "severity": "medium",
+    "reports": 3,
+}
+# A complete SAFE verdict for TARGET, stored a minute before the test's clock.
+SAFE_ROW = {
+    "risk_score": 0,
+    "risk_level": "LOW",
+    "flags": [],
+    "archetype": "legitimate",
+    "confidence": 90,
+    "scan_count": 1,
+    "last_scanned_at": NOW - 60,
+    "category_scores": {
+        **dict.fromkeys(WEIGHTS, 0),
+        "_scan_metadata": {
+            "status": "ok",
+            "coverage": dict.fromkeys(WEIGHTS, 1),
+            "coverage_reasons": {},
+            "risk_display": "0%",
+            "notes": [],
+        },
+    },
+}
 SWAP = {
     "selector": "38ed1739",
     "function_name": "swapExactTokensForTokens",
@@ -296,6 +323,53 @@ async def test_a_server_without_an_analyzer_registry_still_streams(stream_api, m
     kind, final = parse(streamed.text)[-1]
     assert kind == "final" and final.pop("final") is True
     assert final == plain.json()
+
+
+@pytest.mark.asyncio
+async def test_a_target_without_a_local_entry_is_still_answered_from_the_cache(stream_api):
+    api, services = stream_api
+    services.db.get_contract_score.return_value = SAFE_ROW
+
+    with patch("time.time", return_value=NOW):
+        plain = await post(api)
+        streamed = await post(api, accept="text/event-stream")
+
+    body = plain.json()
+    assert (body["cached"], body["classification"]) == (True, verdicts.SAFE)
+    assert services.db.upsert_contract_score.await_count == 0
+    kind, final = parse(streamed.text)[-1]
+    assert kind == "final" and final.pop("final") is True
+    assert final == body
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "entry, match, classification",
+    [
+        ({"source": "admin", "reports": 0, "expires_at": None}, ADMIN_MATCH, verdicts.BLOCK_RECOMMENDED),
+        ({"source": "community", "reports": 3, "expires_at": None}, COMMUNITY_MATCH, verdicts.CAUTION),
+    ],
+    ids=["admin", "community"],
+)
+async def test_a_target_blacklisted_since_its_cached_row_is_scanned_afresh(stream_api, entry, match, classification):
+    api, services = stream_api
+    services.db.get_contract_score.return_value = SAFE_ROW
+    # The entry arrives after the row was written; the target's scan reports it, as check_address does.
+    api.scam_db.known_scams[(56, TARGET)] = entry
+    services.registry = registry(structural=returns("structural", [match]))
+
+    with patch("time.time", return_value=NOW):
+        plain = await post(api)
+        streamed = await post(api, accept="text/event-stream")
+
+    body = plain.json()
+    assert "cached" not in body
+    assert body["classification"] == classification
+    assert body["risk_score"] >= verdicts.CAUTION_MIN
+    assert services.db.upsert_contract_score.await_count == 2
+    kind, final = parse(streamed.text)[-1]
+    assert kind == "final" and final.pop("final") is True
+    assert final == body
 
 
 @pytest.mark.asyncio

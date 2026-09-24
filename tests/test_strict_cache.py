@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from core.policy import PolicyEngine
+from utils.scam_db import ScamDatabase
 
 UNKNOWN_ROW = {
     "risk_score": 20,
@@ -62,6 +63,7 @@ def strict_api(monkeypatch, mock_web3_client):
     )
     monkeypatch.setattr(api, "container", services)
     monkeypatch.setattr(api, "web3_client", mock_web3_client)
+    monkeypatch.setattr(api, "scam_db", ScamDatabase())
     monkeypatch.setattr(
         api,
         "calldata_decoder",

@@ -1522,8 +1522,10 @@ async def _firewall_verdict(
 
         policy_mode = _policy_mode(request)
 
-        # 2b. Check cache for recent result
-        if container and container.db and not tx_specific:
+        # 2b. Check cache for recent result. A row is up to five minutes old and keeps no scam matches,
+        # so a target with a local blacklist entry (admin or community: both set a floor) is scanned
+        # afresh: an entry added since the row was written must not be answered with the row.
+        if container and container.db and not tx_specific and scam_db.local_match(to_addr, req.chainId) is None:
             cached = await container.db.get_contract_score(to_addr, req.chainId, max_age_seconds=300)
             if cached and cached.get('category_scores', {}).get('_scan_metadata', {}).get('coverage'):
                 # A full rescan costs provider calls, so only a caller with a valid API key can force one

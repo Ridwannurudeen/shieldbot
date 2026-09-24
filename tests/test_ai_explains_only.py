@@ -13,6 +13,7 @@ from core.telegram_formatter import CONTROL_CHARACTERS
 from scanner.transaction_scanner import TransactionScanner
 from utils.ai_analyzer import AIAnalyzer
 from utils.firewall_prompt import FIREWALL_SYSTEM_PROMPT
+from utils.scam_db import ScamDatabase
 
 RISKY_SCAN = {
     "address": "0x" + "a" * 40,
@@ -60,6 +61,7 @@ def fallback_api(monkeypatch, mock_web3_client):
     )
     monkeypatch.setattr(api, "container", services)
     monkeypatch.setattr(api, "web3_client", mock_web3_client)
+    monkeypatch.setattr(api, "scam_db", ScamDatabase())
     monkeypatch.setattr(
         api,
         "calldata_decoder",
