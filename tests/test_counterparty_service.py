@@ -1,6 +1,8 @@
 """Counterparty facts: wallet or contract, verification, age and GoPlus address labels."""
 
 import asyncio
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -134,6 +136,23 @@ async def test_goplus_theft_labels_are_read_and_others_ignored():
     ]
     assert facts["label_source"] == "SlowMist,GoPlus"
     assert facts["coverage"]["labels"] is True
+
+
+LEGITIMATE_SPENDERS = json.loads(
+    (Path(__file__).parent / "fixtures" / "goplus_address_security_spenders.json").read_text(encoding="utf-8")
+)["probes"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("probe", LEGITIMATE_SPENDERS, ids=[p["name"] for p in LEGITIMATE_SPENDERS])
+async def test_recorded_legitimate_spenders_carry_no_theft_label(probe):
+    # Association labels (honeypot_related_address, malicious contracts created) floor at 100, so
+    # the aggregators, marketplaces and routers users approve must not carry them. The record is
+    # read as a non-allowlisted spender's, since Permit2 and the routers skip the lookup.
+    service, _, _ = _service(labels=probe["record"])
+    facts = await service.fetch(SPENDER, probe["chain_id"])
+    assert facts["labels"] == []
+    assert judge_spender(facts, True) == (None, None, False)
 
 
 @pytest.mark.asyncio
