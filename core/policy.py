@@ -8,6 +8,28 @@ from core.analyzer import AnalyzerResult
 
 logger = logging.getLogger(__name__)
 
+# The facts a verdict cannot stand without: the target's verification and age, the scam lookup,
+# sellability, and the counterparty of a grant, a signed permit or a payment. Market data, taxes,
+# bytecode patterns and reputation inform the score, but a gap in them never decides a verdict, so
+# only these fields make an incomplete result a failure.
+REQUIRED_COVERAGE = {
+    'structural': ('is_verified', 'contract_age_days', 'scam_database'),
+    'honeypot': ('is_honeypot', 'can_sell'),
+    'intent': ('selector_verification', 'counterparty'),
+    'signature': ('counterparty',),
+}
+
+
+def _required_unknown(result: AnalyzerResult) -> bool:
+    fields = REQUIRED_COVERAGE.get(result.name, ())
+    if not fields or result.data.get('skipped'):
+        return False
+    coverage = result.data.get('coverage')
+    if not coverage:
+        # An unknown result that does not say which fields it lacks may lack any of them.
+        return result.data.get('status') == 'unknown'
+    return any(coverage.get(field) is False for field in fields)
+
 
 class PolicyMode(Enum):
     STRICT = "STRICT"
@@ -45,13 +67,10 @@ class PolicyEngine:
             except ValueError:
                 pass
 
-        # Providers swallow their failures into unknown results, so an analyzer whose coverage is
-        # below 1 has failed as surely as one that raised. Skipped analyzers are covered.
+        # Providers swallow their failures into unknown results, so an analyzer missing a required
+        # field has failed as surely as one that raised. Skipped analyzers are covered.
         failed_names = [r.name for r in results if r.error is not None]
-        failed_names += [
-            name for name, fraction in risk_output.get('coverage', {}).items()
-            if fraction < 1 and name not in failed_names
-        ]
+        failed_names += [r.name for r in results if r.error is None and _required_unknown(r)]
         is_partial = len(failed_names) > 0
 
         output = dict(risk_output)
