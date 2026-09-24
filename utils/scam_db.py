@@ -218,6 +218,8 @@ class ScamDatabase:
         observed_at = time.time()
         result = {'status': 'unknown', 'reason': 'GoPlus unavailable', 'data': {}}
         try:
+            # The request names no chain, so one breaker covers every chain's lookups.
+            provider_breakers.check('goplus_address')
             url = f"https://api.gopluslabs.io/api/v1/address_security/{address}"
             async with aiohttp.ClientSession() as session:
                 for attempt in range(_GOPLUS_ATTEMPTS):
@@ -243,7 +245,9 @@ class ScamDatabase:
                                 result = {'status': 'ok', 'reason': None, 'data': record}
                     if not retriable:
                         break
+            provider_breakers.record_status('goplus_address', None, resp.status)
         except Exception as e:
+            provider_breakers.record_error('goplus_address', None, e)
             logger.error("Error fetching GoPlus address security: %s", type(e).__name__)
             result['reason'] = f'GoPlus request failed ({type(e).__name__})'
         finally:

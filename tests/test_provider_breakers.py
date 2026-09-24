@@ -83,6 +83,10 @@ def goplus_token():
     return lambda i: ScamDatabase.fetch_token_security(address(i), 56)
 
 
+def goplus_address():
+    return lambda i: ScamDatabase.fetch_address_security(address(i))
+
+
 def goplus_phishing():
     service = PhishingService()
     return lambda i: service.check_url(f"https://site{i}.example/")
@@ -140,6 +144,13 @@ CASES = {
         goplus_token,
         "goplus_token:56",
         ("goplus_token", 56),
+        (200, {"code": 1, "result": {}}),
+    ),
+    "goplus_address": Case(
+        "utils.scam_db.aiohttp.ClientSession",
+        goplus_address,
+        "goplus_address",
+        ("goplus_address", None),
         (200, {"code": 1, "result": {}}),
     ),
     "goplus_phishing": Case(
@@ -206,8 +217,10 @@ def isolated(monkeypatch):
     # GoPlus answers are cached per process; Sourcify is the only verification source asked.
     monkeypatch.delenv("BLOCKSCOUT_API_KEY", raising=False)
     scam_db._GOPLUS_CACHE.clear()
+    scam_db._GOPLUS_ADDRESS_CACHE.clear()
     yield
     scam_db._GOPLUS_CACHE.clear()
+    scam_db._GOPLUS_ADDRESS_CACHE.clear()
 
 
 def failed_count(case: Case) -> int:
