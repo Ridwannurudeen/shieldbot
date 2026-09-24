@@ -152,6 +152,14 @@ def _launch_scan(stored_status, risk_score, scanned_at, finding) -> Dict:
     return scan
 
 
+# How decided a launch's impostor check is: a stored check is only replaced by one at least as decided.
+_IMPOSTOR_CHECK_RANK = {"unknown": 0, "none": 1, "collision": 2, "impostor": 3, "official": 3}
+
+
+def _impostor_check(stored) -> Optional[Dict]:
+    return json.loads(stored) if stored else None
+
+
 def _launch_item(chain_id: int, row, finding) -> Dict:
     (token, source, launchpad, pool_id, block_number, tx_hash, block_timestamp,
      discovered_at, stored_status, risk_score, outcome_at, impostor_check) = row
@@ -166,7 +174,7 @@ def _launch_item(chain_id: int, row, finding) -> Dict:
         "block_timestamp": block_timestamp,
         "discovered_at": discovered_at,
         "scan": _launch_scan(stored_status, risk_score, outcome_at, finding),
-        "impostor_check": json.loads(impostor_check) if impostor_check else None,
+        "impostor_check": _impostor_check(impostor_check),
         "verdict_url": f"/api/verdict/{chain_id}/{token}",
     }
 
@@ -2117,13 +2125,24 @@ class Database:
     async def record_launch_impostor_check(self, chain_id: int, token_address: str, check: Dict):
         """Store a launch's check against the official Robinhood tokens (services.robinhood_assets).
 
-        An unknown check never replaces a stored one, so a failed read cannot erase a decided check.
+        A check never replaces a more decided one (_IMPOSTOR_CHECK_RANK), so a failed read or a shorter
+        list cannot turn an impostor, official or collision finding into none or unknown. The check
+        carries the size of the list it was made against.
         """
-        await self._db.execute("""
-            UPDATE discovered_launches
-            SET impostor_check = CASE WHEN ? AND impostor_check IS NOT NULL THEN impostor_check ELSE ? END
-            WHERE chain_id = ? AND token_address = ?
-        """, (check["status"] == "unknown", json.dumps(check), chain_id, token_address))
+        cursor = await self._db.execute(
+            "SELECT impostor_check FROM discovered_launches WHERE chain_id = ? AND token_address = ?",
+            (chain_id, token_address),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return
+        stored = _impostor_check(row[0])
+        if stored is not None and _IMPOSTOR_CHECK_RANK[check["status"]] < _IMPOSTOR_CHECK_RANK[stored["status"]]:
+            return
+        await self._db.execute(
+            "UPDATE discovered_launches SET impostor_check = ? WHERE chain_id = ? AND token_address = ?",
+            (json.dumps(check), chain_id, token_address),
+        )
         await self._db.commit()
 
     # --- Launch Feed ---
@@ -2261,8 +2280,9 @@ class Database:
         """Queue alerts for the launch outcomes recorded at or after ``since``.
 
         A chat gets outcomes recorded after it subscribed: every one in "all" mode, otherwise
-        only blocked ones. A chat is queued at most one alert per launch and outcome, so passes
-        over the same window, and passes after a restart, never queue an alert twice.
+        only blocked ones and those of impostors of an official Robinhood token. A chat is queued
+        at most one alert per launch and outcome, so passes over the same window, and passes after
+        a restart, never queue an alert twice.
 
         A blocked launch whose evidence is not stored yet is held back for up to
         _BLOCKED_EVIDENCE_WAIT_SECONDS. Returns the outcome time of the oldest one held, which
@@ -2284,9 +2304,13 @@ class Database:
         for row in await cursor.fetchall():
             token, stored_status, outcome_at = row[0], row[8], row[10]
             outcome = _launch_outcome(stored_status, outcome_at)
+            impostor_check = _impostor_check(row[11])
+            alerting = outcome == "blocked" or (
+                impostor_check is not None and impostor_check["status"] == "impostor"
+            )
             chats = [
                 chat_id for chat_id, mode, created_at in subscriptions
-                if created_at <= outcome_at and (mode == "all" or outcome == "blocked")
+                if created_at <= outcome_at and (mode == "all" or alerting)
             ]
             if not chats:
                 continue

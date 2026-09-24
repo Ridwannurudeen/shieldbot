@@ -100,6 +100,7 @@ _LAUNCH_ALERT_HEADERS = {
     'cleared': '🟢 CLEARED: a complete scan found no major risks',
 }
 _UNKNOWN_LAUNCH_HEADER = '⚪ UNKNOWN: scan incomplete, not a safety verdict'
+_IMPOSTOR_LAUNCH_HEADER = '🚨 IMPOSTOR: impersonates official {} token; official contract {}'
 _launch_alert_task = None
 
 
@@ -227,7 +228,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **/threats** - Live mempool threat alerts
 **/campaign <address>** - Check if address is part of a scam campaign
 **/report <address> <reason>** - Report a scam address
-**/launchalerts** - Alert this chat to blocked Robinhood Chain launches (`/launchalerts all` for every launch)
+**/launchalerts** - Alert this chat to blocked Robinhood Chain launches and impostors of official tokens (`/launchalerts all` for every launch)
 **/stopalerts** - Stop launch alerts
 **/help** - Show this help message
 
@@ -712,8 +713,8 @@ async def launch_alerts_command(update: Update, context: ContextTypes.DEFAULT_TY
         )
     else:
         text = (
-            "🔔 Robinhood Chain launch alerts are on for blocked launches: honeypots and other "
-            "high-risk tokens.\n\n"
+            "🔔 Robinhood Chain launch alerts are on for blocked launches (honeypots and other "
+            "high-risk tokens) and impostors of official Robinhood tokens.\n\n"
             "Send /launchalerts all for every scanned launch, or /stopalerts to stop."
         )
     await update.message.reply_text(text)
@@ -733,27 +734,35 @@ def format_launch_alert(item: dict) -> str:
     """Plain-text alert for one launch outcome from the launch feed.
 
     An incomplete scan is headed UNKNOWN unless it is blocked, so it never reads as safe, and
-    its partial score is not shown. An impostor of an official Robinhood token is flagged first.
+    its partial score is not shown. An impostor of an official Robinhood token is headed IMPOSTOR,
+    whatever its scan found, and never under a CLEARED heading.
     """
     scan = item['scan']
     header = _LAUNCH_ALERT_HEADERS.get(scan['outcome'])
     if header is None or (scan['status'] != 'ok' and scan['outcome'] != 'blocked'):
         header = _UNKNOWN_LAUNCH_HEADER
-    lines = [header, f"Token: {item['token_address']}", f"Launchpad: {item['launchpad']}"]
+    headings, flags = [header], scan['flags']
+    check = item.get('impostor_check') or {}
+    if check.get('status') == 'impostor':
+        official = (check['symbol'], check['official_address'])
+        headings = [_IMPOSTOR_LAUNCH_HEADER.format(*official)]
+        if header != _LAUNCH_ALERT_HEADERS['cleared']:
+            headings.append(header)
+        # A blocked launch's evidence repeats the heading as its first flag.
+        flags = [flag for flag in flags if flag != IMPOSTOR_FLAG.format(*official)]
+    lines = [*headings, f"Token: {item['token_address']}", f"Launchpad: {item['launchpad']}"]
     if header != _UNKNOWN_LAUNCH_HEADER and scan['risk_score'] is not None:
         lines.append(f"Risk score: {scan['risk_score']:g}/100")
-    flags = scan['flags']
-    impostor_check = item.get('impostor_check')
-    if impostor_check and impostor_check['status'] == 'impostor':
-        # A blocked launch's evidence already leads with the flag; other outcomes carry only the check.
-        label = IMPOSTOR_FLAG.format(impostor_check['symbol'])
-        flags = [label, *(flag for flag in flags if flag != label)]
     lines += [f"• {CONTROL_CHARACTERS.sub(' ', flag)[:150]}" for flag in flags[:3]]
     if scan['status'] != 'ok':
         reasons = '; '.join(dict.fromkeys(
             CONTROL_CHARACTERS.sub(' ', reason) for reason in scan['coverage_reasons'].values()
         )) or 'Provider data unavailable or incomplete'
         lines.append(f"Unknown: {reasons[:300]}")
+    if check.get('status') == 'unknown':
+        lines.append(f"Official token check: unknown ({CONTROL_CHARACTERS.sub(' ', check['reason'])})")
+    elif check.get('status') == 'official':
+        lines.append(f"Official {check['symbol']} token")
     lines.append(f"Evidence: {VERDICT_BASE_URL}{item['verdict_url']}")
     explorer = get_explorer_url(item['chain_id'])
     if explorer:

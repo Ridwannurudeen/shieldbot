@@ -55,9 +55,11 @@ def format_full_report(
     if incomplete and risk_level == 'LOW':
         risk_level = 'UNKNOWN'
     coverage_reasons = risk_output.get('coverage_reasons', {})
+    impostor_check = risk_output.get('impostor_check')
+    impostor = impostor_check is not None and impostor_check['status'] == 'impostor'
 
     # Verdict emoji
-    if rug_prob >= 71:
+    if impostor or rug_prob >= 71:
         verdict_icon = '\U0001F6A8'  # 🚨
     elif rug_prob >= 50:
         verdict_icon = '\U0001F534'  # 🔴
@@ -78,16 +80,28 @@ def format_full_report(
         lines.append(f'*Address:* `{address}`')
     else:
         lines.append(f'*Target:* `{address}`')
-    impostor_check = risk_output.get('impostor_check')
-    if impostor_check:
+    has_metadata = bool(token_info and (token_info.get('name') or token_info.get('symbol')))
+    # A wallet, or a target whose name and symbol could not be read, has no token to check.
+    if impostor_check and contract_data.get('is_contract') is not False and (
+        has_metadata or impostor_check['status'] == 'official'
+    ):
         status = impostor_check['status']
-        if status == 'impostor':
-            detail = (
-                f'\U000026A0 Impersonates official {escape_markdown(impostor_check["symbol"])} token; '
-                f'the official one is `{impostor_check["official_address"]}`'
-            )
+        if status in ('impostor', 'collision'):
+            official = escape_markdown(impostor_check['symbol'])
+            contract = f'official contract `{impostor_check["official_address"]}`'
+            if status == 'impostor':
+                detail = f'\U000026A0 Impersonates official {official} token; {contract}'
+            else:
+                same = 'ticker' if 'symbol' in impostor_check['matched_by'] else 'name'
+                detail = f'Not the official {official} token (same {same}); {contract}'
+            also = impostor_check['also']
+            if also:
+                detail += (
+                    f'; also resembles official {escape_markdown(also["symbol"])} token, '
+                    f'contract `{also["official_address"]}`'
+                )
         elif status == 'official':
-            detail = f'Official {escape_markdown(impostor_check["symbol"])} token on Robinhood Chain'
+            detail = f'Official {escape_markdown(impostor_check["symbol"])} token (Robinhood)'
         elif status == 'none':
             detail = 'No match among official Robinhood Chain tokens'
         else:
@@ -217,7 +231,12 @@ def format_full_report(
 
     # Final verdict
     lines.append('*Final Verdict:*')
-    if rug_prob >= 71:
+    if impostor:
+        lines.append(
+            f'{verdict_icon} Impersonates official {escape_markdown(impostor_check["symbol"])}: '
+            'do not treat as the real token'
+        )
+    elif rug_prob >= 71:
         detail = 'Unknown risk: provider coverage incomplete' if incomplete else f'Rug probability {rug_prob}%'
         lines.append(f'{verdict_icon} DO NOT PROCEED — {detail}')
     elif rug_prob >= 31 or incomplete or risk_level in ('MEDIUM', 'HIGH'):

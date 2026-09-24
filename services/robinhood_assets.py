@@ -1,28 +1,37 @@
-"""Official Robinhood Chain (4663) tokens, and a check for tokens that impersonate them.
+"""Official Robinhood Chain (4663) tokens, and a check for tokens that pass themselves off as them.
 
 Robinhood publishes the tokenised stocks it issues at OFFICIAL_ASSETS_URL. Fetched on 2026-09-24 it
 listed 195 assets, each with a tokenSymbol, a tokenName of the form "<Company> • Robinhood Token"
 (also the contract's on-chain name) and one chainId 4663 deployment with its contractAddress. The
 list does not carry the chain's canonical WETH and USDG, so they are always added.
 
-A token that is not at an official address impersonates an official token when its symbol matches
-that token's symbol, or its name the company or full name. Matching ignores case, spacing and
-punctuation, folds compatibility forms (NFKC) and Cyrillic and Greek letters drawn like Latin ones,
-and reads a 0 as an O. A symbol of three or more characters also matches with one extra leading or
-trailing x, w or t (NVDAX, wNVDA); shorter ones must match exactly, so TON, XP and TF are not read as
-the official ON, P and F.
+A token at an official address is official. Any other token's symbol and name are compared with each
+official token's ticker and company name. A company name drops a trailing Inc., Corp., Corporation,
+Holdings, Class A, Common Stock, ETF or Trust, and a token's name may add token, stock, shares,
+robinhood, rh, x or xstock to it ("Tesla Stock", "NVIDIA • Robinhood Token"). The symbol points at
+an official token when it is the ticker, the ticker with one leading or trailing x, w or t or a
+separated suffix (NVDAX, wNVDA, TSLA.d), or the company name; the name points at it when it is the
+company name. A ticker of one or two characters takes no affix and never points on its own.
 
-A check is official, impostor, none (no match against the complete list) or unknown: without the
-list only the canonical tokens can be matched, and without a token's symbol and name only its
-address can.
+- impostor: the symbol and the name point at the same official token; or the name says Robinhood
+  besides the company; or a pointer only matches once look-alike characters are folded (accents,
+  compatibility forms, Cyrillic and Greek letters drawn like Latin ones, 0 1 l | 5 8).
+- collision: a pointer on its own, such as the same ticker under another name.
+- none: nothing points at an official token on the complete list.
+- unknown: without the list only the canonical tokens can be matched, and without the token's
+  symbol and name only its address.
+
+When the symbol and the name point at different official tokens the stronger match is reported, the
+symbol's first between equals, and the other one as ``also``.
 """
 
 import asyncio
+import json
 import logging
 import re
 import time
 import unicodedata
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import aiohttp
 from eth_abi import decode
@@ -39,30 +48,45 @@ CACHE_TTL_SECONDS = 6 * 3600
 # After a failed fetch the list is not asked for again for five minutes, so scans do not each wait on it.
 RETRY_SECONDS = 300
 TIMEOUT_SECONDS = 10
+# The list was 163 KB on 2026-09-24, and a symbol() and name() reply is two short ABI strings.
+MAX_LIST_BYTES = 1_000_000
+MAX_RPC_REPLY_BYTES = 65_536
+# A new list this much smaller than the last good one is taken to be truncated.
+MIN_LIST_FRACTION = 0.8
 # Symbol and name as each contract returned them on 2026-09-24.
 CANONICAL_TOKENS = {WETH: ("WETH", "WETH"), USDG: ("USDG", "Global Dollar")}
-OFFICIAL_NAME_SUFFIX = " \N{BULLET} Robinhood Token"
 AFFIXES = "xwt"
-MIN_AFFIX_SYMBOL_LENGTH = 3
-IMPOSTOR_FLAG = "Impersonates official {} token"
+MIN_TICKER_LENGTH = 3
+CORPORATE_SUFFIXES = (
+    ("common", "stock"),
+    ("class", "a"),
+    ("inc",),
+    ("corp",),
+    ("corporation",),
+    ("holdings",),
+    ("etf",),
+    ("trust",),
+)
+TOKEN_WORDS = frozenset({"token", "stock", "shares", "robinhood", "rh", "x", "xstock"})
+IMPOSTOR_FLAG = "Impersonates official {} token; official contract {}"
 SYMBOL_SELECTOR = "0x95d89b41"
 NAME_SELECTOR = "0x06fdde03"
 
 _ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
 _HEX = re.compile(r"0x(?:[0-9a-fA-F]{2})*")
-_NOT_ALPHANUMERIC = re.compile(r"[^a-z0-9]")
-# Lower-case Cyrillic and Greek letters drawn like Latin ones, and the digit 0, by code point.
+_NOT_ALPHANUMERIC = re.compile(r"[^a-z0-9]+")
+# Lower-case Cyrillic and Greek letters drawn like Latin ones, and digits and marks read as letters, by code point.
 _LOOKALIKES = str.maketrans(
     {
         code: latin
         for latin, codes in {
             "a": (0x0430, 0x03B1),
-            "b": (0x0432, 0x03B2),
+            "b": (0x0432, 0x03B2, 0x38),
             "c": (0x0441,),
             "d": (0x0501,),
             "e": (0x0435, 0x03B5),
             "h": (0x043D, 0x03B7),
-            "i": (0x0456, 0x03B9),
+            "i": (0x0456, 0x03B9, 0x31, 0x6C, 0x7C),
             "j": (0x0458,),
             "k": (0x043A, 0x03BA),
             "m": (0x043C, 0x03BC),
@@ -70,7 +94,7 @@ _LOOKALIKES = str.maketrans(
             "o": (0x043E, 0x03BF, 0x30),
             "p": (0x0440, 0x03C1),
             "q": (0x051B,),
-            "s": (0x0455,),
+            "s": (0x0455, 0x35),
             "t": (0x0442, 0x03C4),
             "w": (0x051D,),
             "x": (0x0445, 0x03C7),
@@ -80,21 +104,26 @@ _LOOKALIKES = str.maketrans(
         for code in codes
     }
 )
+_FOLDED_NAME_WORDS = (
+    tuple(tuple(word.translate(_LOOKALIKES) for word in suffix) for suffix in CORPORATE_SUFFIXES),
+    frozenset(word.translate(_LOOKALIKES) for word in TOKEN_WORDS),
+)
 
 
 def parse_official_assets(payload) -> Dict[str, Tuple[str, str]]:
     """Map each official 4663 contract address, lower-cased, to its (symbol, name).
 
-    Raises ValueError for a list with any malformed entry or no 4663 token, so a changed or broken
-    response never replaces a good list.
+    Malformed entries are skipped and counted. Raises ValueError when there is no asset list or no
+    4663 token in it.
     """
     assets = payload.get("assets") if isinstance(payload, dict) else None
     if not isinstance(assets, list):
         raise ValueError("No asset list")
-    tokens = {}
+    tokens, skipped = {}, 0
     for asset in assets:
         if not isinstance(asset, dict):
-            raise ValueError("Malformed asset")
+            skipped += 1
+            continue
         symbol, name, deployments = (
             asset.get("tokenSymbol"),
             asset.get("tokenName"),
@@ -107,47 +136,133 @@ def parse_official_assets(payload) -> Dict[str, Tuple[str, str]]:
             and name
             and isinstance(deployments, list)
         ):
-            raise ValueError("Malformed asset")
+            skipped += 1
+            continue
         for deployment in deployments:
             address = deployment.get("contractAddress") if isinstance(deployment, dict) else None
             if not isinstance(address, str) or not _ADDRESS.fullmatch(address):
-                raise ValueError("Malformed deployment")
-            if deployment.get("chainId") == CHAIN_ID:
+                skipped += 1
+            elif deployment.get("chainId") == CHAIN_ID:
                 tokens[address.lower()] = (symbol, name)
+    if skipped:
+        logger.warning("Robinhood official token list: skipped %d malformed entries", skipped)
     if not tokens:
         raise ValueError("No Robinhood Chain tokens listed")
     return tokens
 
 
-def _normalize(text: str) -> str:
-    folded = unicodedata.normalize("NFKC", text).casefold().translate(_LOOKALIKES)
-    return _NOT_ALPHANUMERIC.sub("", folded)
+def _words(text: str, fold: bool) -> List[str]:
+    """Lower-case alphanumeric words; ``fold`` first turns look-alike characters into the letters they imitate."""
+    if fold:
+        decomposed = unicodedata.normalize("NFD", unicodedata.normalize("NFKC", text))
+        text = (
+            "".join(char for char in decomposed if not unicodedata.combining(char))
+            .casefold()
+            .translate(_LOOKALIKES)
+        )
+    else:
+        text = text.casefold()
+    return [word for word in _NOT_ALPHANUMERIC.split(text) if word]
 
 
-def _symbol_matches(symbol: str, official: str) -> bool:
-    """Whether a normalized symbol is an official one, or one with a single affix when that is long enough."""
-    if not symbol:
-        return False
-    if symbol == official:
-        return True
-    if len(official) < MIN_AFFIX_SYMBOL_LENGTH or len(symbol) != len(official) + 1:
-        return False
-    return (symbol[0] in AFFIXES and symbol[1:] == official) or (
-        symbol[-1] in AFFIXES and symbol[:-1] == official
+def _company(words: List[str], fold: bool) -> str:
+    """A name without the legal suffixes and token words around its company name, as one word.
+
+    Folded words are compared with folded suffixes and token words ("holdings" folds to "hoidings").
+    """
+    suffixes, token_words = _FOLDED_NAME_WORDS if fold else (CORPORATE_SUFFIXES, TOKEN_WORDS)
+    words = list(words)
+    while True:
+        suffix = next(
+            (
+                suffix
+                for suffix in suffixes
+                if len(words) > len(suffix) and tuple(words[-len(suffix) :]) == suffix
+            ),
+            None,
+        )
+        if suffix is not None:
+            del words[-len(suffix) :]
+        elif len(words) > 1 and words[-1] in token_words:
+            words.pop()
+        else:
+            return "".join(word for word in words if word not in token_words)
+
+
+def _symbol_points(words: List[str], ticker: str, company: str) -> Optional[str]:
+    """How a symbol's words name an official token: "ticker", "affix", "company", or None."""
+    joined = "".join(words)
+    if not joined:
+        return None
+    if joined == ticker:
+        return "ticker"
+    if joined == company:
+        return "company"
+    if len(ticker) < MIN_TICKER_LENGTH:
+        return None
+    if len(joined) == len(ticker) + 1 and (
+        (joined[0] in AFFIXES and joined[1:] == ticker)
+        or (joined[-1] in AFFIXES and joined[:-1] == ticker)
+    ):
+        return "affix"
+    return "affix" if len(words) > 1 and ticker in (words[0], words[-1]) else None
+
+
+def _classify(
+    observed: Dict[bool, Tuple], official_symbol: str, official_name: str
+) -> Optional[Tuple[str, str]]:
+    """(status, matched_by) of a token against one official token, or None when nothing points at it."""
+    pointers = {}
+    for fold, (symbol_words, name_words) in observed.items():
+        ticker, company = (
+            "".join(_words(official_symbol, fold)),
+            _company(_words(official_name, fold), fold),
+        )
+        by_symbol = (
+            _symbol_points(symbol_words, ticker, company) if symbol_words is not None else None
+        )
+        name = _company(name_words, fold) if name_words is not None else ""
+        pointers[fold] = (by_symbol, bool(name) and name == company)
+    (raw_symbol, raw_name), (folded_symbol, folded_name) = pointers[False], pointers[True]
+    by_symbol, by_name = raw_symbol or folded_symbol, raw_name or folded_name
+    if not (by_symbol or by_name):
+        return None
+    matched_by = "symbol and name" if by_symbol and by_name else "symbol" if by_symbol else "name"
+    # A short ticker is too common to point on its own.
+    symbol_alone = by_symbol is not None and not (
+        by_symbol == "ticker" and len(official_symbol) < MIN_TICKER_LENGTH
     )
+    says_robinhood = observed[True][1] is not None and "robinhood" in observed[True][1]
+    # Corroborated: the symbol and name agree, the name also claims Robinhood, or a pointer needed folding.
+    if (
+        (by_symbol and by_name)
+        or (by_name and says_robinhood)
+        or (symbol_alone and not raw_symbol)
+        or (by_name and not raw_name)
+    ):
+        return "impostor", matched_by
+    if symbol_alone or by_name:
+        return "collision", matched_by
+    return None
 
 
 def _result(
     status: str,
     symbol: Optional[str] = None,
     official_address: Optional[str] = None,
+    matched_by: Optional[str] = None,
+    also: Optional[Dict] = None,
     reason: Optional[str] = None,
+    list_size: Optional[int] = None,
 ) -> Dict:
     return {
         "status": status,
         "symbol": symbol,
         "official_address": official_address,
+        "matched_by": matched_by,
+        "also": also,
         "reason": reason,
+        "list_size": list_size,
     }
 
 
@@ -159,28 +274,41 @@ def check_token(
 ) -> Dict:
     """Classify a 4663 token against the official tokens ``listed`` (None when the list is unavailable).
 
-    ``symbol`` and ``name`` are None when they could not be read. ``symbol`` in the result is the
-    official token matched.
+    ``symbol`` and ``name`` are None when they could not be read. The result's ``symbol`` is the
+    official token matched and ``list_size`` the number of official tokens it was checked against.
     """
     tokens = {**(listed or {}), **CANONICAL_TOKENS}
+    list_size = len(listed) if listed is not None else None
     address = address.lower()
     if address in tokens:
-        return _result("official", tokens[address][0], address)
-    observed_symbol = _normalize(symbol) if symbol is not None else ""
-    observed_name = _normalize(name) if name is not None else ""
+        return _result("official", tokens[address][0], address, list_size=list_size)
+    observed = {
+        fold: (
+            _words(symbol, fold) if symbol is not None else None,
+            _words(name, fold) if name is not None else None,
+        )
+        for fold in (False, True)
+    }
+    matches = []
     for official_address, (official_symbol, official_name) in tokens.items():
-        official = _normalize(official_symbol)
-        names = {
-            _normalize(official_name),
-            _normalize(official_name.removesuffix(OFFICIAL_NAME_SUFFIX)),
-        }
-        if _symbol_matches(observed_symbol, official) or (observed_name and observed_name in names):
-            return _result("impostor", official_symbol, official_address)
+        found = _classify(observed, official_symbol, official_name)
+        if found is not None:
+            matches.append((found, official_symbol, official_address))
+    if matches:
+        # The strongest match first, and the one the symbol names first between equals.
+        matches.sort(
+            key=lambda match: (match[0][0] == "impostor", "symbol" in match[0][1]), reverse=True
+        )
+        ((status, matched_by), official_symbol, official_address), *others = matches
+        also = {"symbol": others[0][1], "official_address": others[0][2]} if others else None
+        return _result(
+            status, official_symbol, official_address, matched_by, also, list_size=list_size
+        )
     if listed is None:
         return _result("unknown", reason="Official Robinhood token list unavailable")
     if symbol is None or name is None:
-        return _result("unknown", reason="Token symbol or name unavailable")
-    return _result("none")
+        return _result("unknown", reason="Token symbol or name unavailable", list_size=list_size)
+    return _result("none", list_size=list_size)
 
 
 def with_impostor_check(scan: Dict, check: Dict) -> Dict:
@@ -188,7 +316,7 @@ def with_impostor_check(scan: Dict, check: Dict) -> Dict:
     labelled = {**scan, "impostor_check": check}
     if check["status"] == "impostor":
         labelled["critical_flags"] = [
-            IMPOSTOR_FLAG.format(check["symbol"]),
+            IMPOSTOR_FLAG.format(check["symbol"], check["official_address"]),
             *scan.get("critical_flags", []),
         ]
     return labelled
@@ -204,11 +332,23 @@ def _decode_string(result) -> Optional[str]:
         return None
 
 
+async def _read_capped(response, limit: int) -> bytes:
+    """A response body of at most ``limit`` bytes; ValueError for a longer one."""
+    body = b""
+    while len(body) <= limit:
+        chunk = await response.content.read(limit + 1 - len(body))
+        if not chunk:
+            return body
+        body += chunk
+    raise ValueError("Response too large")
+
+
 class RobinhoodAssets:
     """Holds the official token list and checks 4663 tokens against it.
 
-    The list is refetched once it is CACHE_TTL_SECONDS old. A failed fetch keeps the last good list;
-    until one succeeds, checks that need it report unknown.
+    The list is refetched once it is CACHE_TTL_SECONDS old. A failed fetch, or a list under
+    MIN_LIST_FRACTION of the last good one, keeps the last good list; until one succeeds, checks
+    that need it report unknown.
     """
 
     def __init__(self, rpc_url: str):
@@ -224,13 +364,24 @@ class RobinhoodAssets:
             now = time.time()
             if now - self._fetched_at >= CACHE_TTL_SECONDS and now >= self._retry_at:
                 try:
-                    self._listed = await self._fetch()
-                    self._fetched_at = time.time()
+                    listed = await self._fetch()
                 except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
                     self._retry_at = time.time() + RETRY_SECONDS
                     logger.warning(
                         "Robinhood official token list fetch failed: %s", type(exc).__name__
                     )
+                else:
+                    if self._listed is not None and len(listed) < MIN_LIST_FRACTION * len(
+                        self._listed
+                    ):
+                        self._retry_at = time.time() + RETRY_SECONDS
+                        logger.warning(
+                            "Robinhood official token list shrank from %d to %d tokens; keeping the last good list",
+                            len(self._listed),
+                            len(listed),
+                        )
+                    else:
+                        self._listed, self._fetched_at = listed, time.time()
         return self._listed
 
     async def _fetch(self) -> Dict[str, Tuple[str, str]]:
@@ -240,17 +391,25 @@ class RobinhoodAssets:
             async with session.get(OFFICIAL_ASSETS_URL) as response:
                 if response.status != 200:
                     raise ValueError(f"HTTP {response.status}")
-                payload = await response.json(content_type=None)
-        return parse_official_assets(payload)
+                body = await _read_capped(response, MAX_LIST_BYTES)
+        return parse_official_assets(json.loads(body))
 
     async def check(self, address: str, symbol: Optional[str], name: Optional[str]) -> Dict:
         """Check a token whose symbol and name were already read; None where one could not be."""
         return check_token(address, symbol, name, await self.listed())
 
-    async def check_onchain(self, address: str) -> Dict:
-        """Read the token's symbol() and name() in one batched JSON-RPC request, then check it."""
-        symbol, name = await self._read_metadata(address)
-        return await self.check(address, symbol, name)
+    async def check_onchain(self, address: str, timeout: float) -> Dict:
+        """Read the token's symbol() and name() in one batched JSON-RPC request, then check it.
+
+        A check still running after ``timeout`` seconds is unknown.
+        """
+        try:
+            async with asyncio.timeout(timeout):
+                symbol, name = await self._read_metadata(address)
+                return await self.check(address, symbol, name)
+        except TimeoutError:
+            logger.warning("Robinhood official token check timed out")
+            return _result("unknown", reason="Official token check timed out")
 
     async def _read_metadata(self, address: str) -> Tuple[Optional[str], Optional[str]]:
         body = [
@@ -268,7 +427,11 @@ class RobinhoodAssets:
             ) as session:
                 async with session.post(self._rpc_url, json=body) as response:
                     status = response.status
-                    rows = await response.json(content_type=None) if status == 200 else None
+                    rows = (
+                        json.loads(await _read_capped(response, MAX_RPC_REPLY_BYTES))
+                        if status == 200
+                        else None
+                    )
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
             logger.warning("Robinhood token metadata read failed: %s", type(exc).__name__)
             return None, None
@@ -277,5 +440,10 @@ class RobinhoodAssets:
                 "Robinhood token metadata read failed: unexpected reply (HTTP %d)", status
             )
             return None, None
-        results = {row.get("id"): row.get("result") for row in rows if isinstance(row, dict)}
+        # JSON true is not an id: in a dict it would stand in for 1.
+        results = {
+            row["id"]: row.get("result")
+            for row in rows
+            if isinstance(row, dict) and type(row.get("id")) is int
+        }
         return _decode_string(results.get(0)), _decode_string(results.get(1))

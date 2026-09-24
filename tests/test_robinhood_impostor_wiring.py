@@ -1,5 +1,6 @@
 """Robinhood Chain scans, launch records, alerts and bot reports carry the official-token check."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -8,26 +9,31 @@ import pytest_asyncio
 from agent.hunter import Hunter
 from agent.tools import AgentTools
 from core.database import Database
+from core.registry import RUN_ALL_DEADLINE_SECONDS
 from core.telegram_formatter import format_full_report
 from services.robinhood_assets import check_token
 from tests.test_bot_app import CHAIN, CHAT_A, TOKENS, _scan, _subscribe, alerts, bot_module  # noqa: F401
 from tests.test_guard_rescan import confirmed, measurement, now, publisher_for  # noqa: F401
-from tests.test_robinhood_assets import AMD, LISTED, NVDA
+from tests.test_robinhood_assets import AMD, LISTED, NVDA, TSLA
 from tests.test_telegram_markdown import assert_literal
 from tests.test_verdict_wiring import bot_scan_functions, update  # noqa: F401
 
 TOKEN = TOKENS[0]
 IMPOSTOR = check_token(TOKEN, "NVDA", "NVIDIA", LISTED)
+COLLISION = check_token(TOKEN, "AMD", "Advanced Micro Dog", LISTED)
+OFFICIAL = check_token(NVDA, None, None, LISTED)
 NO_MATCH = check_token(TOKEN, "MOON", "Moon", LISTED)
 UNKNOWN = check_token(TOKEN, None, None, LISTED)
+IMPOSTOR_FLAG = f"Impersonates official NVDA token; official contract {NVDA}"
+IMPOSTOR_HEADER = f"\N{POLICE CARS REVOLVING LIGHT} IMPOSTOR: impersonates official NVDA token; official contract {NVDA}"
 
 
 # --- AgentTools: the scan every hunter path uses ---------------------------------------------
 
 
-def _tools(check):
+def _tools(check, run_all=None):
     container = MagicMock()
-    container.registry.run_all = AsyncMock(return_value=[])
+    container.registry.run_all = run_all or AsyncMock(return_value=[])
     container.risk_engine.compute_from_results = MagicMock(
         return_value={"rug_probability": 20, "critical_flags": ["New pair (<24h)"]}
     )
@@ -41,13 +47,40 @@ async def test_a_4663_scan_leads_with_the_impostor_flag_and_keeps_its_score():
 
     result = await tools.scan_contract("0x" + "Ab" * 20, chain_id=4663)
 
-    container.robinhood_assets.check_onchain.assert_awaited_once_with("0x" + "ab" * 20)
+    container.robinhood_assets.check_onchain.assert_awaited_once_with(
+        "0x" + "ab" * 20, RUN_ALL_DEADLINE_SECONDS
+    )
     assert result == {
         "rug_probability": 20,
-        "critical_flags": ["Impersonates official NVDA token", "New pair (<24h)"],
+        "critical_flags": [IMPOSTOR_FLAG, "New pair (<24h)"],
         "honeypot_data": None,
         "impostor_check": IMPOSTOR,
     }
+
+
+@pytest.mark.asyncio
+async def test_a_background_scan_checks_within_its_own_deadline():
+    tools, container = _tools(NO_MATCH)
+
+    await tools.scan_contract(TOKEN, chain_id=4663, deadline=45)
+
+    container.robinhood_assets.check_onchain.assert_awaited_once_with(TOKEN, 45)
+
+
+@pytest.mark.asyncio
+async def test_the_check_runs_alongside_the_analyzers():
+    checking = asyncio.Event()
+
+    async def run_all(ctx, deadline=None):
+        await asyncio.wait_for(checking.wait(), 1)
+        return []
+
+    tools, container = _tools(NO_MATCH, run_all=run_all)
+    container.robinhood_assets.check_onchain = AsyncMock(
+        side_effect=lambda *args: checking.set() or NO_MATCH
+    )
+
+    assert (await tools.scan_contract(TOKEN, chain_id=4663))["impostor_check"] == NO_MATCH
 
 
 @pytest.mark.asyncio
@@ -60,7 +93,7 @@ async def test_other_chains_are_not_checked():
     assert "impostor_check" not in result
 
 
-# --- Hunter: the check is stored with the launch -----------------------------------------------
+# --- Hunter and database: the check is stored with the launch ----------------------------------
 
 
 @pytest_asyncio.fixture
@@ -152,6 +185,29 @@ async def test_an_unknown_check_or_a_failed_scan_keeps_a_decided_check(db):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stored, new, kept",
+    [
+        (IMPOSTOR, NO_MATCH, IMPOSTOR),
+        (IMPOSTOR, COLLISION, IMPOSTOR),
+        (OFFICIAL, NO_MATCH, OFFICIAL),
+        (COLLISION, NO_MATCH, COLLISION),
+        (COLLISION, IMPOSTOR, IMPOSTOR),
+        (NO_MATCH, COLLISION, COLLISION),
+        (UNKNOWN, NO_MATCH, NO_MATCH),
+        (NO_MATCH, NO_MATCH, NO_MATCH),
+    ],
+)
+async def test_a_weaker_check_never_replaces_a_stronger_one(db, stored, new, kept):
+    await _discover(db)
+
+    await db.record_launch_impostor_check(CHAIN, TOKEN, stored)
+    await db.record_launch_impostor_check(CHAIN, TOKEN, new)
+
+    assert await _stored(db) == kept
+
+
+@pytest.mark.asyncio
 async def test_a_recheck_decides_a_check_the_launch_scan_could_not(db):
     await _discover(db)
     hunter = _hunter(db, _watching(UNKNOWN), _watching(NO_MATCH))
@@ -207,6 +263,19 @@ async def test_a_launch_table_from_before_the_check_gains_it(tmp_path):
         await reopened.close()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("check, queued", [(IMPOSTOR, True), (COLLISION, False), (NO_MATCH, False)])
+async def test_an_impostor_launch_alerts_chats_subscribed_to_blocked_launches(db, check, queued):
+    await _subscribe(db, CHAT_A, "blocked")
+    await _scan(db, TOKEN, "cleared", 10, at=990.0)
+    await db.record_launch_impostor_check(CHAIN, TOKEN, check)
+
+    await db.enqueue_launch_alerts(CHAIN, 900.0)
+
+    pending = await db.get_pending_launch_alerts(1000.0, 3600, 5, 5)
+    assert [alert["token_address"] for alert in pending] == ([TOKEN] if queued else [])
+
+
 # --- Launch alerts -------------------------------------------------------------------------------
 
 ITEM = {
@@ -226,43 +295,81 @@ CLEARED = {
 }
 
 
-def test_an_impostor_launch_alert_is_labelled_first(bot_module):
-    text = bot_module.format_launch_alert({**ITEM, "scan": CLEARED, "impostor_check": IMPOSTOR})
-
-    assert text.splitlines()[4] == "• Impersonates official NVDA token"
+def _alert(bot, scan, check):
+    return bot.format_launch_alert({**ITEM, "scan": scan, "impostor_check": check}).splitlines()
 
 
-def test_a_blocked_launch_carrying_the_flag_is_labelled_once(bot_module):
-    flags = ["Impersonates official NVDA token", "Honeypot detected"]
-    scan = {**CLEARED, "outcome": "blocked", "risk_score": 90, "flags": flags}
+def test_an_impostor_is_never_alerted_under_a_cleared_heading(bot_module):
+    lines = _alert(bot_module, CLEARED, IMPOSTOR)
 
-    text = bot_module.format_launch_alert({**ITEM, "scan": scan, "impostor_check": IMPOSTOR})
+    assert lines[:3] == [IMPOSTOR_HEADER, f"Token: {TOKEN}", "Launchpad: LONG"]
+    assert not any("CLEARED" in line or line.startswith("\N{LARGE GREEN CIRCLE}") for line in lines)
 
-    assert [line for line in text.splitlines() if line.startswith("• ")] == [
-        f"• {flag}" for flag in flags
+
+def test_a_blocked_impostor_keeps_its_heading_and_is_labelled_once(bot_module):
+    scan = {
+        **CLEARED,
+        "outcome": "blocked",
+        "risk_score": 90,
+        "flags": [IMPOSTOR_FLAG, "Honeypot detected"],
+    }
+
+    lines = _alert(bot_module, scan, IMPOSTOR)
+
+    assert lines[:2] == [
+        IMPOSTOR_HEADER,
+        "\N{LARGE RED CIRCLE} BLOCKED: high-risk Robinhood Chain launch",
     ]
+    assert [line for line in lines if line.startswith("• ")] == ["• Honeypot detected"]
 
 
-@pytest.mark.parametrize("check", [None, NO_MATCH, UNKNOWN, check_token(NVDA, None, None, LISTED)])
-def test_other_launches_are_not_labelled(bot_module, check):
-    text = bot_module.format_launch_alert({**ITEM, "scan": CLEARED, "impostor_check": check})
+def test_an_incomplete_impostor_scan_stays_unknown_without_a_score(bot_module):
+    scan = {
+        **CLEARED,
+        "status": "unknown",
+        "coverage_reasons": {"honeypot": "Simulation unavailable"},
+    }
 
-    assert "Impersonates" not in text
+    lines = _alert(bot_module, scan, IMPOSTOR)
+
+    assert lines[:2] == [
+        IMPOSTOR_HEADER,
+        "\N{MEDIUM WHITE CIRCLE} UNKNOWN: scan incomplete, not a safety verdict",
+    ]
+    assert not any(line.startswith("Risk score") for line in lines)
+
+
+@pytest.mark.parametrize(
+    "check, line",
+    [
+        (UNKNOWN, "Official token check: unknown (Token symbol or name unavailable)"),
+        (OFFICIAL, "Official NVDA token"),
+    ],
+)
+def test_an_alert_states_an_unknown_or_official_check(bot_module, check, line):
+    assert line in _alert(bot_module, CLEARED, check)
+
+
+@pytest.mark.parametrize("check", [None, NO_MATCH, COLLISION])
+def test_other_launches_carry_no_check_line(bot_module, check):
+    lines = _alert(bot_module, CLEARED, check)
+
+    assert lines[0].startswith("\N{LARGE GREEN CIRCLE} CLEARED")
+    assert not any("mpersonates" in line or "fficial" in line for line in lines)
 
 
 @pytest.mark.asyncio
-async def test_a_queued_alert_carries_the_stored_check(bot_module, alerts):
-    await _subscribe(alerts.db, CHAT_A, "all")
+async def test_a_chat_subscribed_to_blocked_launches_receives_the_impostor_alert(
+    bot_module, alerts
+):
+    await _subscribe(alerts.db, CHAT_A, "blocked")
     await _scan(alerts.db, TOKEN, "cleared", 10, at=990.0)
     await alerts.db.record_launch_impostor_check(CHAIN, TOKEN, IMPOSTOR)
     await alerts.db.enqueue_launch_alerts(CHAIN, 900.0)
 
     await bot_module.deliver_launch_alerts(alerts.bot)
 
-    assert (
-        "• Impersonates official NVDA token"
-        in alerts.bot.send_message.await_args.kwargs["text"].splitlines()
-    )
+    assert alerts.bot.send_message.await_args.kwargs["text"].splitlines()[0] == IMPOSTOR_HEADER
 
 
 # --- Bot /scan and /token reports -------------------------------------------------------------
@@ -274,6 +381,18 @@ RISK = {
     "coverage": {"structural": 1},
     "critical_flags": [],
 }
+METADATA = {"name": "Moon", "symbol": "MOON"}
+
+
+def _report(check, contract_data=None, token_info=METADATA):
+    return format_full_report(
+        {**RISK, "impostor_check": check},
+        contract_data or {},
+        {},
+        {},
+        address=TOKEN,
+        token_info=token_info,
+    )
 
 
 @pytest.mark.parametrize(
@@ -281,36 +400,82 @@ RISK = {
     [
         (
             IMPOSTOR,
-            f"Official Token Check: ⚠ Impersonates official NVDA token; the official one is {NVDA}",
+            f"Official Token Check: \N{WARNING SIGN} Impersonates official NVDA token; official contract {NVDA}",
         ),
         (
-            check_token(NVDA, None, None, LISTED),
-            "Official Token Check: Official NVDA token on Robinhood Chain",
+            COLLISION,
+            f"Official Token Check: Not the official AMD token (same ticker); official contract {AMD}",
         ),
+        (
+            check_token(TOKEN, "MOON", "Tesla", LISTED),
+            f"Official Token Check: Not the official TSLA token (same name); official contract {TSLA}",
+        ),
+        (
+            check_token(TOKEN, "AMD", "Tesla", LISTED),
+            f"Official Token Check: Not the official AMD token (same ticker); official contract {AMD}; "
+            f"also resembles official TSLA token, contract {TSLA}",
+        ),
+        (OFFICIAL, "Official Token Check: Official NVDA token (Robinhood)"),
         (NO_MATCH, "Official Token Check: No match among official Robinhood Chain tokens"),
-        (UNKNOWN, "Official Token Check: Unknown (Token symbol or name unavailable)"),
+        (
+            check_token(TOKEN, "MOON", "Moon", None),
+            "Official Token Check: Unknown (Official Robinhood token list unavailable)",
+        ),
     ],
 )
 def test_a_report_states_the_check(check, line):
-    rendered = assert_literal(
-        format_full_report({**RISK, "impostor_check": check}, {}, {}, {}, address=TOKEN)
+    assert line in assert_literal(_report(check)).splitlines()
+
+
+def test_an_impostor_report_ends_with_its_own_verdict():
+    lines = assert_literal(_report(IMPOSTOR)).splitlines()
+
+    assert lines[0].startswith("\N{POLICE CARS REVOLVING LIGHT}")
+    assert (
+        lines[-1]
+        == "\N{POLICE CARS REVOLVING LIGHT} Impersonates official NVDA: do not treat as the real token"
     )
 
-    assert line in rendered.splitlines()
+
+@pytest.mark.parametrize("check", [COLLISION, NO_MATCH, OFFICIAL])
+def test_other_reports_keep_their_verdict(check):
+    assert "Generally Safe" in _report(check).splitlines()[-1]
 
 
-def test_a_report_without_the_check_has_no_line():
-    assert "Official Token Check" not in format_full_report(RISK, {}, {}, {}, address=TOKEN)
+@pytest.mark.parametrize(
+    "check, contract_data, token_info",
+    [
+        (None, {}, METADATA),
+        (UNKNOWN, {}, {}),
+        (UNKNOWN, {}, None),
+        (NO_MATCH, {"is_contract": False}, METADATA),
+    ],
+)
+def test_a_report_without_a_token_to_check_has_no_line(check, contract_data, token_info):
+    assert "Official Token Check" not in _report(check, contract_data, token_info)
+
+
+def test_an_official_token_is_stated_without_its_metadata():
+    assert "Official Token Check: Official NVDA token (Robinhood)" in assert_literal(
+        _report(OFFICIAL, token_info={})
+    )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("handler", ["scan_contract", "check_token"])
-async def test_a_4663_bot_scan_checks_the_token_it_read(bot_scan_functions, handler):
+@pytest.mark.parametrize(
+    "metadata, status, flagged",
+    [
+        ({"name": "NVIDIA", "symbol": "NVDA"}, "impostor", True),
+        ({"name": "Advanced Micro Dog", "symbol": "AMD"}, "collision", False),
+    ],
+)
+async def test_a_4663_bot_scan_checks_the_token_it_read(
+    bot_scan_functions, handler, metadata, status, flagged
+):
     ns = bot_scan_functions
     ns["format_full_report"] = format_full_report
-    ns["web3_client"].get_token_info = AsyncMock(
-        return_value={"name": "Advanced Micro Dog", "symbol": "AMD"}
-    )
+    ns["web3_client"].get_token_info = AsyncMock(return_value=metadata)
     ns["container"].robinhood_assets.check = AsyncMock(
         side_effect=lambda *args: check_token(*args, LISTED)
     )
@@ -319,13 +484,12 @@ async def test_a_4663_bot_scan_checks_the_token_it_read(bot_scan_functions, hand
     await ns[handler](message, TOKEN, chain_id=4663)
 
     ns["container"].robinhood_assets.check.assert_awaited_once_with(
-        TOKEN, "AMD", "Advanced Micro Dog"
+        TOKEN, metadata["symbol"], metadata["name"]
     )
     report = message.message.reply_text.await_args.args[0]
-    assert f"Impersonates official AMD token; the official one is `{AMD}`" in report
-    assert "• Impersonates official AMD token" in report
+    assert ("\N{BULLET} Impersonates official" in report) is flagged
     published = ns["container"].verdict_publisher.publish_fire_and_forget.call_args.args[2]
-    assert published["impostor_check"]["symbol"] == "AMD"
+    assert published["impostor_check"]["status"] == status
 
 
 @pytest.mark.asyncio

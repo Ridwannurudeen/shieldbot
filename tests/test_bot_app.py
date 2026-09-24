@@ -198,7 +198,7 @@ class TestHelpCommand:
 **/threats** - Live mempool threat alerts
 **/campaign <address>** - Check if address is part of a scam campaign
 **/report <address> <reason>** - Report a scam address
-**/launchalerts** - Alert this chat to blocked Robinhood Chain launches (`/launchalerts all` for every launch)
+**/launchalerts** - Alert this chat to blocked Robinhood Chain launches and impostors of official tokens (`/launchalerts all` for every launch)
 **/stopalerts** - Stop launch alerts
 **/help** - Show this help message
 
