@@ -46,6 +46,14 @@ class El {
   }
   get textContent() { return this.text; }
   setAttribute(name, value) { this.attrs[name] = String(value); }
+  get classList() {
+    const names = () => this.className.split(/\s+/).filter(Boolean);
+    return {
+      add: name => { if (!names().includes(name)) this.className = [...names(), name].join(' '); },
+      remove: name => { this.className = names().filter(other => other !== name).join(' '); },
+      contains: name => names().includes(name),
+    };
+  }
   getAttribute(name) { return name in this.attrs ? this.attrs[name] : null; }
   addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
   dispatch(type, event = {}) {
@@ -175,14 +183,17 @@ function reportIntersecting(intersecting) {
   overlayIntersecting = intersecting;
   for (const observer of [...visibilityObservers]) observer.report();
 }
-// content.js keeps Proceed disabled for half a second after an overlay appears, and rejects a
-// request whose dialog stays out of view for ten seconds. The tests run it with no wait and a
-// 100 ms limit, except those that check the real ones.
+// content.js keeps Proceed disabled for half a second after an overlay appears, rejects a
+// request whose dialog stays out of view for ten seconds, and makes Proceed on a Block Recommended
+// overlay wait for a hold of a second and a half. The tests run it with no wait, a 100 ms limit
+// and a 30 ms hold, except those that check the real ones.
 function withShortDelays(source) {
   assert(source.includes('const PROCEED_DELAY_MS = 500;'));
   assert(source.includes('const OUT_OF_VIEW_LIMIT_MS = 10000;'));
+  assert(source.includes('const HOLD_TO_CONFIRM_MS = 1500;'));
   return source.replace('const PROCEED_DELAY_MS = 500;', 'const PROCEED_DELAY_MS = 0;')
-    .replace('const OUT_OF_VIEW_LIMIT_MS = 10000;', 'const OUT_OF_VIEW_LIMIT_MS = 100;');
+    .replace('const OUT_OF_VIEW_LIMIT_MS = 10000;', 'const OUT_OF_VIEW_LIMIT_MS = 100;')
+    .replace('const HOLD_TO_CONFIRM_MS = 1500;', 'const HOLD_TO_CONFIRM_MS = 30;');
 }
 """
 

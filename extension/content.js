@@ -258,6 +258,9 @@
   // cannot be covered either; and the dialog rather than the host, which
   // has no area of its own (its content is position: fixed).
   const PROCEED_DELAY_MS = 500;
+  // On a Block Recommended overlay in Balanced mode, how long Proceed (or
+  // Sign Anyway) must be held down.
+  const HOLD_TO_CONFIRM_MS = 1500;
   let _dialogVisible = false;
   let _visibleSince = Infinity;
   let _visibilityObserver = null;
@@ -326,6 +329,52 @@
       }
       sendVerdict(requestId, action);
     });
+  }
+
+  // Proceed on a Block Recommended overlay counts only when held down for
+  // HOLD_TO_CONFIRM_MS, with the pointer or with Enter or Space, by real
+  // input; a click alone does nothing and letting go early cancels. The
+  // click's rules apply when the hold starts, and the dialog must stay visible
+  // until it ends.
+  function onHold(root, requestId) {
+    const button = root.getElementById("shieldai-proceed");
+    let timer = null;
+    const cancel = () => {
+      clearTimeout(timer);
+      timer = null;
+      button.classList.remove("shieldai-holding");
+    };
+    const start = (event) => {
+      if (!event.isTrusted || timer !== null || button.disabled) return;
+      if (!_dialogVisible) {
+        root.getElementById("shieldai-covered").textContent = _t("overlayCoveredNote");
+        return;
+      }
+      if (Date.now() - _visibleSince < PROCEED_DELAY_MS) return;
+      const startedAt = Date.now();
+      button.classList.add("shieldai-holding");
+      timer = setTimeout(() => {
+        cancel();
+        // The overlay was replaced or removed during the hold.
+        if (_awaitingRequestId !== requestId) return;
+        if (!_dialogVisible || _visibleSince > startedAt) {
+          root.getElementById("shieldai-covered").textContent = _t("overlayCoveredNote");
+          return;
+        }
+        sendVerdict(requestId, "proceed");
+      }, HOLD_TO_CONFIRM_MS);
+    };
+    const holdKey = (event) => event.key === "Enter" || event.key === " ";
+    button.addEventListener("pointerdown", start);
+    button.addEventListener("keydown", (event) => {
+      if (holdKey(event) && !event.repeat) start(event);
+    });
+    button.addEventListener("keyup", (event) => {
+      if (holdKey(event)) cancel();
+    });
+    for (const type of ["pointerup", "pointerleave", "pointercancel", "blur"]) {
+      button.addEventListener(type, cancel);
+    }
   }
 
   // Show an overlay as a modal dialog in its own closed shadow root: focus
@@ -720,6 +769,7 @@
     const chainUnknown = Boolean(result) && (result.coverage || {}).chain === false;
     const canSign = !chainUnknown &&
       !(strict && (unparseable || classification === "UNKNOWN" || classification === "BLOCK_RECOMMENDED"));
+    const hold = canSign && classification === "BLOCK_RECOMMENDED";
     // What background.js found in a Sign-In with Ethereum message leads.
     const signIn = (result && result.siwe) || {};
     const signInSignals = signIn.state === "mismatch"
@@ -762,8 +812,11 @@
 
         <div class="shieldai-actions">
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">${_t("overlayBtnReject")}</button>
-          ${canSign ? `<button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">${_t("overlayBtnSignAnyway")}</button>` : ""}
+          ${!canSign ? "" : hold
+            ? `<button class="shieldai-btn shieldai-btn-proceed shieldai-btn-hold" id="shieldai-proceed" aria-describedby="shieldai-hold-note">${_t("overlayBtnHoldSign")}</button>`
+            : `<button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">${_t("overlayBtnSignAnyway")}</button>`}
         </div>
+        ${hold ? `<p class="shieldai-hold-note" id="shieldai-hold-note">${_t("overlayHoldNote")}</p>` : ""}
         ${COVERED_NOTE}
         ${canSign ? "" : `<p class="shieldai-strict-note">${chainUnknown ? _t("overlayChainNoProceed") : _t("overlayStrictNoProceed")}</p>`}
       </div>
@@ -771,7 +824,9 @@
 
     const root = mountOverlay(overlay, requestId);
     onDecision(root, "shieldai-block", requestId, "block");
-    if (canSign) {
+    if (hold) {
+      onHold(root, requestId);
+    } else if (canSign) {
       onDecision(root, "shieldai-proceed", requestId, "proceed");
     }
   }
@@ -790,6 +845,8 @@
     // Strict mode leaves no way to send a transaction the firewall recommends
     // blocking or could not fully check.
     const canProceed = !chainUnknown && !(strict && (isBlock || classification === "UNKNOWN"));
+    // On Block Recommended (so Balanced mode), Proceed needs a hold.
+    const hold = canProceed && isBlock;
 
     // Display as safety score (100 - risk) so higher = better
     const scoreDisplay = incomplete ? "Unknown (incomplete provider coverage)" :
@@ -885,12 +942,17 @@
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">
             ${_t("overlayBtnBlock")}
           </button>
-          ${canProceed ? `
+          ${!canProceed ? "" : hold ? `
+          <button class="shieldai-btn shieldai-btn-proceed shieldai-btn-hold" id="shieldai-proceed" aria-describedby="shieldai-hold-note">
+            ${_t("overlayBtnHoldProceed")}
+          </button>
+          ` : `
           <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">
             ${_t("overlayBtnProceed")}
           </button>
-          ` : ""}
+          `}
         </div>
+        ${hold ? `<p class="shieldai-hold-note" id="shieldai-hold-note">${_t("overlayHoldNote")}</p>` : ""}
         ${COVERED_NOTE}
         ${canProceed ? "" : `<p class="shieldai-strict-note">${chainUnknown ? _t("overlayChainNoProceed") : _t("overlayStrictNoProceed")}</p>`}
 
@@ -925,7 +987,9 @@
 
     // Button handlers
     onDecision(root, "shieldai-block", requestId, "block");
-    if (canProceed) {
+    if (hold) {
+      onHold(root, requestId);
+    } else if (canProceed) {
       onDecision(root, "shieldai-proceed", requestId, "proceed");
     }
 

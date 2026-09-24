@@ -292,6 +292,27 @@
   color: #e2e8f0;
 }
 
+/* Proceed on a Block Recommended overlay must be held for 1.5 s: the fill
+   grows while it is held and empties when it is let go. */
+.shieldai-btn-hold,
+.shieldai-btn-hold:hover {
+  background-image: linear-gradient(#7f1d1d, #7f1d1d);
+  background-repeat: no-repeat;
+  background-size: 0% 100%;
+}
+.shieldai-btn-hold.shieldai-holding {
+  background-size: 100% 100%;
+  color: #fff;
+  transition: background-size 1.5s linear;
+}
+
+.shieldai-hold-note {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #fca5a5;
+  margin: 10px 0 0;
+}
+
 /* Loading */
 .shieldai-loading {
   text-align: center;

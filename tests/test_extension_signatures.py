@@ -534,3 +534,118 @@ def test_the_overlay_names_both_domains_of_a_sign_in_mismatch(policy):
 """,
         policy,
     )
+
+
+# A Block Recommended overlay in Balanced mode, a transaction's or a signature's, and the ways to
+# press and let go of its Proceed or Sign Anyway button.
+HOLD = r"""
+async function blockOverlay(kind) {
+  const block = {classification: 'BLOCK_RECOMMENDED', risk_score: 95};
+  analyze = async () => ({result: scan(block)});
+  if (kind === 'signature') {
+    await intercept('request', {signMethod: 'eth_signTypedData_v4', chainId: 1,
+      typedData: {primaryType: 'Mail', domain: {name: 'Mail'}, message: {contents: 'hi'}}}, 'eth_signTypedData_v4');
+  } else {
+    await intercept('request');
+  }
+  return byId('shieldai-proceed');
+}
+const press = (button, how) => how === 'pointer'
+  ? button.dispatch('pointerdown', {isTrusted: true})
+  : button.dispatch('keydown', {key: how, isTrusted: true});
+const release = (button, how) => how === 'pointer'
+  ? button.dispatch('pointerup', {isTrusted: true})
+  : button.dispatch('keyup', {key: how, isTrusted: true});
+// The verdict of a completed hold, whose proof is made after the hold's timer: waited for, not
+// assumed to be there after one flush, which a loaded machine can overrun.
+async function heldVerdict() {
+  for (let i = 0; i < 10 && verdicts().length === 0; i++) await flush();
+}
+"""
+
+
+@pytest.mark.parametrize("kind", ["transaction", "signature"])
+@pytest.mark.parametrize("how", ["pointer", "Enter", " "])
+def test_proceed_on_block_recommended_needs_a_hold(kind, how):
+    run_node(
+        CONTENT_HARNESS
+        + HOLD
+        + r"""
+(async () => {
+  const [kind, how] = JSON.parse(process.argv[1]);
+  const proceed = await blockOverlay(kind);
+  const html = overlay().innerHTML;
+  assert(html.includes(kind === 'signature' ? 'Hold to Sign Anyway' : 'Hold to Proceed Anyway'), html);
+  // The hold is explained to assistive technology and on screen.
+  const note = byId(proceed.attrs['aria-describedby']);
+  assert(note && html.includes('for 1.5 seconds'), html);
+  // A click, however real, is not a hold.
+  userClick(proceed);
+  await flush();
+  assert.deepEqual(verdicts(), []);
+  // Letting go early cancels, and the fill empties.
+  press(proceed, how);
+  assert(proceed.classList.contains('shieldai-holding'), 'no progress is shown while held');
+  release(proceed, how);
+  assert(!proceed.classList.contains('shieldai-holding'));
+  await flush();
+  assert.deepEqual(verdicts(), [], 'an early release proceeded');
+  // A synthetic press is ignored.
+  proceed.dispatch(how === 'pointer' ? 'pointerdown' : 'keydown', {key: how, isTrusted: false});
+  await flush();
+  assert.deepEqual(verdicts(), []);
+  // Held to the end, it proceeds.
+  press(proceed, how);
+  await heldVerdict();
+  await assertVerdicts([['request', 'proceed']]);
+""",
+        [kind, how],
+    )
+
+
+@pytest.mark.parametrize("cover", ["covered-throughout", "covered-and-uncovered-during-the-hold"])
+def test_a_hold_counts_only_while_the_dialog_stays_visible(cover):
+    run_node(
+        CONTENT_HARNESS
+        + HOLD
+        + r"""
+(async () => {
+  const cover = JSON.parse(process.argv[1]);
+  const proceed = await blockOverlay('transaction');
+  press(proceed, 'pointer');
+  reportVisibility(false);
+  if (cover === 'covered-and-uncovered-during-the-hold') {
+    clock += 10;
+    reportVisibility(true);
+  }
+  await flush();
+  assert.deepEqual(verdicts(), [], 'a hold the page covered proceeded');
+  assert(byId('shieldai-covered').textContent.includes('covering or altering'));
+  // Pressed again while the dialog is visible, the hold counts.
+  reportVisibility(true);
+  press(proceed, 'pointer');
+  await heldVerdict();
+  await assertVerdicts([['request', 'proceed']]);
+""",
+        cover,
+    )
+
+
+@pytest.mark.parametrize("outcome", ["CAUTION", "HIGH_RISK", "UNKNOWN"])
+def test_only_block_recommended_asks_for_a_hold(outcome):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const outcome = JSON.parse(process.argv[1]);
+  analyze = async () => ({result: scan(outcome === 'UNKNOWN'
+    ? {status: 'unknown', coverage: {honeypot: 0}, coverage_reasons: {honeypot: 'No provider'}}
+    : {classification: outcome, risk_score: 60})});
+  await intercept('request');
+  assert(!overlay().innerHTML.includes('Hold to'), overlay().innerHTML);
+  userClick(byId('shieldai-proceed'));
+  await flush();
+  await assertVerdicts([['request', 'proceed']]);
+""",
+        outcome,
+    )

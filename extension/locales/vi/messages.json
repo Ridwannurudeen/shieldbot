@@ -168,5 +168,8 @@
   "overlayEthSignNote": "eth_sign ký một hash thô, và hash đó có thể là một giao dịch: ký nó có thể cho phép trang này chuyển mọi thứ trong ví của bạn. Không trang web thông thường nào cần điều này.",
   "overlayChainNoProceed": "ShieldAI không thể xác nhận yêu cầu này dành cho mạng nào: không đọc được mạng của ví, mạng không khớp với yêu cầu, hoặc mạng không được hỗ trợ. Không có tùy chọn tiếp tục. Hãy chuyển ví sang một mạng được hỗ trợ và thử lại.",
   "siweMismatch": "Tin nhắn đăng nhập này dành cho {domain}, nhưng trang đang yêu cầu bạn ký là {origin}. Một trang yêu cầu bạn đăng nhập vào trang web khác rất có thể là lừa đảo.",
-  "siweUnreadable": "Tin nhắn này trông giống Sign-In with Ethereum nhưng không tuân theo tiêu chuẩn của nó (EIP-4361), nên không thể kiểm tra trang web mà nó đăng nhập bạn vào."
+  "siweUnreadable": "Tin nhắn này trông giống Sign-In with Ethereum nhưng không tuân theo tiêu chuẩn của nó (EIP-4361), nên không thể kiểm tra trang web mà nó đăng nhập bạn vào.",
+  "overlayBtnHoldProceed": "Giữ để vẫn tiếp tục",
+  "overlayBtnHoldSign": "Giữ để vẫn ký",
+  "overlayHoldNote": "Khuyến nghị chặn. Để vẫn tiếp tục, hãy nhấn giữ nút, hoặc giữ phím Enter hoặc Space trên nút, trong 1,5 giây. Thả ra sớm hơn sẽ hủy."
 }
