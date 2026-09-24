@@ -178,6 +178,10 @@ class Database:
         # so a rollback on the shared one would undo whatever else was being written at the time.
         self._drain_db: Optional[aiosqlite.Connection] = None
         self._drain_lock = asyncio.Lock()
+        # The sender lease's own connection: its commits and rollbacks run beside the drain's, never inside a
+        # transaction the drain has open.
+        self._lease_db: Optional[aiosqlite.Connection] = None
+        self._lease_lock = asyncio.Lock()
 
     async def initialize(self):
         """Open connection and create tables."""
@@ -197,26 +201,41 @@ class Database:
         if self._drain_db is None and self._db is not None and self.db_path != ":memory:":
             async with self._drain_lock:
                 if self._drain_db is None:
-                    opened = await aiosqlite.connect(self.db_path)
-                    if self._db is None:
-                        # close() ran while this connection was opening; leaving it open would
-                        # keep aiosqlite's non-daemon worker thread alive past shutdown.
-                        await opened.close()
-                    else:
-                        await opened.execute("PRAGMA busy_timeout=5000")
-                        self._drain_db = opened
+                    self._drain_db = await self._second_connection()
         return self._drain_db or self._db
+
+    async def _lease(self) -> aiosqlite.Connection:
+        """The sender lease's connection, opened on first use like the drain's; an in-memory database keeps the
+        shared one, as the drain's does."""
+        if self._lease_db is None and self._db is not None and self.db_path != ":memory:":
+            async with self._lease_lock:
+                if self._lease_db is None:
+                    self._lease_db = await self._second_connection()
+        return self._lease_db or self._db
+
+    async def _second_connection(self) -> Optional[aiosqlite.Connection]:
+        """Another connection to the database file, or None if close() ran while it was opening."""
+        opened = await aiosqlite.connect(self.db_path)
+        if self._db is None:
+            # close() ran while this connection was opening; leaving it open would
+            # keep aiosqlite's non-daemon worker thread alive past shutdown.
+            await opened.close()
+            return None
+        await opened.execute("PRAGMA busy_timeout=5000")
+        return opened
 
     async def close(self):
         """Close the database connection.
 
-        Both handles are detached first: a write landing while a close is awaited must fail, not
-        reopen the drain's connection behind us.
+        Every handle is detached first: a write landing while a close is awaited must fail, not
+        reopen the drain's or the lease's connection behind us.
         """
-        drain, shared = self._drain_db, self._db
-        self._drain_db = self._db = None
+        drain, lease, shared = self._drain_db, self._lease_db, self._db
+        self._drain_db = self._lease_db = self._db = None
         if drain:
             await drain.close()
+        if lease:
+            await lease.close()
         if shared:
             await shared.close()
 
@@ -2841,31 +2860,32 @@ class Database:
         """Take or renew the named lease for `holder` for `seconds`, unless another holder's lease is still live.
 
         One conditional upsert, atomic in SQLite, so however many processes ask at once, one holds the lease.
-        Returns the lease's holder and expiry (Unix time) after the attempt.
+        Returns the lease's holder and expiry (Unix time) after the attempt. Runs on the lease's own connection,
+        so it never commits or rolls back a transaction the drain has open.
         """
-        outbox = await self._outbox()
+        connection = await self._lease()
         now = time.time()
         # A failure or a cancellation between the upsert and its commit must not leave the write lock held.
         try:
-            await outbox.execute("""
+            await connection.execute("""
                 INSERT INTO sender_leases (name, holder, expires_at, renewed_at) VALUES (?, ?, ?, ?)
                 ON CONFLICT (name) DO UPDATE SET
                     holder = excluded.holder, expires_at = excluded.expires_at, renewed_at = excluded.renewed_at
                 WHERE sender_leases.holder = excluded.holder OR sender_leases.expires_at <= excluded.renewed_at
             """, (name, holder, now + seconds, now))
-            await outbox.commit()
+            await connection.commit()
         except BaseException:
-            await outbox.rollback()
+            await connection.rollback()
             raise
-        cursor = await outbox.execute("SELECT holder, expires_at FROM sender_leases WHERE name = ?", (name,))
+        cursor = await connection.execute("SELECT holder, expires_at FROM sender_leases WHERE name = ?", (name,))
         row = await cursor.fetchone()
         return row[0], row[1]
 
     async def release_sender_lease(self, name: str, holder: str):
-        """Give up the named lease if `holder` holds it."""
-        outbox = await self._outbox()
-        await outbox.execute("DELETE FROM sender_leases WHERE name = ? AND holder = ?", (name, holder))
-        await outbox.commit()
+        """Give up the named lease if `holder` holds it, on the lease's own connection."""
+        connection = await self._lease()
+        await connection.execute("DELETE FROM sender_leases WHERE name = ? AND holder = ?", (name, holder))
+        await connection.commit()
 
     async def requeue_verdict(self, evidence_id: int):
         """Queue an unresolved record (submitted, unconfirmed or failed) for another attempt."""

@@ -1,4 +1,4 @@
-"""The sender lease: of all the verdict drains on one database, only the lease holder sends.
+"""The sender lease: of all the verdict drains on one database, only the lease holder stores and broadcasts.
 
 A second drain can start by mistake: a second workers.py, or an API still running the drain after
 BACKGROUND_WORKERS=external was set. Two drains on one recorder account would race for its nonces. The fake
@@ -7,9 +7,10 @@ node and the dummy key come from tests/test_verdict_publisher.py; no test touche
 
 import asyncio
 import logging
+import sqlite3
 import time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -28,8 +29,12 @@ from tests.test_verdict_publisher import (
     sends_settled,
     until,
 )
+from tests.test_verdict_storage import insert
 
 TOKENS = ["0x" + f"{n:040x}" for n in range(1, 4)]
+RPC_A = "https://rpc-a.invalid/4663"
+RPC_B = "https://rpc-b.invalid/4663"
+DRAIN_TASKS = ("VerdictPublisher._drain_under_lease", "VerdictPublisher._drain_loop")
 
 
 def scan():
@@ -48,6 +53,7 @@ def scan():
 def short_lease(monkeypatch):
     monkeypatch.setattr(vp, "LEASE_SECONDS", 0.3)
     monkeypatch.setattr(vp, "LEASE_RENEW_SECONDS", 0.05)
+    monkeypatch.setattr(vp, "DB_LOCK_WAIT_SECONDS", 0.05)
     monkeypatch.setattr(vp, "RECEIPT_DELAY_SECONDS", 0)
 
 
@@ -63,8 +69,8 @@ async def two_processes(tmp_path):
     await second.close()
 
 
-def publisher_on(db):
-    return VerdictPublisher(db, rpc_url=RPC, registry_address=REGISTRY)
+def publisher_on(db, rpc_url=RPC):
+    return VerdictPublisher(db, rpc_url=rpc_url, registry_address=REGISTRY)
 
 
 async def lease(db):
@@ -83,6 +89,62 @@ async def holds(db, publisher):
 async def confirmed(db, subject):
     stored = await db.get_latest_verdict_evidence(4663, subject)
     return stored is not None and stored["onchain_status"] == "confirmed"
+
+
+async def queued(db, subject):
+    stored = await db.get_latest_verdict_evidence(4663, subject)
+    return stored is not None and stored["onchain_status"] == "pending"
+
+
+def running_drains():
+    return [task for task in asyncio.all_tasks() if task.get_coro().__qualname__ in DRAIN_TASKS]
+
+
+def watch_broadcasts(chain, gated_url=None, on_broadcast=None):
+    """Note the RPC URL of every eth_sendRawTransaction; hold those sent to gated_url until the event is set."""
+    gate = asyncio.Event()
+    broadcasts = []
+    original = chain.post
+
+    def post(url, json):
+        rows = json if isinstance(json, list) else [json]
+        broadcast = any(row["method"] == "eth_sendRawTransaction" for row in rows)
+        if broadcast:
+            broadcasts.append(url)
+            if on_broadcast is not None:
+                on_broadcast(url)
+        response = original(url, json)
+        if broadcast and url == gated_url:
+            response._gate = gate
+        return response
+
+    chain.post = post
+    return broadcasts, gate
+
+
+def hold_calls(chain, url, method):
+    """Hold the node's answer to `method` from `url` until the returned event is set."""
+    gate = asyncio.Event()
+    original = chain.post
+
+    def post(posted_url, json):
+        response = original(posted_url, json)
+        rows = json if isinstance(json, list) else [json]
+        if posted_url == url and any(row["method"] == method for row in rows):
+            response._gate = gate
+        return response
+
+    chain.post = post
+    return gate
+
+
+def methods_posted_to(chain, url):
+    return [
+        row["method"]
+        for posted_url, body in chain.posts
+        if posted_url == url
+        for row in (body if isinstance(body, list) else [body])
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +185,58 @@ async def test_the_lease_has_one_holder_until_it_expires_unrenewed(two_processes
     assert (await first_db.take_sender_lease("drain", "host-a:1:aa", 60))[0] == "host-b:2:bb"
     await second_db.release_sender_lease("drain", "host-b:2:bb")
     assert (await first_db.take_sender_lease("drain", "host-a:1:aa", 60))[0] == "host-a:1:aa"
+
+
+@pytest.mark.asyncio
+async def test_processes_asking_at_once_get_one_holder(tmp_path):
+    path = str(tmp_path / "shieldbot.db")
+    processes = [Database(path) for _ in range(4)]
+    for db in processes:
+        await db.initialize()
+    try:
+        answers = await asyncio.gather(
+            *(db.take_sender_lease("drain", f"host:{n}:aa", 90) for n, db in enumerate(processes))
+        )
+        holders = {holder for holder, _ in answers}
+        assert len(holders) == 1 and holders <= {f"host:{n}:aa" for n in range(4)}
+    finally:
+        for db in processes:
+            await db.close()
+
+
+@pytest.mark.asyncio
+async def test_lease_writes_never_commit_or_roll_back_the_drains_transaction(tmp_path):
+    db = Database(str(tmp_path / "shieldbot.db"))
+    await db.initialize()
+    try:
+        evidence_id = await insert(db, onchain_status="pending")
+        outbox = await db._outbox()
+        # The drain is part way through a transaction of its own.
+        await outbox.execute(
+            "UPDATE verdict_evidence SET onchain_status = 'sending' WHERE id = ?", (evidence_id,)
+        )
+        renewal = asyncio.create_task(db.take_sender_lease("drain", "host:1:aa", 90))
+        await asyncio.sleep(0.05)
+        # The drain undoes its own write; a lease renewal must not have committed it.
+        await outbox.rollback()
+        assert (await renewal)[0] == "host:1:aa"
+        assert (await db.get_verdict_evidence(evidence_id))["onchain_status"] == "pending"
+        assert db._lease_db is not None
+        assert db._lease_db is not db._drain_db and db._lease_db is not db._db
+    finally:
+        await db.close()
+    assert db._lease_db is None
+
+
+@pytest.mark.asyncio
+async def test_a_lease_call_after_close_never_reopens_its_connection(tmp_path):
+    db = Database(str(tmp_path / "shieldbot.db"))
+    await db.initialize()
+    await db.take_sender_lease("drain", "host:1:aa", 90)
+    await db.close()
+    with pytest.raises(AttributeError):
+        await db.take_sender_lease("drain", "host:1:aa", 90)
+    assert db._lease_db is None
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +298,27 @@ async def test_a_dead_holders_lease_expires_and_the_waiting_drain_takes_over(
 
 
 @pytest.mark.asyncio
+async def test_a_waiting_drain_asks_again_when_the_lease_expires_not_a_whole_period_later(
+    two_processes, short_lease, monkeypatch
+):
+    monkeypatch.setattr(vp, "LEASE_SECONDS", 60.0)
+    first_db, second_db = two_processes
+    first, second = publisher_on(first_db), publisher_on(second_db)
+    with rpc_node(FakeChain()):
+        first.start(recorder_key=KEY)
+        await until(lambda: holds(first_db, first))
+        # The holder dies with its lease a moment from expiring.
+        first._drain_task.cancel()
+        await asyncio.gather(first._drain_task, return_exceptions=True)
+        await first_db.close()
+        await second_db._db.execute("UPDATE sender_leases SET expires_at = ?", (time.time() + 0.3,))
+        await second_db._db.commit()
+        second.start(recorder_key=KEY)
+        await until(lambda: holds(second_db, second))
+        await second.stop()
+
+
+@pytest.mark.asyncio
 async def test_a_holder_that_finds_another_holder_stops_sending_until_it_can_take_the_lease_again(
     two_processes, short_lease, caplog
 ):
@@ -212,25 +347,189 @@ async def test_a_holder_that_finds_another_holder_stops_sending_until_it_can_tak
 
 
 @pytest.mark.asyncio
-async def test_a_holder_that_cannot_renew_stops_sending_while_its_lease_is_still_live(
+async def test_a_holder_whose_renewals_hang_then_fail_stops_while_its_lease_is_still_live(
     two_processes, monkeypatch, caplog
 ):
-    monkeypatch.setattr(vp, "LEASE_SECONDS", 1.0)
+    monkeypatch.setattr(vp, "LEASE_SECONDS", 2.0)
     monkeypatch.setattr(vp, "LEASE_RENEW_SECONDS", 0.2)
+    monkeypatch.setattr(vp, "DB_LOCK_WAIT_SECONDS", 0.5)
     db, other_process = two_processes
     publisher = publisher_on(db)
+
+    async def locked(*args):
+        # "database is locked" arrives only once the busy timeout has passed.
+        await asyncio.sleep(vp.DB_LOCK_WAIT_SECONDS)
+        raise sqlite3.OperationalError("database is locked")
+
     with rpc_node(FakeChain()):
         publisher.start(recorder_key=KEY)
         await until(lambda: holds(db, publisher))
-        monkeypatch.setattr(
-            db, "take_sender_lease", AsyncMock(side_effect=RuntimeError("database is locked"))
-        )
-        await until(lambda: asyncio.sleep(0, "stopped sending" in caplog.text), tries=300)
-        # No other drain could have taken the lease yet: the drain stopped a renewal period before it lapsed.
+        monkeypatch.setattr(db, "take_sender_lease", locked)
+        await until(lambda: asyncio.sleep(0, "stopped sending" in caplog.text), tries=400)
+        # No other drain could have taken the lease yet: the drain stopped before it lapsed.
         holder, expires_at = await lease(other_process)
         assert holder == publisher._lease_holder and expires_at > time.time()
-        assert "RuntimeError" in caplog.text
+        assert "OperationalError" in caplog.text
         await publisher.stop()
+
+
+@pytest.mark.asyncio
+async def test_renewal_is_not_attempted_when_waiting_out_the_lock_could_run_the_lease_out(monkeypatch):
+    # The production timings: a 90 s lease renewed every 15 s, and a lock wait of 5 s before a renewal fails.
+    clock = SimpleNamespace(now=1000.0)
+    monkeypatch.setattr(vp.time, "time", lambda: clock.now)
+    publisher = publisher_on(None)
+    attempts = []
+
+    async def locked():
+        attempts.append(clock.now)
+        clock.now += vp.DB_LOCK_WAIT_SECONDS
+        raise sqlite3.OperationalError("database is locked")
+
+    async def sleep(seconds):
+        clock.now += seconds
+
+    publisher._take_lease = locked
+    with patch("services.verdict_publisher.asyncio.sleep", new=sleep):
+        await publisher._keep_lease(1000.0 + vp.LEASE_SECONDS)
+    # Each attempt could wait out the lock and still leave a renewal period of the lease; the next one could not.
+    assert attempts == [1015.0, 1035.0, 1055.0]
+    assert clock.now == 1075.0
+
+
+@pytest.mark.asyncio
+async def test_a_drain_that_lost_the_lease_neither_stores_nor_broadcasts_what_it_signed(
+    two_processes, monkeypatch, caplog
+):
+    monkeypatch.setattr(vp, "LEASE_SECONDS", 1.0)
+    monkeypatch.setattr(vp, "LEASE_RENEW_SECONDS", 0.1)
+    monkeypatch.setattr(vp, "DB_LOCK_WAIT_SECONDS", 0.05)
+    monkeypatch.setattr(vp, "DRAIN_POLL_SECONDS", 3600)
+    monkeypatch.setattr(vp, "RECEIPT_DELAY_SECONDS", 0)
+    first_db, second_db = two_processes
+    first, second = publisher_on(first_db, RPC_A), publisher_on(second_db, RPC_B)
+
+    async def never_renews(held_until):
+        await asyncio.Event().wait()
+
+    # The first drain's renewal loop never runs: only the check at the send can stop it.
+    first._keep_lease = never_renews
+    chain = FakeChain()
+    broadcasts, _ = watch_broadcasts(chain)
+    reads = hold_calls(chain, RPC_A, "eth_getTransactionCount")
+    with rpc_node(chain):
+        first.start(recorder_key=KEY)
+        await until(lambda: holds(first_db, first))
+        second.start(recorder_key=KEY)
+        # The first drain claims a row while it holds the lease, and its reads before signing are held up.
+        await first.publish(4663, TOKEN, scan())
+        await until(
+            lambda: asyncio.sleep(0, "eth_getTransactionCount" in methods_posted_to(chain, RPC_A))
+        )
+        # Meanwhile its lease runs out unrenewed and the second drain takes it.
+        await until(lambda: holds(second_db, second))
+        reads.set()
+        await until(
+            lambda: asyncio.sleep(0, f"not sending, {second._lease_holder} holds" in caplog.text)
+        )
+        # The first drain claimed the row and signed, then found the lease gone: the row goes back to the queue
+        # with nothing stored or broadcast.
+        await until(lambda: queued(first_db, TOKEN))
+        assert "eth_getTransactionCount" in methods_posted_to(chain, RPC_A)
+        assert RPC_A not in broadcasts
+        evidence_id = (await first_db.get_latest_verdict_evidence(4663, TOKEN))["id"]
+        assert await first_db.get_verdict_transactions([evidence_id]) == {evidence_id: []}
+        second._wake.set()
+        await until(lambda: confirmed(second_db, TOKEN))
+        await first.stop()
+        await second.stop()
+    assert broadcasts == [RPC_B]
+    assert len(chain.sent) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_new_holder_never_broadcasts_while_the_old_holders_broadcast_is_open(
+    two_processes, monkeypatch
+):
+    monkeypatch.setattr(vp, "LEASE_SECONDS", 2.0)
+    monkeypatch.setattr(vp, "LEASE_RENEW_SECONDS", 0.2)
+    monkeypatch.setattr(vp, "DB_LOCK_WAIT_SECONDS", 0.05)
+    # The broadcast phase is shorter than the lease, as PHASE_TIMEOUT_SECONDS is shorter than LEASE_SECONDS.
+    monkeypatch.setattr(vp, "PHASE_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(vp, "DRAIN_POLL_SECONDS", 0.05)
+    monkeypatch.setattr(vp, "RECEIPT_DELAY_SECONDS", 0)
+    first_db, second_db = two_processes
+    first, second = publisher_on(first_db, RPC_A), publisher_on(second_db, RPC_B)
+    chain = FakeChain()
+    open_sends_at_second_broadcast = []
+
+    def on_broadcast(url):
+        if url == RPC_B:
+            open_sends_at_second_broadcast.append(len(first._tasks))
+
+    # The first drain's broadcast hangs until its phase timeout.
+    broadcasts, _ = watch_broadcasts(chain, gated_url=RPC_A, on_broadcast=on_broadcast)
+    with rpc_node(chain):
+        first.start(recorder_key=KEY)
+        await until(lambda: holds(first_db, first))
+        second.start(recorder_key=KEY)
+        await first.publish(4663, TOKEN, scan())
+        await until(lambda: asyncio.sleep(0, RPC_A in broadcasts))
+        # Then its renewals break, so its lease runs out and the second drain takes over.
+        monkeypatch.setattr(
+            first_db, "take_sender_lease", AsyncMock(side_effect=RuntimeError("database is locked"))
+        )
+        await until(lambda: holds(second_db, second))
+        await second.publish(4663, TOKENS[0], scan())
+        await until(lambda: confirmed(second_db, TOKENS[0]))
+        await first.stop()
+        await second.stop()
+    assert broadcasts == [RPC_A, RPC_B]
+    assert open_sends_at_second_broadcast == [0]
+
+
+@pytest.mark.asyncio
+async def test_a_send_that_cannot_renew_the_lease_is_not_broadcast_so_a_new_holder_never_overlaps_it(
+    two_processes, monkeypatch
+):
+    monkeypatch.setattr(vp, "LEASE_SECONDS", 2.0)
+    monkeypatch.setattr(vp, "LEASE_RENEW_SECONDS", 0.2)
+    monkeypatch.setattr(vp, "DB_LOCK_WAIT_SECONDS", 0.05)
+    monkeypatch.setattr(vp, "PHASE_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(vp, "DRAIN_POLL_SECONDS", 0.05)
+    monkeypatch.setattr(vp, "RECEIPT_DELAY_SECONDS", 0)
+    first_db, second_db = two_processes
+    first, second = publisher_on(first_db, RPC_A), publisher_on(second_db, RPC_B)
+    chain = FakeChain()
+    open_sends_at_second_broadcast = []
+
+    def on_broadcast(url):
+        if url == RPC_B:
+            open_sends_at_second_broadcast.append(len(first._tasks))
+
+    broadcasts, _ = watch_broadcasts(chain, gated_url=RPC_A, on_broadcast=on_broadcast)
+    with rpc_node(chain):
+        first.start(recorder_key=KEY)
+        await until(lambda: holds(first_db, first))
+        second.start(recorder_key=KEY)
+        # The first drain's renewals break; its lease now runs out at a fixed time.
+        monkeypatch.setattr(
+            first_db, "take_sender_lease", AsyncMock(side_effect=RuntimeError("database is locked"))
+        )
+        await asyncio.sleep(0.3)
+        _, expires_at = await lease(second_db)
+        # A row reaches the first drain half a second before the lease lapses: a broadcast started now would
+        # still be open when the second drain takes over.
+        await asyncio.sleep(max(0.0, expires_at - 0.5 - time.time()))
+        await first.publish(4663, TOKEN, scan())
+        await until(lambda: holds(second_db, second))
+        await second.publish(4663, TOKENS[0], scan())
+        await until(lambda: confirmed(second_db, TOKENS[0]))
+        await until(lambda: confirmed(second_db, TOKEN))
+        await first.stop()
+        await second.stop()
+    assert RPC_A not in broadcasts
+    assert open_sends_at_second_broadcast == [0, 0]
 
 
 @pytest.mark.asyncio
@@ -241,6 +540,28 @@ async def test_a_clean_stop_releases_the_lease(two_processes, short_lease):
         publisher.start(recorder_key=KEY)
         await until(lambda: holds(db, publisher))
         await publisher.stop()
+    assert await lease(db) is None
+
+
+@pytest.mark.asyncio
+async def test_a_stop_releases_the_lease_only_once_the_drain_has_ended(
+    two_processes, short_lease, monkeypatch
+):
+    db, _ = two_processes
+    publisher = publisher_on(db)
+    drains_at_release = []
+    release = db.release_sender_lease
+
+    async def noted_release(*args):
+        drains_at_release.extend(running_drains())
+        return await release(*args)
+
+    monkeypatch.setattr(db, "release_sender_lease", noted_release)
+    with rpc_node(FakeChain()):
+        publisher.start(recorder_key=KEY)
+        await until(lambda: holds(db, publisher))
+        await publisher.stop()
+    assert drains_at_release == []
     assert await lease(db) is None
 
 

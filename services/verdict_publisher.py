@@ -6,9 +6,11 @@ Every process (API, hunter, bot) calls publish(), which only STORES the canonica
 
 Exactly one process sends: the API process calls start(), which reads ROBINHOOD_RECORDER_PRIVATE_KEY and runs a
 drain that records pending rows oldest-first. With BACKGROUND_WORKERS=external workers.py calls it instead and
-the API does not. No other code path reads the key, so the bot never sends. A drain sends only while it holds the
-sender lease in the database, so two drains started by mistake on one database never race for the recorder's
-nonces: the second waits until the first's lease expires.
+the API does not. No other code path reads the key, so the bot never sends. If two drains run on one database by
+mistake, only the holder of the sender lease stores and broadcasts: a drain takes the lease again after signing and
+before storing, and one that finds the lease gone discards what it signed and returns the row to the queue. A send
+already signed when its drain loses the lease can finish its broadcast within PHASE_TIMEOUT_SECONDS, which is
+shorter than the lease it took, so no other drain can hold the lease and broadcast before that phase ends.
 
 Each row moves through onchain_status:
   off          stored only (another chain, or no registry configured)
@@ -73,7 +75,7 @@ import socket
 import time
 import traceback
 from collections import deque
-from typing import Optional
+from typing import Optional, Tuple
 
 import aiohttp
 from eth_abi import encode
@@ -137,13 +139,18 @@ RECONCILE_BATCH = 5
 MAX_SEND_ATTEMPTS = 5
 # stop() waits this long for a send under way to record its outcome.
 STOP_TIMEOUT_SECONDS = 30
-# Only the drain holding this lease in the database sends. The holder renews it every LEASE_RENEW_SECONDS, and
-# stops sending once a renewal finds another holder, or once renewals have failed until less than one renewal
-# period of the lease is left. A holder that dies keeps the lease until LEASE_SECONDS after its last renewal; a
-# drain waiting for it asks again every LEASE_SECONDS.
+# Only the drain holding this lease in the database stores and broadcasts. The holder renews it every
+# LEASE_RENEW_SECONDS and stops claiming rows once a renewal finds another holder, or before failed renewals could
+# let it run out. Each send takes the lease again after signing, so a broadcast always starts under a lease with
+# LEASE_SECONDS to run. A holder that dies keeps the lease until LEASE_SECONDS after it last took it; a drain waiting
+# for it asks again when it expires.
 LEASE_NAME = f"verdict-drain:{CHAIN_ID}"
-LEASE_SECONDS = 60.0
+LEASE_SECONDS = 90.0
 LEASE_RENEW_SECONDS = 15.0
+# The lease a send has just taken must outlast what follows: storing the transaction (one lock wait) and the
+# broadcast phase. Checked here as a raise, like RECONCILE_AFTER_SECONDS.
+if LEASE_SECONDS <= DB_LOCK_WAIT_SECONDS + PHASE_TIMEOUT_SECONDS:
+    raise RuntimeError("LEASE_SECONDS must exceed storing a transaction plus its broadcast phase")
 # After this many consecutive waits on an earlier transaction, the drain says so loudly.
 WAIT_ALARM_AFTER = 10
 # After this many broadcasts of the same signed bytes, the drain says so loudly. Re-sends are at least
@@ -190,7 +197,7 @@ class VerdictPublisher:
         self._tasks = set()
         self._drain_task = None
         self._wake = None
-        self._lease_holder = None
+        self._lease_holder = f"{socket.gethostname()}:{os.getpid()}:{secrets.token_hex(4)}"
         self._holds_lease = False
         # Set when the lease is lost: the drain loop then returns before it claims another row.
         self._lease_lost = False
@@ -321,7 +328,6 @@ class VerdictPublisher:
             )
             return
         self.recorder = self._account.address
-        self._lease_holder = f"{socket.gethostname()}:{os.getpid()}:{secrets.token_hex(4)}"
         self._wake = asyncio.Event()
         self._drain_task = asyncio.create_task(self._drain_under_lease())
 
@@ -332,12 +338,15 @@ class VerdictPublisher:
         for at most STOP_TIMEOUT_SECONDS, which lets them record their outcome before the database closes. Then the
         sender lease is released, unless a send is still under way: the lease then expires on its own.
         """
-        if self._drain_task is not None:
-            self._drain_task.cancel()
-            self._drain_task = None
-        return asyncio.ensure_future(self._stop_sending())
+        drain_task, self._drain_task = self._drain_task, None
+        if drain_task is not None:
+            drain_task.cancel()
+        return asyncio.ensure_future(self._stop_sending(drain_task))
 
-    async def _stop_sending(self) -> None:
+    async def _stop_sending(self, drain_task: Optional[asyncio.Task]) -> None:
+        # The cancelled drain ends first, so nothing below runs beside its last database call.
+        if drain_task is not None:
+            await asyncio.gather(drain_task, return_exceptions=True)
         await self._settle_sends()
         if not self._holds_lease or self._tasks:
             return
@@ -370,59 +379,71 @@ class VerdictPublisher:
         """
         while True:
             try:
-                held_until = await self._take_lease()
+                held, expires_at = await self._take_lease()
             except Exception as e:
                 logger.error(
                     "Robinhood verdict registry: not sending, the sender lease could not be taken: %s",
                     type(e).__name__,
                 )
-                held_until = None
-            if held_until is None:
                 await asyncio.sleep(LEASE_SECONDS)
+                continue
+            if not held:
+                # Ask again when the other drain's lease runs out, unless it is renewed before then.
+                await asyncio.sleep(min(LEASE_SECONDS, max(0.0, expires_at - time.time())))
                 continue
             logger.info("Robinhood verdict registry: sending as recorder %s", self.recorder)
             drain = asyncio.create_task(self._drain_loop())
             try:
-                await self._keep_lease(held_until)
+                await self._keep_lease(expires_at)
                 self._lease_lost = True
                 self._wake.set()
                 await drain
             finally:
                 drain.cancel()
+                await asyncio.gather(drain, return_exceptions=True)
             self._lease_lost = False
             self._holds_lease = False
             logger.error("Robinhood verdict registry: stopped sending, this process no longer holds the sender lease")
 
-    async def _take_lease(self) -> Optional[float]:
-        """Take or renew the sender lease; the monotonic time it is held until, or None if another drain holds it."""
-        asked_at = time.monotonic()
+    async def _take_lease(self) -> Tuple[bool, float]:
+        """Take or renew the sender lease. Returns whether this process holds it, and when it expires (Unix time)."""
         holder, expires_at = await self._db.take_sender_lease(LEASE_NAME, self._lease_holder, LEASE_SECONDS)
-        if holder != self._lease_holder:
+        self._holds_lease = holder == self._lease_holder
+        if not self._holds_lease:
             logger.warning(
-                "Robinhood verdict registry: not sending, %s holds the sender lease until %s UTC; asking again in %d s",
+                "Robinhood verdict registry: not sending, %s holds the sender lease until %s UTC",
                 holder,
                 time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(expires_at)),
-                LEASE_SECONDS,
             )
-            return None
-        self._holds_lease = True
-        return asked_at + LEASE_SECONDS
+        return self._holds_lease, expires_at
 
     async def _keep_lease(self, held_until: float) -> None:
-        """Renew the lease every LEASE_RENEW_SECONDS. Returns once another drain holds it, or once failed renewals
-        leave less than one renewal period of it, so the drain stops before the lease can pass to another."""
+        """Renew the lease every LEASE_RENEW_SECONDS. Returns once another drain holds it, or once the lease could
+        run out before the next renewal fails, so the drain stops before the lease can pass to another drain.
+
+        held_until is the lease's expiry in Unix time, as stored, so a clock step moves it with the clock every
+        drain compares it against.
+        """
         while True:
             await asyncio.sleep(LEASE_RENEW_SECONDS)
+            if self._lease_running_out(held_until):
+                return
             try:
-                renewed = await self._take_lease()
+                held, expires_at = await self._take_lease()
             except Exception as e:
                 logger.error("Robinhood verdict registry: sender lease not renewed: %s", type(e).__name__)
-                if time.monotonic() >= held_until - LEASE_RENEW_SECONDS:
+                if self._lease_running_out(held_until):
                     return
                 continue
-            if renewed is None:
+            if not held:
                 return
-            held_until = renewed
+            held_until = expires_at
+
+    @staticmethod
+    def _lease_running_out(held_until: float) -> bool:
+        """True once a renewal that waits the whole DB_LOCK_WAIT_SECONDS for the lock and then fails would leave
+        less than one renewal period of the lease."""
+        return time.time() + DB_LOCK_WAIT_SECONDS >= held_until - LEASE_RENEW_SECONDS
 
     async def _drain_loop(self) -> None:
         await self._recover_claims()
@@ -633,6 +654,16 @@ class VerdictPublisher:
                     return "done"
                 if await self._drop_ineligible(row):
                     return "done"
+                # Only the lease holder stores and broadcasts, and a lease taken now outlasts the broadcast phase.
+                try:
+                    held, _ = await self._take_lease()
+                except Exception as e:
+                    logger.error("Verdict record deferred: sender lease not renewed: %s", type(e).__name__)
+                    held = False
+                if not held:
+                    # What was signed is discarded; nothing has been stored or broadcast.
+                    await self._db.release_verdict_claim(evidence_id)
+                    return "retry"
                 _, raw, nonce, max_fee = prepared
                 tx_hash = "0x" + keccak(raw).hex()
                 if any(transaction["tx_hash"] == tx_hash for transaction in transactions):

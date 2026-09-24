@@ -1148,6 +1148,12 @@ async def test_stop_lets_a_send_under_way_finish(db, monkeypatch):
     assert len(chain.sent) == 1
 
 
+async def lease_expired(db):
+    """The dead process's sender lease runs out, as it does LEASE_SECONDS after it last took it, so a restart can send."""
+    await db._db.execute("UPDATE sender_leases SET expires_at = 0")
+    await db._db.commit()
+
+
 async def crash_during(db, chain, method):
     """Simulate the process dying during `method`: the shielded send itself is torn down."""
     chain.raise_on[method] = asyncio.CancelledError()
@@ -1157,6 +1163,7 @@ async def crash_during(db, chain, method):
         with pytest.raises(asyncio.CancelledError):
             await publisher.drain_once()
     chain.raise_on.clear()
+    await lease_expired(db)
     [claimed] = await db.get_claimed_verdicts(4663)
     assert claimed["tx_hash"] is not None and claimed["nonce"] == 7
     return claimed
@@ -1656,6 +1663,7 @@ async def test_s1_a_restart_while_the_replica_lags_resends_the_same_bytes_and_re
         with pytest.raises(asyncio.CancelledError):
             await publisher.drain_once()
     chain.raise_on.clear()
+    await lease_expired(db)
     [(_, first, _)] = chain.mined
     chain.errors["eth_sendRawTransaction"] = {"code": -32000, "message": "nonce too low"}
     chain.base_fee += FEE_CHANGE

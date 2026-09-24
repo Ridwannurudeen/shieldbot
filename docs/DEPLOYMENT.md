@@ -210,13 +210,18 @@ API unit. Set `BACKGROUND_WORKERS=external` in the shared `/opt/shieldbot/.env`,
 that reads `api` beside a running workers.py would run a second drain. workers.py refuses to start unless it
 reads `external`, but it cannot see what the API reads.
 
-If two drains do run on the database, they do not race for the recorder's nonces: a drain sends only while it holds
-the sender lease (the `sender_leases` table) and renews it every 15 seconds. The other logs
-`Robinhood verdict registry: not sending, <host:pid:id> holds the sender lease until ...` once a minute and waits.
-It takes over only when the holder has gone 60 seconds without renewing: after a crash, or when renewals keep
-failing, in which case the holder stops claiming rows about 45 seconds after its last renewal. A send already under
-way when that happens still finishes. A clean stop releases the lease at once, unless a send is still under
-way. The holder's id names its host and process id.
+If two drains do run on the database, only the holder of the sender lease (the `sender_leases` table) stores and
+broadcasts verdict transactions. The holder renews the lease every 15 seconds, and each send takes it again after
+signing and before storing the transaction; a drain that finds the lease held by another discards what it signed
+and puts the row back in the queue. The other drain logs
+`Robinhood verdict registry: not sending, <host:pid:id> holds the sender lease until ...` and asks again when that
+lease expires. It can take over only after the holder has gone 90 seconds without taking the lease: after a crash,
+or when its renewals keep failing, in which case the holder stops claiming rows before the lease can run out. A
+send already signed when its drain loses the lease can finish its broadcast within its 60 second phase timeout,
+which is shorter than the 90 second lease it took just before, so the next holder cannot broadcast while it is
+open. A clean stop releases the lease at once, unless a send is still under way. The holder's id names its host and
+process id. The drains compare the lease's expiry with their own clocks, so drains on different hosts need
+synchronised clocks.
 
 To turn it on, as root:
 
