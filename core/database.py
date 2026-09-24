@@ -1,6 +1,9 @@
 """Database layer — SQLite with WAL mode for contract reputation and outcome tracking."""
 
 import asyncio
+import hashlib
+import hmac
+import ipaddress
 import json
 import os
 import re
@@ -82,6 +85,22 @@ _LAUNCH_OUTCOMES_SINCE = """
     WHERE outcome_at >= ?
     ORDER BY outcome_at, token_address
 """
+
+
+def reporter_hash(secret: str, client_ip: str) -> Optional[str]:
+    """A community report's reporter_id: HMAC-SHA256 of the client IP under REPORTER_HASH_SECRET,
+    as 32 hex characters, or None when no secret is set. Neither the IP nor the secret is stored."""
+    if not secret:
+        return None
+    return hmac.new(secret.encode(), client_ip.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def _is_ip_address(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _lift_scan_metadata(score: Dict) -> Dict:
@@ -503,6 +522,7 @@ class Database:
         await self._db.commit()
         await self._migrate_funding_value_wei()
         await self._migrate_tracked_pairs_chain_id()
+        await self._migrate_reporter_ips()
         await self._create_launch_discovery_tables()
         await self._create_launch_feed_tables()
         await self._create_launch_alert_tables()
@@ -579,6 +599,23 @@ class Database:
                 await self._db.execute(
                     "ALTER TABLE tracked_pairs ADD COLUMN chain_id INTEGER NOT NULL DEFAULT 56"
                 )
+            await self._db.commit()
+        except BaseException:
+            await self._db.rollback()
+            raise
+
+    async def _migrate_reporter_ips(self):
+        """Clear every community report reporter_id that is a raw client IP, stored before reporters
+        were hashed, in one transaction. Rows already cleared or hashed are left as they are."""
+        await self._db.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = await self._db.execute(
+                "SELECT id, reporter_id FROM community_reports WHERE reporter_id IS NOT NULL"
+            )
+            ips = [(row_id,) for row_id, reporter in await cursor.fetchall() if _is_ip_address(reporter)]
+            await self._db.executemany(
+                "UPDATE community_reports SET reporter_id = NULL WHERE id = ?", ips
+            )
             await self._db.commit()
         except BaseException:
             await self._db.rollback()

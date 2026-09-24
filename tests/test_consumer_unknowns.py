@@ -35,7 +35,7 @@ def consumer_api(monkeypatch, mock_web3_client):
     services = SimpleNamespace(
         web3_client=mock_web3_client, db=db,
         registry=SimpleNamespace(run_all=AsyncMock(return_value=[])),
-        policy_engine=None, indexer=None, settings=SimpleNamespace(policy_mode='BALANCED'),
+        policy_engine=None, indexer=None, settings=SimpleNamespace(policy_mode='BALANCED', reporter_hash_secret=''),
     )
     monkeypatch.setattr(api, 'container', services)
     monkeypatch.setattr(api, 'web3_client', mock_web3_client)

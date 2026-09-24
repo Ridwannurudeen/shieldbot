@@ -31,6 +31,7 @@ from core.auth import TIER_LIMITS, hash_key
 from core.circuit_breaker import CLOSED, provider_breakers
 from core.config import Settings
 from core.container import ServiceContainer
+from core.database import reporter_hash
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
 from core.unknown_ledger import unknown_ledger
 from rpc.router import rpc_router
@@ -1684,7 +1685,7 @@ async def community_report(req: CommunityReportRequest, request: Request):
                 address=req.address,
                 chain_id=req.chainId,
                 report_type=req.report_type,
-                reporter_id=client_ip,
+                reporter_id=reporter_hash(container.settings.reporter_hash_secret, client_ip),
                 reason=req.reason,
             )
         return {"status": "recorded", "address": req.address, "report_type": req.report_type}
