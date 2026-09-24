@@ -97,6 +97,8 @@
       *, *::before, *::after { transition: none !important; }
     }
 
+    :focus-visible { outline: 2px solid #60A5FA; outline-offset: 2px; }
+
     /* Scrollbar */
     ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: #1E293B; }
@@ -195,7 +197,7 @@
       useEffect(() => { const t = setTimeout(onDone, 2200); return () => clearTimeout(t); }, []);
       const isErr = type === 'error';
       return (
-        <div className="toast-anim fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-2xl"
+        <div role="status" className="toast-anim fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-2xl"
              style={{ background:'#1E293B', border:`1px solid ${isErr ? 'rgba(239,68,68,0.35)' : '#334155'}`,
                       color: isErr ? '#F87171' : '#10B981', fontSize:13 }}>
           {isErr
@@ -297,7 +299,7 @@
             </svg>
             {msg}
           </span>
-          <button onClick={onRetry} className="ml-4 px-3 py-1 rounded-lg text-xs font-semibold transition-colors"
+          <button onClick={onRetry} className="ml-4 px-3 py-1 min-h-[44px] md:min-h-0 rounded-lg text-xs font-semibold transition-colors"
                   style={{ background:'rgba(239,68,68,0.18)', color:'#FCA5A5' }}>Retry</button>
         </div>
       );
@@ -327,7 +329,7 @@
              }}
              onMouseEnter={() => setHov(true)}
              onMouseLeave={() => setHov(false)}>
-          <div className="flex items-start gap-3">
+          <div className="flex flex-wrap md:flex-nowrap items-start gap-3">
 
             {/* Severity badge */}
             <span className={`shrink-0 text-xs font-bold px-2 py-1 rounded-md uppercase tracking-wide text-center ${sev === 'CRITICAL' ? 'badge-critical' : ''}`}
@@ -351,39 +353,38 @@
             {/* Time */}
             <div className="text-xs shrink-0" style={{ color:'#94A3B8' }}>{timeAgo(ts)}</div>
 
-            {/* Quick actions — visible on hover */}
-            <div className="flex items-center gap-1 shrink-0 transition-all duration-150"
-                 style={{ opacity: hov ? 1 : 0, pointerEvents: hov ? 'auto' : 'none' }}>
+            {/* Quick actions */}
+            <div className="flex items-center justify-end gap-1 shrink-0 w-full md:w-auto">
 
               {exp && addr && (
                 <a href={`${exp}/address/${addr}`} target="_blank" rel="noopener noreferrer"
-                   title="Investigate on Explorer" aria-label="Investigate on Explorer"
-                   className="p-1.5 rounded-lg transition-colors"
+                   title="Investigate on Explorer" aria-label={`Investigate ${short(addr)} on the explorer`}
+                   className="w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg transition-colors"
                    style={{ background:'rgba(59,130,246,0.15)', color:'#60A5FA' }}
                    onClick={e => e.stopPropagation()}>
-                  <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+                  <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
                   </svg>
                 </a>
               )}
 
               {addr && (
-                <button title="Copy Address" aria-label="Copy address to clipboard"
-                        className="p-1.5 rounded-lg transition-colors"
+                <button title="Copy Address" aria-label={`Copy ${short(addr)} to the clipboard`}
+                        className="w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg transition-colors"
                         style={{ background:'rgba(16,185,129,0.15)', color:'#34D399' }}
                         onClick={() => onCopy(addr)}>
-                  <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+                  <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
                     <rect x="9" y="9" width="13" height="13" rx="2"/>
                     <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
                   </svg>
                 </button>
               )}
 
-              <button title="Flag False Positive" aria-label="Flag as false positive"
-                      className="p-1.5 rounded-lg transition-colors"
+              <button title="Flag False Positive" aria-label={`Flag ${addr ? short(addr) : type} as a false positive`}
+                      className="w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg transition-colors"
                       style={{ background:'rgba(245,158,11,0.15)', color:'#FBBF24' }}
                       onClick={() => onFlag(t)}>
-                <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+                <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
                   <line x1="4" y1="22" x2="4" y2="15"/>
                 </svg>
@@ -431,8 +432,8 @@
             {CHAIN_FILTERS.map(f => {
               const active = chain === f.val;
               return (
-                <button key={f.val} onClick={() => onChain(f.val)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150"
+                <button key={f.val} onClick={() => onChain(f.val)} aria-pressed={active}
+                        className="px-3 py-1.5 min-h-[44px] md:min-h-0 rounded-lg text-xs font-medium transition-all duration-150"
                         style={{
                           background: active ? 'rgba(59,130,246,0.18)' : '#1E293B',
                           border: `1px solid ${active ? '#3B82F6' : '#334155'}`,
@@ -553,7 +554,7 @@
       if (unavailable || short.length) {
         return (
           <div className="glass rounded-xl p-5" style={{ border:'1px solid #334155' }}>
-            <div className="text-sm font-semibold mb-4" style={{ color:'#F8FAFC' }}>Threat Velocity</div>
+            <h3 className="text-sm font-semibold mb-4" style={{ color:'#F8FAFC' }}>Threat Velocity</h3>
             <div className="flex items-center justify-center text-sm text-center px-4" style={{ height:190, color:'#94A3B8' }}>
               {unavailable
                 ? 'Threat feed unavailable.'
@@ -571,7 +572,7 @@
         <div className="glass rounded-xl p-5" style={{ border:'1px solid #334155' }}>
           <div className="flex items-start justify-between mb-4">
             <div>
-              <div className="text-sm font-semibold" style={{ color:'#F8FAFC' }}>Threat Velocity</div>
+              <h3 className="text-sm font-semibold" style={{ color:'#F8FAFC' }}>Threat Velocity</h3>
               <div className="text-xs mt-0.5" style={{ color:'#94A3B8' }}>Detections per hour · last 24 h</div>
             </div>
             <span className="text-xs px-2.5 py-1 rounded-full font-medium"
@@ -613,7 +614,7 @@
         <div className="glass rounded-xl p-5" style={{ border:'1px solid #334155' }}>
           <div className="flex items-start justify-between mb-4">
             <div>
-              <div className="text-sm font-semibold" style={{ color:'#F8FAFC' }}>Chain Distribution</div>
+              <h3 className="text-sm font-semibold" style={{ color:'#F8FAFC' }}>Chain Distribution</h3>
               <div className="text-xs mt-0.5" style={{ color:'#94A3B8' }}>Threats in the loaded feed, by network{cappedNote}</div>
             </div>
             {haslive
@@ -661,22 +662,24 @@
       const summary = data.summary || {};
       return (
         <div className="glass rounded-xl p-4 md:p-5" style={{ border: '1px solid #334155' }}>
-          <div className="flex flex-wrap gap-3 mb-4 text-xs" style={{ color: '#94A3B8' }}>
+          <div className="flex flex-wrap items-center gap-x-3 mb-4 text-xs" style={{ color: '#94A3B8' }}>
             <span>Attestor:&nbsp;
               <a href={`https://basescan.org/address/${data.attestor}`} target="_blank" rel="noreferrer"
+                 className="inline-flex items-center min-h-[44px] md:min-h-0"
                  style={{ color: '#60A5FA', fontFamily: 'JetBrains Mono,monospace' }}>
                 {(data.attestor || '').slice(0, 10)}…{(data.attestor || '').slice(-6)}
               </a>
             </span>
             <span>Total recent: <strong style={{ color: '#E2E8F0' }}>{summary.total_recent || 0}</strong></span>
-            <a href={data.explorer || '#'} target="_blank" rel="noreferrer" style={{ color: '#60A5FA' }}>View on EAS Scan ↗</a>
+            <a href={data.explorer || '#'} target="_blank" rel="noreferrer"
+               className="inline-flex items-center min-h-[44px] md:min-h-0" style={{ color: '#60A5FA' }}>View on EAS Scan ↗</a>
           </div>
           {list.length === 0 ? (
             <div className="text-center py-8 text-sm" style={{ color: '#94A3B8' }}>No attestations yet.</div>
           ) : (
             <div className="space-y-2">
               {list.map((a) => (
-                <div key={a.uid} className="flex items-center gap-3 py-2 px-3 rounded-lg"
+                <div key={a.uid} className="flex flex-wrap md:flex-nowrap items-center gap-x-3 py-2 px-3 rounded-lg"
                      style={{ background: '#1E293B', border: '1px solid #334155' }}>
                   <span className="text-xs font-bold px-2 py-1 rounded"
                         style={{ background: riskColor(a.risk_label) + '22', color: riskColor(a.risk_label) }}>
@@ -691,7 +694,8 @@
                     {a.timestamp ? new Date(a.timestamp * 1000).toLocaleString() : ''}
                   </span>
                   <a href={`https://base.easscan.org/attestation/view/${a.uid}`} target="_blank" rel="noreferrer"
-                     className="text-xs" style={{ color: '#60A5FA' }}>EAS ↗</a>
+                     className="text-xs inline-flex items-center justify-center min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0"
+                     style={{ color: '#60A5FA' }}>EAS ↗</a>
                 </div>
               ))}
             </div>
@@ -703,8 +707,8 @@
     function Section({ title, children }) {
       return (
         <section>
-          <div className="text-xs font-semibold uppercase tracking-widest mb-3"
-               style={{ color:'#94A3B8' }}>{title}</div>
+          <h2 className="text-xs font-semibold uppercase tracking-widest mb-3"
+              style={{ color:'#94A3B8' }}>{title}</h2>
           {children}
         </section>
       );
@@ -732,10 +736,12 @@
                 style={{ borderColor:'#1E293B', position:'sticky', top:0, zIndex:40 }}>
           <div>
             <div className="flex items-center gap-3 flex-wrap">
-              <span className="text-lg font-bold" style={{ color:'#F8FAFC' }}>
-                <span style={{ color:'#60A5FA' }}>Shield</span>Bot
-              </span>
-              <span className="text-sm" style={{ color:'#94A3B8' }}>Threat Dashboard</span>
+              <h1 className="flex items-center gap-3">
+                <span className="text-lg font-bold" style={{ color:'#F8FAFC' }}>
+                  <span style={{ color:'#60A5FA' }}>Shield</span>Bot
+                </span>{' '}
+                <span className="text-sm" style={{ color:'#94A3B8' }}>Threat Dashboard</span>
+              </h1>
               <div className="flex items-center gap-1.5">
                 <div style={{
                   width:8, height:8, borderRadius:'50%', background:h.color,
@@ -750,12 +756,14 @@
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <a href="https://shieldbotsecurity.online" style={{ color:'#94A3B8', fontSize:'0.75rem', textDecoration:'none', display:'flex', alignItems:'center', gap:'0.25rem' }}
+            <a href="https://shieldbotsecurity.online" className="flex items-center min-h-[44px] md:min-h-0"
+               style={{ color:'#94A3B8', fontSize:'0.75rem', textDecoration:'none', gap:'0.25rem' }}
                onMouseOver={e => e.currentTarget.style.color='#E2E8F0'}
                onMouseOut={e => e.currentTarget.style.color='#94A3B8'}>
               ← Home
             </a>
-            <a href="mailto:support@shieldbotsecurity.online" style={{ color:'#94A3B8', fontSize:'0.75rem', textDecoration:'none' }}
+            <a href="mailto:support@shieldbotsecurity.online" className="flex items-center min-h-[44px] md:min-h-0"
+               style={{ color:'#94A3B8', fontSize:'0.75rem', textDecoration:'none' }}
                onMouseOver={e => e.currentTarget.style.color='#E2E8F0'}
                onMouseOut={e => e.currentTarget.style.color='#94A3B8'}>
               Support
