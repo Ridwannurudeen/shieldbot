@@ -48,9 +48,10 @@ class AgentTools:
         analysis = self._container.registry.run_all(ctx, deadline=deadline)
         impostor_check = None
         if chain_id == LAUNCH_CHAIN_ID:
-            results, impostor_check = await asyncio.gather(analysis, self._container.robinhood_assets.check_onchain(
+            check = self._container.robinhood_assets.check_onchain(
                 address, RUN_ALL_DEADLINE_SECONDS if deadline is None else deadline,
-            ))
+            )
+            results, impostor_check = await asyncio.gather(analysis, check)
         else:
             results = await analysis
         risk = self._container.risk_engine.compute_from_results(results)

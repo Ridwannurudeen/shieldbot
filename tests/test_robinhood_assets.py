@@ -15,6 +15,8 @@ import services.robinhood_assets as robinhood_assets
 from services.robinhood_assets import (
     CACHE_TTL_SECONDS,
     RETRY_SECONDS,
+    RULES_VERSION,
+    SHRUNK_LIST_CONFIRMATIONS,
     RobinhoodAssets,
     check_token,
     parse_official_assets,
@@ -38,10 +40,13 @@ NO_MATCH = {
     "symbol": None,
     "official_address": None,
     "matched_by": None,
-    "third_party": False,
+    "pointer": None,
+    "third_party": None,
+    "canonical": False,
     "also": None,
     "reason": None,
     "list_size": 195,
+    "rules": RULES_VERSION,
 }
 UNKNOWN_LIST = {
     **NO_MATCH,
@@ -50,6 +55,17 @@ UNKNOWN_LIST = {
     "list_size": None,
 }
 UNKNOWN_METADATA = {**NO_MATCH, "status": "unknown", "reason": "Token symbol or name unavailable"}
+
+
+def _match(symbol, name, listed=LISTED):
+    result = check_token(OTHER, symbol, name, listed)
+    return (
+        result["status"],
+        result["symbol"],
+        result["matched_by"],
+        result["pointer"],
+        result["third_party"],
+    )
 
 
 def test_the_recorded_list_maps_every_asset_to_its_4663_contract():
@@ -70,16 +86,16 @@ def test_the_recorded_list_maps_every_asset_to_its_4663_contract():
             "official",
             "AAPL",
         ),
-        # The name's initials spell the ticker the symbol copies.
+        # The name's initials spell the ticker the symbol copies, which the collision line warns of.
         (
             "0x1c2a482970ae6b6e5052a7a184c8aef19e0840be",
             "AMD",
             "Advanced Micro Dog",
-            "impostor",
+            "collision",
             "AMD",
         ),
-        ("0xf01ab9476afcaa0e0058c83cef2b4c30867abeeb", "AMD", "A Mini Dog", "impostor", "AMD"),
-        # The company name and HOOD, Robinhood's own ticker, as the symbol, and the company as the name.
+        ("0xf01ab9476afcaa0e0058c83cef2b4c30867abeeb", "AMD", "A Mini Dog", "collision", "AMD"),
+        # The company name and HOOD, Robinhood's own ticker, as the symbol.
         ("0x982732a974738b771b07a2588f1b38a968a11e18", "TESLAHOOD", "Tesla", "impostor", "TSLA"),
         # The xStock convention of another issuer.
         (
@@ -111,63 +127,80 @@ def test_tokens_live_on_the_chain(address, symbol, name, status, official):
 
 
 def test_an_impostor_names_the_official_contract_and_how_it_matched():
-    assert check_token(OTHER, "AMD", "Advanced Micro Dog", LISTED) == {
+    assert check_token(OTHER, "NVDA", "NVIDIA", LISTED) == {
         **NO_MATCH,
         "status": "impostor",
-        "symbol": "AMD",
-        "official_address": AMD,
+        "symbol": "NVDA",
+        "official_address": NVDA,
         "matched_by": "symbol and name",
+        "pointer": "ticker",
     }
+
+
+@pytest.mark.parametrize(
+    "symbol, name, official, pointer",
+    [
+        ("NVDA", "NVIDIA \N{BULLET} Robinhood Token", "NVDA", "ticker"),
+        ("NVDA", "NVIDIA", "NVDA", "ticker"),
+        ("NVDAX", "Nvidia Stock", "NVDA", "affix"),
+        ("TSLAx", "Tesla", "TSLA", "affix"),
+        ("TSLA", "Dinari Tesla", "TSLA", "ticker"),
+        ("TSLA", "Tesla Wrapped", "TSLA", "ticker"),
+        ("TSLA", "Tesla Backed", "TSLA", "ticker"),
+        ("P", "Everpure", "P", "ticker"),
+    ],
+)
+def test_a_ticker_and_a_name_pointing_at_the_same_official_token_are_an_impostor(
+    symbol, name, official, pointer
+):
+    assert _match(symbol, name) == ("impostor", official, "symbol and name", pointer, None)
 
 
 @pytest.mark.parametrize(
     "symbol, name, official",
     [
-        ("NVDA", "NVIDIA \N{BULLET} Robinhood Token", "NVDA"),
-        ("NVDA", "NVIDIA", "NVDA"),
-        ("NVDAX", "Nvidia Stock", "NVDA"),
-        ("TSLAx", "Tesla", "TSLA"),
         ("TESLA", "Tesla", "TSLA"),
-        ("P", "Everpure", "P"),
-        ("USDG", "Global Dollar", "USDG"),
-        ("WETH", "WETH", "WETH"),
-        ("NVDA", "New Venture Dog Army", "NVDA"),
+        ("CELSIUS", "Celsius", "CELH"),
+        ("ZOOM", "Zoom", "ZM"),
+        ("APPLE", "Apple", "AAPL"),
     ],
 )
-def test_a_symbol_and_name_that_both_point_at_an_official_token_are_an_impostor(
-    symbol, name, official
-):
-    result = check_token(OTHER, symbol, name, LISTED)
-
-    assert (result["status"], result["symbol"], result["matched_by"]) == (
-        "impostor",
-        official,
-        "symbol and name",
-    )
+def test_the_company_name_as_symbol_and_name_is_one_signal_and_a_collision(symbol, name, official):
+    assert _match(symbol, name) == ("collision", official, "symbol and name", "company", None)
 
 
 @pytest.mark.parametrize(
-    "symbol, name, matched_by",
+    "symbol, name",
     [
-        ("MOON", "Tesla \N{BULLET} Robinhood Token", "name"),
-        ("MOON", "Robinhood Tesla", "name"),
-        ("MOON", "Tesla Inc. Robinhood Token", "name"),
-        ("MOON", "TESLA robinhood", "name"),
-        ("TESLAHOOD", "Moon", "symbol"),
-        ("TSLARH", "Moon", "symbol"),
-        ("TSLAx", "Tesla xStock \N{BULLET} Robinhood Token", "symbol and name"),
+        ("DJT", "Donald J Trump"),
+        ("TEAM", "Together Everyone Achieves More"),
+        ("SATS", "Stack All The Sats"),
+        ("AMD", "Advanced Micro Dog"),
+        ("NVDA", "New Venture Dog Army"),
     ],
 )
-def test_a_symbol_or_name_claiming_robinhood_and_the_company_is_an_impostor(
-    symbol, name, matched_by
-):
-    result = check_token(OTHER, symbol, name, LISTED)
+def test_a_name_spelling_the_ticker_it_copies_is_a_collision(symbol, name):
+    assert _match(symbol, name) == ("collision", symbol, "symbol and initials", "ticker", None)
 
-    assert (result["status"], result["symbol"], result["matched_by"]) == (
-        "impostor",
-        "TSLA",
-        matched_by,
-    )
+
+@pytest.mark.parametrize(
+    "symbol, name, matched_by, pointer",
+    [
+        ("MOON", "Tesla \N{BULLET} Robinhood Token", "name", "company"),
+        ("MOON", "Robinhood Tesla", "name", "company"),
+        ("MOON", "Tesla Inc. Robinhood Token", "name", "company"),
+        ("MOON", "TESLA robinhood", "name", "company"),
+        ("TSLA", "TSLA \N{BULLET} Robinhood Token", "symbol", "ticker"),
+        ("TSLA", "Robinhood Token", "symbol", "ticker"),
+        ("TESLAHOOD", "Moon", "symbol", "robinhood"),
+        ("TSLARH", "Moon", "symbol", "robinhood"),
+        ("TSLAx", "Tesla xStock \N{BULLET} Robinhood Token", "symbol and name", "affix"),
+    ],
+)
+def test_a_symbol_or_name_claiming_robinhood_for_an_official_token_is_an_impostor(
+    symbol, name, matched_by, pointer
+):
+    assert _match(symbol, name) == ("impostor", "TSLA", matched_by, pointer, None)
 
 
 @pytest.mark.parametrize(
@@ -197,61 +230,85 @@ def test_a_symbol_or_name_claiming_robinhood_and_the_company_is_an_impostor(
 def test_a_match_that_needs_look_alike_folding_is_an_impostor(symbol, name, official):
     result = check_token(OTHER, symbol, name, LISTED)
 
-    assert (result["status"], result["symbol"]) == ("impostor", official)
-
-
-@pytest.mark.parametrize(
-    "symbol, name, official, matched_by",
-    [
-        ("nvda", "Moon", "NVDA", "symbol"),
-        ("NVDA-", "Moon", "NVDA", "symbol"),
-        ("N.V.D.A", "Moon", "NVDA", "symbol"),
-        ("NVDAX", "Moon", "NVDA", "symbol"),
-        ("tNVDA", "Moon", "NVDA", "symbol"),
-        ("TSLAx", "Moon", "TSLA", "symbol"),
-        ("TESLA", "Moon", "TSLA", "symbol"),
-        ("USDG", "Moon", "USDG", "symbol"),
-        ("WETH", "Moon", "WETH", "symbol"),
-        ("MOON", "nvidia", "NVDA", "name"),
-        ("MOON", "Tesla Stock", "TSLA", "name"),
-        ("MOON", "Cloudflare, Inc. Class A common stock", "NET", "name"),
-        ("MOON", "Global Dollar", "USDG", "name"),
-        ("MOON", "Tesla Holdings", "TSLA", "name"),
-    ],
-)
-def test_a_bare_ticker_or_company_name_is_a_collision(symbol, name, official, matched_by):
-    result = check_token(OTHER, symbol, name, LISTED)
-
-    assert (result["status"], result["symbol"], result["matched_by"], result["third_party"]) == (
-        "collision",
+    assert (result["status"], result["symbol"], result["pointer"]) == (
+        "impostor",
         official,
-        matched_by,
-        False,
+        "look-alike",
     )
 
 
 @pytest.mark.parametrize(
-    "symbol, name, official, matched_by",
+    "symbol, name, official, matched_by, pointer",
     [
-        ("TSLAx", "Tesla xStock", "TSLA", "symbol and name"),
-        ("TSLA.d", "Tesla, Inc. dShares", "TSLA", "symbol and name"),
-        ("MOON", "Tesla, Inc. dShares", "TSLA", "name"),
-        ("TSLA.d", "Tesla", "TSLA", "symbol and name"),
-        ("TSLA.d", "Moon", "TSLA", "symbol"),
-        ("wNVDA", "Nvidia", "NVDA", "symbol and name"),
-        ("wNVDA", "Moon", "NVDA", "symbol"),
-        ("MOON", "Wrapped Tesla", "TSLA", "name"),
-        ("bTSLA", "Backed Tesla", "TSLA", "name"),
-        ("TSLA", "Dinari Tesla", "TSLA", "symbol and name"),
+        ("nvda", "Moon", "NVDA", "symbol", "ticker"),
+        ("NVDA-", "Moon", "NVDA", "symbol", "ticker"),
+        ("N.V.D.A", "Moon", "NVDA", "symbol", "ticker"),
+        ("NVDAX", "Moon", "NVDA", "symbol", "affix"),
+        ("tNVDA", "Moon", "NVDA", "symbol", "affix"),
+        ("TSLAx", "Moon", "TSLA", "symbol", "affix"),
+        ("TESLA", "Moon", "TSLA", "symbol", "company"),
+        ("MOON", "nvidia", "NVDA", "name", "company"),
+        ("MOON", "Tesla Stock", "TSLA", "name", "company"),
+        ("MOON", "Tesla, Inc. dShares", "TSLA", "name", "company"),
+        ("MOON", "Wrapped Tesla", "TSLA", "name", "company"),
+        ("MOON", "Cloudflare, Inc. Class A common stock", "NET", "name", "company"),
+        ("MOON", "Tesla Holdings", "TSLA", "name", "company"),
+        ("MOON", "SK hynix Inc. American Depositary Shares", "SKHY", "name", "company"),
+        ("MOON", "Nebius Group", "NBIS", "name", "company"),
+        ("MOON", "IREN Ltd", "IREN", "name", "company"),
+        ("MOON", "ASML Holding N.V.", "ASML", "name", "company"),
     ],
 )
-def test_a_third_party_issuers_convention_is_a_collision(symbol, name, official, matched_by):
+def test_a_bare_ticker_or_company_name_is_a_collision(symbol, name, official, matched_by, pointer):
+    assert _match(symbol, name) == ("collision", official, matched_by, pointer, None)
+
+
+@pytest.mark.parametrize(
+    "symbol, name, official, matched_by, convention",
+    [
+        ("TSLAx", "Tesla xStock", "TSLA", "symbol and name", "xStock"),
+        ("TSLA.d", "Tesla, Inc. dShares", "TSLA", "symbol and name", "dShares"),
+        ("TSLA.d", "Tesla", "TSLA", "symbol and name", "dShares"),
+        ("TSLA.d", "Moon", "TSLA", "symbol", "dShares"),
+        ("wNVDA", "Nvidia", "NVDA", "symbol and name", "Wrapped"),
+        ("wNVDA", "Moon", "NVDA", "symbol", "Wrapped"),
+        ("bTSLA", "Backed Tesla", "TSLA", "symbol and name", "Backed"),
+        ("bTSLA", "Backed", "TSLA", "symbol", "Backed"),
+    ],
+)
+def test_a_symbol_in_another_issuers_convention_is_a_third_party_collision(
+    symbol, name, official, matched_by, convention
+):
+    assert _match(symbol, name) == ("collision", official, matched_by, "affix", convention)
+
+
+@pytest.mark.parametrize(
+    "symbol, name, status, matched_by, pointer",
+    [
+        ("WETH", "WETH", "impostor", "symbol and name", "ticker"),
+        ("USDG", "Global Dollar", "impostor", "symbol and name", "ticker"),
+        ("WETH", "Wrapped Ether", "collision", "symbol", "ticker"),
+        ("wWETH", "Moon", "collision", "symbol", "affix"),
+        ("USDG", "Moon", "collision", "symbol", "ticker"),
+        ("MOON", "Global Dollar", "collision", "name", "company"),
+    ],
+)
+def test_a_canonical_token_is_matched_as_canonical_and_never_third_party(
+    symbol, name, status, matched_by, pointer
+):
     result = check_token(OTHER, symbol, name, LISTED)
 
-    assert (result["status"], result["symbol"], result["matched_by"], result["third_party"]) == (
-        "collision",
-        official,
+    assert (
+        result["status"],
+        result["matched_by"],
+        result["pointer"],
+        result["third_party"],
+        result["canonical"],
+    ) == (
+        status,
         matched_by,
+        pointer,
+        None,
         True,
     )
 
@@ -260,6 +317,7 @@ def test_a_third_party_issuers_convention_is_a_collision(symbol, name, official,
     "symbol, name",
     [
         ("P", "Moon"),
+        ("P", "Robinhood Token"),
         ("\N{CYRILLIC CAPITAL LETTER ER}", "Moon"),
         ("TON", "Toncoin"),
         ("XP", "Moon"),
@@ -267,11 +325,12 @@ def test_a_third_party_issuers_convention_is_a_collision(symbol, name, official,
         ("BAT", "Moon"),
         ("XNVDAX", "Moon"),
         ("NVDAS", "Moon"),
+        ("bTSLA", "Moon"),
         ("ILY", "Moon"),
         ("AAP1", "Moon"),
+        ("lntc", "Moon"),
         ("MOON", "Te5la"),
         ("MOON", "Tesla X"),
-        ("lntc", "Moon"),
         ("MOON", "NVIDIA fan club"),
         ("MOON", "Run"),
         ("MOON", "Robinhood Token"),
@@ -285,7 +344,8 @@ def test_tokens_that_only_resemble_an_official_one_are_not_matched(symbol, name)
 
 def test_the_symbols_official_is_named_first_and_the_names_is_also_reported():
     collision = check_token(OTHER, "AMD", "Tesla", LISTED)
-    impostor = check_token(OTHER, "AMD", "Tesla \N{BULLET} Robinhood Token", LISTED)
+    claims = check_token(OTHER, "AMD", "Tesla \N{BULLET} Robinhood Token", LISTED)
+    look_alike = check_token(OTHER, "AMD", "TesIa", LISTED)
 
     assert (collision["status"], collision["symbol"], collision["matched_by"]) == (
         "collision",
@@ -293,12 +353,20 @@ def test_the_symbols_official_is_named_first_and_the_names_is_also_reported():
         "symbol",
     )
     assert collision["also"] == {"symbol": "TSLA", "official_address": TSLA}
-    assert (impostor["status"], impostor["symbol"], impostor["matched_by"]) == (
+    # The name's Robinhood claim counts for the official the symbol points at too.
+    assert (claims["status"], claims["symbol"], claims["matched_by"]) == (
+        "impostor",
+        "AMD",
+        "symbol",
+    )
+    assert claims["also"] == {"symbol": "TSLA", "official_address": TSLA}
+    # A stronger match by the name comes first.
+    assert (look_alike["status"], look_alike["symbol"], look_alike["matched_by"]) == (
         "impostor",
         "TSLA",
         "name",
     )
-    assert impostor["also"] == {"symbol": "AMD", "official_address": AMD}
+    assert look_alike["also"] == {"symbol": "AMD", "official_address": AMD}
 
 
 def test_without_the_list_only_the_canonical_tokens_are_decided():
@@ -306,6 +374,11 @@ def test_without_the_list_only_the_canonical_tokens_are_decided():
     assert check_token(WETH.upper().replace("0X", "0x"), None, None, None)["symbol"] == "WETH"
     assert check_token(OTHER, "USDG", "Global Dollar", None)["status"] == "impostor"
     assert check_token(OTHER, "NVDA", "NVIDIA", None) == UNKNOWN_LIST
+
+
+def test_an_official_or_canonical_address_is_marked_as_such():
+    assert check_token(NVDA, None, None, LISTED)["canonical"] is False
+    assert check_token(WETH, None, None, LISTED)["canonical"] is True
 
 
 @pytest.mark.parametrize("symbol, name", [(None, "Moon"), ("MOON", None), (None, None)])
@@ -368,19 +441,31 @@ def test_deployments_on_other_chains_are_skipped():
     }
 
 
-def test_an_impostor_flag_leads_the_critical_flags():
+@pytest.mark.parametrize(
+    "symbol, name, flag",
+    [
+        (
+            "NVDA",
+            "NVIDIA",
+            f"Impersonates official NVDA token (Robinhood-issued); official contract {NVDA}",
+        ),
+        (
+            "WETH",
+            "WETH",
+            f"Impersonates the canonical WETH of Robinhood Chain; canonical contract {WETH}",
+        ),
+    ],
+)
+def test_an_impostor_flag_leads_the_critical_flags(symbol, name, flag):
     scan = {"rug_probability": 40, "critical_flags": ["Low liquidity (<$10k)", "New pair (<24h)"]}
-    check = check_token(OTHER, "NVDA", "NVIDIA", LISTED)
+    check = check_token(OTHER, symbol, name, LISTED)
 
     labelled = with_impostor_check(scan, check)
 
     assert labelled == {
         **scan,
         "impostor_check": check,
-        "critical_flags": [
-            f"Impersonates official NVDA token; official contract {NVDA}",
-            *scan["critical_flags"],
-        ],
+        "critical_flags": [flag, *scan["critical_flags"]],
     }
     assert scan["critical_flags"] == ["Low liquidity (<$10k)", "New pair (<24h)"]
 
@@ -505,6 +590,38 @@ async def test_a_list_that_shrank_by_at_most_a_fifth_replaces_the_last(served):
 
 
 @pytest.mark.asyncio
+async def test_a_list_that_shrank_further_is_taken_once_fetched_at_the_same_size_three_times(
+    served, caplog
+):
+    await served.service.listed()
+    served.clock += CACHE_TTL_SECONDS
+    served.list_body = _shortened(100)
+
+    with caplog.at_level(logging.ERROR, logger="services.robinhood_assets"):
+        sizes = []
+        for _ in range(SHRUNK_LIST_CONFIRMATIONS):
+            sizes.append(len(await served.service.listed()))
+            served.clock += RETRY_SECONDS
+
+    assert SHRUNK_LIST_CONFIRMATIONS == 3
+    assert sizes == [195, 195, 100]
+    assert caplog.text.count("shrank from 195 to 100 tokens") == 2
+
+
+@pytest.mark.asyncio
+async def test_a_shrunken_list_of_another_size_starts_the_count_again(served):
+    await served.service.listed()
+    for count in (100, 101, 100, 100):
+        served.clock += CACHE_TTL_SECONDS
+        served.list_body = _shortened(count)
+        await served.service.listed()
+
+    assert len(await served.service.listed()) == 195
+    served.clock += CACHE_TTL_SECONDS
+    assert len(await served.service.listed()) == 100
+
+
+@pytest.mark.asyncio
 async def test_an_oversized_list_is_not_read(served, monkeypatch):
     monkeypatch.setattr(robinhood_assets, "MAX_LIST_BYTES", len(RECORDED_TEXT.encode("utf-8")) - 1)
 
@@ -523,13 +640,13 @@ async def test_without_a_good_list_checks_are_unknown(served):
 @pytest.mark.asyncio
 async def test_symbol_and_name_are_read_in_one_batched_request(served):
     served.rpc_reply = [
-        {"jsonrpc": "2.0", "id": 1, "result": abi_string("Advanced Micro Dog")},
-        {"jsonrpc": "2.0", "id": 0, "result": abi_string("AMD")},
+        {"jsonrpc": "2.0", "id": 1, "result": abi_string("NVIDIA")},
+        {"jsonrpc": "2.0", "id": 0, "result": abi_string("NVDA")},
     ]
 
     result = await served.service.check_onchain(OTHER, 10)
 
-    assert (result["status"], result["symbol"]) == ("impostor", "AMD")
+    assert (result["status"], result["symbol"]) == ("impostor", "NVDA")
     (batch,) = served.rpc_requests
     assert [(call["method"], call["params"][0]) for call in batch] == [
         ("eth_call", {"to": OTHER, "data": "0x95d89b41"}),
@@ -567,8 +684,8 @@ async def test_symbol_and_name_are_read_in_one_batched_request(served):
         (
             200,
             [
-                {"jsonrpc": "2.0", "id": False, "result": abi_string("AMD")},
-                {"jsonrpc": "2.0", "id": True, "result": abi_string("Advanced Micro Dog")},
+                {"jsonrpc": "2.0", "id": False, "result": abi_string("NVDA")},
+                {"jsonrpc": "2.0", "id": True, "result": abi_string("NVIDIA")},
             ],
         ),
     ],
@@ -587,8 +704,8 @@ async def test_a_token_whose_metadata_cannot_be_read_is_unknown_unless_its_addre
 async def test_an_oversized_rpc_reply_is_not_read(served, monkeypatch):
     monkeypatch.setattr(robinhood_assets, "MAX_RPC_REPLY_BYTES", 64)
     served.rpc_reply = [
-        {"jsonrpc": "2.0", "id": 0, "result": abi_string("AMD")},
-        {"jsonrpc": "2.0", "id": 1, "result": abi_string("Advanced Micro Dog")},
+        {"jsonrpc": "2.0", "id": 0, "result": abi_string("NVDA")},
+        {"jsonrpc": "2.0", "id": 1, "result": abi_string("NVIDIA")},
     ]
 
     assert await served.service.check_onchain(OTHER, 10) == UNKNOWN_METADATA

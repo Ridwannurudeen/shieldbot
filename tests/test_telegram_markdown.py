@@ -448,6 +448,32 @@ def test_bidi_and_zero_width_controls_are_blanked():
     assert "Token: Evil Name X Y (EVL)" in rendered
 
 
+INVISIBLE = (
+    0xFEFF,
+    0x2060,
+    0x2061,
+    0x2062,
+    0x2063,
+    0x2064,
+    0x00AD,
+    0x061C,
+    0x180E,
+    0x115F,
+    0x1160,
+    0x3164,
+    0xFFA0,
+)
+
+
+@pytest.mark.parametrize("code", INVISIBLE, ids=[f"U+{code:04X}" for code in INVISIBLE])
+def test_invisible_and_filler_characters_are_blanked(code):
+    rendered = assert_literal(
+        _report(True, token_info={"name": f"Evil{chr(code)}Name", "symbol": "EVL"})
+    )
+
+    assert "Token: Evil Name (EVL)" in rendered
+
+
 # --- Operator alerts sent with Markdown ----------------------------------------------------------
 
 

@@ -152,8 +152,12 @@ def _launch_scan(stored_status, risk_score, scanned_at, finding) -> Dict:
     return scan
 
 
-# How decided a launch's impostor check is: a stored check is only replaced by one at least as decided.
+# How decided a launch's impostor check is: under the same rules, a stored check is only replaced by one
+# at least as decided.
 _IMPOSTOR_CHECK_RANK = {"unknown": 0, "none": 1, "collision": 2, "impostor": 3, "official": 3}
+_STORED_IMPOSTOR_CHECK_RANK = "CASE json_extract(impostor_check, '$.status') " + " ".join(
+    f"WHEN '{status}' THEN {rank}" for status, rank in _IMPOSTOR_CHECK_RANK.items()
+) + " END"
 
 
 def _impostor_check(stored) -> Optional[Dict]:
@@ -2125,24 +2129,30 @@ class Database:
     async def record_launch_impostor_check(self, chain_id: int, token_address: str, check: Dict):
         """Store a launch's check against the official Robinhood tokens (services.robinhood_assets).
 
-        A check never replaces a more decided one (_IMPOSTOR_CHECK_RANK), so a failed read or a shorter
-        list cannot turn an impostor, official or collision finding into none or unknown. The check
-        carries the size of the list it was made against.
+        A check made under newer rules replaces the stored one outright, so a corrected rule corrects the
+        stored labels on the next scan; checks stored before rule versions count as rules 1. Under the
+        same rules a check never replaces a more decided one (_IMPOSTOR_CHECK_RANK), so a failed read
+        cannot turn an impostor, official or collision finding into none or unknown, and an official
+        finding is not replaced by a check made from a shorter list. One UPDATE decides and writes.
         """
-        cursor = await self._db.execute(
-            "SELECT impostor_check FROM discovered_launches WHERE chain_id = ? AND token_address = ?",
-            (chain_id, token_address),
-        )
-        row = await cursor.fetchone()
-        if row is None:
-            return
-        stored = _impostor_check(row[0])
-        if stored is not None and _IMPOSTOR_CHECK_RANK[check["status"]] < _IMPOSTOR_CHECK_RANK[stored["status"]]:
-            return
-        await self._db.execute(
-            "UPDATE discovered_launches SET impostor_check = ? WHERE chain_id = ? AND token_address = ?",
-            (json.dumps(check), chain_id, token_address),
-        )
+        await self._db.execute(f"""
+            UPDATE discovered_launches SET impostor_check = :check
+            WHERE chain_id = :chain_id AND token_address = :token AND (
+                impostor_check IS NULL
+                OR COALESCE(json_extract(impostor_check, '$.rules'), 1) < :rules
+                OR (
+                    COALESCE(json_extract(impostor_check, '$.rules'), 1) = :rules
+                    AND {_STORED_IMPOSTOR_CHECK_RANK} <= :rank
+                    AND NOT (
+                        json_extract(impostor_check, '$.status') = 'official'
+                        AND :list_size < json_extract(impostor_check, '$.list_size')
+                    )
+                )
+            )
+        """, {
+            "check": json.dumps(check), "chain_id": chain_id, "token": token_address, "rules": check["rules"],
+            "rank": _IMPOSTOR_CHECK_RANK[check["status"]], "list_size": check["list_size"],
+        })
         await self._db.commit()
 
     # --- Launch Feed ---
@@ -2280,9 +2290,11 @@ class Database:
         """Queue alerts for the launch outcomes recorded at or after ``since``.
 
         A chat gets outcomes recorded after it subscribed: every one in "all" mode, otherwise
-        only blocked ones and those of impostors of an official Robinhood token. A chat is queued
-        at most one alert per launch and outcome, so passes over the same window, and passes after
-        a restart, never queue an alert twice.
+        only blocked ones and those of impostors of an official Robinhood token. An impostor's
+        outcomes other than blocked are all queued as "impostor", so a chat gets one impostor alert
+        per launch besides the blocked one. A chat is queued at most one alert per launch and
+        outcome, so passes over the same window, and passes after a restart, never queue an alert
+        twice.
 
         A blocked launch whose evidence is not stored yet is held back for up to
         _BLOCKED_EVIDENCE_WAIT_SECONDS. Returns the outcome time of the oldest one held, which
@@ -2305,12 +2317,11 @@ class Database:
             token, stored_status, outcome_at = row[0], row[8], row[10]
             outcome = _launch_outcome(stored_status, outcome_at)
             impostor_check = _impostor_check(row[11])
-            alerting = outcome == "blocked" or (
-                impostor_check is not None and impostor_check["status"] == "impostor"
-            )
+            impostor = impostor_check is not None and impostor_check["status"] == "impostor"
+            key = "impostor" if impostor and outcome != "blocked" else outcome
             chats = [
                 chat_id for chat_id, mode, created_at in subscriptions
-                if created_at <= outcome_at and (mode == "all" or alerting)
+                if created_at <= outcome_at and (mode == "all" or outcome == "blocked" or impostor)
             ]
             if not chats:
                 continue
@@ -2319,7 +2330,7 @@ class Database:
                 held = outcome_at if held is None else min(held, outcome_at)
                 continue
             payload = json.dumps(_launch_item(chain_id, row, finding))
-            alerts += [(chat_id, chain_id, token, outcome, outcome_at, payload, now, now) for chat_id in chats]
+            alerts += [(chat_id, chain_id, token, key, outcome_at, payload, now, now) for chat_id in chats]
         await self._db.executemany("""
             INSERT OR IGNORE INTO launch_alert_outbox
                 (chat_id, chain_id, token_address, outcome, outcome_at, payload, created_at, updated_at)

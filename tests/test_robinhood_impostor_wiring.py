@@ -1,6 +1,7 @@
 """Robinhood Chain scans, launch records, alerts and bot reports carry the official-token check."""
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -11,7 +12,8 @@ from agent.tools import AgentTools
 from core.database import Database
 from core.registry import RUN_ALL_DEADLINE_SECONDS
 from core.telegram_formatter import format_full_report
-from services.robinhood_assets import check_token
+from services.robinhood_assets import RULES_VERSION, check_token
+from services.robinhood_simulation import WETH
 from tests.test_bot_app import CHAIN, CHAT_A, TOKENS, _scan, _subscribe, alerts, bot_module  # noqa: F401
 from tests.test_guard_rescan import confirmed, measurement, now, publisher_for  # noqa: F401
 from tests.test_robinhood_assets import AMD, LISTED, NVDA, TSLA
@@ -24,8 +26,8 @@ COLLISION = check_token(TOKEN, "AMD", "Moon", LISTED)
 OFFICIAL = check_token(NVDA, None, None, LISTED)
 NO_MATCH = check_token(TOKEN, "MOON", "Moon", LISTED)
 UNKNOWN = check_token(TOKEN, None, None, LISTED)
-IMPOSTOR_FLAG = f"Impersonates official NVDA token; official contract {NVDA}"
-IMPOSTOR_HEADER = f"\N{POLICE CARS REVOLVING LIGHT} IMPOSTOR: impersonates official NVDA token; official contract {NVDA}"
+IMPOSTOR_FLAG = f"Impersonates official NVDA token (Robinhood-issued); official contract {NVDA}"
+IMPOSTOR_HEADER = f"\N{POLICE CARS REVOLVING LIGHT} IMPOSTOR: {IMPOSTOR_FLAG}"
 
 
 # --- AgentTools: the scan every hunter path uses ---------------------------------------------
@@ -184,6 +186,10 @@ async def test_an_unknown_check_or_a_failed_scan_keeps_a_decided_check(db):
     assert await _stored(db) == IMPOSTOR
 
 
+def _older(check):
+    return {**check, "rules": RULES_VERSION - 1}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "stored, new, kept",
@@ -196,12 +202,23 @@ async def test_an_unknown_check_or_a_failed_scan_keeps_a_decided_check(db):
         (NO_MATCH, COLLISION, COLLISION),
         (UNKNOWN, NO_MATCH, NO_MATCH),
         (NO_MATCH, NO_MATCH, NO_MATCH),
+        # A check made under newer rules corrects one made under older rules, whatever their ranks.
+        (_older(IMPOSTOR), NO_MATCH, NO_MATCH),
+        ({key: value for key, value in IMPOSTOR.items() if key != "rules"}, NO_MATCH, NO_MATCH),
+        (NO_MATCH, _older(IMPOSTOR), NO_MATCH),
+        # An official finding is not replaced from a shorter list.
+        (OFFICIAL, {**IMPOSTOR, "list_size": 150}, OFFICIAL),
+        (OFFICIAL, {**OFFICIAL, "list_size": 150}, OFFICIAL),
+        (OFFICIAL, {**OFFICIAL, "list_size": 196}, {**OFFICIAL, "list_size": 196}),
     ],
 )
-async def test_a_weaker_check_never_replaces_a_stronger_one(db, stored, new, kept):
+async def test_a_stored_check_is_replaced_under_newer_rules_or_by_one_at_least_as_decided(
+    db, stored, new, kept
+):
     await _discover(db)
+    # Stored as an earlier write left it, which may predate rule versions.
+    await db._db.execute("UPDATE discovered_launches SET impostor_check = ?", (json.dumps(stored),))
 
-    await db.record_launch_impostor_check(CHAIN, TOKEN, stored)
     await db.record_launch_impostor_check(CHAIN, TOKEN, new)
 
     assert await _stored(db) == kept
@@ -276,6 +293,24 @@ async def test_an_impostor_launch_alerts_chats_subscribed_to_blocked_launches(db
     assert [alert["token_address"] for alert in pending] == ([TOKEN] if queued else [])
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["blocked", "all"])
+async def test_an_impostor_alerts_once_besides_its_blocked_outcome(db, mode):
+    await _subscribe(db, CHAT_A, mode)
+    await _scan(db, TOKEN, "cleared", 10, at=990.0)
+    await db.record_launch_impostor_check(CHAIN, TOKEN, IMPOSTOR)
+    for status, score, at in (
+        ("cleared", 10, 990.0),
+        ("watching", 50, 991.0),
+        ("blocked", 90, 992.0),
+    ):
+        await _scan(db, TOKEN, status, score, at=at)
+        await db.enqueue_launch_alerts(CHAIN, 900.0)
+
+    pending = await db.get_pending_launch_alerts(1000.0, 3600, 5, 5)
+    assert [alert["outcome"] for alert in pending] == ["impostor", "blocked"]
+
+
 # --- Launch alerts -------------------------------------------------------------------------------
 
 ITEM = {
@@ -343,11 +378,24 @@ def test_an_incomplete_impostor_scan_stays_unknown_without_a_score(bot_module):
     "check, line",
     [
         (UNKNOWN, "Official token check: unknown (Token symbol or name unavailable)"),
-        (OFFICIAL, "Official NVDA token"),
+        (OFFICIAL, "Official NVDA token (Robinhood)"),
     ],
 )
 def test_an_alert_states_an_unknown_or_official_check(bot_module, check, line):
     assert line in _alert(bot_module, CLEARED, check)
+
+
+def test_the_official_symbol_in_an_alert_cannot_add_a_line(bot_module):
+    symbol = "NV\nDA\N{RIGHT-TO-LEFT OVERRIDE}"
+
+    impostor = _alert(bot_module, CLEARED, {**IMPOSTOR, "symbol": symbol})
+    official = _alert(bot_module, CLEARED, {**OFFICIAL, "symbol": symbol})
+
+    assert impostor[0].startswith(
+        "\N{POLICE CARS REVOLVING LIGHT} IMPOSTOR: Impersonates official NV DA  token"
+    )
+    assert impostor[1] == f"Token: {TOKEN}"
+    assert "Official NV DA  token (Robinhood)" in official
 
 
 @pytest.mark.parametrize("check", [None, NO_MATCH, COLLISION])
@@ -381,12 +429,13 @@ RISK = {
     "coverage": {"structural": 1},
     "critical_flags": [],
 }
+INCOMPLETE = {**RISK, "status": "unknown", "coverage": {"structural": 0.5}}
 METADATA = {"name": "Moon", "symbol": "MOON"}
 
 
-def _report(check, contract_data=None, token_info=METADATA):
+def _report(check, contract_data=None, token_info=METADATA, risk=RISK):
     return format_full_report(
-        {**RISK, "impostor_check": check},
+        {**risk, "impostor_check": check},
         contract_data or {},
         {},
         {},
@@ -398,48 +447,71 @@ def _report(check, contract_data=None, token_info=METADATA):
 @pytest.mark.parametrize(
     "check, line",
     [
+        (IMPOSTOR, f"\N{WARNING SIGN} {IMPOSTOR_FLAG}"),
+        (COLLISION, f"Not the official AMD token (same ticker); official contract {AMD}"),
         (
-            IMPOSTOR,
-            f"Official Token Check: \N{WARNING SIGN} Impersonates official NVDA token; official contract {NVDA}",
-        ),
-        (
-            COLLISION,
-            f"Official Token Check: Not the official AMD token (same ticker); official contract {AMD}",
+            check_token(TOKEN, "AMD", "Advanced Micro Dog", LISTED),
+            f"Not the official AMD token (same ticker); official contract {AMD}",
         ),
         (
             check_token(TOKEN, "MOON", "Tesla", LISTED),
-            f"Official Token Check: Not the official TSLA token (same name); official contract {TSLA}",
+            f"Not the official TSLA token (same company name); official contract {TSLA}",
+        ),
+        (
+            check_token(TOKEN, "NVDAX", "Moon", LISTED),
+            f"Not the official NVDA token (ticker with an affix); official contract {NVDA}",
         ),
         (
             check_token(TOKEN, "AMD", "Tesla", LISTED),
-            f"Official Token Check: Not the official AMD token (same ticker); official contract {AMD}; "
+            f"Not the official AMD token (same ticker); official contract {AMD}; "
             f"also resembles official TSLA token, contract {TSLA}",
         ),
         (
             check_token(TOKEN, "TSLAx", "Tesla xStock", LISTED),
-            f"Official Token Check: Third-party TSLA token, not the Robinhood-issued contract; "
-            f"official contract {TSLA}",
+            f"TSLA token in another issuer's convention (xStock), not Robinhood's TSLA; official contract {TSLA}",
         ),
-        (OFFICIAL, "Official Token Check: Official NVDA token (Robinhood)"),
-        (NO_MATCH, "Official Token Check: No match among official Robinhood Chain tokens"),
+        (
+            check_token(TOKEN, "WETH", "WETH", LISTED),
+            f"\N{WARNING SIGN} Impersonates the canonical WETH of Robinhood Chain; canonical contract {WETH}",
+        ),
+        (
+            check_token(TOKEN, "WETH", "Wrapped Ether", LISTED),
+            f"Not the canonical WETH of Robinhood Chain (same ticker); canonical contract {WETH}",
+        ),
+        (check_token(WETH, None, None, LISTED), "The canonical WETH of Robinhood Chain"),
+        (OFFICIAL, "Official NVDA token (Robinhood)"),
+        (NO_MATCH, "No match among official Robinhood Chain tokens"),
         (
             check_token(TOKEN, "MOON", "Moon", None),
-            "Official Token Check: Unknown (Official Robinhood token list unavailable)",
+            "Unknown (Official Robinhood token list unavailable)",
         ),
     ],
 )
 def test_a_report_states_the_check(check, line):
-    assert line in assert_literal(_report(check)).splitlines()
+    assert f"Official Token Check: {line}" in assert_literal(_report(check)).splitlines()
 
 
-def test_an_impostor_report_ends_with_its_own_verdict():
-    lines = assert_literal(_report(IMPOSTOR)).splitlines()
+@pytest.mark.parametrize(
+    "check, risk, verdict",
+    [
+        (IMPOSTOR, RISK, "Impersonates official NVDA: do not treat as the real token"),
+        (
+            IMPOSTOR,
+            INCOMPLETE,
+            "Impersonates official NVDA: do not treat as the real token; unknown risk: provider coverage incomplete",
+        ),
+        (
+            check_token(TOKEN, "WETH", "WETH", LISTED),
+            RISK,
+            "Impersonates the canonical WETH: do not treat as the real token",
+        ),
+    ],
+)
+def test_an_impostor_report_ends_with_its_own_verdict(check, risk, verdict):
+    lines = assert_literal(_report(check, risk=risk)).splitlines()
 
     assert lines[0].startswith("\N{POLICE CARS REVOLVING LIGHT}")
-    assert (
-        lines[-1]
-        == "\N{POLICE CARS REVOLVING LIGHT} Impersonates official NVDA: do not treat as the real token"
-    )
+    assert lines[-1] == f"\N{POLICE CARS REVOLVING LIGHT} {verdict}"
 
 
 @pytest.mark.parametrize("check", [COLLISION, NO_MATCH, OFFICIAL])
@@ -451,18 +523,25 @@ def test_other_reports_keep_their_verdict(check):
     "check, contract_data, token_info",
     [
         (None, {}, METADATA),
-        (UNKNOWN, {}, {}),
-        (UNKNOWN, {}, None),
         (NO_MATCH, {"is_contract": False}, METADATA),
+        (UNKNOWN, {"is_contract": False}, {}),
     ],
 )
-def test_a_report_without_a_token_to_check_has_no_line(check, contract_data, token_info):
+def test_a_report_on_a_wallet_or_without_a_check_has_no_line(check, contract_data, token_info):
     assert "Official Token Check" not in _report(check, contract_data, token_info)
 
 
-def test_an_official_token_is_stated_without_its_metadata():
-    assert "Official Token Check: Official NVDA token (Robinhood)" in assert_literal(
-        _report(OFFICIAL, token_info={})
+@pytest.mark.parametrize(
+    "check, line",
+    [
+        (OFFICIAL, "Official NVDA token (Robinhood)"),
+        (UNKNOWN, "Unknown (Token symbol or name unavailable)"),
+    ],
+)
+def test_an_official_or_unknown_check_is_stated_without_metadata(check, line):
+    assert (
+        f"Official Token Check: {line}"
+        in assert_literal(_report(check, token_info={})).splitlines()
     )
 
 
@@ -472,7 +551,7 @@ def test_an_official_token_is_stated_without_its_metadata():
     "metadata, status, flagged",
     [
         ({"name": "NVIDIA", "symbol": "NVDA"}, "impostor", True),
-        ({"name": "Advanced Micro Dog", "symbol": "AMD"}, "impostor", True),
+        ({"name": "Advanced Micro Dog", "symbol": "AMD"}, "collision", False),
         ({"name": "Moon", "symbol": "AMD"}, "collision", False),
         ({"name": "Tesla, Inc. dShares", "symbol": "TSLA.d"}, "collision", False),
     ],

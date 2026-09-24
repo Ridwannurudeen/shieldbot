@@ -7,9 +7,14 @@ from core.extension_formatter import is_scan_incomplete
 # Replies are sent with Telegram's legacy Markdown, where these characters start an entity.
 _MARKUP = re.compile(r'([_*`\[])')
 # Token names are the token's own text, and flags and reasons can carry its revert strings, so
-# control characters, line separators, and the zero-width and bidirectional controls that can hide or
-# reorder text are blanked before they reach a message.
-CONTROL_CHARACTERS = re.compile(r'[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2066-\u2069]')
+# control characters, line separators, and the invisible, filler and bidirectional characters that can
+# hide or reorder text are blanked before they reach a message.
+CONTROL_CHARACTERS = re.compile(
+    r'[\x00-\x1f\x7f-\x9f\xad\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069'
+    r'\u3164\ufeff\uffa0]'
+)
+# How a collision's symbol or name pointed at the official token.
+_POINTED_BY = {'ticker': 'same ticker', 'affix': 'ticker with an affix', 'company': 'same company name'}
 
 
 def escape_markdown(value) -> str:
@@ -31,6 +36,39 @@ def escape_markdown_lines(text: str) -> str:
     return '\n'.join(
         escape_markdown(line) for line in text.replace('**', '').replace('`', '').split('\n')
     )
+
+
+def describe_impostor_check(check: dict) -> str:
+    """A check against the official Robinhood Chain tokens (services.robinhood_assets), in plain words."""
+    status, symbol, contract = check['status'], check['symbol'], check['official_address']
+    if status == 'unknown':
+        return f"Unknown ({check['reason']})"
+    if status == 'none':
+        return 'No match among official Robinhood Chain tokens'
+    if check['canonical']:
+        if status == 'official':
+            return f'The canonical {symbol} of Robinhood Chain'
+        if status == 'impostor':
+            text = f'Impersonates the canonical {symbol} of Robinhood Chain; canonical contract {contract}'
+        else:
+            text = (
+                f"Not the canonical {symbol} of Robinhood Chain ({_POINTED_BY[check['pointer']]}); "
+                f'canonical contract {contract}'
+            )
+    elif status == 'official':
+        return f'Official {symbol} token (Robinhood)'
+    elif status == 'impostor':
+        text = f'Impersonates official {symbol} token (Robinhood-issued); official contract {contract}'
+    elif check['third_party']:
+        text = (
+            f"{symbol} token in another issuer's convention ({check['third_party']}), not Robinhood's {symbol}; "
+            f'official contract {contract}'
+        )
+    else:
+        text = f"Not the official {symbol} token ({_POINTED_BY[check['pointer']]}); official contract {contract}"
+    if check['also']:
+        text += f"; also resembles official {check['also']['symbol']} token, contract {check['also']['official_address']}"
+    return text
 
 
 def format_full_report(
@@ -81,34 +119,13 @@ def format_full_report(
     else:
         lines.append(f'*Target:* `{address}`')
     has_metadata = bool(token_info and (token_info.get('name') or token_info.get('symbol')))
-    # A wallet, or a target whose name and symbol could not be read, has no token to check.
+    # A wallet has no token to check, and without its name and symbol only an official or unknown check
+    # can be stated.
     if impostor_check and contract_data.get('is_contract') is not False and (
-        has_metadata or impostor_check['status'] == 'official'
+        has_metadata or impostor_check['status'] in ('official', 'unknown')
     ):
-        status = impostor_check['status']
-        if status in ('impostor', 'collision'):
-            official = escape_markdown(impostor_check['symbol'])
-            contract = f'official contract `{impostor_check["official_address"]}`'
-            if status == 'impostor':
-                detail = f'\U000026A0 Impersonates official {official} token; {contract}'
-            elif impostor_check['third_party']:
-                detail = f'Third-party {official} token, not the Robinhood-issued contract; {contract}'
-            else:
-                same = 'ticker' if 'symbol' in impostor_check['matched_by'] else 'name'
-                detail = f'Not the official {official} token (same {same}); {contract}'
-            also = impostor_check['also']
-            if also:
-                detail += (
-                    f'; also resembles official {escape_markdown(also["symbol"])} token, '
-                    f'contract `{also["official_address"]}`'
-                )
-        elif status == 'official':
-            detail = f'Official {escape_markdown(impostor_check["symbol"])} token (Robinhood)'
-        elif status == 'none':
-            detail = 'No match among official Robinhood Chain tokens'
-        else:
-            detail = f'Unknown ({escape_markdown(impostor_check["reason"])})'
-        lines.append(f'*Official Token Check:* {detail}')
+        warning = '\U000026A0 ' if impostor else ''
+        lines.append(f'*Official Token Check:* {warning}{escape_markdown(describe_impostor_check(impostor_check))}')
     lines.append(f'*Risk Archetype:* {archetype.replace("_", " ").title()}')
     probability = 'Unknown (incomplete coverage)' if incomplete else f'{rug_prob}%'
     lines.append(f'*Rug Probability:* {probability}  |  *Risk Level:* {risk_level}')
@@ -234,9 +251,11 @@ def format_full_report(
     # Final verdict
     lines.append('*Final Verdict:*')
     if impostor:
+        claimed = 'the canonical' if impostor_check['canonical'] else 'official'
+        caveat = '; unknown risk: provider coverage incomplete' if incomplete else ''
         lines.append(
-            f'{verdict_icon} Impersonates official {escape_markdown(impostor_check["symbol"])}: '
-            'do not treat as the real token'
+            f'{verdict_icon} Impersonates {claimed} {escape_markdown(impostor_check["symbol"])}: '
+            f'do not treat as the real token{caveat}'
         )
     elif rug_prob >= 71:
         detail = 'Unknown risk: provider coverage incomplete' if incomplete else f'Rug probability {rug_prob}%'

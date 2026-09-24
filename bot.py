@@ -32,11 +32,11 @@ except ImportError:
 from core.config import Settings
 from core.container import ServiceContainer
 from core.telegram_formatter import (
-    CONTROL_CHARACTERS, escape_markdown, escape_markdown_lines, format_full_report,
+    CONTROL_CHARACTERS, describe_impostor_check, escape_markdown, escape_markdown_lines, format_full_report,
 )
 from core.extension_formatter import is_scan_incomplete
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
-from services.robinhood_assets import IMPOSTOR_FLAG, with_impostor_check
+from services.robinhood_assets import with_impostor_check
 from services.mempool_service import supports_pending_transactions
 from utils.web3_client import UnsupportedChainError
 from utils.chain_info import (
@@ -100,7 +100,7 @@ _LAUNCH_ALERT_HEADERS = {
     'cleared': '🟢 CLEARED: a complete scan found no major risks',
 }
 _UNKNOWN_LAUNCH_HEADER = '⚪ UNKNOWN: scan incomplete, not a safety verdict'
-_IMPOSTOR_LAUNCH_HEADER = '🚨 IMPOSTOR: impersonates official {} token; official contract {}'
+_IMPOSTOR_LAUNCH_HEADER = '🚨 IMPOSTOR: {}'
 _launch_alert_task = None
 
 
@@ -744,12 +744,13 @@ def format_launch_alert(item: dict) -> str:
     headings, flags = [header], scan['flags']
     check = item.get('impostor_check') or {}
     if check.get('status') == 'impostor':
-        official = (check['symbol'], check['official_address'])
-        headings = [_IMPOSTOR_LAUNCH_HEADER.format(*official)]
+        # The official symbol comes from Robinhood's list, so it is stripped like any other text.
+        label = describe_impostor_check(check)
+        headings = [_IMPOSTOR_LAUNCH_HEADER.format(CONTROL_CHARACTERS.sub(' ', label))]
         if header != _LAUNCH_ALERT_HEADERS['cleared']:
             headings.append(header)
         # A blocked launch's evidence repeats the heading as its first flag.
-        flags = [flag for flag in flags if flag != IMPOSTOR_FLAG.format(*official)]
+        flags = [flag for flag in flags if flag != label]
     lines = [*headings, f"Token: {item['token_address']}", f"Launchpad: {item['launchpad']}"]
     if header != _UNKNOWN_LAUNCH_HEADER and scan['risk_score'] is not None:
         lines.append(f"Risk score: {scan['risk_score']:g}/100")
@@ -762,7 +763,7 @@ def format_launch_alert(item: dict) -> str:
     if check.get('status') == 'unknown':
         lines.append(f"Official token check: unknown ({CONTROL_CHARACTERS.sub(' ', check['reason'])})")
     elif check.get('status') == 'official':
-        lines.append(f"Official {check['symbol']} token")
+        lines.append(CONTROL_CHARACTERS.sub(' ', describe_impostor_check(check)))
     lines.append(f"Evidence: {VERDICT_BASE_URL}{item['verdict_url']}")
     explorer = get_explorer_url(item['chain_id'])
     if explorer:
