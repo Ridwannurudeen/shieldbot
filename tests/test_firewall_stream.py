@@ -384,6 +384,22 @@ async def test_a_target_blacklisted_since_its_cached_row_is_scanned_afresh(strea
 
 
 @pytest.mark.asyncio
+async def test_a_bad_target_is_refused_with_the_plain_400_before_any_stream(stream_api, mock_web3_client):
+    api, services = stream_api
+    mock_web3_client.is_valid_address = MagicMock(side_effect=lambda value: value.startswith("0x") and len(value) == 42)
+    body = {**BODY, "to": "0x1234"}
+
+    plain = await post(api, body)
+    streamed = await post(api, body, accept="text/event-stream")
+
+    assert (streamed.status_code, streamed.headers["content-type"]) == (400, "application/json")
+    assert streamed.json() == {"detail": "Invalid 'to' address"}
+    assert (plain.status_code, plain.content) == (400, streamed.content)
+    assert not [task for task in asyncio.all_tasks() if task.get_coro().__qualname__ == "_firewall_response"]
+    services.db.get_contract_score.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_side_effects_come_only_from_the_final(stream_api, monkeypatch):
     api, services = stream_api
     blacklist(api)
