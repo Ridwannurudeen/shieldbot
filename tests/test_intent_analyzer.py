@@ -336,16 +336,21 @@ async def test_paying_a_fresh_unverified_contract_blocks():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('creation, floor, target', [
-    ({'age_days': 30}, 60, 'an unverified contract'),
-    (None, 85, 'an unverified contract of unknown age'),
-    ({'age_days': None}, 85, 'an unverified contract of unknown age'),
+@pytest.mark.parametrize('creation, floor, target, known', [
+    ({'age_days': 30}, 60, 'an unverified contract', True),
+    # An unknown age may hide a fresh deployment (85) but is not evidence of one: the verdict is
+    # the older contract's 60 and stays Unknown, as for an approval (judge_spender).
+    (None, 60, 'an unverified contract of unknown age', False),
+    ({'age_days': None}, 60, 'an unverified contract of unknown age', False),
 ], ids=['old', 'no-creation-record', 'no-creation-time'])
-async def test_paying_an_unverified_contract_floors_by_age(creation, floor, target):
+async def test_paying_an_unverified_contract_floors_by_age(creation, floor, target, known):
     result, _ = await _payable(PAYABLE, False, creation)
     assert result.data['floor'] == floor
-    assert result.data['status'] == 'ok'
+    assert result.data['status'] == ('ok' if known else 'unknown')
+    assert result.data['coverage']['counterparty'] is known
     assert result.flags[0] == f'mint() sends 0.1 native value to {target}'
+    if not known:
+        assert result.flags[-1] == 'Contract age unavailable for a payment to an unverified contract'
 
 
 @pytest.mark.asyncio

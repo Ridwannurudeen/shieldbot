@@ -120,11 +120,11 @@ class IntentMismatchAnalyzer(Analyzer):
         # On a router swap the value goes to the allowlisted router, not to the token scanned here.
         payment = _parse_value(value)
         if payment > 0 and not ctx.extra.get('whitelisted_router'):
-            floor, floor_flag, unknown = await self._payment_floor(ctx, decoded, payment)
+            floor, floor_flag, reason = await self._payment_floor(ctx, decoded, payment)
             floors.append((floor, floor_flag))
-            counterparty_known = counterparty_known is not False and not unknown
-            if unknown:
-                counterparty_reasons.append('Contract verification unavailable for a call with native value')
+            counterparty_known = counterparty_known is not False and reason is None
+            if reason:
+                counterparty_reasons.append(reason)
         floors = sorted((pair for pair in floors if pair[0]), reverse=True)
         floor = floors[0][0] if floors else None
         flags[:0] = [flag for _, flag in floors]
@@ -160,7 +160,8 @@ class IntentMismatchAnalyzer(Analyzer):
         )
 
     async def _payment_floor(self, ctx: AnalysisContext, decoded: dict, payment: int) -> tuple:
-        """(floor or None, its flag, unknown) for native value paid to the target with a call.
+        """(floor or None, its flag, the reason it is incomplete or None) for native value paid to
+        the target with a call.
 
         Pay-to-claim and fake-mint pages take the victim's native coin through a call on an
         unverified contract; a verified contract taking payment is ordinary, except for claim(),
@@ -171,18 +172,23 @@ class IntentMismatchAnalyzer(Analyzer):
         call = f"{decoded['function_name']}()" if decoded.get('category') != 'unknown' else f"0x{decoded['selector']}"
         sends = f'{call} sends {payment / 1e18:g} native value to'
         if is_verified is None:
-            return 60, f'{sends} a contract of unknown verification', True
+            reason = 'Contract verification unavailable for a call with native value'
+            return 60, f'{sends} a contract of unknown verification', reason
         if is_verified is True:
-            return (60, f'{sends} the contract', False) if claim else (None, None, False)
+            return (60, f'{sends} the contract', None) if claim else (None, None, None)
         if claim:
-            return 85, f'{sends} an unverified contract', False
+            return 85, f'{sends} an unverified contract', None
         creation = await self._web3_client.get_contract_creation_info(ctx.address, chain_id=ctx.chain_id)
         age = creation.get('age_days') if creation else None
-        if age is not None and age >= 7:
-            return 60, f'{sends} an unverified contract', False
-        # An unknown age may be a fresh deployment, so it takes the fresh floor.
-        age_text = f'{age} days old' if age is not None else 'of unknown age'
-        return 85, f'{sends} an unverified contract {age_text}', False
+        if age is None:
+            # It may be a fresh deployment (85), but nothing says so: the older contract's floor
+            # holds and the verdict stays unknown, as for an approval's spender.
+            return 60, f'{sends} an unverified contract of unknown age', (
+                'Contract age unavailable for a payment to an unverified contract'
+            )
+        if age >= 7:
+            return 60, f'{sends} an unverified contract', None
+        return 85, f'{sends} an unverified contract {age} days old', None
 
 
 def _parse_value(value) -> int:
