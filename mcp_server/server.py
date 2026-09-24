@@ -147,8 +147,10 @@ async def _handle_tools_call(container, params: Dict) -> Dict:
     tool_name = params.get("name")
     arguments = params.get("arguments", {})
 
-    if not tool_name:
+    if not isinstance(tool_name, str) or not tool_name:
         raise ValueError("Missing 'name' in tools/call params")
+    if arguments is not None and not isinstance(arguments, dict):
+        raise ValueError("'arguments' in tools/call params must be an object")
 
     try:
         result = await execute_tool(container, tool_name, arguments)
@@ -180,7 +182,7 @@ async def _handle_resources_list(container, params: Dict) -> Dict:
 
 async def _handle_resources_read(container, params: Dict) -> Dict:
     uri = params.get("uri")
-    if not uri:
+    if not isinstance(uri, str) or not uri:
         raise ValueError("Missing 'uri' in resources/read params")
 
     result = await read_resource(container, uri)
@@ -206,8 +208,10 @@ async def _handle_prompts_get(container, params: Dict) -> Dict:
     name = params.get("name")
     arguments = params.get("arguments", {})
 
-    if not name:
+    if not isinstance(name, str) or not name:
         raise ValueError("Missing 'name' in prompts/get params")
+    if arguments is not None and not isinstance(arguments, dict):
+        raise ValueError("'arguments' in prompts/get params must be an object")
 
     result = get_prompt(name, arguments)
     if result is None:
@@ -253,12 +257,15 @@ async def process_jsonrpc(container, body: Dict) -> Optional[Dict]:
     if jsonrpc_version != "2.0":
         return _jsonrpc_error(request_id, INVALID_REQUEST, "Expected jsonrpc 2.0")
 
-    if not method:
+    if not isinstance(method, str) or not method:
         return _jsonrpc_error(request_id, INVALID_REQUEST, "Missing method")
 
     handler = _METHODS.get(method)
     if handler is None:
         return _jsonrpc_error(request_id, METHOD_NOT_FOUND, f"Method not found: {method}")
+
+    if not isinstance(params, dict):
+        return _jsonrpc_error(request_id, INVALID_PARAMS, "params must be an object")
 
     try:
         result = await handler(container, params)

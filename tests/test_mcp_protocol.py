@@ -115,6 +115,38 @@ async def test_a_body_that_is_not_one_request_object_is_an_invalid_request(conta
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("method", [5, "", [], {}, None])
+async def test_a_method_that_is_not_a_string_is_an_invalid_request(container, method):
+    response = await server.process_jsonrpc(container, {"jsonrpc": "2.0", "id": 4, "method": method})
+
+    assert response["id"] == 4
+    assert response["error"]["code"] == -32600
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        {"method": "tools/list", "params": None},
+        {"method": "tools/list", "params": []},
+        {"method": "ping", "params": "x"},
+        {"method": "tools/call", "params": {"name": 5}},
+        {"method": "tools/call", "params": {"name": {"a": 1}}},
+        {"method": "tools/call", "params": {"name": "scan_contract", "arguments": "x"}},
+        {"method": "resources/read", "params": {"uri": 5}},
+        {"method": "prompts/get", "params": {"name": ["x"]}},
+        {"method": "prompts/get", "params": {"name": "security-analysis", "arguments": "x"}},
+    ],
+)
+async def test_malformed_params_are_invalid_params_without_a_traceback(container, message, caplog):
+    response = await server.process_jsonrpc(container, {"jsonrpc": "2.0", "id": 8, **message})
+
+    assert response["id"] == 8
+    assert response["error"]["code"] == -32602
+    assert not [record for record in caplog.records if record.exc_info]
+
+
+@pytest.mark.asyncio
 async def test_a_tool_call_without_an_id_runs_nothing(container):
     message = {
         "jsonrpc": "2.0",

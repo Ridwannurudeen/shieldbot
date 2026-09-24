@@ -16,6 +16,7 @@ How the transport behaves (`server.py`):
 
 - A request's response is pushed to its session's stream and also returned in the POST body (HTTP 200), so a client without a stream can read it from the body.
 - A notification (a message with no `id`, such as `notifications/initialized` or `notifications/cancelled`) is never answered: the POST returns 202 with an empty body and nothing is sent on the stream. Cancellation is ignored; a running request cannot be interrupted.
+- A message with no `id` is dropped silently even when it is invalid (wrong `jsonrpc`, missing or unknown method), because a notification can never be answered.
 - A JSON array (a batch) or any other non-object body is answered with an Invalid Request error (-32600).
 - The stream sends a `: heartbeat` comment every 30 seconds while idle and closes after 5 minutes without a message. Heartbeats do not count as activity. At most 50 streams can be open; the 51st gets HTTP 503.
 
@@ -23,7 +24,7 @@ How the transport behaves (`server.py`):
 
 - `initialize` always answers `protocolVersion: "2024-11-05"`, whatever version the client asks for; the client decides whether to continue.
 - Declared capabilities: `tools`, `resources` and `prompts`, with no sub-capabilities (no `listChanged`, no `subscribe`).
-- Methods handled: `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`. Anything else is Method not found (-32601). Not implemented: `resources/subscribe`, `resources/templates/list`, `logging/setLevel`, `completion/complete`.
+- Methods handled: `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`. Anything else is Method not found (-32601). A request whose `method` is not a string is Invalid Request (-32600); `params` that is not an object, or a `name`, `uri` or `arguments` of the wrong type inside it, is Invalid params (-32602). Not implemented: `resources/subscribe`, `resources/templates/list`, `logging/setLevel`, `completion/complete`.
 - A tool that fails validation (a missing or non-string required argument, which the error names; bad address; missing, non-integer or unsupported `chain_id`; unknown tool name) returns a result with `isError: true` and `{"error": "..."}` as its text, delivered on the stream like any other result, and no analysis runs.
 
 ## Authentication
