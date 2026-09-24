@@ -38,14 +38,20 @@ def _validate_address(addr: str) -> str:
     return addr.lower()
 
 
+def _validate_chain_id(container, chain_id) -> int:
+    if type(chain_id) is not int:
+        raise ValueError("Invalid argument: chain_id must be an integer")
+    return container.web3_client.validate_chain_id(chain_id)
+
+
 def _require_chain_id(container, params: Dict) -> int:
     # A default chain would analyse an address from another chain on that chain, where it can look clean.
-    if "chain_id" not in params:
+    if params.get("chain_id") is None:
         raise ValueError(
             "Missing required argument: chain_id (the chain the address or transaction is on, "
             "for example 56 = BNB Chain or 4663 = Robinhood Chain)"
         )
-    return container.web3_client.validate_chain_id(params["chain_id"])
+    return _validate_chain_id(container, params["chain_id"])
 
 
 # ---------------------------------------------------------------------------
@@ -410,7 +416,7 @@ async def handle_get_threat_feed(container, params: Dict) -> Dict:
 
 async def handle_get_robinhood_launches(container, params: Dict) -> Dict:
     """Recent launches with their latest scan outcome, from the query behind /api/launches."""
-    chain_id = container.web3_client.validate_chain_id(params.get("chain_id", LAUNCH_CHAIN_ID))
+    chain_id = _validate_chain_id(container, params.get("chain_id", LAUNCH_CHAIN_ID))
     limit = min(max(params.get("limit", 20), 1), 100)
     if chain_id != LAUNCH_CHAIN_ID:
         return {

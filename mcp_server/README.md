@@ -24,7 +24,7 @@ How the transport behaves (`server.py`):
 - `initialize` always answers `protocolVersion: "2024-11-05"`, whatever version the client asks for; the client decides whether to continue.
 - Declared capabilities: `tools`, `resources` and `prompts`, with no sub-capabilities (no `listChanged`, no `subscribe`).
 - Methods handled: `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`. Anything else is Method not found (-32601). Not implemented: `resources/subscribe`, `resources/templates/list`, `logging/setLevel`, `completion/complete`.
-- A tool that fails validation (bad address, missing `chain_id`, unknown tool name) returns a result with `isError: true` and `{"error": "..."}` as its text. An unsupported or non-integer `chain_id` is refused with HTTP 400 and no analysis runs.
+- A tool that fails validation (bad address; missing, non-integer or unsupported `chain_id`; unknown tool name) returns a result with `isError: true` and `{"error": "..."}` as its text, delivered on the stream like any other result, and no analysis runs.
 
 ## Authentication
 
@@ -48,7 +48,7 @@ Every tool result is JSON in a single `text` content item.
 | `get_threat_feed` | none | Latest agent findings (`limit` 1 to 100, default 20). |
 | `get_robinhood_launches` | none | Robinhood Chain (4663) launches with their latest scan outcome; `chain_id` defaults to 4663, the only chain with launch discovery. `unknown` and `not_scanned` launches are never safe. Page with `next_cursor`. |
 
-`chain_id` has no default on the address and transaction tools: a call without it is a tool error. Supported chains are the ones the API registers an adapter for, including 56 (BNB Chain) and 4663 (Robinhood Chain).
+`chain_id` has no default on the address and transaction tools: a call without it is a tool error, and so is a chain the API does not support. Supported chains are the ones the API registers an adapter for, including 56 (BNB Chain) and 4663 (Robinhood Chain).
 
 A tool call:
 

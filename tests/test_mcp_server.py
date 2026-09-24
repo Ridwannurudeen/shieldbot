@@ -943,26 +943,6 @@ class TestProcessJsonRpc:
         assert result["error"]["code"] == -32601
 
 
-@pytest.mark.parametrize("tool_name,arguments", [
-    ("scan_contract", {"address": "0x" + "a" * 40}),
-    ("simulate_transaction", {"from": "0x" + "a" * 40, "to": "0x" + "b" * 40, "data": "0x"}),
-    ("check_deployer", {"address": "0x" + "a" * 40}),
-    ("check_approval_risk", {"wallet_address": "0x" + "a" * 40}),
-    ("query_threat_graph", {"address": "0x" + "a" * 40}),
-])
-def test_unknown_chain_rejected_before_mcp_services(client, mock_container, tool_name, arguments):
-    response = client.post("/mcp/messages", json={
-        "jsonrpc": "2.0", "id": 10, "method": "tools/call",
-        "params": {"name": tool_name, "arguments": {**arguments, "chain_id": 999999}},
-    }, headers=AUTH_HEADERS)
-    assert response.status_code == 400
-    assert "4663" in response.json()["error"]["message"]
-    mock_container.registry.run_all.assert_not_awaited()
-    mock_container.db.get_deployer_risk_summary.assert_not_awaited()
-    mock_container.tenderly_simulator.is_enabled.assert_not_called()
-    mock_container.tenderly_simulator.simulate_transaction.assert_not_awaited()
-
-
 @pytest.mark.asyncio
 async def test_direct_mcp_tool_rejects_unknown_chain(mock_container):
     from mcp_server.tools import execute_tool

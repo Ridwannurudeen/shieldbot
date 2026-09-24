@@ -412,11 +412,8 @@ async def request_validation_middleware(request: Request, call_next):
                 transaction = body.get("transaction")
                 if isinstance(transaction, dict):
                     body_chain_ids.append(transaction.get("chain_id", 56))
-            if request_path == "/mcp/messages" and body.get("method") == "tools/call":
-                params = body.get("params")
-                arguments = params.get("arguments") if isinstance(params, dict) else None
-                if isinstance(arguments, dict) and "chain_id" in arguments:
-                    body_chain_ids.append(arguments["chain_id"])
+            # MCP tool arguments are checked by the MCP router, which reports a bad chain as a tool
+            # error on the client's SSE stream; an HTTP error here would never reach that stream.
             if any(type(chain_id) is not int for chain_id in body_chain_ids):
                 return JSONResponse(status_code=400, content={"detail": "Invalid chain ID"})
             chain_ids.extend(body_chain_ids)
