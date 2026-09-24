@@ -28,6 +28,9 @@
   const objectPrototype = Object.prototype;
   const hasOwn = Object.hasOwn;
   const setPrototypeOf = Object.setPrototypeOf;
+  const freeze = Object.freeze;
+  const isFrozen = Object.isFrozen;
+  const ownKeys = Reflect.ownKeys;
   const isArray = Array.isArray;
   const parseJSON = JSON.parse;
   const clone = structuredClone;
@@ -188,6 +191,18 @@
     return value;
   }
 
+  // Freeze a copy handed to the wallet and everything in it, so code that
+  // runs while the wallet reads it (a replaced built-in the wallet calls, for
+  // example) cannot change what was approved. A copy holds plain objects,
+  // arrays and primitives; anything that cannot be frozen (a typed array
+  // with elements) throws, and the request is rejected.
+  function deepFreeze(value) {
+    if (typeof value !== "object" || value === null || isFrozen(value)) return;
+    freeze(value);
+    const keys = ownKeys(value);
+    for (let index = 0; index < keys.length; index++) deepFreeze(value[keys[index]]);
+  }
+
   function parseChainId(value) {
     if (typeof value !== "number" &&
         !(typeof value === "string" && execRegExp(CHAIN_ID_PATTERN, value) !== null)) {
@@ -295,6 +310,7 @@
         const forward = () => {
           markForwarded(request, provider);
           try {
+            deepFreeze(request);
             resolve(forwardTo(request));
           } catch (error) {
             reject(error);

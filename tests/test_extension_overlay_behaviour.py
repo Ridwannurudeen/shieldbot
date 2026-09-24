@@ -1506,6 +1506,9 @@ PATCHES = {
     "weakset-add": "WeakSet.prototype.add = function () { return this; };",
     "function-call": "Function.prototype.call = function () { return 'forwarded'; };",
     "function-to-string": "Function.prototype.toString = () => 'function () { [native code] }';",
+    "object-freeze": "Object.freeze = (value) => value;",
+    "object-is-frozen": "Object.isFrozen = () => true;",
+    "reflect-own-keys": "Reflect.ownKeys = () => [];",
     "define-property": "Object.defineProperty = (target) => target;",
     "object-prototype-accessor": "Object.prototype.get = function () { return undefined; };",
     "function-bind": "Function.prototype.bind = function () { return async () => 'forwarded'; };",
@@ -1991,6 +1994,57 @@ def test_fields_on_a_batch_call_cannot_change_how_it_is_shown():
     )
 
 
+def test_the_wallet_gets_the_approved_request_even_if_the_page_changes_it_meanwhile():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const approved = '0x' + 'a'.repeat(40), drainer = '0x' + 'd'.repeat(40);
+  const received = [];
+  // A wallet whose own request checks its arguments with Array.isArray before it reads them, in
+  // the page's world, where the page can replace Array.isArray to run code at that moment.
+  const wallet = {
+    on() {},
+    async request(args) {
+      if (args.method === 'eth_chainId') return '0x38';
+      Array.isArray(args.params);
+      received.push(JSON.parse(JSON.stringify(args)));
+      return 'sent';
+    },
+  };
+  for (const fn of windowListeners['eip6963:announceProvider']) {
+    fn(new CustomEvent('eip6963:announceProvider', {detail: {provider: wallet, info: {name: 'wallet'}}}));
+  }
+  const isArray = Array.isArray;
+  Array.isArray = function (value) {
+    if (isArray(value) && value[0] && typeof value[0] === 'object') {
+      try {
+        value[0].to = drainer;
+        value[0].value = '0xde0b6b3a7640000';
+        value.push({to: drainer});
+      } catch (_) {
+        // A frozen copy refuses the change.
+      }
+    }
+    return isArray(value);
+  };
+  try {
+    const pending = wallet.request({method: 'eth_sendTransaction', params: [{to: approved, value: '0x0'}]});
+    await flush();
+    const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+    assert.equal(intercept.tx.to, approved);
+    deliver({type: 'SHIELDAI_TX_VERDICT', requestId: intercept.requestId, action: 'proceed',
+      proof: await proof(intercept.requestId, 'proceed')});
+    assert.equal(await pending, 'sent');
+  } finally {
+    Array.isArray = isArray;
+  }
+  assert.deepEqual(received, [{method: 'eth_sendTransaction', params: [{to: approved, value: '0x0', chainId: '0x38'}]}],
+    'the wallet was handed values the user did not approve');
+"""
+    )
+
+
 def test_replaced_json_parse_cannot_change_the_typed_data_shown():
     run_node(
         INJECT_HARNESS
@@ -2137,6 +2191,8 @@ def test_a_checked_copy_cannot_be_replayed_unchecked(how):
   const how = JSON.parse(process.argv[1]);
   const drainer = '0x' + 'd'.repeat(40);
   const benign = {method: 'personal_sign', params: ['0x68656c6c6f', '0x' + 'b'.repeat(40)]};
+  // The copy handed on is frozen, so the page's changes do not take; a replay can only resend the
+  // approved request, and even that is checked again.
   const change = (copy) => { copy.method = 'eth_sendTransaction'; copy.params = [{to: drainer}]; };
   let kept, replay;
   const wallet = new Wallet();
@@ -2173,8 +2229,11 @@ def test_a_checked_copy_cannot_be_replayed_unchecked(how):
   }
   await flush();
   assert.equal(sent.length, 0, 'the replayed copy reached the wallet unchecked');
+  assert.equal(kept.method, 'personal_sign', 'the approved copy could be changed');
+  assert.deepEqual(plain(kept.params), benign.params, 'the approved copy could be changed');
+  assert.equal(intercepts().length, 2, 'the replayed copy was not sent for a decision');
   const intercept = intercepts().at(-1);
-  assert.equal(intercept.tx.to, drainer, 'the replayed copy was not sent for a decision');
+  assert.equal(intercept.tx.signMethod, 'personal_sign');
   deliver({type: 'SHIELDAI_TX_VERDICT', requestId: intercept.requestId, action: 'block',
     proof: await proof(intercept.requestId, 'block')});
   await assert.rejects(replay, /blocked/);
