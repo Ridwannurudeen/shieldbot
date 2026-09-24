@@ -258,12 +258,21 @@ async def test_a_wallet_scan_is_reused_for_a_short_time_per_chain():
 
 
 @pytest.mark.asyncio
-async def test_a_scan_the_rpc_could_not_answer_is_not_reused():
+@pytest.mark.parametrize(
+    "failing, reason",
+    [
+        (lambda payload: RATE_LIMITED, RPC_UNAVAILABLE_REASON),
+        (chain_handler(logs=lambda to_b: RATE_LIMITED), NOTHING_READ_REASON),
+    ],
+    ids=["block-number-fails", "first-windows-fail"],
+)
+async def test_a_scan_that_read_no_history_is_not_reused(failing, reason):
     service = rescue_service()
-    failed, _, _ = await scan(lambda payload: RATE_LIMITED, 4663, service)
+    failed, _, _ = await scan(failing, 4663, service)
     retried, retry_rpc, _ = await scan(chain_handler(), 4663, service)
 
-    assert failed["coverage_reasons"] == {"allowances": RPC_UNAVAILABLE_REASON}
+    assert failed["coverage_reasons"] == {"allowances": reason}
+    assert failed["scanned_blocks"] is None
     assert retry_rpc.calls
     assert [a["risk_level"] for a in retried["approvals"]] == ["HIGH"]
 

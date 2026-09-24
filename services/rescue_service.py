@@ -237,19 +237,17 @@ class RescueService:
           balances or prices are incomplete, including when the chain's RPC could not be read
         - scanned_blocks: the block range whose approval history was read, or None when none was
 
-        A result is reused for RESULT_CACHE_SECONDS per wallet and chain, unless the chain's RPC
-        could not be read at all: that is often a passing timeout or rate limit, so the next call
-        tries again.
+        A result is reused for RESULT_CACHE_SECONDS per wallet and chain once some approval history
+        was read. A scan that read none is not: that is often a passing timeout or rate limit, so
+        the next call tries again.
         """
         wallet = wallet_address.lower()
         cached = self._results.get((chain_id, wallet))
         if cached is not None:
             return cached
-        rpc_unavailable = False
         try:
             approvals, coverage_reasons, scanned_blocks = await self._fetch_approvals(wallet, chain_id)
         except RuntimeError:
-            rpc_unavailable = True
             approvals, coverage_reasons, scanned_blocks = [], {"allowances": RPC_UNAVAILABLE_REASON}, None
 
         alerts = []
@@ -304,7 +302,7 @@ class RescueService:
             'scanned_blocks': scanned_blocks,
             'scanned_at': time.time(),
         }
-        if not rpc_unavailable:
+        if scanned_blocks is not None:
             self._results[(chain_id, wallet)] = result
         return result
 
