@@ -175,7 +175,7 @@ else:
 - Trading volume / liquidity ratio (wash trade detection)
 - Pair age (new pairs = risky)
 - FDV / 24h volume ratio
-- Price volatility (>200% change = flag)
+- Price volatility (>200% change = flag); skipped, and named as "Volatility unknown", when DexScreener omits the 24h change
 
 **Behavioral Score Factors** (0-100):
 - Wallet reputation (Ethos Network)

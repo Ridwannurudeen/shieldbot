@@ -1,0 +1,892 @@
+{
+ "https://api.dexscreener.com/latest/dex/tokens/0xdAC17F958D2ee523a2206206994597C13D831ec7": {
+  "schemaVersion": "1.0.0",
+  "pairs": [
+   {
+    "chainId": "pulsechain",
+    "dexId": "pulsex",
+    "pairAddress": "0xd2335e1c634fC3a1dDf766161bcb8E7Ec134cF03",
+    "baseToken": {
+     "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+     "name": "Tether USD",
+     "symbol": "USDT"
+    },
+    "quoteToken": {
+     "address": "0x463413c579D29c26D59a65312657DFCe30D545A1",
+     "name": "TREASURY BILL",
+     "symbol": "TREASURY BILL \u327e"
+    },
+    "priceNative": "20.8186",
+    "priceUsd": "0.0009313",
+    "volume": {
+     "h24": 1830.28
+    },
+    "priceChange": {
+     "h24": -1.31
+    },
+    "liquidity": {
+     "usd": 269537.31
+    },
+    "fdv": 33794056,
+    "pairCreatedAt": 1734072665000
+   },
+   {
+    "chainId": "pulsechain",
+    "dexId": "pulsex",
+    "pairAddress": "0x232911c6992E1F2f51FedD1f3d0Be7D3A613F260",
+    "baseToken": {
+     "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+     "name": "Tether USD",
+     "symbol": "USDT"
+    },
+    "quoteToken": {
+     "address": "0x557F7e30aA6D909Cfe8a229A4CB178ab186EC622",
+     "name": "\u0281",
+     "symbol": "\u0281 \u326d"
+    },
+    "priceNative": "0.00000007145",
+    "priceUsd": "0.0009285",
+    "volume": {
+     "h24": 903.84
+    },
+    "priceChange": {
+     "h24": -0.97
+    },
+    "liquidity": {
+     "usd": 142405.12
+    },
+    "fdv": 33690450,
+    "pairCreatedAt": 1733587045000
+   },
+   {
+    "chainId": "pulsechain",
+    "dexId": "pulsex",
+    "pairAddress": "0xa9607906406Cf2Cf98bC1A1F0224C85d779042BD",
+    "baseToken": {
+     "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+     "name": "Tether USD",
+     "symbol": "USDT"
+    },
+    "quoteToken": {
+     "address": "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+     "name": "Dai Stablecoin",
+     "symbol": "DAI"
+    },
+    "priceNative": "0.4337",
+    "priceUsd": "0.0009312",
+    "volume": {
+     "h24": 1610.78
+    },
+    "priceChange": {
+     "h24": 0.02
+    },
+    "liquidity": {
+     "usd": 35958.6
+    },
+    "fdv": 33787894,
+    "pairCreatedAt": 1685661415000
+   },
+   {
+    "chainId": "ethereum",
+    "dexId": "curve",
+    "pairAddress": "0xEf3a1CaE64848F9eB25022de4DCb77b40afFe419-0xdAC17F958D2ee523a2206206994597C13D831ec7-0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    "baseToken": {
+     "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+     "name": "Tether USD",
+     "symbol": "USDT"
+    },
+    "quoteToken": {
+     "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+     "name": "USD Coin",
+     "symbol": "USDC"
+    },
+    "priceNative": "0.9996",
+    "priceUsd": "0.9996",
+    "volume": {
+     "h24": 334.04
+    },
+    "priceChange": {
+     "h24": -0.01
+    },
+    "liquidity": {
+     "usd": 925.45
+    },
+    "fdv": 88274266419,
+    "pairCreatedAt": 1774509491000
+   },
+   {
+    "chainId": "ethereum",
+    "dexId": "curve",
+    "pairAddress": "0xEf3a1CaE64848F9eB25022de4DCb77b40afFe419-0xdAC17F958D2ee523a2206206994597C13D831ec7-0x6B175474E89094C44Da98b954EedeAC495271d0F",
+    "baseToken": {
+     "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+     "name": "Tether USD",
+     "symbol": "USDT"
+    },
+    "quoteToken": {
+     "address": "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+     "name": "Dai Stablecoin",
+     "symbol": "DAI"
+    },
+    "priceNative": "0.9999",
+    "priceUsd": "0.9999",
+    "volume": {
+     "h24": 163.36
+    },
+    "priceChange": {
+     "h24": 0.01
+    },
+    "liquidity": {
+     "usd": 910.51
+    },
+    "fdv": 88298192184,
+    "pairCreatedAt": 1774509491000
+   }
+  ]
+ },
+ "https://api.dexscreener.com/token-pairs/v1/ethereum/0xdAC17F958D2ee523a2206206994597C13D831ec7": [
+  {
+   "chainId": "ethereum",
+   "dexId": "curve",
+   "pairAddress": "0xEf3a1CaE64848F9eB25022de4DCb77b40afFe419-0xdAC17F958D2ee523a2206206994597C13D831ec7-0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+   "baseToken": {
+    "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "quoteToken": {
+    "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    "name": "USD Coin",
+    "symbol": "USDC"
+   },
+   "priceNative": "0.9996",
+   "priceUsd": "0.9996",
+   "volume": {
+    "h24": 334.04
+   },
+   "priceChange": {
+    "h24": -0.01
+   },
+   "liquidity": {
+    "usd": 925.45
+   },
+   "fdv": 88274266419,
+   "pairCreatedAt": 1774509491000
+  },
+  {
+   "chainId": "ethereum",
+   "dexId": "curve",
+   "pairAddress": "0xEf3a1CaE64848F9eB25022de4DCb77b40afFe419-0xdAC17F958D2ee523a2206206994597C13D831ec7-0x6B175474E89094C44Da98b954EedeAC495271d0F",
+   "baseToken": {
+    "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "quoteToken": {
+    "address": "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+    "name": "Dai Stablecoin",
+    "symbol": "DAI"
+   },
+   "priceNative": "0.9999",
+   "priceUsd": "0.9999",
+   "volume": {
+    "h24": 163.36
+   },
+   "priceChange": {
+    "h24": 0.01
+   },
+   "liquidity": {
+    "usd": 910.51
+   },
+   "fdv": 88298192184,
+   "pairCreatedAt": 1774509491000
+  },
+  {
+   "chainId": "ethereum",
+   "dexId": "uniswap",
+   "pairAddress": "0x3b1b1f2e775a6db1664f8e7d59ad568605ea2406312c11aef03146c0cf89d5b9",
+   "baseToken": {
+    "address": "0xdC035D45d973E3EC169d2276DDab16f1e407384F",
+    "name": "USDS Stablecoin",
+    "symbol": "USDS"
+   },
+   "quoteToken": {
+    "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "priceNative": "1.0002504",
+   "priceUsd": "1.00025",
+   "volume": {
+    "h24": 95855598.25
+   },
+   "priceChange": {
+    "h24": 0.01
+   },
+   "liquidity": {
+    "usd": 50152955.91
+   },
+   "fdv": 6539403809,
+   "pairCreatedAt": 1768358735000
+  },
+  {
+   "chainId": "ethereum",
+   "dexId": "uniswap",
+   "pairAddress": "0x96c12209C1130FC16c432978C45F7f6B424eF18d",
+   "baseToken": {
+    "address": "0xF34ca6B7Fe3D6B1c8635A6Bf2bD7bDD252f16426",
+    "name": "Schnitzel Coin",
+    "symbol": "SNTZL"
+   },
+   "quoteToken": {
+    "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "priceNative": "1.2669",
+   "priceUsd": "1.26",
+   "volume": {
+    "h24": 61.35
+   },
+   "priceChange": {
+    "h24": -0.13
+   },
+   "liquidity": {
+    "usd": 6834484.33
+   },
+   "fdv": 126691835,
+   "pairCreatedAt": 1681306547000
+  },
+  {
+   "chainId": "ethereum",
+   "dexId": "uniswap",
+   "pairAddress": "0x863A3534136d1f4A6513D78dAff7dFBE6DAF5eB8",
+   "baseToken": {
+    "address": "0xA4842662637e7C8A0210247D89244B0E45d3f777",
+    "name": "x-DOL-x",
+    "symbol": "XDOL"
+   },
+   "quoteToken": {
+    "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "priceNative": "0.05854",
+   "priceUsd": "0.05854",
+   "volume": {
+    "h24": 14.63
+   },
+   "priceChange": {
+    "h24": null
+   },
+   "liquidity": {
+    "usd": 11029033.89
+   },
+   "fdv": 29271258,
+   "pairCreatedAt": 1773194939000
+  }
+ ],
+ "https://api.dexscreener.com/token-pairs/v1/base/0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913": [
+  {
+   "chainId": "base",
+   "dexId": "quickswap",
+   "pairAddress": "0x5D0bC342178C8Fe2c2f9A9fcC9D52555C99936db",
+   "baseToken": {
+    "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "name": "USD Coin",
+    "symbol": "USDC"
+   },
+   "quoteToken": {
+    "address": "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA",
+    "name": "USD Base Coin",
+    "symbol": "USDbC"
+   },
+   "priceNative": "0.9998",
+   "priceUsd": "0.9998",
+   "volume": {
+    "h24": 212115.82
+   },
+   "priceChange": {
+    "h24": -0.01
+   },
+   "liquidity": {
+    "usd": 111211.5
+   },
+   "fdv": 3696876941,
+   "pairCreatedAt": 1752584457000
+  },
+  {
+   "chainId": "base",
+   "dexId": "aerodrome",
+   "pairAddress": "0x98c7A2338336d2d354663246F64676009c7bDa97",
+   "baseToken": {
+    "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "name": "USD Coin",
+    "symbol": "USDC"
+   },
+   "quoteToken": {
+    "address": "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA",
+    "name": "USD Base Coin",
+    "symbol": "USDbC"
+   },
+   "priceNative": "0.9999",
+   "priceUsd": "0.9999",
+   "volume": {
+    "h24": 68755.35
+   },
+   "priceChange": {
+    "h24": null
+   },
+   "liquidity": {
+    "usd": 143806.86
+   },
+   "fdv": 4262511047
+  },
+  {
+   "chainId": "base",
+   "dexId": "alien-base",
+   "pairAddress": "0x0E635F8EeED4F7279d56692D552F034ECE136019",
+   "baseToken": {
+    "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "name": "USD Coin",
+    "symbol": "USDC"
+   },
+   "quoteToken": {
+    "address": "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA",
+    "name": "USD Base Coin",
+    "symbol": "USDbC"
+   },
+   "priceNative": "0.9999",
+   "priceUsd": "0.9999",
+   "volume": {
+    "h24": 22691.22
+   },
+   "priceChange": {
+    "h24": null
+   },
+   "liquidity": {
+    "usd": 127495.43
+   },
+   "fdv": 4262347742,
+   "pairCreatedAt": 1725278699000
+  },
+  {
+   "chainId": "base",
+   "dexId": "aerodrome",
+   "pairAddress": "0x85f1Aa3a70fEdd1C52705c15BAEd143e675CD626",
+   "baseToken": {
+    "address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+    "name": "Nock",
+    "symbol": "NOCK"
+   },
+   "quoteToken": {
+    "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "name": "USD Coin",
+    "symbol": "USDC"
+   },
+   "priceNative": "0.02801",
+   "priceUsd": "0.02801",
+   "volume": {
+    "h24": 1387053.3
+   },
+   "priceChange": {
+    "h24": -4.25
+   },
+   "liquidity": {
+    "usd": 1402332.76
+   },
+   "fdv": 43568838,
+   "pairCreatedAt": 1766440359000
+  },
+  {
+   "chainId": "base",
+   "dexId": "aerodrome",
+   "pairAddress": "0x6cDcb1C4A4D1C3C6d054b27AC5B77e89eAFb971d",
+   "baseToken": {
+    "address": "0x940181a94A35A4569E4529A3CDfB74e38FD98631",
+    "name": "Aerodrome",
+    "symbol": "AERO"
+   },
+   "quoteToken": {
+    "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "name": "USD Coin",
+    "symbol": "USDC"
+   },
+   "priceNative": "0.7186",
+   "priceUsd": "0.7186",
+   "volume": {
+    "h24": 4950244.97
+   },
+   "priceChange": {
+    "h24": 5.18
+   },
+   "liquidity": {
+    "usd": 37153848.31
+   },
+   "fdv": 1428609706,
+   "pairCreatedAt": 1694127045000
+  },
+  {
+   "chainId": "base",
+   "dexId": "aerodrome",
+   "pairAddress": "0xEAF57753BC382E0324a1D43F72E7027705a2273E",
+   "baseToken": {
+    "address": "0xb2000000000000000000008bC8786B856E61707C",
+    "name": "Meta Platforms Inc.",
+    "symbol": "METAc"
+   },
+   "quoteToken": {
+    "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "name": "USD Coin",
+    "symbol": "USDC"
+   },
+   "priceNative": "768.4333",
+   "priceUsd": "768.43",
+   "volume": {
+    "h24": 17641781.82
+   },
+   "priceChange": {
+    "h24": 3.01
+   },
+   "liquidity": {
+    "usd": 1739765.93
+   },
+   "fdv": 2997262
+  }
+ ],
+ "https://api.dexscreener.com/token-pairs/v1/bsc/0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c": [
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0x172fcD41E0913e95784454622d1c3724f546f849",
+   "baseToken": {
+    "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+    "name": "Wrapped BNB",
+    "symbol": "WBNB"
+   },
+   "quoteToken": {
+    "address": "0x55d398326f99059fF775485246999027B3197955",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "priceNative": "782.3897",
+   "priceUsd": "782.38",
+   "volume": {
+    "h24": 106710775.82
+   },
+   "priceChange": {
+    "h24": 2.79
+   },
+   "liquidity": {
+    "usd": 12509196.42
+   },
+   "fdv": 1223526039,
+   "pairCreatedAt": 1680703943000
+  },
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0x16b9a82891338f9bA80E2D6970FddA79D1eb0daE",
+   "baseToken": {
+    "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+    "name": "Wrapped BNB",
+    "symbol": "WBNB"
+   },
+   "quoteToken": {
+    "address": "0x55d398326f99059fF775485246999027B3197955",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "priceNative": "780.4867",
+   "priceUsd": "780.48",
+   "volume": {
+    "h24": 11671236.99
+   },
+   "priceChange": {
+    "h24": 2.37
+   },
+   "liquidity": {
+    "usd": 79985391.73
+   },
+   "fdv": 1220060099
+  },
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0x36696169C63e42cd08ce11f5deeBbCeBae652050",
+   "baseToken": {
+    "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+    "name": "Wrapped BNB",
+    "symbol": "WBNB"
+   },
+   "quoteToken": {
+    "address": "0x55d398326f99059fF775485246999027B3197955",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "priceNative": "782.07352",
+   "priceUsd": "782.073",
+   "volume": {
+    "h24": 14903243.54
+   },
+   "priceChange": {
+    "h24": 2.75
+   },
+   "liquidity": {
+    "usd": 11064822.96
+   },
+   "fdv": 1223031542,
+   "pairCreatedAt": 1680352272000
+  }
+ ],
+ "https://api.dexscreener.com/token-pairs/v1/bsc/0x55d398326f99059fF775485246999027B3197955": [
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0x92b7807bF19b7DDdf89b706143896d05228f3121",
+   "baseToken": {
+    "address": "0x55d398326f99059fF775485246999027B3197955",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "quoteToken": {
+    "address": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+    "name": "USD Coin",
+    "symbol": "USDC"
+   },
+   "priceNative": "0.9998",
+   "priceUsd": "0.9998",
+   "volume": {
+    "h24": 11930525.58
+   },
+   "priceChange": {
+    "h24": -0.01
+   },
+   "liquidity": {
+    "usd": 30127394.66
+   },
+   "fdv": 9182974572,
+   "pairCreatedAt": 1680356177000
+  },
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0x4f31Fa980a675570939B737Ebdde0471a4Be40Eb",
+   "baseToken": {
+    "address": "0x55d398326f99059fF775485246999027B3197955",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "quoteToken": {
+    "address": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+    "name": "USD Coin",
+    "symbol": "USDC"
+   },
+   "priceNative": "0.9996",
+   "priceUsd": "0.9996",
+   "volume": {
+    "h24": 469929.52
+   },
+   "priceChange": {
+    "h24": null
+   },
+   "liquidity": {
+    "usd": 39445944.97
+   },
+   "fdv": 9180961848,
+   "pairCreatedAt": 1683112489000
+  },
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0xEc6557348085Aa57C72514D67070dC863C0a5A8c",
+   "baseToken": {
+    "address": "0x55d398326f99059fF775485246999027B3197955",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "quoteToken": {
+    "address": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+    "name": "USD Coin",
+    "symbol": "USDC"
+   },
+   "priceNative": "0.9976",
+   "priceUsd": "0.9976",
+   "volume": {
+    "h24": 33469.4
+   },
+   "priceChange": {
+    "h24": -0.2
+   },
+   "liquidity": {
+    "usd": 1811177.65
+   },
+   "fdv": 9163098221,
+   "pairCreatedAt": 1619248279000
+  },
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0x14ca9d552eD2CF0D5dFD1f89Bc6793a464e2ed16",
+   "baseToken": {
+    "address": "0xFe189E97832DA1573e4e4Ff034F4fFC3a15c7777",
+    "name": "MarsCoin",
+    "symbol": "MarsCoin"
+   },
+   "quoteToken": {
+    "address": "0x55d398326f99059fF775485246999027B3197955",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "priceNative": "0.1176",
+   "priceUsd": "0.1176",
+   "volume": {
+    "h24": 3357393.57
+   },
+   "priceChange": {
+    "h24": -4.46
+   },
+   "liquidity": {
+    "usd": 444241.56
+   },
+   "fdv": 117579492,
+   "pairCreatedAt": 1785397624000
+  },
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0xCAaF3c41a40103a23Eeaa4BbA468AF3cF5b0e0D8",
+   "baseToken": {
+    "address": "0xCae117ca6Bc8A341D2E7207F30E180f0e5618B9D",
+    "name": "ARK",
+    "symbol": "ARK"
+   },
+   "quoteToken": {
+    "address": "0x55d398326f99059fF775485246999027B3197955",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "priceNative": "6.3187",
+   "priceUsd": "6.31",
+   "volume": {
+    "h24": 3573835.67
+   },
+   "priceChange": {
+    "h24": 0.7
+   },
+   "liquidity": {
+    "usd": 57471149.27
+   },
+   "fdv": 235906641,
+   "pairCreatedAt": 1756206977000
+  },
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0x2f5ec19ab0583D3FCd9bcbcD9AB416d2858EeA38",
+   "baseToken": {
+    "address": "0x5ce033B2bFCa3Af30b3e8C8457DeaF776A8b695a",
+    "name": "BEM",
+    "symbol": "BEM"
+   },
+   "quoteToken": {
+    "address": "0x55d398326f99059fF775485246999027B3197955",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "priceNative": "59.1892",
+   "priceUsd": "59.18",
+   "volume": {
+    "h24": 615449.27
+   },
+   "priceChange": {
+    "h24": 2.47
+   },
+   "liquidity": {
+    "usd": 136643.43
+   },
+   "fdv": 13364438,
+   "pairCreatedAt": 1787320708000
+  }
+ ],
+ "https://api.dexscreener.com/latest/dex/tokens/0xdbda907a02750f79cbf0414f7112eabe5091c286": {
+  "schemaVersion": "1.0.0",
+  "pairs": null
+ },
+ "https://api.dexscreener.com/token-pairs/v1/bsc/0xdbda907a02750f79cbf0414f7112eabe5091c286": [],
+ "https://api.dexscreener.com/latest/dex/tokens/0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c,0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82,0x16dEa77364B4A9Cc7bfcb9414Ccf37Ae1beBf5F5": {
+  "schemaVersion": "1.0.0",
+  "pairs": [
+   {
+    "chainId": "bsc",
+    "dexId": "pancakeswap",
+    "pairAddress": "0x7f51c8AaA6B0599aBd16674e2b17FEc7a9f674A1",
+    "baseToken": {
+     "address": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+     "name": "PancakeSwap Token",
+     "symbol": "Cake"
+    },
+    "quoteToken": {
+     "address": "0x55d398326f99059fF775485246999027B3197955",
+     "name": "Tether USD",
+     "symbol": "USDT"
+    },
+    "priceNative": "2.6858",
+    "priceUsd": "2.68",
+    "volume": {
+     "h24": 2186412.76
+    },
+    "priceChange": {
+     "h24": 5.29
+    },
+    "liquidity": {
+     "usd": 7191561.06
+    },
+    "fdv": 903952094,
+    "pairCreatedAt": 1680354384000
+   },
+   {
+    "chainId": "bsc",
+    "dexId": "uniswap",
+    "pairAddress": "0xFe4fe5B4575c036aC6D5cCcFe13660020270e27A",
+    "baseToken": {
+     "address": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+     "name": "PancakeSwap Token",
+     "symbol": "Cake"
+    },
+    "quoteToken": {
+     "address": "0x55d398326f99059fF775485246999027B3197955",
+     "name": "Tether USD",
+     "symbol": "USDT"
+    },
+    "priceNative": "2.6841",
+    "priceUsd": "2.68",
+    "volume": {
+     "h24": 1723114.06
+    },
+    "priceChange": {
+     "h24": 5.29
+    },
+    "liquidity": {
+     "usd": 5845488.48
+    },
+    "fdv": 903381937,
+    "pairCreatedAt": 1680319733000
+   },
+   {
+    "chainId": "bsc",
+    "dexId": "pancakeswap",
+    "pairAddress": "0x8e941b427B1b56D81191Bc18D6B1d86944D77076",
+    "baseToken": {
+     "address": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+     "name": "PancakeSwap Token",
+     "symbol": "Cake"
+    },
+    "quoteToken": {
+     "address": "0x5F980533B994c93631A639dEdA7892fC49995839",
+     "name": "Cosanta",
+     "symbol": "COSA"
+    },
+    "priceNative": "1.3857",
+    "priceUsd": "2.68",
+    "volume": {
+     "h24": 33.21
+    },
+    "priceChange": {
+     "h24": 6.28
+    },
+    "liquidity": {
+     "usd": 1960381.3
+    },
+    "fdv": 904278312,
+    "pairCreatedAt": 1706855672000
+   }
+  ]
+ },
+ "https://api.dexscreener.com/tokens/v1/bsc/0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c,0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82,0x16dEa77364B4A9Cc7bfcb9414Ccf37Ae1beBf5F5": [
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0x172fcD41E0913e95784454622d1c3724f546f849",
+   "baseToken": {
+    "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+    "name": "Wrapped BNB",
+    "symbol": "WBNB"
+   },
+   "quoteToken": {
+    "address": "0x55d398326f99059fF775485246999027B3197955",
+    "name": "Tether USD",
+    "symbol": "USDT"
+   },
+   "priceNative": "778.2654",
+   "priceUsd": "778.26",
+   "volume": {
+    "h24": 105753210.06
+   },
+   "priceChange": {
+    "h24": 1.28
+   },
+   "liquidity": {
+    "usd": 12488274.18
+   },
+   "fdv": 1215773559,
+   "pairCreatedAt": 1680703943000
+  },
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0xAfB2Da14056725E3BA3a30dD846B6BBbd7886c56",
+   "baseToken": {
+    "address": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+    "name": "PancakeSwap Token",
+    "symbol": "Cake"
+   },
+   "quoteToken": {
+    "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+    "name": "Wrapped BNB",
+    "symbol": "WBNB"
+   },
+   "priceNative": "0.003458",
+   "priceUsd": "2.68",
+   "volume": {
+    "h24": 2833782.34
+   },
+   "priceChange": {
+    "h24": 5.25
+   },
+   "liquidity": {
+    "usd": 1260253.56
+   },
+   "fdv": 905319298,
+   "pairCreatedAt": 1680528785000
+  },
+  {
+   "chainId": "bsc",
+   "dexId": "pancakeswap",
+   "pairAddress": "0x74d3ec3e2fcd00fD435882c3AFa22579454d69b8",
+   "baseToken": {
+    "address": "0x16dEa77364B4A9Cc7bfcb9414Ccf37Ae1beBf5F5",
+    "name": "Super Intelligence",
+    "symbol": "SI"
+   },
+   "quoteToken": {
+    "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+    "name": "Wrapped BNB",
+    "symbol": "WBNB"
+   },
+   "priceNative": "0.000001721",
+   "priceUsd": "0.001339",
+   "volume": {
+    "h24": 1127527.23
+   },
+   "priceChange": {
+    "h24": 55143
+   },
+   "liquidity": {
+    "usd": 111995.48
+   },
+   "fdv": 1339284,
+   "pairCreatedAt": 1790255559000
+  }
+ ]
+}

@@ -464,7 +464,8 @@ Generate the ShieldAI forensic report now."""
         if dex_data:
             lines.append(f"Liquidity: ${dex_data.get('liquidity_usd', 0):,.0f}")
             lines.append(f"24h Volume: ${dex_data.get('volume_24h', 0):,.0f}")
-            lines.append(f"Price Change 24h: {dex_data.get('price_change_24h', 0):+.1f}%")
+            change = dex_data.get('price_change_24h')
+            lines.append(f"Price Change 24h: {change:+.1f}%" if change is not None else "Price Change 24h: Unknown")
             lines.append(f"FDV: ${dex_data.get('fdv', 0):,.0f}")
 
         # Ethos reputation
