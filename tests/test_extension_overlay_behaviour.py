@@ -453,6 +453,42 @@ def test_replaced_overlay_rejects_the_request_it_was_showing():
     )
 
 
+def test_loading_overlay_cannot_replace_a_quick_result():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  // The loading screen's language file arrives after the error screen's.
+  fetchDelays = [40, 0];
+  analyze = async () => ({error: 'API error 400: Unsupported chain'});
+  await intercept('request');
+  await flush();
+  assert(overlay().innerHTML.includes('ANALYSIS UNAVAILABLE'), 'the loading screen replaced the result');
+  assert.deepEqual(verdicts(), [], 'the request was rejected without the user deciding');
+"""
+    )
+
+
+def test_late_result_shows_a_timed_out_screen_and_rejects():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => { clock += 51000; return {result: scan({})}; };
+  await intercept('request');
+  const html = overlay().innerHTML;
+  assert(html.includes('Timed out'), html);
+  assert(!html.includes('id="shieldai-proceed"'));
+  await assertVerdicts([['request', 'block']]);
+  assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_SHOWN').length, 0);
+  userClick(byId('shieldai-close'));
+  assert.equal(overlay(), null);
+  await flush();
+  assert.equal(verdicts().length, 1);
+"""
+    )
+
+
 @pytest.mark.parametrize(
     "state",
     ["unknown-reason", "unknown-no-reason", "covered-safe", "covered-caution", "incomplete-high"],

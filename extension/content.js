@@ -82,6 +82,11 @@
   // the proof is checked so a replay cannot overtake the original.
   const _seenRequests = new Set();
 
+  // inject.js fails closed 60 seconds after it posts an intercept. A result
+  // that arrives later than this is too late for the user to decide on, so it
+  // gets a timed-out screen instead of a decision overlay.
+  const DECISION_WINDOW_MS = 50000;
+
   // Listen for intercepted transactions from inject.js
   window.addEventListener("message", async (event) => {
     if (
@@ -97,6 +102,7 @@
     _seenRequests.add(requestId);
     // The page can post intercepts too; only inject.js can prove this one.
     if (proof !== await channelProof(requestId, "intercept")) return;
+    const received = Date.now();
 
     // Check if extension is enabled
     const settings = await getSettings();
@@ -118,30 +124,29 @@
       return;
     }
 
-    // Show loading overlay
-    showLoadingOverlay();
+    // Show loading overlay; it must be on screen before any result replaces it
+    await showLoadingOverlay();
 
+    let response;
     try {
       // Send to background for API analysis. The background worker owns the
       // API URL and its default.
-      const response = await chrome.runtime.sendMessage({
+      response = await chrome.runtime.sendMessage({
         type: "SHIELDAI_ANALYZE",
         tx,
       });
-
-      if (response.error) {
-        // API error — show warning and let user decide
-        showErrorOverlay(requestId, response.error, strict);
-      } else {
-        // Show analysis overlay
-        showAnalysisOverlay(requestId, response.result, strict);
-      }
     } catch (err) {
-      showErrorOverlay(
-        requestId,
-        err.message || "Extension communication error. Check extension settings.",
-        strict
-      );
+      response = { error: err.message || "Extension communication error. Check extension settings." };
+    }
+
+    if (Date.now() - received > DECISION_WINDOW_MS) {
+      showTimedOutOverlay(requestId);
+    } else if (response.error) {
+      // API error — show warning and let user decide
+      showErrorOverlay(requestId, response.error, strict);
+    } else {
+      // Show analysis overlay
+      showAnalysisOverlay(requestId, response.result, strict);
     }
   });
 
@@ -733,6 +738,36 @@
     if (!strict) {
       onDecision(root, "shieldai-proceed", requestId, "proceed");
     }
+  }
+
+  // Shown when the analysis came back too late to still decide: the request
+  // is rejected now, and the user is asked to try again.
+  async function showTimedOutOverlay(requestId) {
+    await _loadContentLang();
+    removeOverlay();
+    postVerdict(requestId, "block");
+
+    const overlay = document.createElement("div");
+    overlay.id = "shieldai-overlay";
+    overlay.className = "shieldai-overlay";
+    overlay.innerHTML = `
+      <div class="shieldai-modal" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
+        <div class="shieldai-header">
+          <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
+          <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
+        </div>
+        <div class="shieldai-badge shieldai-badge-unknown">${_t("overlayTimedOut")}</div>
+        <div class="shieldai-section">
+          <p>${_t("overlayTimedOutNote")}</p>
+        </div>
+        <div class="shieldai-actions">
+          <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-close">${_t("overlayBtnClose")}</button>
+        </div>
+      </div>
+    `;
+
+    const root = mountOverlay(overlay);
+    root.getElementById("shieldai-close").addEventListener("click", () => removeOverlay());
   }
 
   function escapeHtml(str) {
