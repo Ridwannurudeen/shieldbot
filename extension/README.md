@@ -55,7 +55,8 @@ version.
   message; the page has no say in it, and the API receives no page origin with a firewall call, so
   the check is made here. A mismatch is Block Recommended without asking the API, and the overlay
   names both domains. A message that says it is a sign-in message but does not follow EIP-4361 goes
-  to the API and comes back Unknown.
+  to the API and comes back Unknown. A `personal_sign` whose first parameter is an address and whose
+  second is not is read as MetaMask signs it, message second; otherwise the message is first.
 - EIP-7702: a transaction with an `authorizationList` (type 0x04) is Block Recommended and its
   overlay lists each delegate address in full, with or without the API. The API adds whether each
   delegate is a verified contract and how old it is: every delegation is Block Recommended (90 for a
@@ -194,7 +195,7 @@ that stops the scripts altogether would need them unregistered through `chrome.s
 - Marketplace orders: a Blur bulk listing signs only a Merkle root of its orders, so their prices
   cannot be read and it is Unknown; any other type under Blur Exchange's domain than its `Order` is
   Unknown too. Typed data over 100,000 characters (a large Seaport bulk order, for example) is refused
-  by the API and shown as unavailable.
+  by the API, and the signature is shown as Unknown with the API's error as the reason.
 - With the wallet on a network the API does not support, nothing can be sent or signed through the
   overlay, which offers only Block: switch networks, or switch the extension off.
 
