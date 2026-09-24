@@ -569,6 +569,8 @@
       }
       const error = new NativeError("ShieldAI cannot check wallet requests made with send or sendAsync. " +
         "Use request instead.");
+      // content.js shows the user a notice saying why, once.
+      postMessage({ type: "SHIELDAI_LEGACY_REFUSED" }, "*");
       if (typeof second === "function") {
         setTimer(() => second(error), 0);
         return undefined;

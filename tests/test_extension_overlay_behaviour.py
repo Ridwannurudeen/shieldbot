@@ -1351,6 +1351,9 @@ def test_documents_the_page_can_reach_first_get_no_key_and_reject_requests(kind,
     assert.equal(notice.attrs.role, 'status');
     assert.match(notice.textContent, /Open the dApp in its own tab/);
     assert.equal(notice.querySelectorAll('button').length, 0);
+    // It leaves once its fade-out animation ends.
+    notice.dispatch('animationend');
+    assert.equal(notices().length, 0);
     return;
   }
   // Where requests are checked, the unsigned message that brings the notice is ignored.
@@ -1390,6 +1393,33 @@ def test_legacy_typed_data_is_shown_field_by_field_end_to_end(method):
   assert.deepEqual(plain(sent[0].params), plain([legacy, '0x' + 'b'.repeat(40)]));
 """,
         method,
+    )
+
+
+def test_a_refused_send_or_send_async_call_brings_one_notice():
+    run_node(
+        FRAME_HARNESS.replace("JSON.parse(process.argv[1]);", "['top', 'content-first', false];", 1)
+        + r"""
+(async () => {
+  const legacy = {on() {}, async request() { return '0x38'; }, sendAsync(payload, callback) { callback(null, {}); }, send() {}};
+  for (const fn of windowListeners['eip6963:announceProvider']) {
+    fn(new CustomEvent('eip6963:announceProvider', {detail: {provider: legacy, info: {name: 'legacy'}}}));
+  }
+  const tx = {to: '0x' + 'a'.repeat(40)};
+  legacy.sendAsync({method: 'eth_sendTransaction', params: [tx]}, () => {});
+  legacy.sendAsync({method: 'personal_sign', params: ['0x00', tx.to]}, () => {});
+  assert.throws(() => legacy.send({method: 'eth_sign', params: []}), /send or sendAsync/);
+  for (let i = 0; i < 3; i++) await flush();
+  const notices = body.children.filter(el => el.shadow && el.shadow.children.some(child => child.className === 'shieldai-notice'));
+  assert.equal(notices.length, 1, 'expected one notice however many calls were refused');
+  const notice = notices[0].shadow.children.find(child => child.className === 'shieldai-notice');
+  assert.match(notice.textContent, /older wallet method ShieldAI cannot check/);
+  assert.equal(notice.attrs.role, 'status');
+  // An unchecked call brings none.
+  legacy.sendAsync({method: 'eth_chainId'}, () => {});
+  await flush();
+  assert.equal(body.children.filter(el => el.shadow).length, 1);
+"""
     )
 
 
@@ -2286,6 +2316,8 @@ def test_send_and_send_async_refuse_checked_or_unreadable_methods(route):
   await assert.rejects(send('wallet_sendCalls', [{calls: [tx]}]), refusal);
   assert.throws(() => send({method: 'eth_sign', params: [tx.to, '0x00']}), refusal);
   assert.throws(() => send(undefined), refusal);
+  // sendAsync without a callback has no other way to answer.
+  assert.throws(() => sendAsync({method: 'eth_sendTransaction', params: [tx]}), refusal);
   assert.deepEqual(reached, [], 'a refused call reached the wallet');
 """,
         route,

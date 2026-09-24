@@ -110,17 +110,22 @@
     setTimeout(() => document.removeEventListener("shieldai:channel-request", answer), 0);
   }
 
-  // In such a document inject.js says so when it rejects a request. The
-  // message is unsigned (there is no key here), so all it does is show the
-  // user a notice, once per document; the notice has no buttons and decides
-  // nothing. Anywhere else the message is ignored.
-  if (reachable) {
-    window.addEventListener("message", function notice(event) {
-      if (event.source !== window || !event.data || event.data.type !== "SHIELDAI_UNCHECKABLE") return;
-      window.removeEventListener("message", notice);
-      showUncheckableNotice();
-    });
-  }
+  // inject.js says so when it rejects a request without asking the user: in
+  // such a document, and for a checked method sent through send or
+  // sendAsync. The messages are unsigned (a page can post them too), so all
+  // they do is show the user a notice, once per kind per document; a notice
+  // has no buttons and decides nothing. The frame notice is shown only where
+  // this script made the same refusal decision.
+  const _shownNotices = new Set();
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || !event.data) return;
+    const type = event.data.type;
+    const key = type === "SHIELDAI_LEGACY_REFUSED" ? "legacyRefusedNotice"
+      : type === "SHIELDAI_UNCHECKABLE" && reachable ? "uncheckableNotice" : null;
+    if (key === null || _shownNotices.has(key)) return;
+    _shownNotices.add(key);
+    showNotice(key);
+  });
 
   // Request ids already seen. inject.js makes a fresh random id per request,
   // so a second intercept with a seen id is the page replaying one (perhaps
@@ -1021,15 +1026,16 @@
     return div.innerHTML;
   }
 
-  // A notice that fades out on its own (see overlay.css) and lets clicks
-  // through to the page.
-  async function showUncheckableNotice() {
+  // A notice that fades out on its own (see overlay.css), lets clicks through
+  // to the page, and leaves once faded.
+  async function showNotice(key) {
     await _loadContentLang();
     const notice = document.createElement("div");
     notice.className = "shieldai-notice";
     notice.setAttribute("role", "status");
-    notice.textContent = _t("uncheckableNotice");
+    notice.textContent = _t(key);
     const { host, root } = createShadow();
+    notice.addEventListener("animationend", () => host.remove());
     root.appendChild(notice);
     (document.body || document.documentElement).appendChild(host);
   }
