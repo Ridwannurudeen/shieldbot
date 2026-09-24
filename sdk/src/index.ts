@@ -80,6 +80,10 @@ export interface ScanResult {
   partial?: boolean;
   failed_sources?: string[];
   policy_mode?: string;
+  /** keccak256 of the verdict's canonical evidence document. */
+  evidence_hash?: string;
+  /** Where the evidence document is shown (GET /evidence/{hash}; JSON at /api/evidence/{hash}); null when it could not be stored. Kept 90 days. */
+  evidence_url?: string | null;
 }
 
 export interface FirewallResult extends ScanResult {
