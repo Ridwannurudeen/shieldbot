@@ -316,8 +316,10 @@
     // If the page removes the overlay, the user can no longer decide here:
     // reject the request so the dApp is not left waiting. The whole document
     // is watched, so replacing the root element or document.open() counts.
+    // document.contains, not isConnected: the page could move the host into
+    // another document, where it would still count as connected.
     const observer = new MutationObserver(() => {
-      if (host.isConnected) return;
+      if (document.contains(host)) return;
       observer.disconnect();
       if (_overlayHost === host) removeOverlay();
     });

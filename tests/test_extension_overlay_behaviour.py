@@ -71,10 +71,11 @@ class El {
       if (watched.includes(observer.target)) queueMicrotask(() => observer.callback([]));
     }
   }
+  // Connected to a document, this one or another, as in a browser.
   get isConnected() {
     let node = this;
     while (node.parent) node = node.parent;
-    return node === document;
+    return node.isDocument === true;
   }
   attachShadow({mode}) {
     const host = this;
@@ -115,7 +116,11 @@ class El {
 }
 const body = new El('body'), head = new El('head'), html = new El('html');
 const document = Object.assign(new EventTarget(), {
-  body, head, documentElement: html, activeElement: body, children: [html],
+  body, head, documentElement: html, activeElement: body, children: [html], isDocument: true,
+  contains(node) {
+    while (node.parent) node = node.parent;
+    return node === document;
+  },
   createElement: tag => new El(tag),
   // Light DOM only, like the real one: nothing inside a shadow root is found.
   getElementById(id) {
@@ -679,6 +684,25 @@ def test_removing_the_overlay_rejects_the_request():
   analyze = async () => ({result: scan({})});
   await intercept('request');
   overlayRoot().host.remove();
+  await flush();
+  await assertVerdicts([['request', 'block']]);
+"""
+    )
+
+
+def test_moving_the_overlay_into_another_document_rejects_the_request():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('request');
+  // There the overlay is still connected, to a document the user may not see, but no longer to this one.
+  const otherBody = new El('body');
+  otherBody.parent = {isDocument: true, children: [otherBody]};
+  const host = overlayRoot().host;
+  host.remove();
+  otherBody.appendChild(host);
   await flush();
   await assertVerdicts([['request', 'block']]);
 """
