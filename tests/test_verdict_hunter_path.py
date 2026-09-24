@@ -34,6 +34,7 @@ from tests.test_robinhood_simulation import (
 from utils.scam_db import ScamDatabase
 
 NO_GOPLUS = {"status": "unknown", "reason": "GoPlus has no data", "data": {}}
+NO_MATCH = {"status": "none", "symbol": None, "official_address": None, "reason": None}
 PINNED_SOURCE_BLOCK = 65_540_000
 
 
@@ -48,6 +49,7 @@ async def hunter_scan(fixture):
         return [await HoneypotAnalyzer(service).analyze(ctx)]
 
     container.registry.run_all = run_all
+    container.robinhood_assets.check_onchain = AsyncMock(return_value=NO_MATCH)
     with (
         fresh_addresses(fixture),
         patch.object(ScamDatabase, "fetch_token_security", new=AsyncMock(return_value=NO_GOPLUS)),
@@ -144,7 +146,7 @@ def test_a_malformed_result_key_is_ignored(value):
 
 
 @pytest.mark.asyncio
-async def test_scan_contract_adds_only_the_honeypot_data_key():
+async def test_scan_contract_adds_only_the_honeypot_data_and_impostor_check_keys():
     risk = {
         "rug_probability": 12.0,
         "risk_level": "LOW",
@@ -160,8 +162,9 @@ async def test_scan_contract_adds_only_the_honeypot_data_key():
         ]
     )
     container.risk_engine.compute_from_results = MagicMock(return_value=dict(risk))
+    container.robinhood_assets.check_onchain = AsyncMock(return_value=NO_MATCH)
     result = await AgentTools(container).scan_contract("0x" + "ab" * 20, chain_id=4663)
-    assert result == {**risk, "honeypot_data": honeypot}
+    assert result == {**risk, "honeypot_data": honeypot, "impostor_check": NO_MATCH}
 
 
 @pytest.mark.asyncio

@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 import aiohttp
 from cachetools import TLRUCache
 
+from core.circuit_breaker import CircuitOpenError, provider_breakers
 from core.unknown_ledger import unknown_ledger
 
 
@@ -118,6 +119,7 @@ class ExplorerService:
                             if response.status != 200 and not (
                                 provider == "sourcify" and response.status == 404
                             ):
+                                provider_breakers.record_status(provider, chain_id, response.status)
                                 return ExplorerResult(
                                     "unknown",
                                     reason=f"HTTP {response.status}",
@@ -128,6 +130,7 @@ class ExplorerService:
                             # that is not an object could not be read, and counts as failed.
                             not_found = "HTTP 404" if response.status == 404 else None
                             data = await response.json()
+                            provider_breakers.record_status(provider, chain_id, response.status)
                             if not isinstance(data, dict):
                                 return ExplorerResult(
                                     "unknown",
@@ -139,19 +142,33 @@ class ExplorerService:
                                 data = _redact_api_key(data, api_key)
                             return ExplorerResult("known", data=data, reason=not_found, provider=provider)
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+                provider_breakers.record_error(provider, chain_id, exc)
                 return ExplorerResult(
                     "unknown", reason=type(exc).__name__, provider=provider
                 )
 
-        if provider == "blockscout":
-            lock = self._blockscout_locks.get(host)
-            if lock is None:
-                lock = self._blockscout_locks[host] = asyncio.Lock()
-            async with lock:
-                cached = self._cache.get(cache_key)
-                if cached is not None:
-                    return cached
-                return self._keep(provider, chain_id, cache_key, await fetch())
+        # The breaker is checked once per lookup, as its request is about to go: a second check
+        # would refuse the breaker's own half-open probe. An open breaker's answer is neither
+        # cached nor shared, so lookups resume as soon as it closes, and it counts as failed.
+        try:
+            if provider == "blockscout":
+                lock = self._blockscout_locks.get(host)
+                if lock is None:
+                    lock = self._blockscout_locks[host] = asyncio.Lock()
+                async with lock:
+                    cached = self._cache.get(cache_key)
+                    if cached is not None:
+                        return cached
+                    # Inside the host's lock, so a lookup queued behind the one that opened the
+                    # breaker sends nothing.
+                    provider_breakers.check(provider, chain_id)
+                    return self._keep(provider, chain_id, cache_key, await fetch())
+            # Every caller asks, one that would share a lookup already out too, so while the
+            # breaker is open none of them waits on that lookup.
+            provider_breakers.check(provider, chain_id)
+        except CircuitOpenError as exc:
+            unknown_ledger.record(provider, chain_id, "failed")
+            return ExplorerResult("unknown", reason=type(exc).__name__, provider=provider)
         # Concurrent callers for one URL (one address on one chain) share one request, so a hot
         # address has at most one live Sourcify lookup, cached and counted once. A caller that is
         # cancelled leaves it running for the others.

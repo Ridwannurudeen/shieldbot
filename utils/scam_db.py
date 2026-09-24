@@ -10,6 +10,7 @@ import logging
 import aiohttp
 from cachetools import TLRUCache, TTLCache
 
+from core.circuit_breaker import provider_breakers
 from core.unknown_ledger import unknown_ledger
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,7 @@ class ScamDatabase:
         observed_at = time.time()
         result = {'status': 'unknown', 'reason': 'GoPlus unavailable', 'data': {}}
         try:
+            provider_breakers.check('goplus_token', chain_id)
             url = f"https://api.gopluslabs.io/api/v1/token_security/{chain_id}?contract_addresses={address}"
             async with aiohttp.ClientSession() as session:
                 # Rate limits are retried with bounded backoff; only a failure that
@@ -177,7 +179,9 @@ class ScamDatabase:
                                 result = {'status': 'ok', 'reason': None, 'data': token}
                     if not retriable:
                         break
+            provider_breakers.record_status('goplus_token', chain_id, resp.status)
         except Exception as e:
+            provider_breakers.record_error('goplus_token', chain_id, e)
             logger.error("Error fetching GoPlus token security: %s", type(e).__name__)
             result['reason'] = f'GoPlus request failed ({type(e).__name__})'
         finally:

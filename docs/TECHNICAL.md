@@ -887,9 +887,43 @@ CMD ["python", "bot.py"]
 ### Data Privacy
 
 - **Persistent Backend State**: SQLite retains scan scores, findings, agent transaction history, chat history and identifiers, subscriptions, verdict evidence and publication outbox state (`core/database.py`).
+- **Retention**: the hunter's sweep in the API process (at startup, then every 30 minutes) deletes chat messages older than 24 hours (each chat also keeps at most its last 50), API key usage rows (`api_usage`), daily key counts (`api_daily_usage`) and daily AI token counts (`ai_token_usage`) older than 90 days, and free key link requests at the first sweep after they expire (a link lasts 30 minutes). Community reports are kept as evidence. Their `reporter_id` is HMAC-SHA256 of the client IP under `REPORTER_HASH_SECRET`, cut to 32 hex characters, or null when that secret is unset; the IP itself is never stored, and a startup migration cleared the IPs stored before. Nothing else expires on its own: beta signup emails, API keys and their owners, scan scores, outcome events, findings, agent firewall history, guardian wallets and alerts, launch alert subscriptions and verdict evidence stay until deleted.
 - **Local Extension State**: Browser storage holds settings, recent scan results, a chat identifier and recent chat messages. Removing the extension does not delete backend records.
 - **External Processing**: Configured RPC and intelligence services receive the addresses or transaction data needed by the invoked checks. Optional AI and report publication flows can send additional analysis data; a risk threshold is not user consent.
 - **Open Source**: All code auditable at https://github.com/Ridwannurudeen/shieldbot
+
+#### Deleting a person's data
+
+There is no deletion route. On the server, run these against `/opt/shieldbot/shieldbot.db` with the `sqlite3` shell, or Python's `sqlite3` module where the shell is not installed (the database is in WAL mode, so the API can stay up):
+
+- **An email address**, in lower case as it is stored (beta list, free key requests, API keys it owns). The keys are deactivated and their owner replaced rather than deleted, and their usage rows go first:
+
+  ```sql
+  DELETE FROM beta_signups WHERE email = 'person@example.com';
+  DELETE FROM free_key_requests WHERE email = 'person@example.com';
+  DELETE FROM api_usage WHERE key_id IN (SELECT key_id FROM api_keys WHERE owner = 'person@example.com');
+  UPDATE api_keys SET is_active = 0, owner = 'deleted' WHERE owner = 'person@example.com';
+  ```
+
+- **A client IP** (community reports). A stored reporter cannot be turned back into an IP, so hash the IP the way the API does, in the form the API received it, then clear the match. This prints `None` when `REPORTER_HASH_SECRET` is unset, in which case no report holds anything derived from an IP:
+
+  ```bash
+  cd /opt/shieldbot && venv/bin/python -c "import sys; from core.config import Settings; from core.database import reporter_hash; print(reporter_hash(Settings().reporter_hash_secret, sys.argv[1]))" 203.0.113.7
+  ```
+
+  ```sql
+  UPDATE community_reports SET reporter_id = NULL WHERE reporter_id = '<printed hash>';
+  ```
+
+- **A Telegram user** (bot chats are stored under `tg-<user id>`; launch alert subscriptions and the alerts queued for them under the chat id, which for a private chat is the user id):
+
+  ```sql
+  DELETE FROM chat_history WHERE user_id = 'tg-123456789';
+  DELETE FROM launch_alert_subscriptions WHERE chat_id = 123456789;
+  DELETE FROM launch_alert_outbox WHERE chat_id = 123456789;
+  ```
+
+Side panel chats are stored under a hash of the install or IP and the chat id, which cannot be looked up from a person's details; they are deleted within 24 hours.
 
 ---
 

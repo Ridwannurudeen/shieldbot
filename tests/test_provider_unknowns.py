@@ -357,6 +357,7 @@ async def test_complete_primary_honeypot_score_matches_baseline():
 @pytest.mark.parametrize('entrypoint', ['direct', 'registry'])
 async def test_failed_simulation_with_clean_fallback_never_becomes_safe(renounced, entrypoint):
     adapter = EvmAdapter.__new__(EvmAdapter)
+    adapter._chain_id = 56
     adapter._honeypot_chain_id = 56
     adapter._chain_name = 'BSC'
     adapter._honeypot_is_replies = {}

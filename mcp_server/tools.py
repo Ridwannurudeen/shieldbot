@@ -209,7 +209,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "each with its latest scan outcome: blocked, watching, cleared, unknown (scan incomplete) or not_scanned. "
             "unknown and not_scanned have status 'unknown' with coverage_reasons and are never safe. "
             "scan.status is authoritative: 'ok' only for a complete scan; per-field coverage is present only "
-            "for blocked launches. Page with next_cursor."
+            "for blocked launches. impostor_check is the launch's check against Robinhood's official token list "
+            "(official, impostor, collision, none or unknown), or null when it was never checked. "
+            "Page with next_cursor."
         ),
         "inputSchema": {
             "type": "object",

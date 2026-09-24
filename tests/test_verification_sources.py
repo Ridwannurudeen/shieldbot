@@ -409,3 +409,82 @@ async def test_an_unknown_explorer_result_is_kept_only_thirty_seconds(status, he
         await service.get_sourcify_verification(ADDRESS, 56)
     assert http.session.get.call_count == 2
     assert first.status == {200: "verified", 404: "unverified", 502: "unknown"}[status]
+
+
+def _open_breaker(provider, chain_id):
+    from core.circuit_breaker import FAILURE_THRESHOLD, OPEN, provider_breakers
+
+    for _ in range(FAILURE_THRESHOLD):
+        provider_breakers.record_status(provider, chain_id, 503)
+    assert provider_breakers.states()[f"{provider}:{chain_id}"] == OPEN
+
+
+@pytest.mark.asyncio
+async def test_a_caller_does_not_wait_on_a_shared_sourcify_lookup_while_the_breaker_is_open(monkeypatch):
+    import services.explorer_service as explorer_module
+    from core.unknown_ledger import UnknownLedger
+
+    ledger = UnknownLedger()
+    monkeypatch.setattr(explorer_module, "unknown_ledger", ledger)
+    release = asyncio.Event()
+    session = _held_sourcify(release)
+    service = ExplorerService()
+    with patch("aiohttp.ClientSession") as client:
+        client.return_value.__aenter__.return_value = session
+        leader = asyncio.create_task(service.get_sourcify_verification(ADDRESS, 56))
+        await asyncio.sleep(0)
+        _open_breaker("sourcify", 56)
+        # Two callers while the breaker is open: each is answered at once, neither joins the
+        # lookup already out, and each open-breaker answer is its own, uncached, counted as failed.
+        refused = [await asyncio.wait_for(service.get_sourcify_verification(ADDRESS, 56), 1) for _ in range(2)]
+        assert [(result.status, result.reason) for result in refused] == [("unknown", "CircuitOpenError")] * 2
+        assert service._cache.get((f"{SOURCIFY}56/{ADDRESS}", ())) is None
+        release.set()
+        assert (await leader).status == "unverified"
+    assert session.get.call_count == 1
+    counts = ledger.for_chain(56)["sourcify"]
+    assert {k: counts[k] for k in ("answered", "unknown", "failed")} == {"answered": 0, "unknown": 1, "failed": 2}
+
+
+def _late_503():
+    """A session whose every GET answers 503 after 0.2 s."""
+    response = MagicMock(status=503)
+    response.json = AsyncMock(return_value=None)
+
+    async def late_reply():
+        await asyncio.sleep(0.2)
+        return response
+
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(side_effect=late_reply)
+    context.__aexit__ = AsyncMock(return_value=False)
+    session = MagicMock()
+    session.get.return_value = context
+    return session
+
+
+@pytest.mark.asyncio
+async def test_a_lookup_that_ends_after_its_caller_stopped_waiting_is_counted_once_by_its_breaker(monkeypatch):
+    import services.counterparty_service as counterparty_module
+    from core.circuit_breaker import CLOSED, OPEN, provider_breakers
+
+    monkeypatch.setattr(counterparty_module, "PROVIDER_TIMEOUT", 0.05)
+    adapter = EvmAdapter(56, "Test", "https://rpc.invalid", etherscan_api_key="test-key")
+    adapter._explorer_service = ExplorerService()
+    adapter.get_bytecode = AsyncMock(return_value="0x6080")
+    with patch("aiohttp.ClientSession") as client:
+        client.return_value.__aenter__.return_value = _late_503()
+        for i, expected in enumerate((CLOSED, CLOSED, OPEN)):
+            assert await adapter.is_verified_contract("0x" + f"{i + 1:040x}") == (None, None)
+            # Both lookups are still out when their caller gets Unknown; each counts once as it ends.
+            await asyncio.sleep(0.4)
+            states = provider_breakers.states()
+            assert (states["etherscan:56"], states["sourcify:56"]) == (expected, expected)
+
+
+@pytest.mark.asyncio
+async def test_an_open_etherscan_breaker_still_lets_sourcify_verify_at_once():
+    _open_breaker("etherscan", 56)
+    result, http = await asyncio.wait_for(_verify({ADDRESS: VERIFIED_SOURCE}, {ADDRESS: SOURCIFY_VERIFIED}), 1)
+    assert result == (True, None)
+    assert [call.args[0] for call in http.session.get.call_args_list] == [f"{SOURCIFY}56/{ADDRESS}"]

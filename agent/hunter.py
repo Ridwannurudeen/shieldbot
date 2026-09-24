@@ -54,10 +54,11 @@ SCAN_INTERVAL_SECONDS = 2.0
 # transaction and its block, and owner() plus its raw re-read, each eth_call preceded by eth_chainId
 # from web3's validation middleware (once on web3 6.15.1 per its source, twice on web3 7 as measured
 # live). The buy/sell simulation sends up to 12: the pool lookup batch, V2 reserves, a block number
-# and three Initialize log windows, then up to three pools simulated twice each.
-SCAN_REQUEST_COST = 22
-# Four guard subjects at five minutes cost 4 * 22 / 300 = 0.293 requests/s of the
-# shared 1 rps budget; after discovery's ~0.27 rps, ~0.44 rps remains for launches.
+# and three Initialize log windows, then up to three pools simulated twice each. The impostor check
+# (services.robinhood_assets) reads the token's symbol and name in one batch.
+SCAN_REQUEST_COST = 23
+# Four guard subjects at five minutes cost 4 * 23 / 300 = 0.307 requests/s of the
+# shared 1 rps budget; after discovery's ~0.27 rps, ~0.42 rps remains for launches.
 # Match the publisher's 300 s unchanged-verdict threshold. Guard expiry must also
 # allow scheduling, scan and publication latency; this is a target, not an SLA.
 GUARD_RESCAN_INTERVAL_SECONDS = VERDICT_REFRESH_SECONDS
@@ -153,6 +154,11 @@ class Hunter:
         if chain_id == LAUNCH_CHAIN_ID and self.rpc_guard is not None:
             await self.rpc_guard.acquire(SCAN_REQUEST_COST)
 
+    async def _record_impostor_check(self, chain_id: int, token: str, result: dict):
+        """Store a 4663 scan's impostor check with its launch, before the outcome that can raise an alert."""
+        if result.get("impostor_check") is not None:
+            await self.db.record_launch_impostor_check(chain_id, token, result["impostor_check"])
+
     async def due_guard_subjects(self):
         """The bounded guard set due a new measurement, oldest complete measurement first."""
         if self.verdict_publisher is None:
@@ -185,6 +191,7 @@ class Hunter:
                 subject["subject"], chain_id=LAUNCH_CHAIN_ID,
                 deadline=BACKGROUND_SCAN_DEADLINE_SECONDS,
             )
+            await self._record_impostor_check(LAUNCH_CHAIN_ID, subject["subject"], result)
             published = await self._publish_verdict(LAUNCH_CHAIN_ID, subject["subject"], result)
             evidence = build_evidence(LAUNCH_CHAIN_ID, subject["subject"], result, None)
             measured_at = evidence.get("observed_at")
@@ -308,6 +315,15 @@ class Hunter:
                 type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
             )
 
+        # Housekeeping: usage records past their retention and expired free key link requests
+        try:
+            await self.db.prune_retention()
+        except Exception as exc:
+            logger.error(
+                "Hunter: retention pruning failed: %s\n%s",
+                type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+            )
+
         logger.info(
             "Hunter sweep %s complete: %d flagged", investigation_id, len(flagged)
         )
@@ -392,6 +408,7 @@ class Hunter:
             result = await self.tools.scan_contract(
                 pair["token_address"], chain_id=chain_id, deadline=BACKGROUND_SCAN_DEADLINE_SECONDS
             )
+            await self._record_impostor_check(chain_id, pair["token_address"], result)
             risk_score = result.get("risk_score", result.get("rug_probability"))
 
             if risk_score is not None and risk_score >= 71:
@@ -508,6 +525,7 @@ class Hunter:
             await self.db.record_launch_scan(LAUNCH_CHAIN_ID, token, "error", None)
             return "error"
 
+        await self._record_impostor_check(LAUNCH_CHAIN_ID, token, result)
         risk_score = result.get("risk_score", result.get("rug_probability"))
         if risk_score is not None and risk_score >= 71:
             status = "blocked"

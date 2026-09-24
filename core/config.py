@@ -103,6 +103,10 @@ class Settings(BaseSettings):
     # Admin
     admin_secret: str = ""
 
+    # Key for the HMAC that community reports store as reporter_id instead of the client IP; empty
+    # stores no reporter. It lives only in the environment, never in the database.
+    reporter_hash_secret: str = ""
+
     # Webhook security
     webhook_allow_query_secret: bool = False
 

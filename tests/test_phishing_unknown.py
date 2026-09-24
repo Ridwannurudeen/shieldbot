@@ -12,6 +12,7 @@ import aiohttp
 import pytest
 from fastapi.testclient import TestClient
 
+from core.circuit_breaker import FAILURE_THRESHOLD
 from services.phishing_service import PhishingService
 
 URL = "https://example.com/swap"
@@ -100,7 +101,8 @@ async def test_an_outage_cannot_grow_the_cache_past_its_bound():
     finally:
         client.stop()
     assert len(service._cache) == 5
-    assert session.get.call_count == 12
+    # The breaker stops asking after the first failures in a row; every domain still gets its answer.
+    assert session.get.call_count == FAILURE_THRESHOLD
 
 
 @pytest.mark.asyncio
