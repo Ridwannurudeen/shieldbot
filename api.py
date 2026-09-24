@@ -1738,6 +1738,7 @@ async def public_stats():
     process. GET /api/coverage/{chain_id} has one chain's providers in full.
     """
     from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
+    from services.verdict_publisher import CHAIN_ID as REGISTRY_CHAIN_ID
 
     db_stats = {}
     launch_discovery = None
@@ -1755,7 +1756,7 @@ async def public_stats():
         }
         evidence = await container.db.get_verdict_evidence_counts()
         evidence_documents = {chain_id: counts["documents"] for chain_id, counts in evidence.items()}
-        registry_records_confirmed = sum(counts["confirmed"] for counts in evidence.values())
+        registry_records_confirmed = evidence[REGISTRY_CHAIN_ID]["confirmed"] if REGISTRY_CHAIN_ID in evidence else 0
 
     mempool = {}
     observable = unobservable = None

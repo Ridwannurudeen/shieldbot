@@ -103,6 +103,16 @@ async def test_stats_report_evidence_and_registry_records(stats_api, db):
 
 
 @pytest.mark.asyncio
+async def test_only_confirmed_robinhood_chain_records_count_as_registry_records(stats_api, db):
+    await _evidence(db, 4663, TOKENS[0], "confirmed")
+    await _evidence(db, 56, TOKENS[1], "confirmed")
+
+    body = (await stats_api.get("/api/stats")).json()
+
+    assert body["registry_records_confirmed"] == 1
+
+
+@pytest.mark.asyncio
 async def test_stats_with_no_evidence_report_zero_records_not_null(stats_api):
     body = (await stats_api.get("/api/stats")).json()
 
