@@ -871,7 +871,7 @@
      "market": "No DexScreener pairs on requested chain (bsc)"
     },
     "critical_flags": [
-     "Proxy/upgradeable contract",
+     "destroy() function: the owner may be able to delete the contract",
      "Market data unknown: No DexScreener pairs on requested chain (bsc)",
      "Sellability unknown: Token not found on honeypot.is; honeypot.is HTTP 404; Unknown fields: is_honeypot, buy_tax, sell_tax, can_sell"
     ],
@@ -2722,5 +2722,5 @@
    }
   }
  ],
- "source": "Recorded 2026-09-24 from public providers for the 20 safe entries of eval/data/benchmark_v1.json: GoPlus token_security (scalar fields), eth_getCode (reduced to the services/contract_service.py BYTECODE_PATTERNS selectors it contains), owner() via RPC, HoneypotService, DexService and EthosService outputs. Explorer verification and creation age are not recorded: they need the production explorer key."
+ "source": "Recorded 2026-09-24 from public providers for the 20 safe entries of eval/data/benchmark_v1.json: GoPlus token_security (scalar fields), eth_getCode (reduced to the services/contract_service.py BYTECODE_PATTERNS selectors it contains as PUSH4 operands), owner() via RPC, HoneypotService, DexService and EthosService outputs. Explorer verification and creation age are not recorded: they need the production explorer key."
 }

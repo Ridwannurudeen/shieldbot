@@ -32,4 +32,3 @@ def test_container_builds_without_tier_service():
         container = ServiceContainer(Settings(_env_file=None))
 
     assert not hasattr(container, "tier_service")
-    assert container.token_gate_service is not None

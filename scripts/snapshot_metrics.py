@@ -39,7 +39,7 @@ def fetch_stats() -> dict:
     _validate_api_url(API_URL)
     headers = {"x-admin-secret": ADMIN_SECRET}
     with httpx.Client(timeout=10.0) as client:
-        resp = client.get(f"{API_URL}/api/admin/stats", headers=headers)
+        resp = client.get(f"{API_URL.rstrip('/')}/api/admin/stats", headers=headers)
         resp.raise_for_status()
         return resp.json()
 

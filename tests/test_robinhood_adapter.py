@@ -97,12 +97,8 @@ async def test_container_excludes_robinhood_from_pending_monitor():
 
     container = MagicMock()
     container.web3_client.get_supported_chain_ids.return_value = [56, 204, 4663]
-    container.db.initialize = AsyncMock()
-    container.indexer.start = AsyncMock()
-    container.greenfield_service.async_init = AsyncMock()
     container.mempool_monitor.start = AsyncMock()
-    container.cache.connect = AsyncMock()
 
-    await ServiceContainer.startup(container)
+    await ServiceContainer.start_mempool_monitor(container)
 
     container.mempool_monitor.start.assert_awaited_once_with(chain_ids=[56, 204])

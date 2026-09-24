@@ -77,3 +77,21 @@ class TestServiceContainer:
             await c.shutdown()
             c.greenfield_service.close.assert_awaited_once()
             c.tenderly_simulator.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_startup_keeps_the_indexer_and_leaves_the_mempool_monitor_to_the_api():
+    """The Telegram bot calls startup() too: it drains its own indexer queue but never polls mempools."""
+    from core.container import ServiceContainer
+
+    container = MagicMock()
+    container.db.initialize = AsyncMock()
+    container.indexer.start = AsyncMock()
+    container.greenfield_service.async_init = AsyncMock()
+    container.cache.connect = AsyncMock()
+    container.mempool_monitor.start = AsyncMock()
+
+    await ServiceContainer.startup(container)
+
+    container.indexer.start.assert_awaited_once_with()
+    container.mempool_monitor.start.assert_not_called()

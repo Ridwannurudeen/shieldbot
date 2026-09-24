@@ -156,7 +156,8 @@ async def test_only_a_revert_counts_as_an_answer(error, missing):
     assert (result.get("status") == "unknown") is missing
 
 
-MINT_AND_PROXY = "0x6080" + "40c10f19" + "3659cfe6"
+# Dispatcher-style PUSH4 operands: mint(address,uint256) and upgradeTo(address).
+MINT_AND_PROXY = "0x6080" + "63" + "40c10f19" + "63" + "3659cfe6"
 FAILED = {**UNKNOWN, "status": "unknown", "reason": "Ownership lookup failed (HTTPError)"}
 HONEYPOT = {"is_honeypot": False, "can_buy": True, "can_sell": True, "buy_tax": 0, "sell_tax": 0}
 MARKET = {"liquidity_usd": 50000, "pair_age_hours": 100, "fdv": 200000, "volume_24h": 2000}

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # One-shot Base mainnet deploy for ShieldBotAttestor.
 #
-# Reads the deployer key from BASE_DEPLOYER_PRIVATE_KEY env var (NEVER committed,
-# NEVER passed as a CLI arg, NEVER printed). Generates a fresh verifier wallet,
-# registers schema, deploys + verifies the contract, prints the VPS env block,
-# and optionally writes it to the VPS over SSH.
+# Signs with the Foundry keystore account base-deployer (DEPLOY_BASE.md step 1);
+# cast and forge ask for its password. The deployer key is never passed on the
+# command line or held in an environment variable. Generates a fresh verifier
+# wallet, registers schema, deploys + verifies the contract, prints the VPS env
+# block, and optionally writes it to the VPS over SSH.
 #
 # Usage (run from your terminal):
-#   read -s BASE_DEPLOYER_PRIVATE_KEY ; export BASE_DEPLOYER_PRIVATE_KEY
 #   export BASESCAN_API_KEY=<from https://basescan.org/myapikey>
 #   export BASE_RPC_URL=https://mainnet.base.org      # or paid endpoint
 #   export VPS_HOST=root@75.119.153.252               # optional — enables auto-VPS update
@@ -16,17 +16,18 @@
 # Prereqs:
 #   - Foundry installed (forge, cast)
 #   - Submodules pulled: cd contracts/base && forge install (no-op if already done)
-#   - Deployer wallet 0xB2Fae83de08b285cB3D6A77Ff520F6AD669D5f33 funded with
+#   - Deployer keystore imported: cast wallet import base-deployer --interactive
+#   - Deployer wallet 0xfE3f3cEAb7266b5de5Ae8738727b6cf82F7Be76c funded with
 #     ~0.005 ETH on Base mainnet
 
 set -euo pipefail
 
-EXPECTED_DEPLOYER="0xB2Fae83de08b285cB3D6A77Ff520F6AD669D5f33"
+DEPLOYER_ACCOUNT="base-deployer"
+EXPECTED_DEPLOYER="0xfE3f3cEAb7266b5de5Ae8738727b6cf82F7Be76c"
 EAS="0x4200000000000000000000000000000000000021"
 SCHEMA_REGISTRY="0x4200000000000000000000000000000000000020"
 
 # ─── Validate env ────────────────────────────────────────────────────────────
-[[ -z "${BASE_DEPLOYER_PRIVATE_KEY:-}" ]] && { echo "ERROR: BASE_DEPLOYER_PRIVATE_KEY not set"; exit 1; }
 # Etherscan v2 unified API: any explorer key works (BscScan/BaseScan/Etherscan).
 # Fall back to BSCSCAN_API_KEY if ETHERSCAN_V2_API_KEY / BASESCAN_API_KEY aren't set.
 ETHERSCAN_V2_API_KEY="${ETHERSCAN_V2_API_KEY:-${BASESCAN_API_KEY:-${BSCSCAN_API_KEY:-}}}"
@@ -37,11 +38,11 @@ BASE_RPC_URL="${BASE_RPC_URL:-https://mainnet.base.org}"
 cd "$(dirname "$0")"
 [[ ! -f foundry.toml ]] && { echo "ERROR: must run from contracts/base/"; exit 1; }
 
-# Confirm the deployer key matches the expected identity wallet.
-DEPLOYER_ADDR=$(cast wallet address --private-key "$BASE_DEPLOYER_PRIVATE_KEY")
+# Confirm the deployer keystore holds the expected owner wallet.
+DEPLOYER_ADDR=$(cast wallet address --account "$DEPLOYER_ACCOUNT")
 if [[ "${DEPLOYER_ADDR,,}" != "${EXPECTED_DEPLOYER,,}" ]]; then
-  echo "ERROR: deployer key resolves to $DEPLOYER_ADDR"
-  echo "       expected $EXPECTED_DEPLOYER (Base identity wallet)"
+  echo "ERROR: keystore $DEPLOYER_ACCOUNT resolves to $DEPLOYER_ADDR"
+  echo "       expected $EXPECTED_DEPLOYER (attestor owner)"
   echo "       refusing to deploy from a different wallet"
   exit 1
 fi
@@ -65,26 +66,24 @@ echo
 echo "── 2. Register schema ──"
 SCHEMA_STR="address scannedAddress,uint8 riskLevel,string scanType,uint64 sourceChainId,bytes32 evidenceHash,string evidenceURI"
 
-# Compute deterministic schema UID (matches EAS): keccak(schema, resolver=0, revocable=true)
-SCHEMA_UID=$(cast keccak "$(cast abi-encode-packed 'string,address,bool' "$SCHEMA_STR" 0x0000000000000000000000000000000000000000 true 2>/dev/null)" 2>/dev/null || echo "")
+# The schema UID is deterministic (matches EAS): keccak256(abi.encodePacked(schema, resolver=0, revocable=true)).
+# For this schema it is 0xdc6d6de6…852e9e, the UID the live attestor uses.
+SCHEMA_PACKED=$(cast abi-encode --packed "f(string,address,bool)" "$SCHEMA_STR" 0x0000000000000000000000000000000000000000 true)
+SCHEMA_UID=$(cast keccak "$SCHEMA_PACKED")
 
-# Fallback: query the registry for an existing record at the computed UID.
 # Try registering — revert means schema already exists, which is fine.
 set +e
 REG_OUT=$(forge script script/RegisterSchema.s.sol \
   --rpc-url "$BASE_RPC_URL" \
   --broadcast \
-  --private-key "$BASE_DEPLOYER_PRIVATE_KEY" \
+  --account "$DEPLOYER_ACCOUNT" --sender "$DEPLOYER_ADDR" \
   --json 2>&1)
-REG_RC=$?
 set -e
 
-# Extract the schema UID from logs regardless of register-vs-already-exists path.
-SCHEMA_UID=$(grep -oE "0x[0-9a-fA-F]{64}" <<<"$REG_OUT" | tail -1)
-ZERO_UID="0x$(printf '0%.0s' {1..64})"
-
-if [[ -z "$SCHEMA_UID" || "$SCHEMA_UID" == "$ZERO_UID" ]]; then
-  echo "ERROR: failed to determine schema UID"
+# Either way the registry must now hold the schema under the computed UID.
+REGISTERED=$(cast call "$SCHEMA_REGISTRY" "getSchema(bytes32)((bytes32,address,bool,string))" "$SCHEMA_UID" --rpc-url "$BASE_RPC_URL")
+if [[ "${REGISTERED,,}" != "(${SCHEMA_UID,,},"* ]]; then
+  echo "ERROR: schema $SCHEMA_UID is not registered"
   echo "$REG_OUT" | tail -20
   exit 1
 fi
@@ -111,7 +110,7 @@ DEPLOY_OUT=$(SCHEMA_UID="$SCHEMA_UID" INITIAL_VERIFIER="$VERIFIER_ADDR" \
   forge script script/DeployAttestor.s.sol \
   --rpc-url "$BASE_RPC_URL" \
   --broadcast \
-  --private-key "$BASE_DEPLOYER_PRIVATE_KEY" \
+  --account "$DEPLOYER_ACCOUNT" --sender "$DEPLOYER_ADDR" \
   --verify \
   --etherscan-api-key "$ETHERSCAN_V2_API_KEY" \
   2>&1)
@@ -162,19 +161,20 @@ echo "Wrote $OUTPUT_FILE (mode 0600). It contains the verifier private key — k
 if [[ -n "${VPS_HOST:-}" ]]; then
   echo
   echo "── 7. Update VPS .env at $VPS_HOST ──"
-  ssh "$VPS_HOST" "set -e; cd /opt/shieldbot; \
-    sed -i.bak \
+  # The verifier key travels on ssh's stdin and is appended by cat, never placed on a command line.
+  printf 'BASE_VERIFIER_PRIVATE_KEY=%s\n' "$VERIFIER_KEY" | ssh "$VPS_HOST" "set -e; cd /opt/shieldbot; \
+    sed -i \
       -e '/^BASE_ATTESTOR_ADDRESS=/d' \
       -e '/^BASE_ATTESTOR_SCHEMA_UID=/d' \
       -e '/^BASE_VERIFIER_PRIVATE_KEY=/d' \
       .env; \
     echo 'BASE_ATTESTOR_ADDRESS=$ATTESTOR_ADDR' >> .env; \
     echo 'BASE_ATTESTOR_SCHEMA_UID=$SCHEMA_UID' >> .env; \
-    echo 'BASE_VERIFIER_PRIVATE_KEY=$VERIFIER_KEY' >> .env; \
+    cat >> .env; \
     chmod 600 .env; \
     systemctl restart shieldbot.service; \
     sleep 3; \
-    journalctl -u shieldbot.service -n 30 --no-pager | grep -E 'Base EAS Attestor|started'"
+    journalctl -u shieldbot.service -n 30 --no-pager | grep -E 'Base EAS Attestor|started' || true"
   echo "VPS updated and service restarted."
 else
   echo
@@ -185,7 +185,7 @@ fi
 echo
 echo "── 8. Fund the verifier wallet ──"
 echo "Send ~0.001 ETH on Base to: $VERIFIER_ADDR"
-echo "(funds 10+ attestations at 150k gas each)"
+echo "(the one attestation posted so far used about 520k gas)"
 
 # ─── Summary ─────────────────────────────────────────────────────────────────
 echo

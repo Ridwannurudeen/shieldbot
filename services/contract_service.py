@@ -14,13 +14,32 @@ BYTECODE_PATTERNS = {
     '44337ea1': 'blacklist',
     '3659cfe6': 'proxy_upgrade',
     '4f1ef286': 'proxy_upgrade',
-    '7a9e5410': 'backdoor',
-    '1694505e': 'selfdestruct',
-    '83197ef0': 'delegatecall',
+    '83197ef0': 'destroy',
 }
 
 # Small delay between BscScan API calls to avoid free-tier rate limit (5/sec)
 BSCSCAN_DELAY = 0.25
+
+
+def push4_operands(bytecode_hex: str) -> set:
+    """Every PUSH4 operand in the code, as hex, found by walking the opcodes once.
+
+    A Solidity dispatcher compares the call's selector against PUSH4 operands, so a selector found
+    here is a function; the same bytes inside another push's data (PUSH1 to PUSH32 immediates are
+    skipped) are not. The walk runs straight from byte 0, so data stored after the code, such as
+    tables read with CODECOPY or the metadata tail, is read as opcodes and can desync it there.
+    """
+    code = bytes.fromhex(bytecode_hex[2:] if bytecode_hex.startswith('0x') else bytecode_hex)
+    operands = set()
+    position = 0
+    while position < len(code):
+        opcode = code[position]
+        if 0x60 <= opcode <= 0x7f:
+            if opcode == 0x63:
+                operands.add(code[position + 1:position + 5].hex())
+            position += opcode - 0x5f
+        position += 1
+    return operands
 
 
 class ContractService:
@@ -44,6 +63,7 @@ class ContractService:
             'has_mint': None,
             'has_pause': None,
             'has_blacklist': None,
+            'has_destroy': None,
             'source_code_patterns': [],
             'bytecode_warnings': [],
         }
@@ -59,6 +79,7 @@ class ContractService:
                     'has_mint': False,
                     'has_pause': False,
                     'has_blacklist': False,
+                    'has_destroy': False,
                 }
 
             results = {'is_contract': True}
@@ -106,6 +127,7 @@ class ContractService:
             has_mint = None
             has_pause = None
             has_blacklist = None
+            has_destroy = None
 
             try:
                 bytecode = await self.web3_client.get_bytecode(address, chain_id=chain_id)
@@ -117,10 +139,12 @@ class ContractService:
                     has_mint = False
                     has_pause = False
                     has_blacklist = False
+                    has_destroy = False
                     if bytecode:
                         bytecode_hex = bytecode.hex() if isinstance(bytecode, bytes) else str(bytecode)
+                        operands = push4_operands(bytecode_hex)
                         for sig, pattern_name in BYTECODE_PATTERNS.items():
-                            if sig in bytecode_hex:
+                            if sig in operands:
                                 bytecode_warnings.append(pattern_name)
                                 if pattern_name == 'mint':
                                     has_mint = True
@@ -128,8 +152,10 @@ class ContractService:
                                     has_pause = True
                                 elif pattern_name == 'blacklist':
                                     has_blacklist = True
-                                elif pattern_name in ('proxy_upgrade', 'delegatecall'):
+                                elif pattern_name == 'proxy_upgrade':
                                     has_proxy = True
+                                elif pattern_name == 'destroy':
+                                    has_destroy = True
             except UnsupportedChainError:
                 raise
             except Exception as e:
@@ -142,6 +168,7 @@ class ContractService:
             results['has_mint'] = has_mint
             results['has_pause'] = has_pause
             results['has_blacklist'] = has_blacklist
+            results['has_destroy'] = has_destroy
 
             # Source code patterns
             source_patterns = []

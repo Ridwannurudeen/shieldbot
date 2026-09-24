@@ -4,6 +4,7 @@ import logging
 import asyncio
 import aiohttp
 from typing import Dict, List, Optional, Tuple
+from cachetools import TTLCache
 from web3 import Web3
 try:
     from web3.middleware import ExtraDataToPOAMiddleware as geth_poa_middleware
@@ -20,9 +21,25 @@ logger = logging.getLogger(__name__)
 # web3 7 from waiting its 30 s default. Both versions accept HTTPProvider(request_kwargs=...).
 RPC_REQUEST_TIMEOUT_SECONDS = 10
 
+# Without honeypot.is no sell is simulated; HoneypotService falls back to GoPlus's own flags.
+HONEYPOT_IS_UNSUPPORTED = (
+    'honeypot.is unsupported for this chain; any honeypot and tax data here is GoPlus-reported, '
+    'not simulated by ShieldBot'
+)
+# check_honeypot and get_tax_info read the same honeypot.is reply, and a scan calls them back to back.
+HONEYPOT_IS_REPLY_TTL_SECONDS = 60
+# Burned LP counts as locked, but these addresses cannot hold a lock, so a chain whose only known
+# "lockers" they are cannot tell unlocked liquidity from liquidity held by an unlisted locker.
+BURN_ADDRESSES = {
+    '0x0000000000000000000000000000000000000000',
+    '0x000000000000000000000000000000000000dead',
+}
+
+# 'etherscan_blockscout': verification from Etherscan, creation from Blockscout, because Etherscan's
+# free tier refuses getcontractcreation on Base and Optimism.
 EXPLORER_BACKENDS = {
-    1: 'etherscan', 56: 'etherscan', 8453: 'etherscan',
-    42161: 'etherscan', 137: 'etherscan', 10: 'etherscan', 204: 'etherscan',
+    1: 'etherscan', 56: 'etherscan', 8453: 'etherscan_blockscout',
+    42161: 'etherscan', 137: 'etherscan', 10: 'etherscan_blockscout', 204: 'etherscan',
     4663: 'sourcify_blockscout',
 }
 
@@ -41,6 +58,21 @@ FACTORY_ABI = [
         ],
         "name": "getPair",
         "outputs": [{"name": "pair", "type": "address"}],
+        "type": "function"
+    }
+]
+
+# Solidly-style factories (Aerodrome on Base, Velodrome on Optimism) revert on getPair.
+SOLIDLY_FACTORY_ABI = [
+    {
+        "constant": True,
+        "inputs": [
+            {"name": "tokenA", "type": "address"},
+            {"name": "tokenB", "type": "address"},
+            {"name": "stable", "type": "bool"}
+        ],
+        "name": "getPool",
+        "outputs": [{"name": "pool", "type": "address"}],
         "type": "function"
     }
 ]
@@ -90,6 +122,7 @@ class EvmAdapter(ChainAdapter):
         quote_tokens: List[Tuple[str, str]] = None,
         factory_address: str = None,
         whitelisted_routers: Dict[str, str] = None,
+        solidly_factory: bool = False,
     ):
         from services.explorer_service import explorer_service
 
@@ -105,7 +138,9 @@ class EvmAdapter(ChainAdapter):
         self._known_lockers = known_lockers or {}
         self._quote_tokens = quote_tokens or []
         self._factory_address = factory_address
+        self._solidly_factory = solidly_factory
         self._whitelisted_routers = whitelisted_routers or {}
+        self._honeypot_is_replies = TTLCache(maxsize=1024, ttl=HONEYPOT_IS_REPLY_TTL_SECONDS)
 
     @property
     def chain_id(self) -> int:
@@ -210,7 +245,7 @@ class EvmAdapter(ChainAdapter):
 
     async def get_contract_creation_info(self, address: str) -> Optional[Dict]:
         try:
-            if self._explorer_backend == 'sourcify_blockscout':
+            if self._explorer_backend in ('sourcify_blockscout', 'etherscan_blockscout'):
                 result = await self._explorer_service.get_contract_creation_info(address, self._chain_id)
                 if result.status == 'unknown':
                     logger.warning("[%s] Creation unknown: %s", self._chain_name, result.reason)
@@ -311,64 +346,76 @@ class EvmAdapter(ChainAdapter):
                 return result
             return {**result, 'status': 'unknown', 'reason': f'Ownership lookup failed ({type(e).__name__})'}
 
+    async def _honeypot_is_reply(self, address: str) -> Tuple[int, Optional[Dict]]:
+        """(HTTP status, JSON body when 200) from honeypot.is, requested once per token.
+
+        A request that raises is not kept, so the next caller asks again.
+        """
+        key = address.lower()
+        reply = self._honeypot_is_replies.get(key)
+        if reply is None:
+            async with aiohttp.ClientSession() as session:
+                url = f"https://api.honeypot.is/v2/IsHoneypot?address={address}&chainID={self._honeypot_chain_id}"
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    reply = (resp.status, await resp.json() if resp.status == 200 else None)
+            self._honeypot_is_replies[key] = reply
+        return reply
+
     async def check_honeypot(self, address: str) -> Dict:
         result = {
             'is_honeypot': None, 'status': 'unknown',
             'reason': 'No honeypot data returned', 'field_providers': {},
         }
         if self._honeypot_chain_id is None:
-            result['reason'] = 'honeypot.is unsupported for this chain'
+            result['reason'] = HONEYPOT_IS_UNSUPPORTED
             return result
         try:
-            async with aiohttp.ClientSession() as session:
-                url = f"https://api.honeypot.is/v2/IsHoneypot?address={address}&chainID={self._honeypot_chain_id}"
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status != 200:
-                        result['reason'] = (
-                            'Token not found on honeypot.is' if resp.status == 404
-                            else f'honeypot.is HTTP {resp.status}'
-                        )
-                        return result
-                    data = await resp.json()
-                    sim_success = data.get('simulationSuccess')
-                    if isinstance(sim_success, bool):
-                        result['simulation_success'] = sim_success
-                    if sim_success is False:
-                        result['reason'] = 'Simulation failed (inconclusive)'
-                        result['simulation_failed'] = True
-                        return result
+            status, data = await self._honeypot_is_reply(address)
+            if status != 200:
+                result['reason'] = (
+                    'Token not found on honeypot.is' if status == 404
+                    else f'honeypot.is HTTP {status}'
+                )
+                return result
+            sim_success = data.get('simulationSuccess')
+            if isinstance(sim_success, bool):
+                result['simulation_success'] = sim_success
+            if sim_success is False:
+                result['reason'] = 'Simulation failed (inconclusive)'
+                result['simulation_failed'] = True
+                return result
 
-                    honeypot_result = data.get('honeypotResult') or {}
-                    is_honeypot = honeypot_result.get('isHoneypot')
-                    if not isinstance(is_honeypot, bool):
-                        return result
-                    reason = honeypot_result.get('honeypotReason') or 'honeypot.is result'
+            honeypot_result = data.get('honeypotResult') or {}
+            is_honeypot = honeypot_result.get('isHoneypot')
+            if not isinstance(is_honeypot, bool):
+                return result
+            reason = honeypot_result.get('honeypotReason') or 'honeypot.is result'
+            result.update({
+                'is_honeypot': is_honeypot, 'status': 'ok', 'reason': reason,
+                'field_providers': {'is_honeypot': 'honeypot.is'},
+            })
+            simulation = data.get('simulationResult') or {}
+            sell_tax = simulation.get('sellTax')
+            buy_tax = simulation.get('buyTax')
+            if (
+                is_honeypot and sim_success is True
+                and isinstance(sell_tax, (int, float)) and not isinstance(sell_tax, bool)
+                and isinstance(buy_tax, (int, float)) and not isinstance(buy_tax, bool)
+                and 0 <= sell_tax < 5 and 0 <= buy_tax < 5
+            ):
+                # Verification is free for a scammer, so it cannot clear a failed sell: the
+                # simulator's verdict stands and the doubt is flagged.
+                verified, _ = await self.is_verified_contract(address)
+                if verified is True:
                     result.update({
-                        'is_honeypot': is_honeypot, 'status': 'ok', 'reason': reason,
-                        'field_providers': {'is_honeypot': 'honeypot.is'},
+                        'reason': f'Flagged but verified with normal taxes (buy:{float(buy_tax)}% sell:{float(sell_tax)}%)',
+                        'likely_false_positive': True,
                     })
-                    simulation = data.get('simulationResult') or {}
-                    sell_tax = simulation.get('sellTax')
-                    buy_tax = simulation.get('buyTax')
-                    if (
-                        is_honeypot and sim_success is True
-                        and isinstance(sell_tax, (int, float)) and not isinstance(sell_tax, bool)
-                        and isinstance(buy_tax, (int, float)) and not isinstance(buy_tax, bool)
-                        and 0 <= sell_tax < 5 and 0 <= buy_tax < 5
-                    ):
-                        # Preserve the existing verified, low-tax false-positive rule.
-                        verified, _ = await self.is_verified_contract(address)
-                        if verified is True:
-                            result.update({
-                                'is_honeypot': False,
-                                'reason': f'Flagged but verified with normal taxes (buy:{float(buy_tax)}% sell:{float(sell_tax)}%)',
-                                'likely_false_positive': True,
-                            })
-                        else:
-                            result.update({
-                                'reason': f'{reason} (taxes low: buy:{float(buy_tax)}% sell:{float(sell_tax)}%)',
-                                'low_tax_honeypot': True,
-                            })
+                else:
+                    result.update({
+                        'reason': f'{reason} (taxes low: buy:{float(buy_tax)}% sell:{float(sell_tax)}%)',
+                        'low_tax_honeypot': True,
+                    })
             return result
         except Exception as e:
             logger.error("[%s] Error checking honeypot: %s", self._chain_name, type(e).__name__)
@@ -381,40 +428,37 @@ class EvmAdapter(ChainAdapter):
             'reason': 'No tax data returned', 'field_providers': {},
         }
         if self._honeypot_chain_id is None:
-            result['reason'] = 'honeypot.is unsupported for this chain'
+            result['reason'] = HONEYPOT_IS_UNSUPPORTED
             return result
         try:
-            async with aiohttp.ClientSession() as session:
-                url = f"https://api.honeypot.is/v2/IsHoneypot?address={address}&chainID={self._honeypot_chain_id}"
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status != 200:
-                        result['reason'] = f'honeypot.is HTTP {resp.status}'
-                        return result
-                    data = await resp.json()
-                    if data.get('simulationSuccess') is False:
-                        result['reason'] = 'Simulation failed (inconclusive)'
-                        result['simulation_failed'] = True
-                        return result
-                    if data.get('simulationSuccess') is not True:
-                        result['reason'] = 'Simulation success unknown'
-                        return result
-                    simulation = data.get('simulationResult') or {}
-                    for field, provider_field in (('buy_tax', 'buyTax'), ('sell_tax', 'sellTax')):
-                        value = simulation.get(provider_field)
-                        if value is None or value == '' or isinstance(value, bool):
-                            continue
-                        try:
-                            value = float(value)
-                        except (TypeError, ValueError):
-                            continue
-                        if 0 <= value < float('inf'):
-                            result[field] = value
-                            result['field_providers'][field] = 'honeypot.is'
-                    if result['buy_tax'] is not None and result['sell_tax'] is not None:
-                        result['status'] = 'ok'
-                        result['reason'] = 'honeypot.is simulation taxes'
-                    else:
-                        result['reason'] = 'Missing or invalid honeypot.is tax data'
+            status, data = await self._honeypot_is_reply(address)
+            if status != 200:
+                result['reason'] = f'honeypot.is HTTP {status}'
+                return result
+            if data.get('simulationSuccess') is False:
+                result['reason'] = 'Simulation failed (inconclusive)'
+                result['simulation_failed'] = True
+                return result
+            if data.get('simulationSuccess') is not True:
+                result['reason'] = 'Simulation success unknown'
+                return result
+            simulation = data.get('simulationResult') or {}
+            for field, provider_field in (('buy_tax', 'buyTax'), ('sell_tax', 'sellTax')):
+                value = simulation.get(provider_field)
+                if value is None or value == '' or isinstance(value, bool):
+                    continue
+                try:
+                    value = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if 0 <= value < float('inf'):
+                    result[field] = value
+                    result['field_providers'][field] = 'honeypot.is'
+            if result['buy_tax'] is not None and result['sell_tax'] is not None:
+                result['status'] = 'ok'
+                result['reason'] = 'honeypot.is simulation taxes'
+            else:
+                result['reason'] = 'Missing or invalid honeypot.is tax data'
             return result
         except Exception as e:
             logger.error("[%s] Error getting tax info: %s", self._chain_name, type(e).__name__)
@@ -422,64 +466,74 @@ class EvmAdapter(ChainAdapter):
             return result
 
     async def get_liquidity_info(self, address: str) -> Dict:
+        """Lock status of the token's first LP pair against a quote token.
+
+        A lock that cannot be read (no factory, no pair found, any failed call) is status unknown
+        with is_locked None, never "not locked". Solidly factories are asked for the volatile
+        pool, then the stable one.
+        """
+        unknown = {'is_locked': None, 'lock_percentage': None, 'pair': None, 'status': 'unknown'}
         if not self._factory_address:
-            return {'is_locked': False, 'lock_percentage': 0, 'pair': None}
+            return {**unknown, 'reason': 'No pair factory configured for this chain'}
 
         try:
             checksum_addr = Web3.to_checksum_address(address)
             factory = self.w3.eth.contract(
-                address=Web3.to_checksum_address(self._factory_address), abi=FACTORY_ABI,
+                address=Web3.to_checksum_address(self._factory_address),
+                abi=SOLIDLY_FACTORY_ABI if self._solidly_factory else FACTORY_ABI,
             )
             zero_address = '0x0000000000000000000000000000000000000000'
             pair_address = None
             paired_with = None
 
+            lookups = []
             for quote_name, quote_addr in self._quote_tokens:
-                try:
-                    addr = await self._call_with_retry(
-                        factory.functions.getPair(
-                            checksum_addr, Web3.to_checksum_address(quote_addr),
-                        ).call,
-                    )
-                    if addr != zero_address:
-                        pair_address = addr
-                        paired_with = quote_name
-                        break
-                except Exception:
-                    continue
+                quote = Web3.to_checksum_address(quote_addr)
+                if self._solidly_factory:
+                    lookups += [
+                        (quote_name, factory.functions.getPool(checksum_addr, quote, stable).call)
+                        for stable in (False, True)
+                    ]
+                else:
+                    lookups.append((quote_name, factory.functions.getPair(checksum_addr, quote).call))
+            for quote_name, lookup in lookups:
+                addr = await self._call_with_retry(lookup)
+                if addr != zero_address:
+                    pair_address = addr
+                    paired_with = quote_name
+                    break
 
             if not pair_address:
-                return {'is_locked': False, 'lock_percentage': 0, 'pair': None}
+                return {**unknown, 'reason': 'No pair with a known quote token'}
 
             pair_contract = self.w3.eth.contract(
                 address=Web3.to_checksum_address(pair_address), abi=PAIR_ABI,
             )
             total_supply = await self._call_with_retry(pair_contract.functions.totalSupply().call)
             if total_supply == 0:
-                return {'is_locked': False, 'lock_percentage': 0, 'pair': pair_address}
+                return {**unknown, 'pair': pair_address, 'reason': 'Pair has no liquidity'}
 
             locked_amount = 0
             locker_details = []
             for locker_addr, locker_name in self._known_lockers.items():
-                try:
-                    balance = await self._call_with_retry(
-                        pair_contract.functions.balanceOf(
-                            Web3.to_checksum_address(locker_addr),
-                        ).call,
-                    )
-                    if balance > 0:
-                        pct = (balance / total_supply) * 100
-                        locked_amount += balance
-                        locker_details.append({
-                            'locker': locker_name,
-                            'address': locker_addr,
-                            'percentage': round(pct, 2),
-                        })
-                except Exception:
-                    continue
+                balance = await self._call_with_retry(
+                    pair_contract.functions.balanceOf(
+                        Web3.to_checksum_address(locker_addr),
+                    ).call,
+                )
+                if balance > 0:
+                    pct = (balance / total_supply) * 100
+                    locked_amount += balance
+                    locker_details.append({
+                        'locker': locker_name,
+                        'address': locker_addr,
+                        'percentage': round(pct, 2),
+                    })
 
             lock_percentage = round((locked_amount / total_supply) * 100, 2) if total_supply > 0 else 0
             is_locked = lock_percentage > 50
+            if not is_locked and not set(self._known_lockers) - BURN_ADDRESSES:
+                return {**unknown, 'pair': pair_address, 'reason': 'No liquidity lockers known for this chain'}
 
             return {
                 'is_locked': is_locked,
@@ -490,7 +544,7 @@ class EvmAdapter(ChainAdapter):
             }
         except Exception as e:
             logger.error("[%s] Error getting liquidity info: %s", self._chain_name, type(e).__name__)
-            return {'is_locked': False, 'lock_percentage': 0}
+            return {**unknown, 'reason': f'Liquidity lookup failed ({type(e).__name__})'}
 
     def get_whitelisted_routers(self) -> Dict[str, str]:
         return dict(self._whitelisted_routers)

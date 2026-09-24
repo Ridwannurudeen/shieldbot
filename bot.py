@@ -12,7 +12,8 @@ import asyncio
 import logging
 import re
 import traceback
-from datetime import datetime, timezone
+
+import aiohttp
 
 try:
     from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -34,6 +35,7 @@ from core.container import ServiceContainer
 from core.telegram_formatter import format_full_report
 from core.extension_formatter import is_scan_incomplete
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
+from services.mempool_service import supports_pending_transactions
 from utils.web3_client import UnsupportedChainError
 from utils.chain_info import (
     get_chain_name, get_explorer_url, get_dexscreener_slug,
@@ -69,6 +71,13 @@ risk_engine = container.risk_engine
 # In-memory scan cache (address -> {result, timestamp})
 _scan_cache = {}
 CACHE_TTL = 300  # 5 minutes
+
+# /threats reads the API's mempool monitor. Every bot request reaches the API from one address and
+# so shares one IP rate-limit bucket there; a busy chat reuses a snapshot instead of using it up.
+MEMPOOL_CACHE_SECONDS = 15
+# ('alerts', chain filter or None) or 'stats' -> (fetched_at, response body). Stats do not depend on
+# the chain filter, so one read serves every filter.
+_mempool_cache = {}
 
 # Robinhood Chain launch alerts. The API's hunter records launch outcomes in the shared
 # database; this process queues alerts for subscribed chats there and sends them.
@@ -130,7 +139,6 @@ async def post_init(application):
         ("rescue", "Scan wallet for risky approvals"),
         ("threats", "Live mempool threat alerts"),
         ("campaign", "Check if address is part of scam campaign"),
-        ("history", "View on-chain scan history"),
         ("report", "Report a scam address"),
         ("launchalerts", "Robinhood Chain launch alerts"),
         ("stopalerts", "Stop launch alerts"),
@@ -180,9 +188,6 @@ Send me a token address, and I'll analyze:
 • Mempool threats — live sandwich & frontrun detection
 • Campaign radar — link addresses to coordinated scam campaigns
 
-**📜 On-Chain History**
-All scans are recorded on BNB Chain for transparency.
-
 **How to use:**
 Send any address and I'll auto-detect what to scan!
 Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`
@@ -194,7 +199,6 @@ Commands:
 /rescue — Scan wallet for risky approvals
 /threats — Live mempool threat alerts
 /campaign — Check scam campaign links
-/history — View on-chain scan history
 /report — Report a scam address
 /launchalerts — Robinhood Chain launch alerts
 /stopalerts — Stop launch alerts
@@ -223,7 +227,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **/rescue <wallet>** - Scan wallet for risky token approvals
 **/threats** - Live mempool threat alerts
 **/campaign <address>** - Check if address is part of a scam campaign
-**/history <address>** - View on-chain scan history
 **/report <address> <reason>** - Report a scam address
 **/launchalerts** - Alert this chat to blocked Robinhood Chain launches (`/launchalerts all` for every launch)
 **/stopalerts** - Stop launch alerts
@@ -316,60 +319,11 @@ async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /history command - query on-chain scan records"""
-    if not context.args:
-        await update.message.reply_text(
-            "❌ Please provide an address.\n\n"
-            "Usage: `/history <address>`",
-            parse_mode='Markdown'
-        )
-        return
-
-    address = context.args[0]
-
-    if not web3_client.is_valid_address(address):
-        await update.message.reply_text("❌ Invalid address format.")
-        return
-
-    status_msg = await update.message.reply_text("📜 Querying on-chain scan history...")
-
-    try:
-        scan_data = await onchain_recorder.get_latest_scan(address)
-
-        if not scan_data:
-            await status_msg.edit_text(
-                f"📜 **On-Chain History**\n\n"
-                f"**Address:** `{address}`\n\n"
-                f"No on-chain scan records found for this address.\n"
-                f"Use `/scan` or `/token` to scan it first!",
-                parse_mode='Markdown'
-            )
-            return
-
-        # Format timestamp
-        ts = scan_data.get('timestamp', 0)
-        scan_time = datetime.fromtimestamp(ts, tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC') if ts > 0 else 'Unknown'
-
-        risk_emoji = {'LOW': '🟢', 'MEDIUM': '🟡', 'HIGH': '🔴', 'SAFE': '✅', 'WARNING': '⚠️', 'DANGER': '🔴'}
-        risk = scan_data.get('risk_level', 'UNKNOWN')
-        emoji = risk_emoji.get(risk, '⚪')
-
-        response = f"""📜 **On-Chain Scan History**
-
-**Address:** `{address}`
-**Last Scan:** {scan_time}
-**Risk Level:** {emoji} {risk}
-**Scan Type:** {scan_data.get('scan_type', 'unknown')}
-**Total Scans:** {scan_data.get('scan_count', 0)}
-
-🔗 [View on BscScan](https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795#events)
-"""
-
-        await status_msg.edit_text(response, parse_mode='Markdown', disable_web_page_preview=True)
-
-    except Exception as e:
-        logger.error(f"Error in /history: {type(e).__name__}")
-        await status_msg.edit_text("❌ Error querying history. Please try again later.")
+    """Handle /history command - on-chain scan history is not available"""
+    # Still registered so chats with a cached command menu get a plain answer instead of silence.
+    await update.message.reply_text(
+        "On-chain scan history is not available. Use /scan or /token to check an address."
+    )
 
 
 async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -410,7 +364,6 @@ Future scans will flag it as a known scam.
         # Record on-chain (fire-and-forget — non-blocking)
         if onchain_recorder.is_available():
             await onchain_recorder.record_scan_fire_and_forget(address, 'high', 'report')
-            response += "\n🔗 On-chain recording scheduled — [view contract](https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795#events)"
         if base_attestor.is_available():
             await base_attestor.attest_fire_and_forget(address, 'high', 'report', source_chain_id=56)
     else:
@@ -538,6 +491,32 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text("❌ Error scanning approvals. Please try again later.")
 
 
+async def _read_mempool_route(session, key, path, params=None):
+    """GET one API mempool route, reusing a read of it younger than MEMPOOL_CACHE_SECONDS.
+
+    A failed read raises and is not kept.
+    """
+    cached = _mempool_cache.get(key)
+    if cached and time.monotonic() - cached[0] < MEMPOOL_CACHE_SECONDS:
+        return cached[1]
+    async with session.get(f"{settings.shieldbot_api_url.rstrip('/')}{path}", params=params) as resp:
+        resp.raise_for_status()
+        body = await resp.json()
+    _mempool_cache[key] = (time.monotonic(), body)
+    return body
+
+
+async def _fetch_mempool_data(chain_id):
+    """Read mempool alerts and counters from the API, whose process runs the only mempool monitor."""
+    params = {'limit': 10}
+    if chain_id is not None:
+        params['chain_id'] = chain_id
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+        alerts = (await _read_mempool_route(session, ('alerts', chain_id), '/api/mempool/alerts', params))['alerts']
+        stats = await _read_mempool_route(session, 'stats', '/api/mempool/stats')
+    return alerts, stats
+
+
 async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /threats command — show live mempool threat alerts."""
     # Optional chain filter
@@ -553,11 +532,21 @@ async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except UnsupportedChainError as e:
             await update.message.reply_text(str(e))
             return
+        if not supports_pending_transactions(chain_id):
+            await update.message.reply_text(
+                f"Mempool monitoring is not available on {get_chain_name(chain_id)}: it has no public "
+                "mempool. Contract scans still cover it."
+            )
+            return
 
     try:
-        alerts = container.mempool_monitor.get_alerts(chain_id=chain_id, limit=10)
-        stats = container.mempool_monitor.get_stats()
+        alerts, stats = await _fetch_mempool_data(chain_id)
+    except Exception as e:
+        logger.error(f"Mempool data unavailable for /threats: {type(e).__name__}")
+        await update.message.reply_text("❌ Live mempool data is unavailable right now. Please try again later.")
+        return
 
+    try:
         response = "🔍 **Mempool Threat Monitor**\n\n"
 
         # Stats summary
@@ -567,9 +556,14 @@ async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response += f"• Frontruns detected: {stats.get('frontruns_detected', 0)}\n"
         response += f"• Suspicious approvals: {stats.get('suspicious_approvals', 0)}\n"
         monitored = stats.get('monitored_chains', [])
-        if monitored:
-            chain_names = [get_chain_name(c) for c in monitored]
-            response += f"• Monitoring: {', '.join(chain_names)}\n"
+        # A chain whose mempool the API could not read is unknown, never clear. Stats that do not
+        # say which chains were read leave every chain unknown.
+        unobservable = stats.get('unobservable_chains', monitored)
+        observed = [c for c in monitored if c not in unobservable]
+        if observed:
+            response += f"• Monitoring: {', '.join(get_chain_name(c) for c in observed)}\n"
+        if unobservable:
+            response += f"• Live data unavailable: {', '.join(get_chain_name(c) for c in unobservable)}\n"
 
         # Recent alerts
         if alerts:
@@ -584,8 +578,14 @@ async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if alert.get('attacker_addr'):
                     response += f"  Attacker: `{alert['attacker_addr'][:16]}...`\n"
         else:
-            filter_text = f" on {get_chain_name(chain_id)}" if chain_id else ""
-            response += f"\n✅ No recent threats detected{filter_text}.\n"
+            watched = [chain_id] if chain_id else monitored
+            clear = [c for c in watched if c in observed]
+            unknown = [c for c in watched if c not in observed]
+            if clear:
+                response += f"\n✅ No recent threats detected on {', '.join(get_chain_name(c) for c in clear)}.\n"
+            if unknown or not watched:
+                where = f" for {', '.join(get_chain_name(c) for c in unknown)}" if unknown else ""
+                response += f"\n⚪ Live mempool data is not available{where} right now, so no result is shown.\n"
 
         await update.message.reply_text(
             response, parse_mode='Markdown', disable_web_page_preview=True,
@@ -995,10 +995,8 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
         keyboard = _scan_buttons(address, chain_id)
 
         # Record on-chain (fire-and-forget — non-blocking)
-        onchain_line = ""
         if risk_level != 'unknown' and onchain_recorder.is_available():
             await onchain_recorder.record_scan_fire_and_forget(address, risk_level, 'contract')
-            onchain_line = "\n\U0001F517 On-chain recording scheduled\n"
         if risk_level != 'unknown' and base_attestor.is_available():
             await base_attestor.attest_fire_and_forget(address, risk_level, 'contract', source_chain_id=chain_id)
         if chain_id == 4663:
@@ -1012,7 +1010,7 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
             pass
 
         await update.message.reply_text(
-            response + onchain_line,
+            response,
             parse_mode='Markdown',
             reply_markup=keyboard,
             disable_web_page_preview=True
@@ -1118,10 +1116,8 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
         keyboard = _token_buttons(address, chain_id)
 
         # Record on-chain (fire-and-forget — non-blocking)
-        onchain_line = ""
         if risk_level != 'unknown' and onchain_recorder.is_available():
             await onchain_recorder.record_scan_fire_and_forget(address, risk_level, 'token')
-            onchain_line = "\n\U0001F517 On-chain recording scheduled\n"
         if risk_level != 'unknown' and base_attestor.is_available():
             await base_attestor.attest_fire_and_forget(address, risk_level, 'token', source_chain_id=chain_id)
         if chain_id == 4663:
@@ -1135,7 +1131,7 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
             pass
 
         await update.message.reply_text(
-            response + onchain_line,
+            response,
             parse_mode='Markdown',
             reply_markup=keyboard,
             disable_web_page_preview=True

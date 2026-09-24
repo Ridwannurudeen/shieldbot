@@ -152,8 +152,10 @@ class TestHoneypotProviderUnknowns:
 
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize('verified, expected', [(True, False), (False, True), (None, True)])
-    async def test_verified_low_tax_rule_requires_actual_verification(self, verified, expected):
+    @pytest.mark.parametrize('verified, doubt_flag', [
+        (True, 'likely_false_positive'), (False, 'low_tax_honeypot'), (None, 'low_tax_honeypot'),
+    ])
+    async def test_verified_low_tax_rule_requires_actual_verification(self, verified, doubt_flag):
         adapter = BscAdapter(rpc_url='https://example.invalid')
         adapter.is_verified_contract = AsyncMock(return_value=(verified, None))
         response = AsyncMock()
@@ -168,7 +170,8 @@ class TestHoneypotProviderUnknowns:
         with patch('adapters.evm_base.aiohttp.ClientSession') as client:
             client.return_value.__aenter__.return_value = session
             result = await adapter.check_honeypot('0xABC')
-        assert result['is_honeypot'] is expected
+        assert result['is_honeypot'] is True
+        assert result[doubt_flag] is True
         assert result['status'] == 'ok'
         assert result['simulation_success'] is True
 

@@ -28,8 +28,9 @@ class IntentMismatchAnalyzer(Analyzer):
       and native value paid to claim()
     """
 
-    def __init__(self, counterparty_service=None):
-        self._counterparty = counterparty_service or UnavailableCounterparty()
+    def __init__(self, web3_client, counterparty_service=None):
+        # Without a counterparty service the allowlist still holds; the spender's facts are unknown.
+        self._counterparty = counterparty_service or UnavailableCounterparty(web3_client)
 
     @property
     def name(self) -> str:
@@ -63,11 +64,13 @@ class IntentMismatchAnalyzer(Analyzer):
             score += 40
             flags.append(f'Disguised selector: {disguised}')
 
+        # One allowlist for these points and the floors below: the scanned chain's routers and
+        # Permit2, checked against the spender the call grants (a permit names the owner first).
+        grant = approval_grant(decoded)
+        whitelisted = self._counterparty.allowlisted_name(grant[0], ctx.chain_id) if grant else None
+
         # 2. Unlimited approval to non-whitelisted target
         if decoded.get('is_unlimited_approval'):
-            spender = decoded.get('params', {}).get('param_0', '')
-            # Check if spender is whitelisted
-            whitelisted = _decoder.is_whitelisted_target(spender, chain_id=ctx.chain_id)
             if not whitelisted:
                 score += 35
                 flags.append('Unlimited approval to non-whitelisted contract')
@@ -106,8 +109,7 @@ class IntentMismatchAnalyzer(Analyzer):
         counterparty = None
         counterparty_known = None
         counterparty_reason = None
-        grant = approval_grant(decoded)
-        if grant and not self._counterparty.allowlisted_name(grant[0], ctx.chain_id):
+        if grant and not whitelisted:
             counterparty = await self._counterparty.fetch(grant[0], ctx.chain_id)
             floor, floor_flag, unknown = judge_spender(counterparty, grant[1])
             counterparty_known = not unknown

@@ -113,7 +113,7 @@ The MCP adapters have narrower coverage than their names may suggest:
 
 These legacy MCP limits remain open. Consumers must not promote their empty lists, zero counts, regex result or default reputation into an authorization decision.
 
-The scan coverage contract does not cover all auxiliary browser features: phishing-error paths can return `is_phishing: false`, and the side-panel injection renderer defaults a missing score to zero and labels it "Safe". Those displays do not prove that a phishing or injection check completed. They remain separate hardening work and must not be advertised as fail-closed protection.
+The scan coverage contract does not cover all auxiliary browser features. When the phishing check gets no answer from GoPlus (HTTP error, network error, malformed reply), it returns `is_phishing: null` with a `reason`, the server holds that for 45 seconds per domain, and the extension shows no banner; so a missing banner does not prove that a phishing check completed. The side-panel injection renderer defaults a missing score to zero and labels it "Safe", so that display does not prove an injection check completed either. Neither is fail-closed protection and must not be advertised as such.
 
 The browser also retains user overrides: generic incomplete results, API errors and risk overlays offer "Proceed Anyway". The new chain-resolution path independently rejects unknown, mismatched or changed chains, but it does not remove those other overrides. Signature requests use a local heuristic warning instead of the transaction-analysis API, and the popup wallet-health request is explicitly BNB-only (`chain_id=56`). Do not describe this extension as an unbypassable security boundary or claim that every incomplete check prevents signing.
 
@@ -611,12 +611,7 @@ Market Metrics:
    ```
    *(WBNB; the returned result depends on current provider coverage.)*
 
-3. **View History** (if any scans recorded):
-   ```
-   /history 0x10ED43C718714eb63d5aA57B78B54704E256024E
-   ```
-
-4. **Report Scam**:
+3. **Report Scam**:
    ```
    /report 0xSCAMADDRESS
    ```
@@ -724,7 +719,6 @@ pytest tests/ --cov=. --cov-report=term-missing
 - [ ] Responds to /start, /help commands
 - [ ] /scan returns risk analysis for contracts
 - [ ] /token shows token name, symbol, and risk score
-- [ ] /history retrieves on-chain scan records
 - [ ] Handles invalid addresses gracefully
 - [ ] Response time <3 seconds for scans
 

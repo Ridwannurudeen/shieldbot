@@ -16,7 +16,7 @@ from services import (
     DexService, EthosService, HoneypotService,
     ContractService, GreenfieldService, TenderlySimulator,
     MempoolMonitor, RescueService, CampaignService,
-    EmailService, PhishingService, TokenSnifferService, TokenGateService,
+    EmailService, PhishingService, TokenSnifferService,
 )
 from core.risk_engine import RiskEngine
 from core.calibration import load_calibration
@@ -125,7 +125,6 @@ class ServiceContainer:
 
         # Bytecode fingerprinting for unverified contracts (must init before registry)
         self.token_sniffer = TokenSnifferService(api_key=settings.token_sniffer_api_key)
-        self.token_gate_service = TokenGateService(rpc_url=settings.bsc_rpc_url)
 
         # Risk engine + analyzer registry
         self.calibration = load_calibration(settings.calibration_config_path)
@@ -135,7 +134,7 @@ class ServiceContainer:
         self.registry.register(MarketAnalyzer(self.dex_service))
         self.registry.register(BehavioralAnalyzer(self.ethos_service))
         self.registry.register(HoneypotAnalyzer(self.honeypot_service))
-        self.registry.register(IntentMismatchAnalyzer(self.counterparty_service))
+        self.registry.register(IntentMismatchAnalyzer(self.web3_client, self.counterparty_service))
         self.registry.register(SignaturePermitAnalyzer(self.counterparty_service))
 
         # Policy engine
@@ -239,17 +238,14 @@ class ServiceContainer:
         self.anomaly_detector = AnomalyDetector(self.db)
 
     async def startup(self):
-        """Initialize async-dependent services."""
+        """Initialize async-dependent services.
+
+        The API and the Telegram bot both call this. Each keeps its own indexer running, since each
+        enqueues scanned contracts into its own in-memory queue.
+        """
         await self.db.initialize()
         await self.indexer.start()
         await self.greenfield_service.async_init()
-        # Start mempool monitor only where pending transactions are available
-        await self.mempool_monitor.start(
-            chain_ids=[
-                chain_id for chain_id in self.web3_client.get_supported_chain_ids()
-                if supports_pending_transactions(chain_id)
-            ]
-        )
         await self.cache.connect()
         logger.info("ServiceContainer started")
         logger.info(f"AI Analysis: {'enabled' if self.ai_analyzer.is_available() else 'disabled'}")
@@ -257,6 +253,18 @@ class ServiceContainer:
         logger.info(f"Tenderly simulation: {'enabled' if self.tenderly_simulator.is_enabled() else 'disabled'}")
         logger.info(f"Email service: {'enabled' if self.email_service.is_enabled() else 'disabled'}")
         logger.info(f"Token Sniffer: {'enabled' if self.token_sniffer.is_enabled() else 'disabled (set TOKEN_SNIFFER_API_KEY to enable)'}")
+
+    async def start_mempool_monitor(self):
+        """Start the mempool monitor where pending transactions are available.
+
+        Only the API lifespan calls this, so one process polls the mempools and holds the alerts.
+        """
+        await self.mempool_monitor.start(
+            chain_ids=[
+                chain_id for chain_id in self.web3_client.get_supported_chain_ids()
+                if supports_pending_transactions(chain_id)
+            ]
+        )
 
     async def shutdown(self):
         """Clean up resources."""

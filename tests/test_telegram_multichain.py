@@ -114,6 +114,7 @@ def bot_chain_functions():
     import asyncio
     from utils.web3_client import UnsupportedChainError, Web3Client
     from core.extension_formatter import is_scan_incomplete
+    from services.mempool_service import supports_pending_transactions
 
     # Load the real menu handlers without importing the optional Telegram package.
     tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
@@ -162,6 +163,8 @@ def bot_chain_functions():
         'web3_client': client,
         'get_chain_name': get_chain_name,
         'parse_chain_prefix': parse_chain_prefix,
+        'supports_pending_transactions': supports_pending_transactions,
+        '_fetch_mempool_data': AsyncMock(return_value=([], {})),
     }
     exec(compile(module, 'bot.py', 'exec'), namespace)
     return namespace
@@ -303,8 +306,7 @@ async def test_bot_threats_rejects_unknown_selection_before_query(bot_chain_func
     ns = bot_chain_functions
     update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock()))
     await ns['threats_command'](update, SimpleNamespace(args=[argument]))
-    ns['container'].mempool_monitor.get_alerts.assert_not_called()
-    ns['container'].mempool_monitor.get_stats.assert_not_called()
+    ns['_fetch_mempool_data'].assert_not_awaited()
     assert 'Unsupported' in update.message.reply_text.call_args.args[0]
 
 
@@ -473,6 +475,22 @@ async def test_bot_caches_uncertainty_and_does_not_attest_as_low(bot_chain_funct
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('handler', ['scan_contract', 'check_token'])
+async def test_bot_records_a_complete_scan_without_promising_it_on_chain(bot_chain_functions, handler):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    ns = bot_chain_functions
+    recorder = ns['onchain_recorder']
+    recorder.is_available.return_value = True
+    recorder.record_scan_fire_and_forget = AsyncMock()
+    recorder.attest_fire_and_forget = AsyncMock()
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock()))
+    await ns[handler](update, '0x' + 'a' * 40, chain_id=56)
+    recorder.record_scan_fire_and_forget.assert_awaited_once()
+    assert 'On-chain recording' not in update.message.reply_text.call_args.args[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('handler', ['scan_contract', 'check_token'])
 async def test_bot_legacy_fallback_cache_cannot_store_safe_unknown(bot_report_functions, handler):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
@@ -618,7 +636,7 @@ async def test_bot_rescue_lower_risk_count_requires_complete_scan(bot_chain_func
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('handler', ['history_command', 'rescue_command', 'threats_command', 'campaign_command',
+@pytest.mark.parametrize('handler', ['rescue_command', 'threats_command', 'campaign_command',
                                      'scan_contract', 'check_token', '_handle_advisor_chat', 'error_handler'])
 async def test_bot_never_sends_or_logs_provider_error_text(bot_chain_functions, handler):
     import ast
@@ -627,14 +645,13 @@ async def test_bot_never_sends_or_logs_provider_error_text(bot_chain_functions, 
     from unittest.mock import AsyncMock
     ns = bot_chain_functions
     tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
-    extra = {'history_command', 'campaign_command'}
+    extra = {'campaign_command'}
     exec(compile(ast.Module(body=[node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)
                                   and node.name in extra], type_ignores=[]), 'bot.py', 'exec'), ns)
     error = RuntimeError('https://rpc.example/v2/SYNTHETIC_KEY_123')
     ns['settings'] = SimpleNamespace(bscscan_api_key='', etherscan_api_key='')
-    ns['onchain_recorder'].get_latest_scan = AsyncMock(side_effect=error)
     ns['container'].rescue_service.scan_approvals.side_effect = error
-    ns['container'].mempool_monitor.get_alerts.side_effect = error
+    ns['_fetch_mempool_data'].side_effect = error
     ns['container'].campaign_service.get_entity_graph = AsyncMock(side_effect=error)
     ns['container'].registry.run_all.side_effect = error
     ns['container'].advisor.chat.side_effect = error

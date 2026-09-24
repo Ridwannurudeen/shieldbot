@@ -108,9 +108,11 @@ export default function Chains() {
           Supported Chains
         </h2>
         <p className="text-gray-400 text-center max-w-md mx-auto mb-14">
-          Contract scans on all 8 chains. Mempool monitoring runs on the 7
-          chains with a public mempool; Robinhood Chain has none, so it gets
-          launch scanning instead.
+          Contract scans on all 8 chains. Mempool monitoring runs on the 4
+          chains with a public mempool: BNB Chain, opBNB, Ethereum and
+          Polygon. Base, Arbitrum, Optimism and Robinhood Chain have none, so
+          contract scans cover them, and Robinhood Chain also gets launch
+          scanning.
         </p>
 
         <motion.div

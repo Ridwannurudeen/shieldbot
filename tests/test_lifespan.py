@@ -21,8 +21,7 @@ def mock_container(monkeypatch):
             "container", "web3_client", "ai_analyzer", "tx_scanner",
             "token_scanner", "calldata_decoder", "scam_db", "dex_service",
             "ethos_service", "honeypot_service", "contract_service", "risk_engine",
-            "greenfield_service", "tenderly_simulator", "token_gate_service",
-            "advisor",
+            "greenfield_service", "tenderly_simulator", "advisor",
         )
     }
     settings = SimpleNamespace(
@@ -30,6 +29,7 @@ def mock_container(monkeypatch):
     )
     container = MagicMock(settings=settings)
     container.startup = AsyncMock()
+    container.start_mempool_monitor = AsyncMock()
     container.shutdown = AsyncMock()
     container.hunter.start = AsyncMock()
     container.hunter.stop = AsyncMock()
@@ -84,6 +84,7 @@ class TestLifespan:
             api.Settings.assert_called_once_with()
             api.ServiceContainer.assert_called_once_with(mock_container.settings)
             mock_container.startup.assert_awaited_once_with()
+            mock_container.start_mempool_monitor.assert_awaited_once_with()
             mock_container.hunter.start.assert_awaited_once_with()
             mock_container.hunter.stop.assert_not_awaited()
             mock_container.launch_watch.start.assert_awaited_once_with()

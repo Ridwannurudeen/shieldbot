@@ -6,11 +6,12 @@ from unittest.mock import AsyncMock
 import pytest
 from core.analyzer import AnalysisContext
 from analyzers.intent import IntentMismatchAnalyzer
+from utils.web3_client import Web3Client
 
 
 @pytest.fixture
 def analyzer():
-    return IntentMismatchAnalyzer()
+    return IntentMismatchAnalyzer(Web3Client())
 
 
 @pytest.mark.asyncio
@@ -153,7 +154,7 @@ def _service(facts=None):
 
 async def _intent(calldata, facts=None, value='0', **extra):
     service = _service(facts)
-    result = await IntentMismatchAnalyzer(service).analyze(AnalysisContext(
+    result = await IntentMismatchAnalyzer(Web3Client(), service).analyze(AnalysisContext(
         address=TOKEN, chain_id=56, from_address=OWNER,
         extra={'calldata': calldata, 'value': value, **extra},
     ))
@@ -217,8 +218,11 @@ async def test_wallet_grant_blocks_through_the_engine():
     _call('8fcbaf0c', OWNER, SPENDER, 0, 0, False, 27, 0, 0),
     _call('095ea7b3', ROUTER, MAX),
     _call('2b67b570', OWNER) + '0' * 512,
+    _call('2a2d80d1', OWNER) + '0' * 512,
     _call('30f28b7a', OWNER) + '0' * 512,
-], ids=['revoke', 'revoke-approval-for-all', 'dai-revoke', 'allowlisted', 'permit2-single', 'permit2-batch'])
+    '0xedd9444b' + '0' * 512,
+], ids=['revoke', 'revoke-approval-for-all', 'dai-revoke', 'allowlisted', 'permit2-permit',
+        'permit2-permit-batch', 'permit2-transfer', 'permit2-transfer-batch'])
 async def test_no_lookup_and_no_floor(calldata):
     result, service = await _intent(calldata)
     service.fetch.assert_not_awaited()
@@ -284,6 +288,21 @@ async def test_claim_with_native_value_floors(is_verified, floor, target, status
     assert result.data['status'] == status
     assert result.data['coverage']['counterparty'] is (status == 'ok')
     assert result.flags[0] == f'claim() sends 0.1 native value to {target}'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('calldata, flag', [
+    (_call('095ea7b3', '0x000000000022D473030F116dDEE9F6B43aC78BA3', MAX), 'Unlimited approval to Permit2'),
+    # A permit names the owner first; the allowlist is checked against the spender.
+    (_call('d505accf', OWNER, ROUTER, MAX, 1, 27, 0, 0), 'Unlimited approval to PancakeSwap V2 Router'),
+], ids=['permit2', 'permit-to-router'])
+async def test_bare_analyzer_allowlists_the_chains_routers_and_permit2(calldata, flag):
+    result = await IntentMismatchAnalyzer(Web3Client()).analyze(AnalysisContext(
+        address=TOKEN, chain_id=56, extra={'calldata': calldata},
+    ))
+    assert (result.score, result.flags) == (5, [flag])
+    assert result.data['status'] == 'ok'
+    assert 'counterparty' not in result.data
 
 
 @pytest.mark.asyncio

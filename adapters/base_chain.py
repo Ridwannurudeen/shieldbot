@@ -46,4 +46,5 @@ class BaseChainAdapter(EvmAdapter):
             quote_tokens=QUOTE_TOKENS,
             factory_address=AERODROME_FACTORY,
             whitelisted_routers=WHITELISTED_ROUTERS,
+            solidly_factory=True,
         )

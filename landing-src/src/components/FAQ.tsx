@@ -12,7 +12,7 @@ const faqs = [
   },
   {
     q: "Which blockchains does ShieldBot support?",
-    a: "BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, Optimism and Robinhood Chain. Contract scans work on all 8. Mempool monitoring covers the 7 chains with a public mempool; Robinhood Chain has none, so ShieldBot scans new Robinhood Chain launches instead. Coverage depends on each chain's data providers, and missing data is reported as Unknown.",
+    a: "BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, Optimism and Robinhood Chain. Contract scans work on all 8. Mempool monitoring covers the 4 chains with a public mempool: BNB Chain, opBNB, Ethereum and Polygon. Base, Arbitrum, Optimism and Robinhood Chain have none, so contract scans cover them, and ShieldBot also scans new Robinhood Chain launches. Coverage depends on each chain's data providers, and missing data is reported as Unknown.",
   },
   {
     q: "What does ShieldBot do on Robinhood Chain?",
@@ -23,12 +23,16 @@ const faqs = [
     a: "Yes. The Chrome extension and the Telegram bot are free to install and use, and neither needs an account.",
   },
   {
+    q: "Does ShieldBot have a token?",
+    a: "No. ShieldBot does not issue, sell, control or endorse any token. An earlier extension release used the BNB Chain token 0x4904c02efa081cb7685346968bac854cdf4e7777 as an access gate; that gate has been removed. Tokens using the ShieldBot name, including SBOT (named shieldbot, 0x8adba5e2f8ebe8a6f8d9f4c8151fba7ce2328900) and SHIELD (named shieldbot_, 0x7bf4c3cd40710b027282b6b85d86f75acfcbd0f1), two Robinhood Chain tokens paired with NVDA in pools opened on 15 September 2026, are not ShieldBot products.",
+  },
+  {
     q: "Does ShieldBot store my private keys or wallet data?",
     a: "No. ShieldBot never asks for, stores or sends your private keys or seed phrase. The extension sends the transaction details and the site's origin to the ShieldBot API so they can be checked.",
   },
   {
     q: "What happens when ShieldBot detects a threat?",
-    a: "Before you sign, ShieldBot shows the verdict, a safety score and a plain-English explanation of what it found. On a known phishing site, a red banner appears on the page. You always stay in control and choose whether to cancel or sign anyway.",
+    a: "Before you sign, ShieldBot shows the verdict, a safety score and a plain-English explanation of what it found. On a known phishing site, a red banner appears on the page. For a warning, you choose whether to cancel or sign anyway. The extension refuses a request on its own only when the request times out after 60 seconds, when it cannot identify your wallet's chain or that chain differs from the chain the transaction names, or when that chain changes during the check; you can then retry.",
   },
   {
     q: "What is the safety score?",

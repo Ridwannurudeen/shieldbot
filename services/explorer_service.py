@@ -5,9 +5,19 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 import aiohttp
 from cachetools import TTLCache
+
+
+# Public Blockscout instances that answer without an API key; other chains go through the keyed
+# PRO gateway. optimism.blockscout.com redirects here, and requests do not follow redirects, so the
+# map names the final host. scripts/check_blockscout_instances.py notices when an instance moves.
+BLOCKSCOUT_INSTANCES = {
+    8453: "https://base.blockscout.com",
+    10: "https://explorer.optimism.io",
+}
 
 
 @dataclass(frozen=True)
@@ -38,12 +48,16 @@ def _redact_api_key(value, api_key: str):
 
 
 class ExplorerService:
-    """Cache provider responses for five minutes; share one PRO rate limiter."""
+    """Cache provider responses for five minutes; pace each Blockscout host on its own.
+
+    The PRO gateway and the public instances have separate rate limits, so a slow or rate-limited
+    instance must not hold up the gateway's lookups, or the other way round.
+    """
 
     def __init__(self):
         self._cache = TTLCache(maxsize=2048, ttl=300)
-        self._blockscout_lock = asyncio.Lock()
-        self._last_request = 0.0
+        self._blockscout_locks: dict[str, asyncio.Lock] = {}
+        self._last_request: dict[str, float] = {}
 
     async def _request(self, provider: str, url: str, params: dict) -> ExplorerResult:
         cache_key = (
@@ -54,6 +68,7 @@ class ExplorerService:
         )
         if cache_key in self._cache:
             return self._cache[cache_key]
+        host = urlsplit(url).hostname
 
         async def fetch():
             try:
@@ -62,10 +77,16 @@ class ExplorerService:
                 ) as session:
                     for attempt in range(3):
                         if provider == "blockscout":
-                            delay = 0.21 - (time.monotonic() - self._last_request)
+                            delay = 0.21 - (
+                                time.monotonic() - self._last_request.get(host, 0.0)
+                            )
                             if delay > 0:
                                 await asyncio.sleep(delay)
-                            self._last_request = time.monotonic()
+                            self._last_request[host] = time.monotonic()
+                        # Redirects are not followed, not even to the same host: the gateway
+                        # request carries the API key in its query string, the only redirect
+                        # seen (optimism.blockscout.com) changes host, and an unfollowed one
+                        # reads as an Unknown HTTP 30x rather than as data from elsewhere.
                         async with session.get(
                             url, params=params, allow_redirects=False
                         ) as response:
@@ -99,7 +120,10 @@ class ExplorerService:
                 )
 
         if provider == "blockscout":
-            async with self._blockscout_lock:
+            lock = self._blockscout_locks.get(host)
+            if lock is None:
+                lock = self._blockscout_locks[host] = asyncio.Lock()
+            async with lock:
                 if cache_key in self._cache:
                     return self._cache[cache_key]
                 result = await fetch()
@@ -112,6 +136,11 @@ class ExplorerService:
     async def _blockscout(
         self, path: str, chain_id: int, params: dict | None = None
     ) -> ExplorerResult:
+        instance = BLOCKSCOUT_INSTANCES.get(chain_id)
+        if instance:
+            return await self._request(
+                "blockscout", f"{instance}/api/v2/{path}", params or {}
+            )
         api_key = os.getenv("BLOCKSCOUT_API_KEY", "")
         if not api_key:
             return ExplorerResult(

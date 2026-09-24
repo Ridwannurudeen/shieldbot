@@ -56,11 +56,18 @@ def unknown_facts(address: str) -> dict:
     }
 
 
+def _allowlisted_name(web3_client, address: str, chain_id: int) -> Optional[str]:
+    """The scanned chain adapter's router name, or Permit2, which no adapter lists."""
+    lower = address.lower()
+    routers = web3_client._get_adapter(chain_id).get_whitelisted_routers() if web3_client else {}
+    return routers.get(lower) or ("Permit2" if lower == PERMIT2 else None)
+
+
 def approval_grant(decoded: dict) -> Optional[tuple]:
     """(spender, unlimited) when decoded calldata grants a positive allowance, else None.
 
     Revokes (amount 0, setApprovalForAll(operator, false), a DAI permit with allowed false) grant
-    nothing. The two Permit2 permit selectors decode only the owner, so they are not judged here.
+    nothing. Permit2's own calldata selectors decode no spender, so they are not judged here.
     """
     params = decoded.get("params") or {}
     selector = decoded.get("selector")
@@ -124,10 +131,7 @@ class CounterpartyService:
         self._scam_db = scam_db
 
     def allowlisted_name(self, address: str, chain_id: int) -> Optional[str]:
-        """The chain adapter's router name, or Permit2, which no adapter lists."""
-        lower = address.lower()
-        routers = self._web3._get_adapter(chain_id).get_whitelisted_routers()
-        return routers.get(lower) or ("Permit2" if lower == PERMIT2 else None)
+        return _allowlisted_name(self._web3, address, chain_id)
 
     async def fetch(self, address: str, chain_id: int) -> dict:
         lower = address.lower()
@@ -205,11 +209,15 @@ class CounterpartyService:
 
 
 class UnavailableCounterparty:
-    """Stands in where no lookup is wired (bare analyzers, the container-less API): only Permit2
-    is allowlisted and every fact is unknown."""
+    """Stands in where no lookup is wired (bare analyzers, the container-less API): every fact is
+    unknown. The allowlist still holds: the chain adapter's routers when a web3 client is given,
+    and Permit2."""
+
+    def __init__(self, web3_client=None):
+        self._web3 = web3_client
 
     def allowlisted_name(self, address: str, chain_id: int) -> Optional[str]:
-        return "Permit2" if address.lower() == PERMIT2 else None
+        return _allowlisted_name(self._web3, address, chain_id)
 
     async def fetch(self, address: str, chain_id: int) -> dict:
         return unknown_facts(address)

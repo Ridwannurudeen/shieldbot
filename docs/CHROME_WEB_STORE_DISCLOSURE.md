@@ -61,13 +61,10 @@ When phishing protection is enabled, the extension also checks the current site 
 
 **Answer:**
 ```
-https://github.com/Ridwannurudeen/shieldbot/blob/main/PRIVACY_POLICY.md
+https://shieldbotsecurity.online/privacy.html
 ```
 
-Or if you prefer a hosted version:
-```
-https://raw.githubusercontent.com/Ridwannurudeen/shieldbot/main/PRIVACY_POLICY.md
-```
+This is the URL the live store listing links. `PRIVACY_POLICY.md` in the repository only points to it.
 
 ---
 
@@ -231,7 +228,7 @@ Provide real-time security analysis for BNB Chain blockchain transactions to pro
 
 Before submitting to Chrome Web Store, ensure:
 
-- ✅ PRIVACY_POLICY.md is published and accessible via GitHub URL
+- ✅ The privacy policy is published at https://shieldbotsecurity.online/privacy.html
 - ✅ Privacy policy URL is added to manifest.json (optional but recommended)
 - ✅ Extension does not use remote code execution (no `eval()`, `new Function()`, or external scripts)
 - ✅ All API communication uses HTTPS (except localhost for development)

@@ -109,9 +109,20 @@ async def test_equivalent_transaction_encodings_reuse_cache(sb):
 
 
 @pytest.mark.asyncio
+async def test_hex_and_decimal_encodings_of_one_value_share_the_cache(sb):
+    response = MagicMock(status_code=200)
+    response.json.return_value = {"status": "ok", "coverage": {"honeypot": 1}, "verdict": "ALLOW", "score": 5}
+    transaction = {"from": "0xA", "to": "0xB", "chain_id": 56, "value": "0x10"}
+    with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response) as post:
+        await sb.check(transaction)
+        second = await sb.check({**transaction, "value": "16"})
+    assert post.await_count == 1
+    assert second.allowed
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("first_value,second_value", [
     ("0x10", "10"),
-    ("not-a-number", "0"),
 ])
 async def test_different_value_encodings_do_not_share_cache(sb, first_value, second_value):
     allow = MagicMock(status_code=200)
@@ -134,6 +145,56 @@ async def test_different_value_encodings_do_not_share_cache(sb, first_value, sec
         second = await sb.check({**transaction, "value": second_value})
     assert post.await_count == 2
     assert second.blocked
+
+
+class Wei(int):
+    pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value,sent", [
+    ("0x10", "16"),
+    ("0X10", "16"),
+    ("0x0010", "16"),
+    ("16", "16"),
+    ("0016", "16"),
+    (" 16 ", "16"),
+    (16, "16"),
+    (Wei(16), "16"),
+    ("0", "0"),
+    (None, "0"),
+    ("0x" + "f" * 64, str(2**256 - 1)),
+    (str(2**256 - 1), str(2**256 - 1)),
+])
+async def test_value_is_sent_as_decimal_wei(sb, value, sent):
+    response = MagicMock(status_code=200)
+    response.json.return_value = {"status": "ok", "coverage": {"honeypot": 1}, "verdict": "ALLOW", "score": 5}
+    with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response) as post:
+        await sb.check({"from": "0xA", "to": "0xB", "chain_id": 56, "value": value})
+    assert post.await_args.kwargs["json"]["transaction"]["value"] == sent
+
+
+@pytest.mark.asyncio
+async def test_missing_value_is_sent_as_zero(sb):
+    response = MagicMock(status_code=200)
+    response.json.return_value = {"status": "ok", "coverage": {"honeypot": 1}, "verdict": "ALLOW", "score": 5}
+    with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response) as post:
+        await sb.check({"from": "0xA", "to": "0xB", "chain_id": 56})
+    assert post.await_args.kwargs["json"]["transaction"]["value"] == "0"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", [
+    "not-a-number", "", "-1", "0b1", "1.5", "1e18", "1_000", 1.5, -1, True,
+    str(2**256), "0x1" + "0" * 64, 2**256,
+])
+async def test_unparseable_value_is_rejected_before_any_request(value):
+    client = ShieldBot(api_key="sb_test", agent_id="agent:1", fail_mode="open")
+    with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock) as post:
+        with pytest.raises(ValueError, match="value must be"):
+            await client.check({"from": "0xA", "to": "0xB", "chain_id": 56, "value": value})
+    post.assert_not_awaited()
+    await client.close()
 
 
 @pytest.mark.asyncio

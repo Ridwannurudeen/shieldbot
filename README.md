@@ -139,7 +139,7 @@ The [container](core/container.py) and [Web3 client](utils/web3_client.py) confi
 | Optimism | 10 |
 | opBNB | 204 |
 
-Provider availability varies by chain. Robinhood uses its own `eth_simulateV1` path; it is excluded from pending-transaction mempool monitoring. A configured adapter does not establish supported honeypot simulation, reputation or liquidity data for every token.
+Provider availability varies by chain. Robinhood uses its own `eth_simulateV1` path; it is excluded from pending-transaction mempool monitoring, as are Base, Arbitrum and Optimism, which have no public mempool. A configured adapter does not establish supported honeypot simulation, reputation or liquidity data for every token.
 
 ## Run the local evidence path
 
@@ -154,10 +154,23 @@ Verified on **2026-09-23** at `main` revision **`27aca4d`**: the main Python sui
 
 For dependency setup and the short copy/paste examples, follow [JUDGE_GUIDE.md](docs/JUDGE_GUIDE.md). No wallet, private key, deployment or broadcast is needed for the offline path.
 
+## ShieldBot does not issue a token
+
+ShieldBot does not issue, sell, control or endorse any token. An earlier extension release used the BNB Chain token `0x4904c02efa081cb7685346968bac854cdf4e7777` (SHIELDBOT) as an access gate for its deployer alert feed; that gate has been removed. Tokens using the ShieldBot name, including the two Robinhood Chain tokens below, are not ShieldBot products.
+
+| Symbol | Name | Token address | Pool (paired with NVDA, opened 2026-09-15) |
+|---|---|---|---|
+| SBOT | shieldbot | `0x8adba5e2f8ebe8a6f8d9f4c8151fba7ce2328900` | `0xc5183c987d5429466e271003c15d333e313e488f` |
+| SHIELD | shieldbot_ | `0x7bf4c3cd40710b027282b6b85d86f75acfcbd0f1` | `0xb4a4085eec22bc088e46a615ddb2f1b327235a86` |
+
+Token names, symbols and pools as listed by GeckoTerminal (network `robinhood`) and confirmed on-chain.
+
 ## Submission status and measured usage
 
-- **Registry deployment:** `OWNER TODO — fill the deployment table in docs/JUDGE_GUIDE.md after deployment`.
+- **Registry deployment:** pending. The Robinhood Chain verdict registry, guard and guarded transfer are not deployed yet, so no contract address is listed.
 - **Measured usage:** the `GET /api/stats` snapshot supplied on **2026-09-22** is recorded in [SUBMISSION.md](docs/SUBMISSION.md); its time of day and the revision serving it were not supplied. Dashboard loading values and historical projections are not usage evidence.
 - **Release boundary:** this README describes this repository snapshot. Deployment, live evidence URLs and the browser-store release must be verified separately.
+
+Use of the hosted service is covered by the [Terms of Service](https://shieldbotsecurity.online/terms.html) and the [Privacy Policy](https://shieldbotsecurity.online/privacy.html).
 
 MIT — see [LICENSE](LICENSE).

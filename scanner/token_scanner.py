@@ -221,10 +221,9 @@ class TokenScanner:
 
     def _resolve_conflicts(self, result: Dict):
         """Resolve conflicts between different checks"""
+        # _check_honeypot, the only place is_honeypot turns True, already reported it in the risks.
         if result.get('is_honeypot'):
             result['checks']['can_sell'] = False
-            if "Token transfers may be restricted" not in str(result.get('risks', [])):
-                result['risks'].append("Honeypot detected - You cannot sell this token after buying")
 
     async def _check_ownership(self, address: str, result: Dict, chain_id: int = 56):
         """Check contract ownership status"""
@@ -249,10 +248,14 @@ class TokenScanner:
         try:
             liquidity_info = await self.web3.get_liquidity_info(address, chain_id=chain_id)
 
-            is_locked = liquidity_info.get('is_locked', False)
-            lock_percentage = liquidity_info.get('lock_percentage', 0)
-
+            is_locked = liquidity_info.get('is_locked')
             result['checks']['liquidity_locked'] = is_locked
+            if is_locked is None:
+                reason = liquidity_info.get('reason') or 'provider data unavailable'
+                result['risks'].append(f"Liquidity lock unknown: {reason}")
+                return False
+
+            lock_percentage = liquidity_info.get('lock_percentage', 0)
             result['liquidity_lock_percentage'] = lock_percentage
 
             if not is_locked:
@@ -298,15 +301,15 @@ class TokenScanner:
                 # A third-party flag can be a false positive; our own simulation executed the sell.
                 simulated = providers.get('is_honeypot') == SIMULATION_PROVIDER
 
+                result['is_honeypot'] = True
+                result['risks'].append("HONEYPOT DETECTED - Cannot sell after buying")
+                honeypot_reason = honeypot_result.get('reason', 'Unknown')
+                result['risks'].append(f"Reason: {honeypot_reason}")
+                # Verifying source and waiting cost a scammer nothing, so they only mark the doubt.
                 if not simulated and is_verified and contract_age_days is not None and contract_age_days > 30:
-                    logger.info(f"Honeypot API flagged {address} but contract is verified and {contract_age_days} days old - likely false positive")
-                    result['is_honeypot'] = False
-                    result['risks'].append("High sell restrictions detected, but contract appears legitimate (verified + established)")
-                else:
-                    result['is_honeypot'] = True
-                    result['risks'].append("HONEYPOT DETECTED - Cannot sell after buying")
-                    honeypot_reason = honeypot_result.get('reason', 'Unknown')
-                    result['risks'].append(f"Reason: {honeypot_reason}")
+                    result['risks'].append(
+                        "Verified and established contract: possible false positive of the honeypot check"
+                    )
             else:
                 result['is_honeypot'] = False
 
@@ -400,6 +403,8 @@ class TokenScanner:
             return 'unknown'
         if result.get('is_honeypot') is None or checks.get('can_sell') is None:
             return 'unknown'
+        if checks.get('liquidity_locked') is None:
+            return 'unknown'
         sell_tax = result.get('sell_tax')
         buy_tax = result.get('buy_tax')
         if sell_tax is not None and sell_tax > 50:
@@ -408,7 +413,7 @@ class TokenScanner:
         warning_count = 0
         if checks.get('ownership_renounced') is False:
             warning_count += 1
-        if not checks.get('liquidity_locked'):
+        if checks.get('liquidity_locked') is False:
             warning_count += 1
         if (buy_tax is not None and buy_tax > 10) or (sell_tax is not None and sell_tax > 10):
             warning_count += 1

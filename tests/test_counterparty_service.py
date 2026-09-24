@@ -172,11 +172,15 @@ def test_unknown_facts_have_no_coverage():
 
 
 @pytest.mark.asyncio
-async def test_unavailable_counterparty_allowlists_only_permit2():
+async def test_unavailable_counterparty_keeps_the_allowlist():
     unavailable = UnavailableCounterparty()
     assert unavailable.allowlisted_name(PERMIT2, 8453) == "Permit2"
     assert unavailable.allowlisted_name(ROUTER, 56) is None
     assert (await unavailable.fetch(SPENDER, 56))["coverage"]["code"] is False
+    service, _, _ = _service()
+    with_client = UnavailableCounterparty(service._web3)
+    assert with_client.allowlisted_name(ROUTER, 56) == "PancakeSwap V2 Router"
+    assert with_client.allowlisted_name(PERMIT2, 56) == "Permit2"
 
 
 def _known(**overrides):

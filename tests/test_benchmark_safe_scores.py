@@ -2,7 +2,9 @@
 
 eval/live_scorer.py scans each entry with AnalysisContext(address, chain_id): no calldata, no typed
 data, is_token True. This replays recorded provider inputs through the real analyzers, registry and
-engine and compares the result with the output pinned at e820c2e (`expected` in the fixture).
+engine and compares the result with the output of the engine before the redesign (`expected` in
+the fixture): pinned at e820c2e, then at fix/audit-integration b400015, whose bytecode scan reads
+1inch V5's 83197ef0 as destroy() rather than delegatecall (same score, different flag).
 """
 
 import json
@@ -54,8 +56,9 @@ async def _score(entry):
         is_verified_contract=AsyncMock(return_value=EXPLORER_VERIFICATION),
         get_contract_creation_info=AsyncMock(return_value=EXPLORER_CREATION),
         get_ownership_info=AsyncMock(return_value=entry["ownership"]),
+        # Each recorded selector as a dispatcher's PUSH4 operand, which is how the scan finds it.
         get_bytecode=AsyncMock(
-            return_value=None if patterns is None else "0x" + "00".join(patterns)
+            return_value=None if patterns is None else "0x" + "".join("63" + sig for sig in patterns)
         ),
     )
     ethos = SimpleNamespace(fetch_wallet_reputation=AsyncMock(return_value=dict(entry["ethos"])))
@@ -72,7 +75,7 @@ async def _score(entry):
             SimpleNamespace(fetch_honeypot_data=AsyncMock(return_value=dict(entry["honeypot"])))
         )
     )
-    registry.register(IntentMismatchAnalyzer())
+    registry.register(IntentMismatchAnalyzer(web3))
     registry.register(SignaturePermitAnalyzer())
     goplus = AsyncMock(return_value=entry["goplus"])
     with (

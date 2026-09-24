@@ -1,6 +1,7 @@
 """ShieldBot Python SDK — async client with local verdict caching."""
 
 import json
+import re
 import time
 import logging
 from typing import Dict, Optional
@@ -22,6 +23,24 @@ class ShieldBotError(Exception):
         super().__init__(f"ShieldBot API error {status_code}: {message}")
 
 DEFAULT_BASE_URL = "https://api.shieldbotsecurity.online"
+
+_WEI_PATTERN = re.compile(r"0[xX][0-9a-fA-F]+|[0-9]+")
+_MAX_WEI = 2**256 - 1
+
+
+def _decimal_wei(value) -> str:
+    """Return a wei amount as a decimal string. None counts as 0; anything but an integer from 0 to 2**256 - 1 is rejected."""
+    text = value.strip() if isinstance(value, str) else ""
+    wei = None
+    if value is None:
+        wei = 0
+    elif isinstance(value, int) and not isinstance(value, bool):
+        wei = int(value)
+    elif _WEI_PATTERN.fullmatch(text):
+        wei = int(text, 16) if text[:2].lower() == "0x" else int(text)
+    if wei is None or not 0 <= wei <= _MAX_WEI:
+        raise ValueError("value must be an integer amount of wei from 0 to 2**256 - 1 (int, decimal or 0x hex string)")
+    return str(wei)
 
 
 class ShieldBot:
@@ -75,7 +94,7 @@ class ShieldBot:
         return json.dumps([
             from_addr.lower() if isinstance(from_addr, str) else from_addr,
             to_addr.lower() if isinstance(to_addr, str) else to_addr,
-            canonical_integer(transaction.get("chain_id", 56)),
+            canonical_integer(transaction["chain_id"]),
             data.lower() if isinstance(data, str) else data,
             canonical_integer(transaction.get("value", "0")),
         ], separators=(",", ":"), ensure_ascii=False)
@@ -111,11 +130,19 @@ class ShieldBot:
         """Check a transaction against the agent firewall.
 
         Args:
-            transaction: Dict with keys: from, to, data (optional), value (optional), chain_id.
+            transaction: Dict with keys: from, to, data (optional), value (optional wei as an int,
+                decimal or 0x hex string, None for 0; sent as a decimal string), chain_id (required).
 
         Returns:
             Verdict with allowed/blocked status, score, flags, and evidence.
+
+        Raises:
+            ValueError: before any request when chain_id is missing (the SDK never assumes a chain)
+                or value is not an integer amount of wei from 0 to 2**256 - 1.
         """
+        if transaction.get("chain_id") is None:
+            raise ValueError("chain_id is required")
+        transaction = {**transaction, "value": _decimal_wei(transaction.get("value"))}
         to_addr = transaction.get("to", "")
         cache_key = self._cache_key(transaction)
 
