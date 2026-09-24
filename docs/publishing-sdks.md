@@ -111,7 +111,7 @@ It handles `initialize`, `tools/list`, `tools/call`, `resources/list`, `resource
 - Resources (3): `shieldbot://threat-feed`, `shieldbot://agent/{agent_id}/health`, `shieldbot://wallet/{address}/guardian`.
 - Prompts (2): `security-analysis`, `agent-evaluation`.
 
-Limits to state wherever it is listed (details in `docs/TECHNICAL.md`): `check_approval_risk` and `query_threat_graph` are unimplemented and always return `status: "unknown"`; `scan_for_injection` is a fixed regex list; `check_agent_reputation` is a heuristic over local firewall records; every tool that takes `chain_id` except `get_robinhood_launches` defaults it to 56 (BNB Chain) when it is left out, unlike the SDKs. The server does not implement `ping` and answers notifications such as `notifications/initialized` with a method-not-found error. It has not been tested against the clients below; connect each one to a development instance before listing it.
+Limits to state wherever it is listed (details in `docs/TECHNICAL.md`): `check_approval_risk` and `query_threat_graph` are unimplemented and always return `status: "unknown"`; `scan_for_injection` is a fixed regex list; `check_agent_reputation` is a heuristic over local firewall records; every tool that analyses an address or a transaction requires `chain_id` and returns a tool error when it is missing or unsupported (`get_robinhood_launches` keeps Robinhood Chain as its default). The server answers `ping` and sends nothing back for notifications. It has not been tested against the clients below; connect each one to a development instance before listing it. See `mcp_server/README.md` for the full behaviour.
 
 ### How a client connects
 

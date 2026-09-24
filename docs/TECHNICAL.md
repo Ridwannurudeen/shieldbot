@@ -107,11 +107,11 @@ The MCP adapters have narrower coverage than their names may suggest:
 
 - `check_approval_risk` and `query_threat_graph` are unimplemented adapters. They return `status: "unknown"`, coverage reasons and null result fields; they do not enumerate approvals or establish absence of cluster connections.
 - `simulate_transaction` returns an `error` with null measurements when Tenderly is unavailable or simulation fails. When simulation produces a result, it returns `success`, `revert_reason`, `asset_changes`, `warnings` and `gas_estimate`; approval changes are not measured and remain null. Output is limited to fields reported by the simulation provider.
-- `check_deployer` uses the local index. `deployer: null` with an unindexed note and zero counts means missing history, not a deployer with no risky contracts.
-- `check_agent_reputation` is a block-rate heuristic over at most 1,000 local firewall records. An unregistered agent has no trust score; a registered agent with no history currently gets 100. Neither zero history nor that default 100 establishes trustworthiness.
+- `check_deployer` uses the local index. An unindexed contract returns `deployer: null`, null counts and `status: "unknown"`; a found deployer also stays `unknown`, because the index holds only contracts ShieldBot itself has scanned, so its counts are lower bounds.
+- `check_agent_reputation` is a block-rate heuristic over at most 1,000 local firewall records. An unregistered agent, or a registered agent with no history, returns a null trust score and `status: "unknown"`; a history that reaches the 1,000-record cap also stays `unknown`, because its count is a lower bound.
 - `scan_for_injection` checks a fixed regex list. `clean: true` means no listed pattern matched, not that arbitrary content is safe; the returned depth label does not add a deeper analysis pass.
 
-These legacy MCP limits remain open. Consumers must not promote their empty lists, zero counts, regex result or default reputation into an authorization decision.
+These legacy MCP limits remain open. Consumers must not promote their empty lists, lower-bound counts or regex result into an authorization decision.
 
 The scan coverage contract does not cover all auxiliary browser features. When the phishing check gets no answer from GoPlus (HTTP error, network error, malformed reply), it returns `is_phishing: null` with a `reason`, the server holds that for 45 seconds per domain, and the extension shows no banner; so a missing banner does not prove that a phishing check completed. The side-panel injection renderer defaults a missing score to zero and labels it "Safe", so that display does not prove an injection check completed either. Neither is fail-closed protection and must not be advertised as such.
 
