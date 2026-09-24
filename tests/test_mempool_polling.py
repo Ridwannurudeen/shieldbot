@@ -10,6 +10,7 @@ from web3.datastructures import AttributeDict
 
 from services import mempool_service
 from services.mempool_service import MempoolMonitor, PendingTx
+from utils.web3_client import Web3Client
 
 SENDER = "0xAbCdEf0123456789aBcDeF0123456789AbCdEf01"
 TOKEN = "0x" + "22" * 20
@@ -50,6 +51,20 @@ def _pending_block():
             ],
         }
     )
+
+
+@pytest.mark.asyncio
+async def test_only_chains_with_a_public_mempool_are_polled():
+    client = Web3Client.__new__(Web3Client)
+    client._adapters = {chain_id: MagicMock() for chain_id in (56, 1, 8453, 42161, 137, 10, 204, 4663)}
+    monitor = MempoolMonitor(client)
+    monitor._poll_pending = AsyncMock()
+
+    await monitor.start()
+    try:
+        assert sorted(monitor.get_stats()["monitored_chains"]) == [1, 56, 137, 204]
+    finally:
+        await monitor.stop()
 
 
 def _fields(tx):

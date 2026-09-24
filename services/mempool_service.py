@@ -13,8 +13,9 @@ from web3 import Web3
 
 logger = logging.getLogger(__name__)
 
-# Preserve existing monitoring coverage; new chains require explicit support.
-PENDING_TRANSACTION_CHAINS = frozenset({56, 1, 8453, 42161, 137, 10, 204})
+# Chains whose RPC serves a public mempool through txpool_content. Base, Arbitrum, Optimism and
+# Robinhood Chain reject txpool calls; their sequencers keep no public mempool to watch.
+PENDING_TRANSACTION_CHAINS = frozenset({56, 1, 137, 204})
 
 
 def supports_pending_transactions(chain_id: int) -> bool:

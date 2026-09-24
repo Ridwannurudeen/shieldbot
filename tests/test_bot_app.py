@@ -326,7 +326,10 @@ class TestThreatsCommand:
         assert not bot_module.container.mempool_monitor.mock_calls
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("chain, name", [("4663", "Robinhood Chain"), ("rh", "Robinhood Chain")])
+    @pytest.mark.parametrize("chain, name", [
+        ("4663", "Robinhood Chain"), ("rh", "Robinhood Chain"),
+        ("base", "Base"), ("42161", "Arbitrum"), ("op", "Optimism"),
+    ])
     async def test_chain_without_a_public_mempool_is_answered_without_asking_the_api(
         self, bot_module, monkeypatch, mempool_api, chain, name,
     ):
