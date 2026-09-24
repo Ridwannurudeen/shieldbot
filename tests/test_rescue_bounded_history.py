@@ -102,14 +102,14 @@ def chain_handler(logs=None, allowance=None, block_number=None):
     return handle
 
 
-def rescue_service():
-    """A service without logs RPCs, so every chain is read through its adapter's public RPC."""
+def rescue_service(**logs_rpcs):
+    """A service reading every chain through its adapter's public RPC unless a logs RPC is given."""
     web3_client = MagicMock()
     web3_client._get_adapter.return_value.w3.provider.endpoint_uri = RPC_URL
     web3_client.get_token_info = AsyncMock(
         return_value={"name": "Token", "symbol": "TKN", "decimals": 18}
     )
-    service = RescueService(web3_client)
+    service = RescueService(web3_client, **logs_rpcs)
     service._fetch_prices = AsyncMock(return_value={TOKEN: 1.0})
     return service
 
@@ -188,6 +188,34 @@ async def test_base_public_rpc_windows_fit_its_2000_block_range():
     assert len(windows) == 24
     assert all(to_b - from_b + 1 == 2_000 for from_b, to_b in windows)
     assert result["scanned_blocks"] == {"from_block": LATEST - 48_000 + 1, "to_block": LATEST}
+
+
+@pytest.mark.asyncio
+async def test_logs_rpc_refusing_the_full_history_is_read_in_recent_windows_instead():
+    archive = "https://archive.invalid"
+    limit_exceeded = (
+        200,
+        {"jsonrpc": "2.0", "id": 1, "error": {"code": -32005, "message": "limit exceeded"}},
+    )
+    windows_only = chain_handler()
+
+    def handle(payload):
+        if payload["method"] == "eth_getLogs":
+            query = payload["params"][0]
+            if int(query["toBlock"], 16) - int(query["fromBlock"], 16) + 1 > 10_000:
+                return limit_exceeded
+        return windows_only(payload)
+
+    result, rpc, sleep = await scan(handle, 56, rescue_service(logs_rpc=archive))
+
+    assert rpc.urls == {archive}
+    assert len(window_bounds(rpc)) == 50 + 24
+    assert [(a["token_address"], a["risk_level"]) for a in result["approvals"]] == [(TOKEN, "HIGH")]
+    assert result["status"] == "unknown"
+    assert result["coverage_reasons"] == {
+        "allowances": f"Approvals before block {WINDOW_START} not scanned"
+    }
+    assert result["scanned_blocks"] == {"from_block": WINDOW_START, "to_block": LATEST}
 
 
 @pytest.mark.asyncio

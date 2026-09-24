@@ -325,7 +325,8 @@ class RescueService:
 
         Pipeline:
           1. eth_getLogs — the whole history from a configured logs RPC at CONCURRENCY=50, or
-             the newest RECENT_LOG_WINDOWS windows from the chain's public RPC
+             the newest RECENT_LOG_WINDOWS windows from the chain's public RPC, or from the logs
+             RPC when it could not serve the whole history
           2. Deduplicate to latest event per (token, spender)
           3. eth_call allowance() — verify each pair is still non-zero on-chain
           4. eth_call balanceOf() — get wallet's token balances
@@ -342,7 +343,18 @@ class RescueService:
             raise RuntimeError(f"Approval scan unavailable: no logs RPC configured for chain {chain_id}")
         public_rpc = chain_id not in self._logs_rpcs
         try:
-            if public_rpc:
+            all_logs = None
+            if not public_rpc:
+                try:
+                    all_logs, latest = await self._fetch_all_approval_logs(wallet, rpc_url)
+                    scanned_blocks = {"from_block": 0, "to_block": latest}
+                except UnsupportedChainError:
+                    raise
+                except Exception as e:
+                    # Read what the logs RPC can serve instead, the rate-limit-aware way.
+                    logger.warning("Full approval history unavailable: %s", type(e).__name__)
+                    public_rpc = True
+            if all_logs is None:
                 all_logs, scanned_from, latest = await self._fetch_recent_approval_logs(
                     wallet, rpc_url, PUBLIC_LOG_WINDOW_BLOCKS.get(chain_id, RECENT_LOG_WINDOW_BLOCKS)
                 )
@@ -351,48 +363,6 @@ class RescueService:
                 scanned_blocks = (
                     {"from_block": scanned_from, "to_block": latest} if scanned_from <= latest else None
                 )
-            else:
-                async with aiohttp.ClientSession() as session:
-                    # Step 1: Get latest block
-                    async with session.post(
-                        rpc_url,
-                        json={"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
-                        timeout=aiohttp.ClientTimeout(total=5),
-                    ) as resp:
-                        bn_data = await resp.json()
-                    if "error" in bn_data or "result" not in bn_data:
-                        raise RuntimeError(f"eth_blockNumber failed: {bn_data.get('error', bn_data)}")
-                    latest = int(bn_data["result"], 16)
-
-                # Step 2: Scan ALL blocks from genesis with CONCURRENCY=50
-                # ~1680 chunks on BSC / 50 concurrent = 34 batches ≈ 10-25s
-                CHUNK_SIZE = 49_999
-                CONCURRENCY = 50
-                chunks = [
-                    (hex(b), hex(min(b + CHUNK_SIZE - 1, latest)))
-                    for b in range(0, latest + 1, CHUNK_SIZE)
-                ]
-
-                topic0 = APPROVAL_TOPIC
-                topic1 = "0x" + wallet.replace("0x", "").lower().zfill(64)
-
-                all_logs: list = []
-                async with aiohttp.ClientSession() as session:
-                    for i in range(0, len(chunks), CONCURRENCY):
-                        batch = chunks[i: i + CONCURRENCY]
-                        batch_results = await asyncio.gather(
-                            *[
-                                self._fetch_log_chunk(session, rpc_url, topic0, topic1, from_b, to_b)
-                                for from_b, to_b in batch
-                            ],
-                            return_exceptions=True,
-                        )
-                        for result in batch_results:
-                            if isinstance(result, Exception):
-                                raise result
-                            if isinstance(result, list):
-                                all_logs.extend(result)
-                scanned_blocks = {"from_block": 0, "to_block": latest}
 
             # Step 3: Keep latest event per (token, spender)
             latest_events: Dict[tuple, Dict] = {}
@@ -526,6 +496,54 @@ class RescueService:
             key=lambda a: (risk_order.get(a.risk_level, 3), -(a.value_at_risk_usd or 0))
         )
         return approvals, coverage_reasons, scanned_blocks
+
+    async def _fetch_all_approval_logs(self, wallet: str, rpc_url: str) -> Tuple[list, int]:
+        """Fetch Approval logs from genesis to the latest block of a logs RPC, and that block.
+
+        Raises when any chunk is unavailable, since a gap in the middle of the history cannot be
+        reported as a block range.
+        """
+        async with aiohttp.ClientSession() as session:
+            # Step 1: Get latest block
+            async with session.post(
+                rpc_url,
+                json={"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                bn_data = await resp.json()
+            if "error" in bn_data or "result" not in bn_data:
+                raise RuntimeError(f"eth_blockNumber failed: {bn_data.get('error', bn_data)}")
+            latest = int(bn_data["result"], 16)
+
+        # Step 2: Scan ALL blocks from genesis with CONCURRENCY=50
+        # ~1680 chunks on BSC / 50 concurrent = 34 batches ≈ 10-25s
+        CHUNK_SIZE = 49_999
+        CONCURRENCY = 50
+        chunks = [
+            (hex(b), hex(min(b + CHUNK_SIZE - 1, latest)))
+            for b in range(0, latest + 1, CHUNK_SIZE)
+        ]
+
+        topic0 = APPROVAL_TOPIC
+        topic1 = "0x" + wallet.replace("0x", "").lower().zfill(64)
+
+        all_logs: list = []
+        async with aiohttp.ClientSession() as session:
+            for i in range(0, len(chunks), CONCURRENCY):
+                batch = chunks[i: i + CONCURRENCY]
+                batch_results = await asyncio.gather(
+                    *[
+                        self._fetch_log_chunk(session, rpc_url, topic0, topic1, from_b, to_b)
+                        for from_b, to_b in batch
+                    ],
+                    return_exceptions=True,
+                )
+                for result in batch_results:
+                    if isinstance(result, Exception):
+                        raise result
+                    if isinstance(result, list):
+                        all_logs.extend(result)
+        return all_logs, latest
 
     async def _fetch_recent_approval_logs(
         self, wallet: str, rpc_url: str, window_blocks: int
