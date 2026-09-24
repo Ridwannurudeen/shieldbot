@@ -127,10 +127,11 @@ class SignaturePermitAnalyzer(Analyzer):
                 score += s
                 flags.extend(f)
 
-            # personal_sign / eth_sign — generally benign
+            # A plain message scores nothing here. What a personal_sign says (a sign-in for another site,
+            # a raw hash) is judged by the extension, and the API's signature-only path floors an eth_sign
+            # at BLIND_SIGN_MIN after this analyzer.
             elif sign_method in ('personal_sign', 'eth_sign'):
                 sig_type = sign_method
-                # personal_sign is typically harmless (login signatures)
                 score = 0
 
             else:
