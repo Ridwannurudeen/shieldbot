@@ -755,6 +755,29 @@ def test_typed_data_that_cannot_be_read_is_shown_as_unparseable_at_high(typed):
     )
 
 
+@pytest.mark.parametrize("policy", ["STRICT", "BALANCED"])
+@pytest.mark.parametrize("typed", ["unparseable", "readable"])
+def test_strict_mode_removes_sign_anyway_on_unparseable_typed_data(policy, typed):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const [policy, typed] = JSON.parse(process.argv[1]);
+  storage.policyMode = policy;
+  const typedData = typed === 'readable' ? {primaryType: 'Mail', domain: {name: 'Mail'}, message: {contents: 'hi'}} : 'not typed data';
+  await intercept('request', {signMethod: 'eth_signTypedData_v4', typedData}, 'eth_signTypedData_v4');
+  const html = overlay().innerHTML;
+  const removed = policy === 'STRICT' && typed === 'unparseable';
+  assert.equal(html.includes('id="shieldai-proceed"'), !removed);
+  assert.equal(html.includes('Strict mode is on'), removed);
+  userClick(byId('shieldai-block'));
+  await flush();
+  await assertVerdicts([['request', 'block']]);
+""",
+        [policy, typed],
+    )
+
+
 def test_a_flood_of_forged_intercepts_cannot_push_out_a_real_request():
     run_node(
         CONTENT_HARNESS
@@ -1145,6 +1168,30 @@ def test_documents_the_page_can_reach_first_get_no_key_and_reject_requests(kind,
   assert.equal(sent.length, 1);
 """,
         [kind, order, kind in REACHABLE],
+    )
+
+
+@pytest.mark.parametrize("method", ["eth_signTypedData", "eth_signTypedData_v1"])
+def test_legacy_typed_data_is_shown_field_by_field_end_to_end(method):
+    run_node(
+        FRAME_HARNESS.replace("JSON.parse(process.argv[1]);", "['top', 'content-first', false];", 1)
+        + r"""
+(async () => {
+  const method = JSON.parse(process.argv[1]);
+  // MetaMask's legacy form: an array of typed fields first, then the address.
+  const legacy = [{type: 'string', name: 'Message', value: 'Hi there'}, {type: 'uint32', name: 'A number', value: '1337'}];
+  const pending = provider.request({method, params: [legacy, '0x' + 'b'.repeat(40)]});
+  for (let i = 0; i < 20 && !overlayRoot()?.getElementById('shieldai-proceed'); i++) await flush();
+  const html = overlayRoot().getElementById('shieldai-overlay').innerHTML;
+  assert(html.includes('<td>Message</td><td>string</td><td>Hi there</td>'), html);
+  assert(html.includes('<td>A number</td><td>uint32</td><td>1337</td>'), html);
+  assert(html.includes('SIGNATURE REQUEST') && !html.includes('UNPARSEABLE'), html);
+  assert.equal(sent.length, 0);
+  overlayRoot().getElementById('shieldai-proceed').dispatch('click', {isTrusted: true});
+  assert.equal(await pending, 'sent');
+  assert.deepEqual(plain(sent[0].params), plain([legacy, '0x' + 'b'.repeat(40)]));
+""",
+        method,
     )
 
 

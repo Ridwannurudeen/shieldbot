@@ -177,7 +177,7 @@
       "eth_signTypedData", "eth_signTypedData_v1",
     ]);
     if (tx.signMethod && SIGN_ONLY_METHODS.has(tx.signMethod)) {
-      showSignatureOverlay(requestId, tx);
+      showSignatureOverlay(requestId, tx, strict);
       return;
     }
     // inject.js could not read the request's structure, so there is nothing
@@ -389,11 +389,21 @@
   // when present, are plain objects and whose primaryType, when present, is a
   // string.
   function isReadableTypedData(typedData) {
-    const isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
-    return isObject(typedData) &&
-      (typedData.domain === undefined || isObject(typedData.domain)) &&
-      (typedData.message === undefined || isObject(typedData.message)) &&
+    return isPlainObject(typedData) &&
+      (typedData.domain === undefined || isPlainObject(typedData.domain)) &&
+      (typedData.message === undefined || isPlainObject(typedData.message)) &&
       (typedData.primaryType === undefined || typeof typedData.primaryType === "string");
+  }
+
+  // The legacy form eth_signTypedData and _v1 take in MetaMask: a list of
+  // fields, each with a string name and type, and a value.
+  function isLegacyTypedData(typedData) {
+    return Array.isArray(typedData) && typedData.every((field) =>
+      isPlainObject(field) && typeof field.name === "string" && typeof field.type === "string");
+  }
+
+  function isPlainObject(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
   }
 
   function shortAddr(addr) {
@@ -486,22 +496,36 @@
   // --- Signature Request Overlay ---
   // Shown instead of the firewall overlay for personal_sign / eth_signTypedData etc.
 
-  async function showSignatureOverlay(requestId, tx) {
+  async function showSignatureOverlay(requestId, tx, strict) {
     await _loadContentLang();
     removeOverlay();
 
     const signMethod = tx.signMethod || "personal_sign";
-    const isTyped = ["eth_signTypedData_v4", "eth_signTypedData_v3", "eth_signTypedData", "eth_signTypedData_v1"]
-      .includes(signMethod);
+    const isLegacy = signMethod === "eth_signTypedData" || signMethod === "eth_signTypedData_v1";
+    const isTyped = isLegacy || signMethod === "eth_signTypedData_v4" || signMethod === "eth_signTypedData_v3";
     const isPersonal = signMethod === "personal_sign" || signMethod === "eth_sign";
+    const legacyFields = isLegacy && isLegacyTypedData(tx.typedData);
     // Typed data that cannot be read is shown as such, at High: the user
-    // cannot see what they would sign.
-    const unparseable = isTyped && !isReadableTypedData(tx.typedData);
+    // cannot see what they would sign. Strict mode leaves no Sign Anyway.
+    const unparseable = isTyped && !legacyFields && !isReadableTypedData(tx.typedData);
+    const canSign = !(strict && unparseable);
 
     let bodyHtml = "";
     let isPermitLike = false;
 
-    if (isTyped && !unparseable) {
+    if (legacyFields) {
+      const rows = tx.typedData.map((field) => {
+        let display = typeof field.value === "object" ? JSON.stringify(field.value) : String(field.value);
+        if (display.length > 80) display = display.slice(0, 77) + "...";
+        return `<tr><td>${escapeHtml(field.name)}</td><td>${escapeHtml(field.type)}</td><td>${escapeHtml(display)}</td></tr>`;
+      }).join("");
+      bodyHtml = `
+        <div class="shieldai-section">
+          <h3>${_t("overlayMessage")}</h3>
+          <table class="shieldai-impact">${rows || `<tr><td colspan='3'>${_t("overlayNoFields")}</td></tr>`}</table>
+        </div>
+      `;
+    } else if (isTyped && !unparseable) {
       const td = tx.typedData;
       const domain = td.domain || {};
       const primaryType = td.primaryType || "Unknown";
@@ -584,14 +608,17 @@
 
         <div class="shieldai-actions">
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">${_t("overlayBtnReject")}</button>
-          <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">${_t("overlayBtnSignAnyway")}</button>
+          ${canSign ? `<button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">${_t("overlayBtnSignAnyway")}</button>` : ""}
         </div>
+        ${canSign ? "" : `<p class="shieldai-strict-note">${_t("overlayStrictNoProceed")}</p>`}
       </div>
     `;
 
     const root = mountOverlay(overlay, requestId);
     onDecision(root, "shieldai-block", requestId, "block");
-    onDecision(root, "shieldai-proceed", requestId, "proceed");
+    if (canSign) {
+      onDecision(root, "shieldai-proceed", requestId, "proceed");
+    }
   }
 
   async function showAnalysisOverlay(requestId, result, strict, tx) {
