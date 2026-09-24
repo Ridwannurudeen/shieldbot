@@ -117,10 +117,10 @@ class ShieldBot:
             Verdict with allowed/blocked status, score, flags, and evidence.
 
         Raises:
-            ShieldBotError: 400 before any request when chain_id is missing; the SDK never assumes a chain.
+            ValueError: before any request when chain_id is missing; the SDK never assumes a chain.
         """
         if transaction.get("chain_id") is None:
-            raise ShieldBotError(400, "chain_id is required")
+            raise ValueError("chain_id is required")
         to_addr = transaction.get("to", "")
         cache_key = self._cache_key(transaction)
 

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from shieldbot.client import ShieldBot, ShieldBotError
+from shieldbot.client import ShieldBot
 from shieldbot.models import Verdict
 
 
@@ -95,8 +95,7 @@ async def test_missing_chain_is_rejected_before_any_request(fail_mode):
     response = MagicMock(status_code=200)
     response.json.return_value = {"verdict": "ALLOW", "score": 0, "status": "ok", "coverage": {"honeypot": 1}}
     with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response) as post:
-        with pytest.raises(ShieldBotError) as error:
+        with pytest.raises(ValueError, match="chain_id is required"):
             await client.check({"from": "0xagent", "to": "0xtarget"})
-    assert error.value.status_code == 400
     post.assert_not_awaited()
     await client.close()

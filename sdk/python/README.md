@@ -62,7 +62,7 @@ asyncio.run(main())
 |-----|----------|-------|
 | `from` | yes | Sender address |
 | `to` | yes | Target address |
-| `chain_id` | yes | Integer chain ID from the table below. The SDK never assumes a chain: without it `check()` raises `ShieldBotError` (400) before sending anything. |
+| `chain_id` | yes | Integer chain ID from the table below. The SDK never assumes a chain: without it `check()` raises `ValueError` before sending anything. |
 | `data` | no | Calldata as a hex string, default `"0x"` |
 | `value` | no | Value in wei as a decimal string, default `"0"` |
 
