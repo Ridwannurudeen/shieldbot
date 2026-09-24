@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 import aiohttp
+from cachetools import TTLCache
 from web3 import Web3
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,9 @@ PUBLIC_RPC_CONCURRENCY = 4
 PUBLIC_RPC_ATTEMPTS = 3
 RATE_LIMIT_TERMS = ("rate limit", "rate-limit", "too many requests")
 
+# A wallet's scan result is reused this long, so repeated calls do not re-run a history scan
+# (a full archive scan sends thousands of requests), while a revoke still shows within minutes.
+RESULT_CACHE_SECONDS = 120
 # Reason given when the chain's RPC could not be read. It names no provider: errors from the RPC
 # client can carry its URL.
 RPC_UNAVAILABLE_REASON = "Approval data unavailable from the chain's RPC"
@@ -175,6 +179,7 @@ class RescueService:
         self._logs_rpcs: Dict[int, str] = rpcs
         # Kept for callers that still read it (read-only).
         self._logs_rpc = self._logs_rpcs.get(56, "")
+        self._results = TTLCache(maxsize=1024, ttl=RESULT_CACHE_SECONDS)
 
     def _rpc_for(self, chain_id: int) -> str:
         """Resolve archive RPC URL for a chain. Falls back to the registered adapter's RPC."""
@@ -203,8 +208,13 @@ class RescueService:
         - status, coverage, coverage_reasons: "unknown" when the approval history read, allowances,
           balances or prices are incomplete, including when the chain's RPC could not be read
         - scanned_blocks: the block range whose approval history was read, or None when none was
+
+        A result is reused for RESULT_CACHE_SECONDS per wallet and chain.
         """
         wallet = wallet_address.lower()
+        cached = self._results.get((chain_id, wallet))
+        if cached is not None:
+            return cached
         try:
             approvals, coverage_reasons, scanned_blocks = await self._fetch_approvals(wallet, chain_id)
         except RuntimeError:
@@ -246,7 +256,7 @@ class RescueService:
             if approval.value_at_risk_usd:
                 total_value_at_risk += approval.value_at_risk_usd
 
-        return {
+        result = {
             'wallet': wallet,
             'chain_id': chain_id,
             'total_approvals': len(approvals),
@@ -262,6 +272,8 @@ class RescueService:
             'scanned_blocks': scanned_blocks,
             'scanned_at': time.time(),
         }
+        self._results[(chain_id, wallet)] = result
+        return result
 
     async def _fetch_approvals(
         self, wallet: str, chain_id: int, api_key: str = ""

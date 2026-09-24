@@ -6,11 +6,12 @@ RPC now is.
 
 import asyncio
 import logging
+import time
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
-from services.rescue_service import APPROVAL_TOPIC, RescueService
+from services.rescue_service import APPROVAL_TOPIC, RESULT_CACHE_SECONDS, RescueService
 
 _real_sleep = asyncio.sleep
 
@@ -206,6 +207,20 @@ async def test_rpc_serving_no_approval_history_reads_unknown_with_nothing_scanne
     }
     assert result["scanned_blocks"] is None
     assert result["total_value_at_risk_usd"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_wallet_scan_is_reused_for_a_short_time_per_chain():
+    service = rescue_service()
+    first, _, _ = await scan(chain_handler(), 4663, service)
+    again, repeat_rpc, _ = await scan(chain_handler(), 4663, service)
+    other, other_rpc, _ = await scan(chain_handler(), 42161, service)
+    service._results.expire(time.monotonic() + RESULT_CACHE_SECONDS)
+    fresh, fresh_rpc, _ = await scan(chain_handler(), 4663, service)
+
+    assert again is first and repeat_rpc.calls == []
+    assert other["chain_id"] == 42161 and other_rpc.calls
+    assert fresh is not first and fresh_rpc.calls
 
 
 @pytest.mark.asyncio
