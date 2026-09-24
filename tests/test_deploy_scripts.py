@@ -33,6 +33,11 @@ df() {
 }
 journalctl() { log journalctl "$@"; }
 scp() { log scp "$@"; [ ! -e "$STATE/scp-fails" ]; }
+find() {
+  # copies-vanish: a backup copy disappears just before it is pruned.
+  if [ -e "$STATE/copies-vanish" ] && [ -f "$1" ]; then rm -f "$1"; fi
+  command find "$@"
+}
 git() { log git "$@"; command git "$@"; }
 systemctl() {
   log systemctl "$@"
@@ -721,6 +726,21 @@ def test_backup_copies_off_box_only_when_asked(backup):
         f" -- {copy.as_posix()} backup@example.net:/srv/shieldbot/"
     )
     assert "BatchMode=yes" in call and "StrictHostKeyChecking=yes" in call
+
+
+def test_a_copy_that_vanishes_while_pruning_does_not_stop_the_off_box_copy(backup):
+    sqlite3.connect(backup.db).close()
+    backup.dir.mkdir()
+    old = backup.dir / "shieldbot_old.db"
+    old.write_bytes(b"")
+    os.utime(old, (time.time() - 30 * 86400, time.time() - 30 * 86400))
+    (backup.state / "copies-vanish").write_bytes(b"")
+    code, _, err = backup.run(
+        KEEP_DAYS="7", KEEP_COUNT="1", BACKUP_REMOTE="backup@example.net:/srv/shieldbot/"
+    )
+    assert code == 0, err
+    assert "could not prune" in err
+    assert [call for call in backup.calls() if call.startswith("scp ")]
 
 
 def test_a_failed_off_box_copy_fails_the_job_and_keeps_the_local_copy(backup):

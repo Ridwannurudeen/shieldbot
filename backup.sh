@@ -55,11 +55,13 @@ echo "[$TIMESTAMP] Backup saved: $DEST"
 
 # Pruning runs only after a good backup, so a failing job never deletes the last good copies. The newest
 # KEEP_COUNT copies stay whatever their age (after an outage every older copy is past KEEP_DAYS); of the rest,
-# those older than KEEP_DAYS days are deleted.
+# those older than KEEP_DAYS days are deleted. A copy that cannot be pruned (removed meanwhile, say) is reported
+# and does not stop the off-box copy.
 find "$BACKUP_DIR" -maxdepth 1 -name 'shieldbot_*.db' -printf '%T@ %p\n' | sort -rn |
   tail -n +$(( KEEP_COUNT + 1 )) | cut -d' ' -f2- |
   while IFS= read -r copy; do
-    find "$copy" -maxdepth 0 -mmin +$(( KEEP_DAYS * 24 * 60 )) -print -delete
+    find "$copy" -maxdepth 0 -mmin +$(( KEEP_DAYS * 24 * 60 )) -print -delete ||
+      echo "[$TIMESTAMP] could not prune $copy" >&2
   done
 
 if [ -n "${BACKUP_REMOTE:-}" ]; then
