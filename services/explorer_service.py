@@ -11,7 +11,8 @@ from cachetools import TTLCache
 
 
 # Public Blockscout instances that answer without an API key; other chains go through the keyed
-# PRO gateway. optimism.blockscout.com redirects here, and requests do not follow redirects.
+# PRO gateway. optimism.blockscout.com redirects here, and requests do not follow redirects, so the
+# map names the final host. scripts/check_blockscout_instances.py notices when an instance moves.
 BLOCKSCOUT_INSTANCES = {
     8453: "https://base.blockscout.com",
     10: "https://explorer.optimism.io",
@@ -74,6 +75,10 @@ class ExplorerService:
                             if delay > 0:
                                 await asyncio.sleep(delay)
                             self._last_request = time.monotonic()
+                        # Redirects are not followed, not even to the same host: the gateway
+                        # request carries the API key in its query string, the only redirect
+                        # seen (optimism.blockscout.com) changes host, and an unfollowed one
+                        # reads as an Unknown HTTP 30x rather than as data from elsewhere.
                         async with session.get(
                             url, params=params, allow_redirects=False
                         ) as response:

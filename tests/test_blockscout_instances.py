@@ -79,13 +79,15 @@ async def test_creation_comes_from_the_public_instance_without_a_key(http, chain
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("chain_id", [8453, 10])
-async def test_instance_failure_is_unknown(http, chain_id):
+@pytest.mark.parametrize("status", [503, 301])
+async def test_instance_failure_or_move_is_unknown(http, chain_id, status):
+    # A moved instance redirects; redirects are not followed, so a move reads as Unknown.
     respond, _ = http
-    respond({}, 503)
+    respond({}, status)
     result = await ExplorerService().get_contract_creation_info(
         RECORDED[chain_id]["hash"], chain_id
     )
-    assert result.status == "unknown" and result.reason == "HTTP 503"
+    assert result.status == "unknown" and result.reason == f"HTTP {status}"
 
 
 @pytest.mark.asyncio
