@@ -98,7 +98,7 @@ class MempoolMonitor:
 
         # Chains to monitor (only chains with txpool or pending block support)
         self._monitored_chains: Set[int] = set()
-        # Chains whose RPC answered "pending" with a sealed block, already warned about once.
+        # Chains whose RPC answered "pending" with a sealed block: warned about once, not asked again.
         self._sealed_pending_chains: Set[int] = set()
 
         # Stats: held in memory, so they restart from zero with the process.
@@ -213,6 +213,8 @@ class MempoolMonitor:
 
     async def _get_pending_block(self, w3: Web3, chain_id: int) -> List[PendingTx]:
         """Fetch pending txs via eth_getBlockByNumber('pending')."""
+        if chain_id in self._sealed_pending_chains:
+            return []
         txs = []
         try:
             loop = asyncio.get_event_loop()
@@ -223,12 +225,11 @@ class MempoolMonitor:
             # block. A genuine pending block has no hash yet; a sealed one holds only mined
             # transactions, which can no longer be front-run, so it is not read as a mempool.
             if block.get("hash") is not None:
-                if chain_id not in self._sealed_pending_chains:
-                    self._sealed_pending_chains.add(chain_id)
-                    logger.warning(
-                        "Chain %s answers 'pending' with a sealed block; its pending-block fallback is skipped",
-                        chain_id,
-                    )
+                self._sealed_pending_chains.add(chain_id)
+                logger.warning(
+                    "Chain %s answers 'pending' with a sealed block; its pending-block fallback is skipped",
+                    chain_id,
+                )
                 return txs
             for tx in (block.get("transactions") or []):
                 # web3 returns each transaction as an AttributeDict, which is a Mapping but not a dict.

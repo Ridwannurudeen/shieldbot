@@ -123,6 +123,8 @@ async def test_a_sealed_block_answered_for_pending_is_skipped_with_one_warning_p
 
     warned = [r.args[0] for r in caplog.records if r.levelno == logging.WARNING]
     assert warned == [56, 204]
+    # Once a chain is known to answer with a sealed block, its full block is not fetched again.
+    assert w3.eth.get_block.call_count == 2
 
 
 @pytest.mark.asyncio
