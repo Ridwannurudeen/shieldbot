@@ -1,11 +1,8 @@
 """Tests for confidence calibration."""
 
 import json
-import pytest
-import pytest_asyncio
-from core.calibration import CalibrationConfig, default_calibration, load_calibration, calibrate_from_outcomes
+from core.calibration import CalibrationConfig, default_calibration, load_calibration, propose_thresholds
 from core.risk_engine import RiskEngine
-from core.database import Database
 
 
 def test_default_calibration_matches_current():
@@ -67,47 +64,20 @@ def test_custom_config_changes_classification():
     assert level_order[result_custom['risk_level']] >= level_order[result_default['risk_level']]
 
 
-@pytest_asyncio.fixture
-async def db(tmp_path):
-    db = Database(str(tmp_path / "test.db"))
-    await db.initialize()
-    yield db
-    await db.close()
+def test_propose_thresholds_insufficient_data():
+    """With fewer than 20 labels there is no proposal."""
+    assert propose_thresholds([(80.0, "scam")] * 5, default_calibration()) is None
 
 
-@pytest.mark.asyncio
-async def test_calibrate_from_outcomes_insufficient_data(db):
-    """With fewer than 20 outcomes, should return defaults."""
-    # Add only 5 outcomes
-    for i in range(5):
-        await db.record_outcome(
-            address=f"0x{'a' * 40}",
-            risk_score_at_scan=80.0,
-            outcome="scam",
-        )
-
-    config = await calibrate_from_outcomes(db)
-    assert config.high_threshold == 71.0  # defaults
-
-
-@pytest.mark.asyncio
-async def test_calibrate_from_outcomes_with_data(db):
-    """With enough labeled outcomes, should produce valid thresholds."""
-    # Add 30 well-separated outcomes
-    for i in range(15):
-        await db.record_outcome(
-            address=f"0x{'a' * 38}{i:02x}",
-            risk_score_at_scan=85.0 + (i % 10),
-            outcome="scam",
-        )
-    for i in range(15):
-        await db.record_outcome(
-            address=f"0x{'b' * 38}{i:02x}",
-            risk_score_at_scan=10.0 + (i % 15),
-            outcome="safe",
-        )
-
-    config = await calibrate_from_outcomes(db)
-    # Thresholds should be reasonable
+def test_propose_thresholds_with_data():
+    """With enough well-separated labels, the proposal is a valid pair of thresholds."""
+    labels = [(85.0 + (i % 10), "scam") for i in range(15)] + [(10.0 + (i % 15), "safe") for i in range(15)]
+    config = propose_thresholds(labels, default_calibration())
     assert 20 <= config.high_threshold <= 95
     assert 10 <= config.medium_threshold <= config.high_threshold
+
+
+def test_propose_thresholds_without_a_separating_threshold():
+    """When no threshold has 80% scam labels at or above it, there is no proposal."""
+    labels = [(95.0, "safe")] * 20 + [(95.0, "scam")] * 4
+    assert propose_thresholds(labels, default_calibration()) is None

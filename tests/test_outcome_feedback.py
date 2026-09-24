@@ -1,5 +1,6 @@
 """POST /api/outcome stays open, but every row says who sent it and no score reads the rows."""
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -174,4 +175,17 @@ async def test_outcomes_stored_before_the_source_column_count_as_client(tmp_path
         assert [row["source"] for row in await database.get_outcomes(ADDRESS)] == ["client"]
     finally:
         await database.close()
+
+
+def test_no_scoring_code_reads_outcome_events():
+    # The rows come from anyone, so nothing that computes a score may read them; scripts/calibrate.py
+    # reads the API key rows into a proposal the owner applies by hand.
+    root = Path(__file__).resolve().parent.parent
+    readers = sorted(
+        path.relative_to(root).as_posix()
+        for folder in ("core", "analyzers", "services", "scanner", "utils", "agent", "adapters", "mcp_server", "rpc")
+        for path in (root / folder).rglob("*.py")
+        if "outcome_events" in path.read_text(encoding="utf-8")
+    )
+    assert readers == ["core/database.py"]
 

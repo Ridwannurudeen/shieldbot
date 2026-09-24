@@ -1,9 +1,14 @@
-"""Confidence calibration — data-driven thresholds and weight tuning."""
+"""Confidence calibration — data-driven thresholds and weight tuning.
+
+The live thresholds come from a config file read at startup. scripts/calibrate.py proposes new ones
+from trusted labels with propose_thresholds(); the owner reviews the proposal and edits the file by
+hand. Nothing applies a proposal on its own.
+"""
 
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -44,74 +49,54 @@ def load_calibration(path: str) -> CalibrationConfig:
         return default_calibration()
 
 
-async def calibrate_from_outcomes(db) -> CalibrationConfig:
-    """Analyze outcome_events to find optimal thresholds via binning.
+# Fewer trusted labels than this give no proposal.
+MIN_LABELS = 20
 
-    Queries the database for outcome events where we know the ground truth
-    (outcome = "safe" or "scam"), bins by risk score, and finds the threshold
-    that maximizes separation between safe and scam.
 
-    Returns a CalibrationConfig with updated thresholds.
+def score_bins(labels: List[Tuple[float, str]]) -> Dict[int, Dict[str, int]]:
+    """Safe and scam label counts per 10-point score bin, keyed by the bin's lowest score (0 to 100)."""
+    bins = {start: {'safe': 0, 'scam': 0} for start in range(0, 110, 10)}
+    for score, label in labels:
+        bins[int(score // 10) * 10][label] += 1
+    return bins
+
+
+def propose_thresholds(labels: List[Tuple[float, str]], current: CalibrationConfig) -> Optional[CalibrationConfig]:
+    """Thresholds learned from (score, 'safe' | 'scam') labels, or None when there are fewer than
+    MIN_LABELS or no HIGH threshold separates them.
+
+    Pass trusted labels only. HIGH is the highest 10-point threshold at or above which at least 80% of
+    the labels are scam. MEDIUM is the highest threshold below HIGH whose band up to HIGH is at least
+    40% scam, else the current MEDIUM, kept below HIGH. The confidence boost grows with the share of
+    labels the pair classifies correctly above 80%.
     """
-    config = default_calibration()
+    if len(labels) < MIN_LABELS:
+        return None
+    bins = score_bins(labels)
 
-    try:
-        # Get all outcomes with known labels
-        cursor = await db._db.execute("""
-            SELECT risk_score_at_scan, outcome
-            FROM outcome_events
-            WHERE outcome IN ('safe', 'scam')
-              AND risk_score_at_scan IS NOT NULL
-        """)
-        rows = await cursor.fetchall()
+    def share_scam(start, end):
+        scam = sum(bins[b]['scam'] for b in range(start, end, 10))
+        total = scam + sum(bins[b]['safe'] for b in range(start, end, 10))
+        return scam / total if total else None
 
-        if len(rows) < 20:
-            logger.info(f"Only {len(rows)} labeled outcomes — need 20+ for calibration")
-            return config
+    high = next(
+        (threshold for threshold in range(90, 20, -10) if (share_scam(threshold, 110) or 0) >= 0.8), None
+    )
+    if high is None:
+        return None
+    medium = next(
+        (threshold for threshold in range(high - 10, 10, -10) if (share_scam(threshold, high) or 0) >= 0.4),
+        min(current.medium_threshold, high - 10),
+    )
 
-        # Bin scores into 10-point ranges and count safe/scam per bin
-        bins = {}  # bin_start -> {'safe': count, 'scam': count}
-        for score, outcome in rows:
-            bin_start = int(score // 10) * 10
-            if bin_start not in bins:
-                bins[bin_start] = {'safe': 0, 'scam': 0}
-            bins[bin_start][outcome] += 1
-
-        # Find HIGH threshold: lowest bin where scam > 80% of entries
-        best_high = 71.0
-        for threshold in range(90, 20, -10):
-            scam_above = sum(bins.get(b, {}).get('scam', 0) for b in range(threshold, 110, 10))
-            safe_above = sum(bins.get(b, {}).get('safe', 0) for b in range(threshold, 110, 10))
-            total_above = scam_above + safe_above
-            if total_above > 0 and scam_above / total_above >= 0.8:
-                best_high = float(threshold)
-                break
-
-        # Find MEDIUM threshold: lowest bin where scam > 40% of entries
-        best_medium = 31.0
-        for threshold in range(int(best_high) - 10, 10, -10):
-            scam_above = sum(bins.get(b, {}).get('scam', 0) for b in range(threshold, int(best_high), 10))
-            safe_above = sum(bins.get(b, {}).get('safe', 0) for b in range(threshold, int(best_high), 10))
-            total_above = scam_above + safe_above
-            if total_above > 0 and scam_above / total_above >= 0.4:
-                best_medium = float(threshold)
-                break
-
-        config.high_threshold = best_high
-        config.medium_threshold = best_medium
-
-        # Calculate confidence boost from historical accuracy
-        correct = sum(1 for s, o in rows if (s >= best_high and o == 'scam') or (s < best_medium and o == 'safe'))
-        accuracy = correct / len(rows) if rows else 0
-        if accuracy > 0.8:
-            config.confidence_boost = min((accuracy - 0.8) * 50, 10.0)
-
-        logger.info(
-            f"Calibration: HIGH>={best_high}, MEDIUM>={best_medium}, "
-            f"accuracy={accuracy:.1%}, boost={config.confidence_boost:.1f}"
-        )
-
-    except Exception as e:
-        logger.error(f"Calibration error: {e}")
-
-    return config
+    correct = sum(
+        1 for score, label in labels
+        if (score >= high and label == 'scam') or (score < medium and label == 'safe')
+    )
+    accuracy = correct / len(labels)
+    return CalibrationConfig(
+        high_threshold=float(high),
+        medium_threshold=float(medium),
+        weight_overrides=dict(current.weight_overrides),
+        confidence_boost=min((accuracy - 0.8) * 50, 10.0) if accuracy > 0.8 else 0.0,
+    )
