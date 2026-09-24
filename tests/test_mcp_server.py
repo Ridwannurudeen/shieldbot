@@ -328,8 +328,35 @@ class TestToolExecution:
             },
         }, headers=AUTH_HEADERS)
         content = json.loads(resp.json()["result"]["content"][0]["text"])
+        from core.extension_formatter import is_scan_incomplete
         assert content["trust_score"] is None
         assert "not registered" in content["note"].lower()
+        assert content["block_rate"] is None
+        assert content["total_transactions"] is None
+        assert content["status"] == "unknown"
+        assert content["coverage"] == {"history": 0}
+        assert content["coverage_reasons"] == {"history": "Agent not registered"}
+        assert is_scan_incomplete(content)
+
+    def test_check_agent_reputation_without_history_is_unknown_not_trusted(self, client, mock_container):
+        """No firewall records is no evidence, not a perfect trust score."""
+        mock_container.db.get_agent_firewall_history = AsyncMock(return_value=[])
+        resp = client.post("/mcp/messages", json={
+            "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": {
+                "name": "check_agent_reputation",
+                "arguments": {"agent_id": "agent:1"},
+            },
+        }, headers=AUTH_HEADERS)
+        content = json.loads(resp.json()["result"]["content"][0]["text"])
+        from core.extension_formatter import is_scan_incomplete
+        assert content["trust_score"] is None
+        assert content["block_rate"] is None
+        assert content["total_transactions"] == 0
+        assert content["status"] == "unknown"
+        assert content["coverage"] == {"history": 0}
+        assert content["coverage_reasons"] == {"history": "No firewall history for this agent"}
+        assert is_scan_incomplete(content)
 
     def test_check_approval_risk_stub(self, client):
         """Unimplemented approval checks are unknown, never an empty clean scan."""
@@ -1025,6 +1052,7 @@ def test_unknown_results_are_described_to_the_client():
     tools = {tool["name"]: tool["description"] for tool in TOOL_DEFINITIONS}
     resources = {resource["uri"]: resource["description"] for resource in RESOURCE_DEFINITIONS}
     for description in (
+        tools["check_agent_reputation"],
         tools["simulate_transaction"],
         tools["check_deployer"],
         resources["shieldbot://wallet/{address}/guardian"],

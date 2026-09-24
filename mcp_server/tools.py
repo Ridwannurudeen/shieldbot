@@ -111,7 +111,11 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "check_agent_reputation",
-        "description": "Look up the trust score and transaction history for an agent registered with ShieldBot's firewall.",
+        "description": (
+            "Look up the trust score and transaction history for an agent registered with ShieldBot's firewall. "
+            "An unregistered agent, or one with no firewall history, returns status 'unknown' with coverage_reasons "
+            "and a null trust_score."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -314,15 +318,28 @@ async def handle_check_agent_reputation(container, params: Dict) -> Dict:
         return {
             "agent_id": agent_id,
             "trust_score": None,
-            "total_transactions": 0,
-            "block_rate": 0.0,
+            "total_transactions": None,
+            "block_rate": None,
+            "status": "unknown",
+            "coverage": {"history": 0},
+            "coverage_reasons": {"history": "Agent not registered"},
             "note": "Agent not registered",
         }
 
     history = await container.db.get_agent_firewall_history(agent_id, limit=1000)
     total = len(history)
+    if total == 0:
+        return {
+            "agent_id": agent_id,
+            "trust_score": None,
+            "total_transactions": 0,
+            "block_rate": None,
+            "status": "unknown",
+            "coverage": {"history": 0},
+            "coverage_reasons": {"history": "No firewall history for this agent"},
+        }
     blocked = sum(1 for h in history if h.get("verdict") == "BLOCK")
-    block_rate = (blocked / total) if total > 0 else 0.0
+    block_rate = blocked / total
 
     # Simple trust heuristic: 100 - block_rate*100, floored at 0
     trust_score = max(0, round(100 - block_rate * 100, 1))

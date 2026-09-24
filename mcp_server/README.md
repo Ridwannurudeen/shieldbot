@@ -41,7 +41,7 @@ Every tool result is JSON in a single `text` content item.
 | `scan_contract` | `address`, `chain_id` | All analyzers and the risk engine. Incomplete coverage gives `status: "unknown"`, `verdict: "UNKNOWN"`, `risk_display: "Unknown (incomplete provider coverage)"` and `coverage_reasons`. |
 | `simulate_transaction` | `from`, `to`, `data`, `chain_id` | Tenderly simulation. Approval changes are not measured (`approvals_granted` is always null). When Tenderly is not configured or the simulation fails: `status: "unknown"`, `coverage_reasons.simulation`, null measurements. |
 | `check_deployer` | `address`, `chain_id` | Local deployer index. An unindexed contract gives `status: "unknown"` with null counts. Counts span every chain the deployer is indexed on, and `flagged_count` counts only contracts with a stored HIGH score, so a contract never scored is not counted. `funded_by` is always null. |
-| `check_agent_reputation` | `agent_id` | Block rate over at most 1,000 local firewall records. An unregistered agent has `trust_score: null`; a registered agent with no history gets 100. |
+| `check_agent_reputation` | `agent_id` | Block rate over at most 1,000 local firewall records. An unregistered agent, or one with no firewall history, gives `status: "unknown"` with null `trust_score` and `block_rate`. |
 | `check_approval_risk` | `wallet_address`, `chain_id` | Not implemented: always `status: "unknown"` with null `approvals`. |
 | `scan_for_injection` | `content` | A fixed regex list. `clean: true` means no listed pattern matched, not that the text is safe. |
 | `query_threat_graph` | `address`, `chain_id` | Not implemented: always `status: "unknown"` with null connections. |
