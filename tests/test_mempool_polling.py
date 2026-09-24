@@ -1,12 +1,14 @@
 """Mempool polling: how pending transactions are read, parsed and handed to the analysis."""
 
+import threading
 from unittest.mock import MagicMock
 
 import pytest
 from hexbytes import HexBytes
 from web3.datastructures import AttributeDict
 
-from services.mempool_service import MempoolMonitor
+from services import mempool_service
+from services.mempool_service import MempoolMonitor, PendingTx
 
 SENDER = "0xAbCdEf0123456789aBcDeF0123456789AbCdEf01"
 TOKEN = "0x" + "22" * 20
@@ -83,3 +85,27 @@ async def test_pending_block_fallback_feeds_the_analysis():
     assert [(a["alert_type"], a["severity"], a["victim_tx"]) for a in alerts] == [
         ("suspicious_approval", "HIGH", "0x" + "01" * 32),
     ]
+
+
+@pytest.mark.asyncio
+async def test_txpool_content_is_parsed_and_built_off_the_event_loop(monkeypatch):
+    built_on = []
+
+    def recording_pending_tx(**fields):
+        built_on.append(threading.get_ident())
+        return PendingTx(**fields)
+
+    monkeypatch.setattr(mempool_service, "PendingTx", recording_pending_tx)
+    w3 = MagicMock()
+    w3.provider.make_request.return_value = {"result": {"pending": {SENDER: {"7": {
+        "hash": "0x" + "04" * 32, "from": SENDER, "to": TOKEN, "value": "0x10",
+        "gasPrice": "0x5", "input": APPROVE_UNLIMITED,
+    }}}}}
+
+    txs = await MempoolMonitor(MagicMock())._get_txpool_content(w3, 1)
+
+    w3.provider.make_request.assert_called_once_with("txpool_content", [])
+    assert [_fields(tx) for tx in txs] == [
+        ("0x" + "04" * 32, SENDER.lower(), TOKEN, 16, 5, APPROVE_UNLIMITED, 1),
+    ]
+    assert built_on and threading.get_ident() not in built_on

@@ -176,13 +176,19 @@ class MempoolMonitor:
             logger.debug("Pending poll failed for chain %s: %s", chain_id, type(e).__name__)
 
     async def _get_txpool_content(self, w3: Web3, chain_id: int) -> List[PendingTx]:
-        """Fetch pending txs via txpool_content RPC."""
+        """Fetch pending txs via txpool_content RPC.
+
+        Ethereum's txpool runs to tens of megabytes, so the fetch, the parse and the PendingTx build
+        all run in the executor; the event loop only receives the finished list.
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._read_txpool_content, w3, chain_id)
+
+    @staticmethod
+    def _read_txpool_content(w3: Web3, chain_id: int) -> List[PendingTx]:
         txs = []
         try:
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None, w3.provider.make_request, "txpool_content", []
-            )
+            result = w3.provider.make_request("txpool_content", [])
             pending = result.get("result", {}).get("pending", {})
             for sender, nonces in pending.items():
                 for nonce, tx_data in nonces.items():
