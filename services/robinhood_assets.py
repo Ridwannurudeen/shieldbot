@@ -251,11 +251,10 @@ def _read_symbol(text: str) -> Dict:
 
 
 def _read_name(text: str) -> Dict:
-    """A name as written, its company words, their plain form and initials, and the markers it carries."""
+    """A name's company words, their plain form and initials, and the markers it carries."""
     plain = {_plain(word) for word in _WORD.findall(text)}
     words = _company_words(_WORD.findall(text))
     return {
-        "text": text,
         "words": words,
         "plain": "".join(_plain(word) for word in words),
         "initials": "".join(_plain(word)[:1] for word in words),
@@ -291,7 +290,7 @@ def _classify(
         folded = _folded(name["words"])
         if name["plain"] == company:
             by_name = "company"
-        elif folded and folded == _folded(_in_case_of(company_words, name["text"])):
+        elif folded and folded == _folded(_in_case_of(company_words, "".join(name["words"]))):
             by_name = "look-alike"
     spelled = name is not None and len(ticker) >= MIN_TICKER_LENGTH and name["initials"] == ticker
     # A short ticker is too common to point on its own.

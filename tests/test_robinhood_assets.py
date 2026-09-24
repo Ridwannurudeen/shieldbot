@@ -191,6 +191,7 @@ def test_a_symbol_or_name_claiming_robinhood_and_the_company_is_an_impostor(
         ("MOON", "TesIa", "TSLA"),
         ("MOON", "NVlDlA", "NVDA"),
         ("MOON", "TE5LA HOLDINGS", "TSLA"),
+        ("MOON", "TE5LA Holdings", "TSLA"),
     ],
 )
 def test_a_match_that_needs_look_alike_folding_is_an_impostor(symbol, name, official):
