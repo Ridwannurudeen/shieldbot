@@ -298,6 +298,10 @@ class RiskEngine:
             label = 'Honeypot coverage unknown: ' if honeypot_data.get('can_sell') is not None else 'Sellability unknown: '
             if not any(flag.startswith(label) for flag in critical_flags):
                 critical_flags.append(label + coverage_reasons.get('honeypot', 'No honeypot data'))
+        # An analyzer's notes name what an add-only signal could not measure (data['notes']). The gap
+        # changes no score and no status, so they follow every flag and never push a risk reason off
+        # the three the extension overlay shows.
+        critical_flags += [note for result in results if not result.error for note in result.data.get('notes', ())]
 
         # --- Escalation overrides ---
         # Token-specific escalation rules only apply to ERC-20 tokens.

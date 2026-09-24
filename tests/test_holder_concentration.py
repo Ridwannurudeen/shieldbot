@@ -205,7 +205,8 @@ async def test_a_missing_holder_list_is_named_not_a_coverage_gap(mock_web3_clien
     mock_web3_client._get_adapter.assert_not_called()
     assert structural.data["top10_holder_percent"] is None
     # Named, and it adds nothing: an add-only signal's absence cannot make a token read safer.
-    assert HOLDERS_UNKNOWN in structural.flags
+    assert structural.data["notes"] == [HOLDERS_UNKNOWN]
+    assert HOLDERS_UNKNOWN not in structural.flags
     assert structural.score == StructuralAnalyzer(None)._compute(structural.data, {})[0]
     assert "top10_holder_percent" not in structural.data["coverage"]
     assert "Top-10" not in (structural.data.get("reason") or "")
@@ -213,7 +214,23 @@ async def test_a_missing_holder_list_is_named_not_a_coverage_gap(mock_web3_clien
     assert structural.data["status"] == status
     risk = RiskEngine().compute_from_results(_with_covered_others(structural))
     assert risk["status"] == status
-    assert HOLDERS_UNKNOWN in risk["critical_flags"]
+    assert risk["critical_flags"][-1] == HOLDERS_UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_the_missing_list_note_never_pushes_a_risk_reason_off_the_overlay(mock_web3_client):
+    structural = await _structural(mock_web3_client, NO_RECORD)
+    honeypot = AnalyzerResult(
+        "honeypot",
+        0.15,
+        80,
+        flags=["Honeypot detected", "Cannot sell token"],
+        data={"is_honeypot": True, "can_sell": False, "buy_tax": 0, "sell_tax": 100},
+    )
+    others = [_covered("market", 0.25), _covered("behavioral", 0.2), honeypot]
+    risk = RiskEngine().compute_from_results([replace(structural, weight=0.4), *others])
+    assert risk["critical_flags"][:2] == ["Honeypot detected", "Cannot sell token"]
+    assert risk["critical_flags"][-1] == HOLDERS_UNKNOWN
 
 
 @pytest.mark.asyncio
@@ -226,7 +243,8 @@ async def test_a_fresh_launch_without_a_holder_list_reads_as_before_apart_from_t
     structural = await _structural(mock_web3_client, NO_RECORD)
     # _compute is the structural scoring without the holder signal, as before this branch.
     score, flags = StructuralAnalyzer(None)._compute(structural.data, {})
-    assert (structural.score, structural.flags) == (score, flags + [HOLDERS_UNKNOWN])
+    assert (structural.score, structural.flags) == (score, flags)
+    assert structural.data["notes"] == [HOLDERS_UNKNOWN]
     assert set(structural.data["coverage"]) == {"is_verified", "contract_age_days"}
     assert structural.data["status"] == "ok"
 
@@ -235,7 +253,7 @@ async def test_a_fresh_launch_without_a_holder_list_reads_as_before_apart_from_t
 async def test_the_signal_does_not_apply_to_a_non_token(mock_web3_client):
     structural = await _structural(mock_web3_client, record(None), is_token=False)
     assert "top10_holder_percent" not in structural.data["coverage"]
-    assert HOLDERS_UNKNOWN not in structural.flags
+    assert "notes" not in structural.data
     assert structural.data["status"] == "ok"
 
 
@@ -244,7 +262,8 @@ async def test_a_safe_blue_chip_is_unchanged(mock_web3_client):
     listed = await _structural(mock_web3_client, record(CAKE_HOLDERS))
     assert listed.data["top10_holder_percent"] == 3.31
     assert listed.data["status"] == "ok"
-    assert not any("holders own" in flag or "holder share" in flag for flag in listed.flags)
+    assert not any("holders own" in flag for flag in listed.flags)
+    assert "notes" not in listed.data
     # The same token scored without the holder signal.
     assert (listed.score, listed.flags) == StructuralAnalyzer(None)._compute(listed.data, {})
 

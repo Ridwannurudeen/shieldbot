@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 # honeypots, 7 read 71-100% and 4 of them 90% or more.
 HOLDER_SHARE_ELEVATED = 70
 HOLDER_SHARE_HIGH = 90
-# The flag that names a token's missing holder list. The signal only adds risk, so its absence is
+# The note that names a token's missing holder list. The signal only adds risk, so its absence is
 # named rather than counted as a coverage gap: core/policy.py's required coverage decides status.
 HOLDERS_UNKNOWN = 'Top-10 holder share unknown: no readable GoPlus holder list'
 
@@ -61,12 +61,12 @@ class StructuralAnalyzer(Analyzer):
             sniffer_data = await self._sniffer.fetch(ctx.address, chain_id=ctx.chain_id)
 
         score, flags = self._compute(data, sniffer_data)
-        # Holder concentration describes a token. A missing holder list is named and adds nothing,
-        # never read as a token whose supply is spread out.
+        # Holder concentration describes a token. A missing holder list is named in a note and adds
+        # nothing, never read as a token whose supply is spread out.
         if ctx.is_token is not False and data.get('is_contract') is not False:
             share = data.get('top10_holder_percent')
             if share is None:
-                flags.append(HOLDERS_UNKNOWN)
+                data['notes'] = [HOLDERS_UNKNOWN]
             elif share >= HOLDER_SHARE_ELEVATED:
                 score = min(score + (20 if share >= HOLDER_SHARE_HIGH else 10), 100)
                 flags.append(
