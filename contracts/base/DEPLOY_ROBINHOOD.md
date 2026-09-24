@@ -249,8 +249,8 @@ Spend limits in the server (`services/verdict_publisher.py`). Only the API proce
 - `maxFeePerGas` = 2 x base fee, capped at 1 gwei, and deferred while the base fee itself is above 1 gwei;
 - deferred while the recorder's balance cannot cover gas limit x `maxFeePerGas`.
 
-The 180 per hour comes from the watch: one 4663 scan reserves 22 requests of the shared 1 request per second
-RPC budget (`services/rpc_guard.py`, `agent.hunter.SCAN_REQUEST_COST`), so at most about 163 scans an hour can
+The 180 per hour comes from the watch: one 4663 scan reserves 23 requests of the shared 1 request per second
+RPC budget (`services/rpc_guard.py`, `agent.hunter.SCAN_REQUEST_COST`), so at most about 156 scans an hour can
 produce a verdict, and discovery draws on the same budget, so the real number is lower. An unchanged verdict can
 be published again after the refresh interval when a newer observation exists, so budget for those refresh
 transactions as well as first scans and changed verdicts.

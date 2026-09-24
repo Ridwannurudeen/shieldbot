@@ -10,9 +10,9 @@ arbitrarily from old records.
 variable of the same name. Zero disables the set. Lowering it and restarting disables excess
 members; increasing it does not silently reenable them. `GUARD_RESCAN_INTERVAL_SECONDS` in
 `agent/hunter.py` imports the publisher's `VERDICT_REFRESH_SECONDS` as its **300-second** interval,
-so the rescan and unchanged-verdict refresh thresholds cannot drift independently. Four subjects require 48 scans/hour: at 22 requests/scan,
-that is 0.293 rps. From the shared 1 rps budget, discovery consumes approximately 0.15 rps,
-leaving approximately 0.557 rps for launch scans and general rechecks. Raising the cap spends
+so the rescan and unchanged-verdict refresh thresholds cannot drift independently. Four subjects require 48 scans/hour: at 23 requests/scan,
+that is 0.307 rps. From the shared 1 rps budget, discovery consumes approximately 0.15 rps,
+leaving approximately 0.543 rps for launch scans and general rechecks. Raising the cap spends
 that remaining capacity and can make the refresh target unattainable.
 
 Discovery runs before scan selection in each fast-watch cycle. Launches receive at least
