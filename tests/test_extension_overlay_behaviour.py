@@ -336,7 +336,7 @@ def test_forged_and_replayed_intercepts_are_ignored(forgery):
 
 @pytest.mark.parametrize("policy", ["STRICT", "BALANCED"])
 @pytest.mark.parametrize("outcome", ["error", "BLOCK_RECOMMENDED", "CAUTION", "UNKNOWN"])
-def test_strict_mode_removes_proceed_on_errors_and_block_verdicts(policy, outcome):
+def test_strict_mode_removes_proceed_on_errors_block_and_unknown_verdicts(policy, outcome):
     run_node(
         CONTENT_HARNESS
         + r"""
@@ -348,7 +348,7 @@ def test_strict_mode_removes_proceed_on_errors_and_block_verdicts(policy, outcom
       : {classification: outcome, risk_score: outcome === 'CAUTION' ? 40 : 90})};
   await intercept('request');
   const html = overlay().innerHTML;
-  const removed = policy === 'STRICT' && ['error', 'BLOCK_RECOMMENDED'].includes(outcome);
+  const removed = policy === 'STRICT' && outcome !== 'CAUTION';
   assert.equal(html.includes('id="shieldai-proceed"'), !removed);
   assert.equal(html.includes('Strict mode is on'), removed);
   userClick(byId('shieldai-block'));

@@ -518,8 +518,9 @@
     const badgeClass = badgeClasses[classification] || "shieldai-badge-caution";
     const label = classLabels[classification] || classification;
     const isBlock = classification === "BLOCK_RECOMMENDED";
-    // Strict mode leaves no way to send a transaction the firewall recommends blocking.
-    const canProceed = !(strict && isBlock);
+    // Strict mode leaves no way to send a transaction the firewall recommends
+    // blocking or could not fully check.
+    const canProceed = !(strict && (isBlock || classification === "UNKNOWN"));
 
     // Display as safety score (100 - risk) so higher = better
     const scoreDisplay = incomplete ? "Unknown (incomplete provider coverage)" :
