@@ -1,4 +1,52 @@
+import { useState, type FormEvent } from "react";
+
 export default function Footer() {
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error" | "dup">("idle");
+  const [message, setMessage] = useState("");
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    const trimmed = email.trim();
+    if (!trimmed) return;
+
+    setStatus("loading");
+    setMessage("");
+
+    try {
+      const res = await fetch("https://api.shieldbotsecurity.online/api/beta-signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: trimmed }),
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        setStatus("success");
+        setMessage(data.message || "You're on the list!");
+        setEmail("");
+      } else if (res.status === 409) {
+        setStatus("dup");
+        setMessage(data.detail || "Already signed up.");
+      } else {
+        setStatus("error");
+        setMessage(data.detail || "Something went wrong.");
+      }
+    } catch {
+      setStatus("error");
+      setMessage("Network error. Please try again.");
+    }
+  }
+
+  const msgColor =
+    status === "success"
+      ? "text-neon"
+      : status === "error"
+        ? "text-red-400"
+        : status === "dup"
+          ? "text-gray-400"
+          : "";
+
   return (
     <footer className="py-16 border-t border-white/5">
       <div className="max-w-6xl mx-auto px-6">
@@ -10,6 +58,34 @@ export default function Footer() {
               <span className="text-neon">Bot</span>
             </div>
             <p className="text-sm text-gray-400">On-chain transaction firewall</p>
+
+            <form onSubmit={handleSubmit} className="flex flex-wrap gap-2 mt-5 max-w-sm">
+              <label htmlFor="footer-email" className="sr-only">
+                Email address for product updates
+              </label>
+              <input
+                id="footer-email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Email for product updates"
+                required
+                className="flex-1 min-w-0 min-h-[44px] px-3 bg-navy-light border border-white/15 rounded-lg text-sm text-white
+                           placeholder:text-gray-400 outline-none focus:border-neon/50 transition-colors"
+              />
+              <button
+                type="submit"
+                disabled={status === "loading"}
+                className="min-h-[44px] px-4 bg-white/10 text-white text-sm font-semibold rounded-lg hover:bg-white/20
+                           transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+              >
+                {status === "loading" ? "Submitting..." : "Stay Updated"}
+              </button>
+              <p role="status" className={`w-full text-sm ${msgColor}`}>
+                {message}
+              </p>
+            </form>
           </div>
 
           {/* Link columns */}
