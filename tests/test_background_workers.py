@@ -5,7 +5,12 @@ reads null with a note, never zero, empty or protected.
 """
 
 import asyncio
+import logging
+import os
 import signal
+import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call
 
@@ -208,6 +213,9 @@ async def test_coverage_never_reads_the_idle_monitor_as_watching(external_api):
 # ---------------------------------------------------------------------------
 
 
+ROOT = Path(__file__).resolve().parent.parent
+
+
 def _worker_container():
     container = MagicMock()
     for name in ("startup", "start_mempool_monitor", "shutdown"):
@@ -216,6 +224,10 @@ def _worker_container():
         getattr(container, name).start = AsyncMock()
         getattr(container, name).stop = AsyncMock()
     container.verdict_publisher.stop = AsyncMock()
+    # The services' own task handles: none running unless a test starts one.
+    for name in ("indexer", "mempool_monitor", "hunter", "launch_watch"):
+        getattr(container, name)._task = None
+    container.verdict_publisher._drain_task = None
     return container
 
 
@@ -242,21 +254,70 @@ async def test_workers_run_the_api_lifespans_background_work_in_its_order():
     await asyncio.sleep(0)
     assert container.mock_calls == LIFESPAN_ORDER[:5]
     stop.set()
-    await running
+    assert await running == 0
     assert container.mock_calls == LIFESPAN_ORDER
 
 
 @pytest.mark.asyncio
-async def test_workers_refuse_to_run_beside_an_api_that_runs_the_work(monkeypatch):
+@pytest.mark.parametrize("service", ["indexer", "mempool_monitor", "verdict_publisher", "hunter", "launch_watch"])
+async def test_workers_stop_and_exit_non_zero_when_background_work_ends_on_its_own(service, caplog):
+    import workers
+
+    container = _worker_container()
+    running_forever = asyncio.Event()
+
+    async def fails():
+        raise RuntimeError("loop crashed")
+
+    for name in ("indexer", "mempool_monitor", "hunter", "launch_watch"):
+        getattr(container, name)._task = asyncio.create_task(running_forever.wait())
+    container.verdict_publisher._drain_task = asyncio.create_task(running_forever.wait())
+    ended = asyncio.create_task(fails())
+    if service == "verdict_publisher":
+        container.verdict_publisher._drain_task = ended
+    else:
+        getattr(container, service)._task = ended
+    with caplog.at_level(logging.ERROR, logger="workers"):
+        # The stop event is never set: the task that ended is what stops the workers.
+        status = await asyncio.wait_for(workers.run(container, asyncio.Event()), 5)
+    assert status == 1
+    assert container.mock_calls == LIFESPAN_ORDER
+    assert "RuntimeError" in caplog.text
+    running_forever.set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("setting", ["api", "both"])
+async def test_workers_refuse_to_run_unless_the_setting_is_external(monkeypatch, caplog, setting):
     import workers
 
     built = MagicMock()
-    monkeypatch.setattr(workers, "Settings", lambda: Settings(_env_file=None))
+    monkeypatch.setattr(workers, "Settings", lambda: Settings(_env_file=None, background_workers=setting))
     monkeypatch.setattr(workers, "ServiceContainer", built)
-    with pytest.raises(SystemExit) as refused:
-        await workers.main()
-    assert "BACKGROUND_WORKERS=external" in str(refused.value.code)
+    with caplog.at_level(logging.ERROR, logger="workers"):
+        assert await workers.main() == workers.MISCONFIGURED == 3
+    assert "background_workers" in caplog.text.lower()
     built.assert_not_called()
+
+
+def test_the_entrypoint_exits_with_the_misconfiguration_status_systemd_does_not_restart(tmp_path):
+    # Run from an empty directory with the setting unset, so no .env is read and nothing starts.
+    environment = {
+        name: value for name, value in os.environ.items() if name.upper() != "BACKGROUND_WORKERS"
+    }
+    environment["PYTHONPATH"] = str(ROOT)
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "workers.py")],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+    )
+    assert result.returncode == 3, result.stderr
+    unit = (ROOT / "deploy" / "shieldbot-workers.service.example").read_text(encoding="utf-8")
+    assert "RestartPreventExitStatus=3" in unit.splitlines()
 
 
 @pytest.mark.asyncio
@@ -282,6 +343,7 @@ async def test_workers_build_the_real_container_and_stop_cleanly_on_a_signal(
     async def run(container, stop):
         ran["container"] = container
         await stop.wait()
+        return 0
 
     monkeypatch.setattr(workers, "run", run)
     main = asyncio.create_task(workers.main())
@@ -291,4 +353,17 @@ async def test_workers_build_the_real_container_and_stop_cleanly_on_a_signal(
     assert ran["container"].settings is settings
     assert set(handlers) == {signal.SIGTERM, signal.SIGINT}
     handlers[signum](signum, None)
-    await asyncio.wait_for(main, timeout=5)
+    assert await asyncio.wait_for(main, timeout=5) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service", ["hunter", "launch_watch"])
+async def test_a_loop_that_never_started_does_not_log_that_it_stopped(service, caplog):
+    from agent.hunter import Hunter
+    from agent.launch_watch import LaunchWatch
+
+    hunter = Hunter(tools=MagicMock(), db=MagicMock(), ai_analyzer=MagicMock(), sentinel=MagicMock())
+    loop = hunter if service == "hunter" else LaunchWatch(hunter)
+    with caplog.at_level(logging.INFO):
+        await loop.stop()
+    assert "stopped" not in caplog.text

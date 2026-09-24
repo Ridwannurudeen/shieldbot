@@ -19,8 +19,11 @@ EnvironmentFile=/opt/shieldbot/.env
 #   [Service]
 #   EnvironmentFile=/etc/shieldbot/recorder.env
 ExecStart=/opt/shieldbot/venv/bin/python workers.py
+# Exit 1 (background work ended on its own) is restarted; exit 3 (a setting that does not allow workers.py to
+# run, such as BACKGROUND_WORKERS not set to external) is not, since a restart cannot fix it.
 Restart=always
 RestartSec=5
+RestartPreventExitStatus=3
 StandardOutput=journal
 StandardError=journal
 # Systemd hardening
