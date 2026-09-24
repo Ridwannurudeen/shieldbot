@@ -18,10 +18,8 @@ logger = logging.getLogger(__name__)
 
 # Expanded suspicious bytecode signatures (~18 patterns)
 SUSPICIOUS_SIGNATURES = {
-    # Critical - backdoor / destructive
-    '7a9e5410': {'warning': 'Potential backdoor function detected', 'severity': 'critical'},
-    '1694505e': {'warning': 'Self-destruct function present', 'severity': 'critical'},
-    '83197ef0': {'warning': 'Delegated call to arbitrary address possible', 'severity': 'critical'},
+    # Critical - destructive
+    '83197ef0': {'warning': 'destroy() function present - owner may be able to self-destruct the contract', 'severity': 'critical'},
     'a9059cbb': {'warning': 'Transfer function (standard)', 'severity': 'info'},
     # Critical - mint / supply manipulation
     '40c10f19': {'warning': 'Mint function detected - owner can inflate supply', 'severity': 'critical'},
@@ -33,8 +31,8 @@ SUSPICIOUS_SIGNATURES = {
     '715018a6': {'warning': 'Renounce ownership function', 'severity': 'info'},
     # High - blacklist / whitelist
     '44337ea1': {'warning': 'Blacklist function - owner can block addresses', 'severity': 'critical'},
-    'fe575a87': {'warning': 'Remove from blacklist function', 'severity': 'info'},
-    'e47d6060': {'warning': 'Add to whitelist function', 'severity': 'info'},
+    'fe575a87': {'warning': 'isBlacklisted(address) getter - blacklist present', 'severity': 'info'},
+    'e47d6060': {'warning': 'isBlackListed(address) getter - blacklist present', 'severity': 'info'},
     # Medium - burn / proxy
     '42966c68': {'warning': 'Burn function detected', 'severity': 'info'},
     '79cc6790': {'warning': 'BurnFrom function', 'severity': 'info'},

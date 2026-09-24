@@ -12,9 +12,7 @@ BYTECODE_PATTERNS = {
     '44337ea1': 'blacklist',
     '3659cfe6': 'proxy_upgrade',
     '4f1ef286': 'proxy_upgrade',
-    '7a9e5410': 'backdoor',
-    '1694505e': 'selfdestruct',
-    '83197ef0': 'delegatecall',
+    '83197ef0': 'destroy',
 }
 
 # Small delay between BscScan API calls to avoid free-tier rate limit (5/sec)
@@ -117,7 +115,7 @@ class ContractService:
                                     has_pause = True
                                 elif pattern_name == 'blacklist':
                                     has_blacklist = True
-                                elif pattern_name in ('proxy_upgrade', 'delegatecall'):
+                                elif pattern_name == 'proxy_upgrade':
                                     has_proxy = True
             except UnsupportedChainError:
                 raise
