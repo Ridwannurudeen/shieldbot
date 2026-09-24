@@ -29,8 +29,19 @@ v2 holds **650 entries in 5 of its 8 classes**; 259 of them (40%) are safe.
 
 Entries are not all independent. The 115 drainer entries are 70 contracts: 45 are the same bytecode at the
 same address on another chain. The 131 approved spenders are 91 addresses from 57 incidents (the same
-contract on several chains counts once per chain). 31 of the 93 impostor tokens share one bytecode.
-Read a class's rates with that in mind.
+contract on several chains counts once per chain). Counted by bytecode (the keccak of `eth_getCode`),
+the classes hold fewer distinct contracts still:
+
+| Class | Entries | With code | Distinct bytecodes | Groups sharing one bytecode (largest) |
+|---|---|---|---|---|
+| `drainer_contract` | 115 | 115 | 57 | 21 (6, 6, 6) |
+| `approval_drainer_spender` | 131 | 119 | 81 | 12 (6, 6, 6) |
+| `address_poisoning` | 52 | 0 (EOAs) | 0 | |
+| `impostor_token` | 93 | 93 | 59 | 3 (31, 4, 2) |
+| `safe` | 259 | 259 | 211 | 17 (20, 7, 4) |
+
+The safe group of 20 is Robinhood's official tokens, one proxy bytecode; the group of 7 is Permit2 on each
+chain. Read a class's rates with that in mind: a rate over distinct bytecodes is not computed yet.
 
 Thin chains: opBNB (204) has 3 safe tokens and nothing else; OP Mainnet (10) has no poisoning (9
 zero-value stablecoin transfers in 5,000 blocks, none matching); Base has 3 drainer contracts; Robinhood
@@ -45,8 +56,8 @@ ones included, also carries an `onchain` source: what a public RPC returned on 2
 |---|---|---|
 | `onchain` | `eth_getCode`, `symbol()` and `name()`, and Transfer logs, read from public RPCs | A direct read of the chain, stated in a form `verify_onchain.py` re-reads |
 | `scamsniffer` | Scam Sniffer's open address blacklist, commit `929fe790` | Not read by any code. Whether GoPlus takes it in cannot be established from public information, so independence from GoPlus is asserted, not proven |
-| `revokecash` | Revoke.cash's approval exploit list, commit `f1f85694` | The only mention in the code is a link to revoke.cash in a bot message |
-| `robinhood` | Robinhood's official token list, `api.robinhood.com/rhj/assets` (195 assets) | Nothing that computes a score reads it; `services/robinhood_assets.py` adds an impostor flag to bot and agent replies after scoring, and `eval/live_scorer.py` does not apply it |
+| `revokecash` | Revoke.cash's approval exploit list, commit `f1f85694` | The only mention in the code is a link to revoke.cash in a bot message. Whether GoPlus takes it in cannot be established from public information, so independence from GoPlus is asserted, not proven |
+| `robinhood` | Robinhood's official token list, `api.robinhood.com/rhj/assets` (195 assets), not pinned: the API has no revisions | Nothing that computes a score reads it. `services/robinhood_assets.py` reads the same list and adds an impostor flag to bot and agent replies after scoring, which `eval/live_scorer.py` does not apply. The `impostor_token` labels rest on that same list and on a symbol and name rule close to that module's, so the class grades the score, which never sees the list, and cannot grade the impostor flag. The two rules differ: the seed's AMD "Advanced Micro Dog" is a collision under the module's rules and an `impostor_token` here |
 | `uniswap` | Uniswap's default token list (commit `20b0d0de`) and deployment docs (commit `1c7597d7`) | Not read by any code |
 | `pancakeswap` | PancakeSwap's token lists, commit `1dd8633d` | Not read by any code |
 | `geckoterminal` | Pool reserves and pool creation dates | Not read by any code; ShieldBot reads DexScreener for liquidity, a separate provider over the same pools |
@@ -61,13 +72,14 @@ Considered and left out: Forta's labelled datasets. Their README says the labels
   first 70 of those contracts in list order (the seed's 15 among them), and each of those 70 again on
   BNB Chain, Base, Arbitrum, Polygon and OP Mainnet where the address holds byte-for-byte the same code
   (45 entries). An address also on Revoke.cash's list is filed under `approval_drainer_spender`.
-- `approval_drainer_spender`: every incident in Revoke.cash's list, one address per incident and chain
-  (the first the incident lists), on the supported chains. Left out are the 10 incidents whose own
+- `approval_drainer_spender`: the evidence is a curated incident list that names the address, not a
+  victim's approval and transfer read on chain. Every incident in Revoke.cash's list, one address per
+  incident and chain (the first the incident lists), on the supported chains. Left out are the 10 incidents whose own
   description says the flaw was fixed, disabled or can no longer be exploited without telling approvers to
   revoke: `lifi-2024`, `lifi`, `maestro`, `socket`, `unizen`, `quixotic`, `flooring`, `magpie`,
   `dolomite` and `civtrade`. Radiant counts only on Arbitrum and BNB Chain: its description says the
   Ethereum and Base pools were never upgraded. The class mixes attacker contracts and wallets (12 entries
-  are EOAs) with exploited protocol contracts that are still exploitable.
+  are EOAs) with exploited protocol contracts whose flaw the list does not describe as fixed.
 - `address_poisoning`: from the Transfer logs of USDT and USDC on each chain (bridged USDT on Base) over
   the last 1,500 to 6,000 blocks before the scan. An entry P, with counterpart C, needs all of: a
   zero-value `Transfer(V -> P)` in a transaction sent by someone other than V (the `transferFrom` that
@@ -80,7 +92,8 @@ Considered and left out: Forta's labelled datasets. Their README says the labels
   first word of 3 or more letters (`Microsoft`, `Palo`, `Lam`), and its address is not on Robinhood's list.
   A name in Robinhood's own "Company • Robinhood Token" form (possibly a Robinhood deployment missing from
   the list) or with another issuer's marker (Backpack, xStock, dShares, Dinari, Backed, Ondo) is left out.
-  At most 2 per ticker, those with the most GeckoTerminal reserves first. The 3 seed impostors were
+  At most 2 per ticker, those with the most GeckoTerminal reserves first; that order put the batch of 31
+  with mispriced reserves (Known biases) ahead of the rest wherever it had a token. The 3 seed impostors were
   labelled under the class definition alone (an official ticker as symbol at another address, or the
   company as name) and are kept; their evidence has no `eth_getCode` fact. The label records that a token
   carries an official ticker or company name at another address; it asserts nothing about intent.
@@ -103,16 +116,20 @@ Considered and left out: Forta's labelled datasets. Their README says the labels
   unknown rate, not as missed recall.
 - Approved spenders include protocol contracts that were exploited, not deployed by an attacker. A
   protocol deployed them, often years ago, so the structural penalties for new or unverified contracts may
-  not apply to them.
+  not apply to them. One of them, Radiant's BNB Chain lending pool, was on the rescue scan's list of known
+  safe spenders (`services/rescue_service.py`) while this set labels it drained; it has been taken off
+  that list, so approvals to it are assessed like any other contract's.
 - Safe means listed by a major exchange, liquid and at least a year old, not audited. It includes meme and
-  fee-on-transfer tokens (BabyDoge, for example) that a tax or honeypot check may flag. 7 safe entries are
-  on ShieldBot's own router allowlist (PancakeSwap V2 Router and 1inch V5 Router on BNB Chain, Uniswap
-  SwapRouter02 on Ethereum and Base, V2 Router02 on Ethereum and Robinhood Chain, UniversalRouter on
-  Robinhood Chain) and 5 on `utils/scam_db.py`'s protected set: they score low by construction.
+  fee-on-transfer tokens (BabyDoge, for example) that a tax or honeypot check may flag.
+- 65 safe entries are not ERC-20 tokens: the 63 Uniswap deployment contracts and the PancakeSwap and 1inch
+  routers. Like drainers, they may score unknown, so the false positive rate's denominator may be nearer
+  the 194 safe tokens than all 259 entries. Some of these routers are on ShieldBot's router allowlist or
+  `utils/scam_db.py`'s protected set, but neither reaches the benchmark scan: the allowlist is read only
+  when a transaction's calldata is decoded, and `eval/live_scorer.py` passes none; the protected set only
+  refuses community blacklisting.
 - 31 impostor tokens look like one deployment: the same bytecode, no owner, a fixed supply (1,000,000 for
   30 of them), pools created 2026-07-11 to 2026-07-14. GeckoTerminal reports reserves of $2 million to $1
   billion for them, which look mispriced; the evidence quotes them as GeckoTerminal reports them.
-- The poisoning evidence records the transaction's sender, but the verify script re-reads only the logs.
 
 ## Classes without entries, and what was tried
 
@@ -133,9 +150,12 @@ Considered and left out: Forta's labelled datasets. Their README says the labels
 python -m eval.verify_onchain --dataset eval/data/benchmark_v2.json
 ```
 
-It re-reads every fact the `onchain` sources state (code size, `symbol()` and `name()`, Transfer logs),
-prints each one that differs or that the RPC would not answer, and exits non-zero if there is any. On
-2026-09-24 it read 1,325 facts for all 650 entries: none differed and none went unanswered. Run it before
+It re-reads every fact the `onchain` sources state (code size, `symbol()` and `name()`, Transfer logs, and
+for each poisoning transfer the transaction's sender, which must not be the tokens' owner), prints each
+one that differs or that the RPC would not answer, and exits non-zero if there is any. On 2026-09-24 it
+read 1,377 facts for all 650 entries: none differed. `1rpc.io/matic` then rate-limited the 10 Polygon
+transaction reads (HTTP 410 and 429), and with `--rpc 137=https://polygon-bor-rpc.publicnode.com` all
+1,377 were read and none differed. Run it before
 recording scores, and mark an entry whose facts no longer hold as stale. Free RPCs refuse old logs:
 publicnode calls a `getLogs` a few thousand blocks back an archive request. The poisoning logs therefore
 cite RPCs that served old logs on 2026-09-24 (`rpc.mevblocker.io`, `rpc-bsc.48.club`, `mainnet.base.org`,
