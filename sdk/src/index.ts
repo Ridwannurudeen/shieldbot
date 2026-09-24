@@ -711,49 +711,59 @@ export class ShieldBot {
     onEvent: () => void,
   ): Promise<FirewallResult> {
     const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let event = '';
-    let data: string[] = [];
-    for (;;) {
-      const { done, value } = await reader.read();
-      buffer += decoder.decode(value, { stream: !done });
-      // A CR that ends the text so far may be half of a CRLF, so it waits for the next chunk.
-      if (done && buffer.endsWith('\r')) {
-        buffer += '\n';
-      }
-      const lines = buffer.split(/\r\n|\n|\r(?!$)/);
-      buffer = lines.pop() as string;
-      for (const line of lines) {
-        if (line.startsWith('event:')) {
-          event = line.slice(6).trim();
-        } else if (line.startsWith('data:')) {
-          data.push(line.slice(line.startsWith('data: ') ? 6 : 5));
-        } else if (line === '' && data.length) {
-          onEvent();
-          const payload = JSON.parse(data.join('\n'));
-          if (event === 'first') {
-            try {
-              onFirst(payload as FirstVerdict);
-            } catch (error) {
-              await reader.cancel();
-              throw new ListenerError(error);
+    try {
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let event = '';
+      let data: string[] = [];
+      for (;;) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        // A CR that ends the text so far may be half of a CRLF, so it waits for the next chunk.
+        if (done && buffer.endsWith('\r')) {
+          buffer += '\n';
+        }
+        const lines = buffer.split(/\r\n|\n|\r(?!$)/);
+        buffer = lines.pop() as string;
+        for (const line of lines) {
+          if (line.startsWith('event:')) {
+            event = line.slice(6).trim();
+          } else if (line.startsWith('data:')) {
+            data.push(line.slice(line.startsWith('data: ') ? 6 : 5));
+          } else if (line === '') {
+            // An empty line ends an event, dispatched if it has data; the next one starts afresh.
+            const name = event;
+            const text = data.join('\n');
+            const dispatch = data.length > 0;
+            event = '';
+            data = [];
+            if (!dispatch) {
+              continue;
             }
-          } else if (event === 'final' || event === 'error') {
-            // The answer is complete: release the connection.
-            await reader.cancel();
-            if (event === 'final') {
+            onEvent();
+            const payload = JSON.parse(text);
+            if (name === 'first') {
+              try {
+                onFirst(payload as FirstVerdict);
+              } catch (error) {
+                throw new ListenerError(error);
+              }
+            } else if (name === 'final') {
               return payload as FirewallResult;
+            } else if (name === 'error') {
+              throw new ShieldBotError(`ShieldBot API error: ${payload.detail || `HTTP ${payload.status}`}`, payload.status);
             }
-            throw new ShieldBotError(`ShieldBot API error: ${payload.detail || `HTTP ${payload.status}`}`, payload.status);
           }
-          event = '';
-          data = [];
+        }
+        if (done) {
+          throw new Error('the stream ended without a final verdict');
         }
       }
-      if (done) {
-        throw new Error('the stream ended without a final verdict');
-      }
+    } finally {
+      // Release the connection however reading ends: the final, an error event, onFirst throwing,
+      // data that is not JSON or an early end. On a stream that already failed (an abort), cancel()
+      // rejects with that same failure, which is then the reason reading stopped.
+      await reader.cancel();
     }
   }
 }

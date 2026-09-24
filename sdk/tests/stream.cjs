@@ -22,12 +22,19 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
 /** A fetch that answers with an event stream the test writes to; like fetch, it errors the stream on abort. */
 function streamingFetch() {
   let controller;
-  let cancelled = false;
-  const body = new ReadableStream({ start(c) { controller = c; }, cancel() { cancelled = true; } });
+  let cancels = 0;
+  const stream = new ReadableStream({ start(c) { controller = c; } });
+  // Counts the SDK's reader.cancel() calls, which a closed stream would not report to its source.
+  const body = {
+    getReader() {
+      const reader = stream.getReader();
+      return { read: () => reader.read(), cancel: (reason) => { cancels += 1; return reader.cancel(reason); } };
+    },
+  };
   const requests = [];
   return {
     requests,
-    cancelled: () => cancelled,
+    cancelled: () => cancels > 0,
     fetch: async (url, init) => {
       requests.push(init);
       init.signal.addEventListener('abort', () => controller.error(Object.assign(new Error('aborted'), { name: 'AbortError' })));
@@ -172,6 +179,40 @@ test('a stream that ends without a final rejects instead of resolving', async ()
     new ShieldBot().firewall('0xb', { chainId: 56, onFirst: () => {} }),
     (error) => error instanceof ShieldBotError && error.code === 'NETWORK_ERROR',
   );
+  assert.equal(stream.cancelled(), true);
+});
+
+test('data lines are joined with LF, not glued: a JSON token split over two lines does not parse', async () => {
+  const stream = streamingFetch();
+  global.fetch = stream.fetch;
+  // Glued, these two lines would read as {"status":"unknown"}; joined with LF the string holds a raw
+  // line break, which JSON refuses. The reader is released either way.
+  stream.write('event: first\ndata: {"status":"unkn\ndata: own"}\n\n');
+  stream.write(sse('final', FINAL));
+  stream.end();
+  let called = false;
+
+  await assert.rejects(
+    new ShieldBot().firewall('0xb', { chainId: 56, onFirst: () => { called = true; } }),
+    (error) => error instanceof ShieldBotError && error.code === 'NETWORK_ERROR',
+  );
+  assert.equal(called, false);
+  assert.equal(stream.cancelled(), true);
+});
+
+test('an empty line ends an event: the next one does not inherit its name', async () => {
+  const stream = streamingFetch();
+  global.fetch = stream.fetch;
+  // A named event with no data, then data with no name: not a first.
+  stream.write(`event: first\n\ndata: ${JSON.stringify(FIRST)}\n\n`);
+  stream.write(sse('final', FINAL));
+  stream.end();
+  let called = false;
+
+  const result = await new ShieldBot().firewall('0xb', { chainId: 56, onFirst: () => { called = true; } });
+
+  assert.equal(called, false);
+  assert.deepEqual(result, FINAL);
 });
 
 test('a plain JSON answer to a streamed request (STRICT) resolves with it', async () => {
