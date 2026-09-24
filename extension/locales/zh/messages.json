@@ -183,5 +183,6 @@
   "overlayHashMessage": "原始哈希签名 (personal_sign)",
   "overlayHashMessageNote": "此请求要求您签署 32 个不是文本的字节。它们可能是某个订单、授权 (permit) 或交易的哈希，合约会将其视为由您签署。正常网站不需要这样做。",
   "overlayOpaqueMessage": "无法读取的消息",
-  "overlayOpaqueMessageNote": "此消息不是可读文本，因此您无法看到自己将要签署的内容。除非您确切知道它是什么，否则请拒绝。"
+  "overlayOpaqueMessageNote": "此消息不是可读文本，因此您无法看到自己将要签署的内容。除非您确切知道它是什么，否则请拒绝。",
+  "overlayNotes": "备注"
 }

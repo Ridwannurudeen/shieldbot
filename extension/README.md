@@ -233,7 +233,7 @@ were written without a native speaker and need the owner's review before release
 `overlayBtnHoldProceed`, `overlayBtnHoldSign`, `overlayHoldNote`, `overlayLookalikeTitle`,
 `overlayLookalikeNote`, `overlayLookalikeNew`, `overlayLookalikePast`, `overlayDelegationTitle`,
 `overlayDelegationNote`, `overlayDelegate`, `overlayDelegateUnreadable`, `overlayHashMessage`,
-`overlayHashMessageNote`, `overlayOpaqueMessage`, `overlayOpaqueMessageNote`.
+`overlayHashMessageNote`, `overlayOpaqueMessage`, `overlayOpaqueMessageNote`, `overlayNotes`.
 
 ## Tests
 

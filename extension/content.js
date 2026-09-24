@@ -529,6 +529,19 @@
     return `<div class="shieldai-section shieldai-sig-note"><p>${escapeHtml(note)}</p></div>`;
   }
 
+  // The API's notes: what a check could not measure, such as a token's
+  // holder share. A note changes no score or classification, so it is shown
+  // as information, apart from the danger signals.
+  function notesSection(result) {
+    const notes = result && Array.isArray(result.notes) ? result.notes : [];
+    if (!notes.length) return "";
+    return `
+      <div class="shieldai-section">
+        <h3>${_t("overlayNotes")}</h3>
+        <ul class="shieldai-notes">${notes.map((note) => `<li>${escapeHtml(note)}</li>`).join("")}</ul>
+      </div>`;
+  }
+
   // The address a transaction sends to: the recipient of a native send (no
   // call data), or of an ERC-20 transfer or transferFrom, in lower case; null
   // for any other call.
@@ -917,6 +930,8 @@
             <ul class="shieldai-signals">${signalsHtml}</ul>
           </div>` : ""}
 
+        ${notesSection(result)}
+
         ${bodyHtml}
 
         <div class="shieldai-actions">
@@ -1031,6 +1046,8 @@
                </div>`
             : ""
         }
+
+        ${notesSection(result)}
 
         <div class="shieldai-section">
           <h3>${_t("overlayTxImpact")}</h3>
