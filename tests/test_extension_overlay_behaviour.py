@@ -488,7 +488,8 @@ def test_focus_that_leaves_the_overlay_returns_to_the_dialog():
         CONTENT_HARNESS
         + r"""
 (async () => {
-  analyze = async () => ({result: scan({})});
+  // A SAFE verdict has no explain button, so this one is a CAUTION.
+  analyze = async () => ({result: scan({classification: 'CAUTION', risk_score: 40})});
   await intercept('request');
   const root = overlayRoot();
   const modal = overlay().querySelector('.shieldai-modal');

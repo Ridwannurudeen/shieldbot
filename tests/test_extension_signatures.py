@@ -293,3 +293,20 @@ def test_an_unsupported_chain_is_answered_as_an_unknown_chain():
   assert.match(other.error, /API error 400/);
 """
     )
+
+
+@pytest.mark.parametrize("outcome", ["SAFE", "CAUTION", "UNKNOWN", "BLOCK_RECOMMENDED"])
+def test_the_explain_button_is_not_offered_on_a_safe_verdict(outcome):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const outcome = JSON.parse(process.argv[1]);
+  analyze = async () => ({result: scan(outcome === 'UNKNOWN'
+    ? {status: 'unknown', coverage: {honeypot: 0}, coverage_reasons: {honeypot: 'No provider'}}
+    : {classification: outcome, risk_score: {SAFE: 0, CAUTION: 40, BLOCK_RECOMMENDED: 90}[outcome]})});
+  await intercept('request');
+  assert.equal(overlay().innerHTML.includes('id="shieldai-explain"'), outcome !== 'SAFE');
+""",
+        outcome,
+    )

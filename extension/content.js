@@ -889,6 +889,7 @@
         ${COVERED_NOTE}
         ${canProceed ? "" : `<p class="shieldai-strict-note">${chainUnknown ? _t("overlayChainNoProceed") : _t("overlayStrictNoProceed")}</p>`}
 
+        ${classification === "SAFE" ? "" : `
         <div class="shieldai-explain-row">
           <button class="shieldai-btn shieldai-btn-explain" id="shieldai-explain">
             ${_t("overlayBtnWhy") || "Why is this risky?"}
@@ -898,6 +899,7 @@
           <p class="shieldai-explain-loading" id="shieldai-explain-loading">Analyzing...</p>
           <p class="shieldai-explain-text" id="shieldai-explain-text"></p>
         </div>
+        `}
       </div>
     `;
 
@@ -921,6 +923,9 @@
     if (canProceed) {
       onDecision(root, "shieldai-proceed", requestId, "proceed");
     }
+
+    // A SAFE verdict has nothing to explain, so it has no "Why is this risky?".
+    if (classification === "SAFE") return;
 
     // "Why is this risky?" handler
     root.getElementById("shieldai-explain").addEventListener("click", () => {
