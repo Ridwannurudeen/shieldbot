@@ -224,15 +224,61 @@ def test_a_post_to_an_unknown_or_closed_session_is_404(client, sessions):
             f"/mcp/messages?session_id={unknown}", json=PING, headers=AUTH_HEADERS
         )
         assert response.status_code == 404
+        assert response.json() == {"detail": "Unknown or expired session"}
 
 
-def test_a_session_only_accepts_the_key_that_opened_it(client, sessions):
+def test_another_keys_session_looks_like_an_unknown_one(client, sessions):
+    # A different answer would tell a caller that the session id exists.
     session_id, queue = sessions[0].create("another-key")
 
     response = client.post(f"/mcp/messages?session_id={session_id}", json=PING, headers=AUTH_HEADERS)
 
-    assert response.status_code == 403
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Unknown or expired session"}
     assert queue.empty()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("request_id", [True, False, 1.5, None, [1], {"a": 1}])
+async def test_an_id_that_is_not_a_string_or_integer_is_an_invalid_request(container, request_id):
+    response = await server.process_jsonrpc(
+        container, {"jsonrpc": "2.0", "id": request_id, "method": "ping"}
+    )
+
+    assert response["id"] is None
+    assert response["error"]["code"] == -32600
+
+
+@pytest.mark.asyncio
+async def test_cancelling_request_id_true_does_not_cancel_request_id_1(app, container, sessions):
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def slow_scan(ctx):
+        started.set()
+        await release.wait()
+        return []
+
+    container.registry.run_all = AsyncMock(side_effect=slow_scan)
+    container.risk_engine.compute_from_results.return_value = {"rug_probability": 0, "status": "ok", "coverage": {}}
+    session_id, queue = sessions[0].create("k1")
+    url = f"/mcp/messages?session_id={session_id}"
+    call = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "scan_contract", "arguments": {"address": "0x" + "a" * 40, "chain_id": 56}},
+    }
+    cancel = {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": True}}
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as http:
+        running = asyncio.create_task(http.post(url, json=call, headers=AUTH_HEADERS))
+        await asyncio.wait_for(started.wait(), 5)
+        assert (await http.post(url, json=cancel, headers=AUTH_HEADERS)).status_code == 202
+        release.set()
+        response = await asyncio.wait_for(running, 5)
+
+    assert response.status_code == 200
+    assert queue.get_nowait()["id"] == 1
 
 
 def test_one_key_can_hold_at_most_five_streams(client, sessions):

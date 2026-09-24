@@ -269,6 +269,10 @@ async def process_jsonrpc(container, body: Dict) -> Optional[Dict]:
     method = body.get("method")
     params = body.get("params", {})
 
+    # MCP ids are strings or integers; a bool would also collide with 0 and 1 in a session's in_flight.
+    if type(request_id) not in (str, int):
+        return _jsonrpc_error(None, INVALID_REQUEST, "id must be a string or an integer")
+
     if jsonrpc_version != "2.0":
         return _jsonrpc_error(request_id, INVALID_REQUEST, "Expected jsonrpc 2.0")
 
@@ -398,10 +402,9 @@ def create_mcp_router(container) -> APIRouter:
         session_id = request.query_params.get("session_id")
         if session_id is not None:
             session = sse_manager.get(session_id)
-            if session is None:
+            # Another key's session gets the same answer as a missing one, so its existence is not disclosed.
+            if session is None or session["key_id"] != key_info["key_id"]:
                 raise HTTPException(status_code=404, detail="Unknown or expired session")
-            if session["key_id"] != key_info["key_id"]:
-                raise HTTPException(status_code=403, detail="Session belongs to another API key")
             sse_manager.touch(session_id)
 
         try:
@@ -414,7 +417,7 @@ def create_mcp_router(container) -> APIRouter:
             return error_resp
 
         request_id = body.get("id") if isinstance(body, dict) else None
-        tracked = session is not None and isinstance(request_id, (str, int))
+        tracked = session is not None and type(request_id) in (str, int)
         if tracked:
             session["in_flight"][request_id] = False
         try:
@@ -426,7 +429,7 @@ def create_mcp_router(container) -> APIRouter:
             if session is not None and body.get("method") == "notifications/cancelled":
                 params = body.get("params")
                 cancelled_id = params.get("requestId") if isinstance(params, dict) else None
-                if isinstance(cancelled_id, (str, int)) and cancelled_id in session["in_flight"]:
+                if type(cancelled_id) in (str, int) and cancelled_id in session["in_flight"]:
                     session["in_flight"][cancelled_id] = True
             return Response(status_code=202)
         # A cancelled request gets no response, as the MCP cancellation spec asks.

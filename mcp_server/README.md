@@ -14,10 +14,11 @@ Production URL: `https://api.shieldbotsecurity.online/mcp/sse`
 
 How the transport behaves (`server.py`):
 
-- A request's response is pushed to its session's stream and also returned in the POST body (HTTP 200), so a client without a stream can read it from the body. A POST with no `session_id` gets the body only. A `session_id` that is unknown or whose stream has closed gets 404, and a session opened with a different API key gets 403.
+- A request's response is pushed to its session's stream and also returned in the POST body (HTTP 200), so a client without a stream can read it from the body. A POST with no `session_id` gets the body only. A `session_id` that is unknown, whose stream has closed, or that was opened with a different API key gets 404 `Unknown or expired session`; the three cases look the same so that another key's session is not disclosed.
 - A notification (a message with no `id`, such as `notifications/initialized` or `notifications/cancelled`) is never answered: the POST returns 202 with an empty body and nothing is sent on the stream. A `notifications/cancelled` for a request still running on the same session drops that request's response: its POST also returns 202 and nothing goes on the stream. The work itself runs to completion.
 - A message with no `id` is dropped silently even when it is invalid (wrong `jsonrpc`, missing or unknown method), because a notification can never be answered.
 - A JSON array (a batch) or any other non-object body is answered with an Invalid Request error (-32600).
+- Through the API, a body that is not valid JSON is refused with HTTP 400 (and one sent without a JSON `Content-Type` with 415) by the API's request middleware before it reaches the MCP router, so nothing goes on the stream. The router's own Parse error (-32700) applies only where it is mounted without that middleware.
 - The stream sends a `: heartbeat` comment every 30 seconds while idle and closes after 30 minutes without a message; a client that disconnects is noticed sooner. Heartbeats do not count as activity. One API key can hold at most 5 open streams (the 6th gets HTTP 429) and the server at most 50 (the 51st gets 503); idle sessions are dropped before either limit is checked.
 - A session holds at most 100 messages its stream has not yet delivered. A client that stops reading its stream loses the session when the 101st arrives: that POST still gets its response in the body, and later POSTs to the session get 404.
 
@@ -25,7 +26,7 @@ How the transport behaves (`server.py`):
 
 - `initialize` always answers `protocolVersion: "2024-11-05"`, whatever version the client asks for; the client decides whether to continue.
 - Declared capabilities: `tools`, `resources` and `prompts`, with no sub-capabilities (no `listChanged`, no `subscribe`).
-- Methods handled: `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list`, `prompts/get`. Anything else is Method not found (-32601). A request whose `method` is not a string is Invalid Request (-32600); `params` that is not an object, or a `name`, `uri` or `arguments` of the wrong type inside it, is Invalid params (-32602). Not implemented: `resources/subscribe`, `logging/setLevel`, `completion/complete`.
+- Methods handled: `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list`, `prompts/get`. Anything else is Method not found (-32601). A request whose `id` is not a string or an integer (null, a bool, a fraction) or whose `method` is not a string is Invalid Request (-32600); `params` that is not an object, or a `name`, `uri` or `arguments` of the wrong type inside it, is Invalid params (-32602). Not implemented: `resources/subscribe`, `logging/setLevel`, `completion/complete`.
 - A tool that fails validation (a missing or non-string required argument, which the error names; bad address; missing, non-integer or unsupported `chain_id`; unknown tool name) returns a result with `isError: true` and `{"error": "..."}` as its text, delivered on the stream like any other result, and no analysis runs.
 
 ## Authentication
