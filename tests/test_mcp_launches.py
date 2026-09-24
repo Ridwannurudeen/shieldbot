@@ -171,8 +171,10 @@ def test_launch_tool_rejects_an_unsupported_chain_before_the_database():
 
     response = _call(_container(db), {"chain_id": 999999})
 
-    assert response.status_code == 400
-    assert "4663" in response.json()["error"]["message"]
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["isError"] is True
+    assert "4663" in json.loads(result["content"][0]["text"])["error"]
     db.get_launch_feed.assert_not_awaited()
 
 
