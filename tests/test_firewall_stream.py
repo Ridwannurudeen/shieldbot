@@ -337,7 +337,8 @@ async def test_a_target_without_a_local_entry_is_still_answered_from_the_cache(s
     body = plain.json()
     assert (body["cached"], body["classification"]) == (True, verdicts.SAFE)
     assert services.db.upsert_contract_score.await_count == 0
-    kind, final = parse(streamed.text)[-1]
+    # The cached branch answers at once: the stream is the final alone.
+    [(kind, final)] = parse(streamed.text)
     assert kind == "final" and final.pop("final") is True
     assert final == body
 
@@ -558,6 +559,39 @@ async def test_a_client_that_leaves_after_the_first_does_not_stop_the_scan(strea
     del scan
     gc.collect()
     assert "never retrieved" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_client_that_leaves_while_the_final_is_awaited_does_not_stop_the_scan(stream_api, monkeypatch, caplog):
+    api, services = stream_api
+    blacklist(api)
+    timer(monkeypatch, api, FIRST_VERDICT_SECONDS / SCALE)
+    gate = asyncio.Event()
+    services.registry = registry(structural=returns("structural", [ADMIN_MATCH]), honeypot=held("honeypot", gate))
+
+    with caplog.at_level("INFO", logger="api"):
+        events = events_of(api)
+        kind, _ = await next_event(events)
+        assert kind == "first"
+        scan = scan_task()
+        # The server asks for the next event and the generator waits on the scan, as the response does
+        # between the first and the final; then the client disconnects and the response is cancelled.
+        waiting = asyncio.ensure_future(events.__anext__())
+        await asyncio.sleep(0)
+        waiting.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiting
+
+        assert not scan.done()
+        gate.set()
+        await asyncio.wait_for(asyncio.wait({scan}), TIMEOUT)
+
+    assert not scan.cancelled()
+    assert services.db.upsert_contract_score.await_count == 1
+    assert services.db.insert_scan_evidence.await_count == 1
+    [line] = [record.getMessage() for record in caplog.records if record.getMessage().startswith("Firewall stream ")]
+    timings = json.loads(line.removeprefix("Firewall stream "))
+    assert (timings["first_kind"], timings["final_at_ms"]) == ("block", None)
 
 
 @pytest.mark.asyncio
