@@ -174,12 +174,10 @@ class RiskEngine:
             if contract_data.get('is_contract') is False and honeypot_data.get('simulation_failed'):
                 composite = max(composite, 80)
 
+            # A confirmed honeypot floors at 80: deep liquidity and low taxes do not make a token
+            # that cannot be sold safe to buy.
             if honeypot_data.get('is_honeypot'):
-                sell_tax = honeypot_data.get('sell_tax')
-                is_false_positive_candidate = liquidity_info is not None and sell_tax is not None and liquidity_info > 500_000 and sell_tax < 5
-                is_proxy = contract_data.get('has_proxy', False)
-                if not is_false_positive_candidate or (honeypot_data.get('low_tax_honeypot') and not is_proxy):
-                    composite = max(composite, 80)
+                composite = max(composite, 80)
 
             if ethos_data.get('severe_reputation_flag'):
                 pair_age = dex_data.get('pair_age_hours')
@@ -318,13 +316,10 @@ class RiskEngine:
             if contract_data.get('is_contract') is False and honeypot_data.get('simulation_failed'):
                 composite = max(composite, 80)
 
-            # Honeypot escalation — floor at 80 if confirmed
+            # Honeypot escalation — floor at 80 if confirmed. Deep liquidity and low taxes do not
+            # make a token that cannot be sold safe to buy.
             if honeypot_data.get('is_honeypot'):
-                sell_tax = honeypot_data.get('sell_tax')
-                is_false_positive_candidate = liquidity is not None and sell_tax is not None and liquidity > 500_000 and sell_tax < 5
-                is_proxy = contract_data.get('has_proxy', False)
-                if not is_false_positive_candidate or (honeypot_data.get('low_tax_honeypot') and not is_proxy):
-                    composite = max(composite, 80)
+                composite = max(composite, 80)
 
             if ethos_data.get('severe_reputation_flag'):
                 pair_age = dex_data.get('pair_age_hours')

@@ -195,3 +195,20 @@ def test_high_severity_scam_match_keeps_the_70_floor(entrypoint, is_token):
     risk = _scam_risk(entrypoint, is_token, HONEYPOT_MATCH)
     assert risk["rug_probability"] == 70
     assert risk["risk_level"] == "MEDIUM"
+
+
+@pytest.mark.parametrize("entrypoint", ["direct", "registry"])
+@pytest.mark.parametrize("has_proxy", [False, True])
+def test_confirmed_honeypot_floors_at_80_whatever_the_liquidity(entrypoint, has_proxy):
+    # A verified, renounced token with deep liquidity and low taxes that cannot be sold.
+    contract = {**CLEAN_TOKEN, "has_proxy": has_proxy}
+    honeypot = {"is_honeypot": True, "can_buy": True, "can_sell": False, "buy_tax": 1, "sell_tax": 2}
+    if entrypoint == "direct":
+        risk = RiskEngine().compute_composite_risk(contract, honeypot, DEEP_MARKET, ETHOS)
+    else:
+        risk = RiskEngine().compute_from_results(
+            _results(15 if has_proxy else 0, contract=contract, market=DEEP_MARKET, honeypot=honeypot)
+        )
+    assert risk["rug_probability"] == 80
+    assert risk["risk_level"] == "HIGH"
+    assert risk["risk_archetype"] == "honeypot"
