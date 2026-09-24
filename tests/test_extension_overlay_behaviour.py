@@ -23,6 +23,13 @@ FAKE_DOM = r"""
 const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
 const {webcrypto} = require('crypto');
 const posted = [];
+// Page-side mutation observers: every removal notifies them, as a childList change would.
+const observers = new Set();
+class FakeMutationObserver {
+  constructor(callback) { this.callback = callback; }
+  observe() { observers.add(this); }
+  disconnect() { observers.delete(this); }
+}
 class El {
   constructor(tag, root, index) {
     this.tagName = tag.toUpperCase(); this.attrs = {}; this.listeners = {}; this.style = {};
@@ -56,6 +63,11 @@ class El {
   remove() {
     if (this.parent) this.parent.children = this.parent.children.filter(c => c !== this);
     this.parent = null;
+    for (const observer of [...observers]) queueMicrotask(() => observer.callback([]));
+  }
+  get isConnected() {
+    for (let node = this; node; node = node.parent) if (node === body || node === html) return true;
+    return false;
   }
   attachShadow({mode}) {
     const host = this;
@@ -111,14 +123,17 @@ const window = {
   location: {href: 'https://dapp.example/', hostname: 'dapp.example'},
   history: {length: 1},
 };
+window.top = window;
 function deliver(data) { for (const fn of [...(windowListeners.message || [])]) fn({source: window, data}); }
 const flush = () => new Promise(resolve => setTimeout(resolve, 60));
+// Taken now, so the tests' own proofs stay right after a test replaces page built-ins.
+const hImport = webcrypto.subtle.importKey.bind(webcrypto.subtle), hSign = webcrypto.subtle.sign.bind(webcrypto.subtle);
+const hEncode = TextEncoder.prototype.encode.bind(new TextEncoder());
 async function proofFor(token, message) {
-  const encoder = new TextEncoder();
-  const key = await webcrypto.subtle.importKey('raw', encoder.encode(token), {name: 'HMAC', hash: 'SHA-256'}, false, ['sign']);
-  const mac = await webcrypto.subtle.sign('HMAC', key, encoder.encode(message));
-  return Array.from(new Uint8Array(mac), b => b.toString(16).padStart(2, '0')).join('');
+  const key = await hImport('raw', hEncode(token), {name: 'HMAC', hash: 'SHA-256'}, false, ['sign']);
+  return new Uint8Array(await hSign('HMAC', key, hEncode(message)));
 }
+const bytes = value => Array.from(value || []);
 const plain = value => JSON.parse(JSON.stringify(value));
 """
 
@@ -128,7 +143,7 @@ CONTENT_HARNESS = (
 const storage = {language: 'en'};
 const analyses = [];
 let analyze = async () => ({error: 'API error 503: unavailable'});
-let phishing = false;
+let phishing = false, phishingChecks = 0;
 let clock = 1000000;
 let fetchDelays = [];
 const chrome = {
@@ -137,13 +152,14 @@ const chrome = {
     getURL: path => 'chrome-extension://id/' + path,
     async sendMessage(message) {
       if (message.type === 'SHIELDAI_ANALYZE') { analyses.push(message.tx); return analyze(message.tx); }
+      phishingChecks++;
       return {result: {is_phishing: phishing}};
     },
   },
 };
 const context = vm.createContext({
   window, document, chrome, crypto: webcrypto, TextEncoder, TextDecoder, CustomEvent, setTimeout, clearTimeout,
-  console, Date: {now: () => clock},
+  console, Date: {now: () => clock}, MutationObserver: FakeMutationObserver,
   fetch: async url => {
     const delay = fetchDelays.shift();
     if (delay) await new Promise(resolve => setTimeout(resolve, delay));
@@ -160,11 +176,16 @@ function overlay() { const root = overlayRoot(); return root ? root.getElementBy
 function byId(id) { return overlayRoot().getElementById(id); }
 function userClick(el) { el.dispatch('click', {isTrusted: true}); }
 function userKey(key, extra = {}) { return overlay().dispatch('keydown', {key, isTrusted: true, ...extra}); }
-function verdicts() { return plain(posted.filter(message => message.type === 'SHIELDAI_TX_VERDICT')); }
+function verdicts() {
+  return posted.filter(message => message.type === 'SHIELDAI_TX_VERDICT')
+    .map(({requestId, action, proof}) => ({requestId, action, proof: bytes(proof)}));
+}
 async function assertVerdicts(expected) {
   const actual = verdicts();
   assert.deepEqual(actual.map(({requestId, action}) => [requestId, action]), expected);
-  for (const {requestId, action, proof} of actual) assert.equal(proof, await proofFor(token, `${requestId}:${action}`));
+  for (const {requestId, action, proof} of actual) {
+    assert.deepEqual(proof, bytes(await proofFor(token, `${requestId}:${action}`)));
+  }
 }
 async function intercept(requestId, tx = {to: '0x' + 'a'.repeat(40), chainId: 56}, method = 'eth_sendTransaction') {
   deliver({type: 'SHIELDAI_TX_INTERCEPT', requestId, method, tx, proof: await proofFor(token, `${requestId}:intercept`)});
@@ -428,10 +449,10 @@ def test_shown_signal_proves_the_request_without_revealing_the_token():
 (async () => {
   analyze = async () => ({result: scan({})});
   await intercept('request');
-  const shown = plain(posted.filter(message => message.type === 'SHIELDAI_TX_SHOWN'));
+  const shown = posted.filter(message => message.type === 'SHIELDAI_TX_SHOWN');
   assert.equal(shown.length, 1);
   assert.equal(shown[0].requestId, 'request');
-  assert.equal(shown[0].proof, await proofFor(token, 'request:shown'));
+  assert.deepEqual(bytes(shown[0].proof), bytes(await proofFor(token, 'request:shown')));
   assert.equal(verdicts().length, 0, 'a verdict was sent before the user decided');
 """
     )
@@ -536,7 +557,7 @@ def test_unknown_result_has_its_own_badge_and_reason(state):
 
 def test_phishing_banner_is_shielded_and_needs_a_real_click():
     run_node(
-        CONTENT_HARNESS.replace("let phishing = false;", "let phishing = true;")
+        CONTENT_HARNESS.replace("let phishing = false,", "let phishing = true,")
         + r"""
 (async () => {
   await flush();
@@ -580,11 +601,12 @@ const provider = {
 window.ethereum = provider;
 window.dispatchEvent = () => {};
 const context = vm.createContext({
-  window, document, crypto: webcrypto, TextEncoder, CustomEvent, queueMicrotask,
-  Event: class { constructor(type) { this.type = type; } }, Promise, Array, Uint8Array,
+  window, document, crypto: {subtle: webcrypto.subtle, randomUUID: webcrypto.randomUUID.bind(webcrypto)},
+  TextEncoder, CustomEvent, structuredClone, queueMicrotask,
+  Event: class { constructor(type) { this.type = type; } },
   console: new Proxy({}, {get: (_, name) => (...args) => logged.push([name, ...args])}),
   setTimeout(fn, delay) { const id = ++nextTimer; timers.set(id, {fn, delay}); return id; },
-  clearTimeout(id) { timers.delete(id); },
+  clearTimeout(id) { timers.delete(id); }, setInterval() { return 0; }, clearInterval() {},
 });
 vm.runInContext(fs.readFileSync('extension/inject.js', 'utf8'), context);
 // Play content.js's side of the handoff: here inject.js started first and is listening.
@@ -703,7 +725,7 @@ def test_inject_takes_the_token_once_and_never_posts_it():
   // A later offer, which only a page script could make, is not taken.
   assert(document.dispatchEvent(new CustomEvent('shieldai:channel', {detail: 'page-token', cancelable: true})));
   const {pending, requestId, intercept} = await startRequest();
-  assert.equal(intercept.proof, await proof(requestId, 'intercept'));
+  assert.deepEqual(bytes(intercept.proof), bytes(await proof(requestId, 'intercept')));
   deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'proceed',
     proof: await proofFor('page-token', `${requestId}:proceed`)});
   await flush();
@@ -738,13 +760,159 @@ def test_inject_leaves_no_page_readable_marker_and_logs_nothing():
 (async () => {
   const markers = [...Object.keys(window), ...Object.keys(provider)].filter(key => /shield/i.test(key));
   assert.deepEqual(markers, []);
-  for (const fn of windowListeners['eip6963:announceProvider']) fn({detail: {provider, info: {name: 'same'}}});
+  for (const fn of windowListeners['eip6963:announceProvider']) {
+    fn(new CustomEvent('eip6963:announceProvider', {detail: {provider, info: {name: 'same'}}}));
+  }
   const {pending, requestId} = await startRequest();
   assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').length, 1,
     'the provider was wrapped twice');
   deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'proceed', proof: await proof(requestId, 'proceed')});
   assert.equal(await pending, 'sent');
   assert.deepEqual(logged, []);
+"""
+    )
+
+
+# Built-ins a page script could replace in its own world before the first wallet call.
+PATCHES = {
+    "set-has": "Set.prototype.has = () => false;",
+    "weakset-has": "WeakSet.prototype.has = () => true;",
+    "weakset-add": "WeakSet.prototype.add = function () { return this; };",
+    "define-property": "Object.defineProperty = (target) => target;",
+    "object-prototype-accessor": "Object.prototype.get = function () { return undefined; };",
+    "function-bind": "Function.prototype.bind = function () { return async () => 'forwarded'; };",
+    "subtle-sign": "crypto.subtle.sign = async () => new Uint8Array(32).buffer;",
+    "subtle-import-key": "crypto.subtle.importKey = async () => null;",
+    "text-encoder": "TextEncoder.prototype.encode = () => new Uint8Array(0);",
+    "uint8array": "Uint8Array = function () { return new Array(32).fill(0); };",
+    "random-uuid": "crypto.randomUUID = () => 'predictable';",
+    "post-message": "window.postMessage = () => {};",
+    "add-event-listener": "window.addEventListener = () => {};",
+    "set-timeout": "setTimeout = () => 0;",
+    "clear-timeout": "clearTimeout = () => {};",
+    "array-from": "Array.from = () => [];",
+    "number-to-string": "Number.prototype.toString = () => '0';",
+    "pad-start": "String.prototype.padStart = () => '00';",
+    "structured-clone": "structuredClone = (value) => value;",
+    "custom-event-detail": "Object.defineProperty(CustomEvent.prototype, 'detail', {get() { return null; }});",
+    "promise-then": (
+        "const then = Promise.prototype.then;"
+        "Promise.prototype.then = function (ok, fail) {"
+        "  return then.call(this, typeof ok === 'function' ? (value) => ok(value && value.byteLength === 32 ? new Uint8Array(32).buffer : value) : ok, fail);"
+        "};"
+    ),
+    "promise-constructor-and-then": (
+        "const then = Promise.prototype.then;"
+        "Promise.prototype.then = function (ok, fail) {"
+        "  return then.call(this, typeof ok === 'function' ? (value) => ok(value && value.byteLength === 32 ? new Uint8Array(32).buffer : value) : ok, fail);"
+        "};"
+        "Promise.prototype.constructor = function Page(executor) { return new Promise(executor); };"
+    ),
+}
+
+
+@pytest.mark.parametrize("patch", sorted(PATCHES))
+def test_replaced_built_ins_cannot_let_a_request_skip_the_decision(patch):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  vm.runInContext(JSON.parse(process.argv[1]), context);
+  // A provider that arrives after the patch must still be wrapped.
+  const late = {on() {}, async request(args) { if (args.method === 'eth_chainId') return '0x38'; sent.push(args); return 'sent'; }};
+  for (const fn of windowListeners['eip6963:announceProvider']) {
+    fn(new CustomEvent('eip6963:announceProvider', {detail: {provider: late, info: {name: 'late'}}}));
+  }
+  for (const target of [provider, late]) {
+    const before = sent.length;
+    const pending = target.request({method: 'eth_sendTransaction', params: [{to: '0x' + 'a'.repeat(40)}]});
+    pending.catch(() => {});
+    await flush();
+    assert.equal(sent.length, before, 'the request reached the wallet before any decision');
+    const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+    assert(intercept, 'the request was not sent for a decision');
+    const requestId = intercept.requestId;
+    assert.notEqual(requestId, 'predictable');
+    for (const forged of [new Uint8Array(32), intercept.proof, await proof(requestId, 'block')]) {
+      deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'proceed', proof: forged});
+    }
+    await flush();
+    assert.equal(sent.length, before, 'a forged verdict sent the transaction');
+    deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'proceed', proof: await proof(requestId, 'proceed')});
+    await flush();
+    assert.equal(sent.length, before + 1, 'the real decision no longer works');
+  }
+""",
+        PATCHES[patch],
+    )
+
+
+def test_fail_closed_timer_survives_replaced_timers():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  vm.runInContext('setTimeout = () => 0; clearTimeout = () => {};', context);
+  const {pending} = await startRequest();
+  assert(fireFailClosedTimer(), 'the fail-closed timer was not armed');
+  await assert.rejects(pending, /blocked/);
+  assert.equal(sent.length, 0);
+"""
+    )
+
+
+def test_the_wallet_gets_the_request_that_was_analysed():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  let reads = 0;
+  const benign = '0x' + 'b'.repeat(40), drainer = '0x' + 'd'.repeat(40);
+  const tx = {get to() { return reads++ === 0 ? benign : drainer; }};
+  const pending = provider.request({method: 'eth_sendTransaction', params: [tx]});
+  pending.catch(() => {});
+  await flush();
+  const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+  assert.equal(intercept.tx.to, benign);
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId: intercept.requestId, action: 'proceed',
+    proof: await proof(intercept.requestId, 'proceed')});
+  await flush();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].params[0].to, benign, 'the wallet was handed a different transaction');
+"""
+    )
+
+
+def test_replaced_json_parse_cannot_change_the_typed_data_shown():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  vm.runInContext("JSON.parse = () => ({primaryType: 'Harmless', message: {}});", context);
+  const typed = JSON.stringify({primaryType: 'Permit', domain: {}, message: {spender: '0x' + 'e'.repeat(40)}});
+  const pending = provider.request({method: 'eth_signTypedData_v4', params: ['0x' + 'b'.repeat(40), typed]});
+  pending.catch(() => {});
+  await flush();
+  const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+  assert.equal(intercept.tx.typedData.primaryType, 'Permit');
+"""
+    )
+
+
+def test_a_provider_set_later_is_wrapped_before_the_page_can_use_it():
+    run_node(
+        INJECT_HARNESS.replace("window.ethereum = provider;\n", "")
+        + r"""
+(async () => {
+  const original = provider.request;
+  window.ethereum = provider;
+  // No timer has run yet: the setter itself wrapped the provider.
+  assert.notEqual(window.ethereum.request, original);
+  const pending = window.ethereum.request({method: 'eth_sendTransaction', params: [{to: '0x' + 'a'.repeat(40)}]});
+  pending.catch(() => {});
+  await flush();
+  assert.equal(sent.length, 0);
+  assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').length, 1);
 """
     )
 

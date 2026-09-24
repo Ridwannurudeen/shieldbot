@@ -108,7 +108,7 @@ async function proofFor(message) {
   const encoder = new TextEncoder();
   const key = await webcrypto.subtle.importKey('raw', encoder.encode('test'), {name: 'HMAC', hash: 'SHA-256'}, false, ['sign']);
   const mac = await webcrypto.subtle.sign('HMAC', key, encoder.encode(message));
-  return Array.from(new Uint8Array(mac), b => b.toString(16).padStart(2, '0')).join('');
+  return new Uint8Array(mac);
 }
 const window = {
   ethereum: provider,
@@ -126,7 +126,8 @@ const window = {
   },
 };
 const context = vm.createContext({
-  window, console: {log() {}, warn() {}}, document: new EventTarget(), CustomEvent, TextEncoder, Uint8Array,
+  window, console: {log() {}, warn() {}}, document: new EventTarget(), CustomEvent, TextEncoder, structuredClone,
+  setInterval() { return 0; }, clearInterval() {},
   crypto: {randomUUID: () => String(++requestNumber), subtle: webcrypto.subtle}, Event: class {constructor(type) {this.type = type;}},
   setTimeout(fn, delay) {if (scenario === 'timeout' && delay < 60000) queueMicrotask(fn); return 1;},
   clearTimeout() {}, queueMicrotask,
@@ -163,7 +164,7 @@ context.document.dispatchEvent(new CustomEvent('shieldai:channel', {detail: 'tes
     assert.ok(queries >= 2);
     if (scenario === 'independent-providers') {
       const second = {on() {}, async request(args) {return args.method === 'eth_chainId' ? '0x1' : 'second';}};
-      window.dispatchEvent({type: 'eip6963:announceProvider', detail: {provider: second, info: {name: 'second'}}});
+      window.dispatchEvent(new CustomEvent('eip6963:announceProvider', {detail: {provider: second, info: {name: 'second'}}}));
       assert.equal(await second.request({method: 'eth_sendTransaction', params: [tx]}), 'second');
       assert.equal(intercepted[1].chainId, 1);
       assert.equal(await provider.request({method: 'eth_sendTransaction', params: [tx]}), 'sent');

@@ -47,16 +47,25 @@
         .map((b) => b.toString(16).padStart(2, "0"))
         .join("");
 
-  // HMAC of `${requestId}:${purpose}` under the channel token, as hex. The
-  // purpose ("intercept", "shown", "block" or "proceed") is part of the input,
-  // so a proof seen for one message cannot be replayed as another.
+  // HMAC of `${requestId}:${purpose}` under the channel token, as 32 bytes.
+  // The purpose ("intercept", "shown", "block" or "proceed") is part of the
+  // input, so a proof seen for one message cannot be replayed as another.
   async function channelProof(requestId, purpose) {
     const encoder = new TextEncoder();
     const key = await crypto.subtle.importKey(
       "raw", encoder.encode(_CHANNEL_TOKEN), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
     );
-    const mac = await crypto.subtle.sign("HMAC", key, encoder.encode(`${requestId}:${purpose}`));
-    return Array.from(new Uint8Array(mac), (b) => b.toString(16).padStart(2, "0")).join("");
+    return new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(`${requestId}:${purpose}`)));
+  }
+
+  // Compare a received proof with the expected one byte by byte, as inject.js
+  // does.
+  function sameProof(expected, received) {
+    if (typeof received !== "object" || received === null) return false;
+    for (let i = 0; i < 32; i++) {
+      if (received[i] !== expected[i]) return false;
+    }
+    return true;
   }
 
   // Hand the token to inject.js. Both are manifest content scripts that run at
@@ -101,7 +110,7 @@
     if (typeof requestId !== "string" || _seenRequests.has(requestId)) return;
     _seenRequests.add(requestId);
     // The page can post intercepts too; only inject.js can prove this one.
-    if (proof !== await channelProof(requestId, "intercept")) return;
+    if (!sameProof(await channelProof(requestId, "intercept"), proof)) return;
     const received = Date.now();
 
     // Check if extension is enabled
