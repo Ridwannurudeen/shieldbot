@@ -1125,9 +1125,21 @@ function signatureMade() {
   for (const wake of signatureWaiters.splice(0)) wake();
 }
 // Resolves once inject.js has completed `count` signatures since it started, and has run what
-// follows the last one (its promise callbacks all run before the next macrotask).
+// follows the last one (its promise callbacks all run before the next macrotask). Rejects after two
+// seconds, so a check that never comes fails as an assertion, not as the subprocess's timeout.
 async function signaturesMade(count) {
-  while (signatures < count) await new Promise(resolve => signatureWaiters.push(resolve));
+  let timer;
+  const late = new Promise((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(
+      `inject.js completed ${signatures} of the ${count} signatures awaited within 2 s`)), 2000);
+  });
+  try {
+    while (signatures < count) {
+      await Promise.race([new Promise(resolve => signatureWaiters.push(resolve)), late]);
+    }
+  } finally {
+    clearTimeout(timer);
+  }
   await new Promise(resolve => setImmediate(resolve));
 }
 // In a browser, crypto's promises belong to the page's world, so a page that replaces its
@@ -1138,6 +1150,8 @@ context.crypto = vm.runInContext(`(host, signed) => ({
     importKey: (...args) => Promise.resolve(host.subtle.importKey(...args)),
     sign: (...args) => {
       const mac = host.subtle.sign(...args);
+      // Registered before inject.js awaits mac, so a signature is counted before inject.js acts on it:
+      // once the intercept is posted, its signature is already in the count a test starts from.
       mac.then(signed, signed);
       return Promise.resolve(mac);
     },
