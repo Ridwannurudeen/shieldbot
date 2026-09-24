@@ -117,6 +117,8 @@
     // ─── Constants ────────────────────────────────────────────────────────────
     const API              = window.location.origin;
     const REFRESH_MS       = 20000;
+    // Items requested from each threat feed source; a source that returns this many may hold more.
+    const FEED_LIMIT       = 100;
 
     // Mirrors utils/chain_info.py.
     const CHAIN_NAMES  = { 56:'BNB', 1:'ETH', 8453:'Base', 42161:'ARB', 137:'Polygon', 10:'OP', 204:'opBNB', 4663:'Robinhood' };
@@ -159,17 +161,6 @@
       });
     }
 
-    function pctChange(threats) {
-      const now = Date.now() / 1000;
-      const last = threats.filter(t => (now - (t.detected_at || t.created_at || 0)) < 86400).length;
-      const prev = threats.filter(t => {
-        const a = now - (t.detected_at || t.created_at || 0);
-        return a >= 86400 && a < 172800;
-      }).length;
-      if (prev === 0) return null;
-      return ((last - prev) / prev) * 100;
-    }
-
     function chainDist(threats) {
       const m = {};
       threats.forEach(t => {
@@ -179,61 +170,7 @@
       return Object.entries(m).map(([name, count]) => ({ name, count })).sort((a,b) => b.count - a.count);
     }
 
-    // ─── SparkLine (SVG) ──────────────────────────────────────────────────────
-    function SparkLine({ data = [], color = '#3B82F6', h = 34 }) {
-      if (data.length < 2) return <div style={{ height: h, width: 80 }} />;
-      const w = 80;
-      const max = Math.max(...data, 1);
-      const pts = data.map((v, i) =>
-        `${(i / (data.length - 1)) * w},${h - (v / max) * (h - 4) - 2}`
-      ).join(' ');
-      return (
-        <svg width={w} height={h} style={{ overflow:'visible', flexShrink:0 }}>
-          <polyline points={pts} fill="none" stroke={color}
-            strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.85" />
-        </svg>
-      );
-    }
-
-    // ─── KPI Tile ──────────────────────────────────────────────────────────────
-    function KPITile({ label, value, color, sparkData, pct, icon }) {
-      const isUp = pct > 0;
-      return (
-        <div className="glass rounded-xl p-4 fade-up flex flex-col gap-2"
-             style={{ border:'1px solid #334155' }}>
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-widest"
-                  style={{ color:'#64748B' }}>{label}</span>
-            <span style={{ fontSize:16 }}>{icon}</span>
-          </div>
-          <div className="flex items-end justify-between gap-2">
-            <div>
-              <div className="text-2xl font-bold leading-none" style={{ color: value == null ? '#475569' : color }}>
-                {value == null ? '—' : typeof value === 'number' ? value.toLocaleString() : value}
-              </div>
-              <div className="text-xs mt-1.5 font-medium"
-                   style={{ color: pct === null ? '#334155' : pct === 0 ? '#64748B' : isUp ? '#EF4444' : '#10B981' }}>
-                {pct === null ? '— no baseline' : pct === 0 ? '= 0.0% vs yesterday' : `${isUp ? '↑' : '↓'} ${Math.abs(pct).toFixed(1)}% vs yesterday`}
-              </div>
-            </div>
-            <SparkLine data={sparkData} color={color} />
-          </div>
-        </div>
-      );
-    }
-
     // ─── Skeletons ────────────────────────────────────────────────────────────
-    function SkeletonTile() {
-      return (
-        <div className="rounded-xl p-4 flex flex-col gap-3"
-             style={{ background:'#1E293B', border:'1px solid #334155' }}>
-          <div className="skeleton" style={{ height:12, width:96 }} />
-          <div className="skeleton" style={{ height:28, width:64 }} />
-          <div className="skeleton" style={{ height:10, width:80 }} />
-        </div>
-      );
-    }
-
     function SkeletonRow() {
       return (
         <div className="flex items-center gap-4 p-4 rounded-xl"
@@ -592,13 +529,19 @@
     }
 
     // ─── Threat Velocity Chart ────────────────────────────────────────────────
-    function ThreatVelocityChart({ data, unavailable }) {
-      if (unavailable) {
+    function ThreatVelocityChart({ data, unavailable, capped }) {
+      // A capped source that reaches back less than 24 h would show its unloaded hours as zero.
+      const short = capped.filter(c => c.since > Date.now() / 1000 - 86400);
+      if (unavailable || short.length) {
         return (
           <div className="glass rounded-xl p-5" style={{ border:'1px solid #334155' }}>
             <div className="text-sm font-semibold mb-4" style={{ color:'#F8FAFC' }}>Threat Velocity</div>
-            <div className="flex items-center justify-center text-sm" style={{ height:190, color:'#475569' }}>
-              Threat feed unavailable.
+            <div className="flex items-center justify-center text-sm text-center px-4" style={{ height:190, color:'#475569' }}>
+              {unavailable
+                ? 'Threat feed unavailable.'
+                : `Hidden: the newest ${FEED_LIMIT} ${short.map(c => c.name).join(' and ')} reach back only to `
+                  + `${new Date(Math.max(...short.map(c => c.since)) * 1000).toLocaleString()}, `
+                  + 'so an hourly count for the last 24 h would show the earlier hours as zero.'}
             </div>
           </div>
         );
@@ -608,7 +551,7 @@
           <div className="flex items-start justify-between mb-4">
             <div>
               <div className="text-sm font-semibold" style={{ color:'#F8FAFC' }}>Threat Velocity</div>
-              <div className="text-xs mt-0.5" style={{ color:'#64748B' }}>Detections per hour · last 24h</div>
+              <div className="text-xs mt-0.5" style={{ color:'#64748B' }}>Detections per hour · last 24 h</div>
             </div>
             <span className="text-xs px-2.5 py-1 rounded-full font-medium"
                   style={{ background:'rgba(59,130,246,0.15)', color:'#3B82F6' }}>Hourly</span>
@@ -639,18 +582,24 @@
     // ─── Chain Distribution Chart ─────────────────────────────────────────────
     const BAR_COLORS = { BNB:'#F0B90B', ETH:'#627EEA', Base:'#0052FF', ARB:'#28A0F0', Polygon:'#8247E5', OP:'#FF0420', opBNB:'#F0B90B', Robinhood:'#84CC16' };
 
-    function ChainDistributionChart({ data, loading, unavailable }) {
+    function ChainDistributionChart({ data, loading, unavailable, capped }) {
       const haslive = data.length > 0;
+      const cappedNote = capped.length
+        ? ` · ${capped.map(c => c.name).join(' and ')} capped at the newest ${FEED_LIMIT}`
+        : '';
       return (
         <div className="glass rounded-xl p-5" style={{ border:'1px solid #334155' }}>
           <div className="flex items-start justify-between mb-4">
             <div>
               <div className="text-sm font-semibold" style={{ color:'#F8FAFC' }}>Chain Distribution</div>
-              <div className="text-xs mt-0.5" style={{ color:'#64748B' }}>Threats grouped by network</div>
+              <div className="text-xs mt-0.5" style={{ color:'#64748B' }}>Threats in the loaded feed, by network{cappedNote}</div>
             </div>
             {haslive
-              ? <span className="text-xs px-2.5 py-1 rounded-full font-medium"
-                      style={{ background:'rgba(240,185,11,0.15)', color:'#F0B90B' }}>Live</span>
+              ? capped.length
+                ? <span className="text-xs px-2.5 py-1 rounded-full font-medium"
+                        style={{ background:'rgba(100,116,139,0.15)', color:'#94A3B8' }}>Capped</span>
+                : <span className="text-xs px-2.5 py-1 rounded-full font-medium"
+                        style={{ background:'rgba(240,185,11,0.15)', color:'#F0B90B' }}>Live</span>
               : !loading && <span className="text-xs px-2.5 py-1 rounded-full font-medium"
                       style={{ background:'rgba(100,116,139,0.15)', color:'#64748B' }}>No data</span>
             }
@@ -672,35 +621,6 @@
             : <div className="flex items-center justify-center text-sm" style={{ height:190, color:'#475569' }}>
                 {loading ? 'Loading…' : unavailable ? 'Threat feed unavailable.' : 'No threats in the current feed.'}
               </div>
-          }
-        </div>
-      );
-    }
-
-    // ─── KPI Tiles Row ────────────────────────────────────────────────────────
-    function KPITilesRow({ threats, stats, feedOk, loading }) {
-      const hourly     = useMemo(() => bucketByHour(threats).map(b => b.count), [threats]);
-      const delta      = useMemo(() => pctChange(threats), [threats]);
-      const highRisk   = useMemo(() => threats.filter(t => ['HIGH','CRITICAL'].includes((t.risk_level || t.severity || '').toUpperCase())).length, [threats]);
-      const chains     = useMemo(() => new Set(threats.map(t => t.chain_id)).size, [threats]);
-      // null when a source could not be reached: shown as a dash, never as a number.
-      const sandwiches = stats ? stats.sandwiches_caught    ?? null : null;
-      const approvals  = stats ? stats.suspicious_approvals ?? null : null;
-      const fromFeed   = (value) => feedOk ? value : null;
-
-      const tiles = useMemo(() => [
-        { label:'High Risk',           value: fromFeed(highRisk),       color:'#EF4444', icon:'🔴', sparkData: feedOk ? hourly : [], pct: fromFeed(delta) },
-        { label:'Sandwich Attacks',    value: sandwiches,               color:'#F59E0B', icon:'⚡', sparkData: [],                   pct: null },
-        { label:'Suspicious Approvals',value: approvals,                color:'#8B5CF6', icon:'⚠️', sparkData: [],                   pct: null },
-        { label:'Active Chains',       value: fromFeed(chains),         color:'#10B981', icon:'🔗', sparkData: [],                   pct: null },
-        { label:'Threats in Feed',     value: fromFeed(threats.length), color:'#3B82F6', icon:'🛡️', sparkData: feedOk ? hourly : [], pct: fromFeed(delta) },
-      ], [hourly, highRisk, chains, sandwiches, approvals, threats.length, delta, feedOk]);
-
-      return (
-        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
-          {loading
-            ? Array(5).fill(0).map((_,i) => <SkeletonTile key={i} />)
-            : tiles.map(tile => <KPITile key={tile.label} {...tile} />)
           }
         </div>
       );
@@ -823,14 +743,21 @@
     }
 
     // ─── Platform Stats Bar ────────────────────────────────────────────────────
+    // Every count on the page comes from /api/stats; each says the window it covers.
     const STAT_ITEMS = [
-      { key:'transactions_monitored', label:'Transactions Monitored', color:'#3B82F6' },
-      { key:'contracts_scanned',      label:'Contracts Scanned',      color:'#10B981' },
-      { key:'threats_detected',       label:'Threats Detected',       color:'#EF4444' },
-      { key:'transactions_blocked',   label:'Transactions Blocked',   color:'#F59E0B' },
-      { key:'sandwiches_caught',      label:'Sandwich Attacks Caught',color:'#8B5CF6' },
-      { key:'suspicious_approvals',   label:'Suspicious Approvals',   color:'#F97316' },
-      { key:'chains_protected',       label:'Mempool Chains Watched', color:'#06B6D4' },
+      { key:'transactions_monitored', label:'Transactions Monitored', span:'since monitor start', color:'#3B82F6' },
+      { key:'contracts_scanned',      label:'Contracts Scanned',      span:'all time',            color:'#10B981' },
+      { key:'threats_detected',       label:'Contract Threats',       span:'all time',            color:'#EF4444' },
+      { key:'transactions_blocked',   label:'Transactions Blocked',   span:'all time',            color:'#F59E0B' },
+      { key:'sandwiches_caught',      label:'Sandwich Attacks Caught',span:'since monitor start', color:'#8B5CF6' },
+      { key:'suspicious_approvals',   label:'Suspicious Approvals',   span:'since monitor start', color:'#F97316' },
+      { key:'chains_protected',       label:'Mempool Chains Watched', span:'last poll',           color:'#06B6D4' },
+    ];
+
+    const DAY_ITEMS = [
+      { key:'contracts_scanned_24h',    label:'Contracts Scanned',    span:'last 24 h', color:'#10B981' },
+      { key:'threats_detected_24h',     label:'Contract Threats',     span:'last 24 h', color:'#EF4444' },
+      { key:'transactions_blocked_24h', label:'Transactions Blocked', span:'last 24 h', color:'#F59E0B' },
     ];
 
     function useCountUp(target, duration = 1200) {
@@ -856,7 +783,7 @@
       return display;
     }
 
-    function StatCard({ label, value, color, loading, note }) {
+    function StatCard({ label, span, value, color, loading, note }) {
       const display = useCountUp(loading || value == null ? 0 : value);
       return (
         <div className="glass rounded-xl p-4 fade-up flex flex-col gap-1 text-center"
@@ -868,6 +795,7 @@
               </div>
           }
           <div className="text-xs font-medium mt-1" style={{ color:'#64748B' }}>{label}</div>
+          <div className="text-xs" style={{ color:'#475569' }}>{span}</div>
           {note && <div className="text-xs" style={{ color:'#94A3B8' }}>{note}</div>}
         </div>
       );
@@ -885,7 +813,7 @@
         <div>
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
             {STAT_ITEMS.map(s => (
-              <StatCard key={s.key} label={s.label} value={stats ? stats[s.key] : null}
+              <StatCard key={s.key} label={s.label} span={s.span} value={stats ? stats[s.key] : null}
                         color={s.color} loading={loading}
                         note={s.key === 'chains_protected' ? mempoolNote : null} />
             ))}
@@ -899,6 +827,24 @@
                   : 'A dash means that source is not reporting right now.'}
             </div>
           )}
+        </div>
+      );
+    }
+
+    function LastDayBar({ stats, loading }) {
+      return (
+        <div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {DAY_ITEMS.map(s => (
+              <StatCard key={s.key} label={s.label} span={s.span} value={stats ? stats[s.key] : null}
+                        color={s.color} loading={loading} />
+            ))}
+          </div>
+          <div className="text-xs mt-2" style={{ color:'#475569' }}>
+            A contract threat is a contract the transaction firewall scored 71 or above; it counts in the last
+            24 h when its latest scan falls in that window. The charts and the feed below show only the newest
+            {' '}{FEED_LIMIT} contract detections and newest {FEED_LIMIT} mempool alerts, so they are not counts.
+          </div>
         </div>
       );
     }
@@ -921,6 +867,7 @@
     function App() {
       const [threats,   setThreats]   = useState([]);
       const [feedOk,    setFeedOk]    = useState(true);
+      const [capped,    setCapped]    = useState([]);
       const [campaigns, setCampaigns] = useState([]);
       const [stats,     setStats]     = useState(null);
       const [loading,   setLoading]   = useState(true);
@@ -937,8 +884,8 @@
           // mempool alerts cannot push contract detections out of a shared limit.
           // /api/stats also carries the mempool counters, so /api/mempool/stats is not fetched.
           const results = await Promise.allSettled([
-            getJSON('/api/threats/feed?source=contracts&limit=100'),
-            getJSON('/api/threats/feed?source=mempool&limit=100'),
+            getJSON(`/api/threats/feed?source=contracts&limit=${FEED_LIMIT}`),
+            getJSON(`/api/threats/feed?source=mempool&limit=${FEED_LIMIT}`),
             getJSON('/api/campaigns/top?limit=10'),
             getJSON('/api/stats'),
             getJSON('/api/base/attestations?limit=20'),
@@ -951,6 +898,13 @@
           // With no feed loaded there is nothing to count: the tiles and charts say so instead of 0.
           setThreats(loaded.flatMap(([, x]) => x.value.threats || []).sort(byNewest));
           setFeedOk(loaded.length > 0);
+          // A source that returned its limit may hold more; its oldest loaded item is as far back as it reaches.
+          setCapped(loaded
+            .filter(([, x]) => (x.value.threats || []).length >= FEED_LIMIT)
+            .map(([name, x]) => ({
+              name,
+              since: Math.min(...x.value.threats.map(t => t.detected_at || t.created_at || 0)),
+            })));
           if (loaded.length) setUpdated(Date.now());
           setError(failed.length
             ? 'Failed to load ' + failed.map(([name, x]) => `${name} (${x.reason?.message || 'unknown error'})`).join(' and ')
@@ -986,19 +940,22 @@
               <PlatformStatsBar stats={stats} loading={loading} />
             </Section>
 
-            <Section title="Performance Overview">
-              <KPITilesRow threats={threats} stats={stats} feedOk={feedOk} loading={loading} />
+            <Section title="Last 24 Hours">
+              <LastDayBar stats={stats} loading={loading} />
             </Section>
 
             <Section title="Analytics">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <ThreatVelocityChart data={velocityData} unavailable={!feedOk} />
-                <ChainDistributionChart data={chainData} loading={loading} unavailable={!feedOk} />
+                <ThreatVelocityChart data={velocityData} unavailable={!feedOk} capped={capped} />
+                <ChainDistributionChart data={chainData} loading={loading} unavailable={!feedOk} capped={capped} />
               </div>
             </Section>
 
             <Section title="Live Threat Feed">
               <div className="glass rounded-xl p-4 md:p-5" style={{ border:'1px solid #334155' }}>
+                <div className="text-xs mb-3" style={{ color:'#64748B' }}>
+                  The newest {FEED_LIMIT} contract detections and the newest {FEED_LIMIT} mempool alerts.
+                </div>
                 <ThreatLogTable
                   threats={threats} loading={loading} error={error}
                   onRetry={fetchData} chain={chain} onChain={setChain}

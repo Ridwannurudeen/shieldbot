@@ -145,3 +145,26 @@ async def test_stats_without_a_database_report_the_goal_fields_as_unavailable(
     assert body["evidence_documents"] is None
     assert body["registry_records_confirmed"] is None
     assert body["launch_discovery"] is None
+    for key in ("contracts_scanned_24h", "threats_detected_24h", "transactions_blocked_24h"):
+        assert body[key] is None, key
+
+
+@pytest.mark.asyncio
+async def test_stats_count_the_last_day_beside_all_time_from_the_same_tables(stats_api, db):
+    await db.upsert_contract_score(TOKENS[0], 56, 90, "HIGH")
+    await db.upsert_contract_score(TOKENS[1], 56, 20, "LOW")
+    await db.upsert_contract_score(TOKENS[2], 56, 95, "HIGH")
+    await db._db.execute(
+        "UPDATE contract_scores SET last_scanned_at = ? WHERE address = ?", (time.time() - 2 * 86400, TOKENS[2])
+    )
+    await db._db.commit()
+    await db.record_outcome(TOKENS[0], 56, 90, "block")
+
+    body = (await stats_api.get("/api/stats")).json()
+
+    assert (body["contracts_scanned"], body["threats_detected"], body["transactions_blocked"]) == (3, 2, 1)
+    assert (body["contracts_scanned_24h"], body["threats_detected_24h"], body["transactions_blocked_24h"]) == (
+        2,
+        1,
+        1,
+    )

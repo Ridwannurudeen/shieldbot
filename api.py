@@ -1730,6 +1730,8 @@ async def public_stats():
     per chain; `registry_records_confirmed` counts those whose record in the Robinhood Chain
     verdict registry is confirmed on-chain. `contracts_scanned` and `threats_detected` count the contracts
     the extension and agent firewalls scored; Telegram, /api/scan and launch scans do not add to them.
+    Those counts and `transactions_blocked` are all time; each `_24h` field counts the same table over
+    the last 24 hours (a contract counts when its latest scan falls in that window).
     """
     from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 
@@ -1759,11 +1761,15 @@ async def public_stats():
         observable = sorted(set(mempool["monitored_chains"]) - set(unobservable))
 
     at = db_stats.get("all_time", {})
+    day = db_stats.get("last_24h", {})
     return {
         "transactions_monitored": mempool.get("total_pending_seen"),
         "contracts_scanned":      at.get("unique_contracts_scanned"),
         "threats_detected":       at.get("threats_detected"),
         "transactions_blocked":   at.get("transactions_blocked"),
+        "contracts_scanned_24h":  day.get("scans"),
+        "threats_detected_24h":   day.get("threats_detected"),
+        "transactions_blocked_24h": day.get("transactions_blocked"),
         "sandwiches_caught":      mempool.get("sandwiches_detected"),
         "suspicious_approvals":   mempool.get("suspicious_approvals"),
         "chains_protected":       len(observable) if observable is not None else None,
