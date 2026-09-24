@@ -163,5 +163,7 @@
   "unknownNoReason": "部分检查未能完成。",
   "overlayBtnWhy": "为什么有风险？",
   "askShieldBotAI": "询问ShieldBot AI",
-  "healthScanUnavailable": "授权扫描不可用 (HTTP {status})"
+  "healthScanUnavailable": "授权扫描不可用 (HTTP {status})",
+  "overlayEthSign": "原始哈希签名 (eth_sign)",
+  "overlayEthSignNote": "eth_sign 签署的是原始哈希，而该哈希可能就是一笔交易：签署后，此网站可能转走您钱包中的全部资产。正常网站不需要这样做。"
 }

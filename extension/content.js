@@ -174,17 +174,14 @@
     }
     const strict = settings.policyMode === "STRICT";
 
-    // Signing requests are NOT transactions — route to dedicated overlay
-    // instead of the firewall API which expects calldata + contract address.
+    // Signing requests are analysed by the API like transactions, and shown
+    // in their own overlay, next to what would be signed.
     const SIGN_ONLY_METHODS = new Set([
       "personal_sign", "eth_sign",
       "eth_signTypedData_v4", "eth_signTypedData_v3",
       "eth_signTypedData", "eth_signTypedData_v1",
     ]);
-    if (tx.signMethod && SIGN_ONLY_METHODS.has(tx.signMethod)) {
-      showSignatureOverlay(requestId, tx, strict);
-      return;
-    }
+    const isSignature = Boolean(tx.signMethod) && SIGN_ONLY_METHODS.has(tx.signMethod);
     // inject.js could not read the request's structure, so there is nothing
     // to analyse: the user is told so and decides.
     if (tx.unknownStructure === true) {
@@ -209,6 +206,8 @@
 
     if (Date.now() - received > DECISION_WINDOW_MS) {
       showTimedOutOverlay(requestId);
+    } else if (isSignature) {
+      showSignatureOverlay(requestId, tx, strict, response);
     } else if (response.error) {
       // API error — show warning and let user decide
       showErrorOverlay(requestId, response.error, strict, tx);
@@ -423,6 +422,44 @@
       _t("unknownNoReason");
   }
 
+  // The class a result is shown as. One that is not complete is Unknown,
+  // never Safe or Caution; High Risk and Block Recommended stay.
+  function verdictOf(result) {
+    const incomplete = result.status !== "ok" || result.partial === true ||
+      result.risk_level === "UNKNOWN" || result.classification === "UNKNOWN" ||
+      !Number.isFinite(result.risk_score) ||
+      Object.values(result.coverage || {}).some(value => Number(value) < 1);
+    const classification = incomplete && !["HIGH_RISK", "BLOCK_RECOMMENDED"].includes(result.classification)
+      ? "UNKNOWN" : result.classification || "CAUTION";
+    return { incomplete, classification };
+  }
+
+  // Classes from least to most severe. What the overlay sees for itself only
+  // raises the API's verdict, never lowers it.
+  const SEVERITY = ["SAFE", "CAUTION", "UNKNOWN", "HIGH_RISK", "BLOCK_RECOMMENDED"];
+  function atLeast(classification, floor) {
+    return SEVERITY.indexOf(floor) > SEVERITY.indexOf(classification) ? floor : classification;
+  }
+
+  const BADGE_CLASSES = {
+    BLOCK_RECOMMENDED: "shieldai-badge-block",
+    HIGH_RISK: "shieldai-badge-high",
+    CAUTION: "shieldai-badge-caution",
+    SAFE: "shieldai-badge-safe",
+    UNKNOWN: "shieldai-badge-unknown",
+  };
+
+  function classLabel(classification) {
+    const labels = {
+      BLOCK_RECOMMENDED: _t("classBlock"),
+      HIGH_RISK: _t("classHighRisk"),
+      CAUTION: _t("classCaution"),
+      SAFE: _t("classSafe"),
+      UNKNOWN: _t("classUnknown"),
+    };
+    return labels[classification] || classification;
+  }
+
   // For one call of a wallet_sendCalls batch, which call it is. inject.js
   // shows the calls one after another and sends the batch only when the user
   // continues on every one.
@@ -581,9 +618,10 @@
   }
 
   // --- Signature Request Overlay ---
-  // Shown instead of the firewall overlay for personal_sign / eth_signTypedData etc.
+  // Shown instead of the firewall overlay for personal_sign / eth_signTypedData
+  // etc., with the API's verdict on it, or its error.
 
-  async function showSignatureOverlay(requestId, tx, strict) {
+  async function showSignatureOverlay(requestId, tx, strict, response) {
     await _loadContentLang();
     removeOverlay();
 
@@ -595,7 +633,6 @@
     // Typed data that cannot be read is shown as such, at High: the user
     // cannot see what they would sign. Strict mode leaves no Sign Anyway.
     const unparseable = isTyped && !legacyFields && !isReadableTypedData(tx.typedData);
-    const canSign = !(strict && unparseable);
 
     let bodyHtml = "";
     let isPermitLike = false;
@@ -668,28 +705,49 @@
       `;
     }
 
-    // Risk classification
-    const badgeClass = isPermitLike || unparseable ? "shieldai-badge-high" : "shieldai-badge-caution";
-    const label = unparseable ? _t("overlayUnparseableTyped")
+    // The verdict is the API's, and Unknown when the API could not be
+    // reached. What the overlay sees for itself only raises it: typed data it
+    // cannot read is at least High Risk, and eth_sign, which signs a raw hash
+    // that can be a transaction, is always Block Recommended.
+    const result = response.result;
+    const { incomplete, classification: verdict } = result
+      ? verdictOf(result) : { incomplete: true, classification: "UNKNOWN" };
+    const ethSign = signMethod === "eth_sign";
+    const classification = ethSign ? "BLOCK_RECOMMENDED" : unparseable ? atLeast(verdict, "HIGH_RISK") : verdict;
+    const why = response.error ? `${_t("overlayCannotReach")} ${response.error}` : incomplete ? unknownReason(result) : "";
+    const canSign = !(strict && (unparseable || classification === "UNKNOWN" || classification === "BLOCK_RECOMMENDED"));
+    const signalsHtml = ((result && result.danger_signals) || [])
+      .map((s) => `<li>${escapeHtml(s)}</li>`)
+      .join("");
+
+    const label = ethSign ? _t("overlayEthSign") : unparseable ? _t("overlayUnparseableTyped")
       : isPermitLike ? _t("overlayApprovalSig") : _t("overlaySigRequest");
-    const note = unparseable ? _t("overlayUnparseableTypedNote")
+    const note = ethSign ? _t("overlayEthSignNote") : unparseable ? _t("overlayUnparseableTypedNote")
       : isPermitLike ? _t("overlayApprovalNote") : _t("overlaySigNote");
 
     const overlay = document.createElement("div");
     overlay.id = "shieldai-overlay";
     overlay.className = "shieldai-overlay";
     overlay.innerHTML = `
-      <div class="shieldai-modal" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
+      <div class="shieldai-modal ${classification === "BLOCK_RECOMMENDED" ? "shieldai-modal-danger" : ""}" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
         <div class="shieldai-header">
           <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
 
-        <div class="shieldai-badge ${badgeClass}">${label}</div>
+        <div class="shieldai-badge ${BADGE_CLASSES[classification] || "shieldai-badge-caution"}">${escapeHtml(classLabel(classification))}</div>
+        ${why ? `<p class="shieldai-unknown-why">${_t("unknownWhy")} ${escapeHtml(why)}</p>` : ""}
 
         <div class="shieldai-section shieldai-sig-note">
+          <h3>${label}</h3>
           <p>${escapeHtml(note)}</p>
         </div>
+
+        ${signalsHtml ? `
+          <div class="shieldai-section">
+            <h3>${_t("overlayDangerSignals")}</h3>
+            <ul class="shieldai-signals">${signalsHtml}</ul>
+          </div>` : ""}
 
         ${bodyHtml}
 
@@ -713,30 +771,9 @@
     await _loadContentLang();
     removeOverlay();
 
-    const badgeClasses = {
-      BLOCK_RECOMMENDED: "shieldai-badge-block",
-      HIGH_RISK: "shieldai-badge-high",
-      CAUTION: "shieldai-badge-caution",
-      SAFE: "shieldai-badge-safe",
-      UNKNOWN: "shieldai-badge-unknown",
-    };
-
-    const classLabels = {
-      BLOCK_RECOMMENDED: _t("classBlock"),
-      HIGH_RISK: _t("classHighRisk"),
-      CAUTION: _t("classCaution"),
-      SAFE: _t("classSafe"),
-      UNKNOWN: _t("classUnknown"),
-    };
-
-    const incomplete = result.status !== "ok" || result.partial === true ||
-      result.risk_level === "UNKNOWN" || result.classification === "UNKNOWN" ||
-      !Number.isFinite(result.risk_score) ||
-      Object.values(result.coverage || {}).some(value => Number(value) < 1);
-    const classification = incomplete && !["HIGH_RISK", "BLOCK_RECOMMENDED"].includes(result.classification)
-      ? "UNKNOWN" : result.classification || "CAUTION";
-    const badgeClass = badgeClasses[classification] || "shieldai-badge-caution";
-    const label = classLabels[classification] || classification;
+    const { incomplete, classification } = verdictOf(result);
+    const badgeClass = BADGE_CLASSES[classification] || "shieldai-badge-caution";
+    const label = classLabel(classification);
     const isBlock = classification === "BLOCK_RECOMMENDED";
     // Strict mode leaves no way to send a transaction the firewall recommends
     // blocking or could not fully check.

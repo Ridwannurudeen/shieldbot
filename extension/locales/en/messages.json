@@ -163,5 +163,7 @@
   "unknownNoReason": "Some checks did not complete.",
   "overlayBtnWhy": "Why is this risky?",
   "askShieldBotAI": "Ask ShieldBot AI",
-  "healthScanUnavailable": "Approval scan unavailable (HTTP {status})"
+  "healthScanUnavailable": "Approval scan unavailable (HTTP {status})",
+  "overlayEthSign": "RAW HASH SIGNATURE (eth_sign)",
+  "overlayEthSignNote": "eth_sign signs a raw hash, and that hash can be a transaction: signing it can let this site move everything in your wallet. No ordinary site needs it."
 }

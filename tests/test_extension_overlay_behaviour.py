@@ -871,7 +871,8 @@ def test_legacy_typed_data_is_shown_as_a_signature(method):
 (async () => {
   const method = JSON.parse(process.argv[1]);
   await intercept('request', {signMethod: method, typedData: {primaryType: 'Permit', domain: {}, message: {spender: '0x' + 'e'.repeat(40)}}}, method);
-  assert.equal(analyses.length, 0, 'a signature was sent to the transaction firewall');
+  assert.equal(analyses.length, 1, 'the signature was not sent for analysis');
+  assert.equal(analyses[0].signMethod, method);
   assert(overlay().innerHTML.includes('APPROVAL SIGNATURE'), overlay().innerHTML);
 """,
         method,
@@ -1000,6 +1001,8 @@ def test_strict_mode_removes_sign_anyway_on_unparseable_typed_data(policy, typed
 (async () => {
   const [policy, typed] = JSON.parse(process.argv[1]);
   storage.policyMode = policy;
+  // The API calls it covered, so only the typed data the overlay cannot read decides.
+  analyze = async () => ({result: scan({})});
   const typedData = typed === 'readable' ? {primaryType: 'Mail', domain: {name: 'Mail'}, message: {contents: 'hi'}} : 'not typed data';
   await intercept('request', {signMethod: 'eth_signTypedData_v4', typedData}, 'eth_signTypedData_v4');
   const html = overlay().innerHTML;
@@ -2230,9 +2233,11 @@ def test_a_checked_copy_cannot_be_replayed_unchecked(how):
     };
   }
   announce(wallet);
+  // It answers the chain, which a signature is analysed on, and keeps the request it is handed.
   const pageProvider = {
     on() {},
     request(args) {
+      if (args.method === 'eth_chainId') return Promise.resolve('0x38');
       kept = args;
       if (how === 'replayed-inside-a-page-provider') {
         change(args);

@@ -163,5 +163,7 @@
   "unknownNoReason": "Một số bước kiểm tra chưa hoàn tất.",
   "overlayBtnWhy": "Tại sao điều này rủi ro?",
   "askShieldBotAI": "Hỏi ShieldBot AI",
-  "healthScanUnavailable": "Không thể quét phê duyệt (HTTP {status})"
+  "healthScanUnavailable": "Không thể quét phê duyệt (HTTP {status})",
+  "overlayEthSign": "CHỮ KÝ HASH THÔ (eth_sign)",
+  "overlayEthSignNote": "eth_sign ký một hash thô, và hash đó có thể là một giao dịch: ký nó có thể cho phép trang này chuyển mọi thứ trong ví của bạn. Không trang web thông thường nào cần điều này."
 }

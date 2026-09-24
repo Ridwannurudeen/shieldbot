@@ -250,8 +250,8 @@ async function handleAnalyze(tx) {
       risk_level: "UNKNOWN",
       risk_score: null,
       coverage: { chain: false },
-      coverage_reasons: { chain: "Wallet chain unavailable, invalid, or mismatched; transaction was not analyzed." },
-      verdict: "Unknown wallet chain. Reconnect the wallet and retry; transaction blocked.",
+      coverage_reasons: { chain: "Wallet chain unavailable, invalid, or mismatched; the request was not analyzed." },
+      verdict: "Unknown wallet chain. Reconnect the wallet and retry; the request is blocked.",
     };
   }
 
@@ -265,20 +265,26 @@ async function handleAnalyze(tx) {
 
   const endpoint = `${apiUrl}/api/firewall`;
 
+  const signMethod = tx._signMethod || tx.signMethod;
   const body = {
     to: tx.to || "",
     from: tx.from || "",
     value: tx.value || "0x0",
-    data: tx.data || "0x",
+    // A message or hash to sign stays in the browser: the API judges
+    // personal_sign and eth_sign by their method and does not read them.
+    data: signMethod === "personal_sign" || signMethod === "eth_sign" ? "0x" : tx.data || "0x",
     chainId,
   };
 
-  // Include typed data for signature analysis (EIP-712, Permit2, etc.)
-  if (tx._typedData || tx.typedData) {
-    body.typedData = tx._typedData || tx.typedData;
+  // Include typed data for signature analysis (EIP-712, Permit2, etc.).
+  // MetaMask's legacy form, a list of fields, is not an EIP-712 object and is
+  // left out; the API reads a signature without typed data as unknown.
+  const typedData = tx._typedData || tx.typedData;
+  if (typeof typedData === "object" && typedData !== null && !Array.isArray(typedData)) {
+    body.typedData = typedData;
   }
-  if (tx._signMethod || tx.signMethod) {
-    body.signMethod = tx._signMethod || tx.signMethod;
+  if (signMethod) {
+    body.signMethod = signMethod;
   }
 
   // Get policy mode setting

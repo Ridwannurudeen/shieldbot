@@ -378,8 +378,8 @@
           };
         }
 
-        // Transactions and batches are analysed on the wallet's chain. A
-        // batch is shown one call at a time, and each call is its own
+        // Transactions, batches and signatures are analysed on the wallet's
+        // chain. A batch is shown one call at a time, and each call is its own
         // decision; the batch goes to the wallet only once all are proceeded.
         const isTransaction = structured && (kind === "transaction" || kind === "calls");
         const count = structured && kind === "calls" ? calls.length : 1;
@@ -410,7 +410,7 @@
           const decide = (index) => {
             if (index < decisions) {
               requestAnalysis(method, unreadable ? unknownStructure : payloadAt(index, chainId), (action) => {
-                if (isTransaction && chainId === null) {
+                if (structured && chainId === null) {
                   reject(new NativeError("Transaction blocked by ShieldAI: wallet chain is unknown or mismatched"));
                   return;
                 }
@@ -443,8 +443,17 @@
           decide(0);
         };
 
-        if (!isTransaction) {
+        if (!structured) {
           analyze(null);
+          return;
+        }
+        // A signature is not bound to the chain it was analysed on: the wallet
+        // gets it as the page sent it.
+        if (!isTransaction) {
+          resolveChainId((chainId) => {
+            interceptData.chainId = chainId;
+            analyze(chainId);
+          });
           return;
         }
         // A batch call that names a chain of its own other than the bound one

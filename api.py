@@ -1126,10 +1126,19 @@ def _extract_signature_target(req: FirewallRequest) -> str:
     return ""
 
 
+# The wallet methods the extension checks as signatures. A typed-data method whose typed data did not
+# arrive as an object (MetaMask's legacy list of fields, or data the extension could not parse) is
+# still a signature, answered as unknown, not a transaction to an invalid address.
+SIGNING_METHODS = {
+    "personal_sign", "eth_sign",
+    "eth_signTypedData", "eth_signTypedData_v1", "eth_signTypedData_v3", "eth_signTypedData_v4",
+}
+
+
 def _is_signature_only_request(req: FirewallRequest) -> bool:
     if req.typedData:
         return not _is_valid_evm_address(req.to)
-    return (req.signMethod or "") in {"personal_sign", "eth_sign"} and not _is_valid_evm_address(req.to)
+    return (req.signMethod or "") in SIGNING_METHODS and not _is_valid_evm_address(req.to)
 
 
 async def _build_signature_only_response(req: FirewallRequest, policy_override: Optional[str] = None) -> Dict:
@@ -1158,9 +1167,10 @@ async def _build_signature_only_response(req: FirewallRequest, policy_override: 
     risk_score = int(max(0, min(100, round(result.score))))
     danger_signals = list(result.flags)
 
-    if req.signMethod == "eth_sign" and risk_score < 30:
-        risk_score = 30
-        danger_signals.append("Blind eth_sign request: wallet may be signing an opaque payload")
+    # eth_sign signs a raw 32-byte hash, which can be a transaction's: it is always Block Recommended.
+    if req.signMethod == "eth_sign" and risk_score < 90:
+        risk_score = 90
+        danger_signals.insert(0, "eth_sign signs a raw hash, and that hash can be a transaction that moves your funds")
 
     if risk_score >= 70:
         classification = "BLOCK_RECOMMENDED"
