@@ -165,8 +165,8 @@ class TestConnectionLimits:
         from mcp_server.server import SSEConnectionManager
 
         mgr = SSEConnectionManager(max_connections=2)
-        mgr.create()
-        mgr.create()
+        mgr.create("k1")
+        mgr.create("k1")
         assert mgr.is_full()
         assert mgr.count == 2
 
@@ -175,7 +175,7 @@ class TestConnectionLimits:
         from mcp_server.server import SSEConnectionManager
 
         mgr = SSEConnectionManager(max_connections=2)
-        sid, _ = mgr.create()
+        sid, _ = mgr.create("k1")
         assert mgr.count == 1
         mgr.remove(sid)
         assert mgr.count == 0
@@ -907,23 +907,23 @@ class TestSSEConnectionManager:
         from mcp_server.server import SSEConnectionManager
         mgr = SSEConnectionManager(max_connections=5)
         assert mgr.count == 0
-        sid1, q1 = mgr.create()
+        sid1, q1 = mgr.create("k1")
         assert mgr.count == 1
-        sid2, q2 = mgr.create()
+        sid2, q2 = mgr.create("k1")
         assert mgr.count == 2
         assert sid1 != sid2
 
-    def test_get_queue(self):
+    def test_get(self):
         from mcp_server.server import SSEConnectionManager
         mgr = SSEConnectionManager()
-        sid, q = mgr.create()
-        assert mgr.get_queue(sid) is q
-        assert mgr.get_queue("nonexistent") is None
+        sid, q = mgr.create("k1")
+        assert mgr.get(sid)["queue"] is q
+        assert mgr.get("nonexistent") is None
 
     def test_touch_updates_activity(self):
         from mcp_server.server import SSEConnectionManager
         mgr = SSEConnectionManager()
-        sid, _ = mgr.create()
+        sid, _ = mgr.create("k1")
         old_time = mgr._connections[sid]["last_activity"]
         time.sleep(0.01)
         mgr.touch(sid)
@@ -933,7 +933,7 @@ class TestSSEConnectionManager:
     def test_is_idle(self):
         from mcp_server.server import SSEConnectionManager, IDLE_TIMEOUT
         mgr = SSEConnectionManager()
-        sid, _ = mgr.create()
+        sid, _ = mgr.create("k1")
         assert not mgr.is_idle(sid)
         # Force activity time way in the past
         mgr._connections[sid]["last_activity"] = time.time() - IDLE_TIMEOUT - 1
@@ -947,17 +947,17 @@ class TestSSEConnectionManager:
     def test_remove(self):
         from mcp_server.server import SSEConnectionManager
         mgr = SSEConnectionManager()
-        sid, _ = mgr.create()
+        sid, _ = mgr.create("k1")
         assert mgr.count == 1
         mgr.remove(sid)
         assert mgr.count == 0
-        assert mgr.get_queue(sid) is None
+        assert mgr.get(sid) is None
 
     def test_is_full(self):
         from mcp_server.server import SSEConnectionManager
         mgr = SSEConnectionManager(max_connections=1)
         assert not mgr.is_full()
-        mgr.create()
+        mgr.create("k1")
         assert mgr.is_full()
 
 

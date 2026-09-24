@@ -30,8 +30,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 MAX_SSE_CONNECTIONS = 50
+MAX_SSE_CONNECTIONS_PER_KEY = 5
 HEARTBEAT_INTERVAL = 30  # seconds
-IDLE_TIMEOUT = 300  # 5 minutes
+IDLE_TIMEOUT = 1800  # 30 minutes; a dead peer is caught sooner by is_disconnected()
 
 SERVER_INFO = {
     "name": "shieldbot-mcp",
@@ -61,7 +62,7 @@ class SSEConnectionManager:
 
     def __init__(self, max_connections: int = MAX_SSE_CONNECTIONS):
         self._max = max_connections
-        # session_id -> {queue, created_at, last_activity}
+        # session_id -> {queue, key_id, created_at, last_activity}
         self._connections: Dict[str, Dict] = {}
 
     @property
@@ -71,23 +72,24 @@ class SSEConnectionManager:
     def is_full(self) -> bool:
         return self.count >= self._max
 
-    def create(self) -> tuple:
-        """Create a new SSE session. Returns (session_id, queue)."""
+    def count_for(self, key_id: str) -> int:
+        return sum(1 for conn in self._connections.values() if conn["key_id"] == key_id)
+
+    def create(self, key_id: str) -> tuple:
+        """Create a new SSE session owned by an API key. Returns (session_id, queue)."""
         session_id = str(uuid.uuid4())
         queue: asyncio.Queue = asyncio.Queue()
         self._connections[session_id] = {
             "queue": queue,
+            "key_id": key_id,
             "created_at": time.time(),
             "last_activity": time.time(),
         }
         logger.info("SSE session created: %s (total: %d)", session_id, self.count)
         return session_id, queue
 
-    def get_queue(self, session_id: str) -> Optional[asyncio.Queue]:
-        conn = self._connections.get(session_id)
-        if conn:
-            return conn["queue"]
-        return None
+    def get(self, session_id: str) -> Optional[Dict]:
+        return self._connections.get(session_id)
 
     def touch(self, session_id: str) -> None:
         """Update last activity timestamp."""
@@ -106,6 +108,11 @@ class SSEConnectionManager:
         if not conn:
             return True
         return (time.time() - conn["last_activity"]) > IDLE_TIMEOUT
+
+    def remove_idle(self) -> None:
+        """Drop idle sessions, including one whose stream was cancelled before it started and never cleaned up."""
+        for session_id in [sid for sid in self._connections if self.is_idle(sid)]:
+            self.remove(session_id)
 
 
 # ---------------------------------------------------------------------------
@@ -311,16 +318,22 @@ def create_mcp_router(container) -> APIRouter:
     @router.get("/sse")
     async def sse_stream(request: Request):
         """SSE event stream endpoint. Sends server->client events."""
-        await _require_api_key(request)
+        key_info = await _require_api_key(request)
         handshake_only = request.query_params.get("handshake_only") in {"1", "true", "yes"}
 
+        sse_manager.remove_idle()
+        if sse_manager.count_for(key_info["key_id"]) >= MAX_SSE_CONNECTIONS_PER_KEY:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Max SSE connections for this API key reached ({MAX_SSE_CONNECTIONS_PER_KEY})",
+            )
         if sse_manager.is_full():
             raise HTTPException(
                 status_code=503,
                 detail=f"Max SSE connections reached ({MAX_SSE_CONNECTIONS})",
             )
 
-        session_id, queue = sse_manager.create()
+        session_id, queue = sse_manager.create(key_info["key_id"])
 
         async def event_generator():
             try:
@@ -367,19 +380,26 @@ def create_mcp_router(container) -> APIRouter:
     @router.post("/messages")
     async def messages(request: Request):
         """JSON-RPC message endpoint. Receives client->server messages."""
-        await _require_api_key(request)
+        key_info = await _require_api_key(request)
 
+        # Without a session_id the response is only returned in the POST body.
+        session = None
         session_id = request.query_params.get("session_id")
+        if session_id is not None:
+            session = sse_manager.get(session_id)
+            if session is None:
+                raise HTTPException(status_code=404, detail="Unknown or expired session")
+            if session["key_id"] != key_info["key_id"]:
+                raise HTTPException(status_code=403, detail="Session belongs to another API key")
+            sse_manager.touch(session_id)
 
         try:
             body = await request.json()
         except Exception:
             error_resp = _jsonrpc_error(None, PARSE_ERROR, "Invalid JSON")
             # If session exists, push error to SSE stream too
-            if session_id:
-                queue = sse_manager.get_queue(session_id)
-                if queue:
-                    await queue.put(error_resp)
+            if session:
+                await session["queue"].put(error_resp)
             return error_resp
 
         response = await process_jsonrpc(container, body)
@@ -387,11 +407,8 @@ def create_mcp_router(container) -> APIRouter:
             return Response(status_code=202)
 
         # If a session is active, push the response to the SSE stream
-        if session_id:
-            queue = sse_manager.get_queue(session_id)
-            if queue:
-                sse_manager.touch(session_id)
-                await queue.put(response)
+        if session:
+            await session["queue"].put(response)
 
         # Also return inline for clients that prefer request/response
         return response

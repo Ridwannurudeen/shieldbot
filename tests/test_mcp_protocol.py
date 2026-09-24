@@ -10,6 +10,7 @@ import mcp_server.server as server
 from utils.web3_client import Web3Client
 
 AUTH_HEADERS = {"X-API-Key": "sb_testkey123456789012345678901234"}
+PING = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
 INITIALIZE = {
     "jsonrpc": "2.0",
     "id": 0,
@@ -162,7 +163,7 @@ async def test_a_tool_call_without_an_id_runs_nothing(container):
 
 
 def test_a_notification_is_accepted_with_no_body_and_nothing_on_the_stream(client, sessions):
-    session_id, queue = sessions[0].create()
+    session_id, queue = sessions[0].create("k1")
     url = f"/mcp/messages?session_id={session_id}"
 
     response = client.post(
@@ -179,7 +180,7 @@ def test_a_notification_is_accepted_with_no_body_and_nothing_on_the_stream(clien
 
 
 def test_a_standard_client_handshake_completes(client, sessions):
-    session_id, queue = sessions[0].create()
+    session_id, queue = sessions[0].create("k1")
     url = f"/mcp/messages?session_id={session_id}"
 
     def send(message):
@@ -196,3 +197,61 @@ def test_a_standard_client_handshake_completes(client, sessions):
     assert [message["id"] for message in streamed] == [0, 1, 2, 3, 4]
     assert all("result" in message for message in streamed)
     assert streamed[0]["result"]["protocolVersion"] == "2024-11-05"
+
+
+def test_a_post_without_a_session_is_answered_in_the_body(client):
+    response = client.post("/mcp/messages", json=PING, headers=AUTH_HEADERS)
+
+    assert response.status_code == 200
+    assert response.json() == {"jsonrpc": "2.0", "id": 1, "result": {}}
+
+
+def test_a_post_to_an_unknown_or_closed_session_is_404(client, sessions):
+    session_id, _ = sessions[0].create("k1")
+    sessions[0].remove(session_id)
+
+    for unknown in ("not-a-session", session_id, ""):
+        response = client.post(
+            f"/mcp/messages?session_id={unknown}", json=PING, headers=AUTH_HEADERS
+        )
+        assert response.status_code == 404
+
+
+def test_a_session_only_accepts_the_key_that_opened_it(client, sessions):
+    session_id, queue = sessions[0].create("another-key")
+
+    response = client.post(f"/mcp/messages?session_id={session_id}", json=PING, headers=AUTH_HEADERS)
+
+    assert response.status_code == 403
+    assert queue.empty()
+
+
+def test_one_key_can_hold_at_most_five_streams(client, sessions):
+    manager = sessions[0]
+    opened = [manager.create("k1")[0] for _ in range(server.MAX_SSE_CONNECTIONS_PER_KEY)]
+    manager.create("another-key")
+
+    assert client.get("/mcp/sse?handshake_only=1", headers=AUTH_HEADERS).status_code == 429
+
+    manager.remove(opened[0])
+    assert client.get("/mcp/sse?handshake_only=1", headers=AUTH_HEADERS).status_code == 200
+
+
+def test_idle_sessions_are_swept_before_the_capacity_check(client, sessions):
+    # A stream cancelled before its first event never runs its cleanup, so its session lingers.
+    manager = sessions[0]
+    for index in range(server.MAX_SSE_CONNECTIONS):
+        session_id, _ = manager.create(f"key-{index}")
+        manager.get(session_id)["last_activity"] -= server.IDLE_TIMEOUT + 1
+    assert manager.is_full()
+
+    assert client.get("/mcp/sse?handshake_only=1", headers=AUTH_HEADERS).status_code == 200
+    assert manager.count == 0
+
+
+def test_a_session_quiet_for_ten_minutes_is_not_idle():
+    manager = server.SSEConnectionManager()
+    session_id, _ = manager.create("k1")
+    manager.get(session_id)["last_activity"] -= 600
+
+    assert not manager.is_idle(session_id)
