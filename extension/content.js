@@ -649,8 +649,7 @@
   function readableText(data) {
     if (typeof data !== "string") return null;
     const digits = data.replace(/^0x/i, "");
-    if (!/^[0-9a-f]+$/i.test(digits)) return data;
-    const text = hexToUtf8(digits.length % 2 ? `0${digits}` : digits);
+    const text = /^[0-9a-f]+$/i.test(digits) ? hexToUtf8(digits.length % 2 ? `0${digits}` : digits) : data;
     return text !== null && !/(?![\t\n\r])\p{Cc}/u.test(text) ? text : null;
   }
 

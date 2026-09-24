@@ -936,6 +936,9 @@ PAYLOADS = {
     "40-bytes-not-utf8": ("0x" + "ff" * 40, "HIGH_RISK"),
     "control-character": ("0x" + "hello\u0007world".encode().hex(), "HIGH_RISK"),
     "nul-character": ("0x" + "sign\u0000in".encode().hex(), "HIGH_RISK"),
+    # The same bytes written out rather than hex-encoded: the wallet signs the same message.
+    "plain-control-character": ("hello\u0007world", "HIGH_RISK"),
+    "plain-nul-character": ("sign\u0000in", "HIGH_RISK"),
     "32-char-ascii-sign-in": ("0x" + "Sign in to dapp.example now 1234".encode().hex(), "SAFE"),
     "tabs-and-line-breaks": ("0x" + "line one\nline two\ttab\r\nend".encode().hex(), "SAFE"),
     "plain-text": ("hello world", "SAFE"),
