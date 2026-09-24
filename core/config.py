@@ -112,6 +112,11 @@ class Settings(BaseSettings):
     # RPC Proxy
     rpc_proxy_enabled: bool = True
 
+    # Where the background work runs (mempool monitor, verdict drain, hunter, launch watch): "api"
+    # starts it in the API process; "external" leaves it to workers.py, run as a service of its own.
+    # Both processes must read the same value. See docs/DEPLOYMENT.md.
+    background_workers: Literal["api", "external"] = "api"
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

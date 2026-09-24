@@ -70,6 +70,19 @@ chat_limiter = RateLimiter(requests_per_minute=50, burst=10)
 # Service container (initialized on startup)
 container: Optional[ServiceContainer] = None
 
+# BACKGROUND_WORKERS as the lifespan read it. With "external" the mempool monitor, the verdict drain, the
+# hunter and the launch watch run in workers.py, and this process holds none of their in-memory state.
+_background_workers = "api"
+_EXTERNAL_WORKERS_NOTE = (
+    "Background work runs in the separate workers process (BACKGROUND_WORKERS=external), and this API "
+    "process holds none of its in-memory state: the mempool counters and the launch watch's run state "
+    "are null here, not zero. The Unknown ledger here counts this process's own lookups only."
+)
+_EXTERNAL_MEMPOOL_DETAIL = (
+    "The mempool monitor runs in the separate workers process (BACKGROUND_WORKERS=external); "
+    "this API process does not hold its alerts or counters."
+)
+
 # Convenience accessors — set after container startup
 web3_client = None
 ai_analyzer = None
@@ -111,7 +124,7 @@ def _bind_globals(c: ServiceContainer):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global container
+    global container, _background_workers
     settings = Settings()
     container = ServiceContainer(settings)
     _bind_globals(container)
@@ -131,8 +144,12 @@ async def lifespan(app: FastAPI):
         _watch_alerts_limiter.use_redis(rate_limit_redis, "watch-alerts", fail_open=False)
         container.auth_manager.use_redis(rate_limit_redis)
         logger.info("Rate limits kept in Redis")
-    await container.start_mempool_monitor()
-    container.verdict_publisher.start()
+    _background_workers = settings.background_workers
+    if _background_workers == "api":
+        await container.start_mempool_monitor()
+        container.verdict_publisher.start()
+    else:
+        logger.info("Background work runs in workers.py (BACKGROUND_WORKERS=external)")
 
     # Initialize RPC proxy if enabled
     if settings.rpc_proxy_enabled:
@@ -165,8 +182,9 @@ async def lifespan(app: FastAPI):
     guard_router = create_guardian_router(container)
     app.include_router(guard_router, prefix="/api/guardian")
 
-    await container.hunter.start()
-    await container.launch_watch.start()
+    if _background_workers == "api":
+        await container.hunter.start()
+        await container.launch_watch.start()
 
     logger.info("ShieldAI Firewall API started")
     yield
@@ -1801,7 +1819,9 @@ async def admin_stats(request: Request):
 
     # Mempool stats (in-memory counters)
     mempool = {}
-    if container.mempool_monitor:
+    if _background_workers == "external":
+        mempool = None
+    elif container.mempool_monitor:
         mempool = container.mempool_monitor.get_stats()
 
     # Phishing cache size (server-side, in-memory)
@@ -1812,8 +1832,11 @@ async def admin_stats(request: Request):
     guard_watch = None
     if container.hunter:
         guard_watch = await container.hunter.guard_watch_stats()
+        if _background_workers == "external":
+            # The launch watch and its RPC budget run in workers.py; this process's copies are idle.
+            guard_watch.update(running=None, rpc_budget=None)
 
-    return {
+    stats = {
         "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
         **db_stats,
         "mempool": mempool,
@@ -1822,6 +1845,9 @@ async def admin_stats(request: Request):
             "domains_cached": phishing_cache_size,
         },
     }
+    if _background_workers == "external":
+        stats["background_workers_note"] = _EXTERNAL_WORKERS_NOTE
+    return stats
 
 
 @app.get("/api/stats")
@@ -1848,6 +1874,9 @@ async def public_stats():
     `unknown_ledger` sums, per provider and per chain, how often a provider lookup was answered,
     came back unknown or failed since `counting_since` (core.unknown_ledger); it restarts with the
     process. GET /api/coverage/{chain_id} has one chain's providers in full.
+    With BACKGROUND_WORKERS=external the mempool monitor runs in workers.py: every mempool field is
+    null, `unknown_ledger` counts this process's lookups only (not the hunter's or the launch
+    watch's), and `background_workers_note` says so.
     """
     from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
     from services.verdict_publisher import CHAIN_ID as REGISTRY_CHAIN_ID
@@ -1872,14 +1901,14 @@ async def public_stats():
 
     mempool = {}
     observable = unobservable = None
-    if container and container.mempool_monitor:
+    if container and container.mempool_monitor and _background_workers == "api":
         mempool = container.mempool_monitor.get_stats()
         unobservable = mempool["unobservable_chains"]
         observable = sorted(set(mempool["monitored_chains"]) - set(unobservable))
 
     at = db_stats.get("all_time", {})
     day = db_stats.get("last_24h", {})
-    return {
+    stats = {
         "transactions_monitored": mempool.get("total_pending_seen"),
         "contracts_scanned":      at.get("unique_contracts_scanned"),
         "threats_detected":       at.get("threats_detected"),
@@ -1898,6 +1927,9 @@ async def public_stats():
         "registry_records_confirmed": registry_records_confirmed,
         "unknown_ledger":         unknown_ledger.summary(),
     }
+    if _background_workers == "external":
+        stats["background_workers_note"] = _EXTERNAL_WORKERS_NOTE
+    return stats
 
 
 @app.get("/api/coverage/{chain_id}")
@@ -1917,6 +1949,8 @@ async def chain_coverage(chain_id: int):
     lookups were answered, came back unknown or failed since `counting_since`, and the latest outcome;
     `chain_independent` holds providers asked about no chain. A provider with no entry has not been
     asked since the process started. Nothing here sends a request to any provider.
+    With BACKGROUND_WORKERS=external this process reads no mempool, so `public_mempool` is never yes,
+    and `provider_health` counts this process's lookups only; `background_workers_note` says so.
     """
     _validate_chain_id(chain_id)
     if not container:
@@ -1925,10 +1959,13 @@ async def chain_coverage(chain_id: int):
     if not supports_pending_transactions(chain_id):
         public_mempool = "no"
     else:
-        mempool = container.mempool_monitor.get_stats() if container.mempool_monitor else None
+        mempool = (
+            container.mempool_monitor.get_stats()
+            if container.mempool_monitor and _background_workers == "api" else None
+        )
         observed = mempool and chain_id in set(mempool["monitored_chains"]) - set(mempool["unobservable_chains"])
         public_mempool = "yes" if observed else "unobservable"
-    return {
+    coverage = {
         "chain_id": chain_id,
         "chain_name": adapter.chain_name,
         "capabilities": {
@@ -1942,6 +1979,9 @@ async def chain_coverage(chain_id: int):
             "chain_independent": unknown_ledger.for_chain(None),
         },
     }
+    if _background_workers == "external":
+        coverage["background_workers_note"] = _EXTERNAL_WORKERS_NOTE
+    return coverage
 
 
 @app.get("/api/base/attestations")
@@ -2222,6 +2262,8 @@ async def mempool_alerts(request: Request, chain_id: int = None, limit: int = 50
             raise HTTPException(status_code=400, detail="Pending-transaction monitoring is not available on this chain")
     if not container or not container.mempool_monitor:
         raise HTTPException(status_code=503, detail="Mempool monitor not available")
+    if _background_workers == "external":
+        raise HTTPException(status_code=503, detail=_EXTERNAL_MEMPOOL_DETAIL)
     limit = max(1, min(limit, 200))
     alerts = container.mempool_monitor.get_alerts(chain_id=chain_id, limit=limit)
     return {"alerts": alerts, "count": len(alerts)}
@@ -2236,6 +2278,8 @@ async def mempool_stats(request: Request, chain_id: int = None):
             raise HTTPException(status_code=400, detail="Pending-transaction monitoring is not available on this chain")
     if not container or not container.mempool_monitor:
         raise HTTPException(status_code=503, detail="Mempool monitor not available")
+    if _background_workers == "external":
+        raise HTTPException(status_code=503, detail=_EXTERNAL_MEMPOOL_DETAIL)
     return container.mempool_monitor.get_stats()
 
 
@@ -2334,9 +2378,10 @@ async def threat_feed(
 
     # Mempool alerts
     mempool_available = chain_id is None or supports_pending_transactions(chain_id)
+    mempool_external = _background_workers == "external"
     mempool_alerts = (
         container.mempool_monitor.get_alerts(chain_id=chain_id, limit=limit)
-        if mempool_available and source != "contracts" else []
+        if mempool_available and not mempool_external and source != "contracts" else []
     )
     for alert in mempool_alerts:
         if since and alert.get('created_at', 0) < since:
@@ -2356,6 +2401,8 @@ async def threat_feed(
     }
     if not mempool_available:
         response['mempool_unavailable'] = "Pending-transaction monitoring is not available on this chain"
+    elif mempool_external and source != "contracts":
+        response['mempool_unavailable'] = _EXTERNAL_MEMPOOL_DETAIL
     return response
 
 

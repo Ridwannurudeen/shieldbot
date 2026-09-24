@@ -239,8 +239,8 @@ class ServiceContainer:
     async def startup(self):
         """Initialize async-dependent services.
 
-        The API and the Telegram bot both call this. Each keeps its own indexer running, since each
-        enqueues scanned contracts into its own in-memory queue.
+        The API, the Telegram bot and workers.py all call this. Each keeps its own indexer running,
+        since each enqueues scanned contracts into its own in-memory queue.
         """
         await self.db.initialize()
         await self.indexer.start()
@@ -256,7 +256,8 @@ class ServiceContainer:
     async def start_mempool_monitor(self):
         """Start the mempool monitor where pending transactions are available.
 
-        Only the API lifespan calls this, so one process polls the mempools and holds the alerts.
+        The API lifespan calls this, or workers.py in its place with BACKGROUND_WORKERS=external, so one
+        process polls the mempools and holds the alerts.
         """
         await self.mempool_monitor.start(
             chain_ids=[

@@ -5,8 +5,9 @@ Every process (API, hunter, bot) calls publish(), which only STORES the canonica
 `pending`: an outbox entry for ShieldBotVerdictRegistry.record().
 
 Exactly one process sends: the API process calls start(), which reads ROBINHOOD_RECORDER_PRIVATE_KEY and runs a
-drain that records pending rows oldest-first. No other code path reads the key, so the bot never sends and two
-processes can never race for the recorder's nonces.
+drain that records pending rows oldest-first. With BACKGROUND_WORKERS=external workers.py calls it instead and
+the API does not. No other code path reads the key, so the bot never sends and two processes can never race for
+the recorder's nonces.
 
 Each row moves through onchain_status:
   off          stored only (another chain, or no registry configured)
@@ -161,7 +162,7 @@ class ObservationDropped(Exception):
 
 
 class VerdictPublisher:
-    """Stores verdict evidence; in the API process, also records Robinhood Chain verdicts on-chain."""
+    """Stores verdict evidence; in the process that runs the drain, also records Robinhood Chain verdicts on-chain."""
 
     def __init__(self, db, rpc_url: Optional[str] = None, registry_address: Optional[str] = None):
         self._db = db
@@ -278,11 +279,11 @@ class VerdictPublisher:
         return task
 
     # ------------------------------------------------------------------
-    # Sending (the API process only)
+    # Sending (the API process, or workers.py in its place)
     # ------------------------------------------------------------------
 
     def start(self, recorder_key: Optional[str] = None) -> None:
-        """Start the drain. Only the API process calls this, which makes it the single on-chain sender."""
+        """Start the drain. Only the API process, or workers.py in its place, calls this: the one on-chain sender."""
         if self._drain_task is not None or not self.is_onchain_enabled():
             return
         key = (

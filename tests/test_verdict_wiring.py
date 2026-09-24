@@ -306,7 +306,7 @@ async def test_other_chains_never_publish_and_keep_bsc_recording(bot_scan_functi
 
 
 # ---------------------------------------------------------------------------
-# Single sender: only the API lifespan starts the drain
+# Single sender: the API lifespan starts the drain, or workers.py in its place
 # ---------------------------------------------------------------------------
 
 
@@ -329,8 +329,12 @@ def test_api_lifespan_starts_the_drain_after_the_container_and_stops_it_before_s
     mock_container.verdict_publisher.stop.assert_awaited_once_with()
 
 
-def test_only_the_api_process_starts_the_drain_or_reads_the_key():
-    """The bot shares the container and the .env file, so no code path it runs may start the drain."""
+def test_only_the_api_process_or_the_workers_start_the_drain_or_read_the_key():
+    """The bot shares the container and the .env file, so no code path it runs may start the drain.
+
+    workers.py starts it in the API's place, and only with BACKGROUND_WORKERS=external, when the API does
+    not (tests/test_background_workers.py).
+    """
     root = Path(__file__).resolve().parent.parent
     starters, key_readers = [], []
     tracked = subprocess.run(
@@ -347,5 +351,5 @@ def test_only_the_api_process_starts_the_drain_or_reads_the_key():
             starters.append(relative)
         if "ROBINHOOD_RECORDER_PRIVATE_KEY" in source:
             key_readers.append(relative)
-    assert starters == ["api.py"]
+    assert starters == ["api.py", "workers.py"]
     assert key_readers == ["services/verdict_publisher.py"]

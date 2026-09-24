@@ -1,0 +1,294 @@
+"""BACKGROUND_WORKERS: background work in the API process (the default) or in workers.py.
+
+With "external" the API starts none of it, and anything the API would have served from that work's memory
+reads null with a note, never zero, empty or protected.
+"""
+
+import asyncio
+import signal
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, call
+
+import httpx
+import pydantic
+import pytest
+import pytest_asyncio
+from fastapi.testclient import TestClient
+
+from core.config import Settings
+from core.database import Database
+from utils.web3_client import Web3Client
+from tests.test_lifespan import mock_container  # noqa: F401  (pytest fixture)
+
+# What an idle mempool monitor and an idle launch watch report: zeros, empty lists and a full budget.
+IDLE_MEMPOOL = {
+    "total_pending_seen": 0,
+    "sandwiches_detected": 0,
+    "frontruns_detected": 0,
+    "suspicious_approvals": 0,
+    "counting_since": 1_790_000_000.0,
+    "monitored_chains": [],
+    "unobservable_chains": [],
+    "pending_count": {},
+    "active_alerts": 0,
+}
+IDLE_GUARD_WATCH = {
+    "max_subjects": 25,
+    "subjects": [],
+    "due_count": 0,
+    "running": False,
+    "rpc_budget": {"state": "closed", "tokens": 4.0},
+}
+
+
+def test_api_is_the_default_and_an_unknown_value_stops_startup():
+    assert Settings(_env_file=None).background_workers == "api"
+    assert Settings(_env_file=None, background_workers="external").background_workers == "external"
+    with pytest.raises(pydantic.ValidationError):
+        Settings(_env_file=None, background_workers="both")
+
+
+# ---------------------------------------------------------------------------
+# The API lifespan
+# ---------------------------------------------------------------------------
+
+
+def test_external_starts_no_background_work_in_the_api(mock_container, monkeypatch):  # noqa: F811
+    import api
+
+    monkeypatch.setattr(api, "_background_workers", "api")
+    mock_container.settings.background_workers = "external"
+    with TestClient(api.app) as client:
+        assert api._background_workers == "external"
+        mock_container.startup.assert_awaited_once_with()
+        mock_container.start_mempool_monitor.assert_not_awaited()
+        mock_container.verdict_publisher.start.assert_not_called()
+        mock_container.hunter.start.assert_not_awaited()
+        mock_container.launch_watch.start.assert_not_awaited()
+        # The routers still mount and the API still serves.
+        assert client.get("/mcp/health").status_code == 200
+    mock_container.shutdown.assert_awaited_once_with()
+
+
+def test_api_setting_starts_the_background_work_as_before(mock_container, monkeypatch):  # noqa: F811
+    import api
+
+    monkeypatch.setattr(api, "_background_workers", "external")
+    with TestClient(api.app):
+        assert api._background_workers == "api"
+        mock_container.start_mempool_monitor.assert_awaited_once_with()
+        mock_container.verdict_publisher.start.assert_called_once_with()
+        mock_container.hunter.start.assert_awaited_once_with()
+        mock_container.launch_watch.start.assert_awaited_once_with()
+
+
+# ---------------------------------------------------------------------------
+# Fields the API served from the background work's memory
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def db():
+    database = Database(":memory:")
+    await database.initialize()
+    yield database
+    await database.close()
+
+
+@pytest_asyncio.fixture
+async def external_api(monkeypatch, db):
+    import api
+
+    registry = Web3Client.__new__(Web3Client)
+    registry._adapters = {
+        chain_id: SimpleNamespace(
+            chain_id=chain_id, chain_name=f"chain {chain_id}", capabilities=lambda: {}
+        )
+        for chain_id in (56, 4663)
+    }
+    monitor = MagicMock()
+    monitor.get_stats.return_value = dict(IDLE_MEMPOOL)
+    monitor.get_alerts.return_value = []
+    services = SimpleNamespace(
+        settings=SimpleNamespace(trusted_proxies=[], admin_secret="test-admin"),
+        auth_manager=None,
+        db=db,
+        mempool_monitor=monitor,
+        phishing_service=None,
+        hunter=SimpleNamespace(guard_watch_stats=AsyncMock(return_value=dict(IDLE_GUARD_WATCH))),
+        rescue_service=SimpleNamespace(approval_history=lambda chain_id: {"history": "full"}),
+    )
+    monkeypatch.setattr(api, "container", services)
+    monkeypatch.setattr(api, "web3_client", registry)
+    monkeypatch.setattr(api, "rate_limiter", api.RateLimiter(1000, 1000))
+    monkeypatch.setattr(api, "_background_workers", "external")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=api.app), base_url="http://testserver"
+    ) as client:
+        yield SimpleNamespace(client=client, monitor=monitor, api=api)
+
+
+MEMPOOL_STATS_FIELDS = (
+    "transactions_monitored",
+    "sandwiches_caught",
+    "suspicious_approvals",
+    "chains_protected",
+    "mempool_chains_observable",
+    "mempool_chains_unobservable",
+    "mempool_counting_since",
+)
+
+
+@pytest.mark.asyncio
+async def test_public_stats_report_mempool_fields_as_null_with_a_note(external_api):
+    body = (await external_api.client.get("/api/stats")).json()
+    for field in MEMPOOL_STATS_FIELDS:
+        assert body[field] is None, field
+    assert "workers" in body["background_workers_note"]
+    # Database-backed fields still come from the database.
+    assert body["contracts_scanned"] == 0
+    assert body["launch_discovery"]["chain_id"] == 4663
+    external_api.monitor.get_stats.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_default_stats_carry_no_note(external_api, monkeypatch):
+    monkeypatch.setattr(external_api.api, "_background_workers", "api")
+    body = (await external_api.client.get("/api/stats")).json()
+    assert "background_workers_note" not in body
+    assert body["transactions_monitored"] == 0
+    assert body["chains_protected"] == 0
+
+
+@pytest.mark.asyncio
+async def test_admin_stats_null_the_mempool_and_the_watch_run_state(external_api):
+    body = (
+        await external_api.client.get("/api/admin/stats", headers={"X-Admin-Secret": "test-admin"})
+    ).json()
+    assert body["mempool"] is None
+    assert body["guard_watch"]["running"] is None
+    assert body["guard_watch"]["rpc_budget"] is None
+    # The guard subjects come from the database and stay.
+    assert body["guard_watch"]["subjects"] == []
+    assert "workers" in body["background_workers_note"]
+    external_api.monitor.get_stats.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/api/mempool/alerts", "/api/mempool/stats"])
+async def test_mempool_routes_answer_unavailable_not_empty(external_api, path):
+    response = await external_api.client.get(path)
+    assert response.status_code == 503
+    assert "workers" in response.json()["detail"]
+    external_api.monitor.get_alerts.assert_not_called()
+    external_api.monitor.get_stats.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_threat_feed_says_mempool_alerts_are_not_here(external_api):
+    body = (await external_api.client.get("/api/threats/feed")).json()
+    assert "workers" in body["mempool_unavailable"]
+    external_api.monitor.get_alerts.assert_not_called()
+    contracts_only = (
+        await external_api.client.get("/api/threats/feed", params={"source": "contracts"})
+    ).json()
+    assert "mempool_unavailable" not in contracts_only
+
+
+@pytest.mark.asyncio
+async def test_coverage_never_reads_the_idle_monitor_as_watching(external_api):
+    body = (await external_api.client.get("/api/coverage/56")).json()
+    assert body["capabilities"]["public_mempool"] == "unobservable"
+    assert "workers" in body["background_workers_note"]
+    external_api.monitor.get_stats.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# workers.py
+# ---------------------------------------------------------------------------
+
+
+def _worker_container():
+    container = MagicMock()
+    for name in ("startup", "start_mempool_monitor", "shutdown"):
+        setattr(container, name, AsyncMock())
+    for name in ("hunter", "launch_watch"):
+        getattr(container, name).start = AsyncMock()
+        getattr(container, name).stop = AsyncMock()
+    container.verdict_publisher.stop = AsyncMock()
+    return container
+
+
+LIFESPAN_ORDER = [
+    call.startup(),
+    call.start_mempool_monitor(),
+    call.verdict_publisher.start(),
+    call.hunter.start(),
+    call.launch_watch.start(),
+    call.launch_watch.stop(),
+    call.hunter.stop(),
+    call.verdict_publisher.stop(),
+    call.shutdown(),
+]
+
+
+@pytest.mark.asyncio
+async def test_workers_run_the_api_lifespans_background_work_in_its_order():
+    import workers
+
+    container = _worker_container()
+    stop = asyncio.Event()
+    running = asyncio.create_task(workers.run(container, stop))
+    await asyncio.sleep(0)
+    assert container.mock_calls == LIFESPAN_ORDER[:5]
+    stop.set()
+    await running
+    assert container.mock_calls == LIFESPAN_ORDER
+
+
+@pytest.mark.asyncio
+async def test_workers_refuse_to_run_beside_an_api_that_runs_the_work(monkeypatch):
+    import workers
+
+    built = MagicMock()
+    monkeypatch.setattr(workers, "Settings", lambda: Settings(_env_file=None))
+    monkeypatch.setattr(workers, "ServiceContainer", built)
+    with pytest.raises(SystemExit) as refused:
+        await workers.main()
+    assert "BACKGROUND_WORKERS=external" in str(refused.value.code)
+    built.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGINT])
+async def test_workers_build_the_real_container_and_stop_cleanly_on_a_signal(
+    monkeypatch, tmp_path, signum
+):
+    import workers
+    from core.container import ServiceContainer
+
+    settings = Settings(
+        _env_file=None,
+        background_workers="external",
+        database_path=str(tmp_path / "workers.db"),
+    )
+    monkeypatch.setattr(workers, "Settings", lambda: settings)
+    handlers = {}
+    monkeypatch.setattr(
+        workers.signal, "signal", lambda sig, handler: handlers.__setitem__(sig, handler)
+    )
+    ran = {}
+
+    async def run(container, stop):
+        ran["container"] = container
+        await stop.wait()
+
+    monkeypatch.setattr(workers, "run", run)
+    main = asyncio.create_task(workers.main())
+    while "container" not in ran:
+        await asyncio.sleep(0)
+    assert isinstance(ran["container"], ServiceContainer)
+    assert ran["container"].settings is settings
+    assert set(handlers) == {signal.SIGTERM, signal.SIGINT}
+    handlers[signum](signum, None)
+    await asyncio.wait_for(main, timeout=5)

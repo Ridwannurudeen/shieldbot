@@ -18,8 +18,9 @@ creation), dexscreener, and rpc (the chain's RPC; a revert is the node answering
 
 Counts live in memory: they restart from zero with the process, and counting_since says when the
 current count began. Each process keeps its own, so the API's ledger covers the API's scans, the
-hunter and the launch watch, and not the Telegram bot. The counters take no lock: call record() on
-the event loop, never from a worker thread.
+hunter and the launch watch, and not the Telegram bot. With BACKGROUND_WORKERS=external the hunter
+and the launch watch run in workers.py and count in its ledger instead. The counters take no lock:
+call record() on the event loop, never from a worker thread.
 """
 
 import time
