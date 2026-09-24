@@ -542,6 +542,11 @@ def test_a_report_puts_the_official_contracts_in_code_spans():
     )
 
 
+@pytest.mark.parametrize("contract", ["0x1234", "0x_not*an`address"])
+def test_a_report_leaves_an_official_contract_that_is_not_an_address_as_plain_text(contract):
+    assert_literal(_report({**COLLISION, "official_address": contract}), f"official contract {contract}")
+
+
 def test_a_report_on_a_check_stored_under_older_rules_still_formats():
     collision = {**ROUND_3_IMPOSTOR, "status": "collision", "matched_by": "symbol"}
 
