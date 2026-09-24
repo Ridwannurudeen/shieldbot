@@ -181,11 +181,13 @@ def test_no_scoring_code_reads_outcome_events():
     # The rows come from anyone, so nothing that computes a score may read them; scripts/calibrate.py
     # reads the API key rows into a proposal the owner applies by hand.
     root = Path(__file__).resolve().parent.parent
+    folders = ("core", "analyzers", "services", "scanner", "utils", "agent", "adapters", "mcp_server", "rpc")
+    # The services' entry points (api.py, bot.py) sit at the root.
+    paths = list(root.glob("*.py")) + [path for folder in folders for path in (root / folder).rglob("*.py")]
     readers = sorted(
         path.relative_to(root).as_posix()
-        for folder in ("core", "analyzers", "services", "scanner", "utils", "agent", "adapters", "mcp_server", "rpc")
-        for path in (root / folder).rglob("*.py")
-        if "outcome_events" in path.read_text(encoding="utf-8")
+        for path in paths
+        if any(marker in path.read_text(encoding="utf-8") for marker in ("outcome_events", "get_outcomes("))
     )
     assert readers == ["core/database.py"]
 
