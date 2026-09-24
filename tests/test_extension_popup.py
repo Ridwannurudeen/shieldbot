@@ -215,8 +215,34 @@ def test_popup_markup_claims_no_protection_before_a_scan():
     assert ">100%<" not in html
 
 
-def test_popup_does_not_hard_code_its_version():
-    assert "v3.0.0" not in (EXTENSION / "popup.html").read_text(encoding="utf-8")
+@pytest.mark.parametrize("page", ["popup.html", "welcome.html"])
+def test_pages_do_not_hard_code_a_version(page):
+    assert not re.search(r"v\d+\.\d+\.\d+", (EXTENSION / page).read_text(encoding="utf-8"))
+
+
+def test_welcome_version_label_comes_from_the_manifest():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for extension JavaScript regression tests")
+    script = r"""
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const element = () => ({textContent: '', style: {}, addEventListener() {}});
+const label = element();
+let ready;
+const context = vm.createContext({
+  window: {addEventListener(type, fn) { if (type === 'DOMContentLoaded') ready = fn; }},
+  document: {getElementById: element, querySelector: selector => selector === '.version' ? label : null},
+  initI18n: async () => {}, applyTranslations() {}, t: key => key,
+  chrome: {runtime: {getManifest: () => JSON.parse(fs.readFileSync('extension/manifest.json', 'utf8'))}},
+});
+vm.runInContext(fs.readFileSync('extension/welcome.js', 'utf8'), context);
+ready().then(() => {
+  assert.equal(label.textContent, 'ShieldBot v' + context.chrome.runtime.getManifest().version);
+  console.log('completed');
+}).catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    result = subprocess.run([node, "-e", script], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert result.returncode == 0 and "completed" in result.stdout, result.stdout + result.stderr
 
 
 def test_contract_monitoring_row_has_its_own_fallback_text():
