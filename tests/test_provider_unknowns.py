@@ -314,7 +314,8 @@ def test_scam_match_token_is_never_discounted_to_low(method):
     from core.analyzer import AnalyzerResult
     contract = {'is_verified': False, 'is_contract': True, 'has_mint': True,
                 'has_proxy': True, 'has_pause': True, 'has_blacklist': True,
-                'contract_age_days': 1, 'scam_matches': ['match'], 'ownership_renounced': True}
+                'contract_age_days': 1, 'ownership_renounced': True,
+                'scam_matches': [{'type': 'Local Blacklist', 'reason': 'Known scam address', 'source': 'ShieldBot'}]}
     honeypot = {'is_honeypot': False, 'can_sell': False, 'buy_tax': 0, 'sell_tax': 0}
     market = {'liquidity_usd': 200000, 'fdv': 200000, 'volume_24h': 2000,
               'pair_age_hours': 100}

@@ -195,6 +195,10 @@ class RiskEngine:
             if contract_data.get('scam_matches'):
                 composite = max(composite, 70)
 
+        # A block-severity scam match (a GoPlus blacklist) is a BLOCK on every target type.
+        floor = 90 if any(match.get('severity') == 'block' for match in contract_data.get('scam_matches') or []) else 0
+        composite = max(composite, floor)
+
         rug_probability = round(min(max(composite, 0), 100), 1)
 
         # --- Risk level (uses calibration thresholds when available) ---
@@ -214,6 +218,9 @@ class RiskEngine:
         # A calibrated medium threshold can sit above the scam floor; a scam match is never LOW.
         if contract_data.get('scam_matches') and risk_level == 'LOW':
             risk_level = 'MEDIUM'
+
+        if floor:
+            risk_level = 'HIGH'
 
         # --- Risk archetype ---
         archetype = self._determine_archetype(
@@ -247,6 +254,7 @@ class RiskEngine:
             'coverage': coverage,
             'coverage_reasons': coverage_reasons,
             'status': 'unknown' if incomplete else 'ok',
+            'transaction_floor': floor or None,
         }
 
     def compute_from_results(self, results: List["AnalyzerResult"], is_token: Optional[bool] = True) -> dict:
@@ -275,7 +283,9 @@ class RiskEngine:
         composite, category_scores, coverage, coverage_reasons, covered_weight, tx_share = self._covered_scores(results)
         required_unknown = is_token is not False and coverage.get('honeypot', 0) < 1
         incomplete = required_unknown or covered_weight < 1 - 1e-9 or any(fraction < 1 for fraction in coverage.values())
-        critical_flags = [flag for result in results for flag in result.flags]
+        # A fired floor's reason leads: the extension overlay shows only the first three flags.
+        ordered = sorted(results, key=lambda result: not (result.data.get('floor') and not result.error))
+        critical_flags = [flag for result in ordered for flag in result.flags]
         if required_unknown:
             # A measured can_sell is known either way, so only the rest of the honeypot data is
             # unknown. The honeypot analyzer uses the same labels, and its flag already carries a reason.
@@ -339,6 +349,14 @@ class RiskEngine:
             if ethos_data.get('severe_reputation_flag') and ethos_data.get('scam_flags'):
                 composite = min(composite + 10, 100)
 
+        # Hard floors: a rule an analyzer declares from evidence it owns (an approval to a wallet, a
+        # pay-to-claim contract) holds whatever the weighted mean and the discount say, and so does
+        # a block-severity scam match (a GoPlus blacklist).
+        floor = max((result.data.get('floor') or 0 for result in results if not result.error), default=0)
+        if any(match.get('severity') == 'block' for match in contract_data.get('scam_matches') or []):
+            floor = max(floor, 90)
+        composite = max(composite, floor)
+
         rug_probability = round(min(max(composite, 0), 100), 1)
 
         high_t = self._calibration.high_threshold if self._calibration else 71
@@ -356,6 +374,13 @@ class RiskEngine:
 
         # A calibrated medium threshold can sit above the scam floor; a scam match is never LOW.
         if contract_data.get('scam_matches') and risk_level == 'LOW':
+            risk_level = 'MEDIUM'
+
+        # A fired floor is never LOW, and one at the extension's fixed BLOCK boundary (71) is HIGH
+        # whatever the calibrated thresholds, so the RPC proxy (which blocks on HIGH) agrees.
+        if floor >= 71:
+            risk_level = 'HIGH'
+        elif floor and risk_level == 'LOW':
             risk_level = 'MEDIUM'
 
         archetype = self._determine_archetype(
@@ -390,6 +415,7 @@ class RiskEngine:
             'coverage': coverage,
             'coverage_reasons': coverage_reasons,
             'status': 'unknown' if incomplete else 'ok',
+            'transaction_floor': floor or None,
         }
 
     def _covered_scores(self, results):

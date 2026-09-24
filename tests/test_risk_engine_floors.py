@@ -1,8 +1,9 @@
-"""Risk engine weighting for skipped analyzers, with the container's production weights."""
+"""Risk engine weighting, the clean-token discount and hard floors, with production weights."""
 
 import pytest
 
 from core.analyzer import AnalyzerResult
+from core.calibration import CalibrationConfig
 from core.risk_engine import RiskEngine
 
 # The weights the registry normalises the container's six analyzers to.
@@ -96,3 +97,101 @@ def test_clean_token_discount_without_transaction_risk_is_unchanged():
     )
     # 100 * .32 - 20, as before.
     assert risk["rug_probability"] == 12
+
+
+RAISED = CalibrationConfig(high_threshold=90.0, medium_threshold=80.0)
+WALLET_FLAG = "Approval to a wallet address, not a contract (drainer pattern)"
+FRESH_UNVERIFIED = ["Contract not verified", "Contract age: 2 days", "Mint function detected"]
+
+
+def _floored(floor, error=None):
+    results = _results(60, contract=CLEAN_TOKEN, market=DEEP_MARKET)
+    results[0].flags = list(FRESH_UNVERIFIED)
+    results[4] = AnalyzerResult(
+        "intent",
+        WEIGHTS["intent"],
+        35,
+        flags=[WALLET_FLAG],
+        data={"status": "ok", "floor": floor},
+        error=error,
+    )
+    return results
+
+
+@pytest.mark.parametrize("floor", [100, 85])
+def test_floor_holds_over_the_mean_and_forces_high_under_calibration(floor):
+    risk = RiskEngine(calibration=RAISED).compute_from_results(_floored(floor))
+    assert risk["rug_probability"] == floor
+    # 85 is below the calibrated 90, but a fired floor at or above 71 is always HIGH.
+    assert risk["risk_level"] == "HIGH"
+    assert risk["transaction_floor"] == floor
+    assert risk["critical_flags"][0] == WALLET_FLAG
+    assert risk["critical_flags"][1:4] == FRESH_UNVERIFIED
+
+
+def test_floor_below_the_block_boundary_is_never_low():
+    risk = RiskEngine(calibration=RAISED).compute_from_results(_floored(60))
+    assert risk["rug_probability"] == 60
+    # Calibration maps 60 to LOW (medium threshold 80); a fired floor is never LOW.
+    assert risk["risk_level"] == "MEDIUM"
+    assert risk["transaction_floor"] == 60
+
+
+def test_floor_on_an_errored_result_is_ignored():
+    risk = RiskEngine().compute_from_results(_floored(100, error="intent analysis unavailable"))
+    assert risk["rug_probability"] < 71
+    assert risk["transaction_floor"] is None
+    assert risk["critical_flags"][0] == FRESH_UNVERIFIED[0]
+
+
+def test_no_floor_reports_none():
+    risk = RiskEngine().compute_from_results(_results(30))
+    assert risk["transaction_floor"] is None
+    assert risk["rug_probability"] == 9.6
+
+
+BLACKLISTED = {
+    "type": "GoPlus Security",
+    "reason": "Blacklisted token",
+    "source": "gopluslabs.io",
+    "severity": "block",
+}
+HONEYPOT_MATCH = {
+    "type": "GoPlus Security",
+    "reason": "Honeypot (GoPlus)",
+    "source": "gopluslabs.io",
+    "severity": "high",
+}
+
+
+def _scam_risk(entrypoint, is_token, match):
+    contract = {**CONTRACT, "scam_matches": [match]}
+    engine = RiskEngine(calibration=RAISED)
+    if entrypoint == "direct":
+        return engine.compute_composite_risk(contract, HONEYPOT, MARKET, ETHOS, is_token=is_token)
+    return engine.compute_from_results(
+        _results(
+            30,
+            contract=contract,
+            market=MARKET if is_token else SKIPPED,
+            honeypot=HONEYPOT if is_token else SKIPPED,
+        ),
+        is_token=is_token,
+    )
+
+
+@pytest.mark.parametrize("entrypoint", ["direct", "registry"])
+@pytest.mark.parametrize("is_token", [True, False])
+def test_block_severity_scam_match_floors_at_90_on_both_entry_points(entrypoint, is_token):
+    risk = _scam_risk(entrypoint, is_token, BLACKLISTED)
+    assert risk["rug_probability"] == 90
+    assert risk["risk_level"] == "HIGH"
+
+
+@pytest.mark.parametrize(
+    "entrypoint, is_token", [("direct", True), ("registry", True), ("registry", False)]
+)
+def test_high_severity_scam_match_keeps_the_70_floor(entrypoint, is_token):
+    risk = _scam_risk(entrypoint, is_token, HONEYPOT_MATCH)
+    assert risk["rug_probability"] == 70
+    assert risk["risk_level"] == "MEDIUM"
