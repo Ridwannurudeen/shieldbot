@@ -64,7 +64,7 @@ asyncio.run(main())
 | `to` | yes | Target address |
 | `chain_id` | yes | Integer chain ID from the table below. The SDK never assumes a chain: without it `check()` raises `ValueError` before sending anything. |
 | `data` | no | Calldata as a hex string, default `"0x"` |
-| `value` | no | Wei as a non-negative `int` or a decimal or `0x` hex string, default `"0"`. The SDK sends it as a decimal string; anything else raises `ValueError` before sending, so the API never prices an unreadable value as zero. |
+| `value` | no | Wei from 0 to 2**256 - 1, as an `int` or a decimal or `0x` hex string; omitted or `None` means `"0"`. The SDK sends it as a decimal string; anything else raises `ValueError` before sending, so the API never prices an unreadable value as zero. |
 
 ## Verdicts and unknown results
 
