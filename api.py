@@ -1892,14 +1892,16 @@ async def watch_alerts_list(request: Request, limit: int = 50):
 
 @app.post("/api/admin/guard-subjects/{chain_id}/{address}")
 async def guard_subject_add(chain_id: int, address: str, request: Request):
-    """Watch a subject with a confirmed verdict. Requires X-Admin-Secret."""
+    """Watch a subject with a verdict confirmed on the configured registry. Requires X-Admin-Secret."""
     _require_admin(request)
     if chain_id != 4663:
         raise HTTPException(status_code=400, detail="Guard watches are only available on chain 4663")
     _validate_chain_id(chain_id)
     if not web3_client.is_valid_address(address):
         raise HTTPException(status_code=400, detail="Invalid address")
-    if not await container.db.register_guard_subject(chain_id, address.lower()):
+    if not await container.db.register_guard_subject(
+        chain_id, address.lower(), container.verdict_publisher.registry,
+    ):
         raise HTTPException(
             status_code=409, detail="Guard watch cap reached or no confirmed verdict for this subject",
         )

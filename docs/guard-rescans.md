@@ -26,8 +26,9 @@ displayed as the latest scan. Guard membership never depends on `tracked_pairs` 
 
 Administrative operations use the existing `X-Admin-Secret` authentication:
 
-- `POST /api/admin/guard-subjects/4663/{address}` registers or reenables a subject with a confirmed
-  verdict. HTTP 409 means capacity is exhausted or no qualifying confirmed verdict exists.
+- `POST /api/admin/guard-subjects/4663/{address}` registers or reenables a subject with a verdict
+  confirmed on the configured registry. HTTP 409 means capacity is exhausted or no qualifying
+  confirmed verdict exists.
 - `DELETE /api/admin/guard-subjects/4663/{address}` persists an opt-out. Later confirmations do not
   re-add it. A queued rescan checks membership again after its budget wait.
 - `GET /api/admin/stats` includes `guard_watch`: members, each last complete measurement's age

@@ -8,10 +8,15 @@ Exactly one process sends: the API process calls start(), which reads ROBINHOOD_
 drain that records pending rows oldest-first. No other code path reads the key, so the bot never sends and two
 processes can never race for the recorder's nonces.
 
+A row is queued for the registry configured when it is stored, and it is only ever sent there: after the
+registry address changes, a row queued for the old one is dropped (RegistryChanged) and deduplication only
+compares rows queued for the new one, so every row names the contract that holds its record.
+
 Each row moves through onchain_status:
   off          stored only (another chain, or no registry configured)
   pending      waiting for the drain
-  dropped      observation missing, stale, future-dated or superseded; never broadcast again
+  dropped      observation missing, stale, future-dated or superseded, or queued for another registry;
+               never broadcast again
   deduplicated newer unchanged measurement retained for supersession; confirmed verdict still fresh
   sending      claimed by the drain; each transaction's hash, nonce and signed bytes are stored BEFORE it is broadcast
   submitted    the node accepted the transaction; no receipt arrived within the receipt timeout
@@ -232,7 +237,7 @@ class VerdictPublisher:
             status = "pending" if queued else "off"
             if queued:
                 previous = await self._db.get_newest_verdict_observation(
-                    chain_id, payload["subject"], include_deduplicated=False
+                    chain_id, payload["subject"], include_deduplicated=False, registry=self.registry
                 )
                 if previous is not None and _repeats(previous, payload):
                     if payload.get("observed_at", 0) <= json.loads(previous["canonical"])["observed_at"]:
@@ -428,7 +433,9 @@ class VerdictPublisher:
                     ) as session:
                         status, tx_hash = await self._mined(session, hashes)
                 if status is not None:
-                    await self._db.update_verdict_onchain(row["id"], status, tx_hash=tx_hash)
+                    await self._db.update_verdict_onchain(
+                        row["id"], status, tx_hash=tx_hash, registry=self.registry
+                    )
                 elif not hashes or row["attempts"] < MAX_SEND_ATTEMPTS:
                     await self._db.release_verdict_claim(row["id"])
                     released += 1
@@ -481,7 +488,7 @@ class VerdictPublisher:
                     status, tx_hash = mined
                     await self._db.update_verdict_onchain(
                         row["id"], status, tx_hash=tx_hash, onchain_error=stored["onchain_error"]
-                        if stored["onchain_status"] == "dropped" else None
+                        if stored["onchain_status"] == "dropped" else None, registry=self.registry,
                     )
                     logger.info("Verdict record %d reconciled: %s", row["id"], status)
                 elif stored["onchain_status"] == "dropped":
@@ -535,7 +542,9 @@ class VerdictPublisher:
                 if prepared[0] == "mined":
                     # One of the row's earlier transactions was mined after all; nothing is sent.
                     _, status, tx_hash = prepared
-                    await self._db.update_verdict_onchain(evidence_id, status, tx_hash=tx_hash)
+                    await self._db.update_verdict_onchain(
+                        evidence_id, status, tx_hash=tx_hash, registry=self.registry
+                    )
                     self._resends.pop(evidence_id, None)
                     logger.info("Verdict record %s by an earlier transaction: tx=%s", status, tx_hash)
                     return "done"
@@ -576,7 +585,7 @@ class VerdictPublisher:
         else:
             status = "unconfirmed"
         await self._db.update_verdict_onchain(
-            evidence_id, status, tx_hash=tx_hash, onchain_error=error
+            evidence_id, status, tx_hash=tx_hash, onchain_error=error, registry=self.registry
         )
         if status in ("confirmed", "reverted"):
             self._resends.pop(evidence_id, None)
@@ -590,9 +599,12 @@ class VerdictPublisher:
         stored = await self._db.get_verdict_evidence(row["id"])
         observed_at = json.loads(stored["canonical"]).get("observed_at")
         reason = None
-        if type(observed_at) is not int or observed_at <= 0:
+        if (stored["registry"] or "").lower() != self.registry.lower():
+            reason = "RegistryChanged"
+        elif type(observed_at) is not int or observed_at <= 0:
             reason = "MissingObservationTime"
         else:
+            # Any newer measurement supersedes this one, whichever registry it was queued for (or none).
             newest = await self._db.get_newest_verdict_observation(CHAIN_ID, row["subject"])
             # No awaited read may separate this clock check from the broadcast decision.
             now = time.time()

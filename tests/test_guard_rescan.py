@@ -50,7 +50,7 @@ def publisher_for(db):
 
 async def confirmed(db, publisher, subject, observed_at):
     result = await publisher.publish(4663, subject, measurement(observed_at))
-    await db.update_verdict_onchain(result["evidence_id"], "confirmed")
+    await db.update_verdict_onchain(result["evidence_id"], "confirmed", registry=publisher.registry)
     return result
 
 
