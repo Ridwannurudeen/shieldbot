@@ -361,6 +361,7 @@ def routing_error_api(monkeypatch):
     registry.is_token_contract = AsyncMock(return_value=True)
     registry.is_verified_contract = AsyncMock(return_value=(True, None))
     registry.get_token_info = AsyncMock(return_value={})
+    registry.get_bytecode = AsyncMock(return_value="0x6080")
     services = SimpleNamespace(
         web3_client=registry,
         db=SimpleNamespace(
@@ -566,26 +567,31 @@ async def test_legacy_fallback_never_clears_a_transaction_specific_request(cache
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("code, value, is_contract, looked_up", [
-    ("0x6080604052", hex(10**17), True, True),
-    ("0x", hex(10**17), False, True),
-    ("ef0100" + "5" * 40, hex(10**17), False, True),
-    (None, hex(10**17), None, True),
-    ("0x6080604052", "0", None, False),
-], ids=["contract", "wallet", "delegated-wallet", "code-unknown", "not-paying"])
-async def test_a_paying_call_tells_the_analyzers_whether_the_target_is_a_contract(
-    cached_firewall_api, code, value, is_contract, looked_up,
+@pytest.mark.parametrize("code, is_contract, verified", [
+    ("0x6080604052", True, True),
+    ("0x", False, False),
+    ("ef0100" + "5" * 40, False, False),
+    (None, None, True),
+], ids=["contract", "wallet", "delegated-wallet", "code-unknown"])
+async def test_the_target_code_is_read_once_and_a_wallet_is_not_verified(
+    cached_firewall_api, code, is_contract, verified,
 ):
     api, services = cached_firewall_api
     services.registry.run_all.return_value = []
     api.calldata_decoder.decode.return_value = dict(PAYABLE)
     api.web3_client.get_bytecode = AsyncMock(return_value=code)
     await api.firewall(
-        api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40, value=value), SimpleNamespace(headers={}),
+        api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40, value=hex(10**17)), SimpleNamespace(headers={}),
     )
     ctx = services.registry.run_all.await_args.args[0]
     assert ctx.extra["is_contract"] is is_contract
-    assert api.web3_client.get_bytecode.await_count == int(looked_up)
+    api.web3_client.get_bytecode.assert_awaited_once()
+    if verified:
+        target = api.web3_client.to_checksum_address("0x" + "a" * 40)
+        api.web3_client.is_verified_contract.assert_awaited_once_with(target, chain_id=56, code=code)
+    else:
+        api.web3_client.is_verified_contract.assert_not_awaited()
+        assert ctx.extra["is_verified"] is None
 
 
 APPROVE = {

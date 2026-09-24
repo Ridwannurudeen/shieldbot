@@ -200,6 +200,7 @@ def fallback_firewall(monkeypatch):
     web3.to_checksum_address.side_effect = lambda address: address
     web3.is_token_contract = AsyncMock(return_value=True)
     web3.is_verified_contract = AsyncMock(return_value=(True, None))
+    web3.get_bytecode = AsyncMock(return_value="0x6080")
     monkeypatch.setattr(api, "container", None)
     monkeypatch.setattr(api, "web3_client", web3)
     monkeypatch.setattr(

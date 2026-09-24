@@ -1216,25 +1216,26 @@ async def firewall(req: FirewallRequest, request: Request):
             # checks (honeypot simulation, DEX liquidity, etc.)
             is_token = None
             is_verified = None
+            # The target's code, read once. A wallet (no code, or an EIP-7702 delegation) has no
+            # source to verify and takes payments with no contract to judge; for a contract, the
+            # verification's clone check reads this code instead of fetching it again.
+            code = await web3_client.get_bytecode(to_addr, chain_id=req.chainId)
+            has_code, delegated = code_kind(code)
+            is_contract = None if has_code is None else has_code and not delegated
             try:
                 is_token = await web3_client.is_token_contract(to_addr, chain_id=req.chainId)
             except UnsupportedChainError:
                 raise
             except Exception:
                 pass
-            try:
-                verified_result = await web3_client.is_verified_contract(to_addr, chain_id=req.chainId)
-                is_verified = verified_result[0] if isinstance(verified_result, tuple) else verified_result
-            except UnsupportedChainError:
-                raise
-            except Exception:
-                pass
-            # A payment is judged on the contract that takes it; a wallet (no code, or an EIP-7702
-            # delegation) has none to judge. Only a paying call needs the lookup.
-            is_contract = None
-            if paying:
-                has_code, delegated = code_kind(await web3_client.get_bytecode(to_addr, chain_id=req.chainId))
-                is_contract = None if has_code is None else has_code and not delegated
+            if is_contract is not False:
+                try:
+                    verified_result = await web3_client.is_verified_contract(to_addr, chain_id=req.chainId, code=code)
+                    is_verified = verified_result[0] if isinstance(verified_result, tuple) else verified_result
+                except UnsupportedChainError:
+                    raise
+                except Exception:
+                    pass
 
             ctx = AnalysisContext(
                 address=to_addr, chain_id=req.chainId, from_address=from_addr,

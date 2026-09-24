@@ -1,11 +1,12 @@
 """Verification from the chain's explorer or Sourcify, and EIP-1167 clones judged by their implementation."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from adapters.evm_base import EvmAdapter
-from services.explorer_service import ExplorerService
+from services.explorer_service import ExplorerResult, ExplorerService
 
 ADDRESS = "0x89e5db8b5aa49aa85ac63f691524311aeb649eba"
 IMPLEMENTATION = "0x" + "4" * 40
@@ -113,15 +114,16 @@ CLONE_CODE = "363d3d373d3d3d363d73" + IMPLEMENTATION[2:] + "5af43d82803e903d9160
 @pytest.mark.asyncio
 @pytest.mark.parametrize("prefix", ["", "0x"], ids=["web3-7", "web3-6"])
 @pytest.mark.parametrize(
-    "implementation, expected",
+    "implementation, expected, requests",
     [
-        ((VERIFIED_SOURCE, SOURCIFY_UNVERIFIED), (True, "contract Token {}")),
-        ((UNVERIFIED_SOURCE, SOURCIFY_UNVERIFIED), (False, None)),
-        ((EXPLORER_DOWN, SOURCIFY_UNVERIFIED), (None, None)),
+        # Sourcify is asked only when the explorer did not verify the contract.
+        ((VERIFIED_SOURCE, SOURCIFY_UNVERIFIED), (True, "contract Token {}"), 3),
+        ((UNVERIFIED_SOURCE, SOURCIFY_UNVERIFIED), (False, None), 4),
+        ((EXPLORER_DOWN, SOURCIFY_UNVERIFIED), (None, None), 4),
     ],
     ids=["verified-implementation", "unverified-implementation", "implementation-unknown"],
 )
-async def test_a_minimal_proxy_is_judged_by_its_implementation(prefix, implementation, expected):
+async def test_a_minimal_proxy_is_judged_by_its_implementation(prefix, implementation, expected, requests):
     impl_explorer, impl_sourcify = implementation
     result, http = await _verify(
         {ADDRESS: UNVERIFIED_SOURCE, IMPLEMENTATION: impl_explorer},
@@ -132,7 +134,52 @@ async def test_a_minimal_proxy_is_judged_by_its_implementation(prefix, implement
         code=prefix + CLONE_CODE,
     )
     assert result == expected
-    assert http.session.get.call_count == 4
+    assert http.session.get.call_count == requests
+
+
+async def _hang(*args, **kwargs):
+    await asyncio.sleep(60)
+
+
+def _adapter_with(explorer, sourcify, code="0x6080"):
+    adapter = EvmAdapter(56, "Test", "https://rpc.invalid", etherscan_api_key="test-key")
+    adapter._etherscan_verification = AsyncMock(return_value=explorer)
+    adapter._explorer_service = MagicMock(get_sourcify_verification=sourcify)
+    adapter.get_bytecode = AsyncMock(return_value=code)
+    return adapter
+
+
+@pytest.mark.asyncio
+async def test_an_explorer_verified_contract_does_not_wait_for_sourcify():
+    sourcify = AsyncMock(side_effect=_hang)
+    adapter = _adapter_with((True, "contract Token {}"), sourcify)
+    assert await asyncio.wait_for(adapter.is_verified_contract(ADDRESS), 1) == (True, "contract Token {}")
+    sourcify.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_sourcify_leaves_the_answer_unknown_in_bounded_time(monkeypatch):
+    import services.counterparty_service as counterparty_module
+
+    monkeypatch.setattr(counterparty_module, "PROVIDER_TIMEOUT", 0.05)
+    adapter = _adapter_with((False, None), AsyncMock(side_effect=_hang))
+    assert await asyncio.wait_for(adapter.is_verified_contract(ADDRESS), 5) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_code_leaves_the_clone_check_out():
+    adapter = _adapter_with((False, None), AsyncMock(return_value=ExplorerResult("unverified")), code=None)
+    assert await adapter.is_verified_contract(ADDRESS) == (False, None)
+    adapter.get_bytecode.assert_awaited_once_with(ADDRESS)
+
+
+@pytest.mark.asyncio
+async def test_code_the_caller_already_read_is_not_read_again():
+    adapter = _adapter_with((False, None), AsyncMock(return_value=ExplorerResult("unverified")))
+    adapter._verification = AsyncMock(side_effect=[(False, None), (True, "contract Impl {}")])
+    assert await adapter.is_verified_contract(ADDRESS, code=CLONE_CODE) == (True, "contract Impl {}")
+    adapter.get_bytecode.assert_not_awaited()
+    assert adapter._verification.await_args_list[1].args == (IMPLEMENTATION,)
 
 
 @pytest.mark.asyncio

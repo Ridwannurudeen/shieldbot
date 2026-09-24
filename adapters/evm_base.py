@@ -215,21 +215,25 @@ class EvmAdapter(ChainAdapter):
             logger.error("[%s] Error getting bytecode: %s", self._chain_name, type(e).__name__)
             return None
 
-    async def is_verified_contract(self, address: str) -> Tuple[Optional[bool], Optional[str]]:
+    async def is_verified_contract(
+        self, address: str, code: Optional[str] = None,
+    ) -> Tuple[Optional[bool], Optional[str]]:
         """Return (verification, source); None means unknown, False means unverified.
 
         An EIP-1167 minimal proxy (a clone) has no source of its own, so a clone that is not
-        verified itself is judged by its implementation.
+        verified itself is judged by its implementation. A caller that already read the contract's
+        code passes it, so the clone check does not read it again.
         """
         verified, source = await self._verification(address)
         if verified is not True:
-            implementation = await self._minimal_proxy_implementation(address)
+            implementation = await self._minimal_proxy_implementation(address, code)
             if implementation:
                 return await self._verification(implementation)
         return verified, source
 
-    async def _minimal_proxy_implementation(self, address: str) -> Optional[str]:
-        code = await self.get_bytecode(address)
+    async def _minimal_proxy_implementation(self, address: str, code: Optional[str]) -> Optional[str]:
+        if code is None:
+            code = await self.get_bytecode(address)
         # web3 6 returns the hex with 0x, web3 7 without.
         match = EIP1167_RUNTIME.fullmatch(code.lower().removeprefix('0x')) if code else None
         return '0x' + match.group(1) if match else None
@@ -244,12 +248,20 @@ class EvmAdapter(ChainAdapter):
                 logger.warning("[%s] Verification unknown: %s", self._chain_name, result.reason)
                 return (None, None)
             return (result.status == 'verified', None)
-        (explorer, source), sourcify = await asyncio.gather(
-            self._etherscan_verification(address),
-            self._explorer_service.get_sourcify_verification(address, self._chain_id),
-        )
-        if explorer is True or sourcify.status == 'verified':
+        from services.counterparty_service import within_timeout
+        from services.explorer_service import ExplorerResult
+
+        explorer, source = await self._etherscan_verification(address)
+        if explorer is True:
             return (True, source)
+        # Sourcify is asked only when the explorer did not verify the contract, and within the
+        # providers' time limit, so a stalled Sourcify leaves the answer Unknown in bounded time.
+        sourcify = await within_timeout(
+            self._explorer_service.get_sourcify_verification(address, self._chain_id),
+            ExplorerResult('unknown', reason='Sourcify timed out', provider='sourcify'),
+        )
+        if sourcify.status == 'verified':
+            return (True, None)
         if explorer is False and sourcify.status == 'unverified':
             return (False, None)
         logger.warning(
