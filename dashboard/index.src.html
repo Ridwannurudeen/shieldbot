@@ -908,12 +908,12 @@
         : null;
       return (
         <div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-3">
             {STAT_ITEMS.map(s => (
               <StatCard key={s.key} label={s.label} span={s.span} value={stats ? stats[s.key] : null}
                         color={s.color} loading={loading} missing={missingText(stats, s.key)}
                         note={s.key === 'chains_protected' ? mempoolNote : null}
-                        className={s.key === 'chains_protected' ? 'col-span-2 lg:col-span-1' : ''} />
+                        className={s.key === 'chains_protected' ? 'col-span-2 xl:col-span-1' : ''} />
             ))}
           </div>
           {!loading && footnote && (
