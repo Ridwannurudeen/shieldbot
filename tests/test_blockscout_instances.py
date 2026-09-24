@@ -99,7 +99,7 @@ async def test_robinhood_still_needs_the_pro_gateway_key(http):
 
 
 @pytest.mark.asyncio
-async def test_each_blockscout_host_is_paced_on_its_own(http):
+async def test_each_blockscout_host_is_spaced_on_its_own(http):
     respond, session = http
     respond(RECORDED[8453])
     clock = [10.0]
@@ -131,8 +131,52 @@ async def test_each_blockscout_host_is_paced_on_its_own(http):
     for host_starts in starts.values():
         assert len(host_starts) == 3
         assert all(b - a >= 0.209 for a, b in zip(host_starts, host_starts[1:]))
-    # No host waits behind another host's requests.
+    # No host's spacing counts another host's requests.
     assert all(host_starts[0] == 10.0 for host_starts in starts.values())
+
+
+@pytest.mark.asyncio
+async def test_a_busy_host_does_not_hold_up_the_others(http):
+    gateway_open = asyncio.Event()
+    calls = []
+    response = MagicMock(status=200)
+    response.json = AsyncMock(return_value=RECORDED[8453])
+
+    def get(url, **kwargs):
+        host = url.split("/")[2]
+        calls.append(host)
+
+        async def enter():
+            if host == "api.blockscout.com":
+                await gateway_open.wait()
+            return response
+
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(side_effect=enter)
+        return context
+
+    http[1].get.side_effect = get
+    service = ExplorerService()
+    with patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}):
+        gateway = [
+            asyncio.create_task(service.get_contract_creation_info("0x" + f"{i:040x}", 4663))
+            for i in range(2)
+        ]
+        await asyncio.sleep(0)
+        # The first gateway request is stuck inside its host's lock and the second waits for it;
+        # Base and Optimism must still be answered meanwhile.
+        await asyncio.wait_for(
+            asyncio.gather(
+                service.get_contract_creation_info(RECORDED[8453]["hash"], 8453),
+                service.get_contract_creation_info(RECORDED[10]["hash"], 10),
+            ),
+            timeout=5,
+        )
+        assert calls.count("api.blockscout.com") == 1
+        assert not any(task.done() for task in gateway)
+        gateway_open.set()
+        await asyncio.gather(*gateway)
+    assert calls.count("api.blockscout.com") == 2
 
 
 def _adapter(adapter_class, creation):
