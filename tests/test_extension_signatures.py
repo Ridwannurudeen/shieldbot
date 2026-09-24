@@ -488,7 +488,8 @@ def test_a_message_that_looks_like_sign_in_but_is_not_eip_4361_is_unknown(varian
     'relative-uri': siwe({uri: '/login'}),
     'statement-on-two-lines': siwe({statement: 'Sign in\nplease.'}),
     'short-address': siwe().replace('0x' + '1234567890'.repeat(4), '0x1234'),
-    'not-first-line': 'Hello!\n' + siwe({domain: 'wallet-login.example'}),
+    // For this site but not on the first line: the domain is read, the layout is not EIP-4361's.
+    'not-first-line': 'Hello!\n' + siwe(),
   }[JSON.parse(process.argv[1])];
   const {result} = await respond(signIn(text));
   assert.equal(bodies.length, 1, 'the signature was not analysed by the API');
@@ -1072,4 +1073,68 @@ def test_a_failed_read_of_the_session_cache_is_tried_again():
   assert.equal((await check('https://drainer.example/')).result.is_phishing, true);
   assert.equal(lookups.length, 1);
 """
+    )
+
+
+# The claimed domain is the run of non-whitespace just before the first " wants you to sign in with
+# your Ethereum account:" anywhere in the text, so line endings, a leading character, a scheme, a
+# path or a zero-width character cannot hide it. Each of these is for another site than the page.
+FOREIGN_LAYOUTS = {
+    "crlf": "siwe({domain: 'wallet-login.example'}).replace(/\\n/g, '\\r\\n')",
+    "leading-space": "' ' + siwe({domain: 'wallet-login.example'})",
+    "leading-character": "'x' + siwe({domain: 'wallet-login.example'})",
+    "leading-character-on-this-site": "'x' + siwe()",
+    "text-before-the-first-line": "'Hello!\\n' + siwe({domain: 'wallet-login.example'})",
+    "scheme": "siwe({domain: 'https://wallet-login.example'})",
+    "path": "siwe({domain: 'wallet-login.example/login'})",
+    "port": "siwe({domain: 'dapp.example:8443'})",
+    "line-separator": "siwe({domain: 'wallet-login.example'}).replace('account:\\n', 'account:\\u2028')",
+    "zero-width-space": "siwe({domain: '\\u200bwallet-login.example'})",
+    "byte-order-mark": "'\\ufeff' + siwe({domain: 'wallet-login.example'})",
+}
+
+
+@pytest.mark.parametrize("layout", list(FOREIGN_LAYOUTS))
+def test_a_sign_in_domain_for_another_site_is_blocked_however_the_message_is_laid_out(layout):
+    run_node(
+        BACKGROUND_HARNESS
+        + SIWE
+        + r"""
+(async () => {
+  const [layout, expression] = JSON.parse(process.argv[1]);
+  const text = eval(expression);
+  const {result} = await respond(signIn(hex(text)));
+  assert.equal(result.siwe.state, 'mismatch', JSON.stringify(result.siwe));
+  assert.equal(result.classification, 'BLOCK_RECOMMENDED');
+  assert.equal(result.siwe.origin, 'dapp.example');
+  assert.equal(bodies.length, 0, 'the API was asked although the verdict cannot change');
+""",
+        [layout, FOREIGN_LAYOUTS[layout]],
+    )
+
+
+UNREADABLE_LAYOUTS = {
+    "this-site-with-crlf": "siwe().replace(/\\n/g, '\\r\\n')",
+    "nothing-before-the-header": "siwe({domain: ''})",
+    "only-a-line-break-before-the-header": "'\\n' + siwe({domain: ''})",
+    "domain-that-is-not-a-host": "siwe({domain: 'wallet|login.example'})",
+}
+
+
+@pytest.mark.parametrize("layout", list(UNREADABLE_LAYOUTS))
+def test_a_sign_in_message_whose_domain_or_layout_cannot_be_read_stays_unknown(layout):
+    run_node(
+        BACKGROUND_HARNESS
+        + SIWE
+        + r"""
+(async () => {
+  const [layout, expression] = JSON.parse(process.argv[1]);
+  const {result} = await respond(signIn(hex(eval(expression))));
+  assert.equal(result.siwe.state, 'unreadable', JSON.stringify(result.siwe));
+  assert.equal(result.status, 'unknown');
+  assert.notEqual(result.classification, 'SAFE');
+  assert.notEqual(result.classification, 'BLOCK_RECOMMENDED');
+  assert.equal(bodies.length, 1, 'the signature was not analysed by the API');
+""",
+        [layout, UNREADABLE_LAYOUTS[layout]],
     )

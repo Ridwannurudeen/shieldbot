@@ -275,15 +275,15 @@ function unknownChain(reason) {
   };
 }
 
-// Sign-In with Ethereum (EIP-4361). The domain on a sign-in message's first
-// line must be the host of the frame that asked, which the browser gives this
-// worker as the message's sender; the page has no say in it. That is checked
-// first, whatever follows. The rest is then parsed strictly, as the reference
-// parser reads it: every field in its order and form, and nothing else, and
-// the URI's host must be the frame's host too. The address's EIP-55 checksum
-// is not required: the standard says SHOULD.
+// Sign-In with Ethereum (EIP-4361). The domain a sign-in message claims must
+// be the host of the frame that asked, which the browser gives this worker as
+// the message's sender; the page has no say in it. The claim is read loosely,
+// so line endings, a character before it, a scheme, a port or a path cannot
+// hide it, and checked first, whatever follows. The rest is then parsed
+// strictly, as the reference parser reads it: every field in its order and
+// form, and nothing else, and the URI's host must be the frame's host too.
+// The address's EIP-55 checksum is not required: the standard says SHOULD.
 const SIWE_HEADER = " wants you to sign in with your Ethereum account:";
-const SIWE_FIRST_LINE = /^(?:[a-z][a-z0-9+.-]*:\/\/)?([^\s/?#]+) wants you to sign in with your Ethereum account:$/i;
 const SIWE_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/i;
 const SIWE_UNREADABLE = "The message looks like Sign-In with Ethereum but does not follow EIP-4361, " +
   "so the site it is for cannot be checked.";
@@ -356,17 +356,20 @@ function parseSiwe(text) {
 function judgeSignIn(data, origin) {
   const text = signedText(data);
   if (text === null || !text.includes(SIWE_HEADER)) return null;
-  const first = SIWE_FIRST_LINE.exec(text.split("\n")[0]);
-  const domain = first && parseUrl(`https://${first[1]}`);
+  // The claimed domain: the run of non-whitespace just before the first
+  // header, whatever comes before it, with or without a scheme.
+  const claim = /\S+$/.exec(text.slice(0, text.indexOf(SIWE_HEADER)));
+  const token = claim && claim[0];
+  const domain = token && parseUrl(token.includes("://") ? token : `https://${token}`);
   if (!domain) return { state: "unreadable" };
   const page = parseUrl(origin);
   const host = page ? page.host : "";
   const mismatch = (claimed) => ({ state: "mismatch", domain: claimed, origin: host || String(origin) });
-  if (domain.username || domain.password || domain.host !== host) return mismatch(first[1]);
+  if (domain.username || domain.password || domain.host !== host) return mismatch(token);
   const uri = parseSiwe(text);
   if (uri === null) return { state: "unreadable" };
   const uriHost = parseUrl(uri).host;
-  return uriHost && uriHost !== host ? mismatch(uriHost) : { state: "match", domain: first[1] };
+  return uriHost && uriHost !== host ? mismatch(uriHost) : { state: "match", domain: token };
 }
 
 async function handleAnalyze(tx, sender) {
