@@ -44,10 +44,11 @@ _LEVEL_RANK = {LOW: 0, MEDIUM: 1, HIGH: 2}
 # The contract_scores rows the threat counts count and the threat feed lists.
 THREAT_CONDITION = f"risk_level = '{HIGH}'"
 
-# A signature request with no transaction behind it has its own table, and a blind eth_sign
-# request scores at least BLIND_SIGN_MIN.
+# A signature request with no transaction behind it has its own table. A blind eth_sign request,
+# which signs a raw hash that can be a transaction's, scores at least BLIND_SIGN_MIN: in the
+# BLOCK_RECOMMENDED band of both tables.
 SIGNATURE_BANDS = ((BLOCK_RECOMMENDED, 70), (HIGH_RISK, 40), (CAUTION, 15), (SAFE, 0))
-BLIND_SIGN_MIN = 30
+BLIND_SIGN_MIN = 90
 
 # STRICT policy turns an incomplete analysis into a block that reports at least this score.
 STRICT_BLOCK_SCORE = 80

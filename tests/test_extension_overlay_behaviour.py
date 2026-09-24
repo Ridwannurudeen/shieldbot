@@ -46,6 +46,14 @@ class El {
   }
   get textContent() { return this.text; }
   setAttribute(name, value) { this.attrs[name] = String(value); }
+  get classList() {
+    const names = () => this.className.split(/\s+/).filter(Boolean);
+    return {
+      add: name => { if (!names().includes(name)) this.className = [...names(), name].join(' '); },
+      remove: name => { this.className = names().filter(other => other !== name).join(' '); },
+      contains: name => names().includes(name),
+    };
+  }
   getAttribute(name) { return name in this.attrs ? this.attrs[name] : null; }
   addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
   dispatch(type, event = {}) {
@@ -175,14 +183,17 @@ function reportIntersecting(intersecting) {
   overlayIntersecting = intersecting;
   for (const observer of [...visibilityObservers]) observer.report();
 }
-// content.js keeps Proceed disabled for half a second after an overlay appears, and rejects a
-// request whose dialog stays out of view for ten seconds. The tests run it with no wait and a
-// 100 ms limit, except those that check the real ones.
+// content.js keeps Proceed disabled for half a second after an overlay appears, rejects a
+// request whose dialog stays out of view for ten seconds, and makes Proceed on a Block Recommended
+// overlay wait for a hold of a second and a half. The tests run it with no wait, a 100 ms limit
+// and a 30 ms hold, except those that check the real ones.
 function withShortDelays(source) {
   assert(source.includes('const PROCEED_DELAY_MS = 500;'));
   assert(source.includes('const OUT_OF_VIEW_LIMIT_MS = 10000;'));
+  assert(source.includes('const HOLD_TO_CONFIRM_MS = 1500;'));
   return source.replace('const PROCEED_DELAY_MS = 500;', 'const PROCEED_DELAY_MS = 0;')
-    .replace('const OUT_OF_VIEW_LIMIT_MS = 10000;', 'const OUT_OF_VIEW_LIMIT_MS = 100;');
+    .replace('const OUT_OF_VIEW_LIMIT_MS = 10000;', 'const OUT_OF_VIEW_LIMIT_MS = 100;')
+    .replace('const HOLD_TO_CONFIRM_MS = 1500;', 'const HOLD_TO_CONFIRM_MS = 30;');
 }
 """
 
@@ -196,7 +207,7 @@ let phishing = false, phishingChecks = 0;
 let clock = 1000000;
 let fetchDelays = [];
 const chrome = {
-  storage: {local: {get(defaults, cb) { cb({...defaults, ...storage}); }}},
+  storage: {local: {get(defaults, cb) { cb({...defaults, ...storage}); }, set(value) { Object.assign(storage, value); }}},
   runtime: {
     getURL: path => 'chrome-extension://id/' + path,
     async sendMessage(message) {
@@ -488,7 +499,8 @@ def test_focus_that_leaves_the_overlay_returns_to_the_dialog():
         CONTENT_HARNESS
         + r"""
 (async () => {
-  analyze = async () => ({result: scan({})});
+  // A SAFE verdict has no explain button, so this one is a CAUTION.
+  analyze = async () => ({result: scan({classification: 'CAUTION', risk_score: 40})});
   await intercept('request');
   const root = overlayRoot();
   const modal = overlay().querySelector('.shieldai-modal');
@@ -871,7 +883,8 @@ def test_legacy_typed_data_is_shown_as_a_signature(method):
 (async () => {
   const method = JSON.parse(process.argv[1]);
   await intercept('request', {signMethod: method, typedData: {primaryType: 'Permit', domain: {}, message: {spender: '0x' + 'e'.repeat(40)}}}, method);
-  assert.equal(analyses.length, 0, 'a signature was sent to the transaction firewall');
+  assert.equal(analyses.length, 1, 'the signature was not sent for analysis');
+  assert.equal(analyses[0].signMethod, method);
   assert(overlay().innerHTML.includes('APPROVAL SIGNATURE'), overlay().innerHTML);
 """,
         method,
@@ -1000,6 +1013,8 @@ def test_strict_mode_removes_sign_anyway_on_unparseable_typed_data(policy, typed
 (async () => {
   const [policy, typed] = JSON.parse(process.argv[1]);
   storage.policyMode = policy;
+  // The API calls it covered, so only the typed data the overlay cannot read decides.
+  analyze = async () => ({result: scan({})});
   const typedData = typed === 'readable' ? {primaryType: 'Mail', domain: {name: 'Mail'}, message: {contents: 'hi'}} : 'not typed data';
   await intercept('request', {signMethod: 'eth_signTypedData_v4', typedData}, 'eth_signTypedData_v4');
   const html = overlay().innerHTML;
@@ -1101,15 +1116,48 @@ const context = vm.createContext({
   setTimeout(fn, delay) { const id = ++nextTimer; timers.set(id, {fn, delay}); return id; },
   clearTimeout(id) { timers.delete(id); }, setInterval() { return 0; }, clearInterval() {},
 });
+// Each HMAC signature inject.js completes wakes whoever waits for it, so a test can wait for
+// inject.js to have checked a proof instead of guessing how long that takes.
+let signatures = 0;
+const signatureWaiters = [];
+function signatureMade() {
+  signatures++;
+  for (const wake of signatureWaiters.splice(0)) wake();
+}
+// Resolves once inject.js has completed `count` signatures since it started, and has run what
+// follows the last one (its promise callbacks all run before the next macrotask). Rejects after two
+// seconds, so a check that never comes fails as an assertion, not as the subprocess's timeout.
+async function signaturesMade(count) {
+  let timer;
+  const late = new Promise((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(
+      `inject.js completed ${signatures} of the ${count} signatures awaited within 2 s`)), 2000);
+  });
+  try {
+    while (signatures < count) {
+      await Promise.race([new Promise(resolve => signatureWaiters.push(resolve)), late]);
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+  await new Promise(resolve => setImmediate(resolve));
+}
 // In a browser, crypto's promises belong to the page's world, so a page that replaces its
-// Promise built-ins reaches them too. Make them the context's promises here as well.
-context.crypto = vm.runInContext(`(host) => ({
+// Promise built-ins reaches them too. Make them the context's promises here as well. A signature
+// is counted on the host's own promise, which no page patch reaches.
+context.crypto = vm.runInContext(`(host, signed) => ({
   subtle: {
     importKey: (...args) => Promise.resolve(host.subtle.importKey(...args)),
-    sign: (...args) => Promise.resolve(host.subtle.sign(...args)),
+    sign: (...args) => {
+      const mac = host.subtle.sign(...args);
+      // Registered before inject.js awaits mac, so a signature is counted before inject.js acts on it:
+      // once the intercept is posted, its signature is already in the count a test starts from.
+      mac.then(signed, signed);
+      return Promise.resolve(mac);
+    },
   },
   randomUUID: () => host.randomUUID(),
-})`, context)(webcrypto);
+})`, context)(webcrypto, signatureMade);
 vm.runInContext(fs.readFileSync('extension/inject.js', 'utf8'), context);
 // Play content.js's side of the handoff: here inject.js started first and is listening.
 const accepted = !document.dispatchEvent(new CustomEvent('shieldai:channel', {detail: 'channel-token', cancelable: true}));
@@ -1117,11 +1165,15 @@ function fireFailClosedTimer() {
   for (const [id, timer] of timers) if (timer.delay === 60000) { timers.delete(id); timer.fn(); return true; }
   return false;
 }
+// Starts a request and waits, a flush at a time and a bounded number of times, for its intercept:
+// inject.js reads the chain and signs the intercept first, which a busy machine can make slow.
 async function startRequest() {
+  const intercepts = () => posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT');
+  const before = intercepts().length;
   const pending = provider.request({method: 'eth_sendTransaction', params: [{to: '0x' + 'a'.repeat(40)}]});
   pending.catch(() => {});
-  await flush();
-  const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+  for (let i = 0; i < 20 && intercepts().length === before; i++) await flush();
+  const intercept = intercepts()[before];
   return {pending, requestId: intercept.requestId, intercept};
 }
 const proof = (requestId, purpose) => proofFor('channel-token', `${requestId}:${purpose}`);
@@ -1146,8 +1198,11 @@ def test_fail_closed_timer_stops_only_for_an_authentic_shown_signal(shown):
     'intercept-proof': intercept.proof,
     'wrong-request': await proof('another-request', 'shown'),
   };
+  const made = signatures;
   if (shown !== 'none') deliver({type: 'SHIELDAI_TX_SHOWN', requestId, proof: proofs[shown]});
-  await flush();
+  // inject.js checks a shown signal's proof with a signature of its own: wait for that check.
+  if (shown === 'none') await flush();
+  else await signaturesMade(made + 1);
   const stopped = !fireFailClosedTimer();
   assert.equal(stopped, shown === 'valid');
   if (shown === 'valid') {
@@ -1209,8 +1264,10 @@ def test_replacing_the_root_element_rejects_a_request_waiting_on_the_overlay():
         + r"""
 (async () => {
   const {pending, requestId} = await startRequest();
-  deliver({type: 'SHIELDAI_TX_SHOWN', requestId, proof: await proof(requestId, 'shown')});
-  await flush();
+  const shownProof = await proof(requestId, 'shown');
+  const made = signatures;
+  deliver({type: 'SHIELDAI_TX_SHOWN', requestId, proof: shownProof});
+  await signaturesMade(made + 1);
   assert(!fireFailClosedTimer(), 'the overlay was shown, so the fail-closed timer should have stopped');
   // What document.open() does: the root element goes, taking the extension's listeners with it,
   // so the Block content.js then posts would never arrive.
@@ -1319,7 +1376,7 @@ window.ethereum = provider;
 window.dispatchEvent = () => {};
 const storage = {language: 'en'};
 const chrome = {
-  storage: {local: {get(defaults, cb) { cb({...defaults, ...storage}); }}},
+  storage: {local: {get(defaults, cb) { cb({...defaults, ...storage}); }, set(value) { Object.assign(storage, value); }}},
   runtime: {
     getURL: path => 'chrome-extension://id/' + path,
     async sendMessage(message) {
@@ -2230,9 +2287,11 @@ def test_a_checked_copy_cannot_be_replayed_unchecked(how):
     };
   }
   announce(wallet);
+  // It answers the chain, which a signature is analysed on, and keeps the request it is handed.
   const pageProvider = {
     on() {},
     request(args) {
+      if (args.method === 'eth_chainId') return Promise.resolve('0x38');
       kept = args;
       if (how === 'replayed-inside-a-page-provider') {
         change(args);

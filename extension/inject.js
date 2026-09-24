@@ -320,12 +320,21 @@
         };
         const txParams = ownFieldsOnly(ownValue(request.params, 0));
         const calls = kind === "calls" ? ownValue(txParams, "calls") : undefined;
+        const authorizations = kind === "transaction" ? ownValue(txParams, "authorizationList") : undefined;
 
         // A transaction must be an object, and a wallet_sendCalls batch an
-        // object whose calls are a non-empty list of objects. Anything else
-        // cannot be analysed: the user is told so and decides.
+        // object whose calls are a non-empty list of objects. An EIP-7702
+        // transaction's authorization list, when there is one, must be a
+        // non-empty list of objects. Anything else cannot be analysed: the user
+        // is told so and decides.
         let structured = true;
-        if (kind === "transaction") structured = isPlainObject(txParams);
+        if (kind === "transaction") {
+          structured = isPlainObject(txParams) &&
+            (authorizations === undefined || (isArray(authorizations) && authorizations.length > 0));
+          for (let index = 0; structured && authorizations !== undefined && index < authorizations.length; index++) {
+            structured = isPlainObject(ownFieldsOnly(ownValue(authorizations, index)));
+          }
+        }
         if (kind === "calls") {
           structured = isPlainObject(txParams) && isArray(calls) && calls.length > 0;
           for (let index = 0; structured && index < calls.length; index++) {
@@ -334,6 +343,10 @@
         }
 
         const unknownStructure = { __proto__: null, unknownStructure: true };
+        // A batch with a call on another chain is shown the same way, marked so
+        // the overlay offers no Proceed: the batch is rejected whatever the user
+        // decides.
+        const callsOnAnotherChain = { __proto__: null, unknownStructure: true, wrongChain: true };
         let interceptData;
 
         if (!structured) {
@@ -365,21 +378,25 @@
             signMethod: method,
           };
         } else if (kind === "sign") {
-          // personal_sign: params[0] is message, params[1] is address
-          // eth_sign: params[0] is address, params[1] is message
-          const isPersonal = method === "personal_sign";
+          // personal_sign takes [message, address] and eth_sign [address,
+          // message]. MetaMask also takes personal_sign's the other way round
+          // when the first is an address and the second is not, and signs the
+          // second, so that order is read as it reads it.
+          const second = ownValue(request.params, 1);
+          const isAddress = (value) => typeof value === "string" && execRegExp(ADDRESS_PATTERN, value) !== null;
+          const messageFirst = method === "personal_sign" && !(isAddress(txParams) && !isAddress(second));
           interceptData = {
             __proto__: null,
-            from: isPersonal ? (ownValue(request.params, 1) || "") : txParams,
+            from: messageFirst ? (second || "") : txParams,
             to: "",
             value: "0x0",
-            data: isPersonal ? txParams : (ownValue(request.params, 1) || "0x"),
+            data: messageFirst ? txParams : (second || "0x"),
             signMethod: method,
           };
         }
 
-        // Transactions and batches are analysed on the wallet's chain. A
-        // batch is shown one call at a time, and each call is its own
+        // Transactions, batches and signatures are analysed on the wallet's
+        // chain. A batch is shown one call at a time, and each call is its own
         // decision; the batch goes to the wallet only once all are proceeded.
         const isTransaction = structured && (kind === "transaction" || kind === "calls");
         const count = structured && kind === "calls" ? calls.length : 1;
@@ -399,6 +416,7 @@
             chainId,
             callIndex: isCall ? index + 1 : undefined,
             callCount: isCall ? count : undefined,
+            authorizationList: isCall ? undefined : authorizations,
           };
         };
         const revision = chainRevision;
@@ -409,8 +427,8 @@
           const decisions = unreadable ? 1 : count;
           const decide = (index) => {
             if (index < decisions) {
-              requestAnalysis(method, unreadable ? unknownStructure : payloadAt(index, chainId), (action) => {
-                if (isTransaction && chainId === null) {
+              requestAnalysis(method, unreadable ? callsOnAnotherChain : payloadAt(index, chainId), (action) => {
+                if (structured && chainId === null) {
                   reject(new NativeError("Transaction blocked by ShieldAI: wallet chain is unknown or mismatched"));
                   return;
                 }
@@ -443,8 +461,17 @@
           decide(0);
         };
 
-        if (!isTransaction) {
+        if (!structured) {
           analyze(null);
+          return;
+        }
+        // A signature is not bound to the chain it was analysed on: the wallet
+        // gets it as the page sent it.
+        if (!isTransaction) {
+          resolveChainId((chainId) => {
+            interceptData.chainId = chainId;
+            analyze(chainId);
+          });
           return;
         }
         // A batch call that names a chain of its own other than the bound one
@@ -709,6 +736,8 @@
       txPayload.callCount = txParams.callCount;
     }
     if (txParams.unknownStructure) txPayload.unknownStructure = true;
+    if (txParams.wrongChain) txPayload.wrongChain = true;
+    if (txParams.authorizationList) txPayload.authorizationList = txParams.authorizationList;
 
     withProof(requestId, "intercept", (proof) => {
       postMessage(

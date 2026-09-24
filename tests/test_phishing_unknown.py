@@ -167,7 +167,8 @@ let fetches = 0;
 const context = vm.createContext({
   chrome: {
     runtime: {onInstalled: {addListener() {}}, onMessage: {addListener() {}}},
-    storage: {local: {get(defaults, cb) {cb(defaults);}}},
+    // Verdicts are also kept in chrome.storage.session, which starts empty.
+    storage: {local: {get(defaults, cb) {cb(defaults);}}, session: {get: async defaults => defaults, set: async () => {}}},
   },
   URL, AbortSignal, console: {warn() {}},
   fetch: async () => {

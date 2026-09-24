@@ -78,7 +78,7 @@ vm.runInContext(fs.readFileSync('extension/background.js', 'utf8'), context);
     'timeout', 'changed-before', 'changed-during', 'changed-back', 'changed-during-query',
     'changed-without-event', 'failed-recheck', 'independent-providers', 'sign-transaction',
     'signature:personal_sign', 'signature:eth_sign', 'signature:eth_signTypedData_v3',
-    'signature:eth_signTypedData_v4',
+    'signature:eth_signTypedData_v4', 'signature-offline:personal_sign', 'signature-offline:eth_signTypedData_v4',
 ])
 def test_injected_transaction_is_bound_to_provider_chain(scenario):
     run_javascript(r'''
@@ -92,7 +92,7 @@ const provider = {
   async request(args) {
     if (args.method !== 'eth_chainId') {sent.push(args); return 'sent';}
     queries++;
-    if (scenario === 'unavailable' || scenario.startsWith('signature:') ||
+    if (scenario === 'unavailable' || scenario.startsWith('signature-offline:') ||
         (scenario === 'failed-recheck' && queries > 1)) throw new Error('offline');
     if (scenario === 'invalid-provider') return '0x1237oops';
     if (scenario === 'timeout') return new Promise(() => {});
@@ -137,11 +137,22 @@ vm.runInContext(fs.readFileSync('extension/inject.js', 'utf8'), context);
 // content.js hands inject.js the channel token at document_start.
 context.document.dispatchEvent(new CustomEvent('shieldai:channel', {detail: 'test', cancelable: true}));
 (async () => {
-  if (scenario.startsWith('signature:')) {
+  // A signature is analysed on the wallet's chain, read once, but not bound to it: it goes to the
+  // wallet as sent. When the chain cannot be read it cannot be analysed, and is rejected.
+  if (scenario.startsWith('signature')) {
     const method = scenario.split(':')[1];
-    assert.equal(await provider.request({method, params: ['0x' + 'a'.repeat(40), '{}']}), 'sent');
-    assert.equal(queries, 0);
+    const pending = provider.request({method, params: ['0x' + 'a'.repeat(40), '{}']});
+    if (scenario.startsWith('signature-offline:')) {
+      await assert.rejects(pending, /chain/i);
+      assert.equal(sent.length, 0);
+      assert.equal(intercepted[0].chainId, null);
+    } else {
+      assert.equal(await pending, 'sent');
+      assert.equal(intercepted[0].chainId, 4663);
+      assert.equal(sent[0].chainId, undefined);
+    }
     assert.equal(intercepted[0].signMethod, method);
+    assert.equal(queries, 1);
     return;
   }
   if (scenario === 'changed-before') change('0x38');

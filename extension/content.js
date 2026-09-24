@@ -174,21 +174,18 @@
     }
     const strict = settings.policyMode === "STRICT";
 
-    // Signing requests are NOT transactions — route to dedicated overlay
-    // instead of the firewall API which expects calldata + contract address.
+    // Signing requests are analysed by the API like transactions, and shown
+    // in their own overlay, next to what would be signed.
     const SIGN_ONLY_METHODS = new Set([
       "personal_sign", "eth_sign",
       "eth_signTypedData_v4", "eth_signTypedData_v3",
       "eth_signTypedData", "eth_signTypedData_v1",
     ]);
-    if (tx.signMethod && SIGN_ONLY_METHODS.has(tx.signMethod)) {
-      showSignatureOverlay(requestId, tx, strict);
-      return;
-    }
+    const isSignature = Boolean(tx.signMethod) && SIGN_ONLY_METHODS.has(tx.signMethod);
     // inject.js could not read the request's structure, so there is nothing
     // to analyse: the user is told so and decides.
     if (tx.unknownStructure === true) {
-      showUnknownStructureOverlay(requestId, strict);
+      showUnknownStructureOverlay(requestId, strict, tx.wrongChain === true);
       return;
     }
 
@@ -207,14 +204,21 @@
       response = { error: err.message || "Extension communication error. Check extension settings." };
     }
 
+    // A send to an address that looks like one the user sent to before, but
+    // is another (address poisoning).
+    const recipient = isSignature ? null : recipientOf(tx);
+    const lookalike = recipient === null ? null : await pastLookalike(recipient);
+
     if (Date.now() - received > DECISION_WINDOW_MS) {
       showTimedOutOverlay(requestId);
+    } else if (isSignature) {
+      showSignatureOverlay(requestId, tx, strict, response);
     } else if (response.error) {
       // API error — show warning and let user decide
-      showErrorOverlay(requestId, response.error, strict, tx);
+      showErrorOverlay(requestId, response.error, strict, tx, recipient, lookalike);
     } else {
       // Show analysis overlay
-      showAnalysisOverlay(requestId, response.result, strict, tx);
+      showAnalysisOverlay(requestId, response.result, strict, tx, recipient, lookalike);
     }
   });
 
@@ -259,6 +263,9 @@
   // cannot be covered either; and the dialog rather than the host, which
   // has no area of its own (its content is position: fixed).
   const PROCEED_DELAY_MS = 500;
+  // On a Block Recommended overlay in Balanced mode, how long Proceed (or
+  // Sign Anyway) must be held down.
+  const HOLD_TO_CONFIRM_MS = 1500;
   let _dialogVisible = false;
   let _visibleSince = Infinity;
   let _visibilityObserver = null;
@@ -312,8 +319,9 @@
   // page script is an untrusted event and is ignored. Proceed also needs the
   // button enabled and the dialog visible without a break for
   // PROCEED_DELAY_MS; when it is not visible, the dialog says so rather than
-  // leave a button that silently does nothing.
-  function onDecision(root, id, requestId, action) {
+  // leave a button that silently does nothing. afterProceed, when given, runs
+  // once Proceed has counted.
+  function onDecision(root, id, requestId, action, afterProceed) {
     const button = root.getElementById(id);
     button.addEventListener("click", (event) => {
       if (!event.isTrusted) return;
@@ -326,7 +334,58 @@
         if (Date.now() - _visibleSince < PROCEED_DELAY_MS) return;
       }
       sendVerdict(requestId, action);
+      if (afterProceed) afterProceed();
     });
+  }
+
+  // Proceed on a Block Recommended overlay counts only when held down for
+  // HOLD_TO_CONFIRM_MS, with the primary pointer's main button or with a new
+  // press of Enter or Space, by real input; a click alone does nothing, and
+  // letting go early cancels. The
+  // click's rules apply when the hold starts, and the dialog must stay visible
+  // until it ends.
+  function onHold(root, requestId, afterProceed) {
+    const button = root.getElementById("shieldai-proceed");
+    let timer = null;
+    const cancel = () => {
+      clearTimeout(timer);
+      timer = null;
+      button.classList.remove("shieldai-holding");
+    };
+    const start = (event) => {
+      if (!event.isTrusted || timer !== null || button.disabled) return;
+      if (!_dialogVisible) {
+        root.getElementById("shieldai-covered").textContent = _t("overlayCoveredNote");
+        return;
+      }
+      if (Date.now() - _visibleSince < PROCEED_DELAY_MS) return;
+      const startedAt = Date.now();
+      button.classList.add("shieldai-holding");
+      timer = setTimeout(() => {
+        cancel();
+        // The overlay was replaced or removed during the hold.
+        if (_awaitingRequestId !== requestId) return;
+        if (!_dialogVisible || _visibleSince > startedAt) {
+          root.getElementById("shieldai-covered").textContent = _t("overlayCoveredNote");
+          return;
+        }
+        sendVerdict(requestId, "proceed");
+        if (afterProceed) afterProceed();
+      }, HOLD_TO_CONFIRM_MS);
+    };
+    const holdKey = (event) => event.key === "Enter" || event.key === " ";
+    button.addEventListener("pointerdown", (event) => {
+      if (event.button === 0 && event.isPrimary) start(event);
+    });
+    button.addEventListener("keydown", (event) => {
+      if (holdKey(event) && !event.repeat) start(event);
+    });
+    button.addEventListener("keyup", (event) => {
+      if (holdKey(event)) cancel();
+    });
+    for (const type of ["pointerup", "pointerleave", "pointercancel", "blur"]) {
+      button.addEventListener(type, cancel);
+    }
   }
 
   // Show an overlay as a modal dialog in its own closed shadow root: focus
@@ -423,6 +482,44 @@
       _t("unknownNoReason");
   }
 
+  // The class a result is shown as. One that is not complete is Unknown,
+  // never Safe or Caution; High Risk and Block Recommended stay.
+  function verdictOf(result) {
+    const incomplete = result.status !== "ok" || result.partial === true ||
+      result.risk_level === "UNKNOWN" || result.classification === "UNKNOWN" ||
+      !Number.isFinite(result.risk_score) ||
+      Object.values(result.coverage || {}).some(value => Number(value) < 1);
+    const classification = incomplete && !["HIGH_RISK", "BLOCK_RECOMMENDED"].includes(result.classification)
+      ? "UNKNOWN" : result.classification || "CAUTION";
+    return { incomplete, classification };
+  }
+
+  // Classes from least to most severe. What the overlay sees for itself only
+  // raises the API's verdict, never lowers it.
+  const SEVERITY = ["SAFE", "CAUTION", "UNKNOWN", "HIGH_RISK", "BLOCK_RECOMMENDED"];
+  function atLeast(classification, floor) {
+    return SEVERITY.indexOf(floor) > SEVERITY.indexOf(classification) ? floor : classification;
+  }
+
+  const badgeClasses = {
+    BLOCK_RECOMMENDED: "shieldai-badge-block",
+    HIGH_RISK: "shieldai-badge-high",
+    CAUTION: "shieldai-badge-caution",
+    SAFE: "shieldai-badge-safe",
+    UNKNOWN: "shieldai-badge-unknown",
+  };
+
+  function classLabel(classification) {
+    const classLabels = {
+      BLOCK_RECOMMENDED: _t("classBlock"),
+      HIGH_RISK: _t("classHighRisk"),
+      CAUTION: _t("classCaution"),
+      SAFE: _t("classSafe"),
+      UNKNOWN: _t("classUnknown"),
+    };
+    return classLabels[classification] || classification;
+  }
+
   // For one call of a wallet_sendCalls batch, which call it is. inject.js
   // shows the calls one after another and sends the batch only when the user
   // continues on every one.
@@ -430,6 +527,77 @@
     if (!tx.callCount) return "";
     const note = _t("overlayBatchCall", { index: tx.callIndex, count: tx.callCount });
     return `<div class="shieldai-section shieldai-sig-note"><p>${escapeHtml(note)}</p></div>`;
+  }
+
+  // The address a transaction sends to: the recipient of a native send (no
+  // call data), or of an ERC-20 transfer or transferFrom, in lower case; null
+  // for any other call.
+  function recipientOf(tx) {
+    const data = String(tx.data || "0x").toLowerCase();
+    if (data === "0x") {
+      return typeof tx.to === "string" && /^0x[0-9a-f]{40}$/i.test(tx.to) ? tx.to.toLowerCase() : null;
+    }
+    const call = /^0xa9059cbb0{24}([0-9a-f]{40})[0-9a-f]{64}$/.exec(data) ||
+      /^0x23b872dd0{24}[0-9a-f]{40}0{24}([0-9a-f]{40})[0-9a-f]{64}$/.exec(data);
+    return call ? `0x${call[1]}` : null;
+  }
+
+  // Recipients the user proceeded with, newest first, kept in this browser
+  // only (chrome.storage.local, never sent anywhere) and capped. A page adds
+  // none: only a Proceed the user chose does.
+  const MAX_SENT_RECIPIENTS = 100;
+
+  function rememberRecipient(recipient) {
+    chrome.storage.local.get({ sentRecipients: [] }, ({ sentRecipients }) => {
+      chrome.storage.local.set({
+        sentRecipients: [recipient, ...sentRecipients.filter((past) => past !== recipient)]
+          .slice(0, MAX_SENT_RECIPIENTS),
+      });
+    });
+  }
+
+  // A past recipient with the same first and last four hex characters as this
+  // one but another middle, or null; none when the user has sent to this very
+  // address before.
+  function pastLookalike(recipient) {
+    return new Promise((resolve) => {
+      chrome.storage.local.get({ sentRecipients: [] }, ({ sentRecipients }) => {
+        resolve(sentRecipients.includes(recipient) ? null : sentRecipients.find((past) =>
+          past.slice(2, 6) === recipient.slice(2, 6) && past.slice(-4) === recipient.slice(-4)) || null);
+      });
+    });
+  }
+
+  // An EIP-7702 transaction's delegates, from the request itself: its
+  // account's code would become theirs.
+  function delegationSection(tx) {
+    if (!Array.isArray(tx.authorizationList)) return "";
+    const rows = tx.authorizationList.map((authorization) => {
+      const address = typeof authorization.address === "string" ? authorization.address : _t("overlayDelegateUnreadable");
+      return `<tr><td>${_t("overlayDelegate")}</td><td class="shieldai-mono">${escapeHtml(address)}</td></tr>`;
+    }).join("");
+    return `
+      <div class="shieldai-section shieldai-delegation" role="alert">
+        <h3>${_t("overlayDelegationTitle")}</h3>
+        <p>${_t("overlayDelegationNote")}</p>
+        <table class="shieldai-impact">${rows}</table>
+      </div>`;
+  }
+
+  // Both addresses in full, the middle of each marked, so the difference shows.
+  function lookalikeSection(recipient, past) {
+    if (!past) return "";
+    const marked = (address) => `${escapeHtml(address.slice(0, 6))}<mark class="shieldai-diff">` +
+      `${escapeHtml(address.slice(6, -4))}</mark>${escapeHtml(address.slice(-4))}`;
+    return `
+      <div class="shieldai-section shieldai-lookalike" role="alert">
+        <h3>${_t("overlayLookalikeTitle")}</h3>
+        <p>${_t("overlayLookalikeNote")}</p>
+        <table class="shieldai-impact">
+          <tr><td>${_t("overlayLookalikeNew")}</td><td class="shieldai-mono">${marked(recipient)}</td></tr>
+          <tr><td>${_t("overlayLookalikePast")}</td><td class="shieldai-mono">${marked(past)}</td></tr>
+        </table>
+      </div>`;
   }
 
   // Where a decision dialog says why a Proceed did nothing: the page is
@@ -470,6 +638,19 @@
     } catch (_) {
       return null;
     }
+  }
+
+  // The text a signed message says, read as MetaMask reads it: a string of
+  // hex digits, with or without 0x, is bytes (an odd count padded with a
+  // leading 0) decoded as UTF-8, and any other string is signed as written.
+  // null when it is not readable text: not a string, bytes that are not
+  // UTF-8, or text holding a control character other than a tab or a line
+  // break.
+  function readableText(data) {
+    if (typeof data !== "string") return null;
+    const digits = data.replace(/^0x/i, "");
+    const text = /^[0-9a-f]+$/i.test(digits) ? hexToUtf8(digits.length % 2 ? `0${digits}` : digits) : data;
+    return text !== null && !/(?![\t\n\r])\p{Cc}/u.test(text) ? text : null;
   }
 
   // Typed data the overlay can show: a plain object whose domain and message,
@@ -581,9 +762,10 @@
   }
 
   // --- Signature Request Overlay ---
-  // Shown instead of the firewall overlay for personal_sign / eth_signTypedData etc.
+  // Shown instead of the firewall overlay for personal_sign / eth_signTypedData
+  // etc., with the API's verdict on it, or its error.
 
-  async function showSignatureOverlay(requestId, tx, strict) {
+  async function showSignatureOverlay(requestId, tx, strict, response) {
     await _loadContentLang();
     removeOverlay();
 
@@ -595,10 +777,14 @@
     // Typed data that cannot be read is shown as such, at High: the user
     // cannot see what they would sign. Strict mode leaves no Sign Anyway.
     const unparseable = isTyped && !legacyFields && !isReadableTypedData(tx.typedData);
-    const canSign = !(strict && unparseable);
 
     let bodyHtml = "";
     let isPermitLike = false;
+    // A personal_sign whose message is not readable text hides what is
+    // signed, and 32 bytes of it can be a hash (an order's, a permit's) that a
+    // contract accepts through toEthSignedMessageHash, as eth_sign's can.
+    let opaque = false;
+    let opaqueHash = false;
 
     if (legacyFields) {
       const rows = tx.typedData.map((field) => {
@@ -654,11 +840,15 @@
         </div>
       `;
     } else if (isPersonal) {
-      // Decode hex message to readable text
+      // The message as the wallet signs it; one that is not readable text is
+      // shown as it was sent.
       const raw = tx.data || "";
-      const decoded = hexToUtf8(raw);
-      const display = decoded || raw;
-      const isBinary = !decoded && raw.length > 2;
+      const decoded = readableText(raw);
+      const display = decoded === null ? String(raw) : decoded;
+      const isBinary = decoded === null && String(raw).length > 2;
+      opaque = signMethod === "personal_sign" && decoded === null;
+      // 63 or 64 hex digits, with or without 0x, are the 32 bytes the wallet signs.
+      opaqueHash = opaque && typeof raw === "string" && /^(0x)?[0-9a-f]{63,64}$/i.test(raw);
 
       bodyHtml = `
         <div class="shieldai-section">
@@ -668,79 +858,108 @@
       `;
     }
 
-    // Risk classification
-    const badgeClass = isPermitLike || unparseable ? "shieldai-badge-high" : "shieldai-badge-caution";
-    const label = unparseable ? _t("overlayUnparseableTyped")
+    // The verdict is the API's, and Unknown when the API could not be
+    // reached. What the overlay sees for itself only raises it: typed data it
+    // cannot read, and a personal_sign message that is not readable text, are
+    // at least High Risk; eth_sign, which signs a raw hash that can be a
+    // transaction, and a personal_sign of 32 bytes that are not text, are
+    // Block Recommended.
+    const result = response.result;
+    const { incomplete, classification: verdict } = result
+      ? verdictOf(result) : { incomplete: true, classification: "UNKNOWN" };
+    const ethSign = signMethod === "eth_sign";
+    const classification = ethSign || opaqueHash ? atLeast(verdict, "BLOCK_RECOMMENDED")
+      : unparseable || opaque ? atLeast(verdict, "HIGH_RISK") : verdict;
+    const why = response.error ? `${_t("overlayCannotReach")} ${response.error}` : incomplete ? unknownReason(result) : "";
+    // A signature whose chain could not be read, or is not supported, was
+    // not analysed, and inject.js rejects it: there is no Sign Anyway.
+    const chainUnknown = Boolean(result) && (result.coverage || {}).chain === false;
+    const canSign = !chainUnknown &&
+      !(strict && (unparseable || classification === "UNKNOWN" || classification === "BLOCK_RECOMMENDED"));
+    const hold = canSign && classification === "BLOCK_RECOMMENDED";
+    // What background.js found in a Sign-In with Ethereum message leads.
+    const signIn = (result && result.siwe) || {};
+    const signInSignals = signIn.state === "mismatch"
+      ? [_t("siweMismatch", { domain: signIn.domain, origin: signIn.origin })]
+      : signIn.state === "unreadable" ? [_t("siweUnreadable")] : [];
+    const signalsHtml = [...signInSignals, ...((result && result.danger_signals) || [])]
+      .map((s) => `<li>${escapeHtml(s)}</li>`)
+      .join("");
+
+    const label = ethSign ? _t("overlayEthSign") : opaqueHash ? _t("overlayHashMessage")
+      : opaque ? _t("overlayOpaqueMessage") : unparseable ? _t("overlayUnparseableTyped")
       : isPermitLike ? _t("overlayApprovalSig") : _t("overlaySigRequest");
-    const note = unparseable ? _t("overlayUnparseableTypedNote")
+    const note = ethSign ? _t("overlayEthSignNote") : opaqueHash ? _t("overlayHashMessageNote")
+      : opaque ? _t("overlayOpaqueMessageNote") : unparseable ? _t("overlayUnparseableTypedNote")
       : isPermitLike ? _t("overlayApprovalNote") : _t("overlaySigNote");
 
     const overlay = document.createElement("div");
     overlay.id = "shieldai-overlay";
     overlay.className = "shieldai-overlay";
     overlay.innerHTML = `
-      <div class="shieldai-modal" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
+      <div class="shieldai-modal ${classification === "BLOCK_RECOMMENDED" ? "shieldai-modal-danger" : ""}" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
         <div class="shieldai-header">
           <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
 
-        <div class="shieldai-badge ${badgeClass}">${label}</div>
+        <div class="shieldai-badge ${badgeClasses[classification] || "shieldai-badge-caution"}">${escapeHtml(classLabel(classification))}</div>
+        ${why ? `<p class="shieldai-unknown-why">${_t("unknownWhy")} ${escapeHtml(why)}</p>` : ""}
 
         <div class="shieldai-section shieldai-sig-note">
+          <h3>${label}</h3>
           <p>${escapeHtml(note)}</p>
         </div>
+
+        ${signalsHtml ? `
+          <div class="shieldai-section">
+            <h3>${_t("overlayDangerSignals")}</h3>
+            <ul class="shieldai-signals">${signalsHtml}</ul>
+          </div>` : ""}
 
         ${bodyHtml}
 
         <div class="shieldai-actions">
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">${_t("overlayBtnReject")}</button>
-          ${canSign ? `<button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">${_t("overlayBtnSignAnyway")}</button>` : ""}
+          ${!canSign ? "" : hold
+            ? `<button class="shieldai-btn shieldai-btn-proceed shieldai-btn-hold" id="shieldai-proceed" aria-describedby="shieldai-hold-note">${_t("overlayBtnHoldSign")}</button>`
+            : `<button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">${_t("overlayBtnSignAnyway")}</button>`}
         </div>
+        ${hold ? `<p class="shieldai-hold-note" id="shieldai-hold-note">${_t("overlayHoldNote")}</p>` : ""}
         ${COVERED_NOTE}
-        ${canSign ? "" : `<p class="shieldai-strict-note">${_t("overlayStrictNoProceed")}</p>`}
+        ${canSign ? "" : `<p class="shieldai-strict-note">${chainUnknown ? _t("overlayChainNoProceed") : _t("overlayStrictNoProceed")}</p>`}
       </div>
     `;
 
     const root = mountOverlay(overlay, requestId);
     onDecision(root, "shieldai-block", requestId, "block");
-    if (canSign) {
+    if (hold) {
+      onHold(root, requestId);
+    } else if (canSign) {
       onDecision(root, "shieldai-proceed", requestId, "proceed");
     }
   }
 
-  async function showAnalysisOverlay(requestId, result, strict, tx) {
+  async function showAnalysisOverlay(requestId, result, strict, tx, recipient, lookalike) {
     await _loadContentLang();
     removeOverlay();
 
-    const badgeClasses = {
-      BLOCK_RECOMMENDED: "shieldai-badge-block",
-      HIGH_RISK: "shieldai-badge-high",
-      CAUTION: "shieldai-badge-caution",
-      SAFE: "shieldai-badge-safe",
-      UNKNOWN: "shieldai-badge-unknown",
-    };
-
-    const classLabels = {
-      BLOCK_RECOMMENDED: _t("classBlock"),
-      HIGH_RISK: _t("classHighRisk"),
-      CAUTION: _t("classCaution"),
-      SAFE: _t("classSafe"),
-      UNKNOWN: _t("classUnknown"),
-    };
-
-    const incomplete = result.status !== "ok" || result.partial === true ||
-      result.risk_level === "UNKNOWN" || result.classification === "UNKNOWN" ||
-      !Number.isFinite(result.risk_score) ||
-      Object.values(result.coverage || {}).some(value => Number(value) < 1);
-    const classification = incomplete && !["HIGH_RISK", "BLOCK_RECOMMENDED"].includes(result.classification)
-      ? "UNKNOWN" : result.classification || "CAUTION";
+    const { incomplete, classification: verdict } = verdictOf(result);
+    // An EIP-7702 delegation is Block Recommended, and a look-alike recipient
+    // at least High Risk, whatever the API found.
+    const classification = Array.isArray(tx.authorizationList) ? "BLOCK_RECOMMENDED"
+      : lookalike ? atLeast(verdict, "HIGH_RISK") : verdict;
     const badgeClass = badgeClasses[classification] || "shieldai-badge-caution";
-    const label = classLabels[classification] || classification;
+    const label = classLabel(classification);
     const isBlock = classification === "BLOCK_RECOMMENDED";
+    // The wallet's chain could not be read, does not match the request, or is
+    // not one the API supports: nothing was analysed, and there is no Proceed.
+    const chainUnknown = (result.coverage || {}).chain === false;
     // Strict mode leaves no way to send a transaction the firewall recommends
     // blocking or could not fully check.
-    const canProceed = !(strict && (isBlock || classification === "UNKNOWN"));
+    const canProceed = !chainUnknown && !(strict && (isBlock || verdict === "UNKNOWN"));
+    // On Block Recommended (so Balanced mode), Proceed needs a hold.
+    const hold = canProceed && isBlock;
 
     // Display as safety score (100 - risk) so higher = better
     const scoreDisplay = incomplete ? "Unknown (incomplete provider coverage)" :
@@ -780,11 +999,13 @@
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
 
-        <div class="shieldai-badge ${badgeClass}">${escapeHtml(label)}${classification === "UNKNOWN" ? "" : ` &mdash; ${escapeHtml(scoreDisplay)}`}</div>
+        <div class="shieldai-badge ${badgeClass}">${escapeHtml(label)}${classification === "UNKNOWN" || classification !== verdict ? "" : ` &mdash; ${escapeHtml(scoreDisplay)}`}</div>
         ${incomplete ? `
           <p class="shieldai-unknown-why">${_t("unknownWhy")} ${escapeHtml(unknownReason(result))}</p>
         ` : ""}
         ${batchNote(tx)}
+        ${delegationSection(tx)}
+        ${lookalikeSection(recipient, lookalike)}
 
         ${result.partial ? `
           <div class="shieldai-section" style="background:#78350f;border-radius:6px;padding:8px 12px;margin-bottom:8px;">
@@ -829,22 +1050,28 @@
         </div>
 
         <div class="shieldai-verdict">
-          ${escapeHtml(incomplete ? "Unknown (incomplete provider coverage)" : result.verdict || "")}
+          ${escapeHtml(incomplete ? "Unknown (incomplete provider coverage)" : classification !== verdict ? label : result.verdict || "")}
         </div>
 
         <div class="shieldai-actions">
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">
             ${_t("overlayBtnBlock")}
           </button>
-          ${canProceed ? `
+          ${!canProceed ? "" : hold ? `
+          <button class="shieldai-btn shieldai-btn-proceed shieldai-btn-hold" id="shieldai-proceed" aria-describedby="shieldai-hold-note">
+            ${_t("overlayBtnHoldProceed")}
+          </button>
+          ` : `
           <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">
             ${_t("overlayBtnProceed")}
           </button>
-          ` : ""}
+          `}
         </div>
+        ${hold ? `<p class="shieldai-hold-note" id="shieldai-hold-note">${_t("overlayHoldNote")}</p>` : ""}
         ${COVERED_NOTE}
-        ${canProceed ? "" : `<p class="shieldai-strict-note">${_t("overlayStrictNoProceed")}</p>`}
+        ${canProceed ? "" : `<p class="shieldai-strict-note">${chainUnknown ? _t("overlayChainNoProceed") : _t("overlayStrictNoProceed")}</p>`}
 
+        ${classification === "SAFE" ? "" : `
         <div class="shieldai-explain-row">
           <button class="shieldai-btn shieldai-btn-explain" id="shieldai-explain">
             ${_t("overlayBtnWhy") || "Why is this risky?"}
@@ -854,6 +1081,7 @@
           <p class="shieldai-explain-loading" id="shieldai-explain-loading">Analyzing...</p>
           <p class="shieldai-explain-text" id="shieldai-explain-text"></p>
         </div>
+        `}
       </div>
     `;
 
@@ -872,11 +1100,17 @@
       });
     }
 
-    // Button handlers
+    // Button handlers. A recipient the user proceeds with is remembered.
+    const remember = recipient ? () => rememberRecipient(recipient) : null;
     onDecision(root, "shieldai-block", requestId, "block");
-    if (canProceed) {
-      onDecision(root, "shieldai-proceed", requestId, "proceed");
+    if (hold) {
+      onHold(root, requestId, remember);
+    } else if (canProceed) {
+      onDecision(root, "shieldai-proceed", requestId, "proceed", remember);
     }
+
+    // A SAFE verdict has nothing to explain, so it has no "Why is this risky?".
+    if (classification === "SAFE") return;
 
     // "Why is this risky?" handler
     root.getElementById("shieldai-explain").addEventListener("click", () => {
@@ -916,23 +1150,28 @@
 
   // Shown when no analysis came back (429, 400, timeout, unreachable API). In
   // Strict mode there is no Proceed: an unchecked transaction stays blocked.
-  async function showErrorOverlay(requestId, errorMsg, strict, tx) {
+  async function showErrorOverlay(requestId, errorMsg, strict, tx, recipient, lookalike) {
     await _loadContentLang();
     removeOverlay();
+    // An EIP-7702 delegation is Block Recommended without the API too.
+    const delegation = Array.isArray(tx.authorizationList);
+    const hold = delegation && !strict;
 
     const overlay = document.createElement("div");
     overlay.id = "shieldai-overlay";
     overlay.className = "shieldai-overlay";
     overlay.innerHTML = `
-      <div class="shieldai-modal" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
+      <div class="shieldai-modal ${delegation ? "shieldai-modal-danger" : ""}" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
         <div class="shieldai-header">
           <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
-        <div class="shieldai-badge shieldai-badge-high">
-          ${_t("overlayAnalysisUnavail")}
+        <div class="shieldai-badge ${delegation ? "shieldai-badge-block" : "shieldai-badge-high"}">
+          ${delegation ? _t("classBlock") : _t("overlayAnalysisUnavail")}
         </div>
         ${batchNote(tx)}
+        ${delegationSection(tx)}
+        ${lookalikeSection(recipient, lookalike)}
         <div class="shieldai-section">
           <p>${_t("overlayCannotReach")}</p>
           <p class="shieldai-error">${escapeHtml(errorMsg)}</p>
@@ -942,29 +1181,40 @@
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">
             ${_t("overlayBtnBlock")}
           </button>
-          ${strict ? "" : `
+          ${strict ? "" : hold ? `
+          <button class="shieldai-btn shieldai-btn-proceed shieldai-btn-hold" id="shieldai-proceed" aria-describedby="shieldai-hold-note">
+            ${_t("overlayBtnHoldProceed")}
+          </button>
+          ` : `
           <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">
             ${_t("overlayBtnProceed")}
           </button>
           `}
         </div>
+        ${hold ? `<p class="shieldai-hold-note" id="shieldai-hold-note">${_t("overlayHoldNote")}</p>` : ""}
         ${COVERED_NOTE}
       </div>
     `;
 
     const root = mountOverlay(overlay, requestId);
+    const remember = recipient ? () => rememberRecipient(recipient) : null;
     onDecision(root, "shieldai-block", requestId, "block");
-    if (!strict) {
-      onDecision(root, "shieldai-proceed", requestId, "proceed");
+    if (hold) {
+      onHold(root, requestId, remember);
+    } else if (!strict) {
+      onDecision(root, "shieldai-proceed", requestId, "proceed", remember);
     }
   }
 
   // Shown for a request inject.js could not read (a transaction that is not
   // an object, or a wallet_sendCalls batch without a list of call objects),
-  // so nothing in it was checked. In Strict mode there is no Proceed.
-  async function showUnknownStructureOverlay(requestId, strict) {
+  // so nothing in it was checked. In Strict mode there is no Proceed, and
+  // none either for a batch with a call on another chain, which inject.js
+  // rejects whatever the user decides.
+  async function showUnknownStructureOverlay(requestId, strict, wrongChain) {
     await _loadContentLang();
     removeOverlay();
+    const canProceed = !strict && !wrongChain;
 
     const overlay = document.createElement("div");
     overlay.id = "shieldai-overlay";
@@ -978,17 +1228,17 @@
         <div class="shieldai-badge shieldai-badge-high">${_t("overlayUnknownStructure")}</div>
         <div class="shieldai-section">
           <p>${_t("overlayUnknownStructureNote")}</p>
-          <p>${strict ? _t("overlayStrictNoProceed") : _t("overlayProceedRisk")}</p>
+          <p>${wrongChain ? _t("overlayChainNoProceed") : strict ? _t("overlayStrictNoProceed") : _t("overlayProceedRisk")}</p>
         </div>
         <div class="shieldai-actions">
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">
             ${_t("overlayBtnBlock")}
           </button>
-          ${strict ? "" : `
+          ${canProceed ? `
           <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">
             ${_t("overlayBtnProceed")}
           </button>
-          `}
+          ` : ""}
         </div>
         ${COVERED_NOTE}
       </div>
@@ -996,7 +1246,7 @@
 
     const root = mountOverlay(overlay, requestId);
     onDecision(root, "shieldai-block", requestId, "block");
-    if (!strict) {
+    if (canProceed) {
       onDecision(root, "shieldai-proceed", requestId, "proceed");
     }
   }
