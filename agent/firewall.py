@@ -23,7 +23,7 @@ _WEI_PATTERN = re.compile(r"0[xX][0-9a-fA-F]+|[0-9]+")
 _MAX_WEI = 2**256 - 1
 
 # USD estimates by native symbol. No price source exists for the others, so their values are unknown.
-_NATIVE_USD_ESTIMATES = {"BNB": 600.0}  # ~$600/BNB estimate -- replace with price feed
+_NATIVE_USD_ESTIMATES = {"BNB": 600.0}
 
 
 def _fire_and_forget(coro, label: str = "background"):

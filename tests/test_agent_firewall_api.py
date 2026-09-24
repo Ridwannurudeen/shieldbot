@@ -467,6 +467,12 @@ def test_agent_rejects_a_value_that_is_not_wei(client, mock_container, value):
     mock_container.db.record_agent_firewall_event.assert_not_called()
 
 
+def test_agent_rejects_a_json_number_value(client, mock_container):
+    response = client.post("/api/agent/firewall", json=_value_request(10**18), headers={"X-API-Key": "sb_testkey"})
+    assert response.status_code == 422
+    mock_container.cache.get_verdict.assert_not_called()
+
+
 def test_agent_rejects_an_overlong_value_without_a_server_error(client, mock_container):
     """A 400-digit value used to overflow the float price estimate into an uncaught 5xx."""
     response = client.post("/api/agent/firewall", json=_value_request("9" * 400), headers={"X-API-Key": "sb_testkey"})
