@@ -108,7 +108,7 @@ class MetaMaskPhishingList:
             lists = parse_metamask_config(payload)
         except Exception as e:
             logger.warning(
-                "MetaMask phishing list not refreshed (%s: %s); %s", type(e).__name__, e,
+                "MetaMask phishing list not refreshed (%s); %s", type(e).__name__,
                 "keeping the last good copy" if self._lists is not None else "no copy loaded yet",
             )
             return False
