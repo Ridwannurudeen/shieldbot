@@ -23,7 +23,15 @@ Names checked on 2026-09-24:
 
 **Recommendation: publish as `shieldbot-sdk`.** It is what people will search for, it matches the PyPI name, and it depends on nobody else's scope. Unscoped names go to whoever publishes first, so publish soon after deciding. If npm rejects it, use `@gudman/shieldbot-sdk`.
 
-Renaming means changing `"name"` in `sdk/package.json`, the import lines in `sdk/README.md` and the usage comment at the top of `sdk/src/index.ts`, and the SDK snippet in `landing-src/src/components/AgentSecurity.tsx`. Treat the first real publish as the test of whether a name is available to you.
+Renaming touches:
+
+- `"name"` in `sdk/package.json`, and both `"name"` entries in `sdk/package-lock.json` (the top-level one and `packages[""]`); running `npm install` in `sdk/` after editing `package.json` rewrites them.
+- Every `@shieldbot/sdk` in `sdk/README.md`: the "after publication" install line and the imports.
+- The tarball name in the `sdk/README.md` install steps (`shieldbot-sdk-3.0.0.tgz`). `npm pack` derives it from the package name: `shieldbot-sdk` keeps it, `@gudman/shieldbot-sdk` gives `gudman-shieldbot-sdk-3.0.0.tgz`.
+- The usage comment at the top of `sdk/src/index.ts`.
+- The SDK snippet in `landing-src/src/components/AgentSecurity.tsx`.
+
+Treat the first real publish as the test of whether a name is available to you.
 
 ## npm
 
