@@ -70,10 +70,10 @@ def test_failed_scam_lookup_renders_known_hits_and_unknown_without_hits():
     assert 'Scam Database Matches: Unknown' not in scan_context
     for forensic_context in (nested_forensic, flat_forensic):
         assert '⚠️ SCAM DATABASE MATCHES: 1' in forensic_context
-        assert '  - known_scam: Reported phishing' in forensic_context
+        assert '  - "known_scam": "Reported phishing"' in forensic_context
         assert 'Scam Database Matches: Unknown' not in forensic_context
     assert 'Scam DB Matches: 1' in firewall_context
-    assert '  - known_scam: Reported phishing' in firewall_context
+    assert '  - "known_scam": "Reported phishing"' in firewall_context
     assert 'Scam DB Matches: Unknown' not in firewall_context
 
 

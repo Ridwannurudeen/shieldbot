@@ -10,8 +10,7 @@ from adapters.robinhood import SIMULATION_PROVIDER
 from utils.chain_info import get_chain_name
 from utils.web3_client import UnsupportedChainError
 from utils.risk_scorer import (
-    findings_from_scan_result, calculate_risk_score,
-    blend_scores, compute_confidence
+    findings_from_scan_result, calculate_risk_score, compute_confidence
 )
 
 logger = logging.getLogger(__name__)
@@ -121,26 +120,8 @@ class TokenScanner:
         findings = findings_from_scan_result(result)
         heuristic_score, _, _ = calculate_risk_score(findings)
 
-        # Compute AI risk score if available
-        ai_result = None
-        if self.ai_analyzer and self.ai_analyzer.is_available():
-            try:
-                ai_result = await self.ai_analyzer.compute_ai_risk_score(address, result)
-            except UnsupportedChainError:
-                raise
-            except Exception as e:
-                logger.error("AI risk scoring failed: %s", type(e).__name__)
-
-        # Only mark AI as successful if we got a valid dict with risk_score
-        ai_score = None
-        if isinstance(ai_result, dict) and 'risk_score' in ai_result:
-            ai_score = ai_result['risk_score']
-            data_sources['ai'] = True
-        else:
-            data_sources['ai'] = False
-
-        # Blend scores (heuristic + AI when available)
-        result['risk_score'] = blend_scores(heuristic_score, ai_score)
+        # The AI writes only the forensic report below, never the score.
+        result['risk_score'] = heuristic_score
 
         # Set data source tracking
         data_sources['bytecode'] = True

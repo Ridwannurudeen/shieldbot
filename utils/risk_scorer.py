@@ -1,10 +1,10 @@
 """
 Risk Scoring Engine
-Calculates blended risk scores (heuristic + AI) with confidence levels
+Calculates heuristic risk scores with confidence levels
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from core.verdicts import HIGH, LOW, MEDIUM, level_from_score
 
@@ -24,10 +24,6 @@ RECOMMENDATIONS = {
     MEDIUM: "Proceed with extreme caution. Verify all details carefully.",
     LOW: "Generally safe, but always verify independently.",
 }
-
-# Blending ratio: 60% heuristic, 40% AI (when AI is available)
-HEURISTIC_WEIGHT = 0.60
-AI_WEIGHT = 0.40
 
 
 def calculate_risk_score(findings: List[Dict]) -> Tuple[int, str, str]:
@@ -50,32 +46,13 @@ def calculate_risk_score(findings: List[Dict]) -> Tuple[int, str, str]:
     return risk_score, risk_level, RECOMMENDATIONS[risk_level]
 
 
-def blend_scores(heuristic_score: int, ai_score: Optional[int]) -> int:
-    """
-    Blend heuristic and AI risk scores.
-    Falls back to 100% heuristic when AI is unavailable.
-
-    Args:
-        heuristic_score: 0-100 from heuristic analysis
-        ai_score: 0-100 from AI analysis, or None
-
-    Returns:
-        Blended score 0-100
-    """
-    if ai_score is None:
-        return heuristic_score
-
-    blended = (HEURISTIC_WEIGHT * heuristic_score) + (AI_WEIGHT * ai_score)
-    return max(0, min(100, round(blended)))
-
-
 def compute_confidence(data_sources: Dict[str, bool]) -> int:
     """
     Compute confidence percentage based on how many data sources responded.
 
     Args:
         data_sources: dict mapping source name to whether it responded successfully
-            e.g. {"bscscan": True, "honeypot_api": True, "scam_db": False, "ai": True}
+            e.g. {"bscscan": True, "honeypot_api": True, "scam_db": False}
 
     Returns:
         Confidence percentage 0-100
@@ -90,7 +67,6 @@ def compute_confidence(data_sources: Dict[str, bool]) -> int:
         "scam_db": 15,
         "honeypot_api": 20,
         "contract_age": 10,
-        "ai": 15,
         "source_code": 5,
     }
 

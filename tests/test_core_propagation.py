@@ -284,7 +284,7 @@ async def test_transaction_scanner_propagates_database_routing_error(mock_web3_c
 @pytest.mark.parametrize("scanner_type, entrypoint", [
     (TokenScanner, "check_token"), (TransactionScanner, "scan_address"),
 ])
-@pytest.mark.parametrize("method", ["compute_ai_risk_score", "generate_forensic_report"])
+@pytest.mark.parametrize("method", ["generate_forensic_report"])
 async def test_scanners_propagate_ai_routing_error(
     mock_web3_client, mock_ai_analyzer, scanner_type, entrypoint, method,
 ):
@@ -390,13 +390,13 @@ async def test_unknown_age_never_reaches_ai_as_low_risk(mock_web3_client, mock_a
     scanner.scam_db.check_address = AsyncMock(return_value=[])
     observed_levels = []
 
-    async def inspect_scan(address, result):
+    async def inspect_scan(address, result, scan_type):
         observed_levels.append((result["status"], result["risk_level"]))
-        return {"risk_score": 0}
+        return None
 
-    mock_ai_analyzer.compute_ai_risk_score.side_effect = inspect_scan
+    mock_ai_analyzer.generate_forensic_report.side_effect = inspect_scan
     await scanner.scan_address("0xABC")
-    mock_ai_analyzer.compute_ai_risk_score.assert_awaited_once()
+    mock_ai_analyzer.generate_forensic_report.assert_awaited_once()
     assert observed_levels == [("unknown", "unknown")]
 
 
@@ -658,7 +658,7 @@ def _assert_no_secret_logged(caplog):
     (TransactionScanner, 'scan_address', 'scam_db', 'check_address'),
     *[(scanner_type, entrypoint, 'ai', method)
       for scanner_type, entrypoint in ((TokenScanner, 'check_token'), (TransactionScanner, 'scan_address'))
-      for method in ('compute_ai_risk_score', 'generate_forensic_report')],
+      for method in ('generate_forensic_report',)],
 ])
 async def test_scanner_provider_errors_do_not_log_secrets(
     mock_web3_client, mock_ai_analyzer, caplog, scanner_type, entrypoint, target, method,
@@ -1019,8 +1019,8 @@ async def test_confirmed_eoa_with_failed_scam_lookup_is_unknown(mock_web3_client
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("scam_matches, expected", [([], (4, "low")), ([SCAM_MATCH], (40, "medium"))])
-async def test_ai_blend_cannot_lower_scam_match_below_its_floor(mock_web3_client, mock_ai_analyzer, scam_matches, expected):
+@pytest.mark.parametrize("scam_matches, expected", [([], (0, "low")), ([SCAM_MATCH], (40, "medium"))])
+async def test_ai_score_moves_neither_the_scan_score_nor_the_scam_match_floor(mock_web3_client, mock_ai_analyzer, scam_matches, expected):
     mock_web3_client.get_contract_creation_info.return_value = {"age_days": 400}
     mock_ai_analyzer.compute_ai_risk_score.return_value = {"risk_score": 10}
     scanner = TransactionScanner(mock_web3_client, mock_ai_analyzer)

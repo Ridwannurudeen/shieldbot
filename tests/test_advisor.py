@@ -424,7 +424,7 @@ async def test_explain_scan_ai_exception_falls_back(advisor, mock_ai):
     ('analyze_contract_bytecode', ('0xABC', '0x00', {'chain_id': 4663})),
     ('analyze_token_safety', ('0xABC', {}, {'chain_id': 4663})),
     ('generate_forensic_report', ('0xABC', {'chain_id': 4663}, 'token')),
-    ('generate_firewall_report', ({'chainId': 4663}, {'chain_id': 4663})),
+    ('generate_firewall_report', ({'chainId': 4663}, {'chain_id': 4663}, 'CAUTION', 40)),
 ])
 async def test_analysis_prompts_use_scan_chain(method, args):
     from utils.ai_analyzer import AIAnalyzer
@@ -462,8 +462,8 @@ def test_advisor_prompt_uses_supplied_chain_identity():
     ('analyze_token_safety', ('0xABC', {}, {'chain_id': None})),
     ('generate_forensic_report', ('0xABC', {}, 'token')),
     ('generate_forensic_report', ('0xABC', {'chain_id': None}, 'token')),
-    ('generate_firewall_report', ({}, {})),
-    ('generate_firewall_report', ({'chainId': None}, {'chain_id': None})),
+    ('generate_firewall_report', ({}, {}, 'CAUTION', 40)),
+    ('generate_firewall_report', ({'chainId': None}, {'chain_id': None}, 'CAUTION', 40)),
 ])
 async def test_missing_prompt_chain_is_unknown(method, args):
     from utils.ai_analyzer import AIAnalyzer

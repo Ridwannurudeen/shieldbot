@@ -1623,26 +1623,24 @@ async def firewall(req: FirewallRequest, request: Request):
             "whitelisted_router": whitelisted,
         }
 
-        firewall_result = None
-        if not is_scan_incomplete(contract_scan) and ai_analyzer and ai_analyzer.is_available():
-            firewall_result = await ai_analyzer.generate_firewall_report(tx_data, contract_scan)
-
-        if firewall_result:
-            alert = format_extension_alert({
-                **contract_scan, 'rug_probability': firewall_result.get('risk_score', contract_scan.get('risk_score', 0)),
-            })
-            firewall_result.update(_coverage_fields(alert))
-            firewall_result["raw_checks"] = _extract_raw_checks(contract_scan)
-            firewall_result.setdefault("asset_delta", [])
-            if tx_specific and firewall_result["classification"] == "SAFE":
-                firewall_result["classification"] = "CAUTION"
-                firewall_result["danger_signals"].append(_TX_CHECKS_UNAVAILABLE)
-                firewall_result["verdict"] = f"CAUTION — {_TX_CHECKS_UNAVAILABLE}"
-            return firewall_result
-        else:
-            return _build_fallback_response(
-                decoded, contract_scan, whitelisted, req.chainId, transaction_specific=tx_specific,
+        response = _build_fallback_response(
+            decoded, contract_scan, whitelisted, req.chainId, transaction_specific=tx_specific,
+        )
+        # The AI explains a known verdict and never sets it: of its reply only the prose is kept.
+        if response["status"] == "ok" and ai_analyzer and ai_analyzer.is_available():
+            explanation = await ai_analyzer.generate_firewall_report(
+                tx_data, contract_scan, response["classification"], response["risk_score"],
             )
+            if explanation:
+                response.update({
+                    key: explanation[key] for key in ("analysis", "plain_english") if isinstance(explanation.get(key), str)
+                })
+                impact = explanation.get("transaction_impact")
+                if isinstance(impact, dict):
+                    response["transaction_impact"].update({
+                        key: impact[key] for key in ("sending", "post_tx_state") if isinstance(impact.get(key), str)
+                    })
+        return response
 
     except HTTPException:
         raise
@@ -2980,8 +2978,15 @@ _TX_CHECKS_UNAVAILABLE = "Transaction checks unavailable: the spender, payment o
 def _build_fallback_response(
     decoded: Dict, scan: Dict, whitelisted: Optional[str], chain_id: int, transaction_specific: bool = False,
 ) -> Dict:
-    """Build a firewall response when AI is unavailable."""
-    risk_score = scan.get("risk_score", 50)
+    """Build a firewall response from the legacy scan when the analysis pipeline failed. The score and
+    classification come from the scan's heuristics and the band table only."""
+    risk_score = scan.get("risk_score")
+    if risk_score is None:
+        # A scan with no heuristic score is Unknown, not a number made up for it.
+        scan = {**scan, 'status': 'unknown', 'coverage_reasons': {
+            **scan.get('coverage_reasons', {}), 'risk_score': 'Heuristic risk score unavailable',
+        }}
+        risk_score = 0
     scam_matches = _scam_match_count(scan)
     is_honeypot = scan.get("is_honeypot")
     is_verified = scan.get("is_verified")
@@ -3009,21 +3014,10 @@ def _build_fallback_response(
     if whitelisted:
         risk_score = max(0, risk_score - 20)
 
-    # Classify
-    if risk_score >= 80:
-        classification = "BLOCK_RECOMMENDED"
-    elif risk_score >= 60:
-        classification = "HIGH_RISK"
-    elif risk_score >= 30:
-        classification = "CAUTION"
-    else:
-        classification = "SAFE"
-
     alert = format_extension_alert({**scan, 'rug_probability': risk_score})
-    if alert['status'] == 'unknown' and classification == 'SAFE':
-        classification = 'CAUTION'
-    if transaction_specific and classification == 'SAFE':
-        classification = 'CAUTION'
+    classification = alert['risk_classification']
+    if transaction_specific and classification == verdicts.SAFE:
+        classification = verdicts.CAUTION
         danger_signals.append(_TX_CHECKS_UNAVAILABLE)
 
     return {

@@ -96,7 +96,7 @@ async def test_onchain_recorder_background_failure_logs_class_only(caplog):
     ("analyze_token_safety", (ADDRESS, {}, {})),
     ("explain_findings", ("Is this safe?", {})),
     ("generate_forensic_report", (ADDRESS, {}, "contract")),
-    ("generate_firewall_report", ({"to": ADDRESS}, {})),
+    ("generate_firewall_report", ({"to": ADDRESS}, {}, "CAUTION", 40)),
 ])
 async def test_ai_provider_failure_logs_class_only(caplog, method, args):
     analyzer = AIAnalyzer.__new__(AIAnalyzer)

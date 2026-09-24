@@ -1,9 +1,8 @@
-"""Tests for utils/risk_scorer.py — scoring logic, blending, confidence."""
+"""Tests for utils/risk_scorer.py — scoring logic, confidence."""
 
 import pytest
 from utils.risk_scorer import (
     calculate_risk_score,
-    blend_scores,
     compute_confidence,
     score_level_from_int,
 )
@@ -79,31 +78,6 @@ class TestCalculateRiskScore:
         assert level == "MEDIUM"
 
 
-# --- blend_scores ---
-
-class TestBlendScores:
-    def test_none_ai_returns_heuristic_only(self):
-        assert blend_scores(50, None) == 50
-
-    def test_with_valid_ai_score(self):
-        # 60% * 50 + 40% * 80 = 30 + 32 = 62
-        assert blend_scores(50, 80) == 62
-
-    def test_both_zero(self):
-        assert blend_scores(0, 0) == 0
-
-    def test_both_max(self):
-        assert blend_scores(100, 100) == 100
-
-    def test_clamps_to_0_100(self):
-        result = blend_scores(0, 0)
-        assert 0 <= result <= 100
-
-    def test_ai_lower_reduces_score(self):
-        # 60% * 80 + 40% * 20 = 48 + 8 = 56
-        assert blend_scores(80, 20) == 56
-
-
 # --- compute_confidence ---
 
 class TestComputeConfidence:
@@ -117,7 +91,6 @@ class TestComputeConfidence:
             "scam_db": True,
             "honeypot_api": True,
             "contract_age": True,
-            "ai": True,
             "source_code": True,
         }
         assert compute_confidence(sources) == 100
@@ -135,12 +108,10 @@ class TestComputeConfidence:
             "bscscan": True,
             "bytecode": True,
             "scam_db": False,
-            "ai": False,
         }
-        # bscscan(20) + bytecode(15) responded, scam_db(15) + ai(15) didn't
-        # achieved=35, total=65
-        result = compute_confidence(sources)
-        assert 50 <= result <= 60  # ~53.8
+        # bscscan(20) + bytecode(15) responded, scam_db(15) didn't
+        # achieved=35, total=50
+        assert compute_confidence(sources) == 70
 
 
 # --- score_level_from_int ---
