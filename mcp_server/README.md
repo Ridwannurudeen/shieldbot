@@ -24,7 +24,7 @@ How the transport behaves (`server.py`):
 - `initialize` always answers `protocolVersion: "2024-11-05"`, whatever version the client asks for; the client decides whether to continue.
 - Declared capabilities: `tools`, `resources` and `prompts`, with no sub-capabilities (no `listChanged`, no `subscribe`).
 - Methods handled: `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`. Anything else is Method not found (-32601). Not implemented: `resources/subscribe`, `resources/templates/list`, `logging/setLevel`, `completion/complete`.
-- A tool that fails validation (bad address; missing, non-integer or unsupported `chain_id`; unknown tool name) returns a result with `isError: true` and `{"error": "..."}` as its text, delivered on the stream like any other result, and no analysis runs.
+- A tool that fails validation (a missing or non-string required argument, which the error names; bad address; missing, non-integer or unsupported `chain_id`; unknown tool name) returns a result with `isError: true` and `{"error": "..."}` as its text, delivered on the stream like any other result, and no analysis runs.
 
 ## Authentication
 
@@ -39,7 +39,7 @@ Every tool result is JSON in a single `text` content item.
 | Tool | Required arguments | Notes |
 |------|--------------------|-------|
 | `scan_contract` | `address`, `chain_id` | All analyzers and the risk engine. Incomplete coverage gives `status: "unknown"`, `verdict: "UNKNOWN"`, `risk_display: "Unknown (incomplete provider coverage)"` and `coverage_reasons`. |
-| `simulate_transaction` | `from`, `to`, `data`, `chain_id` | Tenderly simulation. Approval changes are not measured (`approvals_granted` is always null). When Tenderly is not configured or the simulation fails: `status: "unknown"`, `coverage_reasons.simulation`, null measurements. |
+| `simulate_transaction` | `from`, `to`, `data`, `chain_id` | Tenderly simulation. `from` and `to` must be addresses; the optional `value` is wei as a decimal or `0x` hex string (default `"0"`), and anything else is a tool error rather than a simulation with value 0. Approval changes are not measured (`approvals_granted` is always null). When Tenderly is not configured or the simulation fails: `status: "unknown"`, `coverage_reasons.simulation`, null measurements. |
 | `check_deployer` | `address`, `chain_id` | Local deployer index. An unindexed contract gives `status: "unknown"` with null counts. Counts span every chain the deployer is indexed on, and `flagged_count` counts only contracts with a stored HIGH score, so a contract never scored is not counted. `funded_by` is always null. |
 | `check_agent_reputation` | `agent_id` | Block rate over at most 1,000 local firewall records. An unregistered agent, or one with no firewall history, gives `status: "unknown"` with null `trust_score` and `block_rate`. |
 | `check_approval_risk` | `wallet_address`, `chain_id` | Not implemented: always `status: "unknown"` with null `approvals`. |

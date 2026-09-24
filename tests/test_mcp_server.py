@@ -1046,6 +1046,58 @@ def test_missing_chain_id_is_a_tool_error_not_a_bnb_chain_scan(client, mock_cont
     mock_container.tenderly_simulator.is_enabled.assert_not_called()
 
 
+FULL_ARGUMENTS = {
+    "scan_contract": {"address": "0x" + "a" * 40, "chain_id": 56},
+    "simulate_transaction": {"from": "0x" + "a" * 40, "to": "0x" + "b" * 40, "data": "0x", "chain_id": 56},
+    "check_deployer": {"address": "0x" + "a" * 40, "chain_id": 56},
+    "check_agent_reputation": {"agent_id": "agent:1"},
+    "check_approval_risk": {"wallet_address": "0x" + "a" * 40, "chain_id": 56},
+    "scan_for_injection": {"content": "hello"},
+    "query_threat_graph": {"address": "0x" + "a" * 40, "chain_id": 56},
+}
+
+
+def _tool_error(client, tool, arguments):
+    response = client.post("/mcp/messages", json={
+        "jsonrpc": "2.0", "id": 17, "method": "tools/call",
+        "params": {"name": tool, "arguments": arguments},
+    }, headers=AUTH_HEADERS)
+    result = response.json()["result"]
+    assert result["isError"] is True
+    return json.loads(result["content"][0]["text"])["error"]
+
+
+@pytest.mark.parametrize("tool,name", [
+    (tool, name) for tool, arguments in FULL_ARGUMENTS.items() for name in arguments if name != "chain_id"
+])
+def test_a_missing_or_non_string_required_argument_is_a_tool_error(client, mock_container, tool, name):
+    arguments = {key: value for key, value in FULL_ARGUMENTS[tool].items() if key != name}
+    assert _tool_error(client, tool, arguments) == f"Missing required argument: {name}"
+    assert _tool_error(client, tool, {**arguments, name: None}) == f"Missing required argument: {name}"
+    assert _tool_error(client, tool, {**arguments, name: 123}) == f"Invalid argument: {name} must be a string"
+    mock_container.registry.run_all.assert_not_awaited()
+    mock_container.db.get_deployer_risk_summary.assert_not_awaited()
+    mock_container.db.get_agent_policy.assert_not_awaited()
+    mock_container.tenderly_simulator.is_enabled.assert_not_called()
+
+
+@pytest.mark.parametrize("name", ["from", "to"])
+def test_simulate_transaction_rejects_an_invalid_address(client, mock_container, name):
+    arguments = {**FULL_ARGUMENTS["simulate_transaction"], name: "0x1234"}
+    assert _tool_error(client, "simulate_transaction", arguments) == "Invalid address: 0x1234"
+    mock_container.tenderly_simulator.is_enabled.assert_not_called()
+
+
+@pytest.mark.parametrize("value", ["abc", "1.5", "0x", "0xzz", "", 10])
+def test_simulate_transaction_rejects_a_value_that_is_not_wei(client, mock_container, value):
+    # The simulator would otherwise replace an unparseable value with 0 and simulate a different transaction.
+    arguments = {**FULL_ARGUMENTS["simulate_transaction"], "value": value}
+    assert _tool_error(client, "simulate_transaction", arguments) == (
+        "Invalid argument: value must be a decimal or 0x-prefixed hex amount of wei"
+    )
+    mock_container.tenderly_simulator.is_enabled.assert_not_called()
+
+
 def test_unknown_results_are_described_to_the_client():
     from mcp_server.resources import RESOURCE_DEFINITIONS
     from mcp_server.tools import TOOL_DEFINITIONS

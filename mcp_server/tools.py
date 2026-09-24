@@ -15,6 +15,7 @@ from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 logger = logging.getLogger(__name__)
 
 _ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
+_WEI_RE = re.compile(r"0[xX][0-9a-fA-F]+|[0-9]+")
 _CHAIN_ID_DESCRIPTION = (
     "Chain ID of the chain the address or transaction is on; required, there is no default. "
     "Every chain ShieldBot supports is accepted, including 56 = BNB Chain and 4663 = Robinhood Chain; "
@@ -36,6 +37,15 @@ def _validate_address(addr: str) -> str:
     if not _ADDRESS_RE.match(addr):
         raise ValueError(f"Invalid address: {addr}")
     return addr.lower()
+
+
+def _require(params: Dict, name: str) -> str:
+    value = params.get(name)
+    if value is None:
+        raise ValueError(f"Missing required argument: {name}")
+    if not isinstance(value, str):
+        raise ValueError(f"Invalid argument: {name} must be a string")
+    return value
 
 
 def _validate_chain_id(container, chain_id) -> int:
@@ -207,7 +217,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
 
 async def handle_scan_contract(container, params: Dict) -> Dict:
     """Run all analyzers on a contract and return composite risk score."""
-    address = _validate_address(params["address"])
+    address = _validate_address(_require(params, "address"))
     chain_id = _require_chain_id(container, params)
 
     ctx = AnalysisContext(address=address, chain_id=chain_id)
@@ -231,10 +241,13 @@ async def handle_scan_contract(container, params: Dict) -> Dict:
 
 async def handle_simulate_transaction(container, params: Dict) -> Dict:
     """Simulate a transaction via Tenderly."""
-    from_addr = params["from"]
-    to_addr = params["to"]
-    data = params.get("data", "0x")
+    from_addr = _validate_address(_require(params, "from"))
+    to_addr = _validate_address(_require(params, "to"))
+    data = _require(params, "data")
     value = params.get("value", "0")
+    # The simulator replaces an unparseable value with 0, which would simulate a different transaction.
+    if not isinstance(value, str) or not _WEI_RE.fullmatch(value):
+        raise ValueError("Invalid argument: value must be a decimal or 0x-prefixed hex amount of wei")
     chain_id = _require_chain_id(container, params)
 
     if not container.tenderly_simulator.is_enabled():
@@ -285,7 +298,7 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
 
 async def handle_check_deployer(container, params: Dict) -> Dict:
     """Look up deployer history for a contract."""
-    address = _validate_address(params["address"])
+    address = _validate_address(_require(params, "address"))
     chain_id = _require_chain_id(container, params)
 
     summary = await container.db.get_deployer_risk_summary(address, chain_id)
@@ -311,7 +324,7 @@ async def handle_check_deployer(container, params: Dict) -> Dict:
 
 async def handle_check_agent_reputation(container, params: Dict) -> Dict:
     """Look up agent trust score from firewall history."""
-    agent_id = params["agent_id"]
+    agent_id = _require(params, "agent_id")
 
     policy = await container.db.get_agent_policy(agent_id)
     if not policy:
@@ -354,7 +367,7 @@ async def handle_check_agent_reputation(container, params: Dict) -> Dict:
 
 async def handle_check_approval_risk(container, params: Dict) -> Dict:
     """Report unavailable MCP approval coverage without claiming no approvals."""
-    wallet = _validate_address(params["wallet_address"])
+    wallet = _validate_address(_require(params, "wallet_address"))
     return {
         "wallet_address": wallet,
         "chain_id": _require_chain_id(container, params),
@@ -368,7 +381,7 @@ async def handle_check_approval_risk(container, params: Dict) -> Dict:
 
 async def handle_scan_for_injection(container, params: Dict) -> Dict:
     """Basic regex-based prompt injection detection."""
-    content = params.get("content", "")
+    content = _require(params, "content")
     depth = params.get("depth", "fast")
 
     detections = []
@@ -397,7 +410,7 @@ async def handle_scan_for_injection(container, params: Dict) -> Dict:
 
 async def handle_query_threat_graph(container, params: Dict) -> Dict:
     """Report unavailable MCP graph coverage without claiming no connections."""
-    address = _validate_address(params["address"])
+    address = _validate_address(_require(params, "address"))
     return {
         "address": address,
         "chain_id": _require_chain_id(container, params),
