@@ -15,10 +15,12 @@ import re
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from functools import partial
 from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, RedirectResponse
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from redis.exceptions import RedisError
 from typing import Optional, Dict, Any, List, Literal
@@ -38,7 +40,9 @@ from core.config import Settings
 from core.container import ServiceContainer
 from core.database import SCAN_EVIDENCE_RETENTION_DAYS, reporter_hash
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
+from core.first_verdict import IN_PROGRESS, FirstVerdictProgress, build_first_verdict
 from core.rate_limit import RateLimiter, connect as connect_rate_limit_redis
+from core.registry import FIRST_VERDICT_SECONDS
 from core.scan_evidence import (
     analyzer_outcomes, build_scan_evidence, oldest_simulation_block, render_evidence_page, transaction_evidence,
 )
@@ -1313,18 +1317,122 @@ async def firewall(req: FirewallRequest, request: Request):
     Main firewall endpoint — intercepts a pending transaction,
     analyzes calldata + target contract, and returns a security verdict.
     Every verdict carries evidence_hash and evidence_url (see _with_evidence).
+
+    A request with Accept: text/event-stream gets server-sent events instead (_firewall_events):
+    `first`, an interim verdict that is always Unknown and never SAFE, then `final`, the plain
+    response with final: true, or `error`. STRICT sends no interim verdict, so a STRICT request (the
+    X-Policy-Mode header or the server's default) gets the plain JSON response whatever it accepts.
     """
+    if request.headers.get("accept", "").startswith("text/event-stream"):
+        started = time.monotonic()
+        policy_mode = _policy_mode(request)
+        if policy_mode != "STRICT":
+            # A bad request is refused before the stream's headers go out.
+            if not _is_signature_only_request(req) and not web3_client.is_valid_address(req.to):
+                raise HTTPException(status_code=400, detail="Invalid 'to' address")
+            return StreamingResponse(
+                _firewall_events(req, request, started, policy_mode),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+    return await _firewall_response(req, request)
+
+
+async def _firewall_response(
+    req: FirewallRequest, request: Request, progress: Optional[FirstVerdictProgress] = None,
+) -> Dict:
+    """The firewall's verdict with its stored evidence: the plain response, and the stream's final."""
     trail = {}
-    response = await _firewall_verdict(req, request, trail)
+    response = await _firewall_verdict(req, request, trail, progress)
     return await _with_evidence(
         response, "/api/firewall", req.chainId, caller=_checksum_if_possible(req.sender), **trail,
     )
 
 
-async def _firewall_verdict(req: FirewallRequest, request: Request, trail: Dict) -> Dict:
+def _policy_mode(request: Request) -> str:
+    """The effective policy mode: the X-Policy-Mode header, or the server's default."""
+    if container and container.policy_engine:
+        return container.policy_engine.apply(
+            [], {}, mode_override=request.headers.get("X-Policy-Mode"),
+        )['policy_mode']
+    return "BALANCED"
+
+
+def _sse(event: str, data: Dict) -> str:
+    """One server-sent event whose data is the JSON body the plain route would send for `data`."""
+    return f"event: {event}\ndata: {JSONResponse(jsonable_encoder(data)).body.decode('utf-8')}\n\n"
+
+
+def _first_transaction_fields(decoded: Dict, value_bnb: float, chain_id: int, to_addr: str) -> Dict:
+    """The fields of an interim verdict that describe the request, worded as the final response's."""
+    return {
+        "decoded_action": _format_decoded_action(decoded, chain_id),
+        "calldata_details": _build_calldata_details(decoded),
+        "transaction_impact": {
+            "sending": _sending(decoded, value_bnb, chain_id, "Tokens"),
+            "granting_access": _granting_access(decoded),
+            "recipient": to_addr,
+            "post_tx_state": IN_PROGRESS,
+        },
+        "chain_id": chain_id,
+        "network": _chain_id_to_name(chain_id),
+    }
+
+
+async def _firewall_events(req: FirewallRequest, request: Request, started: float, policy_mode: str):
+    """The streamed firewall's events. `first` comes as soon as a Block-level floor is known, else
+    FIRST_VERDICT_SECONDS after the handler started (`started`, a time.monotonic() reading), and only
+    while the scan is still running; a scan that finishes first, or a request with nothing decoded
+    yet (a signature request never has anything), sends only `final`.
+
+    The scan runs in its own task, and closing this generator (a client disconnect) never cancels
+    it: its side effects (the evidence document, the stored score, the threat graph, the sentinel,
+    the deployer index) still happen once, and only from the final verdict. Logs one line per
+    request with the timings.
+    """
+    progress = FirstVerdictProgress(
+        (analyzer.name for analyzer in container.registry.get_all()), policy_mode,
+    )
+    scan = _fire_and_forget(_firewall_response(req, request, progress), label="firewall_stream_scan")
+    block_known = asyncio.ensure_future(progress.block_known.wait())
+    timings = {
+        "chain_id": req.chainId, "first_at_ms": None, "first_kind": "none", "pending_at_first": None,
+        "final_at_ms": None,
+    }
+    try:
+        await asyncio.wait(
+            (scan, block_known),
+            timeout=max(0.0, started + FIRST_VERDICT_SECONDS - time.monotonic()),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if not scan.done() and progress.describe:
+            elapsed_ms = round((time.monotonic() - started) * 1000)
+            first = build_first_verdict(progress, progress.describe(), elapsed_ms)
+            timings.update(
+                first_at_ms=elapsed_ms,
+                first_kind="block" if progress.block_known.is_set() else "unknown",
+                pending_at_first=first["pending_sources"],
+            )
+            yield _sse("first", first)
+        final = await asyncio.shield(scan)
+        timings["final_at_ms"] = round((time.monotonic() - started) * 1000)
+        yield _sse("final", {**final, "final": True})
+    except HTTPException as exc:
+        yield _sse("error", {"status": exc.status_code, "detail": exc.detail})
+    finally:
+        block_known.cancel()
+        logger.info("Firewall stream %s", json.dumps(timings, sort_keys=True))
+
+
+async def _firewall_verdict(
+    req: FirewallRequest, request: Request, trail: Dict, progress: Optional[FirstVerdictProgress] = None,
+) -> Dict:
     """The firewall's verdict. Each path records in `trail` what its evidence document needs:
     target, target_token, transaction (transaction-specific verdicts only), analyzers,
-    observed_block and, for a verdict served from contract_scores, cached_scan_at."""
+    observed_block and, for a verdict served from contract_scores, cached_scan_at.
+
+    A streamed request passes `progress`, which hears the target's local blacklist match and each
+    analyzer's result as it returns. Nothing else changes: the verdict is the plain route's."""
     try:
         to_addr = req.to
         from_addr = req.sender
@@ -1349,6 +1457,13 @@ async def _firewall_verdict(req: FirewallRequest, request: Request, trail: Dict)
         # Resolve value
         value_wei = _parse_value(req.value)
         value_bnb = value_wei / 1e18
+
+        # A streamed request hears each analyzer's result as it returns; a plain one calls run_all as before.
+        run_options = {}
+        if progress is not None:
+            progress.add_local_match(scam_db.local_match(to_addr, req.chainId))
+            progress.describe = partial(_first_transaction_fields, decoded, value_bnb, req.chainId, to_addr)
+            run_options = {"on_result": progress.add_result}
 
         # Enrich decoded calldata with token names and formatted amounts
         await _enrich_decoded(decoded, to_addr, chain_id=req.chainId)
@@ -1387,16 +1502,12 @@ async def _firewall_verdict(req: FirewallRequest, request: Request, trail: Dict)
                 value_bnb=value_bnb,
                 policy_override=request.headers.get("X-Policy-Mode"),
                 trail=trail,
+                run_options=run_options,
             )
             if router_response:
                 return router_response
 
-        # The effective policy mode: the X-Policy-Mode header, or the server's default.
-        policy_mode = "BALANCED"
-        if container and container.policy_engine:
-            policy_mode = container.policy_engine.apply(
-                [], {}, mode_override=request.headers.get("X-Policy-Mode"),
-            )['policy_mode']
+        policy_mode = _policy_mode(request)
 
         # 2b. Check cache for recent result
         if container and container.db and not tx_specific:
@@ -1466,10 +1577,10 @@ async def _firewall_verdict(req: FirewallRequest, request: Request, trail: Dict)
                     value=req.value, data=req.data, chain_id=req.chainId,
                 )
                 analyzer_results, simulation_result = await asyncio.gather(
-                    container.registry.run_all(ctx), sim_task,
+                    container.registry.run_all(ctx, **run_options), sim_task,
                 )
             elif container and container.registry:
-                analyzer_results = await container.registry.run_all(ctx)
+                analyzer_results = await container.registry.run_all(ctx, **run_options)
                 simulation_result = None
             else:
                 # Fallback: no container (e.g. tests), use old 4-service gather
@@ -3452,11 +3563,13 @@ async def _analyze_router_swap(
     value_bnb: float,
     policy_override: Optional[str] = None,
     trail: Optional[Dict] = None,
+    run_options: Optional[Dict] = None,
 ) -> Optional[Dict]:
     """Analyze swap path tokens when interacting with a trusted router.
 
     When it returns a verdict from the tokens' analyzers, it records their outcomes, keyed
     "token:analyzer" like the response's coverage, and the observed block in `trail`.
+    `run_options` are passed to each token's run_all (a streamed request's on_result).
     """
     if not container or not container.registry or not risk_engine:
         return _build_unverified_swap_response(
@@ -3522,7 +3635,7 @@ async def _analyze_router_swap(
             },
         )
 
-        analyzer_results = await container.registry.run_all(ctx)
+        analyzer_results = await container.registry.run_all(ctx, **(run_options or {}))
         risk_output = risk_engine.compute_from_results(analyzer_results, is_token=True)
 
         # Apply policy mode (handles partial failures)
