@@ -152,10 +152,18 @@ Content-Security-Policy stays `'self'` and no third-party script is loaded. To t
 2. In Site settings, Site installation, copy the script name from the snippet (`pa-...`, the part of
    `https://plausible.io/js/pa-....js` before `.js`).
 3. In the live landing vhost, copy the two `location` blocks from `nginx-shieldbotsecurity-new.conf` and replace
-   `pa-SITE_ID` with that name. Then `nginx -t && systemctl reload nginx`.
-4. Check: `curl -sI https://shieldbotsecurity.online/js/script.js` answers 200, and a page view shows in
-   Plausible within a minute.
-5. Optional, in Site settings: turn on outbound link tracking to count clicks on "Add to Chrome".
+   `pa-SITE_ID` with that name. `-new.conf` is the one with the www-to-bare-domain redirect, which is live since
+   2026-09-23; confirm the live file has that redirect and falls back with `=404`, not `/index.html` (the older
+   `nginx-shieldbotsecurity.conf` does, and would answer `/js/script.js` with the page itself). The server needs
+   outbound DNS to 9.9.9.9 and HTTPS to plausible.io. Then `nginx -t && systemctl reload nginx`.
+4. Check:
+   - `curl -sI https://shieldbotsecurity.online/js/script.js` answers 200 with a JavaScript content type;
+   - `curl -s -o /dev/null -w '%{http_code}
+' -X POST -H 'Content-Type: application/json' -d '{"name":"pageview","url":"https://shieldbotsecurity.online/","domain":"shieldbotsecurity.online"}' https://shieldbotsecurity.online/stats/event`
+     answers 202 (Plausible's answer, not nginx's 404 or 502);
+   - a page view shows in Plausible within a minute, also with an ad blocker switched on.
+5. Optional, in Site settings: turn on outbound link tracking to count clicks on "Add to Chrome". The privacy
+   policy already says outbound clicks are counted.
 
 Until step 3, `/js/script.js` answers 404 and the pages work without analytics.
 

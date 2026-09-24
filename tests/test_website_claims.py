@@ -361,22 +361,30 @@ def test_built_landing_copies_the_current_public_files(name):
 ANALYTICS_TAGS = ('<script src="/js/plausible-init.js"></script>', '<script async src="/js/script.js"></script>')
 
 
-@pytest.mark.parametrize("page", ["index.html", "about.html", "privacy.html", "security.html", "terms.html"])
+LANDING_PAGES = [LANDING_SRC / "index.html", *sorted((LANDING_SRC / "public").glob("*.html"))]
+
+
+@pytest.mark.parametrize("page", LANDING_PAGES, ids=lambda page: page.name)
 def test_every_page_counts_visits_through_this_domain(page):
-    html = read(ROOT / "landing" / page)
-    init, script = (html.index(tag) for tag in ANALYTICS_TAGS)
-    assert init < script, f"{page}: the init file must run before the Plausible script"
+    for html in (read(page), read(ROOT / "landing" / page.name)):
+        init, script = (html.find(tag) for tag in ANALYTICS_TAGS)
+        assert init >= 0 and script >= 0, f"{page.name}: analytics tags missing"
+        assert init < script, f"{page.name}: the init file must run before the Plausible script"
 
 
 def test_analytics_are_proxied_so_the_content_security_policy_stays_self():
     conf = read(ROOT / "deploy" / "nginx-shieldbotsecurity-new.conf")
-    assert "location = /js/script.js" in conf and "location = /stats/event" in conf
+    for path, upstream in (("/js/script.js", "https://plausible.io/js/"), ("/stats/event", "https://plausible.io/api/event")):
+        block = re.search(r"location = " + re.escape(path) + r" \{(.*?)\n    \}", conf, re.DOTALL).group(1)
+        assert upstream in block and "proxy_pass" in block and "proxy_ssl_verify on" in block, path
     assert "plausible.io" not in re.search(r'Content-Security-Policy "([^"]*)"', conf).group(1)
     assert 'endpoint: "/stats/event"' in read(LANDING_SRC / "public" / "js" / "plausible-init.js")
 
 
-def test_privacy_policy_names_the_analytics():
-    assert "Plausible Analytics" in read(LANDING_SRC / "public" / "privacy.html")
+def test_privacy_policy_names_the_analytics_and_what_it_does_not_keep():
+    html = read(LANDING_SRC / "public" / "privacy.html")
+    assert "Plausible Analytics" in html
+    assert "sets no cookies and stores no IP addresses" in html
 
 
 def test_security_policy_is_published_linked_and_listed():
