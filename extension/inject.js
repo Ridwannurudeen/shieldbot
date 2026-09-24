@@ -185,16 +185,8 @@
     // another provider gets the wallet's own request behind the replacement.
     const request = provider.request;
     const originalRequest = bindTo(inheritedRequestOf(request) || request, provider);
-    wrapInheritedRequest(provider);
     let currentChainId = null;
     let chainRevision = 0;
-
-    if (typeof provider.on === "function") {
-      provider.on("chainChanged", (chainId) => {
-        currentChainId = parseChainId(chainId);
-        chainRevision++;
-      });
-    }
 
     // Call back with the wallet's current chain id, or null when it does not
     // answer within 5 seconds, answers something invalid, or the chain changes
@@ -218,23 +210,21 @@
     }
 
     const wrappedRequest = function (args) {
-      // The method is read once, and the wallet is handed that string rather
-      // than the page's object, which could answer the wallet's own read of
-      // method with another one.
-      const method = ownValue(args, "method");
-      if (typeof method !== "string") {
-        return new NativePromise((resolve, reject) => {
-          reject(new NativeError("ShieldAI rejected a wallet request without a string method"));
-        });
-      }
-      const kind = requestKind(method);
-      if (kind === null) {
-        const forwarded = { __proto__: null, method };
-        if (hasOwn(args, "params")) forwarded.params = args.params;
-        return originalRequest(forwarded);
-      }
-
       return new NativePromise((resolve, reject) => {
+        // The method is read once, here so that a request object that throws
+        // rejects, and the wallet is handed that string rather than the page's
+        // object, which could answer the wallet's own read of method with
+        // another one.
+        const method = ownValue(args, "method");
+        if (typeof method !== "string") {
+          reject(new NativeError("ShieldAI rejected a wallet request without a string method"));
+          return;
+        }
+        const kind = requestKind(method);
+        if (kind === null) {
+          resolve(originalRequest(hasOwn(args, "params") ? { method, params: args.params } : { method }));
+          return;
+        }
         if (reachable) {
           reject(new NativeError("ShieldAI cannot check wallet requests made from this embedded frame or popup. " +
             "Open the dApp in its own tab."));
@@ -388,6 +378,17 @@
       });
     };
 
+    // Recorded before anything below can call back into the page, which
+    // could otherwise reach this code again for the same provider.
+    keepWrapper(provider, wrappedRequest);
+    wrapInheritedRequest(provider);
+    if (typeof provider.on === "function") {
+      provider.on("chainChanged", (chainId) => {
+        currentChainId = parseChainId(chainId);
+        chainRevision++;
+      });
+    }
+
     // Use Object.defineProperty for MetaMask v11+ compatibility. The
     // descriptor has no prototype, so a page that adds get or set to
     // Object.prototype cannot turn it into an accessor.
@@ -403,11 +404,9 @@
       try {
         provider.request = wrappedRequest;
       } catch (_) {
-        return;
+        // The provider's own request stays the wallet's.
       }
     }
-
-    keepWrapper(provider, wrappedRequest);
   }
 
   // A page could take request from the provider's prototype and call it on

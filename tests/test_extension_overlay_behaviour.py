@@ -1504,6 +1504,60 @@ def test_fields_on_the_page_transaction_cannot_change_how_it_is_shown(field):
     )
 
 
+def test_a_throwing_request_object_rejects_instead_of_throwing():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const args = new Proxy({}, {getOwnPropertyDescriptor() { throw new Error('trap'); }});
+  let pending;
+  assert.doesNotThrow(() => { pending = provider.request(args); }, 'request threw synchronously');
+  await assert.rejects(pending, /trap/);
+  // A value in params the copy cannot take (here a proxy) rejects the request too.
+  await assert.rejects(provider.request({method: 'eth_sendTransaction', params: [new Proxy({to: '0x' + 'a'.repeat(40)}, {})]}),
+    {name: 'DataCloneError'});
+  await flush();
+  assert.equal(sent.length, 0);
+  assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').length, 0);
+"""
+    )
+
+
+def test_a_method_that_is_not_checked_is_forwarded_as_a_plain_object():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  assert.equal(await provider.request({method: 'eth_getBalance', params: ['0x' + 'b'.repeat(40), 'latest']}), 'sent');
+  assert.notEqual(Object.getPrototypeOf(sent[0]), null, 'a request the wallet reads as it is was given no prototype');
+"""
+    )
+
+
+def test_a_provider_is_recorded_as_wrapped_before_it_is_subscribed_to():
+    run_node(
+        INJECT_HARNESS.replace("window.ethereum = provider;\n", "")
+        + r"""
+(async () => {
+  // A provider whose on() announces it again, which reaches the wrapping code a second time.
+  let subscriptions = 0;
+  const wallet = {
+    on() {
+      subscriptions++;
+      for (const fn of windowListeners['eip6963:announceProvider']) {
+        fn(new CustomEvent('eip6963:announceProvider', {detail: {provider: wallet, info: {name: 'again'}}}));
+      }
+    },
+    async request(args) { if (args.method === 'eth_chainId') return '0x38'; sent.push(args); return 'sent'; },
+  };
+  for (const fn of windowListeners['eip6963:announceProvider']) {
+    fn(new CustomEvent('eip6963:announceProvider', {detail: {provider: wallet, info: {name: 'wallet'}}}));
+  }
+  assert.equal(subscriptions, 1, 'the provider was wrapped more than once');
+"""
+    )
+
+
 def test_replaced_json_parse_cannot_change_the_typed_data_shown():
     run_node(
         INJECT_HARNESS
