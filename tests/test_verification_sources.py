@@ -1,0 +1,186 @@
+"""Verification from the chain's explorer or Sourcify, and EIP-1167 clones judged by their implementation."""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from adapters.evm_base import EvmAdapter
+from services.explorer_service import ExplorerService
+
+ADDRESS = "0x89e5db8b5aa49aa85ac63f691524311aeb649eba"
+IMPLEMENTATION = "0x" + "4" * 40
+ETHERSCAN = "https://api.etherscan.io/v2/api"
+SOURCIFY = "https://sourcify.dev/server/v2/contract/"
+
+
+def _sourcify(chain_id, address, verified):
+    # Shapes recorded from keyless Sourcify v2 on 2026-09-24: 200 with the match, or 404 with nulls.
+    match = "match" if verified else None
+    return {
+        "match": match,
+        "creationMatch": match,
+        "runtimeMatch": match,
+        "chainId": str(chain_id),
+        "address": address,
+    }
+
+
+def _etherscan(source):
+    return {"status": "1", "result": [{"SourceCode": source}]}
+
+
+class FakeHttp:
+    """aiohttp.ClientSession answering by URL: (status, payload) per address, or an exception."""
+
+    def __init__(self, etherscan, sourcify):
+        self.etherscan, self.sourcify = etherscan, sourcify
+        self.session = MagicMock()
+        self.session.get.side_effect = self.get
+
+    def get(self, url, params=None, **kwargs):
+        if url == ETHERSCAN:
+            answer = self.etherscan[params["address"].lower()]
+        else:
+            answer = self.sourcify[url.removeprefix(SOURCIFY).split("/")[1]]
+        context = MagicMock()
+        if isinstance(answer, Exception):
+            context.__aenter__ = AsyncMock(side_effect=answer)
+        else:
+            response = MagicMock(status=answer[0])
+            response.json = AsyncMock(return_value=answer[1])
+            context.__aenter__ = AsyncMock(return_value=response)
+        context.__aexit__ = AsyncMock(return_value=False)
+        return context
+
+
+async def _verify(etherscan, sourcify, code="0x6080", chain_id=56, address=ADDRESS):
+    http = FakeHttp(etherscan, sourcify)
+    adapter = EvmAdapter(chain_id, "Test", "https://rpc.invalid", etherscan_api_key="test-key")
+    adapter._explorer_service = ExplorerService()
+    adapter.get_bytecode = AsyncMock(return_value=code)
+    with patch("aiohttp.ClientSession") as client:
+        client.return_value.__aenter__.return_value = http.session
+        return await adapter.is_verified_contract(address), http
+
+
+VERIFIED_SOURCE = (200, _etherscan("contract Token {}"))
+UNVERIFIED_SOURCE = (200, _etherscan(""))
+EXPLORER_DOWN = (500, None)
+SOURCIFY_VERIFIED = (200, _sourcify(56, ADDRESS, True))
+SOURCIFY_UNVERIFIED = (404, _sourcify(56, ADDRESS, False))
+SOURCIFY_DOWN = (502, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "explorer, sourcify, expected",
+    [
+        (VERIFIED_SOURCE, SOURCIFY_UNVERIFIED, (True, "contract Token {}")),
+        (VERIFIED_SOURCE, SOURCIFY_DOWN, (True, "contract Token {}")),
+        (UNVERIFIED_SOURCE, SOURCIFY_VERIFIED, (True, None)),
+        (EXPLORER_DOWN, SOURCIFY_VERIFIED, (True, None)),
+        (UNVERIFIED_SOURCE, SOURCIFY_UNVERIFIED, (False, None)),
+        # Either source unread and the other not saying verified: unknown, never unverified.
+        (UNVERIFIED_SOURCE, SOURCIFY_DOWN, (None, None)),
+        (EXPLORER_DOWN, SOURCIFY_UNVERIFIED, (None, None)),
+        (EXPLORER_DOWN, SOURCIFY_DOWN, (None, None)),
+        # A Sourcify reply about another contract is not an answer about this one.
+        (UNVERIFIED_SOURCE, (404, _sourcify(56, IMPLEMENTATION, False)), (None, None)),
+        (UNVERIFIED_SOURCE, (404, _sourcify(1, ADDRESS, False)), (None, None)),
+    ],
+    ids=[
+        "explorer-verified",
+        "explorer-verified-sourcify-down",
+        "sourcify-verified",
+        "sourcify-verified-explorer-down",
+        "both-unverified",
+        "sourcify-down",
+        "explorer-down",
+        "both-down",
+        "sourcify-other-address",
+        "sourcify-other-chain",
+    ],
+)
+async def test_explorer_or_sourcify_verifies_and_both_must_deny(explorer, sourcify, expected):
+    result, _ = await _verify({ADDRESS: explorer}, {ADDRESS: sourcify})
+    assert result == expected
+
+
+# EIP-1167 runtime for a clone of IMPLEMENTATION.
+CLONE_CODE = "363d3d373d3d3d363d73" + IMPLEMENTATION[2:] + "5af43d82803e903d91602b57fd5bf3"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", ["", "0x"], ids=["web3-7", "web3-6"])
+@pytest.mark.parametrize(
+    "implementation, expected",
+    [
+        ((VERIFIED_SOURCE, SOURCIFY_UNVERIFIED), (True, "contract Token {}")),
+        ((UNVERIFIED_SOURCE, SOURCIFY_UNVERIFIED), (False, None)),
+        ((EXPLORER_DOWN, SOURCIFY_UNVERIFIED), (None, None)),
+    ],
+    ids=["verified-implementation", "unverified-implementation", "implementation-unknown"],
+)
+async def test_a_minimal_proxy_is_judged_by_its_implementation(prefix, implementation, expected):
+    impl_explorer, impl_sourcify = implementation
+    result, http = await _verify(
+        {ADDRESS: UNVERIFIED_SOURCE, IMPLEMENTATION: impl_explorer},
+        {
+            ADDRESS: SOURCIFY_UNVERIFIED,
+            IMPLEMENTATION: (impl_sourcify[0], _sourcify(56, IMPLEMENTATION, False)),
+        },
+        code=prefix + CLONE_CODE,
+    )
+    assert result == expected
+    assert http.session.get.call_count == 4
+
+
+@pytest.mark.asyncio
+async def test_a_verified_contract_needs_no_code_read():
+    http = FakeHttp({ADDRESS: VERIFIED_SOURCE}, {ADDRESS: SOURCIFY_UNVERIFIED})
+    adapter = EvmAdapter(56, "Test", "https://rpc.invalid", etherscan_api_key="test-key")
+    adapter._explorer_service = ExplorerService()
+    adapter.get_bytecode = AsyncMock(return_value=CLONE_CODE)
+    with patch("aiohttp.ClientSession") as client:
+        client.return_value.__aenter__.return_value = http.session
+        assert (await adapter.is_verified_contract(ADDRESS))[0] is True
+    adapter.get_bytecode.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sourcify, blockscout_verified, expected",
+    [
+        (SOURCIFY_UNVERIFIED, False, "unverified"),
+        (SOURCIFY_DOWN, False, "unknown"),
+        (SOURCIFY_DOWN, True, "verified"),
+        ((200, _sourcify(4663, ADDRESS, True)), False, "verified"),
+    ],
+    ids=["both-unverified", "sourcify-down", "blockscout-verified", "sourcify-verified"],
+)
+async def test_robinhood_chain_needs_both_sourcify_and_blockscout_to_deny(
+    sourcify, blockscout_verified, expected
+):
+    status, payload = sourcify
+    if payload is not None and payload["chainId"] == "56":
+        payload = {**payload, "chainId": "4663"}
+    blockscout = {"hash": ADDRESS, "is_contract": True, "is_verified": blockscout_verified}
+    session = MagicMock()
+
+    def get(url, params=None, **kwargs):
+        answer = (status, payload) if url.startswith(SOURCIFY) else (200, blockscout)
+        response = MagicMock(status=answer[0])
+        response.json = AsyncMock(return_value=answer[1])
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=response)
+        context.__aexit__ = AsyncMock(return_value=False)
+        return context
+
+    session.get.side_effect = get
+    with (
+        patch("aiohttp.ClientSession") as client,
+        patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}),
+    ):
+        client.return_value.__aenter__.return_value = session
+        result = await ExplorerService().get_verification_status(ADDRESS, 4663)
+    assert result.status == expected

@@ -2,6 +2,7 @@
 
 import logging
 import asyncio
+import re
 import aiohttp
 from typing import Dict, List, Optional, Tuple
 from cachetools import TTLCache
@@ -26,6 +27,9 @@ HONEYPOT_IS_UNSUPPORTED = (
     'honeypot.is unsupported for this chain; any honeypot and tax data here is GoPlus-reported, '
     'not simulated by ShieldBot'
 )
+# EIP-1167 minimal proxy runtime code: a clone that delegates every call to the embedded address.
+EIP1167_RUNTIME = re.compile(r'363d3d373d3d3d363d73([0-9a-f]{40})5af43d82803e903d91602b57fd5bf3')
+
 # check_honeypot and get_tax_info read the same honeypot.is reply, and a scan calls them back to back.
 HONEYPOT_IS_REPLY_TTL_SECONDS = 60
 # The structural analyzer, the payment rule and the spender lookup can all ask for one contract's
@@ -212,13 +216,49 @@ class EvmAdapter(ChainAdapter):
             return None
 
     async def is_verified_contract(self, address: str) -> Tuple[Optional[bool], Optional[str]]:
-        """Return (verification, source); None means unknown, False means unverified."""
+        """Return (verification, source); None means unknown, False means unverified.
+
+        An EIP-1167 minimal proxy (a clone) has no source of its own, so a clone that is not
+        verified itself is judged by its implementation.
+        """
+        verified, source = await self._verification(address)
+        if verified is not True:
+            implementation = await self._minimal_proxy_implementation(address)
+            if implementation:
+                return await self._verification(implementation)
+        return verified, source
+
+    async def _minimal_proxy_implementation(self, address: str) -> Optional[str]:
+        code = await self.get_bytecode(address)
+        # web3 6 returns the hex with 0x, web3 7 without.
+        match = EIP1167_RUNTIME.fullmatch(code.lower().removeprefix('0x')) if code else None
+        return '0x' + match.group(1) if match else None
+
+    async def _verification(self, address: str) -> Tuple[Optional[bool], Optional[str]]:
+        """The chain's explorer and Sourcify together: verified when either says so, unverified
+        only when both say not, unknown when one could not be read and the other did not verify.
+        """
         if self._explorer_backend == 'sourcify_blockscout':
             result = await self._explorer_service.get_verification_status(address, self._chain_id)
             if result.status == 'unknown':
                 logger.warning("[%s] Verification unknown: %s", self._chain_name, result.reason)
                 return (None, None)
             return (result.status == 'verified', None)
+        (explorer, source), sourcify = await asyncio.gather(
+            self._etherscan_verification(address),
+            self._explorer_service.get_sourcify_verification(address, self._chain_id),
+        )
+        if explorer is True or sourcify.status == 'verified':
+            return (True, source)
+        if explorer is False and sourcify.status == 'unverified':
+            return (False, None)
+        logger.warning(
+            "[%s] Verification unknown: explorer %s, Sourcify %s",
+            self._chain_name, 'unverified' if explorer is False else 'unknown', sourcify.reason,
+        )
+        return (None, None)
+
+    async def _etherscan_verification(self, address: str) -> Tuple[Optional[bool], Optional[str]]:
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
                 params = {

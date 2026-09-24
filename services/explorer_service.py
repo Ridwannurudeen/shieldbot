@@ -97,7 +97,11 @@ class ExplorerService:
                             ):
                                 await asyncio.sleep(2**attempt)
                                 continue
-                            if response.status != 200:
+                            # Sourcify answers 404 with a body naming the address when no
+                            # contract is verified there: that body is the evidence.
+                            if response.status != 200 and not (
+                                provider == "sourcify" and response.status == 404
+                            ):
                                 return ExplorerResult(
                                     "unknown",
                                     reason=f"HTTP {response.status}",
@@ -152,9 +156,11 @@ class ExplorerService:
             {**(params or {}), "apikey": api_key},
         )
 
-    async def get_verification_status(
+    async def get_sourcify_verification(
         self, address: str, chain_id: int
     ) -> ExplorerResult:
+        """Sourcify's answer: verified, unverified (no match for this address on this chain), or
+        unknown when the reply is missing or names another contract."""
         if not _is_address(address):
             return ExplorerResult("unknown", reason="Invalid address")
         address = address.lower()
@@ -163,30 +169,48 @@ class ExplorerService:
             f"https://sourcify.dev/server/v2/contract/{chain_id}/{address}",
             {},
         )
-        if sourcify.status == "known":
-            data = sourcify.data
-            matches = ("match", "exact_match")
-            if (
-                data.get("chainId") == str(chain_id)
-                and isinstance(data.get("address"), str)
-                and data["address"].lower() == address
-                and data.get("match") in matches
-                and "creationMatch" in data
-                and data["creationMatch"] in (*matches, None)
-                and "runtimeMatch" in data
-                and data["runtimeMatch"] in (*matches, None)
-                and (
-                    data["creationMatch"] in matches or data["runtimeMatch"] in matches
-                )
-            ):
-                return ExplorerResult(
-                    "verified", data={"match": data["match"]}, provider="sourcify"
-                )
-            sourcify = ExplorerResult(
-                "unknown",
-                reason="Missing or mismatched verification evidence",
-                provider="sourcify",
+        if sourcify.status != "known":
+            return sourcify
+        data = sourcify.data
+        matches = ("match", "exact_match")
+        same_contract = (
+            data.get("chainId") == str(chain_id)
+            and isinstance(data.get("address"), str)
+            and data["address"].lower() == address
+            and "creationMatch" in data
+            and "runtimeMatch" in data
+        )
+        if (
+            same_contract
+            and data.get("match") in matches
+            and data["creationMatch"] in (*matches, None)
+            and data["runtimeMatch"] in (*matches, None)
+            and (data["creationMatch"] in matches or data["runtimeMatch"] in matches)
+        ):
+            return ExplorerResult(
+                "verified", data={"match": data["match"]}, provider="sourcify"
             )
+        if same_contract and "match" in data and data["match"] is None and (
+            data["creationMatch"] is None and data["runtimeMatch"] is None
+        ):
+            return ExplorerResult("unverified", reason="not verified", provider="sourcify")
+        return ExplorerResult(
+            "unknown",
+            reason="Missing or mismatched verification evidence",
+            provider="sourcify",
+        )
+
+    async def get_verification_status(
+        self, address: str, chain_id: int
+    ) -> ExplorerResult:
+        """Sourcify and Blockscout together: verified when either says so, unverified only when
+        both say not, unknown otherwise."""
+        if not _is_address(address):
+            return ExplorerResult("unknown", reason="Invalid address")
+        address = address.lower()
+        sourcify = await self.get_sourcify_verification(address, chain_id)
+        if sourcify.status == "verified":
+            return sourcify
 
         blockscout = await self._blockscout(f"addresses/{address}", chain_id)
         if blockscout.status == "known":
@@ -197,15 +221,18 @@ class ExplorerService:
                 and data.get("is_contract") is True
                 and type(data.get("is_verified")) is bool
             ):
-                return ExplorerResult(
-                    "verified" if data["is_verified"] else "unverified",
+                if data["is_verified"] or sourcify.status == "unverified":
+                    return ExplorerResult(
+                        "verified" if data["is_verified"] else "unverified",
+                        provider="blockscout",
+                    )
+                blockscout = ExplorerResult("unverified", reason="not verified", provider="blockscout")
+            else:
+                blockscout = ExplorerResult(
+                    "unknown",
+                    reason="Missing or mismatched contract verification evidence",
                     provider="blockscout",
                 )
-            blockscout = ExplorerResult(
-                "unknown",
-                reason="Missing or mismatched contract verification evidence",
-                provider="blockscout",
-            )
         return ExplorerResult(
             "unknown",
             reason=f"Sourcify: {sourcify.reason}; Blockscout: {blockscout.reason}",
