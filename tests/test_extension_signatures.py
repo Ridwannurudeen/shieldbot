@@ -7,7 +7,12 @@ see for itself (a raw eth_sign, typed data it cannot read) only raises the API's
 
 import pytest
 
-from tests.test_extension_overlay_behaviour import CONTENT_HARNESS, FRAME_HARNESS, run_node
+from tests.test_extension_overlay_behaviour import (
+    CONTENT_HARNESS,
+    FRAME_HARNESS,
+    INJECT_HARNESS,
+    run_node,
+)
 
 # background.js in a vm with a Chrome double: `respond(message, sender)` runs its message
 # listener, `bodies` holds each JSON body it posted and `answer` decides the API's reply.
@@ -208,5 +213,83 @@ def test_a_signature_is_analysed_on_the_wallet_chain_and_forwarded_as_sent():
   assert.equal(await pending, 'sent');
   assert.deepEqual(plain(sent[0].params), params);
   assert.equal('chainId' in sent[0], false, 'a chain was added to a signature request');
+"""
+    )
+
+
+# background.js's answer when the wallet chain cannot be read or does not match the request.
+UNKNOWN_CHAIN = r"""
+const unknownChain = {status: 'unknown', partial: true, classification: 'UNKNOWN', risk_level: 'UNKNOWN',
+  risk_score: null, coverage: {chain: false},
+  coverage_reasons: {chain: 'Wallet chain unavailable, invalid, or mismatched; the request was not analyzed.'}};
+"""
+
+
+@pytest.mark.parametrize("policy", ["STRICT", "BALANCED"])
+@pytest.mark.parametrize("kind", ["transaction", "signature", "batch-call-on-another-chain"])
+def test_an_unknown_or_unsupported_chain_leaves_only_block(policy, kind):
+    run_node(
+        CONTENT_HARNESS
+        + UNKNOWN_CHAIN
+        + r"""
+(async () => {
+  const [policy, kind] = JSON.parse(process.argv[1]);
+  storage.policyMode = policy;
+  analyze = async () => ({result: unknownChain});
+  if (kind === 'transaction') await intercept('request', {to: '0x' + 'a'.repeat(40), chainId: null});
+  if (kind === 'signature') await intercept('request', {signMethod: 'personal_sign', data: '0x68656c6c6f', chainId: null}, 'personal_sign');
+  if (kind === 'batch-call-on-another-chain') {
+    await intercept('request', {unknownStructure: true, wrongChain: true}, 'wallet_sendCalls');
+  }
+  const html = overlay().innerHTML;
+  assert(!html.includes('id="shieldai-proceed"'), 'a Proceed that can only be rejected was offered');
+  assert(html.includes('could not confirm which network'), html);
+  if (kind !== 'batch-call-on-another-chain') assert(html.includes('Why: Wallet chain unavailable'), html);
+  userClick(byId('shieldai-block'));
+  await flush();
+  await assertVerdicts([['request', 'block']]);
+""",
+        [policy, kind],
+    )
+
+
+def test_a_batch_call_on_another_chain_is_marked_for_the_overlay():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const calls = [{to: '0x' + 'a'.repeat(40)}, {to: '0x' + 'c'.repeat(40), chainId: '0x1'}];
+  provider.request({method: 'wallet_sendCalls', params: [{version: '2.0.0', chainId: '0x38', calls}]}).catch(() => {});
+  await flush();
+  const {tx} = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+  assert.equal(tx.unknownStructure, true);
+  assert.equal(tx.wrongChain, true);
+  // A request that cannot be read at all is not about the chain.
+  provider.request({method: 'eth_sendTransaction', params: ['not an object']}).catch(() => {});
+  await flush();
+  const unreadable = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1).tx;
+  assert.equal(unreadable.unknownStructure, true);
+  assert.equal(unreadable.wrongChain, undefined);
+"""
+    )
+
+
+def test_an_unsupported_chain_is_answered_as_an_unknown_chain():
+    run_node(
+        BACKGROUND_HARNESS
+        + r"""
+(async () => {
+  answer = async () => ({ok: false, status: 400,
+    text: async () => JSON.stringify({detail: 'Unsupported chain ID 324. Supported chain IDs: 1, 56'})});
+  const response = await respond({type: 'SHIELDAI_ANALYZE', tx: {to: '0x' + 'a'.repeat(40), chainId: 324}});
+  assert.equal(response.error, undefined);
+  assert.equal(response.result.status, 'unknown');
+  assert.equal(response.result.classification, 'UNKNOWN');
+  assert.equal(response.result.coverage.chain, false);
+  assert.match(response.result.coverage_reasons.chain, /Unsupported chain ID 324/);
+  // Any other refusal is still an error, shown as Analysis Unavailable.
+  answer = async () => ({ok: false, status: 400, text: async () => JSON.stringify({detail: "Invalid 'to' address"})});
+  const other = await respond({type: 'SHIELDAI_ANALYZE', tx: {to: 'nope', chainId: 56}});
+  assert.match(other.error, /API error 400/);
 """
     )

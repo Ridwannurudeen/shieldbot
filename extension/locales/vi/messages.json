@@ -165,5 +165,6 @@
   "askShieldBotAI": "Hỏi ShieldBot AI",
   "healthScanUnavailable": "Không thể quét phê duyệt (HTTP {status})",
   "overlayEthSign": "CHỮ KÝ HASH THÔ (eth_sign)",
-  "overlayEthSignNote": "eth_sign ký một hash thô, và hash đó có thể là một giao dịch: ký nó có thể cho phép trang này chuyển mọi thứ trong ví của bạn. Không trang web thông thường nào cần điều này."
+  "overlayEthSignNote": "eth_sign ký một hash thô, và hash đó có thể là một giao dịch: ký nó có thể cho phép trang này chuyển mọi thứ trong ví của bạn. Không trang web thông thường nào cần điều này.",
+  "overlayChainNoProceed": "ShieldAI không thể xác nhận yêu cầu này dành cho mạng nào: không đọc được mạng của ví, mạng không khớp với yêu cầu, hoặc mạng không được hỗ trợ. Không có tùy chọn tiếp tục. Hãy chuyển ví sang một mạng được hỗ trợ và thử lại."
 }

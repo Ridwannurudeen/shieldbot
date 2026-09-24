@@ -334,6 +334,10 @@
         }
 
         const unknownStructure = { __proto__: null, unknownStructure: true };
+        // A batch with a call on another chain is shown the same way, marked so
+        // the overlay offers no Proceed: the batch is rejected whatever the user
+        // decides.
+        const callsOnAnotherChain = { __proto__: null, unknownStructure: true, wrongChain: true };
         let interceptData;
 
         if (!structured) {
@@ -409,7 +413,7 @@
           const decisions = unreadable ? 1 : count;
           const decide = (index) => {
             if (index < decisions) {
-              requestAnalysis(method, unreadable ? unknownStructure : payloadAt(index, chainId), (action) => {
+              requestAnalysis(method, unreadable ? callsOnAnotherChain : payloadAt(index, chainId), (action) => {
                 if (structured && chainId === null) {
                   reject(new NativeError("Transaction blocked by ShieldAI: wallet chain is unknown or mismatched"));
                   return;
@@ -718,6 +722,7 @@
       txPayload.callCount = txParams.callCount;
     }
     if (txParams.unknownStructure) txPayload.unknownStructure = true;
+    if (txParams.wrongChain) txPayload.wrongChain = true;
 
     withProof(requestId, "intercept", (proof) => {
       postMessage(

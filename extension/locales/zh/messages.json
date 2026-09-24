@@ -165,5 +165,6 @@
   "askShieldBotAI": "询问ShieldBot AI",
   "healthScanUnavailable": "授权扫描不可用 (HTTP {status})",
   "overlayEthSign": "原始哈希签名 (eth_sign)",
-  "overlayEthSignNote": "eth_sign 签署的是原始哈希，而该哈希可能就是一笔交易：签署后，此网站可能转走您钱包中的全部资产。正常网站不需要这样做。"
+  "overlayEthSignNote": "eth_sign 签署的是原始哈希，而该哈希可能就是一笔交易：签署后，此网站可能转走您钱包中的全部资产。正常网站不需要这样做。",
+  "overlayChainNoProceed": "ShieldAI 无法确认此请求所属的网络：无法读取钱包的网络、网络与请求不符，或该网络不受支持。因此没有继续的选项。请将钱包切换到受支持的网络后重试。"
 }

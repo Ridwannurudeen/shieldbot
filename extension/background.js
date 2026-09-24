@@ -238,21 +238,28 @@ async function getApiUrl() {
   });
 }
 
+// The answer for a request whose wallet chain could not be read, does not
+// match the request, or is not one the API supports: nothing was analysed,
+// and the overlay offers only Block.
+function unknownChain(reason) {
+  return {
+    status: "unknown",
+    partial: true,
+    classification: "UNKNOWN",
+    risk_level: "UNKNOWN",
+    risk_score: null,
+    coverage: { chain: false },
+    coverage_reasons: { chain: reason },
+    verdict: "Unknown wallet chain. Reconnect the wallet and retry; the request is blocked.",
+  };
+}
+
 async function handleAnalyze(tx) {
   const validChainId = typeof tx.chainId === "number" ||
     (typeof tx.chainId === "string" && /^(0x[0-9a-f]+|[0-9]+)$/i.test(tx.chainId));
   const chainId = validChainId ? Number(tx.chainId) : null;
   if (!Number.isSafeInteger(chainId) || chainId <= 0) {
-    return {
-      status: "unknown",
-      partial: true,
-      classification: "UNKNOWN",
-      risk_level: "UNKNOWN",
-      risk_score: null,
-      coverage: { chain: false },
-      coverage_reasons: { chain: "Wallet chain unavailable, invalid, or mismatched; the request was not analyzed." },
-      verdict: "Unknown wallet chain. Reconnect the wallet and retry; the request is blocked.",
-    };
+    return unknownChain("Wallet chain unavailable, invalid, or mismatched; the request was not analyzed.");
   }
 
   const apiUrl = await getApiUrl();
@@ -307,6 +314,9 @@ async function handleAnalyze(tx) {
 
   if (!response.ok) {
     const text = await response.text();
+    // The API refuses a chain it does not support with a 400 that says so.
+    const unsupported = response.status === 400 && /"detail":\s*"(Unsupported chain ID[^"]*)"/.exec(text);
+    if (unsupported) return unknownChain(unsupported[1]);
     throw new Error(`API error ${response.status}: ${text}`);
   }
 

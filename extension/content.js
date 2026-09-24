@@ -185,7 +185,7 @@
     // inject.js could not read the request's structure, so there is nothing
     // to analyse: the user is told so and decides.
     if (tx.unknownStructure === true) {
-      showUnknownStructureOverlay(requestId, strict);
+      showUnknownStructureOverlay(requestId, strict, tx.wrongChain === true);
       return;
     }
 
@@ -715,7 +715,11 @@
     const ethSign = signMethod === "eth_sign";
     const classification = ethSign ? "BLOCK_RECOMMENDED" : unparseable ? atLeast(verdict, "HIGH_RISK") : verdict;
     const why = response.error ? `${_t("overlayCannotReach")} ${response.error}` : incomplete ? unknownReason(result) : "";
-    const canSign = !(strict && (unparseable || classification === "UNKNOWN" || classification === "BLOCK_RECOMMENDED"));
+    // A signature whose chain could not be read, or is not supported, was
+    // not analysed, and inject.js rejects it: there is no Sign Anyway.
+    const chainUnknown = Boolean(result) && (result.coverage || {}).chain === false;
+    const canSign = !chainUnknown &&
+      !(strict && (unparseable || classification === "UNKNOWN" || classification === "BLOCK_RECOMMENDED"));
     const signalsHtml = ((result && result.danger_signals) || [])
       .map((s) => `<li>${escapeHtml(s)}</li>`)
       .join("");
@@ -756,7 +760,7 @@
           ${canSign ? `<button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">${_t("overlayBtnSignAnyway")}</button>` : ""}
         </div>
         ${COVERED_NOTE}
-        ${canSign ? "" : `<p class="shieldai-strict-note">${_t("overlayStrictNoProceed")}</p>`}
+        ${canSign ? "" : `<p class="shieldai-strict-note">${chainUnknown ? _t("overlayChainNoProceed") : _t("overlayStrictNoProceed")}</p>`}
       </div>
     `;
 
@@ -775,9 +779,12 @@
     const badgeClass = BADGE_CLASSES[classification] || "shieldai-badge-caution";
     const label = classLabel(classification);
     const isBlock = classification === "BLOCK_RECOMMENDED";
+    // The wallet's chain could not be read, does not match the request, or is
+    // not one the API supports: nothing was analysed, and there is no Proceed.
+    const chainUnknown = (result.coverage || {}).chain === false;
     // Strict mode leaves no way to send a transaction the firewall recommends
     // blocking or could not fully check.
-    const canProceed = !(strict && (isBlock || classification === "UNKNOWN"));
+    const canProceed = !chainUnknown && !(strict && (isBlock || classification === "UNKNOWN"));
 
     // Display as safety score (100 - risk) so higher = better
     const scoreDisplay = incomplete ? "Unknown (incomplete provider coverage)" :
@@ -880,7 +887,7 @@
           ` : ""}
         </div>
         ${COVERED_NOTE}
-        ${canProceed ? "" : `<p class="shieldai-strict-note">${_t("overlayStrictNoProceed")}</p>`}
+        ${canProceed ? "" : `<p class="shieldai-strict-note">${chainUnknown ? _t("overlayChainNoProceed") : _t("overlayStrictNoProceed")}</p>`}
 
         <div class="shieldai-explain-row">
           <button class="shieldai-btn shieldai-btn-explain" id="shieldai-explain">
@@ -998,10 +1005,13 @@
 
   // Shown for a request inject.js could not read (a transaction that is not
   // an object, or a wallet_sendCalls batch without a list of call objects),
-  // so nothing in it was checked. In Strict mode there is no Proceed.
-  async function showUnknownStructureOverlay(requestId, strict) {
+  // so nothing in it was checked. In Strict mode there is no Proceed, and
+  // none either for a batch with a call on another chain, which inject.js
+  // rejects whatever the user decides.
+  async function showUnknownStructureOverlay(requestId, strict, wrongChain) {
     await _loadContentLang();
     removeOverlay();
+    const canProceed = !strict && !wrongChain;
 
     const overlay = document.createElement("div");
     overlay.id = "shieldai-overlay";
@@ -1015,17 +1025,17 @@
         <div class="shieldai-badge shieldai-badge-high">${_t("overlayUnknownStructure")}</div>
         <div class="shieldai-section">
           <p>${_t("overlayUnknownStructureNote")}</p>
-          <p>${strict ? _t("overlayStrictNoProceed") : _t("overlayProceedRisk")}</p>
+          <p>${wrongChain ? _t("overlayChainNoProceed") : strict ? _t("overlayStrictNoProceed") : _t("overlayProceedRisk")}</p>
         </div>
         <div class="shieldai-actions">
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">
             ${_t("overlayBtnBlock")}
           </button>
-          ${strict ? "" : `
+          ${canProceed ? `
           <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">
             ${_t("overlayBtnProceed")}
           </button>
-          `}
+          ` : ""}
         </div>
         ${COVERED_NOTE}
       </div>
@@ -1033,7 +1043,7 @@
 
     const root = mountOverlay(overlay, requestId);
     onDecision(root, "shieldai-block", requestId, "block");
-    if (!strict) {
+    if (canProceed) {
       onDecision(root, "shieldai-proceed", requestId, "proceed");
     }
   }
