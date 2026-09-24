@@ -153,7 +153,7 @@ async def test_rescue_rpc_catches_propagate_routing_error(rescue_pipeline, metho
     args = {
         '_fetch_log_chunk': (session, 'https://rpc.invalid', '0x0', '0x0', '0x0', '0x1'),
         '_eth_call': (session, 'https://rpc.invalid', token, '0x0'),
-        '_fetch_prices': ([token],),
+        '_fetch_prices': ([token], 56),
     }
     with pytest.raises(UnsupportedChainError, match='unsupported'):
         await getattr(RescueService, method)(service, *args[method])

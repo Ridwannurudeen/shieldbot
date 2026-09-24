@@ -14,6 +14,8 @@ import aiohttp
 from cachetools import TTLCache
 from web3 import Web3
 
+from utils.chain_info import get_dexscreener_slug
+
 logger = logging.getLogger(__name__)
 
 # ERC-20 Approval event topic
@@ -101,15 +103,19 @@ KNOWN_SAFE_SPENDERS = {
     "0x4a364f8c717caad9a442737eb7b8a55cc6cf18d8": "Stargate Finance Router",
 }
 
-# Stablecoins — price = $1.00 without an API call
+# Stablecoins by chain — price = $1.00 without an API call, only on the chain they live on
 STABLECOINS = {
-    "0x55d398326f99059ff775485246999027b3197955",  # BSC USDT
-    "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",  # BSC USDC
-    "0xe9e7cea3dedca5984780bafc599bd69add087d56",  # BUSD
-    "0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3",  # DAI on BSC
-    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",  # ETH USDC
-    "0xdac17f958d2ee523a2206206994597c13d831ec7",  # ETH USDT
-    "0x6b175474e89094c44da98b954eedeac495271d0f",  # DAI
+    56: {
+        "0x55d398326f99059ff775485246999027b3197955",  # BSC USDT
+        "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",  # BSC USDC
+        "0xe9e7cea3dedca5984780bafc599bd69add087d56",  # BUSD
+        "0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3",  # DAI on BSC
+    },
+    1: {
+        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",  # ETH USDC
+        "0xdac17f958d2ee523a2206206994597c13d831ec7",  # ETH USDT
+        "0x6b175474e89094c44da98b954eedeac495271d0f",  # DAI
+    },
 }
 
 
@@ -403,7 +409,7 @@ class RescueService:
                 coverage_reasons["balances"] = f"Balance unavailable for {len(unresolved_balances)} token(s)"
 
             # Step 6: Fetch token prices (DexScreener, stablecoins hardcoded)
-            prices = await self._fetch_prices(active_tokens)
+            prices = await self._fetch_prices(active_tokens, chain_id)
             unpriced = [
                 token for token in active_tokens
                 if (token not in balances or balances[token] > 0) and token not in prices
@@ -713,11 +719,12 @@ class RescueService:
         except Exception as e:
             raise RuntimeError("Approval state unavailable") from e
 
-    async def _fetch_prices(self, tokens: List[str]) -> Dict[str, float]:
-        """Fetch token USD prices from DexScreener (free, no API key needed).
+    async def _fetch_prices(self, tokens: List[str], chain_id: int) -> Dict[str, float]:
+        """Fetch token USD prices on ``chain_id`` from DexScreener (free, no API key needed).
 
-        Stablecoins are hardcoded to $1.00.
-        Up to 30 tokens per DexScreener request.
+        Stablecoins are hardcoded to $1.00 on their own chain. Only pairs on ``chain_id`` price a
+        token: DexScreener answers a token address with pairs from every chain, and the same
+        address elsewhere can be another token. Up to 30 tokens per DexScreener request.
         """
         from utils.web3_client import UnsupportedChainError
 
@@ -725,11 +732,12 @@ class RescueService:
 
         # Hardcode stablecoin prices
         for token in tokens:
-            if token.lower() in STABLECOINS:
+            if token.lower() in STABLECOINS.get(chain_id, ()):
                 prices[token] = 1.0
 
+        slug = get_dexscreener_slug(chain_id)
         to_fetch = [t for t in tokens if t not in prices]
-        if not to_fetch:
+        if not to_fetch or not slug:
             return prices
 
         BATCH_SIZE = 30
@@ -750,7 +758,7 @@ class RescueService:
                         batch_lower = [t.lower() for t in batch]
                         for pair in pairs:
                             base_addr = (pair.get("baseToken") or {}).get("address", "").lower()
-                            if base_addr in batch_lower:
+                            if pair.get("chainId") == slug and base_addr in batch_lower:
                                 token_pairs.setdefault(base_addr, []).append(pair)
 
                         for token in batch:
