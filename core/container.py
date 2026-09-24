@@ -44,6 +44,7 @@ from services.reputation import ReputationService
 from services.guardian import GuardianService
 from services.anomaly_detector import AnomalyDetector
 from services.verdict_publisher import VerdictPublisher
+from services.robinhood_assets import RobinhoodAssets
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +145,8 @@ class ServiceContainer:
         self.indexer = DeployerIndexer(self.web3_client, self.db, settings=settings)
         # Verdict evidence storage, plus on-chain records in the Robinhood Chain registry when configured
         self.verdict_publisher = VerdictPublisher(self.db, rpc_url=settings.robinhood_rpc_url)
+        # The official Robinhood Chain tokens, so 4663 scans can tell their impostors apart
+        self.robinhood_assets = RobinhoodAssets(rpc_url=settings.robinhood_rpc_url)
 
         # Mempool monitor + Rescue mode + Campaign detection
         self.mempool_monitor = MempoolMonitor(self.web3_client, self.db)

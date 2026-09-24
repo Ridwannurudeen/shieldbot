@@ -185,10 +185,13 @@ def check_token(
 
 def with_impostor_check(scan: Dict, check: Dict) -> Dict:
     """``scan`` with ``check`` as impostor_check and, for an impostor, its flag first among the critical flags."""
-    flags = list(scan.get("critical_flags", []))
+    labelled = {**scan, "impostor_check": check}
     if check["status"] == "impostor":
-        flags.insert(0, IMPOSTOR_FLAG.format(check["symbol"]))
-    return {**scan, "impostor_check": check, "critical_flags": flags}
+        labelled["critical_flags"] = [
+            IMPOSTOR_FLAG.format(check["symbol"]),
+            *scan.get("critical_flags", []),
+        ]
+    return labelled
 
 
 def _decode_string(result) -> Optional[str]:

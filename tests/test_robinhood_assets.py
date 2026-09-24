@@ -240,6 +240,10 @@ def test_other_results_add_only_the_field(address, symbol, name, listed):
         "critical_flags": ["New pair (<24h)"],
         "impostor_check": check,
     }
+    assert with_impostor_check({"rug_probability": 5}, check) == {
+        "rug_probability": 5,
+        "impostor_check": check,
+    }
 
 
 # --- The service against a local list and RPC --------------------------------------------------

@@ -36,6 +36,7 @@ from core.telegram_formatter import (
 )
 from core.extension_formatter import is_scan_incomplete
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
+from services.robinhood_assets import IMPOSTOR_FLAG, with_impostor_check
 from services.mempool_service import supports_pending_transactions
 from utils.web3_client import UnsupportedChainError
 from utils.chain_info import (
@@ -726,7 +727,7 @@ def format_launch_alert(item: dict) -> str:
     """Plain-text alert for one launch outcome from the launch feed.
 
     An incomplete scan is headed UNKNOWN unless it is blocked, so it never reads as safe, and
-    its partial score is not shown.
+    its partial score is not shown. An impostor of an official Robinhood token is flagged first.
     """
     scan = item['scan']
     header = _LAUNCH_ALERT_HEADERS.get(scan['outcome'])
@@ -735,7 +736,13 @@ def format_launch_alert(item: dict) -> str:
     lines = [header, f"Token: {item['token_address']}", f"Launchpad: {item['launchpad']}"]
     if header != _UNKNOWN_LAUNCH_HEADER and scan['risk_score'] is not None:
         lines.append(f"Risk score: {scan['risk_score']:g}/100")
-    lines += [f"• {CONTROL_CHARACTERS.sub(' ', flag)[:150]}" for flag in scan['flags'][:3]]
+    flags = scan['flags']
+    impostor_check = item.get('impostor_check')
+    if impostor_check and impostor_check['status'] == 'impostor':
+        # A blocked launch's evidence already leads with the flag; other outcomes carry only the check.
+        label = IMPOSTOR_FLAG.format(impostor_check['symbol'])
+        flags = [label, *(flag for flag in flags if flag != label)]
+    lines += [f"• {CONTROL_CHARACTERS.sub(' ', flag)[:150]}" for flag in flags[:3]]
     if scan['status'] != 'ok':
         reasons = '; '.join(dict.fromkeys(
             CONTROL_CHARACTERS.sub(' ', reason) for reason in scan['coverage_reasons'].values()
@@ -935,6 +942,10 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
             )
 
             risk_output = risk_engine.compute_from_results(analyzer_results)
+            if chain_id == 4663:
+                risk_output = with_impostor_check(risk_output, await container.robinhood_assets.check(
+                    address, token_info.get('symbol'), token_info.get('name'),
+                ))
 
             # Extract service data for report formatting
             by_name = {r.name: r for r in analyzer_results}
@@ -1058,6 +1069,10 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
             )
 
             risk_output = risk_engine.compute_from_results(analyzer_results)
+            if chain_id == 4663:
+                risk_output = with_impostor_check(risk_output, await container.robinhood_assets.check(
+                    address, token_info.get('symbol'), token_info.get('name'),
+                ))
 
             by_name = {r.name: r for r in analyzer_results}
             contract_data = by_name["structural"].data if "structural" in by_name else {}

@@ -268,6 +268,9 @@ async def test_a_background_scan_outlasts_a_full_simulator_request_that_an_inter
 
     container = MagicMock(risk_engine=RiskEngine())
     container.registry = registry_of(analyzer("honeypot", 1.0, slow_simulation))
+    container.robinhood_assets.check_onchain = AsyncMock(
+        return_value={"status": "none", "symbol": None, "official_address": None, "reason": None}
+    )
     tools = AgentTools(container)
 
     with patch("core.registry.RUN_ALL_DEADLINE_SECONDS", RUN_ALL_DEADLINE_SECONDS * SCALE):

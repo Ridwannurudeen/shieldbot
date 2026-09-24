@@ -136,8 +136,8 @@ def test_the_reservation_is_the_no_retry_worst_case_of_one_scan():
     # Structural RPC reads: get_code twice, the creation transaction and its block, and two eth_calls
     # (owner() and its raw re-read), each after up to two eth_chainId requests from web3's validation
     # middleware. Simulation: pool lookup batch, V2 reserves, block number, three Initialize log
-    # windows, then up to three pools simulated twice each.
-    assert SCAN_REQUEST_COST == 2 + 2 + 2 * (1 + 2) + (1 + 1 + 1 + 3 + 3 * 2)
+    # windows, then up to three pools simulated twice each. Impostor check: one symbol()/name() batch.
+    assert SCAN_REQUEST_COST == 2 + 2 + 2 * (1 + 2) + (1 + 1 + 1 + 3 + 3 * 2) + 1
 
 
 # --- the breaker pauses 4663 discovery and scans ---

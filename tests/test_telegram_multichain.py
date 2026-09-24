@@ -115,6 +115,7 @@ def bot_chain_functions():
     from utils.web3_client import UnsupportedChainError, Web3Client
     from core.extension_formatter import is_scan_incomplete
     from core.telegram_formatter import escape_markdown
+    from services.robinhood_assets import with_impostor_check
     from services.mempool_service import supports_pending_transactions
 
     # Load the real menu handlers without importing the optional Telegram package.
@@ -133,6 +134,9 @@ def bot_chain_functions():
     services.registry.run_all = AsyncMock(return_value=[])
     services.advisor.chat = AsyncMock(return_value={'text': 'Analysis complete.'})
     services.rescue_service.scan_approvals = AsyncMock(return_value={})
+    services.robinhood_assets.check = AsyncMock(return_value={
+        'status': 'none', 'symbol': None, 'official_address': None, 'reason': None,
+    })
     ai = MagicMock()
     ai.generate_forensic_report = AsyncMock(return_value='Analysis')
     recorder = MagicMock()
@@ -141,6 +145,7 @@ def bot_chain_functions():
         'asyncio': asyncio,
         'is_scan_incomplete': is_scan_incomplete,
         'escape_markdown': escape_markdown,
+        'with_impostor_check': with_impostor_check,
         'UnsupportedChainError': UnsupportedChainError,
         'logger': MagicMock(),
         'container': services,

@@ -168,6 +168,7 @@ async def test_unscanned_item_has_the_full_shape_and_is_never_safe(db):
                 "flags": [],
                 "scanned_at": None,
             },
+            "impostor_check": None,
             "verdict_url": f"/api/verdict/{CHAIN}/{TOKENS[0]}",
         }
     ]

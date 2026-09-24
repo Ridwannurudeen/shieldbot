@@ -14,8 +14,8 @@ from core.extension_formatter import is_scan_incomplete
 
 logger = logging.getLogger(__name__)
 
-# Chain 4663 shares 1 rps; discovery uses ~0.15. Four subjects at 22 requests
-# every 300s use 0.293 rps, leaving ~0.557 rps for launches and other work.
+# Chain 4663 shares 1 rps; discovery uses ~0.15. Four subjects at 23 requests
+# every 300s use 0.307 rps, leaving ~0.543 rps for launches and other work.
 GUARD_WATCH_MAX_SUBJECTS = max(0, int(os.getenv("GUARD_WATCH_MAX_SUBJECTS", "4")))
 
 # Eighteen digits keep a cursor block inside SQLite's signed 64-bit integers.
@@ -38,7 +38,8 @@ _LAUNCH_SELECT = """
            discovered_at,
            CASE WHEN rechecked THEN recheck_status ELSE scan_status END,
            CASE WHEN rechecked THEN NULL ELSE risk_score END,
-           CASE WHEN rechecked THEN recheck_at ELSE scanned_at END AS outcome_at
+           CASE WHEN rechecked THEN recheck_at ELSE scanned_at END AS outcome_at,
+           impostor_check
     FROM (
         SELECT l.*, p.status AS recheck_status, p.last_checked AS recheck_at,
                COALESCE(p.status IN ('blocked', 'cleared') AND p.last_checked >= l.scanned_at, 0)
@@ -67,7 +68,8 @@ _LAUNCH_OUTCOMES_SINCE = """
            discovered_at,
            CASE WHEN rechecked THEN recheck_status ELSE scan_status END,
            CASE WHEN rechecked THEN NULL ELSE risk_score END,
-           CASE WHEN rechecked THEN recheck_at ELSE scanned_at END AS outcome_at
+           CASE WHEN rechecked THEN recheck_at ELSE scanned_at END AS outcome_at,
+           impostor_check
     FROM (
         SELECT l.*, p.status AS recheck_status, p.last_checked AS recheck_at,
                COALESCE(p.status IN ('blocked', 'cleared') AND p.last_checked >= l.scanned_at, 0)
@@ -152,7 +154,7 @@ def _launch_scan(stored_status, risk_score, scanned_at, finding) -> Dict:
 
 def _launch_item(chain_id: int, row, finding) -> Dict:
     (token, source, launchpad, pool_id, block_number, tx_hash, block_timestamp,
-     discovered_at, stored_status, risk_score, outcome_at) = row
+     discovered_at, stored_status, risk_score, outcome_at, impostor_check) = row
     return {
         "chain_id": chain_id,
         "token_address": token,
@@ -164,6 +166,7 @@ def _launch_item(chain_id: int, row, finding) -> Dict:
         "block_timestamp": block_timestamp,
         "discovered_at": discovered_at,
         "scan": _launch_scan(stored_status, risk_score, outcome_at, finding),
+        "impostor_check": json.loads(impostor_check) if impostor_check else None,
         "verdict_url": f"/api/verdict/{chain_id}/{token}",
     }
 
@@ -2001,6 +2004,7 @@ class Database:
                 scan_status TEXT,
                 risk_score REAL,
                 scanned_at REAL,
+                impostor_check TEXT,
                 PRIMARY KEY (chain_id, token_address)
             );
 
@@ -2008,6 +2012,19 @@ class Database:
                 ON discovered_launches(chain_id, scanned_at, block_number);
         """)
         await self._db.commit()
+        await self._migrate_launch_impostor_check()
+
+    async def _migrate_launch_impostor_check(self):
+        """Add the impostor check to launch tables created before it; earlier launches have none."""
+        await self._db.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = await self._db.execute("PRAGMA table_info(discovered_launches)")
+            if not any(column[1] == "impostor_check" for column in await cursor.fetchall()):
+                await self._db.execute("ALTER TABLE discovered_launches ADD COLUMN impostor_check TEXT")
+            await self._db.commit()
+        except BaseException:
+            await self._db.rollback()
+            raise
 
     async def get_launch_cursor(self, chain_id: int, source: str) -> Optional[int]:
         """Return the last block processed for a launch source, or None before its first sweep."""
@@ -2097,6 +2114,18 @@ class Database:
         """, (scan_status, risk_score, time.time(), chain_id, token_address))
         await self._db.commit()
 
+    async def record_launch_impostor_check(self, chain_id: int, token_address: str, check: Dict):
+        """Store a launch's check against the official Robinhood tokens (services.robinhood_assets).
+
+        An unknown check never replaces a stored one, so a failed read cannot erase a decided check.
+        """
+        await self._db.execute("""
+            UPDATE discovered_launches
+            SET impostor_check = CASE WHEN ? AND impostor_check IS NOT NULL THEN impostor_check ELSE ? END
+            WHERE chain_id = ? AND token_address = ?
+        """, (check["status"] == "unknown", json.dumps(check), chain_id, token_address))
+        await self._db.commit()
+
     # --- Launch Feed ---
 
     async def _create_launch_feed_tables(self):
@@ -2111,7 +2140,9 @@ class Database:
     ) -> Tuple[List[Dict], Optional[str]]:
         """Return a page of discovered launches, newest first, each with its latest outcome.
 
-        Each launch's ``scan.status`` is authoritative: "ok" only for a complete scan. ``cursor``
+        Each launch's ``scan.status`` is authoritative: "ok" only for a complete scan. Its
+        ``impostor_check`` is its check against the official Robinhood tokens
+        (record_launch_impostor_check), or None if it was never checked. ``cursor``
         is the ``next_cursor`` of the previous page ("block:token"). The next cursor is None on
         the last page. A malformed cursor raises ValueError.
         """

@@ -75,6 +75,21 @@ def format_full_report(
         lines.append(f'*Address:* `{address}`')
     else:
         lines.append(f'*Target:* `{address}`')
+    impostor_check = risk_output.get('impostor_check')
+    if impostor_check:
+        status = impostor_check['status']
+        if status == 'impostor':
+            detail = (
+                f'\U000026A0 Impersonates official {escape_markdown(impostor_check["symbol"])} token; '
+                f'the official one is `{impostor_check["official_address"]}`'
+            )
+        elif status == 'official':
+            detail = f'Official {escape_markdown(impostor_check["symbol"])} token on Robinhood Chain'
+        elif status == 'none':
+            detail = 'No match among official Robinhood Chain tokens'
+        else:
+            detail = f'Unknown ({escape_markdown(impostor_check["reason"])})'
+        lines.append(f'*Official Token Check:* {detail}')
     lines.append(f'*Risk Archetype:* {archetype.replace("_", " ").title()}')
     probability = 'Unknown (incomplete coverage)' if incomplete else f'{rug_prob}%'
     lines.append(f'*Rug Probability:* {probability}  |  *Risk Level:* {risk_level}')
