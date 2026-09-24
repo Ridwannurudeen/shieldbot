@@ -980,7 +980,8 @@ async def test_scam_database_hit_is_flagged_without_contract_checks(mock_web3_cl
     assert result["scam_matches"] == [SCAM_MATCH]
     assert result["checks"]["scam_database_clean"] is False
     assert "Found 1 scam database match(es)" in result["warnings"]
-    assert result["risk_score"] == 40
+    # A scam database match without a severity is 'high': the risk engine's 70 floor.
+    assert result["risk_score"] == 70
     assert result["risk_level"] == "medium"
     if is_contract is None:
         assert result["status"] == "unknown"
@@ -1019,7 +1020,7 @@ async def test_confirmed_eoa_with_failed_scam_lookup_is_unknown(mock_web3_client
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("scam_matches, expected", [([], (4, "low")), ([SCAM_MATCH], (40, "medium"))])
+@pytest.mark.parametrize("scam_matches, expected", [([], (4, "low")), ([SCAM_MATCH], (70, "medium"))])
 async def test_ai_blend_cannot_lower_scam_match_below_its_floor(mock_web3_client, mock_ai_analyzer, scam_matches, expected):
     mock_web3_client.get_contract_creation_info.return_value = {"age_days": 400}
     mock_ai_analyzer.compute_ai_risk_score.return_value = {"risk_score": 10}

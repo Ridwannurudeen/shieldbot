@@ -7,7 +7,7 @@ Integrates risk_scorer for numeric scoring and AI analysis
 import logging
 from typing import Dict, List, Optional
 from services.contract_service import push4_operands
-from core.risk_engine import MEDIUM_MATCH_FLOOR, database_matches, medium_matches
+from core.risk_engine import database_matches, medium_matches, scam_match_floor
 from utils.scam_db import ScamDatabase
 from utils.chain_info import get_chain_name
 from utils.web3_client import UnsupportedChainError
@@ -214,15 +214,14 @@ class TransactionScanner:
         return result
 
     def _apply_scam_match_risk(self, result: Dict):
-        """Floor the score and level for scam database matches, whether or not contract checks ran.
-
-        A community report holds the CAUTION band and adds nothing to the heuristic score.
+        """Floor the score and level for scam matches, whether or not contract checks ran, with the
+        risk engine's severity floors: a block-severity match blocks here as on /api/firewall, any
+        other scam database match holds 70 and a community report alone 40, adding nothing above it.
         """
         if not result['scam_matches']:
             return
         heuristic_score, _, _ = calculate_risk_score(findings_from_scan_result(result))
-        floor = MEDIUM_MATCH_FLOOR if medium_matches(result['scam_matches']) else 0
-        result['risk_score'] = max(result['risk_score'], heuristic_score, floor)
+        result['risk_score'] = max(result['risk_score'], heuristic_score, scam_match_floor(result['scam_matches']))
         result['risk_level'] = 'high' if result['risk_score'] >= 71 else 'medium'
 
     async def _check_verification(self, address: str, result: Dict, chain_id: int = 56) -> bool:

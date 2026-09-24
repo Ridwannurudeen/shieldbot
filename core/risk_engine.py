@@ -54,6 +54,17 @@ def medium_matches(matches) -> list:
     return [match for match in matches or () if _is_medium(match)]
 
 
+def scam_match_floor(matches) -> int:
+    """The score floor a target's scam matches set, as the engine applies them: 90 for a
+    block-severity match, 70 for any other scam database match, MEDIUM_MATCH_FLOOR for community
+    reports alone, otherwise 0. The legacy scanner applies it in one step."""
+    if any(isinstance(match, dict) and match.get('severity') == 'block' for match in matches or ()):
+        return 90
+    if database_matches(matches):
+        return 70
+    return MEDIUM_MATCH_FLOOR if medium_matches(matches) else 0
+
+
 class RiskEngine:
     """Composite weighted risk scoring across all data sources."""
 

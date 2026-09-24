@@ -151,6 +151,38 @@ async def test_scan_admin_entry_is_a_scam_database_match(mock_web3_client):
     assert result["checks"]["scam_database_clean"] is False
 
 
+GOPLUS_BLOCK = {
+    "type": "GoPlus Security",
+    "reason": "Airdrop scam token",
+    "source": "gopluslabs.io",
+    "severity": "block",
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_contract", [None, False, True])
+@pytest.mark.parametrize(
+    "matches, score, level, classification",
+    [
+        ([ADMIN], 90, "high", "BLOCK_RECOMMENDED"),
+        ([GOPLUS_BLOCK], 90, "high", "BLOCK_RECOMMENDED"),
+        ([COMMUNITY, GOPLUS_BLOCK], 90, "high", "BLOCK_RECOMMENDED"),
+        ([GOPLUS_HIGH], 70, "medium", "HIGH_RISK"),
+        ([COMMUNITY], 40, "medium", "CAUTION"),
+    ],
+)
+async def test_legacy_scan_applies_the_firewall_severity_floors(
+    mock_web3_client, is_contract, matches, score, level, classification
+):
+    mock_web3_client.is_contract.return_value = is_contract
+    result = await _scan(mock_web3_client, matches)
+    assert result["risk_score"] == score
+    assert result["risk_level"] == level
+    # /api/scan classifies the legacy score with the extension's bands.
+    alert = format_extension_alert({**result, "rug_probability": result["risk_score"]})
+    assert alert["risk_classification"] == classification
+
+
 def _contract_section(report):
     return report.split("Contract Analysis")[1].split("Market Intelligence")[0]
 
