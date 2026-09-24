@@ -121,17 +121,18 @@
   const keepCheck = bindTo(WeakMap.prototype.set, wrappedProviders);
   const isWrapped = (provider) => checkOf(provider) !== undefined;
 
-  // The wallet's own request behind each replacement put on a prototype.
-  const inheritedRequests = new WeakMap();
-  const inheritedRequestOf = bindTo(WeakMap.prototype.get, inheritedRequests);
-  const keepInheritedRequest = bindTo(WeakMap.prototype.set, inheritedRequests);
+  // The wallet's own function (request, send or sendAsync) behind each
+  // replacement put on a prototype.
+  const inheritedOriginals = new WeakMap();
+  const originalOf = bindTo(WeakMap.prototype.get, inheritedOriginals);
+  const keepOriginal = bindTo(WeakMap.prototype.set, inheritedOriginals);
 
-  // A prototype's request that could not be replaced (it is neither writable
+  // A prototype's function that could not be replaced (it is neither writable
   // nor configurable), so it is not tried again. The README says that route
   // is not covered.
-  const uncoveredRequests = new WeakSet();
-  const isUncovered = bindTo(WeakSet.prototype.has, uncoveredRequests);
-  const markUncovered = bindTo(WeakSet.prototype.add, uncoveredRequests);
+  const uncoveredFunctions = new WeakSet();
+  const isUncovered = bindTo(WeakSet.prototype.has, uncoveredFunctions);
+  const markUncovered = bindTo(WeakSet.prototype.add, uncoveredFunctions);
 
   // Checked copies on their way to the wallet. When the wallet's own code
   // hands one on to a prototype's request (a subclass calling
@@ -196,12 +197,12 @@
   function wrapProvider(provider) {
     if (!provider || !provider.request || isWrapped(provider)) return;
     // A prototype whose request was replaced is not a provider to wrap.
-    if (inheritedRequestOf(ownValue(provider, "request")) !== undefined) return;
+    if (originalOf(ownValue(provider, "request")) !== undefined) return;
 
     // A provider that inherits request from a prototype already replaced for
     // another provider gets the wallet's own request behind the replacement.
     const request = provider.request;
-    const originalRequest = bindTo(inheritedRequestOf(request) || request, provider);
+    const originalRequest = bindTo(originalOf(request) || request, provider);
     let currentChainId = null;
     let chainRevision = 0;
 
@@ -405,7 +406,9 @@
     // Recorded before anything below can call back into the page, which
     // could otherwise reach this code again for the same provider.
     keepCheck(provider, check);
-    wrapInheritedRequest(provider);
+    wrapInherited(provider, "request", requestReplacement);
+    wrapLegacy(provider, "send");
+    wrapLegacy(provider, "sendAsync");
     if (typeof provider.on === "function") {
       provider.on("chainChanged", (chainId) => {
         currentChainId = parseChainId(chainId);
@@ -433,39 +436,124 @@
     }
   }
 
-  // A page could take request from one of the provider's prototypes and call
+  // A page could take a method from one of the provider's prototypes and call
   // it on the provider (Object.getPrototypeOf(ethereum).request.call(ethereum,
   // ...)), going round the wrapper defined on the provider itself. So the
-  // request of every prototype that defines one, up to Object.prototype, is
-  // replaced too, by one that checks the request for whichever provider it is
-  // called on (wrapping that provider first if need be) and then hands it to
-  // that prototype's own request. A call on anything that cannot be wrapped,
-  // such as a prototype itself, is rejected.
-  function wrapInheritedRequest(provider) {
+  // method of every prototype that defines one, up to Object.prototype, is
+  // replaced too, by the function makeReplacement makes from that prototype's
+  // own one.
+  function wrapInherited(provider, name, makeReplacement) {
     for (let owner = getPrototypeOf(provider); owner !== null && owner !== objectPrototype;
       owner = getPrototypeOf(owner)) {
-      const inherited = ownValue(getOwnPropertyDescriptor(owner, "request"), "value");
-      if (typeof inherited !== "function" || inheritedRequestOf(inherited) !== undefined ||
-          isUncovered(inherited)) {
+      const inherited = ownValue(getOwnPropertyDescriptor(owner, name), "value");
+      if (typeof inherited !== "function" || originalOf(inherited) !== undefined || isUncovered(inherited)) {
         continue;
       }
-      const replacement = function (args) {
-        if (isForwarded(args)) return callFunction(inherited, this, args);
-        wrapProvider(this);
-        const check = checkOf(this);
-        if (check === undefined) {
-          return new NativePromise((resolve, reject) => {
-            reject(new NativeError("Transaction blocked by ShieldAI Firewall"));
-          });
-        }
-        const target = this;
-        return check(args, (copy) => callFunction(inherited, target, copy));
-      };
+      const replacement = makeReplacement(inherited);
       try {
-        defineProperty(owner, "request", { __proto__: null, value: replacement });
-        keepInheritedRequest(replacement, inherited);
+        defineProperty(owner, name, { __proto__: null, value: replacement });
+        keepOriginal(replacement, inherited);
       } catch (_) {
         markUncovered(inherited);
+      }
+    }
+  }
+
+  // A prototype's request is replaced by one that checks the request for
+  // whichever provider it is called on (wrapping that provider first if need
+  // be) and then hands it to that prototype's own request. A call on anything
+  // that cannot be wrapped, such as a prototype itself, is rejected.
+  function requestReplacement(inherited) {
+    return function (args) {
+      if (isForwarded(args)) return callFunction(inherited, this, args);
+      wrapProvider(this);
+      const check = checkOf(this);
+      if (check === undefined) {
+        return new NativePromise((resolve, reject) => {
+          reject(new NativeError("Transaction blocked by ShieldAI Firewall"));
+        });
+      }
+      const target = this;
+      return check(args, (copy) => callFunction(inherited, target, copy));
+    };
+  }
+
+  // Refuses the methods request would check when they come through send or
+  // sendAsync, a provider's older methods, which the check cannot hold for
+  // the user's decision. A call is refused, in the shape its caller expects,
+  // when any method it asks for is checked or cannot be read. A method is a
+  // string first argument, a payload object's own method, or the own method
+  // of each payload in an array. Any other call goes to the wallet with its
+  // own this and arguments, except that a payload object is handed on as the
+  // copy its methods were read from, so a getter or proxy cannot show one
+  // method here and another to the wallet.
+  function legacyReplacement(original) {
+    return function (first, second) {
+      let payload = first;
+      let refused;
+      if (typeof first === "string") {
+        refused = requestKind(first) !== null;
+      } else {
+        try {
+          payload = clone(first);
+          refused = refusesPayloads(payload);
+        } catch (_) {
+          // A payload that cannot be copied cannot be read either.
+          refused = true;
+        }
+      }
+      if (!refused) {
+        return arguments.length < 2
+          ? callFunction(original, this, payload)
+          : callFunction(original, this, payload, second);
+      }
+      const error = new NativeError("ShieldAI cannot check wallet requests made with send or sendAsync. " +
+        "Use request instead.");
+      if (typeof second === "function") {
+        setTimer(() => second(error), 0);
+        return undefined;
+      }
+      if (typeof first === "string") {
+        return new NativePromise((resolve, reject) => {
+          reject(error);
+        });
+      }
+      throw error;
+    };
+  }
+
+  function refusesPayloads(payload) {
+    if (!isArray(payload)) return refusesPayload(payload);
+    for (let index = 0; index < payload.length; index++) {
+      if (refusesPayload(ownValue(payload, index))) return true;
+    }
+    return false;
+  }
+
+  function refusesPayload(payload) {
+    const method = isPlainObject(payload) ? ownValue(payload, "method") : undefined;
+    return typeof method !== "string" || requestKind(method) !== null;
+  }
+
+  // send and sendAsync are replaced on the provider itself and on its
+  // prototypes, as request is.
+  function wrapLegacy(provider, name) {
+    const own = provider[name];
+    if (typeof own !== "function") return;
+    wrapInherited(provider, name, legacyReplacement);
+    const replacement = legacyReplacement(bindTo(originalOf(own) || own, provider));
+    try {
+      defineProperty(provider, name, {
+        __proto__: null,
+        value: replacement,
+        writable: true,
+        configurable: true,
+      });
+    } catch (_) {
+      try {
+        provider[name] = replacement;
+      } catch (_) {
+        // The provider's own method stays the wallet's.
       }
     }
   }

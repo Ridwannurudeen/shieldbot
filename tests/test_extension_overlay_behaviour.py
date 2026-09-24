@@ -1757,6 +1757,118 @@ def test_a_prototype_request_that_cannot_be_replaced_is_left_as_it_is():
     )
 
 
+# A provider with the older send and sendAsync methods, on its prototype and, as MetaMask does,
+# bound onto the instance too. Every call that reaches it is recorded with its this.
+LEGACY_WALLET = r"""
+  const reached = [];
+  class Legacy {
+    constructor(bind) { if (bind) { this.send = this.send.bind(this); this.sendAsync = this.sendAsync.bind(this); } }
+    on() {}
+    async request(args) { if (args.method === 'eth_chainId') return '0x38'; sent.push(args); return 'sent'; }
+    sendAsync(payload, callback) { reached.push({name: 'sendAsync', self: this, payload}); callback(null, {result: 'async'}); }
+    send(first, second) {
+      reached.push({name: 'send', self: this, payload: first, second});
+      if (typeof first === 'string') return Promise.resolve('promised');
+      if (typeof second === 'function') { second(null, {result: 'called back'}); return undefined; }
+      return {result: 'sync'};
+    }
+  }
+  const tx = {to: '0x' + 'a'.repeat(40)};
+  // Calls the method as the page would: on the provider, or taken from the prototype.
+  const via = (wallet, route, name) => (...args) =>
+    route === 'prototype' ? Legacy.prototype[name].call(wallet, ...args) : wallet[name](...args);
+  const callback = () => { let done; const promise = new Promise(resolve => { done = resolve; });
+    const answer = {promise, called: false};
+    answer.fn = (error, result) => { answer.called = true; done({error, result}); };
+    return answer; };
+  // The harness's timers run only when fired.
+  const fireZeroDelayTimers = () => {
+    for (const [id, timer] of timers) if (timer.delay === 0) { timers.delete(id); timer.fn(); }
+  };
+"""
+
+
+@pytest.mark.parametrize("route", ["instance", "bound-instance", "prototype"])
+def test_send_and_send_async_refuse_checked_or_unreadable_methods(route):
+    run_node(
+        INJECT_HARNESS
+        + LEGACY_WALLET
+        + r"""
+(async () => {
+  const route = JSON.parse(process.argv[1]);
+  const wallet = new Legacy(route === 'bound-instance');
+  for (const fn of windowListeners['eip6963:announceProvider']) {
+    fn(new CustomEvent('eip6963:announceProvider', {detail: {provider: wallet, info: {name: 'legacy'}}}));
+  }
+  const send = via(wallet, route, 'send'), sendAsync = via(wallet, route, 'sendAsync');
+  const refusal = /cannot check wallet requests made with send or sendAsync/;
+  // Callback form: the error arrives through the callback.
+  for (const payload of [
+    {id: 1, jsonrpc: '2.0', method: 'eth_sendTransaction', params: [tx]},
+    [{method: 'eth_chainId'}, {method: 'personal_sign', params: ['0x00', tx.to]}],
+    {id: 2, params: []},
+    [{method: 'eth_chainId'}, 'not a payload'],
+    {method: 'eth_chainId', params: [() => {}]},
+  ]) {
+    const first = callback();
+    assert.equal(sendAsync(payload, first.fn), undefined);
+    const second = callback();
+    send(payload, second.fn);
+    assert(!first.called && !second.called, 'the callback was called before the caller returned');
+    fireZeroDelayTimers();
+    assert.match((await first.promise).error.message, refusal);
+    assert.match((await second.promise).error.message, refusal);
+  }
+  // send(method, params) rejects; send(payload) throws.
+  await assert.rejects(send('eth_sendTransaction', [tx]), refusal);
+  await assert.rejects(send('wallet_sendCalls', [{calls: [tx]}]), refusal);
+  assert.throws(() => send({method: 'eth_sign', params: [tx.to, '0x00']}), refusal);
+  assert.throws(() => send(undefined), refusal);
+  assert.deepEqual(reached, [], 'a refused call reached the wallet');
+""",
+        route,
+    )
+
+
+@pytest.mark.parametrize("route", ["instance", "bound-instance", "prototype"])
+def test_send_and_send_async_pass_other_methods_to_the_wallet(route):
+    run_node(
+        INJECT_HARNESS
+        + LEGACY_WALLET
+        + r"""
+(async () => {
+  const route = JSON.parse(process.argv[1]);
+  const wallet = new Legacy(route === 'bound-instance');
+  for (const fn of windowListeners['eip6963:announceProvider']) {
+    fn(new CustomEvent('eip6963:announceProvider', {detail: {provider: wallet, info: {name: 'legacy'}}}));
+  }
+  const send = via(wallet, route, 'send'), sendAsync = via(wallet, route, 'sendAsync');
+  const {promise, fn} = callback();
+  sendAsync({id: 1, jsonrpc: '2.0', method: 'eth_chainId'}, fn);
+  assert.deepEqual((await promise).result, {result: 'async'});
+  const batch = callback();
+  sendAsync([{method: 'eth_chainId'}, {method: 'eth_blockNumber'}], batch.fn);
+  assert.deepEqual((await batch.promise).result, {result: 'async'});
+  assert.equal(await send('eth_accounts'), 'promised');
+  assert.deepEqual(send({method: 'net_version'}), {result: 'sync'});
+  // A getter is read once: the wallet gets the copy that was read, with the method that was checked.
+  let reads = 0;
+  const shifty = {get method() { return reads++ === 0 ? 'eth_chainId' : 'eth_sendTransaction'; }};
+  const last = callback();
+  sendAsync(shifty, last.fn);
+  await last.promise;
+  assert.deepEqual(reached.map(call => call.name), ['sendAsync', 'sendAsync', 'send', 'send', 'sendAsync']);
+  assert(reached.every(call => call.self === wallet), 'the wallet method ran with another this');
+  assert.deepEqual(plain(reached[0].payload), {id: 1, jsonrpc: '2.0', method: 'eth_chainId'});
+  assert.equal(reached[2].payload, 'eth_accounts');
+  assert.notEqual(reached.at(-1).payload, shifty, "the wallet was handed the page's own payload");
+  assert.equal(reached.at(-1).payload.method, 'eth_chainId');
+  assert.equal(reads, 1);
+""",
+        route,
+    )
+
+
 @pytest.mark.parametrize(
     "reason,stored,expected",
     [
