@@ -1,7 +1,9 @@
 """/api/firewall and /api/scan responses link a stored evidence document; GET /api/evidence and
 GET /evidence serve it."""
 
+import itertools
 import json
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -195,16 +197,26 @@ def test_a_plain_call_records_no_transaction(evidence_api):
     assert stored["evidence"]["target_token"] is None
 
 
-def test_a_cached_verdict_gets_a_document_that_says_it_came_from_the_cache(evidence_api):
-    _, client, _ = evidence_api
+@pytest.mark.asyncio
+async def test_hits_on_one_cached_row_share_one_cache_document(evidence_api, monkeypatch):
+    api, client, database = evidence_api
+    # Each response is built five seconds after the last, so the hits never share a second.
+    clock = itertools.count(int(time.time()), 5)
+    monkeypatch.setattr(
+        api, "time", SimpleNamespace(time=lambda: next(clock), monotonic=time.monotonic)
+    )
     first, first_doc = _stored(client, _firewall(client))
     cached, cached_doc = _stored(client, _firewall(client))
-    assert cached["cached"] is True
-    assert cached["evidence_hash"] != first["evidence_hash"]
+    again = _firewall(client).json()
+    assert cached["cached"] is True and again["cached"] is True
+    assert again["evidence_hash"] == cached["evidence_hash"] != first["evidence_hash"]
+    cursor = await database._db.execute("SELECT COUNT(*) FROM scan_evidence")
+    assert (await cursor.fetchone())[0] == 2
     assert first_doc["evidence"]["source"] == "scan"
     doc = cached_doc["evidence"]
     assert doc["source"] == "cache"
-    assert doc["cached_scan_at"] == int(doc["cached_scan_at"]) <= doc["scanned_at"]
+    # The stored scan's time, not the time this hit was served (that is stored_at).
+    assert doc["scanned_at"] == doc["cached_scan_at"] <= first_doc["evidence"]["scanned_at"]
     assert doc["analyzers"] is None
     assert (doc["classification"], doc["risk_score"]) == (
         cached["classification"],

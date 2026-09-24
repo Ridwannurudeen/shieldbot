@@ -170,8 +170,8 @@ def build_scan_evidence(
 
     A field the response path does not report (risk_level, failed_sources or policy_mode on the
     legacy fallback, analyzers on a cached or legacy verdict) is None, never a default. A verdict
-    served from contract_scores has source "cache" and cached_scan_at, the time of the scan that
-    produced the row.
+    served from contract_scores has source "cache", and both cached_scan_at and scanned_at are the
+    time of the scan that produced the row, so every hit on one row gives the same document.
     """
     document = {
         "schema": SCHEMA,
@@ -195,7 +195,7 @@ def build_scan_evidence(
         "observed_block": observed_block,
         "transaction": transaction,
         "shieldbot_commit": SHIELDBOT_COMMIT,
-        "scanned_at": scanned_at,
+        "scanned_at": scanned_at if cached_scan_at is None else int(cached_scan_at),
     }
     caller_hex = _CALLER.fullmatch(caller) if caller else None
     if caller_hex:

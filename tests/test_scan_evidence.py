@@ -95,6 +95,11 @@ def test_a_path_that_reports_no_level_or_policy_records_none():
 def test_a_cached_verdict_says_it_came_from_the_cache():
     doc = document(cached_scan_at=1789999900.25)
     assert (doc["source"], doc["cached_scan_at"]) == ("cache", 1789999900)
+    # Its scan time is the stored scan's, so every hit on one row gives the same bytes.
+    assert doc["scanned_at"] == 1789999900
+    assert canonical_bytes(doc) == canonical_bytes(
+        document(cached_scan_at=1789999900.25, scanned_at=1790000999)
+    )
 
 
 @pytest.mark.parametrize(
