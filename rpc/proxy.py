@@ -154,6 +154,16 @@ class RPCProxy:
                     f"risk score {risk_score}/100 ({risk_level})"
                 )
 
+            # A delegation's floor makes its verdict HIGH, blocked above. One that is not HIGH means
+            # the floor never reached the verdict (an analyzer error, say): it is refused, not forwarded.
+            if authorization_list is not None and risk_level != "HIGH":
+                logger.warning(f"RPC Proxy BLOCKED EIP-7702 tx to {to_addr} (risk={risk_score}, chain={chain_id})")
+                return self._error_response(
+                    rpc_id, -32003,
+                    f"Transaction blocked by ShieldBot firewall — "
+                    f"EIP-7702 delegation not forwarded ({risk_level})"
+                )
+
             # MEDIUM or LOW: forward to upstream
             if risk_level == "MEDIUM":
                 logger.info(f"RPC Proxy WARN tx to {to_addr} (risk={risk_score})")

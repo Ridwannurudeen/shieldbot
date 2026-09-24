@@ -171,12 +171,14 @@ class IntentMismatchAnalyzer(Analyzer):
 
     async def _delegations(self, ctx: AnalysisContext) -> Optional[tuple]:
         """For an EIP-7702 transaction: ([(floor, flag)] per delegate, whether every delegate's facts are
-        known, the reasons they are not). None without an authorization list. A list that is empty or
-        has an authorization whose delegate address cannot be read is judged as an unknown delegate."""
+        known, the reasons they are not). None without an authorization list. One that is not a list
+        (the RPC proxy passes the page's value as sent), is empty, or has an authorization whose delegate
+        address cannot be read is judged as an unknown delegate."""
         authorizations = ctx.extra.get('authorization_list')
         if authorizations is None:
             return None
-        delegates = [item.get('address') if isinstance(item, dict) else None for item in authorizations]
+        items = authorizations if isinstance(authorizations, list) else [None]
+        delegates = [item.get('address') if isinstance(item, dict) else None for item in items]
         if not delegates or not all(isinstance(d, str) and re.fullmatch(r'0x[0-9a-fA-F]{40}', d) for d in delegates):
             return [(100, 'EIP-7702 delegation to an address that cannot be read')], False, [
                 'EIP-7702 delegate address unreadable'

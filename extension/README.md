@@ -196,7 +196,8 @@ that stops the scripts altogether would need them unregistered through `chrome.s
 - The RPC proxy (`rpc/proxy.py`) does not check for look-alike recipients: nothing gives it a
   sender's recent recipients cheaply and reliably (native sends leave no logs, and explorer lists
   need a key per chain). It passes an `eth_sendTransaction`'s `authorizationList` to the same
-  delegation check, and it rejects a signed type 0x04 transaction sent with
+  delegation check and never forwards that transaction: one the check did not judge high risk (an
+  analyzer error, say) is refused as well. It also rejects a signed type 0x04 transaction sent with
   `eth_sendRawTransaction`, which it cannot decode (eth-account 0.11 in production).
 - Marketplace orders: a Blur bulk listing signs only a Merkle root of its orders, so their prices
   cannot be read and it is Unknown; any other type under Blur Exchange's domain than its `Order` is

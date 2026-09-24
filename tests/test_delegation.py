@@ -250,3 +250,66 @@ async def test_the_rpc_proxy_passes_the_authorization_list_to_the_analyzers():
     ctx = container.registry.run_all.await_args.args[0]
     assert ctx.extra["authorization_list"] == authorizations
     assert result["error"]["code"] == -32003
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("authorizations", [7, True, 1.5, "0x" + "7" * 40, {"address": DELEGATE}],
+                         ids=["int", "bool", "float", "string", "object"])
+async def test_an_authorization_list_that_is_not_a_list_is_unknown_and_blocked(authorizations):
+    # The RPC proxy passes the page's authorizationList as sent; anything but a list is unreadable,
+    # never an analyzer error whose floor the risk engine would ignore.
+    service = _service(_facts())
+    result = await _intent(service, authorizations=authorizations)
+    assert result.error is None
+    assert result.data["floor"] == 100
+    assert result.data["status"] == "unknown"
+    assert result.data["coverage"]["delegate"] is False
+    service.fetch.assert_not_awaited()
+
+
+def _proxy(risk_level):
+    from rpc.proxy import RPCProxy
+
+    container = SimpleNamespace(
+        web3_client=SimpleNamespace(
+            validate_chain_id=lambda chain_id: chain_id,
+            get_web3=lambda chain_id: SimpleNamespace(provider=SimpleNamespace(endpoint_uri="https://rpc.example")),
+            get_bytecode=AsyncMock(return_value="0x"),
+            is_token_contract=AsyncMock(return_value=False),
+            is_verified_contract=AsyncMock(return_value=(False, None)),
+        ),
+        registry=SimpleNamespace(run_all=AsyncMock(return_value=[])),
+        risk_engine=SimpleNamespace(
+            compute_from_results=lambda results, is_token: {"risk_level": risk_level, "rug_probability": 40},
+        ),
+    )
+    proxy = RPCProxy(container)
+    proxy._forward = AsyncMock(return_value={"jsonrpc": "2.0", "id": 1, "result": "0xhash"})
+    return proxy
+
+
+def _send(authorizations):
+    params = {"to": SENDER, "from": SENDER, "value": "0x0"}
+    if authorizations is not None:
+        params["authorizationList"] = authorizations
+    return {"jsonrpc": "2.0", "id": 1, "method": "eth_sendTransaction", "params": [params]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("risk_level", ["LOW", "MEDIUM"])
+@pytest.mark.parametrize("authorizations", [[{"address": DELEGATE}], [], 7], ids=["list", "empty", "not-a-list"])
+async def test_the_rpc_proxy_never_forwards_a_delegation_it_did_not_judge_high(risk_level, authorizations):
+    # A delegation's floor makes the verdict HIGH; one that is not HIGH means the floor did not
+    # reach the verdict (an analyzer error, say), so the proxy refuses rather than forward it.
+    proxy = _proxy(risk_level)
+    result = await proxy.handle_request(1, _send(authorizations))
+    assert result["error"]["code"] == -32003
+    assert "EIP-7702" in result["error"]["message"]
+    proxy._forward.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_rpc_proxy_still_forwards_a_low_risk_transaction_without_a_delegation():
+    proxy = _proxy("LOW")
+    result = await proxy.handle_request(1, _send(None))
+    assert result == {"jsonrpc": "2.0", "id": 1, "result": "0xhash"}
