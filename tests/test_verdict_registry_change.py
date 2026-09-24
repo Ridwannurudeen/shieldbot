@@ -5,11 +5,15 @@ a registry other than the one it was queued for, and only a confirmation on the 
 a subject to the guard watch.
 """
 
+import asyncio
+
 import pytest
+import pytest_asyncio
 from eth_account import Account
 from eth_utils import to_checksum_address
 
 import services.verdict_publisher as vp
+from core.database import Database
 from tests.test_verdict_publisher import (
     COMPLETE,
     INCOMPLETE,
@@ -24,10 +28,22 @@ from tests.test_verdict_publisher import (
     rpc_node,
     sender,
 )
-from tests.test_verdict_publisher import db as db
-from tests.test_verdict_publisher import reconcile_now  # noqa: F401  (pytest fixture)
 
 NEW_REGISTRY = "0x" + "d1" * 20
+
+
+@pytest_asyncio.fixture
+async def db():
+    database = Database(":memory:")
+    await database.initialize()
+    yield database
+    await database.close()
+
+
+@pytest.fixture
+def reconcile_now(monkeypatch):
+    """Reconciliation and claim recovery look at rows at once."""
+    monkeypatch.setattr(vp, "RECONCILE_AFTER_SECONDS", -1)
 
 
 @pytest.fixture(autouse=True)
@@ -111,6 +127,93 @@ async def test_only_a_confirmation_on_the_configured_registry_admits_a_guard_sub
     with rpc_node(chain):
         assert await drain_all(publisher) == ["done", "idle"]
     assert [row["subject"] for row in await db.get_guard_subjects(4663)] == [TOKEN]
+
+
+@pytest.mark.asyncio
+async def test_an_old_registry_row_is_dropped_on_requeue_and_its_late_receipt_still_confirms_it(
+    db, reconcile_now
+):
+    chain = FakeChain()
+    chain.lagging, chain.mine = True, False  # the node holds the old registry's transaction; not mined yet
+    old = await record_once(db, chain, sender(db))
+    assert old["onchain_status"] == "submitted"
+    publisher = new_sender(db)
+    with rpc_node(chain):
+        assert await publisher._reconcile() == 1  # no receipt yet, so it is queued again
+        assert await publisher.drain_once() == "done"  # claimed, then dropped instead of sent
+    assert len(chain.sent) == 1
+    dropped = await db.get_verdict_evidence(old["id"])
+    assert (dropped["onchain_status"], dropped["onchain_error"], dropped["tx_hash"]) == (
+        "dropped",
+        "RegistryChanged",
+        old["tx_hash"],
+    )
+
+    # The old registry's transaction lands after all.
+    held = decode_record(chain.sent[0])
+    chain.mined.append((held["nonce"], old["tx_hash"], held["evidence_hash"]))
+    chain.catch_up()
+    with rpc_node(chain):
+        assert await publisher._reconcile() == 0
+    late = await db.get_verdict_evidence(old["id"])
+    assert (late["onchain_status"], late["onchain_error"], late["tx_hash"], late["registry"]) == (
+        "confirmed",
+        "RegistryChanged",
+        old["tx_hash"],
+        to_checksum_address(REGISTRY),
+    )
+    assert held["to"] == REGISTRY
+    assert await db.get_guard_subjects(4663) == []
+
+
+@pytest.mark.asyncio
+async def test_a_claim_left_by_the_old_registry_is_recovered_and_dropped_unsent(db, reconcile_now):
+    old = await make_publisher(db).publish(4663, TOKEN, COMPLETE)
+    await db.claim_next_pending_verdict(4663)
+    publisher = new_sender(db)
+    chain = FakeChain()
+    with rpc_node(chain):
+        assert await publisher._recover_claims() == 1
+        assert await drain_all(publisher) == ["done", "idle"]
+    assert chain.posts == []
+    stored = await db.get_verdict_evidence(old["evidence_id"])
+    assert (stored["onchain_status"], stored["onchain_error"]) == ("dropped", "RegistryChanged")
+
+
+@pytest.mark.asyncio
+async def test_a_claim_the_old_registry_mined_is_recovered_as_confirmed_without_guard_admission(
+    db, reconcile_now
+):
+    chain = FakeChain()
+    chain.raise_on["eth_getTransactionReceipt"] = asyncio.CancelledError()  # killed after broadcasting
+    await make_publisher(db).publish(4663, TOKEN, COMPLETE)
+    with rpc_node(chain):
+        with pytest.raises(asyncio.CancelledError):
+            await sender(db).drain_once()
+    chain.raise_on.clear()
+    [(_, mined_hash, _)] = chain.mined
+    publisher = new_sender(db)
+    with rpc_node(chain):
+        assert await publisher._recover_claims() == 0
+        assert await publisher.drain_once() == "idle"
+    stored = await db.get_latest_verdict_evidence(4663, TOKEN)
+    assert (stored["onchain_status"], stored["tx_hash"], stored["registry"]) == (
+        "confirmed",
+        mined_hash,
+        to_checksum_address(REGISTRY),
+    )
+    assert len(chain.sent) == 1
+    assert await db.get_guard_subjects(4663) == []
+
+
+@pytest.mark.asyncio
+async def test_a_confirmation_that_names_no_registry_never_admits_a_guard_subject(db):
+    first = await make_publisher(db).publish(4663, TOKEN, COMPLETE)
+    await db.update_verdict_onchain(first["evidence_id"], "confirmed")
+    await db.update_verdict_onchain(first["evidence_id"], "confirmed", registry=None)
+    assert await db.get_guard_subjects(4663) == []
+    # The row itself qualifies once the registry it was queued for is named.
+    assert await db.register_guard_subject(4663, TOKEN, REGISTRY)
 
 
 @pytest.mark.asyncio
