@@ -355,7 +355,9 @@ class TestThreatsCommand:
         assert "⚪ Live mempool data is not available for BSC, Ethereum right now" in text
 
     @pytest.mark.asyncio
-    async def test_repeated_calls_reuse_the_snapshot_for_each_chain_filter(self, bot_module, monkeypatch, mempool_api):
+    async def test_repeated_calls_reuse_alerts_per_chain_filter_and_one_stats_read(
+        self, bot_module, monkeypatch, mempool_api,
+    ):
         monkeypatch.setattr(bot_module, "settings", SimpleNamespace(shieldbot_api_url=mempool_api.url))
         replies = []
         for args in ([], [], ["56"], ["56"]):
@@ -366,7 +368,7 @@ class TestThreatsCommand:
         assert bot_module.MEMPOOL_CACHE_SECONDS == 15
         assert mempool_api.requests == [
             ("/api/mempool/alerts", {"limit": "10"}), ("/api/mempool/stats", {}),
-            ("/api/mempool/alerts", {"limit": "10", "chain_id": "56"}), ("/api/mempool/stats", {}),
+            ("/api/mempool/alerts", {"limit": "10", "chain_id": "56"}),
         ]
         assert replies[0] == replies[1] and replies[2] == replies[3]
         assert "• Pending txs seen: 12,345\n" in replies[1]

@@ -76,7 +76,9 @@ CACHE_TTL = 300  # 5 minutes
 # /threats reads the API's mempool monitor. Every bot request reaches the API from one address and
 # so shares one IP rate-limit bucket there; a busy chat reuses a snapshot instead of using it up.
 MEMPOOL_CACHE_SECONDS = 15
-_mempool_cache = {}  # chain filter (None for all chains) -> (fetched_at, (alerts, stats))
+# ('alerts', chain filter or None) or 'stats' -> (fetched_at, response body). Stats do not depend on
+# the chain filter, so one read serves every filter.
+_mempool_cache = {}
 
 # Robinhood Chain launch alerts. The API's hunter records launch outcomes in the shared
 # database; this process queues alerts for subscribed chats there and sends them.
@@ -546,26 +548,29 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text("❌ Error scanning approvals. Please try again later.")
 
 
-async def _fetch_mempool_data(chain_id):
-    """Read mempool alerts and counters from the API, whose process runs the only mempool monitor.
+async def _read_mempool_route(session, key, path, params=None):
+    """GET one API mempool route, reusing a read of it younger than MEMPOOL_CACHE_SECONDS.
 
-    A snapshot is reused for MEMPOOL_CACHE_SECONDS; a failed read is not kept.
+    A failed read raises and is not kept.
     """
-    cached = _mempool_cache.get(chain_id)
+    cached = _mempool_cache.get(key)
     if cached and time.monotonic() - cached[0] < MEMPOOL_CACHE_SECONDS:
         return cached[1]
+    async with session.get(f"{settings.shieldbot_api_url.rstrip('/')}{path}", params=params) as resp:
+        resp.raise_for_status()
+        body = await resp.json()
+    _mempool_cache[key] = (time.monotonic(), body)
+    return body
+
+
+async def _fetch_mempool_data(chain_id):
+    """Read mempool alerts and counters from the API, whose process runs the only mempool monitor."""
     params = {'limit': 10}
     if chain_id is not None:
         params['chain_id'] = chain_id
-    api_url = settings.shieldbot_api_url.rstrip('/')
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-        async with session.get(f"{api_url}/api/mempool/alerts", params=params) as resp:
-            resp.raise_for_status()
-            alerts = (await resp.json())['alerts']
-        async with session.get(f"{api_url}/api/mempool/stats") as resp:
-            resp.raise_for_status()
-            stats = await resp.json()
-    _mempool_cache[chain_id] = (time.monotonic(), (alerts, stats))
+        alerts = (await _read_mempool_route(session, ('alerts', chain_id), '/api/mempool/alerts', params))['alerts']
+        stats = await _read_mempool_route(session, 'stats', '/api/mempool/stats')
     return alerts, stats
 
 
