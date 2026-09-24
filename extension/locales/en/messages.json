@@ -44,7 +44,7 @@
   "dashCheckTxFirewall": "Transaction firewall intercepting all wallet calls",
   "dashCheckPhishing": "Phishing guard scanning visited URLs",
   "dashCheckEIP712": "EIP-712 signature analysis enabled",
-  "dashCheck7Chains": "7 chains monitored in real time",
+  "dashCheckChains": "Transaction checks on 8 chains",
   "dashSecurityLayers": "Security Layers",
   "dashLiveNow": "Live Now",
   "dashTxFirewall": "Transaction Firewall",

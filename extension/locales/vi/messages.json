@@ -44,7 +44,7 @@
   "dashCheckTxFirewall": "Tường lửa giao dịch chặn tất cả lệnh gọi ví",
   "dashCheckPhishing": "Bảo vệ lừa đảo quét URL đã truy cập",
   "dashCheckEIP712": "Phân tích chữ ký EIP-712 đã bật",
-  "dashCheck7Chains": "Giám sát thời gian thực 7 chuỗi",
+  "dashCheckChains": "Kiểm tra giao dịch trên 8 chuỗi",
   "dashSecurityLayers": "Các lớp bảo mật",
   "dashLiveNow": "Đang hoạt động",
   "dashTxFirewall": "Tường lửa giao dịch",

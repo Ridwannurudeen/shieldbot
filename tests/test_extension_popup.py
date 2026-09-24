@@ -3,10 +3,13 @@
 from html.parser import HTMLParser
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 
 import pytest
+
+from utils.chain_info import CHAIN_INFO
 
 ROOT = Path(__file__).resolve().parent.parent
 EXTENSION = ROOT / "extension"
@@ -219,3 +222,14 @@ def test_popup_does_not_hard_code_its_version():
 def test_contract_monitoring_row_has_its_own_fallback_text():
     row = next(element for element in parse("popup.html") if element.get("data-i18n") == "dashContractMonitor")
     assert row["text"].strip() == "Contract Monitoring"
+
+
+def test_extension_states_the_scan_chain_count_and_no_mempool_count():
+    count = len(CHAIN_INFO)
+    html = (EXTENSION / "popup.html").read_text(encoding="utf-8")
+    assert f"<span>{count}</span> Chains Supported" in html
+    for language in ("en", "vi", "zh"):
+        messages = json.loads((EXTENSION / "locales" / language / "messages.json").read_text(encoding="utf-8"))
+        assert str(count) in messages["dashCheckChains"]
+        for text in [*messages.values(), html]:
+            assert not re.search(r"\b7 (chains|chuỗi)|7 条链|mempool", text, re.IGNORECASE)
