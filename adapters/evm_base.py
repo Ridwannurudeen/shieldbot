@@ -397,11 +397,11 @@ class EvmAdapter(ChainAdapter):
                 and isinstance(buy_tax, (int, float)) and not isinstance(buy_tax, bool)
                 and 0 <= sell_tax < 5 and 0 <= buy_tax < 5
             ):
-                # Preserve the existing verified, low-tax false-positive rule.
+                # Verification is free for a scammer, so it cannot clear a failed sell: the
+                # simulator's verdict stands and the doubt is flagged.
                 verified, _ = await self.is_verified_contract(address)
                 if verified is True:
                     result.update({
-                        'is_honeypot': False,
                         'reason': f'Flagged but verified with normal taxes (buy:{float(buy_tax)}% sell:{float(sell_tax)}%)',
                         'likely_false_positive': True,
                     })
