@@ -16,7 +16,7 @@ from services import (
     DexService, EthosService, HoneypotService,
     ContractService, GreenfieldService, TenderlySimulator,
     MempoolMonitor, RescueService, CampaignService,
-    EmailService, PhishingService, TokenSnifferService, TokenGateService,
+    EmailService, PhishingService, TokenSnifferService,
 )
 from core.risk_engine import RiskEngine
 from core.calibration import load_calibration
@@ -123,7 +123,6 @@ class ServiceContainer:
 
         # Bytecode fingerprinting for unverified contracts (must init before registry)
         self.token_sniffer = TokenSnifferService(api_key=settings.token_sniffer_api_key)
-        self.token_gate_service = TokenGateService(rpc_url=settings.bsc_rpc_url)
 
         # Risk engine + analyzer registry
         self.calibration = load_calibration(settings.calibration_config_path)

@@ -10,7 +10,6 @@ from .campaign_service import CampaignService
 from .email_service import EmailService
 from .phishing_service import PhishingService
 from .token_sniffer_service import TokenSnifferService
-from .token_gate_service import TokenGateService
 from .cache import CacheService
 from .injection_scanner import InjectionScanner
 
@@ -18,5 +17,5 @@ __all__ = [
     'DexService', 'EthosService', 'HoneypotService', 'ContractService',
     'GreenfieldService', 'TenderlySimulator', 'MempoolMonitor', 'RescueService',
     'CampaignService', 'EmailService', 'PhishingService', 'TokenSnifferService',
-    'TokenGateService', 'CacheService', 'InjectionScanner',
+    'CacheService', 'InjectionScanner',
 ]
