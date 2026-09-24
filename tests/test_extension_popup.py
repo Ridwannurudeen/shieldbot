@@ -233,3 +233,23 @@ def test_extension_states_the_scan_chain_count_and_no_mempool_count():
         assert str(count) in messages["dashCheckChains"]
         for text in [*messages.values(), html]:
             assert not re.search(r"\b7 (chains|chuỗi)|7 条链|mempool", text, re.IGNORECASE)
+
+
+def contrast(foreground, background):
+    def luminance(color):
+        channels = [int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        linear = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+    light, dark = sorted((luminance(foreground), luminance(background)), reverse=True)
+    return (light + 0.05) / (dark + 0.05)
+
+
+@pytest.mark.parametrize("selector", [".history-time", ".feed-time", ".gauge-sub", ".ctr-meta"])
+def test_popup_secondary_text_is_readable(selector):
+    html = (EXTENSION / "popup.html").read_text(encoding="utf-8")
+    rule = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", html).group(1)
+    color = re.search(r"(?:^|;)\s*(?:color|fill):\s*(#[0-9a-fA-F]{6})", rule).group(1)
+    # #1e293b is the lightest background any of these sit on.
+    assert contrast(color, "#1e293b") >= 4.5, (selector, color)
+
