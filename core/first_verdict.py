@@ -8,7 +8,7 @@ SAFE.
 """
 
 import asyncio
-from typing import Callable, Dict, Iterable, Optional
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from core import verdicts
 from core.analyzer import AnalyzerResult
@@ -29,22 +29,33 @@ def _result_floor(result: AnalyzerResult) -> float:
 class FirstVerdictProgress:
     """What one streamed scan knows so far: the results of the analyzers that have returned
     (AnalyzerRegistry.run_all's on_result), the local blacklist's match for the target, and the
-    registry analyzers still pending. block_known is set as soon as a floor reaches BLOCK_MIN.
+    analyzers still pending. block_known is set as soon as a floor reaches BLOCK_MIN.
+
+    A router swap scans its path tokens instead of the router, so its results are keyed
+    `token:analyzer`, as the final's coverage is: `results` holds (token, result) pairs, the token
+    None for the target's own analyzers.
 
     describe is set once the request is decoded: it returns the response fields that describe the
     request. A request that never sets it (a signature request) gets no interim verdict."""
 
     def __init__(self, pending: Iterable[str], policy_mode: str):
-        self.results = []
+        self.results: List[Tuple[Optional[str], AnalyzerResult]] = []
         self.local_matches = []
         self.pending = set(pending)
         self.policy_mode = policy_mode
         self.block_known = asyncio.Event()
         self.describe: Optional[Callable[[], Dict]] = None
+        self._target_analyzers = set(self.pending)
 
-    def add_result(self, result: AnalyzerResult):
-        self.results.append(result)
-        self.pending.discard(result.name)
+    def expect(self, token: str, names: Iterable[str]):
+        """A router swap is about to run `names` on `token`. The router's own analyzers never run on
+        a router swap, so they are no longer pending."""
+        self.pending -= self._target_analyzers
+        self.pending.update(f'{token}:{name}' for name in names)
+
+    def add_result(self, result: AnalyzerResult, token: Optional[str] = None):
+        self.results.append((token, result))
+        self.pending.discard(f'{token}:{result.name}' if token else result.name)
         if _result_floor(result) >= verdicts.BLOCK_MIN:
             self.block_known.set()
 
@@ -66,18 +77,22 @@ def build_first_verdict(progress: FirstVerdictProgress, transaction: Dict, elaps
     partial mean has no such bound: a structural 60 alone reads HIGH_RISK, and the clean results
     still to come can dilute it to SAFE.
     """
-    floor = max(
-        [_result_floor(result) for result in progress.results] + [scam_match_floor(progress.local_matches)]
-    )
-    flags = [flag for result in progress.results if _result_floor(result) for flag in result.flags]
+    results = [result for _, result in progress.results]
+    floor = max([_result_floor(result) for result in results] + [scam_match_floor(progress.local_matches)])
+    flags = [flag for result in results if _result_floor(result) for flag in result.flags]
     flags += [match['reason'] for match in progress.local_matches]
     pending = sorted(progress.pending)
+    # Each returned analyzer's coverage as the engine measures it, per token on a router swap; the
+    # pending ones have none.
+    coverage = {}
+    for token in dict.fromkeys(token for token, _ in progress.results):
+        measured = RiskEngine().compute_from_results([result for key, result in progress.results if key == token])
+        coverage.update({f'{token}:{name}' if token else name: value for name, value in measured['coverage'].items()})
     alert = format_extension_alert({
         'rug_probability': floor,
         'risk_level': verdicts.UNKNOWN,
         'status': 'unknown',
-        # Each returned analyzer's coverage as the engine measures it; the pending ones have none.
-        'coverage': RiskEngine().compute_from_results(progress.results)['coverage'],
+        'coverage': coverage,
         'coverage_reasons': {
             'pending': 'Full analysis in progress' + (': ' + ', '.join(pending) if pending else ''),
         },

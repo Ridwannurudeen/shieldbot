@@ -31,6 +31,7 @@ NOW = 1_790_000_000.0
 WEIGHTS = {"structural": 0.40, "market": 0.25, "behavioral": 0.20, "honeypot": 0.15}
 ADMIN_MATCH = {"type": "Local Blacklist", "reason": "Confirmed scam address", "source": "ShieldBot", "severity": "block"}
 GOPLUS_BLOCK = {"type": "GoPlus Security", "reason": "Airdrop scam token", "source": "gopluslabs.io", "severity": "block"}
+GOPLUS_HIGH = {"type": "GoPlus Security", "reason": "Owner can change balance", "source": "gopluslabs.io", "severity": "high"}
 SWAP = {
     "selector": "38ed1739",
     "function_name": "swapExactTokensForTokens",
@@ -515,6 +516,42 @@ async def test_a_router_swap_passes_on_result_through_and_shows_a_token_floor(st
     assert kind == "final"
     assert final["classification"] == verdicts.BLOCK_RECOMMENDED
     assert final["raw_checks"]["whitelisted_router"] == "PancakeSwap Router"
+    assert first["risk_score"] <= final["risk_score"]
+
+
+@pytest.mark.asyncio
+async def test_a_router_swap_first_keys_pending_and_coverage_by_token(stream_api, monkeypatch):
+    api, services = stream_api
+    timer(monkeypatch, api, FIRST_VERDICT_SECONDS * SCALE)
+    gate = asyncio.Event()
+    monkeypatch.setattr(
+        api,
+        "calldata_decoder",
+        SimpleNamespace(decode=lambda data: dict(SWAP), is_whitelisted_target=lambda *args, **kwargs: "PancakeSwap Router"),
+    )
+
+    def per_token(name):
+        async def analyze(ctx):
+            if ctx.address == TOKEN_B and name == "honeypot":
+                await gate.wait()
+            return result(name, [GOPLUS_HIGH] if ctx.address == TOKEN_A and name == "structural" else ())
+        return analyze
+
+    services.registry = registry(**{name: per_token(name) for name in WEIGHTS})
+    events = events_of(api, {**BODY, "data": "0x38ed1739"})
+    kind, first = await next_event(events)
+
+    # Token A is done and token B's honeypot analyzer still runs; the router itself is never scanned.
+    assert kind == "first"
+    assert first["pending_sources"] == [f"{TOKEN_B}:honeypot"]
+    assert set(first["coverage"]) == {f"{TOKEN_A}:{name}" for name in WEIGHTS} | {
+        f"{TOKEN_B}:{name}" for name in ("structural", "market", "behavioral")
+    }
+    assert (first["classification"], first["risk_score"]) == (verdicts.HIGH_RISK, 70)
+    gate.set()
+    kind, final = await next_event(events)
+    assert kind == "final"
+    assert set(final["coverage"]) == {f"{token}:{name}" for token in (TOKEN_A, TOKEN_B) for name in WEIGHTS}
     assert first["risk_score"] <= final["risk_score"]
 
 

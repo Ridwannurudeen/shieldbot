@@ -153,6 +153,22 @@ def test_a_known_floor_sets_the_interim_band(results, local_match, score, classi
     assert verdict["risk_display"] == IN_PROGRESS
 
 
+def test_a_router_swap_keys_its_tokens_pending_and_coverage_by_token():
+    token_a, token_b = "0x" + "11" * 20, "0x" + "22" * 20
+    progress = progress_of([], pending=["structural", "honeypot"])
+    progress.expect(token_a, ["structural", "honeypot"])
+    progress.add_result(clean("structural"), token=token_a)
+    progress.add_result(clean("honeypot"), token=token_a)
+    progress.expect(token_b, ["structural", "honeypot"])
+    progress.add_result(clean("structural", [GOPLUS_HIGH]), token=token_b)
+
+    verdict = first(progress)
+
+    assert verdict["pending_sources"] == [f"{token_b}:honeypot"]
+    assert verdict["coverage"] == {f"{token_a}:structural": 1.0, f"{token_a}:honeypot": 1.0, f"{token_b}:structural": 1.0}
+    assert (verdict["risk_score"], verdict["classification"]) == (70, verdicts.HIGH_RISK)
+
+
 def test_block_known_is_set_only_by_a_floor_at_the_block_band():
     for result in (
         with_floor("intent", verdicts.BLOCK_MIN, "Approval to a wallet"),

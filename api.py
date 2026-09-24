@@ -1512,7 +1512,7 @@ async def _firewall_verdict(
                 value_bnb=value_bnb,
                 policy_override=request.headers.get("X-Policy-Mode"),
                 trail=trail,
-                run_options=run_options,
+                progress=progress,
             )
             if router_response:
                 return router_response
@@ -3576,13 +3576,13 @@ async def _analyze_router_swap(
     value_bnb: float,
     policy_override: Optional[str] = None,
     trail: Optional[Dict] = None,
-    run_options: Optional[Dict] = None,
+    progress: Optional[FirstVerdictProgress] = None,
 ) -> Optional[Dict]:
     """Analyze swap path tokens when interacting with a trusted router.
 
     When it returns a verdict from the tokens' analyzers, it records their outcomes, keyed
     "token:analyzer" like the response's coverage, and the observed block in `trail`.
-    `run_options` are passed to each token's run_all (a streamed request's on_result).
+    A streamed request's `progress` hears each token's results, keyed token:analyzer as well.
     """
     if not container or not container.registry or not risk_engine:
         return _build_unverified_swap_response(
@@ -3648,7 +3648,11 @@ async def _analyze_router_swap(
             },
         )
 
-        analyzer_results = await container.registry.run_all(ctx, **(run_options or {}))
+        run_options = {}
+        if progress is not None:
+            progress.expect(token_addr, [analyzer.name for analyzer in container.registry.get_all()])
+            run_options = {"on_result": partial(progress.add_result, token=token_addr)}
+        analyzer_results = await container.registry.run_all(ctx, **run_options)
         risk_output = risk_engine.compute_from_results(analyzer_results, is_token=True)
 
         # Apply policy mode (handles partial failures)
