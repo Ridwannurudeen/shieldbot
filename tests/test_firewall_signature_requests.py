@@ -46,6 +46,27 @@ async def test_eth_sign_is_block_recommended_and_says_it_can_sign_a_transaction(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("sign_method", ["personal_sign", "eth_sign"])
+async def test_a_signature_with_typed_data_it_does_not_recognise_is_labelled_by_its_method(consumer_api, sign_method):  # noqa: F811
+    # The label is the only thing the method changes: an eth_sign is not reported as a personal_sign.
+    api, _ = consumer_api
+    req = api.FirewallRequest(
+        to="", sender="0x" + "b" * 40, signMethod=sign_method,
+        typedData={"primaryType": "UnknownType", "message": {}},
+    )
+    response = await api._build_signature_only_response(req)
+    fields = {field["label"]: field["value"] for field in response["calldata_details"]["fields"]}
+    assert fields["Signature Type"] == sign_method
+    assert response["raw_checks"]["signature"]["sig_type"] == sign_method
+    assert response["shield_score"]["threat_type"] == sign_method
+    assert response["decoded_action"] == f"{sign_method} signature request"
+    assert_unknown_response(response)
+    if sign_method == "eth_sign":
+        assert response["classification"] == verdicts.BLOCK_RECOMMENDED
+        assert response["risk_score"] == verdicts.BLIND_SIGN_MIN
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sign_method", ["personal_sign", "eth_sign"])
 async def test_a_signature_without_a_signer_address_is_accepted_and_judged_as_before(consumer_api, sign_method):  # noqa: F811
     # The extension sends no signer for personal_sign and eth_sign; the request model takes an
     # empty "from" and the verdict does not depend on it.
