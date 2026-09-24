@@ -437,8 +437,12 @@ class RiskEngine:
                         if structural_missing else 'Provider data unavailable or incomplete'
                     )
                 )
+            # A skipped analyzer does not apply to this target (a non-token has no market and no
+            # sellability): it is covered, but a zero from it would only dilute the others.
+            if not result.error and data.get('skipped'):
+                scores[result.name] = 0.0
             # Known adverse evidence remains actionable even if other fields are unknown.
-            if not result.error and (fraction == 1 or result.score > 0):
+            elif not result.error and (fraction == 1 or result.score > 0):
                 included.append(result)
                 scores[result.name] = round(result.score, 1)
             else:
