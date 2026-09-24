@@ -18,8 +18,9 @@ RPC reports ``blockTimestamp=0x0``, so timestamps come from block headers.
 
 ``run`` sweeps each source on its own cursor. ``poll`` is the fast path: once the cursors agree
 and the confirmed head is close, a single ``eth_getLogs`` reads every source together with the
-Swap events of the launches being triaged. With an RpcGuard every JSON-RPC call takes one request
-of the shared 4663 budget, and HTTP 429/5xx statuses and transport failures feed its circuit breaker.
+Swap events of the launches being triaged. With an RpcGuard every JSON-RPC call takes one
+request of the shared 4663 budget, and HTTP 429/5xx statuses and transport failures feed its
+circuit breaker.
 """
 
 import asyncio
@@ -540,10 +541,10 @@ class LaunchDiscovery:
         """POST with bounded exponential backoff on HTTP 429/5xx, transport and rate-limit errors.
 
         With a guard, every attempt first takes one request of the shared budget per JSON-RPC call
-        it carries, and only structured outcomes reach the breaker: HTTP 429/5xx and transport exception classes are
-        failures, a 200 answer is a success. A rate-limit error recognised by its message is
-        retried but reported as neither. An open breaker ends the retries without sending, and
-        a probe is a single attempt.
+        it carries, and only structured outcomes reach the breaker: HTTP 429/5xx and transport
+        exception classes are failures, a 200 answer is a success. A rate-limit error recognised by
+        its message is retried but reported as neither. An open breaker ends the retries without
+        sending, and a probe is a single attempt.
         """
         attempts = 1 if probe else MAX_ATTEMPTS
         calls = len(payload) if isinstance(payload, list) else 1

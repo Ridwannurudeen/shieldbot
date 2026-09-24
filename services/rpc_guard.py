@@ -3,9 +3,10 @@
 One RpcGuard paces every request ShieldBot's background work sends to that RPC: launch discovery
 takes one request per JSON-RPC call (a batch of block headers takes one per header, since the RPC
 rate-limits each call in a batch), the breaker's probe takes one, and hunter scans reserve their
-worst-case request count up front. The budget is an average, not a per-second cap: over any window at least one
-reservation long, the requests granted stay within the rate, while inside a shorter window a
-burst of up to one reservation is allowed, since a scan's own requests are not paced one by one.
+worst-case request count up front. The budget is an average, not a per-second cap: over any window
+at least one reservation long, the requests granted stay within the rate, while inside a shorter
+window a burst of up to one reservation is allowed, since a scan's own requests are not paced one
+by one.
 The breaker trips on structured signals only: HTTP 429 or 5xx statuses and transport exception
 classes, never message text. While it is open, callers get BreakerOpenError without a request
 being sent, so their work waits instead of being recorded.
