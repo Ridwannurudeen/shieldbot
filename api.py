@@ -76,7 +76,9 @@ def _fire_and_forget(coro, label: str = "background"):
             return
         exc = t.exception()
         if exc:
-            logger.error("Fire-and-forget task '%s' failed: %s", label, type(exc).__name__)
+            # An HTTPException names its status, so a refused request reads apart from a server error.
+            failure = f"{type(exc).__name__} {exc.status_code}" if isinstance(exc, HTTPException) else type(exc).__name__
+            logger.error("Fire-and-forget task '%s' failed: %s", label, failure)
     task.add_done_callback(_done_cb)
     return task
 

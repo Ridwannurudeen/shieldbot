@@ -475,7 +475,7 @@ async def test_a_client_that_leaves_after_the_first_does_not_stop_the_scan(strea
     await asyncio.wait_for(asyncio.wait({scan}), TIMEOUT)
 
     if fails:
-        assert "Fire-and-forget task 'firewall_stream_scan' failed: HTTPException" in caplog.text
+        assert "Fire-and-forget task 'firewall_stream_scan' failed: HTTPException 500" in caplog.text
     else:
         assert services.db.upsert_contract_score.await_count == 1
         assert services.db.insert_scan_evidence.await_count == 1
