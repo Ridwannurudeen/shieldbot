@@ -3,6 +3,7 @@ GET /evidence serve it."""
 
 import itertools
 import json
+import re
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -268,9 +269,14 @@ def test_a_personal_sign_caller_is_masked_in_any_address_form(
     evidence_api, mock_web3_client, sender
 ):
     _, client, _ = evidence_api
-    # The API's address checks accept these forms, so the signature target falls back to the sender.
-    mock_web3_client.is_valid_address.side_effect = Web3.is_address
-    mock_web3_client.to_checksum_address.side_effect = Web3.to_checksum_address
+    # web3 7 accepts these forms as addresses (web3 6.15.1 does not), and then the signature target
+    # falls back to the sender.
+    mock_web3_client.is_valid_address.side_effect = lambda value: bool(
+        re.fullmatch(r"(?:0[xX])?[0-9a-fA-F]{40}", value)
+    )
+    mock_web3_client.to_checksum_address.side_effect = lambda value: Web3.to_checksum_address(
+        "0x" + value[-40:]
+    )
     response = client.post(
         "/api/firewall",
         json={
