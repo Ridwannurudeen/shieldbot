@@ -91,26 +91,32 @@ export default function FAQ() {
               transition={{ duration: 0.4, delay: i * 0.05 }}
               className="border border-white/10 rounded-xl overflow-hidden bg-navy-light"
             >
-              <button
-                onClick={() => setOpen(open === i ? null : i)}
-                className="w-full flex items-center justify-between px-6 py-5 text-left gap-4 hover:bg-white/5 transition-colors"
-              >
-                <span className="font-semibold text-white text-sm md:text-base">
-                  {faq.q}
-                </span>
-                <span
-                  className={`text-neon text-xl flex-shrink-0 transition-transform duration-300 ${
-                    open === i ? "rotate-45" : ""
-                  }`}
+              <h3>
+                <button
+                  onClick={() => setOpen(open === i ? null : i)}
+                  aria-expanded={open === i}
+                  aria-controls={`faq-answer-${i}`}
+                  className="w-full flex items-center justify-between px-6 py-5 text-left gap-4 hover:bg-white/5 transition-colors"
                 >
-                  +
-                </span>
-              </button>
+                  <span className="font-semibold text-white text-sm md:text-base">
+                    {faq.q}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className={`text-neon text-xl flex-shrink-0 transition-transform duration-300 ${
+                      open === i ? "rotate-45" : ""
+                    }`}
+                  >
+                    +
+                  </span>
+                </button>
+              </h3>
 
               <AnimatePresence initial={false}>
                 {open === i && (
                   <motion.div
                     key="content"
+                    id={`faq-answer-${i}`}
                     initial={{ height: 0, opacity: 0 }}
                     animate={{ height: "auto", opacity: 1 }}
                     exit={{ height: 0, opacity: 0 }}

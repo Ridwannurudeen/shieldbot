@@ -9,24 +9,24 @@ export default function Footer() {
               <span className="text-white">Shield</span>
               <span className="text-neon">Bot</span>
             </div>
-            <p className="text-sm text-gray-500">On-chain transaction firewall</p>
+            <p className="text-sm text-gray-400">On-chain transaction firewall</p>
           </div>
 
           {/* Link columns */}
           <div className="flex gap-16 flex-wrap">
             <div>
-              <h5 className="text-xs text-gray-500 uppercase tracking-widest mb-3">
+              <h2 className="text-xs text-gray-400 uppercase tracking-widest mb-3">
                 Product
-              </h5>
-              <div className="flex flex-col gap-2">
-                <a href="/dashboard" className="text-sm text-gray-300 hover:text-neon transition-colors">
+              </h2>
+              <div className="flex flex-col md:gap-2">
+                <a href="/dashboard" className="inline-flex items-center min-h-[44px] md:min-h-0 text-sm text-gray-300 hover:text-neon transition-colors">
                   Threat Dashboard
                 </a>
                 <a
                   href="https://youtu.be/NN95rom10R8"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-sm text-gray-300 hover:text-neon transition-colors"
+                  className="inline-flex items-center min-h-[44px] md:min-h-0 text-sm text-gray-300 hover:text-neon transition-colors"
                 >
                   Demo Video
                 </a>
@@ -34,34 +34,34 @@ export default function Footer() {
                   href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-sm text-gray-300 hover:text-neon transition-colors"
+                  className="inline-flex items-center min-h-[44px] md:min-h-0 text-sm text-gray-300 hover:text-neon transition-colors"
                 >
                   Chrome Extension
                 </a>
-                <a href="/about.html" className="text-sm text-gray-300 hover:text-neon transition-colors">
+                <a href="/about.html" className="inline-flex items-center min-h-[44px] md:min-h-0 text-sm text-gray-300 hover:text-neon transition-colors">
                   How It Works
                 </a>
-                <a href="/privacy.html" className="text-sm text-gray-300 hover:text-neon transition-colors">
+                <a href="/privacy.html" className="inline-flex items-center min-h-[44px] md:min-h-0 text-sm text-gray-300 hover:text-neon transition-colors">
                   Privacy Policy
                 </a>
-                <a href="/terms.html" className="text-sm text-gray-300 hover:text-neon transition-colors">
+                <a href="/terms.html" className="inline-flex items-center min-h-[44px] md:min-h-0 text-sm text-gray-300 hover:text-neon transition-colors">
                   Terms of Service
                 </a>
-                <a href="/security.html" className="text-sm text-gray-300 hover:text-neon transition-colors">
+                <a href="/security.html" className="inline-flex items-center min-h-[44px] md:min-h-0 text-sm text-gray-300 hover:text-neon transition-colors">
                   Security
                 </a>
               </div>
             </div>
             <div>
-              <h5 className="text-xs text-gray-500 uppercase tracking-widest mb-3">
+              <h2 className="text-xs text-gray-400 uppercase tracking-widest mb-3">
                 Community
-              </h5>
-              <div className="flex flex-col gap-2">
+              </h2>
+              <div className="flex flex-col md:gap-2">
                 <a
                   href="https://github.com/Ridwannurudeen/shieldbot"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-sm text-gray-300 hover:text-neon transition-colors"
+                  className="inline-flex items-center min-h-[44px] md:min-h-0 text-sm text-gray-300 hover:text-neon transition-colors"
                 >
                   GitHub
                 </a>
@@ -69,7 +69,7 @@ export default function Footer() {
                   href="https://t.me/shieldbot_bnb_bot"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-sm text-gray-300 hover:text-neon transition-colors"
+                  className="inline-flex items-center min-h-[44px] md:min-h-0 text-sm text-gray-300 hover:text-neon transition-colors"
                 >
                   Telegram Bot
                 </a>
@@ -77,13 +77,13 @@ export default function Footer() {
                   href="https://x.com/shieldbot_"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-sm text-gray-300 hover:text-neon transition-colors"
+                  className="inline-flex items-center min-h-[44px] md:min-h-0 text-sm text-gray-300 hover:text-neon transition-colors"
                 >
                   @shieldbot_
                 </a>
                 <a
                   href="mailto:support@shieldbotsecurity.online"
-                  className="text-sm text-gray-300 hover:text-neon transition-colors"
+                  className="inline-flex items-center min-h-[44px] md:min-h-0 text-sm text-gray-300 hover:text-neon transition-colors"
                 >
                   support@shieldbotsecurity.online
                 </a>
@@ -92,7 +92,7 @@ export default function Footer() {
           </div>
         </div>
 
-        <div className="text-center text-xs text-gray-600 mt-12">
+        <div className="text-center text-xs text-gray-400 mt-12">
           &copy; 2026 ShieldBot. Transaction security for EVM chains, including BNB Chain and Robinhood Chain.
         </div>
       </div>

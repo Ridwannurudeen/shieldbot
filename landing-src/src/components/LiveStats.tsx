@@ -83,7 +83,7 @@ export default function LiveStats() {
               <div className="text-2xl md:text-3xl font-extrabold text-neon tracking-tight">
                 {item.value}
               </div>
-              <div className="text-xs text-gray-500 mt-1">{item.label}</div>
+              <div className="text-xs text-gray-400 mt-1">{item.label}</div>
             </div>
           ))}
         </motion.div>
@@ -91,7 +91,7 @@ export default function LiveStats() {
           <div
             className={`w-1.5 h-1.5 rounded-full ${stats ? "bg-neon animate-pulse" : "bg-gray-600"}`}
           />
-          <span className="text-xs text-gray-600">{note}</span>
+          <span className="text-xs text-gray-400">{note}</span>
         </div>
       </div>
     </div>
