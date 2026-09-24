@@ -249,22 +249,22 @@ MEMPOOL_ALERT = {
 MEMPOOL_STATS = {
     "total_pending_seen": 12345, "sandwiches_detected": 2, "frontruns_detected": 0,
     "suspicious_approvals": 7, "counting_since": 900.0, "monitored_chains": [56, 1],
-    "pending_count": {"56": 10, "1": 20}, "active_alerts": 1,
+    "unobservable_chains": [], "pending_count": {"56": 10, "1": 20}, "active_alerts": 1,
 }
 
 
 @pytest_asyncio.fixture
 async def mempool_api():
     """The API's two mempool routes, served on a local port."""
-    api = SimpleNamespace(requests=[], status=200)
+    api = SimpleNamespace(requests=[], status=200, alerts=[MEMPOOL_ALERT], stats=MEMPOOL_STATS)
 
     async def alerts(request):
         api.requests.append((request.path, dict(request.query)))
-        return web.json_response({"alerts": [MEMPOOL_ALERT], "count": 1}, status=api.status)
+        return web.json_response({"alerts": api.alerts, "count": len(api.alerts)}, status=api.status)
 
     async def stats(request):
         api.requests.append((request.path, dict(request.query)))
-        return web.json_response(MEMPOOL_STATS, status=api.status)
+        return web.json_response(api.stats, status=api.status)
 
     app = web.Application()
     app.router.add_get("/api/mempool/alerts", alerts)
@@ -304,6 +304,55 @@ class TestThreatsCommand:
         assert "• Monitoring: BSC, Ethereum\n" in text
         assert "🔴 **Suspicious Approval** (BSC)\n  Unlimited token approval pending\n" in text
         assert not bot_module.container.mempool_monitor.mock_calls
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("args, unobservable, lines, absent", [
+        ([], [], ["• Monitoring: BSC, Ethereum\n", "✅ No recent threats detected on BSC, Ethereum.\n"],
+         ["unavailable", "not available"]),
+        ([], [56], [
+            "• Monitoring: Ethereum\n", "• Live data unavailable: BSC\n",
+            "✅ No recent threats detected on Ethereum.\n",
+            "⚪ Live mempool data is not available for BSC right now, so no result is shown.\n",
+        ], ["• Monitoring: BSC", "detected on BSC"]),
+        (["56"], [56], [
+            "• Monitoring: Ethereum\n", "• Live data unavailable: BSC\n",
+            "⚪ Live mempool data is not available for BSC right now, so no result is shown.\n",
+        ], ["No recent threats"]),
+        ([], [56, 1], [
+            "• Live data unavailable: BSC, Ethereum\n",
+            "⚪ Live mempool data is not available for BSC, Ethereum right now, so no result is shown.\n",
+        ], ["• Monitoring", "No recent threats"]),
+    ], ids=["all-observed", "one-unobservable", "filtered-to-unobservable", "none-observed"])
+    async def test_a_chain_whose_mempool_cannot_be_read_is_never_shown_as_clear(
+        self, bot_module, monkeypatch, mempool_api, args, unobservable, lines, absent,
+    ):
+        monkeypatch.setattr(bot_module, "settings", SimpleNamespace(shieldbot_api_url=mempool_api.url))
+        mempool_api.alerts = []
+        mempool_api.stats = {**MEMPOOL_STATS, "unobservable_chains": unobservable}
+        update = _threats_update()
+
+        await bot_module.threats_command(update, SimpleNamespace(args=args))
+
+        text = update.message.reply_text.await_args.args[0]
+        for line in lines:
+            assert line in text
+        for fragment in absent:
+            assert fragment not in text
+
+    @pytest.mark.asyncio
+    async def test_stats_that_do_not_say_which_chains_were_read_leave_them_all_unknown(
+        self, bot_module, monkeypatch, mempool_api,
+    ):
+        monkeypatch.setattr(bot_module, "settings", SimpleNamespace(shieldbot_api_url=mempool_api.url))
+        mempool_api.alerts = []
+        mempool_api.stats = {k: v for k, v in MEMPOOL_STATS.items() if k != "unobservable_chains"}
+        update = _threats_update()
+
+        await bot_module.threats_command(update, SimpleNamespace(args=[]))
+
+        text = update.message.reply_text.await_args.args[0]
+        assert "No recent threats" not in text
+        assert "⚪ Live mempool data is not available for BSC, Ethereum right now" in text
 
     @pytest.mark.asyncio
     async def test_repeated_calls_reuse_the_snapshot_for_each_chain_filter(self, bot_module, monkeypatch, mempool_api):

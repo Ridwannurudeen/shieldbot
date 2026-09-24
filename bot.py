@@ -608,9 +608,14 @@ async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response += f"• Frontruns detected: {stats.get('frontruns_detected', 0)}\n"
         response += f"• Suspicious approvals: {stats.get('suspicious_approvals', 0)}\n"
         monitored = stats.get('monitored_chains', [])
-        if monitored:
-            chain_names = [get_chain_name(c) for c in monitored]
-            response += f"• Monitoring: {', '.join(chain_names)}\n"
+        # A chain whose mempool the API could not read is unknown, never clear. Stats that do not
+        # say which chains were read leave every chain unknown.
+        unobservable = stats.get('unobservable_chains', monitored)
+        observed = [c for c in monitored if c not in unobservable]
+        if observed:
+            response += f"• Monitoring: {', '.join(get_chain_name(c) for c in observed)}\n"
+        if unobservable:
+            response += f"• Live data unavailable: {', '.join(get_chain_name(c) for c in unobservable)}\n"
 
         # Recent alerts
         if alerts:
@@ -625,8 +630,14 @@ async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if alert.get('attacker_addr'):
                     response += f"  Attacker: `{alert['attacker_addr'][:16]}...`\n"
         else:
-            filter_text = f" on {get_chain_name(chain_id)}" if chain_id else ""
-            response += f"\n✅ No recent threats detected{filter_text}.\n"
+            watched = [chain_id] if chain_id else monitored
+            clear = [c for c in watched if c in observed]
+            unknown = [c for c in watched if c not in observed]
+            if clear:
+                response += f"\n✅ No recent threats detected on {', '.join(get_chain_name(c) for c in clear)}.\n"
+            if unknown or not watched:
+                where = f" for {', '.join(get_chain_name(c) for c in unknown)}" if unknown else ""
+                response += f"\n⚪ Live mempool data is not available{where} right now, so no result is shown.\n"
 
         await update.message.reply_text(
             response, parse_mode='Markdown', disable_web_page_preview=True,

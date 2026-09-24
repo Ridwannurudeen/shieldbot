@@ -70,6 +70,8 @@ async def test_only_chains_with_a_public_mempool_are_polled():
     await monitor.start()
     try:
         assert sorted(monitor.get_stats()["monitored_chains"]) == [1, 56, 137, 204]
+        # Nothing has been read yet, so no chain counts as observed.
+        assert monitor.get_stats()["unobservable_chains"] == [1, 56, 137, 204]
     finally:
         await monitor.stop()
 
@@ -104,10 +106,65 @@ async def test_pending_block_fallback_feeds_the_analysis():
     await monitor._poll_pending(56)
 
     assert monitor.get_stats()["pending_count"] == {56: 3}
+    assert monitor.get_stats()["unobservable_chains"] == []
     alerts = monitor.get_alerts()
     assert [(a["alert_type"], a["severity"], a["victim_tx"]) for a in alerts] == [
         ("suspicious_approval", "HIGH", "0x" + "01" * 32),
     ]
+
+
+TXPOOL_WITH_ONE_TX = {"result": {"pending": {SENDER: {"7": {
+    "hash": "0x" + "04" * 32, "from": SENDER, "to": TOKEN, "value": "0x0",
+    "gasPrice": "0x5", "input": "0x",
+}}}}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("txpool, pending_block", [
+    ({"result": {"pending": {}}}, _pending_block(sealed=True)),
+    (RuntimeError("txpool_content is not available"), _pending_block(sealed=True)),
+    ({"result": {"pending": {}}}, TimeoutError("RPC timeout")),
+    (RuntimeError("txpool_content is not available"), TimeoutError("RPC timeout")),
+], ids=["empty-txpool-sealed-block", "txpool-error-sealed-block", "empty-txpool-block-error", "both-fail"])
+async def test_a_chain_whose_mempool_cannot_be_read_is_unobservable_until_it_can(txpool, pending_block):
+    client = MagicMock()
+    w3 = client.get_web3.return_value
+    w3.provider.make_request.side_effect = [txpool, TXPOOL_WITH_ONE_TX]
+    w3.eth.get_block.side_effect = [pending_block]
+    monitor = MempoolMonitor(client)
+
+    await monitor._poll_pending(56)
+    assert monitor.get_stats()["unobservable_chains"] == [56]
+    assert monitor.get_stats()["pending_count"] == {}
+
+    await monitor._poll_pending(56)
+    assert monitor.get_stats()["unobservable_chains"] == []
+    assert monitor.get_stats()["pending_count"] == {56: 1}
+
+
+@pytest.mark.asyncio
+async def test_a_genuine_empty_pending_block_is_an_observation():
+    client = MagicMock()
+    w3 = client.get_web3.return_value
+    w3.provider.make_request.return_value = {"result": {"pending": {}}}
+    w3.eth.get_block.return_value = AttributeDict({"hash": None, "miner": None, "transactions": []})
+    monitor = MempoolMonitor(client)
+    monitor._unobservable_chains = {1}
+
+    await monitor._poll_pending(1)
+
+    assert monitor.get_stats()["unobservable_chains"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_poll_leaves_the_chain_unobservable():
+    client = MagicMock()
+    monitor = MempoolMonitor(client)
+    monitor._get_txpool_content = AsyncMock(side_effect=RuntimeError("executor is shut down"))
+
+    await monitor._poll_pending(56)
+
+    assert monitor.get_stats()["unobservable_chains"] == [56]
 
 
 @pytest.mark.asyncio
@@ -117,9 +174,9 @@ async def test_a_sealed_block_answered_for_pending_is_skipped_with_one_warning_p
     monitor = MempoolMonitor(MagicMock())
 
     with caplog.at_level(logging.WARNING, logger="services.mempool_service"):
-        assert await monitor._get_pending_block(w3, 56) == []
-        assert await monitor._get_pending_block(w3, 56) == []
-        assert await monitor._get_pending_block(w3, 204) == []
+        assert await monitor._get_pending_block(w3, 56) is None
+        assert await monitor._get_pending_block(w3, 56) is None
+        assert await monitor._get_pending_block(w3, 204) is None
 
     warned = [r.args[0] for r in caplog.records if r.levelno == logging.WARNING]
     assert warned == [56, 204]

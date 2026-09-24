@@ -100,6 +100,9 @@ class MempoolMonitor:
         self._monitored_chains: Set[int] = set()
         # Chains whose RPC answered "pending" with a sealed block: warned about once, not asked again.
         self._sealed_pending_chains: Set[int] = set()
+        # Monitored chains whose last poll read neither a txpool nor a genuine pending block. Their
+        # mempool is unknown, so they must not be reported as free of threats.
+        self._unobservable_chains: Set[int] = set()
 
         # Stats: held in memory, so they restart from zero with the process.
         self._counting_since = time.time()
@@ -120,6 +123,8 @@ class MempoolMonitor:
         self._monitored_chains = {
             chain_id for chain_id in requested if supports_pending_transactions(chain_id)
         }
+        # Until a chain's first poll reads something, nothing is known about its mempool.
+        self._unobservable_chains = set(self._monitored_chains)
         if not self._monitored_chains:
             return
         self._running = True
@@ -171,6 +176,10 @@ class MempoolMonitor:
             if not pending_txs:
                 # Fallback: get pending block
                 pending_txs = await self._get_pending_block(w3, chain_id)
+            if pending_txs is None:
+                self._unobservable_chains.add(chain_id)
+                return
+            self._unobservable_chains.discard(chain_id)
 
             for tx in pending_txs:
                 if tx.tx_hash not in self._pending[chain_id]:
@@ -179,6 +188,7 @@ class MempoolMonitor:
                     await self._analyze_pending_tx(tx)
 
         except Exception as e:
+            self._unobservable_chains.add(chain_id)
             logger.debug("Pending poll failed for chain %s: %s", chain_id, type(e).__name__)
 
     async def _get_txpool_content(self, w3: Web3, chain_id: int) -> List[PendingTx]:
@@ -211,10 +221,14 @@ class MempoolMonitor:
             pass
         return txs
 
-    async def _get_pending_block(self, w3: Web3, chain_id: int) -> List[PendingTx]:
-        """Fetch pending txs via eth_getBlockByNumber('pending')."""
+    async def _get_pending_block(self, w3: Web3, chain_id: int) -> Optional[List[PendingTx]]:
+        """Fetch pending txs via eth_getBlockByNumber('pending').
+
+        Returns None when no genuine pending block was read (the call failed, or the RPC answered
+        with a sealed block), which leaves the chain's mempool unobserved.
+        """
         if chain_id in self._sealed_pending_chains:
-            return []
+            return None
         txs = []
         try:
             loop = asyncio.get_event_loop()
@@ -230,7 +244,7 @@ class MempoolMonitor:
                     "Chain %s answers 'pending' with a sealed block; its pending-block fallback is skipped",
                     chain_id,
                 )
-                return txs
+                return None
             for tx in (block.get("transactions") or []):
                 # web3 returns each transaction as an AttributeDict, which is a Mapping but not a dict.
                 if isinstance(tx, Mapping):
@@ -246,7 +260,7 @@ class MempoolMonitor:
                         chain_id=chain_id,
                     ))
         except Exception:
-            pass
+            return None
         return txs
 
     async def _analyze_pending_tx(self, tx: PendingTx):
@@ -438,6 +452,7 @@ class MempoolMonitor:
             **self._stats,
             'counting_since': self._counting_since,
             'monitored_chains': list(self._monitored_chains),
+            'unobservable_chains': sorted(self._unobservable_chains),
             'pending_count': {
                 cid: len(txs) for cid, txs in self._pending.items()
             },
