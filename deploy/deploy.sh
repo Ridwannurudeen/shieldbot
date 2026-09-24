@@ -2,11 +2,12 @@
 # Gated production deploy for ShieldBot. Run on the server as root. See deploy/README.md.
 #
 #   deploy.sh --check    <commit>       read-only GO / NO-GO; safe to run at any time
-#   deploy.sh --cutover  <commit>       stop, back up, deploy, verify; any failure rolls back by itself
-#   deploy.sh --rollback <backup-dir>   put back the commit and database a cutover saved
+#   deploy.sh --cutover  <commit>       stop, back up, deploy, verify; any failure or signal rolls back by itself
+#   deploy.sh --rollback <backup-dir>   put back the commit, packages and database a cutover saved
 #
-# <commit> is a full or short hex SHA that exists on origin after `git fetch`.
+# <commit> is a full or short hex SHA that is on an origin branch after `git fetch`.
 # Only the shieldbot (API) and shieldbot-bot units are ever stopped or started.
+# Run --cutover inside tmux or under nohup (deploy/README.md), so a dropped SSH session cannot cut it short.
 
 set -Eeuo pipefail
 
@@ -64,6 +65,14 @@ bot_process_clean() {
   esac
 }
 
+# Fails unless the filesystem holding $1 has more than $2 KiB free.
+need_space() {
+  local free
+  free=$(df -Pk "$1" | awk 'NR == 2 { print $4 }')
+  echo "$1: $free KiB free, $2 KiB needed"
+  [ "$free" -gt "$2" ] || fail "not enough free space in $1: $free KiB free, $2 KiB needed"
+}
+
 # A unit that crashes and restarts can look active at any one moment, so watch both for a while.
 units_settled() {
   local api_restarts bot_restarts
@@ -78,7 +87,7 @@ units_settled() {
 
 # ---------------------------------------------------------------- preflight (read-only)
 preflight() {
-  local head rc=0 bot_unit need free
+  local head rc=0 bot_unit db_kib branches
   head=$(git -C "$APP" rev-parse HEAD)
 
   say "Current state"
@@ -89,12 +98,15 @@ preflight() {
   bot_unit=$(systemctl cat "$BOT_UNIT" 2>/dev/null) || fail "unit $BOT_UNIT not found"
   [ -x "$PY" ] || fail "no Python at $PY"
 
-  say "Database and backup space"
+  say "Database and free space"
   [ -f "$DB" ] || fail "no database at $DB"
-  need=$(( $(stat -c %s "$DB") / 1024 * 2 ))
-  free=$(df -Pk "$(dirname "$BACKUP")" | awk 'NR == 2 { print $4 }')
-  echo "database $(( need / 2 )) KiB; $free KiB free for the backup"
-  [ "$free" -gt "$need" ] || fail "not enough free space in $(dirname "$BACKUP") to back up $DB"
+  db_kib=$(( $(stat -c %s "$DB") / 1024 + 1 ))
+  echo "database $db_kib KiB"
+  # The backup is one copy of the database, with the same again as margin. The app's filesystem needs room for
+  # a migration to grow the database and its WAL and for new packages (512 MiB), plus the backup when /root is
+  # on the same filesystem.
+  need_space "$(dirname "$BACKUP")" $(( db_kib * 2 ))
+  need_space "$APP" $(( db_kib * 2 + 524288 ))
 
   say "No modified tracked files (untracked and ignored files survive a checkout)"
   if [ -n "$(git -C "$APP" status --porcelain --untracked-files=no)" ]; then
@@ -123,7 +135,11 @@ preflight() {
   say "Target commit"
   git -C "$APP" fetch --quiet origin
   TARGET=$(git -C "$APP" rev-parse --verify --quiet "$1^{commit}") || fail "$1 is not a commit in $APP after git fetch"
-  git -C "$APP" log --oneline -1 "$TARGET"
+  # A commit made or fetched on the server alone has not been pushed, reviewed or tested by CI.
+  branches=$(git -C "$APP" for-each-ref --contains "$TARGET" --format='%(refname:short)' refs/remotes/origin)
+  [ -n "$branches" ] || fail "$1 is not on any origin branch: push it first"
+  git -C "$APP" --no-pager log --oneline -1 "$TARGET"
+  echo "on" $branches
   if [ "$TARGET" = "$head" ]; then
     echo "already deployed: --cutover would back up, restart and re-verify"
   elif git -C "$APP" merge-base --is-ancestor "$head" "$TARGET"; then
@@ -200,21 +216,24 @@ if result != "ok":
     sys.exit(f"backup failed its integrity check: {result}")
 PYEOF
   mv "$BACKUP/shieldbot.db.partial" "$BACKUP/shieldbot.db"
-  ls -la "$BACKUP"
 }
 
 # ---------------------------------------------------------------- restore
-# Puts back the commit and database recorded in $BACKUP and restarts both units. Returns 0 only when the API
-# answers /api/health and the bot is active again.
+# Puts back the commit, packages and database recorded in $BACKUP and restarts both units. Returns 0 only when
+# the API answers /api/health and the bot is active again.
 restore() {
+  # Nothing may cut the restore short: a second signal or a closed terminal is ignored, here and by the git and
+  # pip it runs, which inherit the setting.
   trap - ERR
+  trap '' INT TERM HUP PIPE
   set +e
   local old ok=0
   old=$(cat "$BACKUP/ROLLBACK_COMMIT")
   printf '\n\033[31m== Restoring %s from %s\033[0m\n' "${old:0:7}" "$BACKUP" >&2
   systemctl stop "$BOT_UNIT"
   systemctl stop "$API_UNIT"
-  if ! git -C "$APP" checkout --quiet "$old"; then
+  # --force: a checkout cut short, or files the failed run edited, must not keep the old commit out.
+  if ! git -C "$APP" checkout --force --quiet "$old"; then
     echo "git checkout $old failed: both units are left stopped and the database is untouched" >&2
     return 1
   fi
@@ -227,7 +246,12 @@ restore() {
   else
     echo "no database in $BACKUP (the failure came before the backup): database left as it was"
   fi
-  "$VENV/bin/pip" install -q -r "$APP/requirements.txt" || ok=1
+  # The frozen list pins every package, dependencies included, to what ran before the deploy.
+  if [ -f "$BACKUP/pip-freeze.txt" ]; then
+    "$VENV/bin/pip" install -q -r "$BACKUP/pip-freeze.txt" || ok=1
+  else
+    "$VENV/bin/pip" install -q -r "$APP/requirements.txt" || ok=1
+  fi
   systemctl start "$API_UNIT"
   if wait_health; then echo "API answers on ${old:0:7}"; else echo "API did not answer: journalctl -u $API_UNIT" >&2; ok=1; fi
   systemctl start "$BOT_UNIT"
@@ -248,6 +272,18 @@ rollback() {
 # shell may roll back.
 on_error() {
   [ "$BASHPID" = "$$" ] || return 0
+  trap - ERR
+  set +e
+  printf '\n\033[31mfailed at line %s: %s\033[0m\n' "$1" "$2" >&2
+  rollback
+}
+
+# A dropped SSH session (HUP), Ctrl-C (INT) or kill (TERM) during the cutover rolls back as well.
+on_signal() {
+  trap - ERR
+  trap '' INT TERM HUP PIPE
+  set +e
+  printf '\n\033[31minterrupted by SIG%s\033[0m\n' "$1" >&2
   rollback
 }
 
@@ -260,15 +296,20 @@ cutover() {
   (umask 077 && mkdir "$BACKUP")
   echo "$OLD" > "$BACKUP/ROLLBACK_COMMIT"
 
-  # From here on any failure puts the old commit and database back.
-  trap on_error ERR
+  # From here on any failure or signal puts the old commit, packages and database back.
+  trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
+  trap 'on_signal HUP' HUP
+  trap 'on_signal INT' INT
+  trap 'on_signal TERM' TERM
 
   say "Stopping $BOT_UNIT, then $API_UNIT"
   systemctl stop "$BOT_UNIT"
   systemctl stop "$API_UNIT"
 
-  say "Backing up the database to $BACKUP"
+  say "Backing up the database and the package list to $BACKUP"
   backup_db
+  "$VENV/bin/pip" freeze > "$BACKUP/pip-freeze.txt"
+  ls -la "$BACKUP"
 
   say "Deploying ${TARGET:0:7}"
   git -C "$APP" checkout --quiet "$TARGET"
@@ -286,7 +327,7 @@ cutover() {
 
   say "The bot's live process cannot see the recorder key"
   if ! bot_process_clean; then
-    trap - ERR
+    trap - ERR INT TERM HUP
     systemctl stop "$BOT_UNIT"
     printf '\033[31mSECURITY: %s stopped. The API is live on %s. Keep %s out of the bot, then start it.\033[0m\n' \
       "$BOT_UNIT" "${TARGET:0:7}" "$RECORDER_KEY" >&2
@@ -301,7 +342,7 @@ cutover() {
   }
   echo "$API_UNIT and $BOT_UNIT active, no restarts"
 
-  trap - ERR
+  trap - ERR INT TERM HUP
   printf '\n\033[32mDEPLOYED\033[0m %s -> %s\n' "${OLD:0:7}" "${TARGET:0:7}"
   echo "Rollback: bash $0 --rollback $BACKUP"
 }

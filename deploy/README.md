@@ -21,27 +21,45 @@ SHA=<full or short commit hash, pushed to origin>
 git -C /opt/shieldbot fetch origin
 git -C /opt/shieldbot show "$SHA:deploy/deploy.sh" > /root/shieldbot-deploy.sh
 bash /root/shieldbot-deploy.sh --check "$SHA"      # read-only: GO or NO-GO
-bash /root/shieldbot-deploy.sh --cutover "$SHA"    # only after --check says GO
+```
+
+Run `--cutover` only after `--check` says GO, and never straight in the SSH session: if the session drops, the
+hangup makes the script roll back half way through a deploy that may have been fine. Run it in tmux, which
+keeps running after a disconnect (reattach with `tmux attach -t deploy`), with a log:
+
+```bash
+tmux new -s deploy "bash /root/shieldbot-deploy.sh --cutover $SHA 2>&1 | tee /root/shieldbot-deploy-$SHA.log"
+```
+
+or, without tmux, detached under nohup, then follow the log:
+
+```bash
+nohup bash /root/shieldbot-deploy.sh --cutover "$SHA" > "/root/shieldbot-deploy-$SHA.log" 2>&1 &
+tail -f "/root/shieldbot-deploy-$SHA.log"
 ```
 
 `--check` changes nothing on the server apart from fetching origin, so it is safe to run at any time. It says
 NO-GO when:
 
 - the `shieldbot` or `shieldbot-bot` unit, or the venv's Python, is missing
-- the database is missing, or `/root` lacks twice its size in free space for the backup
+- the database is missing; `/root` has no more than twice the database's size free (for the backup); or
+  `/opt/shieldbot`'s filesystem has no more than twice the database's size plus 512 MiB free (for a migration's
+  growth, new packages, and the backup if `/root` is on the same filesystem)
 - a tracked file in `/opt/shieldbot` was edited on the server
 - the recorder key (`ROBINHOOD_RECORDER_PRIVATE_KEY`) is set in the shared `/opt/shieldbot/.env`, the bot unit
   loads `recorder.env` or sets the key, or the running bot process has the key in its environment (or its
   environment cannot be read). Only the API may hold that key: `contracts/base/DEPLOY_ROBINHOOD.md`, section 8.
-- the commit is not on origin after `git fetch`
+- the commit does not exist after `git fetch`, or is on no `origin` branch (a commit made only on the server)
 
-It also says how far the commit is ahead of the deployed one and whether `requirements.txt` changes.
+It also names the origin branches holding the commit, how far it is ahead of the deployed one and whether
+`requirements.txt` changes.
 
 `--cutover` runs the same checks, then:
 
 1. stops `shieldbot-bot`, then `shieldbot`
 2. backs up the database with sqlite3's backup API to `/root/shieldbot-backup-<date>-<time>/shieldbot.db`,
-   checked with `PRAGMA quick_check`, and writes the running commit to `ROLLBACK_COMMIT` beside it
+   checked with `PRAGMA quick_check`, and writes the running commit to `ROLLBACK_COMMIT` and the installed
+   packages (`pip freeze`) to `pip-freeze.txt` beside it
 3. checks out the commit and runs `pip install -r requirements.txt` in the venv
 4. starts the API alone (it runs any database migration) and waits for `/api/health`
 5. requires `/api/health` to report `status: ok` with exactly the chains in the deployed
@@ -49,10 +67,14 @@ It also says how far the commit is ahead of the deployed one and whether `requir
 6. starts the bot, checks that its running process does not hold the recorder key, and watches both units for
    20 seconds for a crash or restart
 
-Any failure from step 1 on rolls back by itself: the old commit and the backed-up database go back and both
-units start again. The one exception is the recorder key check in step 6: if the bot holds the key, the script
-stops the bot, leaves the API running on the new commit and exits non-zero. Fix the bot's configuration, then
-start it.
+Any failure from step 1 on, and any HUP, INT or TERM signal, rolls back by itself: the old commit, packages and
+backed-up database go back and both units start again. The script names the line and command that failed. The
+one exception is the recorder key check in step 6: if the bot holds the key, the script stops the bot, leaves
+the API running on the new commit and exits non-zero. Fix the bot's configuration, then start it.
+
+An automatic rollback also discards whatever the new API wrote to the database between its start in step 4 and
+the rollback: those writes go with the backed-up copy. If the failure came before the backup in step 2 was
+taken, there is no copy to restore and the database is left as it is (the new code never ran on it).
 
 The script prints no secret values (it looks for the recorder key by name) and never copies `.env`. Running
 `--cutover` again for the commit that is already deployed repeats the backup, restart and checks and changes
@@ -66,9 +88,12 @@ A successful cutover ends with the exact command, for example:
 bash /root/shieldbot-deploy.sh --rollback /root/shieldbot-backup-20260924-101500
 ```
 
-It stops both units, checks out the commit in `ROLLBACK_COMMIT`, removes any `shieldbot.db-wal` and
-`shieldbot.db-shm`, copies the backed-up database over the live one, reinstalls the requirements and starts
-the API, then the bot. It exits 0 only when the API answers `/api/health` and the bot is active.
+It stops both units, checks out the commit in `ROLLBACK_COMMIT` (with `--force`, so files a failed run edited
+cannot block it), removes any `shieldbot.db-wal` and `shieldbot.db-shm`, copies the backed-up database over the
+live one, reinstalls the packages from `pip-freeze.txt` (or the old commit's `requirements.txt` if the backup
+has no frozen list) and starts the API, then the bot. It exits 0 only when the API answers `/api/health` and the
+bot is active. Signals are ignored while it runs, so neither a second Ctrl-C nor a dropped session can leave it
+half done.
 
 **A rollback puts back the database as it was at the cutover. Everything written since (scans, reports,
 alerts, subscriptions, verdict records) is lost.** The database goes back with the code because older code may

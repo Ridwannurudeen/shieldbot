@@ -25,7 +25,12 @@ log() { printf '%s\n' "$*" >> "$STATE/calls"; }
 id() { echo 0; }
 flock() { return 0; }
 sleep() { :; }
-df() { printf 'Filesystem 1024-blocks Used Available Capacity Mounted\nstub 1 1 99999999 1%% /\n'; }
+df() {
+  # app-free-kib sets the free space reported for the app directory only.
+  local free=99999999
+  [ "${!#}" != "${FAKE_APP:-}" ] || free=$(cat "$STATE/app-free-kib" 2>/dev/null || echo 99999999)
+  printf 'Filesystem 1024-blocks Used Available Capacity Mounted\nstub 1 1 %s 1%% /\n' "$free"
+}
 journalctl() { log journalctl "$@"; }
 scp() { log scp "$@"; }
 git() { log git "$@"; command git "$@"; }
@@ -33,12 +38,15 @@ systemctl() {
   log systemctl "$@"
   case $1 in
     stop) rm -f "$STATE/active-$2" ;;
-    start) touch "$STATE/active-$2" ;;
+    start)
+      touch "$STATE/active-$2"
+      # next-pid-<unit> gives the unit a new main process when it starts.
+      [ ! -e "$STATE/next-pid-$2" ] || mv "$STATE/next-pid-$2" "$STATE/pid-$2" ;;
     is-active) if [ -e "$STATE/active-$2" ]; then echo active; else echo inactive; return 3; fi ;;
     cat) cat "$STATE/unit-$2" ;;
     show)
       case $3 in
-        MainPID) if [ -e "$STATE/active-$5" ]; then echo 4242; else echo 0; fi ;;
+        MainPID) if [ -e "$STATE/active-$5" ]; then cat "$STATE/pid-$5" 2>/dev/null || echo 4242; else echo 0; fi ;;
         NRestarts) echo 0 ;;
       esac ;;
   esac
@@ -48,6 +56,9 @@ curl() {
   [ -e "$STATE/active-shieldbot" ] || return 7
   case ${!#} in
     */api/health)
+      # unhealthy: the API never answers; unhealthy-on-target: it never answers on the target commit.
+      [ ! -e "$STATE/unhealthy" ] || return 7
+      [ ! -e "$STATE/unhealthy-on-target" ] || [ ! -e "$FAKE_APP/NEW_SCHEMA" ] || return 7
       # health-fail-call names the one /api/health request (1, 2, ...) that fails, as curl -f would.
       calls=$(( $(cat "$STATE/health-calls" 2>/dev/null || echo 0) + 1 ))
       echo "$calls" > "$STATE/health-calls"
@@ -163,16 +174,29 @@ class Server:
         bin_dir = self.app / "venv" / "bin"
         bin_dir.mkdir(parents=True)
         write_executable(bin_dir / "python", f'#!/bin/sh\nexec "{PYTHON}" "$@"\n')
-        # pip stands in for the new code's first run: on the target commit it writes a row.
+        # pip stands in for the new code's first run: on the target commit it writes a row. State files make it
+        # edit a tracked file (pip-dirties-tree), fail (pip-fails), or signal the deploy script while it waits
+        # (signal-during-pip holds the signal name; that one fires on every install, the restore's too).
         migrate = (
             "import sqlite3, sys; db = sqlite3.connect(sys.argv[1]); "
             "db.execute('INSERT OR IGNORE INTO scans VALUES (99)'); db.commit(); db.close()"
         )
+        app = self.app.as_posix()
         write_executable(
             bin_dir / "pip",
-            f'#!/bin/sh\nprintf "pip %s\\n" "$*" >> "$STATE/calls"\n'
-            f'if [ -f "{self.app.as_posix()}/NEW_SCHEMA" ]; then '
-            f'"{PYTHON}" -c "{migrate}" "{self.db.as_posix()}"; fi\n',
+            f"""#!/bin/sh
+printf 'pip %s\\n' "$*" >> "$STATE/calls"
+if [ "$1" = freeze ]; then echo fastapi==0.1; exit 0; fi
+if [ -f "{app}/NEW_SCHEMA" ]; then
+  "{PYTHON}" -c "{migrate}" "{self.db.as_posix()}"
+  [ ! -e "$STATE/pip-dirties-tree" ] || echo edited >> "{app}/NEW_SCHEMA"
+fi
+[ ! -e "$STATE/signal-during-pip" ] || kill -"$(cat "$STATE/signal-during-pip")" "$PPID"
+if [ -e "$STATE/signal-during-restore-pip" ] && [ ! -f "{app}/NEW_SCHEMA" ]; then
+  kill -"$(cat "$STATE/signal-during-restore-pip")" "$PPID"
+fi
+[ ! -e "$STATE/pip-fails" ] || [ ! -f "{app}/NEW_SCHEMA" ] || exit 1
+""",
         )
 
         (self.state / "unit-shieldbot").write_text(
@@ -205,7 +229,10 @@ class Server:
         (self.state / "health.json").write_text(json.dumps(payload), encoding="utf-8")
 
     def run(self, *args):
-        return run_script(self.bash, self.script, self.state, *args)
+        return run_script(self.bash, self.script, self.state, *args, FAKE_APP=self.app.as_posix())
+
+    def flag(self, name: str, value: str = "") -> None:
+        (self.state / name).write_text(value, encoding="utf-8")
 
     def head(self) -> str:
         return git(self.app, "rev-parse", "HEAD")
@@ -264,8 +291,11 @@ def test_check_is_read_only_and_says_go(server):
     assert code == 0, err
     assert "GO" in out and "rollback point" in out
     assert "1 commit(s) ahead" in out
+    assert "on origin/main" in out
     calls = server.calls()
     assert any(call.startswith("git -C") and " fetch " in call for call in calls)
+    # A pager would wait for a keypress with nobody at the terminal.
+    assert any(" --no-pager log " in call for call in calls)
     for forbidden in ("systemctl stop", "systemctl start", "pip", "curl"):
         assert not [call for call in calls if call.startswith(forbidden)], forbidden
     assert not [call for call in calls if " checkout " in call]
@@ -323,10 +353,27 @@ def test_check_fails_closed_when_the_bot_environment_cannot_be_read(server):
     assert "could not read the environment" in err
 
 
-def test_check_refuses_a_commit_that_is_not_on_origin(server):
+def test_check_refuses_an_unknown_commit(server):
     code, _, err = server.run("--check", "0123456789abcdef0123456789abcdef01234567")
     assert code == 1
     assert "not a commit" in err
+
+
+def test_check_refuses_a_commit_that_exists_only_on_the_server(server):
+    # A commit made on the server (never pushed) is in the local repository but on no origin branch.
+    local = git(server.app, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "made on the server")
+    code, out, err = server.run("--check", local)
+    assert code == 1
+    assert "not on any origin branch" in err
+    assert "rollback point" not in out
+
+
+def test_check_refuses_when_the_app_filesystem_is_short_of_space(server):
+    server.flag("app-free-kib", "10")
+    code, out, err = server.run("--check", server.target)
+    assert code == 1
+    assert f"not enough free space in {server.app.as_posix()}" in err
+    assert "rollback point" not in out
 
 
 def test_check_refuses_modified_tracked_files(server):
@@ -349,6 +396,7 @@ def test_cutover_deploys_in_order_and_touches_only_its_two_units(server):
     assert rows(backup / "shieldbot.db") == [1]
     assert not list(backup.glob("*.partial"))
     assert not (backup / "env.bak").exists()
+    assert (backup / "pip-freeze.txt").read_text(encoding="utf-8") == "fastapi==0.1\n"
     if os.name == "posix":
         # Windows reports no real modes. The backup holds user data and is root-only.
         assert backup.stat().st_mode & 0o777 == 0o700
@@ -366,8 +414,9 @@ def test_cutover_deploys_in_order_and_touches_only_its_two_units(server):
         if call.startswith("systemctl"):
             assert call.split()[-1] in UNITS, call
     checkout = next(i for i, call in enumerate(calls) if " checkout " in call)
-    assert first(calls, "systemctl stop shieldbot") < checkout < first(calls, "pip")
-    assert first(calls, "pip") < first(calls, "systemctl start shieldbot") < first(calls, "curl")
+    assert first(calls, "systemctl stop shieldbot") < first(calls, "pip freeze") < checkout
+    assert checkout < first(calls, "pip install") < first(calls, "systemctl start shieldbot")
+    assert first(calls, "systemctl start shieldbot") < first(calls, "curl")
     assert first(calls, "curl") < first(calls, "systemctl start shieldbot-bot")
     assert server.active() == UNITS
 
@@ -398,11 +447,103 @@ def test_cutover_rolls_back_when_health_misses_a_chain(server):
     code, out, err = server.run("--cutover", server.target)
     assert code == 1
     assert "expected [56, 4663]" in err
+    # The failing line and command are named.
+    assert "failed at line" in err and "chain_info.py" in err
     assert "rolled back" in err
     assert server.head() == server.old
     assert rows(server.db) == [1]
     assert server.active() == UNITS
     assert not (server.app / "NEW_SCHEMA").exists()
+    # The packages go back to the versions frozen before the deploy.
+    [backup] = server.backups()
+    assert f"pip install -q -r {backup.as_posix()}/pip-freeze.txt" in server.calls()
+
+
+def assert_rolled_back(server, code, err):
+    assert code == 1
+    assert "rolled back" in err and "did not complete" not in err
+    assert server.head() == server.old
+    assert rows(server.db) == [1]
+    assert server.active() == UNITS
+
+
+def test_cutover_rolls_back_when_pip_fails(server):
+    server.flag("pip-fails")
+    code, _, err = server.run("--cutover", server.target)
+    assert_rolled_back(server, code, err)
+    # The API never started on the target: the only starts are the restore's.
+    starts = [call for call in server.calls() if call.startswith("systemctl start")]
+    assert starts == ["systemctl start shieldbot", "systemctl start shieldbot-bot"]
+
+
+def test_cutover_rolls_back_when_the_api_never_answers(server):
+    server.flag("unhealthy-on-target")
+    code, _, err = server.run("--cutover", server.target)
+    assert_rolled_back(server, code, err)
+    assert "journalctl -u shieldbot -n 40 --no-pager" in server.calls()
+    assert (
+        "systemctl start shieldbot-bot" not in server.calls()[: first(server.calls(), "journalctl")]
+    )
+
+
+def test_rollback_discards_edits_the_failed_run_made_to_tracked_files(server):
+    # The failed run edits a file that only the target commit tracks; a plain checkout of the old commit refuses.
+    server.flag("pip-dirties-tree")
+    server.flag("pip-fails")
+    code, _, err = server.run("--cutover", server.target)
+    assert_rolled_back(server, code, err)
+    assert not (server.app / "NEW_SCHEMA").exists()
+    assert git(server.app, "status", "--porcelain", "--untracked-files=no") == ""
+
+
+@pytest.mark.parametrize("signal", ["HUP", "TERM", "INT"])
+def test_a_signal_during_cutover_rolls_back(server, signal):
+    # A dropped SSH session sends HUP. The same signal is sent again during the restore's own pip install, and
+    # the restore must finish regardless.
+    server.flag("signal-during-pip", signal)
+    code, _, err = server.run("--cutover", server.target)
+    assert f"interrupted by SIG{signal}" in err
+    assert_rolled_back(server, code, err)
+    assert len([call for call in server.calls() if call.startswith("pip install")]) == 2
+
+
+@pytest.mark.parametrize("signal", ["HUP", "TERM"])
+def test_a_signal_during_the_restore_does_not_cut_it_short(server, signal):
+    # The deploy fails on its own, then the session drops while the restore reinstalls the old packages.
+    server.flag("pip-fails")
+    server.flag("signal-during-restore-pip", signal)
+    code, _, err = server.run("--cutover", server.target)
+    assert_rolled_back(server, code, err)
+    # The signal is ignored: it neither starts a second restore nor ends this one.
+    assert err.count("== Restoring") == 1
+    assert "interrupted" not in err
+
+
+def test_a_bot_holding_the_key_after_cutover_is_stopped_without_a_rollback(server):
+    secret = "0x" + "5e" * 32
+    environ = server.tmp / "proc" / "4343" / "environ"
+    environ.parent.mkdir(parents=True)
+    environ.write_bytes(f"PATH=/usr/bin\x00{KEY}={secret}\x00".encode())
+    server.flag("next-pid-shieldbot-bot", "4343")
+    code, out, err = server.run("--cutover", server.target)
+    assert code == 1
+    assert "SECURITY" in err
+    assert secret not in out + err
+    assert server.active() == {"shieldbot"}
+    assert server.head() == server.target
+    assert len([call for call in server.calls() if " checkout " in call]) == 1
+    assert "rolled back" not in err
+
+
+def test_a_rollback_that_cannot_bring_the_api_back_says_so(server):
+    server.flag("unhealthy")
+    code, _, err = server.run("--cutover", server.target)
+    assert code == 1
+    assert "the rollback did not complete" in err
+    [backup] = server.backups()
+    assert backup.as_posix() in err
+    assert server.head() == server.old
+    assert rows(server.db) == [1]
 
 
 def test_manual_rollback_restores_the_saved_commit_and_database(server):
