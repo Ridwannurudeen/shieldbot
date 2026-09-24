@@ -197,7 +197,7 @@ def build_scan_evidence(
         "shieldbot_commit": SHIELDBOT_COMMIT,
         "scanned_at": scanned_at if cached_scan_at is None else int(cached_scan_at),
     }
-    caller_hex = _CALLER.fullmatch(caller) if caller else None
+    caller_hex = _CALLER.fullmatch(caller.strip()) if caller else None
     if caller_hex:
         pattern = re.compile(f"(?:0x)?{caller_hex.group(1)}", re.IGNORECASE)
         document = _without_caller(document, pattern)

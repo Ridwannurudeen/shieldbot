@@ -104,8 +104,14 @@ def test_a_cached_verdict_says_it_came_from_the_cache():
 
 @pytest.mark.parametrize(
     "caller",
-    [CALLER.upper(), CALLER[2:], CALLER[2:].lower(), "0X" + CALLER[2:].lower()],
-    ids=["0X-upper", "unprefixed", "unprefixed-lower", "0X-lower"],
+    [
+        CALLER.upper(),
+        CALLER[2:],
+        CALLER[2:].lower(),
+        "0X" + CALLER[2:].lower(),
+        f"  {CALLER}\n",
+    ],
+    ids=["0X-upper", "unprefixed", "unprefixed-lower", "0X-lower", "padded"],
 )
 def test_the_caller_is_masked_in_any_form_the_request_gave_it(caller):
     doc = document(
