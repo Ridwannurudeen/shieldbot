@@ -21,7 +21,7 @@ from services.launch_discovery import (
     MAX_BLOCKS_PER_SWEEP,
     SOURCES,
     LaunchDiscovery,
-    LaunchDiscoveryError,
+    RpcUnavailableError,
 )
 from services.rpc_guard import CLOSED, RPC_BUDGET_RPS, RpcGuard
 
@@ -168,7 +168,8 @@ async def test_a_failed_header_read_keeps_the_launches_confirmed_before_it(db):
     discovery = LaunchDiscovery(db, rpc_url="https://rpc.invalid")
     discovery._post = rpc
     with patch("services.launch_discovery.asyncio.sleep", Clock().sleep):
-        with pytest.raises(LaunchDiscoveryError):
+        # The sweep raises the header read's own failure, so its cause stays visible.
+        with pytest.raises(RpcUnavailableError):
             await discovery.poll()
 
         first_unconfirmed = rpc.failed_batches[0][0]

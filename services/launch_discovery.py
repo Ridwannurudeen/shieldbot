@@ -337,7 +337,7 @@ class LaunchDiscovery:
             except LaunchDiscoveryError as exc:
                 logger.warning("Launch discovery combined read rejected: %s", type(exc).__name__)
                 return {"target": target, "launches": await self._sweep(target), "swaps": {}}
-            records, stop = await self._store(
+            records, stop, _ = await self._store(
                 decoded, {source.name: (cursor, target) for source in SOURCES}
             )
             if stop is not None:
@@ -376,8 +376,8 @@ class LaunchDiscovery:
     async def _sweep(self, target: int) -> List[Dict]:
         """Sweep every source from its own cursor towards ``target`` and store what it finds.
 
-        Raises LaunchDiscoveryError, after storing the launches before it, when a launch block
-        could not be confirmed.
+        When a launch block could not be confirmed, raises the failure behind it after storing
+        the launches before it.
         """
         decoded = []
         progress = {}
@@ -390,12 +390,14 @@ class LaunchDiscovery:
             logs, done = await self._sweep_source(source, cursor, end)
             decoded += logs
             progress[source.name] = (cursor, done)
-        records, stop = await self._store(decoded, progress)
-        if stop is not None:
-            raise LaunchDiscoveryError(f"Launch block {stop} not confirmed")
+        records, _, failure = await self._store(decoded, progress)
+        if failure is not None:
+            raise failure
         return records
 
-    async def _store(self, decoded, progress) -> Tuple[List[Dict], Optional[int]]:
+    async def _store(
+        self, decoded, progress
+    ) -> Tuple[List[Dict], Optional[int], Optional[LaunchDiscoveryError]]:
         """Confirm launch blocks against canonical headers, then record launches and move cursors.
 
         ``progress`` maps each source to (previous cursor, last block covered without a gap).
@@ -403,8 +405,8 @@ class LaunchDiscovery:
         does not match, the launches in older blocks are still recorded and every cursor stops
         short of that block, so the next read resumes there; the failure is logged. A range too
         large to confirm in one pass therefore still moves forward instead of being reread from
-        the same cursor forever. Returns the launches recorded and that first unconfirmed block,
-        or None when every launch was confirmed.
+        the same cursor forever. Returns the launches recorded, that first unconfirmed block and
+        the failure behind it, or None and None when every launch was confirmed.
         """
         records = _launch_records(decoded)
         headers = {}
@@ -439,7 +441,7 @@ class LaunchDiscovery:
             logger.warning(
                 "Launch discovery stopped before block %d: %s", stop, type(failure).__name__
             )
-        return confirmed, stop
+        return confirmed, stop, failure
 
     async def _sweep_source(self, source: LaunchSource, cursor: int, end: int):
         """Read one source up to ``end``, halving a rejected query down to MIN_CHUNK_BLOCKS.
