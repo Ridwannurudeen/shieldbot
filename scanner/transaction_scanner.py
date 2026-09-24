@@ -6,7 +6,7 @@ Integrates risk_scorer for numeric scoring and AI analysis
 
 import logging
 from typing import Dict, List, Optional
-from services.contract_service import pushes_selector
+from services.contract_service import push4_operands
 from utils.scam_db import ScamDatabase
 from utils.chain_info import get_chain_name
 from utils.web3_client import UnsupportedChainError
@@ -329,9 +329,10 @@ class TransactionScanner:
     def _detect_suspicious_patterns(self, bytecode: str) -> List[str]:
         """Detect suspicious patterns in contract bytecode (expanded to ~18 signatures)"""
         warnings = []
+        operands = push4_operands(bytecode)
 
         for sig, info in SUSPICIOUS_SIGNATURES.items():
-            if info['severity'] in ('critical', 'high') and pushes_selector(bytecode, sig):
+            if info['severity'] in ('critical', 'high') and sig in operands:
                 warnings.append(f"{info['warning']}")
 
         return warnings

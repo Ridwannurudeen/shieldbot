@@ -19,18 +19,25 @@ BYTECODE_PATTERNS = {
 BSCSCAN_DELAY = 0.25
 
 
-def pushes_selector(bytecode_hex: str, selector: str) -> bool:
-    """True when the bytecode holds PUSH4 <selector> on a byte boundary, as a dispatcher does.
+def push4_operands(bytecode_hex: str) -> set:
+    """Every PUSH4 operand in the code, as hex, found by walking the opcodes once.
 
-    The same four bytes inside a constant, or across a byte boundary, are not a function.
+    A Solidity dispatcher compares the call's selector against PUSH4 operands, so a selector found
+    here is a function; the same bytes inside another push's data (PUSH1 to PUSH32 immediates are
+    skipped) are not. The walk runs straight from byte 0, so data stored after the code, such as
+    tables read with CODECOPY or the metadata tail, is read as opcodes and can desync it there.
     """
-    needle = '63' + selector
-    start = bytecode_hex.find(needle)
-    while start != -1:
-        if start % 2 == 0:
-            return True
-        start = bytecode_hex.find(needle, start + 1)
-    return False
+    code = bytes.fromhex(bytecode_hex[2:] if bytecode_hex.startswith('0x') else bytecode_hex)
+    operands = set()
+    position = 0
+    while position < len(code):
+        opcode = code[position]
+        if 0x60 <= opcode <= 0x7f:
+            if opcode == 0x63:
+                operands.add(code[position + 1:position + 5].hex())
+            position += opcode - 0x5f
+        position += 1
+    return operands
 
 
 class ContractService:
@@ -124,8 +131,9 @@ class ContractService:
                     has_destroy = False
                     if bytecode:
                         bytecode_hex = bytecode.hex() if isinstance(bytecode, bytes) else str(bytecode)
+                        operands = push4_operands(bytecode_hex)
                         for sig, pattern_name in BYTECODE_PATTERNS.items():
-                            if pushes_selector(bytecode_hex, sig):
+                            if sig in operands:
                                 bytecode_warnings.append(pattern_name)
                                 if pattern_name == 'mint':
                                     has_mint = True

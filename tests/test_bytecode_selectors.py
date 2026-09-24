@@ -56,6 +56,12 @@ def test_every_table_selector_is_a_hashed_signature(table):
     assert not set(table) & set(BENIGN_GETTERS)
 
 
+@pytest.mark.parametrize("table", [BYTECODE_PATTERNS, SUSPICIOUS_SIGNATURES])
+def test_every_table_selector_is_pushed_with_push4(table):
+    # solc pushes a selector with a leading zero byte with PUSH3 or smaller, which the scan never reads.
+    assert not [selector for selector in table if selector.startswith("00")]
+
+
 def test_contract_service_labels_name_the_hashed_function():
     for selector, label in BYTECODE_PATTERNS.items():
         assert LABEL_WORDS[label] in SIGNATURES[selector].lower(), (selector, label)
@@ -156,9 +162,11 @@ def test_destroy_scores_as_an_owner_power_unless_ownership_is_renounced(renounce
 
 
 # mint(address,uint256) and upgradeTo(address) as data rather than as a dispatcher's PUSH4 operand:
-# inside a PUSH32 constant, after a byte other than 0x63, and off a byte boundary (0x06 0x36 ...).
+# inside a PUSH32 constant (twice, the second time as a PUSH4 opcode and operand inside it), after a
+# byte other than 0x63, and off a byte boundary (0x06 0x36 ...).
 SELECTORS_AS_DATA = [
     "0x60806040" + "7f" + "00" * 28 + "40c10f19",
+    "0x60806040" + "7f" + "00" * 27 + "63" + "40c10f19",
     "0x60806040" + "60" + "40c10f19" + "3659cfe6",
     "0x60806040" + "0" + "63" + "40c10f19" + "0",
     "0x60806040" + "0" + "63" + "3659cfe6" + "0",
