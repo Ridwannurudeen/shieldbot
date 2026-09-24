@@ -498,7 +498,10 @@ async def test_balanced_repeat_uses_cache_with_effective_policy(
     req = api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40)
     request = SimpleNamespace(headers={"X-Policy-Mode": override} if override else {})
     cold = await api.firewall(req, request)
-    services.db.get_contract_score.return_value = services.db.upsert_contract_score.call_args.kwargs
+    # The stored row as get_contract_score returns it, with the time of the scan that wrote it.
+    services.db.get_contract_score.return_value = {
+        **services.db.upsert_contract_score.call_args.kwargs, "last_scanned_at": 1790000000.0,
+    }
     warm = await api.firewall(req, request)
 
     assert warm["classification"] == cold["classification"] == "SAFE"

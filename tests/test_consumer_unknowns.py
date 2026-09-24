@@ -503,7 +503,7 @@ async def test_firewall_passes_the_policy_header_to_the_signature_only_path(cons
     monkeypatch.setattr(api, '_build_signature_only_response', signature_only)
     req = _transfer_request(api)
     await api.firewall(req, SimpleNamespace(headers={'X-Policy-Mode': 'STRICT'}))
-    signature_only.assert_awaited_once_with(req, policy_override='STRICT')
+    signature_only.assert_awaited_once_with(req, policy_override='STRICT', trail={})
 
 
 @pytest.mark.asyncio
