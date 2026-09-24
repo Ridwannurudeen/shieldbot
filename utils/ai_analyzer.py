@@ -200,166 +200,6 @@ Base your score on: verification status, contract age, scam DB matches, bytecode
             logger.error("AI risk score failed: %s", type(e).__name__)
             return None
 
-    async def analyze_verified_source(self, address: str, source_code: str, chain_id: Optional[int] = None) -> Optional[Dict]:
-        """
-        AI analysis of verified Solidity source code for dangerous patterns.
-
-        Returns:
-            dict with keys: dangerous_patterns (list of dicts), severity (str), summary (str)
-        """
-        if not self.client:
-            return None
-
-        try:
-            # Truncate source for API limits (first 12KB)
-            source_sample = source_code[:12000] if len(source_code) > 12000 else source_code
-
-            prompt = f"""Analyze this {_get_prompt_chain_name(chain_id)} smart contract source code for dangerous patterns.
-
-Address: {address}
-Source Code:
-```solidity
-{source_sample}
-```
-
-Return ONLY a JSON object (no markdown):
-{{
-  "dangerous_patterns": [
-    {{"pattern": "<name>", "severity": "<critical|high|medium|low>", "detail": "<explanation>"}}
-  ],
-  "severity": "<SAFE|WARNING|DANGER>",
-  "summary": "<2 sentence summary>"
-}}
-
-Look for: honeypot mechanisms (blacklists, trading pauses, max tx traps), hidden mint functions, proxy upgradability, owner-only sell restrictions, fee manipulation, hidden approvals, self-destruct, and delegatecall to unknown addresses."""
-
-            message = await self.client.messages.create(
-                model=self.model,
-                max_tokens=600,
-                messages=[{"role": "user", "content": prompt}]
-            )
-
-            raw = message.content[0].text.strip()
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-                if raw.endswith("```"):
-                    raw = raw[:-3]
-                raw = raw.strip()
-
-            result = json.loads(raw)
-            logger.info(f"AI source analysis for {address}: {result.get('severity', 'unknown')}")
-            return result
-
-        except (json.JSONDecodeError, KeyError) as e:
-            logger.error("AI source analysis parse error: %s", type(e).__name__)
-            return None
-        except Exception as e:
-            logger.error("AI source analysis failed: %s", type(e).__name__)
-            return None
-
-    async def analyze_contract_bytecode(self, address: str, bytecode: str, scan_results: Dict) -> Optional[str]:
-        """
-        Use Claude to analyze contract bytecode and provide natural language explanation.
-        """
-        if not self.client:
-            return None
-
-        try:
-            context = self._prepare_scan_context(address, scan_results)
-            bytecode_sample = bytecode[:8000] if len(bytecode) > 8000 else bytecode
-
-            prompt = f"""You are a blockchain security expert analyzing a smart contract on {_get_prompt_chain_name(scan_results.get('chain_id'))}.
-
-Contract Address: {address}
-Bytecode Sample (first 4KB): {bytecode_sample}
-
-Scan Results from automated tools:
-{context}
-
-Based on the bytecode patterns and scan results, provide:
-1. A clear risk assessment (HIGH/MEDIUM/LOW)
-2. Specific vulnerabilities or concerns you identify
-3. Explanation in simple terms for non-technical users
-4. Actionable recommendation (interact/avoid/proceed with caution)
-
-Keep response under 200 words, focused and actionable."""
-
-            message = await self.client.messages.create(
-                model=self.model,
-                max_tokens=500,
-                messages=[{"role": "user", "content": prompt}]
-            )
-
-            return message.content[0].text
-
-        except Exception as e:
-            logger.error("AI analysis failed: %s", type(e).__name__)
-            return None
-
-    async def analyze_token_safety(self, address: str, token_info: Dict, safety_results: Dict) -> Optional[str]:
-        """
-        Use Claude to analyze token safety and provide contextual recommendations.
-        """
-        if not self.client:
-            return None
-
-        try:
-            context = self._prepare_token_context(address, token_info, safety_results)
-
-            prompt = f"""You are a DeFi security expert analyzing a token on {_get_prompt_chain_name(safety_results.get('chain_id'))}.
-
-Token: {token_info.get('name', 'Unknown')} ({token_info.get('symbol', 'N/A')})
-Address: {address}
-
-Safety Check Results:
-{context}
-
-Provide:
-1. Clear safety verdict (SAFE/WARNING/DANGER)
-2. Key risks identified (honeypot, taxes, ownership, etc.)
-3. Trading advice in simple terms
-4. What users should check before buying
-
-Keep response under 200 words, actionable for traders."""
-
-            message = await self.client.messages.create(
-                model=self.model,
-                max_tokens=500,
-                messages=[{"role": "user", "content": prompt}]
-            )
-
-            return message.content[0].text
-
-        except Exception as e:
-            logger.error("AI token analysis failed: %s", type(e).__name__)
-            return None
-
-    async def explain_findings(self, user_question: str, scan_context: Dict) -> Optional[str]:
-        """Answer user questions about scan results using Claude."""
-        if not self.client:
-            return None
-
-        try:
-            prompt = f"""You are helping a user understand a smart contract security scan.
-
-Scan Context: {scan_context}
-
-User Question: {user_question}
-
-Provide a clear, helpful answer in 2-3 sentences. Use simple language."""
-
-            message = await self.client.messages.create(
-                model=self.model,
-                max_tokens=300,
-                messages=[{"role": "user", "content": prompt}]
-            )
-
-            return message.content[0].text
-
-        except Exception as e:
-            logger.error("AI explanation failed: %s", type(e).__name__)
-            return None
-
     def _format_scan_data(self, scan_data: Dict) -> str:
         """Format scan data dict into readable context string."""
         lines = []
@@ -368,30 +208,6 @@ Provide a clear, helpful answer in 2-3 sentences. Use simple language."""
                 continue  # skip large/recursive fields
             lines.append(f"- {key}: {value}")
         return "\n".join(lines)
-
-    def _prepare_scan_context(self, address: str, scan_results: Dict) -> str:
-        """Format scan results for Claude context"""
-        return f"""
-- Verified: {scan_results.get('is_verified', False)}
-- Risk Level: {scan_results.get('risk_level', 'unknown').upper()}
-- Contract Age: {scan_results.get('contract_age_days', 'unknown')} days
-- Scam Database Matches: {_scam_match_count(scan_results)}
-- Warnings: {', '.join(scan_results.get('warnings', [])) if scan_results.get('warnings') else 'None'}
-"""
-
-    def _prepare_token_context(self, address: str, token_info: Dict, safety_results: Dict) -> str:
-        """Format token safety results for Claude context"""
-        return f"""
-- Token: {token_info.get('name', 'Unknown')} ({token_info.get('symbol', 'N/A')})
-- Is Honeypot: {safety_results.get('is_honeypot', False)}
-- Can Buy: {safety_results.get('checks', {}).get('can_buy', 'unknown')}
-- Can Sell: {safety_results.get('checks', {}).get('can_sell', 'unknown')}
-- Ownership Renounced: {safety_results.get('checks', {}).get('ownership_renounced', 'unknown')}
-- Buy Tax: {safety_results.get('buy_tax', 0)}%
-- Sell Tax: {safety_results.get('sell_tax', 0)}%
-- Safety Level: {safety_results.get('safety_level', 'unknown').upper()}
-- Risks: {', '.join(safety_results.get('risks', [])) if safety_results.get('risks') else 'None'}
-"""
 
     async def generate_forensic_report(self, address: str, scan_data: Dict, scan_type: str) -> Optional[str]:
         """
@@ -593,9 +409,9 @@ Return the explanation JSON now."""
         """Build context string for the firewall prompt."""
         lines = [
             "=== TRANSACTION DATA ===",
-            f"From: {tx_data.get('from', 'unknown')}",
+            f"From: {_untrusted(tx_data.get('from', 'unknown'))}",
             f"To: {tx_data.get('to', 'unknown')}",
-            f"Value: {tx_data.get('value', '0')} wei",
+            f"Value: {_untrusted(tx_data.get('value', '0'))} wei",
             f"Chain ID: {tx_data.get('chainId') if tx_data.get('chainId') is not None else 'Unknown'}",
         ]
 

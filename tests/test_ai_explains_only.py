@@ -215,7 +215,10 @@ async def test_a_token_name_reaches_the_prompt_only_as_bounded_quoted_data():
     }
 
     await analyzer.generate_firewall_report(
-        {"to": "0x" + "a" * 40, "decoded_calldata": decoded}, scan, "HIGH_RISK", 60
+        {"to": "0x" + "a" * 40, "from": INJECTION, "value": INJECTION, "decoded_calldata": decoded},
+        scan,
+        "HIGH_RISK",
+        60,
     )
 
     prompt = analyzer.client.messages.create.await_args.kwargs["messages"][0]["content"]
@@ -223,7 +226,8 @@ async def test_a_token_name_reaches_the_prompt_only_as_bounded_quoted_data():
     assert "\u202e" not in prompt
     assert "A" * 101 not in prompt
     quoted = json.dumps(CONTROL_CHARACTERS.sub(" ", INJECTION)[:100], ensure_ascii=False)
-    assert prompt.count(quoted) >= 6
+    # Name, symbol, spender label, parameter, warning, scam type and reason, sender and value.
+    assert prompt.count(quoted) == 9
     amount = "UNLIMITED " + CONTROL_CHARACTERS.sub(" ", INJECTION)
     assert json.dumps(amount[:100], ensure_ascii=False) in prompt
     assert "Classification: HIGH_RISK" in prompt
