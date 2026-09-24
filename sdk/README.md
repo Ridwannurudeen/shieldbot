@@ -71,7 +71,7 @@ if (!verdict.allowed) {
 | `getThreats({ chainId?, limit?, since? })` | `GET /api/threats/feed` | optional |
 | `health()` | `GET /api/health` | no |
 
-`check()` sends `value` as wei in a decimal string. The API answers `check()` with 404 until the agent is registered with the same API key; a different key gets 403.
+`value` for `check()` and `firewall()` is wei as a decimal or `0x` hex string (default `0`). The SDK sends it as a decimal string and throws `ShieldBotError` with code `INVALID_VALUE` before any request for anything that is not a non-negative integer, so the API never prices an unreadable value as zero. The API answers `check()` with 404 until the agent is registered with the same API key; a different key gets 403.
 
 ## Unknown results
 

@@ -40,7 +40,7 @@ export interface FirewallOptions extends ScanOptions {
   from?: string;
   /** Transaction calldata. */
   data?: string;
-  /** Transaction value in hex. */
+  /** Value in wei, as a decimal or 0x hex string. Sent as decimal wei; anything else throws INVALID_VALUE. */
   value?: string;
 }
 
@@ -276,7 +276,7 @@ export class ShieldBot {
       to: toAddress,
       from: options.from || '',
       data: options.data || '0x',
-      value: options.value || '0x0',
+      value: this._weiValue(options.value, 'firewall'),
       chainId,
     });
   }
@@ -343,6 +343,7 @@ export class ShieldBot {
       throw new ShieldBotError('agentId required for check()', 400, 'MISSING_AGENT_ID');
     }
     const chainId = this._requireChainId(transaction.chainId, 'check');
+    const value = this._weiValue(transaction.value, 'check');
 
     const canonicalInteger = (value: unknown): string => {
       if (
@@ -362,7 +363,7 @@ export class ShieldBot {
       transaction.to?.toLowerCase(),
       canonicalInteger(chainId),
       (transaction.data || '0x').toLowerCase(),
-      canonicalInteger(transaction.value ?? '0'),
+      value,
     ]);
 
     // Check local cache
@@ -378,7 +379,7 @@ export class ShieldBot {
           from: transaction.from,
           to: transaction.to,
           data: transaction.data || '0x',
-          value: transaction.value || '0',
+          value,
           chain_id: chainId,
         },
       });
@@ -465,6 +466,21 @@ export class ShieldBot {
       throw new ShieldBotError(`chainId required for ${method}()`, 400, 'MISSING_CHAIN_ID');
     }
     return chainId;
+  }
+
+  private _weiValue(value: unknown, method: string): string {
+    if (value === undefined) {
+      return '0';
+    }
+    const text = typeof value === 'string' ? value.trim() : '';
+    const valid =
+      typeof value === 'bigint' ? value >= 0n
+        : typeof value === 'number' ? Number.isSafeInteger(value) && value >= 0
+          : /^(0x[0-9a-f]+|[0-9]+)$/i.test(text);
+    if (!valid) {
+      throw new ShieldBotError(`value for ${method}() must be a non-negative integer amount of wei`, 400, 'INVALID_VALUE');
+    }
+    return BigInt(typeof value === 'string' ? text : (value as number | bigint)).toString();
   }
 
   private _cacheVerdict(key: string, verdict: Verdict): void {

@@ -74,7 +74,6 @@ test('equivalent transaction encodings reuse the cached allowance', async () => 
 
 for (const [name, firstValue, secondValue] of [
   ['hex and decimal values', '0x10', '10'],
-  ['unparseable and zero values', 'not-a-number', '0'],
 ]) {
   test(`${name} do not share a cache entry`, async () => {
     let calls = 0;
