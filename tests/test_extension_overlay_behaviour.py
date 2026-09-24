@@ -867,8 +867,8 @@ def test_inject_leaves_no_page_readable_marker_and_logs_nothing():
 # Built-ins a page script could replace in its own world before the first wallet call.
 PATCHES = {
     "set-has": "Set.prototype.has = () => false;",
-    "weakset-has": "WeakSet.prototype.has = () => true;",
-    "weakset-add": "WeakSet.prototype.add = function () { return this; };",
+    "weakmap-get": "WeakMap.prototype.get = () => undefined;",
+    "weakmap-set": "WeakMap.prototype.set = function () { return this; };",
     "define-property": "Object.defineProperty = (target) => target;",
     "object-prototype-accessor": "Object.prototype.get = function () { return undefined; };",
     "function-bind": "Function.prototype.bind = function () { return async () => 'forwarded'; };",
@@ -1012,6 +1012,69 @@ def test_a_provider_set_later_is_wrapped_before_the_page_can_use_it():
   assert.equal(sent.length, 0);
   assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').length, 1);
 """
+    )
+
+
+# The provider is shaped like MetaMask's: a class whose request is also bound onto the instance,
+# behind a Proxy. The page's patch, if any, runs before the provider is announced.
+@pytest.mark.parametrize(
+    "patch",
+    [
+        "",
+        "Object.getPrototypeOf = () => null;",
+        "Object.getOwnPropertyDescriptor = () => undefined;",
+        "WeakMap.prototype.get = () => undefined;",
+        "WeakMap.prototype.set = function () { return this; };",
+    ],
+    ids=["unpatched", "get-prototype-of", "get-own-property-descriptor", "weakmap-get", "weakmap-set"],
+)
+def test_a_request_taken_from_the_provider_prototype_is_checked_too(patch):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  vm.runInContext(JSON.parse(process.argv[1]), context);
+  class WalletProvider {
+    constructor() { this.request = this.request.bind(this); }
+    on() {}
+    async request(args) { if (args.method === 'eth_chainId') return '0x38'; sent.push(args); return 'sent'; }
+  }
+  const wallet = new Proxy(new WalletProvider(), {deleteProperty: () => true});
+  for (const fn of windowListeners['eip6963:announceProvider']) {
+    fn(new CustomEvent('eip6963:announceProvider', {detail: {provider: wallet, info: {name: 'wallet'}}}));
+  }
+  const inherited = Object.getPrototypeOf(wallet).request;
+  const tx = {method: 'eth_sendTransaction', params: [{to: '0x' + 'a'.repeat(40)}]};
+  const intercepts = () => posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT');
+  const routes = [
+    () => wallet.request(tx),
+    () => inherited.call(wallet, tx),
+    // An object the page made from the prototype, never announced.
+    () => inherited.call(Object.create(WalletProvider.prototype), tx),
+  ];
+  for (const route of routes) {
+    const before = intercepts().length;
+    const pending = route();
+    pending.catch(() => {});
+    await flush();
+    assert.equal(sent.length, 0, 'the request reached the wallet before any decision');
+    assert.equal(intercepts().length, before + 1, 'the request was not sent for a decision');
+    const {requestId} = intercepts().at(-1);
+    deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'block', proof: await proof(requestId, 'block')});
+    await assert.rejects(pending, /blocked/);
+  }
+  await assert.rejects(inherited.call(undefined, tx), /blocked/);
+  // The user's Proceed reaches the wallet once, through the wallet's own request.
+  const pending = inherited.call(wallet, tx);
+  await flush();
+  const {requestId} = intercepts().at(-1);
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'proceed', proof: await proof(requestId, 'proceed')});
+  assert.equal(await pending, 'sent');
+  assert.equal(sent.length, 1);
+  await flush();
+  assert.equal(intercepts().length, 4, 'the forwarded request was checked a second time');
+""",
+        patch,
     )
 
 
