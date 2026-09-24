@@ -424,6 +424,7 @@ LIMITERS = (
     "rate_limiter",
     "chat_limiter",
     "_report_limiter",
+    "_outcome_limiter",
     "_signup_limiter",
     "_free_key_limiter",
     "_watch_alerts_limiter",
@@ -488,6 +489,13 @@ def test_redis_backend_binds_every_limiter_with_its_failure_policy(mock_containe
             ).status_code
             == 429
         )
+        assert (
+            client.post(
+                "/api/outcome",
+                json={"address": "0x" + "1" * 40, "user_decision": "block"},
+            ).status_code
+            == 429
+        )
         assert client.post("/api/beta-signup", json={"email": "a@example.com"}).status_code == 429
         assert client.post("/api/keys/free", json={"email": "a@example.com"}).status_code == 429
         assert client.get("/api/watch/alerts").status_code == 429
@@ -507,13 +515,14 @@ def test_redis_keys_name_each_limiter_and_caller_once(mock_container, monkeypatc
         assert "Rate limits kept in Redis" in caplog.text
         client.post("/api/agent/chat", json={"message": "hi", "user_id": "u1"})
         client.post("/api/report", json={"address": "0x" + "1" * 40, "report_type": "scam"})
+        client.post("/api/outcome", json={"address": "0x" + "1" * 40, "user_decision": "block"})
         client.post("/api/beta-signup", json={"email": "a@example.com"})
         client.post("/api/keys/free", json={"email": "a@example.com"})
         client.get("/api/watch/alerts")
         keys = sorted(_text(key) for key in asyncio.run(redis.keys("*")))
     assert keys == sorted(
         f"{KEY_PREFIX}{name}:testclient"
-        for name in ("requests", "chat", "report", "signup", "free-key", "watch-alerts")
+        for name in ("requests", "chat", "report", "outcome", "signup", "free-key", "watch-alerts")
     )
 
 

@@ -8,8 +8,10 @@ import asyncio
 import logging
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call
@@ -22,6 +24,7 @@ from fastapi.testclient import TestClient
 
 from core.config import Settings
 from core.database import Database
+from utils.scam_db import BLACKLIST_RELOAD_SECONDS, ScamDatabase
 from utils.web3_client import Web3Client
 from tests.test_lifespan import mock_container  # noqa: F401  (pytest fixture)
 
@@ -79,12 +82,60 @@ def test_api_setting_starts_the_background_work_as_before(mock_container, monkey
     import api
 
     monkeypatch.setattr(api, "_background_workers", "external")
+    monkeypatch.setattr(api, "_blacklist_reload_task", None)
     with TestClient(api.app):
         assert api._background_workers == "api"
         mock_container.start_mempool_monitor.assert_awaited_once_with()
         mock_container.verdict_publisher.start.assert_called_once_with()
         mock_container.hunter.start.assert_awaited_once_with()
         mock_container.launch_watch.start.assert_awaited_once_with()
+        # The hunter's sweep reloads the scam blacklist here, so the API runs no reload of its own.
+        assert api._blacklist_reload_task is None
+
+
+def test_external_api_reloads_the_blacklist_itself_and_stops_on_shutdown(
+    mock_container, monkeypatch, tmp_path  # noqa: F811
+):
+    import api
+
+    # The API reloads as often as the bot does, and as the hunter's sweep would.
+    assert api.BLACKLIST_RELOAD_SECONDS == BLACKLIST_RELOAD_SECONDS == 1800
+    path = (tmp_path / "shieldbot.db").as_posix()
+    database = Database(path)
+    scam_db = ScamDatabase()
+    scam_db.db = database
+
+    async def startup():
+        await database.initialize()
+        await scam_db.load_blacklist()
+
+    mock_container.startup = AsyncMock(side_effect=startup)
+    mock_container.shutdown = AsyncMock(side_effect=database.close)
+    mock_container.scam_db = scam_db
+    mock_container.settings.background_workers = "external"
+    monkeypatch.setattr(api, "BLACKLIST_RELOAD_SECONDS", 0.05)
+    monkeypatch.setattr(api, "_blacklist_reload_task", None)
+    address = "0x" + "12" * 20
+
+    with TestClient(api.app):
+        task = api._blacklist_reload_task
+        assert task is not None and not task.done()
+        assert scam_db.known_scams == {}
+        # Another process (the bot, or workers.py) writes an entry straight into the table.
+        writer = sqlite3.connect(path)
+        writer.execute(
+            "INSERT INTO scam_blacklist (chain_id, address, source, reports, created_at, expires_at) "
+            "VALUES (56, ?, 'community', 3, ?, ?)",
+            (address, time.time(), time.time() + 3600),
+        )
+        writer.commit()
+        writer.close()
+        deadline = time.monotonic() + 5
+        while (56, address) not in scam_db.known_scams and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert scam_db.known_scams[(56, address)]["source"] == "community"
+
+    assert task.cancelled()
 
 
 # ---------------------------------------------------------------------------

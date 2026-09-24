@@ -2,6 +2,7 @@
 
 import logging
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
+from core.risk_engine import database_matches, medium_matches
 
 logger = logging.getLogger(__name__)
 
@@ -124,9 +125,13 @@ class StructuralAnalyzer(Analyzer):
         if d.get("has_destroy") and d.get("ownership_renounced") is not True:
             score += 15
             flags.append("destroy() function: the owner may be able to delete the contract")
-        if d.get("scam_matches"):
+        hard_matches = database_matches(d.get("scam_matches"))
+        if hard_matches:
             score += 30
-            flags.append(f"Scam DB match ({len(d['scam_matches'])} sources)")
+            flags.append(f"Scam DB match ({len(hard_matches)} sources)")
         if d.get("ownership_renounced") is False:
             score += 5
+        # A community report adds no points: the risk engine holds its floor. Its reason leads, so the
+        # extension, which shows three flags, always names it.
+        flags[:0] = [match["reason"] for match in medium_matches(d.get("scam_matches"))]
         return min(score, 100), flags

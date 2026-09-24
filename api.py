@@ -21,11 +21,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from redis.exceptions import RedisError
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Literal
 
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve_selector
 from utils.chain_info import get_chain_name, get_native_symbol
 from utils.web3_client import UnsupportedChainError
+from utils.scam_db import BLACKLIST_RELOAD_SECONDS
+from core.risk_engine import MEDIUM_MATCH_FLOOR, database_matches, medium_matches
 from services import rpc_guard
 from services.counterparty_service import code_kind
 from services.mempool_service import supports_pending_transactions
@@ -85,6 +87,9 @@ container: Optional[ServiceContainer] = None
 # BACKGROUND_WORKERS as the lifespan read it. With "external" the mempool monitor, the verdict drain, the
 # hunter and the launch watch run in workers.py, and this process holds none of their in-memory state.
 _background_workers = "api"
+# With "external" the hunter's sweep, which reloads the scam blacklist, runs in workers.py, so the API
+# rereads the blacklist itself in this task; None with "api".
+_blacklist_reload_task: Optional[asyncio.Task] = None
 _EXTERNAL_WORKERS_NOTE = (
     "Background work runs in the separate workers process (BACKGROUND_WORKERS=external), and this API "
     "process holds none of its in-memory state: the mempool counters and the launch watch's run state "
@@ -134,9 +139,24 @@ def _bind_globals(c: ServiceContainer):
     advisor = c.advisor
 
 
+async def _blacklist_reload_loop():
+    """Reload the persisted scam blacklist every BLACKLIST_RELOAD_SECONDS until cancelled, so entries
+    the bot or workers.py write reach this process's scans. Startup has just loaded it, so each pass
+    waits first."""
+    while True:
+        await asyncio.sleep(BLACKLIST_RELOAD_SECONDS)
+        try:
+            await container.scam_db.load_blacklist()
+        except Exception as e:
+            logger.error(
+                "Blacklist reload failed: %s\n%s",
+                type(e).__name__, "".join(traceback.format_tb(e.__traceback__)),
+            )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global container, _background_workers
+    global container, _background_workers, _blacklist_reload_task
     settings = Settings()
     container = ServiceContainer(settings)
     _bind_globals(container)
@@ -151,6 +171,7 @@ async def lifespan(app: FastAPI):
         rpc_limiter.use_redis(rate_limit_redis, "rpc", fail_open=True)
         chat_limiter.use_redis(rate_limit_redis, "chat", fail_open=False)
         _report_limiter.use_redis(rate_limit_redis, "report", fail_open=False)
+        _outcome_limiter.use_redis(rate_limit_redis, "outcome", fail_open=False)
         _signup_limiter.use_redis(rate_limit_redis, "signup", fail_open=False)
         _free_key_limiter.use_redis(rate_limit_redis, "free-key", fail_open=False)
         _watch_alerts_limiter.use_redis(rate_limit_redis, "watch-alerts", fail_open=False)
@@ -161,7 +182,7 @@ async def lifespan(app: FastAPI):
             logger.warning(
                 "Rate limits configured for Redis, but it did not answer PING (%s). Until it does, the "
                 "general, RPC proxy and API key limits count in this process's memory and the chat, "
-                "report, signup, free key and watch alert limits refuse every request",
+                "report, outcome, signup, free key and watch alert limits refuse every request",
                 type(e).__name__,
             )
         else:
@@ -209,9 +230,18 @@ async def lifespan(app: FastAPI):
     if _background_workers == "api":
         await container.hunter.start()
         await container.launch_watch.start()
+        _blacklist_reload_task = None
+    else:
+        _blacklist_reload_task = asyncio.create_task(_blacklist_reload_loop())
 
     logger.info("ShieldAI Firewall API started")
     yield
+    if _blacklist_reload_task is not None:
+        _blacklist_reload_task.cancel()
+        try:
+            await _blacklist_reload_task
+        except asyncio.CancelledError:
+            pass
     await container.launch_watch.stop()
     await container.hunter.stop()
     await container.phishing_service.stop()
@@ -514,9 +544,9 @@ class OutcomeRequest(ChainRequest):
     address: str = Field(..., min_length=1, max_length=64)
     chainId: int = Field(default=56, ge=1, le=10_000_000)
     risk_score_at_scan: Optional[float] = Field(default=None, ge=0, le=100)
-    user_decision: str = Field(..., min_length=1, max_length=16)  # "proceed", "block", "ignore"
-    outcome: Optional[str] = Field(default=None, max_length=16)  # "safe", "scam", "unknown"
-    tx_hash: Optional[str] = Field(default=None, max_length=80)
+    user_decision: Literal["proceed", "block", "ignore"]
+    outcome: Optional[Literal["safe", "scam", "unknown"]] = None
+    tx_hash: Optional[str] = Field(default=None, pattern=r"^0x[0-9a-fA-F]{64}$")
 
 
 class CommunityReportRequest(ChainRequest):
@@ -554,6 +584,9 @@ class ExplainRequest(BaseModel):
 
 # Report rate limiter: 5 reports/min per IP
 _report_limiter = RateLimiter(requests_per_minute=5, burst=3)
+
+# Outcome rate limiter for callers without an API key: 10 outcomes/min per IP
+_outcome_limiter = RateLimiter(requests_per_minute=10, burst=5)
 
 # Beta-signup rate limiter: 3 signups/min per IP
 _signup_limiter = RateLimiter(requests_per_minute=3, burst=2)
@@ -1500,9 +1533,7 @@ async def _firewall_verdict(req: FirewallRequest, request: Request, trail: Dict)
             if simulation_result:
                 if not simulation_result.get("success") and simulation_result.get("revert_reason"):
                     danger_signals.insert(0, f"Simulation reverted: {simulation_result['revert_reason']}")
-                    # Only escalate to BLOCK if risk is already elevated
-                    # Low-risk reverts are just bad tx params, not malicious
-                    if alert["rug_probability"] >= verdicts.REVERT_BLOCK_MIN:
+                    if _revert_blocks(risk_output):
                         classification = verdicts.BLOCK_RECOMMENDED
                 for w in simulation_result.get("warnings", []):
                     if w not in danger_signals:
@@ -1518,8 +1549,12 @@ async def _firewall_verdict(req: FirewallRequest, request: Request, trail: Dict)
                     alert["rug_probability"] = risk_score
                     if alert['status'] == 'ok':
                         alert['risk_display'] = f'{risk_score}%'
-                    if verdicts.classify(risk_score) == verdicts.BLOCK_RECOMMENDED:
+                    # The boosted score takes its band, as the extension draws it.
+                    band = verdicts.classify(risk_score)
+                    if band == verdicts.BLOCK_RECOMMENDED:
                         classification = verdicts.BLOCK_RECOMMENDED
+                    elif band == verdicts.HIGH_RISK and classification in (verdicts.SAFE, verdicts.CAUTION):
+                        classification = verdicts.HIGH_RISK
 
             # The level follows the final score, the campaign boost included, here and where it is stored.
             risk_level = verdicts.stored_level(risk_score, risk_output.get("risk_level", verdicts.UNKNOWN))
@@ -1809,8 +1844,24 @@ async def scan_injection(request: Request):
 
 
 @app.post("/api/outcome")
-async def report_outcome(req: OutcomeRequest):
-    """Record a user decision/outcome for a scanned contract (extension reports back)."""
+async def report_outcome(req: OutcomeRequest, request: Request):
+    """Record a user decision/outcome for a scanned contract.
+
+    Anyone may call this, so each row records who sent it: 'key:<key_id>' for a valid API key, or
+    'client'. No score reads these rows; scripts/calibrate.py reads only the API key rows, into a
+    proposal the owner reviews.
+    """
+    # A valid API key is already held to its own quota by the middleware.
+    key_info = getattr(request.state, "api_key_info", None)
+    if key_info is None and not await _outcome_limiter.is_allowed(_get_client_ip(request)):
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Outcome rate limit exceeded (10/min)."},
+        )
+
+    if not web3_client or not web3_client.is_valid_address(req.address):
+        raise HTTPException(status_code=400, detail="Invalid address")
+
     try:
         if container and container.db:
             await container.db.record_outcome(
@@ -1820,6 +1871,7 @@ async def report_outcome(req: OutcomeRequest):
                 user_decision=req.user_decision,
                 outcome=req.outcome,
                 tx_hash=req.tx_hash,
+                source=f"key:{key_info['key_id']}" if key_info else "client",
             )
         return {"status": "recorded"}
     except Exception as e:
@@ -2464,6 +2516,45 @@ async def guard_subject_remove(chain_id: int, address: str, request: Request):
     return {"ok": True, "address": address.lower(), "chain_id": chain_id}
 
 
+class BlacklistConfirmRequest(ChainRequest):
+    address: str = Field(..., min_length=1, max_length=64)
+    # Omitted: the entry covers every chain.
+    chainId: Optional[int] = Field(default=None, ge=1, le=10_000_000)
+    reason: Optional[str] = Field(default=None, max_length=240)
+
+    @field_validator("chainId")
+    @classmethod
+    def validate_chain(cls, value):
+        return value if value is None else _validate_chain_id(value)
+
+
+@app.post("/api/admin/blacklist", include_in_schema=False)
+async def blacklist_confirm(req: BlacklistConfirmRequest, request: Request):
+    """Confirm an address as a scam: a block-severity match that never expires, replacing a community
+    entry for the same address and chain. Requires X-Admin-Secret."""
+    _require_admin(request)
+    if not web3_client.is_valid_address(req.address):
+        raise HTTPException(status_code=400, detail="Invalid address")
+    if not await container.scam_db.confirm_scam(req.address, req.chainId, req.reason):
+        raise HTTPException(status_code=409, detail="This address is a known legitimate contract and cannot be blacklisted")
+    # Off chain only: the bot is the one process that sends from the recorder and attestor wallets.
+    return {"ok": True, "address": req.address.lower(), "chain_id": req.chainId, "source": "admin"}
+
+
+@app.delete("/api/admin/blacklist/{address}", include_in_schema=False)
+async def blacklist_remove(address: str, request: Request, chain_id: Optional[int] = None):
+    """Remove a blacklist entry, community or admin. Without chain_id, removes the entry that covers
+    every chain. Requires X-Admin-Secret."""
+    _require_admin(request)
+    if chain_id is not None:
+        _validate_chain_id(chain_id)
+    if not web3_client.is_valid_address(address):
+        raise HTTPException(status_code=400, detail="Invalid address")
+    if not await container.scam_db.remove_from_blacklist(address, chain_id):
+        raise HTTPException(status_code=404, detail="No blacklist entry for this address and chain")
+    return {"ok": True, "address": address.lower(), "chain_id": chain_id}
+
+
 # Reason codes the code itself assigns; admin-entered and agent-written reasons are free text and stay private.
 _PUBLIC_WATCH_REASONS = {"MANUAL", "SERIAL_SCAMMER"}
 
@@ -3058,8 +3149,18 @@ def _coverage_fields(alert: Dict) -> Dict:
     return {key: alert[key] for key in ('status', 'coverage', 'coverage_reasons', 'risk_display')}
 
 
+def _revert_blocks(risk_output: Dict) -> bool:
+    """Whether a reverted simulation escalates a verdict to BLOCK: only a risk already elevated,
+    verdicts.REVERT_BLOCK_MIN or more before the community floor. Low-risk reverts are just bad
+    transaction parameters. Reading the score before that floor, three accounts' reports neither turn a
+    routine revert (slippage, a deadline, an allowance) into a block nor keep a risky target's revert
+    from one."""
+    return risk_output["score_before_community_floor"] >= verdicts.REVERT_BLOCK_MIN
+
+
 def _scam_match_count(scan: Dict) -> Optional[int]:
-    matches = scan.get("scam_matches", [])
+    # A community report is not a scam database match; its reason names it instead.
+    matches = database_matches(scan.get("scam_matches"))
     if matches:
         return len(matches)
     if scan.get("coverage", {}).get("scam_database") is False:
@@ -3181,6 +3282,10 @@ def _build_fallback_response(
     if scam_matches is not None and scam_matches > 0:
         danger_signals.append(f"Found {scam_matches} scam database match(es)")
         risk_score = max(risk_score, 80)
+
+    for match in medium_matches(scan.get("scam_matches")):
+        danger_signals.append(match["reason"])
+        risk_score = max(risk_score, MEDIUM_MATCH_FLOOR)
 
     if is_honeypot:
         danger_signals.append("Honeypot detected — cannot sell after buying")
@@ -3477,7 +3582,7 @@ async def _analyze_router_swap(
     if sim_result:
         if not sim_result.get("success") and sim_result.get("revert_reason"):
             danger_signals.insert(0, f"Simulation reverted: {sim_result['revert_reason']}")
-            if alert["rug_probability"] >= verdicts.REVERT_BLOCK_MIN:
+            if _revert_blocks(risk_output):
                 classification = verdicts.BLOCK_RECOMMENDED
         for w in sim_result.get("warnings", []):
             if w not in danger_signals:

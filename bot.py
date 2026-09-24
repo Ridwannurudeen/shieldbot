@@ -35,10 +35,12 @@ from core.telegram_formatter import (
     CONTROL_CHARACTERS, describe_impostor_check, escape_markdown, escape_markdown_lines, format_full_report,
 )
 from core.extension_formatter import is_scan_incomplete
+from core.risk_engine import database_matches, medium_matches
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 from services.robinhood_assets import with_impostor_check
 from services.mempool_service import supports_pending_transactions
 from utils.web3_client import UnsupportedChainError
+from utils.scam_db import BLACKLIST_RELOAD_SECONDS
 from utils.chain_info import (
     get_chain_name, get_explorer_url, get_dexscreener_slug,
     parse_chain_prefix,
@@ -102,6 +104,7 @@ _LAUNCH_ALERT_HEADERS = {
 _UNKNOWN_LAUNCH_HEADER = '⚪ UNKNOWN: scan incomplete, not a safety verdict'
 _IMPOSTOR_LAUNCH_HEADER = '🚨 IMPOSTOR: {}'
 _launch_alert_task = None
+_blacklist_reload_task = None
 
 
 def _get_user_chain_id(context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -128,8 +131,9 @@ def _set_cache(address: str, scan_type: str, result: dict):
 
 
 async def post_init(application):
-    """Initialize services, register bot command menu, and start launch alert delivery."""
-    global _launch_alert_task
+    """Initialize services, register bot command menu, and start launch alert delivery and the
+    blacklist reload."""
+    global _launch_alert_task, _blacklist_reload_task
     await container.startup()
     await application.bot.set_my_commands([
         ("start", "Welcome message & quick start"),
@@ -145,16 +149,18 @@ async def post_init(application):
         ("help", "Show all commands"),
     ])
     _launch_alert_task = asyncio.create_task(launch_alert_loop(application.bot))
+    _blacklist_reload_task = asyncio.create_task(blacklist_reload_loop())
 
 
 async def post_stop(application):
-    """Stop launch alert delivery before the bot and its services shut down."""
-    if _launch_alert_task is not None:
-        _launch_alert_task.cancel()
-        try:
-            await _launch_alert_task
-        except asyncio.CancelledError:
-            pass
+    """Stop launch alert delivery and the blacklist reload before the bot and its services shut down."""
+    for task in (_launch_alert_task, _blacklist_reload_task):
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 async def post_shutdown(application):
@@ -340,12 +346,15 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "❌ Please provide an address and reason.\n\n"
             "Usage: `/report <address> <reason>`\n"
-            "Example: `/report 0x1234...5678 honeypot scam`",
+            "Example: `/report 0x1234...5678 honeypot scam`\n"
+            "Tip: Use chain prefixes like `/report eth:0x... <reason>`; without one the report is for your current chain.",
             parse_mode='Markdown'
         )
         return
 
-    address = context.args[0]
+    # The report is for the chain a /scan of the same text would check.
+    prefix_chain_id, address = parse_chain_prefix(context.args[0])
+    chain_id = web3_client.validate_chain_id(prefix_chain_id or _get_user_chain_id(context))
     reason = ' '.join(context.args[1:])
 
     if not web3_client.is_valid_address(address):
@@ -353,31 +362,40 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Community report with safeguards
-    result = scam_db.report_address(address, str(update.effective_user.id))
+    result = await scam_db.report_address(address, str(update.effective_user.id), chain_id)
 
     if not result["accepted"]:
         await update.message.reply_text(f"❌ {result['reason']}")
         return
 
+    # A report writes nothing on chain: three accounts can manufacture a blacklisting.
     if result["blacklisted"]:
+        if result.get("confirmed"):
+            status = "This address is confirmed as a scam."
+        elif result.get("already_listed"):
+            status = (
+                f"This address is already reported by {result['reports']} users in scans. "
+                "It is not confirmed as a scam."
+            )
+        else:
+            status = (
+                f"This address now shows as reported by {result['reports']} users in scans. "
+                "It is not confirmed as a scam."
+            )
         response = f"""✅ **Scam Report — Address Blacklisted**
 
 **Address:** `{address}`
+**Chain:** {get_chain_name(chain_id)}
 **Reason:** {escape_markdown(reason)}
 **Reporter:** User {update.effective_user.id}
 
-This address has been added to our local blacklist.
-Future scans will flag it as a known scam.
+{status}
 """
-        # Record on-chain (fire-and-forget — non-blocking)
-        if onchain_recorder.is_available():
-            await onchain_recorder.record_scan_fire_and_forget(address, 'high', 'report')
-        if base_attestor.is_available():
-            await base_attestor.attest_fire_and_forget(address, 'high', 'report', source_chain_id=56)
     else:
         response = f"""📝 **Report Recorded**
 
 **Address:** `{address}`
+**Chain:** {get_chain_name(chain_id)}
 **Reason:** {escape_markdown(reason)}
 **Progress:** {result['reports']}/{result['needed']} independent reports needed to blacklist.
 
@@ -864,6 +882,22 @@ async def launch_alert_loop(bot):
         await asyncio.sleep(LAUNCH_ALERT_POLL_SECONDS)
 
 
+async def blacklist_reload_loop():
+    """Reload the persisted scam blacklist every BLACKLIST_RELOAD_SECONDS until cancelled.
+
+    Startup has just loaded it, so each pass waits first.
+    """
+    while True:
+        await asyncio.sleep(BLACKLIST_RELOAD_SECONDS)
+        try:
+            await scam_db.load_blacklist()
+        except Exception as e:
+            logger.error(
+                "Blacklist reload failed: %s\n%s",
+                type(e).__name__, "".join(traceback.format_tb(e.__traceback__)),
+            )
+
+
 async def _handle_advisor_chat(update: Update, message: str, chain_id: int = 56):
     """Route free-text messages to the AI advisor."""
     web3_client.validate_chain_id(chain_id)
@@ -1283,14 +1317,21 @@ def format_scan_result(result: dict) -> str:
         check_name = check.replace('_', ' ').title()
         response += f"{status_icon} {check_name}\n"
 
-    if result.get('scam_matches'):
-        response += f"\n⚠️ **Warning:** Found {len(result['scam_matches'])} scam database match(es)\n"
-        for match in result['scam_matches'][:3]:
+    scam_matches = database_matches(result.get('scam_matches'))
+    if scam_matches:
+        response += f"\n⚠️ **Warning:** Found {len(scam_matches)} scam database match(es)\n"
+        for match in scam_matches[:3]:
             response += f"• {escape_markdown(match['type'])}: {escape_markdown(match['reason'])}\n"
 
-    if result.get('warnings'):
+    # A community report is not a scam database match; it is named on its own, once.
+    reported = [match['reason'] for match in medium_matches(result.get('scam_matches'))]
+    for reason in reported:
+        response += f"\n⚠️ {escape_markdown(reason)}\n"
+
+    warnings = [warning for warning in result.get('warnings', []) if warning not in reported]
+    if warnings:
         response += "\n**Warnings:**\n"
-        for warning in result['warnings'][:5]:
+        for warning in warnings[:5]:
             response += f"• {escape_markdown(warning)}\n"
 
     # AI structured risk score

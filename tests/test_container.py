@@ -47,7 +47,7 @@ class TestServiceContainer:
         """startup() and shutdown() call the right async methods."""
         with patch("core.container.Web3Client"), \
              patch("core.container.AIAnalyzer") as MockAI, \
-             patch("core.container.ScamDatabase"), \
+             patch("core.container.ScamDatabase") as MockScamDB, \
              patch("core.container.CalldataDecoder"), \
              patch("core.container.OnchainRecorder"), \
              patch("core.container.TransactionScanner"), \
@@ -61,6 +61,7 @@ class TestServiceContainer:
              patch("core.container.RiskEngine"):
 
             MockAI.return_value.is_available.return_value = False
+            MockScamDB.return_value.load_blacklist = AsyncMock()
             MockGF.return_value.is_enabled.return_value = False
             MockGF.return_value.async_init = AsyncMock()
             MockGF.return_value.close = AsyncMock()
@@ -73,6 +74,7 @@ class TestServiceContainer:
 
             await c.startup()
             c.greenfield_service.async_init.assert_awaited_once()
+            c.scam_db.load_blacklist.assert_awaited_once_with()
 
             await c.shutdown()
             c.greenfield_service.close.assert_awaited_once()
@@ -86,6 +88,7 @@ async def test_startup_keeps_the_indexer_and_leaves_the_mempool_monitor_to_the_a
 
     container = MagicMock()
     container.db.initialize = AsyncMock()
+    container.scam_db.load_blacklist = AsyncMock()
     container.indexer.start = AsyncMock()
     container.greenfield_service.async_init = AsyncMock()
     container.cache.connect = AsyncMock()

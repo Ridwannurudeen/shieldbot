@@ -22,6 +22,7 @@ def mock_container(monkeypatch):
             "token_scanner", "calldata_decoder", "scam_db", "dex_service",
             "ethos_service", "honeypot_service", "contract_service", "risk_engine",
             "greenfield_service", "tenderly_simulator", "advisor", "_background_workers",
+            "_blacklist_reload_task",
         )
     }
     settings = SimpleNamespace(

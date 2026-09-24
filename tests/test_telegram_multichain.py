@@ -376,6 +376,7 @@ def bot_report_functions(bot_chain_functions):
     from pathlib import Path
     from core.extension_formatter import is_scan_incomplete
     from core.telegram_formatter import escape_markdown_lines, format_full_report
+    from core.risk_engine import database_matches, medium_matches
     tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
     names = {'format_scan_result', 'format_token_result'}
     module = ast.Module(body=[node for node in tree.body if isinstance(node, ast.FunctionDef)
@@ -383,6 +384,8 @@ def bot_report_functions(bot_chain_functions):
     bot_chain_functions['is_scan_incomplete'] = is_scan_incomplete
     bot_chain_functions['format_full_report'] = format_full_report
     bot_chain_functions['escape_markdown_lines'] = escape_markdown_lines
+    bot_chain_functions['database_matches'] = database_matches
+    bot_chain_functions['medium_matches'] = medium_matches
     exec(compile(module, 'bot.py', 'exec'), bot_chain_functions)
     return bot_chain_functions
 
