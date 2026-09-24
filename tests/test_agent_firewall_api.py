@@ -265,6 +265,27 @@ def test_agent_firewall_tenderly_revert_floors_risk(client, mock_container):
     assert "simulation_revert" in body["flags"]
 
 
+def test_agent_firewall_reentrancy_warning_stores_the_level_of_its_score(client, mock_container):
+    """The reentrancy floor raises the score to 80, and the level stored and cached with it follows."""
+    mock_container.tenderly_simulator.is_enabled.return_value = True
+    mock_container.risk_engine.compute_from_results.return_value = {
+        "rug_probability": 40, "risk_level": "MEDIUM", "flags": [],
+        "status": "ok", "coverage": {"honeypot": 1},
+        "category_scores": {}, "confidence": 0.8,
+    }
+    mock_container.tenderly_simulator.simulate_transaction = AsyncMock(return_value={
+        "success": True, "asset_changes": [], "warnings": ["Possible reentrancy detected"], "gas_used": 21000,
+    })
+    resp = client.post("/api/agent/firewall",
+                       json=_make_firewall_request(),
+                       headers={"X-API-Key": "sb_testkey"})
+    body = resp.json()
+    assert (body["score"], body["risk_level"]) == (80, "HIGH")
+    stored = mock_container.db.upsert_contract_score.await_args.kwargs
+    assert (stored["risk_score"], stored["risk_level"]) == (80, "HIGH")
+    assert mock_container.cache.set_verdict.await_args.args[2]["risk_level"] == "HIGH"
+
+
 def test_agent_firewall_tenderly_failure_nonfatal(client, mock_container):
     """Tenderly API failure is non-fatal — analysis proceeds without simulation."""
     mock_container.tenderly_simulator.is_enabled.return_value = True

@@ -1461,12 +1461,15 @@ async def firewall(req: FirewallRequest, request: Request):
                     if verdicts.classify(risk_score) == verdicts.BLOCK_RECOMMENDED:
                         classification = verdicts.BLOCK_RECOMMENDED
 
+            # The level follows the final score, the campaign boost included, here and where it is stored.
+            risk_level = verdicts.stored_level(risk_score, risk_output.get("risk_level", verdicts.UNKNOWN))
+
             # Shield score breakdown
             shield_score = {
                 **_coverage_fields(alert),
                 "overall": risk_score,
                 "category_scores": risk_output.get("category_scores", {}),
-                "risk_level": risk_output.get("risk_level", "UNKNOWN"),
+                "risk_level": risk_level,
                 "threat_type": risk_output.get("risk_archetype", "unknown"),
                 "critical_flags": risk_output.get("critical_flags", []),
                 "confidence": alert["confidence"],
@@ -1520,7 +1523,7 @@ async def firewall(req: FirewallRequest, request: Request):
                         address=to_addr,
                         chain_id=req.chainId,
                         risk_score=risk_score,
-                        risk_level=risk_output.get("risk_level", "UNKNOWN"),
+                        risk_level=risk_level,
                         archetype=risk_output.get("risk_archetype"),
                         category_scores={
                             **risk_output.get("category_scores", {}),
@@ -2469,26 +2472,25 @@ async def threat_feed(
     limit = max(1, min(limit, 200))  # cap between 1 and 200
     threats = []
 
-    # Recent high-risk contract scans from DB. Known split: this lists risk_level 'HIGH' while the threat
-    # counts in core.database count risk_score >= 71, and a campaign-boosted score keeps its unboosted level.
+    # Recent high-risk contract scans from DB: the rows the threat counts in core.database count.
     try:
         if source == "mempool":
             cursor = None
         elif chain_id is not None:
-            cursor = await container.db._db.execute("""
+            cursor = await container.db._db.execute(f"""
                 SELECT address, chain_id, risk_score, risk_level, archetype, flags,
                        last_scanned_at
                 FROM contract_scores
-                WHERE risk_level = 'HIGH' AND chain_id = ?
+                WHERE {verdicts.THREAT_CONDITION} AND chain_id = ?
                 ORDER BY last_scanned_at DESC
                 LIMIT ?
             """, (int(chain_id), limit))
         else:
-            cursor = await container.db._db.execute("""
+            cursor = await container.db._db.execute(f"""
                 SELECT address, chain_id, risk_score, risk_level, archetype, flags,
                        last_scanned_at
                 FROM contract_scores
-                WHERE risk_level = 'HIGH'
+                WHERE {verdicts.THREAT_CONDITION}
                 ORDER BY last_scanned_at DESC
                 LIMIT ?
             """, (limit,))

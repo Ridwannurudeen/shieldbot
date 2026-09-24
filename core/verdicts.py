@@ -39,6 +39,10 @@ BANDS = (
 )
 # The highest whole score in SAFE.
 SAFE_MAX = CAUTION_MIN - 1
+_LEVEL_RANK = {LOW: 0, MEDIUM: 1, HIGH: 2}
+
+# The contract_scores rows the threat counts count and the threat feed lists.
+THREAT_CONDITION = f"risk_level = '{HIGH}'"
 
 # A signature request with no transaction behind it has its own table, and a blind eth_sign
 # request scores at least BLIND_SIGN_MIN.
@@ -84,3 +88,14 @@ def level_from_score(score, calibration=None) -> str:
     if score >= medium:
         return MEDIUM
     return LOW
+
+
+def stored_level(score, level) -> str:
+    """The level to store and return with a final score: the producer's level raised to the band
+    level of the score, never lowered, so an incomplete scan's MEDIUM stays MEDIUM. The raise reads
+    the band table, not a calibration, so every stored score in BLOCK_RECOMMENDED is HIGH. UNKNOWN
+    is raised only to HIGH."""
+    band = level_from_score(score)
+    if level not in _LEVEL_RANK:
+        return band if band == HIGH else level
+    return band if _LEVEL_RANK[band] > _LEVEL_RANK[level] else level
