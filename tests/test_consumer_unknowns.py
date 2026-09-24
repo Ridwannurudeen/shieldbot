@@ -267,7 +267,7 @@ def test_covered_cache_keeps_safe(consumer_api):
 async def test_failed_transaction_simulation_is_incomplete(consumer_api, surface):
     api, services = consumer_api
     api.risk_engine.compute_from_results.return_value = {
-        'rug_probability': 0, 'risk_level': 'LOW', 'status': 'ok',
+        'rug_probability': 0, 'score_before_community_floor': 0, 'risk_level': 'LOW', 'status': 'ok',
         'coverage': {'honeypot': 1}, 'coverage_reasons': {},
     }
     api.tenderly_simulator.is_enabled = lambda: True
@@ -320,7 +320,7 @@ async def test_scan_endpoint_preserves_unknown_verdict(consumer_api, incomplete_
 
 
 @pytest.mark.asyncio
-async def test_confirmed_eoa_scan_and_firewall_fallback_render_safe(consumer_api, monkeypatch, mock_web3_client):
+async def test_confirmed_eoa_scan_renders_safe_and_the_degraded_fallback_caution(consumer_api, monkeypatch, mock_web3_client):
     from scanner.transaction_scanner import TransactionScanner
     api, _ = consumer_api
     mock_web3_client.is_contract.return_value = False
@@ -332,8 +332,8 @@ async def test_confirmed_eoa_scan_and_firewall_fallback_render_safe(consumer_api
     assert (response['risk_score'], response['confidence'], response['partial']) == (5, 95, False)
     assert response['risk_display'] == '5%'
     fallback = api._build_fallback_response({}, await scanner.scan_address('0x' + 'a' * 40), None, 56)
-    assert (fallback['status'], fallback['classification'], fallback['partial']) == ('ok', 'SAFE', False)
-    assert fallback['verdict'] == 'SAFE — Risk score 5/100'
+    assert (fallback['status'], fallback['classification'], fallback['partial']) == ('ok', 'CAUTION', False)
+    assert fallback['verdict'] == 'CAUTION — Risk score 5/100'
 
 
 @pytest.mark.asyncio
@@ -503,7 +503,7 @@ async def test_firewall_passes_the_policy_header_to_the_signature_only_path(cons
     monkeypatch.setattr(api, '_build_signature_only_response', signature_only)
     req = _transfer_request(api)
     await api.firewall(req, SimpleNamespace(headers={'X-Policy-Mode': 'STRICT'}))
-    signature_only.assert_awaited_once_with(req, policy_override='STRICT')
+    signature_only.assert_awaited_once_with(req, policy_override='STRICT', trail={})
 
 
 @pytest.mark.asyncio
@@ -1134,13 +1134,13 @@ async def test_api_error_logs_never_include_provider_error_text(consumer_api, mo
     services.db.record_community_report = AsyncMock(side_effect=error)
     monkeypatch.setattr(api, 'token_scanner', SimpleNamespace(check_token=AsyncMock(side_effect=error)))
     monkeypatch.setattr(api, 'tx_scanner', SimpleNamespace(scan_address=AsyncMock(side_effect=error)))
-    request = SimpleNamespace(client=SimpleNamespace(host='leak-' + endpoint), headers={},
+    request = SimpleNamespace(client=SimpleNamespace(host='leak-' + endpoint), headers={}, state=SimpleNamespace(),
                               json=AsyncMock(return_value={'content': 'hello'}))
     calls = {
         'firewall': lambda: api.firewall(api.FirewallRequest(to='0x' + 'a' * 40, sender='0x' + 'b' * 40), request),
         'scan': lambda: api.scan(api.ScanRequest(address='0x' + 'a' * 40)),
         'scan_injection': lambda: api.scan_injection(request),
-        'outcome': lambda: api.report_outcome(api.OutcomeRequest(address='0x' + 'a' * 40, user_decision='proceed')),
+        'outcome': lambda: api.report_outcome(api.OutcomeRequest(address='0x' + 'a' * 40, user_decision='proceed'), request),
         'community_report': lambda: api.community_report(api.CommunityReportRequest(
             address='0x' + 'a' * 40, report_type='scam'), request),
         'agent_chat': lambda: api.agent_chat(api.ChatRequest(message='hello', user_id='test'), request),

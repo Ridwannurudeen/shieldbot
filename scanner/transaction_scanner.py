@@ -6,13 +6,14 @@ Integrates risk_scorer for numeric scoring and AI analysis
 
 import logging
 from typing import Dict, List, Optional
+from core.verdicts import level_from_score
 from services.contract_service import push4_operands
+from core.risk_engine import database_matches, medium_matches, scam_match_floor
 from utils.scam_db import ScamDatabase
 from utils.chain_info import get_chain_name
 from utils.web3_client import UnsupportedChainError
 from utils.risk_scorer import (
-    findings_from_scan_result, calculate_risk_score,
-    blend_scores, compute_confidence
+    findings_from_scan_result, calculate_risk_score, compute_confidence
 )
 
 logger = logging.getLogger(__name__)
@@ -64,9 +65,9 @@ SOURCE_CODE_PATTERNS = [
 class TransactionScanner:
     """Scans contracts for security risks with numeric scoring"""
 
-    def __init__(self, web3_client, ai_analyzer=None):
+    def __init__(self, web3_client, ai_analyzer=None, scam_db=None):
         self.web3 = web3_client
-        self.scam_db = ScamDatabase()
+        self.scam_db = scam_db or ScamDatabase()
         self.ai_analyzer = ai_analyzer
 
     async def scan_address(self, address: str, chain_id: int = 56) -> Dict:
@@ -164,26 +165,8 @@ class TransactionScanner:
         findings = findings_from_scan_result(result)
         heuristic_score, _, _ = calculate_risk_score(findings)
 
-        # Compute AI risk score if available
-        ai_result = None
-        if self.ai_analyzer and self.ai_analyzer.is_available():
-            try:
-                ai_result = await self.ai_analyzer.compute_ai_risk_score(address, result)
-            except UnsupportedChainError:
-                raise
-            except Exception as e:
-                logger.error("AI risk scoring failed: %s", type(e).__name__)
-
-        # Only mark AI as successful if we got a valid dict with risk_score
-        ai_score = None
-        if isinstance(ai_result, dict) and 'risk_score' in ai_result:
-            ai_score = ai_result['risk_score']
-            data_sources['ai'] = True
-        else:
-            data_sources['ai'] = False
-
-        # Blend scores (heuristic + AI when available)
-        result['risk_score'] = blend_scores(heuristic_score, ai_score)
+        # The AI writes only the forensic report below, never the score.
+        result['risk_score'] = heuristic_score
         self._apply_scam_match_risk(result)
         result['confidence'] = compute_confidence(data_sources)
 
@@ -200,25 +183,23 @@ class TransactionScanner:
             except Exception as e:
                 logger.error("Forensic report generation failed: %s", type(e).__name__)
 
-        # Override risk_level from blended score for consistency
-        if result['risk_score'] >= 71:
-            result['risk_level'] = 'high'
-        elif result['risk_score'] >= 31:
-            result['risk_level'] = 'medium'
-        else:
-            result['risk_level'] = 'low'
+        # Override risk_level from the final score for consistency
+        result['risk_level'] = level_from_score(result['risk_score']).lower()
         if result['status'] == 'unknown' and result['risk_level'] == 'low':
             result['risk_level'] = 'unknown'
 
         return result
 
     def _apply_scam_match_risk(self, result: Dict):
-        """Floor the score and level for scam database matches, whether or not contract checks ran."""
+        """Floor the score and level for scam matches, whether or not contract checks ran, with the
+        risk engine's severity floors: a block-severity match blocks here as on /api/firewall, any
+        other scam database match holds 70 and a community report alone 40, adding nothing above it.
+        """
         if not result['scam_matches']:
             return
         heuristic_score, _, _ = calculate_risk_score(findings_from_scan_result(result))
-        result['risk_score'] = max(result['risk_score'], heuristic_score)
-        result['risk_level'] = 'high' if result['risk_score'] >= 71 else 'medium'
+        result['risk_score'] = max(result['risk_score'], heuristic_score, scam_match_floor(result['scam_matches']))
+        result['risk_level'] = level_from_score(result['risk_score']).lower()
 
     async def _check_verification(self, address: str, result: Dict, chain_id: int = 56) -> bool:
         """Check if contract is verified on BscScan. Returns True if check succeeded."""
@@ -257,10 +238,14 @@ class TransactionScanner:
 
             if matches:
                 result['scam_matches'] = list(matches)
-                result['warnings'].append(f"Found {len(matches)} scam database match(es)")
+            hard_matches = database_matches(matches)
+            if hard_matches:
+                result['warnings'].append(f"Found {len(hard_matches)} scam database match(es)")
                 result['checks']['scam_database_clean'] = False
             else:
                 result['checks']['scam_database_clean'] = None if failed_providers else True
+            # A community report is not a scam database match; its reason names it.
+            result['warnings'].extend(match['reason'] for match in medium_matches(matches))
 
             if failed_providers:
                 result['coverage_reasons']['scam_database'] = (
@@ -359,7 +344,7 @@ class TransactionScanner:
         """Calculate overall risk level based on checks (legacy heuristic)"""
         checks = result['checks']
 
-        if result['scam_matches']:
+        if database_matches(result['scam_matches']):
             return 'high'
 
         if checks.get('verified_source') is False and checks.get('not_too_new') is False:

@@ -67,7 +67,7 @@ export interface ScanResult {
   coverage?: Record<string, number>;
   coverage_reasons?: Record<string, string>;
   risk_display?: string;
-  classification: string;
+  classification: 'SAFE' | 'CAUTION' | 'HIGH_RISK' | 'BLOCK_RECOMMENDED';
   risk_score: number;
   danger_signals: string[];
   shield_score?: RiskScore;
@@ -80,6 +80,12 @@ export interface ScanResult {
   partial?: boolean;
   failed_sources?: string[];
   policy_mode?: string;
+  /** Checks that could not run and only add risk: information, not danger signals. */
+  notes?: string[];
+  /** keccak256 of the verdict's canonical evidence document. */
+  evidence_hash?: string;
+  /** Where the evidence document is shown (GET /evidence/{hash}; JSON at /api/evidence/{hash}); null when it could not be stored. Kept 90 days. */
+  evidence_url?: string | null;
 }
 
 export interface FirewallResult extends ScanResult {

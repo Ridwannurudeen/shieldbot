@@ -1,11 +1,9 @@
 """A scam database match must never map to LOW, whatever the calibration."""
 
 import pytest
-import pytest_asyncio
 
 from core.analyzer import AnalyzerResult
-from core.calibration import CalibrationConfig, calibrate_from_outcomes
-from core.database import Database
+from core.calibration import CalibrationConfig, default_calibration, propose_thresholds
 from core.risk_engine import RiskEngine
 
 
@@ -87,23 +85,9 @@ def test_uncalibrated_scam_floor_numbers_are_unchanged(entrypoint, is_token, exp
     assert (risk["rug_probability"], risk["risk_level"]) == expected
 
 
-@pytest_asyncio.fixture
-async def db(tmp_path):
-    database = Database(str(tmp_path / "calibration.db"))
-    await database.initialize()
-    yield database
-    await database.close()
-
-
-@pytest.mark.asyncio
-async def test_outcome_calibration_can_raise_medium_above_the_scam_floor(db):
-    for index in range(20):
-        await db.record_outcome(
-            address=f"0x{'c' * 38}{index:02x}",
-            risk_score_at_scan=95.0 if index < 10 else 85.0,
-            outcome="scam",
-        )
-    calibration = await calibrate_from_outcomes(db)
+def test_proposed_calibration_can_raise_medium_above_the_scam_floor():
+    labels = [(95.0, "scam")] * 10 + [(85.0, "scam")] * 10
+    calibration = propose_thresholds(labels, default_calibration())
     assert (calibration.high_threshold, calibration.medium_threshold) == (90.0, 80.0)
     for entrypoint, is_token in (("direct", True), ("registry", True), ("registry", False)):
         risk = _risk(calibration, entrypoint, is_token, [SCAM_MATCH])

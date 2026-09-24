@@ -83,7 +83,8 @@ KNOWN_SAFE_SPENDERS = {
         # Venus Protocol vToken markets: users approve these to supply assets
         "0xfd5840cd36d94d7229439859c0112a4185bc0255": "Venus Protocol (vUSDT)",
         "0x95c78222b3d6e262426483d42cfa53685a67ab9d": "Venus Protocol (vBUSD)",
-        "0xd50cf00b6e600dd036ba8ef475677d816d6c4281": "Radiant Capital Lending Pool",
+        # Radiant Capital's lending pool (0xd50cf00b...) is left off: since the October 2024 hack its
+        # implementation pulls approved funds (Revoke.cash's approval exploit list).
         "0xa625ab01b08ce023b2a342dbb12a16f2c8489a8f": "Alpaca Finance FairLaunch",
         "0x19609b03c976cca288fbdae5c21d4290e9a4add7": "Wombat Exchange Router",
         "0x4a364f8c717caad9a442737eb7b8a55cc6cf18d8": "Stargate Finance Router",
@@ -214,7 +215,7 @@ class RescueService:
 
     # Override with LOGS_RPC_URL (BSC default) or per-chain entries in logs_rpcs.
     _DEFAULT_LOGS_RPC = ""
-    _DEXSCREENER_API = "https://api.dexscreener.com/latest/dex/tokens"
+    _DEXSCREENER_API = "https://api.dexscreener.com/tokens/v1"
 
     def __init__(
         self,
@@ -803,8 +804,9 @@ class RescueService:
         """Fetch token USD prices on ``chain_id`` from DexScreener (free, no API key needed).
 
         Stablecoins are hardcoded to $1.00 on their own chain. Only pairs on ``chain_id`` price a
-        token: DexScreener answers a token address with pairs from every chain, and the same
-        address elsewhere can be another token. Up to 30 tokens per DexScreener request.
+        token, since the same address elsewhere can be another token, so DexScreener is asked
+        for that chain alone: up to 30 tokens per request, one pair each. Asked without a chain,
+        it shared 30 pairs among all the tokens and chains, so some tokens got none.
         """
         from utils.web3_client import UnsupportedChainError
 
@@ -825,14 +827,13 @@ class RescueService:
             async with aiohttp.ClientSession() as session:
                 for i in range(0, len(to_fetch), BATCH_SIZE):
                     batch = to_fetch[i: i + BATCH_SIZE]
-                    url = f"{self._DEXSCREENER_API}/{','.join(batch)}"
+                    url = f"{self._DEXSCREENER_API}/{slug}/{','.join(batch)}"
                     try:
                         async with session.get(
                             url, timeout=aiohttp.ClientTimeout(total=10)
                         ) as resp:
-                            data = await resp.json()
+                            pairs = await resp.json()
 
-                        pairs = data.get("pairs") or []
                         # Group pairs by base token address
                         token_pairs: Dict[str, list] = {}
                         batch_lower = [t.lower() for t in batch]

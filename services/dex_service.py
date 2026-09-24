@@ -9,7 +9,10 @@ from utils.chain_info import get_dexscreener_slug
 
 logger = logging.getLogger(__name__)
 
-DEX_API_URL = "https://api.dexscreener.com/latest/dex/tokens/{address}"
+# The token's pools on one chain. The unscoped latest/dex/tokens route answers with at most 30
+# pairs from every chain, so where the same address exists on another chain (PulseChain copied
+# Ethereum's state), those pairs can crowd out the requested chain's.
+DEX_API_URL = "https://api.dexscreener.com/token-pairs/v1/{chain}/{address}"
 
 
 class DexService:
@@ -33,19 +36,23 @@ class DexService:
         }
 
         metrics = ('price_usd', 'liquidity_usd', 'volume_24h', 'price_change_24h', 'fdv', 'pair_age_hours')
+        # Every metric but the 24h price change decides the status and is in coverage. The change
+        # feeds only the volatility flag, and DexScreener leaves it out of many flat pairs: when it
+        # is missing, that flag stays unknown and the reason names it.
+        required = tuple(field for field in metrics if field != 'price_change_24h')
         defaults.update(status='unknown', reason='DexScreener data unavailable',
-                        coverage={field: False for field in metrics})
+                        coverage={field: False for field in required})
 
         try:
             slug = get_dexscreener_slug(chain_id)
             if not slug:
                 defaults['reason'] = f'DexScreener unsupported for chain {chain_id}'
                 return defaults
-            # One breaker for every chain: the request names only the token.
+            # One breaker for every chain: DexScreener is one service, whichever chain is asked.
             provider_breakers.check('dexscreener')
             async with aiohttp.ClientSession() as session:
                 async with session.get(
-                    DEX_API_URL.format(address=address),
+                    DEX_API_URL.format(chain=slug, address=address),
                     timeout=aiohttp.ClientTimeout(total=10)
                 ) as resp:
                     if resp.status != 200:
@@ -58,21 +65,30 @@ class DexService:
                     data = await resp.json()
                     provider_breakers.record_status('dexscreener', None, resp.status)
 
-            pairs = [p for p in (data.get('pairs') or []) if p.get('chainId') == slug]
+            pairs = [p for p in data if p.get('chainId') == slug]
             if not pairs:
                 unknown_ledger.record('dexscreener', chain_id, 'unknown')
                 defaults['reason'] = f'No DexScreener pairs on requested chain ({slug})'
                 return defaults
 
-            # Use the highest-liquidity pair for price/liquidity/FDV metrics
-            pair = max(pairs, key=lambda p: float((p.get('liquidity') or {}).get('usd', 0) or 0))
+            # Deepest pool first. Liquidity and pair age are the deepest pool's, whichever side
+            # of it the token is on.
+            pairs.sort(key=lambda p: float((p.get('liquidity') or {}).get('usd', 0) or 0), reverse=True)
+            deepest = pairs[0]
+            # A pair's price, 24h change, FDV and names are its base token's, so they come from the
+            # deepest pair with the token as base token, and are unknown without one.
+            token = address.lower()
+            pair = next(
+                (p for p in pairs if ((p.get('baseToken') or {}).get('address') or '').lower() == token),
+                {},
+            )
 
             base_token = pair.get('baseToken') or {}
             token_name = base_token.get('name')
             token_symbol = base_token.get('symbol')
             values = {
                 'price_usd': pair.get('priceUsd'),
-                'liquidity_usd': (pair.get('liquidity') or {}).get('usd'),
+                'liquidity_usd': (deepest.get('liquidity') or {}).get('usd'),
                 'price_change_24h': (pair.get('priceChange') or {}).get('h24'),
                 'fdv': pair.get('fdv'),
             }
@@ -94,7 +110,7 @@ class DexService:
                 total = sum(float(v) for v in volumes)
                 volume_24h = total if math.isfinite(total) else None
 
-            pair_created = pair.get('pairCreatedAt')
+            pair_created = deepest.get('pairCreatedAt')
             if pair_created:
                 pair_age_hours = (time.time() * 1000 - pair_created) / (1000 * 3600)
             else:
@@ -126,9 +142,9 @@ class DexService:
                 'new_pair_flag': new_pair_flag,
             }
 
-            coverage = {field: result[field] is not None for field in metrics}
-            missing = [field for field, covered in coverage.items() if not covered]
-            result.update(coverage=coverage, status='unknown' if missing else 'ok',
+            coverage = {field: result[field] is not None for field in required}
+            missing = [field for field in metrics if result[field] is None]
+            result.update(coverage=coverage, status='ok' if all(coverage.values()) else 'unknown',
                           reason='Missing DexScreener fields: ' + ', '.join(missing) if missing else None)
             unknown_ledger.record('dexscreener', chain_id, 'answered')
             return result

@@ -7,6 +7,8 @@ import asyncio
 import re
 import time
 import logging
+from typing import Optional
+
 import aiohttp
 from cachetools import TLRUCache, TTLCache
 
@@ -46,6 +48,13 @@ _REPORT_THRESHOLD = 3
 _USER_REPORT_LIMIT = 5
 _USER_REPORT_WINDOW = 86400  # 24 hours
 
+# A community entry lapses after 30 days unless an admin confirms it
+COMMUNITY_BLACKLIST_TTL = 30 * 86400
+
+# How often a process that runs no hunter sweep (the bot, and the API when the sweep runs in
+# workers.py) rereads the persisted blacklist: as often as the sweep prunes and reloads it.
+BLACKLIST_RELOAD_SECONDS = 1800
+
 
 def load_protected_addresses():
     """Import whitelisted routers / known-good addresses at startup."""
@@ -83,13 +92,14 @@ class ScamDatabase:
     """Check addresses against scam databases"""
 
     def __init__(self):
-        # Local blacklist (can be expanded)
-        self.known_scams = set([
-            # Add known scam addresses here
-        ])
+        # The local blacklist, persisted in the database's scam_blacklist table:
+        # (chain_id, address) -> {'source', 'reports', 'expires_at'}, chain_id None for every chain.
+        self.known_scams: dict[tuple[Optional[int], str], dict] = {}
+        # The Database; the service container sets it. Only blacklist writes and loads use it.
+        self.db = None
 
-        # Pending reports: address -> set of (reporter_id, timestamp)
-        self._pending_reports: dict[str, set[tuple[str, float]]] = {}
+        # Pending reports: (chain_id, address) -> set of (reporter_id, timestamp)
+        self._pending_reports: dict[tuple[int, str], set[tuple[str, float]]] = {}
 
         # Per-user rate limiting: reporter_id -> list of timestamps
         self._user_report_times: dict[str, list[float]] = {}
@@ -110,15 +120,10 @@ class ScamDatabase:
         matches = []
         failed_providers = []
 
-        # Check local blacklist. Three community reports put an address here, which is not enough
-        # evidence for a block.
-        if address.lower() in self.known_scams:
-            matches.append({
-                'type': 'Local Blacklist',
-                'reason': 'Known scam address',
-                'source': 'ShieldBot',
-                'severity': 'high',
-            })
+        # Check local blacklist
+        blacklist_match = self._blacklist_match(address.lower(), chain_id)
+        if blacklist_match:
+            matches.append(blacklist_match)
 
         # Check GoPlus Security
         goplus_results = await self._check_goplus(address, chain_id)
@@ -299,8 +304,64 @@ class ScamDatabase:
             }], observed_at=response.get('observed_at', 0), goplus_record=result)
         return ScamMatches(observed_at=response.get('observed_at', 0), goplus_record=result)
     
-    def report_address(self, address: str, reporter_id: str) -> dict:
+    def _active_entry(self, key: tuple) -> Optional[dict]:
+        entry = self.known_scams.get(key)
+        if entry and (entry['expires_at'] is None or entry['expires_at'] > time.time()):
+            return entry
+        return None
+
+    def _blacklist_match(self, address: str, chain_id: int) -> Optional[dict]:
+        """The local blacklist's scam match for an address on a chain, or None.
+
+        An admin entry is a full, block-severity match. A community entry is a medium-severity match
+        named by its report count: three users' reports are a signal anyone can manufacture, never
+        evidence for a block. An admin entry outranks a community one; an expired entry and a
+        protected address never match.
+        """
+        if address in _PROTECTED_ADDRESSES:
+            return None
+        entries = [
+            entry for entry in (self._active_entry((chain_id, address)), self._active_entry((None, address)))
+            if entry
+        ]
+        if not entries:
+            return None
+        entry = min(entries, key=lambda entry: entry['source'] != 'admin')
+        if entry['source'] == 'admin':
+            return {
+                'type': 'Local Blacklist',
+                'reason': 'Confirmed scam address',
+                'source': 'ShieldBot',
+                'severity': 'block',
+            }
+        return {
+            'type': 'community_reports',
+            'reason': f"Reported by {entry['reports']} users",
+            'source': 'ShieldBot',
+            'severity': 'medium',
+            'reports': entry['reports'],
+        }
+
+    async def load_blacklist(self):
+        """Replace the in-memory blacklist with the unexpired entries in the database."""
+        rows = await self.db.get_active_blacklist(time.time())
+        self.known_scams = {
+            (row['chain_id'], row['address']): {
+                'source': row['source'], 'reports': row['reports'], 'expires_at': row['expires_at'],
+            }
+            for row in rows if row['address'] not in _PROTECTED_ADDRESSES
+        }
+
+    async def prune_blacklist(self):
+        """Delete expired entries, then reload, which also picks up entries another process wrote
+        (the Telegram bot's reports)."""
+        await self.db.prune_scam_blacklist(time.time())
+        await self.load_blacklist()
+
+    async def report_address(self, address: str, reporter_id: str, chain_id: int) -> dict:
         """Community report with rate-limiting, whitelist protection, and multi-report threshold.
+
+        Reports count per chain, and the entry they make lists the address on that chain only.
 
         Returns:
             {"accepted": bool, "reason": str, "blacklisted": bool, "reports": int, "needed": int}
@@ -330,30 +391,37 @@ class ScamDatabase:
         times.append(now)
         self._user_report_times[uid] = times
 
-        # 3. Already blacklisted
-        if addr in self.known_scams:
+        # 3. Already blacklisted, on this chain or on every chain; an admin entry answers first
+        entries = [entry for entry in (self._active_entry((chain_id, addr)), self._active_entry((None, addr))) if entry]
+        if entries:
+            entry = min(entries, key=lambda entry: entry['source'] != 'admin')
             return {
                 "accepted": True, "reason": "Already blacklisted.",
-                "blacklisted": True, "reports": _REPORT_THRESHOLD, "needed": _REPORT_THRESHOLD,
+                "blacklisted": True, "reports": entry['reports'], "needed": _REPORT_THRESHOLD,
+                "confirmed": entry['source'] == 'admin', "already_listed": True,
             }
 
-        # 4. Add to pending reports (deduplicate by reporter)
-        pending = self._pending_reports.setdefault(addr, set())
-        # Remove any prior report from this user
-        pending = {(rid, ts) for rid, ts in pending if rid != uid}
+        # 4. Add to pending reports (deduplicate by reporter). A report older than an entry's lifetime
+        # no longer counts.
+        key = (chain_id, addr)
+        pending = {
+            (rid, ts) for rid, ts in self._pending_reports.get(key, set())
+            if rid != uid and now - ts < COMMUNITY_BLACKLIST_TTL
+        }
         pending.add((uid, now))
-        self._pending_reports[addr] = pending
+        self._pending_reports[key] = pending
 
         unique_reporters = len({rid for rid, _ in pending})
 
         # 5. Threshold check
         if unique_reporters >= _REPORT_THRESHOLD:
-            self.add_to_blacklist(address)
-            self._pending_reports.pop(addr, None)
+            await self.add_to_blacklist(address, unique_reporters, chain_id)
+            self._pending_reports.pop(key, None)
             logger.info("Address %s blacklisted after %d independent reports", address, unique_reporters)
             return {
                 "accepted": True, "reason": "Threshold met — address blacklisted.",
                 "blacklisted": True, "reports": unique_reporters, "needed": _REPORT_THRESHOLD,
+                "confirmed": False, "already_listed": False,
             }
 
         logger.info("Report accepted for %s (%d/%d) from %s", address, unique_reporters, _REPORT_THRESHOLD, uid)
@@ -363,16 +431,32 @@ class ScamDatabase:
             "blacklisted": False, "reports": unique_reporters, "needed": _REPORT_THRESHOLD,
         }
 
-    def add_to_blacklist(self, address: str):
-        """Add address to local blacklist (skips protected addresses)."""
+    async def add_to_blacklist(self, address: str, reports: int, chain_id: Optional[int]):
+        """Add a community entry (skips protected addresses). It expires after COMMUNITY_BLACKLIST_TTL
+        unless an admin confirms it, and never replaces an admin entry."""
         addr = address.lower()
         if addr in _PROTECTED_ADDRESSES:
             logger.warning("Refused to blacklist protected address %s", address)
             return
-        self.known_scams.add(addr)
+        await self.db.add_community_blacklist(addr, chain_id, reports, time.time() + COMMUNITY_BLACKLIST_TTL)
+        await self.load_blacklist()
         logger.info(f"Added {address} to blacklist")
 
-    def remove_from_blacklist(self, address: str):
-        """Remove address from local blacklist"""
-        self.known_scams.discard(address.lower())
-        logger.info(f"Removed {address} from blacklist")
+    async def confirm_scam(self, address: str, chain_id: Optional[int], reason: Optional[str]) -> bool:
+        """Admin confirmation: a full scam match that never expires. False for a protected address."""
+        addr = address.lower()
+        if addr in _PROTECTED_ADDRESSES:
+            logger.warning("Refused to blacklist protected address %s", address)
+            return False
+        await self.db.confirm_blacklist(addr, chain_id, reason)
+        await self.load_blacklist()
+        logger.info(f"Confirmed {address} as a scam")
+        return True
+
+    async def remove_from_blacklist(self, address: str, chain_id: Optional[int]) -> bool:
+        """Remove the entry for an address on a chain (None: the every-chain entry). True if one existed."""
+        removed = await self.db.remove_blacklist(address, chain_id)
+        await self.load_blacklist()
+        if removed:
+            logger.info(f"Removed {address} from blacklist")
+        return removed

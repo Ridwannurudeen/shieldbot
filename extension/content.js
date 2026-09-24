@@ -501,7 +501,7 @@
     return SEVERITY.indexOf(floor) > SEVERITY.indexOf(classification) ? floor : classification;
   }
 
-  const BADGE_CLASSES = {
+  const badgeClasses = {
     BLOCK_RECOMMENDED: "shieldai-badge-block",
     HIGH_RISK: "shieldai-badge-high",
     CAUTION: "shieldai-badge-caution",
@@ -510,14 +510,14 @@
   };
 
   function classLabel(classification) {
-    const labels = {
+    const classLabels = {
       BLOCK_RECOMMENDED: _t("classBlock"),
       HIGH_RISK: _t("classHighRisk"),
       CAUTION: _t("classCaution"),
       SAFE: _t("classSafe"),
       UNKNOWN: _t("classUnknown"),
     };
-    return labels[classification] || classification;
+    return classLabels[classification] || classification;
   }
 
   // For one call of a wallet_sendCalls batch, which call it is. inject.js
@@ -903,7 +903,7 @@
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
 
-        <div class="shieldai-badge ${BADGE_CLASSES[classification] || "shieldai-badge-caution"}">${escapeHtml(classLabel(classification))}</div>
+        <div class="shieldai-badge ${badgeClasses[classification] || "shieldai-badge-caution"}">${escapeHtml(classLabel(classification))}</div>
         ${why ? `<p class="shieldai-unknown-why">${_t("unknownWhy")} ${escapeHtml(why)}</p>` : ""}
 
         <div class="shieldai-section shieldai-sig-note">
@@ -949,7 +949,7 @@
     // at least High Risk, whatever the API found.
     const classification = Array.isArray(tx.authorizationList) ? "BLOCK_RECOMMENDED"
       : lookalike ? atLeast(verdict, "HIGH_RISK") : verdict;
-    const badgeClass = BADGE_CLASSES[classification] || "shieldai-badge-caution";
+    const badgeClass = badgeClasses[classification] || "shieldai-badge-caution";
     const label = classLabel(classification);
     const isBlock = classification === "BLOCK_RECOMMENDED";
     // The wallet's chain could not be read, does not match the request, or is

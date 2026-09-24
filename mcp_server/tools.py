@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 
 from core.analyzer import AnalysisContext
 from core.extension_formatter import format_extension_alert
+from core.verdicts import HIGH, LOW, MEDIUM, UNKNOWN
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 
 logger = logging.getLogger(__name__)
@@ -244,15 +245,16 @@ async def handle_scan_contract(container, params: Dict) -> Dict:
 
     alert = format_extension_alert(score_data)
     return {
-        "verdict": "UNKNOWN" if alert["status"] == "unknown" else score_data.get("risk_level", "UNKNOWN"),
+        "verdict": UNKNOWN if alert["status"] == "unknown" else score_data.get("risk_level", UNKNOWN),
         "score": score_data["rug_probability"],
         "flags": score_data.get("critical_flags", []),
+        "notes": score_data.get("notes", []),
         "status": alert["status"],
         "coverage": score_data.get("coverage", {}),
         "coverage_reasons": alert["coverage_reasons"],
         "confidence": score_data.get("confidence_level"),
         "risk_display": alert["risk_display"],
-        "risk_level": score_data.get("risk_level", "UNKNOWN"),
+        "risk_level": score_data.get("risk_level", UNKNOWN),
         "categories": score_data.get("category_scores", {}),
     }
 
@@ -440,9 +442,9 @@ async def handle_scan_for_injection(container, params: Dict) -> Dict:
 
     clean = len(detections) == 0
     if detections:
-        risk_level = "HIGH" if len(detections) >= 3 else "MEDIUM"
+        risk_level = HIGH if len(detections) >= 3 else MEDIUM
     else:
-        risk_level = "LOW"
+        risk_level = LOW
 
     return {
         "clean": clean,

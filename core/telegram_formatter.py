@@ -3,6 +3,8 @@
 import re
 
 from core.extension_formatter import is_scan_incomplete
+from core.risk_engine import database_matches, medium_matches
+from core.verdicts import BLOCK_RECOMMENDED, CAUTION, HIGH, HIGH_RISK, MEDIUM, SAFE, classify
 
 # Replies are sent with Telegram's legacy Markdown, where these characters start an entity.
 _MARKUP = re.compile(r'([_*`\[])')
@@ -92,6 +94,7 @@ def format_full_report(
     archetype = risk_output.get('risk_archetype', 'unknown')
     confidence = risk_output.get('confidence_level', 0)
     flags = risk_output.get('critical_flags', [])
+    notes = risk_output.get('notes', [])
     scores = risk_output.get('category_scores', {})
     incomplete = is_scan_incomplete(risk_output) or bool(
         honeypot_data and honeypot_data.get('simulation_failed')
@@ -103,11 +106,12 @@ def format_full_report(
     impostor = impostor_check is not None and impostor_check['status'] == 'impostor'
 
     # Verdict emoji
-    if impostor or rug_prob >= 71:
+    band = classify(rug_prob)
+    if impostor or band == BLOCK_RECOMMENDED:
         verdict_icon = '\U0001F6A8'  # 🚨
-    elif rug_prob >= 50:
+    elif band == HIGH_RISK:
         verdict_icon = '\U0001F534'  # 🔴
-    elif rug_prob >= 31 or incomplete or risk_level in ('MEDIUM', 'HIGH'):
+    elif band == CAUTION or incomplete or risk_level in (MEDIUM, HIGH):
         verdict_icon = '\U0001F7E1'  # 🟡
     else:
         verdict_icon = '\U0001F7E2'  # 🟢
@@ -150,6 +154,13 @@ def format_full_report(
             lines.append(f'  \u2022 {escape_markdown(flag)}')
         lines.append('')
 
+    # Notes name a check that could not run and only adds risk: information, not a danger signal.
+    if notes:
+        lines.append('*\u2139 Notes:*')
+        for note in notes:
+            lines.append(f'  \u2022 {escape_markdown(note)}')
+        lines.append('')
+
     # Category scores
     lines.append('*Category Breakdown:*')
     for category in ('structural', 'market', 'behavioral', 'honeypot'):
@@ -181,11 +192,14 @@ def format_full_report(
     source_patterns = contract_data.get('source_code_patterns', [])
     if source_patterns:
         lines.append(f'  Source Patterns: {escape_markdown(", ".join(source_patterns))}')
-    scam_matches = contract_data.get('scam_matches', [])
+    scam_matches = database_matches(contract_data.get('scam_matches'))
     if scam_matches:
         lines.append(f'  Scam DB Hits: {len(scam_matches)}')
     elif contract_data.get('coverage', {}).get('scam_database') is False:
         lines.append('  Scam DB Hits: Unknown')
+    # A community report is not a scam database hit; it is named on its own.
+    for match in medium_matches(contract_data.get('scam_matches')):
+        lines.append(f'  {escape_markdown(match["reason"])}')
     lines.append('')
 
     # Market intelligence
@@ -268,10 +282,10 @@ def format_full_report(
             f'{verdict_icon} Impersonates {claimed} {escape_markdown(impostor_check["symbol"])}: '
             f'do not treat as the real token{caveat}'
         )
-    elif rug_prob >= 71:
+    elif band == BLOCK_RECOMMENDED:
         detail = 'Unknown risk: provider coverage incomplete' if incomplete else f'Rug probability {rug_prob}%'
         lines.append(f'{verdict_icon} DO NOT PROCEED — {detail}')
-    elif rug_prob >= 31 or incomplete or risk_level in ('MEDIUM', 'HIGH'):
+    elif band != SAFE or incomplete or risk_level in (MEDIUM, HIGH):
         detail = 'Unknown risk: provider coverage incomplete' if incomplete else f'Moderate risk ({rug_prob}%)'
         lines.append(f'{verdict_icon} PROCEED WITH CAUTION — {detail}')
     else:

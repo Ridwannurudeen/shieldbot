@@ -113,8 +113,8 @@ class ServiceContainer:
         self.robinhood_adapter = RobinhoodAdapter(rpc_url=settings.robinhood_rpc_url)
         self.web3_client.register_adapter(self.robinhood_adapter)
 
-        # Scanners (legacy fallback)
-        self.tx_scanner = TransactionScanner(self.web3_client, self.ai_analyzer)
+        # Scanners (legacy fallback); /api/scan reads the same local blacklist as the analyzers
+        self.tx_scanner = TransactionScanner(self.web3_client, self.ai_analyzer, self.scam_db)
         self.token_scanner = TokenScanner(self.web3_client, self.ai_analyzer)
 
         # Intelligence services
@@ -143,6 +143,7 @@ class ServiceContainer:
 
         # Database + Auth + Indexer
         self.db = Database(settings.database_path)
+        self.scam_db.db = self.db
         self.auth_manager = AuthManager(self.db)
         self.indexer = DeployerIndexer(self.web3_client, self.db, settings=settings)
         # Verdict evidence storage, plus on-chain records in the Robinhood Chain registry when configured
@@ -208,6 +209,7 @@ class ServiceContainer:
             ),
             rpc_guard=self.robinhood_rpc_guard,
             verdict_publisher=self.verdict_publisher,
+            scam_db=self.scam_db,
         )
         # Fast 4663 launch discovery and triaged scans; the lifespan starts and stops it.
         self.launch_watch = LaunchWatch(self.hunter)
@@ -244,10 +246,11 @@ class ServiceContainer:
     async def startup(self):
         """Initialize async-dependent services.
 
-        The API and the Telegram bot both call this. Each keeps its own indexer running, since each
-        enqueues scanned contracts into its own in-memory queue.
+        The API, the Telegram bot and workers.py all call this. Each keeps its own indexer running,
+        since each enqueues scanned contracts into its own in-memory queue.
         """
         await self.db.initialize()
+        await self.scam_db.load_blacklist()
         await self.indexer.start()
         await self.greenfield_service.async_init()
         await self.cache.connect()
@@ -261,7 +264,8 @@ class ServiceContainer:
     async def start_mempool_monitor(self):
         """Start the mempool monitor where pending transactions are available.
 
-        Only the API lifespan calls this, so one process polls the mempools and holds the alerts.
+        The API lifespan calls this, or workers.py in its place with BACKGROUND_WORKERS=external, so one
+        process polls the mempools and holds the alerts.
         """
         await self.mempool_monitor.start(
             chain_ids=[

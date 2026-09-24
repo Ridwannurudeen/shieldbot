@@ -13,7 +13,6 @@ import logging
 import random
 import re
 import traceback
-from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
@@ -21,23 +20,32 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from typing import Optional, Dict, Any, List
+from redis.exceptions import RedisError
+from typing import Optional, Dict, Any, List, Literal
 
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve_selector
 from utils.chain_info import get_chain_name, get_native_symbol
 from utils.web3_client import UnsupportedChainError
+from utils.scam_db import BLACKLIST_RELOAD_SECONDS
+from core.risk_engine import MEDIUM_MATCH_FLOOR, database_matches, medium_matches
 from services import rpc_guard
 from services.counterparty_service import code_kind
 from services.mempool_service import supports_pending_transactions
+from core import verdicts
 from core.auth import TIER_LIMITS, hash_key
 from core.circuit_breaker import CLOSED, provider_breakers
 from core.config import Settings
 from core.container import ServiceContainer
-from core.database import reporter_hash
+from core.database import SCAN_EVIDENCE_RETENTION_DAYS, reporter_hash
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
+from core.rate_limit import RateLimiter, connect as connect_rate_limit_redis
+from core.scan_evidence import (
+    analyzer_outcomes, build_scan_evidence, oldest_simulation_block, render_evidence_page, transaction_evidence,
+)
 from core.unknown_ledger import unknown_ledger
 from core.telegram_formatter import escape_markdown
-from rpc.router import rpc_router
+from core.verdict_evidence import canonical_bytes, evidence_hash
+from rpc.router import rpc_limiter, rpc_router
 from rpc.proxy import RPCProxy
 
 logging.basicConfig(
@@ -69,56 +77,28 @@ def _fire_and_forget(coro, label: str = "background"):
     return task
 
 
-class RateLimiter:
-    """In-memory sliding window rate limiter per IP."""
-
-    def __init__(self, requests_per_minute: int = 30, burst: int = 10):
-        self.rpm = requests_per_minute
-        self.burst = burst
-        self.window = 60.0  # seconds
-        self._hits: Dict[str, list] = defaultdict(list)
-
-    def is_allowed(self, key: str) -> bool:
-        now = time.monotonic()
-        hits = self._hits[key]
-
-        # Prune expired entries
-        cutoff = now - self.window
-        while hits and hits[0] < cutoff:
-            hits.pop(0)
-
-        if len(hits) >= self.rpm:
-            return False
-
-        # Burst check: no more than `burst` requests in 5 seconds
-        burst_cutoff = now - 5.0
-        recent = sum(1 for t in hits if t >= burst_cutoff)
-        if recent >= self.burst:
-            return False
-
-        hits.append(now)
-
-        # Probabilistic cleanup to prevent unbounded memory growth
-        if random.random() < 0.01:
-            self.cleanup()
-
-        return True
-
-    def cleanup(self):
-        """Remove stale IPs (call periodically if needed)."""
-        now = time.monotonic()
-        cutoff = now - self.window * 2
-        stale = [k for k, v in self._hits.items() if not v or v[-1] < cutoff]
-        for k in stale:
-            del self._hits[k]
-
-
 rate_limiter = RateLimiter(requests_per_minute=30, burst=10)
 chat_limiter = RateLimiter(requests_per_minute=50, burst=10)
 
 
 # Service container (initialized on startup)
 container: Optional[ServiceContainer] = None
+
+# BACKGROUND_WORKERS as the lifespan read it. With "external" the mempool monitor, the verdict drain, the
+# hunter and the launch watch run in workers.py, and this process holds none of their in-memory state.
+_background_workers = "api"
+# With "external" the hunter's sweep, which reloads the scam blacklist, runs in workers.py, so the API
+# rereads the blacklist itself in this task; None with "api".
+_blacklist_reload_task: Optional[asyncio.Task] = None
+_EXTERNAL_WORKERS_NOTE = (
+    "Background work runs in the separate workers process (BACKGROUND_WORKERS=external), and this API "
+    "process holds none of its in-memory state: the mempool counters and the launch watch's run state "
+    "are null here, not zero. The Unknown ledger here counts this process's own lookups only."
+)
+_EXTERNAL_MEMPOOL_DETAIL = (
+    "The mempool monitor runs in the separate workers process (BACKGROUND_WORKERS=external); "
+    "this API process does not hold its alerts or counters."
+)
 
 # Convenience accessors — set after container startup
 web3_client = None
@@ -159,16 +139,62 @@ def _bind_globals(c: ServiceContainer):
     advisor = c.advisor
 
 
+async def _blacklist_reload_loop():
+    """Reload the persisted scam blacklist every BLACKLIST_RELOAD_SECONDS until cancelled, so entries
+    the bot or workers.py write reach this process's scans. Startup has just loaded it, so each pass
+    waits first."""
+    while True:
+        await asyncio.sleep(BLACKLIST_RELOAD_SECONDS)
+        try:
+            await container.scam_db.load_blacklist()
+        except Exception as e:
+            logger.error(
+                "Blacklist reload failed: %s\n%s",
+                type(e).__name__, "".join(traceback.format_tb(e.__traceback__)),
+            )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global container
+    global container, _background_workers, _blacklist_reload_task
     settings = Settings()
     container = ServiceContainer(settings)
     _bind_globals(container)
     await container.startup()
-    await container.start_mempool_monitor()
-    container.verdict_publisher.start()
+    rate_limit_redis = None
+    if settings.rate_limit_backend == "redis":
+        rate_limit_redis = connect_rate_limit_redis(settings.redis_url)
+        # When Redis cannot answer, the general request limiter, the RPC proxy's and the API key
+        # minute window count in this process's memory (logged), so an outage takes neither the scan
+        # API nor users' wallets down. The abuse-sensitive limiters refuse (core/rate_limit.py).
+        rate_limiter.use_redis(rate_limit_redis, "requests", fail_open=True)
+        rpc_limiter.use_redis(rate_limit_redis, "rpc", fail_open=True)
+        chat_limiter.use_redis(rate_limit_redis, "chat", fail_open=False)
+        _report_limiter.use_redis(rate_limit_redis, "report", fail_open=False)
+        _outcome_limiter.use_redis(rate_limit_redis, "outcome", fail_open=False)
+        _signup_limiter.use_redis(rate_limit_redis, "signup", fail_open=False)
+        _free_key_limiter.use_redis(rate_limit_redis, "free-key", fail_open=False)
+        _watch_alerts_limiter.use_redis(rate_limit_redis, "watch-alerts", fail_open=False)
+        container.auth_manager.use_redis(rate_limit_redis)
+        try:
+            await rate_limit_redis.ping()
+        except RedisError as e:
+            logger.warning(
+                "Rate limits configured for Redis, but it did not answer PING (%s). Until it does, the "
+                "general, RPC proxy and API key limits count in this process's memory and the chat, "
+                "report, outcome, signup, free key and watch alert limits refuse every request",
+                type(e).__name__,
+            )
+        else:
+            logger.info("Rate limits kept in Redis")
+    # The API serves phishing checks itself, so MetaMask's list refreshes here whichever process runs the work.
     container.phishing_service.start()
+    _background_workers = settings.background_workers
+    if _background_workers == "api":
+        await container.start_mempool_monitor()
+        container.verdict_publisher.start()
+    else:
+        logger.info("Background work runs in workers.py (BACKGROUND_WORKERS=external)")
 
     # Initialize RPC proxy if enabled
     if settings.rpc_proxy_enabled:
@@ -201,11 +227,21 @@ async def lifespan(app: FastAPI):
     guard_router = create_guardian_router(container)
     app.include_router(guard_router, prefix="/api/guardian")
 
-    await container.hunter.start()
-    await container.launch_watch.start()
+    if _background_workers == "api":
+        await container.hunter.start()
+        await container.launch_watch.start()
+        _blacklist_reload_task = None
+    else:
+        _blacklist_reload_task = asyncio.create_task(_blacklist_reload_loop())
 
     logger.info("ShieldAI Firewall API started")
     yield
+    if _blacklist_reload_task is not None:
+        _blacklist_reload_task.cancel()
+        try:
+            await _blacklist_reload_task
+        except asyncio.CancelledError:
+            pass
     await container.launch_watch.stop()
     await container.hunter.stop()
     await container.phishing_service.stop()
@@ -214,6 +250,8 @@ async def lifespan(app: FastAPI):
     rpc_proxy = getattr(app.state, "rpc_proxy", None)
     if rpc_proxy:
         await rpc_proxy.close()
+    if rate_limit_redis is not None:
+        await rate_limit_redis.aclose()
     logger.info("ShieldAI Firewall API shutting down")
 
 
@@ -328,7 +366,7 @@ async def rate_limit_middleware(request: Request, call_next):
     if random.random() < 0.01:
         rate_limiter.cleanup()
 
-    if not rate_limiter.is_allowed(client_ip):
+    if not await rate_limiter.is_allowed(client_ip):
         logger.warning(f"Rate limit exceeded for {client_ip}")
         return JSONResponse(
             status_code=429,
@@ -376,6 +414,10 @@ def _validate_signing_chain(typed_data: Optional[Dict], chain_id: int):
         )
 
 
+def _refuse_json_constant(name: str):
+    raise ValueError(f"{name} is not JSON")
+
+
 @app.middleware("http")
 async def request_validation_middleware(request: Request, call_next):
     content_length = request.headers.get("content-length")
@@ -414,7 +456,9 @@ async def request_validation_middleware(request: Request, call_next):
     body = None
     if raw_body and is_json:
         try:
-            body = await request.json()
+            # NaN and Infinity are not JSON (RFC 8259). Refusing them keeps every body serialisable:
+            # a validation error echoes its input, and the evidence document hashes typed data.
+            body = json.loads(raw_body, parse_constant=_refuse_json_constant)
         except (ValueError, UnicodeDecodeError):
             return JSONResponse(status_code=400, content={"detail": "Invalid JSON body"})
         if isinstance(body, dict):
@@ -485,7 +529,7 @@ class FirewallRequest(ChainRequest):
         if v is None:
             return v
         try:
-            encoded = json.dumps(v, separators=(",", ":"), default=str)
+            encoded = json.dumps(v, separators=(",", ":"), default=str, allow_nan=False)
         except (TypeError, ValueError) as exc:
             raise ValueError("typedData must be JSON serializable") from exc
         if len(encoded) > MAX_TYPED_DATA_CHARS:
@@ -502,9 +546,9 @@ class OutcomeRequest(ChainRequest):
     address: str = Field(..., min_length=1, max_length=64)
     chainId: int = Field(default=56, ge=1, le=10_000_000)
     risk_score_at_scan: Optional[float] = Field(default=None, ge=0, le=100)
-    user_decision: str = Field(..., min_length=1, max_length=16)  # "proceed", "block", "ignore"
-    outcome: Optional[str] = Field(default=None, max_length=16)  # "safe", "scam", "unknown"
-    tx_hash: Optional[str] = Field(default=None, max_length=80)
+    user_decision: Literal["proceed", "block", "ignore"]
+    outcome: Optional[Literal["safe", "scam", "unknown"]] = None
+    tx_hash: Optional[str] = Field(default=None, pattern=r"^0x[0-9a-fA-F]{64}$")
 
 
 class CommunityReportRequest(ChainRequest):
@@ -543,6 +587,9 @@ class ExplainRequest(BaseModel):
 # Report rate limiter: 5 reports/min per IP
 _report_limiter = RateLimiter(requests_per_minute=5, burst=3)
 
+# Outcome rate limiter for callers without an API key: 10 outcomes/min per IP
+_outcome_limiter = RateLimiter(requests_per_minute=10, burst=5)
+
 # Beta-signup rate limiter: 3 signups/min per IP
 _signup_limiter = RateLimiter(requests_per_minute=3, burst=2)
 
@@ -570,7 +617,7 @@ async def beta_signup(req: BetaSignupRequest, request: Request):
     """Collect beta signup emails."""
     # Rate limit per IP
     client_ip = _get_client_ip(request)
-    if not _signup_limiter.is_allowed(f"signup:{client_ip}"):
+    if not await _signup_limiter.is_allowed(client_ip):
         return JSONResponse(status_code=429, content={"detail": "Too many requests. Please try again later."})
 
     import re
@@ -803,6 +850,10 @@ DASHBOARD_CSP = (
     "default-src 'self'; script-src 'self' 'unsafe-inline'; "
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
     "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+)
+# The evidence page has no scripts and loads nothing; its only styles are inline.
+EVIDENCE_CSP = (
+    "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 )
 
 
@@ -1143,7 +1194,9 @@ def _is_signature_only_request(req: FirewallRequest) -> bool:
     return (req.signMethod or "") in SIGNING_METHODS and not _is_valid_evm_address(req.to)
 
 
-async def _build_signature_only_response(req: FirewallRequest, policy_override: Optional[str] = None) -> Dict:
+async def _build_signature_only_response(
+    req: FirewallRequest, policy_override: Optional[str] = None, trail: Optional[Dict] = None,
+) -> Dict:
     from analyzers.signature import SignaturePermitAnalyzer
     from core.analyzer import AnalysisContext
     from core.policy import PolicyEngine
@@ -1170,18 +1223,11 @@ async def _build_signature_only_response(req: FirewallRequest, policy_override: 
     danger_signals = list(result.flags)
 
     # eth_sign signs a raw 32-byte hash, which can be a transaction's: it is always Block Recommended.
-    if req.signMethod == "eth_sign" and risk_score < 90:
-        risk_score = 90
+    if req.signMethod == "eth_sign" and risk_score < verdicts.BLIND_SIGN_MIN:
+        risk_score = verdicts.BLIND_SIGN_MIN
         danger_signals.insert(0, "eth_sign signs a raw hash, and that hash can be a transaction that moves your funds")
 
-    if risk_score >= 70:
-        classification = "BLOCK_RECOMMENDED"
-    elif risk_score >= 40:
-        classification = "HIGH_RISK"
-    elif risk_score >= 15:
-        classification = "CAUTION"
-    else:
-        classification = "SAFE"
+    classification = verdicts.classify(risk_score, verdicts.SIGNATURE_BANDS)
 
     sig_type = result.data.get("sig_type", "signature")
     sign_method = req.signMethod or result.data.get("sign_method") or "signature"
@@ -1193,21 +1239,32 @@ async def _build_signature_only_response(req: FirewallRequest, policy_override: 
     policy = container.policy_engine if container and container.policy_engine else PolicyEngine()
     strict_block = not covered and policy.apply([], {}, mode_override=policy_override)['policy_mode'] == 'STRICT'
     if strict_block:
-        risk_score = max(risk_score, 80)
-        classification = 'BLOCK_RECOMMENDED'
+        risk_score = max(risk_score, verdicts.STRICT_BLOCK_SCORE)
+        classification = verdicts.BLOCK_RECOMMENDED
         danger_signals.insert(0, 'Policy override: signature analysis unavailable or incomplete')
     alert = format_extension_alert({
-        'rug_probability': risk_score, 'risk_level': 'LOW' if covered else 'UNKNOWN',
+        'rug_probability': risk_score, 'risk_level': verdicts.LOW if covered else verdicts.UNKNOWN,
         'status': 'ok' if covered else 'unknown', 'coverage': {'signature': int(covered)},
         'coverage_reasons': {} if covered else {
             'signature': result.data.get('reason') or 'Signature payload analysis unavailable or unsupported',
         },
     })
-    if not covered and classification == 'SAFE':
-        classification = 'CAUTION'
+    if not covered and classification == verdicts.SAFE:
+        classification = verdicts.CAUTION
     decoded_action = f"{sign_method} signature request"
     if sig_type and sig_type not in {"unknown", sign_method}:
         decoded_action += f" ({sig_type})"
+
+    # What the evidence document records (see _firewall_verdict): the signed data only as a hash.
+    if trail is not None:
+        trail.update(
+            target=target,
+            analyzers=analyzer_outcomes([result], {
+                'coverage': {'signature': int(covered)}, 'category_scores': {'signature': risk_score},
+                'coverage_reasons': alert['coverage_reasons'],
+            }),
+            transaction=transaction_evidence(req.data, sign_method=req.signMethod, typed_data=req.typedData),
+        )
 
     return {
         **_coverage_fields(alert),
@@ -1232,7 +1289,8 @@ async def _build_signature_only_response(req: FirewallRequest, policy_override: 
         "analysis": f"Signature-only analysis for {sign_method}",
         "plain_english": (
             alert['recommended_action'] if not covered else
-            "This signature request contains risky permission patterns. Verify the spender, token, and terms before signing." if risk_score >= 40
+            "This signature request contains risky permission patterns. Verify the spender, token, and terms before signing."
+            if classification in (verdicts.HIGH_RISK, verdicts.BLOCK_RECOMMENDED)
             else "No dangerous signature permission pattern was detected."
         ),
         "verdict": f"{classification} - Signature risk {alert['risk_display']}",
@@ -1244,7 +1302,7 @@ async def _build_signature_only_response(req: FirewallRequest, policy_override: 
             "overall": risk_score,
             "category_scores": {"signature": risk_score},
             **_coverage_fields(alert),
-            "risk_level": classification if covered else 'UNKNOWN',
+            "risk_level": classification if covered else verdicts.UNKNOWN,
             "threat_type": sig_type or "signature",
             "critical_flags": danger_signals,
             "confidence": 80 if req.typedData else 60,
@@ -1257,6 +1315,7 @@ async def _build_signature_only_response(req: FirewallRequest, policy_override: 
         "partial": not covered,
         "failed_sources": [] if covered else ["signature"],
         "policy_mode": "STRICT" if strict_block else "SIGNATURE_ONLY",
+        "notes": [],
     }
 
 
@@ -1265,18 +1324,33 @@ async def firewall(req: FirewallRequest, request: Request):
     """
     Main firewall endpoint — intercepts a pending transaction,
     analyzes calldata + target contract, and returns a security verdict.
+    Every verdict carries evidence_hash and evidence_url (see _with_evidence).
     """
+    trail = {}
+    response = await _firewall_verdict(req, request, trail)
+    return await _with_evidence(
+        response, "/api/firewall", req.chainId, caller=_checksum_if_possible(req.sender), **trail,
+    )
+
+
+async def _firewall_verdict(req: FirewallRequest, request: Request, trail: Dict) -> Dict:
+    """The firewall's verdict. Each path records in `trail` what its evidence document needs:
+    target, target_token, transaction (transaction-specific verdicts only), analyzers,
+    observed_block and, for a verdict served from contract_scores, cached_scan_at."""
     try:
         to_addr = req.to
         from_addr = req.sender
 
         if _is_signature_only_request(req):
-            return await _build_signature_only_response(req, policy_override=request.headers.get("X-Policy-Mode"))
+            return await _build_signature_only_response(
+                req, policy_override=request.headers.get("X-Policy-Mode"), trail=trail,
+            )
 
         if not web3_client.is_valid_address(to_addr):
             raise HTTPException(status_code=400, detail="Invalid 'to' address")
 
         to_addr = web3_client.to_checksum_address(to_addr)
+        trail['target'] = to_addr
 
         # 1. Decode calldata
         decoded = calldata_decoder.decode(req.data)
@@ -1290,6 +1364,8 @@ async def firewall(req: FirewallRequest, request: Request):
 
         # Enrich decoded calldata with token names and formatted amounts
         await _enrich_decoded(decoded, to_addr, chain_id=req.chainId)
+        if decoded.get('token_symbol'):
+            trail['target_token'] = {'name': decoded.get('token_name'), 'symbol': decoded['token_symbol']}
 
         # contract_scores holds one verdict per target. An approval's, a claim's, a signature's or
         # a paying call's verdict also depends on this transaction (the spender, the value, the
@@ -1310,6 +1386,11 @@ async def firewall(req: FirewallRequest, request: Request):
             decoded.get('category') == 'approval' or req.typedData
             or (paying and decoded.get('category') != 'claim') or req.authorizationList is not None
         )
+        if tx_specific:
+            trail['transaction'] = transaction_evidence(
+                req.data, function=decoded.get('function_name'), sign_method=req.signMethod,
+                typed_data=req.typedData,
+            )
 
         # 2. If target is a whitelisted router, analyze the swap path tokens instead of bypassing.
         # A delegation is judged on the full path below, whatever the target.
@@ -1322,22 +1403,28 @@ async def firewall(req: FirewallRequest, request: Request):
                 whitelisted=whitelisted,
                 value_bnb=value_bnb,
                 policy_override=request.headers.get("X-Policy-Mode"),
+                trail=trail,
             )
             if router_response:
                 return router_response
+
+        # The effective policy mode: the X-Policy-Mode header, or the server's default.
+        policy_mode = "BALANCED"
+        if container and container.policy_engine:
+            policy_mode = container.policy_engine.apply(
+                [], {}, mode_override=request.headers.get("X-Policy-Mode"),
+            )['policy_mode']
 
         # 2b. Check cache for recent result
         if container and container.db and not tx_specific:
             cached = await container.db.get_contract_score(to_addr, req.chainId, max_age_seconds=300)
             if cached and cached.get('category_scores', {}).get('_scan_metadata', {}).get('coverage'):
-                policy_mode = "BALANCED"
-                if container.policy_engine:
-                    policy_mode = container.policy_engine.apply(
-                        [], {}, mode_override=request.headers.get("X-Policy-Mode"),
-                    )['policy_mode']
-                if policy_mode != "STRICT":
+                # A full rescan costs provider calls, so only a caller with a valid API key can force one
+                # with STRICT. Anyone else is answered from the cached facts in STRICT mode.
+                if policy_mode != "STRICT" or not getattr(request.state, "api_key_info", None):
+                    trail['cached_scan_at'] = cached['last_scanned_at']
                     return _build_cached_response(
-                        cached, decoded, value_bnb, req.chainId, to_addr=to_addr,
+                        cached, decoded, value_bnb, req.chainId, to_addr=to_addr, policy_mode=policy_mode,
                     )
 
         # 2c. Fast deployer history lookup (uses already-indexed data — non-blocking DB query)
@@ -1464,10 +1551,8 @@ async def firewall(req: FirewallRequest, request: Request):
             if simulation_result:
                 if not simulation_result.get("success") and simulation_result.get("revert_reason"):
                     danger_signals.insert(0, f"Simulation reverted: {simulation_result['revert_reason']}")
-                    # Only escalate to BLOCK if risk is already elevated (>= 30)
-                    # Low-risk reverts are just bad tx params, not malicious
-                    if alert["rug_probability"] >= 30:
-                        classification = "BLOCK_RECOMMENDED"
+                    if _revert_blocks(risk_output):
+                        classification = verdicts.BLOCK_RECOMMENDED
                 for w in simulation_result.get("warnings", []):
                     if w not in danger_signals:
                         danger_signals.append(w)
@@ -1482,15 +1567,22 @@ async def firewall(req: FirewallRequest, request: Request):
                     alert["rug_probability"] = risk_score
                     if alert['status'] == 'ok':
                         alert['risk_display'] = f'{risk_score}%'
-                    if risk_score >= 71:
-                        classification = "BLOCK_RECOMMENDED"
+                    # The boosted score takes its band, as the extension draws it.
+                    band = verdicts.classify(risk_score)
+                    if band == verdicts.BLOCK_RECOMMENDED:
+                        classification = verdicts.BLOCK_RECOMMENDED
+                    elif band == verdicts.HIGH_RISK and classification in (verdicts.SAFE, verdicts.CAUTION):
+                        classification = verdicts.HIGH_RISK
+
+            # The level follows the final score, the campaign boost included, here and where it is stored.
+            risk_level = verdicts.stored_level(risk_score, risk_output.get("risk_level", verdicts.UNKNOWN))
 
             # Shield score breakdown
             shield_score = {
                 **_coverage_fields(alert),
                 "overall": risk_score,
                 "category_scores": risk_output.get("category_scores", {}),
-                "risk_level": risk_output.get("risk_level", "UNKNOWN"),
+                "risk_level": risk_level,
                 "threat_type": risk_output.get("risk_archetype", "unknown"),
                 "critical_flags": risk_output.get("critical_flags", []),
                 "confidence": alert["confidence"],
@@ -1535,6 +1627,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 "failed_sources": risk_output.get("failed_sources", []),
                 "policy_mode": risk_output.get("policy_mode", "BALANCED"),
                 "campaign_context": _deployer_ctx,
+                "notes": risk_output.get("notes", []),
             }
 
             # Persist contract score to DB
@@ -1544,11 +1637,11 @@ async def firewall(req: FirewallRequest, request: Request):
                         address=to_addr,
                         chain_id=req.chainId,
                         risk_score=risk_score,
-                        risk_level=risk_output.get("risk_level", "UNKNOWN"),
+                        risk_level=risk_level,
                         archetype=risk_output.get("risk_archetype"),
                         category_scores={
                             **risk_output.get("category_scores", {}),
-                            '_scan_metadata': _coverage_fields(alert),
+                            '_scan_metadata': {**_coverage_fields(alert), 'notes': risk_output.get('notes', [])},
                         },
                         flags=risk_output.get("critical_flags"),
                         confidence=alert.get("confidence"),
@@ -1562,13 +1655,13 @@ async def firewall(req: FirewallRequest, request: Request):
             if container and hasattr(container, 'threat_graph') and describes_target:
                 _fire_and_forget(
                     container.threat_graph.enrich_from_scan(
-                        to_addr, req.chainId, risk_output,
+                        to_addr, req.chainId, {**risk_output, "rug_probability": risk_score, "risk_level": risk_level},
                     ),
                     label="threat_graph_enrich",
                 )
 
             # Sentinel feedback loop: auto-watch deployers of blocked contracts
-            if container and hasattr(container, 'sentinel') and classification == "BLOCK_RECOMMENDED" and describes_target:
+            if container and hasattr(container, 'sentinel') and classification == verdicts.BLOCK_RECOMMENDED and describes_target:
                 try:
                     deployer_info = await container.db.get_deployer_risk_summary(to_addr, req.chainId)
                     deployer_addr = deployer_info["deployer_address"] if deployer_info else None
@@ -1587,8 +1680,8 @@ async def firewall(req: FirewallRequest, request: Request):
             if container and container.indexer:
                 container.indexer.enqueue(to_addr, req.chainId)
 
-            # Greenfield upload for risky transactions (risk >= 50)
-            if greenfield_service and greenfield_service.is_enabled() and risk_score >= 50:
+            # Greenfield upload for risky transactions (HIGH_RISK and above)
+            if greenfield_service and greenfield_service.is_enabled() and risk_score >= verdicts.HIGH_RISK_MIN:
                 try:
                     gf_url = await greenfield_service.upload_report(
                         target_address=to_addr,
@@ -1607,6 +1700,9 @@ async def firewall(req: FirewallRequest, request: Request):
                 except Exception as e:
                     logger.error(f"Greenfield upload failed: {type(e).__name__}")
 
+            if analyzer_results is not None:
+                trail['analyzers'] = analyzer_outcomes(analyzer_results, risk_output)
+                trail['observed_block'] = oldest_simulation_block(analyzer_results)
             return response
 
         except UnsupportedChainError:
@@ -1642,26 +1738,25 @@ async def firewall(req: FirewallRequest, request: Request):
             "whitelisted_router": whitelisted,
         }
 
-        firewall_result = None
-        if not is_scan_incomplete(contract_scan) and ai_analyzer and ai_analyzer.is_available():
-            firewall_result = await ai_analyzer.generate_firewall_report(tx_data, contract_scan)
-
-        if firewall_result:
-            alert = format_extension_alert({
-                **contract_scan, 'rug_probability': firewall_result.get('risk_score', contract_scan.get('risk_score', 0)),
-            })
-            firewall_result.update(_coverage_fields(alert))
-            firewall_result["raw_checks"] = _extract_raw_checks(contract_scan)
-            firewall_result.setdefault("asset_delta", [])
-            if tx_specific and firewall_result["classification"] == "SAFE":
-                firewall_result["classification"] = "CAUTION"
-                firewall_result["danger_signals"].append(_TX_CHECKS_UNAVAILABLE)
-                firewall_result["verdict"] = f"CAUTION — {_TX_CHECKS_UNAVAILABLE}"
-            return firewall_result
-        else:
-            return _build_fallback_response(
-                decoded, contract_scan, whitelisted, req.chainId, transaction_specific=tx_specific,
+        response = _build_fallback_response(
+            decoded, contract_scan, whitelisted, req.chainId, transaction_specific=tx_specific,
+            policy_mode=policy_mode,
+        )
+        # The AI explains a known verdict and never sets it: of its reply only the prose is kept.
+        if response["status"] == "ok" and ai_analyzer and ai_analyzer.is_available():
+            explanation = await ai_analyzer.generate_firewall_report(
+                tx_data, contract_scan, response["classification"], response["risk_score"],
             )
+            if explanation:
+                response.update({
+                    key: explanation[key] for key in ("analysis", "plain_english") if isinstance(explanation.get(key), str)
+                })
+                impact = explanation.get("transaction_impact")
+                if isinstance(impact, dict):
+                    response["transaction_impact"].update({
+                        key: impact[key] for key in ("sending", "post_tx_state") if isinstance(impact.get(key), str)
+                    })
+        return response
 
     except HTTPException:
         raise
@@ -1670,6 +1765,30 @@ async def firewall(req: FirewallRequest, request: Request):
     except Exception as e:
         logger.error(f"Firewall error: {type(e).__name__}\n{''.join(traceback.format_tb(e.__traceback__))}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+async def _with_evidence(response: Dict, endpoint: str, chain_id: int, **trail) -> Dict:
+    """`response` with evidence_hash, the hash of its evidence document (core/scan_evidence.py), and
+    evidence_url, where GET /evidence/{hash} shows it.
+
+    The document is stored before its URL is returned, so the URL never names a missing document;
+    evidence_url is None when it could not be stored, and both are None when the document could not
+    be serialised. Neither failure withholds the verdict.
+    """
+    digest = url = None
+    try:
+        document = build_scan_evidence(endpoint, chain_id, response, int(time.time()), **trail)
+        canonical = canonical_bytes(document).decode("utf-8")
+        digest = evidence_hash(document)
+    except (TypeError, ValueError) as e:
+        logger.error("Scan evidence could not be serialised: %s", type(e).__name__)
+    if digest and container and container.db:
+        try:
+            await container.db.insert_scan_evidence(digest, canonical)
+            url = f"{container.settings.public_api_url.rstrip('/')}/evidence/{digest}"
+        except Exception as e:
+            logger.error("Scan evidence store failed: %s", type(e).__name__)
+    return {**response, "evidence_hash": digest, "evidence_url": url}
 
 
 @app.post("/api/scan")
@@ -1691,11 +1810,12 @@ async def scan(req: ScanRequest):
         result.update(_coverage_fields(alert))
         result['classification'] = alert['risk_classification']
         result['partial'] = alert['status'] == 'unknown' or result.get('partial', False)
+        result['notes'] = []
         if alert['status'] == 'unknown':
-            result['risk_level'] = 'UNKNOWN'
+            result['risk_level'] = verdicts.UNKNOWN
             result['verdict'] = alert['recommended_action']
             result.pop('ai_analysis', None)
-        return result
+        return await _with_evidence(result, "/api/scan", req.chainId, target=address)
 
     except HTTPException:
         raise
@@ -1742,8 +1862,24 @@ async def scan_injection(request: Request):
 
 
 @app.post("/api/outcome")
-async def report_outcome(req: OutcomeRequest):
-    """Record a user decision/outcome for a scanned contract (extension reports back)."""
+async def report_outcome(req: OutcomeRequest, request: Request):
+    """Record a user decision/outcome for a scanned contract.
+
+    Anyone may call this, so each row records who sent it: 'key:<key_id>' for a valid API key, or
+    'client'. No score reads these rows; scripts/calibrate.py reads only the API key rows, into a
+    proposal the owner reviews.
+    """
+    # A valid API key is already held to its own quota by the middleware.
+    key_info = getattr(request.state, "api_key_info", None)
+    if key_info is None and not await _outcome_limiter.is_allowed(_get_client_ip(request)):
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Outcome rate limit exceeded (10/min)."},
+        )
+
+    if not web3_client or not web3_client.is_valid_address(req.address):
+        raise HTTPException(status_code=400, detail="Invalid address")
+
     try:
         if container and container.db:
             await container.db.record_outcome(
@@ -1753,6 +1889,7 @@ async def report_outcome(req: OutcomeRequest):
                 user_decision=req.user_decision,
                 outcome=req.outcome,
                 tx_hash=req.tx_hash,
+                source=f"key:{key_info['key_id']}" if key_info else "client",
             )
         return {"status": "recorded"}
     except Exception as e:
@@ -1765,7 +1902,7 @@ async def community_report(req: CommunityReportRequest, request: Request):
     """Record a community report (false positive, false negative, or scam)."""
     # Rate limit per IP (rightmost = proxy-set, not spoofable)
     client_ip = _get_client_ip(request)
-    if not _report_limiter.is_allowed(f"report:{client_ip}"):
+    if not await _report_limiter.is_allowed(client_ip):
         return JSONResponse(
             status_code=429,
             content={"detail": "Report rate limit exceeded (5/min)."},
@@ -1871,7 +2008,7 @@ async def request_free_key(req: FreeKeyRequest, request: Request):
     if not container or not container.email_service.is_enabled():
         raise HTTPException(status_code=503, detail="Self-serve keys are not enabled")
     client_ip = _get_client_ip(request)
-    if not _free_key_limiter.is_allowed(f"free-key:{client_ip}"):
+    if not await _free_key_limiter.is_allowed(client_ip):
         return JSONResponse(status_code=429, content={"detail": "Too many requests. Please try again later."})
 
     email = req.email.strip().lower()
@@ -2003,7 +2140,9 @@ async def admin_stats(request: Request):
 
     # Mempool stats (in-memory counters)
     mempool = {}
-    if container.mempool_monitor:
+    if _background_workers == "external":
+        mempool = None
+    elif container.mempool_monitor:
         mempool = container.mempool_monitor.get_stats()
 
     # Phishing cache size (server-side, in-memory)
@@ -2014,8 +2153,11 @@ async def admin_stats(request: Request):
     guard_watch = None
     if container.hunter:
         guard_watch = await container.hunter.guard_watch_stats()
+        if _background_workers == "external":
+            # The launch watch and its RPC budget run in workers.py; this process's copies are idle.
+            guard_watch.update(running=None, rpc_budget=None)
 
-    return {
+    stats = {
         "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
         **db_stats,
         "mempool": mempool,
@@ -2024,6 +2166,9 @@ async def admin_stats(request: Request):
             "domains_cached": phishing_cache_size,
         },
     }
+    if _background_workers == "external":
+        stats["background_workers_note"] = _EXTERNAL_WORKERS_NOTE
+    return stats
 
 
 @app.get("/api/stats")
@@ -2050,6 +2195,9 @@ async def public_stats():
     `unknown_ledger` sums, per provider and per chain, how often a provider lookup was answered,
     came back unknown or failed since `counting_since` (core.unknown_ledger); it restarts with the
     process. GET /api/coverage/{chain_id} has one chain's providers in full.
+    With BACKGROUND_WORKERS=external the mempool monitor runs in workers.py: every mempool field is
+    null, `unknown_ledger` counts this process's lookups only (not the hunter's or the launch
+    watch's), and `background_workers_note` says so.
     """
     from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
     from services.verdict_publisher import CHAIN_ID as REGISTRY_CHAIN_ID
@@ -2074,14 +2222,14 @@ async def public_stats():
 
     mempool = {}
     observable = unobservable = None
-    if container and container.mempool_monitor:
+    if container and container.mempool_monitor and _background_workers == "api":
         mempool = container.mempool_monitor.get_stats()
         unobservable = mempool["unobservable_chains"]
         observable = sorted(set(mempool["monitored_chains"]) - set(unobservable))
 
     at = db_stats.get("all_time", {})
     day = db_stats.get("last_24h", {})
-    return {
+    stats = {
         "transactions_monitored": mempool.get("total_pending_seen"),
         "contracts_scanned":      at.get("unique_contracts_scanned"),
         "threats_detected":       at.get("threats_detected"),
@@ -2100,6 +2248,22 @@ async def public_stats():
         "registry_records_confirmed": registry_records_confirmed,
         "unknown_ledger":         unknown_ledger.summary(),
     }
+    if _background_workers == "external":
+        stats["background_workers_note"] = _EXTERNAL_WORKERS_NOTE
+    return stats
+
+
+@app.get("/api/verdicts")
+async def verdict_vocabulary():
+    """The verdict vocabulary and band tables every ShieldBot surface uses, read-only.
+
+    A score is in the first band whose min_score it reaches. risk_level_thresholds are the lowest
+    scores at which a stored risk level is HIGH and MEDIUM on this server: the calibrated thresholds,
+    or the band table's where that is lower, since a stored level is raised to the band of its score.
+    agent_firewall gives the agent firewall's default thresholds and the decisions each
+    classification can meet under them.
+    """
+    return verdicts.describe(container.calibration if container else None)
 
 
 @app.get("/api/coverage/{chain_id}")
@@ -2119,6 +2283,8 @@ async def chain_coverage(chain_id: int):
     lookups were answered, came back unknown or failed since `counting_since`, and the latest outcome;
     `chain_independent` holds providers asked about no chain. A provider with no entry has not been
     asked since the process started. Nothing here sends a request to any provider.
+    With BACKGROUND_WORKERS=external this process reads no mempool, so `public_mempool` is never yes,
+    and `provider_health` counts this process's lookups only; `background_workers_note` says so.
     """
     _validate_chain_id(chain_id)
     if not container:
@@ -2127,10 +2293,13 @@ async def chain_coverage(chain_id: int):
     if not supports_pending_transactions(chain_id):
         public_mempool = "no"
     else:
-        mempool = container.mempool_monitor.get_stats() if container.mempool_monitor else None
+        mempool = (
+            container.mempool_monitor.get_stats()
+            if container.mempool_monitor and _background_workers == "api" else None
+        )
         observed = mempool and chain_id in set(mempool["monitored_chains"]) - set(mempool["unobservable_chains"])
         public_mempool = "yes" if observed else "unobservable"
-    return {
+    coverage = {
         "chain_id": chain_id,
         "chain_name": adapter.chain_name,
         "capabilities": {
@@ -2144,6 +2313,9 @@ async def chain_coverage(chain_id: int):
             "chain_independent": unknown_ledger.for_chain(None),
         },
     }
+    if _background_workers == "external":
+        coverage["background_workers_note"] = _EXTERNAL_WORKERS_NOTE
+    return coverage
 
 
 @app.get("/api/base/attestations")
@@ -2203,6 +2375,53 @@ async def verdict_permalink(chain_id: int, address: str):
             "`off`: this verdict is stored here only and is not recorded on-chain."
         ),
     }
+
+
+async def _stored_scan_evidence(evidence_hash: str) -> Dict:
+    if not re.fullmatch(r"0x[0-9a-fA-F]{64}", evidence_hash):
+        raise HTTPException(status_code=404, detail="No evidence document with this hash")
+    if not container or not container.db:
+        raise HTTPException(status_code=503, detail="Database not available")
+    stored = await container.db.get_scan_evidence(evidence_hash.lower())
+    if stored is None:
+        raise HTTPException(status_code=404, detail="No evidence document with this hash")
+    return stored
+
+
+@app.get("/api/evidence/{evidence_hash}")
+async def scan_evidence(evidence_hash: str):
+    """The evidence document of an /api/firewall or /api/scan verdict, by the evidence_hash its
+    response carried (core/scan_evidence.py).
+
+    Public, and rate-limited by IP like every route. A document is kept SCAN_EVIDENCE_RETENTION_DAYS
+    (90) days; a hash never stored, or pruned since, is 404.
+    """
+    stored = await _stored_scan_evidence(evidence_hash)
+    return {
+        "evidence_hash": evidence_hash.lower(),
+        "canonical": stored["canonical"],
+        "evidence": json.loads(stored["canonical"]),
+        "stored_at": stored["created_at"],
+        "expires_at": stored["created_at"] + SCAN_EVIDENCE_RETENTION_DAYS * 86400,
+        "verify": (
+            "keccak256 of the UTF-8 bytes of `canonical`, exactly as served, must equal evidence_hash. "
+            "This is ShieldBot's own record of the verdict it returned and is not recorded on any chain. "
+            "`source` `cache`: the verdict was served from the stored scan made at `cached_scan_at`."
+        ),
+    }
+
+
+@app.get("/evidence/{evidence_hash}", response_class=HTMLResponse, include_in_schema=False)
+async def scan_evidence_page(evidence_hash: str):
+    """The same document as a self-contained page: no scripts, every value escaped."""
+    stored = await _stored_scan_evidence(evidence_hash)
+    return HTMLResponse(
+        render_evidence_page(
+            evidence_hash.lower(), stored["canonical"],
+            stored["created_at"] + SCAN_EVIDENCE_RETENTION_DAYS * 86400,
+        ),
+        headers={"Content-Security-Policy": EVIDENCE_CSP, "Cache-Control": "no-cache"},
+    )
 
 
 @app.get("/api/admin/signups", include_in_schema=False)
@@ -2315,6 +2534,45 @@ async def guard_subject_remove(chain_id: int, address: str, request: Request):
     return {"ok": True, "address": address.lower(), "chain_id": chain_id}
 
 
+class BlacklistConfirmRequest(ChainRequest):
+    address: str = Field(..., min_length=1, max_length=64)
+    # Omitted: the entry covers every chain.
+    chainId: Optional[int] = Field(default=None, ge=1, le=10_000_000)
+    reason: Optional[str] = Field(default=None, max_length=240)
+
+    @field_validator("chainId")
+    @classmethod
+    def validate_chain(cls, value):
+        return value if value is None else _validate_chain_id(value)
+
+
+@app.post("/api/admin/blacklist", include_in_schema=False)
+async def blacklist_confirm(req: BlacklistConfirmRequest, request: Request):
+    """Confirm an address as a scam: a block-severity match that never expires, replacing a community
+    entry for the same address and chain. Requires X-Admin-Secret."""
+    _require_admin(request)
+    if not web3_client.is_valid_address(req.address):
+        raise HTTPException(status_code=400, detail="Invalid address")
+    if not await container.scam_db.confirm_scam(req.address, req.chainId, req.reason):
+        raise HTTPException(status_code=409, detail="This address is a known legitimate contract and cannot be blacklisted")
+    # Off chain only: the bot is the one process that sends from the recorder and attestor wallets.
+    return {"ok": True, "address": req.address.lower(), "chain_id": req.chainId, "source": "admin"}
+
+
+@app.delete("/api/admin/blacklist/{address}", include_in_schema=False)
+async def blacklist_remove(address: str, request: Request, chain_id: Optional[int] = None):
+    """Remove a blacklist entry, community or admin. Without chain_id, removes the entry that covers
+    every chain. Requires X-Admin-Secret."""
+    _require_admin(request)
+    if chain_id is not None:
+        _validate_chain_id(chain_id)
+    if not web3_client.is_valid_address(address):
+        raise HTTPException(status_code=400, detail="Invalid address")
+    if not await container.scam_db.remove_from_blacklist(address, chain_id):
+        raise HTTPException(status_code=404, detail="No blacklist entry for this address and chain")
+    return {"ok": True, "address": address.lower(), "chain_id": chain_id}
+
+
 # Reason codes the code itself assigns; admin-entered and agent-written reasons are free text and stay private.
 _PUBLIC_WATCH_REASONS = {"MANUAL", "SERIAL_SCAMMER"}
 
@@ -2326,7 +2584,7 @@ async def public_watch_alerts(request: Request):
         raise HTTPException(status_code=503, detail="Watch alerts not available")
 
     client_ip = _get_client_ip(request)
-    if not _watch_alerts_limiter.is_allowed(f"watch-alerts:{client_ip}"):
+    if not await _watch_alerts_limiter.is_allowed(client_ip):
         return JSONResponse(
             status_code=429,
             content={"detail": "Watch alerts rate limit exceeded (10/min)."},
@@ -2353,7 +2611,7 @@ async def agent_chat(req: ChatRequest, request: Request):
         raise HTTPException(503, "Agent not available")
 
     client_ip = _get_client_ip(request)
-    if not chat_limiter.is_allowed(client_ip):
+    if not await chat_limiter.is_allowed(client_ip):
         raise HTTPException(429, "Rate limit exceeded")
 
     # Bind user_id to the caller so users cannot read/poison each other's history: to the install
@@ -2397,7 +2655,7 @@ async def agent_explain(req: ExplainRequest, request: Request):
         raise HTTPException(503, "Agent not available")
 
     client_ip = _get_client_ip(request)
-    if not chat_limiter.is_allowed(client_ip):
+    if not await chat_limiter.is_allowed(client_ip):
         raise HTTPException(429, "Rate limit exceeded")
 
     try:
@@ -2426,6 +2684,8 @@ async def mempool_alerts(request: Request, chain_id: int = None, limit: int = 50
             raise HTTPException(status_code=400, detail="Pending-transaction monitoring is not available on this chain")
     if not container or not container.mempool_monitor:
         raise HTTPException(status_code=503, detail="Mempool monitor not available")
+    if _background_workers == "external":
+        raise HTTPException(status_code=503, detail=_EXTERNAL_MEMPOOL_DETAIL)
     limit = max(1, min(limit, 200))
     alerts = container.mempool_monitor.get_alerts(chain_id=chain_id, limit=limit)
     return {"alerts": alerts, "count": len(alerts)}
@@ -2440,6 +2700,8 @@ async def mempool_stats(request: Request, chain_id: int = None):
             raise HTTPException(status_code=400, detail="Pending-transaction monitoring is not available on this chain")
     if not container or not container.mempool_monitor:
         raise HTTPException(status_code=503, detail="Mempool monitor not available")
+    if _background_workers == "external":
+        raise HTTPException(status_code=503, detail=_EXTERNAL_MEMPOOL_DETAIL)
     return container.mempool_monitor.get_stats()
 
 
@@ -2493,26 +2755,25 @@ async def threat_feed(
     limit = max(1, min(limit, 200))  # cap between 1 and 200
     threats = []
 
-    # Recent high-risk contract scans from DB. Known split: this lists risk_level 'HIGH' while the threat
-    # counts in core.database count risk_score >= 71, and a campaign-boosted score keeps its unboosted level.
+    # Recent high-risk contract scans from DB: the rows the threat counts in core.database count.
     try:
         if source == "mempool":
             cursor = None
         elif chain_id is not None:
-            cursor = await container.db._db.execute("""
+            cursor = await container.db._db.execute(f"""
                 SELECT address, chain_id, risk_score, risk_level, archetype, flags,
                        last_scanned_at
                 FROM contract_scores
-                WHERE risk_level = 'HIGH' AND chain_id = ?
+                WHERE {verdicts.THREAT_CONDITION} AND chain_id = ?
                 ORDER BY last_scanned_at DESC
                 LIMIT ?
             """, (int(chain_id), limit))
         else:
-            cursor = await container.db._db.execute("""
+            cursor = await container.db._db.execute(f"""
                 SELECT address, chain_id, risk_score, risk_level, archetype, flags,
                        last_scanned_at
                 FROM contract_scores
-                WHERE risk_level = 'HIGH'
+                WHERE {verdicts.THREAT_CONDITION}
                 ORDER BY last_scanned_at DESC
                 LIMIT ?
             """, (limit,))
@@ -2538,9 +2799,10 @@ async def threat_feed(
 
     # Mempool alerts
     mempool_available = chain_id is None or supports_pending_transactions(chain_id)
+    mempool_external = _background_workers == "external"
     mempool_alerts = (
         container.mempool_monitor.get_alerts(chain_id=chain_id, limit=limit)
-        if mempool_available and source != "contracts" else []
+        if mempool_available and not mempool_external and source != "contracts" else []
     )
     for alert in mempool_alerts:
         if since and alert.get('created_at', 0) < since:
@@ -2560,6 +2822,8 @@ async def threat_feed(
     }
     if not mempool_available:
         response['mempool_unavailable'] = "Pending-transaction monitoring is not available on this chain"
+    elif mempool_external and source != "contracts":
+        response['mempool_unavailable'] = _EXTERNAL_MEMPOOL_DETAIL
     return response
 
 
@@ -2903,8 +3167,18 @@ def _coverage_fields(alert: Dict) -> Dict:
     return {key: alert[key] for key in ('status', 'coverage', 'coverage_reasons', 'risk_display')}
 
 
+def _revert_blocks(risk_output: Dict) -> bool:
+    """Whether a reverted simulation escalates a verdict to BLOCK: only a risk already elevated,
+    verdicts.REVERT_BLOCK_MIN or more before the community floor. Low-risk reverts are just bad
+    transaction parameters. Reading the score before that floor, three accounts' reports neither turn a
+    routine revert (slippage, a deadline, an allowance) into a block nor keep a risky target's revert
+    from one."""
+    return risk_output["score_before_community_floor"] >= verdicts.REVERT_BLOCK_MIN
+
+
 def _scam_match_count(scan: Dict) -> Optional[int]:
-    matches = scan.get("scam_matches", [])
+    # A community report is not a scam database match; its reason names it instead.
+    matches = database_matches(scan.get("scam_matches"))
     if matches:
         return len(matches)
     if scan.get("coverage", {}).get("scam_database") is False:
@@ -2914,7 +3188,7 @@ def _scam_match_count(scan: Dict) -> Optional[int]:
 
 def _build_cached_response(
     cached: Dict, decoded: Dict, value_bnb: float, chain_id: int = 56,
-    to_addr: str = "",
+    to_addr: str = "", policy_mode: str = "BALANCED",
 ) -> Dict:
     """Build a firewall response from a cached DB row."""
     risk_score = cached['risk_score']
@@ -2924,6 +3198,12 @@ def _build_cached_response(
 
     category_scores = dict(cached.get('category_scores', {}))
     metadata = category_scores.pop('_scan_metadata', {})
+    # STRICT blocks on Unknown, as core.policy does for a fresh scan. A cached row keeps its coverage
+    # but not which fields were missing, so any Unknown in it blocks.
+    if policy_mode == 'STRICT' and is_scan_incomplete({**metadata, 'risk_level': risk_level}):
+        risk_score = max(risk_score, verdicts.STRICT_BLOCK_SCORE)
+        risk_level = verdicts.HIGH
+        flags = ['Policy override: cached analysis unavailable or incomplete', *flags]
     alert = format_extension_alert({
         **metadata, 'rug_probability': risk_score, 'risk_level': risk_level,
         'critical_flags': flags, 'risk_archetype': archetype or 'unknown',
@@ -2967,7 +3247,8 @@ def _build_cached_response(
         "network": _chain_id_to_name(chain_id),
         "partial": alert['status'] == 'unknown',
         "failed_sources": [],
-        "policy_mode": "BALANCED",
+        "policy_mode": policy_mode,
+        "notes": metadata.get('notes', []),
     }
 
 
@@ -2989,13 +3270,26 @@ def _extract_raw_checks(scan: Dict) -> Dict:
 # The legacy scan sees only the target, never the transaction's spender, payment or signature, so
 # it cannot clear a transaction-specific request.
 _TX_CHECKS_UNAVAILABLE = "Transaction checks unavailable: the spender, payment or signature was not analysed"
+# Nor does it check the scam database (the token scanner never asks it) or the calldata's intent, so its
+# heuristics alone never clear a transaction.
+_FULL_ANALYSIS_UNAVAILABLE = (
+    "Full analysis unavailable: heuristic results only, scam database and calldata intent not checked"
+)
 
 
 def _build_fallback_response(
     decoded: Dict, scan: Dict, whitelisted: Optional[str], chain_id: int, transaction_specific: bool = False,
+    policy_mode: str = "BALANCED",
 ) -> Dict:
-    """Build a firewall response when AI is unavailable."""
-    risk_score = scan.get("risk_score", 50)
+    """Build a firewall response from the legacy scan when the analysis pipeline failed. The score and
+    classification come from the scan's heuristics and the band table only."""
+    risk_score = scan.get("risk_score")
+    if risk_score is None:
+        # A scan with no heuristic score is Unknown, not a number made up for it.
+        scan = {**scan, 'status': 'unknown', 'coverage_reasons': {
+            **scan.get('coverage_reasons', {}), 'risk_score': 'Heuristic risk score unavailable',
+        }}
+        risk_score = 0
     scam_matches = _scam_match_count(scan)
     is_honeypot = scan.get("is_honeypot")
     is_verified = scan.get("is_verified")
@@ -3006,6 +3300,10 @@ def _build_fallback_response(
     if scam_matches is not None and scam_matches > 0:
         danger_signals.append(f"Found {scam_matches} scam database match(es)")
         risk_score = max(risk_score, 80)
+
+    for match in medium_matches(scan.get("scam_matches")):
+        danger_signals.append(match["reason"])
+        risk_score = max(risk_score, MEDIUM_MATCH_FLOOR)
 
     if is_honeypot:
         danger_signals.append("Honeypot detected — cannot sell after buying")
@@ -3023,22 +3321,21 @@ def _build_fallback_response(
     if whitelisted:
         risk_score = max(0, risk_score - 20)
 
-    # Classify
-    if risk_score >= 80:
-        classification = "BLOCK_RECOMMENDED"
-    elif risk_score >= 60:
-        classification = "HIGH_RISK"
-    elif risk_score >= 30:
-        classification = "CAUTION"
-    else:
-        classification = "SAFE"
+    # STRICT blocks a degraded analysis, as core.policy does an incomplete one.
+    strict = policy_mode == 'STRICT'
+    if strict:
+        risk_score = max(risk_score, verdicts.STRICT_BLOCK_SCORE)
+        danger_signals.insert(0, 'Policy override: composite analysis unavailable')
 
     alert = format_extension_alert({**scan, 'rug_probability': risk_score})
-    if alert['status'] == 'unknown' and classification == 'SAFE':
-        classification = 'CAUTION'
-    if transaction_specific and classification == 'SAFE':
-        classification = 'CAUTION'
-        danger_signals.append(_TX_CHECKS_UNAVAILABLE)
+    classification = verdicts.BLOCK_RECOMMENDED if strict else alert['risk_classification']
+    action = alert['recommended_action']
+    if classification == verdicts.SAFE:
+        classification = verdicts.CAUTION
+        danger_signals.append(_FULL_ANALYSIS_UNAVAILABLE)
+        action = f'{_FULL_ANALYSIS_UNAVAILABLE}. Review the transaction before proceeding.'
+        if transaction_specific:
+            danger_signals.append(_TX_CHECKS_UNAVAILABLE)
 
     return {
         **_coverage_fields(alert),
@@ -3055,11 +3352,13 @@ def _build_fallback_response(
             "post_tx_state": "AI analysis unavailable — review manually",
         },
         "analysis": "AI analysis unavailable. Showing heuristic results only.",
-        "plain_english": alert['recommended_action'],
+        "plain_english": action,
         "verdict": (f"{classification} — {alert['risk_display']}" if alert['status'] == 'unknown'
                     else f"{classification} — Risk score {risk_score}/100"),
         "raw_checks": _extract_raw_checks(scan),
         "asset_delta": [],
+        "policy_mode": policy_mode,
+        "notes": [],
     }
 
 
@@ -3108,7 +3407,7 @@ def _build_unverified_swap_response(
         "risk_display": 'Unknown (incomplete provider coverage)',
     }
     return {
-        "classification": "CAUTION",
+        "classification": verdicts.CAUTION,
         **coverage_fields,
         "risk_score": 35,
         "decoded_action": _format_decoded_action(decoded, req.chainId),
@@ -3130,7 +3429,7 @@ def _build_unverified_swap_response(
             "This transaction goes to a trusted DEX router, but the tokens in the swap "
             "path could not be checked. Verify the tokens manually before proceeding."
         ),
-        "verdict": "CAUTION — Token safety unverifiable",
+        "verdict": f"{verdicts.CAUTION} — Token safety unverifiable",
         "raw_checks": {
             "is_verified": None,
             "scam_matches": None,
@@ -3145,7 +3444,7 @@ def _build_unverified_swap_response(
             **coverage_fields,
             "overall": 35,
             "category_scores": {},
-            "risk_level": "UNKNOWN",
+            "risk_level": verdicts.UNKNOWN,
             "threat_type": "unknown",
             "critical_flags": [],
             "confidence": 30,
@@ -3158,6 +3457,7 @@ def _build_unverified_swap_response(
         "partial": True,
         "failed_sources": [source],
         "policy_mode": "BALANCED",
+        "notes": [],
     }
 
 
@@ -3169,8 +3469,13 @@ async def _analyze_router_swap(
     whitelisted: str,
     value_bnb: float,
     policy_override: Optional[str] = None,
+    trail: Optional[Dict] = None,
 ) -> Optional[Dict]:
-    """Analyze swap path tokens when interacting with a trusted router."""
+    """Analyze swap path tokens when interacting with a trusted router.
+
+    When it returns a verdict from the tokens' analyzers, it records their outcomes, keyed
+    "token:analyzer" like the response's coverage, and the observed block in `trail`.
+    """
     if not container or not container.registry or not risk_engine:
         return _build_unverified_swap_response(
             req, to_addr, decoded, whitelisted, value_bnb,
@@ -3199,6 +3504,9 @@ async def _analyze_router_swap(
 
     best = None
     token_summaries = []
+    outcomes = {}
+    all_results = []
+    notes = []
 
     for token in candidates:
         if not web3_client.is_valid_address(token):
@@ -3247,6 +3555,12 @@ async def _analyze_router_swap(
             "risk_score": risk_output.get("rug_probability", 0),
             "risk_level": risk_output.get("risk_level", "UNKNOWN"),
         })
+        outcomes.update({
+            f"{token_addr}:{name}": outcome
+            for name, outcome in analyzer_outcomes(analyzer_results, risk_output).items()
+        })
+        all_results += analyzer_results
+        notes += [f"{token_addr}: {note}" for note in risk_output.get("notes", [])]
 
         if not best or risk_output.get("rug_probability", 0) > best["risk_output"].get("rug_probability", 0):
             best = {"address": token_addr, "risk_output": risk_output, "results": analyzer_results}
@@ -3258,8 +3572,8 @@ async def _analyze_router_swap(
     unknown_tokens = [item for item in token_summaries if item['status'] == 'unknown']
     if unknown_tokens or len(token_summaries) != len(candidates):
         risk_output['status'] = 'unknown'
-        if risk_output.get('risk_level') == 'LOW':
-            risk_output['risk_level'] = 'UNKNOWN'
+        if risk_output.get('risk_level') == verdicts.LOW:
+            risk_output['risk_level'] = verdicts.UNKNOWN
         risk_output['coverage_reasons'] = {
             f"{item['address']}:{source}": reason
             for item in unknown_tokens for source, reason in item['coverage_reasons'].items()
@@ -3286,8 +3600,8 @@ async def _analyze_router_swap(
     if sim_result:
         if not sim_result.get("success") and sim_result.get("revert_reason"):
             danger_signals.insert(0, f"Simulation reverted: {sim_result['revert_reason']}")
-            if alert["rug_probability"] >= 30:
-                classification = "BLOCK_RECOMMENDED"
+            if _revert_blocks(risk_output):
+                classification = verdicts.BLOCK_RECOMMENDED
         for w in sim_result.get("warnings", []):
             if w not in danger_signals:
                 danger_signals.append(w)
@@ -3308,6 +3622,9 @@ async def _analyze_router_swap(
         "critical_flags": risk_output.get("critical_flags", []),
         "confidence": alert["confidence"],
     }
+
+    if trail is not None:
+        trail.update(analyzers=outcomes, observed_block=oldest_simulation_block(all_results))
 
     return {
         **_coverage_fields(alert),
@@ -3351,6 +3668,7 @@ async def _analyze_router_swap(
         "partial": alert['status'] == 'unknown' or risk_output.get("partial", False),
         "failed_sources": risk_output.get("failed_sources", []),
         "policy_mode": risk_output.get("policy_mode", "BALANCED"),
+        "notes": notes,
     }
 
 

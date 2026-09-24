@@ -45,7 +45,6 @@ def test_failed_scam_lookup_renders_known_hits_and_unknown_without_hits():
         'scam_matches': [{'type': 'known_scam', 'reason': 'Reported phishing'}],
     }
     hit_report = format_full_report(risk, hit_scan, {}, {})
-    scan_context = analyzer._prepare_scan_context(ADDRESS, hit_scan)
     nested_forensic = analyzer._build_forensic_context(
         ADDRESS, {'contract': hit_scan, 'risk': risk}, 'contract',
     )
@@ -56,7 +55,6 @@ def test_failed_scam_lookup_renders_known_hits_and_unknown_without_hits():
 
     assert 'Scam DB Hits: Unknown' in report
     assert 'Scam DB Hits' not in complete_report
-    assert 'Scam Database Matches: Unknown' in analyzer._prepare_scan_context(ADDRESS, scan)
     assert 'Scam Database Matches: Unknown' in analyzer._build_forensic_context(
         ADDRESS, {'contract': scan, 'risk': risk}, 'contract',
     )
@@ -66,14 +64,12 @@ def test_failed_scam_lookup_renders_known_hits_and_unknown_without_hits():
     assert 'Scam DB Matches: Unknown' in analyzer._build_firewall_context({}, scan)
     assert 'Scam DB Hits: 1' in hit_report
     assert 'Scam DB Hits: Unknown' not in hit_report
-    assert 'Scam Database Matches: 1' in scan_context
-    assert 'Scam Database Matches: Unknown' not in scan_context
     for forensic_context in (nested_forensic, flat_forensic):
         assert '⚠️ SCAM DATABASE MATCHES: 1' in forensic_context
-        assert '  - known_scam: Reported phishing' in forensic_context
+        assert '  - "known_scam": "Reported phishing"' in forensic_context
         assert 'Scam Database Matches: Unknown' not in forensic_context
     assert 'Scam DB Matches: 1' in firewall_context
-    assert '  - known_scam: Reported phishing' in firewall_context
+    assert '  - "known_scam": "Reported phishing"' in firewall_context
     assert 'Scam DB Matches: Unknown' not in firewall_context
 
 

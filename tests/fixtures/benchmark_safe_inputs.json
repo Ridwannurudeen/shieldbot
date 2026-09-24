@@ -58,6 +58,78 @@
      "external_call": "0",
      "hidden_owner": "0",
      "holder_count": "8322302",
+     "holders": [
+      {
+       "address": "0x8f73b65b4caaf64fba2af91cc5d4a2a1318e5d8c",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.135973194320316308",
+       "tag": ""
+      },
+      {
+       "address": "0x9b00a09492a626678e5a3009982191586c444df9",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.075113041174050773",
+       "tag": ""
+      },
+      {
+       "address": "0x6bca74586218db34cdb402295796b79663d816e9",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.057392426723439312",
+       "tag": ""
+      },
+      {
+       "address": "0x16b9a82891338f9ba80e2d6970fdda79d1eb0dae",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.032823239538319746",
+       "tag": ""
+      },
+      {
+       "address": "0x59a661f1c909ca13ba3e9114bfdd81e5a420705d",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.019189224806463147",
+       "tag": ""
+      },
+      {
+       "address": "0x308000d0169ebe674b7640f0c415f44c6987d04d",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.014183824769155133",
+       "tag": ""
+      },
+      {
+       "address": "0x1cea83ec5e48d9157fcae27a19807bef79195ce1",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.011854151809036346",
+       "tag": ""
+      },
+      {
+       "address": "0xd7d069493685a581d27824fc46eda46b7efc0063",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.011657541031107089",
+       "tag": ""
+      },
+      {
+       "address": "0x46df5652d20872234484f20dc9a62350c3452ffc",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.011065786305060415",
+       "tag": ""
+      },
+      {
+       "address": "0x8b3d584bae475cbfb14b60d8136d29fc0684d4cb",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.009332359664209910",
+       "tag": ""
+      }
+     ],
      "honeypot_with_same_creator": "0",
      "is_anti_whale": "0",
      "is_blacklisted": "0",
@@ -201,6 +273,78 @@
      "external_call": "0",
      "hidden_owner": "0",
      "holder_count": "1912650",
+     "holders": [
+      {
+       "address": "0x000000000000000000000000000000000000dead",
+       "is_contract": 0,
+       "is_locked": 1,
+       "percent": "0.937532374288254027",
+       "tag": ""
+      },
+      {
+       "address": "0xf977814e90da44bfa03b6295a0616a897441acec",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.014658813647925620",
+       "tag": ""
+      },
+      {
+       "address": "0x5a52e96bacdabb82fd05763e25335261b270efcb",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.007300020060787805",
+       "tag": ""
+      },
+      {
+       "address": "0x45c54210128a065de780c4b0df3d16664f7f859e",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.002489556269661266",
+       "tag": ""
+      },
+      {
+       "address": "0x86ac3974e2bd0d60825230fa6f355ff11409df5c",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.002274591179335482",
+       "tag": ""
+      },
+      {
+       "address": "0xb274202daba6ae180c665b4fbe59857b7c3a8091",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.001847491813010080",
+       "tag": ""
+      },
+      {
+       "address": "0x73feaa1ee314f8c655e354234017be2193c9e24e",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.001349390461267176",
+       "tag": ""
+      },
+      {
+       "address": "0x0ee833adb865377dbba5e9e53fec5f2072c0d34e",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.001237380785372707",
+       "tag": ""
+      },
+      {
+       "address": "0x91b3927f100bb6c19e5434bfaba07d60670b98d6",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.000990491680771831",
+       "tag": ""
+      },
+      {
+       "address": "0xd183f2bbf8b28d9fec8367cb06fe72b88778c86b",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.000987168586043352",
+       "tag": ""
+      }
+     ],
      "honeypot_with_same_creator": "0",
      "is_anti_whale": "0",
      "is_blacklisted": "0",
@@ -344,6 +488,78 @@
      "external_call": "0",
      "hidden_owner": "0",
      "holder_count": "0",
+     "holders": [
+      {
+       "address": "0x8894e0a0c962cb723c1976a4421c95949be2d4e3",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.042254308211529519",
+       "tag": ""
+      },
+      {
+       "address": "0x5a52e96bacdabb82fd05763e25335261b270efcb",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.032661983111456994",
+       "tag": ""
+      },
+      {
+       "address": "0x092fe28430bade62c7c044b9c77d0aaa06241319",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.015795552032768271",
+       "tag": ""
+      },
+      {
+       "address": "0xef3aeff9a5f61c6dda33069c58c1434006e13b20",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.013778682811088846",
+       "tag": ""
+      },
+      {
+       "address": "0x8932fe7726c1ee743f662f485c3e5a5d1d595f71",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.010929189995324807",
+       "tag": ""
+      },
+      {
+       "address": "0xf977814e90da44bfa03b6295a0616a897441acec",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.010887325937540387",
+       "tag": ""
+      },
+      {
+       "address": "0x128463a60784c4d3f46c23af3f65ed859ba87974",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.009632287367621541",
+       "tag": ""
+      },
+      {
+       "address": "0x0d0707963952f2fba59dd06f2b425ace40b492fe",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.008404930926874695",
+       "tag": ""
+      },
+      {
+       "address": "0x3ce02596ca6982662e3d9b66c73e42a7b9d90e8e",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.007600387792006815",
+       "tag": ""
+      },
+      {
+       "address": "0x18e226459ccf0eec276514a4fd3b226d8961e4d1",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.007525964254571687",
+       "tag": ""
+      }
+     ],
      "honeypot_with_same_creator": "0",
      "is_anti_whale": "0",
      "is_blacklisted": "0",
@@ -488,6 +704,78 @@
      "external_call": "0",
      "hidden_owner": "0",
      "holder_count": "4253196",
+     "holders": [
+      {
+       "address": "0x0000000000000000000000000000000000001004",
+       "is_contract": 1,
+       "is_locked": 1,
+       "percent": "0.184655368081767810",
+       "tag": ""
+      },
+      {
+       "address": "0x489a8756c18c0b8b24ec2a2b9ff3d4d447f79bec",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.101738613345325322",
+       "tag": ""
+      },
+      {
+       "address": "0xe9e7cea3dedca5984780bafc599bd69add087d56",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.037566989803103998",
+       "tag": ""
+      },
+      {
+       "address": "0xd2f93484f2d319194cba95c5171b18c1d8cfd6c4",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.036295490351492180",
+       "tag": ""
+      },
+      {
+       "address": "0x7c9e73d4c71dae564d41f78d56439bb4ba87592f",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.032307646650363887",
+       "tag": ""
+      },
+      {
+       "address": "0x59d779bed4db1e734d3fda3172d45bc3063ecd69",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.029258267078946124",
+       "tag": ""
+      },
+      {
+       "address": "0x174ca62427d18b317b4226342db9e309c0fbd841",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.023963825707132797",
+       "tag": ""
+      },
+      {
+       "address": "0x647bc907d520c3f63be38d01dbd979f5606bec48",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.021724245983486820",
+       "tag": ""
+      },
+      {
+       "address": "0xdf1fd1ea608f910b1bd6ca68163f9e817f752af0",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.018733494526271494",
+       "tag": ""
+      },
+      {
+       "address": "0x58f876857a02d6762e0101bb5c46a8c1ed44dc16",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.016638726004635151",
+       "tag": ""
+      }
+     ],
      "honeypot_with_same_creator": "0",
      "is_anti_whale": "0",
      "is_blacklisted": "0",
@@ -633,6 +921,78 @@
      "external_call": "0",
      "hidden_owner": "0",
      "holder_count": "2543846",
+     "holders": [
+      {
+       "address": "0x5a52e96bacdabb82fd05763e25335261b270efcb",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.141109192741637845",
+       "tag": ""
+      },
+      {
+       "address": "0xf977814e90da44bfa03b6295a0616a897441acec",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.118811881197835495",
+       "tag": ""
+      },
+      {
+       "address": "0x2170ed0880ac9a755fd29b2688956bd959f933f8",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.061432705772586870",
+       "tag": ""
+      },
+      {
+       "address": "0xadfffc33cdc9970349cbcea3d73ec343d6ed116d",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.044944338607477622",
+       "tag": ""
+      },
+      {
+       "address": "0x0000000000000000000000000000000000001004",
+       "is_contract": 1,
+       "is_locked": 1,
+       "percent": "0.042461711993178105",
+       "tag": ""
+      },
+      {
+       "address": "0x8894e0a0c962cb723c1976a4421c95949be2d4e3",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.034930893201343778",
+       "tag": ""
+      },
+      {
+       "address": "0xa74e8ae2f83d2564af25420ad4d6a7fe224b053f",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.028097620801531941",
+       "tag": ""
+      },
+      {
+       "address": "0xc851a293ed8b8888a2e4140744973dd23bbcbaf2",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.026551525582796980",
+       "tag": ""
+      },
+      {
+       "address": "0x835678a611b28684005a5e2233695fb6cbbb0007",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.023699580016687692",
+       "tag": ""
+      },
+      {
+       "address": "0xf508fcd89b8bd15579dc79a6827cb4686a3592c8",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.020466089450342051",
+       "tag": ""
+      }
+     ],
      "honeypot_with_same_creator": "0",
      "is_anti_whale": "0",
      "is_blacklisted": "0",
@@ -1014,6 +1374,78 @@
      "creator_balance": "418.0186131562",
      "creator_percent": "0.000000",
      "holder_count": "4820802",
+     "holders": [
+      {
+       "address": "0x98adef6f2ac8572ec48965509d69a8dd5e8bba9d",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.246100336410103963",
+       "tag": ""
+      },
+      {
+       "address": "0x8894e0a0c962cb723c1976a4421c95949be2d4e3",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.118470563577302809",
+       "tag": ""
+      },
+      {
+       "address": "0xf977814e90da44bfa03b6295a0616a897441acec",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.062932666905867716",
+       "tag": ""
+      },
+      {
+       "address": "0xe2fc31f816a9b94326492132018c3aecc4a93ae1",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.038940965386877031",
+       "tag": ""
+      },
+      {
+       "address": "0x962bd449e630b0d928f308ce63f1a21f02576057",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.021281771076612985",
+       "tag": ""
+      },
+      {
+       "address": "0x318d2aae4c99c2e74f7b5949fa1c34df837789b8",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.020195680212089979",
+       "tag": ""
+      },
+      {
+       "address": "0xb3e1df3aead8aaee6373e305b081d8974fedabf0",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.015744284065931876",
+       "tag": ""
+      },
+      {
+       "address": "0x08439901c2bb071cd0812ed329675c9657434083",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.015609664296698108",
+       "tag": ""
+      },
+      {
+       "address": "0x4f31fa980a675570939b737ebdde0471a4be40eb",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.011120006062432088",
+       "tag": ""
+      },
+      {
+       "address": "0x4028c3a4ae16c114c4325ce34ecd70f809f62191",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.008495903739289230",
+       "tag": ""
+      }
+     ],
      "honeypot_with_same_creator": "0",
      "is_honeypot": "0",
      "is_in_dex": "1",
@@ -1143,6 +1575,78 @@
      "creator_balance": "12875.08918248",
      "creator_percent": "0.000005",
      "holder_count": "1072741",
+     "holders": [
+      {
+       "address": "0xf977814e90da44bfa03b6295a0616a897441acec",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.214508580343213730",
+       "tag": ""
+      },
+      {
+       "address": "0x0000000000000000000000000000000000001004",
+       "is_contract": 1,
+       "is_locked": 1,
+       "percent": "0.176644785985944779",
+       "tag": ""
+      },
+      {
+       "address": "0xdde83cf909ed4392e4099c2781c732c992b3202a",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.041323938377535101",
+       "tag": ""
+      },
+      {
+       "address": "0xec3422ef92b2fb59e84c8b02ba73f1fe84ed8d71",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.031106537082329540",
+       "tag": ""
+      },
+      {
+       "address": "0xa74e8ae2f83d2564af25420ad4d6a7fe224b053f",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.029019065648646361",
+       "tag": ""
+      },
+      {
+       "address": "0x18e226459ccf0eec276514a4fd3b226d8961e4d1",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.021174491714710362",
+       "tag": ""
+      },
+      {
+       "address": "0x4fdfe365436b5273a42f135c6a6244a20404271e",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.016887795677643092",
+       "tag": ""
+      },
+      {
+       "address": "0x08439901c2bb071cd0812ed329675c9657434083",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.016443294992371938",
+       "tag": ""
+      },
+      {
+       "address": "0x21d45650db732ce5df77685d6021d7d5d1da807f",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.016144584108649286",
+       "tag": ""
+      },
+      {
+       "address": "0x8894e0a0c962cb723c1976a4421c95949be2d4e3",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.015284791954490117",
+       "tag": ""
+      }
+     ],
      "honeypot_with_same_creator": "1",
      "is_honeypot": "0",
      "is_in_dex": "1",
@@ -1273,9 +1777,91 @@
      "creator_address": "0x88efdac29e3ba290512e26c04908692ae9810566",
      "creator_balance": "0",
      "creator_percent": "0.000000",
+     "dex": [
+      {
+       "name": "PancakeV1",
+       "pair": "0x3ab77e40340ab084c3e23be8e5a6f7afed9d41dc"
+      },
+      {
+       "name": "PancakeV1",
+       "pair": "0xb3c4217ab2b265bf8c69718d280e3708b5e50577"
+      }
+     ],
      "external_call": "0",
      "hidden_owner": "0",
      "holder_count": "195704",
+     "holders": [
+      {
+       "address": "0x8894e0a0c962cb723c1976a4421c95949be2d4e3",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.113876947070552268",
+       "tag": ""
+      },
+      {
+       "address": "0x59abf3837fa962d6853b4cc0a19513aa031fd32b",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.054184850147165524",
+       "tag": ""
+      },
+      {
+       "address": "0x334b3ecb4dca3593bccc3c7ebd1a1c1d1780fbf1",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.025204978756381937",
+       "tag": ""
+      },
+      {
+       "address": "0xb63555bb6039a0a3dce34be081d430afd388345f",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.022505898068555007",
+       "tag": ""
+      },
+      {
+       "address": "0xad000f8f23b9ec2957e44cb5d6ea03925441d42c",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.019025268681261706",
+       "tag": ""
+      },
+      {
+       "address": "0xae14ce35d66d64fdba42113a98e8056dfc90bae6",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.018569299161034981",
+       "tag": ""
+      },
+      {
+       "address": "0x3ab77e40340ab084c3e23be8e5a6f7afed9d41dc",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.018346909121057634",
+       "tag": "PancakeV1"
+      },
+      {
+       "address": "0x2b214c3dc4e32ddef8256d72fbc41f404e5a191d",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.018312455924039181",
+       "tag": ""
+      },
+      {
+       "address": "0xb3c4217ab2b265bf8c69718d280e3708b5e50577",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.017232212076927892",
+       "tag": "PancakeV1"
+      },
+      {
+       "address": "0x0d44e1611c0754892a93a016cff1159c74a02d93",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.016075641447882029",
+       "tag": ""
+      }
+     ],
      "honeypot_with_same_creator": "0",
      "is_anti_whale": "0",
      "is_blacklisted": "0",
@@ -1422,6 +2008,78 @@
      "creator_balance": "2505.454092",
      "creator_percent": "0.000000",
      "holder_count": "9142164",
+     "holders": [
+      {
+       "address": "0x37305b1cd40574e4c5ce33f8e8306be057fd7341",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.081990033101309975",
+       "tag": ""
+      },
+      {
+       "address": "0xe1940f578743367f38d3f25c2d2d32d6636929b6",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.033893684234766018",
+       "tag": ""
+      },
+      {
+       "address": "0xffa69c0080582098af595156240214b742735a5e",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.031561001276002819",
+       "tag": ""
+      },
+      {
+       "address": "0xad354cfbaa4a8572dd6df021514a3931a8329ef5",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.027912445866534286",
+       "tag": ""
+      },
+      {
+       "address": "0x38aaef3782910bdd9ea3566c839788af6ff9b200",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.023073109576754945",
+       "tag": ""
+      },
+      {
+       "address": "0x40ec5b33f54e0e8a33a975908c5ba1c14e5bbbdf",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.020263480168978505",
+       "tag": ""
+      },
+      {
+       "address": "0x01b8697695eab322a339c4bf75740db75dc9375e",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.014378312351840341",
+       "tag": ""
+      },
+      {
+       "address": "0x3d09d2354530466d32ed37c6ad19ea58504a0c37",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.014206092728027413",
+       "tag": ""
+      },
+      {
+       "address": "0x3b4d794a66304f130a4db8f2551b0070dfcf5ca7",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.012406019734790942",
+       "tag": ""
+      },
+      {
+       "address": "0xee7ae85f2fe2239e27d9c1e23fffe168d63b4055",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.012393203914586494",
+       "tag": ""
+      }
+     ],
      "honeypot_with_same_creator": "0",
      "is_honeypot": "0",
      "is_in_dex": "1",
@@ -1549,6 +2207,78 @@
      "external_call": "0",
      "hidden_owner": "0",
      "holder_count": "3671544",
+     "holders": [
+      {
+       "address": "0x4d5f47fa6a74757f35c14fd3a6ef8e3c9bc514e8",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.150965512243731569",
+       "tag": ""
+      },
+      {
+       "address": "0xf04a5cc80b1e94c69b48f5ee68a08cd2f09a7c3e",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.145856970714843786",
+       "tag": ""
+      },
+      {
+       "address": "0x2f0b23f53734252bda2277357e97e1517d6b042a",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.127517202531589419",
+       "tag": ""
+      },
+      {
+       "address": "0x59cd1c87501baa753d0b5b5ab5d8416a45cd71db",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.058015321867453520",
+       "tag": ""
+      },
+      {
+       "address": "0x94335f3f93e90e4f49c61ef32dfdbb037aba5873",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.028641764540261438",
+       "tag": ""
+      },
+      {
+       "address": "0xc3d688b66703497daa19211eedff47f25384cdc3",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.027298591096929202",
+       "tag": ""
+      },
+      {
+       "address": "0x3ee18b2214aff97000d974cf647e7c347e8fa585",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.021923475668452751",
+       "tag": ""
+      },
+      {
+       "address": "0x3afdc9bca9213a35503b077a6072f3d0d5ab0840",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.017874885112775895",
+       "tag": ""
+      },
+      {
+       "address": "0x21b8065d10f73ee2e260e5b47d3344d3ced7596e",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.013465954437357106",
+       "tag": ""
+      },
+      {
+       "address": "0x4553e3bc6327006a63c5aa4cdac887f66b6a433e",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.012774387666440525",
+       "tag": ""
+      }
+     ],
      "honeypot_with_same_creator": "0",
      "is_anti_whale": "0",
      "is_blacklisted": "0",
@@ -1695,6 +2425,78 @@
      "external_call": "0",
      "hidden_owner": "0",
      "holder_count": "383242",
+     "holders": [
+      {
+       "address": "0x1a9c8182c09f50c8318d769245bea52c32be35bc",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.267247996305835021",
+       "tag": ""
+      },
+      {
+       "address": "0x000000000000000000000000000000000000dead",
+       "is_contract": 0,
+       "is_locked": 1,
+       "percent": "0.112163581083689919",
+       "tag": ""
+      },
+      {
+       "address": "0x5a52e96bacdabb82fd05763e25335261b270efcb",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.034506009688000000",
+       "tag": ""
+      },
+      {
+       "address": "0x61cb39bece033c5bda281747db1c15cced2096eb",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.023047480513298522",
+       "tag": ""
+      },
+      {
+       "address": "0xf977814e90da44bfa03b6295a0616a897441acec",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.018748961148000000",
+       "tag": ""
+      },
+      {
+       "address": "0x5069a64bc6616dec1584ee0500b7813a9b680f7e",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.014826109325065945",
+       "tag": ""
+      },
+      {
+       "address": "0x611f7bf868a6212f871e89f7e44684045ddfb09d",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.013166882624769050",
+       "tag": ""
+      },
+      {
+       "address": "0x36ca0abdf3852f00aee7798c7dfb5ead5d3fec2a",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.012611331355760910",
+       "tag": ""
+      },
+      {
+       "address": "0x090d4613473dee047c3f2706764f49e0821d256e",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.012507466330460843",
+       "tag": ""
+      },
+      {
+       "address": "0xaba63748c4b4def4a3319c3a29fe4829029d926f",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.011999988042744180",
+       "tag": ""
+      }
+     ],
      "honeypot_with_same_creator": "0",
      "is_anti_whale": "1",
      "is_blacklisted": "0",
@@ -1835,6 +2637,78 @@
      "external_call": "0",
      "hidden_owner": "0",
      "holder_count": "920692",
+     "holders": [
+      {
+       "address": "0x5a52e96bacdabb82fd05763e25335261b270efcb",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.042202982000000000",
+       "tag": ""
+      },
+      {
+       "address": "0xbc10f2e862ed4502144c7d632a3459f49dfcdb5e",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.040875543636950000",
+       "tag": ""
+      },
+      {
+       "address": "0xe0b66bfc7344a80152bfec954942e2926a6fca80",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.030000000001610000",
+       "tag": ""
+      },
+      {
+       "address": "0x9bbb46637a1df7cadec2afca19c2920cddcc8db8",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.030000000001610000",
+       "tag": ""
+      },
+      {
+       "address": "0x8652fb672253607c0061677bdcafb77a324de081",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.030000000001610000",
+       "tag": ""
+      },
+      {
+       "address": "0x76287e0f7b107d1c9f8f01d5afac314ea8461a04",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.030000000001610000",
+       "tag": ""
+      },
+      {
+       "address": "0x7594eb0ca0a7f313befd59afe9e95c2201a443e4",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.030000000001610000",
+       "tag": ""
+      },
+      {
+       "address": "0x5a8e77bc30948cc9a51ae4e042d96e145648bb4c",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.030000000001610000",
+       "tag": ""
+      },
+      {
+       "address": "0x0dffd343c2d3460a7ead2797a687304beb394ce0",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.030000000001610000",
+       "tag": ""
+      },
+      {
+       "address": "0x157235a3cc6011d9c26a010875c2550246aabcca",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.022000000001610000",
+       "tag": ""
+      }
+     ],
      "honeypot_with_same_creator": "0",
      "is_anti_whale": "0",
      "is_blacklisted": "0",
@@ -1980,6 +2854,78 @@
      "external_call": "0",
      "hidden_owner": "0",
      "holder_count": "706892",
+     "holders": [
+      {
+       "address": "0xf6e72db5454dd049d0788e411b06cfaf16853042",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.171376191038844820",
+       "tag": ""
+      },
+      {
+       "address": "0x40ec5b33f54e0e8a33a975908c5ba1c14e5bbbdf",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.109978395461799730",
+       "tag": ""
+      },
+      {
+       "address": "0x250ba4e73a365cefdd170a2b1ff9fc03097d64f3",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.033862003398723535",
+       "tag": ""
+      },
+      {
+       "address": "0x4dedf26112b3ec8ec46e7e31ea5e123490b05b8b",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.018713704758760485",
+       "tag": ""
+      },
+      {
+       "address": "0xf97d4744082ab5c5f4fe9774446702cc48ace1a2",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.010912950562752341",
+       "tag": ""
+      },
+      {
+       "address": "0xbebc44782c7db0a1a60cb6fe97d0b483032ff1c7",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.010866628274865520",
+       "tag": ""
+      },
+      {
+       "address": "0x837c20d568dfcd35e74e5cc0b8030f9cebe10a28",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.007496758506382409",
+       "tag": ""
+      },
+      {
+       "address": "0xf84213cda40246be080bfa1744301b9e37ee4852",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.006989223793095733",
+       "tag": ""
+      },
+      {
+       "address": "0x07ede94cf6316f4809f2b725f5d79ad303fb4dc8",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.006147843534446585",
+       "tag": ""
+      },
+      {
+       "address": "0x3b5fb9d9da3546e9ce6e5aa3cceca14c8d20041e",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.005144762602105331",
+       "tag": ""
+      }
+     ],
      "honeypot_with_same_creator": "0",
      "is_anti_whale": "0",
      "is_blacklisted": "0",
@@ -2120,6 +3066,78 @@
      "creator_balance": "3.159885",
      "creator_percent": "0.000000",
      "holder_count": "10700944",
+     "holders": [
+      {
+       "address": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.052187809844495744",
+       "tag": ""
+      },
+      {
+       "address": "0xb026ba5501c9fcdb5b4b746c37e349cd61b81b22",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.037247528253831105",
+       "tag": ""
+      },
+      {
+       "address": "0x8da91a6298ea5d1a8bc985e99798fd0a0f05701a",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.037152939390677842",
+       "tag": ""
+      },
+      {
+       "address": "0xee7ae85f2fe2239e27d9c1e23fffe168d63b4055",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.022977223492239921",
+       "tag": ""
+      },
+      {
+       "address": "0xf76f5123c6b1c49c21adc8903cc571bd875eea4b",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.018775444971555771",
+       "tag": ""
+      },
+      {
+       "address": "0xfa9b1c421ea3fb9974ef155729304f8d3a8c0294",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.018775397580105397",
+       "tag": ""
+      },
+      {
+       "address": "0xf747d90a25310d437bcc11fe69c01cdd14794afc",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.018775397580105397",
+       "tag": ""
+      },
+      {
+       "address": "0xead133f856c70234e530723faf546d88a1baeef2",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.018775397580105397",
+       "tag": ""
+      },
+      {
+       "address": "0xe7a12de9afbcb35ec2b7223795702f2b44a80ed9",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.018775397580105397",
+       "tag": ""
+      },
+      {
+       "address": "0xe0126d34da4b8af7c1b99923171df011b7c79a4c",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.018775397580105397",
+       "tag": ""
+      }
+     ],
      "honeypot_with_same_creator": "0",
      "is_honeypot": "0",
      "is_open_source": "1",
@@ -2243,6 +3261,78 @@
      "external_call": "0",
      "hidden_owner": "0",
      "holder_count": "5269859",
+     "holders": [
+      {
+       "address": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.299525654989672625",
+       "tag": ""
+      },
+      {
+       "address": "0x6c561b446416e1a00e8e93e221854d6ea4171372",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.125455677178904010",
+       "tag": ""
+      },
+      {
+       "address": "0xd4a0e0b9149bcee3c920d2e00b5de09138fd8bb7",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.057393737378371562",
+       "tag": ""
+      },
+      {
+       "address": "0xbd282333710b9c7e33e8a37d027885a7c079ae23",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.031696838470895025",
+       "tag": ""
+      },
+      {
+       "address": "0x498581ff718922c3f8e6a244956af099b2652b2b",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.016501712588504425",
+       "tag": ""
+      },
+      {
+       "address": "0x01784ef301d79e4b2df3a21ad9a536d4cf09a5ce",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.013002936556862808",
+       "tag": ""
+      },
+      {
+       "address": "0xb47219ccd98eae1f40987c672442c2cce9a31605",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.011966154914912752",
+       "tag": ""
+      },
+      {
+       "address": "0x70acdf2ad0bf2402c957154f944c19ef4e1cbae1",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.011733951887679630",
+       "tag": ""
+      },
+      {
+       "address": "0x7aea2e8a3843516afa07293a10ac8e49906dabd1",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.010421408923773889",
+       "tag": ""
+      },
+      {
+       "address": "0xb125e6687d4313864e53df431d5425969c15eb2f",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.010359455643301809",
+       "tag": ""
+      }
+     ],
      "is_anti_whale": "0",
      "is_blacklisted": "0",
      "is_honeypot": "0",
@@ -2378,6 +3468,78 @@
      "creator_balance": "0",
      "creator_percent": "0.000000",
      "holder_count": "341731",
+     "holders": [
+      {
+       "address": "0xc395664b295ed5bf1d249ae8be9740655aa174ef",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.113637276789056655",
+       "tag": ""
+      },
+      {
+       "address": "0x989ba24cb7938c1672b1e9cea873cf4d7629a5fe",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.064474770314143490",
+       "tag": ""
+      },
+      {
+       "address": "0x461cab446731afa993e1477e91af342fe2a727bf",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.047084369344089869",
+       "tag": ""
+      },
+      {
+       "address": "0x58ee32056d946a37f5b49582de3dee1dac0bb974",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.042220008657012850",
+       "tag": ""
+      },
+      {
+       "address": "0x52e2230cdb80edebdadafcf24033608c9a636d7d",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.038087210186729280",
+       "tag": ""
+      },
+      {
+       "address": "0x5b1593313473ac1a7e9bdf359b994552e12a7c86",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.032836420745007209",
+       "tag": ""
+      },
+      {
+       "address": "0x1adb67a4c80a760579378624714dc01b89e69549",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.032224834728894176",
+       "tag": ""
+      },
+      {
+       "address": "0xcfdcce1d0f0cd83cdf3419e813240a639c791a42",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.030986076836182941",
+       "tag": ""
+      },
+      {
+       "address": "0x310fbfe67d134f952571287a75f9f4031fa70a9a",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.026742782116329422",
+       "tag": ""
+      },
+      {
+       "address": "0xa69cffd410477b448699018fadc553c1495ae459",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.023871239689271607",
+       "tag": ""
+      }
+     ],
      "honeypot_with_same_creator": "0",
      "is_open_source": "1",
      "is_proxy": "1",
@@ -2455,6 +3617,21 @@
     "4f1ef286"
    ],
    "chain_id": 8453,
+   "changed_by_holder_signal": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": 0,
+     "intent": 0,
+     "market": 0,
+     "signature": 0,
+     "structural": 35
+    },
+    "critical_flags": [
+     "Proxy/upgradeable contract",
+     "Top 10 holders own 91.54% of supply (burn, locked, pool and locker addresses excluded)"
+    ],
+    "rug_probability": 11.2
+   },
    "description": "cbETH \u2014 Coinbase Wrapped Staked ETH on Base",
    "ethos": {
     "ethos_raw_score": null,
@@ -2503,6 +3680,78 @@
      "creator_balance": "0.000000000000001",
      "creator_percent": "0.000000",
      "holder_count": "204697",
+     "holders": [
+      {
+       "address": "0xcf3d55c10db69f28fd1a75bd73f3d8a2d9c595ad",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.582168878764721381",
+       "tag": ""
+      },
+      {
+       "address": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.243245745003405440",
+       "tag": ""
+      },
+      {
+       "address": "0x60c61a47804283a514bfcdf163138b7528720d0f",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.049799795197873021",
+       "tag": ""
+      },
+      {
+       "address": "0x982663b77d98170266eb969811ead30eb95961e6",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.015663512970151323",
+       "tag": ""
+      },
+      {
+       "address": "0xb125e6687d4313864e53df431d5425969c15eb2f",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.005657465255341605",
+       "tag": ""
+      },
+      {
+       "address": "0x47ca96ea59c13f72745928887f84c9f52c3d7348",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.004763572914220153",
+       "tag": ""
+      },
+      {
+       "address": "0xb4807865a786e9e9e26e6a9610f2078e7fc507fb",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.004226063697688844",
+       "tag": ""
+      },
+      {
+       "address": "0x11c1fbd4b3de66bc0565779b35171a6cf3e71f59",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.003965801586205360",
+       "tag": ""
+      },
+      {
+       "address": "0xadedd8ab6de832766fedf0fac4992e5c4d3ea18a",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.003014154497717155",
+       "tag": ""
+      },
+      {
+       "address": "0x8bb9eaf3c5a906d20c4cc10ea2f73a3ac2d5d41a",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.002928101303019481",
+       "tag": ""
+      }
+     ],
      "honeypot_with_same_creator": "0",
      "is_in_dex": "1",
      "is_open_source": "1",
@@ -2635,6 +3884,78 @@
      "external_call": "0",
      "hidden_owner": "0",
      "holder_count": "753479",
+     "holders": [
+      {
+       "address": "0xebf418fe2512e7e6bd9b87a8f0f294acdc67e6b4",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.498683097851657573",
+       "tag": ""
+      },
+      {
+       "address": "0x62ebec56766e3be84eb6b3437c501e6716a90c0a",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.019491957957459662",
+       "tag": ""
+      },
+      {
+       "address": "0x6325aa7b6fd01475e0f098b24c410fab89b0ad75",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.019061348214459373",
+       "tag": ""
+      },
+      {
+       "address": "0x001aa0fe6f267f8c279b2f89cd61ada3eeca212d",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.018977744720612168",
+       "tag": ""
+      },
+      {
+       "address": "0xeb22d634a714df99cf3ee41cf1f32289669bfbc6",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.018947107513100297",
+       "tag": ""
+      },
+      {
+       "address": "0xcd9d176df726db71f9384480f2d7f12505cca197",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.018947107513100297",
+       "tag": ""
+      },
+      {
+       "address": "0x8185f9d028e22b1bf6165a695f8c121e3d10656d",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.018947107513100297",
+       "tag": ""
+      },
+      {
+       "address": "0x6fb49677cb40b2ecae76696a78ae8254cf0ec447",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.018947107513100297",
+       "tag": ""
+      },
+      {
+       "address": "0x7269de76188e6597444d0859c4e5c336d3c39ddb",
+       "is_contract": 1,
+       "is_locked": 0,
+       "percent": "0.014727766169444787",
+       "tag": ""
+      },
+      {
+       "address": "0xbaed383ede0e5d9d72430661f3285daa77e9439f",
+       "is_contract": 0,
+       "is_locked": 0,
+       "percent": "0.014330292816257988",
+       "tag": ""
+      }
+     ],
      "honeypot_with_same_creator": "0",
      "is_anti_whale": "0",
      "is_blacklisted": "0",
@@ -2722,5 +4043,5 @@
    }
   }
  ],
- "source": "Recorded 2026-09-24 from public providers for the 20 safe entries of eval/data/benchmark_v1.json: GoPlus token_security (scalar fields), eth_getCode (reduced to the services/contract_service.py BYTECODE_PATTERNS selectors it contains as PUSH4 operands), owner() via RPC, HoneypotService, DexService and EthosService outputs. Explorer verification and creation age are not recorded: they need the production explorer key."
+ "source": "Recorded 2026-09-24 from public providers for the 20 safe entries of eval/data/benchmark_v1.json: GoPlus token_security (scalar fields), eth_getCode (reduced to the services/contract_service.py BYTECODE_PATTERNS selectors it contains as PUSH4 operands), owner() via RPC, HoneypotService, DexService and EthosService outputs. Explorer verification and creation age are not recorded: they need the production explorer key. GoPlus's holders (address, is_contract, is_locked, percent, tag) lists and the dex entries (name, pair, pool_manager) whose pair or pool manager is one of those holders were recorded later on 2026-09-24 from the same token_security endpoint; GoPlus lists no holders for the 1inch V5 Router and has no record for the PancakeSwap V2 Router."
 }

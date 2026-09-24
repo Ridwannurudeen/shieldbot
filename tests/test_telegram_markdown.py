@@ -271,7 +271,7 @@ async def test_report_reply_shows_the_reason_literally(bot_module, monkeypatch, 
         bot_module,
         "scam_db",
         SimpleNamespace(
-            report_address=MagicMock(
+            report_address=AsyncMock(
                 return_value={
                     "accepted": True,
                     "blacklisted": blacklisted,
@@ -283,9 +283,12 @@ async def test_report_reply_shows_the_reason_literally(bot_module, monkeypatch, 
     )
     monkeypatch.setattr(bot_module, "onchain_recorder", SimpleNamespace(is_available=lambda: False))
     monkeypatch.setattr(bot_module, "base_attestor", SimpleNamespace(is_available=lambda: False))
+    monkeypatch.setattr(bot_module, "web3_client", SimpleNamespace(
+        validate_chain_id=lambda chain_id: chain_id, is_valid_address=lambda address: True,
+    ))
     update = _update()
 
-    await bot_module.report_command(update, SimpleNamespace(args=[ADDRESS, "honeypot", HOSTILE]))
+    await bot_module.report_command(update, SimpleNamespace(args=[ADDRESS, "honeypot", HOSTILE], user_data={}))
 
     assert f"Reason: honeypot {HOSTILE}\n" in assert_literal(_reply(update), HOSTILE)
 

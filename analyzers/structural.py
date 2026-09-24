@@ -2,8 +2,19 @@
 
 import logging
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
+from core.risk_engine import database_matches, medium_matches
 
 logger = logging.getLogger(__name__)
+
+# Top-10 holder share (percent of supply; burn, locked, pool and locker holders left out) that adds
+# structural points. GoPlus data of 2026-09-24: 17 of the 20 benchmark safes read 3-66% and cbETH
+# 91.5% (bridge and staking contracts); the two routers list no holders. Of the 14 benchmark
+# honeypots, 7 read 71-100% and 4 of them 90% or more.
+HOLDER_SHARE_ELEVATED = 70
+HOLDER_SHARE_HIGH = 90
+# The note that names a token's missing holder list. The signal only adds risk, so its absence is
+# named rather than counted as a coverage gap: core/policy.py's required coverage decides status.
+HOLDERS_UNKNOWN = 'Top-10 holder share unknown: no readable GoPlus holder list'
 
 
 class StructuralAnalyzer(Analyzer):
@@ -51,6 +62,17 @@ class StructuralAnalyzer(Analyzer):
             sniffer_data = await self._sniffer.fetch(ctx.address, chain_id=ctx.chain_id)
 
         score, flags = self._compute(data, sniffer_data)
+        # Holder concentration describes a token. A missing holder list is named in a note and adds
+        # nothing, never read as a token whose supply is spread out.
+        if ctx.is_token is not False and data.get('is_contract') is not False:
+            share = data.get('top10_holder_percent')
+            if share is None:
+                data['notes'] = [HOLDERS_UNKNOWN]
+            elif share >= HOLDER_SHARE_ELEVATED:
+                score = min(score + (20 if share >= HOLDER_SHARE_HIGH else 10), 100)
+                flags.append(
+                    f"Top 10 holders own {share}% of supply (burn, locked, pool and locker addresses excluded)"
+                )
         return AnalyzerResult(
             name=self.name,
             weight=self.weight,
@@ -103,9 +125,13 @@ class StructuralAnalyzer(Analyzer):
         if d.get("has_destroy") and d.get("ownership_renounced") is not True:
             score += 15
             flags.append("destroy() function: the owner may be able to delete the contract")
-        if d.get("scam_matches"):
+        hard_matches = database_matches(d.get("scam_matches"))
+        if hard_matches:
             score += 30
-            flags.append(f"Scam DB match ({len(d['scam_matches'])} sources)")
+            flags.append(f"Scam DB match ({len(hard_matches)} sources)")
         if d.get("ownership_renounced") is False:
             score += 5
+        # A community report adds no points: the risk engine holds its floor. Its reason leads, so the
+        # extension, which shows three flags, always names it.
+        flags[:0] = [match["reason"] for match in medium_matches(d.get("scam_matches"))]
         return min(score, 100), flags

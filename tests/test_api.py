@@ -464,7 +464,10 @@ async def test_strict_cached_analyzer_failure_matches_cold_scan(
         }},
     }
     req = api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40)
-    request = SimpleNamespace(headers={"X-Policy-Mode": override} if override else {})
+    # An authenticated caller: its STRICT request skips the cache (tests/test_strict_cache.py has the others).
+    request = SimpleNamespace(
+        headers={"X-Policy-Mode": override} if override else {}, state=SimpleNamespace(api_key_info={"key_id": "k1"}),
+    )
     cold = await api.firewall(req, request)
     services.db.get_contract_score.return_value = cached
     warm = await api.firewall(req, request)
@@ -498,7 +501,10 @@ async def test_balanced_repeat_uses_cache_with_effective_policy(
     req = api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40)
     request = SimpleNamespace(headers={"X-Policy-Mode": override} if override else {})
     cold = await api.firewall(req, request)
-    services.db.get_contract_score.return_value = services.db.upsert_contract_score.call_args.kwargs
+    # The stored row as get_contract_score returns it, with the time of the scan that wrote it.
+    services.db.get_contract_score.return_value = {
+        **services.db.upsert_contract_score.call_args.kwargs, "last_scanned_at": 1790000000.0,
+    }
     warm = await api.firewall(req, request)
 
     assert warm["classification"] == cold["classification"] == "SAFE"
@@ -528,7 +534,7 @@ async def test_strict_blocks_a_provider_unknown_cold_and_warm(cached_firewall_ap
         }},
     }
     req = api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40)
-    request = SimpleNamespace(headers={})
+    request = SimpleNamespace(headers={}, state=SimpleNamespace(api_key_info={"key_id": "k1"}))
     cold = await api.firewall(req, request)
     services.db.get_contract_score.return_value = cached
     warm = await api.firewall(req, request)
@@ -686,11 +692,11 @@ async def test_legacy_fallback_never_clears_a_transaction_specific_request(cache
     response = await api.firewall(
         api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40, value=value), SimpleNamespace(headers={}),
     )
-    assert response["classification"] == ("CAUTION" if specific else "SAFE")
+    # A degraded verdict is never SAFE; a transaction-specific one also says its checks did not run.
+    assert response["classification"] == "CAUTION"
     assert (TX_CHECKS_UNAVAILABLE in response["danger_signals"]) is specific
     # The verdict line must not contradict the classification, including the AI's own verdict.
-    if specific or not ai:
-        assert response["verdict"].startswith(response["classification"])
+    assert response["verdict"].startswith(response["classification"])
 
 
 @pytest.mark.asyncio

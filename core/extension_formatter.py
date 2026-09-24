@@ -1,5 +1,7 @@
 """Formats composite risk data into a compact JSON dict for the Chrome extension."""
 
+from core.verdicts import BLOCK_RECOMMENDED, CAUTION, HIGH, HIGH_RISK, MEDIUM, SAFE, classify
+
 
 def is_scan_incomplete(risk_output: dict) -> bool:
     coverage = risk_output.get('coverage')
@@ -23,24 +25,22 @@ def format_extension_alert(risk_output: dict) -> dict:
     reasons = risk_output.get('coverage_reasons', {})
 
     # Classification mapping
-    if rug_prob >= 71:
-        classification = 'BLOCK_RECOMMENDED'
+    band = classify(rug_prob)
+    classification = band
+    if band == BLOCK_RECOMMENDED:
         action = 'Do not proceed with this transaction.'
-    elif rug_prob >= 50:
-        classification = 'HIGH_RISK'
+    elif band == HIGH_RISK:
         action = 'High risk detected. Avoid unless you fully understand the risks.'
-    elif rug_prob >= 31:
-        classification = 'CAUTION'
+    elif band == CAUTION:
         action = 'Proceed with caution. Review the flagged concerns.'
-    elif incomplete or risk_level in ('MEDIUM', 'HIGH'):
-        classification = 'CAUTION'
+    elif incomplete or risk_level in (MEDIUM, HIGH):
+        classification = CAUTION
         reason = '; '.join(dict.fromkeys(reasons.values())) or 'Provider data unavailable or incomplete'
         action = f'Unknown: {reason}. Review the missing data before proceeding.'
     else:
-        classification = 'SAFE'
         action = 'No major risks detected. Standard precautions apply.'
 
-    if incomplete and rug_prob >= 31:
+    if incomplete and band != SAFE:
         reason = '; '.join(dict.fromkeys(reasons.values())) or 'Provider data unavailable or incomplete'
         action += f' Unknown: {reason}.'
 

@@ -31,6 +31,7 @@ from core.database import GUARD_WATCH_MAX_SUBJECTS
 from core.extension_formatter import is_scan_incomplete
 from core.registry import BACKGROUND_SCAN_DEADLINE_SECONDS
 from core.verdict_evidence import build_evidence
+from core.verdicts import BLOCK_MIN, SAFE_MAX
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 from services.launch_discovery import LaunchDiscoveryError, WrongChainError
 from services.rpc_guard import CLOSED, BreakerOpenError
@@ -77,7 +78,8 @@ class Hunter:
     """Proactive scheduled threat sweeps."""
 
     def __init__(
-        self, tools, db, ai_analyzer, sentinel, discovery=None, rpc_guard=None, verdict_publisher=None
+        self, tools, db, ai_analyzer, sentinel, discovery=None, rpc_guard=None, verdict_publisher=None,
+        scam_db=None,
     ):
         self.tools = tools
         self.db = db
@@ -86,6 +88,8 @@ class Hunter:
         self.discovery = discovery
         self.rpc_guard = rpc_guard
         self.verdict_publisher = verdict_publisher
+        # The local scam blacklist, whose expired community entries each sweep prunes.
+        self.scam_db = scam_db
         # The fast launch watch, when one is wired in; it owns 4663 work while it runs.
         self.launch_watch = None
         # Held while discovering or scanning 4663 launches, so the sweep and the watch never
@@ -116,7 +120,7 @@ class Hunter:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        logger.info("Hunter stopped")
+            logger.info("Hunter stopped")
 
     @property
     def is_running(self) -> bool:
@@ -205,14 +209,14 @@ class Hunter:
             risk_score = result.get("risk_score", result.get("rug_probability")) if complete else None
             if risk_score is None:
                 status = "unknown"
-            elif risk_score >= 71:
+            elif risk_score >= BLOCK_MIN:
                 status = "blocked"
                 await self._log_finding(
                     f"guard-rescan-{int(time.time())}", subject["subject"], None, risk_score,
                     result, status, chain_id=LAUNCH_CHAIN_ID,
                 )
             else:
-                status = "cleared" if risk_score <= 30 else "watching"
+                status = "cleared" if risk_score <= SAFE_MAX else "watching"
             # Update an existing launch only; guard membership never uses tracked_pairs.
             await self.db.record_launch_scan(LAUNCH_CHAIN_ID, subject["subject"], status, risk_score)
             if complete and published is not None and published["onchain_status"] in (
@@ -315,7 +319,7 @@ class Hunter:
                 type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
             )
 
-        # Housekeeping: usage records past their retention and expired free key link requests
+        # Housekeeping: usage records and scan evidence past their retention, expired free key link requests
         try:
             await self.db.prune_retention()
         except Exception as exc:
@@ -323,6 +327,16 @@ class Hunter:
                 "Hunter: retention pruning failed: %s\n%s",
                 type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
             )
+
+        # Housekeeping: expired community blacklist entries; the reload also picks up the bot's entries
+        if self.scam_db is not None:
+            try:
+                await self.scam_db.prune_blacklist()
+            except Exception as exc:
+                logger.error(
+                    "Hunter: blacklist pruning failed: %s\n%s",
+                    type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+                )
 
         logger.info(
             "Hunter sweep %s complete: %d flagged", investigation_id, len(flagged)
@@ -411,7 +425,7 @@ class Hunter:
             await self._record_impostor_check(chain_id, pair["token_address"], result)
             risk_score = result.get("risk_score", result.get("rug_probability"))
 
-            if risk_score is not None and risk_score >= 71:
+            if risk_score is not None and risk_score >= BLOCK_MIN:
                 # Upgraded to BLOCK. The finding is stored first, so a reader never sees a
                 # blocked pair without the evidence behind it.
                 await self._log_finding(
@@ -435,7 +449,7 @@ class Hunter:
                         reason=f"auto: recheck upgrade {pair['token_address']} (score={risk_score})",
                     )
                 blocked = True
-            elif risk_score is not None and risk_score <= 30 and not is_scan_incomplete(result):
+            elif risk_score is not None and risk_score <= SAFE_MAX and not is_scan_incomplete(result):
                 # Cleared
                 await self.db.update_tracked_pair_status(
                     pair["pair_address"], "cleared"
@@ -527,14 +541,14 @@ class Hunter:
 
         await self._record_impostor_check(LAUNCH_CHAIN_ID, token, result)
         risk_score = result.get("risk_score", result.get("rug_probability"))
-        if risk_score is not None and risk_score >= 71:
+        if risk_score is not None and risk_score >= BLOCK_MIN:
             status = "blocked"
             await self._log_finding(
                 investigation_id, token, None, risk_score, result, status, chain_id=LAUNCH_CHAIN_ID
             )
         elif risk_score is None or is_scan_incomplete(result):
             status = "unknown"
-        elif risk_score <= 30:
+        elif risk_score <= SAFE_MAX:
             status = "cleared"
         else:
             status = "watching"

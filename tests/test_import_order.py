@@ -40,7 +40,7 @@ def _import_first(module):
 @pytest.fixture(scope="module")
 def fresh_imports():
     # Every module still gets its own interpreter; only the waiting is shared.
-    modules = [*MODULES, "api", *(["bot"] if TELEGRAM_INSTALLED else [])]
+    modules = [*MODULES, "api", "workers", *(["bot"] if TELEGRAM_INSTALLED else [])]
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
         yield {module: pool.submit(_import_first, module) for module in modules}
 
@@ -48,6 +48,7 @@ def fresh_imports():
 @pytest.mark.parametrize("module", [
     *MODULES,
     "api",
+    "workers",
     pytest.param("bot", marks=pytest.mark.skipif(
         not TELEGRAM_INSTALLED,
         reason="telegram is not installed",

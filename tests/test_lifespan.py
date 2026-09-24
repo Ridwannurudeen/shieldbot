@@ -21,11 +21,13 @@ def mock_container(monkeypatch):
             "container", "web3_client", "ai_analyzer", "tx_scanner",
             "token_scanner", "calldata_decoder", "scam_db", "dex_service",
             "ethos_service", "honeypot_service", "contract_service", "risk_engine",
-            "greenfield_service", "tenderly_simulator", "advisor",
+            "greenfield_service", "tenderly_simulator", "advisor", "_background_workers",
+            "_blacklist_reload_task",
         )
     }
     settings = SimpleNamespace(
-        rpc_proxy_enabled=False, trusted_proxies=[], admin_secret="",
+        rpc_proxy_enabled=False, trusted_proxies=[], admin_secret="", rate_limit_backend="memory",
+        background_workers="api",
     )
     container = MagicMock(settings=settings)
     container.startup = AsyncMock()

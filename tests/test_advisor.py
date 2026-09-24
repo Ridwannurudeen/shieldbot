@@ -420,11 +420,8 @@ async def test_explain_scan_ai_exception_falls_back(advisor, mock_ai):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('method,args', [
     ('compute_ai_risk_score', ('0xABC', {'chain_id': 4663})),
-    ('analyze_verified_source', ('0xABC', 'contract Token {}', 4663)),
-    ('analyze_contract_bytecode', ('0xABC', '0x00', {'chain_id': 4663})),
-    ('analyze_token_safety', ('0xABC', {}, {'chain_id': 4663})),
     ('generate_forensic_report', ('0xABC', {'chain_id': 4663}, 'token')),
-    ('generate_firewall_report', ({'chainId': 4663}, {'chain_id': 4663})),
+    ('generate_firewall_report', ({'chainId': 4663}, {'chain_id': 4663}, 'CAUTION', 40)),
 ])
 async def test_analysis_prompts_use_scan_chain(method, args):
     from utils.ai_analyzer import AIAnalyzer
@@ -454,16 +451,10 @@ def test_advisor_prompt_uses_supplied_chain_identity():
 @pytest.mark.parametrize('method,args', [
     ('compute_ai_risk_score', ('0xABC', {})),
     ('compute_ai_risk_score', ('0xABC', {'chain_id': None})),
-    ('analyze_verified_source', ('0xABC', 'contract Token {}')),
-    ('analyze_verified_source', ('0xABC', 'contract Token {}', None)),
-    ('analyze_contract_bytecode', ('0xABC', '0x00', {})),
-    ('analyze_contract_bytecode', ('0xABC', '0x00', {'chain_id': None})),
-    ('analyze_token_safety', ('0xABC', {}, {})),
-    ('analyze_token_safety', ('0xABC', {}, {'chain_id': None})),
     ('generate_forensic_report', ('0xABC', {}, 'token')),
     ('generate_forensic_report', ('0xABC', {'chain_id': None}, 'token')),
-    ('generate_firewall_report', ({}, {})),
-    ('generate_firewall_report', ({'chainId': None}, {'chain_id': None})),
+    ('generate_firewall_report', ({}, {}, 'CAUTION', 40)),
+    ('generate_firewall_report', ({'chainId': None}, {'chain_id': None}, 'CAUTION', 40)),
 ])
 async def test_missing_prompt_chain_is_unknown(method, args):
     from utils.ai_analyzer import AIAnalyzer

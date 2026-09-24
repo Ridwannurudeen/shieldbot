@@ -32,6 +32,10 @@ class MarketAnalyzer(Analyzer):
 
         data = await self._service.fetch_token_market_data(ctx.address, chain_id=ctx.chain_id)
         score, flags = self._compute(data)
+        # An ok market may lack only the 24h change. The volatility check only adds risk, so a check
+        # that did not run is a note, not a danger signal.
+        if data.get('status') == 'ok' and data.get('volatility_flag') is None:
+            data = {**data, 'notes': ['Volatility unknown: 24h price change unavailable']}
         return AnalyzerResult(
             name=self.name, weight=self.weight,
             score=score, flags=flags, data=data,
