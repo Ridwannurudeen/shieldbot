@@ -835,6 +835,59 @@ def test_unknown_result_has_its_own_badge_and_reason(state):
     )
 
 
+@pytest.mark.parametrize("notes", ["two-notes", "html-note", "empty", "absent"])
+@pytest.mark.parametrize("kind", ["analysis", "signature"])
+def test_notes_are_shown_as_information_apart_from_the_danger_signals(kind, notes):
+    # A note says what a check could not measure; it changes no score or classification, so it has
+    # its own section, never the danger signals', and a SAFE verdict with notes stays SAFE.
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const [kind, notes] = JSON.parse(process.argv[1]);
+  const given = {
+    'two-notes': ['Top-10 holder share unknown: no readable GoPlus holder list', 'Volatility unknown: 24h price change unavailable'],
+    'html-note': ['<img src=x onerror=alert(1)><b>holders</b>'],
+    'empty': [],
+    'absent': undefined,
+  }[notes];
+  const result = scan({danger_signals: ['A danger signal'], ...(given === undefined ? {} : {notes: given})});
+  analyze = async () => ({result});
+  if (kind === 'signature') {
+    await intercept('request', {signMethod: 'personal_sign', data: '0x68656c6c6f', chainId: 56}, 'personal_sign');
+  } else {
+    await intercept('request');
+  }
+  const html = overlay().innerHTML;
+  const list = name => (new RegExp(`<ul class="${name}">([\\s\\S]*?)</ul>`).exec(html) || [])[1];
+  const escaped = text => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const signals = list('shieldai-signals'), shown = list('shieldai-notes');
+  assert(signals.includes('A danger signal'), html);
+  if (given && given.length) {
+    assert(html.includes('<h3>Notes</h3>'), html);
+    for (const note of given) {
+      assert(shown.includes(`<li>${escaped(note)}</li>`), html);
+      assert(!signals.includes(escaped(note)), 'a note is listed as a danger signal');
+    }
+  } else {
+    assert.equal(shown, undefined, html);
+    assert(!html.includes('<h3>Notes</h3>'), html);
+  }
+  // Nothing in a note becomes markup.
+  assert(!html.includes('<img') && !html.includes('<b>'), html);
+  assert.equal(overlay().querySelector('img'), null);
+  // The notes change nothing the user decides on: still SAFE, with a plain Proceed or Sign Anyway.
+  assert.deepEqual(overlay().querySelector('.shieldai-badge').className.split(/\s+/), ['shieldai-badge', 'shieldai-badge-safe']);
+  assert(!byId('shieldai-proceed').className.includes('shieldai-btn-hold'), html);
+  assert.equal(byId('shieldai-explain'), null);
+  userClick(byId('shieldai-proceed'));
+  await flush();
+  await assertVerdicts([['request', 'proceed']]);
+""",
+        [kind, notes],
+    )
+
+
 @pytest.mark.parametrize("policy", ["STRICT", "BALANCED"])
 def test_a_request_that_cannot_be_read_is_shown_as_unknown_structure(policy):
     run_node(

@@ -3,6 +3,7 @@ the signature path, never as a transaction without a target, and a raw eth_sign 
 Recommended."""
 
 import re
+from types import SimpleNamespace
 
 import pytest
 
@@ -42,6 +43,49 @@ async def test_eth_sign_is_block_recommended_and_says_it_can_sign_a_transaction(
     assert any("can be a transaction" in signal for signal in response["danger_signals"])
     # Nothing about the hash can be checked, so the verdict stays incomplete.
     assert_unknown_response(response)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("to", ["", "0x" + "a" * 40], ids=["no-target", "valid-target"])
+async def test_eth_sign_is_block_recommended_whatever_its_target(consumer_api, to):  # noqa: F811
+    # eth_sign signs a raw hash, not a call to `to`, so a valid `to` does not send it down the
+    # transaction path, where the target's cached row or its own scan would answer it without the
+    # floor and the signature's verdict would be stored as the target's.
+    api, services = consumer_api
+    req = api.FirewallRequest(to=to, sender="", signMethod="eth_sign")
+    assert api._is_signature_only_request(req)
+    trail = {}
+    response = await api._firewall_verdict(req, SimpleNamespace(headers={}), trail)
+    assert response["classification"] == verdicts.BLOCK_RECOMMENDED
+    assert response["risk_score"] >= verdicts.BLIND_SIGN_MIN
+    assert response["danger_signals"][0].startswith("eth_sign signs a raw hash")
+    assert_unknown_response(response)
+    assert trail["target"] == (to or "0x" + "0" * 40)
+    services.db.get_contract_score.assert_not_awaited()
+    services.db.upsert_contract_score.assert_not_awaited()
+    services.registry.run_all.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sign_method", ["personal_sign", "eth_sign"])
+async def test_a_signature_with_typed_data_it_does_not_recognise_is_labelled_by_its_method(consumer_api, sign_method):  # noqa: F811
+    # The signature type names the method that was asked for: an eth_sign is not reported as a
+    # personal_sign, and its verdict is still the eth_sign floor.
+    api, _ = consumer_api
+    req = api.FirewallRequest(
+        to="", sender="0x" + "b" * 40, signMethod=sign_method,
+        typedData={"primaryType": "UnknownType", "message": {}},
+    )
+    response = await api._build_signature_only_response(req)
+    fields = {field["label"]: field["value"] for field in response["calldata_details"]["fields"]}
+    assert fields["Signature Type"] == sign_method
+    assert response["raw_checks"]["signature"]["sig_type"] == sign_method
+    assert response["shield_score"]["threat_type"] == sign_method
+    assert response["decoded_action"] == f"{sign_method} signature request"
+    assert_unknown_response(response)
+    if sign_method == "eth_sign":
+        assert response["classification"] == verdicts.BLOCK_RECOMMENDED
+        assert response["risk_score"] == verdicts.BLIND_SIGN_MIN
 
 
 @pytest.mark.asyncio

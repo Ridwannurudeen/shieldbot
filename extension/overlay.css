@@ -191,6 +191,28 @@
   font-size: 12px;
 }
 
+/* Notes: what a check could not measure. They change no score, so they are
+   drawn as neutral information, not as danger signals. */
+.shieldai-notes {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.shieldai-notes li {
+  font-size: 13px;
+  color: #94a3b8;
+  padding: 4px 0 4px 18px;
+  position: relative;
+}
+
+.shieldai-notes li::before {
+  content: "\2139";
+  position: absolute;
+  left: 0;
+  font-size: 12px;
+}
+
 /* Impact Table */
 .shieldai-impact {
   width: 100%;

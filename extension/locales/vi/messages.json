@@ -183,5 +183,6 @@
   "overlayHashMessage": "CHỮ KÝ HASH THÔ (personal_sign)",
   "overlayHashMessageNote": "Yêu cầu này muốn bạn ký 32 byte không phải là văn bản. Chúng có thể là hash của một lệnh, một permit hoặc một giao dịch mà một hợp đồng sẽ chấp nhận như do bạn ký. Không trang web thông thường nào cần điều này.",
   "overlayOpaqueMessage": "TIN NHẮN KHÔNG ĐỌC ĐƯỢC",
-  "overlayOpaqueMessageNote": "Tin nhắn này không phải là văn bản đọc được, nên bạn không thể thấy mình sẽ ký gì. Hãy từ chối trừ khi bạn biết chính xác nó là gì."
+  "overlayOpaqueMessageNote": "Tin nhắn này không phải là văn bản đọc được, nên bạn không thể thấy mình sẽ ký gì. Hãy từ chối trừ khi bạn biết chính xác nó là gì.",
+  "overlayNotes": "Ghi chú"
 }

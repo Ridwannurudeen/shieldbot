@@ -129,7 +129,7 @@ class SignaturePermitAnalyzer(Analyzer):
 
             # personal_sign / eth_sign — generally benign
             elif sign_method in ('personal_sign', 'eth_sign'):
-                sig_type = 'personal_sign'
+                sig_type = sign_method
                 # personal_sign is typically harmless (login signatures)
                 score = 0
 
