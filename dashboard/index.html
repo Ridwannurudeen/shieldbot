@@ -971,6 +971,7 @@ function ThreatLogTable({
   threats,
   loading,
   error,
+  mempoolUnavailable,
   onRetry,
   chain,
   onChain
@@ -1004,7 +1005,14 @@ function ThreatLogTable({
   })), error && /*#__PURE__*/React.createElement(ErrorBanner, {
     msg: error,
     onRetry: onRetry
-  }), /*#__PURE__*/React.createElement("div", {
+  }), mempoolUnavailable && /*#__PURE__*/React.createElement("div", {
+    className: "px-4 py-3 rounded-xl mb-3 text-sm",
+    style: {
+      background: 'rgba(100,116,139,0.12)',
+      border: '1px solid #334155',
+      color: '#CBD5E1'
+    }
+  }, "Mempool alerts unavailable: ", mempoolUnavailable), /*#__PURE__*/React.createElement("div", {
     className: "flex flex-col gap-2",
     style: {
       maxHeight: 520,
@@ -1018,7 +1026,7 @@ function ThreatLogTable({
     style: {
       color: '#334155'
     }
-  }, error ? 'Threat data unavailable — check the error above.' : chain ? 'No threats on this chain in the current window.' : 'No threats detected. Monitoring active.') : filtered.map(t => /*#__PURE__*/React.createElement(ThreatRow, {
+  }, error ? 'Threat data unavailable — check the error above.' : mempoolUnavailable ? chain ? 'No contract detections on this chain in the current window.' : 'No contract detections in the current window.' : chain ? 'No threats on this chain in the current window.' : 'No threats detected. Monitoring active.') : filtered.map(t => /*#__PURE__*/React.createElement(ThreatRow, {
     key: threatKey(t),
     t: t,
     onCopy: handleCopy,
@@ -1668,13 +1676,20 @@ function useCountUp(target, duration = 1200) {
   }, [target]);
   return display;
 }
+
+// A null count is unknown, never 0. A background_workers_note says the mempool monitor runs in a separate
+// process this API does not read, so its counts are Unavailable; otherwise a dash means not reporting.
+function missingText(stats) {
+  return stats && stats.background_workers_note ? 'Unavailable' : '—';
+}
 function StatCard({
   label,
   span,
   value,
   color,
   loading,
-  note
+  note,
+  missing
 }) {
   const display = useCountUp(loading || value == null ? 0 : value);
   return /*#__PURE__*/React.createElement("div", {
@@ -1690,11 +1705,11 @@ function StatCard({
       width: 72
     }
   }) : /*#__PURE__*/React.createElement("div", {
-    className: "text-2xl font-bold leading-none",
+    className: `${value == null ? 'text-base' : 'text-2xl'} font-bold leading-none`,
     style: {
       color: value == null ? '#475569' : color
     }
-  }, value == null ? '—' : display.toLocaleString()), /*#__PURE__*/React.createElement("div", {
+  }, value == null ? missing : display.toLocaleString()), /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-medium mt-1",
     style: {
       color: '#64748B'
@@ -1729,13 +1744,14 @@ function PlatformStatsBar({
     value: stats ? stats[s.key] : null,
     color: s.color,
     loading: loading,
+    missing: missingText(stats),
     note: s.key === 'chains_protected' ? mempoolNote : null
   }))), !loading && (stats === null || since || anyMissing) && /*#__PURE__*/React.createElement("div", {
     className: "text-xs mt-2",
     style: {
       color: '#475569'
     }
-  }, stats === null ? 'Platform statistics are unavailable right now.' : since ? `Transactions monitored, sandwich attacks and suspicious approvals are counted since ${new Date(since * 1000).toLocaleString()}, when the mempool monitor last started.` : 'A dash means that source is not reporting right now.'));
+  }, stats === null ? 'Platform statistics are unavailable right now.' : stats.background_workers_note ? 'Unavailable: the mempool monitor runs in a separate process that this API does not read, so its counts are unknown here, not zero.' : since ? `Transactions monitored, sandwich attacks and suspicious approvals are counted since ${new Date(since * 1000).toLocaleString()}, when the mempool monitor last started.` : 'A dash means that source is not reporting right now.'));
 }
 function LastDayBar({
   stats,
@@ -1749,7 +1765,8 @@ function LastDayBar({
     span: s.span,
     value: stats ? stats[s.key] : null,
     color: s.color,
-    loading: loading
+    loading: loading,
+    missing: missingText(stats)
   }))), /*#__PURE__*/React.createElement("div", {
     className: "text-xs mt-2",
     style: {
@@ -1783,6 +1800,7 @@ function App() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [mempoolUnavailable, setMempoolUnavailable] = useState(null);
   const [updated, setUpdated] = useState(null);
   const [health, setHealth] = useState('connecting');
   const [chain, setChain] = useState('');
@@ -1811,10 +1829,13 @@ function App() {
       }));
       if (loaded.length) setUpdated(Date.now());
       setError(failed.length ? 'Failed to load ' + failed.map(([name, x]) => `${name} (${x.reason?.message || 'unknown error'})`).join(' and ') : null);
+      // A mempool feed this API cannot read says why in mempool_unavailable: its empty list is not "no threats".
+      const mempoolReason = fm.status === 'fulfilled' ? fm.value.mempool_unavailable || null : null;
+      setMempoolUnavailable(mempoolReason);
       setCampaigns(c.status === 'fulfilled' ? c.value.campaigns || [] : null);
       setStats(p.status === 'fulfilled' ? p.value : null);
       setBaseAttestations(b.status === 'fulfilled' ? b.value : NO_ATTESTATIONS);
-      const failures = results.filter(x => x.status === 'rejected').length;
+      const failures = results.filter(x => x.status === 'rejected').length + (mempoolReason ? 1 : 0);
       setHealth(failures === 0 ? 'live' : failures === results.length ? 'offline' : 'degraded');
     } finally {
       setLoading(false);
@@ -1879,6 +1900,7 @@ function App() {
     threats: threats,
     loading: loading,
     error: error,
+    mempoolUnavailable: mempoolUnavailable,
     onRetry: fetchData,
     chain: chain,
     onChain: setChain
