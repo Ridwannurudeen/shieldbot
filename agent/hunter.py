@@ -77,7 +77,8 @@ class Hunter:
     """Proactive scheduled threat sweeps."""
 
     def __init__(
-        self, tools, db, ai_analyzer, sentinel, discovery=None, rpc_guard=None, verdict_publisher=None
+        self, tools, db, ai_analyzer, sentinel, discovery=None, rpc_guard=None, verdict_publisher=None,
+        scam_db=None,
     ):
         self.tools = tools
         self.db = db
@@ -86,6 +87,8 @@ class Hunter:
         self.discovery = discovery
         self.rpc_guard = rpc_guard
         self.verdict_publisher = verdict_publisher
+        # The local scam blacklist, whose expired community entries each sweep prunes.
+        self.scam_db = scam_db
         # The fast launch watch, when one is wired in; it owns 4663 work while it runs.
         self.launch_watch = None
         # Held while discovering or scanning 4663 launches, so the sweep and the watch never
@@ -323,6 +326,16 @@ class Hunter:
                 "Hunter: retention pruning failed: %s\n%s",
                 type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
             )
+
+        # Housekeeping: expired community blacklist entries; the reload also picks up the bot's entries
+        if self.scam_db is not None:
+            try:
+                await self.scam_db.prune_blacklist()
+            except Exception as exc:
+                logger.error(
+                    "Hunter: blacklist pruning failed: %s\n%s",
+                    type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+                )
 
         logger.info(
             "Hunter sweep %s complete: %d flagged", investigation_id, len(flagged)

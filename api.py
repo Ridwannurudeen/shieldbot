@@ -2318,6 +2318,42 @@ async def guard_subject_remove(chain_id: int, address: str, request: Request):
     return {"ok": True, "address": address.lower(), "chain_id": chain_id}
 
 
+class BlacklistConfirmRequest(ChainRequest):
+    address: str = Field(..., min_length=1, max_length=64)
+    # Omitted: the entry covers every chain.
+    chainId: Optional[int] = Field(default=None, ge=1, le=10_000_000)
+    reason: Optional[str] = Field(default=None, max_length=240)
+
+    @field_validator("chainId")
+    @classmethod
+    def validate_chain(cls, value):
+        return value if value is None else _validate_chain_id(value)
+
+
+@app.post("/api/admin/blacklist", include_in_schema=False)
+async def blacklist_confirm(req: BlacklistConfirmRequest, request: Request):
+    """Confirm an address as a scam: a block-severity match that never expires, replacing a community
+    entry for the same address and chain. Requires X-Admin-Secret."""
+    _require_admin(request)
+    if not web3_client.is_valid_address(req.address):
+        raise HTTPException(status_code=400, detail="Invalid address")
+    if not await container.scam_db.confirm_scam(req.address, req.chainId, req.reason):
+        raise HTTPException(status_code=409, detail="This address is a known legitimate contract and cannot be blacklisted")
+    return {"ok": True, "address": req.address.lower(), "chain_id": req.chainId, "source": "admin"}
+
+
+@app.delete("/api/admin/blacklist/{address}", include_in_schema=False)
+async def blacklist_remove(address: str, request: Request, chain_id: Optional[int] = None):
+    """Remove a blacklist entry, community or admin. Without chain_id, removes the entry that covers
+    every chain. Requires X-Admin-Secret."""
+    _require_admin(request)
+    if not web3_client.is_valid_address(address):
+        raise HTTPException(status_code=400, detail="Invalid address")
+    if not await container.scam_db.remove_from_blacklist(address, chain_id):
+        raise HTTPException(status_code=404, detail="No blacklist entry for this address and chain")
+    return {"ok": True, "address": address.lower(), "chain_id": chain_id}
+
+
 # Reason codes the code itself assigns; admin-entered and agent-written reasons are free text and stay private.
 _PUBLIC_WATCH_REASONS = {"MANUAL", "SERIAL_SCAMMER"}
 

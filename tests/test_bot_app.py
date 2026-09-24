@@ -253,7 +253,7 @@ class TestNoOnChainRecordingPromise:
         attestor = MagicMock()
         attestor.is_available.return_value = False
         scam_db = MagicMock()
-        scam_db.report_address.return_value = {"accepted": True, "blacklisted": True}
+        scam_db.report_address = AsyncMock(return_value={"accepted": True, "blacklisted": True})
         monkeypatch.setattr(bot_module, "onchain_recorder", recorder)
         monkeypatch.setattr(bot_module, "base_attestor", attestor)
         monkeypatch.setattr(bot_module, "scam_db", scam_db)

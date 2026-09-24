@@ -353,7 +353,7 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Community report with safeguards
-    result = scam_db.report_address(address, str(update.effective_user.id))
+    result = await scam_db.report_address(address, str(update.effective_user.id))
 
     if not result["accepted"]:
         await update.message.reply_text(f"❌ {result['reason']}")

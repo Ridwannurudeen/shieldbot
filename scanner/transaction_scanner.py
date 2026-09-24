@@ -65,9 +65,9 @@ SOURCE_CODE_PATTERNS = [
 class TransactionScanner:
     """Scans contracts for security risks with numeric scoring"""
 
-    def __init__(self, web3_client, ai_analyzer=None):
+    def __init__(self, web3_client, ai_analyzer=None, scam_db=None):
         self.web3 = web3_client
-        self.scam_db = ScamDatabase()
+        self.scam_db = scam_db or ScamDatabase()
         self.ai_analyzer = ai_analyzer
 
     async def scan_address(self, address: str, chain_id: int = 56) -> Dict:

@@ -1,5 +1,6 @@
 """A scam database provider failure must never read as a clean address."""
 
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -81,12 +82,17 @@ async def test_goplus_failure_is_a_failed_lookup(reason):
 @pytest.mark.asyncio
 async def test_local_blacklist_match_survives_a_goplus_failure():
     db = ScamDatabase()
-    db.known_scams.add(ADDRESS)
+    db.known_scams[(None, ADDRESS.lower())] = {
+        "source": "community", "reports": 3, "expires_at": time.time() + 60,
+    }
     matches = await _lookup(
         db, goplus={"status": "unknown", "reason": "GoPlus HTTP 503", "data": {}}
     )
-    # Three community reports are griefable, so the local blacklist keeps the 70 floor.
-    assert matches == [{**SCAM_MATCH, "severity": "high"}]
+    # Three community reports are griefable, so they are a medium-severity match, never a block.
+    assert matches == [{
+        "type": "community_reports", "reason": "Reported by 3 users", "source": "ShieldBot",
+        "severity": "medium", "reports": 3,
+    }]
     assert matches.failed_providers == ("GoPlus HTTP 503",)
 
 

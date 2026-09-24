@@ -113,8 +113,8 @@ class ServiceContainer:
         self.robinhood_adapter = RobinhoodAdapter(rpc_url=settings.robinhood_rpc_url)
         self.web3_client.register_adapter(self.robinhood_adapter)
 
-        # Scanners (legacy fallback)
-        self.tx_scanner = TransactionScanner(self.web3_client, self.ai_analyzer)
+        # Scanners (legacy fallback); /api/scan reads the same local blacklist as the analyzers
+        self.tx_scanner = TransactionScanner(self.web3_client, self.ai_analyzer, self.scam_db)
         self.token_scanner = TokenScanner(self.web3_client, self.ai_analyzer)
 
         # Intelligence services
@@ -143,6 +143,7 @@ class ServiceContainer:
 
         # Database + Auth + Indexer
         self.db = Database(settings.database_path)
+        self.scam_db.db = self.db
         self.auth_manager = AuthManager(self.db)
         self.indexer = DeployerIndexer(self.web3_client, self.db, settings=settings)
         # Verdict evidence storage, plus on-chain records in the Robinhood Chain registry when configured
@@ -208,6 +209,7 @@ class ServiceContainer:
             ),
             rpc_guard=self.robinhood_rpc_guard,
             verdict_publisher=self.verdict_publisher,
+            scam_db=self.scam_db,
         )
         # Fast 4663 launch discovery and triaged scans; the lifespan starts and stops it.
         self.launch_watch = LaunchWatch(self.hunter)
@@ -248,6 +250,7 @@ class ServiceContainer:
         enqueues scanned contracts into its own in-memory queue.
         """
         await self.db.initialize()
+        await self.scam_db.load_blacklist()
         await self.indexer.start()
         await self.greenfield_service.async_init()
         await self.cache.connect()

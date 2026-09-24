@@ -551,6 +551,7 @@ class Database:
         await self._create_verdict_evidence_tables()
         await self._create_ai_usage_tables()
         await self._create_free_key_tables()
+        await self._create_scam_blacklist_table()
 
         # Migrate: add registered_by_key column for existing DBs
         try:
@@ -1409,6 +1410,88 @@ class Database:
             ON CONFLICT(utc_day) DO UPDATE SET tokens = tokens + excluded.tokens
         """, (utc_day, tokens))
         await self._db.commit()
+
+    # --- Scam Blacklist ---
+
+    async def _create_scam_blacklist_table(self):
+        """The local scam blacklist. chain_id NULL covers every chain, expires_at NULL never expires.
+        source is 'community' (users reported the address) or 'admin' (an admin confirmed it); one
+        entry per address and chain."""
+        await self._db.executescript("""
+            CREATE TABLE IF NOT EXISTS scam_blacklist (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chain_id INTEGER,
+                address TEXT NOT NULL,
+                source TEXT NOT NULL CHECK (source IN ('community', 'admin')),
+                reason TEXT,
+                reports INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL,
+                expires_at REAL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_scam_blacklist_entry
+                ON scam_blacklist(address, COALESCE(chain_id, 0));
+        """)
+        await self._db.commit()
+
+    async def add_community_blacklist(
+        self, address: str, chain_id: Optional[int], reports: int, expires_at: float,
+    ):
+        """Add or renew a community entry. An admin entry for the same address and chain is left as it is."""
+        await self._db.execute("""
+            INSERT INTO scam_blacklist (chain_id, address, source, reports, created_at, expires_at)
+            VALUES (?, ?, 'community', ?, ?, ?)
+            ON CONFLICT (address, COALESCE(chain_id, 0)) DO UPDATE SET
+                reports = excluded.reports,
+                created_at = excluded.created_at,
+                expires_at = excluded.expires_at
+            WHERE scam_blacklist.source = 'community'
+        """, (chain_id, address.lower(), reports, time.time(), expires_at))
+        await self._db.commit()
+
+    async def confirm_blacklist(self, address: str, chain_id: Optional[int], reason: Optional[str]):
+        """Make an address an admin entry that never expires, confirming a community entry in place
+        (its report count is kept)."""
+        await self._db.execute("""
+            INSERT INTO scam_blacklist (chain_id, address, source, reason, created_at, expires_at)
+            VALUES (?, ?, 'admin', ?, ?, NULL)
+            ON CONFLICT (address, COALESCE(chain_id, 0)) DO UPDATE SET
+                source = 'admin',
+                reason = COALESCE(excluded.reason, scam_blacklist.reason),
+                expires_at = NULL
+        """, (chain_id, address.lower(), reason, time.time()))
+        await self._db.commit()
+
+    async def remove_blacklist(self, address: str, chain_id: Optional[int]) -> bool:
+        """Delete the entry for an address on a chain (NULL: the every-chain entry). True if one was deleted."""
+        cursor = await self._db.execute(
+            "DELETE FROM scam_blacklist WHERE address = ? AND COALESCE(chain_id, 0) = COALESCE(?, 0)",
+            (address.lower(), chain_id),
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def get_active_blacklist(self, now: float) -> List[Dict]:
+        """Every blacklist entry that has not expired at `now`."""
+        cursor = await self._db.execute("""
+            SELECT chain_id, address, source, reason, reports, created_at, expires_at
+            FROM scam_blacklist
+            WHERE expires_at IS NULL OR expires_at > ?
+        """, (now,))
+        return [
+            {
+                'chain_id': r[0], 'address': r[1], 'source': r[2], 'reason': r[3],
+                'reports': r[4], 'created_at': r[5], 'expires_at': r[6],
+            }
+            for r in await cursor.fetchall()
+        ]
+
+    async def prune_scam_blacklist(self, now: float) -> int:
+        """Delete the entries that have expired at `now`. Returns how many were deleted."""
+        cursor = await self._db.execute(
+            "DELETE FROM scam_blacklist WHERE expires_at IS NOT NULL AND expires_at <= ?", (now,)
+        )
+        await self._db.commit()
+        return cursor.rowcount
 
     # --- Self-Serve Free Keys ---
 

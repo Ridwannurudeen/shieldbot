@@ -271,7 +271,7 @@ async def test_report_reply_shows_the_reason_literally(bot_module, monkeypatch, 
         bot_module,
         "scam_db",
         SimpleNamespace(
-            report_address=MagicMock(
+            report_address=AsyncMock(
                 return_value={
                     "accepted": True,
                     "blacklisted": blacklisted,
