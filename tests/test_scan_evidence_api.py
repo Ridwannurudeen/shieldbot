@@ -9,6 +9,7 @@ import pytest
 import pytest_asyncio
 from eth_utils import keccak
 from fastapi.testclient import TestClient
+from web3 import Web3
 
 from core.analyzer import AnalyzerResult
 from core.database import SCAN_EVIDENCE_RETENTION_DAYS, Database
@@ -246,6 +247,32 @@ def test_a_signature_request_records_hashes_not_the_signed_data(evidence_api):
     assert set(doc["analyzers"]) == {"signature"}
     assert doc["transaction"]["typed_data_primary_type"] == "Permit"
     assert doc["transaction"]["typed_data_keccak"].startswith("0x")
+    assert CALLER[2:].lower() not in stored["canonical"].lower()
+
+
+@pytest.mark.parametrize(
+    "sender", ["0X" + CALLER[2:], CALLER[2:], CALLER[2:].lower()], ids=["0X", "unprefixed", "lower"]
+)
+def test_a_personal_sign_caller_is_masked_in_any_address_form(
+    evidence_api, mock_web3_client, sender
+):
+    _, client, _ = evidence_api
+    # The API's address checks accept these forms, so the signature target falls back to the sender.
+    mock_web3_client.is_valid_address.side_effect = Web3.is_address
+    mock_web3_client.to_checksum_address.side_effect = Web3.to_checksum_address
+    response = client.post(
+        "/api/firewall",
+        json={
+            "to": "",
+            "from": sender,
+            "data": "0x68656c6c6f",
+            "chainId": 56,
+            "signMethod": "personal_sign",
+        },
+    )
+    assert response.status_code == 200
+    _, stored = _stored(client, response)
+    assert stored["evidence"]["target"] == "[caller]"
     assert CALLER[2:].lower() not in stored["canonical"].lower()
 
 

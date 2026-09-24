@@ -1284,7 +1284,9 @@ async def firewall(req: FirewallRequest, request: Request):
     """
     trail = {}
     response = await _firewall_verdict(req, request, trail)
-    return await _with_evidence(response, "/api/firewall", req.chainId, caller=req.sender, **trail)
+    return await _with_evidence(
+        response, "/api/firewall", req.chainId, caller=_checksum_if_possible(req.sender), **trail,
+    )
 
 
 async def _firewall_verdict(req: FirewallRequest, request: Request, trail: Dict) -> Dict:

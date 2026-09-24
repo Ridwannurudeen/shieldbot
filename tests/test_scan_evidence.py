@@ -97,6 +97,24 @@ def test_a_cached_verdict_says_it_came_from_the_cache():
     assert (doc["source"], doc["cached_scan_at"]) == ("cache", 1789999900)
 
 
+@pytest.mark.parametrize(
+    "caller",
+    [CALLER.upper(), CALLER[2:], CALLER[2:].lower(), "0X" + CALLER[2:].lower()],
+    ids=["0X-upper", "unprefixed", "unprefixed-lower", "0X-lower"],
+)
+def test_the_caller_is_masked_in_any_form_the_request_gave_it(caller):
+    doc = document(
+        target=CALLER,
+        caller=caller,
+        response={
+            **RESPONSE,
+            "coverage_reasons": {"signature": f"spender 0X{CALLER[2:].upper()} or {CALLER[2:]}"},
+        },
+    )
+    assert doc["target"] == "[caller]"
+    assert CALLER[2:].lower() not in canonical_bytes(doc).decode("utf-8").lower()
+
+
 def test_the_hash_is_stable_and_is_keccak_of_the_canonical_bytes():
     first = document()
     reordered = document(

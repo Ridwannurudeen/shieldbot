@@ -29,7 +29,8 @@ SCHEMA = "shieldbot-scan-evidence"
 SCHEMA_VERSION = 1
 CALLER_PLACEHOLDER = "[caller]"
 
-_ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
+# The caller's address in any form the API accepts: with 0x or 0X, or without a prefix.
+_CALLER = re.compile(r"(?:0[xX])?([0-9a-fA-F]{40})")
 _HEX_BYTES = re.compile(r"0x(?:[0-9a-fA-F]{2})*")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 
@@ -196,8 +197,10 @@ def build_scan_evidence(
         "shieldbot_commit": SHIELDBOT_COMMIT,
         "scanned_at": scanned_at,
     }
-    if caller and _ADDRESS.fullmatch(caller):
-        document = _without_caller(document, re.compile(f"(?:0x)?{caller[2:]}", re.IGNORECASE))
+    caller_hex = _CALLER.fullmatch(caller) if caller else None
+    if caller_hex:
+        pattern = re.compile(f"(?:0x)?{caller_hex.group(1)}", re.IGNORECASE)
+        document = _without_caller(document, pattern)
     return document
 
 
