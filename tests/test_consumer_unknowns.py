@@ -471,6 +471,11 @@ async def test_signature_only_path_honours_strict(consumer_api, mode, covered, e
     assert response['classification'] == expected
     blocked = expected == 'BLOCK_RECOMMENDED'
     assert (response['danger_signals'][0] == 'Policy override: signature analysis unavailable or incomplete') is blocked
+    # The same override core.policy applies: at least 80, the incomplete source named, the mode reported.
+    assert response['risk_score'] == (80 if blocked else 30)
+    assert response['shield_score']['overall'] == response['risk_score']
+    assert response['failed_sources'] == ([] if covered else ['signature'])
+    assert response['policy_mode'] == ('STRICT' if blocked else 'SIGNATURE_ONLY')
 
 
 @pytest.mark.asyncio

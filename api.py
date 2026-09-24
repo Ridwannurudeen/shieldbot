@@ -1056,6 +1056,13 @@ async def _build_signature_only_response(req: FirewallRequest, policy_override: 
         sig_type in {'eip2612_permit', 'permit2', 'permit2_transfer', 'seaport_order'}
         or (not req.typedData and req.signMethod == 'personal_sign')
     ) and result.data.get('status') != 'unknown'
+    # As core.policy does, STRICT turns an unavailable or incomplete analysis into a block.
+    policy = container.policy_engine if container and container.policy_engine else PolicyEngine()
+    strict_block = not covered and policy.apply([], {}, mode_override=policy_override)['policy_mode'] == 'STRICT'
+    if strict_block:
+        risk_score = max(risk_score, 80)
+        classification = 'BLOCK_RECOMMENDED'
+        danger_signals.insert(0, 'Policy override: signature analysis unavailable or incomplete')
     alert = format_extension_alert({
         'rug_probability': risk_score, 'risk_level': 'LOW' if covered else 'UNKNOWN',
         'status': 'ok' if covered else 'unknown', 'coverage': {'signature': int(covered)},
@@ -1065,10 +1072,6 @@ async def _build_signature_only_response(req: FirewallRequest, policy_override: 
     })
     if not covered and classification == 'SAFE':
         classification = 'CAUTION'
-    policy = container.policy_engine if container and container.policy_engine else PolicyEngine()
-    if not covered and policy.apply([], {}, mode_override=policy_override)['policy_mode'] == 'STRICT':
-        classification = 'BLOCK_RECOMMENDED'
-        danger_signals.insert(0, 'Policy override: signature analysis unavailable or incomplete')
     decoded_action = f"{sign_method} signature request"
     if sig_type and sig_type not in {"unknown", sign_method}:
         decoded_action += f" ({sig_type})"
@@ -1119,8 +1122,8 @@ async def _build_signature_only_response(req: FirewallRequest, policy_override: 
         "chain_id": req.chainId,
         "network": _chain_id_to_name(req.chainId),
         "partial": not covered,
-        "failed_sources": [],
-        "policy_mode": "SIGNATURE_ONLY",
+        "failed_sources": [] if covered else ["signature"],
+        "policy_mode": "STRICT" if strict_block else "SIGNATURE_ONLY",
     }
 
 
