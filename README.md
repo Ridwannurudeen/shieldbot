@@ -168,7 +168,7 @@ The two Robinhood Chain tokens were paired with NVDA in pools opened on 2026-09-
 
 ## Submission status and measured usage
 
-- **Registry deployment:** `OWNER TODO — fill the deployment table in docs/JUDGE_GUIDE.md after deployment`.
+- **Registry deployment:** pending. The Robinhood Chain verdict registry, guard and guarded transfer are not deployed yet, so no contract address is listed.
 - **Measured usage:** the `GET /api/stats` snapshot supplied on **2026-09-22** is recorded in [SUBMISSION.md](docs/SUBMISSION.md); its time of day and the revision serving it were not supplied. Dashboard loading values and historical projections are not usage evidence.
 - **Release boundary:** this README describes this repository snapshot. Deployment, live evidence URLs and the browser-store release must be verified separately.
 

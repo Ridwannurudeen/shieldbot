@@ -5,7 +5,7 @@ End-to-end runbook. Total time: ~10 minutes once the keystore is set up. Total c
 ## Prerequisites
 
 - Foundry installed (`curl -L https://foundry.paradigm.xyz | bash && foundryup`)
-- The Base identity wallet `0xB2Fae83de08b285cB3D6A77Ff520F6AD669D5f33` funded with ~0.005 ETH on Base
+- A deployer wallet funded with ~0.005 ETH on Base. The deploying account becomes the attestor's `owner()`. The live attestor `0xA4A192510FB8Ad1B6C92972a15BfAba73E7a655B` was deployed from, and is owned by, `0xfE3f3cEAb7266b5de5Ae8738727b6cf82F7Be76c`.
 - BaseScan API key from https://basescan.org/myapikey
 - (Recommended) Alchemy/QuickNode Base archive endpoint for `BASE_LOGS_RPC_URL`
 
@@ -14,7 +14,7 @@ End-to-end runbook. Total time: ~10 minutes once the keystore is set up. Total c
 ```bash
 cd contracts/base
 cast wallet import base-deployer --interactive
-# paste private key for 0xB2Fae83…D5f33 when prompted, set a password
+# paste the deployer's private key when prompted, set a password
 ```
 
 This creates an encrypted keystore at `~/.foundry/keystores/base-deployer`. The plaintext key never touches disk.
@@ -43,7 +43,7 @@ address scannedAddress,uint8 riskLevel,string scanType,uint64 sourceChainId,byte
 
 ## 4. Generate the bot verifier wallet
 
-Don't reuse `0xB2Fae83…` for hot signing — that's the identity wallet for credentials. Generate a fresh keypair for the bot:
+Don't reuse the deployer (owner) wallet for hot signing. Generate a fresh keypair for the bot:
 
 ```bash
 cast wallet new
@@ -76,7 +76,7 @@ echo "https://basescan.org/address/<BASE_ATTESTOR_ADDRESS>#code"
 
 ## 7. Fund the verifier wallet
 
-Send ~0.001 ETH to the verifier address (step 4) on Base. Each `attest()` call costs ~150k gas (~$0.10), so this funds ~10 attestations to start.
+Send ~0.001 ETH to the verifier address (step 4) on Base. The one attestation posted so far used 519,907 gas, so budget for about 520k gas per `attest()` call.
 
 ## 8. Wire VPS
 
@@ -96,7 +96,7 @@ Base EAS Attestor: enabled
 
 ## 9. Smoke test
 
-Run a scan via Telegram bot or `/api/scan`. Within ~5s, check the attestor's stats:
+Run a scan via the Telegram bot (`/api/scan` does not attest). Within ~5s, check the attestor's stats:
 ```bash
 cast call <BASE_ATTESTOR_ADDRESS> "totalAttestations()(uint256)" --rpc-url base
 # should be 1
@@ -109,13 +109,12 @@ https://base.easscan.org/attestations?attester=<BASE_ATTESTOR_ADDRESS>
 
 ## 10. Lock down
 
-- Verify the deployer (`0xB2Fae83…`) is `owner()` on the attestor.
+- Verify the deployer is `owner()` on the attestor. For the live attestor that is `0xfE3f…e76c`.
 - Verifier wallet should hold only operating gas (~0.005 ETH max).
-- If the verifier key is ever compromised: from `0xB2Fae83…`, call `setVerifier(<compromised>, false)` and `setVerifier(<new>, true)`.
+- If the verifier key is ever compromised: from the owner wallet, call `setVerifier(<compromised>, false)` and `setVerifier(<new>, true)`.
 
 ## What this gives you
 
-- **Base Builder Talent credential** — verified contract from `0xB2Fae83…` auto-mints it.
-- **Real Base integration** — every ShieldBot scan now produces a permanent EAS attestation, queryable on `base.easscan.org`.
-- **Cross-chain attestations** — `sourceChainId` field means BSC scans are now Base-verifiable too.
+- **Base integration** — Telegram bot scans with a complete result, and `/report` blacklistings, request an EAS attestation when the attestor is configured. API, extension, MCP and SDK scans never attest. On 2026-09-24 the live attestor held one attestation (`totalAttestations()` = 1), posted on deployment day; it is queryable on `base.easscan.org`.
+- **Cross-chain field** — `sourceChainId` records the chain of the scanned address, so an attestation on Base can describe a contract on another chain.
 - **Same primitive Coinbase Verifications uses** — EAS schema `0xf8b05c79...0de9` (Verified Account) lives on the same contract.
