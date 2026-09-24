@@ -1010,9 +1010,10 @@ def _is_signature_only_request(req: FirewallRequest) -> bool:
     return (req.signMethod or "") in {"personal_sign", "eth_sign"} and not _is_valid_evm_address(req.to)
 
 
-async def _build_signature_only_response(req: FirewallRequest) -> Dict:
+async def _build_signature_only_response(req: FirewallRequest, policy_override: Optional[str] = None) -> Dict:
     from analyzers.signature import SignaturePermitAnalyzer
     from core.analyzer import AnalysisContext
+    from core.policy import PolicyEngine
 
     fallback_target = (
         _checksum_if_possible(req.sender)
@@ -1063,6 +1064,10 @@ async def _build_signature_only_response(req: FirewallRequest) -> Dict:
     })
     if not covered and classification == 'SAFE':
         classification = 'CAUTION'
+    policy = container.policy_engine if container and container.policy_engine else PolicyEngine()
+    if not covered and policy.apply([], {}, mode_override=policy_override)['policy_mode'] == 'STRICT':
+        classification = 'BLOCK_RECOMMENDED'
+        danger_signals.insert(0, 'Policy override: signature analysis unavailable or incomplete')
     decoded_action = f"{sign_method} signature request"
     if sig_type and sig_type not in {"unknown", sign_method}:
         decoded_action += f" ({sig_type})"
@@ -1129,7 +1134,7 @@ async def firewall(req: FirewallRequest, request: Request):
         from_addr = req.sender
 
         if _is_signature_only_request(req):
-            return await _build_signature_only_response(req)
+            return await _build_signature_only_response(req, policy_override=request.headers.get("X-Policy-Mode"))
 
         if not web3_client.is_valid_address(to_addr):
             raise HTTPException(status_code=400, detail="Invalid 'to' address")

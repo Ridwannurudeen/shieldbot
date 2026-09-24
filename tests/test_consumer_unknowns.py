@@ -455,6 +455,35 @@ async def test_signature_transfer_to_a_verified_protocol_is_covered_caution(cons
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('mode, covered, expected', [
+    ('STRICT', False, 'BLOCK_RECOMMENDED'),
+    ('strict', False, 'BLOCK_RECOMMENDED'),
+    ('BALANCED', False, 'CAUTION'),
+    (None, False, 'CAUTION'),
+    ('STRICT', True, 'CAUTION'),
+])
+async def test_signature_only_path_honours_strict(consumer_api, mode, covered, expected):
+    api, services = consumer_api
+    services.counterparty_service = _spender_service(**({} if covered else {
+        'is_contract': None, 'labels': None, 'reason': 'Spender facts unknown: code (RPC), labels (GoPlus HTTP 429)',
+    }))
+    response = await api._build_signature_only_response(_transfer_request(api), policy_override=mode)
+    assert response['classification'] == expected
+    blocked = expected == 'BLOCK_RECOMMENDED'
+    assert (response['danger_signals'][0] == 'Policy override: signature analysis unavailable or incomplete') is blocked
+
+
+@pytest.mark.asyncio
+async def test_firewall_passes_the_policy_header_to_the_signature_only_path(consumer_api, monkeypatch):
+    api, _ = consumer_api
+    signature_only = AsyncMock(return_value={})
+    monkeypatch.setattr(api, '_build_signature_only_response', signature_only)
+    req = _transfer_request(api)
+    await api.firewall(req, SimpleNamespace(headers={'X-Policy-Mode': 'STRICT'}))
+    signature_only.assert_awaited_once_with(req, policy_override='STRICT')
+
+
+@pytest.mark.asyncio
 async def test_signature_with_unknown_spender_facts_is_unknown(consumer_api):
     api, services = consumer_api
     services.counterparty_service = _spender_service(
