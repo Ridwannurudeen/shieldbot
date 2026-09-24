@@ -218,6 +218,7 @@ _SUMMARY = (
     ("cached_scan_at", "Cached scan at"),
     ("policy_mode", "Policy mode"),
     ("failed_sources", "Failed sources"),
+    ("notes", "Notes"),
     ("observed_block", "Observed block"),
     ("transaction", "Transaction"),
     ("scanned_at", "Scanned at"),

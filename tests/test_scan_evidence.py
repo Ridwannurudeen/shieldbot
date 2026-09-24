@@ -1,5 +1,6 @@
 """Evidence documents for /api/firewall and /api/scan verdicts (core/scan_evidence.py)."""
 
+import html
 import json
 
 import pytest
@@ -310,6 +311,7 @@ def test_the_page_escapes_every_value_and_shows_the_canonical_bytes():
         target_token={"name": marked, "symbol": "<b>SYM</b>"},
         analyzers={"structural": {"status": "ok", "reason": marked}},
         transaction=transaction_evidence(CALLDATA, function=marked),
+        response={**RESPONSE, "notes": [f"Note {marked}"]},
     )
     canonical = canonical_bytes(doc).decode("utf-8")
     digest = evidence_hash(doc)
@@ -320,9 +322,10 @@ def test_the_page_escapes_every_value_and_shows_the_canonical_bytes():
     assert "&lt;script&gt;" in page
     assert digest in page
     assert "keccak256" in page
+    # Notes have their own row in the summary, above the canonical JSON.
+    summary = page.split('<pre id="canonical">', 1)[0]
+    assert "<th>Notes</th><td>" + html.escape(json.dumps([f"Note {marked}"])) + "</td>" in summary
     # The canonical JSON is shown escaped, and unescaping it gives the exact bytes back.
-    import html
-
     shown = page.split('<pre id="canonical">', 1)[1].split("</pre>", 1)[0]
     assert html.unescape(shown) == canonical
     assert "0x" + keccak(html.unescape(shown).encode("utf-8")).hex() == digest
