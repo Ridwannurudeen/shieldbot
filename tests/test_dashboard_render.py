@@ -9,6 +9,7 @@ listeners run.
 """
 
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -211,6 +212,9 @@ def render(
 ):
     node = shutil.which("node")
     if node is None:
+        # CI must run these; a developer machine without Node skips them.
+        if os.environ.get("CI"):
+            pytest.fail("Node.js is required for dashboard rendering tests in CI")
         pytest.skip("Node.js is required for dashboard rendering tests")
     replies = {
         "/api/stats": [200, stats],
