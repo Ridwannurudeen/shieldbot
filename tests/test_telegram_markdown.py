@@ -375,3 +375,65 @@ def test_launch_alerts_are_plain_text_and_show_flags_as_written(bot_module):
     }
 
     assert f"• {HOSTILE}" in bot_module.format_launch_alert(item).splitlines()
+
+
+# --- Addresses a user types reach code spans, which legacy Markdown cannot escape ---------------
+
+HOSTILE_ADDRESS = "0x`[Claim](https://evil.example)`aaaa"
+INVALID = "\N{CROSS MARK} Invalid address format."
+
+
+@pytest.fixture
+def entry_points(bot_module, monkeypatch):
+    """The bot with a real address check and its scans replaced, so only the entry points reply."""
+    from web3 import Web3
+
+    monkeypatch.setattr(bot_module.web3_client, "is_valid_address", Web3.is_address)
+    monkeypatch.setattr(bot_module.web3_client, "validate_chain_id", lambda chain_id: chain_id)
+    monkeypatch.setattr(bot_module, "scan_contract", AsyncMock())
+    monkeypatch.setattr(bot_module, "check_token", AsyncMock())
+    return bot_module
+
+
+def _assert_rejected(bot, replies):
+    for call in replies.await_args_list:
+        if call.kwargs.get("parse_mode") == "Markdown":
+            assert_literal(call.args[0])
+    assert replies.await_args.args == (INVALID,)
+    bot.scan_contract.assert_not_awaited()
+    bot.check_token.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["scan_command", "token_command"])
+async def test_a_scan_command_rejects_an_address_that_is_not_one(entry_points, command):
+    update = _update()
+
+    await getattr(entry_points, command)(
+        update, SimpleNamespace(args=[HOSTILE_ADDRESS], user_data={})
+    )
+
+    _assert_rejected(entry_points, update.message.reply_text)
+
+
+@pytest.mark.asyncio
+async def test_a_typed_address_that_is_not_one_is_rejected(entry_points):
+    update = _update()
+    update.message.text = HOSTILE_ADDRESS.ljust(42, "a")
+
+    await entry_points.handle_address(update, SimpleNamespace(user_data={}))
+
+    _assert_rejected(entry_points, update.message.reply_text)
+
+
+@pytest.mark.asyncio
+async def test_a_token_button_with_an_address_that_is_not_one_is_rejected(entry_points):
+    query = MagicMock(data=f"token_{HOSTILE_ADDRESS}")
+    query.answer = AsyncMock()
+    query.message.reply_text = AsyncMock()
+
+    await entry_points.button_callback(
+        SimpleNamespace(callback_query=query), SimpleNamespace(user_data={})
+    )
+
+    _assert_rejected(entry_points, query.message.reply_text)

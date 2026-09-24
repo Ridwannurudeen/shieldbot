@@ -297,6 +297,9 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw = context.args[0]
     prefix_chain_id, address = parse_chain_prefix(raw)
     chain_id = web3_client.validate_chain_id(prefix_chain_id or _get_user_chain_id(context))
+    if not web3_client.is_valid_address(address):
+        await update.message.reply_text("❌ Invalid address format.")
+        return
     await scan_contract(update, address, chain_id=chain_id)
 
 
@@ -314,6 +317,9 @@ async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw = context.args[0]
     prefix_chain_id, address = parse_chain_prefix(raw)
     chain_id = web3_client.validate_chain_id(prefix_chain_id or _get_user_chain_id(context))
+    if not web3_client.is_valid_address(address):
+        await update.message.reply_text("❌ Invalid address format.")
+        return
     await check_token(update, address, chain_id=chain_id)
 
 
@@ -889,6 +895,11 @@ async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Check if it looks like an Ethereum address
     if address.startswith('0x') and len(address) == 42:
+        # Replies show the address in code spans, which legacy Markdown cannot escape.
+        if not web3_client.is_valid_address(address):
+            await update.message.reply_text("❌ Invalid address format.")
+            return
+
         # Show scanning message
         status_msg = await update.message.reply_text(
             f"🔍 Analyzing address on {chain_name}..."
@@ -1182,6 +1193,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     elif query.data.startswith('token_'):
         address = query.data.replace('token_', '')
+        if not web3_client.is_valid_address(address):
+            await query.message.reply_text("❌ Invalid address format.")
+            return
         user_chain_id = _get_user_chain_id(context)
         await query.message.reply_text(f"🔍 Running token safety check for `{address}`...", parse_mode='Markdown')
         await check_token(query, address, chain_id=user_chain_id)

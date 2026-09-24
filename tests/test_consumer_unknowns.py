@@ -141,7 +141,9 @@ async def test_bot_only_skips_token_scan_for_confirmed_non_token(identification)
         'Update': object, 'ContextTypes': SimpleNamespace(DEFAULT_TYPE=object),
         'parse_chain_prefix': lambda text: (None, text),
         '_get_user_chain_id': lambda context: 56, 'get_chain_name': lambda chain_id: 'BSC',
-        'web3_client': SimpleNamespace(is_token_contract=AsyncMock(return_value=identification)),
+        'web3_client': SimpleNamespace(
+            is_token_contract=AsyncMock(return_value=identification), is_valid_address=lambda _: True,
+        ),
         'check_token': AsyncMock(), 'scan_contract': AsyncMock(),
     }
     exec(compile(ast.Module(body=[handler], type_ignores=[]), 'bot.py', 'exec'), namespace)
