@@ -619,10 +619,13 @@ PERMIT = {
     (CLAIM, None, "0", 0, 1, 1),
     ({"selector": None}, PERMIT, "0", 0, 0, 0),
     (TRANSFER, None, "0", 1, 1, 1),
-    # A call that pays the target is judged on this payment, so no earlier row answers it; the
-    # payment floor describes the target, so its row is kept.
-    (PAYABLE, None, hex(10**17), 0, 1, 1),
-], ids=["approval", "claim", "typed-data", "transfer", "payable"])
+    # A call that pays the target is judged on this payment, so no earlier row answers it. Its
+    # floor comes from one user's payment, so it does not become the verdict every other request
+    # to that contract (a transfer, a zero-value call) is served for five minutes.
+    (PAYABLE, None, hex(10**17), 0, 0, 0),
+    # claim() is the exception (design section 1.2): paying to claim marks the contract itself.
+    (CLAIM, None, hex(10**17), 0, 1, 1),
+], ids=["approval", "claim", "typed-data", "transfer", "payable", "paid-claim"])
 async def test_transaction_verdicts_and_the_target_row(
     cached_firewall_api, decoded, typed_data, value, reads, writes, watches,
 ):

@@ -1160,11 +1160,16 @@ async def firewall(req: FirewallRequest, request: Request):
         # typed data), so a row cached from another transaction never answers one. A spender's
         # floor describes the spender, not the target, so approval and typed-data verdicts are not
         # written to the target's row either, and do not put the target's deployer on the watch
-        # list. A claim's or a payment's floor describes the target, so its row is kept. A plain
-        # native send has no payment rule and its recipient is the row, so it stays cacheable.
+        # list. Neither is another call's payment floor: it comes from one user's payment, and the
+        # contract's other requests (a transfer, a zero-value call) must not be served it. A
+        # claim's floor, paid or not, describes the target, so its row is kept. A plain native
+        # send has no payment rule and its recipient is the row, so it stays cacheable.
         paying = value_wei > 0 and decoded.get('selector') is not None
         tx_specific = decoded.get('category') in ('approval', 'claim') or bool(req.typedData) or paying
-        describes_target = not (decoded.get('category') == 'approval' or req.typedData)
+        describes_target = not (
+            decoded.get('category') == 'approval' or req.typedData
+            or (paying and decoded.get('category') != 'claim')
+        )
 
         # 2. If target is a whitelisted router, analyze the swap path tokens instead of bypassing
         if whitelisted:
