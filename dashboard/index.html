@@ -70,6 +70,7 @@
       .toast-anim  { animation: none; }
       .fade-up     { animation: none; }
       .badge-critical { animation: none; }
+      *, *::before, *::after { transition: none !important; }
     }
 
     /* Scrollbar */
@@ -412,6 +413,8 @@ const API = window.location.origin;
 const REFRESH_MS = 20000;
 // Items requested from each threat feed source; a source that returns this many may hold more.
 const FEED_LIMIT = 100;
+// With reduced motion, counts show their value at once, the live dot does not pulse and charts do not animate.
+const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // Mirrors utils/chain_info.py.
 const CHAIN_NAMES = {
@@ -1257,7 +1260,8 @@ function ThreatVelocityChart({
     stroke: "#3B82F6",
     strokeWidth: 2,
     fill: "url(#velGrad)",
-    dot: false
+    dot: false,
+    isAnimationActive: !REDUCED_MOTION
   }))));
 }
 
@@ -1359,7 +1363,8 @@ function ChainDistributionChart({
   }), /*#__PURE__*/React.createElement(Bar, {
     dataKey: "count",
     name: "Threats",
-    radius: [4, 4, 0, 0]
+    radius: [4, 4, 0, 0],
+    isAnimationActive: !REDUCED_MOTION
   }, data.map((e, i) => /*#__PURE__*/React.createElement(Cell, {
     key: i,
     fill: BAR_COLORS[e.name] || '#3B82F6'
@@ -1501,6 +1506,7 @@ function Header({
 }) {
   const [glow, setGlow] = useState(true);
   useEffect(() => {
+    if (REDUCED_MOTION) return;
     const t = setInterval(() => setGlow(v => !v), 900);
     return () => clearInterval(t);
   }, []);
@@ -1640,9 +1646,9 @@ function useCountUp(target, duration = 1200) {
   const [display, setDisplay] = useState(0);
   const shown = useRef(0);
   useEffect(() => {
-    if (!target) {
-      shown.current = 0;
-      setDisplay(0);
+    if (!target || REDUCED_MOTION) {
+      shown.current = target;
+      setDisplay(target);
       return;
     }
     const start = Date.now();
