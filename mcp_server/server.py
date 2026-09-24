@@ -17,7 +17,7 @@ import uuid
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from utils.web3_client import UnsupportedChainError
 
@@ -42,7 +42,7 @@ SERVER_INFO = {
 
 SERVER_CAPABILITIES = {
     "tools": {},
-    "resources": {"subscribe": True},
+    "resources": {},
     "prompts": {},
 }
 
@@ -137,6 +137,10 @@ async def _handle_initialize(container, params: Dict) -> Dict:
     }
 
 
+async def _handle_ping(container, params: Dict) -> Dict:
+    return {}
+
+
 async def _handle_tools_list(container, params: Dict) -> Dict:
     return {"tools": TOOL_DEFINITIONS}
 
@@ -219,6 +223,7 @@ async def _handle_prompts_get(container, params: Dict) -> Dict:
 # Method dispatch table
 _METHODS = {
     "initialize": _handle_initialize,
+    "ping": _handle_ping,
     "tools/list": _handle_tools_list,
     "tools/call": _handle_tools_call,
     "resources/list": _handle_resources_list,
@@ -232,8 +237,18 @@ _METHODS = {
 # Process a single JSON-RPC request
 # ---------------------------------------------------------------------------
 
-async def process_jsonrpc(container, body: Dict) -> Dict:
-    """Process a JSON-RPC 2.0 request and return the response dict."""
+async def process_jsonrpc(container, body: Dict) -> Optional[Dict]:
+    """Process a JSON-RPC 2.0 message and return the response dict, or None for a notification.
+
+    A message without an id is a notification, which must never be answered. The ones MCP clients
+    send need no action: notifications/initialized carries no data, and notifications/cancelled
+    may be ignored because a request here cannot be interrupted once it is running.
+    """
+    if not isinstance(body, dict):
+        return _jsonrpc_error(None, INVALID_REQUEST, "Expected a JSON-RPC request object")
+    if "id" not in body:
+        return None
+
     jsonrpc_version = body.get("jsonrpc")
     request_id = body.get("id")
     method = body.get("method")
@@ -369,6 +384,9 @@ def create_mcp_router(container) -> APIRouter:
                 status_code=400,
                 content=_jsonrpc_error(body.get("id"), INVALID_PARAMS, str(exc)),
             )
+
+        if response is None:
+            return Response(status_code=202)
 
         # If a session is active, push the response to the SSE stream
         if session_id:
