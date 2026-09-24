@@ -172,4 +172,6 @@ The two Robinhood Chain tokens were paired with NVDA in pools opened on 2026-09-
 - **Measured usage:** the `GET /api/stats` snapshot supplied on **2026-09-22** is recorded in [SUBMISSION.md](docs/SUBMISSION.md); its time of day and the revision serving it were not supplied. Dashboard loading values and historical projections are not usage evidence.
 - **Release boundary:** this README describes this repository snapshot. Deployment, live evidence URLs and the browser-store release must be verified separately.
 
+Use of the hosted service is covered by the [Terms of Service](https://shieldbotsecurity.online/terms.html) and the [Privacy Policy](https://shieldbotsecurity.online/privacy.html).
+
 MIT — see [LICENSE](LICENSE).

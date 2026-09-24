@@ -209,7 +209,7 @@ def test_structured_data_is_valid_and_matches_the_visible_faq():
 
 
 @pytest.mark.parametrize(
-    "name", ["about.html", "privacy.html", "sitemap.xml", ".well-known/security.txt"]
+    "name", ["about.html", "privacy.html", "terms.html", "sitemap.xml", ".well-known/security.txt"]
 )
 def test_built_landing_copies_the_current_public_files(name):
     source = read(LANDING_SRC / "public" / name).replace("\r\n", "\n")
