@@ -246,9 +246,9 @@ class RiskEngine:
         # The score without the community floor: the firewall's revert rule reads it, so a crowd
         # signal can neither cause that escalation nor mask it.
         score_before_community_floor = round(min(max(composite, floor, 0), 100), 1)
-        if medium_matches(scam_matches):
-            floor = max(floor, MEDIUM_MATCH_FLOOR)
-        composite = max(composite, floor)
+        # Not a hard floor: transaction_floor reports only those.
+        community_floor = MEDIUM_MATCH_FLOOR if medium_matches(scam_matches) else 0
+        composite = max(composite, floor, community_floor)
 
         rug_probability = round(min(max(composite, 0), 100), 1)
 
@@ -405,9 +405,9 @@ class RiskEngine:
         # The score without the community floor: the firewall's revert rule reads it, so a crowd
         # signal can neither cause that escalation nor mask it.
         score_before_community_floor = round(min(max(composite, floor, 0), 100), 1)
-        if medium_matches(contract_data.get('scam_matches')):
-            floor = max(floor, MEDIUM_MATCH_FLOOR)
-        composite = max(composite, floor)
+        # Not a hard floor: transaction_floor reports only those.
+        community_floor = MEDIUM_MATCH_FLOOR if medium_matches(contract_data.get('scam_matches')) else 0
+        composite = max(composite, floor, community_floor)
 
         rug_probability = round(min(max(composite, 0), 100), 1)
 

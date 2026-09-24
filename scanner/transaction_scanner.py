@@ -6,7 +6,7 @@ Integrates risk_scorer for numeric scoring and AI analysis
 
 import logging
 from typing import Dict, List, Optional
-from core.verdicts import HIGH, level_from_score
+from core.verdicts import level_from_score
 from services.contract_service import push4_operands
 from core.risk_engine import database_matches, medium_matches, scam_match_floor
 from utils.scam_db import ScamDatabase
@@ -199,7 +199,7 @@ class TransactionScanner:
             return
         heuristic_score, _, _ = calculate_risk_score(findings_from_scan_result(result))
         result['risk_score'] = max(result['risk_score'], heuristic_score, scam_match_floor(result['scam_matches']))
-        result['risk_level'] = 'high' if level_from_score(result['risk_score']) == HIGH else 'medium'
+        result['risk_level'] = level_from_score(result['risk_score']).lower()
 
     async def _check_verification(self, address: str, result: Dict, chain_id: int = 56) -> bool:
         """Check if contract is verified on BscScan. Returns True if check succeeded."""

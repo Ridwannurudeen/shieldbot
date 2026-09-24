@@ -116,6 +116,15 @@ def test_the_score_before_the_community_floor_is_exposed(entrypoint, is_token):
 
 
 @pytest.mark.parametrize("entrypoint, is_token", TARGETS)
+def test_a_community_report_is_not_a_transaction_floor(entrypoint, is_token):
+    risk = _risk(entrypoint, is_token, [COMMUNITY])
+    assert risk["transaction_floor"] is None
+    assert (risk["rug_probability"], risk["risk_level"]) == (40, "MEDIUM")
+    # A block-severity match is a hard floor and is reported as one.
+    assert _risk(entrypoint, is_token, [ADMIN, COMMUNITY])["transaction_floor"] == 90
+
+
+@pytest.mark.parametrize("entrypoint, is_token", TARGETS)
 def test_admin_confirmed_entry_blocks_alone(entrypoint, is_token):
     risk = _risk(entrypoint, is_token, [ADMIN])
     assert risk["rug_probability"] >= 90
