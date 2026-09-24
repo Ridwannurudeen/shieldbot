@@ -319,7 +319,7 @@ class Hunter:
                 type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
             )
 
-        # Housekeeping: usage records past their retention and expired free key link requests
+        # Housekeeping: usage records and scan evidence past their retention, expired free key link requests
         try:
             await self.db.prune_retention()
         except Exception as exc:

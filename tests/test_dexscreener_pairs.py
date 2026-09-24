@@ -249,9 +249,11 @@ async def test_a_missing_24h_change_is_named_and_scores_like_a_flat_one(ledger):
     assert risk["risk_level"] == flat_risk["risk_level"]
     assert risk["category_scores"] == flat_risk["category_scores"]
     assert risk["status"] == alert["status"] == "ok"
-    assert marker in risk["critical_flags"]
-    assert marker in alert["top_flags"]
-    assert marker not in flat_risk["critical_flags"]
+    # A note, not a danger signal: the check did not run, and nothing it would have found adds risk.
+    assert risk["notes"] == [marker]
+    assert marker not in risk["critical_flags"]
+    assert marker not in alert["top_flags"]
+    assert flat_risk["notes"] == []
 
 
 @pytest.mark.asyncio

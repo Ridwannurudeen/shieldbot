@@ -1,4 +1,5 @@
-"""Usage records are kept USAGE_RETENTION_DAYS; expired free key link requests are deleted."""
+"""Usage records are kept USAGE_RETENTION_DAYS and scan evidence SCAN_EVIDENCE_RETENTION_DAYS;
+expired free key link requests are deleted."""
 
 import time
 from unittest.mock import AsyncMock, MagicMock
@@ -8,7 +9,7 @@ import pytest_asyncio
 
 from agent.hunter import Hunter
 from core.auth import AuthManager
-from core.database import USAGE_RETENTION_DAYS, Database
+from core.database import SCAN_EVIDENCE_RETENTION_DAYS, USAGE_RETENTION_DAYS, Database
 
 
 @pytest_asyncio.fixture
@@ -47,6 +48,15 @@ async def seed(db, now):
         await db._db.execute(
             "INSERT INTO ai_token_usage (utc_day, tokens) VALUES (?, ?)", (day, used * 100)
         )
+    for label, created_at in (
+        ("expired", now - (SCAN_EVIDENCE_RETENTION_DAYS + 1) * 86400),
+        ("kept", now - (SCAN_EVIDENCE_RETENTION_DAYS - 1) * 86400),
+        ("new", now),
+    ):
+        await db._db.execute(
+            "INSERT INTO scan_evidence (evidence_hash, canonical, created_at) VALUES (?, '{}', ?)",
+            (label, created_at),
+        )
     await db._db.commit()
     # Adding a request deletes the expired ones first, so the expired row goes in last.
     assert await db.add_free_key_request("new@example.com", "pending", now + 1800)
@@ -57,6 +67,8 @@ async def seed(db, now):
 async def test_the_usage_prune_searches_an_index_rather_than_scanning_the_table(db):
     plan = await rows(db, "EXPLAIN QUERY PLAN DELETE FROM api_usage WHERE created_at < 0")
     assert any("USING INDEX idx_api_usage_created_at" in row[-1] for row in plan), plan
+    plan = await rows(db, "EXPLAIN QUERY PLAN DELETE FROM scan_evidence WHERE created_at < 0")
+    assert any("USING INDEX idx_scan_evidence_created_at" in row[-1] for row in plan), plan
 
 
 @pytest.mark.asyncio
@@ -70,6 +82,7 @@ async def test_prune_deletes_only_rows_past_their_retention(db):
         "api_daily_usage": 1,
         "ai_token_usage": 1,
         "free_key_requests": 1,
+        "scan_evidence": 1,
     }
     assert len(await rows(db, "SELECT id FROM api_usage")) == 2
     assert await rows(db, "SELECT utc_day FROM api_daily_usage ORDER BY utc_day") == [
@@ -81,11 +94,16 @@ async def test_prune_deletes_only_rows_past_their_retention(db):
         (today,),
     ]
     assert await rows(db, "SELECT email FROM free_key_requests") == [("new@example.com",)]
+    assert await rows(db, "SELECT evidence_hash FROM scan_evidence ORDER BY created_at") == [
+        ("kept",),
+        ("new",),
+    ]
     assert await db.prune_retention() == {
         "api_usage": 0,
         "api_daily_usage": 0,
         "ai_token_usage": 0,
         "free_key_requests": 0,
+        "scan_evidence": 0,
     }
 
 
@@ -134,6 +152,7 @@ async def test_every_hunter_sweep_prunes_chats_and_usage_records(db):
     assert await rows(db, "SELECT id FROM chat_history") == []
     assert len(await rows(db, "SELECT id FROM api_usage")) == 2
     assert await rows(db, "SELECT email FROM free_key_requests") == [("new@example.com",)]
+    assert len(await rows(db, "SELECT evidence_hash FROM scan_evidence")) == 2
 
 
 @pytest.mark.asyncio

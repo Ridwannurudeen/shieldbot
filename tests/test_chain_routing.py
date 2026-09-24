@@ -246,6 +246,16 @@ def test_invalid_json_rejected_before_services(routing_api):
     assert services.mock_calls == []
 
 
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_nan_and_infinity_are_rejected_before_services(routing_api, constant):
+    client, _, services = routing_api
+    body = '{"to": "", "from": "' + ADDRESS + '", "typedData": {"message": {"value": ' + constant + "}}}"
+    response = client.post("/api/firewall", content=body, headers={"content-type": "application/json"})
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Invalid JSON body"}
+    assert services.mock_calls == []
+
+
 @pytest.mark.parametrize("chain_id", ["4663", 56.5, True, 999999])
 def test_guardian_raw_body_rejects_invalid_chain_before_persistence(routing_api, chain_id):
     client, _, services = routing_api
@@ -528,7 +538,12 @@ def test_matching_signing_domain_preserves_signature_response(routing_api, chain
     expected = asyncio.run(api._build_signature_only_response(api.FirewallRequest(**payload)))
     response = client.post("/api/firewall", json=payload, headers={"x-api-key": "test-key"})
     assert response.status_code == 200
-    assert response.json() == expected
+    body = response.json()
+    # The route adds the verdict's evidence document; the verdict itself is the helper's.
+    assert body.pop("evidence_hash").startswith("0x")
+    assert "evidence_url" in body
+    body.pop("evidence_url")
+    assert body == expected
     assert response.json()["chain_id"] == chain_id
     services.auth_manager.validate_key.assert_awaited_once()
     services.auth_manager.record_usage.assert_awaited_once()

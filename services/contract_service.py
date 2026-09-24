@@ -1,6 +1,10 @@
 import asyncio
 import logging
 import time
+from decimal import Decimal, InvalidOperation
+from typing import Optional
+
+from adapters.evm_base import BURN_ADDRESSES
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +44,39 @@ def push4_operands(bytecode_hex: str) -> set:
     return operands
 
 
+def top_holder_share(goplus: dict, excluded: set) -> Optional[float]:
+    """Percent of total supply held by the largest holders GoPlus lists, rounded to 0.01.
+
+    GoPlus lists a token's ten largest holders, each with `percent` as a fraction of total supply.
+    Left out: `excluded` (burn addresses and the chain's known lockers), holders GoPlus marks
+    locked, and the token's DEX pairs and pool managers, which hold liquidity rather than a stake;
+    so the share covers fewer than ten holders when any are left out. None when GoPlus gave no
+    holder list or an entry cannot be read: a missing list is Unknown, never a spread-out token.
+    """
+    holders = goplus.get('holders')
+    if not isinstance(holders, list) or not holders:
+        return None
+    pools = {
+        str(pool[key]).lower()
+        for pool in goplus.get('dex') or [] if isinstance(pool, dict)
+        for key in ('pair', 'pool_manager') if pool.get(key)
+    }
+    share = Decimal(0)
+    for holder in holders:
+        if not isinstance(holder, dict) or not isinstance(holder.get('address'), str):
+            return None
+        try:
+            fraction = Decimal(str(holder.get('percent')))
+        except InvalidOperation:
+            return None
+        if not fraction.is_finite() or not 0 <= fraction <= 1:
+            return None
+        address = holder['address'].lower()
+        if address not in excluded and address not in pools and holder.get('is_locked') not in (1, '1'):
+            share += fraction
+    return float(round(share * 100, 2))
+
+
 class ContractService:
     """Wraps existing scanner + web3_client contract checks."""
 
@@ -64,6 +101,7 @@ class ContractService:
             'has_destroy': None,
             'source_code_patterns': [],
             'bytecode_warnings': [],
+            'top10_holder_percent': None,
         }
 
         try:
@@ -108,6 +146,11 @@ class ContractService:
             if results['is_verified'] is None and goplus.get('is_open_source') in ('0', '1'):
                 results['is_verified'] = goplus['is_open_source'] == '1'
                 results['field_providers'] = {'is_verified': 'goplus'}
+
+            # The largest holders' share of supply, from the same record; None when it lists none.
+            if goplus.get('holders'):
+                lockers = self.web3_client._get_adapter(chain_id).get_known_lockers()
+                results['top10_holder_percent'] = top_holder_share(goplus, BURN_ADDRESSES | set(lockers))
 
             # Ownership (RPC call, not BscScan)
             ownership = await self.web3_client.get_ownership_info(address, chain_id=chain_id)

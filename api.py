@@ -36,11 +36,15 @@ from core.auth import TIER_LIMITS, hash_key
 from core.circuit_breaker import CLOSED, provider_breakers
 from core.config import Settings
 from core.container import ServiceContainer
-from core.database import reporter_hash
+from core.database import SCAN_EVIDENCE_RETENTION_DAYS, reporter_hash
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
 from core.rate_limit import RateLimiter, connect as connect_rate_limit_redis
+from core.scan_evidence import (
+    analyzer_outcomes, build_scan_evidence, oldest_simulation_block, render_evidence_page, transaction_evidence,
+)
 from core.unknown_ledger import unknown_ledger
 from core.telegram_formatter import escape_markdown
+from core.verdict_evidence import canonical_bytes, evidence_hash
 from rpc.router import rpc_limiter, rpc_router
 from rpc.proxy import RPCProxy
 
@@ -410,6 +414,10 @@ def _validate_signing_chain(typed_data: Optional[Dict], chain_id: int):
         )
 
 
+def _refuse_json_constant(name: str):
+    raise ValueError(f"{name} is not JSON")
+
+
 @app.middleware("http")
 async def request_validation_middleware(request: Request, call_next):
     content_length = request.headers.get("content-length")
@@ -448,7 +456,9 @@ async def request_validation_middleware(request: Request, call_next):
     body = None
     if raw_body and is_json:
         try:
-            body = await request.json()
+            # NaN and Infinity are not JSON (RFC 8259). Refusing them keeps every body serialisable:
+            # a validation error echoes its input, and the evidence document hashes typed data.
+            body = json.loads(raw_body, parse_constant=_refuse_json_constant)
         except (ValueError, UnicodeDecodeError):
             return JSONResponse(status_code=400, content={"detail": "Invalid JSON body"})
         if isinstance(body, dict):
@@ -517,7 +527,7 @@ class FirewallRequest(ChainRequest):
         if v is None:
             return v
         try:
-            encoded = json.dumps(v, separators=(",", ":"), default=str)
+            encoded = json.dumps(v, separators=(",", ":"), default=str, allow_nan=False)
         except (TypeError, ValueError) as exc:
             raise ValueError("typedData must be JSON serializable") from exc
         if len(encoded) > MAX_TYPED_DATA_CHARS:
@@ -838,6 +848,10 @@ DASHBOARD_CSP = (
     "default-src 'self'; script-src 'self' 'unsafe-inline'; "
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
     "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+)
+# The evidence page has no scripts and loads nothing; its only styles are inline.
+EVIDENCE_CSP = (
+    "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 )
 
 
@@ -1169,7 +1183,9 @@ def _is_signature_only_request(req: FirewallRequest) -> bool:
     return (req.signMethod or "") in {"personal_sign", "eth_sign"} and not _is_valid_evm_address(req.to)
 
 
-async def _build_signature_only_response(req: FirewallRequest, policy_override: Optional[str] = None) -> Dict:
+async def _build_signature_only_response(
+    req: FirewallRequest, policy_override: Optional[str] = None, trail: Optional[Dict] = None,
+) -> Dict:
     from analyzers.signature import SignaturePermitAnalyzer
     from core.analyzer import AnalysisContext
     from core.policy import PolicyEngine
@@ -1227,6 +1243,17 @@ async def _build_signature_only_response(req: FirewallRequest, policy_override: 
     if sig_type and sig_type not in {"unknown", sign_method}:
         decoded_action += f" ({sig_type})"
 
+    # What the evidence document records (see _firewall_verdict): the signed data only as a hash.
+    if trail is not None:
+        trail.update(
+            target=target,
+            analyzers=analyzer_outcomes([result], {
+                'coverage': {'signature': int(covered)}, 'category_scores': {'signature': risk_score},
+                'coverage_reasons': alert['coverage_reasons'],
+            }),
+            transaction=transaction_evidence(req.data, sign_method=req.signMethod, typed_data=req.typedData),
+        )
+
     return {
         **_coverage_fields(alert),
         "classification": classification,
@@ -1276,6 +1303,7 @@ async def _build_signature_only_response(req: FirewallRequest, policy_override: 
         "partial": not covered,
         "failed_sources": [] if covered else ["signature"],
         "policy_mode": "STRICT" if strict_block else "SIGNATURE_ONLY",
+        "notes": [],
     }
 
 
@@ -1284,18 +1312,33 @@ async def firewall(req: FirewallRequest, request: Request):
     """
     Main firewall endpoint — intercepts a pending transaction,
     analyzes calldata + target contract, and returns a security verdict.
+    Every verdict carries evidence_hash and evidence_url (see _with_evidence).
     """
+    trail = {}
+    response = await _firewall_verdict(req, request, trail)
+    return await _with_evidence(
+        response, "/api/firewall", req.chainId, caller=_checksum_if_possible(req.sender), **trail,
+    )
+
+
+async def _firewall_verdict(req: FirewallRequest, request: Request, trail: Dict) -> Dict:
+    """The firewall's verdict. Each path records in `trail` what its evidence document needs:
+    target, target_token, transaction (transaction-specific verdicts only), analyzers,
+    observed_block and, for a verdict served from contract_scores, cached_scan_at."""
     try:
         to_addr = req.to
         from_addr = req.sender
 
         if _is_signature_only_request(req):
-            return await _build_signature_only_response(req, policy_override=request.headers.get("X-Policy-Mode"))
+            return await _build_signature_only_response(
+                req, policy_override=request.headers.get("X-Policy-Mode"), trail=trail,
+            )
 
         if not web3_client.is_valid_address(to_addr):
             raise HTTPException(status_code=400, detail="Invalid 'to' address")
 
         to_addr = web3_client.to_checksum_address(to_addr)
+        trail['target'] = to_addr
 
         # 1. Decode calldata
         decoded = calldata_decoder.decode(req.data)
@@ -1309,6 +1352,8 @@ async def firewall(req: FirewallRequest, request: Request):
 
         # Enrich decoded calldata with token names and formatted amounts
         await _enrich_decoded(decoded, to_addr, chain_id=req.chainId)
+        if decoded.get('token_symbol'):
+            trail['target_token'] = {'name': decoded.get('token_name'), 'symbol': decoded['token_symbol']}
 
         # contract_scores holds one verdict per target. An approval's, a claim's, a signature's or
         # a paying call's verdict also depends on this transaction (the spender, the value, the
@@ -1325,6 +1370,11 @@ async def firewall(req: FirewallRequest, request: Request):
             decoded.get('category') == 'approval' or req.typedData
             or (paying and decoded.get('category') != 'claim')
         )
+        if tx_specific:
+            trail['transaction'] = transaction_evidence(
+                req.data, function=decoded.get('function_name'), sign_method=req.signMethod,
+                typed_data=req.typedData,
+            )
 
         # 2. If target is a whitelisted router, analyze the swap path tokens instead of bypassing
         if whitelisted:
@@ -1336,6 +1386,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 whitelisted=whitelisted,
                 value_bnb=value_bnb,
                 policy_override=request.headers.get("X-Policy-Mode"),
+                trail=trail,
             )
             if router_response:
                 return router_response
@@ -1354,6 +1405,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 # A full rescan costs provider calls, so only a caller with a valid API key can force one
                 # with STRICT. Anyone else is answered from the cached facts in STRICT mode.
                 if policy_mode != "STRICT" or not getattr(request.state, "api_key_info", None):
+                    trail['cached_scan_at'] = cached['last_scanned_at']
                     return _build_cached_response(
                         cached, decoded, value_bnb, req.chainId, to_addr=to_addr, policy_mode=policy_mode,
                     )
@@ -1557,6 +1609,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 "failed_sources": risk_output.get("failed_sources", []),
                 "policy_mode": risk_output.get("policy_mode", "BALANCED"),
                 "campaign_context": _deployer_ctx,
+                "notes": risk_output.get("notes", []),
             }
 
             # Persist contract score to DB
@@ -1570,7 +1623,7 @@ async def firewall(req: FirewallRequest, request: Request):
                         archetype=risk_output.get("risk_archetype"),
                         category_scores={
                             **risk_output.get("category_scores", {}),
-                            '_scan_metadata': _coverage_fields(alert),
+                            '_scan_metadata': {**_coverage_fields(alert), 'notes': risk_output.get('notes', [])},
                         },
                         flags=risk_output.get("critical_flags"),
                         confidence=alert.get("confidence"),
@@ -1629,6 +1682,9 @@ async def firewall(req: FirewallRequest, request: Request):
                 except Exception as e:
                     logger.error(f"Greenfield upload failed: {type(e).__name__}")
 
+            if analyzer_results is not None:
+                trail['analyzers'] = analyzer_outcomes(analyzer_results, risk_output)
+                trail['observed_block'] = oldest_simulation_block(analyzer_results)
             return response
 
         except UnsupportedChainError:
@@ -1693,6 +1749,30 @@ async def firewall(req: FirewallRequest, request: Request):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+async def _with_evidence(response: Dict, endpoint: str, chain_id: int, **trail) -> Dict:
+    """`response` with evidence_hash, the hash of its evidence document (core/scan_evidence.py), and
+    evidence_url, where GET /evidence/{hash} shows it.
+
+    The document is stored before its URL is returned, so the URL never names a missing document;
+    evidence_url is None when it could not be stored, and both are None when the document could not
+    be serialised. Neither failure withholds the verdict.
+    """
+    digest = url = None
+    try:
+        document = build_scan_evidence(endpoint, chain_id, response, int(time.time()), **trail)
+        canonical = canonical_bytes(document).decode("utf-8")
+        digest = evidence_hash(document)
+    except (TypeError, ValueError) as e:
+        logger.error("Scan evidence could not be serialised: %s", type(e).__name__)
+    if digest and container and container.db:
+        try:
+            await container.db.insert_scan_evidence(digest, canonical)
+            url = f"{container.settings.public_api_url.rstrip('/')}/evidence/{digest}"
+        except Exception as e:
+            logger.error("Scan evidence store failed: %s", type(e).__name__)
+    return {**response, "evidence_hash": digest, "evidence_url": url}
+
+
 @app.post("/api/scan")
 async def scan(req: ScanRequest):
     """Quick contract scan — reuses TransactionScanner.scan_address."""
@@ -1712,11 +1792,12 @@ async def scan(req: ScanRequest):
         result.update(_coverage_fields(alert))
         result['classification'] = alert['risk_classification']
         result['partial'] = alert['status'] == 'unknown' or result.get('partial', False)
+        result['notes'] = []
         if alert['status'] == 'unknown':
             result['risk_level'] = verdicts.UNKNOWN
             result['verdict'] = alert['recommended_action']
             result.pop('ai_analysis', None)
-        return result
+        return await _with_evidence(result, "/api/scan", req.chainId, target=address)
 
     except HTTPException:
         raise
@@ -2276,6 +2357,53 @@ async def verdict_permalink(chain_id: int, address: str):
             "`off`: this verdict is stored here only and is not recorded on-chain."
         ),
     }
+
+
+async def _stored_scan_evidence(evidence_hash: str) -> Dict:
+    if not re.fullmatch(r"0x[0-9a-fA-F]{64}", evidence_hash):
+        raise HTTPException(status_code=404, detail="No evidence document with this hash")
+    if not container or not container.db:
+        raise HTTPException(status_code=503, detail="Database not available")
+    stored = await container.db.get_scan_evidence(evidence_hash.lower())
+    if stored is None:
+        raise HTTPException(status_code=404, detail="No evidence document with this hash")
+    return stored
+
+
+@app.get("/api/evidence/{evidence_hash}")
+async def scan_evidence(evidence_hash: str):
+    """The evidence document of an /api/firewall or /api/scan verdict, by the evidence_hash its
+    response carried (core/scan_evidence.py).
+
+    Public, and rate-limited by IP like every route. A document is kept SCAN_EVIDENCE_RETENTION_DAYS
+    (90) days; a hash never stored, or pruned since, is 404.
+    """
+    stored = await _stored_scan_evidence(evidence_hash)
+    return {
+        "evidence_hash": evidence_hash.lower(),
+        "canonical": stored["canonical"],
+        "evidence": json.loads(stored["canonical"]),
+        "stored_at": stored["created_at"],
+        "expires_at": stored["created_at"] + SCAN_EVIDENCE_RETENTION_DAYS * 86400,
+        "verify": (
+            "keccak256 of the UTF-8 bytes of `canonical`, exactly as served, must equal evidence_hash. "
+            "This is ShieldBot's own record of the verdict it returned and is not recorded on any chain. "
+            "`source` `cache`: the verdict was served from the stored scan made at `cached_scan_at`."
+        ),
+    }
+
+
+@app.get("/evidence/{evidence_hash}", response_class=HTMLResponse, include_in_schema=False)
+async def scan_evidence_page(evidence_hash: str):
+    """The same document as a self-contained page: no scripts, every value escaped."""
+    stored = await _stored_scan_evidence(evidence_hash)
+    return HTMLResponse(
+        render_evidence_page(
+            evidence_hash.lower(), stored["canonical"],
+            stored["created_at"] + SCAN_EVIDENCE_RETENTION_DAYS * 86400,
+        ),
+        headers={"Content-Security-Policy": EVIDENCE_CSP, "Cache-Control": "no-cache"},
+    )
 
 
 @app.get("/api/admin/signups", include_in_schema=False)
@@ -3102,6 +3230,7 @@ def _build_cached_response(
         "partial": alert['status'] == 'unknown',
         "failed_sources": [],
         "policy_mode": policy_mode,
+        "notes": metadata.get('notes', []),
     }
 
 
@@ -3211,6 +3340,7 @@ def _build_fallback_response(
         "raw_checks": _extract_raw_checks(scan),
         "asset_delta": [],
         "policy_mode": policy_mode,
+        "notes": [],
     }
 
 
@@ -3309,6 +3439,7 @@ def _build_unverified_swap_response(
         "partial": True,
         "failed_sources": [source],
         "policy_mode": "BALANCED",
+        "notes": [],
     }
 
 
@@ -3320,8 +3451,13 @@ async def _analyze_router_swap(
     whitelisted: str,
     value_bnb: float,
     policy_override: Optional[str] = None,
+    trail: Optional[Dict] = None,
 ) -> Optional[Dict]:
-    """Analyze swap path tokens when interacting with a trusted router."""
+    """Analyze swap path tokens when interacting with a trusted router.
+
+    When it returns a verdict from the tokens' analyzers, it records their outcomes, keyed
+    "token:analyzer" like the response's coverage, and the observed block in `trail`.
+    """
     if not container or not container.registry or not risk_engine:
         return _build_unverified_swap_response(
             req, to_addr, decoded, whitelisted, value_bnb,
@@ -3350,6 +3486,9 @@ async def _analyze_router_swap(
 
     best = None
     token_summaries = []
+    outcomes = {}
+    all_results = []
+    notes = []
 
     for token in candidates:
         if not web3_client.is_valid_address(token):
@@ -3398,6 +3537,12 @@ async def _analyze_router_swap(
             "risk_score": risk_output.get("rug_probability", 0),
             "risk_level": risk_output.get("risk_level", "UNKNOWN"),
         })
+        outcomes.update({
+            f"{token_addr}:{name}": outcome
+            for name, outcome in analyzer_outcomes(analyzer_results, risk_output).items()
+        })
+        all_results += analyzer_results
+        notes += [f"{token_addr}: {note}" for note in risk_output.get("notes", [])]
 
         if not best or risk_output.get("rug_probability", 0) > best["risk_output"].get("rug_probability", 0):
             best = {"address": token_addr, "risk_output": risk_output, "results": analyzer_results}
@@ -3460,6 +3605,9 @@ async def _analyze_router_swap(
         "confidence": alert["confidence"],
     }
 
+    if trail is not None:
+        trail.update(analyzers=outcomes, observed_block=oldest_simulation_block(all_results))
+
     return {
         **_coverage_fields(alert),
         "classification": classification,
@@ -3502,6 +3650,7 @@ async def _analyze_router_swap(
         "partial": alert['status'] == 'unknown' or risk_output.get("partial", False),
         "failed_sources": risk_output.get("failed_sources", []),
         "policy_mode": risk_output.get("policy_mode", "BALANCED"),
+        "notes": notes,
     }
 
 

@@ -299,6 +299,7 @@ class RiskEngine:
             'status': 'unknown' if incomplete else 'ok',
             'transaction_floor': floor or None,
             'score_before_community_floor': score_before_community_floor,
+            'notes': [],
         }
 
     def compute_from_results(self, results: List["AnalyzerResult"], is_token: Optional[bool] = True) -> dict:
@@ -336,6 +337,12 @@ class RiskEngine:
             label = 'Honeypot coverage unknown: ' if honeypot_data.get('can_sell') is not None else 'Sellability unknown: '
             if not any(flag.startswith(label) for flag in critical_flags):
                 critical_flags.append(label + coverage_reasons.get('honeypot', 'No honeypot data'))
+        # An analyzer's notes name what an add-only signal could not measure (data['notes']). The gap
+        # changes no score and no status, so it is information, not a danger signal: notes have their
+        # own list and never enter critical_flags. Contract: only an analyzer writes data['notes']
+        # (structural and market do); no provider's data carries that key, so every result's notes
+        # are its analyzer's.
+        notes = [note for result in results if not result.error for note in result.data.get('notes', ())]
 
         # --- Escalation overrides ---
         # Token-specific escalation rules only apply to ERC-20 tokens.
@@ -461,6 +468,7 @@ class RiskEngine:
             'status': 'unknown' if incomplete else 'ok',
             'transaction_floor': floor or None,
             'score_before_community_floor': score_before_community_floor,
+            'notes': notes,
         }
 
     def _covered_scores(self, results):

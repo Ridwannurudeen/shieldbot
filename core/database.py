@@ -36,6 +36,8 @@ _LAUNCH_ALERT_SEND_TIMEOUT_SECONDS = 300
 # Days of API key usage rows and daily AI token counts kept. Quotas and the AI budget read only the
 # current UTC day, and /api/usage reads the last 30 days.
 USAGE_RETENTION_DAYS = 90
+# Days an /api/firewall or /api/scan evidence document (core/scan_evidence.py) stays retrievable.
+SCAN_EVIDENCE_RETENTION_DAYS = 90
 
 # One row per discovered launch with its latest outcome. A recheck records blocked or cleared on
 # the launch's tracked pair (keyed by the token), and a newer one supersedes the launch scan. A
@@ -578,6 +580,7 @@ class Database:
         await self._create_launch_feed_tables()
         await self._create_launch_alert_tables()
         await self._create_verdict_evidence_tables()
+        await self._create_scan_evidence_tables()
         await self._create_ai_usage_tables()
         await self._create_free_key_tables()
         await self._create_scam_blacklist_table()
@@ -1415,7 +1418,8 @@ class Database:
         return cursor.rowcount
 
     async def prune_retention(self) -> Dict[str, int]:
-        """Delete usage records older than USAGE_RETENTION_DAYS and expired free key link requests.
+        """Delete usage records older than USAGE_RETENTION_DAYS, scan evidence documents older than
+        SCAN_EVIDENCE_RETENTION_DAYS and expired free key link requests.
 
         Returns the rows deleted per table.
         """
@@ -1427,6 +1431,10 @@ class Database:
             ("api_daily_usage", "DELETE FROM api_daily_usage WHERE utc_day < ?", oldest_day),
             ("ai_token_usage", "DELETE FROM ai_token_usage WHERE utc_day < ?", oldest_day),
             ("free_key_requests", "DELETE FROM free_key_requests WHERE expires_at <= ?", now),
+            (
+                "scan_evidence", "DELETE FROM scan_evidence WHERE created_at < ?",
+                now - SCAN_EVIDENCE_RETENTION_DAYS * 86400,
+            ),
         ):
             cursor = await self._db.execute(sql, (cutoff,))
             deleted[table] = cursor.rowcount
@@ -2732,6 +2740,41 @@ class Database:
             (state, error, time.time(), alert_id),
         )
         await self._db.commit()
+    # --- Scan Evidence ---
+
+    async def _create_scan_evidence_tables(self):
+        await self._db.executescript("""
+            CREATE TABLE IF NOT EXISTS scan_evidence (
+                evidence_hash TEXT PRIMARY KEY,
+                canonical TEXT NOT NULL,
+                created_at REAL NOT NULL
+            );
+
+            -- The retention prune deletes by time alone.
+            CREATE INDEX IF NOT EXISTS idx_scan_evidence_created_at
+                ON scan_evidence(created_at);
+        """)
+        await self._db.commit()
+
+    async def insert_scan_evidence(self, evidence_hash: str, canonical: str):
+        """Store one /api/firewall or /api/scan evidence document under its hash.
+
+        Equal bytes have an equal hash, so a document already stored is left as it is.
+        """
+        await self._db.execute(
+            "INSERT OR IGNORE INTO scan_evidence (evidence_hash, canonical, created_at) VALUES (?, ?, ?)",
+            (evidence_hash, canonical, time.time()),
+        )
+        await self._db.commit()
+
+    async def get_scan_evidence(self, evidence_hash: str) -> Optional[Dict]:
+        """The stored document and when it was stored, or None for a hash never stored or pruned."""
+        cursor = await self._db.execute(
+            "SELECT canonical, created_at FROM scan_evidence WHERE evidence_hash = ?", (evidence_hash,)
+        )
+        row = await cursor.fetchone()
+        return None if row is None else {"canonical": row[0], "created_at": row[1]}
+
     # --- Verdict Evidence ---
 
     async def _create_verdict_evidence_tables(self):
