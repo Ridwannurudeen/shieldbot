@@ -60,10 +60,13 @@ HIGH_APPROVAL = 10**24  # ~1 million tokens at 18 decimals
 # exposes one, its own getter also named the expected contract there: factory() with WETH() or
 # WETH9() for the DEX routers (and positionManager() for the PancakeSwap Smart Router),
 # defaultFactory() for Aerodrome and Velodrome, poolManager() for the Uniswap Universal Routers
-# outside Ethereum, name() and underlying() for the Venus markets, and one owner() on both chains
+# outside Ethereum, name() and underlying() for the Venus markets, and one owner() on every chain
 # for KyberSwap and OpenOcean; the Ethereum Universal Router is in Uniswap's deploy-addresses list.
-# Addresses holding other code on the other chain are left off it: PancakeSwap V2 and ApeSwap on
-# Ethereum, and Uniswap V2 and the Universal Router on BSC, where Uniswap documents other addresses.
+# 1inch documents its V6 router at the same address on every chain but zkSync; on each chain
+# listed, V6 answers the same owner() as V5, whose code there is the same size as on Ethereum.
+# Addresses holding other code on a chain are left off it: PancakeSwap V2 and ApeSwap on Ethereum,
+# Uniswap V2 and the Universal Router on BSC, where Uniswap documents other addresses, and the
+# PancakeSwap Smart Router on Base (no code on Arbitrum).
 KNOWN_SAFE_SPENDERS = {
     56: {
         "0x10ed43c718714eb63d5aa57b78b54704e256024e": "PancakeSwap V2",
@@ -100,23 +103,46 @@ KNOWN_SAFE_SPENDERS = {
         "0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43": "Aerodrome Router",
         "0x2626664c2603336e57b271c5c0b26f421741e481": "Uniswap SwapRouter02",
         "0x6ff5693b99212da76ad316178a184ab56d299b43": "Uniswap Universal Router",
+        "0x1b81d678ffb9c0263b24a97847620c99d213eb14": "PancakeSwap V3 Swap Router",
+        "0x111111125421ca6dc452d289314280a0f8842a65": "1inch V6",
+        "0x1111111254eeb25477b68fb85ed929f73a960582": "1inch V5",
+        "0x6131b5fae19ea4f9d964eac0408e4408b66337b5": "KyberSwap Meta Aggregation Router V2",
+        "0x6352a56caadc4f1e25cd6c75970fa768a3304e64": "OpenOcean Exchange V2",
     },
     10: {
         "0xa062ae8a9c5e11aaa026fc2670b0d65ccc8b2858": "Velodrome Router",
         "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45": "Uniswap SwapRouter02",
         "0x851116d9223fabed8e56c0e6b8ad0c31d98b3507": "Uniswap Universal Router",
+        "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap V3",
+        "0x111111125421ca6dc452d289314280a0f8842a65": "1inch V6",
+        "0x1111111254eeb25477b68fb85ed929f73a960582": "1inch V5",
+        "0x6131b5fae19ea4f9d964eac0408e4408b66337b5": "KyberSwap Meta Aggregation Router V2",
+        "0x6352a56caadc4f1e25cd6c75970fa768a3304e64": "OpenOcean Exchange V2",
     },
     42161: {
         "0xc873fecbd354f5a56e00e710b90ef4201db2448d": "Camelot Router",
         "0x1f721e2e82f6676fce4ea07a5958cf098d339e18": "Camelot V3 Swap Router",
         "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45": "Uniswap SwapRouter02",
         "0xa51afafe0263b40edaef0df8781ea9aa03e381a3": "Uniswap Universal Router",
+        "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap V3",
+        "0x1b02da8cb0d097eb8d57a175b88c7d8b47997506": "SushiSwap",
+        "0x1b81d678ffb9c0263b24a97847620c99d213eb14": "PancakeSwap V3 Swap Router",
+        "0x111111125421ca6dc452d289314280a0f8842a65": "1inch V6",
+        "0x1111111254eeb25477b68fb85ed929f73a960582": "1inch V5",
+        "0x6131b5fae19ea4f9d964eac0408e4408b66337b5": "KyberSwap Meta Aggregation Router V2",
+        "0x6352a56caadc4f1e25cd6c75970fa768a3304e64": "OpenOcean Exchange V2",
     },
     137: {
         "0xa5e0829caced8ffdd4de3c43696c57f7d7a678ff": "QuickSwap Router",
         "0xf5b509bb0909a69b1c207e495f687a596c168e12": "QuickSwap V3 Swap Router",
         "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45": "Uniswap SwapRouter02",
         "0x1095692a6237d83c6a72f3f5efedb9a670c49223": "Uniswap Universal Router",
+        "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap V3",
+        "0x1b02da8cb0d097eb8d57a175b88c7d8b47997506": "SushiSwap",
+        "0x111111125421ca6dc452d289314280a0f8842a65": "1inch V6",
+        "0x1111111254eeb25477b68fb85ed929f73a960582": "1inch V5",
+        "0x6131b5fae19ea4f9d964eac0408e4408b66337b5": "KyberSwap Meta Aggregation Router V2",
+        "0x6352a56caadc4f1e25cd6c75970fa768a3304e64": "OpenOcean Exchange V2",
     },
 }
 
