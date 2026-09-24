@@ -95,6 +95,9 @@ LAUNCH_ALERT_MAX_AGE_SECONDS = 3600
 # before the last one; the outbox never queues an alert twice.
 LAUNCH_ALERT_OVERLAP_SECONDS = 60
 VERDICT_BASE_URL = "https://api.shieldbotsecurity.online"
+# The API's hunter prunes the persisted scam blacklist every 30 minutes; this process rereads it as
+# often, so admin confirmations and removals and the entries the API adds reach the bot's scans.
+BLACKLIST_RELOAD_SECONDS = 1800
 _LAUNCH_ALERT_HEADERS = {
     'blocked': '🔴 BLOCKED: high-risk Robinhood Chain launch',
     'watching': '🟡 WATCHING: medium-risk Robinhood Chain launch',
@@ -103,6 +106,7 @@ _LAUNCH_ALERT_HEADERS = {
 _UNKNOWN_LAUNCH_HEADER = '⚪ UNKNOWN: scan incomplete, not a safety verdict'
 _IMPOSTOR_LAUNCH_HEADER = '🚨 IMPOSTOR: {}'
 _launch_alert_task = None
+_blacklist_reload_task = None
 
 
 def _get_user_chain_id(context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -129,8 +133,9 @@ def _set_cache(address: str, scan_type: str, result: dict):
 
 
 async def post_init(application):
-    """Initialize services, register bot command menu, and start launch alert delivery."""
-    global _launch_alert_task
+    """Initialize services, register bot command menu, and start launch alert delivery and the
+    blacklist reload."""
+    global _launch_alert_task, _blacklist_reload_task
     await container.startup()
     await application.bot.set_my_commands([
         ("start", "Welcome message & quick start"),
@@ -146,16 +151,18 @@ async def post_init(application):
         ("help", "Show all commands"),
     ])
     _launch_alert_task = asyncio.create_task(launch_alert_loop(application.bot))
+    _blacklist_reload_task = asyncio.create_task(blacklist_reload_loop())
 
 
 async def post_stop(application):
-    """Stop launch alert delivery before the bot and its services shut down."""
-    if _launch_alert_task is not None:
-        _launch_alert_task.cancel()
-        try:
-            await _launch_alert_task
-        except asyncio.CancelledError:
-            pass
+    """Stop launch alert delivery and the blacklist reload before the bot and its services shut down."""
+    for task in (_launch_alert_task, _blacklist_reload_task):
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 async def post_shutdown(application):
@@ -863,6 +870,22 @@ async def launch_alert_loop(bot):
                 type(e).__name__, "".join(traceback.format_tb(e.__traceback__)),
             )
         await asyncio.sleep(LAUNCH_ALERT_POLL_SECONDS)
+
+
+async def blacklist_reload_loop():
+    """Reload the persisted scam blacklist every BLACKLIST_RELOAD_SECONDS until cancelled.
+
+    Startup has just loaded it, so each pass waits first.
+    """
+    while True:
+        await asyncio.sleep(BLACKLIST_RELOAD_SECONDS)
+        try:
+            await scam_db.load_blacklist()
+        except Exception as e:
+            logger.error(
+                "Blacklist reload failed: %s\n%s",
+                type(e).__name__, "".join(traceback.format_tb(e.__traceback__)),
+            )
 
 
 async def _handle_advisor_chat(update: Update, message: str, chain_id: int = 56):

@@ -137,16 +137,25 @@ class TestLifecycleHooks:
             finally:
                 stopped.set()
 
+        reload_started = asyncio.Event()
+
+        async def fake_reload_loop():
+            reload_started.set()
+            await asyncio.Event().wait()
+
         monkeypatch.setattr(bot_module, "launch_alert_loop", fake_loop)
+        monkeypatch.setattr(bot_module, "blacklist_reload_loop", fake_reload_loop)
         application = MagicMock()
         application.bot.set_my_commands = AsyncMock()
 
         await bot_module.post_init(application)
         await asyncio.wait_for(started.wait(), 1)
+        await asyncio.wait_for(reload_started.wait(), 1)
         await bot_module.post_stop(application)
 
         assert stopped.is_set()
         assert bot_module._launch_alert_task.cancelled()
+        assert bot_module._blacklist_reload_task.cancelled()
         container.startup.assert_awaited_once_with()
         # Only the API process polls mempools; the bot reads the API's monitor.
         container.start_mempool_monitor.assert_not_called()
@@ -169,6 +178,31 @@ class TestLifecycleHooks:
         await bot_module.post_stop(MagicMock())
 
         assert bot_module._launch_alert_task is None
+        assert bot_module._blacklist_reload_task is None
+
+    @pytest.mark.asyncio
+    async def test_the_blacklist_reloads_every_thirty_minutes_and_survives_a_failure(self, bot_module, monkeypatch):
+        assert bot_module.BLACKLIST_RELOAD_SECONDS == 1800
+        loads = []
+        second_load = asyncio.Event()
+
+        async def load_blacklist():
+            loads.append(len(loads))
+            if len(loads) == 1:
+                raise RuntimeError("database is locked")
+            second_load.set()
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(bot_module, "BLACKLIST_RELOAD_SECONDS", 0)
+        monkeypatch.setattr(bot_module, "scam_db", SimpleNamespace(load_blacklist=load_blacklist))
+        task = asyncio.get_running_loop().create_task(bot_module.blacklist_reload_loop())
+        await asyncio.wait_for(second_load.wait(), 1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        # The loop reloads with the same loader startup uses, and a failed pass does not end it.
+        assert loads == [0, 1]
 
     @pytest.mark.asyncio
     async def test_post_shutdown_stops_services(self, bot_module, monkeypatch):
