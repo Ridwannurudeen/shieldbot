@@ -571,6 +571,7 @@ class Database:
         await self._db.commit()
         await self._migrate_funding_value_wei()
         await self._migrate_tracked_pairs_chain_id()
+        await self._migrate_outcome_source()
         await self._migrate_reporter_ips()
         await self._migrate_contract_score_levels()
         await self._create_launch_discovery_tables()
@@ -579,6 +580,7 @@ class Database:
         await self._create_verdict_evidence_tables()
         await self._create_ai_usage_tables()
         await self._create_free_key_tables()
+        await self._create_scam_blacklist_table()
 
         # Migrate: add registered_by_key column for existing DBs
         try:
@@ -648,6 +650,21 @@ class Database:
             if not any(column[1] == "chain_id" for column in await cursor.fetchall()):
                 await self._db.execute(
                     "ALTER TABLE tracked_pairs ADD COLUMN chain_id INTEGER NOT NULL DEFAULT 56"
+                )
+            await self._db.commit()
+        except BaseException:
+            await self._db.rollback()
+            raise
+
+    async def _migrate_outcome_source(self):
+        """Record who sent each outcome event. Rows from before this column came from a route anyone
+        can call, so they are 'client' rows."""
+        await self._db.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = await self._db.execute("PRAGMA table_info(outcome_events)")
+            if not any(column[1] == "source" for column in await cursor.fetchall()):
+                await self._db.execute(
+                    "ALTER TABLE outcome_events ADD COLUMN source TEXT NOT NULL DEFAULT 'client'"
                 )
             await self._db.commit()
         except BaseException:
@@ -800,14 +817,18 @@ class Database:
         user_decision: str = None,
         outcome: str = None,
         tx_hash: str = None,
+        source: str = "client",
     ):
-        """Record a user decision or outcome event."""
+        """Record a user decision or outcome event.
+
+        source is 'key:<key_id>' when a valid API key sent it, otherwise 'client'.
+        """
         now = time.time()
         await self._db.execute("""
             INSERT INTO outcome_events
-                (address, chain_id, risk_score_at_scan, user_decision, outcome, tx_hash, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (address.lower(), chain_id, risk_score_at_scan, user_decision, outcome, tx_hash, now))
+                (address, chain_id, risk_score_at_scan, user_decision, outcome, tx_hash, source, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (address.lower(), chain_id, risk_score_at_scan, user_decision, outcome, tx_hash, source, now))
         await self._db.commit()
 
     # --- Community Reports ---
@@ -1069,7 +1090,7 @@ class Database:
     async def get_outcomes(self, address: str, chain_id: int = 56, limit: int = 50) -> List[Dict]:
         """Get outcome events for an address."""
         cursor = await self._db.execute("""
-            SELECT risk_score_at_scan, user_decision, outcome, tx_hash, created_at
+            SELECT risk_score_at_scan, user_decision, outcome, tx_hash, source, created_at
             FROM outcome_events
             WHERE address = ? AND chain_id = ?
             ORDER BY created_at DESC
@@ -1082,7 +1103,8 @@ class Database:
                 'user_decision': r[1],
                 'outcome': r[2],
                 'tx_hash': r[3],
-                'created_at': r[4],
+                'source': r[4],
+                'created_at': r[5],
             }
             for r in rows
         ]
@@ -1437,6 +1459,88 @@ class Database:
             ON CONFLICT(utc_day) DO UPDATE SET tokens = tokens + excluded.tokens
         """, (utc_day, tokens))
         await self._db.commit()
+
+    # --- Scam Blacklist ---
+
+    async def _create_scam_blacklist_table(self):
+        """The local scam blacklist. chain_id NULL covers every chain, expires_at NULL never expires.
+        source is 'community' (users reported the address) or 'admin' (an admin confirmed it); one
+        entry per address and chain."""
+        await self._db.executescript("""
+            CREATE TABLE IF NOT EXISTS scam_blacklist (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chain_id INTEGER,
+                address TEXT NOT NULL,
+                source TEXT NOT NULL CHECK (source IN ('community', 'admin')),
+                reason TEXT,
+                reports INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL,
+                expires_at REAL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_scam_blacklist_entry
+                ON scam_blacklist(address, COALESCE(chain_id, 0));
+        """)
+        await self._db.commit()
+
+    async def add_community_blacklist(
+        self, address: str, chain_id: Optional[int], reports: int, expires_at: float,
+    ):
+        """Add or renew a community entry. An admin entry for the same address and chain is left as it is."""
+        await self._db.execute("""
+            INSERT INTO scam_blacklist (chain_id, address, source, reports, created_at, expires_at)
+            VALUES (?, ?, 'community', ?, ?, ?)
+            ON CONFLICT (address, COALESCE(chain_id, 0)) DO UPDATE SET
+                reports = excluded.reports,
+                created_at = excluded.created_at,
+                expires_at = excluded.expires_at
+            WHERE scam_blacklist.source = 'community'
+        """, (chain_id, address.lower(), reports, time.time(), expires_at))
+        await self._db.commit()
+
+    async def confirm_blacklist(self, address: str, chain_id: Optional[int], reason: Optional[str]):
+        """Make an address an admin entry that never expires, confirming a community entry in place
+        (its report count is kept)."""
+        await self._db.execute("""
+            INSERT INTO scam_blacklist (chain_id, address, source, reason, created_at, expires_at)
+            VALUES (?, ?, 'admin', ?, ?, NULL)
+            ON CONFLICT (address, COALESCE(chain_id, 0)) DO UPDATE SET
+                source = 'admin',
+                reason = COALESCE(excluded.reason, scam_blacklist.reason),
+                expires_at = NULL
+        """, (chain_id, address.lower(), reason, time.time()))
+        await self._db.commit()
+
+    async def remove_blacklist(self, address: str, chain_id: Optional[int]) -> bool:
+        """Delete the entry for an address on a chain (NULL: the every-chain entry). True if one was deleted."""
+        cursor = await self._db.execute(
+            "DELETE FROM scam_blacklist WHERE address = ? AND COALESCE(chain_id, 0) = COALESCE(?, 0)",
+            (address.lower(), chain_id),
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def get_active_blacklist(self, now: float) -> List[Dict]:
+        """Every blacklist entry that has not expired at `now`."""
+        cursor = await self._db.execute("""
+            SELECT chain_id, address, source, reason, reports, created_at, expires_at
+            FROM scam_blacklist
+            WHERE expires_at IS NULL OR expires_at > ?
+        """, (now,))
+        return [
+            {
+                'chain_id': r[0], 'address': r[1], 'source': r[2], 'reason': r[3],
+                'reports': r[4], 'created_at': r[5], 'expires_at': r[6],
+            }
+            for r in await cursor.fetchall()
+        ]
+
+    async def prune_scam_blacklist(self, now: float) -> int:
+        """Delete the entries that have expired at `now`. Returns how many were deleted."""
+        cursor = await self._db.execute(
+            "DELETE FROM scam_blacklist WHERE expires_at IS NOT NULL AND expires_at <= ?", (now,)
+        )
+        await self._db.commit()
+        return cursor.rowcount
 
     # --- Self-Serve Free Keys ---
 

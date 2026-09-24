@@ -137,16 +137,25 @@ class TestLifecycleHooks:
             finally:
                 stopped.set()
 
+        reload_started = asyncio.Event()
+
+        async def fake_reload_loop():
+            reload_started.set()
+            await asyncio.Event().wait()
+
         monkeypatch.setattr(bot_module, "launch_alert_loop", fake_loop)
+        monkeypatch.setattr(bot_module, "blacklist_reload_loop", fake_reload_loop)
         application = MagicMock()
         application.bot.set_my_commands = AsyncMock()
 
         await bot_module.post_init(application)
         await asyncio.wait_for(started.wait(), 1)
+        await asyncio.wait_for(reload_started.wait(), 1)
         await bot_module.post_stop(application)
 
         assert stopped.is_set()
         assert bot_module._launch_alert_task.cancelled()
+        assert bot_module._blacklist_reload_task.cancelled()
         container.startup.assert_awaited_once_with()
         # Only the API process polls mempools; the bot reads the API's monitor.
         container.start_mempool_monitor.assert_not_called()
@@ -169,6 +178,31 @@ class TestLifecycleHooks:
         await bot_module.post_stop(MagicMock())
 
         assert bot_module._launch_alert_task is None
+        assert bot_module._blacklist_reload_task is None
+
+    @pytest.mark.asyncio
+    async def test_the_blacklist_reloads_every_thirty_minutes_and_survives_a_failure(self, bot_module, monkeypatch):
+        assert bot_module.BLACKLIST_RELOAD_SECONDS == 1800
+        loads = []
+        second_load = asyncio.Event()
+
+        async def load_blacklist():
+            loads.append(len(loads))
+            if len(loads) == 1:
+                raise RuntimeError("database is locked")
+            second_load.set()
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(bot_module, "BLACKLIST_RELOAD_SECONDS", 0)
+        monkeypatch.setattr(bot_module, "scam_db", SimpleNamespace(load_blacklist=load_blacklist))
+        task = asyncio.get_running_loop().create_task(bot_module.blacklist_reload_loop())
+        await asyncio.wait_for(second_load.wait(), 1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        # The loop reloads with the same loader startup uses, and a failed pass does not end it.
+        assert loads == [0, 1]
 
     @pytest.mark.asyncio
     async def test_post_shutdown_stops_services(self, bot_module, monkeypatch):
@@ -245,30 +279,105 @@ class TestNoOnChainRecordingPromise:
         )
         recorder.get_latest_scan.assert_not_awaited()
 
-    @pytest.mark.asyncio
-    async def test_report_does_not_link_the_bsc_recorder(self, bot_module, monkeypatch):
-        address = "0x0000000000000000000000000000000000000001"
+    @staticmethod
+    async def _report(bot_module, monkeypatch, result):
         recorder = MagicMock(record_scan_fire_and_forget=AsyncMock())
         recorder.is_available.return_value = True
-        attestor = MagicMock()
-        attestor.is_available.return_value = False
-        scam_db = MagicMock()
-        scam_db.report_address.return_value = {"accepted": True, "blacklisted": True}
+        attestor = MagicMock(attest_fire_and_forget=AsyncMock())
+        attestor.is_available.return_value = True
         monkeypatch.setattr(bot_module, "onchain_recorder", recorder)
         monkeypatch.setattr(bot_module, "base_attestor", attestor)
-        monkeypatch.setattr(bot_module, "scam_db", scam_db)
+        monkeypatch.setattr(bot_module, "scam_db", SimpleNamespace(report_address=AsyncMock(return_value=result)))
         update = MagicMock(spec=Update)
         update.message.reply_text = AsyncMock()
         update.effective_user.id = 42
-        context = MagicMock(args=[address, "honeypot"])
+        await bot_module.report_command(update, MagicMock(args=["0x" + "0" * 39 + "1", "honeypot"]))
+        return update.message.reply_text.await_args.args[0], recorder, attestor
 
-        await bot_module.report_command(update, context)
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("already_listed, sentence", [
+        (False, "This address now shows as reported by 3 users in scans. It is not confirmed as a scam."),
+        (True, "This address is already reported by 3 users in scans. It is not confirmed as a scam."),
+    ])
+    async def test_a_community_blacklisting_writes_nothing_on_chain(
+        self, bot_module, monkeypatch, already_listed, sentence,
+    ):
+        result = {
+            "accepted": True, "reason": "", "blacklisted": True, "reports": 3, "needed": 3, "confirmed": False,
+            "already_listed": already_listed,
+        }
+        text, recorder, attestor = await self._report(bot_module, monkeypatch, result)
 
-        text = update.message.reply_text.await_args.args[0]
         assert "Address Blacklisted" in text
+        assert sentence in text
+        assert "known scam" not in text
         assert "On-chain recording" not in text
         assert "bscscan.com" not in text
-        recorder.record_scan_fire_and_forget.assert_awaited_once_with(address, "high", "report")
+        recorder.record_scan_fire_and_forget.assert_not_awaited()
+        attestor.attest_fire_and_forget.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("raw, user_data, chain_id", [
+        ("eth:0x" + "0" * 39 + "1", {"chain_id": 56}, 1),
+        ("0x" + "0" * 39 + "1", {"chain_id": 8453}, 8453),
+        ("0x" + "0" * 39 + "1", {}, 56),
+    ])
+    async def test_a_report_is_for_the_chain_a_scan_would_use(self, bot_module, monkeypatch, raw, user_data, chain_id):
+        report_address = AsyncMock(return_value={"accepted": True, "blacklisted": False, "reports": 1, "needed": 3})
+        monkeypatch.setattr(bot_module, "scam_db", SimpleNamespace(report_address=report_address))
+        monkeypatch.setattr(bot_module, "web3_client", SimpleNamespace(
+            validate_chain_id=lambda chain: chain, is_valid_address=lambda address: True,
+        ))
+        update = MagicMock(spec=Update)
+        update.message.reply_text = AsyncMock()
+        update.effective_user.id = 42
+
+        await bot_module.report_command(update, SimpleNamespace(args=[raw, "drainer"], user_data=user_data))
+
+        report_address.assert_awaited_once_with("0x" + "0" * 39 + "1", "42", chain_id)
+
+    @pytest.mark.asyncio
+    async def test_a_report_of_an_admin_confirmed_address_says_it_is_confirmed(self, bot_module, monkeypatch):
+        result = {
+            "accepted": True, "reason": "Already blacklisted.", "blacklisted": True, "reports": 0, "needed": 3,
+            "confirmed": True,
+        }
+        text, recorder, attestor = await self._report(bot_module, monkeypatch, result)
+
+        assert "This address is confirmed as a scam." in text
+        assert "reported by 0 users" not in text
+        recorder.record_scan_fire_and_forget.assert_not_awaited()
+        attestor.attest_fire_and_forget.assert_not_awaited()
+
+
+COMMUNITY_MATCH = {
+    "type": "community_reports", "reason": "Reported by 3 users", "source": "ShieldBot", "severity": "medium",
+    "reports": 3,
+}
+ADMIN_MATCH = {"type": "Local Blacklist", "reason": "Confirmed scam address", "source": "ShieldBot", "severity": "block"}
+
+
+class TestScanResultNamesCommunityReports:
+    @staticmethod
+    def _scan(matches, warnings):
+        return {
+            "address": "0x" + "a" * 40, "is_contract": True, "is_verified": True, "risk_level": "medium",
+            "risk_score": 40, "status": "ok", "coverage": {"scam_database": True}, "checks": {},
+            "scam_matches": matches, "warnings": warnings,
+        }
+
+    def test_a_community_report_is_not_a_scam_database_match(self, bot_module):
+        text = bot_module.format_scan_result(self._scan([COMMUNITY_MATCH], ["Reported by 3 users"]))
+        assert "scam database match" not in text
+        assert text.count("Reported by 3 users") == 1
+
+    def test_database_matches_are_counted_apart_from_community_reports(self, bot_module):
+        text = bot_module.format_scan_result(self._scan(
+            [ADMIN_MATCH, COMMUNITY_MATCH], ["Found 1 scam database match(es)", "Reported by 3 users"],
+        ))
+        assert "Found 1 scam database match(es)" in text
+        assert "Confirmed scam address" in text
+        assert text.count("Reported by 3 users") == 1
 
 
 class TestChainPrefixHelp:

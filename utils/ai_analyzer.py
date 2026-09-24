@@ -17,6 +17,7 @@ except ImportError:
 from core.telegram_formatter import CONTROL_CHARACTERS
 from utils.firewall_prompt import FIREWALL_SYSTEM_PROMPT
 from utils.chain_info import get_chain_name
+from core.risk_engine import database_matches, medium_matches
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +32,13 @@ def _get_prompt_chain_name(chain_id: Optional[int]) -> str:
     return get_chain_name(chain_id) if chain_id is not None else 'Unknown chain'
 
 
+# How the prompts name a community report: it is neither a scam database match nor a scan warning.
+_COMMUNITY_REPORT_LABEL = "Community reports, unconfirmed, not a scam database match"
+
+
 def _scam_match_count(scan_data: Dict) -> str:
-    scam_matches = scan_data.get('scam_matches', [])
+    # A community report is not a scam database match; the prompts give it a labelled line of its own.
+    scam_matches = database_matches(scan_data.get('scam_matches'))
     if scam_matches:
         return str(len(scam_matches))
     if scan_data.get('coverage', {}).get('scam_database') is False:
@@ -307,16 +313,18 @@ Generate the ShieldAI forensic report now."""
             lines.append(f"Wallet Reputation: {_known(ethos_data.get('reputation_score'), '{}/100')}")
             lines.append(f"Trust Level: {_known(ethos_data.get('trust_level'))}")
 
-        # Critical flags, which can carry a token's own revert strings
-        flags = risk_output.get('critical_flags', [])
+        # Critical flags, which can carry a token's own revert strings. A community report is not one:
+        # it has its own labelled line below.
+        scam_data = contract_data or data
+        reported = [match['reason'] for match in medium_matches(scam_data.get('scam_matches'))]
+        flags = [flag for flag in risk_output.get('critical_flags', []) if flag not in reported]
         if flags:
             lines.append("Critical Flags:")
             for f in flags:
                 lines.append(f"  - {_untrusted(f)}")
 
         # Scam DB
-        scam_data = contract_data or data
-        scam_matches = scam_data.get('scam_matches', [])
+        scam_matches = database_matches(scam_data.get('scam_matches'))
         if scam_matches:
             lines.append(f"⚠️ SCAM DATABASE MATCHES: {len(scam_matches)}")
             for m in scam_matches[:3]:
@@ -325,6 +333,8 @@ Generate the ShieldAI forensic report now."""
             lines.append("Scam Database Matches: Unknown")
         else:
             lines.append("Scam Database Matches: 0")
+        for reason in reported:
+            lines.append(f"{_COMMUNITY_REPORT_LABEL}: {reason}")
 
         # Source code patterns
         patterns = data.get('source_code_patterns', [])
@@ -449,6 +459,9 @@ Return the explanation JSON now."""
         lines.append(f"Is Verified: {_known(contract_scan.get('is_verified'))}")
         lines.append(f"Contract Age: {_known(contract_scan.get('contract_age_days'), '{} days')}")
         lines.append(f"Scam DB Matches: {_scam_match_count(contract_scan)}")
+        reported = [match['reason'] for match in medium_matches(contract_scan.get('scam_matches'))]
+        for reason in reported:
+            lines.append(f"{_COMMUNITY_REPORT_LABEL}: {reason}")
         lines.append(f"Risk Score (heuristic): {_known(contract_scan.get('risk_score'), '{}/100')}")
 
         # Token-specific data
@@ -463,13 +476,13 @@ Return the explanation JSON now."""
         if ownership is not None:
             lines.append(f"Ownership Renounced: {ownership}")
 
-        warnings = contract_scan.get('warnings', [])
+        warnings = [warning for warning in contract_scan.get('warnings', []) if warning not in reported]
         if warnings:
             lines.append("Warnings:")
             for w in warnings[:8]:
                 lines.append(f"  - {_untrusted(w)}")
 
-        scam_matches = contract_scan.get('scam_matches', [])
+        scam_matches = database_matches(contract_scan.get('scam_matches'))
         if scam_matches:
             lines.append("Scam Matches:")
             for m in scam_matches[:5]:

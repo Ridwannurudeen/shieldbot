@@ -3,6 +3,7 @@
 import re
 
 from core.extension_formatter import is_scan_incomplete
+from core.risk_engine import database_matches, medium_matches
 from core.verdicts import BLOCK_RECOMMENDED, CAUTION, HIGH, HIGH_RISK, MEDIUM, SAFE, classify
 
 # Replies are sent with Telegram's legacy Markdown, where these characters start an entity.
@@ -183,11 +184,14 @@ def format_full_report(
     source_patterns = contract_data.get('source_code_patterns', [])
     if source_patterns:
         lines.append(f'  Source Patterns: {escape_markdown(", ".join(source_patterns))}')
-    scam_matches = contract_data.get('scam_matches', [])
+    scam_matches = database_matches(contract_data.get('scam_matches'))
     if scam_matches:
         lines.append(f'  Scam DB Hits: {len(scam_matches)}')
     elif contract_data.get('coverage', {}).get('scam_database') is False:
         lines.append('  Scam DB Hits: Unknown')
+    # A community report is not a scam database hit; it is named on its own.
+    for match in medium_matches(contract_data.get('scam_matches')):
+        lines.append(f'  {escape_markdown(match["reason"])}')
     lines.append('')
 
     # Market intelligence

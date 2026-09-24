@@ -8,6 +8,8 @@ from typing import Dict, List, Tuple
 
 from core.verdicts import HIGH, LOW, MEDIUM, level_from_score
 
+from core.risk_engine import database_matches
+
 logger = logging.getLogger(__name__)
 
 # Severity weights for heuristic scoring
@@ -102,8 +104,8 @@ def findings_from_scan_result(result: Dict) -> List[Dict]:
     """
     findings = []
 
-    # Scam DB matches = critical
-    for match in result.get('scam_matches', []):
+    # Scam DB matches = critical. A community report is not one: the scanner holds its floor.
+    for match in database_matches(result.get('scam_matches')):
         findings.append({
             "severity": "critical",
             "message": f"Scam DB match: {match.get('type', 'unknown')} - {match.get('reason', '')}"

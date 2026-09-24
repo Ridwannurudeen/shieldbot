@@ -34,6 +34,38 @@ WEIGHT_MARKET = 0.25
 WEIGHT_BEHAVIORAL = 0.20
 WEIGHT_HONEYPOT = 0.15
 
+# A scam match's severity sets what it does to a score. 'block' (GoPlus labels the token a scam, or
+# an admin confirmed the address) floors it at 90; 'high', the default, is a scam database finding
+# with the 70 floor. 'medium' is a crowd signal: a community blacklist entry, which anyone who can
+# send reports can create. It raises a score to MEDIUM_MATCH_FLOOR, inside the CAUTION band, is shown
+# by its reason, and is never counted as a scam database match.
+MEDIUM_MATCH_FLOOR = 40
+
+
+def _is_medium(match) -> bool:
+    return isinstance(match, dict) and match.get('severity') == 'medium'
+
+
+def database_matches(matches) -> list:
+    """The matches that are scam database findings: every match except a medium-severity one."""
+    return [match for match in matches or () if not _is_medium(match)]
+
+
+def medium_matches(matches) -> list:
+    """The medium-severity matches (community reports)."""
+    return [match for match in matches or () if _is_medium(match)]
+
+
+def scam_match_floor(matches) -> int:
+    """The score floor a target's scam matches set, as the engine applies them: 90 for a
+    block-severity match, 70 for any other scam database match, MEDIUM_MATCH_FLOOR for community
+    reports alone, otherwise 0. The legacy scanner applies it in one step."""
+    if any(isinstance(match, dict) and match.get('severity') == 'block' for match in matches or ()):
+        return 90
+    if database_matches(matches):
+        return 70
+    return MEDIUM_MATCH_FLOOR if medium_matches(matches) else 0
+
 
 class RiskEngine:
     """Composite weighted risk scoring across all data sources."""
@@ -50,7 +82,10 @@ class RiskEngine:
         ethos_data: dict,
         is_token: Optional[bool] = True,
     ) -> dict:
-        critical_flags = []
+        scam_matches = contract_data.get('scam_matches')
+        hard_matches = database_matches(scam_matches)
+        # A community report's reason leads, so the extension, which shows three flags, always names it.
+        critical_flags = [match['reason'] for match in medium_matches(scam_matches)]
 
         # --- Structural score (0-100) ---
         structural = 0
@@ -75,9 +110,9 @@ class RiskEngine:
         if contract_data.get('has_destroy') and contract_data.get('ownership_renounced') is not True:
             structural += 15
             critical_flags.append('destroy() function: the owner may be able to delete the contract')
-        if contract_data.get('scam_matches'):
+        if hard_matches:
             structural += 30
-            critical_flags.append(f'Scam DB match ({len(contract_data["scam_matches"])} sources)')
+            critical_flags.append(f'Scam DB match ({len(hard_matches)} sources)')
         if contract_data.get('ownership_renounced') is False:
             structural += 5
         structural = min(structural, 100)
@@ -195,17 +230,25 @@ class RiskEngine:
             # A failed scam lookup or bytecode scan is not a clean one, so it earns no positive signal.
             contract_coverage = contract_data.get('coverage', {})
             checks_covered = contract_coverage.get('scam_database', True) and contract_coverage.get('bytecode', True)
-            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not contract_data.get('scam_matches') and checks_covered:
+            # A community report does not withhold the discount: its only effect is its floor below.
+            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not hard_matches and checks_covered:
                 composite = max(composite - 20, 0)
 
-            if contract_data.get('scam_matches'):
+            if hard_matches:
                 composite = max(composite, 70)
 
-        # A block-severity scam match (GoPlus labels the token a scam) is a BLOCK on every target type.
+        # A block-severity scam match (GoPlus labels the token a scam, or an admin confirmed the
+        # address) is a BLOCK on every target type. A community report holds the CAUTION band on every
+        # target type and never adds more.
         floor = 90 if any(
-            isinstance(match, dict) and match.get('severity') == 'block' for match in contract_data.get('scam_matches') or []
+            isinstance(match, dict) and match.get('severity') == 'block' for match in scam_matches or []
         ) else 0
-        composite = max(composite, floor)
+        # The score without the community floor: the firewall's revert rule reads it, so a crowd
+        # signal can neither cause that escalation nor mask it.
+        score_before_community_floor = round(min(max(composite, floor, 0), 100), 1)
+        # Not a hard floor: transaction_floor reports only those.
+        community_floor = MEDIUM_MATCH_FLOOR if medium_matches(scam_matches) else 0
+        composite = max(composite, floor, community_floor)
 
         rug_probability = round(min(max(composite, 0), 100), 1)
 
@@ -219,7 +262,7 @@ class RiskEngine:
         if contract_data.get('scam_matches') and risk_level == LOW:
             risk_level = MEDIUM
 
-        if floor:
+        if floor >= BLOCK_MIN:
             risk_level = HIGH
 
         # --- Risk archetype ---
@@ -255,6 +298,7 @@ class RiskEngine:
             'coverage_reasons': coverage_reasons,
             'status': 'unknown' if incomplete else 'ok',
             'transaction_floor': floor or None,
+            'score_before_community_floor': score_before_community_floor,
         }
 
     def compute_from_results(self, results: List["AnalyzerResult"], is_token: Optional[bool] = True) -> dict:
@@ -304,6 +348,8 @@ class RiskEngine:
 
         is_verified = contract_data.get('is_verified', True)
         has_blacklist = contract_data.get('has_blacklist', False)
+        # A community report is not a scam database match: it takes no 70 floor, only its own below.
+        hard_matches = database_matches(contract_data.get('scam_matches'))
 
         if is_token is not False:
             if has_mint and has_proxy and ownership_renounced is False:
@@ -330,31 +376,38 @@ class RiskEngine:
 
             # Positive signals — reduce score for renounced ownership with high liquidity.
             # A failed scam lookup or bytecode scan is not a clean one, so it earns no positive signal.
-            # The signal describes the token, so it never discounts the transaction's own share.
+            # The signal describes the token, so it never discounts the transaction's own share. A
+            # community report does not withhold it: its only effect is its floor below.
             liquidity_info = dex_data.get('liquidity_usd')
             contract_coverage = contract_data.get('coverage', {})
             checks_covered = contract_coverage.get('scam_database', True) and contract_coverage.get('bytecode', True)
-            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not contract_data.get('scam_matches') and checks_covered:
+            if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not hard_matches and checks_covered:
                 composite = max(composite - 20, tx_share)
 
-            if contract_data.get('scam_matches'):
+            if hard_matches:
                 composite = max(composite, 70)
         else:
             # Non-token: only escalate for verified scam matches or behavioral flags
-            if contract_data.get('scam_matches'):
+            if hard_matches:
                 composite = max(composite, 70)
             if ethos_data.get('severe_reputation_flag') and ethos_data.get('scam_flags'):
                 composite = min(composite + 10, 100)
 
         # Hard floors: a rule an analyzer declares from evidence it owns (an approval to a wallet, a
         # pay-to-claim contract) holds whatever the weighted mean and the discount say, and so does
-        # a block-severity scam match (GoPlus labels the token a scam).
+        # a block-severity scam match (GoPlus labels the token a scam, or an admin confirmed the
+        # address). A community report holds the CAUTION band and never adds more.
         floor = max((result.data.get('floor') or 0 for result in results if not result.error), default=0)
         if any(
             isinstance(match, dict) and match.get('severity') == 'block' for match in contract_data.get('scam_matches') or []
         ):
             floor = max(floor, 90)
-        composite = max(composite, floor)
+        # The score without the community floor: the firewall's revert rule reads it, so a crowd
+        # signal can neither cause that escalation nor mask it.
+        score_before_community_floor = round(min(max(composite, floor, 0), 100), 1)
+        # Not a hard floor: transaction_floor reports only those.
+        community_floor = MEDIUM_MATCH_FLOOR if medium_matches(contract_data.get('scam_matches')) else 0
+        composite = max(composite, floor, community_floor)
 
         rug_probability = round(min(max(composite, 0), 100), 1)
 
@@ -407,6 +460,7 @@ class RiskEngine:
             'coverage_reasons': coverage_reasons,
             'status': 'unknown' if incomplete else 'ok',
             'transaction_floor': floor or None,
+            'score_before_community_floor': score_before_community_floor,
         }
 
     def _covered_scores(self, results):
