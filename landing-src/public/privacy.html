@@ -72,6 +72,8 @@
       display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
     }
   </style>
+    <script src="/js/plausible-init.js"></script>
+    <script async src="/js/script.js"></script>
 </head>
 <body>
 
@@ -154,6 +156,7 @@
     </ul>
     <p>These services receive only the data needed for their function, such as a contract address, a transaction to simulate or a site origin. They are governed by their own privacy policies.</p>
     <p>If you join the update list on our website, we store your email address and send messages through our email provider, Resend.</p>
+    <p>Our website counts visits with Plausible Analytics. It sets no cookies and stores no IP addresses: to count a visitor once per day it uses a hash of the IP address and browser with a salt that Plausible rotates and deletes every 24 hours. The requests go through our own domain, and what we see is aggregate: pages viewed, referring sites, country, and device and browser type. The extension does not load it.</p>
 
     <h2>7. Data Retention</h2>
     <p>Scan results (contract address, chain, risk score and findings) are kept on our servers so repeat checks are faster and the public threat feed works. They do not include your IP address. If you file a report about a contract, the report is kept as evidence, with at most a keyed hash of your IP address and never the address itself. Messages to the AI assistant are deleted after 24 hours. Until then, side panel chats are stored under an identifier derived from your IP address and chat ID, and Telegram chats under your Telegram user ID. If you use an API key, a record of each request (the key, the endpoint and the time) is kept for 90 days. Like most web services, our servers may keep standard access and application logs for security and troubleshooting. To have the data linked to your email address, IP address or Telegram account deleted, write to the address in section 11.</p>

@@ -142,6 +142,23 @@ once nginx stops adding `Access-Control-Allow-Origin: *`.
 
 After an edit: `nginx -t && systemctl reload nginx`.
 
+### Landing analytics (Plausible)
+
+The landing pages load `/js/plausible-init.js` and `/js/script.js`, and send page views to `/stats/event`. The
+landing vhost (`nginx-shieldbotsecurity-new.conf`) proxies both paths to Plausible, so the site's
+Content-Security-Policy stays `'self'` and no third-party script is loaded. To turn it on:
+
+1. Create a Plausible account and add the site `shieldbotsecurity.online`.
+2. In Site settings, Site installation, copy the script name from the snippet (`pa-...`, the part of
+   `https://plausible.io/js/pa-....js` before `.js`).
+3. In the live landing vhost, copy the two `location` blocks from `nginx-shieldbotsecurity-new.conf` and replace
+   `pa-SITE_ID` with that name. Then `nginx -t && systemctl reload nginx`.
+4. Check: `curl -sI https://shieldbotsecurity.online/js/script.js` answers 200, and a page view shows in
+   Plausible within a minute.
+5. Optional, in Site settings: turn on outbound link tracking to count clicks on "Add to Chrome".
+
+Until step 3, `/js/script.js` answers 404 and the pages work without analytics.
+
 ## Nightly backups
 
 `backup.sh` (repo root) copies the database with sqlite3's backup API while both services keep running, checks
