@@ -349,13 +349,31 @@ async def test_health_no_approvals_excellent(guardian_with_rescue, mock_rescue):
 
 
 @pytest.mark.asyncio
-async def test_health_rescue_failure_returns_unknown(mock_db, mock_rescue):
-    """If rescue_service.scan_approvals raises, Guardian falls back to 'unknown'."""
-    mock_rescue.scan_approvals = AsyncMock(side_effect=RuntimeError("RPC down"))
-    g = GuardianService(db=mock_db, rescue_service=mock_rescue)
-    result = await g.get_health("0xabc", 56)
-    assert result["level"] == "unknown"
-    assert "warnings" in result
+async def test_rpc_that_cannot_serve_approvals_reads_unknown_through_the_real_rescue_scan(mock_db):
+    """The rescue scan answers an unreadable RPC with status unknown; Guardian keeps it unknown."""
+    from unittest.mock import patch
+
+    from services.rescue_service import RPC_UNAVAILABLE_REASON, RescueService
+
+    web3_client = MagicMock()
+    web3_client._get_adapter.return_value.w3.provider.endpoint_uri = "https://rpc.invalid/secret-key"
+    session = MagicMock()
+    session.post.side_effect = RuntimeError("Session is closed: https://rpc.invalid/secret-key")
+    g = GuardianService(db=mock_db, rescue_service=RescueService(web3_client))
+    with patch("services.rescue_service.aiohttp.ClientSession") as factory:
+        factory.return_value.__aenter__.return_value = session
+        approvals = await g.get_approvals("0x" + "1" * 40, 4663)
+        health = await g.get_health("0x" + "1" * 40, 4663)
+
+    assert approvals["approvals"] == []
+    assert approvals["status"] == "unknown"
+    assert approvals["coverage_reasons"] == {"allowances": RPC_UNAVAILABLE_REASON}
+    assert health["status"] == "unknown"
+    assert health["level"] == "unknown"
+    assert health["warnings"] == [f"Approval data incomplete: {RPC_UNAVAILABLE_REASON}"]
+    assert health["total_value_at_risk_usd"] is None
+    assert "secret-key" not in repr(approvals) + repr(health)
+    mock_db.update_guardian_health.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -476,17 +494,6 @@ async def test_health_unknown_approvals_explain_reason_and_value_is_unknown(
     assert health["warnings"] == [expected_warning]
     assert health["total_value_at_risk_usd"] is None
     mock_db.update_guardian_health.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_unavailable_rescue_scan_logs_warning_without_traceback(guardian_with_rescue, mock_rescue, caplog):
-    mock_rescue.scan_approvals.side_effect = RuntimeError("Approval scan unavailable")
-    with caplog.at_level(logging.WARNING, logger="services.guardian"):
-        assert await guardian_with_rescue._scan_approvals("0xabc", 56) is None
-    records = [record for record in caplog.records if record.name == "services.guardian"]
-    assert [record.levelno for record in records] == [logging.WARNING]
-    assert records[0].exc_info is None
-    assert "Traceback" not in caplog.text
 
 
 @pytest.mark.asyncio
