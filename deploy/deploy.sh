@@ -87,7 +87,7 @@ units_settled() {
 
 # ---------------------------------------------------------------- preflight (read-only)
 preflight() {
-  local head rc=0 bot_unit db_kib branches
+  local head rc=0 bot_unit db_kib refs ref branches
   head=$(git -C "$APP" rev-parse HEAD)
 
   say "Current state"
@@ -133,13 +133,19 @@ preflight() {
   bot_process_clean || fail "the running bot process check did not pass"
 
   say "Target commit"
-  git -C "$APP" fetch --quiet origin
+  # --prune drops remote branches deleted on origin, so a stale one cannot vouch for the commit.
+  git -C "$APP" fetch --prune --quiet origin
   TARGET=$(git -C "$APP" rev-parse --verify --quiet "$1^{commit}") || fail "$1 is not a commit in $APP after git fetch"
-  # A commit made or fetched on the server alone has not been pushed, reviewed or tested by CI.
-  branches=$(git -C "$APP" for-each-ref --contains "$TARGET" --format='%(refname:short)' refs/remotes/origin)
+  # A commit made or fetched on the server alone has not been pushed, reviewed or tested by CI. origin/HEAD only
+  # points at another branch, so it is left out.
+  refs=$(git -C "$APP" for-each-ref --contains "$TARGET" --format='%(refname:lstrip=2)' refs/remotes/origin)
+  branches=
+  for ref in $refs; do
+    [ "$ref" = origin/HEAD ] || branches+=" $ref"
+  done
   [ -n "$branches" ] || fail "$1 is not on any origin branch: push it first"
   git -C "$APP" --no-pager log --oneline -1 "$TARGET"
-  echo "on" $branches
+  echo "on$branches"
   if [ "$TARGET" = "$head" ]; then
     echo "already deployed: --cutover would back up, restart and re-verify"
   elif git -C "$APP" merge-base --is-ancestor "$head" "$TARGET"; then
@@ -225,14 +231,20 @@ restore() {
   # Nothing may cut the restore short: a second signal or a closed terminal is ignored, here and by the git and
   # pip it runs, which inherit the setting.
   trap - ERR
-  trap '' INT TERM HUP PIPE
+  trap '' INT TERM HUP QUIT PIPE
   set +e
-  local old ok=0
+  local old from edits ok=0
   old=$(cat "$BACKUP/ROLLBACK_COMMIT")
+  from=$(git -C "$APP" rev-parse HEAD)
   printf '\n\033[31m== Restoring %s from %s\033[0m\n' "${old:0:7}" "$BACKUP" >&2
   systemctl stop "$BOT_UNIT"
   systemctl stop "$API_UNIT"
-  # --force: a checkout cut short, or files the failed run edited, must not keep the old commit out.
+  # --force: a checkout cut short, or files the failed run edited, must not keep the old commit out. Hand edits
+  # on the server are lost with them, so name them first.
+  edits=$(git -C "$APP" status --short --untracked-files=no)
+  if [ -n "$edits" ]; then
+    printf 'discarding edits to tracked files:\n%s\n' "$edits" >&2
+  fi
   if ! git -C "$APP" checkout --force --quiet "$old"; then
     echo "git checkout $old failed: both units are left stopped and the database is untouched" >&2
     return 1
@@ -246,11 +258,12 @@ restore() {
   else
     echo "no database in $BACKUP (the failure came before the backup): database left as it was"
   fi
-  # The frozen list pins every package, dependencies included, to what ran before the deploy.
-  if [ -f "$BACKUP/pip-freeze.txt" ]; then
-    "$VENV/bin/pip" install -q -r "$BACKUP/pip-freeze.txt" || ok=1
-  else
-    "$VENV/bin/pip" install -q -r "$APP/requirements.txt" || ok=1
+  # The frozen list pins every package, pip and dependencies included, to what ran before the deploy.
+  local packages=$APP/requirements.txt
+  [ ! -f "$BACKUP/pip-freeze.txt" ] || packages=$BACKUP/pip-freeze.txt
+  if ! "$VENV/bin/pip" install -q -r "$packages"; then
+    echo "packages not restored: the venv still holds ${from:0:7}'s packages" >&2
+    ok=1
   fi
   systemctl start "$API_UNIT"
   if wait_health; then echo "API answers on ${old:0:7}"; else echo "API did not answer: journalctl -u $API_UNIT" >&2; ok=1; fi
@@ -278,10 +291,10 @@ on_error() {
   rollback
 }
 
-# A dropped SSH session (HUP), Ctrl-C (INT) or kill (TERM) during the cutover rolls back as well.
+# A dropped SSH session (HUP), Ctrl-C (INT), Ctrl-\ (QUIT) or kill (TERM) during the cutover rolls back as well.
 on_signal() {
   trap - ERR
-  trap '' INT TERM HUP PIPE
+  trap '' INT TERM HUP QUIT PIPE
   set +e
   printf '\n\033[31minterrupted by SIG%s\033[0m\n' "$1" >&2
   rollback
@@ -301,6 +314,7 @@ cutover() {
   trap 'on_signal HUP' HUP
   trap 'on_signal INT' INT
   trap 'on_signal TERM' TERM
+  trap 'on_signal QUIT' QUIT
 
   say "Stopping $BOT_UNIT, then $API_UNIT"
   systemctl stop "$BOT_UNIT"
@@ -308,7 +322,10 @@ cutover() {
 
   say "Backing up the database and the package list to $BACKUP"
   backup_db
-  "$VENV/bin/pip" freeze > "$BACKUP/pip-freeze.txt"
+  # --all includes pip itself. The list gets its final name only once complete, so a restore never installs
+  # from half a list.
+  "$VENV/bin/pip" freeze --all > "$BACKUP/pip-freeze.txt.partial"
+  mv "$BACKUP/pip-freeze.txt.partial" "$BACKUP/pip-freeze.txt"
   ls -la "$BACKUP"
 
   say "Deploying ${TARGET:0:7}"
@@ -327,8 +344,9 @@ cutover() {
 
   say "The bot's live process cannot see the recorder key"
   if ! bot_process_clean; then
-    trap - ERR INT TERM HUP
+    # Stop the bot while a failure to stop it still rolls back, then leave the API running.
     systemctl stop "$BOT_UNIT"
+    trap - ERR INT TERM HUP QUIT
     printf '\033[31mSECURITY: %s stopped. The API is live on %s. Keep %s out of the bot, then start it.\033[0m\n' \
       "$BOT_UNIT" "${TARGET:0:7}" "$RECORDER_KEY" >&2
     exit 1
@@ -342,7 +360,7 @@ cutover() {
   }
   echo "$API_UNIT and $BOT_UNIT active, no restarts"
 
-  trap - ERR INT TERM HUP
+  trap - ERR INT TERM HUP QUIT
   printf '\n\033[32mDEPLOYED\033[0m %s -> %s\n' "${OLD:0:7}" "${TARGET:0:7}"
   echo "Rollback: bash $0 --rollback $BACKUP"
 }

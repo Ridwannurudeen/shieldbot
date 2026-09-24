@@ -25,10 +25,11 @@ bash /root/shieldbot-deploy.sh --check "$SHA"      # read-only: GO or NO-GO
 
 Run `--cutover` only after `--check` says GO, and never straight in the SSH session: if the session drops, the
 hangup makes the script roll back half way through a deploy that may have been fine. Run it in tmux, which
-keeps running after a disconnect (reattach with `tmux attach -t deploy`), with a log:
+keeps running after a disconnect (reattach with `tmux attach -t deploy`), with a log. `tee -i` ignores Ctrl-C,
+so the rollback's output still reaches the log and the screen after you press it:
 
 ```bash
-tmux new -s deploy "bash /root/shieldbot-deploy.sh --cutover $SHA 2>&1 | tee /root/shieldbot-deploy-$SHA.log"
+tmux new -s deploy "bash /root/shieldbot-deploy.sh --cutover $SHA 2>&1 | tee -i /root/shieldbot-deploy-$SHA.log"
 ```
 
 or, without tmux, detached under nohup, then follow the log:
@@ -37,6 +38,13 @@ or, without tmux, detached under nohup, then follow the log:
 nohup bash /root/shieldbot-deploy.sh --cutover "$SHA" > "/root/shieldbot-deploy-$SHA.log" 2>&1 &
 tail -f "/root/shieldbot-deploy-$SHA.log"
 ```
+
+The rollback on HUP applies to the tmux form (if the tmux session itself is killed) and to a plain SSH session.
+Under nohup the script ignores HUP by design, so a disconnect leaves it running. Ctrl-C, Ctrl-\ and `kill`
+(INT, QUIT, TERM) roll back in every form. `kill -9` (SIGKILL) cannot be caught: the script dies on the spot,
+nothing rolls back, and a `pip` or `git` it was running can be left behind as an orphan. Find it with
+`pgrep -af 'pip install|git -C /opt/shieldbot'`, kill it by hand, then run `--rollback` with the backup
+directory the script printed.
 
 `--check` changes nothing on the server apart from fetching origin, so it is safe to run at any time. It says
 NO-GO when:
@@ -59,7 +67,8 @@ It also names the origin branches holding the commit, how far it is ahead of the
 1. stops `shieldbot-bot`, then `shieldbot`
 2. backs up the database with sqlite3's backup API to `/root/shieldbot-backup-<date>-<time>/shieldbot.db`,
    checked with `PRAGMA quick_check`, and writes the running commit to `ROLLBACK_COMMIT` and the installed
-   packages (`pip freeze`) to `pip-freeze.txt` beside it
+   packages, pip included (`pip freeze --all`), to `pip-freeze.txt` beside it; the list gets that name only
+   once it is complete
 3. checks out the commit and runs `pip install -r requirements.txt` in the venv
 4. starts the API alone (it runs any database migration) and waits for `/api/health`
 5. requires `/api/health` to report `status: ok` with exactly the chains in the deployed
@@ -67,10 +76,10 @@ It also names the origin branches holding the commit, how far it is ahead of the
 6. starts the bot, checks that its running process does not hold the recorder key, and watches both units for
    20 seconds for a crash or restart
 
-Any failure from step 1 on, and any HUP, INT or TERM signal, rolls back by itself: the old commit, packages and
-backed-up database go back and both units start again. The script names the line and command that failed. The
-one exception is the recorder key check in step 6: if the bot holds the key, the script stops the bot, leaves
-the API running on the new commit and exits non-zero. Fix the bot's configuration, then start it.
+Any failure from step 1 on, and any HUP, INT, QUIT or TERM signal, rolls back by itself: the old commit,
+packages and backed-up database go back and both units start again. The script names the line and command that
+failed. The one exception is the recorder key check in step 6: if the bot holds the key, the script stops the
+bot, leaves the API running on the new commit and exits non-zero. Fix the bot's configuration, then start it.
 
 An automatic rollback also discards whatever the new API wrote to the database between its start in step 4 and
 the rollback: those writes go with the backed-up copy. If the failure came before the backup in step 2 was
@@ -88,12 +97,13 @@ A successful cutover ends with the exact command, for example:
 bash /root/shieldbot-deploy.sh --rollback /root/shieldbot-backup-20260924-101500
 ```
 
-It stops both units, checks out the commit in `ROLLBACK_COMMIT` (with `--force`, so files a failed run edited
-cannot block it), removes any `shieldbot.db-wal` and `shieldbot.db-shm`, copies the backed-up database over the
-live one, reinstalls the packages from `pip-freeze.txt` (or the old commit's `requirements.txt` if the backup
-has no frozen list) and starts the API, then the bot. It exits 0 only when the API answers `/api/health` and the
-bot is active. Signals are ignored while it runs, so neither a second Ctrl-C nor a dropped session can leave it
-half done.
+It stops both units, lists any edits to tracked files it is about to discard, checks out the commit in
+`ROLLBACK_COMMIT` (with `--force`, so files a failed run edited cannot block it), removes any `shieldbot.db-wal`
+and `shieldbot.db-shm`, copies the backed-up database over the live one, reinstalls the packages from
+`pip-freeze.txt` (or the old commit's `requirements.txt` if the backup has no frozen list) and starts the API,
+then the bot. If the reinstall fails it says so: the venv then still holds the newer commit's packages. It exits
+0 only when the API answers `/api/health` and the bot is active. Signals are ignored while it runs, so neither a
+second Ctrl-C nor a dropped session can leave it half done.
 
 **A rollback puts back the database as it was at the cutover. Everything written since (scans, reports,
 alerts, subscriptions, verdict records) is lost.** The database goes back with the code because older code may

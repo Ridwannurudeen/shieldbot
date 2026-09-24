@@ -175,8 +175,10 @@ class Server:
         bin_dir.mkdir(parents=True)
         write_executable(bin_dir / "python", f'#!/bin/sh\nexec "{PYTHON}" "$@"\n')
         # pip stands in for the new code's first run: on the target commit it writes a row. State files make it
-        # edit a tracked file (pip-dirties-tree), fail (pip-fails), or signal the deploy script while it waits
-        # (signal-during-pip holds the signal name; that one fires on every install, the restore's too).
+        # edit a tracked file (pip-dirties-tree), fail on the target (pip-fails) or in the restore
+        # (pip-fails-on-restore), die half way through `pip freeze` (freeze-truncated), signal the deploy script
+        # while it waits (signal-during-pip holds the signal name and fires on every install, the restore's too),
+        # or behave like Ctrl-C, which signals the script and kills pip itself (ctrl-c-during-pip).
         migrate = (
             "import sqlite3, sys; db = sqlite3.connect(sys.argv[1]); "
             "db.execute('INSERT OR IGNORE INTO scans VALUES (99)'); db.commit(); db.close()"
@@ -186,11 +188,17 @@ class Server:
             bin_dir / "pip",
             f"""#!/bin/sh
 printf 'pip %s\\n' "$*" >> "$STATE/calls"
-if [ "$1" = freeze ]; then echo fastapi==0.1; exit 0; fi
+if [ "$1" = freeze ]; then
+  echo fastapi==0.1
+  if [ -e "$STATE/freeze-truncated" ]; then printf 'web3==6'; exit 1; fi
+  exit 0
+fi
 if [ -f "{app}/NEW_SCHEMA" ]; then
   "{PYTHON}" -c "{migrate}" "{self.db.as_posix()}"
   [ ! -e "$STATE/pip-dirties-tree" ] || echo edited >> "{app}/NEW_SCHEMA"
+  if [ -e "$STATE/ctrl-c-during-pip" ]; then kill -INT "$PPID"; kill -INT $$; fi
 fi
+[ ! -e "$STATE/pip-fails-on-restore" ] || [ -f "{app}/NEW_SCHEMA" ] || exit 1
 [ ! -e "$STATE/signal-during-pip" ] || kill -"$(cat "$STATE/signal-during-pip")" "$PPID"
 if [ -e "$STATE/signal-during-restore-pip" ] && [ ! -f "{app}/NEW_SCHEMA" ]; then
   kill -"$(cat "$STATE/signal-during-restore-pip")" "$PPID"
@@ -287,11 +295,13 @@ def test_bad_arguments_stop_before_any_command(server, args):
 
 def test_check_is_read_only_and_says_go(server):
     database = server.db.read_bytes()
+    # A clone has origin/HEAD pointing at the default branch; it is not a branch of its own.
+    git(server.app, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
     code, out, err = server.run("--check", server.target[:7])
     assert code == 0, err
     assert "GO" in out and "rollback point" in out
     assert "1 commit(s) ahead" in out
-    assert "on origin/main" in out
+    assert "\non origin/main\n" in out
     calls = server.calls()
     assert any(call.startswith("git -C") and " fetch " in call for call in calls)
     # A pager would wait for a keypress with nobody at the terminal.
@@ -368,6 +378,16 @@ def test_check_refuses_a_commit_that_exists_only_on_the_server(server):
     assert "rollback point" not in out
 
 
+def test_check_refuses_a_commit_whose_only_origin_branch_was_deleted(server):
+    # The server still remembers origin/gone, but the branch no longer exists on origin.
+    local = git(server.app, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "on a deleted branch")
+    git(server.app, "update-ref", "refs/remotes/origin/gone", local)
+    code, out, err = server.run("--check", local)
+    assert code == 1
+    assert "not on any origin branch" in err
+    assert "rollback point" not in out
+
+
 def test_check_refuses_when_the_app_filesystem_is_short_of_space(server):
     server.flag("app-free-kib", "10")
     code, out, err = server.run("--check", server.target)
@@ -414,7 +434,8 @@ def test_cutover_deploys_in_order_and_touches_only_its_two_units(server):
         if call.startswith("systemctl"):
             assert call.split()[-1] in UNITS, call
     checkout = next(i for i, call in enumerate(calls) if " checkout " in call)
-    assert first(calls, "systemctl stop shieldbot") < first(calls, "pip freeze") < checkout
+    # --all includes pip itself, so a pip upgrade is undone too.
+    assert first(calls, "systemctl stop shieldbot") < first(calls, "pip freeze --all") < checkout
     assert checkout < first(calls, "pip install") < first(calls, "systemctl start shieldbot")
     assert first(calls, "systemctl start shieldbot") < first(calls, "curl")
     assert first(calls, "curl") < first(calls, "systemctl start shieldbot-bot")
@@ -496,7 +517,36 @@ def test_rollback_discards_edits_the_failed_run_made_to_tracked_files(server):
     assert git(server.app, "status", "--porcelain", "--untracked-files=no") == ""
 
 
-@pytest.mark.parametrize("signal", ["HUP", "TERM", "INT"])
+def test_a_truncated_package_list_is_never_restored(server):
+    # pip freeze dies half way: the partial list must not be what the restore installs from.
+    server.flag("freeze-truncated")
+    code, _, err = server.run("--cutover", server.target)
+    assert_rolled_back(server, code, err)
+    [backup] = server.backups()
+    assert not (backup / "pip-freeze.txt").exists()
+    installs = [call for call in server.calls() if call.startswith("pip install")]
+    assert installs == [f"pip install -q -r {server.app.as_posix()}/requirements.txt"]
+
+
+def test_a_failed_package_restore_is_named(server):
+    server.flag("pip-fails")
+    server.flag("pip-fails-on-restore")
+    code, _, err = server.run("--cutover", server.target)
+    assert code == 1
+    assert f"packages not restored: the venv still holds {server.target[:7]}'s packages" in err
+    assert "the rollback did not complete" in err
+    assert server.head() == server.old
+
+
+def test_ctrl_c_during_cutover_rolls_back(server):
+    # Ctrl-C signals the whole foreground process group: the script and the pip it is waiting for, which dies.
+    server.flag("ctrl-c-during-pip")
+    code, _, err = server.run("--cutover", server.target)
+    assert "interrupted by SIGINT" in err
+    assert_rolled_back(server, code, err)
+
+
+@pytest.mark.parametrize("signal", ["HUP", "TERM", "INT", "QUIT"])
 def test_a_signal_during_cutover_rolls_back(server, signal):
     # A dropped SSH session sends HUP. The same signal is sent again during the restore's own pip install, and
     # the restore must finish regardless.
@@ -507,7 +557,7 @@ def test_a_signal_during_cutover_rolls_back(server, signal):
     assert len([call for call in server.calls() if call.startswith("pip install")]) == 2
 
 
-@pytest.mark.parametrize("signal", ["HUP", "TERM"])
+@pytest.mark.parametrize("signal", ["HUP", "TERM", "QUIT"])
 def test_a_signal_during_the_restore_does_not_cut_it_short(server, signal):
     # The deploy fails on its own, then the session drops while the restore reinstalls the old packages.
     server.flag("pip-fails")
@@ -554,6 +604,19 @@ def test_manual_rollback_restores_the_saved_commit_and_database(server):
     assert server.head() == server.old
     assert rows(server.db) == [1]
     assert server.active() == UNITS
+
+
+def test_manual_rollback_lists_the_hand_edits_it_discards(server):
+    assert server.run("--cutover", server.target)[0] == 0
+    (server.app / "requirements.txt").write_text(
+        "fastapi\nhotfix-on-the-server\n", encoding="utf-8"
+    )
+    [backup] = server.backups()
+    code, out, err = server.run("--rollback", backup.as_posix())
+    assert code == 0, err + out
+    assert "discarding edits to tracked files" in err
+    assert " M requirements.txt" in err
+    assert (server.app / "requirements.txt").read_text(encoding="utf-8") == "fastapi\n"
 
 
 def test_rollback_refuses_a_directory_without_a_saved_commit(server):
