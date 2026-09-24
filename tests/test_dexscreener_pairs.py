@@ -264,3 +264,16 @@ async def test_the_forensic_prompt_reads_a_missing_24h_change_as_unknown(ledger)
     )
 
     assert "Price Change 24h: Unknown" in context
+
+
+@pytest.mark.asyncio
+async def test_a_lowercase_request_address_still_finds_the_tokens_own_pair(ledger):
+    # DexScreener spells addresses checksummed whatever the request's case.
+    reply = REPLIES[f"{API}/token-pairs/v1/ethereum/{USDT}"]
+    result, _ = await market(
+        USDT.lower(), 1, {f"{API}/token-pairs/v1/ethereum/{USDT.lower()}": reply}
+    )
+
+    assert result["token_symbol"] == "USDT"
+    assert result["price_usd"] == 0.9996
+    assert result["status"] == "ok"

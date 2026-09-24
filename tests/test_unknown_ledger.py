@@ -389,7 +389,7 @@ async def test_goplus_phishing_lookups_are_counted_without_a_chain(ledger, reply
 
 PAIR = {
     "chainId": "bsc",
-    "baseToken": {"name": "T", "symbol": "T"},
+    "baseToken": {"address": TOKEN, "name": "T", "symbol": "T"},
     "priceUsd": "1",
     "liquidity": {"usd": 100000},
     "volume": {"h24": 5},
