@@ -1482,6 +1482,28 @@ def test_the_wallet_is_told_the_chain_that_was_analysed(given):
     )
 
 
+@pytest.mark.parametrize("field", ["signMethod", "typedData", "unknownStructure", "callCount"])
+def test_fields_on_the_page_transaction_cannot_change_how_it_is_shown(field):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const field = JSON.parse(process.argv[1]);
+  // A signMethod would have content.js show the transaction as a message to sign, with no
+  // analysis; unknownStructure or callCount would change its overlay too.
+  const value = {signMethod: 'personal_sign', typedData: {primaryType: 'Mail'}, unknownStructure: true, callCount: 1}[field];
+  const drainer = '0x' + 'd'.repeat(40);
+  const pending = provider.request({method: 'eth_sendTransaction',
+    params: [{to: drainer, data: '0x095ea7b3', [field]: value, callIndex: 1}]});
+  pending.catch(() => {});
+  await flush();
+  const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+  assert.deepEqual(plain(intercept.tx), {to: drainer, from: '', value: '0x0', data: '0x095ea7b3', chainId: 56});
+""",
+        field,
+    )
+
+
 def test_replaced_json_parse_cannot_change_the_typed_data_shown():
     run_node(
         INJECT_HARNESS

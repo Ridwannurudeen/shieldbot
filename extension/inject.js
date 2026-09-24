@@ -316,19 +316,22 @@
         // decision; the batch goes to the wallet only once all are proceeded.
         const isTransaction = structured && (kind === "transaction" || kind === "calls");
         const count = structured && kind === "calls" ? calls.length : 1;
+        // Only the fields the analysis reads are taken from the page's
+        // transaction or call: any other field on it, such as a signMethod,
+        // could change how content.js shows the request.
         const payloadAt = (index, chainId) => {
           if (!isTransaction) return interceptData;
-          if (kind === "transaction") return { __proto__: null, ...txParams, chainId };
-          const call = ownValue(calls, index);
+          const isCall = kind === "calls";
+          const source = isCall ? ownValue(calls, index) : txParams;
           return {
             __proto__: null,
-            to: call.to,
+            to: source.to,
             from: txParams.from,
-            value: call.value,
-            data: call.data,
+            value: source.value,
+            data: source.data,
             chainId,
-            callIndex: index + 1,
-            callCount: count,
+            callIndex: isCall ? index + 1 : undefined,
+            callCount: isCall ? count : undefined,
           };
         };
         const revision = chainRevision;
