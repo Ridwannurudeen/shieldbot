@@ -24,10 +24,13 @@ async def env(monkeypatch):
     await db.initialize()
     auth = AuthManager(db)
     send = AsyncMock(return_value={"id": "re_1"})
+    notice = AsyncMock(return_value={"id": "re_n"})
     services = SimpleNamespace(
         db=db,
         auth_manager=auth,
-        email_service=SimpleNamespace(is_enabled=lambda: True, send_free_key_verification=send),
+        email_service=SimpleNamespace(
+            is_enabled=lambda: True, send_free_key_verification=send, send_free_key_exists_notice=notice
+        ),
         settings=SimpleNamespace(trusted_proxies=[], public_api_url="https://api.example"),
     )
     try:
@@ -37,7 +40,9 @@ async def env(monkeypatch):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=api.app), base_url="http://testserver"
         ) as client:
-            yield SimpleNamespace(client=client, db=db, auth=auth, send=send, services=services)
+            yield SimpleNamespace(
+                client=client, db=db, auth=auth, send=send, notice=notice, services=services
+            )
     finally:
         await db.close()
 
@@ -133,11 +138,33 @@ async def test_unknown_token_is_refused(env):
 
 
 @pytest.mark.asyncio
+async def test_link_host_ignores_a_trailing_slash(env):
+    env.services.settings.public_api_url = "https://api.example/"
+    await _request(env)
+    assert env.send.await_args.args[1].startswith("https://api.example/api/keys/free/verify#token=")
+
+
+@pytest.mark.asyncio
 async def test_one_pending_link_per_address(env):
-    assert (await _request(env)).status_code == 200
+    first = await _request(env)
     second = await _request(env)
-    assert second.status_code == 429
+    assert second.status_code == 200
+    assert second.json() == first.json()
     assert env.send.await_count == 1
+    env.notice.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_request_answers_the_same_whatever_the_address_state(env, monkeypatch):
+    """New address, address with a pending link, address with a key: one answer, so no enumeration."""
+    import api
+
+    monkeypatch.setattr(api, "_free_key_limiter", api.RateLimiter(1000, 1000))
+    await env.auth.create_key("keyed@example.com", "free")
+    answers = [await _request(env, "new@example.com"), await _request(env, "new@example.com")]
+    answers.append(await _request(env, "keyed@example.com"))
+    assert {response.status_code for response in answers} == {200}
+    assert len({response.text for response in answers}) == 1
 
 
 @pytest.mark.asyncio
@@ -149,14 +176,21 @@ async def test_requests_are_limited_per_ip(env):
 
 
 @pytest.mark.asyncio
-async def test_an_address_with_an_active_free_key_gets_no_second_one(env):
+async def test_an_address_with_an_active_free_key_gets_no_second_one(env, monkeypatch):
     await _request(env)
     token = _sent_token(env)
+    import api
+
+    monkeypatch.setattr(api, "_free_key_limiter", api.RateLimiter(1000, 1000))
     await env.auth.create_key(EMAIL, "free")
     assert (await _verify(env, token)).status_code == 409
-    assert (await _request(env)).status_code == 409
+    assert (await _request(env)).status_code == 200
+    env.notice.assert_awaited_once_with(EMAIL)
+    assert env.send.await_count == 1
     cursor = await env.db._db.execute("SELECT COUNT(*) FROM api_keys WHERE owner = ?", (EMAIL,))
     assert (await cursor.fetchone())[0] == 1
+    assert (await _request(env)).status_code == 200
+    assert env.notice.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -205,6 +239,21 @@ async def test_email_service_sends_the_link_without_logging_it(monkeypatch, capl
     assert "https://api.example/api/keys/free/verify#token=abc&lt;def" in params["html"]
     assert "abc<def" not in params["html"]
     assert "token=" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_email_service_sends_the_key_exists_notice(monkeypatch):
+    from services.email_service import EmailService
+
+    resend = SimpleNamespace(
+        api_key=None, Emails=SimpleNamespace(send=MagicMock(return_value={"id": "re_n"}))
+    )
+    monkeypatch.setitem(sys.modules, "resend", resend)
+    assert await EmailService(api_key="re_key").send_free_key_exists_notice(EMAIL) == {"id": "re_n"}
+    params = resend.Emails.send.call_args.args[0]
+    assert params["to"] == [EMAIL]
+    assert "already has an active free" in params["html"]
+    assert "deactivate" in params["html"]
 
 
 @pytest.mark.asyncio

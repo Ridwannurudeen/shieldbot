@@ -46,9 +46,21 @@ class EmailService:
             return None
 
     async def send_free_key_verification(self, to_email: str, verify_url: str) -> Optional[dict]:
-        """Email the single-use link that creates a free API key. Returns Resend response or None on failure.
+        """Email the single-use link that creates a free API key. Returns Resend response or None on failure."""
+        return await self._send_free_key_email(
+            to_email, "Your ShieldBot API key link", _build_free_key_verification_html(verify_url)
+        )
 
-        The link carries the token, so neither the link nor the request parameters are logged.
+    async def send_free_key_exists_notice(self, to_email: str) -> Optional[dict]:
+        """Tell an address that asked for a free key that it already has one. Returns Resend response or None on failure."""
+        return await self._send_free_key_email(
+            to_email, "Your ShieldBot API key request", _build_free_key_exists_html()
+        )
+
+    async def _send_free_key_email(self, to_email: str, subject: str, html: str) -> Optional[dict]:
+        """Send one self-serve key email.
+
+        A verification link carries its token, so neither the message nor the request parameters are logged.
         """
         if not self.is_enabled():
             return None
@@ -60,16 +72,44 @@ class EmailService:
             params: resend.Emails.SendParams = {
                 "from": self._from_email,
                 "to": [to_email],
-                "subject": "Your ShieldBot API key link",
-                "html": _build_free_key_verification_html(verify_url),
+                "subject": subject,
+                "html": html,
             }
 
             response = await asyncio.to_thread(resend.Emails.send, params)
-            logger.info("Free key verification email sent")
+            logger.info("Free key email sent: %s", subject)
             return response
         except Exception as e:
-            logger.error("Failed to send free key verification email: %s", type(e).__name__)
+            logger.error("Failed to send free key email: %s", type(e).__name__)
             return None
+
+
+def _build_free_key_exists_html() -> str:
+    """Short HTML email for an address that already has an active free key."""
+    return """\
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0;padding:40px 20px;background-color:#0a0e1a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background-color:#111827;border:1px solid #1f2937;border-radius:12px;">
+    <tr>
+      <td style="padding:40px;">
+        <h2 style="margin:0 0 16px;color:#ffffff;font-size:22px;font-weight:700;">No new ShieldBot API key was created</h2>
+        <p style="margin:0 0 24px;color:#9ca3af;font-size:15px;line-height:1.7;">
+          This address already has an active free ShieldBot API key, and each address can hold one.
+          The admin must deactivate the existing key before a new one can be issued.
+        </p>
+        <p style="margin:0;color:#4a5568;font-size:12px;line-height:1.6;">
+          If you did not ask for a key, ignore this email: nothing has changed.
+        </p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
 
 
 def _build_free_key_verification_html(verify_url: str) -> str:

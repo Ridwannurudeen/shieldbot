@@ -1701,22 +1701,25 @@ async def request_free_key(req: FreeKeyRequest, request: Request):
     email = req.email.strip().lower()
     if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
         raise HTTPException(status_code=400, detail="Invalid email address")
-    if await container.auth_manager.has_active_key(email, "free"):
-        raise HTTPException(status_code=409, detail="This email already has an active free key.")
 
-    # The link carries the token in its fragment, which browsers never send, so it stays out of access logs.
+    # One answer whether the address is new, has a pending link or already has a key, so the
+    # endpoint does not reveal which. Every mail takes the address's pending slot, so an address
+    # gets at most one mail per link lifetime; while a slot is pending nothing new is sent.
+    answer = {"message": "Check your email for the next step. A link that creates a key expires in 30 minutes."}
     token = secrets.token_urlsafe(32)
     token_hash = hash_key(token)
     if not await container.db.add_free_key_request(email, token_hash, time.time() + FREE_KEY_LINK_TTL_SECONDS):
-        return JSONResponse(
-            status_code=429,
-            content={"detail": "A key link was already sent to this address and has not expired. Use it, or wait 30 minutes."},
-        )
-    verify_url = f"{container.settings.public_api_url}/api/keys/free/verify#token={token}"
-    if not await container.email_service.send_free_key_verification(email, verify_url):
+        return answer
+    if await container.auth_manager.has_active_key(email, "free"):
+        delivered = await container.email_service.send_free_key_exists_notice(email)
+    else:
+        # The token rides in the fragment, which browsers never send, so it stays out of access logs.
+        verify_url = f"{container.settings.public_api_url.rstrip('/')}/api/keys/free/verify#token={token}"
+        delivered = await container.email_service.send_free_key_verification(email, verify_url)
+    if not delivered:
         await container.db.delete_free_key_request(token_hash)
         raise HTTPException(status_code=503, detail="The email could not be sent. Please try again later.")
-    return {"message": "Check your email for a link that creates your key. It expires in 30 minutes."}
+    return answer
 
 
 @app.get("/api/keys/free/verify", response_class=HTMLResponse, include_in_schema=False)
