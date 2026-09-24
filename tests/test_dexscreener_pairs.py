@@ -7,12 +7,18 @@ unscoped route served for the same tokens, so a return to it fails here on the d
 the bug.
 """
 
+import copy
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from analyzers.market import MarketAnalyzer
+from core.analyzer import AnalysisContext, AnalyzerResult
+from core.extension_formatter import format_extension_alert
+from core.risk_engine import RiskEngine
 from core.unknown_ledger import UnknownLedger
 from services.dex_service import DexService
 from utils.ai_analyzer import AIAnalyzer
@@ -184,6 +190,68 @@ async def test_a_missing_24h_change_leaves_only_the_volatility_flag_unknown(
     assert result["status"] == "ok"
     assert all(result["coverage"].values())
     assert counts(ledger, chain_id) == {"answered": 1, "unknown": 0, "failed": 0}
+
+
+async def scan(market_data):
+    """The risk output and extension alert for a fully covered token with this market data."""
+    service = SimpleNamespace(fetch_token_market_data=AsyncMock(return_value=market_data))
+    results = [
+        AnalyzerResult(
+            name="structural",
+            weight=0.40,
+            score=0,
+            data={
+                "status": "ok",
+                "is_contract": True,
+                "is_verified": True,
+                "contract_age_days": 400,
+                "scam_matches": [],
+                "coverage": {"scam_database": True, "is_verified": True, "contract_age_days": True},
+            },
+        ),
+        await MarketAnalyzer(service).analyze(AnalysisContext(address=USDC, chain_id=8453)),
+        AnalyzerResult(name="behavioral", weight=0.20, score=0, data={"status": "ok"}),
+        AnalyzerResult(
+            name="honeypot",
+            weight=0.15,
+            score=0,
+            data={
+                "status": "ok",
+                "is_honeypot": False,
+                "can_buy": True,
+                "can_sell": True,
+                "buy_tax": 0,
+                "sell_tax": 0,
+            },
+        ),
+    ]
+    risk = RiskEngine().compute_from_results(results)
+    return risk, format_extension_alert(risk)
+
+
+@pytest.mark.asyncio
+async def test_a_missing_24h_change_is_named_and_scores_like_a_flat_one(ledger):
+    url = f"{API}/token-pairs/v1/base/{USDC}"
+    flat_reply = copy.deepcopy(REPLIES[url])
+    for pair in flat_reply:
+        pair["priceChange"] = {"h24": 0}
+    missing, _ = await market(USDC, 8453)
+    flat, _ = await market(USDC, 8453, {url: flat_reply})
+    assert flat["volatility_flag"] is False
+
+    risk, alert = await scan(missing)
+    flat_risk, flat_alert = await scan(flat)
+
+    marker = "Volatility unknown: 24h price change unavailable"
+    assert risk["coverage"]["market"] == 1
+    assert alert["risk_classification"] == flat_alert["risk_classification"] == "SAFE"
+    assert risk["rug_probability"] == flat_risk["rug_probability"]
+    assert risk["risk_level"] == flat_risk["risk_level"]
+    assert risk["category_scores"] == flat_risk["category_scores"]
+    assert risk["status"] == alert["status"] == "ok"
+    assert marker in risk["critical_flags"]
+    assert marker in alert["top_flags"]
+    assert marker not in flat_risk["critical_flags"]
 
 
 @pytest.mark.asyncio
