@@ -1,0 +1,131 @@
+# ShieldBot MCP server
+
+The API serves a [Model Context Protocol](https://modelcontextprotocol.io) server under `/mcp` (mounted in `api.py`). It reports itself as `shieldbot-mcp` version 3.1.0 and speaks protocol version `2024-11-05` over the HTTP+SSE transport. It does not implement the newer Streamable HTTP transport.
+
+Production URL: `https://api.shieldbotsecurity.online/mcp/sse`
+
+## Endpoints
+
+| Endpoint | Purpose | Auth |
+|----------|---------|------|
+| `GET /mcp/sse` | Event stream. The first event is `endpoint` with `/mcp/messages?session_id=<id>`; responses follow as `message` events. | `X-API-Key` |
+| `POST /mcp/messages?session_id=<id>` | One JSON-RPC 2.0 message per request. | `X-API-Key` |
+| `GET /mcp/health` | Status and open session count. | none |
+
+How the transport behaves (`server.py`):
+
+- A request's response is pushed to its session's stream and also returned in the POST body (HTTP 200), so a client without a stream can read it from the body.
+- A notification (a message with no `id`, such as `notifications/initialized` or `notifications/cancelled`) is never answered: the POST returns 202 with an empty body and nothing is sent on the stream. Cancellation is ignored; a running request cannot be interrupted.
+- A JSON array (a batch) or any other non-object body is answered with an Invalid Request error (-32600).
+- The stream sends a `: heartbeat` comment every 30 seconds while idle and closes after 5 minutes without a message. Heartbeats do not count as activity. At most 50 streams can be open; the 51st gets HTTP 503.
+
+## Protocol
+
+- `initialize` always answers `protocolVersion: "2024-11-05"`, whatever version the client asks for; the client decides whether to continue.
+- Declared capabilities: `tools`, `resources` and `prompts`, with no sub-capabilities (no `listChanged`, no `subscribe`).
+- Methods handled: `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`. Anything else is Method not found (-32601). Not implemented: `resources/subscribe`, `resources/templates/list`, `logging/setLevel`, `completion/complete`.
+- A tool that fails validation (bad address, missing `chain_id`, unknown tool name) returns a result with `isError: true` and `{"error": "..."}` as its text. An unsupported or non-integer `chain_id` is refused with HTTP 400 and no analysis runs.
+
+## Authentication
+
+- Both `/mcp/sse` and `/mcp/messages` require an `X-API-Key` header. Without a valid key the request is refused (401 or 403).
+- Keys start with `sb_`. They are issued by an administrator only: `POST /api/keys` with the `X-Admin-Secret` header. There is no self-service signup, so an outside user cannot get a key today.
+- Every request made with a key counts against that key's per-minute and daily limits (free tier 60 per minute and 1,000 per day, pro tier 300 and 50,000). Opening a stream counts once; each POST counts once. Over the limit the API answers 429.
+
+## Tools (9)
+
+Every tool result is JSON in a single `text` content item.
+
+| Tool | Required arguments | Notes |
+|------|--------------------|-------|
+| `scan_contract` | `address`, `chain_id` | All analyzers and the risk engine. Incomplete coverage gives `status: "unknown"`, `verdict: "UNKNOWN"`, `risk_display: "Unknown (incomplete provider coverage)"` and `coverage_reasons`. |
+| `simulate_transaction` | `from`, `to`, `data`, `chain_id` | Tenderly simulation. Approval changes are not measured (`approvals_granted` is always null). When Tenderly is not configured or the simulation fails: `status: "unknown"`, `coverage_reasons.simulation`, null measurements. |
+| `check_deployer` | `address`, `chain_id` | Local deployer index. An unindexed contract gives `status: "unknown"` with null counts. Counts span every chain the deployer is indexed on, and `flagged_count` counts only contracts with a stored HIGH score, so a contract never scored is not counted. `funded_by` is always null. |
+| `check_agent_reputation` | `agent_id` | Block rate over at most 1,000 local firewall records. An unregistered agent has `trust_score: null`; a registered agent with no history gets 100. |
+| `check_approval_risk` | `wallet_address`, `chain_id` | Not implemented: always `status: "unknown"` with null `approvals`. |
+| `scan_for_injection` | `content` | A fixed regex list. `clean: true` means no listed pattern matched, not that the text is safe. |
+| `query_threat_graph` | `address`, `chain_id` | Not implemented: always `status: "unknown"` with null connections. |
+| `get_threat_feed` | none | Latest agent findings (`limit` 1 to 100, default 20). |
+| `get_robinhood_launches` | none | Robinhood Chain (4663) launches with their latest scan outcome; `chain_id` defaults to 4663, the only chain with launch discovery. `unknown` and `not_scanned` launches are never safe. Page with `next_cursor`. |
+
+`chain_id` has no default on the address and transaction tools: a call without it is a tool error. Supported chains are the ones the API registers an adapter for, including 56 (BNB Chain) and 4663 (Robinhood Chain).
+
+A tool call:
+
+```json
+{"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+ "params": {"name": "scan_contract", "arguments": {"address": "0x...", "chain_id": 4663}}}
+```
+
+## Resources (3)
+
+| URI | Content |
+|-----|---------|
+| `shieldbot://threat-feed` | The 50 latest agent findings. |
+| `shieldbot://agent/{agent_id}/health` | Policy and the 20 latest firewall verdicts of a registered agent. |
+| `shieldbot://wallet/{address}/guardian` | Not implemented: always `status: "unknown"` with null `approvals`. |
+
+The two templated URIs are listed by `resources/list` as they are; substitute the value before calling `resources/read`.
+
+## Prompts (2)
+
+- `security-analysis` (optional `contract_address`, `transaction_hash`): steps that call `scan_contract`, `check_deployer` and `simulate_transaction`, and ask for an UNKNOWN verdict when coverage is incomplete.
+- `agent-evaluation` (required `agent_id`): steps that call `check_agent_reputation` and read the agent health resource.
+
+## Connecting a client
+
+The snippets follow each client's documentation as checked on 2026-09-24. None of them has been run against this server end to end. Replace `sb_...` with a real key.
+
+**Claude Code**
+
+```bash
+claude mcp add --transport sse shieldbot https://api.shieldbotsecurity.online/mcp/sse --header "X-API-Key: sb_..."
+```
+
+Add `--scope user` to use it in every project. To share it through a project's `.mcp.json` without committing the key:
+
+```json
+{
+  "mcpServers": {
+    "shieldbot": {
+      "type": "sse",
+      "url": "https://api.shieldbotsecurity.online/mcp/sse",
+      "headers": { "X-API-Key": "${SHIELDBOT_API_KEY}" }
+    }
+  }
+}
+```
+
+**Cursor** (`.cursor/mcp.json` in a project, or `~/.cursor/mcp.json`)
+
+```json
+{
+  "mcpServers": {
+    "shieldbot": {
+      "url": "https://api.shieldbotsecurity.online/mcp/sse",
+      "headers": { "X-API-Key": "${env:SHIELDBOT_API_KEY}" }
+    }
+  }
+}
+```
+
+**Claude Desktop** runs local servers from its config file, so it reaches this server through the [`mcp-remote`](https://github.com/geelen/mcp-remote) bridge (needs Node.js). In `claude_desktop_config.json` (macOS `~/Library/Application Support/Claude/`, Windows `%APPDATA%\Claude\`):
+
+```json
+{
+  "mcpServers": {
+    "shieldbot": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://api.shieldbotsecurity.online/mcp/sse",
+        "--transport", "sse-only",
+        "--header", "X-API-Key:${SHIELDBOT_API_KEY}"
+      ],
+      "env": { "SHIELDBOT_API_KEY": "sb_..." }
+    }
+  }
+}
+```
+
+`--transport sse-only` stops the bridge from trying Streamable HTTP first. The header has no space after the colon because Claude Desktop on Windows does not escape spaces inside `args`.
