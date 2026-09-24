@@ -1561,6 +1561,50 @@ def test_a_provider_is_recorded_as_wrapped_before_it_is_subscribed_to():
     )
 
 
+@pytest.mark.parametrize("call_chain", ["other", "same-hex", "same-number"])
+def test_a_batch_call_naming_another_chain_is_shown_as_unknown_structure_and_rejected(call_chain):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const callChain = {other: '0x1', 'same-hex': '0x38', 'same-number': 56}[JSON.parse(process.argv[1])];
+  const calls = [{to: '0x' + 'a'.repeat(40)}, {to: '0x' + 'c'.repeat(40), chainId: callChain}];
+  const pending = provider.request({method: 'wallet_sendCalls', params: [{version: '2.0.0', chainId: '0x38', calls}]});
+  pending.catch(() => {});
+  const intercepts = () => posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT');
+  await flush();
+  const {requestId, tx} = intercepts().at(-1);
+  if (callChain !== '0x1') {
+    assert.equal(tx.callIndex, 1, 'a call on the bound chain was not analysed');
+    return;
+  }
+  assert.equal(tx.unknownStructure, true);
+  assert.equal(intercepts().length, 1);
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'proceed', proof: await proof(requestId, 'proceed')});
+  await assert.rejects(pending, /chain/);
+  assert.equal(sent.length, 0);
+""",
+        call_chain,
+    )
+
+
+def test_fields_on_a_batch_call_cannot_change_how_it_is_shown():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const call = {to: '0x' + 'd'.repeat(40), data: '0x095ea7b3', signMethod: 'personal_sign', unknownStructure: true,
+    typedData: {primaryType: 'Mail'}, callCount: 9};
+  const pending = provider.request({method: 'wallet_sendCalls', params: [{version: '2.0.0', calls: [call]}]});
+  pending.catch(() => {});
+  await flush();
+  const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+  assert.deepEqual(plain(intercept.tx), {to: call.to, from: '', value: '0x0', data: call.data, chainId: 56,
+    callIndex: 1, callCount: 1});
+"""
+    )
+
+
 def test_replaced_json_parse_cannot_change_the_typed_data_shown():
     run_node(
         INJECT_HARNESS

@@ -278,10 +278,11 @@
           }
         }
 
+        const unknownStructure = { __proto__: null, unknownStructure: true };
         let interceptData;
 
         if (!structured) {
-          interceptData = { __proto__: null, unknownStructure: true };
+          interceptData = unknownStructure;
         } else if (kind === "typed") {
           // eth_signTypedData_v3 and _v4 take [address, data]. The older
           // eth_signTypedData and _v1 take [data, address] in MetaMask and
@@ -347,11 +348,13 @@
         };
         const revision = chainRevision;
 
-        // Ask content script to analyze via background
-        const analyze = (chainId) => {
+        // Ask content script to analyze via background. A batch that cannot be
+        // analysed as it stands is shown as one request of unknown structure.
+        const analyze = (chainId, unreadable) => {
+          const decisions = unreadable ? 1 : count;
           const decide = (index) => {
-            if (index < count) {
-              requestAnalysis(method, payloadAt(index, chainId), (action) => {
+            if (index < decisions) {
+              requestAnalysis(method, unreadable ? unknownStructure : payloadAt(index, chainId), (action) => {
                 if (isTransaction && chainId === null) {
                   reject(new NativeError("Transaction blocked by ShieldAI: wallet chain is unknown or mismatched"));
                   return;
@@ -389,9 +392,23 @@
           analyze(null);
           return;
         }
+        // A batch call that names a chain of its own other than the bound one
+        // cannot be analysed on that chain.
+        const callOnAnotherChain = (chainId) => {
+          for (let index = 0; index < count; index++) {
+            const callChainId = ownValue(calls, index).chainId;
+            if (callChainId !== undefined && parseChainId(callChainId) !== chainId) return true;
+          }
+          return false;
+        };
+
         resolveChainId((chainId) => {
           if (txParams.chainId !== undefined && parseChainId(txParams.chainId) !== chainId) {
             analyze(null);
+            return;
+          }
+          if (kind === "calls" && callOnAnotherChain(chainId)) {
+            analyze(null, true);
             return;
           }
           analyze(chainId);
