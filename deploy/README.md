@@ -121,10 +121,11 @@ After an edit: `nginx -t && systemctl reload nginx`.
 
 `backup.sh` (repo root) copies the database with sqlite3's backup API while both services keep running, checks
 the copy with `PRAGMA quick_check` and saves it as `/opt/shieldbot/backups/shieldbot_<date>_<time>.db`
-(mode 600). Only after a good backup does it delete its own copies older than `KEEP_DAYS` days (default 7), so
-a job that keeps failing never deletes the last good copies. With `BACKUP_REMOTE` set it also sends the new
-copy there with `scp` (ssh key auth, no password prompt); unset, nothing leaves the machine. Any failure exits
-non-zero.
+(mode 600). Only after a good backup does it prune: the newest `KEEP_COUNT` copies (default 7) always stay,
+and of the rest it deletes those older than `KEEP_DAYS` days (default 7). A job that keeps failing never
+deletes anything, and after a long outage the newest copies survive even though all of them are old. With
+`BACKUP_REMOTE` set it also sends the new copy there with `scp` (ssh key auth, no password prompt, and the host
+key must already be known); unset, nothing leaves the machine. Any failure exits non-zero.
 
 Nothing schedules it. To run it nightly at 02:30, add this line to `/etc/cron.d/shieldbot-backup`:
 
@@ -132,11 +133,16 @@ Nothing schedules it. To run it nightly at 02:30, add this line to `/etc/cron.d/
 30 2 * * * root /bin/bash /opt/shieldbot/backup.sh >> /var/log/shieldbot-backup.log 2>&1
 ```
 
-With 14 days kept and an off-box copy (root's ssh key must already be accepted by the backup host):
+With 14 days kept and an off-box copy:
 
 ```
 30 2 * * * root KEEP_DAYS=14 BACKUP_REMOTE=backup@backup-host:/srv/shieldbot/ /bin/bash /opt/shieldbot/backup.sh >> /var/log/shieldbot-backup.log 2>&1
 ```
+
+For the off-box copy, root's ssh key must be authorised on the backup host, and the host's key must already be
+in `/root/.ssh/known_hosts`: `scp` runs with `StrictHostKeyChecking=yes` and refuses an unknown or changed host.
+Connect once by hand as root (`ssh backup@backup-host`), check the fingerprint it shows against the one the
+backup host's provider or console reports, and accept it.
 
 Set these on the cron line, not by editing `backup.sh`: an edited tracked file makes `deploy.sh --check` say
 NO-GO. Local copies sit on the same disk as the database, so they cover a bad write or a bad deploy, not the

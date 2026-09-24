@@ -32,7 +32,7 @@ df() {
   printf 'Filesystem 1024-blocks Used Available Capacity Mounted\nstub 1 1 %s 1%% /\n' "$free"
 }
 journalctl() { log journalctl "$@"; }
-scp() { log scp "$@"; }
+scp() { log scp "$@"; [ ! -e "$STATE/scp-fails" ]; }
 git() { log git "$@"; command git "$@"; }
 systemctl() {
   log systemctl "$@"
@@ -624,12 +624,28 @@ def test_backup_prunes_only_its_own_copies_older_than_keep_days(backup):
         path = backup.dir / name
         path.write_bytes(b"")
         os.utime(path, (now - days * 86400, now - days * 86400))
-    code, _, err = backup.run(KEEP_DAYS="3")
+    code, _, err = backup.run(KEEP_DAYS="3", KEEP_COUNT="1")
     assert code == 0, err
     names = {path.name for path in backup.dir.iterdir()}
     assert "shieldbot_old.db" not in names
     assert {"shieldbot_recent.db", "unrelated.db"} <= names
     assert len([name for name in names if name.startswith("shieldbot_")]) == 2
+
+
+def test_backup_keeps_the_newest_copies_after_a_long_outage(backup):
+    # After weeks without a backup every older copy is past KEEP_DAYS; the newest KEEP_COUNT still stay.
+    sqlite3.connect(backup.db).close()
+    backup.dir.mkdir()
+    now = time.time()
+    for days in range(30, 35):
+        path = backup.dir / f"shieldbot_{days}.db"
+        path.write_bytes(b"")
+        os.utime(path, (now - days * 86400, now - days * 86400))
+    code, _, err = backup.run(KEEP_DAYS="7", KEEP_COUNT="3")
+    assert code == 0, err
+    names = sorted(path.name for path in backup.dir.iterdir())
+    assert len(names) == 3
+    assert {"shieldbot_30.db", "shieldbot_31.db"} <= set(names)
 
 
 def test_backup_copies_off_box_only_when_asked(backup):
@@ -639,9 +655,18 @@ def test_backup_copies_off_box_only_when_asked(backup):
     [copy] = backup.dir.glob("shieldbot_*.db")
     [call] = backup.calls()
     assert call.startswith("scp ") and call.endswith(
-        f"{copy.as_posix()} backup@example.net:/srv/shieldbot/"
+        f" -- {copy.as_posix()} backup@example.net:/srv/shieldbot/"
     )
-    assert "BatchMode=yes" in call
+    assert "BatchMode=yes" in call and "StrictHostKeyChecking=yes" in call
+
+
+def test_a_failed_off_box_copy_fails_the_job_and_keeps_the_local_copy(backup):
+    sqlite3.connect(backup.db).close()
+    (backup.state / "scp-fails").write_bytes(b"")
+    code, out, _ = backup.run(BACKUP_REMOTE="backup@example.net:/srv/shieldbot/")
+    assert code != 0
+    [copy] = backup.dir.glob("shieldbot_*.db")
+    assert "Backup saved" in out and "Copied off-box" not in out
 
 
 def test_backup_never_creates_a_missing_database(backup):
@@ -651,10 +676,11 @@ def test_backup_never_creates_a_missing_database(backup):
     assert not list(backup.dir.glob("shieldbot_*"))
 
 
-@pytest.mark.parametrize("keep_days", ["0", "7d", "-1"])
-def test_backup_rejects_a_bad_keep_days(backup, keep_days):
+@pytest.mark.parametrize("name", ["KEEP_DAYS", "KEEP_COUNT"])
+@pytest.mark.parametrize("value", ["0", "7d", "-1"])
+def test_backup_rejects_a_bad_retention_setting(backup, name, value):
     sqlite3.connect(backup.db).close()
-    code, _, err = backup.run(KEEP_DAYS=keep_days)
+    code, _, err = backup.run(**{name: value})
     assert code == 2
-    assert "KEEP_DAYS" in err
+    assert name in err
     assert not backup.dir.exists()
