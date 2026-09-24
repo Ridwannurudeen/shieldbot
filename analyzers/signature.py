@@ -109,12 +109,14 @@ class SignaturePermitAnalyzer(Analyzer):
                 sig_type = primary_type or sign_method or 'unknown'
 
             if permit:
-                s, f, spender, unlimited = permit
+                s, f, spender, unlimited, granted = permit
                 score += s
                 flags.extend(f)
-                s, f, floor, spender_data = await self._judge_spender(spender, unlimited, sig_type, ctx.chain_id)
-                score += s
-                flags = f + flags if floor else flags + f
+                # A revoke gives the spender nothing, so there is no spender to judge.
+                if granted:
+                    s, f, floor, spender_data = await self._judge_spender(spender, unlimited, sig_type, ctx.chain_id)
+                    score += s
+                    flags = f + flags if floor else flags + f
 
         except UnsupportedChainError:
             raise
@@ -166,15 +168,19 @@ class SignaturePermitAnalyzer(Analyzer):
         return points, flags, floor, data
 
     def _check_permit(self, message: Dict, domain: Dict) -> tuple:
-        """Check EIP-2612 Permit for dangerous patterns: (score, flags, spender, unlimited)."""
+        """Check EIP-2612 Permit for dangerous patterns: (score, flags, spender, unlimited, granted)."""
         score = 0.0
         flags = []
 
         value = _parse_uint(message.get('value', 0))
         spender = (message.get('spender') or '').lower()
         deadline = _parse_uint(message.get('deadline', 0))
-        # A DAI-style permit has no amount: allowed true grants the spender everything.
-        unlimited = value >= UNLIMITED_THRESHOLD or message.get('allowed') is True
+        # A DAI-style permit has no amount: allowed true grants the spender everything and allowed
+        # false revokes. An EIP-2612 permit for a value of 0 is a revoke too.
+        if 'allowed' in message:
+            granted = unlimited = message.get('allowed') is True
+        else:
+            granted, unlimited = 'value' not in message or value > 0, value >= UNLIMITED_THRESHOLD
 
         # Unlimited value
         if unlimited:
@@ -188,10 +194,10 @@ class SignaturePermitAnalyzer(Analyzer):
             score += 10
             flags.append('Permit: far-future deadline (>1 year)')
 
-        return score, flags, spender, unlimited
+        return score, flags, spender, unlimited, granted
 
     def _check_permit2(self, message: Dict, primary_type: str) -> tuple:
-        """Check a Permit2 AllowanceTransfer: (score, flags, spender, unlimited)."""
+        """Check a Permit2 AllowanceTransfer: (score, flags, spender, unlimited, granted)."""
         score = 0.0
         flags = []
         spender = (message.get('spender') or '').lower()
@@ -223,10 +229,10 @@ class SignaturePermitAnalyzer(Analyzer):
                     score += 15
                     flags.append(f'Permit2 Batch: unlimited amount for token #{i+1}')
 
-        return score, flags, spender, unlimited
+        return score, flags, spender, unlimited, True
 
     def _check_permit2_transfer(self, message: Dict, primary_type: str) -> tuple:
-        """Check a Permit2 SignatureTransfer: (score, flags, spender, unlimited)."""
+        """Check a Permit2 SignatureTransfer: (score, flags, spender, unlimited, granted)."""
         score = 0.0
         flags = []
         spender = (message.get('spender') or '').lower()
@@ -249,7 +255,7 @@ class SignaturePermitAnalyzer(Analyzer):
             score += 10
             flags.append('Permit2 transfer: far-future deadline (>1 year)')
 
-        return score, flags, spender, unlimited
+        return score, flags, spender, unlimited, True
 
     def _check_seaport(self, message: Dict) -> tuple:
         """Check Seaport OrderComponents for zero-price listings."""

@@ -225,15 +225,28 @@ async def test_unlimited_eip2612_permit_to_an_unverified_contract_is_blocked():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('allowed, floor', [(True, 85), (False, 60)])
-async def test_dai_permit_with_allowed_true_is_unlimited(allowed, floor):
+async def test_dai_permit_with_allowed_true_is_unlimited():
     # DAI's permit has no amount: allowed true grants the spender everything.
     typed = {'primaryType': 'Permit', 'domain': {'name': 'Dai Stablecoin'}, 'message': {
-        'holder': '0x' + 'a' * 40, 'spender': SPENDER, 'nonce': '0', 'expiry': '0', 'allowed': allowed,
+        'holder': '0x' + 'a' * 40, 'spender': SPENDER, 'nonce': '0', 'expiry': '0', 'allowed': True,
     }}
     result = await _analyze(SignaturePermitAnalyzer(_service(_facts(is_verified=False, age_days=90))), typed)
-    assert result.data['floor'] == floor
-    assert ('Permit: unlimited token approval' in result.flags) is allowed
+    assert result.data['floor'] == 85
+    assert 'Permit: unlimited token approval' in result.flags
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('message', [
+    {'holder': '0x' + 'a' * 40, 'spender': SPENDER, 'nonce': '0', 'expiry': '0', 'allowed': False},
+    {'owner': '0x' + 'a' * 40, 'spender': SPENDER, 'value': '0', 'nonce': '0', 'deadline': '1'},
+], ids=['dai-allowed-false', 'eip2612-zero-value'])
+async def test_a_revoke_permit_judges_no_spender(message):
+    service = _service(_facts(is_contract=False, is_verified=None, age_days=None))
+    result = await _analyze(SignaturePermitAnalyzer(service), {'primaryType': 'Permit', 'domain': {}, 'message': message})
+    service.fetch.assert_not_awaited()
+    assert result.score == 0
+    assert 'floor' not in result.data
+    assert result.data.get('status', 'ok') == 'ok'
 
 
 @pytest.mark.asyncio
