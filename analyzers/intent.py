@@ -4,6 +4,7 @@ import logging
 from typing import List
 
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
+from services.counterparty_service import UnavailableCounterparty, approval_grant, judge_spender
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD
 
 logger = logging.getLogger(__name__)
@@ -23,8 +24,12 @@ class IntentMismatchAnalyzer(Analyzer):
     - Unlimited approval to non-whitelisted target
     - Native value sent on an approval call
     - Unknown selector on unverified contract
-    - Approval to an EOA (spender is not a contract)
+    - Hard floors: a grant to a wallet, a labelled address or an unverified or new contract,
+      and native value paid to claim()
     """
+
+    def __init__(self, counterparty_service=None):
+        self._counterparty = counterparty_service or UnavailableCounterparty()
 
     @property
     def name(self) -> str:
@@ -95,13 +100,33 @@ class IntentMismatchAnalyzer(Analyzer):
                 verification_unknown = True
                 flags.append('Selector risk unknown: contract verification unavailable')
 
-        # 5. Approval to EOA — check via extra data if available
-        if decoded.get('is_approval'):
-            spender = decoded.get('params', {}).get('param_0', '')
-            is_spender_contract = ctx.extra.get('spender_is_contract')
-            if is_spender_contract is False:
-                score += 35
-                flags.append('Approval to an EOA (not a contract)')
+        # 5. Hard floors. A positive grant to a spender outside the allowlist is judged on the
+        # spender's facts; native value paid to claim() is the pay-to-claim phishing pattern.
+        floor = None
+        counterparty = None
+        counterparty_known = None
+        counterparty_reason = None
+        grant = approval_grant(decoded)
+        if grant and not self._counterparty.allowlisted_name(grant[0], ctx.chain_id):
+            counterparty = await self._counterparty.fetch(grant[0], ctx.chain_id)
+            floor, floor_flag, unknown = judge_spender(counterparty, grant[1])
+            counterparty_known = not unknown
+            counterparty_reason = counterparty['reason'] if unknown else None
+        elif decoded.get('category') == 'claim' and _parse_value(value) > 0:
+            is_verified = ctx.extra.get('is_verified')
+            floor = 85 if is_verified is False else 60
+            target = {False: 'an unverified contract', True: 'the contract'}.get(
+                is_verified, 'a contract of unknown verification'
+            )
+            floor_flag = f'claim() sends {_parse_value(value) / 1e18:g} native value to {target}'
+            counterparty_known = is_verified is not None
+            counterparty_reason = (
+                None if counterparty_known else 'Contract verification unavailable for claim() with native value'
+            )
+        if floor:
+            flags.insert(0, floor_flag)
+        if counterparty_reason:
+            flags.append(counterparty_reason)
 
         score = min(score, 100)
 
@@ -111,15 +136,23 @@ class IntentMismatchAnalyzer(Analyzer):
             score=score,
             flags=flags,
             data={
-                'status': 'unknown' if verification_unknown else 'ok',
-                'coverage': {'selector_verification': not verification_unknown},
-                'reason': 'Contract verification unavailable for unknown selector' if verification_unknown else None,
+                'status': 'unknown' if verification_unknown or counterparty_known is False else 'ok',
+                'coverage': {
+                    'selector_verification': not verification_unknown,
+                    **({} if counterparty_known is None else {'counterparty': counterparty_known}),
+                },
+                'reason': (
+                    'Contract verification unavailable for unknown selector' if verification_unknown
+                    else counterparty_reason
+                ),
                 'selector': selector,
                 'function_name': decoded.get('function_name'),
                 'category': decoded.get('category'),
                 'is_approval': decoded.get('is_approval', False),
                 'is_unlimited': decoded.get('is_unlimited_approval', False),
                 'disguised': disguised is not None,
+                **({'floor': floor} if floor else {}),
+                **({'counterparty': counterparty} if counterparty else {}),
             },
         )
 

@@ -251,6 +251,20 @@ async def test_rpc_analysis_routing_error_never_forwards(proxy, mock_container, 
     mock_container.risk_engine.compute_from_results.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_failed_verification_lookup_reaches_the_analyzers_as_unknown(proxy, mock_container):
+    # A failed explorer lookup is unknown, not unverified: unverified sets a claim() floor of 85.
+    mock_container.web3_client.is_token_contract = AsyncMock(return_value=False)
+    mock_container.web3_client.is_verified_contract = AsyncMock(side_effect=RuntimeError("explorer down"))
+    proxy._forward = AsyncMock(return_value={"jsonrpc": "2.0", "id": 1, "result": "0xabc"})
+    await proxy.handle_request(56, {
+        "jsonrpc": "2.0", "id": 1, "method": "eth_sendTransaction",
+        "params": [{"to": "0x" + "a" * 40, "from": "0x" + "b" * 40, "data": "0x4e71d92d", "value": "0x1"}],
+    })
+    ctx = mock_container.registry.run_all.await_args.args[0]
+    assert ctx.extra["is_verified"] is None
+
+
 SYNTHETIC_RPC_KEY = "SYNTHETIC-RPC-KEY-4f2c9e"
 
 

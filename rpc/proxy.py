@@ -90,7 +90,7 @@ class RPCProxy:
 
             # Detect token vs non-token for accurate risk assessment
             is_token = None
-            is_verified = False
+            is_verified = None
             try:
                 is_token = await self._container.web3_client.is_token_contract(to_addr, chain_id=chain_id)
             except UnsupportedChainError:

@@ -56,6 +56,31 @@ def unknown_facts(address: str) -> dict:
     }
 
 
+def approval_grant(decoded: dict) -> Optional[tuple]:
+    """(spender, unlimited) when decoded calldata grants a positive allowance, else None.
+
+    Revokes (amount 0, setApprovalForAll(operator, false), a DAI permit with allowed false) grant
+    nothing. The two Permit2 permit selectors decode only the owner, so they are not judged here.
+    """
+    params = decoded.get("params") or {}
+    selector = decoded.get("selector")
+    if selector in ("095ea7b3", "39509351"):  # approve, increaseAllowance(spender, amount)
+        amount = params.get("param_1")
+        granted, spender = isinstance(amount, int) and amount > 0, params.get("param_0")
+        unlimited = bool(decoded.get("is_unlimited_approval"))
+    elif selector == "a22cb465":  # setApprovalForAll(operator, approved)
+        granted, spender, unlimited = params.get("param_1") is True, params.get("param_0"), True
+    elif selector == "d505accf":  # EIP-2612 permit(owner, spender, value, deadline, ...)
+        value = params.get("param_2")
+        granted, spender = isinstance(value, int) and value > 0, params.get("param_1")
+        unlimited = bool(decoded.get("is_unlimited_approval"))
+    elif selector == "8fcbaf0c":  # DAI permit(holder, spender, nonce, expiry, allowed): all or nothing
+        granted, spender, unlimited = params.get("param_4") is True, params.get("param_1"), True
+    else:
+        return None
+    return (spender, unlimited) if granted and spender else None
+
+
 def judge_spender(facts: dict, unlimited: bool) -> tuple:
     """Hard floor for granting a non-allowlisted spender a token allowance.
 
