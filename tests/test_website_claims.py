@@ -120,10 +120,21 @@ def test_welcome_page_does_not_claim_the_extension_blocks():
     assert not claims, f"welcome.html claims the extension blocks transactions: {claims}"
 
 
-def test_welcome_page_chain_count_matches_the_registry():
+def extension_chain_ids() -> set:
+    """The chains the extension names in popup.js CHAIN_NAMES.
+
+    inject.js and background.js keep no chain list: they pass any wallet chain id to /api/firewall.
+    """
+    table = re.search(r"const CHAIN_NAMES = \{([^}]*)\}", read(ROOT / "extension" / "popup.js")).group(1)
+    return {int(chain_id) for chain_id in re.findall(r"\b(\d+):", table)}
+
+
+def test_welcome_page_chain_count_matches_the_extension():
+    chains = extension_chain_ids()
+    assert chains <= set(chain_info()), "the extension names a chain the API does not scan"
     counts = re.findall(r"\b(\d+)\s+(?:more\s+)?(?:EVM\s+)?(?:chains?|networks)\b", welcome_text())
     assert counts, "welcome.html should state how many chains it supports"
-    assert {int(count) for count in counts} == {len(chain_info())}
+    assert {int(count) for count in counts} == {len(chains)}
 
 
 def _risk_bands() -> dict:
