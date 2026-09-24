@@ -9,6 +9,7 @@ import pytest
 from analyzers.structural import StructuralAnalyzer
 from core.analyzer import AnalyzerResult
 from core.risk_engine import RiskEngine
+from utils.scam_db import ScamDatabase
 
 
 COMMUNITY = {
@@ -94,6 +95,7 @@ def firewall(monkeypatch, mock_web3_client):
     )
     monkeypatch.setattr(api, "container", services)
     monkeypatch.setattr(api, "web3_client", mock_web3_client)
+    monkeypatch.setattr(api, "scam_db", ScamDatabase())
     monkeypatch.setattr(
         api,
         "calldata_decoder",
