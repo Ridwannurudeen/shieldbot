@@ -306,6 +306,51 @@ class TestThreatsCommand:
         assert not bot_module.container.mempool_monitor.mock_calls
 
     @pytest.mark.asyncio
+    async def test_repeated_calls_reuse_the_snapshot_for_each_chain_filter(self, bot_module, monkeypatch, mempool_api):
+        monkeypatch.setattr(bot_module, "settings", SimpleNamespace(shieldbot_api_url=mempool_api.url))
+        replies = []
+        for args in ([], [], ["56"], ["56"]):
+            update = _threats_update()
+            await bot_module.threats_command(update, SimpleNamespace(args=args))
+            replies.append(update.message.reply_text.await_args.args[0])
+
+        assert bot_module.MEMPOOL_CACHE_SECONDS == 15
+        assert mempool_api.requests == [
+            ("/api/mempool/alerts", {"limit": "10"}), ("/api/mempool/stats", {}),
+            ("/api/mempool/alerts", {"limit": "10", "chain_id": "56"}), ("/api/mempool/stats", {}),
+        ]
+        assert replies[0] == replies[1] and replies[2] == replies[3]
+        assert "• Pending txs seen: 12,345\n" in replies[1]
+
+    @pytest.mark.asyncio
+    async def test_an_expired_snapshot_is_fetched_again(self, bot_module, monkeypatch, mempool_api):
+        monkeypatch.setattr(bot_module, "settings", SimpleNamespace(shieldbot_api_url=mempool_api.url))
+        monkeypatch.setattr(bot_module, "MEMPOOL_CACHE_SECONDS", 0)
+
+        for _ in range(2):
+            await bot_module.threats_command(_threats_update(), SimpleNamespace(args=[]))
+
+        assert [path for path, _ in mempool_api.requests] == ["/api/mempool/alerts", "/api/mempool/stats"] * 2
+
+    @pytest.mark.asyncio
+    async def test_a_failed_read_is_not_reused(self, bot_module, monkeypatch, mempool_api):
+        monkeypatch.setattr(bot_module, "settings", SimpleNamespace(shieldbot_api_url=mempool_api.url))
+        mempool_api.status = 503
+        failed = _threats_update()
+        await bot_module.threats_command(failed, SimpleNamespace(args=[]))
+        mempool_api.status = 200
+        answered = _threats_update()
+        await bot_module.threats_command(answered, SimpleNamespace(args=[]))
+
+        failed.message.reply_text.assert_awaited_once_with(
+            "❌ Live mempool data is unavailable right now. Please try again later."
+        )
+        assert "• Pending txs seen: 12,345\n" in answered.message.reply_text.await_args.args[0]
+        assert [path for path, _ in mempool_api.requests] == [
+            "/api/mempool/alerts", "/api/mempool/alerts", "/api/mempool/stats",
+        ]
+
+    @pytest.mark.asyncio
     async def test_a_trailing_slash_on_the_api_url_is_ignored(self, bot_module, monkeypatch, mempool_api):
         monkeypatch.setattr(bot_module, "settings", SimpleNamespace(shieldbot_api_url=mempool_api.url + "/"))
         update = _threats_update()

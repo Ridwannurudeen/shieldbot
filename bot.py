@@ -73,6 +73,11 @@ risk_engine = container.risk_engine
 _scan_cache = {}
 CACHE_TTL = 300  # 5 minutes
 
+# /threats reads the API's mempool monitor. Every bot request reaches the API from one address and
+# so shares one IP rate-limit bucket there; a busy chat reuses a snapshot instead of using it up.
+MEMPOOL_CACHE_SECONDS = 15
+_mempool_cache = {}  # chain filter (None for all chains) -> (fetched_at, (alerts, stats))
+
 # Robinhood Chain launch alerts. The API's hunter records launch outcomes in the shared
 # database; this process queues alerts for subscribed chats there and sends them.
 LAUNCH_ALERT_POLL_SECONDS = 30
@@ -542,7 +547,13 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _fetch_mempool_data(chain_id):
-    """Read mempool alerts and counters from the API, whose process runs the only mempool monitor."""
+    """Read mempool alerts and counters from the API, whose process runs the only mempool monitor.
+
+    A snapshot is reused for MEMPOOL_CACHE_SECONDS; a failed read is not kept.
+    """
+    cached = _mempool_cache.get(chain_id)
+    if cached and time.monotonic() - cached[0] < MEMPOOL_CACHE_SECONDS:
+        return cached[1]
     params = {'limit': 10}
     if chain_id is not None:
         params['chain_id'] = chain_id
@@ -554,6 +565,7 @@ async def _fetch_mempool_data(chain_id):
         async with session.get(f"{api_url}/api/mempool/stats") as resp:
             resp.raise_for_status()
             stats = await resp.json()
+    _mempool_cache[chain_id] = (time.monotonic(), (alerts, stats))
     return alerts, stats
 
 
