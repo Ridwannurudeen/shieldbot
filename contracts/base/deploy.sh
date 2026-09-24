@@ -66,10 +66,11 @@ echo
 echo "── 2. Register schema ──"
 SCHEMA_STR="address scannedAddress,uint8 riskLevel,string scanType,uint64 sourceChainId,bytes32 evidenceHash,string evidenceURI"
 
-# Compute deterministic schema UID (matches EAS): keccak(schema, resolver=0, revocable=true)
-SCHEMA_UID=$(cast keccak "$(cast abi-encode-packed 'string,address,bool' "$SCHEMA_STR" 0x0000000000000000000000000000000000000000 true 2>/dev/null)" 2>/dev/null || echo "")
+# The schema UID is deterministic (matches EAS): keccak256(abi.encodePacked(schema, resolver=0, revocable=true)).
+# For this schema it is 0xdc6d6de6…852e9e, the UID the live attestor uses.
+SCHEMA_PACKED=$(cast abi-encode --packed "f(string,address,bool)" "$SCHEMA_STR" 0x0000000000000000000000000000000000000000 true)
+SCHEMA_UID=$(cast keccak "$SCHEMA_PACKED")
 
-# Fallback: query the registry for an existing record at the computed UID.
 # Try registering — revert means schema already exists, which is fine.
 set +e
 REG_OUT=$(forge script script/RegisterSchema.s.sol \
@@ -77,15 +78,12 @@ REG_OUT=$(forge script script/RegisterSchema.s.sol \
   --broadcast \
   --account "$DEPLOYER_ACCOUNT" --sender "$DEPLOYER_ADDR" \
   --json 2>&1)
-REG_RC=$?
 set -e
 
-# Extract the schema UID from logs regardless of register-vs-already-exists path.
-SCHEMA_UID=$(grep -oE "0x[0-9a-fA-F]{64}" <<<"$REG_OUT" | tail -1)
-ZERO_UID="0x$(printf '0%.0s' {1..64})"
-
-if [[ -z "$SCHEMA_UID" || "$SCHEMA_UID" == "$ZERO_UID" ]]; then
-  echo "ERROR: failed to determine schema UID"
+# Either way the registry must now hold the schema under the computed UID.
+REGISTERED=$(cast call "$SCHEMA_REGISTRY" "getSchema(bytes32)((bytes32,address,bool,string))" "$SCHEMA_UID" --rpc-url "$BASE_RPC_URL")
+if [[ "${REGISTERED,,}" != "(${SCHEMA_UID,,},"* ]]; then
+  echo "ERROR: schema $SCHEMA_UID is not registered"
   echo "$REG_OUT" | tail -20
   exit 1
 fi
@@ -163,7 +161,8 @@ echo "Wrote $OUTPUT_FILE (mode 0600). It contains the verifier private key — k
 if [[ -n "${VPS_HOST:-}" ]]; then
   echo
   echo "── 7. Update VPS .env at $VPS_HOST ──"
-  ssh "$VPS_HOST" "set -e; cd /opt/shieldbot; \
+  # The verifier key travels on ssh's stdin and is appended by cat, never placed on a command line.
+  printf 'BASE_VERIFIER_PRIVATE_KEY=%s\n' "$VERIFIER_KEY" | ssh "$VPS_HOST" "set -e; cd /opt/shieldbot; \
     sed -i.bak \
       -e '/^BASE_ATTESTOR_ADDRESS=/d' \
       -e '/^BASE_ATTESTOR_SCHEMA_UID=/d' \
@@ -171,7 +170,7 @@ if [[ -n "${VPS_HOST:-}" ]]; then
       .env; \
     echo 'BASE_ATTESTOR_ADDRESS=$ATTESTOR_ADDR' >> .env; \
     echo 'BASE_ATTESTOR_SCHEMA_UID=$SCHEMA_UID' >> .env; \
-    echo 'BASE_VERIFIER_PRIVATE_KEY=$VERIFIER_KEY' >> .env; \
+    cat >> .env; \
     chmod 600 .env; \
     systemctl restart shieldbot.service; \
     sleep 3; \
