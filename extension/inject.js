@@ -207,6 +207,18 @@
     console.log("[ShieldAI] Firewall active — intercepting " + (label || "provider"));
   }
 
+  // HMAC of a request id under the channel token: content.js sends it with
+  // SHIELDAI_TX_SHOWN, so that message cannot be forged without the token and
+  // does not reveal it to the page.
+  async function channelProof(requestId) {
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw", encoder.encode(_CHANNEL_TOKEN), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+    );
+    const mac = await crypto.subtle.sign("HMAC", key, encoder.encode(requestId));
+    return Array.from(new Uint8Array(mac), (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
   /**
    * Post message to content script and wait for verdict.
    */
@@ -220,13 +232,26 @@
             .map((b) => b.toString(16).padStart(2, "0"))
             .join("");
 
-      function handleVerdict(event) {
+      function handleMessage(event) {
         if (
           event.source !== window ||
           !event.data ||
-          event.data.type !== "SHIELDAI_TX_VERDICT" ||
           event.data.requestId !== requestId
         ) {
+          return;
+        }
+        if (event.data.type === "SHIELDAI_TX_SHOWN") {
+          // The overlay is on screen: wait for the user's decision instead
+          // of failing closed on the timer.
+          const proof = event.data.proof;
+          if (_CHANNEL_TOKEN) {
+            channelProof(requestId).then((expected) => {
+              if (proof === expected) clearTimeout(timeout);
+            });
+          }
+          return;
+        }
+        if (event.data.type !== "SHIELDAI_TX_VERDICT") {
           return;
         }
         // Reject verdicts without a valid channel token — prevents page
@@ -234,11 +259,20 @@
         if (_CHANNEL_TOKEN === null || event.data._ct !== _CHANNEL_TOKEN) {
           return;
         }
-        window.removeEventListener("message", handleVerdict);
+        clearTimeout(timeout);
+        window.removeEventListener("message", handleMessage);
         resolve(event.data);
       }
 
-      window.addEventListener("message", handleVerdict);
+      // Fail closed: if no verdict arrives within 60 seconds, block rather than
+      // forward a transaction nobody checked. The timer stops once content.js
+      // proves the overlay is showing, so a user reading it is never cut off.
+      const timeout = setTimeout(() => {
+        window.removeEventListener("message", handleMessage);
+        resolve({ action: "block", reason: "Analysis timed out" });
+      }, 60000);
+
+      window.addEventListener("message", handleMessage);
 
       const txPayload = {
         to: txParams.to || "",
@@ -261,13 +295,6 @@
         },
         "*"
       );
-
-      // Timeout after 60 seconds. Fail closed: if the firewall cannot return a
-      // verdict, do not silently forward a potentially malicious transaction.
-      setTimeout(() => {
-        window.removeEventListener("message", handleVerdict);
-        resolve({ action: "block", reason: "Analysis timed out" });
-      }, 60000);
     });
   }
 

@@ -213,6 +213,120 @@ def test_overlay_is_a_modal_dialog_that_keeps_focus_and_rejects_on_escape(kind):
     )
 
 
+def test_shown_signal_proves_the_channel_without_revealing_its_token():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('request');
+  const shown = posted.filter(message => message.type === 'SHIELDAI_TX_SHOWN');
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0].requestId, 'request');
+  assert.equal(shown[0].proof, await proofFor(token, 'request'));
+  assert(!JSON.stringify(shown[0]).includes(token), 'the channel token leaked to the page');
+  assert.equal(verdicts().length, 0, 'a verdict was sent before the user decided');
+"""
+    )
+
+
+def test_replaced_overlay_rejects_the_request_it_was_showing():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('first');
+  await intercept('second');
+  assert.deepEqual(verdicts(), [{type: 'SHIELDAI_TX_VERDICT', requestId: 'first', action: 'block', _ct: token}]);
+  document.getElementById('shieldai-proceed').click();
+  assert.deepEqual(verdicts().at(-1), {type: 'SHIELDAI_TX_VERDICT', requestId: 'second', action: 'proceed', _ct: token});
+  assert.equal(verdicts().length, 2);
+"""
+    )
+
+
+INJECT_HARNESS = (
+    FAKE_DOM
+    + r"""
+const timers = new Map();
+let nextTimer = 0, sent = [], logged = [];
+const provider = {
+  on() {},
+  async request(args) { if (args.method === 'eth_chainId') return '0x38'; sent.push(args); return 'sent'; },
+};
+window.ethereum = provider;
+window.dispatchEvent = () => {};
+const context = vm.createContext({
+  window, performance: {clearResourceTimings() {}}, crypto: webcrypto, TextEncoder, queueMicrotask,
+  Event: class { constructor(type) { this.type = type; } }, Promise, Array, Uint8Array,
+  console: new Proxy({}, {get: (_, name) => (...args) => logged.push([name, ...args])}),
+  setTimeout(fn, delay) { const id = ++nextTimer; timers.set(id, {fn, delay}); return id; },
+  clearTimeout(id) { timers.delete(id); },
+});
+vm.runInContext(fs.readFileSync('extension/inject.js', 'utf8'), context);
+deliver({type: '__SHIELDAI_INIT__', _ct: 'channel-token'});
+function fireFailClosedTimer() {
+  for (const [id, timer] of timers) if (timer.delay === 60000) { timers.delete(id); timer.fn(); return true; }
+  return false;
+}
+async function startRequest() {
+  const pending = provider.request({method: 'eth_sendTransaction', params: [{to: '0x' + 'a'.repeat(40)}]});
+  pending.catch(() => {});
+  await flush();
+  const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+  return {pending, requestId: intercept.requestId};
+}
+"""
+)
+
+
+@pytest.mark.parametrize(
+    "shown", ["none", "valid", "token-as-proof", "wrong-request", "missing-proof"]
+)
+def test_fail_closed_timer_stops_only_for_an_authentic_shown_signal(shown):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const shown = JSON.parse(process.argv[1]);
+  const {pending, requestId} = await startRequest();
+  const proofs = {
+    valid: await proofFor('channel-token', requestId),
+    'token-as-proof': 'channel-token',
+    'wrong-request': await proofFor('channel-token', 'another-request'),
+  };
+  if (shown !== 'none') deliver({type: 'SHIELDAI_TX_SHOWN', requestId, proof: proofs[shown]});
+  await flush();
+  const stopped = !fireFailClosedTimer();
+  assert.equal(stopped, shown === 'valid');
+  if (shown === 'valid') {
+    deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'proceed', _ct: 'channel-token'});
+    assert.equal(await pending, 'sent');
+  } else {
+    await assert.rejects(pending, /blocked/);
+    assert.equal(sent.length, 0);
+  }
+""",
+        shown,
+    )
+
+
+def test_verdict_after_the_timeout_is_ignored_and_forged_verdicts_still_fail():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const {pending, requestId} = await startRequest();
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'proceed', _ct: 'forged'});
+  fireFailClosedTimer();
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'proceed', _ct: 'channel-token'});
+  await assert.rejects(pending, /blocked/);
+  assert.equal(sent.length, 0);
+"""
+    )
+
+
 @pytest.mark.parametrize(
     "reason,stored,expected",
     [

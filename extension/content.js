@@ -43,6 +43,18 @@
         .map((b) => b.toString(16).padStart(2, "0"))
         .join("");
 
+  // HMAC of a request id under the channel token. SHIELDAI_TX_SHOWN carries it
+  // so inject.js can trust that message, while the page, which sees every
+  // window message, never sees the token itself.
+  async function channelProof(requestId) {
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw", encoder.encode(_CHANNEL_TOKEN), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+    );
+    const mac = await crypto.subtle.sign("HMAC", key, encoder.encode(requestId));
+    return Array.from(new Uint8Array(mac), (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
   // Inject the page-level script — token is NOT in the URL to prevent
   // extraction via performance.getEntriesByType("resource").
   const script = document.createElement("script");
@@ -131,6 +143,11 @@
 
   // --- Overlay Management ---
 
+  // The request whose overlay is waiting for the user. inject.js stops its
+  // no-verdict timeout once it knows the overlay is on screen, so a request
+  // whose overlay goes away without a decision is rejected here.
+  let _awaitingRequestId = null;
+
   function postVerdict(requestId, action) {
     window.postMessage(
       { type: "SHIELDAI_TX_VERDICT", requestId, action, _ct: _CHANNEL_TOKEN },
@@ -141,15 +158,22 @@
   function removeOverlay() {
     const existing = document.getElementById("shieldai-overlay");
     if (existing) existing.remove();
+    if (_awaitingRequestId !== null) {
+      const requestId = _awaitingRequestId;
+      _awaitingRequestId = null;
+      postVerdict(requestId, "block");
+    }
   }
 
   function sendVerdict(requestId, action) {
+    _awaitingRequestId = null;
     removeOverlay();
     postVerdict(requestId, action);
   }
 
   // Show an overlay as a modal dialog: focus moves into it and Tab stays in
-  // it. For a decision overlay, Escape rejects.
+  // it. For a decision overlay, Escape rejects, and inject.js is told the
+  // user now holds the decision so it waits instead of timing out.
   function mountOverlay(overlay, requestId) {
     const modal = overlay.querySelector(".shieldai-modal");
     overlay.tabIndex = -1;
@@ -170,6 +194,12 @@
     });
     (document.body || document.documentElement).appendChild(overlay);
     modal.focus();
+    if (requestId) {
+      _awaitingRequestId = requestId;
+      channelProof(requestId).then((proof) => {
+        window.postMessage({ type: "SHIELDAI_TX_SHOWN", requestId, proof }, "*");
+      });
+    }
   }
 
   async function showLoadingOverlay() {
