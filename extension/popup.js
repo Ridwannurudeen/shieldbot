@@ -49,6 +49,12 @@ function isIncompleteScan(scan) {
     Object.values(scan.coverage || {}).some(value => Number(value) < 1);
 }
 
+// One line saying why a scan is Unknown, from its coverage reasons.
+function unknownReason(scan) {
+  const reason = Object.values(scan.coverage_reasons || {}).filter(Boolean).join("; ") || t("unknownNoReason");
+  return `${t("unknownWhy")} ${reason}`;
+}
+
 function fmtUsd(val) {
   if (!val && val !== 0) return null;
   if (val >= 1e6) return "$" + (val / 1e6).toFixed(1) + "M";
@@ -72,6 +78,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     await initI18n();
     applyTranslations();
   }
+  const version = "v" + chrome.runtime.getManifest().version;
+  document.querySelectorAll(".version, .dh-version").forEach((el) => { el.textContent = version; });
   if (_isFullPage) {
     document.body.classList.add("expanded");
     const btn = document.getElementById("expandBtn");
@@ -113,14 +121,34 @@ function initCompact() {
     window.close();
   });
 
-  document.querySelectorAll(".tab").forEach((tab) => {
+  const tabs = Array.from(document.querySelectorAll(".tab"));
+  tabs.forEach((tab, index) => {
     tab.addEventListener("click", () => {
-      document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+      tabs.forEach((t) => {
+        t.classList.remove("active");
+        t.setAttribute("aria-selected", "false");
+        t.tabIndex = -1;
+      });
       document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
       tab.classList.add("active");
+      tab.setAttribute("aria-selected", "true");
+      tab.tabIndex = 0;
       document.getElementById("tab-" + tab.dataset.tab).classList.add("active");
       if (tab.dataset.tab === "history") loadAndRenderHistory(historyList);
       if (tab.dataset.tab === "feed") loadDeployerFeed();
+    });
+    // Arrow keys, Home and End move between tabs and open the one they reach.
+    tab.addEventListener("keydown", (event) => {
+      const target = {
+        ArrowRight: (index + 1) % tabs.length,
+        ArrowLeft: (index - 1 + tabs.length) % tabs.length,
+        Home: 0,
+        End: tabs.length - 1,
+      }[event.key];
+      if (target === undefined) return;
+      event.preventDefault();
+      tabs[target].focus();
+      tabs[target].click();
     });
   });
 
@@ -246,7 +274,7 @@ function renderCompactHistory(history, listEl) {
   };
   listEl.innerHTML = history.map((item) => {
     const incomplete = isIncompleteScan(item);
-    const b = incomplete ? { cls: "badge-caution", label: "UNKNOWN" } :
+    const b = incomplete ? { cls: "badge-unknown", label: t("classUnknown") } :
       MAP[item.classification] || { cls: "badge-caution", label: item.classification };
     const scoreDisplay = incomplete ? "Unknown" : `${100 - item.risk_score}/100`;
     return `<div class="history-item">
@@ -254,6 +282,7 @@ function renderCompactHistory(history, listEl) {
       <div class="history-info">
         <div class="history-recipient">${escapeHtml(item.recipient || item.to || "Unknown")}</div>
         <div class="history-time">${formatTime(item.timestamp)}</div>
+        ${incomplete ? `<div class="history-why">${escapeHtml(unknownReason(item))}</div>` : ""}
       </div>
       <div class="history-score">${scoreDisplay}</div>
     </div>`;
@@ -469,6 +498,7 @@ const FEED_MAP = {
   HIGH_RISK:         { cls: "badge-high",    label: "HIGH",    color: "#F97316", border: "#F97316" },
   BLOCK_RECOMMENDED: { cls: "badge-block",   label: "BLOCK",   color: "#EF4444", border: "#EF4444" },
 };
+const FEED_UNKNOWN = { cls: "badge-unknown", color: "#94A3B8", border: "#94A3B8" };
 
 function renderDashFeed(history) {
   const feedEl = document.getElementById("dash-feed");
@@ -487,8 +517,8 @@ function renderDashFeed(history) {
   };
   feedEl.innerHTML = history.slice(0, 8).map((item) => {
     const incomplete = isIncompleteScan(item);
-    const b = (incomplete ? null : FEED_MAP[item.classification]) || { cls: "badge-caution", color: "#EAB308", border: "#EAB308" };
-    const lbl = incomplete ? "UNKNOWN" : FEED_LABELS[item.classification] || item.classification;
+    const b = incomplete ? FEED_UNKNOWN : FEED_MAP[item.classification] || { cls: "badge-caution", color: "#EAB308", border: "#EAB308" };
+    const lbl = incomplete ? t("classUnknown") : FEED_LABELS[item.classification] || item.classification;
     const safety = incomplete ? "Unknown" : 100 - item.risk_score;
     const addr = escapeHtml(shortAddr(item.recipient || item.to || "Unknown"));
     return `<div class="feed-item" style="--fc:${b.border}">
@@ -496,6 +526,7 @@ function renderDashFeed(history) {
       <div class="feed-info">
         <div class="feed-addr">${addr}</div>
         <div class="feed-time">${formatTime(item.timestamp)}</div>
+        ${incomplete ? `<div class="feed-why">${escapeHtml(unknownReason(item))}</div>` : ""}
       </div>
       <div class="feed-score" style="color:${b.color}">${safety}</div>
     </div>`;
@@ -508,11 +539,11 @@ function renderDashStats(history) {
   const total   = history.length;
   const blocked = history.filter((h) => h.classification === "BLOCK_RECOMMENDED").length;
   const safe    = history.filter((h) => !isIncompleteScan(h) && h.classification === "SAFE").length;
-  const safeRate = total > 0 ? Math.round((safe / total) * 100) : 100;
+  const safeRate = total > 0 ? Math.round((safe / total) * 100) + "%" : "\u2013";
 
   document.getElementById("dash-stat-total").textContent   = total;
   document.getElementById("dash-stat-blocked").textContent = blocked;
-  document.getElementById("dash-stat-safe").textContent    = safeRate + "%";
+  document.getElementById("dash-stat-safe").textContent    = safeRate;
 }
 
 // ---- Center ----
@@ -526,10 +557,11 @@ function renderDashCenter(lastScan) {
   const verdictEl     = document.getElementById("dash-verdict");
 
   if (!lastScan) {
-    // Default: PROTECTED / 100
-    setGauge(gaugeArc, gaugeNum, 100, true);
-    clsBadge.textContent = "PROTECTED";
-    clsBadge.className   = "cls-badge cls-protected";
+    // Nothing has been checked yet, so there is no score to show.
+    setGauge(gaugeArc, gaugeNum, null);
+    gaugeNum.textContent = "\u2013";
+    clsBadge.textContent = t("dashNothingChecked");
+    clsBadge.className   = "cls-badge cls-idle";
     metaEl.textContent   = t("dashFirewallActive");
     protectedList.style.display = "block";
     verdictWrap.style.display   = "none";
@@ -538,7 +570,7 @@ function renderDashCenter(lastScan) {
 
   const incomplete = isIncompleteScan(lastScan);
   const safety = incomplete ? null : 100 - lastScan.risk_score;
-  setGauge(gaugeArc, gaugeNum, safety, false);
+  setGauge(gaugeArc, gaugeNum, safety);
 
   const CLS = {
     SAFE:              { cls: "cls-safe",    label: t("classSafe") },
@@ -546,7 +578,7 @@ function renderDashCenter(lastScan) {
     HIGH_RISK:         { cls: "cls-high",    label: t("classHighRisk") },
     BLOCK_RECOMMENDED: { cls: "cls-block",   label: t("classBlock") },
   };
-  const b = incomplete ? { cls: "cls-caution", label: "UNKNOWN" } :
+  const b = incomplete ? { cls: "cls-unknown", label: t("classUnknown") } :
     CLS[lastScan.classification] || { cls: "cls-caution", label: lastScan.classification };
   clsBadge.textContent = b.label;
   clsBadge.className   = `cls-badge ${b.cls}`;
@@ -556,10 +588,10 @@ function renderDashCenter(lastScan) {
 
   protectedList.style.display = "none";
   verdictWrap.style.display   = "block";
-  verdictEl.textContent = incomplete ? "Unknown (incomplete provider coverage)" : lastScan.verdict || t("overlayNoAnalysis");
+  verdictEl.textContent = incomplete ? unknownReason(lastScan) : lastScan.verdict || t("overlayNoAnalysis");
 }
 
-function setGauge(arcEl, numEl, score, glow) {
+function setGauge(arcEl, numEl, score) {
   const circumference = 439.82;
   const totalArc      = 293.2;
   const clamped = Math.max(0, Math.min(100, score));
@@ -567,17 +599,11 @@ function setGauge(arcEl, numEl, score, glow) {
 
   arcEl.style.strokeDasharray = `${filled} ${circumference - filled}`;
 
-  const color = score === null ? "#EAB308" : clamped >= 80 ? "#22C55E" : clamped >= 50 ? "#F97316" : "#EF4444";
+  const color = score === null ? "#94A3B8" : clamped >= 80 ? "#22C55E" : clamped >= 50 ? "#F97316" : "#EF4444";
   arcEl.style.stroke = color;
 
   numEl.textContent  = score === null ? "?" : clamped;
   numEl.style.fill   = clamped >= 80 ? "#f8fafc" : color;
-
-  if (glow) {
-    arcEl.classList.add("glow");
-  } else {
-    arcEl.classList.remove("glow");
-  }
 }
 
 // ============================================================

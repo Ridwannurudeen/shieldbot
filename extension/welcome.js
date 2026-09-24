@@ -1,6 +1,7 @@
 window.addEventListener("DOMContentLoaded", async () => {
   await initI18n();
   applyTranslations();
+  document.querySelector(".version").textContent = "ShieldBot v" + chrome.runtime.getManifest().version;
 
   const btn = document.getElementById("connectBtn");
   const statusMsg = document.getElementById("statusMsg");

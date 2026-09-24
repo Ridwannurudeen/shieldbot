@@ -37,7 +37,7 @@ CHAIN_INFO: Dict[int, Dict[str, str]] = {
         'name': 'Polygon',
         'explorer_url': 'https://polygonscan.com',
         'dexscreener_slug': 'polygon',
-        'native_symbol': 'MATIC',
+        'native_symbol': 'POL',
     },
     4663: {
         'name': 'Robinhood Chain',

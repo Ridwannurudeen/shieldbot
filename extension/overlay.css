@@ -1,5 +1,12 @@
 /* ShieldAI Firewall Overlay Styles */
 
+/* The overlay and banner render in closed shadow roots. Start the host from
+   initial values so inherited page styles (font, colour, text transform) do
+   not leak in through it. */
+:host {
+  all: initial;
+}
+
 .shieldai-overlay {
   position: fixed !important;
   inset: 0 !important;
@@ -11,6 +18,12 @@
   justify-content: center;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   animation: shieldai-fadein 0.2s ease-out;
+}
+
+/* The dialog and its backdrop take focus only to keep it inside the overlay. */
+.shieldai-overlay:focus,
+.shieldai-modal:focus {
+  outline: none;
 }
 
 @keyframes shieldai-fadein {
@@ -66,7 +79,7 @@
   margin: 0;
 }
 
-/* Classification Badge */
+/* Classification Badge: every text colour below keeps 4.5:1 or better */
 .shieldai-badge {
   display: inline-block;
   padding: 6px 16px;
@@ -76,6 +89,28 @@
   color: #fff;
   letter-spacing: 0.5px;
   margin-bottom: 16px;
+}
+
+.shieldai-badge-block { background: #dc2626; color: #fff; }
+.shieldai-badge-high { background: #f97316; color: #0f172a; }
+.shieldai-badge-caution { background: #eab308; color: #0f172a; }
+.shieldai-badge-safe { background: #22c55e; color: #0f172a; }
+
+/* Unknown is neither safe nor a warning: neutral grey, hatched so it cannot
+   be mistaken for a colour-coded verdict. */
+.shieldai-badge-unknown {
+  background: repeating-linear-gradient(135deg, #475569 0 6px, #3f4b5e 6px 12px);
+  color: #f8fafc;
+  border: 1px solid #94a3b8;
+}
+
+.shieldai-unknown-why {
+  font-size: 13px;
+  color: #cbd5e1;
+  margin: -8px 0 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Sections */
@@ -178,12 +213,25 @@
   transition: all 0.15s ease;
 }
 
+.shieldai-btn:focus-visible,
+.shieldai-calldata-toggle:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
 .shieldai-btn-block {
-  background: #ef4444;
+  background: #dc2626;
   color: #fff;
 }
 .shieldai-btn-block:hover {
-  background: #dc2626;
+  background: #b91c1c;
+}
+
+.shieldai-strict-note {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #cbd5e1;
+  margin: 10px 0 0;
 }
 
 .shieldai-btn-proceed {
@@ -220,7 +268,7 @@
 
 .shieldai-subtext {
   font-size: 12px !important;
-  color: #64748b !important;
+  color: #94a3b8 !important;
   margin-top: 6px !important;
 }
 
@@ -297,7 +345,7 @@
 }
 
 .shieldai-phishing-btn-leave {
-  background: #ef4444 !important;
+  background: #dc2626 !important;
   color: #fff !important;
   border: none !important;
   padding: 8px 16px !important;
@@ -309,7 +357,7 @@
 }
 
 .shieldai-phishing-btn-leave:hover {
-  background: #dc2626 !important;
+  background: #b91c1c !important;
 }
 
 .shieldai-phishing-btn-dismiss {
@@ -364,7 +412,7 @@
 .shieldai-sig-binary {
   font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 11px;
-  color: #64748b;
+  color: #94a3b8;
 }
 
 /* Decoded Calldata */
@@ -460,7 +508,7 @@
 .shieldai-delta-out { color: #ef4444; }
 .shieldai-sim-badge {
   font-size: 10px; font-weight: 500; text-transform: uppercase;
-  background: #1e293b; color: #64748b; border-radius: 4px;
+  background: #1e293b; color: #94a3b8; border-radius: 4px;
   padding: 1px 5px; margin-left: 6px; vertical-align: middle;
 }
 
@@ -495,7 +543,7 @@
   border-left: 3px solid #3b82f6;
 }
 .shieldai-explain-loading {
-  color: #64748b;
+  color: #94a3b8;
   font-size: 12px;
   margin: 0;
 }

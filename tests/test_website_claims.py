@@ -143,7 +143,7 @@ def test_welcome_page_chain_count_matches_the_extension():
 
 
 def test_welcome_page_names_every_extension_chain():
-    subtitle = re.search(r'<p class="subtitle">(.*?)</p>', read(WELCOME), re.DOTALL).group(1)
+    subtitle = re.search(r'<p class="subtitle"[^>]*>(.*?)</p>', read(WELCOME), re.DOTALL).group(1)
     listed = re.split(r",\s*|\s+and\s+", subtitle.split(":", 1)[1].strip().rstrip("."))
     aliases = {"BNB Chain": "BSC"}
     names = {chain_info()[chain_id]["name"] for chain_id in extension_chain_ids()}

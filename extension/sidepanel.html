@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <style>
@@ -292,7 +292,7 @@
     #chatInput::placeholder { color: #475569; }
     #sendBtn {
       padding: 10px 16px;
-      background: #3b82f6;
+      background: #2563eb;
       border: none;
       border-radius: 8px;
       color: #ffffff;
@@ -302,7 +302,7 @@
       flex-shrink: 0;
       transition: background 0.15s;
     }
-    #sendBtn:hover { background: #2563eb; }
+    #sendBtn:hover { background: #1d4ed8; }
     #sendBtn:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
 
     /* Tab bar */
@@ -435,7 +435,7 @@
     #refreshAlertsBtn {
       flex: 1;
       padding: 10px 16px;
-      background: #3b82f6;
+      background: #2563eb;
       border: none;
       border-radius: 8px;
       color: #ffffff;
@@ -444,7 +444,7 @@
       cursor: pointer;
       transition: background 0.15s;
     }
-    #refreshAlertsBtn:hover { background: #2563eb; }
+    #refreshAlertsBtn:hover { background: #1d4ed8; }
     #refreshAlertsBtn:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
 
     .alert-card {
@@ -538,7 +538,7 @@
     #injectionInput::placeholder { color: #475569; }
     #scanInjectionBtn {
       padding: 10px 16px;
-      background: #3b82f6;
+      background: #2563eb;
       border: none;
       border-radius: 8px;
       color: #ffffff;
@@ -548,7 +548,7 @@
       transition: background 0.15s;
       align-self: flex-end;
     }
-    #scanInjectionBtn:hover { background: #2563eb; }
+    #scanInjectionBtn:hover { background: #1d4ed8; }
     #scanInjectionBtn:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
 
     #scannerResults {
@@ -644,7 +644,7 @@
   <div id="chatPanel" class="panel active">
     <div id="messages"></div>
     <div class="input-area">
-      <select id="chainSelect">
+      <select id="chainSelect" aria-label="Chain">
         <option value="56">BSC</option>
         <option value="1">ETH</option>
         <option value="8453">Base</option>

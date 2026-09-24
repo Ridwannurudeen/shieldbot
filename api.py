@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from typing import Optional, Dict, Any, List
 
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve_selector
-from utils.chain_info import get_chain_name
+from utils.chain_info import get_chain_name, get_native_symbol
 from utils.web3_client import UnsupportedChainError
 from services.mempool_service import supports_pending_transactions
 from core.config import Settings
@@ -1079,7 +1079,7 @@ async def _build_signature_only_response(req: FirewallRequest) -> Dict:
         "transaction_impact": {
             "sending": "No on-chain transaction",
             "granting_access": "Signature may grant token or marketplace permissions" if danger_signals else "None detected",
-            "recipient": target[:10] + "..." if _is_valid_evm_address(target) else "N/A",
+            "recipient": target if _is_valid_evm_address(target) else "N/A",
             "post_tx_state": "Signature can be submitted later by the requesting dApp or spender",
         },
         "analysis": f"Signature-only analysis for {sign_method}",
@@ -1322,13 +1322,13 @@ async def firewall(req: FirewallRequest, request: Request):
                 **_coverage_fields(alert),
                 "classification": classification,
                 "risk_score": risk_score,
-                "decoded_action": _format_decoded_action(decoded),
+                "decoded_action": _format_decoded_action(decoded, req.chainId),
                 "calldata_details": _build_calldata_details(decoded),
                 "danger_signals": danger_signals,
                 "transaction_impact": {
-                    "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens",
-                    "granting_access": "UNLIMITED" if decoded.get("is_unlimited_approval") else "None",
-                    "recipient": f"{to_addr[:10]}...",
+                    "sending": _sending(decoded, value_bnb, req.chainId, "Tokens"),
+                    "granting_access": _granting_access(decoded),
+                    "recipient": to_addr,
                     "post_tx_state": f"Risk archetype: {alert['risk_archetype']}",
                 },
                 "analysis": f"Composite risk analysis — archetype: {alert['risk_archetype']}, confidence: {alert['confidence']}%",
@@ -1348,7 +1348,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 },
                 "shield_score": shield_score,
                 "simulation": simulation_result,
-                "asset_delta": _build_asset_delta(simulation_result, decoded, value_bnb),
+                "asset_delta": _build_asset_delta(simulation_result, decoded, value_bnb, req.chainId),
                 "greenfield_url": None,
                 "chain_id": req.chainId,
                 "network": _chain_id_to_name(req.chainId),
@@ -1476,7 +1476,7 @@ async def firewall(req: FirewallRequest, request: Request):
             firewall_result.setdefault("asset_delta", [])
             return firewall_result
         else:
-            return _build_fallback_response(decoded, contract_scan, whitelisted)
+            return _build_fallback_response(decoded, contract_scan, whitelisted, req.chainId)
 
     except HTTPException:
         raise
@@ -2278,18 +2278,17 @@ async def _get_deployer_campaign_context(contract_addr: str, chain_id: int, cont
         return None
 
 
-def _format_decoded_action(decoded: Dict) -> str:
+def _format_decoded_action(decoded: Dict, chain_id: int) -> str:
     """Convert decoded calldata into a plain English action label for the overlay."""
     func = decoded.get("function_name", "")
     category = decoded.get("category", "")
     params = decoded.get("params", {})
 
     if not func or func == "Native Transfer":
-        return "Native BNB Transfer"
+        return f"Native {get_native_symbol(chain_id) or 'Coin'} Transfer"
 
     if category == "approval":
-        spender = params.get("param_0", "")
-        spender_label = decoded.get("spender_label") or _short_addr(str(spender))
+        spender_label = _approval_spender(decoded) or "an unknown spender"
         if decoded.get("is_unlimited_approval"):
             return f"UNLIMITED Approval to {spender_label}"
         if "permit" in func.lower():
@@ -2303,9 +2302,7 @@ def _format_decoded_action(decoded: Dict) -> str:
             recipient = params.get("param_1", "")
         else:
             recipient = params.get("param_0", "")
-        r = str(recipient)
-        recipient_short = f"{r[:8]}..." if len(r) > 10 else r
-        return f"Token Transfer to {recipient_short}"
+        return f"Token Transfer to {_checksum_if_possible(str(recipient))}"
 
     if category == "swap":
         return "DEX Token Swap"
@@ -2343,15 +2340,11 @@ def _build_calldata_details(decoded: Dict) -> Dict:
     fields = []
 
     if category == "approval":
-        spender = params.get("param_0", "")
-        spender_label = decoded.get("spender_label") or _short_addr(str(spender))
-        amount = params.get("param_1")
-        is_unlimited = decoded.get("is_unlimited_approval", False)
+        granted = _granting_access(decoded)
         fields = [
             {"label": "Function", "value": func},
-            {"label": "Spender", "value": spender_label},
-            {"label": "Amount", "value": "Unlimited", "danger": True} if is_unlimited else
-            {"label": "Amount", "value": str(amount) if amount is not None else "Unknown"},
+            {"label": "Spender", "value": _approval_spender(decoded) or "Unknown"},
+            {"label": "Grants", "value": granted, "danger": granted in ("UNLIMITED", "ALL tokens in the collection")},
         ]
     elif category == "transfer":
         if func == "transferFrom":
@@ -2361,7 +2354,7 @@ def _build_calldata_details(decoded: Dict) -> Dict:
             fields = [
                 {"label": "Function", "value": func},
                 {"label": "From", "value": _short_addr(str(frm))},
-                {"label": "To", "value": _short_addr(str(to))},
+                {"label": "To", "value": _checksum_if_possible(str(to))},
                 {"label": "Amount", "value": str(amount) if amount is not None else "Unknown"},
             ]
         else:
@@ -2369,7 +2362,7 @@ def _build_calldata_details(decoded: Dict) -> Dict:
             amount = params.get("param_1")
             fields = [
                 {"label": "Function", "value": func},
-                {"label": "To", "value": _short_addr(str(to))},
+                {"label": "To", "value": _checksum_if_possible(str(to))},
                 {"label": "Amount", "value": str(amount) if amount is not None else "Unknown"},
             ]
     elif category == "swap":
@@ -2399,20 +2392,90 @@ def _build_calldata_details(decoded: Dict) -> Dict:
     return {"category": category, "fields": fields}
 
 
-def _build_asset_delta_fallback(decoded: Dict, value_bnb: float) -> List:
+# Where the decoder puts each approval function's spender and amount (None when
+# it does not decode it: Permit2 keeps both inside a struct).
+_APPROVAL_PARAMS = {
+    "approve": ("param_0", "param_1"),
+    "increaseAllowance": ("param_0", "param_1"),
+    "setApprovalForAll": ("param_0", None),
+    "permit": ("param_1", "param_2"),
+    "permit (DAI-style)": ("param_1", None),
+    "permit (Permit2)": (None, None),
+    "permit (Permit2 batch)": (None, None),
+}
+# Approval functions that grant or revoke with a boolean, and the label when they grant.
+_APPROVAL_FLAG_PARAM = {
+    "setApprovalForAll": ("param_1", "ALL tokens in the collection"),
+    "permit (DAI-style)": ("param_4", "UNLIMITED"),
+}
+
+
+# Universal Router execute(): its commands can include a Permit2 permit.
+_UNIVERSAL_ROUTER_EXECUTE = "3593564c"
+
+
+def _approval_spender(decoded: Dict) -> Optional[str]:
+    """The approved spender: its known name, else its checksummed address, else None."""
+    param = _APPROVAL_PARAMS.get(decoded.get("function_name"), (None, None))[0]
+    spender = decoded.get("params", {}).get(param) if param else None
+    return decoded.get("spender_label") or (_checksum_if_possible(str(spender)) if spender else None)
+
+
+def _native_symbol(chain_id: int) -> str:
+    return get_native_symbol(chain_id) or "native coin"
+
+
+def _sending(decoded: Dict, value_bnb: float, chain_id: int, tokens: str) -> str:
+    """The Sending row: the native amount, nothing for a bare approval, else tokens."""
+    if value_bnb > 0:
+        return f"{value_bnb:g} {_native_symbol(chain_id)}"
+    return "Nothing (approval only)" if decoded.get("is_approval") else tokens
+
+
+def _granting_access(decoded: Dict) -> str:
+    """Say what spending rights a call grants. "None" only when it grants nothing."""
+    if decoded.get("selector") == _UNIVERSAL_ROUTER_EXECUTE:
+        return "Unknown (may include a Permit2 permit)"
+    if decoded.get("category", "unknown") == "unknown":
+        return "Unknown"
+    if not decoded.get("is_approval"):
+        return "None"
+    func = decoded.get("function_name")
+    params = decoded.get("params", {})
+    if func in _APPROVAL_FLAG_PARAM:
+        param, granted = _APPROVAL_FLAG_PARAM[func]
+        flag = params.get(param)
+        if flag is None:
+            return "Approval, amount unknown"
+        return granted if flag else "None (revokes access)"
+    if decoded.get("is_unlimited_approval"):
+        return "UNLIMITED"
+    amount_param = _APPROVAL_PARAMS.get(func, (None, None))[1]
+    amount = params.get(amount_param) if amount_param else None
+    if not isinstance(amount, int):
+        return "Approval, amount unknown"
+    if decoded.get("formatted_amount"):
+        return "None (amount is 0)" if amount == 0 else f"Limited approval: {decoded['formatted_amount']}"
+    if func == "approve":
+        # approve() shares its selector with ERC-721 approve(to, tokenId). Without
+        # the token's decimals the number may be an NFT id, and 0 may be token #0.
+        return f"Approval: {amount} (raw amount or NFT token id)"
+    return "None (amount is 0)" if amount == 0 else f"Limited approval: {amount} (raw token units)"
+
+
+def _build_asset_delta_fallback(decoded: Dict, value_bnb: float, chain_id: int) -> List:
     """Construct basic asset_delta from calldata when simulation is unavailable."""
     deltas = []
     if value_bnb > 0:
-        deltas.append(f"-{value_bnb:g} BNB")
+        deltas.append(f"-{value_bnb:g} {_native_symbol(chain_id)}")
     if decoded.get("is_approval"):
-        if decoded.get("is_unlimited_approval"):
-            deltas.append("Approval: unlimited token spend")
-        else:
-            deltas.append("Approval: limited token spend")
+        deltas.append(f"Access granted: {_granting_access(decoded)}")
     return deltas
 
 
-def _build_asset_delta(simulation_result: Optional[Dict], decoded: Dict, value_bnb: float) -> List:
+def _build_asset_delta(
+    simulation_result: Optional[Dict], decoded: Dict, value_bnb: float, chain_id: int,
+) -> List:
     """Build asset_delta list for the extension response.
 
     Uses simulation deltas when available and simulation succeeded.
@@ -2427,7 +2490,7 @@ def _build_asset_delta(simulation_result: Optional[Dict], decoded: Dict, value_b
             # Do not show native BNB delta (msg.value relay fee) as if it were
             # the full picture. Show a clear notice instead.
             return ["Unable to simulate — cross-chain or complex transaction. Verify manually."]
-    return _build_asset_delta_fallback(decoded, value_bnb)
+    return _build_asset_delta_fallback(decoded, value_bnb, chain_id)
 
 
 def _coverage_fields(alert: Dict) -> Dict:
@@ -2466,13 +2529,13 @@ def _build_cached_response(
         **_coverage_fields(alert),
         "classification": classification,
         "risk_score": risk_score,
-        "decoded_action": _format_decoded_action(decoded),
+        "decoded_action": _format_decoded_action(decoded, chain_id),
         "calldata_details": _build_calldata_details(decoded),
         "danger_signals": flags,
         "transaction_impact": {
-            "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens",
-            "granting_access": "UNLIMITED" if decoded.get("is_unlimited_approval") else "None",
-            "recipient": f"{to_addr[:10]}..." if to_addr else "Unknown",
+            "sending": _sending(decoded, value_bnb, chain_id, "Tokens"),
+            "granting_access": _granting_access(decoded),
+            "recipient": to_addr or "Unknown",
             "post_tx_state": f"Risk archetype: {archetype}",
         },
         "analysis": f"Cached result (scanned {cached.get('scan_count', 1)} times)",
@@ -2491,7 +2554,7 @@ def _build_cached_response(
             "confidence": cached.get('confidence', 0),
         },
         "simulation": None,
-        "asset_delta": _build_asset_delta_fallback(decoded, value_bnb),
+        "asset_delta": _build_asset_delta_fallback(decoded, value_bnb, chain_id),
         "greenfield_url": None,
         "cached": True,
         "chain_id": chain_id,
@@ -2517,7 +2580,7 @@ def _extract_raw_checks(scan: Dict) -> Dict:
     }
 
 
-def _build_fallback_response(decoded: Dict, scan: Dict, whitelisted: Optional[str]) -> Dict:
+def _build_fallback_response(decoded: Dict, scan: Dict, whitelisted: Optional[str], chain_id: int) -> Dict:
     """Build a firewall response when AI is unavailable."""
     risk_score = scan.get("risk_score", 50)
     scam_matches = _scam_match_count(scan)
@@ -2566,14 +2629,12 @@ def _build_fallback_response(decoded: Dict, scan: Dict, whitelisted: Optional[st
         "partial": alert['status'] == 'unknown',
         "classification": classification,
         "risk_score": min(100, risk_score),
-        "decoded_action": _format_decoded_action(decoded),
+        "decoded_action": _format_decoded_action(decoded, chain_id),
         "calldata_details": _build_calldata_details(decoded),
         "danger_signals": danger_signals,
         "transaction_impact": {
             "sending": "Unknown (AI unavailable)",
-            "granting_access": "Unknown" if not decoded.get("is_approval") else (
-                "UNLIMITED" if is_unlimited_approval else "Limited approval"
-            ),
+            "granting_access": _granting_access(decoded),
             "recipient": scan.get("address", "Unknown"),
             "post_tx_state": "AI analysis unavailable — review manually",
         },
@@ -2634,15 +2695,15 @@ def _build_unverified_swap_response(
         "classification": "CAUTION",
         **coverage_fields,
         "risk_score": 35,
-        "decoded_action": _format_decoded_action(decoded),
+        "decoded_action": _format_decoded_action(decoded, req.chainId),
         "calldata_details": _build_calldata_details(decoded),
         "danger_signals": [
             f"Swap via trusted router ({whitelisted}) but {reason.lower()} — token safety unverified",
         ],
         "transaction_impact": {
-            "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens (via router)",
-            "granting_access": "UNLIMITED" if decoded.get("is_unlimited_approval") else "None",
-            "recipient": f"{whitelisted} ({to_addr[:10]}...)",
+            "sending": _sending(decoded, value_bnb, req.chainId, "Tokens (via router)"),
+            "granting_access": _granting_access(decoded),
+            "recipient": f"{whitelisted} ({to_addr})",
             "post_tx_state": f"Swap via {whitelisted} — {reason.lower()}",
         },
         "analysis": (
@@ -2674,7 +2735,7 @@ def _build_unverified_swap_response(
             "confidence": 30,
         },
         "simulation": None,
-        "asset_delta": _build_asset_delta_fallback(decoded, value_bnb),
+        "asset_delta": _build_asset_delta_fallback(decoded, value_bnb, req.chainId),
         "greenfield_url": None,
         "chain_id": req.chainId,
         "network": _chain_id_to_name(req.chainId),
@@ -2836,13 +2897,13 @@ async def _analyze_router_swap(
         **_coverage_fields(alert),
         "classification": classification,
         "risk_score": risk_score,
-        "decoded_action": _format_decoded_action(decoded),
+        "decoded_action": _format_decoded_action(decoded, req.chainId),
         "calldata_details": _build_calldata_details(decoded),
         "danger_signals": danger_signals,
         "transaction_impact": {
-            "sending": f"{value_bnb:g} BNB" if value_bnb > 0 else "Tokens (via router)",
-            "granting_access": "UNLIMITED" if decoded.get("is_unlimited_approval") else "None",
-            "recipient": f"{whitelisted} ({to_addr[:10]}...)",
+            "sending": _sending(decoded, value_bnb, req.chainId, "Tokens (via router)"),
+            "granting_access": _granting_access(decoded),
+            "recipient": f"{whitelisted} ({to_addr})",
             "post_tx_state": f"Swap via {whitelisted} — analyzed {best['address'][:10]}...",
         },
         "analysis": f"Trusted router detected ({whitelisted}), analyzed swap path tokens.",
@@ -2866,7 +2927,7 @@ async def _analyze_router_swap(
         "asset_delta": (
             [d["display"] for d in sim_result["asset_deltas"]]
             if sim_result and sim_result.get("asset_deltas")
-            else _build_asset_delta_fallback(decoded, value_bnb)
+            else _build_asset_delta_fallback(decoded, value_bnb, req.chainId)
         ),
         "greenfield_url": None,
         "chain_id": req.chainId,
@@ -2945,19 +3006,23 @@ async def _enrich_decoded(decoded: Dict, to_addr: str, chain_id: int = 56):
             decoded["token_symbol"] = token_info["symbol"]
             decoded["token_name"] = token_info["name"]
 
+            spender_param, amount_param = _APPROVAL_PARAMS.get(decoded.get("function_name"), (None, None))
+
             # Format the approval amount
-            amount = params.get("param_1")  # uint256 amount
+            amount = params.get(amount_param) if amount_param else None
             if isinstance(amount, int):
                 if amount >= UNLIMITED_THRESHOLD:
                     decoded["formatted_amount"] = f"UNLIMITED {token_info['symbol']}"
                 else:
                     decimals = token_info.get("decimals", 18)
                     human_amount = amount / (10 ** decimals)
-                    decoded["formatted_amount"] = f"{human_amount:,.4f} {token_info['symbol']}".rstrip("0").rstrip(".")
-                    decoded["formatted_amount"] += f" {token_info['symbol']}" if not decoded["formatted_amount"].endswith(token_info['symbol']) else ""
+                    number = f"{human_amount:,.4f}".rstrip("0").rstrip(".")
+                    if number == "0" and amount:
+                        number = f"{human_amount:.4g}"
+                    decoded["formatted_amount"] = f"{number} {token_info['symbol']}"
 
             # Resolve the spender address
-            spender = params.get("param_0", "")
+            spender = params.get(spender_param) if spender_param else None
             if spender:
                 spender_name = calldata_decoder.is_whitelisted_target(spender)
                 if spender_name:

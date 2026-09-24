@@ -1,70 +1,117 @@
 /**
  * ShieldAI Inject Script
- * Runs in the PAGE context to intercept wallet transactions.
- * Wraps provider.request() directly — compatible with MetaMask's
+ * A manifest content script that runs in the page's own JavaScript world
+ * ("world": "MAIN") at document_start, in every frame, to intercept wallet
+ * requests. Wraps provider.request() directly — compatible with MetaMask's
  * protected window.ethereum property.
  */
 (function () {
   "use strict";
 
-  if (window.__shieldai_injected) return;
-  window.__shieldai_injected = true;
+  // Page scripts share this JavaScript world and run after this file, so they
+  // can replace any built-in (Set.prototype.has, Object.defineProperty,
+  // crypto.subtle.sign, Promise.prototype.then, ...) before a wallet call.
+  // Every built-in used after startup is taken here, while it is still the
+  // browser's own, and only these references are used later.
+  const uncurry = Function.prototype.bind.bind(Function.prototype.call);
+  const bindTo = uncurry(Function.prototype.bind);
+  // Promises are read with this then and a callback, never with await: await
+  // looks up the promise's constructor and then, which a page can replace,
+  // while the original then always calls back with the real value.
+  const then = uncurry(Promise.prototype.then);
+  const NativePromise = Promise;
+  const defineProperty = Object.defineProperty;
+  const parseJSON = JSON.parse;
+  const clone = structuredClone;
+  const toNumber = Number;
+  const isSafeInteger = Number.isSafeInteger;
+  const execRegExp = uncurry(RegExp.prototype.exec);
+  const Bytes = Uint8Array;
+  const importKey = bindTo(crypto.subtle.importKey, crypto.subtle);
+  const sign = bindTo(crypto.subtle.sign, crypto.subtle);
+  const randomUUID = bindTo(crypto.randomUUID, crypto);
+  const encode = bindTo(TextEncoder.prototype.encode, new TextEncoder());
+  const postMessage = bindTo(window.postMessage, window);
+  const addWindowListener = bindTo(window.addEventListener, window);
+  const removeWindowListener = bindTo(window.removeEventListener, window);
+  const setTimer = setTimeout;
+  const clearTimer = clearTimeout;
+  const clearTicker = clearInterval;
+  const eventDetail = uncurry(Object.getOwnPropertyDescriptor(CustomEvent.prototype, "detail").get);
 
-  // Clear resource timing entries so extension URLs are not leaked
-  // to page scripts via performance.getEntriesByType("resource").
-  try { performance.clearResourceTimings(); } catch (_) {}
+  // HMAC key for the channel shared with content.js. content.js hands over
+  // its token once, at document_start, before any page script runs (see
+  // offerToken there). It is imported straight into a non-extractable key
+  // and not kept, so no later page script can read it. null until then.
+  let _channelKey = null;
 
-  // Channel token for verdict authentication — starts null (reject all
-  // verdicts until init handshake from content.js completes).
-  let _CHANNEL_TOKEN = null;
+  function takeToken(event) {
+    const token = eventDetail(event);
+    if (typeof token !== "string" || !token) return;
+    event.preventDefault();
+    document.removeEventListener("shieldai:channel", takeToken);
+    _channelKey = importKey(
+      "raw", encode(token), { __proto__: null, name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+    );
+  }
+  document.addEventListener("shieldai:channel", takeToken);
+  document.dispatchEvent(new CustomEvent("shieldai:channel-request"));
 
-  // Receive the token from content.js via a one-time postMessage handshake.
-  // content.js runs at document_start (before any page scripts) and sends
-  // the init message immediately on inject.js load, so page scripts cannot
-  // register a listener in time to intercept it.
-  window.addEventListener("message", function _initHandler(event) {
-    if (
-      event.source !== window ||
-      !event.data ||
-      event.data.type !== "__SHIELDAI_INIT__"
-    ) {
-      return;
+  // What kind of request a method is, or null when it is not intercepted. A
+  // switch rather than a Set, so no replaceable built-in decides it.
+  function requestKind(method) {
+    switch (method) {
+      case "eth_sendTransaction":
+      case "eth_signTransaction":
+        return "transaction";
+      case "eth_signTypedData_v4":
+      case "eth_signTypedData_v3":
+        return "typed";
+      case "personal_sign":
+      case "eth_sign":
+        return "sign";
+      default:
+        return null;
     }
-    _CHANNEL_TOKEN = event.data._ct || "";
-    window.removeEventListener("message", _initHandler);
-  });
+  }
 
-  const INTERCEPTED_METHODS = new Set([
-    "eth_sendTransaction",
-    "eth_signTransaction",
-    "eth_signTypedData_v4",
-    "eth_signTypedData_v3",
-    "personal_sign",
-    "eth_sign",
-  ]);
-
-  /**
-   * Wrap a provider's request method to intercept transactions.
-   * Modifies the provider in-place (no Proxy, no Object.defineProperty).
-   */
-  const TYPED_DATA_METHODS = new Set([
-    "eth_signTypedData_v4",
-    "eth_signTypedData_v3",
-  ]);
-
-  const SIGN_METHODS = new Set(["personal_sign", "eth_sign"]);
+  // Providers already wrapped. Kept in this closure rather than as a flag on
+  // the provider, which the page could read to detect the extension.
+  const wrappedProviders = new WeakSet();
+  const isWrapped = bindTo(WeakSet.prototype.has, wrappedProviders);
+  const markWrapped = bindTo(WeakSet.prototype.add, wrappedProviders);
 
   // Stores the original (un-wrapped) provider.request — used by the revoke handler
   // so revoke TXs bypass ShieldAI analysis and go straight to the wallet.
   let _lastOriginalRequest = null;
 
+  const CHAIN_ID_PATTERN = /^(0x[0-9a-f]+|[0-9]+)$/i;
+
   function parseChainId(value) {
     if (typeof value !== "number" &&
-        !(typeof value === "string" && /^(0x[0-9a-f]+|[0-9]+)$/i.test(value))) {
+        !(typeof value === "string" && execRegExp(CHAIN_ID_PATTERN, value) !== null)) {
       return null;
     }
-    const chainId = Number(value);
-    return Number.isSafeInteger(chainId) && chainId > 0 ? chainId : null;
+    const chainId = toNumber(value);
+    return isSafeInteger(chainId) && chainId > 0 ? chainId : null;
+  }
+
+  // Call back with the HMAC of `${requestId}:${purpose}` under the channel key:
+  // the proof content.js makes too, which the page can see but cannot make.
+  function withProof(requestId, purpose, callback) {
+    then(_channelKey, (key) => {
+      then(sign("HMAC", key, encode(`${requestId}:${purpose}`)), (mac) => callback(new Bytes(mac)));
+    });
+  }
+
+  // Compare a received proof with the expected one byte by byte, using no
+  // built-in a page could replace.
+  function sameProof(expected, received) {
+    if (typeof received !== "object" || received === null) return false;
+    for (let i = 0; i < 32; i++) {
+      if (received[i] !== expected[i]) return false;
+    }
+    return true;
   }
 
   /**
@@ -72,10 +119,10 @@
    * Uses Object.defineProperty for compatibility with MetaMask v11+
    * where provider.request may be non-writable.
    */
-  function wrapProvider(provider, label) {
-    if (!provider || !provider.request || provider.__shieldai_proxied) return;
+  function wrapProvider(provider) {
+    if (!provider || !provider.request || isWrapped(provider)) return;
 
-    const originalRequest = provider.request.bind(provider);
+    const originalRequest = bindTo(provider.request, provider);
     _lastOriginalRequest = originalRequest;
     let currentChainId = null;
     let chainRevision = 0;
@@ -87,108 +134,141 @@
       });
     }
 
-    async function resolveChainId() {
+    // Call back with the wallet's current chain id, or null when it does not
+    // answer within 5 seconds, answers something invalid, or the chain changes
+    // while asking.
+    function resolveChainId(callback) {
       const revision = chainRevision;
-      let timeout;
-      try {
-        const chainId = await Promise.race([
-          originalRequest({ method: "eth_chainId" }),
-          new Promise((resolve) => { timeout = setTimeout(() => resolve(null), 5000); }),
-        ]);
+      let answered = false;
+      const answer = (chainId) => {
+        if (answered) return;
+        answered = true;
+        clearTimer(timeout);
         currentChainId = revision === chainRevision ? parseChainId(chainId) : null;
+        callback(currentChainId);
+      };
+      const timeout = setTimer(() => answer(null), 5000);
+      try {
+        then(originalRequest({ method: "eth_chainId" }), answer, () => answer(null));
       } catch (_) {
-        currentChainId = null;
-      } finally {
-        clearTimeout(timeout);
+        answer(null);
       }
-      return currentChainId;
     }
 
-    const wrappedRequest = async function (args) {
-      if (!args || !INTERCEPTED_METHODS.has(args.method)) {
+    const wrappedRequest = function (args) {
+      const method = args ? args.method : undefined;
+      const kind = requestKind(method);
+      if (kind === null) {
         return originalRequest(args);
       }
 
-      const txParams = args.params?.[0];
-      if (!txParams) return originalRequest(args);
-
-      console.log("[ShieldAI] Intercepted:", args.method, txParams);
-
-      let interceptData;
-
-      if (TYPED_DATA_METHODS.has(args.method)) {
-        // EIP-712: params[0] is address, params[1] is typed data JSON
-        const rawTypedData = args.params?.[1];
-        let parsedTypedData = null;
-        try {
-          parsedTypedData =
-            typeof rawTypedData === "string"
-              ? JSON.parse(rawTypedData)
-              : rawTypedData;
-        } catch (e) {
-          console.warn("[ShieldAI] Failed to parse typed data:", e);
-        }
-        interceptData = {
-          from: txParams,
-          to: "",
-          value: "0x0",
-          data: "0x",
-          typedData: parsedTypedData,
-          signMethod: args.method,
+      return new NativePromise((resolve, reject) => {
+        // Analyse and forward one copy of the request: a getter or proxy in
+        // the page's own object could otherwise show the analysis one
+        // transaction and hand the wallet another.
+        const request = clone({ method, params: args.params });
+        const forward = () => {
+          try {
+            resolve(originalRequest(request));
+          } catch (error) {
+            reject(error);
+          }
         };
-      } else if (SIGN_METHODS.has(args.method)) {
-        // personal_sign: params[0] is message, params[1] is address
-        // eth_sign: params[0] is address, params[1] is message
-        const isPersonal = args.method === "personal_sign";
-        interceptData = {
-          from: isPersonal ? (args.params?.[1] || "") : txParams,
-          to: "",
-          value: "0x0",
-          data: isPersonal ? txParams : (args.params?.[1] || "0x"),
-          signMethod: args.method,
+        const txParams = request.params?.[0];
+        if (!txParams) {
+          forward();
+          return;
+        }
+
+        let interceptData;
+
+        if (kind === "typed") {
+          // EIP-712: params[0] is address, params[1] is typed data JSON
+          const rawTypedData = request.params?.[1];
+          let parsedTypedData = null;
+          try {
+            parsedTypedData =
+              typeof rawTypedData === "string"
+                ? parseJSON(rawTypedData)
+                : rawTypedData;
+          } catch (_) {
+            // Unparseable typed data goes to the overlay without its fields.
+          }
+          interceptData = {
+            from: txParams,
+            to: "",
+            value: "0x0",
+            data: "0x",
+            typedData: parsedTypedData,
+            signMethod: method,
+          };
+        } else if (kind === "sign") {
+          // personal_sign: params[0] is message, params[1] is address
+          // eth_sign: params[0] is address, params[1] is message
+          const isPersonal = method === "personal_sign";
+          interceptData = {
+            from: isPersonal ? (request.params?.[1] || "") : txParams,
+            to: "",
+            value: "0x0",
+            data: isPersonal ? txParams : (request.params?.[1] || "0x"),
+            signMethod: method,
+          };
+        } else {
+          // eth_sendTransaction / eth_signTransaction — standard tx object
+          interceptData = txParams;
+        }
+
+        const isTransaction = kind === "transaction";
+        const revision = chainRevision;
+
+        // Ask content script to analyze via background
+        const analyze = (chainId) => {
+          requestAnalysis(method, isTransaction ? { ...interceptData, chainId } : interceptData, (action) => {
+            if (isTransaction && chainId === null) {
+              reject(new Error("Transaction blocked by ShieldAI: wallet chain is unknown or mismatched"));
+              return;
+            }
+            if (action !== "proceed") {
+              reject(new Error("Transaction blocked by ShieldAI Firewall"));
+              return;
+            }
+            if (!isTransaction) {
+              forward();
+              return;
+            }
+            // A verdict only covers the chain observed before analysis. Recheck
+            // even when the provider does not implement chainChanged events.
+            resolveChainId((latestChainId) => {
+              if (revision !== chainRevision || latestChainId !== chainId) {
+                reject(new Error("Transaction blocked by ShieldAI: wallet chain changed; retry analysis"));
+                return;
+              }
+              // proceed — forward to original wallet
+              forward();
+            });
+          });
         };
-      } else {
-        // eth_sendTransaction / eth_signTransaction — standard tx object
-        interceptData = txParams;
-      }
 
-      const isTransaction = args.method === "eth_sendTransaction" || args.method === "eth_signTransaction";
-      const revision = chainRevision;
-      let chainId = null;
-      if (isTransaction) {
-        chainId = await resolveChainId();
-        if (interceptData.chainId !== undefined && parseChainId(interceptData.chainId) !== chainId) {
-          chainId = null;
+        if (!isTransaction) {
+          analyze(null);
+          return;
         }
-      }
-
-      // Ask content script to analyze via background
-      const verdict = await requestAnalysis(args.method, isTransaction ? { ...interceptData, chainId } : interceptData);
-
-      if (isTransaction && chainId === null) {
-        throw new Error("Transaction blocked by ShieldAI: wallet chain is unknown or mismatched");
-      }
-
-      if (verdict.action === "block") {
-        throw new Error("Transaction blocked by ShieldAI Firewall");
-      }
-
-      // A verdict only covers the chain observed before analysis. Recheck even
-      // when the provider does not implement chainChanged events.
-      if (isTransaction) {
-        const latestChainId = await resolveChainId();
-        if (revision !== chainRevision || latestChainId !== chainId) {
-          throw new Error("Transaction blocked by ShieldAI: wallet chain changed; retry analysis");
-        }
-      }
-
-      // proceed — forward to original wallet
-      return originalRequest(args);
+        resolveChainId((chainId) => {
+          if (interceptData.chainId !== undefined && parseChainId(interceptData.chainId) !== chainId) {
+            analyze(null);
+            return;
+          }
+          analyze(chainId);
+        });
+      });
     };
 
-    // Use Object.defineProperty for MetaMask v11+ compatibility
+    // Use Object.defineProperty for MetaMask v11+ compatibility. The
+    // descriptor has no prototype, so a page that adds get or set to
+    // Object.prototype cannot turn it into an accessor.
     try {
-      Object.defineProperty(provider, "request", {
+      defineProperty(provider, "request", {
+        __proto__: null,
         value: wrappedRequest,
         writable: true,
         configurable: true,
@@ -197,85 +277,100 @@
       // Fallback to direct assignment if defineProperty fails
       try {
         provider.request = wrappedRequest;
-      } catch (e2) {
-        console.warn("[ShieldAI] Cannot wrap provider.request:", e2);
+      } catch (_) {
         return;
       }
     }
 
-    provider.__shieldai_proxied = true;
-    console.log("[ShieldAI] Firewall active — intercepting " + (label || "provider"));
+    markWrapped(provider);
   }
 
   /**
-   * Post message to content script and wait for verdict.
+   * Post the request to the content script and call back with "block" or
+   * "proceed" once a verdict with a valid proof arrives.
    */
-  function requestAnalysis(method, txParams) {
-    return new Promise((resolve) => {
-      // Use cryptographically random ID (replaces Math.random)
-      const requestId = crypto.randomUUID
-        ? crypto.randomUUID()
-        : "shieldai_" +
-          Array.from(crypto.getRandomValues(new Uint8Array(16)))
-            .map((b) => b.toString(16).padStart(2, "0"))
-            .join("");
+  function requestAnalysis(method, txParams, decide) {
+    // Without the channel no verdict can be trusted, so fail closed now.
+    if (_channelKey === null) {
+      decide("block");
+      return;
+    }
 
-      function handleVerdict(event) {
-        if (
-          event.source !== window ||
-          !event.data ||
-          event.data.type !== "SHIELDAI_TX_VERDICT" ||
-          event.data.requestId !== requestId
-        ) {
-          return;
-        }
-        // Reject verdicts without a valid channel token — prevents page
-        // scripts from forging verdicts.  null = init not yet received.
-        if (_CHANNEL_TOKEN === null || event.data._ct !== _CHANNEL_TOKEN) {
-          return;
-        }
-        window.removeEventListener("message", handleVerdict);
-        resolve(event.data);
+    const requestId = randomUUID();
+    let decided = false;
+    const finish = (action) => {
+      if (decided) return;
+      decided = true;
+      clearTimer(timeout);
+      removeWindowListener("message", handleMessage);
+      decide(action);
+    };
+
+    function handleMessage(event) {
+      // Anything read here comes from a page-visible message and counts only
+      // once its proof checks out.
+      const data = event.data;
+      if (event.source !== window || !data || data.requestId !== requestId) {
+        return;
       }
+      const { type, action, proof } = data;
+      if (type === "SHIELDAI_TX_SHOWN") {
+        // The overlay is on screen: wait for the user's decision instead
+        // of failing closed on the timer.
+        withProof(requestId, "shown", (expected) => {
+          if (sameProof(expected, proof)) clearTimer(timeout);
+        });
+        return;
+      }
+      // A verdict counts only with the proof content.js makes for that exact
+      // action, so the page can neither forge one nor relabel a Block.
+      if (type !== "SHIELDAI_TX_VERDICT" || (action !== "block" && action !== "proceed")) {
+        return;
+      }
+      withProof(requestId, action, (expected) => {
+        if (sameProof(expected, proof)) finish(action);
+      });
+    }
 
-      window.addEventListener("message", handleVerdict);
+    // Fail closed: if no verdict arrives within 60 seconds, block rather than
+    // forward a transaction nobody checked. The timer stops once content.js
+    // proves the overlay is showing, so a user reading it is never cut off.
+    const timeout = setTimer(() => finish("block"), 60000);
 
-      const txPayload = {
-        to: txParams.to || "",
-        from: txParams.from || "",
-        value: txParams.value || "0x0",
-        data: txParams.data || "0x",
-        chainId: txParams.chainId,
-      };
+    addWindowListener("message", handleMessage);
 
-      // Forward typed data and sign method for EIP-712 / signature analysis
-      if (txParams.typedData) txPayload.typedData = txParams.typedData;
-      if (txParams.signMethod) txPayload.signMethod = txParams.signMethod;
+    const txPayload = {
+      to: txParams.to || "",
+      from: txParams.from || "",
+      value: txParams.value || "0x0",
+      data: txParams.data || "0x",
+      chainId: txParams.chainId,
+    };
 
-      window.postMessage(
+    // Forward typed data and sign method for EIP-712 / signature analysis
+    if (txParams.typedData) txPayload.typedData = txParams.typedData;
+    if (txParams.signMethod) txPayload.signMethod = txParams.signMethod;
+
+    withProof(requestId, "intercept", (proof) => {
+      postMessage(
         {
           type: "SHIELDAI_TX_INTERCEPT",
           requestId,
           method,
           tx: txPayload,
+          proof,
         },
         "*"
       );
-
-      // Timeout after 60 seconds. Fail closed: if the firewall cannot return a
-      // verdict, do not silently forward a potentially malicious transaction.
-      setTimeout(() => {
-        window.removeEventListener("message", handleVerdict);
-        resolve({ action: "block", reason: "Analysis timed out" });
-      }, 60000);
     });
   }
 
   // --- Hook window.ethereum ---
 
   function tryWrap() {
-    if (window.ethereum && !window.ethereum.__shieldai_proxied) {
-      wrapProvider(window.ethereum, "window.ethereum");
+    const provider = window.ethereum;
+    if (provider && !isWrapped(provider)) {
+      wrapProvider(provider);
       return true;
     }
     return false;
@@ -286,7 +381,8 @@
     let _pending = window.ethereum;
 
     try {
-      Object.defineProperty(window, "ethereum", {
+      defineProperty(window, "ethereum", {
+        __proto__: null,
         configurable: true,
         enumerable: true,
         get() {
@@ -294,12 +390,14 @@
         },
         set(provider) {
           _pending = provider;
-          if (provider && !provider.__shieldai_proxied) {
-            setTimeout(() => {
-              wrapProvider(provider, "window.ethereum (deferred)");
-              // Restore normal property so wallet detection isn't affected
+          if (provider && !isWrapped(provider)) {
+            // Wrap before anything else can use the provider.
+            wrapProvider(provider);
+            // Restore normal property so wallet detection isn't affected
+            setTimer(() => {
               try {
-                Object.defineProperty(window, "ethereum", {
+                defineProperty(window, "ethereum", {
+                  __proto__: null,
                   configurable: true,
                   enumerable: true,
                   writable: true,
@@ -313,19 +411,19 @@
     } catch (e) {
       // MetaMask may have locked window.ethereum — poll instead
       const poll = setInterval(() => {
-        if (tryWrap()) clearInterval(poll);
+        if (tryWrap()) clearTicker(poll);
       }, 200);
-      setTimeout(() => clearInterval(poll), 30000);
+      setTimer(() => clearTicker(poll), 30000);
     }
   }
 
 
   // --- Hook EIP-6963 providers (Rabby, modern MetaMask, etc.) ---
 
-  window.addEventListener("eip6963:announceProvider", (event) => {
-    const detail = event.detail;
-    if (detail?.provider && !detail.provider.__shieldai_proxied) {
-      wrapProvider(detail.provider, "EIP-6963: " + (detail.info?.name || "unknown"));
+  addWindowListener("eip6963:announceProvider", (event) => {
+    const detail = eventDetail(event);
+    if (detail?.provider && !isWrapped(detail.provider)) {
+      wrapProvider(detail.provider);
     }
   });
 
