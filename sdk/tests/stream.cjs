@@ -22,10 +22,12 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
 /** A fetch that answers with an event stream the test writes to; like fetch, it errors the stream on abort. */
 function streamingFetch() {
   let controller;
-  const body = new ReadableStream({ start(c) { controller = c; } });
+  let cancelled = false;
+  const body = new ReadableStream({ start(c) { controller = c; }, cancel() { cancelled = true; } });
   const requests = [];
   return {
     requests,
+    cancelled: () => cancelled,
     fetch: async (url, init) => {
       requests.push(init);
       init.signal.addEventListener('abort', () => controller.error(Object.assign(new Error('aborted'), { name: 'AbortError' })));
@@ -72,6 +74,64 @@ test('events split across chunks, even inside a character, are read whole', asyn
   assert.deepEqual(result, FINAL);
 });
 
+// The first event with its JSON split over three data lines, one of them with no space after the colon.
+function multiLineFirst() {
+  const [head, ...rest] = JSON.stringify(FIRST).split(',');
+  return `event: first\ndata: ${head},\ndata: ${rest.slice(0, 3).join(',')},\ndata:${rest.slice(3).join(',')}\n\n`;
+}
+
+test('data lines are joined with LF, and a lone CR ends a line', async () => {
+  const stream = streamingFetch();
+  global.fetch = stream.fetch;
+  stream.write((multiLineFirst() + sse('final', FINAL)).replace(/\n/g, '\r'));
+  stream.end();
+  const firsts = [];
+
+  const result = await new ShieldBot().firewall('0xb', { chainId: 56, onFirst: (first) => firsts.push(first) });
+
+  assert.deepEqual(firsts, [FIRST]);
+  assert.deepEqual(result, FINAL);
+});
+
+test('a CRLF split between chunks ends one line, not two', async () => {
+  const stream = streamingFetch();
+  global.fetch = stream.fetch;
+  // Every chunk boundary falls between a CR and its LF, inside a multi-line event.
+  for (const part of (multiLineFirst() + sse('final', FINAL)).replace(/\n/g, '\r\n').split('\n')) {
+    stream.write(part);
+    stream.write('\n');
+  }
+  stream.end();
+  const firsts = [];
+
+  const result = await new ShieldBot().firewall('0xb', { chainId: 56, onFirst: (first) => firsts.push(first) });
+
+  assert.deepEqual(firsts, [FIRST]);
+  assert.deepEqual(result, FINAL);
+});
+
+test('an exception from onFirst rejects the call unchanged and releases the stream', async () => {
+  const stream = streamingFetch();
+  global.fetch = stream.fetch;
+  stream.write(sse('first', FIRST));
+  const failure = new TypeError('the caller broke');
+
+  await assert.rejects(
+    new ShieldBot().firewall('0xb', { chainId: 56, onFirst: () => { throw failure; } }),
+    (error) => error === failure,
+  );
+  assert.equal(stream.cancelled(), true);
+});
+
+test('the stream is released once the final arrives', async () => {
+  const stream = streamingFetch();
+  global.fetch = stream.fetch;
+  stream.write(sse('final', FINAL));
+
+  assert.deepEqual(await new ShieldBot().firewall('0xb', { chainId: 56, onFirst: () => {} }), FINAL);
+  assert.equal(stream.cancelled(), true);
+});
+
 test('an error event rejects with the API status and no final', async () => {
   const stream = streamingFetch();
   global.fetch = stream.fetch;
@@ -86,6 +146,7 @@ test('an error event rejects with the API status and no final', async () => {
     (error) => error instanceof ShieldBotError && error.status === 500 && /Internal server error/.test(error.message),
   );
   assert.equal(firsts.length, 1);
+  assert.equal(stream.cancelled(), true);
 });
 
 test('a stream with only the final never calls onFirst', async () => {

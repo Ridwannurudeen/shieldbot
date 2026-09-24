@@ -120,6 +120,7 @@ const result = await shield.firewall('0xTarget', {
 - `finalTimeout` (default 30000 ms) replaces `timeout` for a streamed call: it bounds the wait for the response and then for each next event.
 - An `error` event rejects with `ShieldBotError` and the API's HTTP status. A stream that ends without a final rejects with code `NETWORK_ERROR`.
 - `GET /api/verdicts` publishes this contract as `first_verdict`.
+- An exception thrown by `onFirst` is not caught: `firewall()` rejects with it and stops reading the stream.
 
 ## Supported chains
 
@@ -172,6 +173,10 @@ The fail mode applies to `check()` when the API is unreachable, times out or ret
 - **`closed`**: block the transaction (`analysis_unavailable: true`).
 
 4xx responses to `check()` (invalid key, unregistered agent, unsupported chain, rate limit) are thrown as `ShieldBotError`, never turned into a verdict. The other methods throw `ShieldBotError` on every failure; `status` holds the HTTP status (408 with code `TIMEOUT`, 0 with code `NETWORK_ERROR`).
+
+## Development
+
+The package runs on Node.js 18 or later. `npm test` needs Node.js 20.4 or later: the stream tests (`tests/stream.cjs`) use `node:test`'s mock timers.
 
 ## License
 

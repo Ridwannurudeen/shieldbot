@@ -280,6 +280,11 @@ class ShieldBotError extends Error {
 
 export { ShieldBotError };
 
+/** Carries an exception thrown by the caller's onFirst through _request's error mapping unchanged. */
+class ListenerError {
+  constructor(public error: unknown) {}
+}
+
 const DEFAULT_BASE_URL = 'https://api.shieldbotsecurity.online';
 const DEFAULT_TIMEOUT = 10_000;
 const DEFAULT_FINAL_TIMEOUT = 30_000;
@@ -680,6 +685,7 @@ export class ShieldBot {
       }
       return (await response.json()) as T;
     } catch (error) {
+      if (error instanceof ListenerError) throw error.error;
       if (error instanceof ShieldBotError) throw error;
       if ((error as Error).name === 'AbortError') {
         throw new ShieldBotError('Request timed out', 408, 'TIMEOUT');
@@ -696,7 +702,8 @@ export class ShieldBot {
 
   /**
    * Reads a streamed firewall response: `first` goes to onFirst, `final` resolves, and `error`
-   * throws a ShieldBotError with the API's status. onEvent runs on every event.
+   * throws a ShieldBotError with the API's status. onEvent runs on every event. Lines may end in
+   * LF, CRLF or CR, and an event's `data:` lines are joined with LF.
    */
   private async _readStream(
     response: Response,
@@ -707,33 +714,45 @@ export class ShieldBot {
     const decoder = new TextDecoder();
     let buffer = '';
     let event = '';
-    let data = '';
+    let data: string[] = [];
     for (;;) {
       const { done, value } = await reader.read();
-      if (done) {
-        throw new Error('the stream ended without a final verdict');
+      buffer += decoder.decode(value, { stream: !done });
+      // A CR that ends the text so far may be half of a CRLF, so it waits for the next chunk.
+      if (done && buffer.endsWith('\r')) {
+        buffer += '\n';
       }
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
+      const lines = buffer.split(/\r\n|\n|\r(?!$)/);
       buffer = lines.pop() as string;
-      for (const line of lines.map((text) => text.replace(/\r$/, ''))) {
+      for (const line of lines) {
         if (line.startsWith('event:')) {
           event = line.slice(6).trim();
         } else if (line.startsWith('data:')) {
-          data += line.slice(5).trim();
-        } else if (line === '' && data) {
+          data.push(line.slice(line.startsWith('data: ') ? 6 : 5));
+        } else if (line === '' && data.length) {
           onEvent();
-          const payload = JSON.parse(data);
+          const payload = JSON.parse(data.join('\n'));
           if (event === 'first') {
-            onFirst(payload as FirstVerdict);
-          } else if (event === 'final') {
-            return payload as FirewallResult;
-          } else if (event === 'error') {
+            try {
+              onFirst(payload as FirstVerdict);
+            } catch (error) {
+              await reader.cancel();
+              throw new ListenerError(error);
+            }
+          } else if (event === 'final' || event === 'error') {
+            // The answer is complete: release the connection.
+            await reader.cancel();
+            if (event === 'final') {
+              return payload as FirewallResult;
+            }
             throw new ShieldBotError(`ShieldBot API error: ${payload.detail || `HTTP ${payload.status}`}`, payload.status);
           }
           event = '';
-          data = '';
+          data = [];
         }
+      }
+      if (done) {
+        throw new Error('the stream ended without a final verdict');
       }
     }
   }
