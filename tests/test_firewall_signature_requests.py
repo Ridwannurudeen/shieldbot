@@ -2,9 +2,13 @@
 the signature path, never as a transaction without a target, and a raw eth_sign is always Block
 Recommended."""
 
+import re
+
 import pytest
 
+from core import verdicts
 from tests.test_consumer_unknowns import assert_unknown_response, consumer_api  # noqa: F401
+from tests.test_scan_evidence_api import _stored, evidence_api  # noqa: F401
 
 SIGNING_METHODS = [
     "eth_signTypedData",
@@ -55,3 +59,29 @@ async def test_a_signature_without_a_signer_address_is_accepted_and_judged_as_be
     assert response["classification"] == with_signer["classification"]
     assert response["risk_score"] == with_signer["risk_score"]
     assert response["status"] == with_signer["status"]
+
+
+@pytest.mark.parametrize(
+    "sign_method, classification",
+    [("personal_sign", verdicts.SAFE), ("eth_sign", verdicts.BLOCK_RECOMMENDED)],
+)
+def test_a_signature_sent_without_its_signer_keeps_its_verdict_and_stores_no_address(
+    evidence_api, mock_web3_client, sign_method, classification  # noqa: F811
+):
+    # The extension sends personal_sign and eth_sign with an empty "from": the verdict, its
+    # evidence document and its notes hold no address, and the target is the zero-address fallback.
+    _, client, _ = evidence_api
+    mock_web3_client.is_valid_address.side_effect = lambda value: bool(re.fullmatch(r"0x[0-9a-fA-F]{40}", value))
+    mock_web3_client.to_checksum_address.side_effect = lambda value: value
+    response = client.post(
+        "/api/firewall",
+        json={"to": "", "from": "", "data": "0x", "chainId": 56, "signMethod": sign_method},
+    )
+    assert response.status_code == 200
+    body, stored = _stored(client, response)
+    assert body["classification"] == classification
+    assert body["notes"] == []
+    assert stored["evidence"]["target"] == "0x" + "0" * 40
+    if sign_method == "eth_sign":
+        assert body["risk_score"] >= verdicts.BLIND_SIGN_MIN
+        assert body["danger_signals"][0].startswith("eth_sign signs a raw hash")
