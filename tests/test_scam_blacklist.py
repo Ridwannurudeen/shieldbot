@@ -453,6 +453,31 @@ def test_admin_removes_an_entry(admin_api):
     services.scam_db.remove_from_blacklist.assert_awaited_once_with(ADDRESS, 56)
 
 
+@pytest.mark.asyncio
+async def test_the_remove_route_validates_the_chain_itself(admin_api):
+    api, _, services = admin_api
+    request = SimpleNamespace(headers={"x-admin-secret": "test-admin"})
+    with pytest.raises(api.HTTPException) as refused:
+        await api.blacklist_remove(ADDRESS, request, chain_id=999999)
+    assert refused.value.status_code == 400
+    services.scam_db.remove_from_blacklist.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_removal_is_logged_only_when_an_entry_was_removed(db_path, caplog):
+    db, scam_db = await _open(db_path)
+    try:
+        with caplog.at_level("INFO", logger="utils.scam_db"):
+            assert await scam_db.remove_from_blacklist(ADDRESS, 56) is False
+        assert "Removed" not in caplog.text
+        await _report_three_times(scam_db)
+        with caplog.at_level("INFO", logger="utils.scam_db"):
+            assert await scam_db.remove_from_blacklist(ADDRESS, 56) is True
+        assert "Removed" in caplog.text
+    finally:
+        await db.close()
+
+
 def test_removing_a_missing_entry_is_not_found(admin_api):
     _, client, services = admin_api
     services.scam_db.remove_from_blacklist.return_value = False

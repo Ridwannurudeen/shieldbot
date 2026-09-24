@@ -2356,6 +2356,8 @@ async def blacklist_confirm(req: BlacklistConfirmRequest, request: Request):
 async def blacklist_remove(address: str, request: Request, chain_id: Optional[int] = None):
     """Remove a blacklist entry, community or admin. Without chain_id, removes the entry that covers
     every chain. Requires X-Admin-Secret."""
+    if chain_id is not None:
+        _validate_chain_id(chain_id)
     _require_admin(request)
     if not web3_client.is_valid_address(address):
         raise HTTPException(status_code=400, detail="Invalid address")

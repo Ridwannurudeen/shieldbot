@@ -453,5 +453,6 @@ class ScamDatabase:
         """Remove the entry for an address on a chain (None: the every-chain entry). True if one existed."""
         removed = await self.db.remove_blacklist(address, chain_id)
         await self.load_blacklist()
-        logger.info(f"Removed {address} from blacklist")
+        if removed:
+            logger.info(f"Removed {address} from blacklist")
         return removed
