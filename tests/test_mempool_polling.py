@@ -149,6 +149,24 @@ async def test_txpool_content_is_parsed_and_built_off_the_event_loop(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_stop_logs_only_for_a_monitor_that_was_started(caplog):
+    """The Telegram bot's container shuts down a monitor it never started."""
+    client = Web3Client.__new__(Web3Client)
+    client._adapters = {56: MagicMock()}
+    never_started = MempoolMonitor(client)
+    started = MempoolMonitor(client)
+    started._poll_pending = AsyncMock()
+    await started.start([56])
+
+    with caplog.at_level(logging.INFO, logger="services.mempool_service"):
+        await never_started.stop()
+        assert "MempoolMonitor stopped" not in caplog.messages
+        await started.stop()
+        assert caplog.messages.count("MempoolMonitor stopped") == 1
+    assert started._task is None
+
+
+@pytest.mark.asyncio
 async def test_each_chain_poll_logs_its_duration(monkeypatch, caplog):
     monitor = MempoolMonitor(MagicMock())
     monitor._running = True

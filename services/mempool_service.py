@@ -127,15 +127,16 @@ class MempoolMonitor:
         logger.info(f"MempoolMonitor started for chains: {self._monitored_chains}")
 
     async def stop(self):
-        """Stop monitoring."""
+        """Stop monitoring. A monitor that never started (the Telegram bot's) has nothing to stop."""
+        if not self._task:
+            return
         self._running = False
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-            self._task = None
+        self._task.cancel()
+        try:
+            await self._task
+        except asyncio.CancelledError:
+            pass
+        self._task = None
         logger.info("MempoolMonitor stopped")
 
     async def _monitor_loop(self):
