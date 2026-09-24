@@ -69,6 +69,7 @@ class ExplorerService:
     def __init__(self):
         self._cache = TLRUCache(maxsize=2048, ttu=_result_ttu)
         self._blockscout_locks: dict[str, asyncio.Lock] = {}
+        self._inflight: dict[tuple, asyncio.Task] = {}
         self._last_request: dict[str, float] = {}
 
     async def _request(
@@ -149,11 +150,26 @@ class ExplorerService:
                 cached = self._cache.get(cache_key)
                 if cached is not None:
                     return cached
-                result = await fetch()
-                self._cache[cache_key] = result
-        else:
-            result = await fetch()
-            self._cache[cache_key] = result
+                return self._keep(provider, chain_id, cache_key, await fetch())
+        # Concurrent callers for one URL (one address on one chain) share one request, so a hot
+        # address has at most one live Sourcify lookup, cached and counted once. A caller that is
+        # cancelled leaves it running for the others.
+        flight_key = (asyncio.get_running_loop(), cache_key)
+        if flight_key not in self._inflight:
+            self._inflight[flight_key] = asyncio.create_task(
+                self._settle(provider, chain_id, cache_key, flight_key, fetch())
+            )
+        return await asyncio.shield(self._inflight[flight_key])
+
+    async def _settle(self, provider, chain_id, cache_key, flight_key, lookup) -> ExplorerResult:
+        try:
+            return self._keep(provider, chain_id, cache_key, await lookup)
+        finally:
+            self._inflight.pop(flight_key, None)
+
+    def _keep(self, provider, chain_id, cache_key, result) -> ExplorerResult:
+        """Cache a fetched reply and count it in the Unknown ledger."""
+        self._cache[cache_key] = result
         unknown_ledger.record(
             provider,
             chain_id,

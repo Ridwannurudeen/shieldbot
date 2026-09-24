@@ -303,6 +303,80 @@ async def test_a_timed_out_sourcify_lookup_is_still_counted_once_when_it_ends(mo
     assert session.get.call_count == 1
 
 
+def _held_sourcify(release):
+    """A session whose Sourcify reply (404, not verified) comes once `release` is set."""
+    response = MagicMock(status=404)
+    response.json = AsyncMock(return_value=_sourcify(56, ADDRESS, False))
+
+    async def held_reply():
+        await release.wait()
+        return response
+
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(side_effect=held_reply)
+    context.__aexit__ = AsyncMock(return_value=False)
+    session = MagicMock()
+    session.get.return_value = context
+    return session
+
+
+@pytest.mark.asyncio
+async def test_a_hot_address_has_one_live_sourcify_lookup(monkeypatch):
+    import services.counterparty_service as counterparty_module
+    import services.explorer_service as explorer_module
+    from core.unknown_ledger import UnknownLedger
+
+    ledger = UnknownLedger()
+    monkeypatch.setattr(explorer_module, "unknown_ledger", ledger)
+    monkeypatch.setattr(counterparty_module, "PROVIDER_TIMEOUT", 0.05)
+    release = asyncio.Event()
+    session = _held_sourcify(release)
+    adapter = EvmAdapter(56, "Test", "https://rpc.invalid", etherscan_api_key="test-key")
+    service = adapter._explorer_service = ExplorerService()
+    adapter._etherscan_verification = AsyncMock(return_value=(False, None))
+    adapter.get_bytecode = AsyncMock(return_value="0x6080")
+    with patch("aiohttp.ClientSession") as client:
+        client.return_value.__aenter__.return_value = session
+        # Two scans stop waiting while the first Sourcify lookup is still out; two more callers,
+        # one with the address in upper case, then wait on it together.
+        assert await adapter.is_verified_contract(ADDRESS) == (None, None)
+        assert await adapter.is_verified_contract(ADDRESS) == (None, None)
+        waiting = asyncio.gather(
+            service.get_sourcify_verification(ADDRESS, 56),
+            service.get_sourcify_verification("0x" + ADDRESS[2:].upper(), 56),
+        )
+        await asyncio.sleep(0)
+        release.set()
+        results = await waiting
+        await asyncio.sleep(0.01)
+    assert [result.status for result in results] == ["unverified", "unverified"]
+    assert session.get.call_count == 1
+    counts = ledger.for_chain(56)["sourcify"]
+    assert {k: counts[k] for k in ("answered", "unknown", "failed")} == {"answered": 0, "unknown": 1, "failed": 0}
+    assert service._inflight == {}
+
+
+@pytest.mark.asyncio
+async def test_cancelling_the_first_caller_leaves_the_shared_sourcify_lookup_running():
+    release = asyncio.Event()
+    session = _held_sourcify(release)
+    service = ExplorerService()
+    with patch("aiohttp.ClientSession") as client:
+        client.return_value.__aenter__.return_value = session
+        leader = asyncio.create_task(service.get_sourcify_verification(ADDRESS, 56))
+        await asyncio.sleep(0)
+        follower = asyncio.create_task(service.get_sourcify_verification(ADDRESS, 56))
+        await asyncio.sleep(0)
+        leader.cancel()
+        release.set()
+        result = await follower
+    with pytest.raises(asyncio.CancelledError):
+        await leader
+    assert result.status == "unverified"
+    assert session.get.call_count == 1
+    assert service._inflight == {}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status, held", [(200, 300), (404, 300), (502, 30)], ids=["verified", "unverified", "unknown"])
 async def test_an_unknown_explorer_result_is_kept_only_thirty_seconds(status, held):
