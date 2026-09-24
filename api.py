@@ -24,6 +24,7 @@ from typing import Optional, Dict, Any, List
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve_selector
 from utils.chain_info import get_chain_name
 from utils.web3_client import UnsupportedChainError
+from services.counterparty_service import code_kind
 from services.mempool_service import supports_pending_transactions
 from core.config import Settings
 from core.container import ServiceContainer
@@ -1161,10 +1162,8 @@ async def firewall(req: FirewallRequest, request: Request):
         # written to the target's row either, and do not put the target's deployer on the watch
         # list. A claim's or a payment's floor describes the target, so its row is kept. A plain
         # native send has no payment rule and its recipient is the row, so it stays cacheable.
-        tx_specific = (
-            decoded.get('category') in ('approval', 'claim') or bool(req.typedData)
-            or (value_wei > 0 and decoded.get('selector') is not None)
-        )
+        paying = value_wei > 0 and decoded.get('selector') is not None
+        tx_specific = decoded.get('category') in ('approval', 'claim') or bool(req.typedData) or paying
         describes_target = not (decoded.get('category') == 'approval' or req.typedData)
 
         # 2. If target is a whitelisted router, analyze the swap path tokens instead of bypassing
@@ -1222,6 +1221,12 @@ async def firewall(req: FirewallRequest, request: Request):
                 raise
             except Exception:
                 pass
+            # A payment is judged on the contract that takes it; a wallet (no code, or an EIP-7702
+            # delegation) has none to judge. Only a paying call needs the lookup.
+            is_contract = None
+            if paying:
+                has_code, delegated = code_kind(await web3_client.get_bytecode(to_addr, chain_id=req.chainId))
+                is_contract = None if has_code is None else has_code and not delegated
 
             ctx = AnalysisContext(
                 address=to_addr, chain_id=req.chainId, from_address=from_addr,
@@ -1232,6 +1237,7 @@ async def firewall(req: FirewallRequest, request: Request):
                     'typed_data': req.typedData,
                     'sign_method': req.signMethod,
                     'is_verified': is_verified,
+                    'is_contract': is_contract,
                 },
             )
 

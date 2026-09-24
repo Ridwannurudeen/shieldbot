@@ -62,6 +62,18 @@ async def _within_timeout(awaitable, unknown):
         return unknown
 
 
+def code_kind(code: Optional[str]) -> tuple:
+    """(is_contract, delegated) from an eth_getCode answer; (None, None) when the code is unknown.
+
+    web3 6 returns the hex with 0x and web3 7 without. An EIP-7702 delegated account has code, but
+    only the delegation designator: it is a wallet.
+    """
+    if code is None:
+        return None, None
+    code_hex = code.lower().removeprefix("0x")
+    return len(code_hex) > 0, code_hex.startswith(DELEGATION_PREFIX) and len(code_hex) == DELEGATION_HEX_LENGTH
+
+
 def unknown_facts(address: str) -> dict:
     """Facts for a counterparty nobody could look up."""
     return {
@@ -195,14 +207,7 @@ class CounterpartyService:
             _within_timeout(self._web3.get_contract_creation_info(address, chain_id=chain_id), None),
             _within_timeout(self._scam_db.fetch_address_security(address), timed_out),
         )
-        # web3 6 returns the code hex with 0x, web3 7 without.
-        code_hex = None if code is None else code.lower().removeprefix("0x")
-        is_contract = None if code_hex is None else len(code_hex) > 0
-        delegated = (
-            None
-            if code_hex is None
-            else (code_hex.startswith(DELEGATION_PREFIX) and len(code_hex) == DELEGATION_HEX_LENGTH)
-        )
+        is_contract, delegated = code_kind(code)
         # A wallet has no source to verify and no creation to date.
         wallet = is_contract is False or delegated is True
         is_verified = None if wallet else verification[0]

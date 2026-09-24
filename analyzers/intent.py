@@ -164,6 +164,10 @@ class IntentMismatchAnalyzer(Analyzer):
         unverified contract; a verified contract taking payment is ordinary, except for claim(),
         where paying to claim is itself the phishing pattern.
         """
+        if ctx.extra.get('is_contract') is False:
+            # A wallet takes payments; there is no contract to judge, and an explorer calls every
+            # wallet unverified.
+            return None, None, None
         is_verified = ctx.extra.get('is_verified')
         claim = decoded.get('category') == 'claim'
         call = decoded.get('signature') or f"0x{decoded['selector']}"

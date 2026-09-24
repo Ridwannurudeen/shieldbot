@@ -383,6 +383,15 @@ async def test_payment_flag_names_the_call_by_its_signature():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('calldata', [CLAIM, CLAIM_AIRDROP, PAYABLE])
+async def test_paying_a_wallet_has_no_payment_floor(calldata):
+    result, creation = await _payable(calldata, False, {'age_days': 1}, is_contract=False)
+    creation.assert_not_awaited()
+    assert 'floor' not in result.data
+    assert result.data['status'] == 'ok'
+
+
+@pytest.mark.asyncio
 async def test_value_on_a_router_swap_is_not_a_payment_to_the_token():
     swap = '0x7ff36ab5' + '0' * 256
     result, creation = await _payable(swap, False, {'age_days': 1}, whitelisted_router='PancakeSwap V2 Router')
