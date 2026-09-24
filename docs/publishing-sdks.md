@@ -29,7 +29,7 @@ Renaming touches:
 - Every `@shieldbot/sdk` in `sdk/README.md`: the "after publication" install line and the imports.
 - The tarball name in the `sdk/README.md` install steps (`shieldbot-sdk-3.0.0.tgz`). `npm pack` derives it from the package name: `shieldbot-sdk` keeps it, `@gudman/shieldbot-sdk` gives `gudman-shieldbot-sdk-3.0.0.tgz`.
 - The usage comment at the top of `sdk/src/index.ts`.
-- The SDK snippet in `landing-src/src/components/AgentSecurity.tsx`.
+- The SDK snippet in `landing-src/src/components/AgentSecurity.tsx`, and then the built site: the committed bundle in `landing/assets/` carries the package name, so rebuild `landing/` (`npm run build` in `landing-src`) and deploy it before or together with the publish.
 
 Treat the first real publish as the test of whether a name is available to you.
 
@@ -47,13 +47,15 @@ Treat the first real publish as the test of whether a name is available to you.
 ```bash
 cd sdk
 npm ci
-npm test                          # compiles and runs tests/*.cjs
+npm test                          # compiles and runs tests/*.cjs (see the note below on Windows)
 npm run lint
 npm audit --audit-level=moderate  # the CI gate; one low-severity esbuild advisory is open today
 npm pack --dry-run                # prepack rebuilds dist/ from a clean directory; check the file list
 npm publish --dry-run
 npm publish                       # publishConfig.access is already "public"
 ```
+
+`npm test` passes the pattern `tests/*.cjs` to Node. A POSIX shell (CI, macOS, Linux, Git Bash) expands it; on Windows npm runs scripts through `cmd.exe`, which does not, so there it works only with Node 21 or later, whose test runner expands the pattern itself. With Node 18 or 20 on Windows, run `node --test` with the file names listed explicitly.
 
 Then check `npm view <name>` and install the package into an empty project. Once the package exists, npm recommends the package setting "Require two-factor authentication and disallow tokens"; choose it unless you move to trusted publishing. A published version number can never be reused, so bump `version` before every release.
 
