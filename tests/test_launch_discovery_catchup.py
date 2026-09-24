@@ -146,10 +146,9 @@ async def test_far_behind_sweep_reads_its_headers_within_the_rpc_call_rate(db):
     discovery = LaunchDiscovery(db, rpc_url="https://rpc.invalid", guard=guard)
     discovery._post = rpc
     started = clock.now
-    with (
-        patch("services.launch_discovery.asyncio.sleep", clock.sleep),
-        patch("services.rpc_guard.asyncio.sleep", clock.sleep),
-    ):
+    # The guard's pacing and the retry backoff both wait through asyncio.sleep, which this patches
+    # for the whole test.
+    with patch("asyncio.sleep", clock.sleep):
         polled = await discovery.poll()
 
     assert rpc.rejected == 0
