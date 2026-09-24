@@ -16,8 +16,9 @@ logger = logging.getLogger(__name__)
 
 _ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 _CHAIN_ID_DESCRIPTION = (
-    "Chain ID (default 56 = BNB Chain). Every chain ShieldBot supports is accepted, "
-    "including 4663 = Robinhood Chain; an unsupported chain ID is rejected."
+    "Chain ID of the chain the address or transaction is on; required, there is no default. "
+    "Every chain ShieldBot supports is accepted, including 56 = BNB Chain and 4663 = Robinhood Chain; "
+    "an unsupported chain ID is rejected."
 )
 
 # --- Injection detection patterns (basic regex for V3.1 stub) ---
@@ -37,6 +38,16 @@ def _validate_address(addr: str) -> str:
     return addr.lower()
 
 
+def _require_chain_id(container, params: Dict) -> int:
+    # A default chain would analyse an address from another chain on that chain, where it can look clean.
+    if "chain_id" not in params:
+        raise ValueError(
+            "Missing required argument: chain_id (the chain the address or transaction is on, "
+            "for example 56 = BNB Chain or 4663 = Robinhood Chain)"
+        )
+    return container.web3_client.validate_chain_id(params["chain_id"])
+
+
 # ---------------------------------------------------------------------------
 # Tool schema definitions
 # ---------------------------------------------------------------------------
@@ -53,9 +64,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "address": {"type": "string", "description": "Contract address (0x...)"},
-                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION, "default": 56},
+                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION},
             },
-            "required": ["address"],
+            "required": ["address", "chain_id"],
         },
     },
     {
@@ -68,9 +79,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "to": {"type": "string", "description": "Recipient / contract address"},
                 "data": {"type": "string", "description": "Transaction calldata (hex)"},
                 "value": {"type": "string", "description": "Value in wei (default '0')", "default": "0"},
-                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION, "default": 56},
+                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION},
             },
-            "required": ["from", "to", "data"],
+            "required": ["from", "to", "data", "chain_id"],
         },
     },
     {
@@ -80,9 +91,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "address": {"type": "string", "description": "Contract address to check deployer for"},
-                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION, "default": 56},
+                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION},
             },
-            "required": ["address"],
+            "required": ["address", "chain_id"],
         },
     },
     {
@@ -103,9 +114,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "wallet_address": {"type": "string", "description": "Wallet address to scan"},
-                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION, "default": 56},
+                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION},
             },
-            "required": ["wallet_address"],
+            "required": ["wallet_address", "chain_id"],
         },
     },
     {
@@ -132,10 +143,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "address": {"type": "string", "description": "Address to check"},
-                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION, "default": 56},
+                "chain_id": {"type": "integer", "description": _CHAIN_ID_DESCRIPTION},
                 "max_depth": {"type": "integer", "description": "Max traversal depth (default 2)", "default": 2},
             },
-            "required": ["address"],
+            "required": ["address", "chain_id"],
         },
     },
     {
@@ -180,7 +191,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
 async def handle_scan_contract(container, params: Dict) -> Dict:
     """Run all analyzers on a contract and return composite risk score."""
     address = _validate_address(params["address"])
-    chain_id = container.web3_client.validate_chain_id(params.get("chain_id", 56))
+    chain_id = _require_chain_id(container, params)
 
     ctx = AnalysisContext(address=address, chain_id=chain_id)
     results = await container.registry.run_all(ctx)
@@ -207,7 +218,7 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
     to_addr = params["to"]
     data = params.get("data", "0x")
     value = params.get("value", "0")
-    chain_id = container.web3_client.validate_chain_id(params.get("chain_id", 56))
+    chain_id = _require_chain_id(container, params)
 
     if not container.tenderly_simulator.is_enabled():
         return {
@@ -252,7 +263,7 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
 async def handle_check_deployer(container, params: Dict) -> Dict:
     """Look up deployer history for a contract."""
     address = _validate_address(params["address"])
-    chain_id = container.web3_client.validate_chain_id(params.get("chain_id", 56))
+    chain_id = _require_chain_id(container, params)
 
     summary = await container.db.get_deployer_risk_summary(address, chain_id)
     if summary is None:
@@ -307,7 +318,7 @@ async def handle_check_approval_risk(container, params: Dict) -> Dict:
     wallet = _validate_address(params["wallet_address"])
     return {
         "wallet_address": wallet,
-        "chain_id": container.web3_client.validate_chain_id(params.get("chain_id", 56)),
+        "chain_id": _require_chain_id(container, params),
         "approvals": None,
         "status": "unknown",
         "coverage": {"approvals": 0},
@@ -350,7 +361,7 @@ async def handle_query_threat_graph(container, params: Dict) -> Dict:
     address = _validate_address(params["address"])
     return {
         "address": address,
-        "chain_id": container.web3_client.validate_chain_id(params.get("chain_id", 56)),
+        "chain_id": _require_chain_id(container, params),
         "connected_to_cluster": None,
         "cluster_id": None,
         "edges": None,

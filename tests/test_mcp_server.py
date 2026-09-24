@@ -271,7 +271,7 @@ class TestToolExecution:
             "jsonrpc": "2.0", "id": 4, "method": "tools/call",
             "params": {
                 "name": "check_deployer",
-                "arguments": {"address": "0x" + "b" * 40},
+                "arguments": {"address": "0x" + "b" * 40, "chain_id": 56},
             },
         }, headers=AUTH_HEADERS)
         body = resp.json()
@@ -287,7 +287,7 @@ class TestToolExecution:
             "jsonrpc": "2.0", "id": 5, "method": "tools/call",
             "params": {
                 "name": "check_deployer",
-                "arguments": {"address": "0x" + "c" * 40},
+                "arguments": {"address": "0x" + "c" * 40, "chain_id": 56},
             },
         }, headers=AUTH_HEADERS)
         content = json.loads(resp.json()["result"]["content"][0]["text"])
@@ -330,7 +330,7 @@ class TestToolExecution:
             "jsonrpc": "2.0", "id": 8, "method": "tools/call",
             "params": {
                 "name": "check_approval_risk",
-                "arguments": {"wallet_address": "0x" + "d" * 40},
+                "arguments": {"wallet_address": "0x" + "d" * 40, "chain_id": 56},
             },
         }, headers=AUTH_HEADERS)
         content = json.loads(resp.json()["result"]["content"][0]["text"])
@@ -375,7 +375,7 @@ class TestToolExecution:
             "jsonrpc": "2.0", "id": 11, "method": "tools/call",
             "params": {
                 "name": "query_threat_graph",
-                "arguments": {"address": "0x" + "e" * 40},
+                "arguments": {"address": "0x" + "e" * 40, "chain_id": 56},
             },
         }, headers=AUTH_HEADERS)
         content = json.loads(resp.json()["result"]["content"][0]["text"])
@@ -398,6 +398,7 @@ class TestToolExecution:
                     "from": "0x" + "1" * 40,
                     "to": "0x" + "2" * 40,
                     "data": "0x38ed1739",
+                    "chain_id": 56,
                 },
             },
         }, headers=AUTH_HEADERS)
@@ -428,6 +429,7 @@ class TestToolExecution:
                     "from": "0x" + "1" * 40,
                     "to": "0x" + "2" * 40,
                     "data": "0x38ed1739",
+                    "chain_id": 56,
                 },
             },
         }, headers=AUTH_HEADERS)
@@ -457,6 +459,7 @@ class TestToolExecution:
                     "from": "0x" + "1" * 40,
                     "to": "0x" + "2" * 40,
                     "data": "0x38ed1739",
+                    "chain_id": 56,
                 },
             },
         }, headers=AUTH_HEADERS)
@@ -477,6 +480,7 @@ class TestToolExecution:
                     "from": "0x" + "1" * 40,
                     "to": "0x" + "2" * 40,
                     "data": "0x38ed1739",
+                    "chain_id": 56,
                 },
             },
         }, headers=AUTH_HEADERS)
@@ -504,7 +508,7 @@ class TestToolExecution:
             "jsonrpc": "2.0", "id": 15, "method": "tools/call",
             "params": {
                 "name": "scan_contract",
-                "arguments": {"address": "not_an_address"},
+                "arguments": {"address": "not_an_address", "chain_id": 56},
             },
         }, headers=AUTH_HEADERS)
         body = resp.json()
@@ -620,6 +624,7 @@ class TestPrompts:
         text = result["messages"][0]["content"]["text"]
         assert "0x" + "a" * 40 in text
         assert "scan_contract" in text
+        assert "chain_id" in text
 
     def test_get_agent_evaluation_prompt(self, client):
         """Get agent-evaluation prompt."""
@@ -967,7 +972,7 @@ async def test_mcp_maps_engine_keys_and_coverage(mock_container, status, reason,
         "coverage_reasons": {"honeypot": reason} if reason else {},
         "category_scores": {"honeypot": None if reason else 0},
     }
-    result = await handle_scan_contract(mock_container, {"address": "0x" + "a" * 40})
+    result = await handle_scan_contract(mock_container, {"address": "0x" + "a" * 40, "chain_id": 56})
     assert result["score"] == score
     assert result["flags"] == ([reason] if reason else [])
     assert result["status"] == status
@@ -976,6 +981,39 @@ async def test_mcp_maps_engine_keys_and_coverage(mock_container, status, reason,
     assert result["risk_display"] == ("Unknown (incomplete provider coverage)" if reason else "7%")
     if reason:
         assert result["verdict"] == "UNKNOWN"
+
+
+CHAIN_TOOLS = {
+    "scan_contract": {"address": "0x" + "a" * 40},
+    "simulate_transaction": {"from": "0x" + "a" * 40, "to": "0x" + "b" * 40, "data": "0x"},
+    "check_deployer": {"address": "0x" + "a" * 40},
+    "check_approval_risk": {"wallet_address": "0x" + "a" * 40},
+    "query_threat_graph": {"address": "0x" + "a" * 40},
+}
+
+
+def test_tools_that_analyse_an_address_or_transaction_require_chain_id():
+    from mcp_server.tools import TOOL_DEFINITIONS
+    tools = {tool["name"]: tool for tool in TOOL_DEFINITIONS}
+    for name in CHAIN_TOOLS:
+        schema = tools[name]["inputSchema"]
+        assert "chain_id" in schema["required"], name
+        assert "default" not in schema["properties"]["chain_id"], name
+
+
+@pytest.mark.parametrize("tool_name,arguments", CHAIN_TOOLS.items())
+def test_missing_chain_id_is_a_tool_error_not_a_bnb_chain_scan(client, mock_container, tool_name, arguments):
+    response = client.post("/mcp/messages", json={
+        "jsonrpc": "2.0", "id": 16, "method": "tools/call",
+        "params": {"name": tool_name, "arguments": arguments},
+    }, headers=AUTH_HEADERS)
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["isError"] is True
+    assert json.loads(result["content"][0]["text"])["error"].startswith("Missing required argument: chain_id")
+    mock_container.registry.run_all.assert_not_awaited()
+    mock_container.db.get_deployer_risk_summary.assert_not_awaited()
+    mock_container.tenderly_simulator.is_enabled.assert_not_called()
 
 
 def test_mcp_prompt_includes_unknown():
