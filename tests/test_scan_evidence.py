@@ -210,11 +210,11 @@ def test_analyzer_outcomes_follow_the_engine():
                 "coverage": {
                     "is_verified": True,
                     "contract_age_days": True,
-                    "top10_holder_percent": False,
+                    "scam_database": False,
                 },
                 "field_providers": {"is_verified": "goplus"},
                 "status": "unknown",
-                "reason": "Top-10 holder share unknown",
+                "reason": "Scam database unavailable: GoPlus HTTP 500",
             },
         ),
         AnalyzerResult("market", 0.25, 0, data={"skipped": True, "reason": "non-token contract"}),
@@ -231,11 +231,11 @@ def test_analyzer_outcomes_follow_the_engine():
         "status": "unknown",
         "score": 25,
         "coverage": risk["coverage"]["structural"],
-        "reason": "Top-10 holder share unknown",
+        "reason": "Scam database unavailable: GoPlus HTTP 500",
         "fields": {
             "is_verified": "answered",
             "contract_age_days": "answered",
-            "top10_holder_percent": "unknown",
+            "scam_database": "unknown",
         },
         "field_providers": {"is_verified": "goplus"},
     }
