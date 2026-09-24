@@ -180,8 +180,9 @@ check_stats() {
   return 1
 }
 
-# The backup runs with both units stopped. sqlite3's backup API writes one self-contained file (no WAL to carry),
-# which is checked before it gets its final name, so a partial backup can never be restored.
+# The backup runs with both units stopped. sqlite3's backup API writes the copy, which leaves WAL mode so it is
+# one self-contained file (the app switches it back when it opens it) and is checked before it gets its final
+# name, so a partial backup can never be restored.
 backup_db() {
   "$PY" - "$DB" "$BACKUP/shieldbot.db.partial" <<'PYEOF'
 import sqlite3
@@ -192,6 +193,7 @@ source = sqlite3.connect(Path(sys.argv[1]).resolve().as_uri() + "?mode=rw", uri=
 copy = sqlite3.connect(sys.argv[2])
 source.backup(copy)
 source.close()
+copy.execute("PRAGMA journal_mode=DELETE")
 result = copy.execute("PRAGMA quick_check").fetchone()[0]
 copy.close()
 if result != "ok":

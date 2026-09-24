@@ -91,3 +91,75 @@ grep -nE 'proxy_pass|proxy_set_header|proxy_.*timeout|add_header' /etc/nginx/sit
 ```
 
 After an edit: `nginx -t && systemctl reload nginx`.
+
+## Nightly backups
+
+`backup.sh` (repo root) copies the database with sqlite3's backup API while both services keep running, checks
+the copy with `PRAGMA quick_check` and saves it as `/opt/shieldbot/backups/shieldbot_<date>_<time>.db`
+(mode 600). Only after a good backup does it delete its own copies older than `KEEP_DAYS` days (default 7), so
+a job that keeps failing never deletes the last good copies. With `BACKUP_REMOTE` set it also sends the new
+copy there with `scp` (ssh key auth, no password prompt); unset, nothing leaves the machine. Any failure exits
+non-zero.
+
+Nothing schedules it. To run it nightly at 02:30, add this line to `/etc/cron.d/shieldbot-backup`:
+
+```
+30 2 * * * root /bin/bash /opt/shieldbot/backup.sh >> /var/log/shieldbot-backup.log 2>&1
+```
+
+With 14 days kept and an off-box copy (root's ssh key must already be accepted by the backup host):
+
+```
+30 2 * * * root KEEP_DAYS=14 BACKUP_REMOTE=backup@backup-host:/srv/shieldbot/ /bin/bash /opt/shieldbot/backup.sh >> /var/log/shieldbot-backup.log 2>&1
+```
+
+Set these on the cron line, not by editing `backup.sh`: an edited tracked file makes `deploy.sh --check` say
+NO-GO. Local copies sit on the same disk as the database, so they cover a bad write or a bad deploy, not the
+loss of the machine; only `BACKUP_REMOTE` covers that. The copies hold user data and this script does not
+encrypt them.
+
+## Restore a backup
+
+Pick a file with `ls -lt /opt/shieldbot/backups/`, then, as root:
+
+```bash
+BACKUP=/opt/shieldbot/backups/shieldbot_YYYYMMDD_HHMMSS.db
+
+# 1. Check the backup before touching anything. It must print "ok", then a row count.
+/opt/shieldbot/venv/bin/python - "$BACKUP" <<'PY'
+import sqlite3, sys
+from pathlib import Path
+db = sqlite3.connect(Path(sys.argv[1]).resolve().as_uri() + "?mode=ro", uri=True)
+print(db.execute("PRAGMA integrity_check").fetchone()[0])
+print(db.execute("SELECT COUNT(*) FROM contract_scores").fetchone()[0], "contract_scores rows")
+PY
+
+# 2. Stop the bot, then the API.
+systemctl stop shieldbot-bot
+systemctl stop shieldbot
+
+# 3. Keep the current database aside, then restore. A WAL file beside the database must not be replayed onto
+#    the restored copy, and copying into the existing file keeps its owner and mode.
+ASIDE=/root/shieldbot-before-restore-$(date +%Y%m%d-%H%M%S)
+mkdir -m 700 "$ASIDE"
+cp -a /opt/shieldbot/shieldbot.db* "$ASIDE"/
+rm -f /opt/shieldbot/shieldbot.db-wal /opt/shieldbot/shieldbot.db-shm
+cp "$BACKUP" /opt/shieldbot/shieldbot.db
+
+# 4. Start the API, verify it, then start the bot.
+systemctl start shieldbot
+sleep 15
+curl -s http://127.0.0.1:8000/api/health
+curl -s http://127.0.0.1:8000/api/stats
+systemctl start shieldbot-bot
+systemctl is-active shieldbot shieldbot-bot
+```
+
+Verify: `/api/health` returns `"status":"ok"` with the chain list, `contracts_scanned` in `/api/stats` equals
+the `contract_scores` count from step 1 (until new scans arrive), and both units print `active`. If anything is
+wrong, put the previous database back: stop both units, run
+`rm -f /opt/shieldbot/shieldbot.db-wal /opt/shieldbot/shieldbot.db-shm && cp -a "$ASIDE"/shieldbot.db* /opt/shieldbot/`
+and start the API, then the bot.
+
+To test a backup without touching production, run step 1 alone: it opens the file read-only and leaves nothing
+beside it.

@@ -1,4 +1,4 @@
-"""Local runs of deploy/deploy.sh against a throwaway repository and database.
+"""Local runs of deploy/deploy.sh and backup.sh against a throwaway repository and database.
 
 systemctl, curl and the other host commands are shell functions that record every call, so the tests can
 check what a run would do to the server without touching one.
@@ -10,6 +10,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,7 @@ flock() { return 0; }
 sleep() { :; }
 df() { printf 'Filesystem 1024-blocks Used Available Capacity Mounted\nstub 1 1 99999999 1%% /\n'; }
 journalctl() { log journalctl "$@"; }
+scp() { log scp "$@"; }
 git() { log git "$@"; command git "$@"; }
 systemctl() {
   log systemctl "$@"
@@ -389,3 +391,98 @@ def test_rollback_refuses_a_directory_without_a_saved_commit(server):
     assert code == 1
     assert "ROLLBACK_COMMIT" in err
     assert not [call for call in server.calls() if call.startswith("systemctl stop")]
+
+
+class Backup:
+    def __init__(self, tmp: Path, bash: str):
+        self.tmp, self.bash = tmp, bash
+        self.state = tmp / "state"
+        self.state.mkdir()
+        self.db = tmp / "shieldbot.db"
+        self.dir = tmp / "backups"
+        self.script = write_script(
+            tmp / "backup.sh",
+            (ROOT / "backup.sh").read_text(encoding="utf-8"),
+            {
+                "DB=/opt/shieldbot/shieldbot.db": f"DB={self.db.as_posix()}",
+                "BACKUP_DIR=/opt/shieldbot/backups": f"BACKUP_DIR={self.dir.as_posix()}",
+                "PY=/opt/shieldbot/venv/bin/python3": f"PY={PYTHON}",
+            },
+        )
+
+    def run(self, **env):
+        return run_script(self.bash, self.script, self.state, **env)
+
+    def calls(self) -> list:
+        path = self.state / "calls"
+        return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+
+@pytest.fixture
+def backup(tmp_path, bash):
+    return Backup(tmp_path, bash)
+
+
+def test_backup_takes_a_consistent_copy_while_the_database_is_in_use(backup):
+    live = sqlite3.connect(backup.db)
+    live.execute("PRAGMA journal_mode=WAL")
+    live.execute("CREATE TABLE scans (id INTEGER PRIMARY KEY)")
+    live.execute("INSERT INTO scans VALUES (1)")
+    live.commit()
+    # The committed row still sits in the WAL while this connection stays open.
+    try:
+        code, out, err = backup.run()
+    finally:
+        live.close()
+    assert code == 0, err
+    [copy] = backup.dir.glob("shieldbot_*.db")
+    # Header bytes 18 and 19 are 1 for a rollback-journal database: the copy stands alone, with no WAL to carry.
+    assert copy.read_bytes()[18:20] == b"\x01\x01"
+    assert rows(copy) == [1]
+    assert "Backup saved" in out
+    assert sorted(path.name for path in backup.dir.iterdir()) == [copy.name]
+    assert backup.calls() == []
+
+
+def test_backup_prunes_only_its_own_copies_older_than_keep_days(backup):
+    sqlite3.connect(backup.db).close()
+    backup.dir.mkdir()
+    now = time.time()
+    for name, days in (("shieldbot_old.db", 4), ("shieldbot_recent.db", 2), ("unrelated.db", 30)):
+        path = backup.dir / name
+        path.write_bytes(b"")
+        os.utime(path, (now - days * 86400, now - days * 86400))
+    code, _, err = backup.run(KEEP_DAYS="3")
+    assert code == 0, err
+    names = {path.name for path in backup.dir.iterdir()}
+    assert "shieldbot_old.db" not in names
+    assert {"shieldbot_recent.db", "unrelated.db"} <= names
+    assert len([name for name in names if name.startswith("shieldbot_")]) == 2
+
+
+def test_backup_copies_off_box_only_when_asked(backup):
+    sqlite3.connect(backup.db).close()
+    code, out, err = backup.run(BACKUP_REMOTE="backup@example.net:/srv/shieldbot/")
+    assert code == 0, err
+    [copy] = backup.dir.glob("shieldbot_*.db")
+    [call] = backup.calls()
+    assert call.startswith("scp ") and call.endswith(
+        f"{copy.as_posix()} backup@example.net:/srv/shieldbot/"
+    )
+    assert "BatchMode=yes" in call
+
+
+def test_backup_never_creates_a_missing_database(backup):
+    code, _, err = backup.run()
+    assert code != 0
+    assert not backup.db.exists()
+    assert not list(backup.dir.glob("shieldbot_*"))
+
+
+@pytest.mark.parametrize("keep_days", ["0", "7d", "-1"])
+def test_backup_rejects_a_bad_keep_days(backup, keep_days):
+    sqlite3.connect(backup.db).close()
+    code, _, err = backup.run(KEEP_DAYS=keep_days)
+    assert code == 2
+    assert "KEEP_DAYS" in err
+    assert not backup.dir.exists()
