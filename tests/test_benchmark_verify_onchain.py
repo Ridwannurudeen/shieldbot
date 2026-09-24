@@ -103,6 +103,16 @@ def test_an_rpc_that_refuses_the_request_leaves_its_facts_unread(capsys):
     assert "its Transfer log was not found" in out
 
 
+def test_an_rpc_over_its_quota_leaves_the_batch_unread_with_its_reason(capsys):
+    def over_quota(url, payload):
+        return {"jsonrpc": "2.0", "id": None, "error": {"code": -32001, "message": "usage limit"}}
+
+    assert verify.main(["--dataset", str(DATASET)], post=over_quota) == 1
+    out = capsys.readouterr().out
+    # The sender check never runs when its log was not read, so 10 of the 11 facts carry the reason.
+    assert "0 differ, 11 could not be read" in out and out.count(": usage limit") == 10
+
+
 def test_an_rpc_given_for_a_chain_reads_all_of_its_facts():
     urls = set()
 

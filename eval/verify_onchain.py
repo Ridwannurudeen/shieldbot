@@ -185,7 +185,13 @@ def _read(checks, post, unread):
             except (OSError, ValueError) as e:
                 unread.extend((check, f"{type(e).__name__}: {e}") for check in chunk)
                 continue
-            answers = {item.get("id"): item for item in reply} if isinstance(reply, list) else {}
+            if not isinstance(reply, list):
+                # An RPC over its quota answers the whole batch with one error object.
+                error = reply.get("error") if isinstance(reply, dict) else None
+                reason = (error or {}).get("message", "no answer")
+                unread.extend((check, reason) for check in chunk)
+                continue
+            answers = {item.get("id"): item for item in reply}
             for i, check in enumerate(chunk):
                 answer = answers.get(i, {})
                 if answer.get("result") is None:
