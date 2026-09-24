@@ -21,6 +21,15 @@ npm install /path/to/shieldbot/sdk/shieldbot-sdk-3.0.0.tgz
 
 After publication it will install with `npm install @shieldbot/sdk` (planned name, not published yet and may change before release).
 
+## Changes since the unpublished 3.0.0 tree
+
+Nothing was ever published, but code built from earlier copies of this repository behaves differently:
+
+- `scan`, `firewall`, `check`, `rescue` and `queryThreatGraph` require a chain and throw `MISSING_CHAIN_ID` without one. They used to fall back to BNB Chain (56).
+- `queryThreatGraph(address, chainId, maxDepth?)` takes the chain as a new second argument, so `maxDepth` moved to third. It used to send no chain at all, which the API treated as BNB Chain.
+- `health()` is typed with `supported_chains`, the field the API actually returns, instead of `chains`.
+- `check()` and `firewall()` send `value` as decimal wei and throw `INVALID_VALUE` for anything that is not a non-negative integer. They used to forward it unchanged.
+
 ## API key
 
 `check()` and `register()` need an API key and an `agentId`. Every other call works without a key under a per-IP rate limit; with a key, the key's quota applies instead. There is no self-serve signup yet: keys are issued by the ShieldBot operator.
