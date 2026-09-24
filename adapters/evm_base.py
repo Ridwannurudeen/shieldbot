@@ -256,6 +256,7 @@ class EvmAdapter(ChainAdapter):
             return (None, None)
 
     async def get_contract_creation_info(self, address: str) -> Optional[Dict]:
+        etherscan_answered = False
         try:
             if self._explorer_backend in ('sourcify_blockscout', 'etherscan_blockscout'):
                 result = await self._explorer_service.get_contract_creation_info(address, self._chain_id)
@@ -287,9 +288,10 @@ class EvmAdapter(ChainAdapter):
                         return None
                     data = await resp.json()
                     if data['status'] == '1' and data['result']:
-                        unknown_ledger.record('etherscan', self._chain_id, 'answered')
                         result = data['result'][0]
                         tx_hash = result.get('txHash')
+                        etherscan_answered = True
+                        unknown_ledger.record('etherscan', self._chain_id, 'answered')
                         tx = await self._call_with_retry(self.w3.eth.get_transaction, tx_hash)
                         block = await self._call_with_retry(self.w3.eth.get_block, tx['blockNumber'])
                         creation_time = datetime.fromtimestamp(block['timestamp'], tz=timezone.utc)
@@ -300,11 +302,14 @@ class EvmAdapter(ChainAdapter):
                             'creation_time': creation_time.isoformat(),
                             'age_days': age_days,
                         }
-            unknown_ledger.record('etherscan', self._chain_id, 'failed')
+            # Etherscan answers "No data found" for an address it holds no creation record for.
+            no_record = data['status'] == '0' and data.get('message') == 'No data found'
+            unknown_ledger.record('etherscan', self._chain_id, 'unknown' if no_record else 'failed')
             return None
         except Exception as e:
-            # Only the Etherscan request raises aiohttp errors; the creation time's RPC reads count as rpc.
-            if isinstance(e, (aiohttp.ClientError, asyncio.TimeoutError)):
+            # Before Etherscan has answered, an error is its request or reply failing; after, it comes from
+            # the creation time's RPC reads, which count as rpc.
+            if self._explorer_backend == 'etherscan' and not etherscan_answered:
                 unknown_ledger.record('etherscan', self._chain_id, 'failed')
             logger.error("[%s] Error getting creation info: %s", self._chain_name, type(e).__name__)
             return None

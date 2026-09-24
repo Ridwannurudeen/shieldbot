@@ -52,7 +52,10 @@ def ledger(monkeypatch):
 
 
 def _aiohttp(module, *replies):
-    """Patch `module`'s aiohttp.ClientSession so successive GETs get `replies`: (status, body) or an exception."""
+    """Patch `module`'s aiohttp.ClientSession so successive GETs get `replies`: (status, body) or an exception.
+
+    A body that is an exception is raised by the reply's .json().
+    """
     session = MagicMock()
     contexts = []
     for reply in replies:
@@ -62,7 +65,9 @@ def _aiohttp(module, *replies):
         else:
             status, body = reply
             response = MagicMock(status=status)
-            response.json = AsyncMock(return_value=body)
+            response.json = (
+                AsyncMock(side_effect=body) if isinstance(body, Exception) else AsyncMock(return_value=body)
+            )
             context.__aenter__ = AsyncMock(return_value=response)
         contexts.append(context)
     session.get.side_effect = contexts
@@ -192,6 +197,9 @@ async def test_rpc_rate_limits_that_outlast_the_retries_count_one_failure(ledger
 
 SOURCE = {"status": "1", "result": [{"SourceCode": "contract A {}"}]}
 CREATION = {"status": "1", "result": [{"txHash": "0x" + "12" * 32, "contractCreator": TOKEN}]}
+# Etherscan's reply for an address it holds no creation record for (published in l2beat/l2beat#12965;
+# Etherscan's docs say only that status 0 can be an error or a valid request with no records).
+NO_RECORD = {"status": "0", "message": "No data found", "result": None}
 REFUSED = {
     "status": "0",
     "message": "NOTOK",
@@ -225,8 +233,26 @@ async def test_etherscan_verification_lookups_are_counted(ledger, reply, outcome
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "reply, outcome",
-    [((200, REFUSED), "failed"), ((503, None), "failed"), (aiohttp.ClientError(), "failed")],
-    ids=["refused", "server-error", "network-error"],
+    [
+        ((200, NO_RECORD), "unknown"),
+        ((200, REFUSED), "failed"),
+        ((503, None), "failed"),
+        (aiohttp.ClientError(), "failed"),
+        ((200, ValueError("Expecting value")), "failed"),
+        ((200, ["not", "an", "object"]), "failed"),
+        ((200, {"message": "OK"}), "failed"),
+        ((200, {"status": "1", "result": ["not an object"]}), "failed"),
+    ],
+    ids=[
+        "no-record",
+        "refused",
+        "server-error",
+        "network-error",
+        "unreadable-body",
+        "non-object-body",
+        "no-status",
+        "malformed-result",
+    ],
 )
 async def test_etherscan_creation_lookups_that_do_not_answer_are_counted(ledger, reply, outcome):
     from adapters.evm_base import EvmAdapter
