@@ -615,17 +615,24 @@ async def test_real_advisor_chat_keeps_text_only_for_complete_scan(consumer_api,
 
 
 @pytest.mark.asyncio
-async def test_rescue_unavailable_approval_scan_returns_503_without_raw_error(consumer_api):
-    from fastapi import HTTPException
+async def test_rescue_unreachable_rpc_answers_unknown_without_raw_error(consumer_api):
+    from unittest.mock import patch
+    from services.rescue_service import RescueService
     api, services = consumer_api
     services.settings.bscscan_api_key = ''
-    services.rescue_service = SimpleNamespace(scan_approvals=AsyncMock(
-        side_effect=RuntimeError('Session is closed: https://rpc.example/secret-key'),
-    ))
-    with pytest.raises(HTTPException) as exc:
-        await api.rescue_scan('0x' + 'b' * 40, chain_id=4663)
-    assert exc.value.status_code == 503
-    assert exc.value.detail == 'Approval scan unavailable'
+    api.web3_client._get_adapter.return_value.w3.provider.endpoint_uri = 'https://rpc.example/secret-key'
+    services.rescue_service = RescueService(api.web3_client)
+    session = MagicMock()
+    session.post.side_effect = RuntimeError('Session is closed: https://rpc.example/secret-key')
+    with patch('services.rescue_service.aiohttp.ClientSession') as factory:
+        factory.return_value.__aenter__.return_value = session
+        response = await api.rescue_scan('0x' + 'b' * 40, chain_id=4663)
+    session.post.assert_called()
+    assert response['status'] == 'unknown'
+    assert response['approvals'] == []
+    assert response['scanned_blocks'] is None
+    assert response['coverage_reasons'] == {'allowances': "Approval data unavailable from the chain's RPC"}
+    assert 'secret-key' not in str(response)
 
 
 @pytest.mark.asyncio
@@ -705,6 +712,57 @@ assert(ctx.approvalsEl.innerHTML.includes('risk-low'));
         encoding='utf-8', check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('stored, chain_id', [({'selectedChainId': 8453}, 8453), ({}, 56)])
+def test_extension_wallet_health_scans_the_selected_chain_and_shows_a_failed_scan_as_unknown(stored, chain_id):
+    import json
+    from pathlib import Path
+    import shutil
+    import subprocess
+
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('Node.js is required for extension JavaScript regression tests')
+    script = '''
+const fs = require('fs');
+const vm = require('vm');
+const assert = require('assert/strict');
+const [stored, chainId] = JSON.parse(process.argv[1]);
+function element() {return {innerHTML: '', textContent: '', style: {}};}
+const requested = [];
+const context = {
+  URLSearchParams, location: {search: ''}, escapeHtml: String,
+  t: (key, values) => values ? `${key}:${values.status}` : key,
+  AbortController, setTimeout, clearTimeout,
+  document: {addEventListener() {}, createElement: element, getElementById: element},
+  chrome: {runtime: {sendMessage() {}}, storage: {local: {get(defaults, done) { done({...defaults, ...stored}); }, set() {}}}},
+  fetch: async (url) => { requested.push(url); return {ok: false, status: 503, json: async () => ({})}; },
+};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync('extension/popup.js', 'utf8'), context);
+context.escapeHtml = String;
+const ctx = {compact: true, scoreNumEl: element(), statsEl: element(), approvalsEl: element(),
+  resultEl: element(), loadingEl: element(), errorEl: element()};
+(async () => {
+  await context.runHealthScan('0x' + 'a'.repeat(40), ctx);
+  assert.deepEqual(requested, [`https://api.shieldbotsecurity.online/api/rescue/0x${'a'.repeat(40)}?chain_id=${chainId}`]);
+  assert.notEqual(ctx.errorEl.style.display, 'block');
+  assert.equal(ctx.scoreNumEl.textContent, '?');
+  assert(ctx.approvalsEl.innerHTML.includes('Unknown: healthScanUnavailable:503'));
+  assert.equal(ctx.resultEl.style.display, 'block');
+})().catch((error) => { console.error(error); process.exit(1); });
+'''
+    result = subprocess.run(
+        [node, '-e', script, json.dumps([stored, chain_id])],
+        cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True,
+        encoding='utf-8', check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    root = Path(__file__).resolve().parents[1] / 'extension' / 'locales'
+    for language in ('en', 'vi', 'zh'):
+        messages = json.loads((root / language / 'messages.json').read_text(encoding='utf-8'))
+        assert '(HTTP {status})' in messages['healthScanUnavailable'], language
 
 
 @pytest.mark.parametrize('surface', ['popup-compact', 'popup-dashboard', 'sidepanel-guardian'])

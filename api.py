@@ -1722,10 +1722,20 @@ async def public_stats():
 
     A source that is not running reports null, never 0. Mempool counters live in memory and restart
     from zero with the process; `mempool_counting_since` says when the current count began.
+    `launch_discovery` says how far Robinhood Chain launch discovery has read, from the database
+    alone: its lowest source cursor, when a sweep last moved a cursor, and the newest launch block.
+    A cursor far below the chain head, or an old `last_sweep_at`, means discovery has stalled.
     """
+    from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
+
     db_stats = {}
+    launch_discovery = None
     if container and container.db:
         db_stats = await container.db.get_platform_stats()
+        launch_discovery = {
+            "chain_id": LAUNCH_CHAIN_ID,
+            **await container.db.get_launch_discovery_status(LAUNCH_CHAIN_ID),
+        }
 
     mempool = {}
     if container and container.mempool_monitor:
@@ -1741,6 +1751,7 @@ async def public_stats():
         "suspicious_approvals":   mempool.get("suspicious_approvals"),
         "chains_protected":       len(mempool["monitored_chains"]) if "monitored_chains" in mempool else None,
         "mempool_counting_since": mempool.get("counting_since"),
+        "launch_discovery":       launch_discovery,
     }
 
 
@@ -2039,7 +2050,9 @@ async def rescue_scan(wallet_address: str, chain_id: int = 56):
     """Scan a wallet's active token approvals and assess risk (Rescue Mode).
 
     Returns risky approvals, Tier 1 alerts with explanations, and
-    Tier 2 pre-built revoke transactions for one-click cleanup.
+    Tier 2 pre-built revoke transactions for one-click cleanup. When the chain's RPC serves only
+    part of the approval history, or none of it, the scan answers status "unknown" with the reason
+    and the blocks it read (scanned_blocks), never an error.
     """
     _validate_chain_id(chain_id)
     if not container or not container.rescue_service:
@@ -2049,14 +2062,9 @@ async def rescue_scan(wallet_address: str, chain_id: int = 56):
         raise HTTPException(status_code=400, detail="Invalid wallet address")
 
     api_key = container.settings.bscscan_api_key
-    try:
-        result = await container.rescue_service.scan_approvals(
-            wallet_address, chain_id=chain_id, etherscan_api_key=api_key,
-        )
-    except RuntimeError as exc:
-        logger.warning(f"Approval scan unavailable for chain {chain_id}")
-        raise HTTPException(status_code=503, detail="Approval scan unavailable") from exc
-    return result
+    return await container.rescue_service.scan_approvals(
+        wallet_address, chain_id=chain_id, etherscan_api_key=api_key,
+    )
 
 
 # --- Threat Feed API ---
@@ -2162,6 +2170,9 @@ async def launch_feed(chain_id: int, limit: int = 50, cursor: str = None):
     its status and coverage reasons; unknown and not_scanned are never safe. scan.status is
     authoritative: "ok" only for a complete scan. Per-field coverage is included only where the
     hunter recorded it, for blocked launches. Each launch links its public verdict at verdict_url.
+    scanned_share counts the launches whose block is in the last 24 hours and how many of them
+    have any scan outcome. Scans share one small RPC budget and only launches seen trading soon
+    after launch are picked, so most launches are never scanned; this says how many were.
     Query params:
     - limit: max results (default 50, max 200)
     - cursor: next_cursor from the previous page (optional)
@@ -2185,11 +2196,14 @@ async def launch_feed(chain_id: int, limit: int = 50, cursor: str = None):
         launches, next_cursor = await container.db.get_launch_feed(chain_id, limit, cursor)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid cursor") from exc
+    window_hours = 24
+    scanned_share = await container.db.get_launch_scan_share(chain_id, time.time() - window_hours * 3600)
     return {
         'launches': launches,
         'count': len(launches),
         'chain_id': chain_id,
         'next_cursor': next_cursor,
+        'scanned_share': {'window_hours': window_hours, **scanned_share},
     }
 
 

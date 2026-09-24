@@ -265,16 +265,24 @@ function renderCompactHistory(history, listEl) {
 // ============================================================
 
 async function runHealthScan(addr, ctx) {
-  const { apiUrl } = await new Promise((r) => chrome.storage.local.get({ apiUrl: DEFAULT_API_URL }, r));
+  // The chain chosen in the side panel's chain selector, which its Guardian tab also scans.
+  const { apiUrl, selectedChainId } = await new Promise((r) =>
+    chrome.storage.local.get({ apiUrl: DEFAULT_API_URL, selectedChainId: 56 }, r));
+  const chainId = parseInt(selectedChainId) || 56;
   ctx.resultEl.style.display  = "none";
   ctx.loadingEl.style.display = "block";
   ctx.errorEl.style.display   = "none";
   try {
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), 60000);
-    const resp = await fetch(`${apiUrl}/api/rescue/${addr}?chain_id=56`, { signal: ctrl.signal });
+    const resp = await fetch(`${apiUrl}/api/rescue/${addr}?chain_id=${chainId}`, { signal: ctrl.signal });
     clearTimeout(to);
     ctx.loadingEl.style.display = "none";
+    if (resp.status >= 500) {
+      // The server could not scan: the wallet's approvals are unknown, not clean.
+      renderHealthData({ status: "unknown", coverage_reasons: { scan: t("healthScanUnavailable", { status: resp.status }) } }, ctx);
+      return;
+    }
     if (!resp.ok) throw new Error(`API error ${resp.status}`);
     renderHealthData(await resp.json(), ctx);
   } catch (err) {

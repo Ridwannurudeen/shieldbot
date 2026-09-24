@@ -32,6 +32,7 @@ from core.extension_formatter import is_scan_incomplete
 from core.registry import BACKGROUND_SCAN_DEADLINE_SECONDS
 from core.verdict_evidence import build_evidence
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
+from services.launch_discovery import LaunchDiscoveryError, WrongChainError
 from services.rpc_guard import CLOSED, BreakerOpenError
 from services.verdict_publisher import VERDICT_REFRESH_SECONDS
 
@@ -56,7 +57,7 @@ SCAN_INTERVAL_SECONDS = 2.0
 # and three Initialize log windows, then up to three pools simulated twice each.
 SCAN_REQUEST_COST = 22
 # Four guard subjects at five minutes cost 4 * 22 / 300 = 0.293 requests/s of the
-# shared 1 rps budget; after discovery's ~0.15 rps, ~0.557 rps remains for launches.
+# shared 1 rps budget; after discovery's ~0.27 rps, ~0.44 rps remains for launches.
 # Match the publisher's 300 s unchanged-verdict threshold. Guard expiry must also
 # allow scheduling, scan and publication latency; this is a target, not an SLA.
 GUARD_RESCAN_INTERVAL_SECONDS = VERDICT_REFRESH_SECONDS
@@ -461,6 +462,13 @@ class Hunter:
                 return []
             try:
                 await self.discovery.run()
+            except WrongChainError as exc:
+                # Nothing an RPC for another chain reports can be used; the launch watch pauses on it.
+                logger.error("Hunter: launch discovery RPC is not Robinhood Chain: %s", type(exc).__name__)
+            except LaunchDiscoveryError as exc:
+                # An RPC read that failed or a block it could not confirm: discovery kept what it
+                # confirmed and resumes from there next sweep.
+                logger.warning("Hunter: launch discovery stopped: %s", type(exc).__name__)
             except Exception as exc:
                 logger.error(
                     "Hunter: launch discovery failed: %s\n%s",

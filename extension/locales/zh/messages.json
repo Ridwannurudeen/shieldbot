@@ -141,5 +141,6 @@
   "classCaution": "注意",
   "classSafe": "安全",
   "overlayBtnWhy": "为什么有风险？",
-  "askShieldBotAI": "询问ShieldBot AI"
+  "askShieldBotAI": "询问ShieldBot AI",
+  "healthScanUnavailable": "授权扫描不可用 (HTTP {status})"
 }

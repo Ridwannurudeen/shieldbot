@@ -135,6 +135,20 @@ async def test_work_waiting_for_budget_is_refused_if_the_breaker_opens_meanwhile
 
 
 @pytest.mark.asyncio
+async def test_a_wait_the_breaker_refuses_gives_its_slot_back(clock):
+    guard = guard_on(clock)
+    await guard.acquire(18)
+    waiting = asyncio.ensure_future(guard.acquire(10))
+    await _real_sleep(0)
+    open_guard(guard)
+
+    with pytest.raises(BreakerOpenError):
+        await waiting
+    # Only the reservation that was granted still occupies the budget.
+    assert guard.get_stats()["wait_seconds"] == pytest.approx(18 / RPC_BUDGET_RPS)
+
+
+@pytest.mark.asyncio
 async def test_open_then_half_open_probe_then_closed(clock):
     guard = guard_on(clock)
     open_guard(guard)

@@ -141,5 +141,6 @@
   "classCaution": "CAUTION",
   "classSafe": "SAFE",
   "overlayBtnWhy": "Why is this risky?",
-  "askShieldBotAI": "Ask ShieldBot AI"
+  "askShieldBotAI": "Ask ShieldBot AI",
+  "healthScanUnavailable": "Approval scan unavailable (HTTP {status})"
 }

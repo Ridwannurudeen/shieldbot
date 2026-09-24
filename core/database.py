@@ -14,8 +14,8 @@ from core.extension_formatter import is_scan_incomplete
 
 logger = logging.getLogger(__name__)
 
-# Chain 4663 shares 1 rps; discovery uses ~0.15. Four subjects at 22 requests
-# every 300s use 0.293 rps, leaving ~0.557 rps for launches and other work.
+# Chain 4663 shares 1 rps; discovery uses ~0.27. Four subjects at 22 requests
+# every 300s use 0.293 rps, leaving ~0.44 rps for launches and other work.
 GUARD_WATCH_MAX_SUBJECTS = max(0, int(os.getenv("GUARD_WATCH_MAX_SUBJECTS", "4")))
 
 # Eighteen digits keep a cursor block inside SQLite's signed 64-bit integers.
@@ -2029,6 +2029,24 @@ class Database:
         """, (chain_id, source, last_block, time.time()))
         await self._db.commit()
 
+    async def get_launch_discovery_status(self, chain_id: int) -> Dict:
+        """Report how far launch discovery has read, from its stored cursors and launches.
+
+        ``cursor`` is the lowest source cursor, the block through which every source has been
+        read; ``last_sweep_at`` is when a sweep last moved a cursor; ``last_discovered_block`` is
+        the newest launch recorded. Each is None until discovery has stored one.
+        """
+        cursor = await self._db.execute(
+            "SELECT MIN(last_block), MAX(updated_at) FROM launch_discovery_cursors WHERE chain_id = ?",
+            (chain_id,),
+        )
+        lowest, last_sweep_at = await cursor.fetchone()
+        cursor = await self._db.execute(
+            "SELECT MAX(block_number) FROM discovered_launches WHERE chain_id = ?", (chain_id,)
+        )
+        newest = (await cursor.fetchone())[0]
+        return {"cursor": lowest, "last_sweep_at": last_sweep_at, "last_discovered_block": newest}
+
     async def upsert_discovered_launches(self, chain_id: int, launches: List[Dict]):
         """Record launches idempotently, one row per token.
 
@@ -2103,8 +2121,23 @@ class Database:
         await self._db.executescript("""
             CREATE INDEX IF NOT EXISTS idx_discovered_launches_feed
                 ON discovered_launches(chain_id, block_number DESC, token_address DESC);
+            CREATE INDEX IF NOT EXISTS idx_discovered_launches_scan_share
+                ON discovered_launches(chain_id, block_timestamp, scanned_at);
         """)
         await self._db.commit()
+
+    async def get_launch_scan_share(self, chain_id: int, since: float) -> Dict:
+        """Count the launches whose block is at or after ``since`` and how many of them were scanned.
+
+        A launch counts as scanned once any scan outcome was recorded for it, including an
+        incomplete or failed one.
+        """
+        cursor = await self._db.execute("""
+            SELECT COUNT(*), COUNT(scanned_at) FROM discovered_launches
+            WHERE chain_id = ? AND block_timestamp >= ?
+        """, (chain_id, since))
+        launches, scanned = await cursor.fetchone()
+        return {"launches": launches, "scanned": scanned}
 
     async def get_launch_feed(
         self, chain_id: int, limit: int, cursor: Optional[str] = None

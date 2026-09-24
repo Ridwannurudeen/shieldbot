@@ -1,6 +1,7 @@
 """Tests for agent.hunter — scheduled threat sweep loop."""
 
 import asyncio
+import logging
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -16,7 +17,7 @@ from agent.hunter import (
 )
 from core.database import Database
 from core.registry import BACKGROUND_SCAN_DEADLINE_SECONDS
-from services.launch_discovery import LaunchDiscoveryError
+from services.launch_discovery import LaunchDiscoveryError, WrongChainError
 
 
 @pytest.fixture
@@ -477,6 +478,41 @@ async def test_scan_new_pairs_discovers_then_scans_newest_launches_up_to_the_cap
     )
     remaining = await real_db.get_unscanned_launches(4663, limit=100)
     assert [row["token_address"] for row in remaining] == newest[LAUNCH_SCANS_PER_SWEEP:]
+
+
+@pytest.mark.asyncio
+async def test_discovery_that_stops_part_way_logs_one_warning_and_scans_still_run(
+    tools, ai, sentinel, real_db, caplog
+):
+    await real_db.upsert_discovered_launches(4663, [launch(0)])
+    discovery = MagicMock()
+    discovery.run = AsyncMock(side_effect=LaunchDiscoveryError("Launch block 65000001 not confirmed"))
+    tools.scan_contract = AsyncMock(return_value=scan_result(10))
+    hunter = Hunter(tools=tools, db=real_db, ai_analyzer=ai, sentinel=sentinel, discovery=discovery)
+
+    with caplog.at_level(logging.DEBUG, logger="agent.hunter"):
+        await hunter._scan_new_pairs("sweep-1")
+
+    records = [record for record in caplog.records if record.name == "agent.hunter"]
+    assert [(record.levelno, record.getMessage()) for record in records] == [
+        (logging.WARNING, "Hunter: launch discovery stopped: LaunchDiscoveryError"),
+    ]
+    tools.scan_contract.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_discovery_rpc_on_the_wrong_chain_is_logged_as_an_error(tools, ai, sentinel, real_db, caplog):
+    discovery = MagicMock()
+    discovery.run = AsyncMock(side_effect=WrongChainError("RPC is not Robinhood Chain"))
+    hunter = Hunter(tools=tools, db=real_db, ai_analyzer=ai, sentinel=sentinel, discovery=discovery)
+
+    with caplog.at_level(logging.DEBUG, logger="agent.hunter"):
+        await hunter._scan_new_pairs("sweep-1")
+
+    records = [record for record in caplog.records if record.name == "agent.hunter"]
+    assert [(record.levelno, record.getMessage()) for record in records] == [
+        (logging.ERROR, "Hunter: launch discovery RPC is not Robinhood Chain: WrongChainError"),
+    ]
 
 
 @pytest.mark.asyncio

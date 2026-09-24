@@ -18,8 +18,9 @@ RPC reports ``blockTimestamp=0x0``, so timestamps come from block headers.
 
 ``run`` sweeps each source on its own cursor. ``poll`` is the fast path: once the cursors agree
 and the confirmed head is close, a single ``eth_getLogs`` reads every source together with the
-Swap events of the launches being triaged. With an RpcGuard every request takes the shared 4663
-budget, and HTTP 429/5xx statuses and transport failures feed its circuit breaker.
+Swap events of the launches being triaged. With an RpcGuard every JSON-RPC call takes one
+request of the shared 4663 budget, and HTTP 429/5xx statuses and transport failures feed its
+circuit breaker.
 """
 
 import asyncio
@@ -56,7 +57,12 @@ BACKFILL_BLOCKS = 36_000
 # and swap volume is what pushes a range towards the RPC's 10,000-log limit, so anything larger
 # goes through the per-source sweep, which reads no swaps.
 COMBINED_MAX_BLOCKS = 2_000
-HEADER_BATCH = 50
+# eth_getBlockByNumber calls per batch request. The public RPC rate-limits every call in a batch,
+# so a batch takes one request of the guard's budget per call. Measured on 2026-09-24 with batches
+# sent about once a second: batches of 50 drew HTTP 429 within a few requests, up to four in a
+# row, enough to open the breaker in the middle of a store; batches of 20 and of 10 drew none in
+# thirty requests.
+HEADER_BATCH = 10
 MAX_ATTEMPTS = 4
 REQUEST_INTERVAL = 0.5
 QUOTE_ASSETS = frozenset({WETH_ADDRESS, "0x" + "0" * 40})
@@ -230,8 +236,8 @@ def _launch_records(decoded) -> List[Dict]:
     return records
 
 
-def _split_combined(logs, start: int, end: int, pairs) -> Tuple[List, List[str]]:
-    """Split one combined eth_getLogs result into decoded source logs and swapped pools.
+def _split_combined(logs, start: int, end: int, pairs) -> Tuple[List, List[Tuple[str, int]]]:
+    """Split one combined eth_getLogs result into decoded source logs and (pool, block) swaps.
 
     The query matches any requested address with any requested topic, so a pairing that is
     neither a source event nor a Swap is legitimately possible and skipped. A log from an address
@@ -254,9 +260,9 @@ def _split_combined(logs, start: int, end: int, pairs) -> Tuple[List, List[str]]
         elif log.get("removed"):
             continue
         elif topic == SWAP_V4_TOPIC and address == POOL_MANAGER_ADDRESS and len(topic_list) > 1:
-            swapped.append(_hash(topic_list[1]))
+            swapped.append((_hash(topic_list[1]), _quantity(log.get("blockNumber"))))
         elif topic == SWAP_V2_TOPIC and address in pairs:
-            swapped.append(address)
+            swapped.append((address, _quantity(log.get("blockNumber"))))
     return decoded, swapped
 
 
@@ -276,16 +282,16 @@ class LaunchDiscovery:
         self.rpc_url = rpc_url
         self.guard = guard
         self._session: Optional[aiohttp.ClientSession] = None
-        self._last_request = 0.0
+        self._next_request = 0.0
         self._chain_checked = False
         self._combined_failed = False
 
     async def run(self):
         """Run one bounded sweep over every source.
 
-        A source whose log request fails stops at its last completed chunk. If the launch
-        blocks cannot be confirmed against canonical headers, nothing is written and no
-        cursor moves.
+        A source whose log request fails stops at its last completed chunk. If a launch block
+        cannot be confirmed against its canonical header, only the launches in older blocks are
+        written and no cursor moves past that block.
         """
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
             self._session = session
@@ -302,8 +308,10 @@ class LaunchDiscovery:
         ``pools`` and for the pools of launches found in the same range. Otherwise the per-source
         sweep catches up and no swaps are counted; so it does when the RPC rejects the combined
         query or returns a log that cannot be trusted, and on the poll after the RPC gave up on
-        one, so a query the RPC keeps failing is never repeated. The chain id is checked once per
-        instance.
+        one, so a query the RPC keeps failing is never repeated. When a launch block of the
+        combined read cannot be confirmed, the poll covers only the blocks before it: the target
+        returned is the block before it, and only swaps up to there are counted, so the next poll
+        reads the rest once. The chain id is checked once per instance.
         """
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
             self._session = session
@@ -329,11 +337,15 @@ class LaunchDiscovery:
             except LaunchDiscoveryError as exc:
                 logger.warning("Launch discovery combined read rejected: %s", type(exc).__name__)
                 return {"target": target, "launches": await self._sweep(target), "swaps": {}}
-            records = await self._store(decoded, {source.name: (cursor, target) for source in SOURCES})
+            records, stop, _ = await self._store(
+                decoded, {source.name: (cursor, target) for source in SOURCES}
+            )
+            if stop is not None:
+                target = stop - 1
             pools.update(record["pool_id"] for record in records if record["pool_id"])
             counts = {}
-            for pool in swapped:
-                if pool in pools:
+            for pool, block in swapped:
+                if pool in pools and block <= target:
                     counts[pool] = counts.get(pool, 0) + 1
             return {"target": target, "launches": records, "swaps": counts}
 
@@ -362,7 +374,11 @@ class LaunchDiscovery:
         return _quantity(await self._call("eth_blockNumber", [])) - CONFIRMATIONS
 
     async def _sweep(self, target: int) -> List[Dict]:
-        """Sweep every source from its own cursor towards ``target`` and store what it finds."""
+        """Sweep every source from its own cursor towards ``target`` and store what it finds.
+
+        When a launch block could not be confirmed, raises the failure behind it after storing
+        the launches before it.
+        """
         decoded = []
         progress = {}
         for source in SOURCES:
@@ -374,26 +390,58 @@ class LaunchDiscovery:
             logs, done = await self._sweep_source(source, cursor, end)
             decoded += logs
             progress[source.name] = (cursor, done)
-        return await self._store(decoded, progress)
+        records, _, failure = await self._store(decoded, progress)
+        if failure is not None:
+            raise failure
+        return records
 
-    async def _store(self, decoded, progress) -> List[Dict]:
+    async def _store(
+        self, decoded, progress
+    ) -> Tuple[List[Dict], Optional[int], Optional[LaunchDiscoveryError]]:
         """Confirm launch blocks against canonical headers, then record launches and move cursors.
 
-        ``progress`` maps each source to (previous cursor, last block covered without a gap). If
-        a header does not match, nothing is written and no cursor moves.
+        ``progress`` maps each source to (previous cursor, last block covered without a gap).
+        Headers are read oldest first. At the first launch block whose header cannot be read or
+        does not match, the launches in older blocks are still recorded and every cursor stops
+        short of that block, so the next read resumes there; the failure is logged. A range too
+        large to confirm in one pass therefore still moves forward instead of being reread from
+        the same cursor forever. Returns the launches recorded, that first unconfirmed block and
+        the failure behind it, or None and None when every launch was confirmed.
         """
         records = _launch_records(decoded)
-        headers = await self._block_headers({record["block_number"] for record in records})
-        for record in records:
-            header = headers[record["block_number"]]
-            if _hash(header.get("hash")) != record.pop("block_hash"):
-                raise LaunchDiscoveryError("Log block is no longer canonical")
-            record["block_timestamp"] = _quantity(header.get("timestamp"))
-        await self.db.upsert_discovered_launches(CHAIN_ID, records)
+        headers = {}
+        failure = None
+        try:
+            await self._block_headers({record["block_number"] for record in records}, headers)
+        except LaunchDiscoveryError as exc:
+            failure = exc
+        stop = None
+        for record in sorted(records, key=lambda record: record["block_number"]):
+            header = headers.get(record["block_number"])
+            if header is None:
+                stop = record["block_number"]
+                break
+            try:
+                if _hash(header.get("hash")) != record["block_hash"]:
+                    raise LaunchDiscoveryError("Log block is no longer canonical")
+                record["block_timestamp"] = _quantity(header.get("timestamp"))
+            except LaunchDiscoveryError as exc:
+                stop, failure = record["block_number"], exc
+                break
+        confirmed = [record for record in records if stop is None or record["block_number"] < stop]
+        for record in confirmed:
+            del record["block_hash"]
+        await self.db.upsert_discovered_launches(CHAIN_ID, confirmed)
         for name, (cursor, done) in progress.items():
+            if stop is not None:
+                done = min(done, stop - 1)
             if done > cursor:
                 await self.db.set_launch_cursor(CHAIN_ID, name, done)
-        return records
+        if stop is not None:
+            logger.warning(
+                "Launch discovery stopped before block %d: %s", stop, type(failure).__name__
+            )
+        return confirmed, stop, failure
 
     async def _sweep_source(self, source: LaunchSource, cursor: int, end: int):
         """Read one source up to ``end``, halving a rejected query down to MIN_CHUNK_BLOCKS.
@@ -452,8 +500,12 @@ class LaunchDiscovery:
             raise LaunchDiscoveryError("Malformed eth_getLogs result")
         return result
 
-    async def _block_headers(self, numbers) -> Dict[int, Dict]:
-        headers = {}
+    async def _block_headers(self, numbers, headers: Dict[int, Dict]):
+        """Read the headers of ``numbers`` into ``headers``, oldest first.
+
+        Raises at the first header that cannot be read; the headers read before it stay in
+        ``headers``.
+        """
         ordered = sorted(numbers)
         for offset in range(0, len(ordered), HEADER_BATCH):
             batch = ordered[offset : offset + HEADER_BATCH]
@@ -478,7 +530,6 @@ class LaunchDiscovery:
                 if not isinstance(header, dict) or _quantity(header.get("number")) != number:
                     raise LaunchDiscoveryError("Missing or mismatched block header")
                 headers[number] = header
-        return headers
 
     async def _call(self, method: str, params: list, probe: bool = False):
         body = await self._request(
@@ -491,15 +542,16 @@ class LaunchDiscovery:
     async def _request(self, payload, probe: bool = False):
         """POST with bounded exponential backoff on HTTP 429/5xx, transport and rate-limit errors.
 
-        With a guard, every attempt first takes one request of the shared budget, and only
-        structured outcomes reach the breaker: HTTP 429/5xx and transport exception classes are
-        failures, a 200 answer is a success. A rate-limit error recognised by its message is
-        retried but reported as neither. An open breaker ends the retries without sending, and
-        a probe is a single attempt.
+        With a guard, every attempt first takes one request of the shared budget per JSON-RPC call
+        it carries, and only structured outcomes reach the breaker: HTTP 429/5xx and transport
+        exception classes are failures, a 200 answer is a success. A rate-limit error recognised by
+        its message is retried but reported as neither. An open breaker ends the retries without
+        sending, and a probe is a single attempt.
         """
         attempts = 1 if probe else MAX_ATTEMPTS
+        calls = len(payload) if isinstance(payload, list) else 1
         for attempt in range(attempts):
-            await self._pace(probe)
+            await self._pace(calls, probe)
             try:
                 status, body = await self._post(payload)
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
@@ -521,15 +573,15 @@ class LaunchDiscovery:
                 await asyncio.sleep(2**attempt)
         raise RpcUnavailableError(f"RPC unavailable after {attempts} attempts")
 
-    async def _pace(self, probe: bool):
+    async def _pace(self, calls: int, probe: bool):
         if self.guard is None:
-            wait = self._last_request + REQUEST_INTERVAL - time.monotonic()
+            wait = self._next_request - time.monotonic()
             if wait > 0:
                 await asyncio.sleep(wait)
-            self._last_request = time.monotonic()
+            self._next_request = time.monotonic() + calls * REQUEST_INTERVAL
             return
         try:
-            await self.guard.acquire(1, probe=probe)
+            await self.guard.acquire(calls, probe=probe)
         except BreakerOpenError as exc:
             raise RpcUnavailableError("RPC breaker open") from exc
 

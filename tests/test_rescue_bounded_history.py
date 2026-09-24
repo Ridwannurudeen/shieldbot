@@ -1,12 +1,23 @@
-"""Rescue approval history on Robinhood Chain (4663) is a bounded, rate-limit-aware window."""
+"""Rescue approval history through a public RPC is a bounded, rate-limit-aware window.
+
+Robinhood Chain (4663) was the first chain read this way; every chain without a configured logs
+RPC now is.
+"""
 
 import asyncio
 import logging
+import time
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
-from services.rescue_service import APPROVAL_TOPIC, RescueService
+from services.rescue_service import (
+    APPROVAL_TOPIC,
+    RESULT_CACHE_SECONDS,
+    NOTHING_READ_REASON,
+    RPC_UNAVAILABLE_REASON,
+    RescueService,
+)
 
 _real_sleep = asyncio.sleep
 
@@ -97,14 +108,20 @@ def chain_handler(logs=None, allowance=None, block_number=None):
     return handle
 
 
-async def scan(handler, chain_id=4663):
+def rescue_service(**logs_rpcs):
+    """A service reading every chain through its adapter's public RPC unless a logs RPC is given."""
     web3_client = MagicMock()
     web3_client._get_adapter.return_value.w3.provider.endpoint_uri = RPC_URL
     web3_client.get_token_info = AsyncMock(
         return_value={"name": "Token", "symbol": "TKN", "decimals": 18}
     )
-    service = RescueService(web3_client)
+    service = RescueService(web3_client, **logs_rpcs)
     service._fetch_prices = AsyncMock(return_value={TOKEN: 1.0})
+    return service
+
+
+async def scan(handler, chain_id=4663, service=None):
+    service = service or rescue_service()
     rpc = FakeRpc(handler)
     sleep = AsyncMock()
     with (
@@ -145,7 +162,119 @@ async def test_robinhood_scans_bounded_recent_window_and_marks_allowances_incomp
     assert result["coverage_reasons"] == {
         "allowances": f"Approvals before block {WINDOW_START} not scanned"
     }
+    assert result["scanned_blocks"] == {"from_block": WINDOW_START, "to_block": LATEST}
     assert result["total_value_at_risk_usd"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [56, 1, 137, 42161, 10, 204])
+async def test_chains_without_a_logs_rpc_read_the_same_bounded_recent_windows(chain_id):
+    result, rpc, sleep = await scan(chain_handler(), chain_id)
+
+    windows = window_bounds(rpc)
+    assert len(windows) == 24
+    assert windows[0][1] == LATEST and windows[-1][0] == WINDOW_START
+    assert all(to_b - from_b + 1 == 10_000 for from_b, to_b in windows)
+    assert rpc.max_in_flight == 4
+    assert rpc.urls == {RPC_URL}
+    assert result["chain_id"] == chain_id
+    assert [a["risk_level"] for a in result["approvals"]] == ["HIGH"]
+    assert result["status"] == "unknown"
+    assert result["coverage_reasons"] == {
+        "allowances": f"Approvals before block {WINDOW_START} not scanned"
+    }
+    assert result["scanned_blocks"] == {"from_block": WINDOW_START, "to_block": LATEST}
+
+
+@pytest.mark.asyncio
+async def test_base_public_rpc_windows_fit_its_2000_block_range():
+    result, rpc, sleep = await scan(chain_handler(), 8453)
+
+    windows = window_bounds(rpc)
+    assert len(windows) == 24
+    assert all(to_b - from_b + 1 == 2_000 for from_b, to_b in windows)
+    assert result["scanned_blocks"] == {"from_block": LATEST - 48_000 + 1, "to_block": LATEST}
+
+
+@pytest.mark.asyncio
+async def test_logs_rpc_refusing_the_full_history_is_read_in_recent_windows_instead():
+    archive = "https://archive.invalid"
+    limit_exceeded = (
+        200,
+        {"jsonrpc": "2.0", "id": 1, "error": {"code": -32005, "message": "limit exceeded"}},
+    )
+    windows_only = chain_handler()
+
+    def handle(payload):
+        if payload["method"] == "eth_getLogs":
+            query = payload["params"][0]
+            if int(query["toBlock"], 16) - int(query["fromBlock"], 16) + 1 > 10_000:
+                return limit_exceeded
+        return windows_only(payload)
+
+    result, rpc, sleep = await scan(handle, 56, rescue_service(logs_rpc=archive))
+
+    assert rpc.urls == {archive}
+    assert len(window_bounds(rpc)) == 50 + 24
+    assert [(a["token_address"], a["risk_level"]) for a in result["approvals"]] == [(TOKEN, "HIGH")]
+    assert result["status"] == "unknown"
+    assert result["coverage_reasons"] == {
+        "allowances": f"Approvals before block {WINDOW_START} not scanned"
+    }
+    assert result["scanned_blocks"] == {"from_block": WINDOW_START, "to_block": LATEST}
+
+
+@pytest.mark.asyncio
+async def test_rpc_serving_no_approval_history_reads_unknown_with_nothing_scanned():
+    limit_exceeded = (
+        200,
+        {"jsonrpc": "2.0", "id": 1, "error": {"code": -32005, "message": "limit exceeded"}},
+    )
+    result, rpc, sleep = await scan(chain_handler(logs=lambda to_b: limit_exceeded), 56)
+
+    assert len(window_bounds(rpc)) == 4
+    assert result["approvals"] == []
+    assert result["status"] == "unknown"
+    assert result["coverage"]["allowances"] is False
+    assert result["coverage_reasons"] == {
+        "allowances": NOTHING_READ_REASON
+    }
+    assert result["scanned_blocks"] is None
+    assert result["total_value_at_risk_usd"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_wallet_scan_is_reused_for_a_short_time_per_chain():
+    service = rescue_service()
+    first, _, _ = await scan(chain_handler(), 4663, service)
+    again, repeat_rpc, _ = await scan(chain_handler(), 4663, service)
+    other, other_rpc, _ = await scan(chain_handler(), 42161, service)
+    service._results.expire(time.monotonic() + RESULT_CACHE_SECONDS)
+    fresh, fresh_rpc, _ = await scan(chain_handler(), 4663, service)
+
+    assert again is first and repeat_rpc.calls == []
+    assert other["chain_id"] == 42161 and other_rpc.calls
+    assert fresh is not first and fresh_rpc.calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failing, reason",
+    [
+        (lambda payload: RATE_LIMITED, RPC_UNAVAILABLE_REASON),
+        (chain_handler(logs=lambda to_b: RATE_LIMITED), NOTHING_READ_REASON),
+    ],
+    ids=["block-number-fails", "first-windows-fail"],
+)
+async def test_a_scan_that_read_no_history_is_not_reused(failing, reason):
+    service = rescue_service()
+    failed, _, _ = await scan(failing, 4663, service)
+    retried, retry_rpc, _ = await scan(chain_handler(), 4663, service)
+
+    assert failed["coverage_reasons"] == {"allowances": reason}
+    assert failed["scanned_blocks"] is None
+    assert retry_rpc.calls
+    assert [a["risk_level"] for a in retried["approvals"]] == ["HIGH"]
 
 
 @pytest.mark.asyncio
@@ -184,7 +313,7 @@ async def test_robinhood_error_with_rate_inside_a_word_is_not_retried():
     assert [to_b for _, to_b in window_bounds(rpc)].count(LATEST) == 1
     sleep.assert_not_awaited()
     assert result["coverage_reasons"] == {
-        "allowances": f"Approvals before block {LATEST + 1} not scanned"
+        "allowances": NOTHING_READ_REASON
     }
 
 
@@ -245,8 +374,26 @@ async def test_robinhood_log_limit_error_is_not_retried_and_never_reads_clean():
     assert result["status"] == "unknown"
     assert result["coverage"]["allowances"] is False
     assert result["coverage_reasons"] == {
-        "allowances": f"Approvals before block {LATEST + 1} not scanned"
+        "allowances": NOTHING_READ_REASON
     }
+
+
+@pytest.mark.asyncio
+async def test_logs_after_a_failed_window_are_not_used_so_approvals_match_the_blocks_read():
+    older_log = {**APPROVAL_LOG, "blockNumber": hex(LATEST - 10_005)}
+
+    def logs(to_b):
+        if to_b == LATEST:
+            return LOG_LIMIT_ERROR
+        return ok([older_log] if to_b == LATEST - 10_000 else [])
+
+    result, rpc, sleep = await scan(chain_handler(logs=logs))
+
+    assert len(window_bounds(rpc)) == 4
+    assert result["approvals"] == []
+    assert result["scanned_blocks"] is None
+    assert result["coverage_reasons"] == {"allowances": NOTHING_READ_REASON}
+    assert rpc.methods("eth_call") == []
 
 
 @pytest.mark.asyncio
@@ -262,16 +409,25 @@ async def test_robinhood_unavailable_allowance_is_unknown_and_reasons_combine():
 
 
 @pytest.mark.asyncio
-async def test_robinhood_unavailable_block_number_raises_without_scanning():
+async def test_unavailable_block_number_reads_unknown_without_scanning(caplog):
     methods = []
 
     def handle(payload):
         methods.append(payload["method"])
         return RATE_LIMITED
 
-    with pytest.raises(RuntimeError, match="Approval scan unavailable"):
-        await scan(handle)
+    with caplog.at_level(logging.DEBUG):
+        result, rpc, sleep = await scan(handle)
+
     assert methods == ["eth_blockNumber"] * 3
+    assert result["approvals"] == []
+    assert result["status"] == "unknown"
+    assert result["coverage_reasons"] == {
+        "allowances": "Approval data unavailable from the chain's RPC"
+    }
+    assert result["scanned_blocks"] is None
+    assert "SECRET_KEY_4663" not in caplog.text
+    assert "SECRET_KEY_4663" not in str(result)
 
 
 @pytest.mark.asyncio
@@ -304,3 +460,4 @@ async def test_bsc_rescue_keeps_full_history_chunks_concurrency_and_archive_rpc(
     assert rpc.urls == {"https://archive.invalid"}
     assert result["status"] == "ok"
     assert result["coverage_reasons"] == {}
+    assert result["scanned_blocks"] == {"from_block": 0, "to_block": latest}
