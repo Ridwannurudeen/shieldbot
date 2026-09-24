@@ -322,6 +322,30 @@ class TestToolExecution:
         # 1 block out of 3 = 33.3% block rate -> trust ~66.7
         assert content["trust_score"] == 66.7
         assert content["block_rate"] == 0.3333
+        from core.extension_formatter import is_scan_incomplete
+        assert content["status"] == "ok"
+        assert content["coverage"] == {"history": 1}
+        assert content["coverage_reasons"] == {}
+        assert not is_scan_incomplete(content)
+
+    def test_check_agent_reputation_over_a_full_window_is_a_lower_bound(self, client, mock_container):
+        """At the query cap the agent may have more records than were read."""
+        mock_container.db.get_agent_firewall_history = AsyncMock(
+            return_value=[{"verdict": "ALLOW"}] * 999 + [{"verdict": "BLOCK"}]
+        )
+        resp = client.post("/mcp/messages", json={
+            "jsonrpc": "2.0", "id": 6, "method": "tools/call",
+            "params": {"name": "check_agent_reputation", "arguments": {"agent_id": "agent:1"}},
+        }, headers=AUTH_HEADERS)
+        content = json.loads(resp.json()["result"]["content"][0]["text"])
+        from core.extension_formatter import is_scan_incomplete
+        assert mock_container.db.get_agent_firewall_history.call_args.kwargs["limit"] == 1000
+        assert content["total_transactions"] == 1000
+        assert content["block_rate"] == 0.001
+        assert content["status"] == "unknown"
+        assert content["coverage"] == {"history": 0}
+        assert content["coverage_reasons"] == {"history": "Only the latest 1000 firewall records are read, so total_transactions is a lower bound"}
+        assert is_scan_incomplete(content)
 
     def test_check_agent_reputation_not_registered(self, client, mock_container):
         """check_agent_reputation handles unregistered agent."""

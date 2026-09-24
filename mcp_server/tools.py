@@ -15,6 +15,7 @@ from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 logger = logging.getLogger(__name__)
 
 _ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
+_REPUTATION_WINDOW = 1000  # latest firewall records read per agent
 # Bounded so int() never meets a huge literal: 64 hex digits or 78 decimal digits cover 2**256 - 1.
 _WEI_RE = re.compile(r"0[xX][0-9a-fA-F]{1,64}|[0-9]{1,78}")
 _CHAIN_ID_DESCRIPTION = (
@@ -127,7 +128,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "description": (
             "Look up the trust score and transaction history for an agent registered with ShieldBot's firewall. "
             "An unregistered agent, or one with no firewall history, returns status 'unknown' with coverage_reasons "
-            "and a null trust_score."
+            "and a null trust_score. Only the latest 1000 firewall records are read; an agent with that many also "
+            "returns status 'unknown', because its counts are a lower bound."
         ),
         "inputSchema": {
             "type": "object",
@@ -352,7 +354,7 @@ async def handle_check_agent_reputation(container, params: Dict) -> Dict:
             "note": "Agent not registered",
         }
 
-    history = await container.db.get_agent_firewall_history(agent_id, limit=1000)
+    history = await container.db.get_agent_firewall_history(agent_id, limit=_REPUTATION_WINDOW)
     total = len(history)
     if total == 0:
         return {
@@ -370,11 +372,20 @@ async def handle_check_agent_reputation(container, params: Dict) -> Dict:
     # Simple trust heuristic: 100 - block_rate*100, floored at 0
     trust_score = max(0, round(100 - block_rate * 100, 1))
 
-    return {
+    result = {
         "agent_id": agent_id,
         "trust_score": trust_score,
         "total_transactions": total,
         "block_rate": round(block_rate, 4),
+    }
+    if total < _REPUTATION_WINDOW:
+        return {**result, "status": "ok", "coverage": {"history": 1}, "coverage_reasons": {}}
+    # A full window means older records were not read: the count is a lower bound.
+    return {
+        **result,
+        "status": "unknown",
+        "coverage": {"history": 0},
+        "coverage_reasons": {"history": f"Only the latest {_REPUTATION_WINDOW} firewall records are read, so total_transactions is a lower bound"},
     }
 
 
