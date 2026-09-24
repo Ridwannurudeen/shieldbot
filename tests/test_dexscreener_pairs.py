@@ -15,6 +15,7 @@ import pytest
 
 from core.unknown_ledger import UnknownLedger
 from services.dex_service import DexService
+from utils.ai_analyzer import AIAnalyzer
 
 REPLIES = json.loads(
     (Path(__file__).parent / "fixtures" / "dexscreener_replies.json").read_text(encoding="utf-8")
@@ -183,3 +184,15 @@ async def test_a_missing_24h_change_leaves_only_the_volatility_flag_unknown(
     assert result["status"] == "ok"
     assert all(result["coverage"].values())
     assert counts(ledger, chain_id) == {"answered": 1, "unknown": 0, "failed": 0}
+
+
+@pytest.mark.asyncio
+async def test_the_forensic_prompt_reads_a_missing_24h_change_as_unknown(ledger):
+    result, _ = await market(USDC, 8453)
+    assert result["status"] == "ok"
+
+    context = AIAnalyzer.__new__(AIAnalyzer)._build_forensic_context(
+        USDC, {"dex": result}, "token"
+    )
+
+    assert "Price Change 24h: Unknown" in context
