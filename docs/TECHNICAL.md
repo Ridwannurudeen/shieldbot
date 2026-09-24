@@ -189,6 +189,31 @@ else:
 - Transfer restrictions
 - Liquidity lock status (PinkLock, Unicrypt)
 
+#### Feedback loops
+
+The routes that feed these loops are open to anyone, so nothing they send can block a transaction on its own or change a threshold.
+
+- **Outcomes** (`POST /api/outcome`): each row records who sent it in `outcome_events.source`, `key:<key_id>` for a valid API key or `client` otherwise (rows stored before the column existed are `client`). The decision must be `proceed`, `block` or `ignore`, the outcome `safe`, `scam` or `unknown`, the address must parse and a transaction hash must be 32 bytes of hex. Callers without a key are limited to 10 outcomes a minute per IP. No score reads these rows.
+- **Local scam blacklist** (`scam_blacklist` table): three different reporters of the Telegram bot's `/report` put an address on it as a `community` entry, which expires after 30 days. A community entry is a medium-severity scam match: it raises a score to 40 (CAUTION) on every target type and adds nothing above that (it does withhold the 20-point discount for renounced ownership and deep liquidity, as every scam match does), is shown as "Reported by N users" and never counts as a scam database match, so on its own it can never reach BLOCK. An admin can confirm an address, which makes it an `admin` entry that never expires and a block-severity match (floor 90), or remove any entry:
+
+  ```bash
+  # chainId omitted: the entry covers every chain
+  curl -X POST https://api.shieldbotsecurity.online/api/admin/blacklist -H "X-Admin-Secret: $ADMIN_SECRET" \
+       -H "Content-Type: application/json" -d '{"address": "0x...", "chainId": 56, "reason": "drainer"}'
+  # chain_id omitted: removes the entry that covers every chain
+  curl -X DELETE "https://api.shieldbotsecurity.online/api/admin/blacklist/0x...?chain_id=56" -H "X-Admin-Secret: $ADMIN_SECRET"
+  ```
+
+  Protected addresses (the BNB Chain routers, WBNB, BUSD and USDT) are refused everywhere and ignored if found in the table. The API and the bot load the unexpired entries at startup; the API's hunter sweep (every 30 minutes) deletes expired entries and reloads, which also picks up entries the bot added. `POST /api/report` stores reports in `community_reports` but does not feed the blacklist.
+- **Calibration**: the HIGH and MEDIUM thresholds, and a confidence boost, come from `core/calibration_config.json` (or `CALIBRATION_CONFIG_PATH`), read at startup. `scripts/calibrate.py` proposes new values from trusted labels only: benchmark entries with recorded scores (`--scores`, see `eval/README.md`) and outcome rows sent with an API key. It never reads `client` rows and never writes the config. With fewer than 20 trusted labels it proposes nothing.
+
+  ```bash
+  cd /opt/shieldbot && venv/bin/python scripts/calibrate.py --db shieldbot.db --out /tmp/calibration-proposal.json \
+      [--scores eval/data/live_scores.json]
+  ```
+
+  To apply a proposal, read it first: `labels.outcomes.by_source` counts the outcome rows per API key (free keys are self-serve, so one key can supply many labels), `bins` gives the safe and scam labels per 10-point score bin, and `metrics` gives the precision and recall of the current and proposed thresholds. If you accept it, copy `proposed.high_threshold`, `proposed.medium_threshold` and `proposed.confidence_boost` into the config file by hand, commit the change, deploy it and restart the API and the bot. A threshold change moves the LOW, MEDIUM and HIGH risk levels (the RPC proxy blocks on HIGH); the extension's CAUTION, HIGH_RISK and BLOCK bands (31, 50 and 71) are fixed.
+
 ---
 
 ### 3. Data Services (Parallel Intelligence)
@@ -718,7 +743,7 @@ pytest tests/ --cov=. --cov-report=term-missing
 - `test_ownership.py` — Ownership renouncement checks
 - `test_multichain_routing.py` — Chain adapter routing
 - `test_policy.py` — Policy engine modes (STRICT/BALANCED)
-- `test_calibration.py` — Data-driven threshold calibration
+- `test_calibration.py`, `test_calibrate_script.py` — Threshold proposals from trusted labels
 - Additional modules cover provider coverage, Robinhood simulation fixtures, verdict publication, auth, persistence and other paths.
 
 ### Manual Testing Checklist
@@ -892,7 +917,7 @@ CMD ["python", "bot.py"]
 ### Data Privacy
 
 - **Persistent Backend State**: SQLite retains scan scores, findings, agent transaction history, chat history and identifiers, subscriptions, verdict evidence and publication outbox state (`core/database.py`).
-- **Retention**: the hunter's sweep in the API process (at startup, then every 30 minutes) deletes chat messages older than 24 hours (each chat also keeps at most its last 50), API key usage rows (`api_usage`), daily key counts (`api_daily_usage`) and daily AI token counts (`ai_token_usage`) older than 90 days, and free key link requests at the first sweep after they expire (a link lasts 30 minutes). Community reports are kept as evidence. Their `reporter_id` is HMAC-SHA256 of the client IP under `REPORTER_HASH_SECRET`, cut to 32 hex characters, or null when that secret is unset; the IP itself is never stored, and a startup migration cleared the IPs stored before. Nothing else expires on its own: beta signup emails, API keys and their owners, scan scores, outcome events, findings, agent firewall history, guardian wallets and alerts, launch alert subscriptions and verdict evidence stay until deleted.
+- **Retention**: the hunter's sweep in the API process (at startup, then every 30 minutes) deletes chat messages older than 24 hours (each chat also keeps at most its last 50), API key usage rows (`api_usage`), daily key counts (`api_daily_usage`) and daily AI token counts (`ai_token_usage`) older than 90 days, and free key link requests at the first sweep after they expire (a link lasts 30 minutes), and community entries of the scam blacklist 30 days after they were added unless an admin confirmed them. Community reports are kept as evidence. Their `reporter_id` is HMAC-SHA256 of the client IP under `REPORTER_HASH_SECRET`, cut to 32 hex characters, or null when that secret is unset; the IP itself is never stored, and a startup migration cleared the IPs stored before. Nothing else expires on its own: beta signup emails, API keys and their owners, scan scores, outcome events, findings, agent firewall history, guardian wallets and alerts, launch alert subscriptions and verdict evidence stay until deleted.
 - **Local Extension State**: Browser storage holds settings, recent scan results, a chat identifier and recent chat messages. Removing the extension does not delete backend records.
 - **External Processing**: Configured RPC and intelligence services receive the addresses or transaction data needed by the invoked checks. Optional AI and report publication flows can send additional analysis data; a risk threshold is not user consent.
 - **Open Source**: All code auditable at https://github.com/Ridwannurudeen/shieldbot
