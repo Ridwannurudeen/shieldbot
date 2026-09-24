@@ -106,6 +106,7 @@ async def test_chat_is_paused_once_the_budget_is_used(db, used):
     assert "AI chat is paused for today" in AI_CHAT_PAUSED
     ai.chat_with_usage.assert_not_called()
     assert await db.get_ai_tokens_used(_today()) == used
+    assert await db.get_chat_history("u1") == []
 
 
 @pytest.mark.asyncio
@@ -145,4 +146,10 @@ async def test_explain_records_tokens_and_falls_back_to_rules_when_spent(db):
     assert await advisor.explain_scan(scan) == "Plain English"
     assert "85/100" in await advisor.explain_scan(scan)
     assert ai.chat_with_usage.await_count == 2
+
+
+def test_default_budget():
+    from core.config import Settings
+
+    assert Settings.model_fields["ai_daily_token_budget"].default == 1_000_000
 

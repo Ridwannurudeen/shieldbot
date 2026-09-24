@@ -197,9 +197,10 @@ class Advisor:
             else:
                 await self.db.add_ai_tokens_used(_utc_day(), tokens)
 
-        # Persist both sides of the conversation
-        await self.db.insert_chat_message(user_id, "user", message)
-        await self.db.insert_chat_message(user_id, "assistant", response_text)
+        # Persist both sides of the conversation; a paused reply would only crowd tomorrow's history
+        if response_text != AI_CHAT_PAUSED:
+            await self.db.insert_chat_message(user_id, "user", message)
+            await self.db.insert_chat_message(user_id, "assistant", response_text)
 
         result: Dict[str, Any] = {"text": response_text}
 
