@@ -74,3 +74,25 @@ def test_unknown_market_on_a_token_is_not_made_safer():
     assert risk["coverage"]["market"] == 0
     assert risk["status"] == "unknown"
     assert risk["risk_level"] == "MEDIUM"
+
+
+CLEAN_TOKEN = {**CONTRACT, "ownership_renounced": True}
+DEEP_MARKET = {"liquidity_usd": 5_000_000, "pair_age_hours": 1000}
+
+
+@pytest.mark.parametrize("intent, expected", [(35, 4.2), (70, 8.4)])
+def test_clean_token_discount_keeps_the_transaction_share(intent, expected):
+    risk = RiskEngine().compute_from_results(
+        _results(0, contract=CLEAN_TOKEN, market=DEEP_MARKET, intent=intent)
+    )
+    # The renounced, liquid token earns its discount on its own components only: intent * .12.
+    assert risk["rug_probability"] == expected
+    assert risk["category_scores"]["intent"] == intent
+
+
+def test_clean_token_discount_without_transaction_risk_is_unchanged():
+    risk = RiskEngine().compute_from_results(
+        _results(100, contract=CLEAN_TOKEN, market=DEEP_MARKET)
+    )
+    # 100 * .32 - 20, as before.
+    assert risk["rug_probability"] == 12

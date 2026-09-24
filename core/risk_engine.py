@@ -155,7 +155,7 @@ class RiskEngine:
             AnalyzerResult('behavioral', WEIGHT_BEHAVIORAL, behavioral, data=ethos_data),
             AnalyzerResult('honeypot', WEIGHT_HONEYPOT, honeypot_score, data=honeypot_data),
         ]
-        composite, category_scores, coverage, coverage_reasons, covered_weight = self._covered_scores(component_results)
+        composite, category_scores, coverage, coverage_reasons, covered_weight, _ = self._covered_scores(component_results)
         required_unknown = is_token is not False and coverage.get('honeypot', 0) < 1
         incomplete = required_unknown or covered_weight < 1 - 1e-9 or any(fraction < 1 for fraction in coverage.values())
         if required_unknown:
@@ -272,7 +272,7 @@ class RiskEngine:
         dex_data = by_name.get("market", _EMPTY_RESULT).data
         ethos_data = by_name.get("behavioral", _EMPTY_RESULT).data
 
-        composite, category_scores, coverage, coverage_reasons, covered_weight = self._covered_scores(results)
+        composite, category_scores, coverage, coverage_reasons, covered_weight, tx_share = self._covered_scores(results)
         required_unknown = is_token is not False and coverage.get('honeypot', 0) < 1
         incomplete = required_unknown or covered_weight < 1 - 1e-9 or any(fraction < 1 for fraction in coverage.values())
         critical_flags = [flag for result in results for flag in result.flags]
@@ -323,11 +323,12 @@ class RiskEngine:
 
             # Positive signals — reduce score for renounced ownership with high liquidity.
             # A failed scam lookup or bytecode scan is not a clean one, so it earns no positive signal.
+            # The signal describes the token, so it never discounts the transaction's own share.
             liquidity_info = dex_data.get('liquidity_usd')
             contract_coverage = contract_data.get('coverage', {})
             checks_covered = contract_coverage.get('scam_database', True) and contract_coverage.get('bytecode', True)
             if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not contract_data.get('scam_matches') and checks_covered:
-                composite = max(composite - 20, 0)
+                composite = max(composite - 20, tx_share)
 
             if contract_data.get('scam_matches'):
                 composite = max(composite, 70)
@@ -449,9 +450,12 @@ class RiskEngine:
                 scores[result.name] = None
         weight = sum(result.weight for result in included)
         composite = sum(result.score * result.weight for result in included)
+        # The part of the mean that describes the transaction (calldata, typed data), not the target.
+        tx_share = sum(result.score * result.weight for result in included if result.name in ('intent', 'signature'))
         if weight and abs(weight - 1) > 1e-9:
             composite /= weight
-        return composite, scores, coverage, reasons, covered_weight
+            tx_share /= weight
+        return composite, scores, coverage, reasons, covered_weight, tx_share
 
     def _determine_archetype(self, contract_data, honeypot_data, dex_data, rug_prob, is_token: Optional[bool] = True):
         # Token-specific archetypes only apply to ERC-20 tokens.
