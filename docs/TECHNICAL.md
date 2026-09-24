@@ -915,11 +915,12 @@ There is no deletion route. On the server, run these against `/opt/shieldbot/shi
   UPDATE community_reports SET reporter_id = NULL WHERE reporter_id = '<printed hash>';
   ```
 
-- **A Telegram user** (bot chats are stored under `tg-<user id>`; launch alerts under the chat id, which for a private chat is the user id):
+- **A Telegram user** (bot chats are stored under `tg-<user id>`; launch alert subscriptions and the alerts queued for them under the chat id, which for a private chat is the user id):
 
   ```sql
   DELETE FROM chat_history WHERE user_id = 'tg-123456789';
   DELETE FROM launch_alert_subscriptions WHERE chat_id = 123456789;
+  DELETE FROM launch_alert_outbox WHERE chat_id = 123456789;
   ```
 
 Side panel chats are stored under a hash of the install or IP and the chat id, which cannot be looked up from a person's details; they are deleted within 24 hours.
