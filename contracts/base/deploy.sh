@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # One-shot Base mainnet deploy for ShieldBotAttestor.
 #
-# Reads the deployer key from BASE_DEPLOYER_PRIVATE_KEY env var (NEVER committed,
-# NEVER passed as a CLI arg, NEVER printed). Generates a fresh verifier wallet,
-# registers schema, deploys + verifies the contract, prints the VPS env block,
-# and optionally writes it to the VPS over SSH.
+# Signs with the Foundry keystore account base-deployer (DEPLOY_BASE.md step 1);
+# cast and forge ask for its password. The deployer key is never passed on the
+# command line or held in an environment variable. Generates a fresh verifier
+# wallet, registers schema, deploys + verifies the contract, prints the VPS env
+# block, and optionally writes it to the VPS over SSH.
 #
 # Usage (run from your terminal):
-#   read -s BASE_DEPLOYER_PRIVATE_KEY ; export BASE_DEPLOYER_PRIVATE_KEY
 #   export BASESCAN_API_KEY=<from https://basescan.org/myapikey>
 #   export BASE_RPC_URL=https://mainnet.base.org      # or paid endpoint
 #   export VPS_HOST=root@75.119.153.252               # optional — enables auto-VPS update
@@ -16,17 +16,18 @@
 # Prereqs:
 #   - Foundry installed (forge, cast)
 #   - Submodules pulled: cd contracts/base && forge install (no-op if already done)
-#   - Deployer wallet 0xB2Fae83de08b285cB3D6A77Ff520F6AD669D5f33 funded with
+#   - Deployer keystore imported: cast wallet import base-deployer --interactive
+#   - Deployer wallet 0xfE3f3cEAb7266b5de5Ae8738727b6cf82F7Be76c funded with
 #     ~0.005 ETH on Base mainnet
 
 set -euo pipefail
 
-EXPECTED_DEPLOYER="0xB2Fae83de08b285cB3D6A77Ff520F6AD669D5f33"
+DEPLOYER_ACCOUNT="base-deployer"
+EXPECTED_DEPLOYER="0xfE3f3cEAb7266b5de5Ae8738727b6cf82F7Be76c"
 EAS="0x4200000000000000000000000000000000000021"
 SCHEMA_REGISTRY="0x4200000000000000000000000000000000000020"
 
 # ─── Validate env ────────────────────────────────────────────────────────────
-[[ -z "${BASE_DEPLOYER_PRIVATE_KEY:-}" ]] && { echo "ERROR: BASE_DEPLOYER_PRIVATE_KEY not set"; exit 1; }
 # Etherscan v2 unified API: any explorer key works (BscScan/BaseScan/Etherscan).
 # Fall back to BSCSCAN_API_KEY if ETHERSCAN_V2_API_KEY / BASESCAN_API_KEY aren't set.
 ETHERSCAN_V2_API_KEY="${ETHERSCAN_V2_API_KEY:-${BASESCAN_API_KEY:-${BSCSCAN_API_KEY:-}}}"
@@ -37,11 +38,11 @@ BASE_RPC_URL="${BASE_RPC_URL:-https://mainnet.base.org}"
 cd "$(dirname "$0")"
 [[ ! -f foundry.toml ]] && { echo "ERROR: must run from contracts/base/"; exit 1; }
 
-# Confirm the deployer key matches the expected identity wallet.
-DEPLOYER_ADDR=$(cast wallet address --private-key "$BASE_DEPLOYER_PRIVATE_KEY")
+# Confirm the deployer keystore holds the expected owner wallet.
+DEPLOYER_ADDR=$(cast wallet address --account "$DEPLOYER_ACCOUNT")
 if [[ "${DEPLOYER_ADDR,,}" != "${EXPECTED_DEPLOYER,,}" ]]; then
-  echo "ERROR: deployer key resolves to $DEPLOYER_ADDR"
-  echo "       expected $EXPECTED_DEPLOYER (Base identity wallet)"
+  echo "ERROR: keystore $DEPLOYER_ACCOUNT resolves to $DEPLOYER_ADDR"
+  echo "       expected $EXPECTED_DEPLOYER (attestor owner)"
   echo "       refusing to deploy from a different wallet"
   exit 1
 fi
@@ -74,7 +75,7 @@ set +e
 REG_OUT=$(forge script script/RegisterSchema.s.sol \
   --rpc-url "$BASE_RPC_URL" \
   --broadcast \
-  --private-key "$BASE_DEPLOYER_PRIVATE_KEY" \
+  --account "$DEPLOYER_ACCOUNT" --sender "$DEPLOYER_ADDR" \
   --json 2>&1)
 REG_RC=$?
 set -e
@@ -111,7 +112,7 @@ DEPLOY_OUT=$(SCHEMA_UID="$SCHEMA_UID" INITIAL_VERIFIER="$VERIFIER_ADDR" \
   forge script script/DeployAttestor.s.sol \
   --rpc-url "$BASE_RPC_URL" \
   --broadcast \
-  --private-key "$BASE_DEPLOYER_PRIVATE_KEY" \
+  --account "$DEPLOYER_ACCOUNT" --sender "$DEPLOYER_ADDR" \
   --verify \
   --etherscan-api-key "$ETHERSCAN_V2_API_KEY" \
   2>&1)
@@ -185,7 +186,7 @@ fi
 echo
 echo "── 8. Fund the verifier wallet ──"
 echo "Send ~0.001 ETH on Base to: $VERIFIER_ADDR"
-echo "(funds 10+ attestations at 150k gas each)"
+echo "(the one attestation posted so far used about 520k gas)"
 
 # ─── Summary ─────────────────────────────────────────────────────────────────
 echo
