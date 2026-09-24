@@ -141,14 +141,15 @@ MAX_SEND_ATTEMPTS = 5
 STOP_TIMEOUT_SECONDS = 30
 # Only the drain holding this lease in the database stores and broadcasts. The holder renews it every
 # LEASE_RENEW_SECONDS and stops claiming rows once a renewal finds another holder, or before failed renewals could
-# let it run out. Each send takes the lease again after signing, so a broadcast always starts under a lease with
-# LEASE_SECONDS to run. A holder that dies keeps the lease until LEASE_SECONDS after it last took it; a drain waiting
-# for it asks again when it expires.
+# let it run out. Each send takes the lease again after signing and goes on only if the lease is its own and has at
+# least DB_LOCK_WAIT_SECONDS + PHASE_TIMEOUT_SECONDS left to run. A holder that dies keeps the lease until
+# LEASE_SECONDS after it last took it; a drain waiting for it asks again when it expires.
 LEASE_NAME = f"verdict-drain:{CHAIN_ID}"
 LEASE_SECONDS = 90.0
 LEASE_RENEW_SECONDS = 15.0
-# The lease a send has just taken must outlast what follows: storing the transaction (one lock wait) and the
-# broadcast phase. Checked here as a raise, like RECONCILE_AFTER_SECONDS.
+# The lease a send has just taken must outlast what follows: the freshness reads, storing the transaction (one lock
+# wait) and the broadcast phase. The reads take far less than the LEASE_SECONDS - DB_LOCK_WAIT_SECONDS -
+# PHASE_TIMEOUT_SECONDS of headroom. Checked here as a raise, like RECONCILE_AFTER_SECONDS.
 if LEASE_SECONDS <= DB_LOCK_WAIT_SECONDS + PHASE_TIMEOUT_SECONDS:
     raise RuntimeError("LEASE_SECONDS must exceed storing a transaction plus its broadcast phase")
 # After this many consecutive waits on an earlier transaction, the drain says so loudly.
@@ -406,7 +407,7 @@ class VerdictPublisher:
                 keeper.cancel()
                 drain.cancel()
                 await asyncio.wait({keeper, drain})
-            self._lease_lost = False
+                self._lease_lost = False
             logger.error("Robinhood verdict registry: stopped sending until this process holds the sender lease again")
 
     async def _take_lease(self) -> Tuple[bool, float]:
@@ -662,14 +663,17 @@ class VerdictPublisher:
                 try:
                     held, expires_at = await self._take_lease()
                 except Exception as e:
+                    # The lease could not be written; the renewal loop's deadline still guards it, so only this row
+                    # waits. What was signed is discarded; nothing has been stored or broadcast.
                     logger.error("Verdict record deferred: sender lease not renewed: %s", type(e).__name__)
-                    held, expires_at = False, 0.0
+                    await self._db.release_verdict_claim(evidence_id)
+                    return "retry"
                 if held and expires_at < time.time() + DB_LOCK_WAIT_SECONDS + PHASE_TIMEOUT_SECONDS:
                     logger.error("Verdict record deferred: the sender lease expires too soon for a broadcast")
                     held = False
                 if not held:
-                    # What was signed is discarded; nothing has been stored or broadcast. The drain stops claiming
-                    # until the lease is taken again.
+                    # Refused: what was signed is discarded, and the drain stops claiming until it has taken the
+                    # lease again.
                     self._lease_lost = True
                     await self._db.release_verdict_claim(evidence_id)
                     return "retry"

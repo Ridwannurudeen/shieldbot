@@ -625,6 +625,33 @@ async def test_a_send_under_a_lease_too_short_for_its_broadcast_is_not_made_and_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "answer,stops_the_drain",
+    [
+        (AsyncMock(side_effect=sqlite3.OperationalError("database is locked")), False),
+        (AsyncMock(return_value=(False, time.time() + 90)), True),
+        (AsyncMock(return_value=(True, time.time())), True),
+    ],
+    ids=["lease call failed", "another drain holds it", "too little time left"],
+)
+async def test_a_send_the_lease_check_does_not_pass_is_deferred_and_only_a_refusal_stops_the_drain(
+    two_processes, short_lease, answer, stops_the_drain
+):
+    db, _ = two_processes
+    publisher = sending_publisher(db)
+    publisher._take_lease = answer
+    chain = FakeChain()
+    await publisher.publish(4663, TOKEN, scan())
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "retry"
+    assert chain.sent == []
+    assert await queued(db, TOKEN)
+    # A lease call that could not be written leaves the lease to the renewal loop's deadline; a refusal means the
+    # lease is not this drain's to send under, so it stops claiming until it takes the lease again.
+    assert publisher._lease_lost is stops_the_drain
+
+
+@pytest.mark.asyncio
 async def test_the_check_at_a_send_comes_before_the_last_freshness_check(two_processes, short_lease):
     db, _ = two_processes
     publisher = sending_publisher(db)

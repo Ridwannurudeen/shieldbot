@@ -224,9 +224,10 @@ id. The drains compare the lease's expiry with their own clocks, so drains on di
 clocks.
 
 The lease also applies with the default `BACKGROUND_WORKERS=api`, where the API is the only drain. After a clean
-stop or `systemctl restart` it sends again at once. After a crash (a kill, an out-of-memory stop, a power loss)
-the lease still names the dead process, so the restarted API stores and broadcasts no verdict until that lease
-expires: up to 90 seconds. Verdicts queued meanwhile wait as `pending` and go out after it.
+stop or `systemctl restart` it sends again at once, unless the stop came while a send was still under way: as said
+above, the lease is then left to expire rather than released. After a crash (a kill, an out-of-memory stop, a power
+loss) the lease still names the dead process. In both cases the restarted API stores and broadcasts no verdict until
+that lease expires: up to 90 seconds. Verdicts queued meanwhile wait as `pending` and go out after it.
 
 To turn it on, as root:
 
