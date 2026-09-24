@@ -68,6 +68,25 @@
     return true;
   }
 
+  // Whether another script of this page can reach this document before the
+  // handover below completes: a frame whose parent is same-origin, an
+  // about:blank or about:srcdoc document (a frame's initial empty document is
+  // about:blank), or a popup whose opener is same-origin. Such a script could
+  // take the token, or pose as inject.js, so these documents get no handover
+  // at all: inject.js, which applies the same rule, then holds no key and
+  // rejects every wallet request it checks there.
+  function reachableByPage() {
+    if (window.location.protocol === "about:" || window.frameElement !== null) return true;
+    const opener = window.opener;
+    if (!opener) return false;
+    try {
+      return Boolean(opener.document);
+    } catch (_) {
+      // Reading a cross-origin window's document throws.
+      return false;
+    }
+  }
+
   // Hand the token to inject.js. Both are manifest content scripts that run at
   // document_start, before any page script. If inject.js is already listening
   // it takes the offer and cancels the event; otherwise it asks when it starts
@@ -78,12 +97,35 @@
       new CustomEvent("shieldai:channel", { detail: _CHANNEL_TOKEN, cancelable: true })
     );
   }
-  if (!offerToken()) {
-    document.addEventListener("shieldai:channel-request", function answer() {
+  const reachable = reachableByPage();
+  if (!reachable && !offerToken()) {
+    const answer = () => {
       document.removeEventListener("shieldai:channel-request", answer);
       offerToken();
-    });
+    };
+    document.addEventListener("shieldai:channel-request", answer);
+    // inject.js asks at document_start or not at all. Stop listening once that
+    // has passed, so a later request, which only a page script could send,
+    // gets no answer.
+    setTimeout(() => document.removeEventListener("shieldai:channel-request", answer), 0);
   }
+
+  // inject.js says so when it rejects a request without asking the user: in
+  // such a document, and for a checked method sent through send or
+  // sendAsync. The messages are unsigned (a page can post them too), so all
+  // they do is show the user a notice, once per kind per document; a notice
+  // has no buttons and decides nothing. The frame notice is shown only where
+  // this script made the same refusal decision.
+  const _shownNotices = new Set();
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || !event.data) return;
+    const type = event.data.type;
+    const key = type === "SHIELDAI_LEGACY_REFUSED" ? "legacyRefusedNotice"
+      : type === "SHIELDAI_UNCHECKABLE" && reachable ? "uncheckableNotice" : null;
+    if (key === null || _shownNotices.has(key)) return;
+    _shownNotices.add(key);
+    showNotice(key);
+  });
 
   // Request ids already seen. inject.js makes a fresh random id per request,
   // so a second intercept with a seen id is the page replaying one (perhaps
@@ -137,9 +179,16 @@
     const SIGN_ONLY_METHODS = new Set([
       "personal_sign", "eth_sign",
       "eth_signTypedData_v4", "eth_signTypedData_v3",
+      "eth_signTypedData", "eth_signTypedData_v1",
     ]);
     if (tx.signMethod && SIGN_ONLY_METHODS.has(tx.signMethod)) {
-      showSignatureOverlay(requestId, tx);
+      showSignatureOverlay(requestId, tx, strict);
+      return;
+    }
+    // inject.js could not read the request's structure, so there is nothing
+    // to analyse: the user is told so and decides.
+    if (tx.unknownStructure === true) {
+      showUnknownStructureOverlay(requestId, strict);
       return;
     }
 
@@ -162,10 +211,10 @@
       showTimedOutOverlay(requestId);
     } else if (response.error) {
       // API error — show warning and let user decide
-      showErrorOverlay(requestId, response.error, strict);
+      showErrorOverlay(requestId, response.error, strict, tx);
     } else {
       // Show analysis overlay
-      showAnalysisOverlay(requestId, response.result, strict);
+      showAnalysisOverlay(requestId, response.result, strict, tx);
     }
   });
 
@@ -197,6 +246,29 @@
   // Host element of the overlay on screen, if any.
   let _overlayHost = null;
 
+  // A page can hide the overlay, cover it or make it see-through, and lay
+  // something of its own over it so a click the user means for the page lands
+  // on Proceed (clickjacking). This cannot be fully prevented; two things
+  // make it harder. Proceed and Sign Anyway stay disabled for half a second
+  // after an overlay appears, so a click aimed at what was there before does
+  // not land on them. And they count only once IntersectionObserver v2 has
+  // reported the dialog visible (on screen, not covered, not made transparent,
+  // filtered or transformed) without a break for that half second: the time
+  // it last became visible is kept (Infinity while it is not). The
+  // whole dialog is watched, not only its buttons, so the verdict text
+  // cannot be covered either; and the dialog rather than the host, which
+  // has no area of its own (its content is position: fixed).
+  const PROCEED_DELAY_MS = 500;
+  let _dialogVisible = false;
+  let _visibleSince = Infinity;
+  let _visibilityObserver = null;
+
+  // A dialog the page keeps out of view (not intersecting the viewport:
+  // display: none, or moved off screen) this long is taken as gone, and its
+  // request is rejected rather than left waiting.
+  const OUT_OF_VIEW_LIMIT_MS = 10000;
+  let _outOfViewTimer = null;
+
   // The request whose overlay is waiting for the user. inject.js stops its
   // no-verdict timeout once it knows the overlay is on screen, so a request
   // whose overlay goes away without a decision is rejected here.
@@ -215,6 +287,14 @@
       _overlayHost.remove();
       _overlayHost = null;
     }
+    if (_visibilityObserver) {
+      _visibilityObserver.disconnect();
+      _visibilityObserver = null;
+    }
+    if (_outOfViewTimer !== null) {
+      clearTimeout(_outOfViewTimer);
+      _outOfViewTimer = null;
+    }
     if (_awaitingRequestId !== null) {
       const requestId = _awaitingRequestId;
       _awaitingRequestId = null;
@@ -229,10 +309,22 @@
   }
 
   // A decision button acts only on real user input: a synthetic click from a
-  // page script is an untrusted event and is ignored.
+  // page script is an untrusted event and is ignored. Proceed also needs the
+  // button enabled and the dialog visible without a break for
+  // PROCEED_DELAY_MS; when it is not visible, the dialog says so rather than
+  // leave a button that silently does nothing.
   function onDecision(root, id, requestId, action) {
-    root.getElementById(id).addEventListener("click", (event) => {
+    const button = root.getElementById(id);
+    button.addEventListener("click", (event) => {
       if (!event.isTrusted) return;
+      if (action === "proceed") {
+        if (button.disabled) return;
+        if (!_dialogVisible) {
+          root.getElementById("shieldai-covered").textContent = _t("overlayCoveredNote");
+          return;
+        }
+        if (Date.now() - _visibleSince < PROCEED_DELAY_MS) return;
+      }
       sendVerdict(requestId, action);
     });
   }
@@ -269,14 +361,52 @@
     });
     (document.body || document.documentElement).appendChild(host);
     _overlayHost = host;
+    const proceed = root.getElementById("shieldai-proceed");
+    if (proceed) {
+      proceed.disabled = true;
+      setTimeout(() => {
+        proceed.disabled = false;
+      }, PROCEED_DELAY_MS);
+    }
+    _dialogVisible = false;
+    _visibleSince = Infinity;
+    _visibilityObserver = new IntersectionObserver((entries) => {
+      if (_overlayHost !== host) return;
+      const entry = entries[entries.length - 1];
+      // The observer reports changes only, so a cover shows up as one entry
+      // when it starts and one when it ends: the half second counts from the
+      // end.
+      const visible = entry.isVisible === true;
+      if (!visible) _visibleSince = Infinity;
+      else if (!_dialogVisible) _visibleSince = Date.now();
+      _dialogVisible = visible;
+      if (entry.isIntersecting !== false) {
+        clearTimeout(_outOfViewTimer);
+        _outOfViewTimer = null;
+      } else if (_outOfViewTimer === null) {
+        _outOfViewTimer = setTimeout(function outOfView() {
+          if (_overlayHost !== host) return;
+          // A hidden tab shows nothing: wait until the user is back on it.
+          if (document.visibilityState !== "visible") {
+            _outOfViewTimer = setTimeout(outOfView, OUT_OF_VIEW_LIMIT_MS);
+            return;
+          }
+          removeOverlay();
+        }, OUT_OF_VIEW_LIMIT_MS);
+      }
+    }, { trackVisibility: true, delay: 100 });
+    _visibilityObserver.observe(modal);
     // If the page removes the overlay, the user can no longer decide here:
-    // reject the request so the dApp is not left waiting.
+    // reject the request so the dApp is not left waiting. The whole document
+    // is watched, so replacing the root element or document.open() counts.
+    // document.contains, not isConnected: the page could move the host into
+    // another document, where it would still count as connected.
     const observer = new MutationObserver(() => {
-      if (host.isConnected) return;
+      if (document.contains(host)) return;
       observer.disconnect();
       if (_overlayHost === host) removeOverlay();
     });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
+    observer.observe(document, { childList: true, subtree: true });
     modal.focus();
     if (requestId) {
       _awaitingRequestId = requestId;
@@ -292,6 +422,19 @@
     return Object.values(result.coverage_reasons || {}).filter(Boolean).join("; ") ||
       _t("unknownNoReason");
   }
+
+  // For one call of a wallet_sendCalls batch, which call it is. inject.js
+  // shows the calls one after another and sends the batch only when the user
+  // continues on every one.
+  function batchNote(tx) {
+    if (!tx.callCount) return "";
+    const note = _t("overlayBatchCall", { index: tx.callIndex, count: tx.callCount });
+    return `<div class="shieldai-section shieldai-sig-note"><p>${escapeHtml(note)}</p></div>`;
+  }
+
+  // Where a decision dialog says why a Proceed did nothing: the page is
+  // covering or altering it. Empty (and not shown) until then.
+  const COVERED_NOTE = `<p class="shieldai-covered-note" id="shieldai-covered" role="alert"></p>`;
 
   async function showLoadingOverlay() {
     await _loadContentLang();
@@ -327,6 +470,27 @@
     } catch (_) {
       return null;
     }
+  }
+
+  // Typed data the overlay can show: a plain object whose domain and message,
+  // when present, are plain objects and whose primaryType, when present, is a
+  // string.
+  function isReadableTypedData(typedData) {
+    return isPlainObject(typedData) &&
+      (typedData.domain === undefined || isPlainObject(typedData.domain)) &&
+      (typedData.message === undefined || isPlainObject(typedData.message)) &&
+      (typedData.primaryType === undefined || typeof typedData.primaryType === "string");
+  }
+
+  // The legacy form eth_signTypedData and _v1 take in MetaMask: a list of
+  // fields, each with a string name and type, and a value.
+  function isLegacyTypedData(typedData) {
+    return Array.isArray(typedData) && typedData.every((field) =>
+      isPlainObject(field) && typeof field.name === "string" && typeof field.type === "string");
+  }
+
+  function isPlainObject(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
   }
 
   function shortAddr(addr) {
@@ -419,18 +583,36 @@
   // --- Signature Request Overlay ---
   // Shown instead of the firewall overlay for personal_sign / eth_signTypedData etc.
 
-  async function showSignatureOverlay(requestId, tx) {
+  async function showSignatureOverlay(requestId, tx, strict) {
     await _loadContentLang();
     removeOverlay();
 
     const signMethod = tx.signMethod || "personal_sign";
-    const isTyped = signMethod === "eth_signTypedData_v4" || signMethod === "eth_signTypedData_v3";
+    const isLegacy = signMethod === "eth_signTypedData" || signMethod === "eth_signTypedData_v1";
+    const isTyped = isLegacy || signMethod === "eth_signTypedData_v4" || signMethod === "eth_signTypedData_v3";
     const isPersonal = signMethod === "personal_sign" || signMethod === "eth_sign";
+    const legacyFields = isLegacy && isLegacyTypedData(tx.typedData);
+    // Typed data that cannot be read is shown as such, at High: the user
+    // cannot see what they would sign. Strict mode leaves no Sign Anyway.
+    const unparseable = isTyped && !legacyFields && !isReadableTypedData(tx.typedData);
+    const canSign = !(strict && unparseable);
 
     let bodyHtml = "";
     let isPermitLike = false;
 
-    if (isTyped && tx.typedData) {
+    if (legacyFields) {
+      const rows = tx.typedData.map((field) => {
+        let display = typeof field.value === "object" ? JSON.stringify(field.value) : String(field.value);
+        if (display.length > 80) display = display.slice(0, 77) + "...";
+        return `<tr><td>${escapeHtml(field.name)}</td><td>${escapeHtml(field.type)}</td><td>${escapeHtml(display)}</td></tr>`;
+      }).join("");
+      bodyHtml = `
+        <div class="shieldai-section">
+          <h3>${_t("overlayMessage")}</h3>
+          <table class="shieldai-impact">${rows || `<tr><td colspan='3'>${_t("overlayNoFields")}</td></tr>`}</table>
+        </div>
+      `;
+    } else if (isTyped && !unparseable) {
       const td = tx.typedData;
       const domain = td.domain || {};
       const primaryType = td.primaryType || "Unknown";
@@ -487,9 +669,11 @@
     }
 
     // Risk classification
-    const badgeClass = isPermitLike ? "shieldai-badge-high" : "shieldai-badge-caution";
-    const label = isPermitLike ? _t("overlayApprovalSig") : _t("overlaySigRequest");
-    const note = isPermitLike ? _t("overlayApprovalNote") : _t("overlaySigNote");
+    const badgeClass = isPermitLike || unparseable ? "shieldai-badge-high" : "shieldai-badge-caution";
+    const label = unparseable ? _t("overlayUnparseableTyped")
+      : isPermitLike ? _t("overlayApprovalSig") : _t("overlaySigRequest");
+    const note = unparseable ? _t("overlayUnparseableTypedNote")
+      : isPermitLike ? _t("overlayApprovalNote") : _t("overlaySigNote");
 
     const overlay = document.createElement("div");
     overlay.id = "shieldai-overlay";
@@ -511,17 +695,21 @@
 
         <div class="shieldai-actions">
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">${_t("overlayBtnReject")}</button>
-          <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">${_t("overlayBtnSignAnyway")}</button>
+          ${canSign ? `<button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">${_t("overlayBtnSignAnyway")}</button>` : ""}
         </div>
+        ${COVERED_NOTE}
+        ${canSign ? "" : `<p class="shieldai-strict-note">${_t("overlayStrictNoProceed")}</p>`}
       </div>
     `;
 
     const root = mountOverlay(overlay, requestId);
     onDecision(root, "shieldai-block", requestId, "block");
-    onDecision(root, "shieldai-proceed", requestId, "proceed");
+    if (canSign) {
+      onDecision(root, "shieldai-proceed", requestId, "proceed");
+    }
   }
 
-  async function showAnalysisOverlay(requestId, result, strict) {
+  async function showAnalysisOverlay(requestId, result, strict, tx) {
     await _loadContentLang();
     removeOverlay();
 
@@ -596,6 +784,7 @@
         ${incomplete ? `
           <p class="shieldai-unknown-why">${_t("unknownWhy")} ${escapeHtml(unknownReason(result))}</p>
         ` : ""}
+        ${batchNote(tx)}
 
         ${result.partial ? `
           <div class="shieldai-section" style="background:#78350f;border-radius:6px;padding:8px 12px;margin-bottom:8px;">
@@ -653,6 +842,7 @@
           </button>
           ` : ""}
         </div>
+        ${COVERED_NOTE}
         ${canProceed ? "" : `<p class="shieldai-strict-note">${_t("overlayStrictNoProceed")}</p>`}
 
         <div class="shieldai-explain-row">
@@ -726,7 +916,7 @@
 
   // Shown when no analysis came back (429, 400, timeout, unreachable API). In
   // Strict mode there is no Proceed: an unchecked transaction stays blocked.
-  async function showErrorOverlay(requestId, errorMsg, strict) {
+  async function showErrorOverlay(requestId, errorMsg, strict, tx) {
     await _loadContentLang();
     removeOverlay();
 
@@ -742,6 +932,7 @@
         <div class="shieldai-badge shieldai-badge-high">
           ${_t("overlayAnalysisUnavail")}
         </div>
+        ${batchNote(tx)}
         <div class="shieldai-section">
           <p>${_t("overlayCannotReach")}</p>
           <p class="shieldai-error">${escapeHtml(errorMsg)}</p>
@@ -757,6 +948,49 @@
           </button>
           `}
         </div>
+        ${COVERED_NOTE}
+      </div>
+    `;
+
+    const root = mountOverlay(overlay, requestId);
+    onDecision(root, "shieldai-block", requestId, "block");
+    if (!strict) {
+      onDecision(root, "shieldai-proceed", requestId, "proceed");
+    }
+  }
+
+  // Shown for a request inject.js could not read (a transaction that is not
+  // an object, or a wallet_sendCalls batch without a list of call objects),
+  // so nothing in it was checked. In Strict mode there is no Proceed.
+  async function showUnknownStructureOverlay(requestId, strict) {
+    await _loadContentLang();
+    removeOverlay();
+
+    const overlay = document.createElement("div");
+    overlay.id = "shieldai-overlay";
+    overlay.className = "shieldai-overlay";
+    overlay.innerHTML = `
+      <div class="shieldai-modal" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
+        <div class="shieldai-header">
+          <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
+          <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
+        </div>
+        <div class="shieldai-badge shieldai-badge-high">${_t("overlayUnknownStructure")}</div>
+        <div class="shieldai-section">
+          <p>${_t("overlayUnknownStructureNote")}</p>
+          <p>${strict ? _t("overlayStrictNoProceed") : _t("overlayProceedRisk")}</p>
+        </div>
+        <div class="shieldai-actions">
+          <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">
+            ${_t("overlayBtnBlock")}
+          </button>
+          ${strict ? "" : `
+          <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">
+            ${_t("overlayBtnProceed")}
+          </button>
+          `}
+        </div>
+        ${COVERED_NOTE}
       </div>
     `;
 
@@ -801,6 +1035,20 @@
     const div = document.createElement("div");
     div.textContent = str;
     return div.innerHTML;
+  }
+
+  // A notice that fades out on its own (see overlay.css), lets clicks through
+  // to the page, and leaves once faded.
+  async function showNotice(key) {
+    await _loadContentLang();
+    const notice = document.createElement("div");
+    notice.className = "shieldai-notice";
+    notice.setAttribute("role", "status");
+    notice.textContent = _t(key);
+    const { host, root } = createShadow();
+    notice.addEventListener("animationend", () => host.remove());
+    root.appendChild(notice);
+    (document.body || document.documentElement).appendChild(host);
   }
 
   // --- Phishing Site Check ---

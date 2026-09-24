@@ -10,14 +10,16 @@ import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+from core.verdicts import BLOCK_MIN, CAUTION_MIN
+
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class CalibrationConfig:
     """Risk classification thresholds and weight overrides."""
-    high_threshold: float = 71.0
-    medium_threshold: float = 31.0
+    high_threshold: float = float(BLOCK_MIN)
+    medium_threshold: float = float(CAUTION_MIN)
     weight_overrides: Dict[str, float] = field(default_factory=dict)
     confidence_boost: float = 0.0  # Added to confidence when historical accuracy is high
 
@@ -25,8 +27,8 @@ class CalibrationConfig:
 def default_calibration() -> CalibrationConfig:
     """Return the default calibration matching current hardcoded values."""
     return CalibrationConfig(
-        high_threshold=71.0,
-        medium_threshold=31.0,
+        high_threshold=float(BLOCK_MIN),
+        medium_threshold=float(CAUTION_MIN),
     )
 
 
@@ -36,8 +38,8 @@ def load_calibration(path: str) -> CalibrationConfig:
         with open(path, 'r') as f:
             data = json.load(f)
         return CalibrationConfig(
-            high_threshold=data.get('high_threshold', 71.0),
-            medium_threshold=data.get('medium_threshold', 31.0),
+            high_threshold=data.get('high_threshold', float(BLOCK_MIN)),
+            medium_threshold=data.get('medium_threshold', float(CAUTION_MIN)),
             weight_overrides=data.get('weight_overrides', {}),
             confidence_boost=data.get('confidence_boost', 0.0),
         )

@@ -22,6 +22,17 @@ IMPOSTORS = {
     "0xf01ab9476afcaa0e0058c83cef2b4c30867abeeb",
     "0x982732a974738b771b07a2588f1b38a968a11e18",
 }
+# The fewest entries each class of the committed file may hold (eval/README.md, "Size").
+MINIMUMS = {
+    "honeypot": 0,
+    "rug_pull": 0,
+    "drainer_contract": 100,
+    "approval_drainer_spender": 100,
+    "address_poisoning": 50,
+    "impostor_token": 90,
+    "fake_claim": 0,
+    "safe": 250,
+}
 DRAINER = "0x" + "d0" * 20
 SAFE = "0x" + "5a" * 20
 SOURCE = {
@@ -74,39 +85,42 @@ def record(address, status="ok", score=None, chain_id=1):
 # ---------------------------------------------------------------------------
 
 
-def test_the_seed_holds_only_independently_sourced_malicious_labels():
+def test_the_dataset_holds_every_class_minimum_with_about_40_percent_safe():
     data = json.loads(Path(V2).read_text(encoding="utf-8"))
     entries = load_dataset(V2)
-    assert len(entries) == len(data["entries"]) == 38
+    # A stale entry stays in the file and is left out when it loads.
+    assert 500 <= len(entries) <= len(data["entries"])
     counts = {name: sum(1 for e in entries if e.category == name) for name in CLASSES}
-    assert counts == {
-        "honeypot": 0,
-        "rug_pull": 0,
-        "drainer_contract": 15,
-        "approval_drainer_spender": 0,
-        "address_poisoning": 0,
-        "impostor_token": 3,
-        "fake_claim": 0,
-        "safe": 20,
-    }
+    assert all(counts[name] >= minimum for name, minimum in MINIMUMS.items()), counts
+    assert 0.35 <= counts["safe"] / len(entries) <= 0.45
+    described = ", ".join(f"{counts[name]} {name}" for name in CLASSES if counts[name])
+    assert f"{len(entries)} entries ({described})" in data["description"]
+
+
+def test_every_label_is_sourced_by_accepted_providers():
+    entries = load_dataset(V2)
     for item in entries:
-        if item.label == "safe":
-            continue
-        assert item.sources and item.labeled
+        assert item.sources and item.labeled, (item.chain_id, item.address)
         for source in item.sources:
             assert source["provider"] in LABEL_PROVIDERS
             assert source["url"].startswith("https://") and source["retrieved"] >= item.labeled
-    assert {e.address for e in entries if e.category == "impostor_token"} == IMPOSTORS
+    assert IMPOSTORS <= {e.address for e in entries if e.category == "impostor_token"}
 
 
-def test_the_seed_safes_are_the_v1_safes():
+def test_no_address_is_listed_twice_on_a_chain():
+    data = json.loads(Path(V2).read_text(encoding="utf-8"))
+    keys = [(item["chain_id"], item["address"].lower()) for item in data["entries"]]
+    assert len(keys) == len(set(keys))
+
+
+def test_the_v1_safes_are_kept():
     v1_safes = {
         (e.chain_id, e.address)
         for e in load_dataset("eval/data/benchmark_v1.json")
         if e.label == "safe"
     }
     v2_safes = {(e.chain_id, e.address) for e in load_dataset(V2) if e.label == "safe"}
-    assert v2_safes == v1_safes and len(v2_safes) == 20
+    assert len(v1_safes) == 20 and v1_safes <= v2_safes
 
 
 # ---------------------------------------------------------------------------

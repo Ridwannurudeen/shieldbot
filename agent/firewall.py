@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from agent.policy_engine import AgentPolicyEngine
 from core.analyzer import AnalysisContext
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
+from core.verdicts import UNKNOWN, stored_level
 from utils.chain_info import get_native_symbol
 from utils.web3_client import UnsupportedChainError
 
@@ -298,6 +299,8 @@ def create_agent_firewall_router(container) -> APIRouter:
                 "coverage": risk_output.get("coverage", {}),
                 "coverage_reasons": risk_output.get("coverage_reasons", {}),
             }
+            # The level follows the final score, the simulation floors included, wherever it is stored or returned.
+            risk_output = {**risk_output, "risk_level": stored_level(risk_score, risk_output.get("risk_level", UNKNOWN))}
             # Cache in DB
             await container.db.upsert_contract_score(
                 address=to_addr, chain_id=chain_id,

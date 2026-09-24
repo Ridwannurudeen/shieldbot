@@ -37,6 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.calibration import MIN_LABELS, confidence_boost, load_calibration, propose_thresholds, score_bins
 from core.config import Settings
 from core.risk_engine import MEDIUM_MATCH_FLOOR
+from core.verdicts import CAUTION_MIN
 from eval.benchmark import json_sha256, load_scores
 from eval.dataset import load_dataset
 
@@ -52,9 +53,9 @@ THRESHOLD_CEILINGS = (
     ),
     (
         "medium_threshold",
-        30,
-        "At or below 30, a score under the extension's CAUTION band (31) would be MEDIUM, which the "
-        "extension reports as missing data.",
+        CAUTION_MIN - 1,
+        f"At or below {CAUTION_MIN - 1}, a score under the extension's CAUTION band ({CAUTION_MIN}) would "
+        "be MEDIUM, which the extension reports as missing data.",
     ),
 )
 

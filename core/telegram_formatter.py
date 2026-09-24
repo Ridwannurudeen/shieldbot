@@ -4,6 +4,7 @@ import re
 
 from core.extension_formatter import is_scan_incomplete
 from core.risk_engine import database_matches, medium_matches
+from core.verdicts import BLOCK_RECOMMENDED, CAUTION, HIGH, HIGH_RISK, MEDIUM, SAFE, classify
 
 # Replies are sent with Telegram's legacy Markdown, where these characters start an entity.
 _MARKUP = re.compile(r'([_*`\[])')
@@ -104,11 +105,12 @@ def format_full_report(
     impostor = impostor_check is not None and impostor_check['status'] == 'impostor'
 
     # Verdict emoji
-    if impostor or rug_prob >= 71:
+    band = classify(rug_prob)
+    if impostor or band == BLOCK_RECOMMENDED:
         verdict_icon = '\U0001F6A8'  # 🚨
-    elif rug_prob >= 50:
+    elif band == HIGH_RISK:
         verdict_icon = '\U0001F534'  # 🔴
-    elif rug_prob >= 31 or incomplete or risk_level in ('MEDIUM', 'HIGH'):
+    elif band == CAUTION or incomplete or risk_level in (MEDIUM, HIGH):
         verdict_icon = '\U0001F7E1'  # 🟡
     else:
         verdict_icon = '\U0001F7E2'  # 🟢
@@ -272,10 +274,10 @@ def format_full_report(
             f'{verdict_icon} Impersonates {claimed} {escape_markdown(impostor_check["symbol"])}: '
             f'do not treat as the real token{caveat}'
         )
-    elif rug_prob >= 71:
+    elif band == BLOCK_RECOMMENDED:
         detail = 'Unknown risk: provider coverage incomplete' if incomplete else f'Rug probability {rug_prob}%'
         lines.append(f'{verdict_icon} DO NOT PROCEED — {detail}')
-    elif rug_prob >= 31 or incomplete or risk_level in ('MEDIUM', 'HIGH'):
+    elif band != SAFE or incomplete or risk_level in (MEDIUM, HIGH):
         detail = 'Unknown risk: provider coverage incomplete' if incomplete else f'Moderate risk ({rug_prob}%)'
         lines.append(f'{verdict_icon} PROCEED WITH CAUTION — {detail}')
     else:

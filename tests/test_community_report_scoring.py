@@ -241,8 +241,7 @@ def test_fallback_firewall_response_names_a_community_report_without_blocking():
 COMMUNITY_LINE = "Community reports, unconfirmed, not a scam database match: Reported by 3 users"
 
 
-@pytest.mark.parametrize("builder", ["firewall", "scan"])
-def test_the_ai_prompts_label_a_community_report_and_keep_it_out_of_warnings(builder):
+def test_the_firewall_prompt_labels_a_community_report_and_keeps_it_out_of_warnings():
     analyzer = AIAnalyzer.__new__(AIAnalyzer)
     scan = {
         "is_verified": True,
@@ -251,22 +250,34 @@ def test_the_ai_prompts_label_a_community_report_and_keep_it_out_of_warnings(bui
         "scam_matches": [COMMUNITY],
         "coverage": {"scam_database": True},
     }
-    if builder == "firewall":
-        build = lambda data: analyzer._build_firewall_context({}, data)  # noqa: E731
-        no_warnings = "Warnings:"
-    else:
-        build = lambda data: analyzer._prepare_scan_context(ADDRESS, data)  # noqa: E731
-        no_warnings = "Warnings: Reported"
-    context = build(scan)
+    context = analyzer._build_firewall_context({}, scan)
     assert COMMUNITY_LINE in context
     assert context.count("Reported by 3 users") == 1
-    assert no_warnings not in context
+    assert "Warnings:" not in context
 
     # Other warnings stay under Warnings; the community report still does not.
-    context = build({**scan, "warnings": ["Contract source code is not verified", "Reported by 3 users"]})
+    context = analyzer._build_firewall_context(
+        {}, {**scan, "warnings": ["Contract source code is not verified", "Reported by 3 users"]}
+    )
     assert COMMUNITY_LINE in context
     assert context.count("Reported by 3 users") == 1
     assert "Contract source code is not verified" in context.split("Warnings:")[1]
+
+
+def test_the_forensic_prompt_labels_a_community_report_and_keeps_it_out_of_the_flags():
+    analyzer = AIAnalyzer.__new__(AIAnalyzer)
+    contract = {"is_verified": False, "scam_matches": [COMMUNITY], "coverage": {"scam_database": True}}
+    risk = {"rug_probability": 40, "critical_flags": ["Reported by 3 users"]}
+    context = analyzer._build_forensic_context(ADDRESS, {"contract": contract, "risk": risk}, "contract")
+    assert COMMUNITY_LINE in context
+    assert context.count("Reported by 3 users") == 1
+    assert "Critical Flags:" not in context
+    assert "Scam Database Matches: 0" in context
+
+    risk = {**risk, "critical_flags": ["Reported by 3 users", "Contract not verified"]}
+    context = analyzer._build_forensic_context(ADDRESS, {"contract": contract, "risk": risk}, "contract")
+    assert context.count("Reported by 3 users") == 1
+    assert "Contract not verified" in context.split("Critical Flags:")[1]
 
 
 def test_raw_checks_count_only_database_matches():

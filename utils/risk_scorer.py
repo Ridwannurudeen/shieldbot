@@ -1,10 +1,12 @@
 """
 Risk Scoring Engine
-Calculates blended risk scores (heuristic + AI) with confidence levels
+Calculates heuristic risk scores with confidence levels
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
+
+from core.verdicts import HIGH, LOW, MEDIUM, level_from_score
 
 from core.risk_engine import database_matches
 
@@ -19,9 +21,11 @@ SEVERITY_WEIGHTS = {
     "info": 0
 }
 
-# Blending ratio: 60% heuristic, 40% AI (when AI is available)
-HEURISTIC_WEIGHT = 0.60
-AI_WEIGHT = 0.40
+RECOMMENDATIONS = {
+    HIGH: "DO NOT PROCEED - Critical security issues detected.",
+    MEDIUM: "Proceed with extreme caution. Verify all details carefully.",
+    LOW: "Generally safe, but always verify independently.",
+}
 
 
 def calculate_risk_score(findings: List[Dict]) -> Tuple[int, str, str]:
@@ -40,37 +44,8 @@ def calculate_risk_score(findings: List[Dict]) -> Tuple[int, str, str]:
         total_risk += SEVERITY_WEIGHTS.get(severity, 0)
 
     risk_score = min(total_risk, 100)
-
-    if risk_score >= 71:
-        risk_level = "HIGH"
-        recommendation = "DO NOT PROCEED - Critical security issues detected."
-    elif risk_score >= 31:
-        risk_level = "MEDIUM"
-        recommendation = "Proceed with extreme caution. Verify all details carefully."
-    else:
-        risk_level = "LOW"
-        recommendation = "Generally safe, but always verify independently."
-
-    return risk_score, risk_level, recommendation
-
-
-def blend_scores(heuristic_score: int, ai_score: Optional[int]) -> int:
-    """
-    Blend heuristic and AI risk scores.
-    Falls back to 100% heuristic when AI is unavailable.
-
-    Args:
-        heuristic_score: 0-100 from heuristic analysis
-        ai_score: 0-100 from AI analysis, or None
-
-    Returns:
-        Blended score 0-100
-    """
-    if ai_score is None:
-        return heuristic_score
-
-    blended = (HEURISTIC_WEIGHT * heuristic_score) + (AI_WEIGHT * ai_score)
-    return max(0, min(100, round(blended)))
+    risk_level = level_from_score(risk_score)
+    return risk_score, risk_level, RECOMMENDATIONS[risk_level]
 
 
 def compute_confidence(data_sources: Dict[str, bool]) -> int:
@@ -79,7 +54,7 @@ def compute_confidence(data_sources: Dict[str, bool]) -> int:
 
     Args:
         data_sources: dict mapping source name to whether it responded successfully
-            e.g. {"bscscan": True, "honeypot_api": True, "scam_db": False, "ai": True}
+            e.g. {"bscscan": True, "honeypot_api": True, "scam_db": False}
 
     Returns:
         Confidence percentage 0-100
@@ -94,7 +69,6 @@ def compute_confidence(data_sources: Dict[str, bool]) -> int:
         "scam_db": 15,
         "honeypot_api": 20,
         "contract_age": 10,
-        "ai": 15,
         "source_code": 5,
     }
 
@@ -115,20 +89,12 @@ def compute_confidence(data_sources: Dict[str, bool]) -> int:
 
 def score_level_from_int(score: int) -> str:
     """Convert numeric score to risk level string."""
-    if score >= 71:
-        return "HIGH"
-    elif score >= 31:
-        return "MEDIUM"
-    return "LOW"
+    return level_from_score(score)
 
 
 def recommendation_from_score(score: int) -> str:
     """Get recommendation text from numeric score."""
-    if score >= 71:
-        return "DO NOT PROCEED - Critical security issues detected."
-    elif score >= 31:
-        return "Proceed with extreme caution. Verify all details carefully."
-    return "Generally safe, but always verify independently."
+    return RECOMMENDATIONS[level_from_score(score)]
 
 
 def findings_from_scan_result(result: Dict) -> List[Dict]:

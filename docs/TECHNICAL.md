@@ -175,7 +175,7 @@ else:
 - Trading volume / liquidity ratio (wash trade detection)
 - Pair age (new pairs = risky)
 - FDV / 24h volume ratio
-- Price volatility (>200% change = flag)
+- Price volatility (>200% change = flag); skipped, and named as "Volatility unknown", when DexScreener omits the 24h change
 
 **Behavioral Score Factors** (0-100):
 - Wallet reputation (Ethos Network)
@@ -318,6 +318,8 @@ a coordinated scam launch.
 - Adds contextual explanations; no measured false-positive reduction is claimed
 - Provides **educational value** (users learn security patterns)
 
+The AI never sets a score or a verdict. The legacy scanners score from their heuristics alone, and when the analysis pipeline fails the firewall's fallback takes its score and classification from those heuristics and the band table in `core/verdicts.py`; the model is told that verdict and only its explanation text is kept. In the firewall and forensic report prompts, token names and symbols, function names, labels, warnings and scam database reasons appear only as quoted, length-capped text that the prompt calls untrusted; the advisor chat's tool results are not treated this way yet.
+
 ---
 
 ## Technology Stack
@@ -372,7 +374,7 @@ shieldbot/
 ├── utils/
 │   ├── ai_analyzer.py          # AI forensic analysis
 │   ├── calldata_decoder.py     # Transaction decoder + whitelist
-│   ├── risk_scorer.py          # Blended scoring logic
+│   ├── risk_scorer.py          # Heuristic scoring logic
 │   ├── web3_client.py          # Web3 + liquidity lock detection
 │   ├── scam_db.py              # Multi-source scam database
 │   ├── firewall_prompt.py      # AI system prompt
@@ -741,7 +743,7 @@ pytest tests/ --cov=. --cov-report=term-missing
 **Selected test modules** (see [TESTING.md](TESTING.md) for measured suite results):
 - `test_api.py` — Firewall & scan API endpoints
 - `test_calldata.py` — Calldata decoder, selector detection, approval parsing
-- `test_risk_scorer.py` — Heuristic scoring, blending, confidence
+- `test_risk_scorer.py` — Heuristic scoring, confidence
 - `test_intent_analyzer.py` — Intent mismatch detection
 - `test_rpc_proxy.py` — RPC proxy intercept, fail-closed behavior
 - `test_ownership.py` — Ownership renouncement checks
@@ -914,6 +916,7 @@ CMD ["python", "bot.py"]
 
 - **CORS Allowlist**: Allows configured origins; this is not authentication
 - **Rate Limiting**: API middleware applies key quotas or an IP-based fallback
+- **STRICT and the score cache**: `/api/firewall` answers a repeat request for a target from its stored verdict for 5 minutes. The `X-Policy-Mode: STRICT` header skips that cache only on a request with a valid API key; any other STRICT request is answered from the cached facts judged in STRICT mode (a cached row with any Unknown in it blocks), so the header can no longer force a full uncached scan. That does not make every request cacheable: transaction-specific requests (paying calls, approvals, typed-data signatures) and swaps through a trusted router always scan fresh by design, because their verdict depends on the transaction as well as the target. For those, the IP rate limiter above is the control on repeated fresh scans.
 - **AI Spend Cap**: advisor chat (API side panel and Telegram) and scan explanations share one daily token budget, `AI_DAILY_TOKEN_BUDGET` (default 1,000,000 input plus output tokens per UTC day, counted from the provider's reported usage and stored in SQLite). Once it is used, chat answers that AI chat is paused for today and explanations fall back to rule-based text. `AI_DAILY_TOKEN_BUDGET=0` pauses AI entirely, a kill switch; a negative value is refused and stops the API and bot at startup. The check runs before each call, so calls already in flight can overshoot it by their own size.
 - **Input Validation**: Review the request model and handler for the endpoint being used; this document does not claim that every input path has identical validation.
 - **Error Handling**: Inspect endpoint error responses separately; this document does not certify that every path redacts internal details.

@@ -6,6 +6,10 @@ in `/opt/shieldbot/venv` and its SQLite database at `/opt/shieldbot/shieldbot.db
 - `shieldbot`: the API (`uvicorn api:app` on 127.0.0.1:8000; `shieldbot-api.service` in this repo)
 - `shieldbot-bot`: the Telegram bot
 
+A third unit, `shieldbot-workers` (`python workers.py`; `shieldbot-workers.service.example`), exists only if
+`BACKGROUND_WORKERS=external` was turned on (`docs/DEPLOYMENT.md`); it then runs the background work and holds the
+recorder key. `deploy.sh` does not manage it: stop it before `--cutover` or `--rollback` and start it after.
+
 nginx fronts the API and serves the landing site. Every other unit on the machine, including `rh-census-4663`,
 belongs to other work. `deploy.sh` stops and starts only the two units above. It never touches other units,
 nginx, `.env` or systemd itself (no `daemon-reload`: a changed unit file is applied by hand).
@@ -57,6 +61,8 @@ NO-GO when:
 - the recorder key (`ROBINHOOD_RECORDER_PRIVATE_KEY`) is set in the shared `/opt/shieldbot/.env`, the bot unit
   loads `recorder.env` or sets the key, or the running bot process has the key in its environment (or its
   environment cannot be read). Only the API may hold that key: `contracts/base/DEPLOY_ROBINHOOD.md`, section 8.
+- `BACKGROUND_WORKERS=external` is set in the shared `.env` and the API unit still loads `recorder.env` or sets
+  the key: the workers unit holds it then (`docs/DEPLOYMENT.md`)
 - the commit does not exist after `git fetch`, or is on no `origin` branch (a commit made only on the server)
 
 It also names the origin branches holding the commit, how far it is ahead of the deployed one and whether
@@ -135,6 +141,31 @@ and three localhost addresses). A site on any other origin that calls the API fr
 once nginx stops adding `Access-Control-Allow-Origin: *`.
 
 After an edit: `nginx -t && systemctl reload nginx`.
+
+### Landing analytics (Plausible)
+
+The landing pages load `/js/plausible-init.js` and `/js/script.js`, and send page views to `/stats/event`. The
+landing vhost (`nginx-shieldbotsecurity-new.conf`) proxies both paths to Plausible, so the site's
+Content-Security-Policy stays `'self'` and no third-party script is loaded. To turn it on:
+
+1. Create a Plausible account and add the site `shieldbotsecurity.online`.
+2. In Site settings, Site installation, copy the script name from the snippet (`pa-...`, the part of
+   `https://plausible.io/js/pa-....js` before `.js`).
+3. In the live landing vhost, copy the two `location` blocks from `nginx-shieldbotsecurity-new.conf` and replace
+   `pa-SITE_ID` with that name. `-new.conf` is the one with the www-to-bare-domain redirect, which is live since
+   2026-09-23; confirm the live file has that redirect and falls back with `=404`, not `/index.html` (the older
+   `nginx-shieldbotsecurity.conf` does, and would answer `/js/script.js` with the page itself). The server needs
+   outbound DNS to 9.9.9.9 and HTTPS to plausible.io. Then `nginx -t && systemctl reload nginx`.
+4. Check:
+   - `curl -sI https://shieldbotsecurity.online/js/script.js` answers 200 with a JavaScript content type;
+   - `curl -s -o /dev/null -w '%{http_code}
+' -X POST -H 'Content-Type: application/json' -d '{"name":"pageview","url":"https://shieldbotsecurity.online/","domain":"shieldbotsecurity.online"}' https://shieldbotsecurity.online/stats/event`
+     answers 202 (Plausible's answer, not nginx's 404 or 502);
+   - a page view shows in Plausible within a minute, also with an ad blocker switched on.
+5. Optional, in Site settings: turn on outbound link tracking to count clicks on "Add to Chrome". The privacy
+   policy already says outbound clicks are counted.
+
+Until step 3, `/js/script.js` answers 404 and the pages work without analytics.
 
 ## Nightly backups
 

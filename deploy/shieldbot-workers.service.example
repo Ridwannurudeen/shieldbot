@@ -1,0 +1,37 @@
+# ShieldBot background workers (workers.py): the mempool monitor, the Robinhood Chain verdict drain, the
+# hunter and the launch watch, in a process of their own. Only for BACKGROUND_WORKERS=external, set in the
+# shared /opt/shieldbot/.env so the API reads it too. Turning it on: docs/DEPLOYMENT.md, "Background workers
+# in their own process". Run exactly one copy.
+[Unit]
+Description=ShieldBot background workers
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=shieldbot
+Group=shieldbot
+WorkingDirectory=/opt/shieldbot
+Environment="PATH=/opt/shieldbot/venv/bin"
+EnvironmentFile=/opt/shieldbot/.env
+# This unit runs the verdict drain, so the recorder key file moves here from the API unit's drop-in, with
+# `systemctl edit shieldbot-workers` rather than in this file (contracts/base/DEPLOY_ROBINHOOD.md, section 8):
+#   [Service]
+#   EnvironmentFile=/etc/shieldbot/recorder.env
+ExecStart=/opt/shieldbot/venv/bin/python workers.py
+# Exit 1 (background work ended on its own) is restarted; exit 3 (a setting that does not allow workers.py to
+# run, such as BACKGROUND_WORKERS not set to external) is not, since a restart cannot fix it.
+Restart=always
+RestartSec=5
+RestartPreventExitStatus=3
+StandardOutput=journal
+StandardError=journal
+# Systemd hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/shieldbot
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
