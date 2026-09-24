@@ -200,8 +200,9 @@ def test_a_plain_call_records_no_transaction(evidence_api):
 @pytest.mark.asyncio
 async def test_hits_on_one_cached_row_share_one_cache_document(evidence_api, monkeypatch):
     api, client, database = evidence_api
-    # Each response is built five seconds after the last, so the hits never share a second.
-    clock = itertools.count(int(time.time()), 5)
+    # Responses are built an hour ahead of the database's clock and five seconds apart, so no
+    # hit shares a second with the scan it was served from, or with another hit.
+    clock = itertools.count(int(time.time()) + 3600, 5)
     monkeypatch.setattr(
         api, "time", SimpleNamespace(time=lambda: next(clock), monotonic=time.monotonic)
     )
@@ -216,7 +217,7 @@ async def test_hits_on_one_cached_row_share_one_cache_document(evidence_api, mon
     doc = cached_doc["evidence"]
     assert doc["source"] == "cache"
     # The stored scan's time, not the time this hit was served (that is stored_at).
-    assert doc["scanned_at"] == doc["cached_scan_at"] <= first_doc["evidence"]["scanned_at"]
+    assert doc["scanned_at"] == doc["cached_scan_at"] < first_doc["evidence"]["scanned_at"]
     assert doc["analyzers"] is None
     assert (doc["classification"], doc["risk_score"]) == (
         cached["classification"],
