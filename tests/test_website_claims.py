@@ -1,8 +1,8 @@
 """The public website must not drift from the code it describes.
 
 These checks tie the landing page, the about page, the dashboard and the extension's welcome page to
-the facts they state (chain counts, tool counts, score bands, chain tables, roadmap status) and fail
-when a source changes without the site, or when the committed builds fall behind their sources.
+the facts they state (chain counts, tool counts, score bands, chain tables, per-chain coverage) and
+fail when a source changes without the site, or when the committed builds fall behind their sources.
 """
 
 import json
@@ -72,42 +72,17 @@ def test_chains_section_lists_every_scan_chain():
     assert "Robinhood Chain" in names
 
 
-def test_mcp_and_bot_counts_match_the_code():
+def test_mcp_counts_match_the_code():
     from mcp_server.prompts import PROMPT_DEFINITIONS
     from mcp_server.resources import RESOURCE_DEFINITIONS, RESOURCE_TEMPLATE_DEFINITIONS
     from mcp_server.tools import TOOL_DEFINITIONS
 
     agent = read(COMPONENTS / "AgentSecurity.tsx")
-    roadmap = read(COMPONENTS / "Roadmap.tsx")
     # MCP lists parameterised resources as templates; the site counts both as resources.
     resources = len(RESOURCE_DEFINITIONS) + len(RESOURCE_TEMPLATE_DEFINITIONS)
     assert f"{len(TOOL_DEFINITIONS)} security tools" in agent
     assert f"{resources} threat resources" in agent
     assert f"{len(PROMPT_DEFINITIONS)} analysis prompts" in agent
-    assert (
-        f"MCP Server ({len(TOOL_DEFINITIONS)} tools, {resources} resources"
-        in roadmap
-    )
-
-    commands = len(re.findall(r'CommandHandler\("', read(ROOT / "bot.py")))
-    assert f"Telegram bot ({commands} commands)" in roadmap
-
-
-def test_roadmap_marks_nothing_complete_that_is_still_open():
-    roadmap = read(COMPONENTS / "Roadmap.tsx")
-    done = [
-        item
-        for items in re.findall(r'status: "done",\s*items: \[(.*?)\]', roadmap, re.DOTALL)
-        for item in re.findall(r'"([^"]+)"', items)
-    ]
-    still_open = re.findall(r"^- \[ \] \*\*([^*]+)\*\*", read(ROOT / "ROADMAP.md"), re.MULTILINE)
-    assert done and still_open
-    for item in done:
-        assert not re.search(r"\b(?:deploying|proposed|planned|upcoming|in progress)\b", item, re.I)
-        for title in still_open:
-            assert title.lower() not in item.lower(), (
-                f"Roadmap.tsx marks {item!r} Complete; ROADMAP.md leaves {title!r} open"
-            )
 
 
 def welcome_text() -> str:

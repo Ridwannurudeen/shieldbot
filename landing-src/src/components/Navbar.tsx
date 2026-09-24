@@ -2,8 +2,9 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const links = [
-  { label: "Features", href: "#features" },
+  { label: "How it works", href: "#how-it-works" },
   { label: "Chains", href: "#chains" },
+  { label: "Agents", href: "#agent-security" },
   { label: "Robinhood Chain", href: "#robinhood-chain" },
   { label: "Dashboard", href: "/dashboard" },
   { label: "Add to Chrome", href: "https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk" },
@@ -45,7 +46,7 @@ export default function Navbar() {
         </a>
 
         {/* Desktop links */}
-        <div className="hidden md:flex items-center gap-8">
+        <div className="hidden lg:flex items-center gap-8">
           {links.slice(0, -1).map((l) => (
             <a
               key={l.label}
@@ -67,7 +68,7 @@ export default function Navbar() {
 
         {/* Mobile hamburger */}
         <button
-          className="md:hidden text-gray-400 hover:text-white"
+          className="lg:hidden text-gray-400 hover:text-white"
           onClick={() => setOpen(!open)}
           aria-label="Toggle menu"
         >
@@ -88,7 +89,7 @@ export default function Navbar() {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="md:hidden overflow-hidden bg-navy-light border-b border-white/5"
+            className="lg:hidden overflow-hidden bg-navy-light border-b border-white/5"
           >
             <div className="px-6 py-4 flex flex-col gap-4">
               {links.slice(0, -1).map((l) => (
