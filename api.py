@@ -376,6 +376,10 @@ def _validate_signing_chain(typed_data: Optional[Dict], chain_id: int):
         )
 
 
+def _refuse_json_constant(name: str):
+    raise ValueError(f"{name} is not JSON")
+
+
 @app.middleware("http")
 async def request_validation_middleware(request: Request, call_next):
     content_length = request.headers.get("content-length")
@@ -414,7 +418,9 @@ async def request_validation_middleware(request: Request, call_next):
     body = None
     if raw_body and is_json:
         try:
-            body = await request.json()
+            # NaN and Infinity are not JSON (RFC 8259). Refusing them keeps every body serialisable:
+            # a validation error echoes its input, and the evidence document hashes typed data.
+            body = json.loads(raw_body, parse_constant=_refuse_json_constant)
         except (ValueError, UnicodeDecodeError):
             return JSONResponse(status_code=400, content={"detail": "Invalid JSON body"})
         if isinstance(body, dict):
@@ -483,7 +489,7 @@ class FirewallRequest(ChainRequest):
         if v is None:
             return v
         try:
-            encoded = json.dumps(v, separators=(",", ":"), default=str)
+            encoded = json.dumps(v, separators=(",", ":"), default=str, allow_nan=False)
         except (TypeError, ValueError) as exc:
             raise ValueError("typedData must be JSON serializable") from exc
         if len(encoded) > MAX_TYPED_DATA_CHARS:

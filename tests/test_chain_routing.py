@@ -246,6 +246,16 @@ def test_invalid_json_rejected_before_services(routing_api):
     assert services.mock_calls == []
 
 
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_nan_and_infinity_are_rejected_before_services(routing_api, constant):
+    client, _, services = routing_api
+    body = '{"to": "", "from": "' + ADDRESS + '", "typedData": {"message": {"value": ' + constant + "}}}"
+    response = client.post("/api/firewall", content=body, headers={"content-type": "application/json"})
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Invalid JSON body"}
+    assert services.mock_calls == []
+
+
 @pytest.mark.parametrize("chain_id", ["4663", 56.5, True, 999999])
 def test_guardian_raw_body_rejects_invalid_chain_before_persistence(routing_api, chain_id):
     client, _, services = routing_api
