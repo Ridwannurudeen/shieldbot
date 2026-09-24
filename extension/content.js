@@ -384,8 +384,14 @@
         clearTimeout(_outOfViewTimer);
         _outOfViewTimer = null;
       } else if (_outOfViewTimer === null) {
-        _outOfViewTimer = setTimeout(() => {
-          if (_overlayHost === host) removeOverlay();
+        _outOfViewTimer = setTimeout(function outOfView() {
+          if (_overlayHost !== host) return;
+          // A hidden tab shows nothing: wait until the user is back on it.
+          if (document.visibilityState !== "visible") {
+            _outOfViewTimer = setTimeout(outOfView, OUT_OF_VIEW_LIMIT_MS);
+            return;
+          }
+          removeOverlay();
         }, OUT_OF_VIEW_LIMIT_MS);
       }
     }, { trackVisibility: true, delay: 100 });

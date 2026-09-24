@@ -117,6 +117,7 @@ class El {
 const body = new El('body'), head = new El('head'), html = new El('html');
 const document = Object.assign(new EventTarget(), {
   body, head, documentElement: html, activeElement: body, children: [html], isDocument: true,
+  visibilityState: 'visible',
   contains(node) {
     while (node.parent) node = node.parent;
     return node === document;
@@ -647,6 +648,28 @@ def test_the_half_second_counts_from_when_a_cover_ends():
   userClick(proceed);
   await flush();
   await assertVerdicts([['request', 'proceed']]);
+"""
+    )
+
+
+def test_a_hidden_tab_does_not_count_as_the_dialog_kept_out_of_view():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('request');
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  // The user switched to another tab: nothing is reported as in view there.
+  document.visibilityState = 'hidden';
+  reportIntersecting(false);
+  await wait(250);
+  assert.deepEqual(verdicts(), [], 'the request was rejected while its tab was hidden');
+  assert(overlay(), 'the warning was taken down while its tab was hidden');
+  // Back on the tab, and the dialog still out of view: now it counts.
+  document.visibilityState = 'visible';
+  await wait(150);
+  await assertVerdicts([['request', 'block']]);
 """
     )
 
