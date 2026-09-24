@@ -33,7 +33,7 @@ def messages(language):
 
 def test_reference_scan_finds_lookups_in_every_form():
     keys = referenced_keys()
-    for key in ("tabSettings", "feedHeading", "overlayTitle", "statusChecking"):
+    for key in ("tabSettings", "feedHeading", "overlayTitle", "statusChecking", "overlayNotes"):
         assert key in keys
 
 

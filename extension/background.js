@@ -21,16 +21,34 @@ chrome.runtime.onInstalled.addListener((details) => {
   }
 });
 
-// In-memory phishing cache: domain -> {result, expiresAt}
+// Phishing cache: host -> {is_phishing, expiresAt}
 // Avoids repeated API calls when navigating across pages on the same site.
+// Chrome stops an idle service worker, so the cache is also kept in
+// chrome.storage.session, which content scripts cannot read and which lasts
+// for the browser session. Only verdicts are kept, under the host alone. A
+// site flagged is kept flagged for an hour; one not flagged is asked about
+// again after five minutes, so a site flagged since is seen soon.
 const _phishingCache = new Map();
 const PHISHING_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const NOT_PHISHING_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_PHISHING_CACHE = 500;
+let _phishingCacheLoad = null;
+
+function loadPhishingCache() {
+  _phishingCacheLoad ||= chrome.storage.session.get({ phishingCache: {} }).then(({ phishingCache }) => {
+    for (const [host, entry] of Object.entries(phishingCache)) _phishingCache.set(host, entry);
+  }, (err) => {
+    // Read it again next time rather than leave this worker without checks.
+    _phishingCacheLoad = null;
+    throw err;
+  });
+  return _phishingCacheLoad;
+}
 
 // Listen for messages from content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "SHIELDAI_ANALYZE") {
-    handleAnalyze(message.tx)
+    handleAnalyze(message.tx, sender)
       .then((result) => {
         saveToHistory(message.tx, result);
         sendResponse({ result });
@@ -166,9 +184,10 @@ async function checkPhishing(url) {
     const lookupUrl = `${parsedUrl.protocol}//${parsedUrl.host}/`;
 
     // Check extension-side cache
+    await loadPhishingCache();
     const cached = _phishingCache.get(cacheKey);
     if (cached && Date.now() < cached.expiresAt) {
-      return cached.result;
+      return { is_phishing: cached.is_phishing };
     }
 
     // Get configured API URL — if not set, skip silently
@@ -201,7 +220,9 @@ async function checkPhishing(url) {
       const firstKey = _phishingCache.keys().next().value;
       _phishingCache.delete(firstKey);
     }
-    _phishingCache.set(cacheKey, { result, expiresAt: Date.now() + PHISHING_CACHE_TTL_MS });
+    const ttl = result.is_phishing ? PHISHING_CACHE_TTL_MS : NOT_PHISHING_CACHE_TTL_MS;
+    _phishingCache.set(cacheKey, { is_phishing: result.is_phishing, expiresAt: Date.now() + ttl });
+    chrome.storage.session.set({ phishingCache: Object.fromEntries(_phishingCache) });
     return result;
   } catch (err) {
     console.warn("Phishing check failed:", err.message || err);
@@ -238,20 +259,149 @@ async function getApiUrl() {
   });
 }
 
-async function handleAnalyze(tx) {
+// The answer for a request whose wallet chain could not be read, does not
+// match the request, or is not one the API supports: nothing was analysed,
+// and the overlay offers only Block.
+function unknownChain(reason) {
+  return {
+    status: "unknown",
+    partial: true,
+    classification: "UNKNOWN",
+    risk_level: "UNKNOWN",
+    risk_score: null,
+    coverage: { chain: false },
+    coverage_reasons: { chain: reason },
+    verdict: "Unknown wallet chain. Reconnect the wallet and retry; the request is blocked.",
+  };
+}
+
+// Sign-In with Ethereum (EIP-4361). The domain a sign-in message claims must
+// be the host of the frame that asked, which the browser gives this worker as
+// the message's sender; the page has no say in it. The claim is read loosely,
+// so line endings, a character before it, a scheme, a port or a path cannot
+// hide it, and checked first, whatever follows. The rest is then parsed in
+// the standard's layout, every field in its order and form and nothing else,
+// and the URI's host must be the frame's host too. URIs must be URLs a browser
+// can parse, which is stricter than the reference parser; the address's
+// EIP-55 checksum is not required: the standard says SHOULD.
+const SIWE_HEADER = " wants you to sign in with your Ethereum account:";
+const SIWE_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/i;
+const SIWE_UNREADABLE = "The message looks like Sign-In with Ethereum but does not follow EIP-4361, " +
+  "so the site it is for cannot be checked.";
+
+// A URL, or null for a string that is not one.
+function parseUrl(value) {
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+}
+
+// The text a personal_sign message signs, read as MetaMask reads it: a string
+// of hex digits, with or without 0x, is bytes (an odd count padded with a
+// leading 0) decoded as UTF-8, and anything else is signed as written. null
+// when the bytes are not text.
+function signedText(data) {
+  if (typeof data !== "string") return null;
+  const digits = data.replace(/^0x/i, "");
+  if (!/^[0-9a-f]+$/i.test(digits)) return data;
+  const even = digits.length % 2 ? `0${digits}` : digits;
+  const bytes = new Uint8Array(even.length / 2);
+  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(even.slice(i * 2, i * 2 + 2), 16);
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+// The URI of a message laid out as EIP-4361 says after its first line, or null.
+function parseSiwe(text) {
+  const lines = text.split("\n");
+  if (!/^0x[0-9a-f]{40}$/i.test(lines[1] || "") || lines[2] !== "") return null;
+  // After the blank line, either no statement (a blank line, then the URI) or
+  // a statement of one line and a blank line. An empty statement is an empty
+  // line, as siwe's toMessage() writes it: the address, four line feeds, URI.
+  let at = lines[3] === "" && lines[4] !== "" ? 4 : lines[4] === "" ? 5 : -1;
+  if (at < 0) return null;
+  const take = (prefix, valid) => {
+    const line = lines[at] || "";
+    if (!line.startsWith(prefix) || !valid(line.slice(prefix.length))) return null;
+    at++;
+    return line.slice(prefix.length);
+  };
+  const isUri = (value) => /^[a-z][a-z0-9+.-]*:\S+$/i.test(value) && parseUrl(value) !== null;
+  const isDate = (value) => SIWE_DATE.test(value);
+  const uri = take("URI: ", isUri);
+  if (uri === null ||
+      take("Version: ", (value) => value === "1") === null ||
+      take("Chain ID: ", (value) => /^[0-9]+$/.test(value)) === null ||
+      take("Nonce: ", (value) => /^[a-z0-9]{8,}$/i.test(value)) === null ||
+      take("Issued At: ", isDate) === null) {
+    return null;
+  }
+  for (const [prefix, valid] of [
+    ["Expiration Time: ", isDate],
+    ["Not Before: ", isDate],
+    ["Request ID: ", (value) => /^[a-z0-9\-._~%!$&'()*+,;=:@]*$/i.test(value)],
+  ]) {
+    if ((lines[at] || "").startsWith(prefix) && take(prefix, valid) === null) return null;
+  }
+  if (lines[at] === "Resources:") {
+    at++;
+    while ((lines[at] || "").startsWith("- ") && isUri(lines[at].slice(2))) at++;
+  }
+  return at === lines.length ? uri : null;
+}
+
+// What a personal_sign message says about the site it signs in to: null when
+// it is not a sign-in message; "mismatch" when the domain on its first line, or
+// its URI's host, is not the host of origin, the frame that asked; "unreadable"
+// when it says it is one but its first line cannot be read, or its first line
+// is for this site and the rest is not laid out as EIP-4361; "match" otherwise.
+function judgeSignIn(data, origin) {
+  const text = signedText(data);
+  if (text === null || !text.includes(SIWE_HEADER)) return null;
+  // The claimed domain: the run of non-whitespace just before the first
+  // header, whatever comes before it, with or without a scheme.
+  const claim = /\S+$/.exec(text.slice(0, text.indexOf(SIWE_HEADER)));
+  const token = claim && claim[0];
+  const domain = token && parseUrl(token.includes("://") ? token : `https://${token}`);
+  if (!domain) return { state: "unreadable" };
+  const page = parseUrl(origin);
+  const host = page ? page.host : "";
+  const mismatch = (claimed) => ({ state: "mismatch", domain: claimed, origin: host || String(origin) });
+  if (domain.username || domain.password || domain.host !== host) return mismatch(token);
+  const uri = parseSiwe(text);
+  if (uri === null) return { state: "unreadable" };
+  const uriHost = parseUrl(uri).host;
+  return uriHost && uriHost !== host ? mismatch(uriHost) : { state: "match", domain: token };
+}
+
+async function handleAnalyze(tx, sender) {
   const validChainId = typeof tx.chainId === "number" ||
     (typeof tx.chainId === "string" && /^(0x[0-9a-f]+|[0-9]+)$/i.test(tx.chainId));
   const chainId = validChainId ? Number(tx.chainId) : null;
   if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+    return unknownChain("Wallet chain unavailable, invalid, or mismatched; the request was not analyzed.");
+  }
+
+  // A sign-in message for another site than the one asking is Block
+  // Recommended whatever the API would say, so the API is not asked.
+  const signMethod = tx._signMethod || tx.signMethod;
+  const signIn = signMethod === "personal_sign" ? judgeSignIn(tx.data, sender.origin) : null;
+  if (signIn && signIn.state === "mismatch") {
     return {
-      status: "unknown",
-      partial: true,
-      classification: "UNKNOWN",
-      risk_level: "UNKNOWN",
-      risk_score: null,
-      coverage: { chain: false },
-      coverage_reasons: { chain: "Wallet chain unavailable, invalid, or mismatched; transaction was not analyzed." },
-      verdict: "Unknown wallet chain. Reconnect the wallet and retry; transaction blocked.",
+      status: "ok",
+      partial: false,
+      classification: "BLOCK_RECOMMENDED",
+      risk_level: "HIGH",
+      risk_score: 100,
+      coverage: { siwe: 1 },
+      coverage_reasons: {},
+      siwe: signIn,
+      verdict: `Sign-in message for ${signIn.domain}, asked for by ${signIn.origin}`,
     };
   }
 
@@ -265,20 +415,31 @@ async function handleAnalyze(tx) {
 
   const endpoint = `${apiUrl}/api/firewall`;
 
+  // A message or hash to sign, and its signer, stay in the browser: the API
+  // judges personal_sign and eth_sign by their method and reads neither.
+  const byMethod = signMethod === "personal_sign" || signMethod === "eth_sign";
   const body = {
     to: tx.to || "",
-    from: tx.from || "",
+    from: byMethod ? "" : tx.from || "",
     value: tx.value || "0x0",
-    data: tx.data || "0x",
+    data: byMethod ? "0x" : tx.data || "0x",
     chainId,
   };
 
-  // Include typed data for signature analysis (EIP-712, Permit2, etc.)
-  if (tx._typedData || tx.typedData) {
-    body.typedData = tx._typedData || tx.typedData;
+  // Include typed data for signature analysis (EIP-712, Permit2, etc.).
+  // MetaMask's legacy form, a list of fields, is not an EIP-712 object and is
+  // left out; the API reads a signature without typed data as unknown.
+  const typedData = tx._typedData || tx.typedData;
+  if (typeof typedData === "object" && typedData !== null && !Array.isArray(typedData)) {
+    body.typedData = typedData;
   }
-  if (tx._signMethod || tx.signMethod) {
-    body.signMethod = tx._signMethod || tx.signMethod;
+  if (signMethod) {
+    body.signMethod = signMethod;
+  }
+  // An EIP-7702 transaction's delegates: only each authorization's address is
+  // sent, never its signature.
+  if (Array.isArray(tx.authorizationList)) {
+    body.authorizationList = tx.authorizationList.map((authorization) => ({ address: authorization.address }));
   }
 
   // Get policy mode setting
@@ -301,10 +462,28 @@ async function handleAnalyze(tx) {
 
   if (!response.ok) {
     const text = await response.text();
+    // The API refuses a chain it does not support with a 400 that says so.
+    const unsupported = response.status === 400 && /"detail":\s*"(Unsupported chain ID[^"]*)"/.exec(text);
+    if (unsupported) return unknownChain(unsupported[1]);
     throw new Error(`API error ${response.status}: ${text}`);
   }
 
-  return response.json();
+  const result = await response.json();
+  // The API cannot tell which site a sign-in message is for; a message that
+  // says it is one but cannot be read leaves the verdict Unknown, never Safe
+  // (the API's own rule for an incomplete signature).
+  if (signIn && signIn.state === "unreadable") {
+    return {
+      ...result,
+      classification: result.classification === "SAFE" ? "CAUTION" : result.classification,
+      status: "unknown",
+      partial: true,
+      coverage: { ...result.coverage, siwe: 0 },
+      coverage_reasons: { ...result.coverage_reasons, siwe: SIWE_UNREADABLE },
+      siwe: signIn,
+    };
+  }
+  return result;
 }
 
 async function checkHealth() {

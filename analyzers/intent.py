@@ -1,10 +1,14 @@
 """Intent Mismatch Analyzer — detects when tx behavior doesn't match user intent."""
 
+import asyncio
 import logging
-from typing import List
+import re
+from typing import List, Optional
 
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
-from services.counterparty_service import UnavailableCounterparty, approval_grant, judge_spender, within_timeout
+from services.counterparty_service import (
+    UnavailableCounterparty, approval_grant, judge_delegate, judge_spender, within_timeout,
+)
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD
 
 logger = logging.getLogger(__name__)
@@ -25,7 +29,7 @@ class IntentMismatchAnalyzer(Analyzer):
     - Native value sent on an approval call
     - Unknown selector on unverified contract
     - Hard floors: a grant to a wallet, a labelled address or an unverified or new contract,
-      and native value paid to claim() or to an unverified contract
+      native value paid to claim() or to an unverified contract, and any EIP-7702 delegation
     """
 
     def __init__(self, web3_client, counterparty_service=None):
@@ -51,8 +55,10 @@ class IntentMismatchAnalyzer(Analyzer):
         # Decode calldata
         decoded = _decoder.decode(calldata)
         selector = decoded.get('selector')
+        # An EIP-7702 authorization list hands the sender's account to each delegate's code.
+        delegations = await self._delegations(ctx)
 
-        if not selector:
+        if not selector and delegations is None:
             # Native transfer — no calldata to analyze
             return AnalyzerResult(
                 name=self.name, weight=self.weight, score=0,
@@ -116,12 +122,18 @@ class IntentMismatchAnalyzer(Analyzer):
             if unknown:
                 counterparty_reasons.append(counterparty['reason'])
         # On a router swap the value goes to the allowlisted router, not to the token scanned here.
-        if payment > 0 and not ctx.extra.get('whitelisted_router'):
+        # A native send with no call pays a recipient, not a contract call.
+        if payment > 0 and selector and not ctx.extra.get('whitelisted_router'):
             floor, floor_flag, reason = await self._payment_floor(ctx, decoded, payment)
             floors.append((floor, floor_flag))
             counterparty_known = counterparty_known is not False and reason is None
             if reason:
                 counterparty_reasons.append(reason)
+        delegate_known = None
+        if delegations is not None:
+            delegation_floors, delegate_known, delegate_reasons = delegations
+            floors.extend(delegation_floors)
+            counterparty_reasons.extend(delegate_reasons)
         floors = sorted((pair for pair in floors if pair[0]), reverse=True)
         floor = floors[0][0] if floors else None
         flags[:0] = [flag for _, flag in floors]
@@ -136,10 +148,11 @@ class IntentMismatchAnalyzer(Analyzer):
             score=score,
             flags=flags,
             data={
-                'status': 'unknown' if verification_unknown or counterparty_known is False else 'ok',
+                'status': 'unknown' if verification_unknown or False in (counterparty_known, delegate_known) else 'ok',
                 'coverage': {
                     'selector_verification': not verification_unknown,
                     **({} if counterparty_known is None else {'counterparty': counterparty_known}),
+                    **({} if delegate_known is None else {'delegate': delegate_known}),
                 },
                 'reason': (
                     'Contract verification unavailable for unknown selector' if verification_unknown
@@ -155,6 +168,31 @@ class IntentMismatchAnalyzer(Analyzer):
                 **({'counterparty': counterparty} if counterparty else {}),
             },
         )
+
+    async def _delegations(self, ctx: AnalysisContext) -> Optional[tuple]:
+        """For an EIP-7702 transaction: ([(floor, flag)] per delegate, whether every delegate's facts are
+        known, the reasons they are not). None without an authorization list. One that is not a list
+        (the RPC proxy passes the page's value as sent), is empty, or has an authorization whose delegate
+        address cannot be read is judged as an unknown delegate."""
+        authorizations = ctx.extra.get('authorization_list')
+        if authorizations is None:
+            return None
+        items = authorizations if isinstance(authorizations, list) else [None]
+        delegates = [item.get('address') if isinstance(item, dict) else None for item in items]
+        if not delegates or not all(isinstance(d, str) and re.fullmatch(r'0x[0-9a-fA-F]{40}', d) for d in delegates):
+            return [(100, 'EIP-7702 delegation to an address that cannot be read')], False, [
+                'EIP-7702 delegate address unreadable'
+            ]
+        delegates = list(dict.fromkeys(d.lower() for d in delegates))
+        # Each lookup is bounded by the provider timeout; together they take as long as the slowest.
+        all_facts = await asyncio.gather(*(self._counterparty.fetch(d, ctx.chain_id) for d in delegates))
+        floors, reasons = [], []
+        for delegate, facts in zip(delegates, all_facts):
+            floor, flag, unknown = judge_delegate(delegate, facts)
+            floors.append((floor, flag))
+            if unknown:
+                reasons.append(facts['reason'] or f'EIP-7702 delegate {delegate}: facts unknown')
+        return floors, not reasons, reasons
 
     async def _payment_floor(self, ctx: AnalysisContext, decoded: dict, payment: int) -> tuple:
         """(floor or None, its flag, the reason it is incomplete or None) for native value paid to

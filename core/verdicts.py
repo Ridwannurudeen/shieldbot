@@ -44,10 +44,11 @@ _LEVEL_RANK = {LOW: 0, MEDIUM: 1, HIGH: 2}
 # The contract_scores rows the threat counts count and the threat feed lists.
 THREAT_CONDITION = f"risk_level = '{HIGH}'"
 
-# A signature request with no transaction behind it has its own table, and a blind eth_sign
-# request scores at least BLIND_SIGN_MIN.
+# A signature request with no transaction behind it has its own table. A blind eth_sign request,
+# which signs a raw hash that can be a transaction's, scores at least BLIND_SIGN_MIN: in the
+# BLOCK_RECOMMENDED band of both tables.
 SIGNATURE_BANDS = ((BLOCK_RECOMMENDED, 70), (HIGH_RISK, 40), (CAUTION, 15), (SAFE, 0))
-BLIND_SIGN_MIN = 30
+BLIND_SIGN_MIN = 90
 
 # STRICT policy turns an incomplete analysis into a block that reports at least this score.
 STRICT_BLOCK_SCORE = 80
@@ -123,6 +124,7 @@ def describe(calibration=None) -> dict:
         "agent_verdicts": list(AGENT_VERDICTS),
         "bands": [{"classification": name, "min_score": lowest} for name, lowest in BANDS],
         "signature_bands": [{"classification": name, "min_score": lowest} for name, lowest in SIGNATURE_BANDS],
+        "blind_sign_min": BLIND_SIGN_MIN,
         "risk_level_thresholds": {HIGH: min(high, BLOCK_MIN), MEDIUM: min(medium, CAUTION_MIN)},
         "unknown": "A scan with incomplete coverage has status 'unknown' and is never classified SAFE.",
         "strict_block_score": STRICT_BLOCK_SCORE,

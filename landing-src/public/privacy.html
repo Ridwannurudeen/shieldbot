@@ -107,8 +107,9 @@
       <li><strong>data</strong> — the encoded calldata (function call and arguments)</li>
       <li><strong>chainId</strong> — the blockchain network identifier</li>
       <li><strong>typedData</strong> — EIP-712 structured data, if applicable (e.g. Permit2 signatures)</li>
+      <li><strong>authorizationList</strong> — for an EIP-7702 transaction, the address of each contract it would delegate your account to (never the signed authorization)</li>
     </ul>
-    <p>With each check the extension also sends the signing method (for signature requests) and your policy mode (Balanced or Strict). This is the minimum required for a meaningful security analysis.</p>
+    <p>With each check the extension also sends the signing method (for signature requests) and your policy mode (Balanced or Strict). For a <code>personal_sign</code> or <code>eth_sign</code> request, neither the text of the message or the hash you would sign nor your wallet address is sent. This is the minimum required for a meaningful security analysis.</p>
     <p>Some features send data only when you use them:</p>
     <ul>
       <li><strong>AI chat in the side panel</strong> — the message you type</li>
@@ -123,6 +124,7 @@
       <li>Firewall enabled/disabled state</li>
       <li>Policy mode (Balanced or Strict)</li>
       <li>The last 50 transaction scan results for the history view</li>
+      <li>The last 100 addresses you chose to send to through a web page, to warn you when a later recipient only looks like one of them</li>
       <li>The wallet address you enter in the Wallet Health scanner</li>
     </ul>
 
@@ -136,7 +138,7 @@
     <p>Scan results are stored by contract address and chain. They are <strong>not</strong> stored with your IP address, and we do not use wallet addresses as user identifiers.</p>
 
     <h2>5. Phishing Detection</h2>
-    <p>When you visit a website, the extension sends only the site's origin (scheme, host and port; never the path or query string) to our API, which checks it against the GoPlus phishing database. The result is cached in your browser for one hour to minimise requests. The origin is used only for this check and is not stored in our database.</p>
+    <p>When you visit a website, the extension sends only the site's origin (scheme, host and port; never the path or query string) to our API, which checks it against the GoPlus phishing database. The result is cached in your browser to minimise requests: for one hour when the site is flagged, and for five minutes when it is not. The origin is used only for this check and is not stored in our database.</p>
 
     <h2>6. Data Sharing</h2>
     <p>We do not sell, rent, or share your data with third parties for advertising or marketing purposes. To perform security analysis, we query the following external services:</p>

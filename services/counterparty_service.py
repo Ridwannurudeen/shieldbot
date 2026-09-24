@@ -188,6 +188,34 @@ def judge_spender(facts: dict, unlimited: bool) -> tuple:
     return None, None, unknown
 
 
+def judge_delegate(address: str, facts: dict) -> tuple:
+    """Floor for an EIP-7702 authorization that makes `address` the code of the signer's account.
+
+    Returns (floor, flag, unknown). The delegate's code runs as the account and can move everything
+    in it, so every delegation is Block Recommended: 90 for a verified contract live seven days or
+    more with no theft label, 100 for anything else. The flag names the delegate in full and says
+    what is known of it; unknown is True when a fact that description depends on is not known.
+    """
+    labels, age, verified, contract = facts["labels"], facts["age_days"], facts["is_verified"], facts["is_contract"]
+    if labels:
+        source = f" ({facts['label_source']})" if facts["label_source"] else ""
+        what = f"flagged by GoPlus: {', '.join(labels)}{source}"
+    elif contract is False:
+        what = "a wallet, not a contract"
+    elif facts["delegated"]:
+        what = "a delegated wallet, not a contract"
+    elif verified is None:
+        what = "a contract, verification unknown" if contract else "code and verification unknown"
+    elif verified is False:
+        what = "an unverified contract" + ("" if age is None else f", {age} days old")
+    else:
+        what = "a verified contract of unknown age" if age is None else f"a verified contract, {age} days old"
+    known_contract = contract is True and not facts["delegated"]
+    unknown = labels is None or contract is None or (known_contract and (verified is None or (verified and age is None)))
+    established = labels == [] and known_contract and verified is True and age is not None and age >= 7
+    return 90 if established else 100, f"EIP-7702 delegation hands your account to {address}, {what}", unknown
+
+
 class CounterpartyService:
     """Looks up counterparty facts, cached for five minutes per chain and address."""
 

@@ -521,6 +521,8 @@ class FirewallRequest(ChainRequest):
     chainId: int = Field(default=56, ge=1, le=10_000_000)
     typedData: Optional[Dict] = None
     signMethod: Optional[str] = Field(default=None, max_length=64)
+    # An EIP-7702 (type 0x04) transaction's authorizations; the analysis reads each one's address.
+    authorizationList: Optional[List[Dict]] = Field(default=None, max_length=16)
 
     @model_validator(mode="after")
     def validate_signing_chain(self):
@@ -1183,10 +1185,24 @@ def _extract_signature_target(req: FirewallRequest) -> str:
     return ""
 
 
+# The wallet methods the extension checks as signatures. A typed-data method whose typed data did not
+# arrive as an object (MetaMask's legacy list of fields, or data the extension could not parse) is
+# still a signature, answered as unknown, not a transaction to an invalid address.
+SIGNING_METHODS = {
+    "personal_sign", "eth_sign",
+    "eth_signTypedData", "eth_signTypedData_v1", "eth_signTypedData_v3", "eth_signTypedData_v4",
+}
+
+
 def _is_signature_only_request(req: FirewallRequest) -> bool:
+    # eth_sign signs a raw hash, not a call to `to`, so it is answered here whatever `to` is: the
+    # signature path applies its floor, and the transaction path would answer it from the target's
+    # cached row or scan and store its verdict as the target's.
+    if req.signMethod == "eth_sign":
+        return True
     if req.typedData:
         return not _is_valid_evm_address(req.to)
-    return (req.signMethod or "") in {"personal_sign", "eth_sign"} and not _is_valid_evm_address(req.to)
+    return (req.signMethod or "") in SIGNING_METHODS and not _is_valid_evm_address(req.to)
 
 
 async def _build_signature_only_response(
@@ -1217,16 +1233,17 @@ async def _build_signature_only_response(
     risk_score = int(max(0, min(100, round(result.score))))
     danger_signals = list(result.flags)
 
+    # eth_sign signs a raw 32-byte hash, which can be a transaction's: it is always Block Recommended.
     if req.signMethod == "eth_sign" and risk_score < verdicts.BLIND_SIGN_MIN:
         risk_score = verdicts.BLIND_SIGN_MIN
-        danger_signals.append("Blind eth_sign request: wallet may be signing an opaque payload")
+        danger_signals.insert(0, "eth_sign signs a raw hash, and that hash can be a transaction that moves your funds")
 
     classification = verdicts.classify(risk_score, verdicts.SIGNATURE_BANDS)
 
     sig_type = result.data.get("sig_type", "signature")
     sign_method = req.signMethod or result.data.get("sign_method") or "signature"
     covered = not result.error and 'Failed to parse typed data' not in danger_signals and (
-        sig_type in {'eip2612_permit', 'permit2', 'permit2_transfer', 'seaport_order'}
+        sig_type in {'eip2612_permit', 'permit2', 'permit2_transfer', 'seaport_order', 'seaport_bulk_order', 'blur_order'}
         or (not req.typedData and req.signMethod == 'personal_sign')
     ) and result.data.get('status') != 'unknown'
     # As core.policy does, STRICT turns an unavailable or incomplete analysis into a block.
@@ -1491,12 +1508,16 @@ async def _firewall_verdict(
         # list. Neither is another call's payment floor: it comes from one user's payment, and the
         # contract's other requests (a transfer, a zero-value call) must not be served it. A
         # claim's floor, paid or not, describes the target, so its row is kept. A plain native
-        # send has no payment rule and its recipient is the row, so it stays cacheable.
+        # send has no payment rule and its recipient is the row, so it stays cacheable. An EIP-7702
+        # delegation's floor describes the delegate, never the target.
         paying = value_wei > 0 and decoded.get('selector') is not None
-        tx_specific = decoded.get('category') in ('approval', 'claim') or bool(req.typedData) or paying
+        tx_specific = (
+            decoded.get('category') in ('approval', 'claim') or bool(req.typedData) or paying
+            or req.authorizationList is not None
+        )
         describes_target = not (
             decoded.get('category') == 'approval' or req.typedData
-            or (paying and decoded.get('category') != 'claim')
+            or (paying and decoded.get('category') != 'claim') or req.authorizationList is not None
         )
         if tx_specific:
             trail['transaction'] = transaction_evidence(
@@ -1504,8 +1525,9 @@ async def _firewall_verdict(
                 typed_data=req.typedData,
             )
 
-        # 2. If target is a whitelisted router, analyze the swap path tokens instead of bypassing
-        if whitelisted:
+        # 2. If target is a whitelisted router, analyze the swap path tokens instead of bypassing.
+        # A delegation is judged on the full path below, whatever the target.
+        if whitelisted and req.authorizationList is None:
             router_response = await _analyze_router_swap(
                 req=req,
                 to_addr=to_addr,
@@ -1581,6 +1603,7 @@ async def _firewall_verdict(
                     'sign_method': req.signMethod,
                     'is_verified': is_verified,
                     'is_contract': is_contract,
+                    'authorization_list': req.authorizationList,
                 },
             )
 

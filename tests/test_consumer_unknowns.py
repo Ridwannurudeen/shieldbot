@@ -649,8 +649,12 @@ load('background', 'function saveToHistory');
     assert.equal(html.includes('100/100'), complete);
     assert.equal(html.includes('SAFE'), complete);
     if (surface === 'content-explain') {
-      nodes.get('shieldai-explain').handlers.click();
-      assert.equal(nodes.get('shieldai-explain-text').textContent.includes('SAFE'), complete);
+      // A SAFE verdict has nothing to explain and no button; an Unknown one keeps it.
+      assert.equal(html.includes('id="shieldai-explain"'), !complete);
+      if (!complete) {
+        nodes.get('shieldai-explain').handlers.click();
+        assert(!nodes.get('shieldai-explain-text').textContent.includes('SAFE'));
+      }
     }
   } else if (surface === 'sidepanel') {
     context.renderRiskCard(scan);

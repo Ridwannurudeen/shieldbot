@@ -78,14 +78,26 @@ class RPCProxy:
                 from_addr = tx_fields.get("from", "")
                 value = tx_fields.get("value", "0x0")
                 data = tx_fields.get("data", "0x")
+                # A signed EIP-7702 (type 4) transaction is not decoded, so it is blocked above.
+                authorization_list = None
             else:
                 tx_params = params[0] if params else {}
                 to_addr = tx_params.get("to", "")
                 from_addr = tx_params.get("from", "")
                 value = tx_params.get("value", "0x0")
                 data = tx_params.get("data", "0x")
+                authorization_list = tx_params.get("authorizationList")
 
             if not to_addr:
+                # An EIP-7702 transaction always has a recipient, so one without is no contract
+                # creation to forward unanalysed: like any delegation not judged HIGH, it is refused.
+                if authorization_list is not None:
+                    logger.warning(f"RPC Proxy BLOCKED EIP-7702 tx with no recipient (chain={chain_id})")
+                    return self._error_response(
+                        rpc_id, -32003,
+                        "Transaction blocked by ShieldBot firewall — "
+                        "EIP-7702 delegation not forwarded (no recipient)"
+                    )
                 # Contract creation — forward without analysis
                 return await self._forward(upstream_rpc, payload, chain_id)
 
@@ -123,7 +135,10 @@ class RPCProxy:
                 chain_id=chain_id,
                 from_address=from_addr,
                 is_token=is_token,
-                extra={'calldata': data, 'value': value, 'is_verified': is_verified, 'is_contract': is_contract},
+                extra={
+                    'calldata': data, 'value': value, 'is_verified': is_verified, 'is_contract': is_contract,
+                    'authorization_list': authorization_list,
+                },
             )
 
             analyzer_results = await self._container.registry.run_all(ctx)
@@ -146,6 +161,16 @@ class RPCProxy:
                     rpc_id, -32003,
                     f"Transaction blocked by ShieldBot firewall — "
                     f"risk score {risk_score}/100 ({risk_level})"
+                )
+
+            # A delegation's floor makes its verdict HIGH, blocked above. One that is not HIGH means
+            # the floor never reached the verdict (an analyzer error, say): it is refused, not forwarded.
+            if authorization_list is not None and risk_level != "HIGH":
+                logger.warning(f"RPC Proxy BLOCKED EIP-7702 tx to {to_addr} (risk={risk_score}, chain={chain_id})")
+                return self._error_response(
+                    rpc_id, -32003,
+                    f"Transaction blocked by ShieldBot firewall — "
+                    f"EIP-7702 delegation not forwarded ({risk_level})"
                 )
 
             # MEDIUM or LOW: forward to upstream

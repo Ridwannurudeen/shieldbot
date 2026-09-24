@@ -251,6 +251,10 @@ async def test_the_vocabulary_endpoint_publishes_the_module(monkeypatch):
     assert body["signature_bands"] == [
         {"classification": name, "min_score": low} for name, low in verdicts.SIGNATURE_BANDS
     ]
+    # The eth_sign floor is in the Block band of both tables.
+    assert body["blind_sign_min"] == verdicts.BLIND_SIGN_MIN
+    for bands in (verdicts.BANDS, verdicts.SIGNATURE_BANDS):
+        assert verdicts.classify(body["blind_sign_min"], bands) == verdicts.BLOCK_RECOMMENDED
     # The stored level is raised to the band table's, so a calibrated threshold above it does not apply.
     assert body["risk_level_thresholds"] == {"HIGH": 71, "MEDIUM": 21.0}
     assert body["agent_firewall"]["decisions_by_classification"] == {
