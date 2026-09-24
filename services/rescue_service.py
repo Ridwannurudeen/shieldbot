@@ -103,6 +103,35 @@ KNOWN_SAFE_SPENDERS = {
     "0x4a364f8c717caad9a442737eb7b8a55cc6cf18d8": "Stargate Finance Router",
 }
 
+# Main DEX routers of Base, Optimism, Arbitrum and Polygon, trusted only on their own chain: the
+# same address on another chain can hold other code or none. On 2026-09-24 each one held code on
+# that chain's public RPC, and its factory() (Aerodrome and Velodrome: defaultFactory(); Universal
+# Router: poolManager()) returned the factory the protocol documents for that chain.
+CHAIN_SAFE_SPENDERS = {
+    8453: {
+        "0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43": "Aerodrome Router",
+        "0x2626664c2603336e57b271c5c0b26f421741e481": "Uniswap SwapRouter02",
+        "0x6ff5693b99212da76ad316178a184ab56d299b43": "Uniswap Universal Router",
+    },
+    10: {
+        "0xa062ae8a9c5e11aaa026fc2670b0d65ccc8b2858": "Velodrome Router",
+        "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45": "Uniswap SwapRouter02",
+        "0x851116d9223fabed8e56c0e6b8ad0c31d98b3507": "Uniswap Universal Router",
+    },
+    42161: {
+        "0xc873fecbd354f5a56e00e710b90ef4201db2448d": "Camelot Router",
+        "0x1f721e2e82f6676fce4ea07a5958cf098d339e18": "Camelot V3 Swap Router",
+        "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45": "Uniswap SwapRouter02",
+        "0xa51afafe0263b40edaef0df8781ea9aa03e381a3": "Uniswap Universal Router",
+    },
+    137: {
+        "0xa5e0829caced8ffdd4de3c43696c57f7d7a678ff": "QuickSwap Router",
+        "0xf5b509bb0909a69b1c207e495f687a596c168e12": "QuickSwap V3 Swap Router",
+        "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45": "Uniswap SwapRouter02",
+        "0x1095692a6237d83c6a72f3f5efedb9a670c49223": "Uniswap Universal Router",
+    },
+}
+
 # Stablecoins by chain — price = $1.00 without an API call, only on the chain they live on
 STABLECOINS = {
     56: {
@@ -117,6 +146,11 @@ STABLECOINS = {
         "0x6b175474e89094c44da98b954eedeac495271d0f",  # DAI
     },
 }
+
+
+def _known_spender(spender: str, chain_id: int) -> Optional[str]:
+    """Label of a known safe spender on ``chain_id``, or None."""
+    return CHAIN_SAFE_SPENDERS.get(chain_id, {}).get(spender) or KNOWN_SAFE_SPENDERS.get(spender)
 
 
 def _is_rate_limited(error) -> bool:
@@ -438,9 +472,9 @@ class RescueService:
                 symbol = token_info.get("symbol", "???")
                 decimals = token_info.get("decimals", 18)
 
-                spender_label = KNOWN_SAFE_SPENDERS.get(spender, "Unknown Contract")
+                spender_label = _known_spender(spender, chain_id) or "Unknown Contract"
                 risk_level, risk_reason = self._assess_approval_risk(
-                    spender, current_allowance, spender_label
+                    spender, current_allowance, spender_label, chain_id
                 )
 
                 if current_allowance >= UNLIMITED_THRESHOLD:
@@ -790,10 +824,10 @@ class RescueService:
         return prices
 
     def _assess_approval_risk(
-        self, spender: str, amount: int, spender_label: str
+        self, spender: str, amount: int, spender_label: str, chain_id: int
     ) -> tuple:
-        """Assess risk level for a token approval."""
-        is_known_safe = spender.lower() in KNOWN_SAFE_SPENDERS
+        """Assess risk level for a token approval on ``chain_id``."""
+        is_known_safe = _known_spender(spender.lower(), chain_id) is not None
 
         if amount >= UNLIMITED_THRESHOLD:
             if is_known_safe:
