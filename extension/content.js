@@ -258,6 +258,12 @@
   let _lastNotVisibleAt = 0;
   let _visibilityObserver = null;
 
+  // A dialog the page keeps out of view (not intersecting the viewport:
+  // display: none, or moved off screen) this long is taken as gone, and its
+  // request is rejected rather than left waiting.
+  const OUT_OF_VIEW_LIMIT_MS = 10000;
+  let _outOfViewTimer = null;
+
   // The request whose overlay is waiting for the user. inject.js stops its
   // no-verdict timeout once it knows the overlay is on screen, so a request
   // whose overlay goes away without a decision is rejected here.
@@ -279,6 +285,10 @@
     if (_visibilityObserver) {
       _visibilityObserver.disconnect();
       _visibilityObserver = null;
+    }
+    if (_outOfViewTimer !== null) {
+      clearTimeout(_outOfViewTimer);
+      _outOfViewTimer = null;
     }
     if (_awaitingRequestId !== null) {
       const requestId = _awaitingRequestId;
@@ -357,8 +367,17 @@
     _lastNotVisibleAt = Date.now();
     _visibilityObserver = new IntersectionObserver((entries) => {
       if (_overlayHost !== host) return;
-      _dialogVisible = entries[entries.length - 1].isVisible === true;
+      const entry = entries[entries.length - 1];
+      _dialogVisible = entry.isVisible === true;
       if (!_dialogVisible) _lastNotVisibleAt = Date.now();
+      if (entry.isIntersecting !== false) {
+        clearTimeout(_outOfViewTimer);
+        _outOfViewTimer = null;
+      } else if (_outOfViewTimer === null) {
+        _outOfViewTimer = setTimeout(() => {
+          if (_overlayHost === host) removeOverlay();
+        }, OUT_OF_VIEW_LIMIT_MS);
+      }
     }, { trackVisibility: true, delay: 100 });
     _visibilityObserver.observe(modal);
     // If the page removes the overlay, the user can no longer decide here:

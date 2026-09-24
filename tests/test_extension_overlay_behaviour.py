@@ -154,25 +154,34 @@ async function proofFor(token, message) {
 const bytes = value => Array.from(value || []);
 const plain = value => JSON.parse(JSON.stringify(value));
 // IntersectionObserver v2 double: it reports whether the observed element is visible (on screen,
-// not covered, not made see-through), once when observed and again whenever a test calls
-// reportVisibility.
-let overlayVisible = true;
+// not covered, not made see-through) and whether it intersects the viewport at all, once when
+// observed and again whenever a test calls reportVisibility or reportIntersecting.
+let overlayVisible = true, overlayIntersecting = true;
 const visibilityObservers = new Set();
 class FakeIntersectionObserver {
   constructor(callback, options) { this.callback = callback; this.options = options; }
   observe(target) { this.target = target; visibilityObservers.add(this); queueMicrotask(() => this.report()); }
-  report() { this.callback([{target: this.target, isVisible: overlayVisible}]); }
+  report() {
+    this.callback([{target: this.target, isVisible: overlayVisible && overlayIntersecting, isIntersecting: overlayIntersecting}]);
+  }
   disconnect() { visibilityObservers.delete(this); }
 }
 function reportVisibility(visible) {
   overlayVisible = visible;
   for (const observer of [...visibilityObservers]) observer.report();
 }
-// content.js keeps Proceed disabled for half a second after an overlay appears. The tests run it
-// without that wait, except the one that checks the wait itself.
-function withoutProceedDelay(source) {
+function reportIntersecting(intersecting) {
+  overlayIntersecting = intersecting;
+  for (const observer of [...visibilityObservers]) observer.report();
+}
+// content.js keeps Proceed disabled for half a second after an overlay appears, and rejects a
+// request whose dialog stays out of view for ten seconds. The tests run it with no wait and a
+// 100 ms limit, except those that check the real ones.
+function withShortDelays(source) {
   assert(source.includes('const PROCEED_DELAY_MS = 500;'));
-  return source.replace('const PROCEED_DELAY_MS = 500;', 'const PROCEED_DELAY_MS = 0;');
+  assert(source.includes('const OUT_OF_VIEW_LIMIT_MS = 10000;'));
+  return source.replace('const PROCEED_DELAY_MS = 500;', 'const PROCEED_DELAY_MS = 0;')
+    .replace('const OUT_OF_VIEW_LIMIT_MS = 10000;', 'const OUT_OF_VIEW_LIMIT_MS = 100;');
 }
 """
 
@@ -206,7 +215,7 @@ const context = vm.createContext({
     return {json: async () => JSON.parse(fs.readFileSync(url.replace('chrome-extension://id/', 'extension/'), 'utf8'))};
   },
 });
-vm.runInContext(withoutProceedDelay(fs.readFileSync('extension/content.js', 'utf8')), context);
+vm.runInContext(withShortDelays(fs.readFileSync('extension/content.js', 'utf8')), context);
 // Play inject.js's side of the document_start handoff: it starts after content.js and asks.
 let token = null;
 document.addEventListener('shieldai:channel', event => { token = event.detail; event.preventDefault(); });
@@ -533,7 +542,7 @@ def test_proceed_does_nothing_while_the_overlay_is_not_visible(kind):
 def test_proceed_is_enabled_only_half_a_second_after_the_overlay_appears():
     run_node(
         CONTENT_HARNESS.replace(
-            "withoutProceedDelay(fs.readFileSync('extension/content.js', 'utf8'))",
+            "withShortDelays(fs.readFileSync('extension/content.js', 'utf8'))",
             "fs.readFileSync('extension/content.js', 'utf8')",
         )
         + r"""
@@ -559,7 +568,7 @@ def test_proceed_is_enabled_only_half_a_second_after_the_overlay_appears():
 # The same overlay code, keeping its real PROCEED_DELAY_MS. The harness's clock only moves when a
 # test moves it.
 REAL_DELAY_HARNESS = CONTENT_HARNESS.replace(
-    "withoutProceedDelay(fs.readFileSync('extension/content.js', 'utf8'))",
+    "withShortDelays(fs.readFileSync('extension/content.js', 'utf8'))",
     "fs.readFileSync('extension/content.js', 'utf8')",
 )
 
@@ -590,6 +599,29 @@ def test_proceed_needs_the_dialog_visible_without_a_break_for_half_a_second():
   userClick(proceed);
   await flush();
   await assertVerdicts([['request', 'proceed']]);
+"""
+    )
+
+
+def test_a_dialog_kept_out_of_view_rejects_the_request():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('request');
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  // Out of view (display: none, or moved off screen) for less than the limit, then back.
+  reportIntersecting(false);
+  await wait(60);
+  reportIntersecting(true);
+  await wait(80);
+  assert.deepEqual(verdicts(), [], 'a short spell out of view rejected the request');
+  // Out of view for longer than the limit: rejected, not left waiting.
+  reportIntersecting(false);
+  await wait(150);
+  await assertVerdicts([['request', 'block']]);
+  assert.equal(overlay(), null);
 """
     )
 
@@ -1265,7 +1297,7 @@ const offers = [];
 document.addEventListener('shieldai:channel', event => offers.push(event.detail));
 for (const script of order === 'content-first' ? ['content', 'inject'] : ['inject', 'content']) {
   const source = fs.readFileSync(`extension/${script}.js`, 'utf8');
-  vm.runInContext(script === 'content' ? withoutProceedDelay(source) : source, script === 'content' ? contentWorld : pageWorld);
+  vm.runInContext(script === 'content' ? withShortDelays(source) : source, script === 'content' ? contentWorld : pageWorld);
 }
 const overlayRoot = () => { const host = body.children.find(el => el.shadow); return host ? host.shadow : null; };
 // The Proceed or Sign Anyway button once the overlay shows it enabled.
