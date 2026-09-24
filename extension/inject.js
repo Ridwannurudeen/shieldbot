@@ -1,35 +1,29 @@
 /**
  * ShieldAI Inject Script
- * Runs in the PAGE context to intercept wallet transactions.
+ * A manifest content script that runs in the page's own JavaScript world
+ * ("world": "MAIN") at document_start, to intercept wallet transactions.
  * Wraps provider.request() directly — compatible with MetaMask's
  * protected window.ethereum property.
  */
 (function () {
   "use strict";
 
-  // Clear resource timing entries so extension URLs are not leaked
-  // to page scripts via performance.getEntriesByType("resource").
-  try { performance.clearResourceTimings(); } catch (_) {}
+  // HMAC key for the channel shared with content.js. content.js hands over
+  // its token once, at document_start, before any page script runs (see
+  // offerToken there). It is imported straight into a non-extractable key
+  // and not kept, so no later page script can read it. null until then.
+  let _channelKey = null;
 
-  // Channel token for verdict authentication — starts null (reject all
-  // verdicts until init handshake from content.js completes).
-  let _CHANNEL_TOKEN = null;
-
-  // Receive the token from content.js via a one-time postMessage handshake.
-  // content.js runs at document_start (before any page scripts) and sends
-  // the init message immediately on inject.js load, so page scripts cannot
-  // register a listener in time to intercept it.
-  window.addEventListener("message", function _initHandler(event) {
-    if (
-      event.source !== window ||
-      !event.data ||
-      event.data.type !== "__SHIELDAI_INIT__"
-    ) {
-      return;
-    }
-    _CHANNEL_TOKEN = event.data._ct || "";
-    window.removeEventListener("message", _initHandler);
-  });
+  function takeToken(event) {
+    if (typeof event.detail !== "string" || !event.detail) return;
+    event.preventDefault();
+    document.removeEventListener("shieldai:channel", takeToken);
+    _channelKey = crypto.subtle.importKey(
+      "raw", new TextEncoder().encode(event.detail), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+    );
+  }
+  document.addEventListener("shieldai:channel", takeToken);
+  document.dispatchEvent(new CustomEvent("shieldai:channel-request"));
 
   const INTERCEPTED_METHODS = new Set([
     "eth_sendTransaction",
@@ -204,15 +198,13 @@
     wrappedProviders.add(provider);
   }
 
-  // HMAC of a request id under the channel token: content.js sends it with
-  // SHIELDAI_TX_SHOWN, so that message cannot be forged without the token and
-  // does not reveal it to the page.
-  async function channelProof(requestId) {
-    const encoder = new TextEncoder();
-    const key = await crypto.subtle.importKey(
-      "raw", encoder.encode(_CHANNEL_TOKEN), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+  // HMAC of `${requestId}:${purpose}` under the channel key, as hex: the proof
+  // content.js makes too. Messages on the window channel carry only such
+  // proofs, which the page can see but cannot compute.
+  async function channelProof(requestId, purpose) {
+    const mac = await crypto.subtle.sign(
+      "HMAC", await _channelKey, new TextEncoder().encode(`${requestId}:${purpose}`)
     );
-    const mac = await crypto.subtle.sign("HMAC", key, encoder.encode(requestId));
     return Array.from(new Uint8Array(mac), (b) => b.toString(16).padStart(2, "0")).join("");
   }
 
@@ -221,6 +213,12 @@
    */
   function requestAnalysis(method, txParams) {
     return new Promise((resolve) => {
+      // Without the channel no verdict can be trusted, so fail closed now.
+      if (_channelKey === null) {
+        resolve({ action: "block", reason: "Extension channel unavailable" });
+        return;
+      }
+
       // Use cryptographically random ID (replaces Math.random)
       const requestId = crypto.randomUUID
         ? crypto.randomUUID()
@@ -237,28 +235,26 @@
         ) {
           return;
         }
-        if (event.data.type === "SHIELDAI_TX_SHOWN") {
+        const { type, action, proof } = event.data;
+        if (type === "SHIELDAI_TX_SHOWN") {
           // The overlay is on screen: wait for the user's decision instead
           // of failing closed on the timer.
-          const proof = event.data.proof;
-          if (_CHANNEL_TOKEN) {
-            channelProof(requestId).then((expected) => {
-              if (proof === expected) clearTimeout(timeout);
-            });
-          }
+          channelProof(requestId, "shown").then((expected) => {
+            if (proof === expected) clearTimeout(timeout);
+          });
           return;
         }
-        if (event.data.type !== "SHIELDAI_TX_VERDICT") {
+        // A verdict counts only with the proof content.js makes for that exact
+        // action, so the page can neither forge one nor relabel a Block.
+        if (type !== "SHIELDAI_TX_VERDICT" || (action !== "block" && action !== "proceed")) {
           return;
         }
-        // Reject verdicts without a valid channel token — prevents page
-        // scripts from forging verdicts.  null = init not yet received.
-        if (_CHANNEL_TOKEN === null || event.data._ct !== _CHANNEL_TOKEN) {
-          return;
-        }
-        clearTimeout(timeout);
-        window.removeEventListener("message", handleMessage);
-        resolve(event.data);
+        channelProof(requestId, action).then((expected) => {
+          if (proof !== expected) return;
+          clearTimeout(timeout);
+          window.removeEventListener("message", handleMessage);
+          resolve({ action });
+        });
       }
 
       // Fail closed: if no verdict arrives within 60 seconds, block rather than
@@ -283,15 +279,18 @@
       if (txParams.typedData) txPayload.typedData = txParams.typedData;
       if (txParams.signMethod) txPayload.signMethod = txParams.signMethod;
 
-      window.postMessage(
-        {
-          type: "SHIELDAI_TX_INTERCEPT",
-          requestId,
-          method,
-          tx: txPayload,
-        },
-        "*"
-      );
+      channelProof(requestId, "intercept").then((proof) => {
+        window.postMessage(
+          {
+            type: "SHIELDAI_TX_INTERCEPT",
+            requestId,
+            method,
+            tx: txPayload,
+            proof,
+          },
+          "*"
+        );
+      });
     });
   }
 

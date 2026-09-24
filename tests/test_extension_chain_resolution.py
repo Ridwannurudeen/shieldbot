@@ -83,6 +83,7 @@ vm.runInContext(fs.readFileSync('extension/background.js', 'utf8'), context);
 def test_injected_transaction_is_bound_to_provider_chain(scenario):
     run_javascript(r'''
 const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const {webcrypto} = require('crypto');
 const scenario = JSON.parse(process.argv[1]);
 const handlers = new Map(), intercepted = [], sent = [], providerEvents = new Map();
 let chain = '0x1237', queries = 0, requestNumber = 0;
@@ -103,6 +104,12 @@ const provider = {
   },
 };
 function change(value) {chain = value; providerEvents.get('chainChanged')?.(value);}
+async function proofFor(message) {
+  const encoder = new TextEncoder();
+  const key = await webcrypto.subtle.importKey('raw', encoder.encode('test'), {name: 'HMAC', hash: 'SHA-256'}, false, ['sign']);
+  const mac = await webcrypto.subtle.sign('HMAC', key, encoder.encode(message));
+  return Array.from(new Uint8Array(mac), b => b.toString(16).padStart(2, '0')).join('');
+}
 const window = {
   ethereum: provider,
   addEventListener(name, fn) {if (!handlers.has(name)) handlers.set(name, new Set()); handlers.get(name).add(fn);},
@@ -114,18 +121,19 @@ const window = {
     if (scenario === 'changed-during' || scenario === 'changed-back') change('0x38');
     if (scenario === 'changed-back') change('0x1237');
     if (scenario === 'changed-without-event') chain = '0x38';
-    queueMicrotask(() => window.dispatchEvent({type: 'message', source: window,
-      data: {type: 'SHIELDAI_TX_VERDICT', requestId: message.requestId, action: 'proceed', _ct: 'test'}}));
+    proofFor(`${message.requestId}:proceed`).then(proof => window.dispatchEvent({type: 'message', source: window,
+      data: {type: 'SHIELDAI_TX_VERDICT', requestId: message.requestId, action: 'proceed', proof}}));
   },
 };
 const context = vm.createContext({
-  window, console: {log() {}, warn() {}}, performance: {clearResourceTimings() {}},
-  crypto: {randomUUID: () => String(++requestNumber)}, Event: class {constructor(type) {this.type = type;}},
+  window, console: {log() {}, warn() {}}, document: new EventTarget(), CustomEvent, TextEncoder, Uint8Array,
+  crypto: {randomUUID: () => String(++requestNumber), subtle: webcrypto.subtle}, Event: class {constructor(type) {this.type = type;}},
   setTimeout(fn, delay) {if (scenario === 'timeout' && delay < 60000) queueMicrotask(fn); return 1;},
   clearTimeout() {}, queueMicrotask,
 });
 vm.runInContext(fs.readFileSync('extension/inject.js', 'utf8'), context);
-window.dispatchEvent({type: 'message', source: window, data: {type: '__SHIELDAI_INIT__', _ct: 'test'}});
+// content.js hands inject.js the channel token at document_start.
+context.document.dispatchEvent(new CustomEvent('shieldai:channel', {detail: 'test', cancelable: true}));
 (async () => {
   if (scenario.startsWith('signature:')) {
     const method = scenario.split(':')[1];

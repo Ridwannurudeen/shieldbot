@@ -464,7 +464,7 @@ const context = {
   URLSearchParams, location: {search: ''}, Date, MAX_HISTORY: 50,
   t: key => key, _t: key => key, escapeHtml: String,
   _loadContentLang: async () => {}, removeOverlay() {}, buildCalldataSection: () => '',
-  mountOverlay(overlay) {appended.push(overlay);},
+  mountOverlay(overlay) {appended.push(overlay); return context.document;}, onDecision() {},
   document: {
     addEventListener() {}, createElement: element,
     getElementById(id) {if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id);},

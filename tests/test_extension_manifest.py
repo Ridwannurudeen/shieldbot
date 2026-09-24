@@ -115,3 +115,19 @@ def test_description_is_short_and_honest():
 def test_no_new_host_permissions():
     assert MANIFEST["host_permissions"] == ["https://*/*"]
     assert MANIFEST["optional_host_permissions"] == ["http://localhost/*", "http://127.0.0.1/*"]
+
+
+def test_page_script_is_a_main_world_content_script():
+    scripts = {tuple(entry["js"]): entry for entry in MANIFEST["content_scripts"]}
+    isolated, main = scripts[("content.js",)], scripts[("inject.js",)]
+    assert isolated.get("world", "ISOLATED") == "ISOLATED"
+    assert main["world"] == "MAIN"
+    for entry in (isolated, main):
+        assert entry["run_at"] == "document_start"
+        assert entry["matches"] == MANIFEST["host_permissions"]
+    # Manifest content scripts can only name the MAIN world from Chrome 111.
+    assert int(MANIFEST["minimum_chrome_version"]) >= 111
+    # inject.js is no longer loaded through a page <script>, so pages cannot fetch it to probe for us.
+    resources = [item for entry in MANIFEST["web_accessible_resources"] for item in entry["resources"]]
+    assert "inject.js" not in resources
+

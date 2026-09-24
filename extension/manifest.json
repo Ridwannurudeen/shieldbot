@@ -4,6 +4,7 @@
   "version": "3.1.0",
   "description": "__MSG_extDescription__",
   "default_locale": "en",
+  "minimum_chrome_version": "111",
   "permissions": [
     "storage",
     "permissions",
@@ -32,6 +33,16 @@
         "content.js"
       ],
       "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://*/*"
+      ],
+      "js": [
+        "inject.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
     }
   ],
   "action": {
@@ -41,7 +52,6 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "inject.js",
         "overlay.css",
         "welcome.html",
         "i18n.js",

@@ -1,5 +1,12 @@
 /* ShieldAI Firewall Overlay Styles */
 
+/* The overlay and banner render in closed shadow roots. Start the host from
+   initial values so inherited page styles (font, colour, text transform) do
+   not leak in through it. */
+:host {
+  all: initial;
+}
+
 .shieldai-overlay {
   position: fixed !important;
   inset: 0 !important;
