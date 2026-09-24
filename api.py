@@ -1273,11 +1273,13 @@ async def firewall(req: FirewallRequest, request: Request):
                 simulation_result = None
             else:
                 # Fallback: no container (e.g. tests), use old 4-service gather
+                from analyzers.behavioral import counterparty_reputation
+
                 gather_tasks = [
                     contract_service.fetch_contract_data(to_addr, chain_id=req.chainId),
                     honeypot_service.fetch_honeypot_data(to_addr, chain_id=req.chainId),
                     dex_service.fetch_token_market_data(to_addr),
-                    ethos_service.fetch_wallet_reputation(from_addr),
+                    counterparty_reputation(ethos_service, decoded, to_addr),
                 ]
                 results = await asyncio.gather(*gather_tasks)
                 risk_output = risk_engine.compute_composite_risk(

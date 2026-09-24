@@ -266,3 +266,108 @@ async def test_firewall_missing_reputation_profile_stays_safe(fallback_firewall)
     assert response["status"] == "ok"
     assert response["classification"] == "SAFE"
     assert response["coverage"]["behavioral"] == 1
+
+
+TARGET = "0x" + "a" * 40
+SPENDER = "0x" + "5" * 40
+RECIPIENT = "0x" + "d" * 40
+
+
+def _word(value):
+    return format(value, "064x") if isinstance(value, int) else value[2:].rjust(64, "0")
+
+
+def _call(selector, *args):
+    return "0x" + selector + "".join(_word(arg) for arg in args)
+
+
+MAX = 2**256 - 1
+SCORED = [
+    ("approve", _call("095ea7b3", SPENDER, MAX)),
+    ("increaseAllowance", _call("39509351", SPENDER, 1)),
+    ("setApprovalForAll", _call("a22cb465", SPENDER, 1)),
+    ("permit", _call("d505accf", WALLET, SPENDER, MAX, 1, 27, 0, 0)),
+    ("dai-permit", _call("8fcbaf0c", WALLET, SPENDER, 0, 1, 1, 27, 0, 0)),
+]
+NOT_SCORED = [
+    ("transfer", _call("a9059cbb", RECIPIENT, 1)),
+    ("transferFrom", _call("23b872dd", WALLET, RECIPIENT, 1)),
+    ("swap", "0x7ff36ab5" + "0" * 256),
+    ("claim", "0x4e71d92d"),
+    ("unknown", "0xdeadbeef"),
+]
+
+
+def _counterparty_analyzer(data):
+    service = SimpleNamespace(fetch_wallet_reputation=AsyncMock(return_value=data))
+    return BehavioralAnalyzer(service), service
+
+
+def _ctx(calldata):
+    return AnalysisContext(TARGET, from_address=WALLET, extra={"calldata": calldata})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("calldata", [c for _, c in SCORED], ids=[n for n, _ in SCORED])
+async def test_approval_family_scores_the_spender(calldata):
+    analyzer, service = _counterparty_analyzer(dict(NEUTRAL))
+    result = await analyzer.analyze(_ctx(calldata))
+    service.fetch_wallet_reputation.assert_awaited_once_with(SPENDER)
+    assert result.data["counterparty"] == SPENDER
+
+
+@pytest.mark.asyncio
+async def test_native_send_scores_the_recipient_never_the_sender():
+    analyzer, service = _counterparty_analyzer(dict(NEUTRAL))
+    result = await analyzer.analyze(_ctx("0x"))
+    service.fetch_wallet_reputation.assert_awaited_once_with(TARGET)
+    assert result.data["counterparty"] == TARGET
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("calldata", [c for _, c in NOT_SCORED], ids=[n for n, _ in NOT_SCORED])
+async def test_other_calls_are_neutral_and_covered_without_a_lookup(calldata):
+    analyzer, service = _counterparty_analyzer(dict(NEUTRAL))
+    with patch("services.ethos_service.time.time", return_value=1000):
+        result = await analyzer.analyze(_ctx(calldata))
+    service.fetch_wallet_reputation.assert_not_awaited()
+    assert result.data == {**NEUTRAL, "counterparty": None, "status": "ok"}
+    assert (result.score, result.flags) == (0, [])
+    risk = RiskEngine().compute_from_results([result])
+    assert risk["coverage"]["behavioral"] == 1
+
+
+@pytest.mark.asyncio
+async def test_token_transfer_to_a_severe_reputation_does_not_leak_into_the_token_row():
+    # The verdict for a transfer is cached under the token, so the recipient's reputation
+    # must not change it.
+    severe = {**NEUTRAL, "severe_reputation_flag": True, "scam_flags": ["Profile slashed on Ethos"]}
+    transfer = await _counterparty_analyzer(severe)[0].analyze(_ctx(NOT_SCORED[0][1]))
+    neutral = await _counterparty_analyzer(dict(NEUTRAL))[0].analyze(_ctx("0x"))
+    results = [
+        AnalyzerResult("structural", 0.4, 20, data=CONTRACT),
+        AnalyzerResult("market", 0.25, 0, data=MARKET),
+        AnalyzerResult("honeypot", 0.15, 0, data=HONEYPOT),
+    ]
+    with_transfer = RiskEngine().compute_from_results(results + [transfer])
+    with_neutral = RiskEngine().compute_from_results(results + [neutral])
+    assert transfer.score == 0
+    assert with_transfer["rug_probability"] == with_neutral["rug_probability"] == 8
+
+
+@pytest.mark.asyncio
+async def test_firewall_fallback_scores_the_same_counterparty(fallback_firewall):
+    approve = {
+        "selector": "095ea7b3", "category": "approval", "function_name": "approve",
+        "params": {"param_0": SPENDER, "param_1": MAX},
+        "is_approval": True, "is_unlimited_approval": True,
+    }
+    fallback_firewall.calldata_decoder.decode.return_value = approve
+    factory, session = _http(status=404)
+    with factory as http:
+        http.return_value.__aenter__ = AsyncMock(return_value=session)
+        http.return_value.__aexit__ = AsyncMock(return_value=False)
+        request = fallback_firewall.FirewallRequest(to=TARGET, sender=WALLET, chainId=56)
+        await fallback_firewall.firewall(request, SimpleNamespace(headers={}))
+    assert session.get.call_count == 1
+    assert session.get.call_args.args[0].endswith(f"address:{SPENDER}")
