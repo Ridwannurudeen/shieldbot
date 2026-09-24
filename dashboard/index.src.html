@@ -128,12 +128,13 @@
     const CHAIN_COLORS = { 56:'#F0B90B', 1:'#627EEA', 8453:'#0052FF', 42161:'#28A0F0', 137:'#8247E5', 10:'#FF0420', 204:'#F0B90B', 4663:'#84CC16' };
     const EXPLORERS    = { 56:'https://bscscan.com', 1:'https://etherscan.io', 8453:'https://basescan.org', 42161:'https://arbiscan.io', 137:'https://polygonscan.com', 10:'https://optimistic.etherscan.io', 204:'https://opbnbscan.com', 4663:'https://robinhoodchain.blockscout.com' };
 
+    // Opaque badge backgrounds, so a hovered row cannot lower the text's contrast (each is at least 4.5:1).
     const SEV = {
-      CRITICAL: { bg:'rgba(239,68,68,0.15)',   text:'#EF4444', border:'rgba(239,68,68,0.35)' },
-      HIGH:     { bg:'rgba(245,158,11,0.15)',  text:'#F59E0B', border:'rgba(245,158,11,0.35)' },
-      MEDIUM:   { bg:'rgba(59,130,246,0.15)',  text:'#3B82F6', border:'rgba(59,130,246,0.35)' },
-      LOW:      { bg:'rgba(16,185,129,0.15)',  text:'#10B981', border:'rgba(16,185,129,0.35)' },
-      UNKNOWN:  { bg:'rgba(100,116,139,0.15)', text:'#94A3B8', border:'rgba(100,116,139,0.35)' },
+      CRITICAL: { bg:'#3D2D3C', text:'#F87171', border:'rgba(239,68,68,0.35)' },
+      HIGH:     { bg:'#3E3B34', text:'#FBBF24', border:'rgba(245,158,11,0.35)' },
+      MEDIUM:   { bg:'#223657', text:'#60A5FA', border:'rgba(59,130,246,0.35)' },
+      LOW:      { bg:'#1C3F46', text:'#34D399', border:'rgba(16,185,129,0.35)' },
+      UNKNOWN:  { bg:'#283447', text:'#94A3B8', border:'rgba(100,116,139,0.35)' },
     };
 
     // ─── Utilities ────────────────────────────────────────────────────────────
@@ -196,7 +197,7 @@
       return (
         <div className="toast-anim fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-2xl"
              style={{ background:'#1E293B', border:`1px solid ${isErr ? 'rgba(239,68,68,0.35)' : '#334155'}`,
-                      color: isErr ? '#EF4444' : '#10B981', fontSize:13 }}>
+                      color: isErr ? '#F87171' : '#10B981', fontSize:13 }}>
           {isErr
             ? <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
@@ -250,17 +251,17 @@
             <div className="flex items-center justify-between mb-5">
               <span className="font-semibold text-base" style={{ color:'#F8FAFC' }}>Flag False Positive</span>
               <button onClick={onClose} className="transition-colors hover:text-white"
-                      style={{ color:'#64748B', fontSize:18, lineHeight:1 }}>✕</button>
+                      style={{ color:'#94A3B8', fontSize:18, lineHeight:1 }}>✕</button>
             </div>
 
             <div className="space-y-2 mb-4">
               <div className="rounded-lg p-3" style={{ background:'#0F172A' }}>
-                <div className="text-xs mb-1" style={{ color:'#64748B' }}>Threat Type</div>
+                <div className="text-xs mb-1" style={{ color:'#94A3B8' }}>Threat Type</div>
                 <div className="text-sm font-medium" style={{ color:'#F8FAFC' }}>{type}</div>
               </div>
               <div className="rounded-lg p-3" style={{ background:'#0F172A' }}>
-                <div className="text-xs mb-1" style={{ color:'#64748B' }}>Address</div>
-                <div className="text-xs font-mono break-all" style={{ color:'#3B82F6', fontFamily:'JetBrains Mono,monospace' }}>
+                <div className="text-xs mb-1" style={{ color:'#94A3B8' }}>Address</div>
+                <div className="text-xs font-mono break-all" style={{ color:'#60A5FA', fontFamily:'JetBrains Mono,monospace' }}>
                   {addr || '—'}
                 </div>
               </div>
@@ -274,9 +275,9 @@
 
             <div className="flex gap-2 mt-4">
               <button onClick={onClose} className="flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors"
-                      style={{ background:'#334155', color:'#94A3B8' }}>Cancel</button>
+                      style={{ background:'#334155', color:'#E2E8F0' }}>Cancel</button>
               <button onClick={submit} disabled={!canSend} className="flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors"
-                      style={{ background:'#3B82F6', color:'#fff', opacity: canSend ? 1 : 0.5 }}>
+                      style={{ background:'#2563EB', color:'#fff', opacity: canSend ? 1 : 0.5 }}>
                 {sending ? 'Sending…' : 'Submit Report'}
               </button>
             </div>
@@ -297,7 +298,7 @@
             {msg}
           </span>
           <button onClick={onRetry} className="ml-4 px-3 py-1 rounded-lg text-xs font-semibold transition-colors"
-                  style={{ background:'rgba(239,68,68,0.18)', color:'#EF4444' }}>Retry</button>
+                  style={{ background:'rgba(239,68,68,0.18)', color:'#FCA5A5' }}>Retry</button>
         </div>
       );
     }
@@ -339,16 +340,16 @@
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-semibold text-sm" style={{ color:'#F8FAFC' }}>{type}</span>
                 <span className="text-xs px-2 py-0.5 rounded-full font-medium"
-                      style={{ background:`${cColor}20`, color:cColor }}>{chain}</span>
+                      style={{ background:`${cColor}20`, color:'#E2E8F0' }}>{chain}</span>
               </div>
-              {note && <div className="text-xs mt-0.5 truncate" style={{ color:'#475569' }}>{note}</div>}
-              <div className="text-xs mt-0.5 font-mono" style={{ color:'#3B82F6', fontFamily:'JetBrains Mono,monospace' }}>
+              {note && <div className="text-xs mt-0.5 truncate" style={{ color:'#94A3B8' }}>{note}</div>}
+              <div className="text-xs mt-0.5 font-mono" style={{ color:'#60A5FA', fontFamily:'JetBrains Mono,monospace' }}>
                 {addr ? short(addr) : '—'}
               </div>
             </div>
 
             {/* Time */}
-            <div className="text-xs shrink-0" style={{ color:'#475569' }}>{timeAgo(ts)}</div>
+            <div className="text-xs shrink-0" style={{ color:'#94A3B8' }}>{timeAgo(ts)}</div>
 
             {/* Quick actions — visible on hover */}
             <div className="flex items-center gap-1 shrink-0 transition-all duration-150"
@@ -358,7 +359,7 @@
                 <a href={`${exp}/address/${addr}`} target="_blank" rel="noopener noreferrer"
                    title="Investigate on Explorer" aria-label="Investigate on Explorer"
                    className="p-1.5 rounded-lg transition-colors"
-                   style={{ background:'rgba(59,130,246,0.15)', color:'#3B82F6' }}
+                   style={{ background:'rgba(59,130,246,0.15)', color:'#60A5FA' }}
                    onClick={e => e.stopPropagation()}>
                   <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
@@ -369,7 +370,7 @@
               {addr && (
                 <button title="Copy Address" aria-label="Copy address to clipboard"
                         className="p-1.5 rounded-lg transition-colors"
-                        style={{ background:'rgba(16,185,129,0.15)', color:'#10B981' }}
+                        style={{ background:'rgba(16,185,129,0.15)', color:'#34D399' }}
                         onClick={() => onCopy(addr)}>
                   <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
                     <rect x="9" y="9" width="13" height="13" rx="2"/>
@@ -380,7 +381,7 @@
 
               <button title="Flag False Positive" aria-label="Flag as false positive"
                       className="p-1.5 rounded-lg transition-colors"
-                      style={{ background:'rgba(245,158,11,0.15)', color:'#F59E0B' }}
+                      style={{ background:'rgba(245,158,11,0.15)', color:'#FBBF24' }}
                       onClick={() => onFlag(t)}>
                 <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
@@ -435,7 +436,7 @@
                         style={{
                           background: active ? 'rgba(59,130,246,0.18)' : '#1E293B',
                           border: `1px solid ${active ? '#3B82F6' : '#334155'}`,
-                          color: active ? '#3B82F6' : '#64748B',
+                          color: active ? '#60A5FA' : '#94A3B8',
                         }}>
                   {f.label}
                 </button>
@@ -456,7 +457,7 @@
             {loading
               ? Array(6).fill(0).map((_,i) => <SkeletonRow key={i} />)
               : filtered.length === 0
-                ? <div className="text-center py-16 text-sm" style={{ color:'#334155' }}>
+                ? <div className="text-center py-16 text-sm" style={{ color:'#94A3B8' }}>
                     {error
                       ? 'Threat data unavailable — check the error above.'
                       : mempoolUnavailable
@@ -499,11 +500,11 @@
       }
 
       if (campaigns === null) {
-        return <div className="text-center py-8 text-sm" style={{ color:'#475569' }}>Campaign data unavailable.</div>;
+        return <div className="text-center py-8 text-sm" style={{ color:'#94A3B8' }}>Campaign data unavailable.</div>;
       }
 
       if (!campaigns.length) {
-        return <div className="text-center py-8 text-sm" style={{ color:'#334155' }}>No campaigns detected.</div>;
+        return <div className="text-center py-8 text-sm" style={{ color:'#94A3B8' }}>No campaigns detected.</div>;
       }
 
       return (
@@ -515,14 +516,15 @@
             const tot = c.contract_count || 1;
             const pct = scored ? Math.min(100, (hi / tot) * 100) : 0;
             const bar = !scored ? '#475569' : pct > 50 ? '#EF4444' : pct > 20 ? '#F59E0B' : '#10B981';
+            const barText = !scored ? '#94A3B8' : pct > 50 ? '#F87171' : pct > 20 ? '#FBBF24' : '#34D399';
             return (
               <div key={i} className="rounded-xl p-4 fade-up"
                    style={{ background:'#1E293B', border:'1px solid #334155' }}>
                 <div className="text-sm font-medium font-mono break-all"
-                     style={{ color:'#3B82F6', fontFamily:'JetBrains Mono,monospace' }}>
+                     style={{ color:'#60A5FA', fontFamily:'JetBrains Mono,monospace' }}>
                   {(c.deployer || '').slice(0,10)}…{(c.deployer || '').slice(-6)}
                 </div>
-                <div className="text-xs mt-2" style={{ color:'#64748B' }}>
+                <div className="text-xs mt-2" style={{ color:'#94A3B8' }}>
                   {c.contract_count} contracts · {c.chain_count} chain(s)
                   {c.funder ? ` · Funder: ${c.funder.slice(0,8)}…` : ''}
                 </div>
@@ -532,8 +534,8 @@
                 </div>
                 <div className="text-xs mt-2" style={{ color:'#94A3B8' }}>
                   {scored
-                    ? <><span style={{ color:bar }}>{hi} HIGH/CRIT</span> / {tot} total</>
-                    : <span style={{ color:bar }}>Contracts not scored yet</span>}
+                    ? <><span style={{ color:barText }}>{hi} HIGH/CRIT</span> / {tot} total</>
+                    : <span style={{ color:barText }}>Contracts not scored yet</span>}
                 </div>
               </div>
             );
@@ -552,7 +554,7 @@
         return (
           <div className="glass rounded-xl p-5" style={{ border:'1px solid #334155' }}>
             <div className="text-sm font-semibold mb-4" style={{ color:'#F8FAFC' }}>Threat Velocity</div>
-            <div className="flex items-center justify-center text-sm text-center px-4" style={{ height:190, color:'#475569' }}>
+            <div className="flex items-center justify-center text-sm text-center px-4" style={{ height:190, color:'#94A3B8' }}>
               {unavailable
                 ? 'Threat feed unavailable.'
                 : short.some(c => c.since === null)
@@ -570,10 +572,10 @@
           <div className="flex items-start justify-between mb-4">
             <div>
               <div className="text-sm font-semibold" style={{ color:'#F8FAFC' }}>Threat Velocity</div>
-              <div className="text-xs mt-0.5" style={{ color:'#64748B' }}>Detections per hour · last 24 h</div>
+              <div className="text-xs mt-0.5" style={{ color:'#94A3B8' }}>Detections per hour · last 24 h</div>
             </div>
             <span className="text-xs px-2.5 py-1 rounded-full font-medium"
-                  style={{ background:'rgba(59,130,246,0.15)', color:'#3B82F6' }}>Hourly</span>
+                  style={{ background:'rgba(59,130,246,0.15)', color:'#60A5FA' }}>Hourly</span>
           </div>
           <ResponsiveContainer width="100%" height={190}>
             <AreaChart data={data} margin={{ top:4, right:4, left:-20, bottom:0 }}>
@@ -584,9 +586,9 @@
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#1E293B" vertical={false} />
-              <XAxis dataKey="hour" tick={{ fill:'#475569', fontSize:10 }}
+              <XAxis dataKey="hour" tick={{ fill:'#94A3B8', fontSize:10 }}
                      tickLine={false} axisLine={false} interval={5} />
-              <YAxis tick={{ fill:'#475569', fontSize:10 }} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fill:'#94A3B8', fontSize:10 }} tickLine={false} axisLine={false} />
               <Tooltip contentStyle={{ background:'#1E293B', border:'1px solid #334155',
                                        borderRadius:8, color:'#F8FAFC', fontSize:12 }}
                        cursor={{ stroke:'#334155', strokeWidth:1 }} />
@@ -612,7 +614,7 @@
           <div className="flex items-start justify-between mb-4">
             <div>
               <div className="text-sm font-semibold" style={{ color:'#F8FAFC' }}>Chain Distribution</div>
-              <div className="text-xs mt-0.5" style={{ color:'#64748B' }}>Threats in the loaded feed, by network{cappedNote}</div>
+              <div className="text-xs mt-0.5" style={{ color:'#94A3B8' }}>Threats in the loaded feed, by network{cappedNote}</div>
             </div>
             {haslive
               ? capped.length
@@ -621,15 +623,15 @@
                 : <span className="text-xs px-2.5 py-1 rounded-full font-medium"
                         style={{ background:'rgba(240,185,11,0.15)', color:'#F0B90B' }}>Live</span>
               : !loading && <span className="text-xs px-2.5 py-1 rounded-full font-medium"
-                      style={{ background:'rgba(100,116,139,0.15)', color:'#64748B' }}>No data</span>
+                      style={{ background:'rgba(100,116,139,0.15)', color:'#94A3B8' }}>No data</span>
             }
           </div>
           {haslive
             ? <ResponsiveContainer width="100%" height={190}>
                 <BarChart data={data} margin={{ top:4, right:4, left:-20, bottom:0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1E293B" vertical={false} />
-                  <XAxis dataKey="name" tick={{ fill:'#475569', fontSize:11 }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fill:'#475569', fontSize:10 }} tickLine={false} axisLine={false} />
+                  <XAxis dataKey="name" tick={{ fill:'#94A3B8', fontSize:11 }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fill:'#94A3B8', fontSize:10 }} tickLine={false} axisLine={false} />
                   <Tooltip contentStyle={{ background:'#1E293B', border:'1px solid #334155',
                                            borderRadius:8, color:'#F8FAFC', fontSize:12 }}
                            cursor={{ fill:'rgba(255,255,255,0.03)' }} />
@@ -638,7 +640,7 @@
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
-            : <div className="flex items-center justify-center text-sm" style={{ height:190, color:'#475569' }}>
+            : <div className="flex items-center justify-center text-sm" style={{ height:190, color:'#94A3B8' }}>
                 {loading ? 'Loading…' : unavailable ? 'Threat feed unavailable.' : 'No threats in the current feed.'}
               </div>
           }
@@ -649,9 +651,9 @@
     // ─── Section Label ────────────────────────────────────────────────────────
     function BaseAttestationsPanel({ data }) {
       const riskColor = (label) => {
-        if (label === 'DANGER' || label === 'HIGH') return '#EF4444';
-        if (label === 'WARNING' || label === 'MEDIUM') return '#F59E0B';
-        if (label === 'SAFE' || label === 'LOW') return '#10B981';
+        if (label === 'DANGER' || label === 'HIGH') return '#FCA5A5';
+        if (label === 'WARNING' || label === 'MEDIUM') return '#FBBF24';
+        if (label === 'SAFE' || label === 'LOW') return '#34D399';
         return '#94A3B8';
       };
       const chainName = (id) => CHAIN_NAMES[id] || `chain ${id}`;
@@ -662,15 +664,15 @@
           <div className="flex flex-wrap gap-3 mb-4 text-xs" style={{ color: '#94A3B8' }}>
             <span>Attestor:&nbsp;
               <a href={`https://basescan.org/address/${data.attestor}`} target="_blank" rel="noreferrer"
-                 style={{ color: '#3B82F6', fontFamily: 'JetBrains Mono,monospace' }}>
+                 style={{ color: '#60A5FA', fontFamily: 'JetBrains Mono,monospace' }}>
                 {(data.attestor || '').slice(0, 10)}…{(data.attestor || '').slice(-6)}
               </a>
             </span>
             <span>Total recent: <strong style={{ color: '#E2E8F0' }}>{summary.total_recent || 0}</strong></span>
-            <a href={data.explorer || '#'} target="_blank" rel="noreferrer" style={{ color: '#3B82F6' }}>View on EAS Scan ↗</a>
+            <a href={data.explorer || '#'} target="_blank" rel="noreferrer" style={{ color: '#60A5FA' }}>View on EAS Scan ↗</a>
           </div>
           {list.length === 0 ? (
-            <div className="text-center py-8 text-sm" style={{ color: '#475569' }}>No attestations yet.</div>
+            <div className="text-center py-8 text-sm" style={{ color: '#94A3B8' }}>No attestations yet.</div>
           ) : (
             <div className="space-y-2">
               {list.map((a) => (
@@ -684,12 +686,12 @@
                   <span className="text-xs font-mono" style={{ color: '#E2E8F0' }}>
                     {(a.scanned_address || '').slice(0, 8)}…{(a.scanned_address || '').slice(-6)}
                   </span>
-                  <span className="text-xs" style={{ color: '#64748B' }}>via {chainName(a.source_chain_id)}</span>
-                  <span className="text-xs ml-auto" style={{ color: '#64748B' }}>
+                  <span className="text-xs" style={{ color: '#94A3B8' }}>via {chainName(a.source_chain_id)}</span>
+                  <span className="text-xs ml-auto" style={{ color: '#94A3B8' }}>
                     {a.timestamp ? new Date(a.timestamp * 1000).toLocaleString() : ''}
                   </span>
                   <a href={`https://base.easscan.org/attestation/view/${a.uid}`} target="_blank" rel="noreferrer"
-                     className="text-xs" style={{ color: '#3B82F6' }}>EAS ↗</a>
+                     className="text-xs" style={{ color: '#60A5FA' }}>EAS ↗</a>
                 </div>
               ))}
             </div>
@@ -702,7 +704,7 @@
       return (
         <section>
           <div className="text-xs font-semibold uppercase tracking-widest mb-3"
-               style={{ color:'#475569' }}>{title}</div>
+               style={{ color:'#94A3B8' }}>{title}</div>
           {children}
         </section>
       );
@@ -710,10 +712,10 @@
 
     // ─── Header ───────────────────────────────────────────────────────────────
     const HEALTH = {
-      connecting: { color:'#64748B', label:'CONNECTING' },
+      connecting: { color:'#94A3B8', label:'CONNECTING' },
       live:       { color:'#10B981', label:'LIVE' },
       degraded:   { color:'#F59E0B', label:'PARTIAL DATA' },
-      offline:    { color:'#EF4444', label:'OFFLINE' },
+      offline:    { color:'#F87171', label:'OFFLINE' },
     };
 
     function Header({ lastUpdated, health }) {
@@ -731,9 +733,9 @@
           <div>
             <div className="flex items-center gap-3 flex-wrap">
               <span className="text-lg font-bold" style={{ color:'#F8FAFC' }}>
-                <span style={{ color:'#3B82F6' }}>Shield</span>Bot
+                <span style={{ color:'#60A5FA' }}>Shield</span>Bot
               </span>
-              <span className="text-sm" style={{ color:'#475569' }}>Threat Dashboard</span>
+              <span className="text-sm" style={{ color:'#94A3B8' }}>Threat Dashboard</span>
               <div className="flex items-center gap-1.5">
                 <div style={{
                   width:8, height:8, borderRadius:'50%', background:h.color,
@@ -743,22 +745,22 @@
                 <span className="text-xs font-semibold" style={{ color:h.color }}>{h.label}</span>
               </div>
             </div>
-            <div className="text-xs mt-0.5" style={{ color:'#334155' }}>
+            <div className="text-xs mt-0.5" style={{ color:'#94A3B8' }}>
               Contract detections and mempool alerts · refreshes every {REFRESH_MS / 1000} seconds
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <a href="https://shieldbotsecurity.online" style={{ color:'#475569', fontSize:'0.75rem', textDecoration:'none', display:'flex', alignItems:'center', gap:'0.25rem' }}
-               onMouseOver={e => e.currentTarget.style.color='#94A3B8'}
-               onMouseOut={e => e.currentTarget.style.color='#475569'}>
+            <a href="https://shieldbotsecurity.online" style={{ color:'#94A3B8', fontSize:'0.75rem', textDecoration:'none', display:'flex', alignItems:'center', gap:'0.25rem' }}
+               onMouseOver={e => e.currentTarget.style.color='#E2E8F0'}
+               onMouseOut={e => e.currentTarget.style.color='#94A3B8'}>
               ← Home
             </a>
-            <a href="mailto:support@shieldbotsecurity.online" style={{ color:'#475569', fontSize:'0.75rem', textDecoration:'none' }}
-               onMouseOver={e => e.currentTarget.style.color='#94A3B8'}
-               onMouseOut={e => e.currentTarget.style.color='#475569'}>
+            <a href="mailto:support@shieldbotsecurity.online" style={{ color:'#94A3B8', fontSize:'0.75rem', textDecoration:'none' }}
+               onMouseOver={e => e.currentTarget.style.color='#E2E8F0'}
+               onMouseOut={e => e.currentTarget.style.color='#94A3B8'}>
               Support
             </a>
-            <div className="text-xs font-mono" style={{ color:'#334155', fontFamily:'JetBrains Mono,monospace' }}>
+            <div className="text-xs font-mono" style={{ color:'#94A3B8', fontFamily:'JetBrains Mono,monospace' }}>
               {lastUpdated ? `↻ ${timeAgo(lastUpdated / 1000)}` : 'Connecting…'}
             </div>
           </div>
@@ -821,12 +823,12 @@
           {loading
             ? <div className="skeleton mx-auto" style={{ height:28, width:72 }} />
             : <div className={`${value == null ? 'text-base' : 'text-2xl'} font-bold leading-none`}
-                   style={{ color: value == null ? '#475569' : color }}>
+                   style={{ color: value == null ? '#94A3B8' : color }}>
                 {value == null ? missing : display.toLocaleString()}
               </div>
           }
-          <div className="text-xs font-medium mt-1" style={{ color:'#64748B' }}>{label}</div>
-          <div className="text-xs" style={{ color:'#475569' }}>{span}</div>
+          <div className="text-xs font-medium mt-1" style={{ color:'#CBD5E1' }}>{label}</div>
+          <div className="text-xs" style={{ color:'#94A3B8' }}>{span}</div>
           {note && <div className="text-xs" style={{ color:'#94A3B8' }}>{note}</div>}
         </div>
       );
@@ -850,7 +852,7 @@
             ))}
           </div>
           {!loading && (stats === null || since || anyMissing) && (
-            <div className="text-xs mt-2" style={{ color:'#475569' }}>
+            <div className="text-xs mt-2" style={{ color:'#94A3B8' }}>
               {stats === null
                 ? 'Platform statistics are unavailable right now.'
                 : stats.background_workers_note
@@ -873,7 +875,7 @@
                         color={s.color} loading={loading} missing={missingText(stats)} />
             ))}
           </div>
-          <div className="text-xs mt-2" style={{ color:'#475569' }}>
+          <div className="text-xs mt-2" style={{ color:'#94A3B8' }}>
             A contract threat is a contract the extension and agent firewalls scored high risk. On record means
             its latest score, since a rescan replaces it; it counts in the last 24 h when that scan falls in the
             window. The charts and the feed below show only the newest
@@ -992,7 +994,7 @@
 
             <Section title="Live Threat Feed">
               <div className="glass rounded-xl p-4 md:p-5" style={{ border:'1px solid #334155' }}>
-                <div className="text-xs mb-3" style={{ color:'#64748B' }}>
+                <div className="text-xs mb-3" style={{ color:'#94A3B8' }}>
                   The newest {FEED_LIMIT} contract detections and the newest {FEED_LIMIT} mempool alerts.
                 </div>
                 <ThreatLogTable

@@ -447,29 +447,31 @@ const EXPLORERS = {
   204: 'https://opbnbscan.com',
   4663: 'https://robinhoodchain.blockscout.com'
 };
+
+// Opaque badge backgrounds, so a hovered row cannot lower the text's contrast (each is at least 4.5:1).
 const SEV = {
   CRITICAL: {
-    bg: 'rgba(239,68,68,0.15)',
-    text: '#EF4444',
+    bg: '#3D2D3C',
+    text: '#F87171',
     border: 'rgba(239,68,68,0.35)'
   },
   HIGH: {
-    bg: 'rgba(245,158,11,0.15)',
-    text: '#F59E0B',
+    bg: '#3E3B34',
+    text: '#FBBF24',
     border: 'rgba(245,158,11,0.35)'
   },
   MEDIUM: {
-    bg: 'rgba(59,130,246,0.15)',
-    text: '#3B82F6',
+    bg: '#223657',
+    text: '#60A5FA',
     border: 'rgba(59,130,246,0.35)'
   },
   LOW: {
-    bg: 'rgba(16,185,129,0.15)',
-    text: '#10B981',
+    bg: '#1C3F46',
+    text: '#34D399',
     border: 'rgba(16,185,129,0.35)'
   },
   UNKNOWN: {
-    bg: 'rgba(100,116,139,0.15)',
+    bg: '#283447',
     text: '#94A3B8',
     border: 'rgba(100,116,139,0.35)'
   }
@@ -575,7 +577,7 @@ function Toast({
     style: {
       background: '#1E293B',
       border: `1px solid ${isErr ? 'rgba(239,68,68,0.35)' : '#334155'}`,
-      color: isErr ? '#EF4444' : '#10B981',
+      color: isErr ? '#F87171' : '#10B981',
       fontSize: 13
     }
   }, isErr ? /*#__PURE__*/React.createElement("svg", {
@@ -679,7 +681,7 @@ function FlagModal({
     onClick: onClose,
     className: "transition-colors hover:text-white",
     style: {
-      color: '#64748B',
+      color: '#94A3B8',
       fontSize: 18,
       lineHeight: 1
     }
@@ -693,7 +695,7 @@ function FlagModal({
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-xs mb-1",
     style: {
-      color: '#64748B'
+      color: '#94A3B8'
     }
   }, "Threat Type"), /*#__PURE__*/React.createElement("div", {
     className: "text-sm font-medium",
@@ -708,12 +710,12 @@ function FlagModal({
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-xs mb-1",
     style: {
-      color: '#64748B'
+      color: '#94A3B8'
     }
   }, "Address"), /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-mono break-all",
     style: {
-      color: '#3B82F6',
+      color: '#60A5FA',
       fontFamily: 'JetBrains Mono,monospace'
     }
   }, addr || '—'))), /*#__PURE__*/React.createElement("textarea", {
@@ -737,14 +739,14 @@ function FlagModal({
     className: "flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors",
     style: {
       background: '#334155',
-      color: '#94A3B8'
+      color: '#E2E8F0'
     }
   }, "Cancel"), /*#__PURE__*/React.createElement("button", {
     onClick: submit,
     disabled: !canSend,
     className: "flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors",
     style: {
-      background: '#3B82F6',
+      background: '#2563EB',
       color: '#fff',
       opacity: canSend ? 1 : 0.5
     }
@@ -782,7 +784,7 @@ function ErrorBanner({
     className: "ml-4 px-3 py-1 rounded-lg text-xs font-semibold transition-colors",
     style: {
       background: 'rgba(239,68,68,0.18)',
-      color: '#EF4444'
+      color: '#FCA5A5'
     }
   }, "Retry"));
 }
@@ -837,23 +839,23 @@ function ThreatRow({
     className: "text-xs px-2 py-0.5 rounded-full font-medium",
     style: {
       background: `${cColor}20`,
-      color: cColor
+      color: '#E2E8F0'
     }
   }, chain)), note && /*#__PURE__*/React.createElement("div", {
     className: "text-xs mt-0.5 truncate",
     style: {
-      color: '#475569'
+      color: '#94A3B8'
     }
   }, note), /*#__PURE__*/React.createElement("div", {
     className: "text-xs mt-0.5 font-mono",
     style: {
-      color: '#3B82F6',
+      color: '#60A5FA',
       fontFamily: 'JetBrains Mono,monospace'
     }
   }, addr ? short(addr) : '—')), /*#__PURE__*/React.createElement("div", {
     className: "text-xs shrink-0",
     style: {
-      color: '#475569'
+      color: '#94A3B8'
     }
   }, timeAgo(ts)), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-1 shrink-0 transition-all duration-150",
@@ -870,7 +872,7 @@ function ThreatRow({
     className: "p-1.5 rounded-lg transition-colors",
     style: {
       background: 'rgba(59,130,246,0.15)',
-      color: '#3B82F6'
+      color: '#60A5FA'
     },
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("svg", {
@@ -889,7 +891,7 @@ function ThreatRow({
     className: "p-1.5 rounded-lg transition-colors",
     style: {
       background: 'rgba(16,185,129,0.15)',
-      color: '#10B981'
+      color: '#34D399'
     },
     onClick: () => onCopy(addr)
   }, /*#__PURE__*/React.createElement("svg", {
@@ -914,7 +916,7 @@ function ThreatRow({
     className: "p-1.5 rounded-lg transition-colors",
     style: {
       background: 'rgba(245,158,11,0.15)',
-      color: '#F59E0B'
+      color: '#FBBF24'
     },
     onClick: () => onFlag(t)
   }, /*#__PURE__*/React.createElement("svg", {
@@ -999,7 +1001,7 @@ function ThreatLogTable({
       style: {
         background: active ? 'rgba(59,130,246,0.18)' : '#1E293B',
         border: `1px solid ${active ? '#3B82F6' : '#334155'}`,
-        color: active ? '#3B82F6' : '#64748B'
+        color: active ? '#60A5FA' : '#94A3B8'
       }
     }, f.label);
   })), error && /*#__PURE__*/React.createElement(ErrorBanner, {
@@ -1024,7 +1026,7 @@ function ThreatLogTable({
   })) : filtered.length === 0 ? /*#__PURE__*/React.createElement("div", {
     className: "text-center py-16 text-sm",
     style: {
-      color: '#334155'
+      color: '#94A3B8'
     }
   }, error ? 'Threat data unavailable — check the error above.' : mempoolUnavailable ? chain ? 'No contract detections on this chain in the current window.' : 'No contract detections in the current window.' : chain ? 'No threats on this chain in the current window.' : 'No threats detected. Monitoring active.') : filtered.map(t => /*#__PURE__*/React.createElement(ThreatRow, {
     key: threatKey(t),
@@ -1084,7 +1086,7 @@ function CampaignsGrid({
     return /*#__PURE__*/React.createElement("div", {
       className: "text-center py-8 text-sm",
       style: {
-        color: '#475569'
+        color: '#94A3B8'
       }
     }, "Campaign data unavailable.");
   }
@@ -1092,7 +1094,7 @@ function CampaignsGrid({
     return /*#__PURE__*/React.createElement("div", {
       className: "text-center py-8 text-sm",
       style: {
-        color: '#334155'
+        color: '#94A3B8'
       }
     }, "No campaigns detected.");
   }
@@ -1105,6 +1107,7 @@ function CampaignsGrid({
     const tot = c.contract_count || 1;
     const pct = scored ? Math.min(100, hi / tot * 100) : 0;
     const bar = !scored ? '#475569' : pct > 50 ? '#EF4444' : pct > 20 ? '#F59E0B' : '#10B981';
+    const barText = !scored ? '#94A3B8' : pct > 50 ? '#F87171' : pct > 20 ? '#FBBF24' : '#34D399';
     return /*#__PURE__*/React.createElement("div", {
       key: i,
       className: "rounded-xl p-4 fade-up",
@@ -1115,13 +1118,13 @@ function CampaignsGrid({
     }, /*#__PURE__*/React.createElement("div", {
       className: "text-sm font-medium font-mono break-all",
       style: {
-        color: '#3B82F6',
+        color: '#60A5FA',
         fontFamily: 'JetBrains Mono,monospace'
       }
     }, (c.deployer || '').slice(0, 10), "\u2026", (c.deployer || '').slice(-6)), /*#__PURE__*/React.createElement("div", {
       className: "text-xs mt-2",
       style: {
-        color: '#64748B'
+        color: '#94A3B8'
       }
     }, c.contract_count, " contracts \xB7 ", c.chain_count, " chain(s)", c.funder ? ` · Funder: ${c.funder.slice(0, 8)}…` : ''), /*#__PURE__*/React.createElement("div", {
       className: "mt-3 rounded-full overflow-hidden",
@@ -1142,11 +1145,11 @@ function CampaignsGrid({
       }
     }, scored ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
       style: {
-        color: bar
+        color: barText
       }
     }, hi, " HIGH/CRIT"), " / ", tot, " total") : /*#__PURE__*/React.createElement("span", {
       style: {
-        color: bar
+        color: barText
       }
     }, "Contracts not scored yet")));
   }));
@@ -1177,7 +1180,7 @@ function ThreatVelocityChart({
       className: "flex items-center justify-center text-sm text-center px-4",
       style: {
         height: 190,
-        color: '#475569'
+        color: '#94A3B8'
       }
     }, unavailable ? 'Threat feed unavailable.' : short.some(c => c.since === null) ? `Hidden: some of the newest ${FEED_LIMIT} ${shortNames} carry no time, so how far back they ` + 'reach is unknown and an hourly count for the last 24 h could show missing hours as zero.' : `Hidden: the newest ${FEED_LIMIT} ${shortNames} reach back only to ` + `${new Date(Math.max(...short.map(c => c.since)) * 1000).toLocaleString()}, ` + 'so an hourly count for the last 24 h would show the earlier hours as zero.'));
   }
@@ -1196,13 +1199,13 @@ function ThreatVelocityChart({
   }, "Threat Velocity"), /*#__PURE__*/React.createElement("div", {
     className: "text-xs mt-0.5",
     style: {
-      color: '#64748B'
+      color: '#94A3B8'
     }
   }, "Detections per hour \xB7 last 24 h")), /*#__PURE__*/React.createElement("span", {
     className: "text-xs px-2.5 py-1 rounded-full font-medium",
     style: {
       background: 'rgba(59,130,246,0.15)',
-      color: '#3B82F6'
+      color: '#60A5FA'
     }
   }, "Hourly")), /*#__PURE__*/React.createElement(ResponsiveContainer, {
     width: "100%",
@@ -1236,7 +1239,7 @@ function ThreatVelocityChart({
   }), /*#__PURE__*/React.createElement(XAxis, {
     dataKey: "hour",
     tick: {
-      fill: '#475569',
+      fill: '#94A3B8',
       fontSize: 10
     },
     tickLine: false,
@@ -1244,7 +1247,7 @@ function ThreatVelocityChart({
     interval: 5
   }), /*#__PURE__*/React.createElement(YAxis, {
     tick: {
-      fill: '#475569',
+      fill: '#94A3B8',
       fontSize: 10
     },
     tickLine: false,
@@ -1307,7 +1310,7 @@ function ChainDistributionChart({
   }, "Chain Distribution"), /*#__PURE__*/React.createElement("div", {
     className: "text-xs mt-0.5",
     style: {
-      color: '#64748B'
+      color: '#94A3B8'
     }
   }, "Threats in the loaded feed, by network", cappedNote)), haslive ? capped.length ? /*#__PURE__*/React.createElement("span", {
     className: "text-xs px-2.5 py-1 rounded-full font-medium",
@@ -1325,7 +1328,7 @@ function ChainDistributionChart({
     className: "text-xs px-2.5 py-1 rounded-full font-medium",
     style: {
       background: 'rgba(100,116,139,0.15)',
-      color: '#64748B'
+      color: '#94A3B8'
     }
   }, "No data")), haslive ? /*#__PURE__*/React.createElement(ResponsiveContainer, {
     width: "100%",
@@ -1345,14 +1348,14 @@ function ChainDistributionChart({
   }), /*#__PURE__*/React.createElement(XAxis, {
     dataKey: "name",
     tick: {
-      fill: '#475569',
+      fill: '#94A3B8',
       fontSize: 11
     },
     tickLine: false,
     axisLine: false
   }), /*#__PURE__*/React.createElement(YAxis, {
     tick: {
-      fill: '#475569',
+      fill: '#94A3B8',
       fontSize: 10
     },
     tickLine: false,
@@ -1380,7 +1383,7 @@ function ChainDistributionChart({
     className: "flex items-center justify-center text-sm",
     style: {
       height: 190,
-      color: '#475569'
+      color: '#94A3B8'
     }
   }, loading ? 'Loading…' : unavailable ? 'Threat feed unavailable.' : 'No threats in the current feed.'));
 }
@@ -1390,9 +1393,9 @@ function BaseAttestationsPanel({
   data
 }) {
   const riskColor = label => {
-    if (label === 'DANGER' || label === 'HIGH') return '#EF4444';
-    if (label === 'WARNING' || label === 'MEDIUM') return '#F59E0B';
-    if (label === 'SAFE' || label === 'LOW') return '#10B981';
+    if (label === 'DANGER' || label === 'HIGH') return '#FCA5A5';
+    if (label === 'WARNING' || label === 'MEDIUM') return '#FBBF24';
+    if (label === 'SAFE' || label === 'LOW') return '#34D399';
     return '#94A3B8';
   };
   const chainName = id => CHAIN_NAMES[id] || `chain ${id}`;
@@ -1413,7 +1416,7 @@ function BaseAttestationsPanel({
     target: "_blank",
     rel: "noreferrer",
     style: {
-      color: '#3B82F6',
+      color: '#60A5FA',
       fontFamily: 'JetBrains Mono,monospace'
     }
   }, (data.attestor || '').slice(0, 10), "\u2026", (data.attestor || '').slice(-6))), /*#__PURE__*/React.createElement("span", null, "Total recent: ", /*#__PURE__*/React.createElement("strong", {
@@ -1425,12 +1428,12 @@ function BaseAttestationsPanel({
     target: "_blank",
     rel: "noreferrer",
     style: {
-      color: '#3B82F6'
+      color: '#60A5FA'
     }
   }, "View on EAS Scan \u2197")), list.length === 0 ? /*#__PURE__*/React.createElement("div", {
     className: "text-center py-8 text-sm",
     style: {
-      color: '#475569'
+      color: '#94A3B8'
     }
   }, "No attestations yet.") : /*#__PURE__*/React.createElement("div", {
     className: "space-y-2"
@@ -1460,12 +1463,12 @@ function BaseAttestationsPanel({
   }, (a.scanned_address || '').slice(0, 8), "\u2026", (a.scanned_address || '').slice(-6)), /*#__PURE__*/React.createElement("span", {
     className: "text-xs",
     style: {
-      color: '#64748B'
+      color: '#94A3B8'
     }
   }, "via ", chainName(a.source_chain_id)), /*#__PURE__*/React.createElement("span", {
     className: "text-xs ml-auto",
     style: {
-      color: '#64748B'
+      color: '#94A3B8'
     }
   }, a.timestamp ? new Date(a.timestamp * 1000).toLocaleString() : ''), /*#__PURE__*/React.createElement("a", {
     href: `https://base.easscan.org/attestation/view/${a.uid}`,
@@ -1473,7 +1476,7 @@ function BaseAttestationsPanel({
     rel: "noreferrer",
     className: "text-xs",
     style: {
-      color: '#3B82F6'
+      color: '#60A5FA'
     }
   }, "EAS \u2197")))));
 }
@@ -1484,7 +1487,7 @@ function Section({
   return /*#__PURE__*/React.createElement("section", null, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-semibold uppercase tracking-widest mb-3",
     style: {
-      color: '#475569'
+      color: '#94A3B8'
     }
   }, title), children);
 }
@@ -1492,7 +1495,7 @@ function Section({
 // ─── Header ───────────────────────────────────────────────────────────────
 const HEALTH = {
   connecting: {
-    color: '#64748B',
+    color: '#94A3B8',
     label: 'CONNECTING'
   },
   live: {
@@ -1504,7 +1507,7 @@ const HEALTH = {
     label: 'PARTIAL DATA'
   },
   offline: {
-    color: '#EF4444',
+    color: '#F87171',
     label: 'OFFLINE'
   }
 };
@@ -1536,12 +1539,12 @@ function Header({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#3B82F6'
+      color: '#60A5FA'
     }
   }, "Shield"), "Bot"), /*#__PURE__*/React.createElement("span", {
     className: "text-sm",
     style: {
-      color: '#475569'
+      color: '#94A3B8'
     }
   }, "Threat Dashboard"), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-1.5"
@@ -1562,35 +1565,35 @@ function Header({
   }, h.label))), /*#__PURE__*/React.createElement("div", {
     className: "text-xs mt-0.5",
     style: {
-      color: '#334155'
+      color: '#94A3B8'
     }
   }, "Contract detections and mempool alerts \xB7 refreshes every ", REFRESH_MS / 1000, " seconds")), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-4"
   }, /*#__PURE__*/React.createElement("a", {
     href: "https://shieldbotsecurity.online",
     style: {
-      color: '#475569',
+      color: '#94A3B8',
       fontSize: '0.75rem',
       textDecoration: 'none',
       display: 'flex',
       alignItems: 'center',
       gap: '0.25rem'
     },
-    onMouseOver: e => e.currentTarget.style.color = '#94A3B8',
-    onMouseOut: e => e.currentTarget.style.color = '#475569'
+    onMouseOver: e => e.currentTarget.style.color = '#E2E8F0',
+    onMouseOut: e => e.currentTarget.style.color = '#94A3B8'
   }, "\u2190 Home"), /*#__PURE__*/React.createElement("a", {
     href: "mailto:support@shieldbotsecurity.online",
     style: {
-      color: '#475569',
+      color: '#94A3B8',
       fontSize: '0.75rem',
       textDecoration: 'none'
     },
-    onMouseOver: e => e.currentTarget.style.color = '#94A3B8',
-    onMouseOut: e => e.currentTarget.style.color = '#475569'
+    onMouseOver: e => e.currentTarget.style.color = '#E2E8F0',
+    onMouseOut: e => e.currentTarget.style.color = '#94A3B8'
   }, "Support"), /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-mono",
     style: {
-      color: '#334155',
+      color: '#94A3B8',
       fontFamily: 'JetBrains Mono,monospace'
     }
   }, lastUpdated ? `↻ ${timeAgo(lastUpdated / 1000)}` : 'Connecting…')));
@@ -1707,17 +1710,17 @@ function StatCard({
   }) : /*#__PURE__*/React.createElement("div", {
     className: `${value == null ? 'text-base' : 'text-2xl'} font-bold leading-none`,
     style: {
-      color: value == null ? '#475569' : color
+      color: value == null ? '#94A3B8' : color
     }
   }, value == null ? missing : display.toLocaleString()), /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-medium mt-1",
     style: {
-      color: '#64748B'
+      color: '#CBD5E1'
     }
   }, label), /*#__PURE__*/React.createElement("div", {
     className: "text-xs",
     style: {
-      color: '#475569'
+      color: '#94A3B8'
     }
   }, span), note && /*#__PURE__*/React.createElement("div", {
     className: "text-xs",
@@ -1749,7 +1752,7 @@ function PlatformStatsBar({
   }))), !loading && (stats === null || since || anyMissing) && /*#__PURE__*/React.createElement("div", {
     className: "text-xs mt-2",
     style: {
-      color: '#475569'
+      color: '#94A3B8'
     }
   }, stats === null ? 'Platform statistics are unavailable right now.' : stats.background_workers_note ? 'Unavailable: the mempool monitor runs in a separate process that this API does not read, so its counts are unknown here, not zero.' : since ? `Transactions monitored, sandwich attacks and suspicious approvals are counted since ${new Date(since * 1000).toLocaleString()}, when the mempool monitor last started.` : 'A dash means that source is not reporting right now.'));
 }
@@ -1770,7 +1773,7 @@ function LastDayBar({
   }))), /*#__PURE__*/React.createElement("div", {
     className: "text-xs mt-2",
     style: {
-      color: '#475569'
+      color: '#94A3B8'
     }
   }, "A contract threat is a contract the extension and agent firewalls scored high risk. On record means its latest score, since a rescan replaces it; it counts in the last 24 h when that scan falls in the window. The charts and the feed below show only the newest", ' ', FEED_LIMIT, " contract detections and newest ", FEED_LIMIT, " mempool alerts, so they are not counts."));
 }
@@ -1894,7 +1897,7 @@ function App() {
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-xs mb-3",
     style: {
-      color: '#64748B'
+      color: '#94A3B8'
     }
   }, "The newest ", FEED_LIMIT, " contract detections and the newest ", FEED_LIMIT, " mempool alerts."), /*#__PURE__*/React.createElement(ThreatLogTable, {
     threats: threats,
