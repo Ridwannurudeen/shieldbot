@@ -10,13 +10,13 @@ The package is not on npm yet. npm cannot install a subdirectory of a Git reposi
 git clone https://github.com/Ridwannurudeen/shieldbot.git
 cd shieldbot/sdk
 npm ci
-npm pack        # builds dist/ and writes shieldbot-sdk-3.0.0.tgz
+npm pack        # builds dist/ and writes shieldbot-sdk-3.1.0.tgz
 ```
 
 Then, in your project:
 
 ```bash
-npm install /path/to/shieldbot/sdk/shieldbot-sdk-3.0.0.tgz
+npm install /path/to/shieldbot/sdk/shieldbot-sdk-3.1.0.tgz
 ```
 
 After publication it will install with `npm install @shieldbot/sdk` (planned name, not published yet and may change before release).
@@ -69,7 +69,7 @@ if (!verdict.allowed) {
 | Method | Endpoint | API key |
 |--------|----------|---------|
 | `scan(address, { chainId })` | `POST /api/scan` | optional |
-| `firewall(to, { chainId, from?, data?, value? })` | `POST /api/firewall` | optional |
+| `firewall(to, { chainId, from?, data?, value?, onFirst?, finalTimeout? })` | `POST /api/firewall` | optional |
 | `check({ from, to, chainId, data?, value? })` | `POST /api/agent/firewall` | required, with `agentId` and a registered agent |
 | `register(ownerAddress, policy?)` | `POST /api/agent/register` | required, with `agentId` |
 | `checkReputation(agentId?)` | `GET /api/reputation/{agentId}` | optional |
@@ -95,6 +95,31 @@ if (rescue.status !== 'ok') {
   console.log('Incomplete approval scan:', rescue.coverage_reasons, rescue.scanned_blocks);
 }
 ```
+
+## Fast first verdict
+
+`firewall()` can stream its answer. Pass `onFirst` and the API may send an interim verdict while its analysis still runs; `firewall()` still resolves with the final verdict, the same result a plain call returns, with `final: true`. Without `onFirst` the call is the plain request it always was.
+
+```typescript
+const result = await shield.firewall('0xTarget', {
+  chainId: 56,
+  from: '0xSender',
+  data: '0x...',
+  onFirst: (first) => {
+    // Always status 'unknown', never SAFE: show it as "analysis in progress".
+    if (first.classification === 'BLOCK_RECOMMENDED') {
+      console.log('Blocked early:', first.danger_signals);
+    }
+  },
+});
+```
+
+- The interim verdict (`FirstVerdict`) comes as soon as a hard floor already puts the transaction in `BLOCK_RECOMMENDED` (an address the ShieldBot operator confirmed as a scam, for example), otherwise about 3 seconds after the API starts on the request, and only while the analysis is still running. A fast analysis sends only the final.
+- It always has `status: 'unknown'` and is never `SAFE`. Its `risk_score` and `classification` come only from floors already known, never from a partial average, so they never overstate the final verdict's band; `CAUTION` with `risk_score` 0 means nothing is known yet. It lists `pending_sources` (the analyzers still running) and `elapsed_ms`, and has no `evidence_hash` or `evidence_url`: only the final is recorded.
+- Under a STRICT policy the API sends no interim verdict. It answers with the plain JSON, which `firewall()` returns as it is, and `onFirst` is not called.
+- `finalTimeout` (default 30000 ms) replaces `timeout` for a streamed call: it bounds the wait for the response and then for each next event.
+- An `error` event rejects with `ShieldBotError` and the API's HTTP status. A stream that ends without a final rejects with code `NETWORK_ERROR`.
+- `GET /api/verdicts` publishes this contract as `first_verdict`.
 
 ## Supported chains
 
