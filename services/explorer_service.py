@@ -120,7 +120,10 @@ class ExplorerService:
                 )
 
         if provider == "blockscout":
-            async with self._blockscout_locks.setdefault(host, asyncio.Lock()):
+            lock = self._blockscout_locks.get(host)
+            if lock is None:
+                lock = self._blockscout_locks[host] = asyncio.Lock()
+            async with lock:
                 if cache_key in self._cache:
                     return self._cache[cache_key]
                 result = await fetch()
