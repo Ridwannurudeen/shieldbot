@@ -4,6 +4,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from cachetools import TLRUCache
 
 from adapters.evm_base import EvmAdapter
 from services.explorer_service import ExplorerResult, ExplorerService
@@ -231,3 +232,26 @@ async def test_robinhood_chain_needs_both_sourcify_and_blockscout_to_deny(
         client.return_value.__aenter__.return_value = session
         result = await ExplorerService().get_verification_status(ADDRESS, 4663)
     assert result.status == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status, held", [(200, 300), (404, 300), (502, 30)], ids=["verified", "unverified", "unknown"])
+async def test_an_unknown_explorer_result_is_kept_only_thirty_seconds(status, held):
+    import services.explorer_service as explorer_module
+
+    service = ExplorerService()
+    assert service._cache.ttu is explorer_module._result_ttu
+    clock = [0.0]
+    service._cache = TLRUCache(maxsize=16, ttu=explorer_module._result_ttu, timer=lambda: clock[0])
+    payload = None if status == 502 else _sourcify(56, ADDRESS, status == 200)
+    http = FakeHttp({}, {ADDRESS: (status, payload)})
+    with patch("aiohttp.ClientSession") as client:
+        client.return_value.__aenter__.return_value = http.session
+        first = await service.get_sourcify_verification(ADDRESS, 56)
+        clock[0] = held - 1
+        await service.get_sourcify_verification(ADDRESS, 56)
+        assert http.session.get.call_count == 1
+        clock[0] = held + 1
+        await service.get_sourcify_verification(ADDRESS, 56)
+    assert http.session.get.call_count == 2
+    assert first.status == {200: "verified", 404: "unverified", 502: "unknown"}[status]

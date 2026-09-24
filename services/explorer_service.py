@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 import aiohttp
-from cachetools import TTLCache
+from cachetools import TLRUCache
 
 
 # Public Blockscout instances that answer without an API key; other chains go through the keyed
@@ -18,6 +18,16 @@ BLOCKSCOUT_INSTANCES = {
     8453: "https://base.blockscout.com",
     10: "https://explorer.optimism.io",
 }
+
+
+# An answer holds for five minutes; a failed lookup is asked again after 30 seconds, so one
+# provider blip does not leave a contract Unknown for five minutes.
+RESULT_TTL_SECONDS = 300
+UNKNOWN_RESULT_TTL_SECONDS = 30
+
+
+def _result_ttu(key, result, now):
+    return now + (UNKNOWN_RESULT_TTL_SECONDS if result.status == "unknown" else RESULT_TTL_SECONDS)
 
 
 @dataclass(frozen=True)
@@ -48,14 +58,14 @@ def _redact_api_key(value, api_key: str):
 
 
 class ExplorerService:
-    """Cache provider responses for five minutes; pace each Blockscout host on its own.
+    """Cache provider responses (five minutes, a failure 30 seconds); pace each Blockscout host.
 
     The PRO gateway and the public instances have separate rate limits, so a slow or rate-limited
     instance must not hold up the gateway's lookups, or the other way round.
     """
 
     def __init__(self):
-        self._cache = TTLCache(maxsize=2048, ttl=300)
+        self._cache = TLRUCache(maxsize=2048, ttu=_result_ttu)
         self._blockscout_locks: dict[str, asyncio.Lock] = {}
         self._last_request: dict[str, float] = {}
 
@@ -66,8 +76,9 @@ class ExplorerService:
                 sorted((key, value) for key, value in params.items() if key != "apikey")
             ),
         )
-        if cache_key in self._cache:
-            return self._cache[cache_key]
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
         host = urlsplit(url).hostname
 
         async def fetch():
@@ -128,8 +139,9 @@ class ExplorerService:
             if lock is None:
                 lock = self._blockscout_locks[host] = asyncio.Lock()
             async with lock:
-                if cache_key in self._cache:
-                    return self._cache[cache_key]
+                cached = self._cache.get(cache_key)
+                if cached is not None:
+                    return cached
                 result = await fetch()
                 self._cache[cache_key] = result
         else:
