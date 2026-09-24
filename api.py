@@ -1500,7 +1500,10 @@ async def _firewall_verdict(
         # A streamed request hears each analyzer's result as it returns; a plain one calls run_all as before.
         run_options = {}
         if progress is not None:
-            progress.add_local_match(local_match)
+            # The router shortcut judges only the path tokens, so the entry of a target it answers for
+            # (a community one) never reaches the final and must not raise the first above it.
+            if not router_answers:
+                progress.add_local_match(local_match)
             # Worded as the router's answer only when the router answers.
             progress.describe = partial(
                 _first_transaction_fields, decoded, value_bnb, req.chainId, to_addr,

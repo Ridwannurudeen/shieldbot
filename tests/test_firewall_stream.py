@@ -826,6 +826,45 @@ async def test_a_streamed_admin_listed_router_blocks_first_and_last(stream_api, 
 
 
 @pytest.mark.asyncio
+async def test_a_community_listed_router_keeps_the_router_path_and_no_first_above_its_final(stream_api, monkeypatch):
+    api, services = stream_api
+    # Three reporters listed a router that _PROTECTED_ADDRESSES (BNB Chain only) does not cover.
+    api.scam_db.known_scams[(1, TARGET)] = {"source": "community", "reports": 3, "expires_at": None}
+    timer(monkeypatch, api, FIRST_VERDICT_SECONDS * SCALE)
+    gate = asyncio.Event()
+    body, scanned = router_swap(monkeypatch, api, services, gate)
+
+    events = events_of(api, body)
+    kind, first = await next_event(events)
+    assert kind == "first"
+    assert first["risk_score"] == 0
+    assert "Reported by 3 users" not in first["danger_signals"]
+    assert first["transaction_impact"]["recipient"] == f"Uniswap Router ({TARGET})"
+    gate.set()
+    kind, final = await next_event(events)
+
+    assert kind == "final"
+    assert set(scanned) == {TOKEN_A, TOKEN_B}
+    assert final["classification"] == verdicts.SAFE
+    assert band_rank(first["risk_score"]) <= band_rank(final["risk_score"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("listed", [False, True], ids=["unlisted", "community-listed"])
+async def test_a_router_swaps_streamed_final_is_its_plain_response(stream_api, monkeypatch, listed):
+    api, services = stream_api
+    if listed:
+        api.scam_db.known_scams[(1, TARGET)] = {"source": "community", "reports": 3, "expires_at": None}
+    body, scanned = router_swap(monkeypatch, api, services)
+
+    final, plain = await final_and_plain(api, body)
+
+    assert set(scanned) == {TOKEN_A, TOKEN_B}
+    assert plain["raw_checks"]["whitelisted_router"] == "Uniswap Router"
+    assert final == plain
+
+
+@pytest.mark.asyncio
 async def test_an_error_inside_the_stream_is_an_error_event_and_no_final(stream_api, monkeypatch):
     api, services = stream_api
     blacklist(api)
