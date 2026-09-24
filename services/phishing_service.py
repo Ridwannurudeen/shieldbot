@@ -25,15 +25,19 @@ class PhishingService:
 
         Returns:
             {
-                "is_phishing": bool,
-                "confidence": "high" | "low",
-                "source": "goplus" | None,
+                "is_phishing": bool | None,
+                "confidence": "high" | "low" | None,
+                "source": "goplus" | "test" | None,
                 "cached": bool,
+                "reason": str,  # only with is_phishing None
             }
+
+        is_phishing None means no verdict: GoPlus could not be asked or gave no answer. It is
+        never cached, so the next check asks again.
         """
-        defaults = {
-            "is_phishing": False,
-            "confidence": "low",
+        no_verdict = {
+            "is_phishing": None,
+            "confidence": None,
             "source": None,
             "cached": False,
         }
@@ -42,7 +46,7 @@ class PhishingService:
             parsed = urlparse(url)
             domain = parsed.netloc.lower()
             if not domain:
-                return defaults
+                return {**no_verdict, "reason": "URL has no host"}
 
             # Test trigger — only active when SHIELDBOT_TEST_MODE=1 env var is set.
             # Prevents griefing attacks via shared URLs with the test parameter.
@@ -77,13 +81,17 @@ class PhishingService:
                         logger.warning(
                             "GoPlus phishing API returned %s for %s", resp.status, domain
                         )
-                        return defaults
+                        return {**no_verdict, "reason": f"GoPlus HTTP {resp.status}"}
                     data = await resp.json()
 
-            result_data = data.get("result", {})
+            result_data = data.get("result") if isinstance(data, dict) and data.get("code") == 1 else None
             # GoPlus returns "phishing_site": 1 (integer) or "is_phishing_site": "1" (string)
             # Handle both field names and both types defensively.
-            raw = result_data.get("phishing_site", result_data.get("is_phishing_site", 0))
+            raw = None
+            if isinstance(result_data, dict):
+                raw = result_data.get("phishing_site", result_data.get("is_phishing_site"))
+            if raw not in (0, 1, "0", "1"):
+                return {**no_verdict, "reason": "GoPlus returned no phishing verdict"}
             is_phishing = int(raw) == 1
 
             result = {
@@ -102,7 +110,7 @@ class PhishingService:
 
         except aiohttp.ClientError as e:
             logger.warning("GoPlus phishing check network error for %s: %s", url, type(e).__name__)
-            return defaults
+            return {**no_verdict, "reason": f"GoPlus request failed ({type(e).__name__})"}
         except Exception as e:
             logger.error("Phishing check failed for %s: %s", url, type(e).__name__)
-            return defaults
+            return {**no_verdict, "reason": f"Phishing check failed ({type(e).__name__})"}
