@@ -210,6 +210,12 @@
     }
   }
 
+  // One line saying why a result is Unknown, from its coverage reasons.
+  function unknownReason(result) {
+    return Object.values(result.coverage_reasons || {}).filter(Boolean).join("; ") ||
+      _t("unknownNoReason");
+  }
+
   async function showLoadingOverlay() {
     await _loadContentLang();
     removeOverlay();
@@ -448,6 +454,7 @@
       HIGH_RISK: "shieldai-badge-high",
       CAUTION: "shieldai-badge-caution",
       SAFE: "shieldai-badge-safe",
+      UNKNOWN: "shieldai-badge-unknown",
     };
 
     const classLabels = {
@@ -455,6 +462,7 @@
       HIGH_RISK: _t("classHighRisk"),
       CAUTION: _t("classCaution"),
       SAFE: _t("classSafe"),
+      UNKNOWN: _t("classUnknown"),
     };
 
     const incomplete = result.status !== "ok" || result.partial === true ||
@@ -507,7 +515,10 @@
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
 
-        <div class="shieldai-badge ${badgeClass}">${escapeHtml(label)} &mdash; ${escapeHtml(scoreDisplay)}</div>
+        <div class="shieldai-badge ${badgeClass}">${escapeHtml(label)}${classification === "UNKNOWN" ? "" : ` &mdash; ${escapeHtml(scoreDisplay)}`}</div>
+        ${incomplete ? `
+          <p class="shieldai-unknown-why">${_t("unknownWhy")} ${escapeHtml(unknownReason(result))}</p>
+        ` : ""}
 
         ${result.partial ? `
           <div class="shieldai-section" style="background:#78350f;border-radius:6px;padding:8px 12px;margin-bottom:8px;">
@@ -538,7 +549,7 @@
           <h3>${_t("overlayTxImpact")}</h3>
           <table class="shieldai-impact">
             <tr><td>${_t("overlaySending")}</td><td>${escapeHtml(impact.sending || "N/A")}</td></tr>
-            <tr><td>${_t("overlayGrantingAccess")}</td><td>${escapeHtml(impact.granting_access || "None")}</td></tr>
+            <tr><td>${_t("overlayGrantingAccess")}</td><td>${escapeHtml(impact.granting_access || "Unknown")}</td></tr>
             <tr><td>${_t("overlayRecipient")}</td><td class="shieldai-mono">${escapeHtml(impact.recipient || "N/A")}</td></tr>
             <tr><td>${_t("overlayAfterTx")}</td><td>${escapeHtml(impact.post_tx_state || "N/A")}</td></tr>
           </table>

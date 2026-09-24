@@ -89,6 +89,23 @@
 .shieldai-badge-caution { background: #eab308; color: #0f172a; }
 .shieldai-badge-safe { background: #22c55e; color: #0f172a; }
 
+/* Unknown is neither safe nor a warning: neutral grey, hatched so it cannot
+   be mistaken for a colour-coded verdict. */
+.shieldai-badge-unknown {
+  background: repeating-linear-gradient(135deg, #475569 0 6px, #3f4b5e 6px 12px);
+  color: #f8fafc;
+  border: 1px solid #94a3b8;
+}
+
+.shieldai-unknown-why {
+  font-size: 13px;
+  color: #cbd5e1;
+  margin: -8px 0 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Sections */
 .shieldai-section {
   margin-bottom: 14px;

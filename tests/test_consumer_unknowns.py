@@ -488,6 +488,7 @@ function load(file, start, end) {
 }
 load('popup');
 context.escapeHtml = String;
+load('content', '  // One line saying why a result is Unknown', '  async function showLoadingOverlay');
 load('content', '  async function showAnalysisOverlay', '  async function showErrorOverlay');
 load('sidepanel', '  function renderRiskCard', '  // -------------------------------------------------------------------\n  // Suggested prompts');
 load('sidepanel', '  function appendMessage', '  // -------------------------------------------------------------------\n  // Save / export');
@@ -506,7 +507,7 @@ load('background', 'function saveToHistory');
   } else if (surface === 'center') {
     context.renderDashCenter(scan);
     assert.equal(nodes.get('dash-gauge-num').textContent, complete ? 100 : '?');
-    assert.equal(nodes.get('dash-cls-badge').textContent, complete ? 'classSafe' : 'UNKNOWN');
+    assert.equal(nodes.get('dash-cls-badge').textContent, complete ? 'classSafe' : 'classUnknown');
     assert.equal(nodes.get('dash-verdict').textContent.includes('SAFE'), complete);
   } else if (surface === 'stats') {
     context.renderDashStats([scan]);

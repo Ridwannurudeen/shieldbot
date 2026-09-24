@@ -149,6 +149,9 @@
   "classHighRisk": "HIGH RISK",
   "classCaution": "CAUTION",
   "classSafe": "SAFE",
+  "classUnknown": "UNKNOWN",
+  "unknownWhy": "Why:",
+  "unknownNoReason": "Some checks did not complete.",
   "overlayBtnWhy": "Why is this risky?",
   "askShieldBotAI": "Ask ShieldBot AI"
 }

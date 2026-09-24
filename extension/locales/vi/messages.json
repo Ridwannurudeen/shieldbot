@@ -149,6 +149,9 @@
   "classHighRisk": "RỦI RO CAO",
   "classCaution": "THẬN TRỌNG",
   "classSafe": "AN TOÀN",
+  "classUnknown": "KHÔNG XÁC ĐỊNH",
+  "unknownWhy": "Lý do:",
+  "unknownNoReason": "Một số bước kiểm tra chưa hoàn tất.",
   "overlayBtnWhy": "Tại sao điều này rủi ro?",
   "askShieldBotAI": "Hỏi ShieldBot AI"
 }

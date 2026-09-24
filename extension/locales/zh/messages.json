@@ -149,6 +149,9 @@
   "classHighRisk": "高风险",
   "classCaution": "注意",
   "classSafe": "安全",
+  "classUnknown": "未知",
+  "unknownWhy": "原因：",
+  "unknownNoReason": "部分检查未能完成。",
   "overlayBtnWhy": "为什么有风险？",
   "askShieldBotAI": "询问ShieldBot AI"
 }

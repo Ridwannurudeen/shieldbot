@@ -67,9 +67,12 @@
     .badge-caution { background: #eab308; color: #000; }
     .badge-high { background: #f97316; }
     .badge-block { background: #ef4444; }
+    /* Unknown: neutral hatched grey, so it reads as neither safe nor a warning */
+    .badge-unknown { background: repeating-linear-gradient(135deg, #475569 0 4px, #3f4b5e 4px 8px); color: #f8fafc; }
     .history-info { flex: 1; min-width: 0; }
     .history-recipient { font-size: 12px; color: #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .history-time { font-size: 10px; color: #475569; }
+    .history-why { font-size: 10px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .history-score { font-size: 12px; font-weight: 600; color: #94a3b8; flex-shrink: 0; }
     .history-empty { text-align: center; padding: 24px 0; color: #475569; font-size: 13px; }
     .history-list::-webkit-scrollbar { width: 4px; }
@@ -233,6 +236,7 @@
     .feed-info { flex: 1; min-width: 0; }
     .feed-addr { font-size: 10px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: 'SF Mono', 'Fira Code', monospace; }
     .feed-time { font-size: 9px; color: #334155; margin-top: 1px; }
+    .feed-why { font-size: 9px; color: #94a3b8; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .feed-score { font-size: 11px; font-weight: 800; flex-shrink: 0; }
 
     .feed-empty {
@@ -347,6 +351,7 @@
     .cls-caution   { background: rgba(234,179,8,.1);   color: #EAB308; border: 1px solid rgba(234,179,8,.22); }
     .cls-high      { background: rgba(249,115,22,.1);  color: #F97316; border: 1px solid rgba(249,115,22,.22); }
     .cls-block     { background: rgba(239,68,68,.1);   color: #EF4444; border: 1px solid rgba(239,68,68,.22); }
+    .cls-unknown   { background: repeating-linear-gradient(135deg, rgba(148,163,184,.16) 0 6px, rgba(148,163,184,.06) 6px 12px); color: #CBD5E1; border: 1px solid rgba(148,163,184,.35); }
     .cls-idle      { background: rgba(71,85,105,.1);   color: #475569; border: 1px solid rgba(71,85,105,.15); }
 
     .ctr-meta { font-size: 10px; color: #334155; text-align: center; margin-bottom: 12px; font-family: 'SF Mono','Fira Code',monospace; }

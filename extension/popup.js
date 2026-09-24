@@ -49,6 +49,12 @@ function isIncompleteScan(scan) {
     Object.values(scan.coverage || {}).some(value => Number(value) < 1);
 }
 
+// One line saying why a scan is Unknown, from its coverage reasons.
+function unknownReason(scan) {
+  const reason = Object.values(scan.coverage_reasons || {}).filter(Boolean).join("; ") || t("unknownNoReason");
+  return `${t("unknownWhy")} ${reason}`;
+}
+
 function fmtUsd(val) {
   if (!val && val !== 0) return null;
   if (val >= 1e6) return "$" + (val / 1e6).toFixed(1) + "M";
@@ -246,7 +252,7 @@ function renderCompactHistory(history, listEl) {
   };
   listEl.innerHTML = history.map((item) => {
     const incomplete = isIncompleteScan(item);
-    const b = incomplete ? { cls: "badge-caution", label: "UNKNOWN" } :
+    const b = incomplete ? { cls: "badge-unknown", label: t("classUnknown") } :
       MAP[item.classification] || { cls: "badge-caution", label: item.classification };
     const scoreDisplay = incomplete ? "Unknown" : `${100 - item.risk_score}/100`;
     return `<div class="history-item">
@@ -254,6 +260,7 @@ function renderCompactHistory(history, listEl) {
       <div class="history-info">
         <div class="history-recipient">${escapeHtml(item.recipient || item.to || "Unknown")}</div>
         <div class="history-time">${formatTime(item.timestamp)}</div>
+        ${incomplete ? `<div class="history-why">${escapeHtml(unknownReason(item))}</div>` : ""}
       </div>
       <div class="history-score">${scoreDisplay}</div>
     </div>`;
@@ -461,6 +468,7 @@ const FEED_MAP = {
   HIGH_RISK:         { cls: "badge-high",    label: "HIGH",    color: "#F97316", border: "#F97316" },
   BLOCK_RECOMMENDED: { cls: "badge-block",   label: "BLOCK",   color: "#EF4444", border: "#EF4444" },
 };
+const FEED_UNKNOWN = { cls: "badge-unknown", color: "#94A3B8", border: "#94A3B8" };
 
 function renderDashFeed(history) {
   const feedEl = document.getElementById("dash-feed");
@@ -479,8 +487,8 @@ function renderDashFeed(history) {
   };
   feedEl.innerHTML = history.slice(0, 8).map((item) => {
     const incomplete = isIncompleteScan(item);
-    const b = (incomplete ? null : FEED_MAP[item.classification]) || { cls: "badge-caution", color: "#EAB308", border: "#EAB308" };
-    const lbl = incomplete ? "UNKNOWN" : FEED_LABELS[item.classification] || item.classification;
+    const b = incomplete ? FEED_UNKNOWN : FEED_MAP[item.classification] || { cls: "badge-caution", color: "#EAB308", border: "#EAB308" };
+    const lbl = incomplete ? t("classUnknown") : FEED_LABELS[item.classification] || item.classification;
     const safety = incomplete ? "Unknown" : 100 - item.risk_score;
     const addr = escapeHtml(shortAddr(item.recipient || item.to || "Unknown"));
     return `<div class="feed-item" style="--fc:${b.border}">
@@ -488,6 +496,7 @@ function renderDashFeed(history) {
       <div class="feed-info">
         <div class="feed-addr">${addr}</div>
         <div class="feed-time">${formatTime(item.timestamp)}</div>
+        ${incomplete ? `<div class="feed-why">${escapeHtml(unknownReason(item))}</div>` : ""}
       </div>
       <div class="feed-score" style="color:${b.color}">${safety}</div>
     </div>`;
@@ -538,7 +547,7 @@ function renderDashCenter(lastScan) {
     HIGH_RISK:         { cls: "cls-high",    label: t("classHighRisk") },
     BLOCK_RECOMMENDED: { cls: "cls-block",   label: t("classBlock") },
   };
-  const b = incomplete ? { cls: "cls-caution", label: "UNKNOWN" } :
+  const b = incomplete ? { cls: "cls-unknown", label: t("classUnknown") } :
     CLS[lastScan.classification] || { cls: "cls-caution", label: lastScan.classification };
   clsBadge.textContent = b.label;
   clsBadge.className   = `cls-badge ${b.cls}`;
@@ -548,7 +557,7 @@ function renderDashCenter(lastScan) {
 
   protectedList.style.display = "none";
   verdictWrap.style.display   = "block";
-  verdictEl.textContent = incomplete ? "Unknown (incomplete provider coverage)" : lastScan.verdict || t("overlayNoAnalysis");
+  verdictEl.textContent = incomplete ? unknownReason(lastScan) : lastScan.verdict || t("overlayNoAnalysis");
 }
 
 function setGauge(arcEl, numEl, score, glow) {
@@ -559,7 +568,7 @@ function setGauge(arcEl, numEl, score, glow) {
 
   arcEl.style.strokeDasharray = `${filled} ${circumference - filled}`;
 
-  const color = score === null ? "#EAB308" : clamped >= 80 ? "#22C55E" : clamped >= 50 ? "#F97316" : "#EF4444";
+  const color = score === null ? "#94A3B8" : clamped >= 80 ? "#22C55E" : clamped >= 50 ? "#F97316" : "#EF4444";
   arcEl.style.stroke = color;
 
   numEl.textContent  = score === null ? "?" : clamped;

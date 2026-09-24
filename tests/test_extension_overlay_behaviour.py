@@ -271,6 +271,51 @@ def test_replaced_overlay_rejects_the_request_it_was_showing():
     )
 
 
+@pytest.mark.parametrize(
+    "state",
+    ["unknown-reason", "unknown-no-reason", "covered-safe", "covered-caution", "incomplete-high"],
+)
+def test_unknown_result_has_its_own_badge_and_reason(state):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const state = JSON.parse(process.argv[1]);
+  const results = {
+    'unknown-reason': scan({status: 'unknown', coverage: {structural: 0}, coverage_reasons: {structural: 'Contract age unavailable'}}),
+    'unknown-no-reason': scan({status: 'unknown', coverage: {}, coverage_reasons: {}}),
+    'covered-safe': scan({}),
+    'covered-caution': scan({classification: 'CAUTION', risk_score: 40}),
+    'incomplete-high': scan({status: 'unknown', classification: 'HIGH_RISK', risk_score: 60, coverage_reasons: {honeypot: 'No provider'}}),
+  };
+  analyze = async () => ({result: results[state]});
+  await intercept('request');
+  const badge = overlay().querySelector('.shieldai-badge');
+  const classes = badge.className.split(/\s+/);
+  const why = overlay().querySelector('.shieldai-unknown-why');
+  const html = overlay().innerHTML;
+  if (state.startsWith('unknown')) {
+    assert.deepEqual(classes, ['shieldai-badge', 'shieldai-badge-unknown']);
+    assert(html.includes('>UNKNOWN<') || /UNKNOWN\s*<\/div>/.test(html));
+    assert(!html.includes('SAFE') && !html.includes('CAUTION'));
+    assert(why, 'no reason line');
+    const reason = state === 'unknown-reason' ? 'Contract age unavailable' : 'Some checks did not complete.';
+    assert(html.includes('Why: ' + reason));
+    assert(html.includes('<td>Granting Access</td><td>Unknown</td>'), 'a missing grant must not read None');
+  } else if (state === 'incomplete-high') {
+    assert(classes.includes('shieldai-badge-high'));
+    assert(html.includes('Why: No provider'));
+  } else {
+    assert(!classes.includes('shieldai-badge-unknown'));
+    assert(classes.includes(state === 'covered-safe' ? 'shieldai-badge-safe' : 'shieldai-badge-caution'));
+    assert.equal(why, null);
+  }
+  assert.equal(badge.attrs.style, undefined, 'badge colour must come from the stylesheet');
+""",
+        state,
+    )
+
+
 INJECT_HARNESS = (
     FAKE_DOM
     + r"""
