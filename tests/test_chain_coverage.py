@@ -81,7 +81,8 @@ def test_bsc_simulates_sells_reads_etherscan_and_knows_its_lockers(coverage):
     }
 
 
-def test_robinhood_simulates_with_eth_simulate_and_reads_blockscout(coverage):
+def test_robinhood_simulates_with_eth_simulate_and_reads_blockscout(coverage, monkeypatch):
+    monkeypatch.setenv("BLOCKSCOUT_API_KEY", "test-key")
     capabilities = coverage.get(4663).json()["capabilities"]
     assert capabilities["sell_simulation"] == "eth_simulateV1"
     assert capabilities["contract_age"] == "blockscout"
@@ -91,6 +92,24 @@ def test_robinhood_simulates_with_eth_simulate_and_reads_blockscout(coverage):
     assert capabilities["router_allowlist"] == {"present": True, "routers": 2}
     assert capabilities["public_mempool"] == "no"
     assert capabilities["approvals"] == {"history": "recent", "window_blocks": 240_000}
+
+
+def test_without_the_gateway_key_robinhood_has_no_age_source_and_verifies_on_sourcify_only(
+    coverage, monkeypatch
+):
+    monkeypatch.delenv("BLOCKSCOUT_API_KEY", raising=False)
+    capabilities = coverage.get(4663).json()["capabilities"]
+    assert capabilities["contract_age"] is None
+    assert capabilities["verification"] == "sourcify"
+
+
+def test_base_ages_contracts_through_its_public_blockscout_with_or_without_the_key(coverage, monkeypatch):
+    for key in ("test-key", None):
+        if key:
+            monkeypatch.setenv("BLOCKSCOUT_API_KEY", key)
+        else:
+            monkeypatch.delenv("BLOCKSCOUT_API_KEY", raising=False)
+        assert coverage.get(8453).json()["capabilities"]["contract_age"] == "blockscout"
 
 
 def test_base_ages_contracts_through_blockscout_and_reads_short_log_windows(coverage):

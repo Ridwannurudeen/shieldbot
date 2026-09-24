@@ -1733,7 +1733,7 @@ async def public_stats():
     the extension and agent firewalls scored; Telegram, /api/scan and launch scans do not add to them.
     Those counts and `transactions_blocked` are all time; each `_24h` field counts the same table over
     the last 24 hours (a contract counts when its latest scan falls in that window).
-    `unknown_ledger` sums, per provider and per chain, how often a provider request was answered,
+    `unknown_ledger` sums, per provider and per chain, how often a provider lookup was answered,
     came back unknown or failed since `counting_since` (core.unknown_ledger); it restarts with the
     process. GET /api/coverage/{chain_id} has one chain's providers in full.
     """
@@ -1793,13 +1793,15 @@ async def chain_coverage(chain_id: int):
 
     `capabilities`: `sell_simulation` is honeypot.is, eth_simulateV1, or goplus_reported (no sell is
     simulated; GoPlus's own flags only); `contract_age` and `verification` name the explorer each lookup
-    asks; `liquidity_lock` says whether any real locker is known (with only burn addresses known, lock
-    status is unknown); `router_allowlist` counts the swap routers configured as trusted on this chain;
-    `public_mempool` is yes when the mempool monitor read this chain on its last poll, unobservable
-    when the chain has a public mempool that was not read, and no when it has none; `approvals` says
-    whether a rescue scan reads the full approval history or only the newest `window_blocks` blocks.
+    asks (`contract_age` is null where no request can be sent: Robinhood Chain's creation lookup needs
+    the Blockscout gateway key, and without it verification is Sourcify alone); `liquidity_lock` says
+    whether any real locker is known (with only burn addresses known, lock status is unknown);
+    `router_allowlist` counts the swap routers configured as trusted on this chain; `public_mempool` is
+    yes when the mempool monitor read this chain on its last poll, unobservable when the chain has a
+    public mempool that was not read, and no when it has none; `approvals` says whether a rescue scan
+    reads the full approval history or only the newest `window_blocks` blocks.
     `provider_health` is this chain's Unknown ledger (core.unknown_ledger): per provider, how many
-    requests were answered, came back unknown or failed since `counting_since`, and the latest outcome;
+    lookups were answered, came back unknown or failed since `counting_since`, and the latest outcome;
     `chain_independent` holds providers asked about no chain. A provider with no entry has not been
     asked since the process started. Nothing here sends a request to any provider.
     """

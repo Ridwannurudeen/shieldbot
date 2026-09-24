@@ -585,15 +585,21 @@ class EvmAdapter(ChainAdapter):
         """What this chain's configuration lets a scan check, for GET /api/coverage/{chain_id}.
 
         sell_simulation is goplus_reported where no sell is simulated and honeypot and tax fields come
-        from GoPlus's own flags. Liquidity lock status is unknown on a chain whose only known lockers
-        are burn addresses: an unlocked pool cannot be told from one held by an unlisted locker.
+        from GoPlus's own flags. A Blockscout source is named only where a Blockscout request can be
+        sent; without one, contract_age is None (no other source is asked) and verification falls back
+        to Sourcify alone. Liquidity lock status is unknown on a chain whose only known lockers are burn
+        addresses: an unlocked pool cannot be told from one held by an unlisted locker.
         """
         lockers = [name for address, name in self._known_lockers.items() if address not in BURN_ADDRESSES]
+        blockscout = self._explorer_service.can_reach_blockscout(self._chain_id)
         return {
             'sell_simulation': 'honeypot.is' if self._honeypot_chain_id is not None else 'goplus_reported',
-            'contract_age': 'etherscan' if self._explorer_backend == 'etherscan' else 'blockscout',
+            'contract_age': (
+                'etherscan' if self._explorer_backend == 'etherscan' else 'blockscout' if blockscout else None
+            ),
             'verification': (
-                'sourcify+blockscout' if self._explorer_backend == 'sourcify_blockscout' else 'etherscan'
+                'etherscan' if self._explorer_backend != 'sourcify_blockscout'
+                else 'sourcify+blockscout' if blockscout else 'sourcify'
             ),
             'liquidity_lock': {'lockers': 'known' if lockers else 'unknown', 'known_lockers': lockers},
             'router_allowlist': {

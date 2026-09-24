@@ -144,23 +144,27 @@ class ExplorerService:
         )
         return result
 
+    def can_reach_blockscout(self, chain_id: int) -> bool:
+        """Whether a Blockscout request can be sent for chain_id: a public instance serves it, or the
+        PRO gateway's BLOCKSCOUT_API_KEY is set."""
+        return chain_id in BLOCKSCOUT_INSTANCES or bool(os.getenv("BLOCKSCOUT_API_KEY", ""))
+
     async def _blockscout(
         self, path: str, chain_id: int, params: dict | None = None
     ) -> ExplorerResult:
+        if not self.can_reach_blockscout(chain_id):
+            return ExplorerResult(
+                "unknown", reason="BLOCKSCOUT_API_KEY is missing", provider="blockscout"
+            )
         instance = BLOCKSCOUT_INSTANCES.get(chain_id)
         if instance:
             return await self._request(
                 "blockscout", f"{instance}/api/v2/{path}", params or {}, chain_id
             )
-        api_key = os.getenv("BLOCKSCOUT_API_KEY", "")
-        if not api_key:
-            return ExplorerResult(
-                "unknown", reason="BLOCKSCOUT_API_KEY is missing", provider="blockscout"
-            )
         return await self._request(
             "blockscout",
             f"https://api.blockscout.com/{chain_id}/api/v2/{path}",
-            {**(params or {}), "apikey": api_key},
+            {**(params or {}), "apikey": os.getenv("BLOCKSCOUT_API_KEY")},
             chain_id,
         )
 
