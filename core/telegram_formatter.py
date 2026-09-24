@@ -1,6 +1,33 @@
 """Formats composite risk data into a full Telegram intelligence report."""
 
+import re
+
 from core.extension_formatter import is_scan_incomplete
+
+# Replies are sent with Telegram's legacy Markdown, where these characters start an entity.
+_MARKUP = re.compile(r'([_*`\[])')
+# Token names are the token's own text, and flags and reasons can carry its revert strings, so
+# control characters and line separators are blanked before they reach a message.
+CONTROL_CHARACTERS = re.compile(r'[\x00-\x1f\x7f-\x9f\u2028\u2029]')
+
+
+def escape_markdown(value) -> str:
+    """Show an untrusted value literally in a legacy Markdown message, with no markup or line breaks.
+
+    Legacy Markdown has no escape for a backslash, and one ending a value would escape the markup
+    after it, so a backslash is shown as the look-alike SET MINUS.
+    """
+    text = CONTROL_CHARACTERS.sub(' ', str(value)).replace('\\', '\N{SET MINUS}')
+    return _MARKUP.sub(r'\\\1', text)
+
+
+def escape_markdown_lines(text: str) -> str:
+    """Escape multi-line AI text line by line, keeping its line breaks.
+
+    The model is asked for ** bold, which legacy Markdown renders as nothing, so it is dropped
+    rather than shown as asterisks.
+    """
+    return '\n'.join(escape_markdown(line) for line in text.replace('**', '').split('\n'))
 
 
 def format_full_report(
@@ -44,7 +71,7 @@ def format_full_report(
 
     # Target (with token name and symbol if available)
     if token_info and token_info.get('name') and token_info.get('symbol'):
-        lines.append(f'*Token:* {token_info["name"]} ({token_info["symbol"]})')
+        lines.append(f'*Token:* {escape_markdown(token_info["name"])} ({escape_markdown(token_info["symbol"])})')
         lines.append(f'*Address:* `{address}`')
     else:
         lines.append(f'*Target:* `{address}`')
@@ -58,7 +85,7 @@ def format_full_report(
     if flags:
         lines.append('*\U000026A0 Critical Flags:*')
         for flag in flags:
-            lines.append(f'  \u2022 {flag}')
+            lines.append(f'  \u2022 {escape_markdown(flag)}')
         lines.append('')
 
     # Category scores
@@ -68,7 +95,7 @@ def format_full_report(
         value = f'{score}/100' if score is not None else 'Unknown'
         reason = coverage_reasons.get(category)
         if reason:
-            value += f' ({reason})'
+            value += f' ({escape_markdown(reason)})'
         lines.append(f'  {category.title()}: {value}')
     lines.append('')
 
@@ -88,10 +115,10 @@ def format_full_report(
 
     bytecode_warnings = contract_data.get('bytecode_warnings', [])
     if bytecode_warnings:
-        lines.append(f'  Bytecode Warnings: {", ".join(bytecode_warnings)}')
+        lines.append(f'  Bytecode Warnings: {escape_markdown(", ".join(bytecode_warnings))}')
     source_patterns = contract_data.get('source_code_patterns', [])
     if source_patterns:
-        lines.append(f'  Source Patterns: {", ".join(source_patterns)}')
+        lines.append(f'  Source Patterns: {escape_markdown(", ".join(source_patterns))}')
     scam_matches = contract_data.get('scam_matches', [])
     if scam_matches:
         lines.append(f'  Scam DB Hits: {len(scam_matches)}')
@@ -101,7 +128,7 @@ def format_full_report(
 
     # Market intelligence
     lines.append('*\U0001F4CA Market Intelligence:*')
-    market_reason = dex_data.get('reason') or 'Provider data unavailable'
+    market_reason = escape_markdown(dex_data.get('reason') or 'Provider data unavailable')
     for key, label in (('liquidity_usd', 'Liquidity'), ('volume_24h', '24h Volume'), ('fdv', 'FDV')):
         value = dex_data.get(key)
         rendered = f'${value:,.0f}' if value is not None else f'Unknown ({market_reason})'
@@ -128,11 +155,11 @@ def format_full_report(
     # Wallet reputation
     lines.append('*\U0001F464 Wallet Reputation (Ethos):*')
     rep_score = ethos_data.get('reputation_score', 50)
-    trust = ethos_data.get('trust_level', 'unknown')
+    trust = escape_markdown(ethos_data.get('trust_level', 'unknown'))
     lines.append(f'  Score: {rep_score}  |  Trust: {trust}')
     ethos_flags = ethos_data.get('scam_flags', [])
     if ethos_flags:
-        lines.append(f'  Scam Flags: {", ".join(str(f) for f in ethos_flags)}')
+        lines.append(f'  Scam Flags: {escape_markdown(", ".join(str(f) for f in ethos_flags))}')
     linked = ethos_data.get('linked_wallets', [])
     if linked:
         lines.append(f'  Linked Wallets: {len(linked)}')
@@ -141,7 +168,9 @@ def format_full_report(
     # Trade simulation
     if honeypot_data is not None:
         lines.append('*\U0001F9EA Trade Simulation:*')
-        reason = honeypot_data.get('reason') or honeypot_data.get('honeypot_reason') or 'Provider data unavailable'
+        reason = escape_markdown(
+            honeypot_data.get('reason') or honeypot_data.get('honeypot_reason') or 'Provider data unavailable'
+        )
         is_honeypot = honeypot_data.get('is_honeypot')
         if is_honeypot is None or (honeypot_data.get('simulation_failed') and is_honeypot is False):
             hp = f'Unknown ({reason})'
@@ -165,7 +194,7 @@ def format_full_report(
     # AI Analysis
     if ai_analysis and not incomplete:
         lines.append('*\U0001F9E0 AI Analysis:*')
-        lines.append(ai_analysis)
+        lines.append(escape_markdown_lines(ai_analysis))
         lines.append('')
 
     # Final verdict

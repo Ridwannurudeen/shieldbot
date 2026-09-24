@@ -10,7 +10,6 @@ import sys
 import time
 import asyncio
 import logging
-import re
 import traceback
 
 import aiohttp
@@ -32,7 +31,9 @@ except ImportError:
 
 from core.config import Settings
 from core.container import ServiceContainer
-from core.telegram_formatter import format_full_report
+from core.telegram_formatter import (
+    CONTROL_CHARACTERS, escape_markdown, escape_markdown_lines, format_full_report,
+)
 from core.extension_formatter import is_scan_incomplete
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 from services.mempool_service import supports_pending_transactions
@@ -98,9 +99,6 @@ _LAUNCH_ALERT_HEADERS = {
     'cleared': '🟢 CLEARED: a complete scan found no major risks',
 }
 _UNKNOWN_LAUNCH_HEADER = '⚪ UNKNOWN: scan incomplete, not a safety verdict'
-# Flags and reasons can carry a token's own revert string, so control characters and line
-# separators are blanked before they reach an alert.
-_CONTROL_CHARACTERS = re.compile(r'[\x00-\x1f\x7f-\x9f\u2028\u2029]')
 _launch_alert_task = None
 
 
@@ -355,7 +353,7 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response = f"""✅ **Scam Report — Address Blacklisted**
 
 **Address:** `{address}`
-**Reason:** {reason}
+**Reason:** {escape_markdown(reason)}
 **Reporter:** User {update.effective_user.id}
 
 This address has been added to our local blacklist.
@@ -370,7 +368,7 @@ Future scans will flag it as a known scam.
         response = f"""📝 **Report Recorded**
 
 **Address:** `{address}`
-**Reason:** {reason}
+**Reason:** {escape_markdown(reason)}
 **Progress:** {result['reports']}/{result['needed']} independent reports needed to blacklist.
 
 Thank you — more reports from different users are needed before this address is blacklisted.
@@ -428,7 +426,7 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if incomplete:
             reasons = '; '.join(dict.fromkeys(result.get('coverage_reasons', {}).values())) or 'Approval data unavailable'
             response += f"🔴 High Risk: {high} | 🟡 Medium: {medium} | ⚪ Unconfirmed: {lower_risk}\n"
-            response += f"⚠️ **Scan incomplete:** {reasons}\n"
+            response += f"⚠️ **Scan incomplete:** {escape_markdown(reasons)}\n"
         else:
             response += f"🔴 High Risk: {high} | 🟡 Medium: {medium} | Lower risk: {lower_risk}\n"
 
@@ -447,9 +445,9 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 risk_icon = '🔴' if a['risk_level'] == 'HIGH' else '🟡'
                 symbol = a.get('token_symbol', '???')
                 spender_label = a.get('spender_label') or a.get('spender', '')[:10] + '...'
-                response += f"{risk_icon} {symbol} → {spender_label}"
+                response += f"{risk_icon} {escape_markdown(symbol)} → {escape_markdown(spender_label)}"
                 if a.get('risk_reason'):
-                    response += f" — {a['risk_reason']}"
+                    response += f" — {escape_markdown(a['risk_reason'])}"
                 response += "\n"
 
         # Show alerts
@@ -457,10 +455,10 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if alerts:
             response += "\n**Alerts:**\n"
             for alert in alerts[:5]:
-                response += f"⚠️ **{alert.get('title', 'Alert')}**\n"
-                response += f"  {alert.get('description', '')}\n"
+                response += f"⚠️ **{escape_markdown(alert.get('title', 'Alert'))}**\n"
+                response += f"  {escape_markdown(alert.get('description', ''))}\n"
                 if alert.get('what_you_can_do'):
-                    response += f"  💡 {alert['what_you_can_do']}\n"
+                    response += f"  💡 {escape_markdown(alert['what_you_can_do'])}\n"
 
         # Revoke instructions
         revoke_txs = result.get('revoke_txs', [])
@@ -573,8 +571,8 @@ async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 sev_icon = '🔴' if sev == 'HIGH' else '🟡'
                 atype = alert.get('alert_type', 'unknown').replace('_', ' ').title()
                 chain_name = get_chain_name(alert.get('chain_id', 56))
-                response += f"\n{sev_icon} **{atype}** ({chain_name})\n"
-                response += f"  {alert.get('description', 'No details')}\n"
+                response += f"\n{sev_icon} **{escape_markdown(atype)}** ({chain_name})\n"
+                response += f"  {escape_markdown(alert.get('description', 'No details'))}\n"
                 if alert.get('attacker_addr'):
                     response += f"  Attacker: `{alert['attacker_addr'][:16]}...`\n"
         else:
@@ -644,7 +642,7 @@ async def campaign_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if indicators:
             response += "\n**Indicators:**\n"
             for ind in indicators[:8]:
-                response += f"• {ind}\n"
+                response += f"• {escape_markdown(ind)}\n"
 
         # Cross-chain contracts
         xchain = graph.get('cross_chain_contracts', [])
@@ -737,10 +735,10 @@ def format_launch_alert(item: dict) -> str:
     lines = [header, f"Token: {item['token_address']}", f"Launchpad: {item['launchpad']}"]
     if header != _UNKNOWN_LAUNCH_HEADER and scan['risk_score'] is not None:
         lines.append(f"Risk score: {scan['risk_score']:g}/100")
-    lines += [f"• {_CONTROL_CHARACTERS.sub(' ', flag)[:150]}" for flag in scan['flags'][:3]]
+    lines += [f"• {CONTROL_CHARACTERS.sub(' ', flag)[:150]}" for flag in scan['flags'][:3]]
     if scan['status'] != 'ok':
         reasons = '; '.join(dict.fromkeys(
-            _CONTROL_CHARACTERS.sub(' ', reason) for reason in scan['coverage_reasons'].values()
+            CONTROL_CHARACTERS.sub(' ', reason) for reason in scan['coverage_reasons'].values()
         )) or 'Provider data unavailable or incomplete'
         lines.append(f"Unknown: {reasons[:300]}")
     lines.append(f"Evidence: {VERDICT_BASE_URL}{item['verdict_url']}")
@@ -1206,7 +1204,7 @@ def format_scan_result(result: dict) -> str:
         result.get('is_contract') is not False and result.get('is_verified') is None
     )
     if result.get('forensic_report') and not incomplete:
-        return result['forensic_report']
+        return escape_markdown_lines(result['forensic_report'])
 
     risk_emoji = {
         'high': '🔴',
@@ -1247,28 +1245,31 @@ def format_scan_result(result: dict) -> str:
     if result.get('scam_matches'):
         response += f"\n⚠️ **Warning:** Found {len(result['scam_matches'])} scam database match(es)\n"
         for match in result['scam_matches'][:3]:
-            response += f"• {match['type']}: {match['reason']}\n"
+            response += f"• {escape_markdown(match['type'])}: {escape_markdown(match['reason'])}\n"
 
     if result.get('warnings'):
         response += "\n**Warnings:**\n"
         for warning in result['warnings'][:5]:
-            response += f"• {warning}\n"
+            response += f"• {escape_markdown(warning)}\n"
 
     # AI structured risk score
     ai_risk = result.get('ai_risk_score')
     if ai_risk and not incomplete:
         response += f"\n🤖 **AI Risk Assessment:**\n"
-        response += f"Score: {ai_risk.get('risk_score', 'N/A')}/100 | Level: {ai_risk.get('risk_level', 'N/A')}\n"
+        response += (
+            f"Score: {escape_markdown(ai_risk.get('risk_score', 'N/A'))}/100 | "
+            f"Level: {escape_markdown(ai_risk.get('risk_level', 'N/A'))}\n"
+        )
         findings = ai_risk.get('key_findings', [])
         for f in findings[:3]:
-            response += f"• {f}\n"
+            response += f"• {escape_markdown(f)}\n"
         rec = ai_risk.get('recommendation', '')
         if rec:
-            response += f"💡 {rec}\n"
+            response += f"💡 {escape_markdown(rec)}\n"
 
     # Narrative AI analysis
     if result.get('ai_analysis') and not incomplete:
-        response += f"\n🧠 **AI Analysis:**\n{result['ai_analysis'][:500]}\n"
+        response += f"\n🧠 **AI Analysis:**\n{escape_markdown_lines(result['ai_analysis'][:500])}\n"
 
     return response
 
@@ -1281,7 +1282,7 @@ def format_token_result(result: dict) -> str:
         result.get(field) is None for field in ('is_honeypot', 'buy_tax', 'sell_tax')
     ) or result.get('checks', {}).get('can_sell') is None
     if result.get('forensic_report') and not incomplete:
-        return result['forensic_report']
+        return escape_markdown_lines(result['forensic_report'])
 
     safety_emoji = {
         'safe': '✅',
@@ -1302,7 +1303,7 @@ def format_token_result(result: dict) -> str:
     response = f"""
 💰 **Token Safety Report**
 
-**Token:** {result.get('name', 'Unknown')} ({result.get('symbol', 'N/A')})
+**Token:** {escape_markdown(result.get('name', 'Unknown'))} ({escape_markdown(result.get('symbol', 'N/A'))})
 **Address:** `{result['address']}`
 **Safety:** {emoji} {safety_level.upper()}
 **Risk Score:** {score} (Confidence: {result.get('confidence', 'N/A')}%)
@@ -1325,7 +1326,7 @@ def format_token_result(result: dict) -> str:
     if result.get('risks'):
         response += "\n**Risks Detected:**\n"
         for risk in result['risks'][:6]:
-            response += f"• {risk}\n"
+            response += f"• {escape_markdown(risk)}\n"
 
     buy_tax = result.get('buy_tax')
     sell_tax = result.get('sell_tax')
@@ -1337,17 +1338,20 @@ def format_token_result(result: dict) -> str:
     ai_risk = result.get('ai_risk_score')
     if ai_risk and not incomplete:
         response += f"\n🤖 **AI Risk Assessment:**\n"
-        response += f"Score: {ai_risk.get('risk_score', 'N/A')}/100 | Level: {ai_risk.get('risk_level', 'N/A')}\n"
+        response += (
+            f"Score: {escape_markdown(ai_risk.get('risk_score', 'N/A'))}/100 | "
+            f"Level: {escape_markdown(ai_risk.get('risk_level', 'N/A'))}\n"
+        )
         findings = ai_risk.get('key_findings', [])
         for f in findings[:3]:
-            response += f"• {f}\n"
+            response += f"• {escape_markdown(f)}\n"
         rec = ai_risk.get('recommendation', '')
         if rec:
-            response += f"💡 {rec}\n"
+            response += f"💡 {escape_markdown(rec)}\n"
 
     # Narrative AI analysis
     if result.get('ai_analysis') and not incomplete:
-        response += f"\n🧠 **AI Analysis:**\n{result['ai_analysis'][:500]}\n"
+        response += f"\n🧠 **AI Analysis:**\n{escape_markdown_lines(result['ai_analysis'][:500])}\n"
 
     return response
 

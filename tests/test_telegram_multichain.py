@@ -114,6 +114,7 @@ def bot_chain_functions():
     import asyncio
     from utils.web3_client import UnsupportedChainError, Web3Client
     from core.extension_formatter import is_scan_incomplete
+    from core.telegram_formatter import escape_markdown
     from services.mempool_service import supports_pending_transactions
 
     # Load the real menu handlers without importing the optional Telegram package.
@@ -139,6 +140,7 @@ def bot_chain_functions():
     namespace = {
         'asyncio': asyncio,
         'is_scan_incomplete': is_scan_incomplete,
+        'escape_markdown': escape_markdown,
         'UnsupportedChainError': UnsupportedChainError,
         'logger': MagicMock(),
         'container': services,
@@ -368,13 +370,14 @@ def bot_report_functions(bot_chain_functions):
     import ast
     from pathlib import Path
     from core.extension_formatter import is_scan_incomplete
-    from core.telegram_formatter import format_full_report
+    from core.telegram_formatter import escape_markdown_lines, format_full_report
     tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
     names = {'format_scan_result', 'format_token_result'}
     module = ast.Module(body=[node for node in tree.body if isinstance(node, ast.FunctionDef)
                              and node.name in names], type_ignores=[])
     bot_chain_functions['is_scan_incomplete'] = is_scan_incomplete
     bot_chain_functions['format_full_report'] = format_full_report
+    bot_chain_functions['escape_markdown_lines'] = escape_markdown_lines
     exec(compile(module, 'bot.py', 'exec'), bot_chain_functions)
     return bot_chain_functions
 

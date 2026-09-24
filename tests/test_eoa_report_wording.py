@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from core.extension_formatter import is_scan_incomplete
-from core.telegram_formatter import format_full_report
+from core.telegram_formatter import escape_markdown, escape_markdown_lines, format_full_report
 from scanner.transaction_scanner import TransactionScanner
 
 
@@ -26,7 +26,11 @@ def format_scan_result():
         ],
         type_ignores=[],
     )
-    namespace = {"is_scan_incomplete": is_scan_incomplete}
+    namespace = {
+        "is_scan_incomplete": is_scan_incomplete,
+        "escape_markdown": escape_markdown,
+        "escape_markdown_lines": escape_markdown_lines,
+    }
     exec(compile(module, "bot.py", "exec"), namespace)
     return namespace["format_scan_result"]
 
