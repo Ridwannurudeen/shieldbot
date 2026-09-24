@@ -241,6 +241,19 @@
   // Host element of the overlay on screen, if any.
   let _overlayHost = null;
 
+  // A page can hide the overlay, cover it or make it see-through, and lay
+  // something of its own over it so a click the user means for the page lands
+  // on Proceed (clickjacking). This cannot be fully prevented; two things
+  // make it harder. Proceed and Sign Anyway stay disabled for half a second
+  // after an overlay appears, so a click aimed at what was there before does
+  // not land on them. And they do nothing while the dialog is not visible by
+  // the latest IntersectionObserver v2 report (off screen, covered, or made
+  // transparent, filtered or transformed). The dialog is watched rather than
+  // the host, which has no area of its own: its content is position: fixed.
+  const PROCEED_DELAY_MS = 500;
+  let _overlayVisible = false;
+  let _visibilityObserver = null;
+
   // The request whose overlay is waiting for the user. inject.js stops its
   // no-verdict timeout once it knows the overlay is on screen, so a request
   // whose overlay goes away without a decision is rejected here.
@@ -258,6 +271,7 @@
     if (_overlayHost) {
       _overlayHost.remove();
       _overlayHost = null;
+      _visibilityObserver.disconnect();
     }
     if (_awaitingRequestId !== null) {
       const requestId = _awaitingRequestId;
@@ -273,10 +287,13 @@
   }
 
   // A decision button acts only on real user input: a synthetic click from a
-  // page script is an untrusted event and is ignored.
+  // page script is an untrusted event and is ignored. Proceed also needs the
+  // button enabled and the dialog visible (see PROCEED_DELAY_MS).
   function onDecision(root, id, requestId, action) {
-    root.getElementById(id).addEventListener("click", (event) => {
+    const button = root.getElementById(id);
+    button.addEventListener("click", (event) => {
       if (!event.isTrusted) return;
+      if (action === "proceed" && (button.disabled || !_overlayVisible)) return;
       sendVerdict(requestId, action);
     });
   }
@@ -313,6 +330,18 @@
     });
     (document.body || document.documentElement).appendChild(host);
     _overlayHost = host;
+    const proceed = root.getElementById("shieldai-proceed");
+    if (proceed) {
+      proceed.disabled = true;
+      setTimeout(() => {
+        proceed.disabled = false;
+      }, PROCEED_DELAY_MS);
+    }
+    _overlayVisible = false;
+    _visibilityObserver = new IntersectionObserver((entries) => {
+      if (_overlayHost === host) _overlayVisible = entries[entries.length - 1].isVisible === true;
+    }, { trackVisibility: true, delay: 100 });
+    _visibilityObserver.observe(modal);
     // If the page removes the overlay, the user can no longer decide here:
     // reject the request so the dApp is not left waiting. The whole document
     // is watched, so replacing the root element or document.open() counts.

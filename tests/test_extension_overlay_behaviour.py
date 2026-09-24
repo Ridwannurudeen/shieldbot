@@ -153,6 +153,27 @@ async function proofFor(token, message) {
 }
 const bytes = value => Array.from(value || []);
 const plain = value => JSON.parse(JSON.stringify(value));
+// IntersectionObserver v2 double: it reports whether the observed element is visible (on screen,
+// not covered, not made see-through), once when observed and again whenever a test calls
+// reportVisibility.
+let overlayVisible = true;
+const visibilityObservers = new Set();
+class FakeIntersectionObserver {
+  constructor(callback, options) { this.callback = callback; this.options = options; }
+  observe(target) { this.target = target; visibilityObservers.add(this); queueMicrotask(() => this.report()); }
+  report() { this.callback([{target: this.target, isVisible: overlayVisible}]); }
+  disconnect() { visibilityObservers.delete(this); }
+}
+function reportVisibility(visible) {
+  overlayVisible = visible;
+  for (const observer of [...visibilityObservers]) observer.report();
+}
+// content.js keeps Proceed disabled for half a second after an overlay appears. The tests run it
+// without that wait, except the one that checks the wait itself.
+function withoutProceedDelay(source) {
+  assert(source.includes('const PROCEED_DELAY_MS = 500;'));
+  return source.replace('const PROCEED_DELAY_MS = 500;', 'const PROCEED_DELAY_MS = 0;');
+}
 """
 
 CONTENT_HARNESS = (
@@ -178,13 +199,14 @@ const chrome = {
 const context = vm.createContext({
   window, document, chrome, crypto: webcrypto, TextEncoder, TextDecoder, CustomEvent, setTimeout, clearTimeout,
   console, Date: {now: () => clock}, MutationObserver: FakeMutationObserver,
+  IntersectionObserver: FakeIntersectionObserver,
   fetch: async url => {
     const delay = fetchDelays.shift();
     if (delay) await new Promise(resolve => setTimeout(resolve, delay));
     return {json: async () => JSON.parse(fs.readFileSync(url.replace('chrome-extension://id/', 'extension/'), 'utf8'))};
   },
 });
-vm.runInContext(fs.readFileSync('extension/content.js', 'utf8'), context);
+vm.runInContext(withoutProceedDelay(fs.readFileSync('extension/content.js', 'utf8')), context);
 // Play inject.js's side of the document_start handoff: it starts after content.js and asks.
 let token = null;
 document.addEventListener('shieldai:channel', event => { token = event.detail; event.preventDefault(); });
@@ -470,6 +492,62 @@ def test_focus_that_leaves_the_overlay_returns_to_the_dialog():
   block.focus();
   overlay().dispatch('focusout', {target: explain, relatedTarget: block});
   assert.equal(root.activeElement, block, 'focus moving inside the dialog must stay where it went');
+"""
+    )
+
+
+@pytest.mark.parametrize("kind", ["analysis", "signature"])
+def test_proceed_does_nothing_while_the_overlay_is_not_visible(kind):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const kind = JSON.parse(process.argv[1]);
+  analyze = async () => ({result: scan({})});
+  if (kind === 'signature') {
+    await intercept('request', {signMethod: 'personal_sign', data: '0x68656c6c6f'}, 'personal_sign');
+  } else {
+    await intercept('request');
+  }
+  const [observer] = visibilityObservers;
+  assert.deepEqual(plain(observer.options), {trackVisibility: true, delay: 100});
+  assert(observer.target.className.includes('shieldai-modal'), 'the dialog itself should be watched');
+  // Covered, moved off screen or made see-through by the page: a click there is not the user's choice.
+  reportVisibility(false);
+  userClick(byId('shieldai-proceed'));
+  await flush();
+  assert.deepEqual(verdicts(), []);
+  assert(overlay(), 'the overlay closed');
+  reportVisibility(true);
+  userClick(byId('shieldai-proceed'));
+  await flush();
+  await assertVerdicts([['request', 'proceed']]);
+""",
+        kind,
+    )
+
+
+def test_proceed_is_enabled_only_half_a_second_after_the_overlay_appears():
+    run_node(
+        CONTENT_HARNESS.replace(
+            "withoutProceedDelay(fs.readFileSync('extension/content.js', 'utf8'))",
+            "fs.readFileSync('extension/content.js', 'utf8')",
+        )
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('request');
+  const proceed = byId('shieldai-proceed');
+  assert(proceed.disabled, 'Proceed was enabled at once');
+  assert(!byId('shieldai-block').disabled, 'Block should never wait');
+  userClick(proceed);
+  await flush();
+  assert.deepEqual(verdicts(), [], 'a click in the first half second counted');
+  await new Promise(resolve => setTimeout(resolve, 500));
+  assert(!proceed.disabled);
+  userClick(proceed);
+  await flush();
+  await assertVerdicts([['request', 'proceed']]);
 """
     )
 
@@ -1094,7 +1172,7 @@ const chrome = {
 };
 const contentWorld = vm.createContext({
   window, document, chrome, crypto: webcrypto, TextEncoder, TextDecoder, CustomEvent, setTimeout, clearTimeout,
-  console, Date, MutationObserver: FakeMutationObserver,
+  console, Date, MutationObserver: FakeMutationObserver, IntersectionObserver: FakeIntersectionObserver,
   fetch: async url => ({json: async () => JSON.parse(fs.readFileSync(url.replace('chrome-extension://id/', 'extension/'), 'utf8'))}),
 });
 const pageWorld = vm.createContext({
@@ -1108,9 +1186,19 @@ const pageWorld = vm.createContext({
 const offers = [];
 document.addEventListener('shieldai:channel', event => offers.push(event.detail));
 for (const script of order === 'content-first' ? ['content', 'inject'] : ['inject', 'content']) {
-  vm.runInContext(fs.readFileSync(`extension/${script}.js`, 'utf8'), script === 'content' ? contentWorld : pageWorld);
+  const source = fs.readFileSync(`extension/${script}.js`, 'utf8');
+  vm.runInContext(script === 'content' ? withoutProceedDelay(source) : source, script === 'content' ? contentWorld : pageWorld);
 }
 const overlayRoot = () => { const host = body.children.find(el => el.shadow); return host ? host.shadow : null; };
+// The Proceed or Sign Anyway button once the overlay shows it enabled.
+async function proceedButton() {
+  for (let i = 0; i < 20; i++) {
+    const button = overlayRoot()?.getElementById('shieldai-proceed');
+    if (button && !button.disabled) return button;
+    await flush();
+  }
+  assert.fail('no enabled Proceed button appeared');
+}
 """
 )
 
@@ -1160,10 +1248,10 @@ def test_documents_the_page_can_reach_first_get_no_key_and_reject_requests(kind,
   await flush();
   assert.equal(notices().length, 0);
   const pending = provider.request({method: 'eth_sendTransaction', params: [tx]});
-  for (let i = 0; i < 20 && !overlayRoot()?.getElementById('shieldai-proceed'); i++) await flush();
+  const proceed = await proceedButton();
   assert.equal(sent.length, 0, 'the transaction reached the wallet before the user decided');
   assert.equal(intercepts().length, 1);
-  overlayRoot().getElementById('shieldai-proceed').dispatch('click', {isTrusted: true});
+  proceed.dispatch('click', {isTrusted: true});
   assert.equal(await pending, 'sent');
   assert.equal(sent.length, 1);
 """,
@@ -1181,13 +1269,13 @@ def test_legacy_typed_data_is_shown_field_by_field_end_to_end(method):
   // MetaMask's legacy form: an array of typed fields first, then the address.
   const legacy = [{type: 'string', name: 'Message', value: 'Hi there'}, {type: 'uint32', name: 'A number', value: '1337'}];
   const pending = provider.request({method, params: [legacy, '0x' + 'b'.repeat(40)]});
-  for (let i = 0; i < 20 && !overlayRoot()?.getElementById('shieldai-proceed'); i++) await flush();
+  const proceed = await proceedButton();
   const html = overlayRoot().getElementById('shieldai-overlay').innerHTML;
   assert(html.includes('<td>Message</td><td>string</td><td>Hi there</td>'), html);
   assert(html.includes('<td>A number</td><td>uint32</td><td>1337</td>'), html);
   assert(html.includes('SIGNATURE REQUEST') && !html.includes('UNPARSEABLE'), html);
   assert.equal(sent.length, 0);
-  overlayRoot().getElementById('shieldai-proceed').dispatch('click', {isTrusted: true});
+  proceed.dispatch('click', {isTrusted: true});
   assert.equal(await pending, 'sent');
   assert.deepEqual(plain(sent[0].params), plain([legacy, '0x' + 'b'.repeat(40)]));
 """,
