@@ -1115,14 +1115,30 @@ def test_simulate_transaction_rejects_an_invalid_address(client, mock_container,
     mock_container.tenderly_simulator.is_enabled.assert_not_called()
 
 
-@pytest.mark.parametrize("value", ["abc", "1.5", "0x", "0xzz", "", 10])
+@pytest.mark.parametrize("value", [
+    "abc", "1.5", "0x", "0xzz", "", 10,
+    "1" * 4301, "0x" + "f" * 65, str(2**256), "0x1" + "0" * 64,
+])
 def test_simulate_transaction_rejects_a_value_that_is_not_wei(client, mock_container, value):
     # The simulator would otherwise replace an unparseable value with 0 and simulate a different transaction.
     arguments = {**FULL_ARGUMENTS["simulate_transaction"], "value": value}
     assert _tool_error(client, "simulate_transaction", arguments) == (
-        "Invalid argument: value must be a decimal or 0x-prefixed hex amount of wei"
+        "Invalid argument: value must be a decimal or 0x-prefixed hex amount of wei below 2**256"
     )
     mock_container.tenderly_simulator.is_enabled.assert_not_called()
+
+
+@pytest.mark.parametrize("value,passed", [
+    ("0", "0"), ("007", "7"), ("0x10", "16"), ("0X10", "16"),
+    ("0x" + "f" * 64, str(2**256 - 1)), (str(2**256 - 1), str(2**256 - 1)),
+])
+def test_simulate_transaction_passes_the_value_on_as_a_decimal(client, mock_container, value, passed):
+    mock_container.tenderly_simulator.is_enabled.return_value = True
+    client.post("/mcp/messages", json={
+        "jsonrpc": "2.0", "id": 18, "method": "tools/call",
+        "params": {"name": "simulate_transaction", "arguments": {**FULL_ARGUMENTS["simulate_transaction"], "value": value}},
+    }, headers=AUTH_HEADERS)
+    assert mock_container.tenderly_simulator.simulate_transaction.call_args.kwargs["value"] == passed
 
 
 def test_unknown_results_are_described_to_the_client():

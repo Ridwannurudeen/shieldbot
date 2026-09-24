@@ -15,7 +15,8 @@ from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 logger = logging.getLogger(__name__)
 
 _ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
-_WEI_RE = re.compile(r"0[xX][0-9a-fA-F]+|[0-9]+")
+# Bounded so int() never meets a huge literal: 64 hex digits or 78 decimal digits cover 2**256 - 1.
+_WEI_RE = re.compile(r"0[xX][0-9a-fA-F]{1,64}|[0-9]{1,78}")
 _CHAIN_ID_DESCRIPTION = (
     "Chain ID of the chain the address or transaction is on; required, there is no default. "
     "Every chain ShieldBot supports is accepted, including 56 = BNB Chain and 4663 = Robinhood Chain; "
@@ -247,9 +248,13 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
     to_addr = _validate_address(_require(params, "to"))
     data = _require(params, "data")
     value = params.get("value", "0")
-    # The simulator replaces an unparseable value with 0, which would simulate a different transaction.
-    if not isinstance(value, str) or not _WEI_RE.fullmatch(value):
-        raise ValueError("Invalid argument: value must be a decimal or 0x-prefixed hex amount of wei")
+    # The simulator replaces an unparseable value with 0, which would simulate a different transaction,
+    # so only a wei amount below 2**256 is accepted, and it is passed on as a decimal string.
+    wei = None
+    if isinstance(value, str) and _WEI_RE.fullmatch(value):
+        wei = int(value, 16) if value[:2].lower() == "0x" else int(value)
+    if wei is None or wei >= 2**256:
+        raise ValueError("Invalid argument: value must be a decimal or 0x-prefixed hex amount of wei below 2**256")
     chain_id = _require_chain_id(container, params)
 
     if not container.tenderly_simulator.is_enabled():
@@ -269,7 +274,7 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
     result = await container.tenderly_simulator.simulate_transaction(
         to_address=to_addr,
         from_address=from_addr,
-        value=value,
+        value=str(wei),
         data=data,
         chain_id=chain_id,
     )
