@@ -2497,6 +2497,14 @@ class Database:
                 retry_after REAL NOT NULL DEFAULT 0,
                 PRIMARY KEY (chain_id, subject)
             );
+
+            -- Which process may send (services.verdict_publisher), until expires_at unless it renews.
+            CREATE TABLE IF NOT EXISTS sender_leases (
+                name TEXT PRIMARY KEY,
+                holder TEXT NOT NULL,
+                expires_at REAL NOT NULL,
+                renewed_at REAL NOT NULL
+            );
         """)
         # Lowering the configured cap retires excess registrations deterministically.
         await self._db.execute("""
@@ -2827,6 +2835,36 @@ class Database:
             UPDATE verdict_evidence SET onchain_status = 'pending', updated_at = ?
             WHERE id = ? AND onchain_status = 'sending'
         """, (time.time(), evidence_id))
+        await outbox.commit()
+
+    async def take_sender_lease(self, name: str, holder: str, seconds: float) -> Tuple[str, float]:
+        """Take or renew the named lease for `holder` for `seconds`, unless another holder's lease is still live.
+
+        One conditional upsert, atomic in SQLite, so however many processes ask at once, one holds the lease.
+        Returns the lease's holder and expiry (Unix time) after the attempt.
+        """
+        outbox = await self._outbox()
+        now = time.time()
+        # A failure or a cancellation between the upsert and its commit must not leave the write lock held.
+        try:
+            await outbox.execute("""
+                INSERT INTO sender_leases (name, holder, expires_at, renewed_at) VALUES (?, ?, ?, ?)
+                ON CONFLICT (name) DO UPDATE SET
+                    holder = excluded.holder, expires_at = excluded.expires_at, renewed_at = excluded.renewed_at
+                WHERE sender_leases.holder = excluded.holder OR sender_leases.expires_at <= excluded.renewed_at
+            """, (name, holder, now + seconds, now))
+            await outbox.commit()
+        except BaseException:
+            await outbox.rollback()
+            raise
+        cursor = await outbox.execute("SELECT holder, expires_at FROM sender_leases WHERE name = ?", (name,))
+        row = await cursor.fetchone()
+        return row[0], row[1]
+
+    async def release_sender_lease(self, name: str, holder: str):
+        """Give up the named lease if `holder` holds it."""
+        outbox = await self._outbox()
+        await outbox.execute("DELETE FROM sender_leases WHERE name = ? AND holder = ?", (name, holder))
         await outbox.commit()
 
     async def requeue_verdict(self, evidence_id: int):

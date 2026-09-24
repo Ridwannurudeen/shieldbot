@@ -270,7 +270,8 @@ bot, and every other path, only stores evidence and queues Robinhood Chain verdi
 SQLite database; the bot code never reads the key.
 
 **The API must run as a single uvicorn process: no `--workers` and no `--reload`** (as in `shieldbot-api.service`
-in this repository). Two API processes would be two senders racing for the recorder's nonces.
+in this repository). Two API processes would be two drains. The sender lease in the database lets only one of them
+send at a time (docs/DEPLOYMENT.md), but one process is still the supported setup.
 
 **With `BACKGROUND_WORKERS=external`** (docs/DEPLOYMENT.md) the drain runs in `workers.py`, under the
 `shieldbot-workers` unit, and the API starts none. Where this section says the API unit, read `shieldbot-workers`:

@@ -207,8 +207,16 @@ registry records, guard subjects and verdict permalinks.
 **The recorder key moves with the drain.** With `external`, workers.py is the only process that signs verdict
 transactions. The key file `/etc/shieldbot/recorder.env` must be loaded by the workers unit and removed from the
 API unit. Set `BACKGROUND_WORKERS=external` in the shared `/opt/shieldbot/.env`, which both units read: an API
-that reads `api` beside a running workers.py would be a second sender racing for the recorder's nonces.
-workers.py refuses to start unless it reads `external`, but it cannot see what the API reads.
+that reads `api` beside a running workers.py would run a second drain. workers.py refuses to start unless it
+reads `external`, but it cannot see what the API reads.
+
+If two drains do run on the database, they do not race for the recorder's nonces: a drain sends only while it holds
+the sender lease (the `sender_leases` table) and renews it every 15 seconds. The other logs
+`Robinhood verdict registry: not sending, <host:pid:id> holds the sender lease until ...` once a minute and waits.
+It takes over only when the holder has gone 60 seconds without renewing: after a crash, or when renewals keep
+failing, in which case the holder stops claiming rows about 45 seconds after its last renewal. A send already under
+way when that happens still finishes. A clean stop releases the lease at once, unless a send is still under
+way. The holder's id names its host and process id.
 
 To turn it on, as root:
 

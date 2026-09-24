@@ -6,8 +6,9 @@ Every process (API, hunter, bot) calls publish(), which only STORES the canonica
 
 Exactly one process sends: the API process calls start(), which reads ROBINHOOD_RECORDER_PRIVATE_KEY and runs a
 drain that records pending rows oldest-first. With BACKGROUND_WORKERS=external workers.py calls it instead and
-the API does not. No other code path reads the key, so the bot never sends and two processes can never race for
-the recorder's nonces.
+the API does not. No other code path reads the key, so the bot never sends. A drain sends only while it holds the
+sender lease in the database, so two drains started by mistake on one database never race for the recorder's
+nonces: the second waits until the first's lease expires.
 
 Each row moves through onchain_status:
   off          stored only (another chain, or no registry configured)
@@ -67,6 +68,8 @@ import json
 import logging
 import os
 import re
+import secrets
+import socket
 import time
 import traceback
 from collections import deque
@@ -134,6 +137,13 @@ RECONCILE_BATCH = 5
 MAX_SEND_ATTEMPTS = 5
 # stop() waits this long for a send under way to record its outcome.
 STOP_TIMEOUT_SECONDS = 30
+# Only the drain holding this lease in the database sends. The holder renews it every LEASE_RENEW_SECONDS, and
+# stops sending once a renewal finds another holder, or once renewals have failed until less than one renewal
+# period of the lease is left. A holder that dies keeps the lease until LEASE_SECONDS after its last renewal; a
+# drain waiting for it asks again every LEASE_SECONDS.
+LEASE_NAME = f"verdict-drain:{CHAIN_ID}"
+LEASE_SECONDS = 60.0
+LEASE_RENEW_SECONDS = 15.0
 # After this many consecutive waits on an earlier transaction, the drain says so loudly.
 WAIT_ALARM_AFTER = 10
 # After this many broadcasts of the same signed bytes, the drain says so loudly. Re-sends are at least
@@ -180,6 +190,10 @@ class VerdictPublisher:
         self._tasks = set()
         self._drain_task = None
         self._wake = None
+        self._lease_holder = None
+        self._holds_lease = False
+        # Set when the lease is lost: the drain loop then returns before it claims another row.
+        self._lease_lost = False
         self._waits = 0
         # Per row, the bytes last broadcast again and how often in a row: {evidence_id: (tx_hash, count)}.
         self._resends = {}
@@ -307,20 +321,32 @@ class VerdictPublisher:
             )
             return
         self.recorder = self._account.address
+        self._lease_holder = f"{socket.gethostname()}:{os.getpid()}:{secrets.token_hex(4)}"
         self._wake = asyncio.Event()
-        self._drain_task = asyncio.create_task(self._drain_loop())
-        logger.info("Robinhood verdict registry: sending as recorder %s", self.recorder)
+        self._drain_task = asyncio.create_task(self._drain_under_lease())
 
     def stop(self) -> "asyncio.Future":
         """Stop the drain now; returns an awaitable that finishes when sends already under way have finished.
 
         The drain loop is cancelled at once. Sends are shielded, so they run on; awaiting the result waits for them
-        for at most STOP_TIMEOUT_SECONDS, which lets them record their outcome before the database closes.
+        for at most STOP_TIMEOUT_SECONDS, which lets them record their outcome before the database closes. Then the
+        sender lease is released, unless a send is still under way: the lease then expires on its own.
         """
         if self._drain_task is not None:
             self._drain_task.cancel()
             self._drain_task = None
-        return asyncio.ensure_future(self._settle_sends())
+        return asyncio.ensure_future(self._stop_sending())
+
+    async def _stop_sending(self) -> None:
+        await self._settle_sends()
+        if not self._holds_lease or self._tasks:
+            return
+        self._holds_lease = False
+        # Best effort: a lease that is not released expires within LEASE_SECONDS.
+        try:
+            await self._db.release_sender_lease(LEASE_NAME, self._lease_holder)
+        except Exception as e:
+            logger.warning("Robinhood verdict registry: sender lease not released: %s", type(e).__name__)
 
     async def _settle_sends(self) -> None:
         tasks = list(self._tasks)
@@ -333,11 +359,76 @@ class VerdictPublisher:
                 len(unfinished),
             )
 
+    async def _drain_under_lease(self) -> None:
+        """Run the drain only while this process holds the sender lease, renewing it as the drain runs.
+
+        The lease is renewed beside the drain rather than between its turns: one send can take longer than
+        LEASE_SECONDS, and so can the drain's waits after a failure or at the rate cap. A drain that loses the lease
+        finishes the send under way, if any, and returns before it claims another row; it is stopped that way
+        rather than cancelled, so no write of its own is cut off between a statement and its commit. Then this
+        process waits for the lease again.
+        """
+        while True:
+            try:
+                held_until = await self._take_lease()
+            except Exception as e:
+                logger.error(
+                    "Robinhood verdict registry: not sending, the sender lease could not be taken: %s",
+                    type(e).__name__,
+                )
+                held_until = None
+            if held_until is None:
+                await asyncio.sleep(LEASE_SECONDS)
+                continue
+            logger.info("Robinhood verdict registry: sending as recorder %s", self.recorder)
+            drain = asyncio.create_task(self._drain_loop())
+            try:
+                await self._keep_lease(held_until)
+                self._lease_lost = True
+                self._wake.set()
+                await drain
+            finally:
+                drain.cancel()
+            self._lease_lost = False
+            self._holds_lease = False
+            logger.error("Robinhood verdict registry: stopped sending, this process no longer holds the sender lease")
+
+    async def _take_lease(self) -> Optional[float]:
+        """Take or renew the sender lease; the monotonic time it is held until, or None if another drain holds it."""
+        asked_at = time.monotonic()
+        holder, expires_at = await self._db.take_sender_lease(LEASE_NAME, self._lease_holder, LEASE_SECONDS)
+        if holder != self._lease_holder:
+            logger.warning(
+                "Robinhood verdict registry: not sending, %s holds the sender lease until %s UTC; asking again in %d s",
+                holder,
+                time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(expires_at)),
+                LEASE_SECONDS,
+            )
+            return None
+        self._holds_lease = True
+        return asked_at + LEASE_SECONDS
+
+    async def _keep_lease(self, held_until: float) -> None:
+        """Renew the lease every LEASE_RENEW_SECONDS. Returns once another drain holds it, or once failed renewals
+        leave less than one renewal period of it, so the drain stops before the lease can pass to another."""
+        while True:
+            await asyncio.sleep(LEASE_RENEW_SECONDS)
+            try:
+                renewed = await self._take_lease()
+            except Exception as e:
+                logger.error("Robinhood verdict registry: sender lease not renewed: %s", type(e).__name__)
+                if time.monotonic() >= held_until - LEASE_RENEW_SECONDS:
+                    return
+                continue
+            if renewed is None:
+                return
+            held_until = renewed
+
     async def _drain_loop(self) -> None:
         await self._recover_claims()
         await self._reconcile()
         backoff = 0.0
-        while True:
+        while not self._lease_lost:
             self._wake.clear()
             try:
                 outcome = await self.drain_once()
