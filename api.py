@@ -159,6 +159,7 @@ async def lifespan(app: FastAPI):
     await container.startup()
     await container.start_mempool_monitor()
     container.verdict_publisher.start()
+    await container.phishing_service.start()
 
     # Initialize RPC proxy if enabled
     if settings.rpc_proxy_enabled:
@@ -198,6 +199,7 @@ async def lifespan(app: FastAPI):
     yield
     await container.launch_watch.stop()
     await container.hunter.stop()
+    await container.phishing_service.stop()
     await container.verdict_publisher.stop()
     await container.shutdown()
     rpc_proxy = getattr(app.state, "rpc_proxy", None)
@@ -644,8 +646,10 @@ async def check_phishing(url: str, request: Request):
     """Check if a URL is a known phishing site.
 
     Called by the Chrome extension content script on every page load.
-    Verdicts are cached server-side for 1 hour per domain; when GoPlus gives no answer the
-    result is is_phishing null with a reason, held for 45 seconds per domain.
+    A host on MetaMask's open phishing list (refreshed hourly) is phishing with source "metamask";
+    otherwise GoPlus decides. GoPlus verdicts are cached server-side for 1 hour per domain; when neither
+    source flags the host and GoPlus gives no answer, the result is is_phishing null with a reason,
+    held for 45 seconds per domain.
     No API key required — rate-limited by IP via the existing middleware.
     """
     if not container or not container.phishing_service:

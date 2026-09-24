@@ -1,7 +1,9 @@
+import asyncio
 import time
 import logging
 import aiohttp
 from cachetools import TTLCache
+from typing import Optional
 from urllib.parse import quote, urlparse
 
 logger = logging.getLogger(__name__)
@@ -10,18 +12,143 @@ GOPLUS_PHISHING_URL = "https://api.gopluslabs.io/api/v1/phishing_site"
 CACHE_TTL = 3600  # Cache results for 1 hour per domain
 NO_VERDICT_TTL = 45  # During a GoPlus outage, ask about each domain at most this often
 CACHE_MAXSIZE = 10_000  # Domains held at once; when full, expired then least recently used go first
+# MetaMask's open phishing list (eth-phishing-detect, config version 2; about 100,000 domains on 2026-09-24).
+METAMASK_CONFIG_URL = "https://raw.githubusercontent.com/MetaMask/eth-phishing-detect/main/src/config.json"
+METAMASK_REFRESH_SECONDS = 3600
+# After a failed fetch the last good copy stays in use, and the list is asked for again this much sooner.
+METAMASK_RETRY_SECONDS = 300
+METAMASK_TIMEOUT_SECONDS = 60
+
+
+def parse_metamask_config(payload) -> tuple:
+    """(blocked domains, allowed domains, fuzzy targets, tolerance) from an eth-phishing-detect version 2 config.
+
+    Raises ValueError for anything else, so a changed or broken response never replaces a good list.
+    Entries with a path (sites.google.com/view/...) block a page, not a host; checks are cached per host,
+    so they are left out.
+    """
+    if not isinstance(payload, dict) or payload.get("version") != 2:
+        raise ValueError("Not a version 2 config")
+    tolerance = payload.get("tolerance")
+    if type(tolerance) is not int or tolerance < 0:
+        raise ValueError("Malformed tolerance")
+    lists = {}
+    for name in ("blacklist", "whitelist", "fuzzylist"):
+        entries = payload.get(name)
+        if not isinstance(entries, list) or not all(isinstance(entry, str) for entry in entries):
+            raise ValueError(f"Malformed {name}")
+        lists[name] = [entry.lower().rstrip(".") for entry in entries if entry and "/" not in entry]
+    if not lists["blacklist"]:
+        raise ValueError("Empty blacklist")
+    fuzzy = tuple((domain, _fuzzy_form(domain)) for domain in lists["fuzzylist"])
+    return frozenset(lists["blacklist"]), frozenset(lists["whitelist"]), fuzzy, tolerance
+
+
+def _fuzzy_form(domain: str) -> str:
+    """A domain without its top-level label, the form MetaMask's fuzzy match compares: metamask.io -> metamask."""
+    return ".".join(domain.split(".")[:-1])
+
+
+def _within_edits(source: str, target: str, limit: int) -> bool:
+    """Whether the Levenshtein distance between two strings is at most `limit`."""
+    if abs(len(source) - len(target)) > limit:
+        return False
+    previous = list(range(len(target) + 1))
+    for i, left in enumerate(source, 1):
+        current = [i]
+        for j, right in enumerate(target, 1):
+            current.append(min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (left != right)))
+        previous = current
+    return previous[-1] <= limit
+
+
+class MetaMaskPhishingList:
+    """MetaMask's eth-phishing-detect list, matched against a host the way its detector does.
+
+    A host on the whitelist, or under a whitelisted domain, never matches. Otherwise a host on the
+    blacklist, or under a blacklisted domain, is a "blocklist" match; and when the tolerance is above
+    zero, a host whose name without its top-level label (and a leading "www.") is within that many edits
+    of a fuzzylist domain's is a "fuzzy" match: a lookalike of that domain.
+    """
+
+    def __init__(self):
+        self._lists = None  # the last good copy, from parse_metamask_config
+
+    def match(self, host: str) -> Optional[dict]:
+        """{"type": "blocklist" | "fuzzy", "domain": listed domain} when the list flags the host, else None."""
+        if self._lists is None or not host:
+            return None
+        blocked, allowed, fuzzy, tolerance = self._lists
+        host = host.lower().rstrip(".")
+        labels = host.split(".")
+        suffixes = [".".join(labels[index:]) for index in range(len(labels))]
+        if any(suffix in allowed for suffix in suffixes):
+            return None
+        for suffix in suffixes:
+            if suffix in blocked:
+                return {"type": "blocklist", "domain": suffix}
+        if tolerance > 0:
+            form = _fuzzy_form(host)
+            form = form[4:] if form.startswith("www.") else form
+            for domain, target in fuzzy:
+                if _within_edits(form, target, tolerance):
+                    return {"type": "fuzzy", "domain": domain}
+        return None
+
+    async def refresh(self) -> bool:
+        """Fetch the list and replace the last good copy; on any failure keep that copy and return False."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    METAMASK_CONFIG_URL, timeout=aiohttp.ClientTimeout(total=METAMASK_TIMEOUT_SECONDS)
+                ) as resp:
+                    if resp.status != 200:
+                        raise ValueError(f"HTTP {resp.status}")
+                    payload = await resp.json(content_type=None)
+            lists = parse_metamask_config(payload)
+        except Exception as e:
+            logger.warning(
+                "MetaMask phishing list not refreshed (%s: %s); %s", type(e).__name__, e,
+                "keeping the last good copy" if self._lists is not None else "no copy loaded yet",
+            )
+            return False
+        self._lists = lists
+        logger.info("MetaMask phishing list loaded: %d blocked domains", len(lists[0]))
+        return True
 
 
 class PhishingService:
-    """Checks URLs against the GoPlus phishing site detection API.
+    """Checks URLs against MetaMask's open phishing list and the GoPlus phishing site detection API.
 
-    Results are cached by domain for CACHE_TTL seconds to avoid
+    GoPlus results are cached by domain for CACHE_TTL seconds to avoid
     redundant API calls when a user navigates across pages on the same site.
     """
 
     def __init__(self):
         # domain -> (result_dict, expires_at); bounded so an outage cannot grow it without limit
         self._cache = TTLCache(maxsize=CACHE_MAXSIZE, ttl=CACHE_TTL)
+        self.metamask = MetaMaskPhishingList()
+        self._refresh_task = None
+
+    async def start(self):
+        """Keep MetaMask's list in memory: fetched now, then hourly, and again sooner after a failed fetch."""
+        if self._refresh_task is None:
+            self._refresh_task = asyncio.create_task(self._refresh_loop())
+
+    async def stop(self):
+        """Cancel the refresh loop and wait for it to finish."""
+        task, self._refresh_task = self._refresh_task, None
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    async def _refresh_loop(self):
+        while True:
+            loaded = await self.metamask.refresh()
+            await asyncio.sleep(METAMASK_REFRESH_SECONDS if loaded else METAMASK_RETRY_SECONDS)
 
     async def check_url(self, url: str) -> dict:
         """Return phishing verdict for a URL.
@@ -30,13 +157,16 @@ class PhishingService:
             {
                 "is_phishing": bool | None,
                 "confidence": "high" | "low" | None,
-                "source": "goplus" | "test" | None,
+                "source": "metamask" | "goplus" | "test" | None,
                 "cached": bool,
+                "match": {"type": "blocklist" | "fuzzy", "domain": str},  # only with source "metamask"
                 "reason": str,  # only with is_phishing None
             }
 
-        is_phishing None means no verdict: GoPlus could not be asked or gave no answer. It is
-        held for NO_VERDICT_TTL seconds per domain, not CACHE_TTL, and then asked again.
+        A host MetaMask's list flags is phishing, source "metamask", without asking GoPlus. Otherwise
+        GoPlus decides. is_phishing None means no verdict: MetaMask's list does not flag the host and
+        GoPlus could not be asked or gave no answer. It is held for NO_VERDICT_TTL seconds per domain,
+        not CACHE_TTL, and then asked again.
         """
         cache_key = None
         try:
@@ -59,6 +189,18 @@ class PhishingService:
 
             # Strip port for cache key
             cache_key = domain.split(":")[0]
+
+            listed = self.metamask.match(parsed.hostname)
+            if listed is not None:
+                # Not cached, so it is checked again on every page load: log quietly.
+                logger.info("Phishing site on MetaMask's list: %s", parsed.hostname)
+                return {
+                    "is_phishing": True,
+                    "confidence": "high",
+                    "source": "metamask",
+                    "cached": False,
+                    "match": listed,
+                }
 
             # Check in-memory cache
             cached = self._cache.get(cache_key)
