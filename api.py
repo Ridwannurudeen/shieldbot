@@ -1735,7 +1735,7 @@ async def public_stats():
     the last 24 hours (a contract counts when its latest scan falls in that window).
     `unknown_ledger` sums, per provider and per chain, how often a provider request was answered,
     came back unknown or failed since `counting_since` (core.unknown_ledger); it restarts with the
-    process.
+    process. GET /api/coverage/{chain_id} has one chain's providers in full.
     """
     from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 
@@ -1784,6 +1784,48 @@ async def public_stats():
         "evidence_documents":     evidence_documents,
         "registry_records_confirmed": registry_records_confirmed,
         "unknown_ledger":         unknown_ledger.summary(),
+    }
+
+
+@app.get("/api/coverage/{chain_id}")
+async def chain_coverage(chain_id: int):
+    """What a scan on this chain can check, from its configuration, and how its providers are answering.
+
+    `capabilities`: `sell_simulation` is honeypot.is, eth_simulateV1, or goplus_reported (no sell is
+    simulated; GoPlus's own flags only); `contract_age` and `verification` name the explorer each lookup
+    asks; `liquidity_lock` says whether any real locker is known (with only burn addresses known, lock
+    status is unknown); `router_allowlist` counts the swap routers configured as trusted on this chain;
+    `public_mempool` is yes when the mempool monitor read this chain on its last poll, unobservable
+    when the chain has a public mempool that was not read, and no when it has none; `approvals` says
+    whether a rescue scan reads the full approval history or only the newest `window_blocks` blocks.
+    `provider_health` is this chain's Unknown ledger (core.unknown_ledger): per provider, how many
+    requests were answered, came back unknown or failed since `counting_since`, and the latest outcome;
+    `chain_independent` holds providers asked about no chain. A provider with no entry has not been
+    asked since the process started. Nothing here sends a request to any provider.
+    """
+    _validate_chain_id(chain_id)
+    if not container:
+        raise HTTPException(status_code=503, detail="Service not available")
+    adapter = web3_client._get_adapter(chain_id)
+    if not supports_pending_transactions(chain_id):
+        public_mempool = "no"
+    else:
+        mempool = container.mempool_monitor.get_stats() if container.mempool_monitor else None
+        observed = mempool and chain_id in set(mempool["monitored_chains"]) - set(mempool["unobservable_chains"])
+        public_mempool = "yes" if observed else "unobservable"
+    return {
+        "chain_id": chain_id,
+        "chain_name": adapter.chain_name,
+        "capabilities": {
+            **adapter.capabilities(),
+            "public_mempool": public_mempool,
+            "approvals": container.rescue_service.approval_history(chain_id),
+        },
+        "provider_health": {
+            "counting_since": unknown_ledger.counting_since,
+            "providers": unknown_ledger.for_chain(chain_id),
+            "chain_independent": unknown_ledger.for_chain(None),
+        },
     }
 
 

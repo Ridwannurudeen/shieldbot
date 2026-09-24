@@ -575,3 +575,23 @@ class EvmAdapter(ChainAdapter):
 
     def get_whitelisted_routers(self) -> Dict[str, str]:
         return dict(self._whitelisted_routers)
+
+    def capabilities(self) -> Dict:
+        """What this chain's configuration lets a scan check, for GET /api/coverage/{chain_id}.
+
+        sell_simulation is goplus_reported where no sell is simulated and honeypot and tax fields come
+        from GoPlus's own flags. Liquidity lock status is unknown on a chain whose only known lockers
+        are burn addresses: an unlocked pool cannot be told from one held by an unlisted locker.
+        """
+        lockers = [name for address, name in self._known_lockers.items() if address not in BURN_ADDRESSES]
+        return {
+            'sell_simulation': 'honeypot.is' if self._honeypot_chain_id is not None else 'goplus_reported',
+            'contract_age': 'etherscan' if self._explorer_backend == 'etherscan' else 'blockscout',
+            'verification': (
+                'sourcify+blockscout' if self._explorer_backend == 'sourcify_blockscout' else 'etherscan'
+            ),
+            'liquidity_lock': {'lockers': 'known' if lockers else 'unknown', 'known_lockers': lockers},
+            'router_allowlist': {
+                'present': bool(self._whitelisted_routers), 'routers': len(self._whitelisted_routers),
+            },
+        }

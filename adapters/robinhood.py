@@ -71,3 +71,6 @@ class RobinhoodAdapter(EvmAdapter):
     async def get_tax_info(self, address: str) -> Dict:
         simulation = await self._simulator.simulate(address)
         return _simulation_response(simulation, ('buy_tax', 'sell_tax'), ('buy_tax', 'sell_tax'))
+
+    def capabilities(self) -> Dict:
+        return {**super().capabilities(), 'sell_simulation': SIMULATION_PROVIDER}

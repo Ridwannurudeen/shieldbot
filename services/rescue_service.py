@@ -235,6 +235,14 @@ class RescueService:
         self._logs_rpc = self._logs_rpcs.get(56, "")
         self._results = TTLCache(maxsize=1024, ttl=RESULT_CACHE_SECONDS)
 
+    def approval_history(self, chain_id: int) -> Dict[str, Any]:
+        """How much approval history a scan on chain_id reads: all of it from a configured logs RPC,
+        or the newest windows from the chain's own RPC. Names no RPC, since its URL can carry a key."""
+        if chain_id in self._logs_rpcs:
+            return {"history": "full", "window_blocks": None}
+        window = PUBLIC_LOG_WINDOW_BLOCKS.get(chain_id, RECENT_LOG_WINDOW_BLOCKS)
+        return {"history": "recent", "window_blocks": window * RECENT_LOG_WINDOWS}
+
     def _rpc_for(self, chain_id: int) -> str:
         """Resolve archive RPC URL for a chain. Falls back to the registered adapter's RPC."""
         adapter = self._web3_client._get_adapter(chain_id) if self._web3_client else None
