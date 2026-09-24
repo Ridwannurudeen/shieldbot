@@ -1,0 +1,2726 @@
+{
+ "entries": [
+  {
+   "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+   "bytecode_patterns": [],
+   "chain_id": 56,
+   "description": "WBNB \u2014 Wrapped BNB",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232440.5275025,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": 0,
+     "intent": 0,
+     "market": null,
+     "signature": 0,
+     "structural": 0
+    },
+    "confidence_level": 70,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 1.0,
+     "intent": 1,
+     "market": 0.8333333333333334,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {
+     "market": "Missing DexScreener fields: pair_age_hours"
+    },
+    "critical_flags": [
+     "Market data unknown: Missing DexScreener fields: pair_age_hours"
+    ],
+    "risk_archetype": "unknown",
+    "risk_level": "MEDIUM",
+    "rug_probability": 0.0,
+    "status": "unknown"
+   },
+   "goplus": {
+    "data": {
+     "anti_whale_modifiable": "0",
+     "buy_tax": "0",
+     "can_take_back_ownership": "0",
+     "cannot_buy": "0",
+     "creator_address": "0x4e656459ed25bf986eea1196bc1b00665401645d",
+     "creator_balance": "0.0001101",
+     "creator_percent": "0.000000",
+     "external_call": "0",
+     "hidden_owner": "0",
+     "holder_count": "8322302",
+     "honeypot_with_same_creator": "0",
+     "is_anti_whale": "0",
+     "is_blacklisted": "0",
+     "is_honeypot": "0",
+     "is_in_dex": "1",
+     "is_mintable": "0",
+     "is_open_source": "1",
+     "is_proxy": "0",
+     "is_whitelisted": "0",
+     "owner_balance": "0",
+     "owner_change_balance": "0",
+     "owner_percent": "0",
+     "personal_slippage_modifiable": "0",
+     "selfdestruct": "0",
+     "sell_tax": "0",
+     "slippage_modifiable": "0",
+     "token_name": "Wrapped BNB",
+     "token_symbol": "WBNB",
+     "total_supply": "1567972.855812138624003188",
+     "trading_cooldown": "0",
+     "transfer_pausable": "0",
+     "transfer_tax": "",
+     "trust_list": "1"
+    },
+    "reason": null,
+    "status": "ok"
+   },
+   "honeypot": {
+    "buy_tax": 0.0,
+    "can_buy": true,
+    "can_sell": true,
+    "coverage": {
+     "buy_tax": true,
+     "can_buy": true,
+     "can_sell": true,
+     "is_honeypot": true,
+     "sell_tax": true
+    },
+    "field_providers": {
+     "buy_tax": "honeypot.is",
+     "can_buy": "honeypot.is",
+     "can_sell": "honeypot.is",
+     "is_honeypot": "honeypot.is",
+     "sell_tax": "honeypot.is"
+    },
+    "honeypot_reason": "honeypot.is result; honeypot.is simulation taxes",
+    "is_honeypot": false,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232437.1950529,
+    "reason": "honeypot.is result; honeypot.is simulation taxes",
+    "sell_tax": 0.0,
+    "simulation_failed": false,
+    "status": "ok"
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": true,
+     "liquidity_usd": true,
+     "pair_age_hours": false,
+     "price_change_24h": true,
+     "price_usd": true,
+     "volume_24h": true
+    },
+    "fdv": 1208982465.0,
+    "liquidity_usd": 80966393.03,
+    "low_liquidity_flag": false,
+    "new_pair_flag": null,
+    "observed_at": 1790232439.5935423,
+    "pair_age_hours": null,
+    "price_change_24h": -2.4,
+    "price_usd": 772.97,
+    "reason": "Missing DexScreener fields: pair_age_hours",
+    "status": "unknown",
+    "token_name": "Wrapped BNB",
+    "token_symbol": "WBNB",
+    "volatility_flag": false,
+    "volume_24h": 228493556.88,
+    "wash_trade_flag": false
+   },
+   "ownership": {
+    "is_renounced": null,
+    "owner": null
+   }
+  },
+  {
+   "address": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+   "bytecode_patterns": [
+    "40c10f19",
+    "a0712d68"
+   ],
+   "chain_id": 56,
+   "description": "CAKE \u2014 PancakeSwap Token",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232447.9269464,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": 0,
+     "intent": 0,
+     "market": 0,
+     "signature": 0,
+     "structural": 20
+    },
+    "confidence_level": 80,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 1.0,
+     "intent": 1,
+     "market": 1.0,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {},
+    "critical_flags": [
+     "Mint function detected"
+    ],
+    "risk_archetype": "legitimate",
+    "risk_level": "LOW",
+    "rug_probability": 6.4,
+    "status": "ok"
+   },
+   "goplus": {
+    "data": {
+     "anti_whale_modifiable": "0",
+     "can_take_back_ownership": "0",
+     "cannot_buy": "0",
+     "creator_address": "0x0f9399fc81dac77908a2dde54bb87ee2d17a3373",
+     "creator_balance": "0",
+     "creator_percent": "0.000000",
+     "external_call": "0",
+     "hidden_owner": "0",
+     "holder_count": "1912650",
+     "honeypot_with_same_creator": "0",
+     "is_anti_whale": "0",
+     "is_blacklisted": "0",
+     "is_honeypot": "0",
+     "is_in_dex": "1",
+     "is_mintable": "1",
+     "is_open_source": "1",
+     "is_proxy": "0",
+     "is_whitelisted": "0",
+     "owner_address": "0x73feaa1ee314f8c655e354234017be2193c9e24e",
+     "owner_balance": "7270163.537570476",
+     "owner_change_balance": "0",
+     "owner_percent": "0.001349",
+     "personal_slippage_modifiable": "0",
+     "selfdestruct": "0",
+     "slippage_modifiable": "0",
+     "token_name": "PancakeSwap Token",
+     "token_symbol": "Cake",
+     "total_supply": "5387735435.751051201610995531",
+     "trading_cooldown": "0",
+     "transfer_pausable": "0",
+     "transfer_tax": "",
+     "trust_list": "1"
+    },
+    "reason": null,
+    "status": "ok"
+   },
+   "honeypot": {
+    "buy_tax": 0.0,
+    "can_buy": true,
+    "can_sell": true,
+    "coverage": {
+     "buy_tax": true,
+     "can_buy": true,
+     "can_sell": true,
+     "is_honeypot": true,
+     "sell_tax": true
+    },
+    "field_providers": {
+     "buy_tax": "honeypot.is",
+     "can_buy": "honeypot.is",
+     "can_sell": "honeypot.is",
+     "is_honeypot": "honeypot.is",
+     "sell_tax": "honeypot.is"
+    },
+    "honeypot_reason": "honeypot.is result; honeypot.is simulation taxes",
+    "is_honeypot": false,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232445.3539658,
+    "reason": "honeypot.is result; honeypot.is simulation taxes",
+    "sell_tax": 0.0,
+    "simulation_failed": false,
+    "status": "ok"
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": true,
+     "liquidity_usd": true,
+     "pair_age_hours": true,
+     "price_change_24h": true,
+     "price_usd": true,
+     "volume_24h": true
+    },
+    "fdv": 883133797.0,
+    "liquidity_usd": 7098913.38,
+    "low_liquidity_flag": false,
+    "new_pair_flag": false,
+    "observed_at": 1790232447.1850073,
+    "pair_age_hours": 30521.7,
+    "price_change_24h": -1.92,
+    "price_usd": 2.62,
+    "reason": null,
+    "status": "ok",
+    "token_name": "PancakeSwap Token",
+    "token_symbol": "Cake",
+    "volatility_flag": false,
+    "volume_24h": 8180161.91,
+    "wash_trade_flag": false
+   },
+   "ownership": {
+    "is_renounced": false,
+    "owner": "0x73feaa1eE314F8c655E354234017bE2193C9E24E"
+   }
+  },
+  {
+   "address": "0x55d398326f99059fF775485246999027B3197955",
+   "bytecode_patterns": [
+    "a0712d68"
+   ],
+   "chain_id": 56,
+   "description": "BSC-USD (USDT on BSC)",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232455.046845,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": 0,
+     "intent": 0,
+     "market": 0,
+     "signature": 0,
+     "structural": 20
+    },
+    "confidence_level": 80,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 1.0,
+     "intent": 1,
+     "market": 1.0,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {},
+    "critical_flags": [
+     "Mint function detected"
+    ],
+    "risk_archetype": "legitimate",
+    "risk_level": "LOW",
+    "rug_probability": 6.4,
+    "status": "ok"
+   },
+   "goplus": {
+    "data": {
+     "anti_whale_modifiable": "0",
+     "buy_tax": "0",
+     "can_take_back_ownership": "0",
+     "cannot_buy": "0",
+     "creator_address": "0x970609ba2c160a1b491b90867681918bdc9773af",
+     "creator_balance": "11228.304730136147970439",
+     "creator_percent": "0.000001",
+     "external_call": "0",
+     "hidden_owner": "0",
+     "holder_count": "0",
+     "honeypot_with_same_creator": "0",
+     "is_anti_whale": "0",
+     "is_blacklisted": "0",
+     "is_honeypot": "0",
+     "is_in_dex": "1",
+     "is_mintable": "1",
+     "is_open_source": "1",
+     "is_proxy": "0",
+     "is_whitelisted": "0",
+     "owner_address": "0xf68a4b64162906eff0ff6ae34e2bb1cd42fef62d",
+     "owner_balance": "1502.0092659182822",
+     "owner_change_balance": "0",
+     "owner_percent": "0.0",
+     "personal_slippage_modifiable": "0",
+     "selfdestruct": "0",
+     "sell_tax": "0",
+     "slippage_modifiable": "0",
+     "token_name": "Tether USD",
+     "token_symbol": "USDT",
+     "total_supply": "9184991859.680809663064697687",
+     "trading_cooldown": "0",
+     "transfer_pausable": "0",
+     "transfer_tax": "",
+     "trust_list": "1"
+    },
+    "reason": null,
+    "status": "ok"
+   },
+   "honeypot": {
+    "buy_tax": 0.0,
+    "can_buy": true,
+    "can_sell": true,
+    "coverage": {
+     "buy_tax": true,
+     "can_buy": true,
+     "can_sell": true,
+     "is_honeypot": true,
+     "sell_tax": true
+    },
+    "field_providers": {
+     "buy_tax": "honeypot.is",
+     "can_buy": "honeypot.is",
+     "can_sell": "honeypot.is",
+     "is_honeypot": "honeypot.is",
+     "sell_tax": "honeypot.is"
+    },
+    "honeypot_reason": "honeypot.is result; honeypot.is simulation taxes",
+    "is_honeypot": false,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232452.2951832,
+    "reason": "honeypot.is result; honeypot.is simulation taxes",
+    "sell_tax": 0.0,
+    "simulation_failed": false,
+    "status": "ok"
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": true,
+     "liquidity_usd": true,
+     "pair_age_hours": true,
+     "price_change_24h": true,
+     "price_usd": true,
+     "volume_24h": true
+    },
+    "fdv": 236069126.0,
+    "liquidity_usd": 57358396.2,
+    "low_liquidity_flag": false,
+    "new_pair_flag": false,
+    "observed_at": 1790232453.9348984,
+    "pair_age_hours": 9451.5,
+    "price_change_24h": 0.25,
+    "price_usd": 6.29,
+    "reason": null,
+    "status": "ok",
+    "token_name": "ARK",
+    "token_symbol": "ARK",
+    "volatility_flag": false,
+    "volume_24h": 38412299.53,
+    "wash_trade_flag": false
+   },
+   "ownership": {
+    "is_renounced": false,
+    "owner": "0xF68a4b64162906efF0fF6aE34E2bB1Cd42FEf62d"
+   }
+  },
+  {
+   "address": "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56",
+   "bytecode_patterns": [
+    "a0712d68"
+   ],
+   "chain_id": 56,
+   "description": "BUSD \u2014 Binance USD",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232462.9956422,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": 0,
+     "intent": 0,
+     "market": 0,
+     "signature": 0,
+     "structural": 20
+    },
+    "confidence_level": 80,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 1.0,
+     "intent": 1,
+     "market": 1.0,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {},
+    "critical_flags": [
+     "Mint function detected"
+    ],
+    "risk_archetype": "legitimate",
+    "risk_level": "LOW",
+    "rug_probability": 6.4,
+    "status": "ok"
+   },
+   "goplus": {
+    "data": {
+     "anti_whale_modifiable": "0",
+     "buy_tax": "0",
+     "can_take_back_ownership": "0",
+     "cannot_buy": "0",
+     "creator_address": "0xf07c30e4cd6cfff525791b4b601bd345bded7f47",
+     "creator_balance": "125.2",
+     "creator_percent": "0.000000",
+     "external_call": "0",
+     "hidden_owner": "0",
+     "holder_count": "4253196",
+     "honeypot_with_same_creator": "0",
+     "is_anti_whale": "0",
+     "is_blacklisted": "0",
+     "is_honeypot": "0",
+     "is_in_dex": "1",
+     "is_mintable": "1",
+     "is_open_source": "1",
+     "is_proxy": "0",
+     "is_whitelisted": "0",
+     "owner_address": "0xd2f93484f2d319194cba95c5171b18c1d8cfd6c4",
+     "owner_balance": "10278473.90701175",
+     "owner_change_balance": "0",
+     "owner_percent": "0.036295",
+     "personal_slippage_modifiable": "0",
+     "selfdestruct": "0",
+     "sell_tax": "0",
+     "slippage_modifiable": "0",
+     "token_name": "BUSD Token",
+     "token_symbol": "BUSD",
+     "total_supply": "283188732.469877799809987481",
+     "trading_cooldown": "0",
+     "transfer_pausable": "0",
+     "transfer_tax": "",
+     "trust_list": "1"
+    },
+    "reason": null,
+    "status": "ok"
+   },
+   "honeypot": {
+    "buy_tax": 0.0,
+    "can_buy": true,
+    "can_sell": true,
+    "coverage": {
+     "buy_tax": true,
+     "can_buy": true,
+     "can_sell": true,
+     "is_honeypot": true,
+     "sell_tax": true
+    },
+    "field_providers": {
+     "buy_tax": "honeypot.is",
+     "can_buy": "honeypot.is",
+     "can_sell": "honeypot.is",
+     "is_honeypot": "honeypot.is",
+     "sell_tax": "honeypot.is"
+    },
+    "honeypot_reason": "honeypot.is result; honeypot.is simulation taxes",
+    "is_honeypot": false,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232459.9278235,
+    "reason": "honeypot.is result; honeypot.is simulation taxes",
+    "sell_tax": 0.0,
+    "simulation_failed": false,
+    "status": "ok"
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": true,
+     "liquidity_usd": true,
+     "pair_age_hours": true,
+     "price_change_24h": true,
+     "price_usd": true,
+     "volume_24h": true
+    },
+    "fdv": 280928986.0,
+    "liquidity_usd": 12226205.74,
+    "low_liquidity_flag": false,
+    "new_pair_flag": false,
+    "observed_at": 1790232462.182078,
+    "pair_age_hours": 46947.4,
+    "price_change_24h": -1.18,
+    "price_usd": 0.993,
+    "reason": null,
+    "status": "ok",
+    "token_name": "BUSD Token",
+    "token_symbol": "BUSD",
+    "volatility_flag": false,
+    "volume_24h": 1120794.09,
+    "wash_trade_flag": false
+   },
+   "ownership": {
+    "is_renounced": false,
+    "owner": "0xD2f93484f2D319194cBa95C5171B18C1d8cfD6C4"
+   }
+  },
+  {
+   "address": "0x2170Ed0880ac9A755fd29B2688956BD959F933F8",
+   "bytecode_patterns": [
+    "a0712d68"
+   ],
+   "chain_id": 56,
+   "description": "ETH \u2014 Binance-Peg Ethereum",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232470.765936,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": 0,
+     "intent": 0,
+     "market": 0,
+     "signature": 0,
+     "structural": 20
+    },
+    "confidence_level": 80,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 1.0,
+     "intent": 1,
+     "market": 1.0,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {},
+    "critical_flags": [
+     "Mint function detected"
+    ],
+    "risk_archetype": "legitimate",
+    "risk_level": "LOW",
+    "rug_probability": 6.4,
+    "status": "ok"
+   },
+   "goplus": {
+    "data": {
+     "anti_whale_modifiable": "0",
+     "buy_tax": "0",
+     "can_take_back_ownership": "0",
+     "cannot_buy": "0",
+     "cannot_sell_all": "0",
+     "creator_address": "0x88efdac29e3ba290512e26c04908692ae9810566",
+     "creator_balance": "0.49401352116603952",
+     "creator_percent": "0.000001",
+     "external_call": "0",
+     "hidden_owner": "0",
+     "holder_count": "2543846",
+     "honeypot_with_same_creator": "0",
+     "is_anti_whale": "0",
+     "is_blacklisted": "0",
+     "is_honeypot": "0",
+     "is_in_dex": "1",
+     "is_mintable": "1",
+     "is_open_source": "1",
+     "is_proxy": "0",
+     "is_whitelisted": "0",
+     "lp_holder_count": "62",
+     "lp_total_supply": "41914.671195861236",
+     "owner_address": "0xf68a4b64162906eff0ff6ae34e2bb1cd42fef62d",
+     "owner_balance": "0.03530850301251893",
+     "owner_change_balance": "0",
+     "owner_percent": "0.0",
+     "personal_slippage_modifiable": "0",
+     "selfdestruct": "0",
+     "sell_tax": "0",
+     "slippage_modifiable": "0",
+     "token_name": "Ethereum Token",
+     "token_symbol": "ETH",
+     "total_supply": "504999.999958700045164475",
+     "trading_cooldown": "0",
+     "transfer_pausable": "0",
+     "transfer_tax": "",
+     "trust_list": "1"
+    },
+    "reason": null,
+    "status": "ok"
+   },
+   "honeypot": {
+    "buy_tax": 0.0,
+    "can_buy": true,
+    "can_sell": true,
+    "coverage": {
+     "buy_tax": true,
+     "can_buy": true,
+     "can_sell": true,
+     "is_honeypot": true,
+     "sell_tax": true
+    },
+    "field_providers": {
+     "buy_tax": "honeypot.is",
+     "can_buy": "honeypot.is",
+     "can_sell": "honeypot.is",
+     "is_honeypot": "honeypot.is",
+     "sell_tax": "honeypot.is"
+    },
+    "honeypot_reason": "honeypot.is result; honeypot.is simulation taxes",
+    "is_honeypot": false,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232467.6969268,
+    "reason": "honeypot.is result; honeypot.is simulation taxes",
+    "sell_tax": 0.0,
+    "simulation_failed": false,
+    "status": "ok"
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": true,
+     "liquidity_usd": true,
+     "pair_age_hours": true,
+     "price_change_24h": true,
+     "price_usd": true,
+     "volume_24h": true
+    },
+    "fdv": 1357814138.0,
+    "liquidity_usd": 17287386.63,
+    "low_liquidity_flag": false,
+    "new_pair_flag": false,
+    "observed_at": 1790232469.8563986,
+    "pair_age_hours": 30471.2,
+    "price_change_24h": -2.46,
+    "price_usd": 2688.82,
+    "reason": null,
+    "status": "ok",
+    "token_name": "Ethereum Token",
+    "token_symbol": "ETH",
+    "volatility_flag": false,
+    "volume_24h": 34464532.96,
+    "wash_trade_flag": false
+   },
+   "ownership": {
+    "is_renounced": false,
+    "owner": "0xF68a4b64162906efF0fF6aE34E2bB1Cd42FEf62d"
+   }
+  },
+  {
+   "address": "0x10ED43C718714eb63d5aA57B78B54704E256024E",
+   "bytecode_patterns": [],
+   "chain_id": 56,
+   "description": "PancakeSwap V2 Router",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232478.9154763,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": null,
+     "intent": 0,
+     "market": null,
+     "signature": 0,
+     "structural": 0
+    },
+    "confidence_level": 30,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 0.0,
+     "intent": 1,
+     "market": 0.0,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {
+     "honeypot": "Token not found on honeypot.is; honeypot.is HTTP 404; GoPlus has no data for this token on this chain; Unknown fields: is_honeypot, buy_tax, sell_tax, can_buy, can_sell",
+     "market": "No DexScreener pairs on requested chain (bsc)"
+    },
+    "critical_flags": [
+     "Market data unknown: No DexScreener pairs on requested chain (bsc)",
+     "Sellability unknown: Token not found on honeypot.is; honeypot.is HTTP 404; GoPlus has no data for this token on this chain; Unknown fields: is_honeypot, buy_tax, sell_tax, can_buy, can_sell"
+    ],
+    "risk_archetype": "unknown",
+    "risk_level": "MEDIUM",
+    "rug_probability": 0.0,
+    "status": "unknown"
+   },
+   "goplus": {
+    "data": {},
+    "reason": "GoPlus has no data for this token on this chain",
+    "status": "unknown"
+   },
+   "honeypot": {
+    "buy_tax": null,
+    "can_buy": null,
+    "can_sell": null,
+    "cannot_buy": null,
+    "cannot_sell_all": null,
+    "coverage": {
+     "buy_tax": false,
+     "can_buy": false,
+     "can_sell": false,
+     "is_honeypot": false,
+     "sell_tax": false
+    },
+    "field_providers": {},
+    "honeypot_reason": "Token not found on honeypot.is; honeypot.is HTTP 404; GoPlus has no data for this token on this chain; Unknown fields: is_honeypot, buy_tax, sell_tax, can_buy, can_sell",
+    "is_honeypot": null,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232472.550616,
+    "reason": "Token not found on honeypot.is; honeypot.is HTTP 404; GoPlus has no data for this token on this chain; Unknown fields: is_honeypot, buy_tax, sell_tax, can_buy, can_sell",
+    "sell_tax": null,
+    "simulation_failed": false,
+    "status": "unknown",
+    "transfer_pausable": null
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": false,
+     "liquidity_usd": false,
+     "pair_age_hours": false,
+     "price_change_24h": false,
+     "price_usd": false,
+     "volume_24h": false
+    },
+    "fdv": null,
+    "liquidity_usd": null,
+    "low_liquidity_flag": null,
+    "new_pair_flag": null,
+    "observed_at": 1790232477.8597388,
+    "pair_age_hours": null,
+    "price_change_24h": null,
+    "price_usd": null,
+    "reason": "No DexScreener pairs on requested chain (bsc)",
+    "status": "unknown",
+    "token_name": null,
+    "token_symbol": null,
+    "volatility_flag": null,
+    "volume_24h": null,
+    "wash_trade_flag": null
+   },
+   "ownership": {
+    "is_renounced": null,
+    "owner": null
+   }
+  },
+  {
+   "address": "0x1111111254EEB25477B68fb85Ed929f73A960582",
+   "bytecode_patterns": [
+    "83197ef0"
+   ],
+   "chain_id": 56,
+   "description": "1inch V5 Router",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232486.996165,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": null,
+     "intent": 0,
+     "market": null,
+     "signature": 0,
+     "structural": 20
+    },
+    "confidence_level": 30,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 0.2,
+     "intent": 1,
+     "market": 0.0,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {
+     "honeypot": "Token not found on honeypot.is; honeypot.is HTTP 404; Unknown fields: is_honeypot, buy_tax, sell_tax, can_sell",
+     "market": "No DexScreener pairs on requested chain (bsc)"
+    },
+    "critical_flags": [
+     "destroy() function: the owner may be able to delete the contract",
+     "Market data unknown: No DexScreener pairs on requested chain (bsc)",
+     "Sellability unknown: Token not found on honeypot.is; honeypot.is HTTP 404; Unknown fields: is_honeypot, buy_tax, sell_tax, can_sell"
+    ],
+    "risk_archetype": "unknown",
+    "risk_level": "MEDIUM",
+    "rug_probability": 9.4,
+    "status": "unknown"
+   },
+   "goplus": {
+    "data": {
+     "buy_tax": "",
+     "cannot_buy": "0",
+     "creator_address": "0xccbdbd9b0309a77fc6a56e087ff2765ff394012e",
+     "creator_balance": "0",
+     "creator_percent": "0",
+     "holder_count": "0",
+     "honeypot_with_same_creator": "0",
+     "is_in_dex": "0",
+     "is_open_source": "1",
+     "is_proxy": "1",
+     "owner_address": "0x7a4c2f97069f874a355607ebc52aefcc4eac9202",
+     "sell_tax": "",
+     "token_name": "",
+     "token_symbol": "",
+     "transfer_tax": ""
+    },
+    "reason": null,
+    "status": "ok"
+   },
+   "honeypot": {
+    "buy_tax": null,
+    "can_buy": true,
+    "can_sell": null,
+    "cannot_buy": false,
+    "cannot_sell_all": null,
+    "coverage": {
+     "buy_tax": false,
+     "can_buy": true,
+     "can_sell": false,
+     "is_honeypot": false,
+     "sell_tax": false
+    },
+    "field_providers": {
+     "can_buy": "goplus",
+     "cannot_buy": "goplus"
+    },
+    "honeypot_reason": "Token not found on honeypot.is; honeypot.is HTTP 404; Unknown fields: is_honeypot, buy_tax, sell_tax, can_sell",
+    "is_honeypot": null,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232480.6161003,
+    "reason": "Token not found on honeypot.is; honeypot.is HTTP 404; Unknown fields: is_honeypot, buy_tax, sell_tax, can_sell",
+    "sell_tax": null,
+    "simulation_failed": false,
+    "status": "unknown",
+    "transfer_pausable": null
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": false,
+     "liquidity_usd": false,
+     "pair_age_hours": false,
+     "price_change_24h": false,
+     "price_usd": false,
+     "volume_24h": false
+    },
+    "fdv": null,
+    "liquidity_usd": null,
+    "low_liquidity_flag": null,
+    "new_pair_flag": null,
+    "observed_at": 1790232485.938615,
+    "pair_age_hours": null,
+    "price_change_24h": null,
+    "price_usd": null,
+    "reason": "No DexScreener pairs on requested chain (bsc)",
+    "status": "unknown",
+    "token_name": null,
+    "token_symbol": null,
+    "volatility_flag": null,
+    "volume_24h": null,
+    "wash_trade_flag": null
+   },
+   "ownership": {
+    "is_renounced": false,
+    "owner": "0x7a4C2f97069f874A355607eBC52aEfCc4eAc9202"
+   }
+  },
+  {
+   "address": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+   "bytecode_patterns": [
+    "3659cfe6",
+    "4f1ef286"
+   ],
+   "chain_id": 56,
+   "description": "USDC \u2014 Binance-Peg USD Coin",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232495.2687407,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": 0,
+     "intent": 0,
+     "market": 0,
+     "signature": 0,
+     "structural": 15
+    },
+    "confidence_level": 80,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 1.0,
+     "intent": 1,
+     "market": 1.0,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {},
+    "critical_flags": [
+     "Proxy/upgradeable contract"
+    ],
+    "risk_archetype": "legitimate",
+    "risk_level": "LOW",
+    "rug_probability": 4.8,
+    "status": "ok"
+   },
+   "goplus": {
+    "data": {
+     "buy_tax": "0",
+     "cannot_buy": "0",
+     "creator_address": "0xfc19e4ce0e0a27b09f2011ef0512669a0f76367a",
+     "creator_balance": "418.0186131562",
+     "creator_percent": "0.000000",
+     "holder_count": "4820802",
+     "honeypot_with_same_creator": "0",
+     "is_honeypot": "0",
+     "is_in_dex": "1",
+     "is_open_source": "1",
+     "is_proxy": "1",
+     "sell_tax": "0",
+     "token_name": "USD Coin",
+     "token_symbol": "USDC",
+     "total_supply": "1588999877.439803986446539541",
+     "transfer_tax": "",
+     "trust_list": "1"
+    },
+    "reason": null,
+    "status": "ok"
+   },
+   "honeypot": {
+    "buy_tax": 0.0,
+    "can_buy": true,
+    "can_sell": true,
+    "coverage": {
+     "buy_tax": true,
+     "can_buy": true,
+     "can_sell": true,
+     "is_honeypot": true,
+     "sell_tax": true
+    },
+    "field_providers": {
+     "buy_tax": "honeypot.is",
+     "can_buy": "honeypot.is",
+     "can_sell": "honeypot.is",
+     "is_honeypot": "honeypot.is",
+     "sell_tax": "honeypot.is"
+    },
+    "honeypot_reason": "honeypot.is result; honeypot.is simulation taxes",
+    "is_honeypot": false,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232491.8939157,
+    "reason": "honeypot.is result; honeypot.is simulation taxes",
+    "sell_tax": 0.0,
+    "simulation_failed": false,
+    "status": "ok"
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": true,
+     "liquidity_usd": true,
+     "pair_age_hours": true,
+     "price_change_24h": true,
+     "price_usd": true,
+     "volume_24h": true
+    },
+    "fdv": 123905529.0,
+    "liquidity_usd": 17430718.8,
+    "low_liquidity_flag": false,
+    "new_pair_flag": false,
+    "observed_at": 1790232494.0277367,
+    "pair_age_hours": 10524.4,
+    "price_change_24h": -4.05,
+    "price_usd": 1.93,
+    "reason": null,
+    "status": "ok",
+    "token_name": "Cosanta",
+    "token_symbol": "COSA",
+    "volatility_flag": false,
+    "volume_24h": 14264029.22,
+    "wash_trade_flag": false
+   },
+   "ownership": {
+    "is_renounced": null,
+    "owner": null
+   }
+  },
+  {
+   "address": "0xbA2aE424d960c26247Dd6c32edC70B295c744C43",
+   "bytecode_patterns": [
+    "3659cfe6",
+    "4f1ef286"
+   ],
+   "chain_id": 56,
+   "description": "DOGE \u2014 Binance-Peg Dogecoin",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232503.0475082,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": 0,
+     "intent": 0,
+     "market": 0,
+     "signature": 0,
+     "structural": 15
+    },
+    "confidence_level": 80,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 1.0,
+     "intent": 1,
+     "market": 1.0,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {},
+    "critical_flags": [
+     "Proxy/upgradeable contract"
+    ],
+    "risk_archetype": "legitimate",
+    "risk_level": "LOW",
+    "rug_probability": 4.8,
+    "status": "ok"
+   },
+   "goplus": {
+    "data": {
+     "buy_tax": "0",
+     "cannot_buy": "0",
+     "cannot_sell_all": "0",
+     "creator_address": "0x08adbaa6a215affd711f532ec219299ba1e5b9b7",
+     "creator_balance": "12875.08918248",
+     "creator_percent": "0.000005",
+     "holder_count": "1072741",
+     "honeypot_with_same_creator": "1",
+     "is_honeypot": "0",
+     "is_in_dex": "1",
+     "is_open_source": "1",
+     "is_proxy": "1",
+     "lp_holder_count": "54",
+     "lp_total_supply": "371013992421.3523",
+     "sell_tax": "0",
+     "token_name": "Dogecoin",
+     "token_symbol": "DOGE",
+     "total_supply": "2563999999.99999998",
+     "transfer_tax": "",
+     "trust_list": "1"
+    },
+    "reason": null,
+    "status": "ok"
+   },
+   "honeypot": {
+    "buy_tax": 0.0,
+    "can_buy": true,
+    "can_sell": true,
+    "coverage": {
+     "buy_tax": true,
+     "can_buy": true,
+     "can_sell": true,
+     "is_honeypot": true,
+     "sell_tax": true
+    },
+    "field_providers": {
+     "buy_tax": "honeypot.is",
+     "can_buy": "honeypot.is",
+     "can_sell": "honeypot.is",
+     "is_honeypot": "honeypot.is",
+     "sell_tax": "honeypot.is"
+    },
+    "honeypot_reason": "honeypot.is result; honeypot.is simulation taxes",
+    "is_honeypot": false,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232499.7190568,
+    "reason": "honeypot.is result; honeypot.is simulation taxes",
+    "sell_tax": 0.0,
+    "simulation_failed": false,
+    "status": "ok"
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": true,
+     "liquidity_usd": true,
+     "pair_age_hours": true,
+     "price_change_24h": true,
+     "price_usd": true,
+     "volume_24h": true
+    },
+    "fdv": 242683606.0,
+    "liquidity_usd": 4864208.38,
+    "low_liquidity_flag": false,
+    "new_pair_flag": false,
+    "observed_at": 1790232501.9183438,
+    "pair_age_hours": 11899.6,
+    "price_change_24h": -7.51,
+    "price_usd": 0.0947,
+    "reason": null,
+    "status": "ok",
+    "token_name": "Dogecoin",
+    "token_symbol": "DOGE",
+    "volatility_flag": false,
+    "volume_24h": 2052502.95,
+    "wash_trade_flag": false
+   },
+   "ownership": {
+    "is_renounced": null,
+    "owner": null
+   }
+  },
+  {
+   "address": "0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3",
+   "bytecode_patterns": [
+    "a0712d68"
+   ],
+   "chain_id": 56,
+   "description": "DAI \u2014 Binance-Peg Dai",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232510.9760783,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": 0,
+     "intent": 0,
+     "market": 0,
+     "signature": 0,
+     "structural": 20
+    },
+    "confidence_level": 80,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 1.0,
+     "intent": 1,
+     "market": 1.0,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {},
+    "critical_flags": [
+     "Mint function detected"
+    ],
+    "risk_archetype": "legitimate",
+    "risk_level": "LOW",
+    "rug_probability": 6.4,
+    "status": "ok"
+   },
+   "goplus": {
+    "data": {
+     "anti_whale_modifiable": "0",
+     "buy_tax": "",
+     "can_take_back_ownership": "0",
+     "cannot_buy": "0",
+     "creator_address": "0x88efdac29e3ba290512e26c04908692ae9810566",
+     "creator_balance": "0",
+     "creator_percent": "0.000000",
+     "external_call": "0",
+     "hidden_owner": "0",
+     "holder_count": "195704",
+     "honeypot_with_same_creator": "0",
+     "is_anti_whale": "0",
+     "is_blacklisted": "0",
+     "is_honeypot": "0",
+     "is_in_dex": "1",
+     "is_mintable": "1",
+     "is_open_source": "1",
+     "is_proxy": "0",
+     "is_whitelisted": "0",
+     "lp_holder_count": "759",
+     "lp_total_supply": "545558.955112981621791971",
+     "owner_address": "0xf68a4b64162906eff0ff6ae34e2bb1cd42fef62d",
+     "owner_balance": "0",
+     "owner_change_balance": "0",
+     "owner_percent": "0.0",
+     "personal_slippage_modifiable": "0",
+     "selfdestruct": "0",
+     "sell_tax": "",
+     "slippage_modifiable": "0",
+     "token_name": "Dai Token",
+     "token_symbol": "DAI",
+     "total_supply": "31102957.951694995010665997",
+     "trading_cooldown": "0",
+     "transfer_pausable": "0",
+     "transfer_tax": "",
+     "trust_list": "1"
+    },
+    "reason": null,
+    "status": "ok"
+   },
+   "honeypot": {
+    "buy_tax": 0.0,
+    "can_buy": true,
+    "can_sell": true,
+    "coverage": {
+     "buy_tax": true,
+     "can_buy": true,
+     "can_sell": true,
+     "is_honeypot": true,
+     "sell_tax": true
+    },
+    "field_providers": {
+     "buy_tax": "honeypot.is",
+     "can_buy": "honeypot.is",
+     "can_sell": "honeypot.is",
+     "is_honeypot": "honeypot.is",
+     "sell_tax": "honeypot.is"
+    },
+    "honeypot_reason": "honeypot.is result; honeypot.is simulation taxes",
+    "is_honeypot": false,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232507.454321,
+    "reason": "honeypot.is result; honeypot.is simulation taxes",
+    "sell_tax": 0.0,
+    "simulation_failed": false,
+    "status": "ok"
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": true,
+     "liquidity_usd": true,
+     "pair_age_hours": true,
+     "price_change_24h": true,
+     "price_usd": true,
+     "volume_24h": true
+    },
+    "fdv": 100282472.0,
+    "liquidity_usd": 2286443.69,
+    "low_liquidity_flag": false,
+    "new_pair_flag": false,
+    "observed_at": 1790232509.4957454,
+    "pair_age_hours": 4101.2,
+    "price_change_24h": -0.12,
+    "price_usd": 2.0056,
+    "reason": null,
+    "status": "ok",
+    "token_name": "#BeTheBest",
+    "token_symbol": "#BTB",
+    "volatility_flag": false,
+    "volume_24h": 262567.43,
+    "wash_trade_flag": false
+   },
+   "ownership": {
+    "is_renounced": false,
+    "owner": "0xF68a4b64162906efF0fF6aE34E2bB1Cd42FEf62d"
+   }
+  },
+  {
+   "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+   "bytecode_patterns": [
+    "3659cfe6",
+    "4f1ef286"
+   ],
+   "chain_id": 1,
+   "description": "USDC \u2014 USD Coin on Ethereum",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232521.5276585,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": 0,
+     "intent": 0,
+     "market": null,
+     "signature": 0,
+     "structural": 20
+    },
+    "confidence_level": 80,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 1.0,
+     "intent": 1,
+     "market": 0.8333333333333334,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {
+     "market": "Missing DexScreener fields: price_change_24h"
+    },
+    "critical_flags": [
+     "Proxy/upgradeable contract",
+     "Market data unknown: Missing DexScreener fields: price_change_24h"
+    ],
+    "risk_archetype": "unknown",
+    "risk_level": "MEDIUM",
+    "rug_probability": 8.0,
+    "status": "unknown"
+   },
+   "goplus": {
+    "data": {
+     "buy_tax": "0",
+     "cannot_buy": "0",
+     "creator_address": "0x95ba4cf87d6723ad9c0db21737d862be80e93911",
+     "creator_balance": "2505.454092",
+     "creator_percent": "0.000000",
+     "holder_count": "9142164",
+     "honeypot_with_same_creator": "0",
+     "is_honeypot": "0",
+     "is_in_dex": "1",
+     "is_open_source": "1",
+     "is_proxy": "1",
+     "sell_tax": "0",
+     "token_name": "USD Coin",
+     "token_symbol": "USDC",
+     "total_supply": "50137719661.613585",
+     "transfer_tax": "",
+     "trust_list": "1"
+    },
+    "reason": null,
+    "status": "ok"
+   },
+   "honeypot": {
+    "buy_tax": 0.0,
+    "can_buy": true,
+    "can_sell": true,
+    "coverage": {
+     "buy_tax": true,
+     "can_buy": true,
+     "can_sell": true,
+     "is_honeypot": true,
+     "sell_tax": true
+    },
+    "field_providers": {
+     "buy_tax": "honeypot.is",
+     "can_buy": "honeypot.is",
+     "can_sell": "honeypot.is",
+     "is_honeypot": "honeypot.is",
+     "sell_tax": "honeypot.is"
+    },
+    "honeypot_reason": "honeypot.is result; honeypot.is simulation taxes",
+    "is_honeypot": false,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232517.6849778,
+    "reason": "honeypot.is result; honeypot.is simulation taxes",
+    "sell_tax": 0.0,
+    "simulation_failed": false,
+    "status": "ok"
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": true,
+     "liquidity_usd": true,
+     "pair_age_hours": true,
+     "price_change_24h": false,
+     "price_usd": true,
+     "volume_24h": true
+    },
+    "fdv": 49723394525.0,
+    "liquidity_usd": 5781238.69,
+    "low_liquidity_flag": false,
+    "new_pair_flag": false,
+    "observed_at": 1790232520.3111694,
+    "pair_age_hours": 328.1,
+    "price_change_24h": null,
+    "price_usd": 1.000098,
+    "reason": "Missing DexScreener fields: price_change_24h",
+    "status": "unknown",
+    "token_name": "USD Coin",
+    "token_symbol": "USDC",
+    "volatility_flag": null,
+    "volume_24h": 173988436.36,
+    "wash_trade_flag": false
+   },
+   "ownership": {
+    "is_renounced": false,
+    "owner": "0xFcb19e6a322b27c06842A71e8c725399f049AE3a"
+   }
+  },
+  {
+   "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+   "bytecode_patterns": [],
+   "chain_id": 1,
+   "description": "WETH \u2014 Wrapped Ether on Ethereum",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232530.6077056,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": 0,
+     "intent": 0,
+     "market": 0,
+     "signature": 0,
+     "structural": 0
+    },
+    "confidence_level": 80,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 1.0,
+     "intent": 1,
+     "market": 1.0,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {},
+    "critical_flags": [],
+    "risk_archetype": "legitimate",
+    "risk_level": "LOW",
+    "rug_probability": 0.0,
+    "status": "ok"
+   },
+   "goplus": {
+    "data": {
+     "anti_whale_modifiable": "0",
+     "buy_tax": "0",
+     "can_take_back_ownership": "0",
+     "cannot_buy": "0",
+     "creator_address": "0x4f26ffbe5f04ed43630fdc30a87638d53d0b0876",
+     "creator_balance": "0.0042501181000001",
+     "creator_percent": "0.000000",
+     "external_call": "0",
+     "hidden_owner": "0",
+     "holder_count": "3671544",
+     "honeypot_with_same_creator": "0",
+     "is_anti_whale": "0",
+     "is_blacklisted": "0",
+     "is_honeypot": "0",
+     "is_in_dex": "1",
+     "is_mintable": "0",
+     "is_open_source": "1",
+     "is_proxy": "0",
+     "is_whitelisted": "0",
+     "owner_balance": "0",
+     "owner_change_balance": "0",
+     "owner_percent": "0",
+     "personal_slippage_modifiable": "0",
+     "selfdestruct": "0",
+     "sell_tax": "0",
+     "slippage_modifiable": "0",
+     "token_name": "Wrapped Ether",
+     "token_symbol": "WETH",
+     "total_supply": "2096017.01833976246232922",
+     "trading_cooldown": "0",
+     "transfer_pausable": "0",
+     "transfer_tax": "",
+     "trust_list": "1"
+    },
+    "reason": null,
+    "status": "ok"
+   },
+   "honeypot": {
+    "buy_tax": 0.0,
+    "can_buy": true,
+    "can_sell": true,
+    "coverage": {
+     "buy_tax": true,
+     "can_buy": true,
+     "can_sell": true,
+     "is_honeypot": true,
+     "sell_tax": true
+    },
+    "field_providers": {
+     "buy_tax": "honeypot.is",
+     "can_buy": "honeypot.is",
+     "can_sell": "honeypot.is",
+     "is_honeypot": "honeypot.is",
+     "sell_tax": "honeypot.is"
+    },
+    "honeypot_reason": "honeypot.is result; honeypot.is simulation taxes",
+    "is_honeypot": false,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232527.7189019,
+    "reason": "honeypot.is result; honeypot.is simulation taxes",
+    "sell_tax": 0.0,
+    "simulation_failed": false,
+    "status": "ok"
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": true,
+     "liquidity_usd": true,
+     "pair_age_hours": true,
+     "price_change_24h": true,
+     "price_usd": true,
+     "volume_24h": true
+    },
+    "fdv": 5626138107.0,
+    "liquidity_usd": 108385686.71,
+    "low_liquidity_flag": false,
+    "new_pair_flag": false,
+    "observed_at": 1790232529.6596937,
+    "pair_age_hours": 47222.2,
+    "price_change_24h": -2.69,
+    "price_usd": 2687.74,
+    "reason": null,
+    "status": "ok",
+    "token_name": "Wrapped Ether",
+    "token_symbol": "WETH",
+    "volatility_flag": false,
+    "volume_24h": 233727361.69,
+    "wash_trade_flag": false
+   },
+   "ownership": {
+    "is_renounced": null,
+    "owner": null
+   }
+  },
+  {
+   "address": "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
+   "bytecode_patterns": [
+    "40c10f19"
+   ],
+   "chain_id": 1,
+   "description": "UNI \u2014 Uniswap Token on Ethereum",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232538.845748,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": 0,
+     "intent": 0,
+     "market": null,
+     "signature": 0,
+     "structural": 15
+    },
+    "confidence_level": 80,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 1.0,
+     "intent": 1,
+     "market": 0.6666666666666666,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {
+     "market": "Missing DexScreener fields: price_change_24h, fdv"
+    },
+    "critical_flags": [
+     "Mint function detected",
+     "Market data unknown: Missing DexScreener fields: price_change_24h, fdv"
+    ],
+    "risk_archetype": "unknown",
+    "risk_level": "MEDIUM",
+    "rug_probability": 6.0,
+    "status": "unknown"
+   },
+   "goplus": {
+    "data": {
+     "anti_whale_modifiable": "0",
+     "buy_tax": "0",
+     "can_take_back_ownership": "0",
+     "cannot_buy": "0",
+     "creator_address": "0x41653c7d61609d856f29355e404f310ec4142cfb",
+     "creator_balance": "0.002858162612694493",
+     "creator_percent": "0.000000",
+     "external_call": "0",
+     "hidden_owner": "0",
+     "holder_count": "383242",
+     "honeypot_with_same_creator": "0",
+     "is_anti_whale": "1",
+     "is_blacklisted": "0",
+     "is_honeypot": "0",
+     "is_mintable": "0",
+     "is_open_source": "1",
+     "is_proxy": "0",
+     "is_whitelisted": "0",
+     "owner_address": "0x1a9c8182c09f50c8318d769245bea52c32be35bc",
+     "owner_balance": "267247996.30583504",
+     "owner_change_balance": "0",
+     "owner_percent": "0.267248",
+     "personal_slippage_modifiable": "0",
+     "selfdestruct": "0",
+     "sell_tax": "0",
+     "slippage_modifiable": "0",
+     "token_name": "Uniswap",
+     "token_symbol": "UNI",
+     "total_supply": "1000000000",
+     "trading_cooldown": "0",
+     "transfer_pausable": "0",
+     "transfer_tax": "",
+     "trust_list": "1"
+    },
+    "reason": null,
+    "status": "ok"
+   },
+   "honeypot": {
+    "buy_tax": 0.0,
+    "can_buy": true,
+    "can_sell": true,
+    "coverage": {
+     "buy_tax": true,
+     "can_buy": true,
+     "can_sell": true,
+     "is_honeypot": true,
+     "sell_tax": true
+    },
+    "field_providers": {
+     "buy_tax": "honeypot.is",
+     "can_buy": "honeypot.is",
+     "can_sell": "honeypot.is",
+     "is_honeypot": "honeypot.is",
+     "sell_tax": "honeypot.is"
+    },
+    "honeypot_reason": "honeypot.is result; honeypot.is simulation taxes",
+    "is_honeypot": false,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232535.3175228,
+    "reason": "honeypot.is result; honeypot.is simulation taxes",
+    "sell_tax": 0.0,
+    "simulation_failed": false,
+    "status": "ok"
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": false,
+     "liquidity_usd": true,
+     "pair_age_hours": true,
+     "price_change_24h": false,
+     "price_usd": true,
+     "volume_24h": true
+    },
+    "fdv": null,
+    "liquidity_usd": 175391782.32,
+    "low_liquidity_flag": false,
+    "new_pair_flag": false,
+    "observed_at": 1790232537.61591,
+    "pair_age_hours": 52480.3,
+    "price_change_24h": null,
+    "price_usd": 9716563.98,
+    "reason": "Missing DexScreener fields: price_change_24h, fdv",
+    "status": "unknown",
+    "token_name": "Uniswap",
+    "token_symbol": "UNI",
+    "volatility_flag": null,
+    "volume_24h": 29338699.12,
+    "wash_trade_flag": false
+   },
+   "ownership": {
+    "is_renounced": null,
+    "owner": null
+   }
+  },
+  {
+   "address": "0x514910771AF9Ca656af840dff83E8264EcF986CA",
+   "bytecode_patterns": [],
+   "chain_id": 1,
+   "description": "LINK \u2014 Chainlink Token on Ethereum",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232547.6365342,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": 0,
+     "intent": 0,
+     "market": 0,
+     "signature": 0,
+     "structural": 0
+    },
+    "confidence_level": 80,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 1.0,
+     "intent": 1,
+     "market": 1.0,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {},
+    "critical_flags": [],
+    "risk_archetype": "legitimate",
+    "risk_level": "LOW",
+    "rug_probability": 0.0,
+    "status": "ok"
+   },
+   "goplus": {
+    "data": {
+     "anti_whale_modifiable": "0",
+     "buy_tax": "0",
+     "can_take_back_ownership": "0",
+     "cannot_buy": "0",
+     "cannot_sell_all": "0",
+     "creator_address": "0xf55037738604fddfc4043d12f25124e94d7d1780",
+     "creator_balance": "12.76821886885309716",
+     "creator_percent": "0.000000",
+     "external_call": "0",
+     "hidden_owner": "0",
+     "holder_count": "920692",
+     "honeypot_with_same_creator": "0",
+     "is_anti_whale": "0",
+     "is_blacklisted": "0",
+     "is_honeypot": "0",
+     "is_in_dex": "1",
+     "is_mintable": "0",
+     "is_open_source": "1",
+     "is_proxy": "0",
+     "is_whitelisted": "0",
+     "lp_holder_count": "191",
+     "lp_total_supply": "356943.8944930401",
+     "owner_balance": "0",
+     "owner_change_balance": "0",
+     "owner_percent": "0",
+     "personal_slippage_modifiable": "0",
+     "selfdestruct": "0",
+     "sell_tax": "0",
+     "slippage_modifiable": "0",
+     "token_name": "ChainLink Token",
+     "token_symbol": "LINK",
+     "total_supply": "1000000000",
+     "trading_cooldown": "0",
+     "transfer_pausable": "0",
+     "transfer_tax": "",
+     "trust_list": "1"
+    },
+    "reason": null,
+    "status": "ok"
+   },
+   "honeypot": {
+    "buy_tax": 0.0,
+    "can_buy": true,
+    "can_sell": true,
+    "coverage": {
+     "buy_tax": true,
+     "can_buy": true,
+     "can_sell": true,
+     "is_honeypot": true,
+     "sell_tax": true
+    },
+    "field_providers": {
+     "buy_tax": "honeypot.is",
+     "can_buy": "honeypot.is",
+     "can_sell": "honeypot.is",
+     "is_honeypot": "honeypot.is",
+     "sell_tax": "honeypot.is"
+    },
+    "honeypot_reason": "honeypot.is result; honeypot.is simulation taxes",
+    "is_honeypot": false,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232543.5917604,
+    "reason": "honeypot.is result; honeypot.is simulation taxes",
+    "sell_tax": 0.0,
+    "simulation_failed": false,
+    "status": "ok"
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": true,
+     "liquidity_usd": true,
+     "pair_age_hours": true,
+     "price_change_24h": true,
+     "price_usd": true,
+     "volume_24h": true
+    },
+    "fdv": 12367309615.0,
+    "liquidity_usd": 17784934.42,
+    "low_liquidity_flag": false,
+    "new_pair_flag": false,
+    "observed_at": 1790232546.5484393,
+    "pair_age_hours": 14431.7,
+    "price_change_24h": -4.78,
+    "price_usd": 12.36,
+    "reason": null,
+    "status": "ok",
+    "token_name": "ChainLink Token",
+    "token_symbol": "LINK",
+    "volatility_flag": false,
+    "volume_24h": 10655010.040000001,
+    "wash_trade_flag": false
+   },
+   "ownership": {
+    "is_renounced": null,
+    "owner": null
+   }
+  },
+  {
+   "address": "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+   "bytecode_patterns": [
+    "40c10f19"
+   ],
+   "chain_id": 1,
+   "description": "DAI \u2014 Dai Stablecoin on Ethereum",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232555.7038963,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": 0,
+     "intent": 0,
+     "market": 0,
+     "signature": 0,
+     "structural": 15
+    },
+    "confidence_level": 80,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 1.0,
+     "intent": 1,
+     "market": 1.0,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {},
+    "critical_flags": [
+     "Mint function detected"
+    ],
+    "risk_archetype": "legitimate",
+    "risk_level": "LOW",
+    "rug_probability": 4.8,
+    "status": "ok"
+   },
+   "goplus": {
+    "data": {
+     "anti_whale_modifiable": "0",
+     "buy_tax": "0",
+     "can_take_back_ownership": "0",
+     "cannot_buy": "0",
+     "creator_address": "0xb5b06a16621616875a6c2637948bf98ea57c58fa",
+     "creator_balance": "0",
+     "creator_percent": "0.000000",
+     "external_call": "0",
+     "hidden_owner": "0",
+     "holder_count": "706892",
+     "honeypot_with_same_creator": "0",
+     "is_anti_whale": "0",
+     "is_blacklisted": "0",
+     "is_honeypot": "0",
+     "is_in_dex": "1",
+     "is_mintable": "1",
+     "is_open_source": "1",
+     "is_proxy": "0",
+     "is_whitelisted": "0",
+     "owner_balance": "0",
+     "owner_change_balance": "0",
+     "owner_percent": "0",
+     "personal_slippage_modifiable": "0",
+     "selfdestruct": "0",
+     "sell_tax": "0",
+     "slippage_modifiable": "0",
+     "token_name": "Dai Stablecoin",
+     "token_symbol": "DAI",
+     "total_supply": "4587257737.876280204082989164",
+     "trading_cooldown": "0",
+     "transfer_pausable": "0",
+     "transfer_tax": "",
+     "trust_list": "1"
+    },
+    "reason": null,
+    "status": "ok"
+   },
+   "honeypot": {
+    "buy_tax": 0.0,
+    "can_buy": true,
+    "can_sell": true,
+    "coverage": {
+     "buy_tax": true,
+     "can_buy": true,
+     "can_sell": true,
+     "is_honeypot": true,
+     "sell_tax": true
+    },
+    "field_providers": {
+     "buy_tax": "honeypot.is",
+     "can_buy": "honeypot.is",
+     "can_sell": "honeypot.is",
+     "is_honeypot": "honeypot.is",
+     "sell_tax": "honeypot.is"
+    },
+    "honeypot_reason": "honeypot.is result; honeypot.is simulation taxes",
+    "is_honeypot": false,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232552.1661344,
+    "reason": "honeypot.is result; honeypot.is simulation taxes",
+    "sell_tax": 0.0,
+    "simulation_failed": false,
+    "status": "ok"
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": true,
+     "liquidity_usd": true,
+     "pair_age_hours": true,
+     "price_change_24h": true,
+     "price_usd": true,
+     "volume_24h": true
+    },
+    "fdv": 4585876444.0,
+    "liquidity_usd": 109837526.06,
+    "low_liquidity_flag": false,
+    "new_pair_flag": false,
+    "observed_at": 1790232554.418352,
+    "pair_age_hours": 53002.9,
+    "price_change_24h": -0.03,
+    "price_usd": 0.9998,
+    "reason": null,
+    "status": "ok",
+    "token_name": "Dai Stablecoin",
+    "token_symbol": "DAI",
+    "volatility_flag": false,
+    "volume_24h": 4545216.01,
+    "wash_trade_flag": false
+   },
+   "ownership": {
+    "is_renounced": null,
+    "owner": null
+   }
+  },
+  {
+   "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "bytecode_patterns": [
+    "3659cfe6",
+    "4f1ef286"
+   ],
+   "chain_id": 8453,
+   "description": "USDC \u2014 USD Coin on Base",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232566.1300263,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": 0,
+     "intent": 0,
+     "market": 0,
+     "signature": 0,
+     "structural": 20
+    },
+    "confidence_level": 80,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 1.0,
+     "intent": 1,
+     "market": 1.0,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {},
+    "critical_flags": [
+     "Proxy/upgradeable contract"
+    ],
+    "risk_archetype": "legitimate",
+    "risk_level": "LOW",
+    "rug_probability": 6.4,
+    "status": "ok"
+   },
+   "goplus": {
+    "data": {
+     "buy_tax": "0",
+     "cannot_buy": "0",
+     "creator_address": "0x6aAFF8af0ae8017725312C388bA3745dfE91185B",
+     "creator_balance": "3.159885",
+     "creator_percent": "0.000000",
+     "holder_count": "10700944",
+     "honeypot_with_same_creator": "0",
+     "is_honeypot": "0",
+     "is_open_source": "1",
+     "is_proxy": "1",
+     "owner_address": "0x4fc7850364958d97b4d3f5a08f79db2493f8ca44",
+     "sell_tax": "0",
+     "token_name": "USD Coin",
+     "token_symbol": "USDC",
+     "total_supply": "4268493121.504402",
+     "transfer_tax": "",
+     "trust_list": "1"
+    },
+    "reason": null,
+    "status": "ok"
+   },
+   "honeypot": {
+    "buy_tax": 0.0,
+    "can_buy": true,
+    "can_sell": true,
+    "coverage": {
+     "buy_tax": true,
+     "can_buy": true,
+     "can_sell": true,
+     "is_honeypot": true,
+     "sell_tax": true
+    },
+    "field_providers": {
+     "buy_tax": "honeypot.is",
+     "can_buy": "honeypot.is",
+     "can_sell": "honeypot.is",
+     "is_honeypot": "honeypot.is",
+     "sell_tax": "honeypot.is"
+    },
+    "honeypot_reason": "honeypot.is result; honeypot.is simulation taxes",
+    "is_honeypot": false,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232562.6203072,
+    "reason": "honeypot.is result; honeypot.is simulation taxes",
+    "sell_tax": 0.0,
+    "simulation_failed": false,
+    "status": "ok"
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": true,
+     "liquidity_usd": true,
+     "pair_age_hours": true,
+     "price_change_24h": true,
+     "price_usd": true,
+     "volume_24h": true
+    },
+    "fdv": 1348698451.0,
+    "liquidity_usd": 36095298.03,
+    "low_liquidity_flag": false,
+    "new_pair_flag": false,
+    "observed_at": 1790232565.0166972,
+    "pair_age_hours": 26696.0,
+    "price_change_24h": -6.7,
+    "price_usd": 0.6784,
+    "reason": null,
+    "status": "ok",
+    "token_name": "Aerodrome",
+    "token_symbol": "AERO",
+    "volatility_flag": false,
+    "volume_24h": 34474969.35,
+    "wash_trade_flag": false
+   },
+   "ownership": {
+    "is_renounced": false,
+    "owner": "0x3ABd6f64A422225E61E435baE41db12096106df7"
+   }
+  },
+  {
+   "address": "0x4200000000000000000000000000000000000006",
+   "bytecode_patterns": [],
+   "chain_id": 8453,
+   "description": "WETH \u2014 Wrapped Ether on Base",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232575.0998266,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": 0,
+     "intent": 0,
+     "market": 0,
+     "signature": 0,
+     "structural": 0
+    },
+    "confidence_level": 80,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 1.0,
+     "intent": 1,
+     "market": 1.0,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {},
+    "critical_flags": [],
+    "risk_archetype": "legitimate",
+    "risk_level": "LOW",
+    "rug_probability": 0.0,
+    "status": "ok"
+   },
+   "goplus": {
+    "data": {
+     "anti_whale_modifiable": "0",
+     "can_take_back_ownership": "0",
+     "cannot_buy": "0",
+     "external_call": "0",
+     "hidden_owner": "0",
+     "holder_count": "5269859",
+     "is_anti_whale": "0",
+     "is_blacklisted": "0",
+     "is_honeypot": "0",
+     "is_mintable": "0",
+     "is_open_source": "1",
+     "is_proxy": "0",
+     "is_whitelisted": "0",
+     "owner_balance": "0",
+     "owner_change_balance": "0",
+     "owner_percent": "0",
+     "personal_slippage_modifiable": "0",
+     "selfdestruct": "0",
+     "slippage_modifiable": "0",
+     "token_name": "Wrapped Ether",
+     "token_symbol": "WETH",
+     "total_supply": "261224.705735227167856857",
+     "trading_cooldown": "0",
+     "transfer_pausable": "0",
+     "transfer_tax": ""
+    },
+    "reason": null,
+    "status": "ok"
+   },
+   "honeypot": {
+    "buy_tax": 0.0,
+    "can_buy": true,
+    "can_sell": true,
+    "coverage": {
+     "buy_tax": true,
+     "can_buy": true,
+     "can_sell": true,
+     "is_honeypot": true,
+     "sell_tax": true
+    },
+    "field_providers": {
+     "buy_tax": "honeypot.is",
+     "can_buy": "honeypot.is",
+     "can_sell": "honeypot.is",
+     "is_honeypot": "honeypot.is",
+     "sell_tax": "honeypot.is"
+    },
+    "honeypot_reason": "honeypot.is result; honeypot.is simulation taxes",
+    "is_honeypot": false,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232572.118764,
+    "reason": "honeypot.is result; honeypot.is simulation taxes",
+    "sell_tax": 0.0,
+    "simulation_failed": false,
+    "status": "ok"
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": true,
+     "liquidity_usd": true,
+     "pair_age_hours": true,
+     "price_change_24h": true,
+     "price_usd": true,
+     "volume_24h": true
+    },
+    "fdv": 708543173.0,
+    "liquidity_usd": 152516167.17,
+    "low_liquidity_flag": false,
+    "new_pair_flag": false,
+    "observed_at": 1790232574.1050007,
+    "pair_age_hours": 24984.8,
+    "price_change_24h": -2.68,
+    "price_usd": 2687.04,
+    "reason": null,
+    "status": "ok",
+    "token_name": "Wrapped Ether",
+    "token_symbol": "WETH",
+    "volatility_flag": false,
+    "volume_24h": 379783390.67,
+    "wash_trade_flag": false
+   },
+   "ownership": {
+    "is_renounced": null,
+    "owner": null
+   }
+  },
+  {
+   "address": "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA",
+   "bytecode_patterns": [
+    "3659cfe6",
+    "4f1ef286"
+   ],
+   "chain_id": 8453,
+   "description": "USDbC \u2014 USD Base Coin on Base",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232583.141925,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": 0,
+     "intent": 0,
+     "market": 0,
+     "signature": 0,
+     "structural": 15
+    },
+    "confidence_level": 80,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 1.0,
+     "intent": 1,
+     "market": 1.0,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {},
+    "critical_flags": [
+     "Proxy/upgradeable contract"
+    ],
+    "risk_archetype": "legitimate",
+    "risk_level": "LOW",
+    "rug_probability": 4.8,
+    "status": "ok"
+   },
+   "goplus": {
+    "data": {
+     "cannot_buy": "0",
+     "creator_address": "0x3885226c26c467b342220132ec9d0b311b2dd43c",
+     "creator_balance": "0",
+     "creator_percent": "0.000000",
+     "holder_count": "341731",
+     "honeypot_with_same_creator": "0",
+     "is_open_source": "1",
+     "is_proxy": "1",
+     "owner_address": "0xd94e416cf2c7167608b2515b7e4102b41efff94f",
+     "token_name": "USD Base Coin",
+     "token_symbol": "USDbC",
+     "total_supply": "5917090.114322",
+     "transfer_tax": ""
+    },
+    "reason": null,
+    "status": "ok"
+   },
+   "honeypot": {
+    "buy_tax": 0.0,
+    "can_buy": true,
+    "can_sell": true,
+    "coverage": {
+     "buy_tax": true,
+     "can_buy": true,
+     "can_sell": true,
+     "is_honeypot": true,
+     "sell_tax": true
+    },
+    "field_providers": {
+     "buy_tax": "honeypot.is",
+     "can_buy": "honeypot.is",
+     "can_sell": "honeypot.is",
+     "is_honeypot": "honeypot.is",
+     "sell_tax": "honeypot.is"
+    },
+    "honeypot_reason": "honeypot.is result; honeypot.is simulation taxes",
+    "is_honeypot": false,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232579.8606184,
+    "reason": "honeypot.is result; honeypot.is simulation taxes",
+    "sell_tax": 0.0,
+    "simulation_failed": false,
+    "status": "ok"
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": true,
+     "liquidity_usd": true,
+     "pair_age_hours": true,
+     "price_change_24h": true,
+     "price_usd": true,
+     "volume_24h": true
+    },
+    "fdv": 4998742.0,
+    "liquidity_usd": 1326474.23,
+    "low_liquidity_flag": false,
+    "new_pair_flag": false,
+    "observed_at": 1790232581.96044,
+    "pair_age_hours": 859.3,
+    "price_change_24h": -2.08,
+    "price_usd": 0.02001,
+    "reason": null,
+    "status": "ok",
+    "token_name": "Fantom Bomb",
+    "token_symbol": "fBOMB",
+    "volatility_flag": false,
+    "volume_24h": 889287.96,
+    "wash_trade_flag": false
+   },
+   "ownership": {
+    "is_renounced": null,
+    "owner": null
+   }
+  },
+  {
+   "address": "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22",
+   "bytecode_patterns": [
+    "3659cfe6",
+    "4f1ef286"
+   ],
+   "chain_id": 8453,
+   "description": "cbETH \u2014 Coinbase Wrapped Staked ETH on Base",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232591.1807158,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": 0,
+     "intent": 0,
+     "market": 0,
+     "signature": 0,
+     "structural": 15
+    },
+    "confidence_level": 80,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 1.0,
+     "intent": 1,
+     "market": 1.0,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {},
+    "critical_flags": [
+     "Proxy/upgradeable contract"
+    ],
+    "risk_archetype": "legitimate",
+    "risk_level": "LOW",
+    "rug_probability": 4.8,
+    "status": "ok"
+   },
+   "goplus": {
+    "data": {
+     "buy_tax": "",
+     "cannot_buy": "0",
+     "creator_address": "0x0cf966857325db9a9b4dada66e80ce581c18aca1",
+     "creator_balance": "0.000000000000001",
+     "creator_percent": "0.000000",
+     "holder_count": "204697",
+     "honeypot_with_same_creator": "0",
+     "is_in_dex": "1",
+     "is_open_source": "1",
+     "is_proxy": "1",
+     "lp_holder_count": "10",
+     "lp_total_supply": "991084.9179675976",
+     "owner_address": "0xd94e416cf2c7167608b2515b7e4102b41efff94f",
+     "sell_tax": "",
+     "token_name": "Coinbase Wrapped Staked ETH",
+     "token_symbol": "cbETH",
+     "total_supply": "77343.736405329509829621",
+     "transfer_tax": ""
+    },
+    "reason": null,
+    "status": "ok"
+   },
+   "honeypot": {
+    "buy_tax": 0.0,
+    "can_buy": true,
+    "can_sell": true,
+    "coverage": {
+     "buy_tax": true,
+     "can_buy": true,
+     "can_sell": true,
+     "is_honeypot": true,
+     "sell_tax": true
+    },
+    "field_providers": {
+     "buy_tax": "honeypot.is",
+     "can_buy": "honeypot.is",
+     "can_sell": "honeypot.is",
+     "is_honeypot": "honeypot.is",
+     "sell_tax": "honeypot.is"
+    },
+    "honeypot_reason": "honeypot.is result; honeypot.is simulation taxes",
+    "is_honeypot": false,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232588.1407397,
+    "reason": "honeypot.is result; honeypot.is simulation taxes",
+    "sell_tax": 0.0,
+    "simulation_failed": false,
+    "status": "ok"
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": true,
+     "liquidity_usd": true,
+     "pair_age_hours": true,
+     "price_change_24h": true,
+     "price_usd": true,
+     "volume_24h": true
+    },
+    "fdv": 237497813.0,
+    "liquidity_usd": 1448911.73,
+    "low_liquidity_flag": false,
+    "new_pair_flag": false,
+    "observed_at": 1790232590.1750326,
+    "pair_age_hours": 10069.3,
+    "price_change_24h": -2.47,
+    "price_usd": 3063.1,
+    "reason": null,
+    "status": "ok",
+    "token_name": "Coinbase Wrapped Staked ETH",
+    "token_symbol": "cbETH",
+    "volatility_flag": false,
+    "volume_24h": 1821905.08,
+    "wash_trade_flag": false
+   },
+   "ownership": {
+    "is_renounced": null,
+    "owner": null
+   }
+  },
+  {
+   "address": "0x940181a94A35A4569E4529A3CDfB74e38FD98631",
+   "bytecode_patterns": [
+    "40c10f19"
+   ],
+   "chain_id": 8453,
+   "description": "AERO \u2014 Aerodrome Finance on Base",
+   "ethos": {
+    "ethos_raw_score": null,
+    "linked_wallets": [],
+    "low_reputation_flag": false,
+    "observed_at": 1790232599.4584146,
+    "reputation_score": 50,
+    "review_stats": {},
+    "scam_flags": [],
+    "severe_reputation_flag": false,
+    "trust_level": "unknown",
+    "vouch_count": 0
+   },
+   "expected": {
+    "category_scores": {
+     "behavioral": 0,
+     "honeypot": 0,
+     "intent": 0,
+     "market": 0,
+     "signature": 0,
+     "structural": 15
+    },
+    "confidence_level": 80,
+    "coverage": {
+     "behavioral": 1,
+     "honeypot": 1.0,
+     "intent": 1,
+     "market": 1.0,
+     "signature": 1,
+     "structural": 1.0
+    },
+    "coverage_reasons": {},
+    "critical_flags": [
+     "Mint function detected"
+    ],
+    "risk_archetype": "legitimate",
+    "risk_level": "LOW",
+    "rug_probability": 4.8,
+    "status": "ok"
+   },
+   "goplus": {
+    "data": {
+     "anti_whale_modifiable": "0",
+     "buy_tax": "",
+     "can_take_back_ownership": "0",
+     "cannot_buy": "0",
+     "creator_address": "0xe83f922C34A1962e9aE9F52B59e18239764f2818",
+     "creator_balance": "0",
+     "creator_percent": "0.000000",
+     "external_call": "0",
+     "hidden_owner": "0",
+     "holder_count": "753479",
+     "honeypot_with_same_creator": "0",
+     "is_anti_whale": "0",
+     "is_blacklisted": "0",
+     "is_honeypot": "0",
+     "is_in_dex": "1",
+     "is_mintable": "1",
+     "is_open_source": "1",
+     "is_proxy": "0",
+     "is_whitelisted": "0",
+     "lp_holder_count": "176",
+     "lp_total_supply": "23127.512197357682",
+     "owner_balance": "0",
+     "owner_change_balance": "0",
+     "owner_percent": "0",
+     "personal_slippage_modifiable": "0",
+     "selfdestruct": "0",
+     "sell_tax": "",
+     "slippage_modifiable": "0",
+     "token_name": "Aerodrome",
+     "token_symbol": "AERO",
+     "total_supply": "1988034890.229641792427930557",
+     "trading_cooldown": "0",
+     "transfer_pausable": "0",
+     "transfer_tax": ""
+    },
+    "reason": null,
+    "status": "ok"
+   },
+   "honeypot": {
+    "buy_tax": 0.0,
+    "can_buy": true,
+    "can_sell": true,
+    "coverage": {
+     "buy_tax": true,
+     "can_buy": true,
+     "can_sell": true,
+     "is_honeypot": true,
+     "sell_tax": true
+    },
+    "field_providers": {
+     "buy_tax": "honeypot.is",
+     "can_buy": "honeypot.is",
+     "can_sell": "honeypot.is",
+     "is_honeypot": "honeypot.is",
+     "sell_tax": "honeypot.is"
+    },
+    "honeypot_reason": "honeypot.is result; honeypot.is simulation taxes",
+    "is_honeypot": false,
+    "low_tax_honeypot": false,
+    "observed_at": 1790232596.3201854,
+    "reason": "honeypot.is result; honeypot.is simulation taxes",
+    "sell_tax": 0.0,
+    "simulation_failed": false,
+    "status": "ok"
+   },
+   "is_contract": true,
+   "market": {
+    "coverage": {
+     "fdv": true,
+     "liquidity_usd": true,
+     "pair_age_hours": true,
+     "price_change_24h": true,
+     "price_usd": true,
+     "volume_24h": true
+    },
+    "fdv": 1348598354.0,
+    "liquidity_usd": 36093958.75,
+    "low_liquidity_flag": false,
+    "new_pair_flag": false,
+    "observed_at": 1790232598.7091095,
+    "pair_age_hours": 26696.0,
+    "price_change_24h": -6.71,
+    "price_usd": 0.6783,
+    "reason": null,
+    "status": "ok",
+    "token_name": "Aerodrome",
+    "token_symbol": "AERO",
+    "volatility_flag": false,
+    "volume_24h": 29105752.58,
+    "wash_trade_flag": false
+   },
+   "ownership": {
+    "is_renounced": null,
+    "owner": null
+   }
+  }
+ ],
+ "source": "Recorded 2026-09-24 from public providers for the 20 safe entries of eval/data/benchmark_v1.json: GoPlus token_security (scalar fields), eth_getCode (reduced to the services/contract_service.py BYTECODE_PATTERNS selectors it contains as PUSH4 operands), owner() via RPC, HoneypotService, DexService and EthosService outputs. Explorer verification and creation age are not recorded: they need the production explorer key."
+}

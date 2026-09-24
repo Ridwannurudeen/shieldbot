@@ -13,6 +13,22 @@ LOW_REPUTATION_THRESHOLD = 500
 SEVERE_REPUTATION_THRESHOLD = 300
 
 
+def neutral_reputation() -> dict:
+    """Reputation of an address with no Ethos profile: neutral."""
+    return {
+        'observed_at': time.time(),
+        'reputation_score': 50,
+        'ethos_raw_score': None,
+        'trust_level': 'unknown',
+        'scam_flags': [],
+        'linked_wallets': [],
+        'vouch_count': 0,
+        'review_stats': {},
+        'low_reputation_flag': False,
+        'severe_reputation_flag': False,
+    }
+
+
 class EthosService:
     """Fetches wallet reputation data from Ethos Network."""
 
@@ -20,18 +36,7 @@ class EthosService:
         self.privy_token = os.getenv('ETHOS_PRIVY_TOKEN')
 
     async def fetch_wallet_reputation(self, wallet_address: str) -> dict:
-        defaults = {
-            'observed_at': time.time(),
-            'reputation_score': 50,
-            'ethos_raw_score': None,
-            'trust_level': 'unknown',
-            'scam_flags': [],
-            'linked_wallets': [],
-            'vouch_count': 0,
-            'review_stats': {},
-            'low_reputation_flag': False,
-            'severe_reputation_flag': False,
-        }
+        defaults = neutral_reputation()
 
         try:
             userkey = f"address:{wallet_address}"

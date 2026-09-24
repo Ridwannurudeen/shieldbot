@@ -73,7 +73,7 @@ def test_bsc_simulates_sells_reads_etherscan_and_knows_its_lockers(coverage):
     assert body["capabilities"] == {
         "sell_simulation": "honeypot.is",
         "contract_age": "etherscan",
-        "verification": "etherscan",
+        "verification": "etherscan+sourcify",
         "liquidity_lock": {"lockers": "known", "known_lockers": ["PinkLock", "Unicrypt"]},
         "router_allowlist": {"present": True, "routers": 6},
         "public_mempool": "yes",
@@ -116,7 +116,7 @@ def test_base_ages_contracts_through_blockscout_and_reads_short_log_windows(cove
     capabilities = coverage.get(8453).json()["capabilities"]
     assert capabilities["sell_simulation"] == "honeypot.is"
     assert capabilities["contract_age"] == "blockscout"
-    assert capabilities["verification"] == "etherscan"
+    assert capabilities["verification"] == "etherscan+sourcify"
     assert capabilities["approvals"] == {"history": "recent", "window_blocks": 48_000}
 
 

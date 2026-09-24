@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 import aiohttp
-from cachetools import TTLCache
+from cachetools import TLRUCache
 
 from core.circuit_breaker import CircuitOpenError, provider_breakers
 from core.unknown_ledger import unknown_ledger
@@ -21,6 +21,16 @@ BLOCKSCOUT_INSTANCES = {
     8453: "https://base.blockscout.com",
     10: "https://explorer.optimism.io",
 }
+
+
+# An answer holds for five minutes; a failed lookup is asked again after 30 seconds, so one
+# provider blip does not leave a contract Unknown for five minutes.
+RESULT_TTL_SECONDS = 300
+UNKNOWN_RESULT_TTL_SECONDS = 30
+
+
+def _result_ttu(key, result, now):
+    return now + (UNKNOWN_RESULT_TTL_SECONDS if result.status == "unknown" else RESULT_TTL_SECONDS)
 
 
 @dataclass(frozen=True)
@@ -51,15 +61,16 @@ def _redact_api_key(value, api_key: str):
 
 
 class ExplorerService:
-    """Cache provider responses for five minutes; pace each Blockscout host on its own.
+    """Cache provider responses (five minutes, a failure 30 seconds); pace each Blockscout host.
 
     The PRO gateway and the public instances have separate rate limits, so a slow or rate-limited
     instance must not hold up the gateway's lookups, or the other way round.
     """
 
     def __init__(self):
-        self._cache = TTLCache(maxsize=2048, ttl=300)
+        self._cache = TLRUCache(maxsize=2048, ttu=_result_ttu)
         self._blockscout_locks: dict[str, asyncio.Lock] = {}
+        self._inflight: dict[tuple, asyncio.Task] = {}
         self._last_request: dict[str, float] = {}
 
     async def _request(
@@ -71,14 +82,12 @@ class ExplorerService:
                 sorted((key, value) for key, value in params.items() if key != "apikey")
             ),
         )
-        if cache_key in self._cache:
-            return self._cache[cache_key]
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
         host = urlsplit(url).hostname
 
         async def fetch():
-            # Checked here, inside the host's lock for Blockscout, so a lookup queued behind the
-            # one that opened the breaker sends nothing. It raises CircuitOpenError.
-            provider_breakers.check(provider, chain_id)
             try:
                 async with aiohttp.ClientSession(
                     timeout=aiohttp.ClientTimeout(total=15)
@@ -105,13 +114,21 @@ class ExplorerService:
                             ):
                                 await asyncio.sleep(2**attempt)
                                 continue
-                            if response.status != 200:
+                            # Sourcify answers 404 with a body naming the address when no
+                            # contract is verified there: that body is the evidence.
+                            if response.status != 200 and not (
+                                provider == "sourcify" and response.status == 404
+                            ):
                                 provider_breakers.record_status(provider, chain_id, response.status)
                                 return ExplorerResult(
                                     "unknown",
                                     reason=f"HTTP {response.status}",
                                     provider=provider,
                                 )
+                            # A 404 with a readable body keeps its reason, so the Unknown ledger
+                            # counts it as the provider having nothing for this address; a body
+                            # that is not an object could not be read, and counts as failed.
+                            not_found = "HTTP 404" if response.status == 404 else None
                             data = await response.json()
                             provider_breakers.record_status(provider, chain_id, response.status)
                             if not isinstance(data, dict):
@@ -123,34 +140,59 @@ class ExplorerService:
                             api_key = params.get("apikey")
                             if api_key:
                                 data = _redact_api_key(data, api_key)
-                            return ExplorerResult("known", data=data, provider=provider)
+                            return ExplorerResult("known", data=data, reason=not_found, provider=provider)
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
                 provider_breakers.record_error(provider, chain_id, exc)
                 return ExplorerResult(
                     "unknown", reason=type(exc).__name__, provider=provider
                 )
 
+        # The breaker is checked once per lookup, as its request is about to go: a second check
+        # would refuse the breaker's own half-open probe. An open breaker's answer is neither
+        # cached nor shared, so lookups resume as soon as it closes, and it counts as failed.
         try:
             if provider == "blockscout":
                 lock = self._blockscout_locks.get(host)
                 if lock is None:
                     lock = self._blockscout_locks[host] = asyncio.Lock()
                 async with lock:
-                    if cache_key in self._cache:
-                        return self._cache[cache_key]
-                    result = await fetch()
-                    self._cache[cache_key] = result
-            else:
-                result = await fetch()
-                self._cache[cache_key] = result
+                    cached = self._cache.get(cache_key)
+                    if cached is not None:
+                        return cached
+                    # Inside the host's lock, so a lookup queued behind the one that opened the
+                    # breaker sends nothing.
+                    provider_breakers.check(provider, chain_id)
+                    return self._keep(provider, chain_id, cache_key, await fetch())
+            # Every caller asks, one that would share a lookup already out too, so while the
+            # breaker is open none of them waits on that lookup.
+            provider_breakers.check(provider, chain_id)
         except CircuitOpenError as exc:
-            # Not cached, so lookups resume as soon as the breaker closes; counted as failed below.
-            result = ExplorerResult("unknown", reason=type(exc).__name__, provider=provider)
+            unknown_ledger.record(provider, chain_id, "failed")
+            return ExplorerResult("unknown", reason=type(exc).__name__, provider=provider)
+        # Concurrent callers for one URL (one address on one chain) share one request, so a hot
+        # address has at most one live Sourcify lookup, cached and counted once. A caller that is
+        # cancelled leaves it running for the others.
+        flight_key = (asyncio.get_running_loop(), cache_key)
+        if flight_key not in self._inflight:
+            self._inflight[flight_key] = asyncio.create_task(
+                self._settle(provider, chain_id, cache_key, flight_key, fetch())
+            )
+        return await asyncio.shield(self._inflight[flight_key])
+
+    async def _settle(self, provider, chain_id, cache_key, flight_key, lookup) -> ExplorerResult:
+        try:
+            return self._keep(provider, chain_id, cache_key, await lookup)
+        finally:
+            self._inflight.pop(flight_key, None)
+
+    def _keep(self, provider, chain_id, cache_key, result) -> ExplorerResult:
+        """Cache a fetched reply and count it in the Unknown ledger."""
+        self._cache[cache_key] = result
         unknown_ledger.record(
             provider,
             chain_id,
-            "answered" if result.status == "known"
-            else "unknown" if result.reason == "HTTP 404"
+            "unknown" if result.reason == "HTTP 404"
+            else "answered" if result.status == "known"
             else "failed",
         )
         return result
@@ -179,9 +221,11 @@ class ExplorerService:
             chain_id,
         )
 
-    async def get_verification_status(
+    async def get_sourcify_verification(
         self, address: str, chain_id: int
     ) -> ExplorerResult:
+        """Sourcify's answer: verified, unverified (no match for this address on this chain), or
+        unknown when the reply is missing or names another contract."""
         if not _is_address(address):
             return ExplorerResult("unknown", reason="Invalid address")
         address = address.lower()
@@ -191,30 +235,48 @@ class ExplorerService:
             {},
             chain_id,
         )
-        if sourcify.status == "known":
-            data = sourcify.data
-            matches = ("match", "exact_match")
-            if (
-                data.get("chainId") == str(chain_id)
-                and isinstance(data.get("address"), str)
-                and data["address"].lower() == address
-                and data.get("match") in matches
-                and "creationMatch" in data
-                and data["creationMatch"] in (*matches, None)
-                and "runtimeMatch" in data
-                and data["runtimeMatch"] in (*matches, None)
-                and (
-                    data["creationMatch"] in matches or data["runtimeMatch"] in matches
-                )
-            ):
-                return ExplorerResult(
-                    "verified", data={"match": data["match"]}, provider="sourcify"
-                )
-            sourcify = ExplorerResult(
-                "unknown",
-                reason="Missing or mismatched verification evidence",
-                provider="sourcify",
+        if sourcify.status != "known":
+            return sourcify
+        data = sourcify.data
+        matches = ("match", "exact_match")
+        same_contract = (
+            data.get("chainId") == str(chain_id)
+            and isinstance(data.get("address"), str)
+            and data["address"].lower() == address
+            and "creationMatch" in data
+            and "runtimeMatch" in data
+        )
+        if (
+            same_contract
+            and data.get("match") in matches
+            and data["creationMatch"] in (*matches, None)
+            and data["runtimeMatch"] in (*matches, None)
+            and (data["creationMatch"] in matches or data["runtimeMatch"] in matches)
+        ):
+            return ExplorerResult(
+                "verified", data={"match": data["match"]}, provider="sourcify"
             )
+        if same_contract and "match" in data and data["match"] is None and (
+            data["creationMatch"] is None and data["runtimeMatch"] is None
+        ):
+            return ExplorerResult("unverified", reason="not verified", provider="sourcify")
+        return ExplorerResult(
+            "unknown",
+            reason="Missing or mismatched verification evidence",
+            provider="sourcify",
+        )
+
+    async def get_verification_status(
+        self, address: str, chain_id: int
+    ) -> ExplorerResult:
+        """Sourcify and Blockscout together: verified when either says so, unverified only when
+        both say not, unknown otherwise."""
+        if not _is_address(address):
+            return ExplorerResult("unknown", reason="Invalid address")
+        address = address.lower()
+        sourcify = await self.get_sourcify_verification(address, chain_id)
+        if sourcify.status == "verified":
+            return sourcify
 
         blockscout = await self._blockscout(f"addresses/{address}", chain_id)
         if blockscout.status == "known":
@@ -225,15 +287,18 @@ class ExplorerService:
                 and data.get("is_contract") is True
                 and type(data.get("is_verified")) is bool
             ):
-                return ExplorerResult(
-                    "verified" if data["is_verified"] else "unverified",
+                if data["is_verified"] or sourcify.status == "unverified":
+                    return ExplorerResult(
+                        "verified" if data["is_verified"] else "unverified",
+                        provider="blockscout",
+                    )
+                blockscout = ExplorerResult("unverified", reason="not verified", provider="blockscout")
+            else:
+                blockscout = ExplorerResult(
+                    "unknown",
+                    reason="Missing or mismatched contract verification evidence",
                     provider="blockscout",
                 )
-            blockscout = ExplorerResult(
-                "unknown",
-                reason="Missing or mismatched contract verification evidence",
-                provider="blockscout",
-            )
         return ExplorerResult(
             "unknown",
             reason=f"Sourcify: {sourcify.reason}; Blockscout: {blockscout.reason}",

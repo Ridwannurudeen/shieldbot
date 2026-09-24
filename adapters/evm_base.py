@@ -2,6 +2,7 @@
 
 import logging
 import asyncio
+import re
 import aiohttp
 from typing import Dict, List, Optional, Tuple
 from cachetools import TTLCache
@@ -28,8 +29,17 @@ HONEYPOT_IS_UNSUPPORTED = (
     'honeypot.is unsupported for this chain; any honeypot and tax data here is GoPlus-reported, '
     'not simulated by ShieldBot'
 )
+# The sources verification asks on a chain with Etherscan, in this order; GET /api/coverage names
+# them from the same tuple.
+VERIFICATION_SOURCES = ('etherscan', 'sourcify')
+# EIP-1167 minimal proxy runtime code: a clone that delegates every call to the embedded address.
+EIP1167_RUNTIME = re.compile(r'363d3d373d3d3d363d73([0-9a-f]{40})5af43d82803e903d91602b57fd5bf3')
+
 # check_honeypot and get_tax_info read the same honeypot.is reply, and a scan calls them back to back.
 HONEYPOT_IS_REPLY_TTL_SECONDS = 60
+# The structural analyzer, the payment rule and the spender lookup can all ask for one contract's
+# creation within a scan, and a creation does not change.
+CREATION_INFO_TTL_SECONDS = 300
 # Burned LP counts as locked, but these addresses cannot hold a lock, so a chain whose only known
 # "lockers" they are cannot tell unlocked liquidity from liquidity held by an unlisted locker.
 BURN_ADDRESSES = {
@@ -143,6 +153,8 @@ class EvmAdapter(ChainAdapter):
         self._solidly_factory = solidly_factory
         self._whitelisted_routers = whitelisted_routers or {}
         self._honeypot_is_replies = TTLCache(maxsize=1024, ttl=HONEYPOT_IS_REPLY_TTL_SECONDS)
+        self._creation_infos = TTLCache(maxsize=1024, ttl=CREATION_INFO_TTL_SECONDS)
+        self._creation_inflight = {}
 
     @property
     def chain_id(self) -> int:
@@ -215,14 +227,81 @@ class EvmAdapter(ChainAdapter):
             logger.error("[%s] Error getting bytecode: %s", self._chain_name, type(e).__name__)
             return None
 
-    async def is_verified_contract(self, address: str) -> Tuple[Optional[bool], Optional[str]]:
-        """Return (verification, source); None means unknown, False means unverified."""
+    async def is_verified_contract(
+        self, address: str, code: Optional[str] = None,
+    ) -> Tuple[Optional[bool], Optional[str]]:
+        """Return (verification, source); None means unknown, False means unverified.
+
+        An EIP-1167 minimal proxy (a clone) has no source of its own, so a clone that is not
+        verified itself is judged by its implementation. A caller that already read the contract's
+        code passes it, so the clone check does not read it again.
+        """
+        verified, source = await self._verification(address)
+        if verified is not True:
+            implementation = await self._minimal_proxy_implementation(address, code)
+            if implementation:
+                return await self._verification(implementation)
+        return verified, source
+
+    async def _minimal_proxy_implementation(self, address: str, code: Optional[str]) -> Optional[str]:
+        if code is None:
+            code = await self.get_bytecode(address)
+        # web3 6 returns the hex with 0x, web3 7 without.
+        match = EIP1167_RUNTIME.fullmatch(code.lower().removeprefix('0x')) if code else None
+        return '0x' + match.group(1) if match else None
+
+    async def _verification(self, address: str) -> Tuple[Optional[bool], Optional[str]]:
+        """The chain's explorer and Sourcify together: verified when either says so, unverified
+        only when both say not, unknown when one could not be read and the other did not verify.
+
+        Each source is awaited for PROVIDER_TIMEOUT (8 s) at most and counts as unknown after it.
+        A direct caller such as the structural analyzer waits about 16 s at most on a chain with
+        Etherscan (Etherscan, then Sourcify) and 8 s on Robinhood Chain, where Sourcify and
+        Blockscout share one bound. Approvals and permits get one 8 s window for both sources on
+        every chain: the spender-facts step wraps this call in its own PROVIDER_TIMEOUT, so there a
+        stalled Etherscan leaves verification unknown, and Sourcify's later answer is only cached
+        for a later lookup.
+        """
+        # Imported here: services imports utils.web3_client, which imports this module's adapters.
+        from services.counterparty_service import within_timeout
+
         if self._explorer_backend == 'sourcify_blockscout':
-            result = await self._explorer_service.get_verification_status(address, self._chain_id)
+            from services.explorer_service import ExplorerResult
+
+            result = await within_timeout(
+                self._explorer_service.get_verification_status(address, self._chain_id),
+                ExplorerResult('unknown', reason='Sourcify and Blockscout timed out'),
+            )
             if result.status == 'unknown':
                 logger.warning("[%s] Verification unknown: %s", self._chain_name, result.reason)
                 return (None, None)
             return (result.status == 'verified', None)
+        lookups = {'etherscan': self._etherscan_verification, 'sourcify': self._sourcify_verification}
+        timed_out = object()
+        answers = []
+        # A source is asked only when none before it verified the contract.
+        for name in VERIFICATION_SOURCES:
+            answer = await within_timeout(lookups[name](address), timed_out)
+            verified = None if answer is timed_out else answer[0]
+            if verified is True:
+                return answer
+            answers.append('timed out' if answer is timed_out else 'unknown' if verified is None else 'unverified')
+        if all(answer == 'unverified' for answer in answers):
+            return (False, None)
+        logger.warning(
+            "[%s] Verification unknown: %s", self._chain_name,
+            ', '.join(f'{name} {answer}' for name, answer in zip(VERIFICATION_SOURCES, answers)),
+        )
+        return (None, None)
+
+    async def _sourcify_verification(self, address: str) -> Tuple[Optional[bool], Optional[str]]:
+        result = await self._explorer_service.get_sourcify_verification(address, self._chain_id)
+        if result.status == 'unknown':
+            logger.warning("[%s] Sourcify verification unknown: %s", self._chain_name, result.reason)
+            return (None, None)
+        return (result.status == 'verified', None)
+
+    async def _etherscan_verification(self, address: str) -> Tuple[Optional[bool], Optional[str]]:
         try:
             provider_breakers.check('etherscan', self._chain_id)
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
@@ -261,6 +340,32 @@ class EvmAdapter(ChainAdapter):
             return (None, None)
 
     async def get_contract_creation_info(self, address: str) -> Optional[Dict]:
+        """Creation info, one lookup per contract shared by concurrent callers and kept for five
+        minutes. Only an answer with an age is kept, so a failed or undated lookup is asked again.
+        A cached answer is not a lookup, so it records nothing in the Unknown ledger.
+        """
+        key = (self._chain_id, address.lower())
+        cached = self._creation_infos.get(key)
+        if cached is not None:
+            return dict(cached)
+        flight_key = (asyncio.get_running_loop(), key)
+        if flight_key not in self._creation_inflight:
+            self._creation_inflight[flight_key] = asyncio.create_task(
+                self._lookup_creation_info(address, key, flight_key)
+            )
+        info = await asyncio.shield(self._creation_inflight[flight_key])
+        return dict(info) if info else info
+
+    async def _lookup_creation_info(self, address: str, key: tuple, flight_key: tuple) -> Optional[Dict]:
+        try:
+            info = await self._fetch_creation_info(address)
+        finally:
+            self._creation_inflight.pop(flight_key, None)
+        if info and info.get('age_days') is not None:
+            self._creation_infos[key] = info
+        return info
+
+    async def _fetch_creation_info(self, address: str) -> Optional[Dict]:
         etherscan_answered = False
         try:
             if self._explorer_backend in ('sourcify_blockscout', 'etherscan_blockscout'):
@@ -600,8 +705,9 @@ class EvmAdapter(ChainAdapter):
         sell_simulation is goplus_reported where no sell is simulated and honeypot and tax fields come
         from GoPlus's own flags. A Blockscout source is named only where a Blockscout request can be
         sent; without one, contract_age is None (no other source is asked) and verification falls back
-        to Sourcify alone. Liquidity lock status is unknown on a chain whose only known lockers are burn
-        addresses: an unlocked pool cannot be told from one held by an unlisted locker.
+        to Sourcify alone, which can verify a contract but not call it unverified. Liquidity lock
+        status is unknown on a chain whose only known lockers are burn addresses: an unlocked pool
+        cannot be told from one held by an unlisted locker.
         """
         lockers = [name for address, name in self._known_lockers.items() if address not in BURN_ADDRESSES]
         blockscout = self._explorer_service.can_reach_blockscout(self._chain_id)
@@ -610,8 +716,11 @@ class EvmAdapter(ChainAdapter):
             'contract_age': (
                 'etherscan' if self._explorer_backend == 'etherscan' else 'blockscout' if blockscout else None
             ),
+            # VERIFICATION_SOURCES in the order they are asked; on Robinhood Chain, Sourcify then
+            # Blockscout where a Blockscout request can be sent. Verified when any source says so,
+            # unverified only when every source asked says not.
             'verification': (
-                'etherscan' if self._explorer_backend != 'sourcify_blockscout'
+                '+'.join(VERIFICATION_SOURCES) if self._explorer_backend != 'sourcify_blockscout'
                 else 'sourcify+blockscout' if blockscout else 'sourcify'
             ),
             'liquidity_lock': {'lockers': 'known' if lockers else 'unknown', 'known_lockers': lockers},

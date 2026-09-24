@@ -110,6 +110,58 @@ async def test_a_verified_low_tax_honeypot_leaves_the_service_unsellable_and_dou
     goplus.assert_not_awaited()
 
 
+LIKELY_FALSE_POSITIVE = "Honeypot flag may be a false positive: the contract is verified and its taxes are normal"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entrypoint", ["direct", "registry"])
+async def test_a_verified_low_tax_honeypot_with_deep_liquidity_blocks_with_the_doubt_noted(entrypoint):
+    from types import SimpleNamespace
+
+    from analyzers.market import MarketAnalyzer
+    from analyzers.structural import StructuralAnalyzer
+    from core.extension_formatter import format_extension_alert
+    from core.registry import AnalyzerRegistry
+
+    adapter, session = _adapter(verified=True)
+    web3_client = Web3Client()
+    web3_client.register_adapter(adapter)
+    with (
+        patch("adapters.evm_base.aiohttp.ClientSession") as client,
+        patch.object(ScamDatabase, "fetch_token_security", new=AsyncMock()),
+    ):
+        client.return_value.__aenter__ = AsyncMock(return_value=session)
+        data = await HoneypotService(web3_client).fetch_honeypot_data(TOKEN, chain_id=56)
+    contract = {
+        "is_contract": True,
+        "is_verified": True,
+        "contract_age_days": 400,
+        "ownership_renounced": True,
+        "has_mint": False,
+        "has_proxy": False,
+        "has_blacklist": False,
+        "scam_matches": [],
+    }
+    market = {"liquidity_usd": 5_000_000, "pair_age_hours": 1000}
+    if entrypoint == "direct":
+        risk = RiskEngine().compute_composite_risk(contract, data, market, {"reputation_score": 80})
+    else:
+        registry = AnalyzerRegistry()
+        for analyzer, fetch, value in (
+            (StructuralAnalyzer, "fetch_contract_data", contract),
+            (MarketAnalyzer, "fetch_token_market_data", market),
+            (HoneypotAnalyzer, "fetch_honeypot_data", data),
+        ):
+            registry.register(analyzer(SimpleNamespace(**{fetch: AsyncMock(return_value=value)})))
+        risk = RiskEngine().compute_from_results(await registry.run_all(AnalysisContext(TOKEN)))
+    alert = format_extension_alert(risk)
+    # The doubt is noted, but deep liquidity and a verified source do not lift the 80 floor.
+    assert risk["rug_probability"] == 80
+    assert risk["risk_level"] == "HIGH"
+    assert alert["risk_classification"] == "BLOCK_RECOMMENDED"
+    assert alert["top_flags"][:2] == ["Honeypot detected", LIKELY_FALSE_POSITIVE]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("sell_tax", [0, 5, 99.9])
 async def test_a_honeypot_verdict_is_never_turned_sellable_by_its_tax(sell_tax):

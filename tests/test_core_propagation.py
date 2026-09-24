@@ -403,11 +403,15 @@ async def test_unknown_age_never_reaches_ai_as_low_risk(mock_web3_client, mock_a
 def _complete_non_token_results(structural):
     from core.analyzer import AnalyzerResult
 
+    # The container's six analyzers at the weights the registry normalises them to.
+    structural.weight = .32
     return [
         structural,
-        AnalyzerResult('market', .25, 0, data={'skipped': True}),
-        AnalyzerResult('behavioral', .2, 0, data={'reputation_score': 80}),
-        AnalyzerResult('honeypot', .15, 0, data={'skipped': True}),
+        AnalyzerResult('market', .2, 0, data={'skipped': True}),
+        AnalyzerResult('behavioral', .16, 0, data={'reputation_score': 80}),
+        AnalyzerResult('honeypot', .12, 0, data={'skipped': True}),
+        AnalyzerResult('intent', .12, 0, data={'intent': 'native_transfer'}),
+        AnalyzerResult('signature', .08, 0, data={'sign_method': '', 'has_typed_data': False}),
     ]
 
 
@@ -435,7 +439,8 @@ async def test_confirmed_eoa_structural_coverage_is_complete(mock_web3_client):
             assert risk['status'] == 'ok'
             continue
         risk = RiskEngine().compute_from_results(_complete_non_token_results(structural), is_token=False)
-        assert risk['rug_probability'] == 20
+        # Skipped market and honeypot leave the mean: 50 * .32 / .68.
+        assert risk['rug_probability'] == 23.5
         assert risk['risk_level'] == 'LOW'
         assert risk['risk_archetype'] == 'legitimate'
         assert risk['status'] == 'ok'

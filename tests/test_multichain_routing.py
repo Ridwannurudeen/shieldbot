@@ -117,7 +117,9 @@ async def test_registered_chain_preserves_adapter_result(chain_id, method):
     client.register_adapter(adapter)
     assert client.get_web3(chain_id) is adapter.w3
     assert await getattr(client, method)("address", chain_id) is result
-    getattr(adapter, method).assert_awaited_once_with("address")
+    # is_verified_contract also forwards the code a caller already read (none here).
+    forwarded = {"code": None} if method == "is_verified_contract" else {}
+    getattr(adapter, method).assert_awaited_once_with("address", **forwarded)
 
 
 @pytest.mark.asyncio

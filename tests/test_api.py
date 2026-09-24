@@ -321,6 +321,10 @@ class TestSignatureFirewall:
         api_module.web3_client.to_checksum_address.side_effect = lambda addr: addr
 
         typed_data = {
+            "types": {"Permit": [{"name": name, "type": kind} for name, kind in (
+                ("owner", "address"), ("spender", "address"), ("value", "uint256"), ("nonce", "uint256"),
+                ("deadline", "uint256"),
+            )]},
             "primaryType": "Permit",
             "domain": {"name": "RiskyToken", "verifyingContract": "0x" + "c" * 40},
             "message": {
@@ -361,6 +365,7 @@ def routing_error_api(monkeypatch):
     registry.is_token_contract = AsyncMock(return_value=True)
     registry.is_verified_contract = AsyncMock(return_value=(True, None))
     registry.get_token_info = AsyncMock(return_value={})
+    registry.get_bytecode = AsyncMock(return_value="0x6080")
     services = SimpleNamespace(
         web3_client=registry,
         db=SimpleNamespace(
@@ -500,6 +505,290 @@ async def test_balanced_repeat_uses_cache_with_effective_policy(
     assert warm["policy_mode"] == cold["policy_mode"] == "BALANCED"
     assert warm["cached"] is True
     services.registry.run_all.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_strict_blocks_a_provider_unknown_cold_and_warm(cached_firewall_api):
+    from core.analyzer import AnalyzerResult
+    from core.policy import PolicyEngine
+
+    api, services = cached_firewall_api
+    services.policy_engine = PolicyEngine("STRICT")
+    # The provider failed without raising: no error, status unknown.
+    results = [AnalyzerResult("honeypot", 1.0, 0, data={
+        "is_honeypot": False, "can_sell": True, "buy_tax": 0, "sell_tax": 0,
+        "status": "unknown", "reason": "honeypot.is HTTP 503",
+    })]
+    services.registry.run_all.return_value = results
+    output = api.risk_engine.compute_from_results(results)
+    cached = {
+        "risk_score": output["rug_probability"], "risk_level": output["risk_level"],
+        "category_scores": {"_scan_metadata": {
+            key: output[key] for key in ("status", "coverage", "coverage_reasons")
+        }},
+    }
+    req = api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40)
+    request = SimpleNamespace(headers={})
+    cold = await api.firewall(req, request)
+    services.db.get_contract_score.return_value = cached
+    warm = await api.firewall(req, request)
+
+    assert cold["classification"] == warm["classification"] == "BLOCK_RECOMMENDED"
+    assert cold["failed_sources"] == warm["failed_sources"] == ["honeypot"]
+    assert cold["policy_mode"] == warm["policy_mode"] == "STRICT"
+    assert warm.get("cached") is not True
+    assert services.registry.run_all.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_an_undeclared_allowed_key_is_not_a_revoke_on_the_main_firewall_path(cached_firewall_api):
+    from analyzers.signature import SignaturePermitAnalyzer
+    from core.registry import AnalyzerRegistry
+
+    api, services = cached_firewall_api
+    spender = "0x" + "5" * 40
+    counterparty = SimpleNamespace(
+        allowlisted_name=lambda address, chain_id: None,
+        fetch=AsyncMock(return_value={
+            "address": spender, "allowlisted": None, "is_contract": True, "delegated": False,
+            "is_verified": False, "age_days": 90, "labels": [], "label_source": "",
+            "coverage": {"code": True, "verification": True, "age": True, "labels": True},
+            "reason": None, "observed_at": 0,
+        }),
+    )
+    registry = AnalyzerRegistry()
+    registry.register(SignaturePermitAnalyzer(counterparty))
+    services.registry = registry
+    permit_type = [{"name": name, "type": kind} for name, kind in (
+        ("owner", "address"), ("spender", "address"), ("value", "uint256"), ("nonce", "uint256"), ("deadline", "uint256"),
+    )]
+    # The wallet signs the declared EIP-2612 type, value MAX; allowed is not in the digest.
+    typed = {"types": {"Permit": permit_type}, "primaryType": "Permit", "domain": {"name": "Token"}, "message": {
+        "owner": "0x" + "b" * 40, "spender": spender, "value": str(2**256 - 1), "nonce": "0", "deadline": "1",
+        "allowed": False,
+    }}
+    response = await api.firewall(
+        api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40, typedData=typed, signMethod="eth_signTypedData_v4"),
+        SimpleNamespace(headers={}),
+    )
+    assert response["classification"] == "BLOCK_RECOMMENDED"
+    assert response["risk_score"] == 85
+    counterparty.fetch.assert_awaited_once_with(spender, 56)
+
+
+def _struct(*members):
+    return [{"name": name, "type": kind} for name, kind in members]
+
+
+SIGNED_SPENDER = "0x" + "5" * 40
+EIP2612 = _struct(("owner", "address"), ("spender", "address"), ("value", "uint256"), ("nonce", "uint256"), ("deadline", "uint256"))
+PERMIT_MESSAGE = {"owner": "0x" + "b" * 40, "spender": SIGNED_SPENDER, "value": "1", "nonce": "0", "deadline": "1"}
+TOKEN_PERMISSIONS = {"TokenPermissions": _struct(("token", "address"), ("amount", "uint256"))}
+
+
+@pytest.fixture
+def diluting_firewall_api(cached_firewall_api):
+    """The main firewall path with a clean, fully covered target analyzer carrying most of the weight
+    beside the real signature analyzer, whose spender is a known verified contract."""
+    from analyzers.signature import SignaturePermitAnalyzer
+    from core.analyzer import Analyzer, AnalyzerResult
+    from core.registry import AnalyzerRegistry
+
+    class CleanTarget(Analyzer):
+        name = "behavioral"
+        weight = 0.9
+
+        async def analyze(self, ctx):
+            return AnalyzerResult(self.name, self.weight, 0, data={"status": "ok"})
+
+    api, services = cached_firewall_api
+    services.web3_client.is_token_contract = AsyncMock(return_value=False)
+    counterparty = SimpleNamespace(
+        allowlisted_name=lambda address, chain_id: None,
+        fetch=AsyncMock(return_value={
+            "address": SIGNED_SPENDER, "allowlisted": None, "is_contract": True, "delegated": False,
+            "is_verified": True, "age_days": 400, "labels": [], "label_source": "",
+            "coverage": {"code": True, "verification": True, "age": True, "labels": True},
+            "reason": None, "observed_at": 0,
+        }),
+    )
+    registry = AnalyzerRegistry()
+    registry.register(CleanTarget())
+    registry.register(SignaturePermitAnalyzer(counterparty))
+    services.registry = registry
+
+    async def firewall(typed):
+        return await api.firewall(
+            api.FirewallRequest(
+                to="0x" + "a" * 40, sender="0x" + "b" * 40, typedData=typed, signMethod="eth_signTypedData_v4",
+            ),
+            SimpleNamespace(headers={}),
+        )
+
+    return firewall
+
+
+@pytest.mark.asyncio
+async def test_a_readable_small_permit_to_a_verified_spender_is_safe_on_the_main_firewall_path(diluting_firewall_api):
+    response = await diluting_firewall_api(
+        {"types": {"Permit": EIP2612}, "primaryType": "Permit", "message": PERMIT_MESSAGE},
+    )
+    assert response["classification"] == "SAFE"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("typed", [
+    {"primaryType": "Permit", "message": PERMIT_MESSAGE},
+    {"types": {"Permit": EIP2612 + _struct(("allowed", "bool"))}, "primaryType": "Permit", "message": PERMIT_MESSAGE},
+    {"types": {
+        "PermitDetails": _struct(("token", "address"), ("expiration", "uint48"), ("nonce", "uint48")),
+        "PermitSingle": _struct(("details", "PermitDetails"), ("spender", "address"), ("sigDeadline", "uint256")),
+    }, "primaryType": "PermitSingle", "message": {
+        "details": {"token": "0x" + "c" * 40, "amount": "1", "expiration": "0", "nonce": "0"},
+        "spender": SIGNED_SPENDER, "sigDeadline": "0",
+    }},
+    {"types": {**TOKEN_PERMISSIONS, "PermitTransferFrom": _struct(
+        ("permitted", "TokenPermissions[]"), ("spender", "address"), ("nonce", "uint256"), ("deadline", "uint256"),
+    )}, "primaryType": "PermitTransferFrom", "message": {
+        "permitted": {"token": "0x" + "c" * 40, "amount": "1"}, "spender": SIGNED_SPENDER, "nonce": "0", "deadline": "1",
+    }},
+    {"types": {"Permit": EIP2612}, "primaryType": "Permit", "message": "not an object"},
+], ids=["permit-without-types", "permit-declaring-value-and-allowed", "permit2-without-amount",
+        "permit2-transfer-declared-as-a-batch", "unparseable"])
+async def test_typed_data_whose_type_cannot_be_read_is_never_safe_on_the_main_firewall_path(diluting_firewall_api, typed):
+    # The signature analyzer carries a tenth of the weight: counted as fully covered, its score
+    # would be diluted by the clean target to SAFE.
+    response = await diluting_firewall_api(typed)
+    assert response["classification"] != "SAFE"
+    assert response["status"] == "unknown"
+
+
+CLEAN_SCAN = {"risk_score": 0, "status": "ok", "coverage": {"is_verified": 1}, "is_verified": True}
+TX_CHECKS_UNAVAILABLE = "Transaction checks unavailable: the spender, payment or signature was not analysed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ai", [False, True], ids=["heuristic", "ai"])
+@pytest.mark.parametrize("specific, value", [(False, "0"), (True, "0"), (True, hex(10**17))],
+                         ids=["transfer", "approval", "payable"])
+async def test_legacy_fallback_never_clears_a_transaction_specific_request(cached_firewall_api, ai, specific, value):
+    api, services = cached_firewall_api
+    services.registry.run_all.side_effect = RuntimeError("pipeline down")
+    api.token_scanner.check_token.return_value = dict(CLEAN_SCAN)
+    api.ai_analyzer = SimpleNamespace(
+        is_available=lambda: ai,
+        generate_firewall_report=AsyncMock(return_value={
+            "classification": "SAFE", "risk_score": 5, "danger_signals": [], "verdict": "Looks fine",
+        }),
+    )
+    api.calldata_decoder.decode.return_value = dict(TRANSFER if not specific else PAYABLE if int(value, 0) else APPROVE)
+    api.web3_client.get_bytecode = AsyncMock(return_value="0x6080")
+    response = await api.firewall(
+        api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40, value=value), SimpleNamespace(headers={}),
+    )
+    assert response["classification"] == ("CAUTION" if specific else "SAFE")
+    assert (TX_CHECKS_UNAVAILABLE in response["danger_signals"]) is specific
+    # The verdict line must not contradict the classification, including the AI's own verdict.
+    if specific or not ai:
+        assert response["verdict"].startswith(response["classification"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code, is_contract, verified", [
+    ("0x6080604052", True, True),
+    ("0x", False, False),
+    ("ef0100" + "5" * 40, False, False),
+    (None, None, True),
+], ids=["contract", "wallet", "delegated-wallet", "code-unknown"])
+async def test_the_target_code_is_read_once_and_a_wallet_is_not_verified(
+    cached_firewall_api, code, is_contract, verified,
+):
+    api, services = cached_firewall_api
+    services.registry.run_all.return_value = []
+    api.calldata_decoder.decode.return_value = dict(PAYABLE)
+    api.web3_client.get_bytecode = AsyncMock(return_value=code)
+    await api.firewall(
+        api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40, value=hex(10**17)), SimpleNamespace(headers={}),
+    )
+    ctx = services.registry.run_all.await_args.args[0]
+    assert ctx.extra["is_contract"] is is_contract
+    api.web3_client.get_bytecode.assert_awaited_once()
+    if verified:
+        target = api.web3_client.to_checksum_address("0x" + "a" * 40)
+        api.web3_client.is_verified_contract.assert_awaited_once_with(target, chain_id=56, code=code)
+    else:
+        api.web3_client.is_verified_contract.assert_not_awaited()
+        assert ctx.extra["is_verified"] is None
+
+
+APPROVE = {
+    "selector": "095ea7b3", "function_name": "approve", "signature": "approve(address,uint256)",
+    "category": "approval", "risk": "high", "params": {"param_0": "0x" + "c" * 40, "param_1": 2 ** 256 - 1},
+    "is_approval": True, "is_unlimited_approval": True, "raw": "0x095ea7b3",
+}
+CLAIM = {
+    "selector": "4e71d92d", "function_name": "claim", "signature": "claim()", "category": "claim",
+    "risk": "medium", "params": {}, "is_approval": False, "is_unlimited_approval": False, "raw": "0x4e71d92d",
+}
+TRANSFER = {
+    "selector": "a9059cbb", "function_name": "transfer", "signature": "transfer(address,uint256)",
+    "category": "transfer", "risk": "medium", "params": {"param_0": "0x" + "d" * 40, "param_1": 1},
+    "is_approval": False, "is_unlimited_approval": False, "raw": "0xa9059cbb",
+}
+PAYABLE = {
+    "selector": "40c10f19", "function_name": "mint", "signature": "mint(address,uint256)", "category": "supply",
+    "risk": "high", "params": {"param_0": "0x" + "b" * 40, "param_1": 1},
+    "is_approval": False, "is_unlimited_approval": False, "raw": "0x40c10f19",
+}
+PERMIT = {
+    "primaryType": "Permit",
+    "domain": {"name": "Token"},
+    "message": {"spender": "0x" + "c" * 40, "value": str(2 ** 256 - 1), "deadline": "1"},
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decoded, typed_data, value, reads, writes, watches", [
+    (APPROVE, None, "0", 0, 0, 0),
+    (CLAIM, None, "0", 0, 1, 1),
+    ({"selector": None}, PERMIT, "0", 0, 0, 0),
+    (TRANSFER, None, "0", 1, 1, 1),
+    # A call that pays the target is judged on this payment, so no earlier row answers it. Its
+    # floor comes from one user's payment, so it does not become the verdict every other request
+    # to that contract (a transfer, a zero-value call) is served for five minutes.
+    (PAYABLE, None, hex(10**17), 0, 0, 0),
+    # claim() is the exception (design section 1.2): paying to claim marks the contract itself.
+    (CLAIM, None, hex(10**17), 0, 1, 1),
+], ids=["approval", "claim", "typed-data", "transfer", "payable", "paid-claim"])
+async def test_transaction_verdicts_and_the_target_row(
+    cached_firewall_api, decoded, typed_data, value, reads, writes, watches,
+):
+    from core.analyzer import AnalyzerResult
+
+    api, services = cached_firewall_api
+    services.sentinel = SimpleNamespace(on_scan_blocked=AsyncMock())
+    services.threat_graph = SimpleNamespace(enrich_from_scan=AsyncMock())
+    services.registry.run_all.return_value = [
+        AnalyzerResult("honeypot", 0.5, 0, data={
+            "is_honeypot": False, "can_sell": True, "buy_tax": 0, "sell_tax": 0,
+        }),
+        AnalyzerResult("intent", 0.5, 0, flags=["Approval to a wallet address, not a contract (drainer pattern)"],
+                       data={"status": "ok", "floor": 100}),
+    ]
+    api.calldata_decoder.decode.return_value = dict(decoded)
+    api.web3_client.get_bytecode = AsyncMock(return_value="0x6080")
+    req = api.FirewallRequest(
+        to="0x" + "a" * 40, sender="0x" + "b" * 40, typedData=typed_data, value=value,
+        signMethod="eth_signTypedData_v4" if typed_data else None,
+    )
+    response = await api.firewall(req, SimpleNamespace(headers={}))
+
+    assert response["classification"] == "BLOCK_RECOMMENDED"
+    assert services.db.get_contract_score.await_count == reads
+    assert services.db.upsert_contract_score.await_count == writes
+    assert services.sentinel.on_scan_blocked.call_count == watches
+    # The threat graph learns only from verdicts that describe the target, like its row.
+    assert services.threat_graph.enrich_from_scan.call_count == writes
 
 
 @pytest.mark.asyncio

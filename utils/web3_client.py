@@ -117,8 +117,10 @@ class Web3Client:
     async def get_bytecode(self, address: str, chain_id: int = 56) -> Optional[str]:
         return await self._get_adapter(chain_id).get_bytecode(address)
 
-    async def is_verified_contract(self, address: str, chain_id: int = 56) -> Tuple[Optional[bool], Optional[str]]:
-        return await self._get_adapter(chain_id).is_verified_contract(address)
+    async def is_verified_contract(
+        self, address: str, chain_id: int = 56, code: Optional[str] = None,
+    ) -> Tuple[Optional[bool], Optional[str]]:
+        return await self._get_adapter(chain_id).is_verified_contract(address, code=code)
 
     async def get_contract_creation_info(self, address: str, chain_id: int = 56) -> Optional[Dict]:
         return await self._get_adapter(chain_id).get_contract_creation_info(address)

@@ -87,8 +87,10 @@ async def test_live_sourcify_absence_is_unknown(http, payload):
     enqueue, session, _ = http
     enqueue(payload, 404)
     result = await ExplorerService().get_verification_status(payload["address"], 4663)
+    # Sourcify's 404 says the contract is not verified there; without Blockscout's answer the
+    # contract's verification is still unknown.
     assert result.status == "unknown"
-    assert "HTTP 404" in result.reason and "BLOCKSCOUT_API_KEY" in result.reason
+    assert "Sourcify: not verified" in result.reason and "BLOCKSCOUT_API_KEY" in result.reason
     assert session.get.call_count == 1
 
 
@@ -115,7 +117,7 @@ async def test_sourcify_malformed_or_wrong_identity_unknown(http, payload):
 @pytest.mark.parametrize("verified", [True, False])
 async def test_blockscout_fallback_and_shared_address_cache(http, verified):
     enqueue, session, client = http
-    enqueue({}, 404)
+    enqueue({**SOURCIFY_DEAD, "address": ADDRESS}, 404)
     enqueue({**BLOCKSCOUT_ADDRESS, "is_verified": verified})
     service = ExplorerService()
     with patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}):
@@ -377,6 +379,16 @@ async def test_funder_out_of_range_value_unknown(http, value):
     assert result.status == "unknown" and result.reason
 
 
+def _sourcify_answers(adapter, status="unverified"):
+    """Answer the adapter's Sourcify lookup and its clone check without HTTP or RPC."""
+    adapter._explorer_service = MagicMock()
+    adapter._explorer_service.get_sourcify_verification = AsyncMock(
+        return_value=ExplorerResult(status, reason="test")
+    )
+    adapter.get_bytecode = AsyncMock(return_value="0x6080")
+    return adapter
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("chain_id", [56, 8453])
 @pytest.mark.parametrize("source", ["", "contract Token {}"])
@@ -384,9 +396,9 @@ async def test_existing_etherscan_verification_request_and_result_unchanged(
     http, chain_id, source
 ):
     http[0]({"status": "1", "result": [{"SourceCode": source}]})
-    adapter = EvmAdapter(
+    adapter = _sourcify_answers(EvmAdapter(
         chain_id, "Existing", "https://rpc.invalid", etherscan_api_key="test-key"
-    )
+    ))
     assert await adapter.is_verified_contract(ADDRESS) == (bool(source), source or None)
     http[1].get.assert_called_once_with(
         "https://api.etherscan.io/v2/api",
@@ -410,6 +422,7 @@ async def test_robinhood_adapter_verification_tuple(http, status, expected):
     adapter._explorer_service.get_verification_status = AsyncMock(
         return_value=ExplorerResult(status, reason="test")
     )
+    adapter.get_bytecode = AsyncMock(return_value="0x6080")
     assert await adapter.is_verified_contract(ADDRESS) == (expected, None)
     adapter._explorer_service.get_verification_status.assert_awaited_once_with(
         ADDRESS, 4663
@@ -450,7 +463,7 @@ async def test_etherscan_missing_verification_is_unknown(payload):
     session.get.return_value.__aenter__.return_value = response
     with patch("aiohttp.ClientSession") as client:
         client.return_value.__aenter__.return_value = session
-        adapter = EvmAdapter(56, "BSC", "https://rpc.invalid")
+        adapter = _sourcify_answers(EvmAdapter(56, "BSC", "https://rpc.invalid"))
         assert await adapter.is_verified_contract("0x" + "1" * 40) == (None, None)
 
 
@@ -526,7 +539,7 @@ async def test_robinhood_adapter_missing_creator_skips_rpc(http):
 )
 async def test_etherscan_http_error_does_not_produce_evidence(http, method, payload):
     http[0](payload, 500)
-    adapter = EvmAdapter(56, "BSC", "https://rpc.invalid")
+    adapter = _sourcify_answers(EvmAdapter(56, "BSC", "https://rpc.invalid"))
     adapter._call_with_retry = AsyncMock()
     result = await getattr(adapter, method)(ADDRESS)
     assert result == ((None, None) if method == "is_verified_contract" else None)
@@ -733,6 +746,7 @@ async def test_adapter_explorer_exception_logs_do_not_expose_api_key(
         )
     else:
         http[0]({}).json.side_effect = error
+        _sourcify_answers(adapter)
     result = await getattr(adapter, method)(ADDRESS)
     assert result == ((None, None) if method == "is_verified_contract" else None)
     assert "ClientResponseError" in caplog.text

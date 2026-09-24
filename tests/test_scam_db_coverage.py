@@ -85,7 +85,8 @@ async def test_local_blacklist_match_survives_a_goplus_failure():
     matches = await _lookup(
         db, goplus={"status": "unknown", "reason": "GoPlus HTTP 503", "data": {}}
     )
-    assert matches == [SCAM_MATCH]
+    # Three community reports are griefable, so the local blacklist keeps the 70 floor.
+    assert matches == [{**SCAM_MATCH, "severity": "high"}]
     assert matches.failed_providers == ("GoPlus HTTP 503",)
 
 
@@ -241,3 +242,137 @@ async def test_contract_service_scam_and_bytecode_failures_are_both_reported(moc
     assert data["coverage"] == {"scam_database": False, "bytecode": False}
     assert data["reason"] == "Scam database unavailable: GoPlus HTTP 503; Bytecode scan unavailable"
     assert structural.data["status"] == "unknown"
+
+
+def _record(**fields):
+    return {"status": "ok", "reason": None, "data": {"is_open_source": "1", **fields}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fields, severity, reason",
+    [
+        ({"is_airdrop_scam": "1"}, "block", "Airdrop scam token"),
+        (
+            {"fake_token": {"true_token_address": "0x" + "2" * 40, "value": 1}},
+            "block",
+            "Counterfeit of a mainstream token",
+        ),
+        ({"fake_token": {"value": "1"}}, "block", "Counterfeit of a mainstream token"),
+        ({"is_honeypot": "1"}, "high", "Honeypot (GoPlus)"),
+        ({"cannot_sell_all": "1"}, "high", "Cannot sell all tokens"),
+        ({"owner_change_balance": "1"}, "high", "Owner can change balance"),
+        (
+            {"is_airdrop_scam": "1", "is_honeypot": "1"},
+            "block",
+            "Airdrop scam token; Honeypot (GoPlus)",
+        ),
+    ],
+)
+async def test_goplus_match_severity(fields, severity, reason):
+    matches = await _lookup(ScamDatabase(), goplus=_record(**fields))
+    assert matches == [
+        {"type": "GoPlus Security", "reason": reason, "source": "gopluslabs.io", "severity": severity}
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"is_open_source": "0"},
+        # A blacklist function is an owner power the structural analyzer scores, not a scam finding:
+        # USDT on Ethereum has one (GoPlus is_blacklisted "1", probed 2026-09-24).
+        {"is_blacklisted": "1"},
+        # GoPlus sets it on Binance-Peg Dogecoin (probed 2026-09-24): a fact about the deployer.
+        {"honeypot_with_same_creator": "1"},
+        {"fake_token": {"true_token_address": "", "value": 0}},
+        {"is_airdrop_scam": "0", "is_blacklisted": "0", "is_honeypot": "0"},
+        {},
+    ],
+)
+async def test_goplus_fields_that_are_not_scam_matches(fields):
+    matches = await _lookup(ScamDatabase(), goplus=_record(**fields))
+    assert (matches, matches.failed_providers) == ([], ())
+
+
+async def _fill(mock_web3_client, explorer, goplus):
+    mock_web3_client.is_verified_contract.return_value = (explorer, None)
+    service = ContractService(mock_web3_client, ScamDatabase())
+    with patch.object(ScamDatabase, "fetch_token_security", new=AsyncMock(return_value=goplus)), patch(
+        "services.contract_service.BSCSCAN_DELAY", 0
+    ):
+        return await service.fetch_contract_data(ADDRESS, chain_id=4663)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("open_source, verified", [("1", True), ("0", False)])
+async def test_goplus_fills_verification_only_when_the_explorer_did_not_answer(
+    mock_web3_client, open_source, verified
+):
+    data = await _fill(mock_web3_client, None, _record(is_open_source=open_source))
+    assert data["is_verified"] is verified
+    assert data["field_providers"] == {"is_verified": "goplus"}
+    assert data["scam_matches"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("explorer", [True, False])
+async def test_explorer_verification_answer_is_kept(mock_web3_client, explorer):
+    data = await _fill(mock_web3_client, explorer, _record(is_open_source="1" if not explorer else "0"))
+    assert data["is_verified"] is explorer
+    assert "field_providers" not in data
+
+
+@pytest.mark.asyncio
+async def test_goplus_record_rides_with_the_matches():
+    matches = await _lookup(ScamDatabase(), goplus=_record(is_blacklisted="1"))
+    assert matches.goplus_record == {"is_open_source": "1", "is_blacklisted": "1"}
+    failed = await _lookup(ScamDatabase(), goplus={"status": "unknown", "reason": "GoPlus HTTP 503", "data": {}})
+    assert failed.goplus_record == {}
+
+
+@pytest.mark.asyncio
+async def test_goplus_blacklist_function_becomes_the_structural_owner_power(mock_web3_client):
+    data = await _fill(mock_web3_client, True, _record(is_blacklisted="1"))
+    assert data["scam_matches"] == []
+    assert data["has_blacklist"] is True
+    assert data["field_providers"] == {"has_blacklist": "goplus"}
+
+
+@pytest.mark.asyncio
+async def test_bytecode_blacklist_finding_needs_no_goplus_provider(mock_web3_client):
+    mock_web3_client.get_bytecode.return_value = "0x6344337ea1"
+    data = await _fill(mock_web3_client, True, _record(is_blacklisted="1"))
+    assert data["has_blacklist"] is True
+    assert "field_providers" not in data
+
+
+@pytest.mark.asyncio
+async def test_contract_service_reads_goplus_through_the_injected_scam_database(mock_web3_client):
+    mock_web3_client.is_verified_contract.return_value = (None, None)
+    scam_db = MagicMock(check_address=AsyncMock(
+        return_value=ScamMatches(goplus_record={"is_open_source": "1", "is_blacklisted": "1"})
+    ))
+    direct = AsyncMock()
+    with patch.object(ScamDatabase, "fetch_token_security", new=direct), patch(
+        "services.contract_service.BSCSCAN_DELAY", 0
+    ):
+        data = await ContractService(mock_web3_client, scam_db).fetch_contract_data(ADDRESS, chain_id=56)
+    direct.assert_not_awaited()
+    assert (data["is_verified"], data["has_blacklist"]) == (True, True)
+    assert data["field_providers"] == {"is_verified": "goplus", "has_blacklist": "goplus"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "goplus",
+    [
+        {"status": "unknown", "reason": "GoPlus HTTP 429", "data": {}},
+        {"status": "ok", "reason": None, "data": {"is_honeypot": "0"}},
+    ],
+)
+async def test_verification_stays_unknown_without_a_goplus_answer(mock_web3_client, goplus):
+    data = await _fill(mock_web3_client, None, goplus)
+    assert data["is_verified"] is None
+    assert "field_providers" not in data

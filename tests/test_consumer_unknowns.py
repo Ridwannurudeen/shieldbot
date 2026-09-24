@@ -36,6 +36,7 @@ def consumer_api(monkeypatch, mock_web3_client):
         web3_client=mock_web3_client, db=db,
         registry=SimpleNamespace(run_all=AsyncMock(return_value=[])),
         policy_engine=None, indexer=None, settings=SimpleNamespace(policy_mode='BALANCED', reporter_hash_secret=''),
+        counterparty_service=None,
     )
     monkeypatch.setattr(api, 'container', services)
     monkeypatch.setattr(api, 'web3_client', mock_web3_client)
@@ -380,6 +381,22 @@ async def test_missing_swap_analyzers_does_not_fall_back_to_router(consumer_api)
     assert_unknown_response(response)
 
 
+def _struct(*members):
+    return [{'name': name, 'type': kind} for name, kind in members]
+
+
+# The types a wallet signs with: only declared members enter the EIP-712 digest.
+EIP2612_TYPES = {'Permit': _struct(
+    ('owner', 'address'), ('spender', 'address'), ('value', 'uint256'), ('nonce', 'uint256'), ('deadline', 'uint256'),
+)}
+TRANSFER_TYPES = {
+    'TokenPermissions': _struct(('token', 'address'), ('amount', 'uint256')),
+    'PermitTransferFrom': _struct(
+        ('permitted', 'TokenPermissions'), ('spender', 'address'), ('nonce', 'uint256'), ('deadline', 'uint256'),
+    ),
+}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('sign_method,typed_data', [
     ('eth_signTypedData_v4', {'primaryType': 'UnknownType', 'message': {}}),
@@ -413,7 +430,7 @@ async def test_supported_signature_preserves_covered_safe(consumer_api):
     api, _ = consumer_api
     req = api.FirewallRequest(to='', sender='0x' + 'b' * 40,
         signMethod='eth_signTypedData_v4', typedData={
-            'primaryType': 'Permit', 'message': {
+            'types': EIP2612_TYPES, 'primaryType': 'Permit', 'message': {
                 'spender': '0x000000000022d473030f116ddee9f6b43ac78ba3', 'value': '1', 'deadline': '1',
             },
         })
@@ -421,6 +438,116 @@ async def test_supported_signature_preserves_covered_safe(consumer_api):
     assert response['classification'] == 'SAFE'
     assert response['status'] == 'ok'
     assert response['coverage'] == {'signature': 1}
+
+
+def _spender_service(**facts):
+    return SimpleNamespace(
+        allowlisted_name=lambda address, chain_id: None,
+        fetch=AsyncMock(return_value={
+            'address': '0x' + '5' * 40, 'allowlisted': None, 'is_contract': True, 'delegated': False,
+            'is_verified': True, 'age_days': 400, 'labels': [], 'label_source': '',
+            'coverage': {'code': True, 'verification': True, 'age': True, 'labels': True},
+            'reason': None, 'observed_at': 0, **facts,
+        }),
+    )
+
+
+def _transfer_request(api):
+    return api.FirewallRequest(to='', sender='0x' + 'b' * 40, signMethod='eth_signTypedData_v4', typedData={
+        'types': TRANSFER_TYPES, 'primaryType': 'PermitTransferFrom', 'message': {
+            'permitted': {'token': '0x' + 'c' * 40, 'amount': '1000'},
+            'spender': '0x' + '5' * 40, 'nonce': '0', 'deadline': '1',
+        },
+    })
+
+
+@pytest.mark.asyncio
+async def test_signature_transfer_to_a_verified_protocol_is_covered_caution(consumer_api):
+    api, services = consumer_api
+    services.counterparty_service = _spender_service()
+    response = await api._build_signature_only_response(_transfer_request(api))
+    assert response['classification'] == 'CAUTION'
+    assert response['risk_score'] == 30
+    assert response['status'] == 'ok'
+    assert response['raw_checks']['signature']['sig_type'] == 'permit2_transfer'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mode, covered, expected', [
+    ('STRICT', False, 'BLOCK_RECOMMENDED'),
+    ('strict', False, 'BLOCK_RECOMMENDED'),
+    ('BALANCED', False, 'CAUTION'),
+    (None, False, 'CAUTION'),
+    ('STRICT', True, 'CAUTION'),
+])
+async def test_signature_only_path_honours_strict(consumer_api, mode, covered, expected):
+    api, services = consumer_api
+    services.counterparty_service = _spender_service(**({} if covered else {
+        'is_contract': None, 'labels': None, 'reason': 'Spender facts unknown: code (RPC), labels (GoPlus HTTP 429)',
+    }))
+    response = await api._build_signature_only_response(_transfer_request(api), policy_override=mode)
+    assert response['classification'] == expected
+    blocked = expected == 'BLOCK_RECOMMENDED'
+    assert (response['danger_signals'][0] == 'Policy override: signature analysis unavailable or incomplete') is blocked
+    # The same override core.policy applies: at least 80, the incomplete source named, the mode reported.
+    assert response['risk_score'] == (80 if blocked else 30)
+    assert response['shield_score']['overall'] == response['risk_score']
+    assert response['failed_sources'] == ([] if covered else ['signature'])
+    assert response['policy_mode'] == ('STRICT' if blocked else 'SIGNATURE_ONLY')
+
+
+@pytest.mark.asyncio
+async def test_firewall_passes_the_policy_header_to_the_signature_only_path(consumer_api, monkeypatch):
+    api, _ = consumer_api
+    signature_only = AsyncMock(return_value={})
+    monkeypatch.setattr(api, '_build_signature_only_response', signature_only)
+    req = _transfer_request(api)
+    await api.firewall(req, SimpleNamespace(headers={'X-Policy-Mode': 'STRICT'}))
+    signature_only.assert_awaited_once_with(req, policy_override='STRICT')
+
+
+@pytest.mark.asyncio
+async def test_a_float_permit_amount_is_not_a_safe_revoke(consumer_api):
+    # typedData is a Dict, so a JSON 1e30 arrives as a float.
+    api, services = consumer_api
+    services.counterparty_service = _spender_service(is_verified=False, age_days=90)
+    req = api.FirewallRequest(to='', sender='0x' + 'b' * 40, signMethod='eth_signTypedData_v4', typedData={
+        'types': EIP2612_TYPES, 'primaryType': 'Permit',
+        'message': {'spender': '0x' + '5' * 40, 'value': 1e30, 'deadline': '1'},
+    })
+    response = await api._build_signature_only_response(req)
+    assert response['classification'] == 'BLOCK_RECOMMENDED'
+    assert response['risk_score'] == 85
+    services.counterparty_service.fetch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_an_undeclared_allowed_key_is_not_a_revoke_on_the_signature_only_path(consumer_api):
+    # The wallet signs the declared EIP-2612 type, value MAX; allowed is not in the digest.
+    api, services = consumer_api
+    services.counterparty_service = _spender_service(is_verified=False, age_days=90)
+    req = api.FirewallRequest(to='', sender='0x' + 'b' * 40, signMethod='eth_signTypedData_v4', typedData={
+        'types': EIP2612_TYPES, 'primaryType': 'Permit', 'message': {
+            'owner': '0x' + 'b' * 40, 'spender': '0x' + '5' * 40, 'value': str(2 ** 256 - 1), 'nonce': '0',
+            'deadline': '1', 'allowed': False,
+        },
+    })
+    response = await api._build_signature_only_response(req)
+    assert response['classification'] == 'BLOCK_RECOMMENDED'
+    assert response['risk_score'] == 85
+    services.counterparty_service.fetch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_signature_with_unknown_spender_facts_is_unknown(consumer_api):
+    api, services = consumer_api
+    services.counterparty_service = _spender_service(
+        is_contract=None, labels=None, reason='Spender facts unknown: code (RPC), labels (GoPlus HTTP 429)',
+    )
+    response = await api._build_signature_only_response(_transfer_request(api))
+    assert_unknown_response(response)
+    assert response['risk_score'] == 30
+    assert response['coverage_reasons']['signature'].startswith('Spender facts unknown: code (RPC)')
 
 
 @pytest.mark.parametrize('surface', ['compact', 'feed', 'center', 'stats', 'content', 'content-explain', 'sidepanel', 'sidepanel-message', 'history'])

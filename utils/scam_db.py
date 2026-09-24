@@ -8,7 +8,7 @@ import re
 import time
 import logging
 import aiohttp
-from cachetools import TTLCache
+from cachetools import TLRUCache, TTLCache
 
 from core.circuit_breaker import provider_breakers
 from core.unknown_ledger import unknown_ledger
@@ -20,6 +20,15 @@ _ETH_ADDR_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
 _GOPLUS_CACHE = TTLCache(maxsize=1024, ttl=30)
 _GOPLUS_INFLIGHT = {}
 _GOPLUS_NO_DATA = 'GoPlus has no data for this token on this chain'
+
+
+def _address_security_ttu(key, result, now):
+    # An address's labels change slowly; a failed lookup is retried after 30 seconds.
+    return now + (600 if result['status'] == 'ok' else 30)
+
+
+_GOPLUS_ADDRESS_CACHE = TLRUCache(maxsize=1024, ttu=_address_security_ttu)
+_GOPLUS_ADDRESS_INFLIGHT = {}
 
 # Response codes that ask for the same request again; their meaning is not
 # documented anywhere we can read offline, so the reason stays neutral.
@@ -61,10 +70,13 @@ class ScamMatches(list):
     Matches with a non-empty ``failed_providers`` are incomplete, never clean.
     """
 
-    def __init__(self, matches=(), failed_providers=(), observed_at=0):
+    def __init__(self, matches=(), failed_providers=(), observed_at=0, goplus_record=None):
         super().__init__(matches)
         self.failed_providers = tuple(failed_providers)
         self.observed_at = observed_at
+        # GoPlus's token record, empty when it gave none: the contract service reads facts from it
+        # that are not scam findings.
+        self.goplus_record = goplus_record or {}
 
 
 class ScamDatabase:
@@ -98,12 +110,14 @@ class ScamDatabase:
         matches = []
         failed_providers = []
 
-        # Check local blacklist
+        # Check local blacklist. Three community reports put an address here, which is not enough
+        # evidence for a block.
         if address.lower() in self.known_scams:
             matches.append({
                 'type': 'Local Blacklist',
                 'reason': 'Known scam address',
-                'source': 'ShieldBot'
+                'source': 'ShieldBot',
+                'severity': 'high',
             })
 
         # Check GoPlus Security
@@ -111,7 +125,9 @@ class ScamDatabase:
         matches.extend(goplus_results)
         failed_providers.extend(goplus_results.failed_providers)
 
-        return ScamMatches(matches, failed_providers, min(observed_at, goplus_results.observed_at))
+        return ScamMatches(
+            matches, failed_providers, min(observed_at, goplus_results.observed_at), goplus_results.goplus_record
+        )
     
     @staticmethod
     async def fetch_token_security(address: str, chain_id: int = 56) -> dict:
@@ -178,6 +194,72 @@ class ScamDatabase:
         _GOPLUS_CACHE[key] = result
         return result
 
+    @staticmethod
+    async def fetch_address_security(address: str) -> dict:
+        """GoPlus malicious-address labels, shared across concurrent scans.
+
+        GoPlus accepts a chain but returns the same labels for every chain, so none is sent.
+        """
+        if not _ETH_ADDR_RE.fullmatch(address):
+            return {'status': 'unknown', 'reason': 'Invalid address', 'data': {}}
+        key = address.lower()
+        cached = _GOPLUS_ADDRESS_CACHE.get(key)
+        if cached is not None:
+            return cached
+        flight_key = (asyncio.get_running_loop(), key)
+        if flight_key not in _GOPLUS_ADDRESS_INFLIGHT:
+            _GOPLUS_ADDRESS_INFLIGHT[flight_key] = asyncio.create_task(
+                ScamDatabase._fetch_address_security(key, flight_key)
+            )
+        return await asyncio.shield(_GOPLUS_ADDRESS_INFLIGHT[flight_key])
+
+    @staticmethod
+    async def _fetch_address_security(address: str, flight_key: tuple) -> dict:
+        observed_at = time.time()
+        result = {'status': 'unknown', 'reason': 'GoPlus unavailable', 'data': {}}
+        try:
+            # The request names no chain, so one breaker covers every chain's lookups.
+            provider_breakers.check('goplus_address')
+            url = f"https://api.gopluslabs.io/api/v1/address_security/{address}"
+            async with aiohttp.ClientSession() as session:
+                for attempt in range(_GOPLUS_ATTEMPTS):
+                    if attempt:
+                        await asyncio.sleep(_GOPLUS_BACKOFF * (2 ** (attempt - 1)))
+                    retriable = False
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                        if resp.status != 200:
+                            result = {'status': 'unknown', 'reason': f'GoPlus HTTP {resp.status}', 'data': {}}
+                            retriable = resp.status == 429
+                        else:
+                            payload = await resp.json()
+                            code = payload.get('code') if isinstance(payload, dict) else None
+                            record = payload.get('result') if isinstance(payload, dict) else None
+                            if code in _GOPLUS_RETRY_CODES:
+                                result = {'status': 'unknown', 'reason': f'GoPlus returned code {code}', 'data': {}}
+                                retriable = True
+                            elif code != 1:
+                                result = {'status': 'unknown', 'reason': 'GoPlus returned an unsuccessful response', 'data': {}}
+                            elif not isinstance(record, dict) or not record:
+                                result = {'status': 'unknown', 'reason': 'GoPlus returned no address record', 'data': {}}
+                            else:
+                                result = {'status': 'ok', 'reason': None, 'data': record}
+                    if not retriable:
+                        break
+            provider_breakers.record_status('goplus_address', None, resp.status)
+        except Exception as e:
+            provider_breakers.record_error('goplus_address', None, e)
+            logger.error("Error fetching GoPlus address security: %s", type(e).__name__)
+            result['reason'] = f'GoPlus request failed ({type(e).__name__})'
+        finally:
+            _GOPLUS_ADDRESS_INFLIGHT.pop(flight_key, None)
+        result['observed_at'] = observed_at
+        unknown_ledger.record('goplus_address', None, (
+            'answered' if result['status'] == 'ok'
+            else 'unknown' if result['reason'] == 'GoPlus returned no address record' else 'failed'
+        ))
+        _GOPLUS_ADDRESS_CACHE[address] = result
+        return result
+
     async def _check_goplus(self, address: str, chain_id: int = 56) -> ScamMatches:
         """Check GoPlus Security API for token risk indicators.
 
@@ -187,13 +269,23 @@ class ScamDatabase:
         if response['status'] != 'ok' and response['reason'] != _GOPLUS_NO_DATA:
             return ScamMatches(failed_providers=(response['reason'],), observed_at=response.get('observed_at', 0))
         result = response['data']
-        flags = []
-        if result.get('is_blacklisted') == '1':
-            flags.append('Blacklisted token')
+        # GoPlus labels the token itself a scam: block. The optional keys are absent unless set, and
+        # the record is the answer, so an absent key means not flagged. fake_token is an object.
+        block_flags = []
+        if result.get('is_airdrop_scam') == '1':
+            block_flags.append('Airdrop scam token')
+        fake_token = result.get('fake_token')
+        if isinstance(fake_token, dict) and str(fake_token.get('value')) == '1':
+            block_flags.append('Counterfeit of a mainstream token')
+        # A restriction that makes the token dangerous to hold: the 70 floor. Not scam findings:
+        # is_blacklisted means the contract has a blacklist function (USDT on Ethereum has one),
+        # an owner power the contract service passes to structural scoring; not open source is the
+        # explorer's unverified finding, which structural scoring already counts;
+        # honeypot_with_same_creator describes the deployer, and GoPlus sets it on Binance-Peg
+        # Dogecoin.
+        flags = list(block_flags)
         if result.get('is_honeypot') == '1':
             flags.append('Honeypot (GoPlus)')
-        if result.get('is_open_source') == '0':
-            flags.append('Not open source')
         if result.get('cannot_sell_all') == '1':
             flags.append('Cannot sell all tokens')
         if result.get('owner_change_balance') == '1':
@@ -203,8 +295,9 @@ class ScamDatabase:
                 'type': 'GoPlus Security',
                 'reason': '; '.join(flags),
                 'source': 'gopluslabs.io',
-            }], observed_at=response.get('observed_at', 0))
-        return ScamMatches(observed_at=response.get('observed_at', 0))
+                'severity': 'block' if block_flags else 'high',
+            }], observed_at=response.get('observed_at', 0), goplus_record=result)
+        return ScamMatches(observed_at=response.get('observed_at', 0), goplus_record=result)
     
     def report_address(self, address: str, reporter_id: str) -> dict:
         """Community report with rate-limiting, whitelist protection, and multi-report threshold.

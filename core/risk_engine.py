@@ -70,6 +70,9 @@ class RiskEngine:
         if contract_data.get('has_blacklist'):
             structural += 10
             critical_flags.append('Blacklist function detected')
+        if contract_data.get('has_destroy') and contract_data.get('ownership_renounced') is not True:
+            structural += 15
+            critical_flags.append('destroy() function: the owner may be able to delete the contract')
         if contract_data.get('scam_matches'):
             structural += 30
             critical_flags.append(f'Scam DB match ({len(contract_data["scam_matches"])} sources)')
@@ -120,6 +123,9 @@ class RiskEngine:
         if honeypot_data.get('is_honeypot'):
             honeypot_score += 80
             critical_flags.append('Honeypot detected')
+            # The doubt is explanation only: the simulated sell still failed, so the score stands.
+            if honeypot_data.get('likely_false_positive'):
+                critical_flags.append('Honeypot flag may be a false positive: the contract is verified and its taxes are normal')
         if honeypot_data.get('simulation_failed') and not honeypot_data.get('is_honeypot'):
             honeypot_score += 40
             critical_flags.append('Honeypot simulation failed — treat as suspicious')
@@ -155,7 +161,7 @@ class RiskEngine:
             AnalyzerResult('behavioral', WEIGHT_BEHAVIORAL, behavioral, data=ethos_data),
             AnalyzerResult('honeypot', WEIGHT_HONEYPOT, honeypot_score, data=honeypot_data),
         ]
-        composite, category_scores, coverage, coverage_reasons, covered_weight = self._covered_scores(component_results)
+        composite, category_scores, coverage, coverage_reasons, covered_weight, _ = self._covered_scores(component_results)
         required_unknown = is_token is not False and coverage.get('honeypot', 0) < 1
         incomplete = required_unknown or covered_weight < 1 - 1e-9 or any(fraction < 1 for fraction in coverage.values())
         if required_unknown:
@@ -174,12 +180,10 @@ class RiskEngine:
             if contract_data.get('is_contract') is False and honeypot_data.get('simulation_failed'):
                 composite = max(composite, 80)
 
+            # A confirmed honeypot floors at 80: deep liquidity and low taxes do not make a token
+            # that cannot be sold safe to buy.
             if honeypot_data.get('is_honeypot'):
-                sell_tax = honeypot_data.get('sell_tax')
-                is_false_positive_candidate = liquidity_info is not None and sell_tax is not None and liquidity_info > 500_000 and sell_tax < 5
-                is_proxy = contract_data.get('has_proxy', False)
-                if not is_false_positive_candidate or (honeypot_data.get('low_tax_honeypot') and not is_proxy):
-                    composite = max(composite, 80)
+                composite = max(composite, 80)
 
             if ethos_data.get('severe_reputation_flag'):
                 pair_age = dex_data.get('pair_age_hours')
@@ -194,6 +198,12 @@ class RiskEngine:
 
             if contract_data.get('scam_matches'):
                 composite = max(composite, 70)
+
+        # A block-severity scam match (GoPlus labels the token a scam) is a BLOCK on every target type.
+        floor = 90 if any(
+            isinstance(match, dict) and match.get('severity') == 'block' for match in contract_data.get('scam_matches') or []
+        ) else 0
+        composite = max(composite, floor)
 
         rug_probability = round(min(max(composite, 0), 100), 1)
 
@@ -214,6 +224,9 @@ class RiskEngine:
         # A calibrated medium threshold can sit above the scam floor; a scam match is never LOW.
         if contract_data.get('scam_matches') and risk_level == 'LOW':
             risk_level = 'MEDIUM'
+
+        if floor:
+            risk_level = 'HIGH'
 
         # --- Risk archetype ---
         archetype = self._determine_archetype(
@@ -247,6 +260,7 @@ class RiskEngine:
             'coverage': coverage,
             'coverage_reasons': coverage_reasons,
             'status': 'unknown' if incomplete else 'ok',
+            'transaction_floor': floor or None,
         }
 
     def compute_from_results(self, results: List["AnalyzerResult"], is_token: Optional[bool] = True) -> dict:
@@ -272,10 +286,12 @@ class RiskEngine:
         dex_data = by_name.get("market", _EMPTY_RESULT).data
         ethos_data = by_name.get("behavioral", _EMPTY_RESULT).data
 
-        composite, category_scores, coverage, coverage_reasons, covered_weight = self._covered_scores(results)
+        composite, category_scores, coverage, coverage_reasons, covered_weight, tx_share = self._covered_scores(results)
         required_unknown = is_token is not False and coverage.get('honeypot', 0) < 1
         incomplete = required_unknown or covered_weight < 1 - 1e-9 or any(fraction < 1 for fraction in coverage.values())
-        critical_flags = [flag for result in results for flag in result.flags]
+        # A fired floor's reason leads: the extension overlay shows only the first three flags.
+        ordered = sorted(results, key=lambda result: not (result.data.get('floor') and not result.error))
+        critical_flags = [flag for result in ordered for flag in result.flags]
         if required_unknown:
             # A measured can_sell is known either way, so only the rest of the honeypot data is
             # unknown. The honeypot analyzer uses the same labels, and its flag already carries a reason.
@@ -308,13 +324,10 @@ class RiskEngine:
             if contract_data.get('is_contract') is False and honeypot_data.get('simulation_failed'):
                 composite = max(composite, 80)
 
-            # Honeypot escalation — floor at 80 if confirmed
+            # Honeypot escalation — floor at 80 if confirmed. Deep liquidity and low taxes do not
+            # make a token that cannot be sold safe to buy.
             if honeypot_data.get('is_honeypot'):
-                sell_tax = honeypot_data.get('sell_tax')
-                is_false_positive_candidate = liquidity is not None and sell_tax is not None and liquidity > 500_000 and sell_tax < 5
-                is_proxy = contract_data.get('has_proxy', False)
-                if not is_false_positive_candidate or (honeypot_data.get('low_tax_honeypot') and not is_proxy):
-                    composite = max(composite, 80)
+                composite = max(composite, 80)
 
             if ethos_data.get('severe_reputation_flag'):
                 pair_age = dex_data.get('pair_age_hours')
@@ -323,11 +336,12 @@ class RiskEngine:
 
             # Positive signals — reduce score for renounced ownership with high liquidity.
             # A failed scam lookup or bytecode scan is not a clean one, so it earns no positive signal.
+            # The signal describes the token, so it never discounts the transaction's own share.
             liquidity_info = dex_data.get('liquidity_usd')
             contract_coverage = contract_data.get('coverage', {})
             checks_covered = contract_coverage.get('scam_database', True) and contract_coverage.get('bytecode', True)
             if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not contract_data.get('scam_matches') and checks_covered:
-                composite = max(composite - 20, 0)
+                composite = max(composite - 20, tx_share)
 
             if contract_data.get('scam_matches'):
                 composite = max(composite, 70)
@@ -337,6 +351,16 @@ class RiskEngine:
                 composite = max(composite, 70)
             if ethos_data.get('severe_reputation_flag') and ethos_data.get('scam_flags'):
                 composite = min(composite + 10, 100)
+
+        # Hard floors: a rule an analyzer declares from evidence it owns (an approval to a wallet, a
+        # pay-to-claim contract) holds whatever the weighted mean and the discount say, and so does
+        # a block-severity scam match (GoPlus labels the token a scam).
+        floor = max((result.data.get('floor') or 0 for result in results if not result.error), default=0)
+        if any(
+            isinstance(match, dict) and match.get('severity') == 'block' for match in contract_data.get('scam_matches') or []
+        ):
+            floor = max(floor, 90)
+        composite = max(composite, floor)
 
         rug_probability = round(min(max(composite, 0), 100), 1)
 
@@ -355,6 +379,13 @@ class RiskEngine:
 
         # A calibrated medium threshold can sit above the scam floor; a scam match is never LOW.
         if contract_data.get('scam_matches') and risk_level == 'LOW':
+            risk_level = 'MEDIUM'
+
+        # A fired floor is never LOW, and one at the extension's fixed BLOCK boundary (71) is HIGH
+        # whatever the calibrated thresholds, so the RPC proxy (which blocks on HIGH) agrees.
+        if floor >= 71:
+            risk_level = 'HIGH'
+        elif floor and risk_level == 'LOW':
             risk_level = 'MEDIUM'
 
         archetype = self._determine_archetype(
@@ -389,6 +420,7 @@ class RiskEngine:
             'coverage': coverage,
             'coverage_reasons': coverage_reasons,
             'status': 'unknown' if incomplete else 'ok',
+            'transaction_floor': floor or None,
         }
 
     def _covered_scores(self, results):
@@ -437,17 +469,24 @@ class RiskEngine:
                         if structural_missing else 'Provider data unavailable or incomplete'
                     )
                 )
+            # A skipped analyzer does not apply to this target (a non-token has no market and no
+            # sellability): it is covered, but a zero from it would only dilute the others.
+            if not result.error and data.get('skipped'):
+                scores[result.name] = 0.0
             # Known adverse evidence remains actionable even if other fields are unknown.
-            if not result.error and (fraction == 1 or result.score > 0):
+            elif not result.error and (fraction == 1 or result.score > 0):
                 included.append(result)
                 scores[result.name] = round(result.score, 1)
             else:
                 scores[result.name] = None
         weight = sum(result.weight for result in included)
         composite = sum(result.score * result.weight for result in included)
+        # The part of the mean that describes the transaction (calldata, typed data), not the target.
+        tx_share = sum(result.score * result.weight for result in included if result.name in ('intent', 'signature'))
         if weight and abs(weight - 1) > 1e-9:
             composite /= weight
-        return composite, scores, coverage, reasons, covered_weight
+            tx_share /= weight
+        return composite, scores, coverage, reasons, covered_weight, tx_share
 
     def _determine_archetype(self, contract_data, honeypot_data, dex_data, rug_prob, is_token: Optional[bool] = True):
         # Token-specific archetypes only apply to ERC-20 tokens.

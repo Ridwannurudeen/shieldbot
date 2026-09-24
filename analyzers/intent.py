@@ -4,6 +4,7 @@ import logging
 from typing import List
 
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
+from services.counterparty_service import UnavailableCounterparty, approval_grant, judge_spender, within_timeout
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD
 
 logger = logging.getLogger(__name__)
@@ -23,11 +24,14 @@ class IntentMismatchAnalyzer(Analyzer):
     - Unlimited approval to non-whitelisted target
     - Native value sent on an approval call
     - Unknown selector on unverified contract
-    - Approval to an EOA (spender is not a contract)
+    - Hard floors: a grant to a wallet, a labelled address or an unverified or new contract,
+      and native value paid to claim() or to an unverified contract
     """
 
-    def __init__(self, web3_client):
+    def __init__(self, web3_client, counterparty_service=None):
         self._web3_client = web3_client
+        # Without a counterparty service the allowlist still holds; the spender's facts are unknown.
+        self._counterparty = counterparty_service or UnavailableCounterparty(web3_client)
 
     @property
     def name(self) -> str:
@@ -42,7 +46,7 @@ class IntentMismatchAnalyzer(Analyzer):
         flags: List[str] = []
 
         calldata = ctx.extra.get('calldata', '0x')
-        value = ctx.extra.get('value', '0')
+        payment = _parse_value(ctx.extra.get('value', '0'))
 
         # Decode calldata
         decoded = _decoder.decode(calldata)
@@ -61,12 +65,13 @@ class IntentMismatchAnalyzer(Analyzer):
             score += 40
             flags.append(f'Disguised selector: {disguised}')
 
+        # One allowlist for these points and the floors below: the scanned chain's routers and
+        # Permit2, checked against the spender the call grants (a permit names the owner first).
+        grant = approval_grant(decoded)
+        whitelisted = self._counterparty.allowlisted_name(grant[0], ctx.chain_id) if grant else None
+
         # 2. Unlimited approval to non-whitelisted target
         if decoded.get('is_unlimited_approval'):
-            spender = decoded.get('params', {}).get('param_0', '')
-            # Check if spender is whitelisted on this chain
-            adapter = self._web3_client._get_adapter(ctx.chain_id)
-            whitelisted = _decoder.is_whitelisted_target(spender, chain_id=ctx.chain_id, adapter=adapter)
             if not whitelisted:
                 score += 35
                 flags.append('Unlimited approval to non-whitelisted contract')
@@ -76,11 +81,9 @@ class IntentMismatchAnalyzer(Analyzer):
                 flags.append(f'Unlimited approval to {whitelisted}')
 
         # 3. Native value > 0 on an approval call
-        if decoded.get('is_approval'):
-            value_int = _parse_value(value)
-            if value_int > 0:
-                score += 30
-                flags.append('Native value sent with approval call (unusual)')
+        if decoded.get('is_approval') and payment > 0:
+            score += 30
+            flags.append('Native value sent with approval call (unusual)')
 
         verification_unknown = False
 
@@ -99,13 +102,31 @@ class IntentMismatchAnalyzer(Analyzer):
                 verification_unknown = True
                 flags.append('Selector risk unknown: contract verification unavailable')
 
-        # 5. Approval to EOA — check via extra data if available
-        if decoded.get('is_approval'):
-            spender = decoded.get('params', {}).get('param_0', '')
-            is_spender_contract = ctx.extra.get('spender_is_contract')
-            if is_spender_contract is False:
-                score += 35
-                flags.append('Approval to an EOA (not a contract)')
+        # 5. Hard floors. A positive grant to a spender outside the allowlist is judged on the
+        # spender's facts; native value paid with a call is judged on the target's.
+        floors = []
+        counterparty = None
+        counterparty_known = None
+        counterparty_reasons = []
+        if grant and not whitelisted:
+            counterparty = await self._counterparty.fetch(grant[0], ctx.chain_id)
+            floor, floor_flag, unknown = judge_spender(counterparty, grant[1])
+            floors.append((floor, floor_flag))
+            counterparty_known = not unknown
+            if unknown:
+                counterparty_reasons.append(counterparty['reason'])
+        # On a router swap the value goes to the allowlisted router, not to the token scanned here.
+        if payment > 0 and not ctx.extra.get('whitelisted_router'):
+            floor, floor_flag, reason = await self._payment_floor(ctx, decoded, payment)
+            floors.append((floor, floor_flag))
+            counterparty_known = counterparty_known is not False and reason is None
+            if reason:
+                counterparty_reasons.append(reason)
+        floors = sorted((pair for pair in floors if pair[0]), reverse=True)
+        floor = floors[0][0] if floors else None
+        flags[:0] = [flag for _, flag in floors]
+        flags.extend(counterparty_reasons)
+        counterparty_reason = '; '.join(counterparty_reasons) or None
 
         score = min(score, 100)
 
@@ -115,17 +136,62 @@ class IntentMismatchAnalyzer(Analyzer):
             score=score,
             flags=flags,
             data={
-                'status': 'unknown' if verification_unknown else 'ok',
-                'coverage': {'selector_verification': not verification_unknown},
-                'reason': 'Contract verification unavailable for unknown selector' if verification_unknown else None,
+                'status': 'unknown' if verification_unknown or counterparty_known is False else 'ok',
+                'coverage': {
+                    'selector_verification': not verification_unknown,
+                    **({} if counterparty_known is None else {'counterparty': counterparty_known}),
+                },
+                'reason': (
+                    'Contract verification unavailable for unknown selector' if verification_unknown
+                    else counterparty_reason
+                ),
                 'selector': selector,
                 'function_name': decoded.get('function_name'),
                 'category': decoded.get('category'),
                 'is_approval': decoded.get('is_approval', False),
                 'is_unlimited': decoded.get('is_unlimited_approval', False),
                 'disguised': disguised is not None,
+                **({'floor': floor} if floor else {}),
+                **({'counterparty': counterparty} if counterparty else {}),
             },
         )
+
+    async def _payment_floor(self, ctx: AnalysisContext, decoded: dict, payment: int) -> tuple:
+        """(floor or None, its flag, the reason it is incomplete or None) for native value paid to
+        the target with a call.
+
+        Pay-to-claim and fake-mint pages take the victim's native coin through a call on an
+        unverified contract; a verified contract taking payment is ordinary, except for claim(),
+        where paying to claim is itself the phishing pattern.
+        """
+        if ctx.extra.get('is_contract') is False:
+            # A wallet takes payments; there is no contract to judge, and an explorer calls every
+            # wallet unverified.
+            return None, None, None
+        is_verified = ctx.extra.get('is_verified')
+        claim = decoded.get('category') == 'claim'
+        call = decoded.get('signature') or f"0x{decoded['selector']}"
+        sends = f'{call} sends {payment / 1e18:g} native value to'
+        if is_verified is None:
+            reason = 'Contract verification unavailable for a call with native value'
+            return 60, f'{sends} a contract of unknown verification', reason
+        if is_verified is True:
+            return (60, f'{sends} the contract', None) if claim else (None, None, None)
+        if claim:
+            return 85, f'{sends} an unverified contract', None
+        creation = await within_timeout(
+            self._web3_client.get_contract_creation_info(ctx.address, chain_id=ctx.chain_id), None
+        )
+        age = creation.get('age_days') if creation else None
+        if age is None:
+            # It may be a fresh deployment (85), but nothing says so: the older contract's floor
+            # holds and the verdict stays unknown, as for an approval's spender.
+            return 60, f'{sends} an unverified contract of unknown age', (
+                'Contract age unavailable for a payment to an unverified contract'
+            )
+        if age >= 7:
+            return 60, f'{sends} an unverified contract', None
+        return 85, f'{sends} an unverified contract {age} days old', None
 
 
 def _parse_value(value) -> int:

@@ -38,6 +38,7 @@ from adapters.optimism import OptimismAdapter
 from adapters.robinhood import RobinhoodAdapter
 from services.mempool_service import supports_pending_transactions
 from services.cache import CacheService
+from services.counterparty_service import CounterpartyService
 from services.injection_scanner import InjectionScanner
 from services.threat_graph import ThreatGraphService
 from services.reputation import ReputationService
@@ -121,6 +122,7 @@ class ServiceContainer:
         self.ethos_service = EthosService()
         self.honeypot_service = HoneypotService(self.web3_client)
         self.contract_service = ContractService(self.web3_client, self.scam_db)
+        self.counterparty_service = CounterpartyService(self.web3_client, self.scam_db)
 
         # Bytecode fingerprinting for unverified contracts (must init before registry)
         self.token_sniffer = TokenSnifferService(api_key=settings.token_sniffer_api_key)
@@ -133,8 +135,8 @@ class ServiceContainer:
         self.registry.register(MarketAnalyzer(self.dex_service))
         self.registry.register(BehavioralAnalyzer(self.ethos_service))
         self.registry.register(HoneypotAnalyzer(self.honeypot_service))
-        self.registry.register(IntentMismatchAnalyzer(self.web3_client))
-        self.registry.register(SignaturePermitAnalyzer())
+        self.registry.register(IntentMismatchAnalyzer(self.web3_client, self.counterparty_service))
+        self.registry.register(SignaturePermitAnalyzer(self.counterparty_service))
 
         # Policy engine
         self.policy_engine = PolicyEngine(settings.policy_mode)

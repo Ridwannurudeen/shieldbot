@@ -26,8 +26,13 @@ class ChainAdapter(ABC):
         """Get contract bytecode as hex string."""
 
     @abstractmethod
-    async def is_verified_contract(self, address: str) -> Tuple[Optional[bool], Optional[str]]:
-        """Check if contract is verified. Returns (is_verified, source_code_or_None)."""
+    async def is_verified_contract(
+        self, address: str, code: Optional[str] = None,
+    ) -> Tuple[Optional[bool], Optional[str]]:
+        """Check if contract is verified. Returns (is_verified, source_code_or_None).
+
+        `code`, when the caller already read the contract's code, spares a second read.
+        """
 
     @abstractmethod
     async def get_contract_creation_info(self, address: str) -> Optional[Dict]:

@@ -68,11 +68,23 @@ def etherscan_adapter() -> EvmAdapter:
     adapter.etherscan_api_key = "key"
     adapter._honeypot_chain_id = 56
     adapter._honeypot_is_replies = {}
+    adapter._creation_infos = {}
+    adapter._creation_inflight = {}
+    # Verification asks Sourcify when Etherscan did not verify, and reads the code for the clone
+    # check; neither goes through the Etherscan session under test.
+    adapter._explorer_service = MagicMock(get_sourcify_verification=AsyncMock(
+        return_value=ExplorerResult("unknown", reason="not asked here", provider="sourcify"),
+    ))
+    adapter.get_bytecode = AsyncMock(return_value="0x6080")
     return adapter
 
 
 def goplus_token():
     return lambda i: ScamDatabase.fetch_token_security(address(i), 56)
+
+
+def goplus_address():
+    return lambda i: ScamDatabase.fetch_address_security(address(i))
 
 
 def goplus_phishing():
@@ -132,6 +144,13 @@ CASES = {
         goplus_token,
         "goplus_token:56",
         ("goplus_token", 56),
+        (200, {"code": 1, "result": {}}),
+    ),
+    "goplus_address": Case(
+        "utils.scam_db.aiohttp.ClientSession",
+        goplus_address,
+        "goplus_address",
+        ("goplus_address", None),
         (200, {"code": 1, "result": {}}),
     ),
     "goplus_phishing": Case(
@@ -198,8 +217,10 @@ def isolated(monkeypatch):
     # GoPlus answers are cached per process; Sourcify is the only verification source asked.
     monkeypatch.delenv("BLOCKSCOUT_API_KEY", raising=False)
     scam_db._GOPLUS_CACHE.clear()
+    scam_db._GOPLUS_ADDRESS_CACHE.clear()
     yield
     scam_db._GOPLUS_CACHE.clear()
+    scam_db._GOPLUS_ADDRESS_CACHE.clear()
 
 
 def failed_count(case: Case) -> int:

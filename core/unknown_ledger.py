@@ -14,8 +14,9 @@ Etherscan's docs say only that status 0 can be an error or a request with no rec
 status 0 reply counts as failed.
 
 Providers: honeypot.is and eth_simulateV1 (sell simulation), goplus_token, goplus_phishing (asked
-about a URL, so it has no chain), etherscan, blockscout and sourcify (verification and contract
-creation), dexscreener, and rpc (the chain's RPC; a revert is the node answering).
+about a URL, so it has no chain), goplus_address (an approval spender's labels; GoPlus answers the
+same for every chain, so it has none either), etherscan, blockscout and sourcify (verification and
+contract creation), dexscreener, and rpc (the chain's RPC; a revert is the node answering).
 
 Counts live in memory: they restart from zero with the process, and counting_since says when the
 current count began. Each process keeps its own, so the API's ledger covers the API's scans, the

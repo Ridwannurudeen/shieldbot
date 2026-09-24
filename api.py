@@ -27,6 +27,7 @@ from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve
 from utils.chain_info import get_chain_name, get_native_symbol
 from utils.web3_client import UnsupportedChainError
 from services import rpc_guard
+from services.counterparty_service import code_kind
 from services.mempool_service import supports_pending_transactions
 from core.auth import TIER_LIMITS, hash_key
 from core.circuit_breaker import CLOSED, provider_breakers
@@ -1131,9 +1132,10 @@ def _is_signature_only_request(req: FirewallRequest) -> bool:
     return (req.signMethod or "") in {"personal_sign", "eth_sign"} and not _is_valid_evm_address(req.to)
 
 
-async def _build_signature_only_response(req: FirewallRequest) -> Dict:
+async def _build_signature_only_response(req: FirewallRequest, policy_override: Optional[str] = None) -> Dict:
     from analyzers.signature import SignaturePermitAnalyzer
     from core.analyzer import AnalysisContext
+    from core.policy import PolicyEngine
 
     fallback_target = (
         _checksum_if_possible(req.sender)
@@ -1152,7 +1154,7 @@ async def _build_signature_only_response(req: FirewallRequest) -> Dict:
             "calldata": req.data,
         },
     )
-    result = await SignaturePermitAnalyzer().analyze(ctx)
+    result = await SignaturePermitAnalyzer(container.counterparty_service if container else None).analyze(ctx)
     risk_score = int(max(0, min(100, round(result.score))))
     danger_signals = list(result.flags)
 
@@ -1172,13 +1174,22 @@ async def _build_signature_only_response(req: FirewallRequest) -> Dict:
     sig_type = result.data.get("sig_type", "signature")
     sign_method = req.signMethod or result.data.get("sign_method") or "signature"
     covered = not result.error and 'Failed to parse typed data' not in danger_signals and (
-        sig_type in {'eip2612_permit', 'permit2', 'seaport_order'}
+        sig_type in {'eip2612_permit', 'permit2', 'permit2_transfer', 'seaport_order'}
         or (not req.typedData and req.signMethod == 'personal_sign')
-    )
+    ) and result.data.get('status') != 'unknown'
+    # As core.policy does, STRICT turns an unavailable or incomplete analysis into a block.
+    policy = container.policy_engine if container and container.policy_engine else PolicyEngine()
+    strict_block = not covered and policy.apply([], {}, mode_override=policy_override)['policy_mode'] == 'STRICT'
+    if strict_block:
+        risk_score = max(risk_score, 80)
+        classification = 'BLOCK_RECOMMENDED'
+        danger_signals.insert(0, 'Policy override: signature analysis unavailable or incomplete')
     alert = format_extension_alert({
         'rug_probability': risk_score, 'risk_level': 'LOW' if covered else 'UNKNOWN',
         'status': 'ok' if covered else 'unknown', 'coverage': {'signature': int(covered)},
-        'coverage_reasons': {} if covered else {'signature': 'Signature payload analysis unavailable or unsupported'},
+        'coverage_reasons': {} if covered else {
+            'signature': result.data.get('reason') or 'Signature payload analysis unavailable or unsupported',
+        },
     })
     if not covered and classification == 'SAFE':
         classification = 'CAUTION'
@@ -1232,8 +1243,8 @@ async def _build_signature_only_response(req: FirewallRequest) -> Dict:
         "chain_id": req.chainId,
         "network": _chain_id_to_name(req.chainId),
         "partial": not covered,
-        "failed_sources": [],
-        "policy_mode": "SIGNATURE_ONLY",
+        "failed_sources": [] if covered else ["signature"],
+        "policy_mode": "STRICT" if strict_block else "SIGNATURE_ONLY",
     }
 
 
@@ -1248,7 +1259,7 @@ async def firewall(req: FirewallRequest, request: Request):
         from_addr = req.sender
 
         if _is_signature_only_request(req):
-            return await _build_signature_only_response(req)
+            return await _build_signature_only_response(req, policy_override=request.headers.get("X-Policy-Mode"))
 
         if not web3_client.is_valid_address(to_addr):
             raise HTTPException(status_code=400, detail="Invalid 'to' address")
@@ -1268,6 +1279,22 @@ async def firewall(req: FirewallRequest, request: Request):
         # Enrich decoded calldata with token names and formatted amounts
         await _enrich_decoded(decoded, to_addr, chain_id=req.chainId)
 
+        # contract_scores holds one verdict per target. An approval's, a claim's, a signature's or
+        # a paying call's verdict also depends on this transaction (the spender, the value, the
+        # typed data), so a row cached from another transaction never answers one. A spender's
+        # floor describes the spender, not the target, so approval and typed-data verdicts are not
+        # written to the target's row either, and do not put the target's deployer on the watch
+        # list. Neither is another call's payment floor: it comes from one user's payment, and the
+        # contract's other requests (a transfer, a zero-value call) must not be served it. A
+        # claim's floor, paid or not, describes the target, so its row is kept. A plain native
+        # send has no payment rule and its recipient is the row, so it stays cacheable.
+        paying = value_wei > 0 and decoded.get('selector') is not None
+        tx_specific = decoded.get('category') in ('approval', 'claim') or bool(req.typedData) or paying
+        describes_target = not (
+            decoded.get('category') == 'approval' or req.typedData
+            or (paying and decoded.get('category') != 'claim')
+        )
+
         # 2. If target is a whitelisted router, analyze the swap path tokens instead of bypassing
         if whitelisted:
             router_response = await _analyze_router_swap(
@@ -1283,7 +1310,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 return router_response
 
         # 2b. Check cache for recent result
-        if container and container.db:
+        if container and container.db and not tx_specific:
             cached = await container.db.get_contract_score(to_addr, req.chainId, max_age_seconds=300)
             if cached and cached.get('category_scores', {}).get('_scan_metadata', {}).get('coverage'):
                 policy_mode = "BALANCED"
@@ -1310,19 +1337,26 @@ async def firewall(req: FirewallRequest, request: Request):
             # checks (honeypot simulation, DEX liquidity, etc.)
             is_token = None
             is_verified = None
+            # The target's code, read once. A wallet (no code, or an EIP-7702 delegation) has no
+            # source to verify and takes payments with no contract to judge; for a contract, the
+            # verification's clone check reads this code instead of fetching it again.
+            code = await web3_client.get_bytecode(to_addr, chain_id=req.chainId)
+            has_code, delegated = code_kind(code)
+            is_contract = None if has_code is None else has_code and not delegated
             try:
                 is_token = await web3_client.is_token_contract(to_addr, chain_id=req.chainId)
             except UnsupportedChainError:
                 raise
             except Exception:
                 pass
-            try:
-                verified_result = await web3_client.is_verified_contract(to_addr, chain_id=req.chainId)
-                is_verified = verified_result[0] if isinstance(verified_result, tuple) else verified_result
-            except UnsupportedChainError:
-                raise
-            except Exception:
-                pass
+            if is_contract is not False:
+                try:
+                    verified_result = await web3_client.is_verified_contract(to_addr, chain_id=req.chainId, code=code)
+                    is_verified = verified_result[0] if isinstance(verified_result, tuple) else verified_result
+                except UnsupportedChainError:
+                    raise
+                except Exception:
+                    pass
 
             ctx = AnalysisContext(
                 address=to_addr, chain_id=req.chainId, from_address=from_addr,
@@ -1333,6 +1367,7 @@ async def firewall(req: FirewallRequest, request: Request):
                     'typed_data': req.typedData,
                     'sign_method': req.signMethod,
                     'is_verified': is_verified,
+                    'is_contract': is_contract,
                 },
             )
 
@@ -1351,11 +1386,13 @@ async def firewall(req: FirewallRequest, request: Request):
                 simulation_result = None
             else:
                 # Fallback: no container (e.g. tests), use old 4-service gather
+                from analyzers.behavioral import counterparty_reputation
+
                 gather_tasks = [
                     contract_service.fetch_contract_data(to_addr, chain_id=req.chainId),
                     honeypot_service.fetch_honeypot_data(to_addr, chain_id=req.chainId),
                     dex_service.fetch_token_market_data(to_addr),
-                    ethos_service.fetch_wallet_reputation(from_addr),
+                    counterparty_reputation(ethos_service, decoded, to_addr),
                 ]
                 results = await asyncio.gather(*gather_tasks)
                 risk_output = risk_engine.compute_composite_risk(
@@ -1483,7 +1520,7 @@ async def firewall(req: FirewallRequest, request: Request):
             }
 
             # Persist contract score to DB
-            if container and container.db:
+            if container and container.db and describes_target:
                 try:
                     await container.db.upsert_contract_score(
                         address=to_addr,
@@ -1503,8 +1540,8 @@ async def firewall(req: FirewallRequest, request: Request):
                 except Exception as e:
                     logger.error(f"DB upsert failed: {type(e).__name__}")
 
-            # Auto-enrich threat graph (fire-and-forget)
-            if container and hasattr(container, 'threat_graph'):
+            # Auto-enrich threat graph (fire-and-forget), from verdicts that describe the target
+            if container and hasattr(container, 'threat_graph') and describes_target:
                 _fire_and_forget(
                     container.threat_graph.enrich_from_scan(
                         to_addr, req.chainId, risk_output,
@@ -1513,7 +1550,7 @@ async def firewall(req: FirewallRequest, request: Request):
                 )
 
             # Sentinel feedback loop: auto-watch deployers of blocked contracts
-            if container and hasattr(container, 'sentinel') and classification == "BLOCK_RECOMMENDED":
+            if container and hasattr(container, 'sentinel') and classification == "BLOCK_RECOMMENDED" and describes_target:
                 try:
                     deployer_info = await container.db.get_deployer_risk_summary(to_addr, req.chainId)
                     deployer_addr = deployer_info["deployer_address"] if deployer_info else None
@@ -1598,9 +1635,15 @@ async def firewall(req: FirewallRequest, request: Request):
             firewall_result.update(_coverage_fields(alert))
             firewall_result["raw_checks"] = _extract_raw_checks(contract_scan)
             firewall_result.setdefault("asset_delta", [])
+            if tx_specific and firewall_result["classification"] == "SAFE":
+                firewall_result["classification"] = "CAUTION"
+                firewall_result["danger_signals"].append(_TX_CHECKS_UNAVAILABLE)
+                firewall_result["verdict"] = f"CAUTION — {_TX_CHECKS_UNAVAILABLE}"
             return firewall_result
         else:
-            return _build_fallback_response(decoded, contract_scan, whitelisted, req.chainId)
+            return _build_fallback_response(
+                decoded, contract_scan, whitelisted, req.chainId, transaction_specific=tx_specific,
+            )
 
     except HTTPException:
         raise
@@ -2925,7 +2968,14 @@ def _extract_raw_checks(scan: Dict) -> Dict:
     }
 
 
-def _build_fallback_response(decoded: Dict, scan: Dict, whitelisted: Optional[str], chain_id: int) -> Dict:
+# The legacy scan sees only the target, never the transaction's spender, payment or signature, so
+# it cannot clear a transaction-specific request.
+_TX_CHECKS_UNAVAILABLE = "Transaction checks unavailable: the spender, payment or signature was not analysed"
+
+
+def _build_fallback_response(
+    decoded: Dict, scan: Dict, whitelisted: Optional[str], chain_id: int, transaction_specific: bool = False,
+) -> Dict:
     """Build a firewall response when AI is unavailable."""
     risk_score = scan.get("risk_score", 50)
     scam_matches = _scam_match_count(scan)
@@ -2968,6 +3018,9 @@ def _build_fallback_response(decoded: Dict, scan: Dict, whitelisted: Optional[st
     alert = format_extension_alert({**scan, 'rug_probability': risk_score})
     if alert['status'] == 'unknown' and classification == 'SAFE':
         classification = 'CAUTION'
+    if transaction_specific and classification == 'SAFE':
+        classification = 'CAUTION'
+        danger_signals.append(_TX_CHECKS_UNAVAILABLE)
 
     return {
         **_coverage_fields(alert),

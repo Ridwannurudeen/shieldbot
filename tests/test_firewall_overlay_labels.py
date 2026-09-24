@@ -78,6 +78,7 @@ def labels_api(monkeypatch, mock_web3_client):
         policy_engine=None,
         indexer=None,
         settings=SimpleNamespace(policy_mode="BALANCED"),
+        counterparty_service=None,
     )
     monkeypatch.setattr(api, "container", services)
     monkeypatch.setattr(api, "web3_client", mock_web3_client)
