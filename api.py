@@ -2354,7 +2354,10 @@ async def verdict_vocabulary():
     scores at which a stored risk level is HIGH and MEDIUM on this server: the calibrated thresholds,
     or the band table's where that is lower, since a stored level is raised to the band of its score.
     agent_firewall gives the agent firewall's default thresholds and the decisions each
-    classification can meet under them.
+    classification can meet under them. first_verdict describes the interim event of a streamed
+    POST /api/firewall (Accept: text/event-stream): sent at most `seconds` after the handler starts,
+    always status 'unknown', never a classification in `never`, and only under the listed policy
+    modes.
     """
     return verdicts.describe(container.calibration if container else None)
 
