@@ -370,6 +370,53 @@ def test_check_fails_closed_when_the_bot_environment_cannot_be_read(server):
     assert "could not read the environment" in err
 
 
+API_UNIT_WITH_KEY = (
+    "[Service]\nExecStart=uvicorn api:app\n\n"
+    "# /etc/systemd/system/shieldbot.service.d/override.conf\n"
+    "[Service]\nEnvironmentFile=/etc/shieldbot/recorder.env\n"
+)
+
+
+@pytest.mark.parametrize(
+    "setting",
+    [
+        "BACKGROUND_WORKERS=external",
+        "export BACKGROUND_WORKERS = 'external'  # workers.py sends",
+        'background_workers="external"\r',
+    ],
+)
+def test_check_refuses_an_api_that_loads_the_key_when_the_workers_send(server, setting):
+    # With BACKGROUND_WORKERS=external the workers unit runs the drain; the key must have moved there.
+    (server.app / ".env").write_text(f"TELEGRAM_BOT_TOKEN=unused\n{setting}\n", encoding="utf-8")
+    (server.state / "unit-shieldbot").write_text(API_UNIT_WITH_KEY, encoding="utf-8")
+    code, out, err = server.run("--check", server.target)
+    assert code == 1
+    assert "BACKGROUND_WORKERS=external" in err and "recorder.env" in err
+    assert "rollback point" not in out
+
+
+def test_check_accepts_an_api_without_the_key_when_the_workers_send(server):
+    (server.app / ".env").write_text(
+        "TELEGRAM_BOT_TOKEN=unused\nBACKGROUND_WORKERS=external\n", encoding="utf-8"
+    )
+    code, out, err = server.run("--check", server.target)
+    assert code == 0, err
+    assert "does not load the recorder key" in out
+    assert "rollback point" in out
+
+
+@pytest.mark.parametrize(
+    "setting", ["", "BACKGROUND_WORKERS=api\n", "# BACKGROUND_WORKERS=external\n"]
+)
+def test_check_still_lets_the_api_hold_the_key_when_it_runs_the_drain(server, setting):
+    (server.app / ".env").write_text(f"TELEGRAM_BOT_TOKEN=unused\n{setting}", encoding="utf-8")
+    (server.state / "unit-shieldbot").write_text(API_UNIT_WITH_KEY, encoding="utf-8")
+    code, out, err = server.run("--check", server.target)
+    assert code == 0, err
+    assert "rollback point" in out
+    assert "BACKGROUND_WORKERS" not in out
+
+
 def test_check_refuses_an_unknown_commit(server):
     code, _, err = server.run("--check", "0123456789abcdef0123456789abcdef01234567")
     assert code == 1

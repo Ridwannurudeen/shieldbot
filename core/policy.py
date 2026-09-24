@@ -5,6 +5,7 @@ from enum import Enum
 from typing import Dict, List, Optional
 
 from core.analyzer import AnalyzerResult
+from core.verdicts import BLOCK_RECOMMENDED, HIGH, STRICT_BLOCK_SCORE
 
 logger = logging.getLogger(__name__)
 
@@ -85,9 +86,9 @@ class PolicyEngine:
         if active_mode == PolicyMode.STRICT:
             # Any failure → BLOCK
             logger.warning(f"STRICT policy: analyzers failed ({failed_names}), overriding to BLOCK")
-            output['risk_level'] = 'HIGH'
-            output['rug_probability'] = max(output.get('rug_probability', 0), 80)
-            output['policy_override'] = 'BLOCK_RECOMMENDED'
+            output['risk_level'] = HIGH
+            output['rug_probability'] = max(output.get('rug_probability', 0), STRICT_BLOCK_SCORE)
+            output['policy_override'] = BLOCK_RECOMMENDED
             if 'critical_flags' not in output:
                 output['critical_flags'] = []
             output['critical_flags'].insert(

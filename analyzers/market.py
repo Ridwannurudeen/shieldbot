@@ -51,6 +51,9 @@ class MarketAnalyzer(Analyzer):
         if d.get('volatility_flag'):
             score += 20
             flags.append('Extreme volatility (>200%)')
+        elif d.get('status') == 'ok' and d.get('volatility_flag') is None:
+            # An ok market may lack only the 24h change; say the volatility check did not run.
+            flags.append('Volatility unknown: 24h price change unavailable')
         if d.get('wash_trade_flag'):
             score += 25
             flags.append('Possible wash trading')

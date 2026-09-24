@@ -424,7 +424,7 @@ async def test_goplus_phishing_lookups_are_counted_without_a_chain(ledger, reply
 
 PAIR = {
     "chainId": "bsc",
-    "baseToken": {"name": "T", "symbol": "T"},
+    "baseToken": {"address": TOKEN, "name": "T", "symbol": "T"},
     "priceUsd": "1",
     "liquidity": {"usd": 100000},
     "volume": {"h24": 5},
@@ -438,8 +438,8 @@ PAIR = {
 @pytest.mark.parametrize(
     "reply, outcome",
     [
-        ((200, {"pairs": [PAIR]}), "answered"),
-        ((200, {"pairs": None}), "unknown"),
+        ((200, [PAIR]), "answered"),
+        ((200, []), "unknown"),
         ((429, None), "failed"),
         (aiohttp.ClientConnectionError(), "failed"),
     ],

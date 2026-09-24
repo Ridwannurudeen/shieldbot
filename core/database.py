@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Tuple
 import aiosqlite
 
 from core.extension_formatter import is_scan_incomplete
+from core.verdicts import CAUTION_MIN, HIGH, THREAT_CONDITION, stored_level
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +218,13 @@ class Database:
         # so a rollback on the shared one would undo whatever else was being written at the time.
         self._drain_db: Optional[aiosqlite.Connection] = None
         self._drain_lock = asyncio.Lock()
+        # The sender lease's own connection: its commits and rollbacks run beside the drain's, never inside a
+        # transaction the drain has open.
+        self._lease_db: Optional[aiosqlite.Connection] = None
+        self._lease_lock = asyncio.Lock()
+        # One lease call at a time on that connection: calls that overlap share its implicit transaction, so one
+        # call's rollback would undo another's upsert.
+        self._lease_calls = asyncio.Lock()
 
     async def initialize(self):
         """Open connection and create tables."""
@@ -236,28 +244,48 @@ class Database:
         if self._drain_db is None and self._db is not None and self.db_path != ":memory:":
             async with self._drain_lock:
                 if self._drain_db is None:
-                    opened = await aiosqlite.connect(self.db_path)
-                    if self._db is None:
-                        # close() ran while this connection was opening; leaving it open would
-                        # keep aiosqlite's non-daemon worker thread alive past shutdown.
-                        await opened.close()
-                    else:
-                        await opened.execute("PRAGMA busy_timeout=5000")
-                        self._drain_db = opened
+                    self._drain_db = await self._second_connection()
         return self._drain_db or self._db
+
+    async def _lease(self) -> aiosqlite.Connection:
+        """The sender lease's connection, opened on first use like the drain's; an in-memory database keeps the
+        shared one, as the drain's does."""
+        if self._lease_db is None and self._db is not None and self.db_path != ":memory:":
+            async with self._lease_lock:
+                if self._lease_db is None:
+                    self._lease_db = await self._second_connection()
+        return self._lease_db or self._db
+
+    async def _second_connection(self) -> Optional[aiosqlite.Connection]:
+        """Another connection to the database file, or None if close() ran while it was opening."""
+        opened = await aiosqlite.connect(self.db_path)
+        if self._db is None:
+            # close() ran while this connection was opening; leaving it open would
+            # keep aiosqlite's non-daemon worker thread alive past shutdown.
+            await opened.close()
+            return None
+        await opened.execute("PRAGMA busy_timeout=5000")
+        return opened
 
     async def close(self):
         """Close the database connection.
 
-        Both handles are detached first: a write landing while a close is awaited must fail, not
-        reopen the drain's connection behind us.
+        Every handle is detached first: a write landing while a close is awaited must fail, not
+        reopen the drain's or the lease's connection behind us.
         """
-        drain, shared = self._drain_db, self._db
-        self._drain_db = self._db = None
-        if drain:
-            await drain.close()
-        if shared:
-            await shared.close()
+        drain, lease, shared = self._drain_db, self._lease_db, self._db
+        self._drain_db = self._lease_db = self._db = None
+        # A connection that fails to close must not leave the others open.
+        try:
+            if drain:
+                await drain.close()
+        finally:
+            try:
+                if lease:
+                    await lease.close()
+            finally:
+                if shared:
+                    await shared.close()
 
     async def _create_tables(self):
         await self._db.executescript("""
@@ -546,6 +574,7 @@ class Database:
         await self._migrate_funding_value_wei()
         await self._migrate_tracked_pairs_chain_id()
         await self._migrate_reporter_ips()
+        await self._migrate_contract_score_levels()
         await self._create_launch_discovery_tables()
         await self._create_launch_feed_tables()
         await self._create_launch_alert_tables()
@@ -639,6 +668,29 @@ class Database:
             ips = [(row_id,) for row_id, reporter in await cursor.fetchall() if _is_ip_address(reporter)]
             await self._db.executemany(
                 "UPDATE community_reports SET reporter_id = NULL WHERE id = ?", ips
+            )
+            await self._db.commit()
+        except BaseException:
+            await self._db.rollback()
+            raise
+
+    async def _migrate_contract_score_levels(self):
+        """Raise every stored level below the band of its stored score, in one transaction. Rows
+        written before the level followed the final score keep the level of the unboosted or unfloored
+        score. A level is never lowered, so an incomplete scan's MEDIUM stays MEDIUM."""
+        await self._db.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = await self._db.execute(
+                "SELECT address, chain_id, risk_score, risk_level FROM contract_scores WHERE risk_score >= ?",
+                (CAUTION_MIN,),
+            )
+            raised = []
+            for address, chain_id, score, level in await cursor.fetchall():
+                level_for_score = stored_level(score, level)
+                if level_for_score != level:
+                    raised.append((level_for_score, address, chain_id))
+            await self._db.executemany(
+                "UPDATE contract_scores SET risk_level = ? WHERE address = ? AND chain_id = ?", raised
             )
             await self._db.commit()
         except BaseException:
@@ -929,11 +981,9 @@ class Database:
         unique_contracts = row[0] or 0
         total_scan_events = int(row[1] or 0)
 
-        # Known split: this counts risk_score >= 71 while the threat feed (api.py) lists risk_level 'HIGH'.
-        # The firewall's campaign boost raises a stored score without raising its stored level, so the two
-        # can disagree until both read one verdict vocabulary and band table.
+        # The threat feed (api.py) lists the same rows.
         cur = await self._db.execute(
-            "SELECT COUNT(*) FROM contract_scores WHERE risk_score >= 71"
+            f"SELECT COUNT(*) FROM contract_scores WHERE {THREAT_CONDITION}"
         )
         threats_detected = (await cur.fetchone())[0] or 0
 
@@ -985,9 +1035,8 @@ class Database:
             )
             scans = (await cur.fetchone())[0] or 0
 
-            # The same known split as the all-time threat count above: score >= 71, not risk_level 'HIGH'.
             cur = await self._db.execute(
-                "SELECT COUNT(*) FROM contract_scores WHERE last_scanned_at > ? AND risk_score >= 71",
+                f"SELECT COUNT(*) FROM contract_scores WHERE last_scanned_at > ? AND {THREAT_CONDITION}",
                 (cutoff,)
             )
             threats = (await cur.fetchone())[0] or 0
@@ -1058,10 +1107,10 @@ class Database:
             return None
         deployer = row[0]
 
-        cursor = await self._db.execute("""
+        cursor = await self._db.execute(f"""
             SELECT
                 COUNT(DISTINCT d.contract_address),
-                COALESCE(SUM(CASE WHEN cs.risk_level = 'HIGH' THEN 1 ELSE 0 END), 0)
+                COALESCE(SUM(CASE WHEN cs.risk_level = '{HIGH}' THEN 1 ELSE 0 END), 0)
             FROM deployers d
             LEFT JOIN contract_scores cs
                 ON cs.address = d.contract_address AND cs.chain_id = d.chain_id
@@ -2668,6 +2717,14 @@ class Database:
                 retry_after REAL NOT NULL DEFAULT 0,
                 PRIMARY KEY (chain_id, subject)
             );
+
+            -- Which process may send (services.verdict_publisher), until expires_at unless it renews.
+            CREATE TABLE IF NOT EXISTS sender_leases (
+                name TEXT PRIMARY KEY,
+                holder TEXT NOT NULL,
+                expires_at REAL NOT NULL,
+                renewed_at REAL NOT NULL
+            );
         """)
         # Lowering the configured cap retires excess registrations deterministically.
         await self._db.execute("""
@@ -3007,6 +3064,42 @@ class Database:
             WHERE id = ? AND onchain_status = 'sending'
         """, (time.time(), evidence_id))
         await outbox.commit()
+
+    async def take_sender_lease(self, name: str, holder: str, seconds: float) -> Tuple[Optional[str], float]:
+        """Take or renew the named lease for `holder` for `seconds`, unless another holder's lease is still live.
+
+        One conditional upsert, atomic in SQLite, so however many processes ask at once, one holds the lease.
+        Returns the lease's holder and expiry (Unix time) after the attempt, or (None, now) if the lease was
+        released before it could be read back. Runs on the lease's own connection, one call at a time, so it never
+        commits or rolls back a transaction the drain or another lease call has open.
+        """
+        connection = await self._lease()
+        async with self._lease_calls:
+            now = time.time()
+            # A failure or a cancellation between the upsert and its commit must not leave the write lock held.
+            try:
+                await connection.execute("""
+                    INSERT INTO sender_leases (name, holder, expires_at, renewed_at) VALUES (?, ?, ?, ?)
+                    ON CONFLICT (name) DO UPDATE SET
+                        holder = excluded.holder, expires_at = excluded.expires_at, renewed_at = excluded.renewed_at
+                    WHERE sender_leases.holder = excluded.holder OR sender_leases.expires_at <= excluded.renewed_at
+                """, (name, holder, now + seconds, now))
+                await connection.commit()
+            except BaseException:
+                await connection.rollback()
+                raise
+            cursor = await connection.execute(
+                "SELECT holder, expires_at FROM sender_leases WHERE name = ?", (name,)
+            )
+            row = await cursor.fetchone()
+        return (row[0], row[1]) if row else (None, now)
+
+    async def release_sender_lease(self, name: str, holder: str):
+        """Give up the named lease if `holder` holds it, on the lease's own connection."""
+        connection = await self._lease()
+        async with self._lease_calls:
+            await connection.execute("DELETE FROM sender_leases WHERE name = ? AND holder = ?", (name, holder))
+            await connection.commit()
 
     async def requeue_verdict(self, evidence_id: int):
         """Queue an unresolved record (submitted, unconfirmed or failed) for another attempt."""

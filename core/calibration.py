@@ -5,14 +5,16 @@ import logging
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 
+from core.verdicts import BLOCK_MIN, CAUTION_MIN
+
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class CalibrationConfig:
     """Risk classification thresholds and weight overrides."""
-    high_threshold: float = 71.0
-    medium_threshold: float = 31.0
+    high_threshold: float = float(BLOCK_MIN)
+    medium_threshold: float = float(CAUTION_MIN)
     weight_overrides: Dict[str, float] = field(default_factory=dict)
     confidence_boost: float = 0.0  # Added to confidence when historical accuracy is high
 
@@ -20,8 +22,8 @@ class CalibrationConfig:
 def default_calibration() -> CalibrationConfig:
     """Return the default calibration matching current hardcoded values."""
     return CalibrationConfig(
-        high_threshold=71.0,
-        medium_threshold=31.0,
+        high_threshold=float(BLOCK_MIN),
+        medium_threshold=float(CAUTION_MIN),
     )
 
 
@@ -31,8 +33,8 @@ def load_calibration(path: str) -> CalibrationConfig:
         with open(path, 'r') as f:
             data = json.load(f)
         return CalibrationConfig(
-            high_threshold=data.get('high_threshold', 71.0),
-            medium_threshold=data.get('medium_threshold', 31.0),
+            high_threshold=data.get('high_threshold', float(BLOCK_MIN)),
+            medium_threshold=data.get('medium_threshold', float(CAUTION_MIN)),
             weight_overrides=data.get('weight_overrides', {}),
             confidence_boost=data.get('confidence_boost', 0.0),
         )
@@ -78,7 +80,7 @@ async def calibrate_from_outcomes(db) -> CalibrationConfig:
             bins[bin_start][outcome] += 1
 
         # Find HIGH threshold: lowest bin where scam > 80% of entries
-        best_high = 71.0
+        best_high = float(BLOCK_MIN)
         for threshold in range(90, 20, -10):
             scam_above = sum(bins.get(b, {}).get('scam', 0) for b in range(threshold, 110, 10))
             safe_above = sum(bins.get(b, {}).get('safe', 0) for b in range(threshold, 110, 10))
@@ -88,7 +90,7 @@ async def calibrate_from_outcomes(db) -> CalibrationConfig:
                 break
 
         # Find MEDIUM threshold: lowest bin where scam > 40% of entries
-        best_medium = 31.0
+        best_medium = float(CAUTION_MIN)
         for threshold in range(int(best_high) - 10, 10, -10):
             scam_above = sum(bins.get(b, {}).get('scam', 0) for b in range(threshold, int(best_high), 10))
             safe_above = sum(bins.get(b, {}).get('safe', 0) for b in range(threshold, int(best_high), 10))

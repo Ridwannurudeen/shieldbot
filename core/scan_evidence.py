@@ -168,8 +168,8 @@ def build_scan_evidence(
 ) -> Dict:
     """The evidence document for one response of `endpoint`.
 
-    A field the response path does not report (risk_level, failed_sources or policy_mode on the
-    legacy fallback, analyzers on a cached or legacy verdict) is None, never a default. A verdict
+    A field the response path does not report (risk_level or failed_sources on the legacy fallback,
+    analyzers on a cached or legacy verdict) is None, never a default. A verdict
     served from contract_scores has source "cache", and both cached_scan_at and scanned_at are the
     time of the scan that produced the row, so every hit on one row gives the same document.
     """

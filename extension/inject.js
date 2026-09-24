@@ -15,17 +15,30 @@
   // browser's own, and only these references are used later.
   const uncurry = Function.prototype.bind.bind(Function.prototype.call);
   const bindTo = uncurry(Function.prototype.bind);
+  const callFunction = uncurry(Function.prototype.call);
   // Promises are read with this then and a callback, never with await: await
   // looks up the promise's constructor and then, which a page can replace,
   // while the original then always calls back with the real value.
   const then = uncurry(Promise.prototype.then);
   const NativePromise = Promise;
+  const NativeError = Error;
   const defineProperty = Object.defineProperty;
+  const getPrototypeOf = Object.getPrototypeOf;
+  const getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+  const objectPrototype = Object.prototype;
+  const hasOwn = Object.hasOwn;
+  const setPrototypeOf = Object.setPrototypeOf;
+  const freeze = Object.freeze;
+  const isFrozen = Object.isFrozen;
+  const ownKeys = Reflect.ownKeys;
+  const isArray = Array.isArray;
   const parseJSON = JSON.parse;
   const clone = structuredClone;
   const toNumber = Number;
   const isSafeInteger = Number.isSafeInteger;
+  const toRadix = uncurry(Number.prototype.toString);
   const execRegExp = uncurry(RegExp.prototype.exec);
+  const functionSource = uncurry(Function.prototype.toString);
   const Bytes = Uint8Array;
   const importKey = bindTo(crypto.subtle.importKey, crypto.subtle);
   const sign = bindTo(crypto.subtle.sign, crypto.subtle);
@@ -34,6 +47,9 @@
   const postMessage = bindTo(window.postMessage, window);
   const addWindowListener = bindTo(window.addEventListener, window);
   const removeWindowListener = bindTo(window.removeEventListener, window);
+  const removeDocumentListener = bindTo(document.removeEventListener, document);
+  const NativeMutationObserver = MutationObserver;
+  const observeMutations = uncurry(MutationObserver.prototype.observe);
   const setTimer = setTimeout;
   const clearTimer = clearTimeout;
   const clearTicker = clearInterval;
@@ -45,17 +61,58 @@
   // and not kept, so no later page script can read it. null until then.
   let _channelKey = null;
 
+  // content.js hands over no token in a document another script of this page
+  // can reach before the handover completes (see reachableByPage there), and
+  // the same rule applies here: in such a document a key offered here could
+  // come from that script. So none is taken there, and every wallet request
+  // checked there is rejected.
+  function reachableByPage() {
+    if (window.location.protocol === "about:" || window.frameElement !== null) return true;
+    const opener = window.opener;
+    if (!opener) return false;
+    try {
+      return Boolean(opener.document);
+    } catch (_) {
+      // Reading a cross-origin window's document throws.
+      return false;
+    }
+  }
+  const reachable = reachableByPage();
+
   function takeToken(event) {
     const token = eventDetail(event);
     if (typeof token !== "string" || !token) return;
     event.preventDefault();
-    document.removeEventListener("shieldai:channel", takeToken);
+    removeDocumentListener("shieldai:channel", takeToken);
     _channelKey = importKey(
       "raw", encode(token), { __proto__: null, name: "HMAC", hash: "SHA-256" }, false, ["sign"]
     );
   }
-  document.addEventListener("shieldai:channel", takeToken);
-  document.dispatchEvent(new CustomEvent("shieldai:channel-request"));
+  if (!reachable) {
+    document.addEventListener("shieldai:channel", takeToken);
+    document.dispatchEvent(new CustomEvent("shieldai:channel-request"));
+    // content.js offers its token at document_start or not at all. Stop
+    // listening once that has passed, so a later offer, which only a page
+    // script could make, cannot set the key.
+    setTimer(() => removeDocumentListener("shieldai:channel", takeToken), 0);
+  }
+
+  // Requests waiting for a verdict, by id, with the function that ends each.
+  const pendingRequests = new Map();
+  const keepPending = bindTo(Map.prototype.set, pendingRequests);
+  const dropPending = bindTo(Map.prototype.delete, pendingRequests);
+  const forEachPending = bindTo(Map.prototype.forEach, pendingRequests);
+
+  // document.open() takes the extension's listeners away with the document,
+  // so the Block content.js posts for a request whose overlay went with it
+  // would never arrive. When the root element is replaced, every request
+  // waiting for a verdict is rejected instead.
+  let rootElement = document.documentElement;
+  observeMutations(new NativeMutationObserver(() => {
+    if (document.documentElement === rootElement) return;
+    rootElement = document.documentElement;
+    forEachPending((finish) => finish("block"));
+  }), document, { __proto__: null, childList: true });
 
   // What kind of request a method is, or null when it is not intercepted. A
   // switch rather than a Set, so no replaceable built-in decides it.
@@ -66,26 +123,85 @@
         return "transaction";
       case "eth_signTypedData_v4":
       case "eth_signTypedData_v3":
+      case "eth_signTypedData":
+      case "eth_signTypedData_v1":
         return "typed";
       case "personal_sign":
       case "eth_sign":
         return "sign";
+      case "wallet_sendCalls":
+        return "calls";
       default:
         return null;
     }
   }
 
-  // Providers already wrapped. Kept in this closure rather than as a flag on
+  // Per wrapped provider, the function that checks its requests, which keeps
+  // that provider's own state. Kept in this closure rather than as a flag on
   // the provider, which the page could read to detect the extension.
-  const wrappedProviders = new WeakSet();
-  const isWrapped = bindTo(WeakSet.prototype.has, wrappedProviders);
-  const markWrapped = bindTo(WeakSet.prototype.add, wrappedProviders);
+  const wrappedProviders = new WeakMap();
+  const checkOf = bindTo(WeakMap.prototype.get, wrappedProviders);
+  const keepCheck = bindTo(WeakMap.prototype.set, wrappedProviders);
+  const isWrapped = (provider) => checkOf(provider) !== undefined;
 
-  // Stores the original (un-wrapped) provider.request — used by the revoke handler
-  // so revoke TXs bypass ShieldAI analysis and go straight to the wallet.
-  let _lastOriginalRequest = null;
+  // The wallet's own function (request, send or sendAsync) behind each
+  // replacement put on a prototype.
+  const inheritedOriginals = new WeakMap();
+  const originalOf = bindTo(WeakMap.prototype.get, inheritedOriginals);
+  const keepOriginal = bindTo(WeakMap.prototype.set, inheritedOriginals);
+
+  // A prototype's function that could not be replaced (it is neither writable
+  // nor configurable), so it is not tried again. The README says that route
+  // is not covered.
+  const uncoveredFunctions = new WeakSet();
+  const isUncovered = bindTo(WeakSet.prototype.has, uncoveredFunctions);
+  const markUncovered = bindTo(WeakSet.prototype.add, uncoveredFunctions);
+
+  // A checked copy on its way to the wallet, with the provider it was checked
+  // for, only while the call that hands it over has not returned. When the
+  // wallet's own code passes it on to a prototype's request of that provider
+  // in that time (a subclass calling super.request(args) before its first
+  // await), it goes through rather than being checked twice. Anywhere else,
+  // or later, the copy is just another request: a page that keeps one,
+  // changes it and hands it to a provider gets it checked again.
+  const forwardedCopies = new WeakMap();
+  const forwardedFor = bindTo(WeakMap.prototype.get, forwardedCopies);
+  const markForwarded = bindTo(WeakMap.prototype.set, forwardedCopies);
+  const unmarkForwarded = bindTo(WeakMap.prototype.delete, forwardedCopies);
 
   const CHAIN_ID_PATTERN = /^(0x[0-9a-f]+|[0-9]+)$/i;
+  const ADDRESS_PATTERN = /^0x[0-9a-f]{40}$/i;
+  const NATIVE_CODE = /\{\s*\[native code\]\s*\}\s*$/;
+
+  function isPlainObject(value) {
+    return typeof value === "object" && value !== null && !isArray(value);
+  }
+
+  // A property the object holds itself. A plain read of one it lacks falls
+  // through to prototypes, which the page can fill.
+  function ownValue(object, key) {
+    return typeof object === "object" && object !== null && hasOwn(object, key) ? object[key] : undefined;
+  }
+
+  // Take the prototype off an object in the copy of a request, so a field it
+  // lacks reads as undefined, for the wallet as for the analysis, instead of
+  // as whatever the page put on Object.prototype.
+  function ownFieldsOnly(value) {
+    if (isPlainObject(value)) setPrototypeOf(value, null);
+    return value;
+  }
+
+  // Freeze a copy handed to the wallet and everything in it, so code that
+  // runs while the wallet reads it (a replaced built-in the wallet calls, for
+  // example) cannot change what was approved. A copy holds plain objects,
+  // arrays and primitives; anything that cannot be frozen (a typed array
+  // with elements) throws, and the request is rejected.
+  function deepFreeze(value) {
+    if (typeof value !== "object" || value === null || isFrozen(value)) return;
+    freeze(value);
+    const keys = ownKeys(value);
+    for (let index = 0; index < keys.length; index++) deepFreeze(value[keys[index]]);
+  }
 
   function parseChainId(value) {
     if (typeof value !== "number" &&
@@ -121,18 +237,15 @@
    */
   function wrapProvider(provider) {
     if (!provider || !provider.request || isWrapped(provider)) return;
+    // A prototype whose request was replaced is not a provider to wrap.
+    if (originalOf(ownValue(provider, "request")) !== undefined) return;
 
-    const originalRequest = bindTo(provider.request, provider);
-    _lastOriginalRequest = originalRequest;
+    // A provider that inherits request from a prototype already replaced for
+    // another provider gets the wallet's own request behind the replacement.
+    const request = provider.request;
+    const originalRequest = bindTo(originalOf(request) || request, provider);
     let currentChainId = null;
     let chainRevision = 0;
-
-    if (typeof provider.on === "function") {
-      provider.on("chainChanged", (chainId) => {
-        currentChainId = parseChainId(chainId);
-        chainRevision++;
-      });
-    }
 
     // Call back with the wallet's current chain id, or null when it does not
     // answer within 5 seconds, answers something invalid, or the chain changes
@@ -155,36 +268,84 @@
       }
     }
 
-    const wrappedRequest = function (args) {
-      const method = args ? args.method : undefined;
-      const kind = requestKind(method);
-      if (kind === null) {
-        return originalRequest(args);
-      }
-
+    // Run a request past the user and hand it to forwardTo: the wallet's own
+    // request that was called, applied to this provider.
+    const check = function (args, forwardTo) {
       return new NativePromise((resolve, reject) => {
-        // Analyse and forward one copy of the request: a getter or proxy in
-        // the page's own object could otherwise show the analysis one
-        // transaction and hand the wallet another.
-        const request = clone({ method, params: args.params });
-        const forward = () => {
-          try {
-            resolve(originalRequest(request));
-          } catch (error) {
-            reject(error);
-          }
-        };
-        const txParams = request.params?.[0];
-        if (!txParams) {
-          forward();
+        // The method is read once, here so that a request object that throws
+        // rejects, and the wallet is handed that string rather than the page's
+        // object, which could answer the wallet's own read of method with
+        // another one.
+        const method = ownValue(args, "method");
+        if (typeof method !== "string") {
+          reject(new NativeError("ShieldAI rejected a wallet request without a string method"));
           return;
         }
+        const kind = requestKind(method);
+        if (kind === null) {
+          resolve(forwardTo(hasOwn(args, "params") ? { method, params: args.params } : { method }));
+          return;
+        }
+        if (reachable) {
+          const error = new NativeError("ShieldAI cannot check wallet requests made from this embedded frame or " +
+            "popup. Open the dApp in its own tab.");
+          // EIP-1193 4100: Unauthorized.
+          defineProperty(error, "code", {
+            __proto__: null,
+            value: 4100,
+            writable: true,
+            enumerable: true,
+            configurable: true,
+          });
+          // content.js shows the user a notice saying why, once.
+          postMessage({ type: "SHIELDAI_UNCHECKABLE" }, "*");
+          reject(error);
+          return;
+        }
+        // Analyse and forward one copy of the request: a getter or proxy in
+        // the page's own object could otherwise show the analysis one
+        // transaction and hand the wallet another. Only values the request
+        // holds itself are read from the copy.
+        const request = { __proto__: null, method, params: clone(ownValue(args, "params")) };
+        const forward = () => {
+          markForwarded(request, provider);
+          try {
+            deepFreeze(request);
+            resolve(forwardTo(request));
+          } catch (error) {
+            reject(error);
+          } finally {
+            unmarkForwarded(request);
+          }
+        };
+        const txParams = ownFieldsOnly(ownValue(request.params, 0));
+        const calls = kind === "calls" ? ownValue(txParams, "calls") : undefined;
 
+        // A transaction must be an object, and a wallet_sendCalls batch an
+        // object whose calls are a non-empty list of objects. Anything else
+        // cannot be analysed: the user is told so and decides.
+        let structured = true;
+        if (kind === "transaction") structured = isPlainObject(txParams);
+        if (kind === "calls") {
+          structured = isPlainObject(txParams) && isArray(calls) && calls.length > 0;
+          for (let index = 0; structured && index < calls.length; index++) {
+            structured = isPlainObject(ownFieldsOnly(ownValue(calls, index)));
+          }
+        }
+
+        const unknownStructure = { __proto__: null, unknownStructure: true };
         let interceptData;
 
-        if (kind === "typed") {
-          // EIP-712: params[0] is address, params[1] is typed data JSON
-          const rawTypedData = request.params?.[1];
+        if (!structured) {
+          interceptData = unknownStructure;
+        } else if (kind === "typed") {
+          // eth_signTypedData_v3 and _v4 take [address, data]. The older
+          // eth_signTypedData and _v1 take [data, address] in MetaMask and
+          // [address, data] in some other wallets, so the data is taken to be
+          // the parameter that is not the address.
+          const second = ownValue(request.params, 1);
+          const dataFirst = !(typeof txParams === "string" && execRegExp(ADDRESS_PATTERN, txParams) !== null);
+          const rawTypedData = ownFieldsOnly(dataFirst ? txParams : second);
           let parsedTypedData = null;
           try {
             parsedTypedData =
@@ -195,7 +356,8 @@
             // Unparseable typed data goes to the overlay without its fields.
           }
           interceptData = {
-            from: txParams,
+            __proto__: null,
+            from: dataFirst ? second : txParams,
             to: "",
             value: "0x0",
             data: "0x",
@@ -207,29 +369,57 @@
           // eth_sign: params[0] is address, params[1] is message
           const isPersonal = method === "personal_sign";
           interceptData = {
-            from: isPersonal ? (request.params?.[1] || "") : txParams,
+            __proto__: null,
+            from: isPersonal ? (ownValue(request.params, 1) || "") : txParams,
             to: "",
             value: "0x0",
-            data: isPersonal ? txParams : (request.params?.[1] || "0x"),
+            data: isPersonal ? txParams : (ownValue(request.params, 1) || "0x"),
             signMethod: method,
           };
-        } else {
-          // eth_sendTransaction / eth_signTransaction — standard tx object
-          interceptData = txParams;
         }
 
-        const isTransaction = kind === "transaction";
+        // Transactions and batches are analysed on the wallet's chain. A
+        // batch is shown one call at a time, and each call is its own
+        // decision; the batch goes to the wallet only once all are proceeded.
+        const isTransaction = structured && (kind === "transaction" || kind === "calls");
+        const count = structured && kind === "calls" ? calls.length : 1;
+        // Only the fields the analysis reads are taken from the page's
+        // transaction or call: any other field on it, such as a signMethod,
+        // could change how content.js shows the request.
+        const payloadAt = (index, chainId) => {
+          if (!isTransaction) return interceptData;
+          const isCall = kind === "calls";
+          const source = isCall ? ownValue(calls, index) : txParams;
+          return {
+            __proto__: null,
+            to: source.to,
+            from: txParams.from,
+            value: source.value,
+            data: source.data,
+            chainId,
+            callIndex: isCall ? index + 1 : undefined,
+            callCount: isCall ? count : undefined,
+          };
+        };
         const revision = chainRevision;
 
-        // Ask content script to analyze via background
-        const analyze = (chainId) => {
-          requestAnalysis(method, isTransaction ? { ...interceptData, chainId } : interceptData, (action) => {
-            if (isTransaction && chainId === null) {
-              reject(new Error("Transaction blocked by ShieldAI: wallet chain is unknown or mismatched"));
-              return;
-            }
-            if (action !== "proceed") {
-              reject(new Error("Transaction blocked by ShieldAI Firewall"));
+        // Ask content script to analyze via background. A batch that cannot be
+        // analysed as it stands is shown as one request of unknown structure.
+        const analyze = (chainId, unreadable) => {
+          const decisions = unreadable ? 1 : count;
+          const decide = (index) => {
+            if (index < decisions) {
+              requestAnalysis(method, unreadable ? unknownStructure : payloadAt(index, chainId), (action) => {
+                if (isTransaction && chainId === null) {
+                  reject(new NativeError("Transaction blocked by ShieldAI: wallet chain is unknown or mismatched"));
+                  return;
+                }
+                if (action !== "proceed") {
+                  reject(new NativeError("Transaction blocked by ShieldAI Firewall"));
+                  return;
+                }
+                decide(index + 1);
+              });
               return;
             }
             if (!isTransaction) {
@@ -240,28 +430,63 @@
             // even when the provider does not implement chainChanged events.
             resolveChainId((latestChainId) => {
               if (revision !== chainRevision || latestChainId !== chainId) {
-                reject(new Error("Transaction blocked by ShieldAI: wallet chain changed; retry analysis"));
+                reject(new NativeError("Transaction blocked by ShieldAI: wallet chain changed; retry analysis"));
                 return;
               }
+              // The wallet holds the request to the analysed chain only when
+              // the request names one, so name it if the page left it out.
+              if (txParams.chainId === undefined) txParams.chainId = `0x${toRadix(chainId, 16)}`;
               // proceed — forward to original wallet
               forward();
             });
-          });
+          };
+          decide(0);
         };
 
         if (!isTransaction) {
           analyze(null);
           return;
         }
+        // A batch call that names a chain of its own other than the bound one
+        // cannot be analysed on that chain.
+        const callOnAnotherChain = (chainId) => {
+          for (let index = 0; index < count; index++) {
+            const callChainId = ownValue(calls, index).chainId;
+            if (callChainId !== undefined && parseChainId(callChainId) !== chainId) return true;
+          }
+          return false;
+        };
+
         resolveChainId((chainId) => {
-          if (interceptData.chainId !== undefined && parseChainId(interceptData.chainId) !== chainId) {
+          if (txParams.chainId !== undefined && parseChainId(txParams.chainId) !== chainId) {
             analyze(null);
+            return;
+          }
+          if (kind === "calls" && callOnAnotherChain(chainId)) {
+            analyze(null, true);
             return;
           }
           analyze(chainId);
         });
       });
     };
+
+    const wrappedRequest = function (args) {
+      return check(args, originalRequest);
+    };
+
+    // Recorded before anything below can call back into the page, which
+    // could otherwise reach this code again for the same provider.
+    keepCheck(provider, check);
+    wrapInherited(provider, "request", requestReplacement);
+    wrapLegacy(provider, "send");
+    wrapLegacy(provider, "sendAsync");
+    if (typeof provider.on === "function") {
+      provider.on("chainChanged", (chainId) => {
+        currentChainId = parseChainId(chainId);
+        chainRevision++;
+      });
+    }
 
     // Use Object.defineProperty for MetaMask v11+ compatibility. The
     // descriptor has no prototype, so a page that adds get or set to
@@ -278,11 +503,137 @@
       try {
         provider.request = wrappedRequest;
       } catch (_) {
-        return;
+        // The provider's own request stays the wallet's.
       }
     }
+  }
 
-    markWrapped(provider);
+  // A page could take a method from one of the provider's prototypes and call
+  // it on the provider (Object.getPrototypeOf(ethereum).request.call(ethereum,
+  // ...)), going round the wrapper defined on the provider itself. So the
+  // method of every prototype that defines one, up to Object.prototype, is
+  // replaced too, by the function makeReplacement makes from that prototype's
+  // own one. A function that reads as native code is skipped: a platform
+  // prototype's is never replaced (nor a bound function or a Proxy around a
+  // function, which read the same), while wallet code above it still is.
+  function wrapInherited(provider, name, makeReplacement) {
+    for (let owner = getPrototypeOf(provider); owner !== null && owner !== objectPrototype;
+      owner = getPrototypeOf(owner)) {
+      const inherited = ownValue(getOwnPropertyDescriptor(owner, name), "value");
+      if (typeof inherited === "function" && execRegExp(NATIVE_CODE, functionSource(inherited)) !== null) continue;
+      if (typeof inherited !== "function" || originalOf(inherited) !== undefined || isUncovered(inherited)) {
+        continue;
+      }
+      const replacement = makeReplacement(inherited);
+      try {
+        defineProperty(owner, name, { __proto__: null, value: replacement });
+        keepOriginal(replacement, inherited);
+      } catch (_) {
+        markUncovered(inherited);
+      }
+    }
+  }
+
+  // A prototype's request is replaced by one that checks the request for
+  // whichever provider it is called on (wrapping that provider first if need
+  // be) and then hands it to that prototype's own request. A call on anything
+  // that cannot be wrapped, such as a prototype itself, is rejected.
+  function requestReplacement(inherited) {
+    return function (args) {
+      const forwardedTo = forwardedFor(args);
+      if (forwardedTo !== undefined && forwardedTo === this) return callFunction(inherited, this, args);
+      wrapProvider(this);
+      const check = checkOf(this);
+      if (check === undefined) {
+        return new NativePromise((resolve, reject) => {
+          reject(new NativeError("Transaction blocked by ShieldAI Firewall"));
+        });
+      }
+      const target = this;
+      return check(args, (copy) => callFunction(inherited, target, copy));
+    };
+  }
+
+  // Refuses the methods request would check when they come through send or
+  // sendAsync, a provider's older methods, which the check cannot hold for
+  // the user's decision. A call is refused, in the shape its caller expects,
+  // when any method it asks for is checked or cannot be read. A method is a
+  // string first argument, a payload object's own method, or the own method
+  // of each payload in an array. Any other call goes to the wallet with its
+  // own this and arguments, except that a payload object is handed on as the
+  // copy its methods were read from, so a getter or proxy cannot show one
+  // method here and another to the wallet.
+  function legacyReplacement(original) {
+    return function (first, second) {
+      let payload = first;
+      let refused;
+      if (typeof first === "string") {
+        refused = requestKind(first) !== null;
+      } else {
+        try {
+          payload = clone(first);
+          refused = refusesPayloads(payload);
+        } catch (_) {
+          // A payload that cannot be copied cannot be read either.
+          refused = true;
+        }
+      }
+      if (!refused) {
+        return arguments.length < 2
+          ? callFunction(original, this, payload)
+          : callFunction(original, this, payload, second);
+      }
+      const error = new NativeError("ShieldAI cannot check wallet requests made with send or sendAsync. " +
+        "Use request instead.");
+      // content.js shows the user a notice saying why, once.
+      postMessage({ type: "SHIELDAI_LEGACY_REFUSED" }, "*");
+      if (typeof second === "function") {
+        setTimer(() => second(error), 0);
+        return undefined;
+      }
+      if (typeof first === "string") {
+        return new NativePromise((resolve, reject) => {
+          reject(error);
+        });
+      }
+      throw error;
+    };
+  }
+
+  function refusesPayloads(payload) {
+    if (!isArray(payload)) return refusesPayload(payload);
+    for (let index = 0; index < payload.length; index++) {
+      if (refusesPayload(ownValue(payload, index))) return true;
+    }
+    return false;
+  }
+
+  function refusesPayload(payload) {
+    const method = isPlainObject(payload) ? ownValue(payload, "method") : undefined;
+    return typeof method !== "string" || requestKind(method) !== null;
+  }
+
+  // send and sendAsync are replaced on the provider itself and on its
+  // prototypes, as request is.
+  function wrapLegacy(provider, name) {
+    const own = provider[name];
+    if (typeof own !== "function") return;
+    wrapInherited(provider, name, legacyReplacement);
+    const replacement = legacyReplacement(bindTo(originalOf(own) || own, provider));
+    try {
+      defineProperty(provider, name, {
+        __proto__: null,
+        value: replacement,
+        writable: true,
+        configurable: true,
+      });
+    } catch (_) {
+      try {
+        provider[name] = replacement;
+      } catch (_) {
+        // The provider's own method stays the wallet's.
+      }
+    }
   }
 
   /**
@@ -301,6 +652,7 @@
     const finish = (action) => {
       if (decided) return;
       decided = true;
+      dropPending(requestId);
       clearTimer(timeout);
       removeWindowListener("message", handleMessage);
       decide(action);
@@ -337,9 +689,11 @@
     // proves the overlay is showing, so a user reading it is never cut off.
     const timeout = setTimer(() => finish("block"), 60000);
 
+    keepPending(requestId, finish);
     addWindowListener("message", handleMessage);
 
     const txPayload = {
+      __proto__: null,
       to: txParams.to || "",
       from: txParams.from || "",
       value: txParams.value || "0x0",
@@ -350,6 +704,11 @@
     // Forward typed data and sign method for EIP-712 / signature analysis
     if (txParams.typedData) txPayload.typedData = txParams.typedData;
     if (txParams.signMethod) txPayload.signMethod = txParams.signMethod;
+    if (txParams.callCount) {
+      txPayload.callIndex = txParams.callIndex;
+      txPayload.callCount = txParams.callCount;
+    }
+    if (txParams.unknownStructure) txPayload.unknownStructure = true;
 
     withProof(requestId, "intercept", (proof) => {
       postMessage(

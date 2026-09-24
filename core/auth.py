@@ -11,6 +11,10 @@ import logging
 from contextlib import contextmanager
 from typing import Dict, Iterator, List, Optional, Tuple
 
+from redis.exceptions import RedisError
+
+from core.rate_limit import RedisWindow
+
 logger = logging.getLogger(__name__)
 
 # Tier-based rate limits
@@ -79,9 +83,19 @@ class AuthManager:
 
     def __init__(self, db):
         self.db = db
-        # In-memory per-minute windows: key_id -> hit timestamps. Daily counts are in api_daily_usage.
+        # Per-minute windows: key_id -> hit timestamps in memory, or in Redis after use_redis().
+        # Daily counts are in api_daily_usage.
         self._minute_hits: Dict[str, List[float]] = {}
+        self._minute_redis: Optional[RedisWindow] = None
         self._check_lock = asyncio.Lock()
+
+    def use_redis(self, client) -> None:
+        """Keep the per-minute windows in Redis, where every API process shares them.
+
+        When Redis cannot answer, the request is counted in this process's memory window instead,
+        with a logged error. The daily quota applies either way.
+        """
+        self._minute_redis = RedisWindow(client, "api-key", 60.0, edge_counts=False)
 
     async def create_key(self, owner: str, tier: str = "free") -> Dict:
         """Create a new API key and store hash in DB."""
@@ -137,11 +151,11 @@ class AuthManager:
     async def check_rate_limit(self, key_info: Dict) -> bool:
         """Check if the key is within rate limits. Returns True if allowed.
 
-        The per-minute window is in memory. The daily quota is a durable counter for the UTC
-        calendar day: an allowed request is counted and committed before it is served, so the
-        count survives a restart and each allowed request is counted once. If the counter cannot
-        be read or written the request is refused. The key's quota state, including the
-        Retry-After seconds of a refusal, is stored in key_info["quota"].
+        The per-minute window is in memory, or in Redis after use_redis(). The daily quota is a
+        durable counter for the UTC calendar day: an allowed request is counted and committed
+        before it is served, so the count survives a restart and each allowed request is counted
+        once. If the counter cannot be read or written the request is refused. The key's quota
+        state, including the Retry-After seconds of a refusal, is stored in key_info["quota"].
         """
         key_id = key_info["key_id"]
         checks = _request_checks.get()
@@ -149,24 +163,43 @@ class AuthManager:
             allowed, key_info["quota"] = checks[key_id]
             return allowed
 
+        # Taken before the lock, so a Redis that hangs cannot hold up every other key's check.
+        redis_hit = None
+        if self._minute_redis is not None:
+            try:
+                redis_hit = await self._minute_redis.add(key_id, time.time())
+            except RedisError as e:
+                logger.error(
+                    "API key minute limit counted in this process's memory, Redis unavailable: %s",
+                    type(e).__name__,
+                )
         async with self._check_lock:
             now = time.time()
             day = int(now // 86400)
-            hits = [t for t in self._minute_hits.get(key_id, []) if t > now - 60]
-            self._minute_hits[key_id] = hits
+            if redis_hit is None:
+                hits = [t for t in self._minute_hits.get(key_id, []) if t > now - 60]
+                self._minute_hits[key_id] = hits
+                minute_full = len(hits) >= key_info["rpm_limit"]
+                oldest = hits[0] if hits else None
+            else:
+                minute_full = redis_hit.count > key_info["rpm_limit"]
+                oldest = redis_hit.oldest
             try:
-                if len(hits) >= key_info["rpm_limit"]:
+                if minute_full:
                     allowed = False
                     used = await self._used_on_day(key_id, day)
-                    retry_after = math.ceil(hits[0] + 60 - now)
+                    retry_after = math.ceil(oldest + 60 - now)
                 else:
                     allowed, used = await self._count_request(key_id, day, key_info["daily_limit"])
                     retry_after = None if allowed else math.ceil((day + 1) * 86400 - now)
             except Exception as e:
                 logger.error("API quota store unavailable: %s", type(e).__name__)
                 allowed, used, retry_after = False, None, QUOTA_UNAVAILABLE_RETRY_AFTER
-            if allowed:
+            if allowed and redis_hit is None:
                 hits.append(now)
+        if redis_hit is not None and not allowed:
+            # As in memory, only allowed requests count: a refused request's hit is taken back out.
+            await self._minute_redis.remove(redis_hit)
 
         quota = {**_quota(key_info["daily_limit"], used, day), "retry_after": retry_after}
         key_info["quota"] = quota

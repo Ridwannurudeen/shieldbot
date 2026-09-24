@@ -23,11 +23,12 @@ FAKE_DOM = r"""
 const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
 const {webcrypto} = require('crypto');
 const posted = [];
-// Page-side mutation observers: every removal notifies them, as a childList change would.
+// Page-side mutation observers: a removal notifies those watching the removed node's former
+// parent or one of its ancestors (they all watch subtrees), as a childList change would.
 const observers = new Set();
 class FakeMutationObserver {
   constructor(callback) { this.callback = callback; }
-  observe() { observers.add(this); }
+  observe(target) { this.target = target; observers.add(this); }
   disconnect() { observers.delete(this); }
 }
 class El {
@@ -61,13 +62,20 @@ class El {
   appendChild(child) { child.parent = this; this.children.push(child); return child; }
   insertBefore(child) { child.parent = this; this.children.unshift(child); return child; }
   remove() {
-    if (this.parent) this.parent.children = this.parent.children.filter(c => c !== this);
+    const parent = this.parent;
+    if (parent) parent.children = parent.children.filter(c => c !== this);
     this.parent = null;
-    for (const observer of [...observers]) queueMicrotask(() => observer.callback([]));
+    const watched = [];
+    for (let node = parent; node; node = node.parent) watched.push(node);
+    for (const observer of [...observers]) {
+      if (watched.includes(observer.target)) queueMicrotask(() => observer.callback([]));
+    }
   }
+  // Connected to a document, this one or another, as in a browser.
   get isConnected() {
-    for (let node = this; node; node = node.parent) if (node === body || node === html) return true;
-    return false;
+    let node = this;
+    while (node.parent) node = node.parent;
+    return node.isDocument === true;
   }
   attachShadow({mode}) {
     const host = this;
@@ -108,22 +116,33 @@ class El {
 }
 const body = new El('body'), head = new El('head'), html = new El('html');
 const document = Object.assign(new EventTarget(), {
-  body, head, documentElement: html, activeElement: body,
+  body, head, documentElement: html, activeElement: body, children: [html], isDocument: true,
+  visibilityState: 'visible',
+  contains(node) {
+    while (node.parent) node = node.parent;
+    return node === document;
+  },
   createElement: tag => new El(tag),
   // Light DOM only, like the real one: nothing inside a shadow root is found.
   getElementById(id) {
     return [...body.children, ...html.children].find(el => el.id === id) || null;
   },
 });
+html.parent = document;
+body.parent = html;
+head.parent = html;
 const windowListeners = {};
 const window = {
   addEventListener(type, fn) { (windowListeners[type] ||= []).push(fn); },
   removeEventListener(type, fn) { windowListeners[type] = (windowListeners[type] || []).filter(f => f !== fn); },
   postMessage(data) { posted.push(data); },
-  location: {href: 'https://dapp.example/', hostname: 'dapp.example'},
+  location: {href: 'https://dapp.example/', protocol: 'https:', hostname: 'dapp.example'},
   history: {length: 1},
 };
 window.top = window;
+// A top-level document without an opener; frame tests change these.
+window.frameElement = null;
+window.opener = null;
 function deliver(data) { for (const fn of [...(windowListeners.message || [])]) fn({source: window, data}); }
 const flush = () => new Promise(resolve => setTimeout(resolve, 60));
 // Taken now, so the tests' own proofs stay right after a test replaces page built-ins.
@@ -135,6 +154,36 @@ async function proofFor(token, message) {
 }
 const bytes = value => Array.from(value || []);
 const plain = value => JSON.parse(JSON.stringify(value));
+// IntersectionObserver v2 double: it reports whether the observed element is visible (on screen,
+// not covered, not made see-through) and whether it intersects the viewport at all, once when
+// observed and again whenever a test calls reportVisibility or reportIntersecting.
+let overlayVisible = true, overlayIntersecting = true;
+const visibilityObservers = new Set();
+class FakeIntersectionObserver {
+  constructor(callback, options) { this.callback = callback; this.options = options; }
+  observe(target) { this.target = target; visibilityObservers.add(this); queueMicrotask(() => this.report()); }
+  report() {
+    this.callback([{target: this.target, isVisible: overlayVisible && overlayIntersecting, isIntersecting: overlayIntersecting}]);
+  }
+  disconnect() { visibilityObservers.delete(this); }
+}
+function reportVisibility(visible) {
+  overlayVisible = visible;
+  for (const observer of [...visibilityObservers]) observer.report();
+}
+function reportIntersecting(intersecting) {
+  overlayIntersecting = intersecting;
+  for (const observer of [...visibilityObservers]) observer.report();
+}
+// content.js keeps Proceed disabled for half a second after an overlay appears, and rejects a
+// request whose dialog stays out of view for ten seconds. The tests run it with no wait and a
+// 100 ms limit, except those that check the real ones.
+function withShortDelays(source) {
+  assert(source.includes('const PROCEED_DELAY_MS = 500;'));
+  assert(source.includes('const OUT_OF_VIEW_LIMIT_MS = 10000;'));
+  return source.replace('const PROCEED_DELAY_MS = 500;', 'const PROCEED_DELAY_MS = 0;')
+    .replace('const OUT_OF_VIEW_LIMIT_MS = 10000;', 'const OUT_OF_VIEW_LIMIT_MS = 100;');
+}
 """
 
 CONTENT_HARNESS = (
@@ -160,13 +209,14 @@ const chrome = {
 const context = vm.createContext({
   window, document, chrome, crypto: webcrypto, TextEncoder, TextDecoder, CustomEvent, setTimeout, clearTimeout,
   console, Date: {now: () => clock}, MutationObserver: FakeMutationObserver,
+  IntersectionObserver: FakeIntersectionObserver,
   fetch: async url => {
     const delay = fetchDelays.shift();
     if (delay) await new Promise(resolve => setTimeout(resolve, delay));
     return {json: async () => JSON.parse(fs.readFileSync(url.replace('chrome-extension://id/', 'extension/'), 'utf8'))};
   },
 });
-vm.runInContext(fs.readFileSync('extension/content.js', 'utf8'), context);
+vm.runInContext(withShortDelays(fs.readFileSync('extension/content.js', 'utf8')), context);
 // Play inject.js's side of the document_start handoff: it starts after content.js and asks.
 let token = null;
 document.addEventListener('shieldai:channel', event => { token = event.detail; event.preventDefault(); });
@@ -232,6 +282,20 @@ def test_token_is_handed_over_once_at_document_start():
   document.addEventListener('shieldai:channel', event => { second = event.detail; });
   document.dispatchEvent(new CustomEvent('shieldai:channel-request'));
   assert.equal(second, null, 'content.js answered a second request, which a page script could send');
+"""
+    )
+
+
+def test_content_script_answers_no_request_once_document_start_has_passed():
+    run_node(
+        CONTENT_HARNESS.replace("document.dispatchEvent(new CustomEvent('shieldai:channel-request'));\n", "")
+        + r"""
+(async () => {
+  // inject.js never asked at document_start. Once that has passed, a request can only come from
+  // a page script.
+  await flush();
+  document.dispatchEvent(new CustomEvent('shieldai:channel-request'));
+  assert.equal(token, null, 'content.js handed its token to a late request');
 """
     )
 
@@ -442,6 +506,210 @@ def test_focus_that_leaves_the_overlay_returns_to_the_dialog():
     )
 
 
+@pytest.mark.parametrize("kind", ["analysis", "signature"])
+def test_proceed_does_nothing_while_the_overlay_is_not_visible(kind):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const kind = JSON.parse(process.argv[1]);
+  analyze = async () => ({result: scan({})});
+  if (kind === 'signature') {
+    await intercept('request', {signMethod: 'personal_sign', data: '0x68656c6c6f'}, 'personal_sign');
+  } else {
+    await intercept('request');
+  }
+  const [observer] = visibilityObservers;
+  assert.deepEqual(plain(observer.options), {trackVisibility: true, delay: 100});
+  assert(observer.target.className.includes('shieldai-modal'), 'the dialog itself should be watched');
+  // Covered, moved off screen or made see-through by the page: a click there is not the user's choice.
+  assert.equal(byId('shieldai-covered').textContent, '', 'the covered line showed before any click');
+  reportVisibility(false);
+  userClick(byId('shieldai-proceed'));
+  await flush();
+  assert.deepEqual(verdicts(), []);
+  assert(overlay(), 'the overlay closed');
+  // The button does not just go dead: the dialog says why.
+  assert.match(byId('shieldai-covered').textContent,
+    /covering or altering this warning, so the button to continue is disabled until the warning is fully visible/);
+  reportVisibility(true);
+  userClick(byId('shieldai-proceed'));
+  await flush();
+  await assertVerdicts([['request', 'proceed']]);
+""",
+        kind,
+    )
+
+
+def test_proceed_is_enabled_only_half_a_second_after_the_overlay_appears():
+    run_node(
+        CONTENT_HARNESS.replace(
+            "withShortDelays(fs.readFileSync('extension/content.js', 'utf8'))",
+            "fs.readFileSync('extension/content.js', 'utf8')",
+        )
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('request');
+  const proceed = byId('shieldai-proceed');
+  assert(proceed.disabled, 'Proceed was enabled at once');
+  assert(!byId('shieldai-block').disabled, 'Block should never wait');
+  userClick(proceed);
+  await flush();
+  assert.deepEqual(verdicts(), [], 'a click in the first half second counted');
+  await new Promise(resolve => setTimeout(resolve, 500));
+  clock += 500;
+  assert(!proceed.disabled);
+  userClick(proceed);
+  await flush();
+  await assertVerdicts([['request', 'proceed']]);
+"""
+    )
+
+
+# The same overlay code, keeping its real PROCEED_DELAY_MS. The harness's clock only moves when a
+# test moves it.
+REAL_DELAY_HARNESS = CONTENT_HARNESS.replace(
+    "withShortDelays(fs.readFileSync('extension/content.js', 'utf8'))",
+    "fs.readFileSync('extension/content.js', 'utf8')",
+)
+
+
+def test_proceed_needs_the_dialog_visible_without_a_break_for_half_a_second():
+    run_node(
+        REAL_DELAY_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('request');
+  await new Promise(resolve => setTimeout(resolve, 550));
+  const proceed = byId('shieldai-proceed');
+  assert(!proceed.disabled);
+  clock += 600;
+  // Covered a moment ago and uncovered just now: not long enough.
+  reportVisibility(false);
+  userClick(proceed);
+  await flush();
+  assert.match(byId('shieldai-covered').textContent, /covering or altering/);
+  reportVisibility(true);
+  userClick(proceed);
+  clock += 499;
+  userClick(proceed);
+  await flush();
+  assert.deepEqual(verdicts(), [], 'a Proceed counted before the dialog was visible for half a second');
+  clock += 1;
+  userClick(proceed);
+  await flush();
+  await assertVerdicts([['request', 'proceed']]);
+"""
+    )
+
+
+def test_a_dialog_kept_out_of_view_rejects_the_request():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('request');
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  // Out of view (display: none, or moved off screen) for less than the limit, then back.
+  reportIntersecting(false);
+  await wait(60);
+  reportIntersecting(true);
+  await wait(80);
+  assert.deepEqual(verdicts(), [], 'a short spell out of view rejected the request');
+  // Out of view for longer than the limit: rejected, not left waiting.
+  reportIntersecting(false);
+  await wait(150);
+  await assertVerdicts([['request', 'block']]);
+  assert.equal(overlay(), null);
+"""
+    )
+
+
+def test_the_half_second_counts_from_when_a_cover_ends():
+    run_node(
+        REAL_DELAY_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('request');
+  await new Promise(resolve => setTimeout(resolve, 550));
+  const proceed = byId('shieldai-proceed');
+  clock += 600;
+  // IntersectionObserver reports only changes: one entry when a cover starts, one when it ends.
+  reportVisibility(false);
+  clock += 1000;
+  reportVisibility(true);
+  userClick(proceed);
+  await flush();
+  assert.deepEqual(verdicts(), [], 'a click right after a long cover ended counted');
+  clock += 500;
+  userClick(proceed);
+  await flush();
+  await assertVerdicts([['request', 'proceed']]);
+"""
+    )
+
+
+def test_a_hidden_tab_does_not_count_as_the_dialog_kept_out_of_view():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('request');
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  // The user switched to another tab: nothing is reported as in view there.
+  document.visibilityState = 'hidden';
+  reportIntersecting(false);
+  await wait(250);
+  assert.deepEqual(verdicts(), [], 'the request was rejected while its tab was hidden');
+  assert(overlay(), 'the warning was taken down while its tab was hidden');
+  // Back on the tab, and the dialog still out of view: now it counts.
+  document.visibilityState = 'visible';
+  await wait(150);
+  await assertVerdicts([['request', 'block']]);
+"""
+    )
+
+
+def test_block_works_while_the_dialog_is_not_visible():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('request');
+  reportVisibility(false);
+  userClick(byId('shieldai-block'));
+  await flush();
+  await assertVerdicts([['request', 'block']]);
+"""
+    )
+
+
+def test_a_new_dialog_starts_its_visibility_afresh():
+    run_node(
+        REAL_DELAY_HARNESS
+        + r"""
+(async () => {
+  // The loading screen is up for a second before the result replaces it.
+  analyze = async () => { clock += 1000; return {result: scan({})}; };
+  await intercept('request');
+  await new Promise(resolve => setTimeout(resolve, 550));
+  userClick(byId('shieldai-proceed'));
+  await flush();
+  assert.deepEqual(verdicts(), [], 'the loading screen\'s time on screen counted for the result');
+  clock += 500;
+  userClick(byId('shieldai-proceed'));
+  await flush();
+  await assertVerdicts([['request', 'proceed']]);
+"""
+    )
+
+
 def test_shown_signal_proves_the_request_without_revealing_the_token():
     run_node(
         CONTENT_HARNESS
@@ -555,6 +823,61 @@ def test_unknown_result_has_its_own_badge_and_reason(state):
     )
 
 
+@pytest.mark.parametrize("policy", ["STRICT", "BALANCED"])
+def test_a_request_that_cannot_be_read_is_shown_as_unknown_structure(policy):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  storage.policyMode = JSON.parse(process.argv[1]);
+  await intercept('request', {unknownStructure: true}, 'wallet_sendCalls');
+  assert.equal(analyses.length, 0, 'a request that could not be read was sent for analysis');
+  const html = overlay().innerHTML;
+  assert(html.includes('UNKNOWN STRUCTURE'), html);
+  assert(overlay().querySelector('.shieldai-badge').className.includes('shieldai-badge-high'));
+  assert.equal(html.includes('id="shieldai-proceed"'), storage.policyMode !== 'STRICT');
+  assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_SHOWN').length, 1);
+  assert.deepEqual(verdicts(), []);
+  userClick(byId(storage.policyMode === 'STRICT' ? 'shieldai-block' : 'shieldai-proceed'));
+  await flush();
+  await assertVerdicts([['request', storage.policyMode === 'STRICT' ? 'block' : 'proceed']]);
+""",
+        policy,
+    )
+
+
+@pytest.mark.parametrize("outcome", ["analysis", "error"])
+def test_a_batch_call_overlay_says_which_call_it_is(outcome):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => JSON.parse(process.argv[1]) === 'error' ? {error: 'timeout'} : {result: scan({})};
+  await intercept('request', {to: '0x' + 'a'.repeat(40), chainId: 56, callIndex: 2, callCount: 3}, 'wallet_sendCalls');
+  assert.equal(analyses.length, 1);
+  assert(overlay().innerHTML.includes('Call 2 of 3 in a batch'), overlay().innerHTML);
+  await intercept('single');
+  assert(!overlay().innerHTML.includes('in a batch'));
+""",
+        outcome,
+    )
+
+
+@pytest.mark.parametrize("method", ["eth_signTypedData", "eth_signTypedData_v1"])
+def test_legacy_typed_data_is_shown_as_a_signature(method):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const method = JSON.parse(process.argv[1]);
+  await intercept('request', {signMethod: method, typedData: {primaryType: 'Permit', domain: {}, message: {spender: '0x' + 'e'.repeat(40)}}}, method);
+  assert.equal(analyses.length, 0, 'a signature was sent to the transaction firewall');
+  assert(overlay().innerHTML.includes('APPROVAL SIGNATURE'), overlay().innerHTML);
+""",
+        method,
+    )
+
+
 def test_phishing_banner_is_shielded_and_needs_a_real_click():
     run_node(
         CONTENT_HARNESS.replace("let phishing = false,", "let phishing = true,")
@@ -600,6 +923,94 @@ def test_removing_the_overlay_rejects_the_request():
   await flush();
   await assertVerdicts([['request', 'block']]);
 """
+    )
+
+
+def test_moving_the_overlay_into_another_document_rejects_the_request():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('request');
+  // There the overlay is still connected, to a document the user may not see, but no longer to this one.
+  const otherBody = new El('body');
+  otherBody.parent = {isDocument: true, children: [otherBody]};
+  const host = overlayRoot().host;
+  host.remove();
+  otherBody.appendChild(host);
+  await flush();
+  await assertVerdicts([['request', 'block']]);
+"""
+    )
+
+
+def test_removing_the_whole_document_rejects_the_request():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('request');
+  // What replacing the root element or calling document.open() does to the tree.
+  html.remove();
+  await flush();
+  await assertVerdicts([['request', 'block']]);
+"""
+    )
+
+
+@pytest.mark.parametrize(
+    "typed",
+    ["array", "string", "null", "missing", "number-primary-type", "string-message", "null-domain"],
+)
+def test_typed_data_that_cannot_be_read_is_shown_as_unparseable_at_high(typed):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const typedData = {
+    array: [{type: 'string', name: 'Message', value: 'Hi'}],
+    string: 'not typed data',
+    null: null,
+    missing: undefined,
+    'number-primary-type': {primaryType: 7, domain: {}, message: {}},
+    'string-message': {primaryType: 'Permit', domain: {}, message: 'spender'},
+    'null-domain': {primaryType: 'Permit', domain: null, message: {}},
+  }[JSON.parse(process.argv[1])];
+  await intercept('request', {signMethod: 'eth_signTypedData_v4', typedData}, 'eth_signTypedData_v4');
+  assert(overlay(), 'no overlay was shown');
+  const html = overlay().innerHTML;
+  assert(html.includes('UNPARSEABLE TYPED DATA'), html);
+  assert(overlay().querySelector('.shieldai-badge').className.includes('shieldai-badge-high'));
+  userClick(byId('shieldai-block'));
+  await flush();
+  await assertVerdicts([['request', 'block']]);
+""",
+        typed,
+    )
+
+
+@pytest.mark.parametrize("policy", ["STRICT", "BALANCED"])
+@pytest.mark.parametrize("typed", ["unparseable", "readable"])
+def test_strict_mode_removes_sign_anyway_on_unparseable_typed_data(policy, typed):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const [policy, typed] = JSON.parse(process.argv[1]);
+  storage.policyMode = policy;
+  const typedData = typed === 'readable' ? {primaryType: 'Mail', domain: {name: 'Mail'}, message: {contents: 'hi'}} : 'not typed data';
+  await intercept('request', {signMethod: 'eth_signTypedData_v4', typedData}, 'eth_signTypedData_v4');
+  const html = overlay().innerHTML;
+  const removed = policy === 'STRICT' && typed === 'unparseable';
+  assert.equal(html.includes('id="shieldai-proceed"'), !removed);
+  assert.equal(html.includes('Strict mode is on'), removed);
+  userClick(byId('shieldai-block'));
+  await flush();
+  await assertVerdicts([['request', 'block']]);
+""",
+        [policy, typed],
     )
 
 
@@ -684,7 +1095,7 @@ const provider = {
 window.ethereum = provider;
 window.dispatchEvent = () => {};
 const context = vm.createContext({
-  window, document, TextEncoder, CustomEvent, structuredClone, queueMicrotask,
+  window, document, TextEncoder, CustomEvent, structuredClone, queueMicrotask, MutationObserver: FakeMutationObserver,
   Event: class { constructor(type) { this.type = type; } },
   console: new Proxy({}, {get: (_, name) => (...args) => logged.push([name, ...args])}),
   setTimeout(fn, delay) { const id = ++nextTimer; timers.set(id, {fn, delay}); return id; },
@@ -792,6 +1203,25 @@ def test_forged_verdicts_are_ignored(forgery):
     )
 
 
+def test_replacing_the_root_element_rejects_a_request_waiting_on_the_overlay():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const {pending, requestId} = await startRequest();
+  deliver({type: 'SHIELDAI_TX_SHOWN', requestId, proof: await proof(requestId, 'shown')});
+  await flush();
+  assert(!fireFailClosedTimer(), 'the overlay was shown, so the fail-closed timer should have stopped');
+  // What document.open() does: the root element goes, taking the extension's listeners with it,
+  // so the Block content.js then posts would never arrive.
+  html.remove();
+  document.documentElement = new El('html');
+  await assert.rejects(pending, /blocked/);
+  assert.equal(sent.length, 0);
+"""
+    )
+
+
 def test_verdict_after_the_timeout_is_ignored():
     run_node(
         INJECT_HARNESS
@@ -844,6 +1274,232 @@ def test_inject_fails_closed_at_once_without_the_channel():
     )
 
 
+def test_inject_takes_no_key_once_document_start_has_passed():
+    run_node(
+        INJECT_HARNESS.replace(
+            "const accepted = !document.dispatchEvent(",
+            "const accepted = false && !document.dispatchEvent(",
+        )
+        + r"""
+(async () => {
+  // No key arrived at document_start; the zero-delay timer marks its end.
+  for (const [id, timer] of timers) if (timer.delay === 0) { timers.delete(id); timer.fn(); }
+  assert(document.dispatchEvent(new CustomEvent('shieldai:channel', {detail: 'late-token', cancelable: true})),
+    'inject.js took a key offered after document_start');
+  await assert.rejects(provider.request({method: 'eth_sendTransaction', params: [{to: '0x' + 'a'.repeat(40)}]}), /blocked/);
+  await flush();
+  assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').length, 0);
+  assert.equal(sent.length, 0);
+"""
+    )
+
+
+# Both scripts in one document, each in its own world as in a browser: content.js with the Chrome
+# APIs, inject.js with the page's. They share the window and the document. The document is the
+# kind given in argv: its URL, its parent and its opener, as the scripts see them from inside.
+FRAME_HARNESS = (
+    FAKE_DOM
+    + r"""
+const [kind, order, reachable] = JSON.parse(process.argv[1]);
+const crossOrigin = {get document() { throw new Error('Blocked a frame from accessing a cross-origin frame'); }};
+const sameOrigin = {document: {}};
+if (kind.startsWith('about-')) Object.assign(window.location, {protocol: 'about:', href: kind.replace('-', ':')});
+if (kind === 'cross-origin-frame' || kind === 'about-srcdoc') window.top = window.parent = crossOrigin;
+if (kind === 'same-origin-frame') { window.top = window.parent = sameOrigin; window.frameElement = {tagName: 'IFRAME'}; }
+if (kind === 'same-origin-opener') window.opener = sameOrigin;
+if (kind === 'cross-origin-opener') window.opener = crossOrigin;
+// Messages reach every window listener, asynchronously, as window.postMessage does.
+window.postMessage = data => { posted.push(data); setTimeout(() => deliver(data), 0); };
+const sent = [];
+const provider = {
+  on() {},
+  async request(args) { if (args.method === 'eth_chainId') return '0x38'; sent.push(args); return 'sent'; },
+};
+window.ethereum = provider;
+window.dispatchEvent = () => {};
+const storage = {language: 'en'};
+const chrome = {
+  storage: {local: {get(defaults, cb) { cb({...defaults, ...storage}); }}},
+  runtime: {
+    getURL: path => 'chrome-extension://id/' + path,
+    async sendMessage(message) {
+      return message.type === 'SHIELDAI_ANALYZE' ? {result: {status: 'ok', partial: false, classification: 'SAFE',
+        risk_score: 0, coverage: {honeypot: 1}, coverage_reasons: {}, verdict: 'SAFE', transaction_impact: {}}}
+        : {result: {is_phishing: false}};
+    },
+  },
+};
+const contentWorld = vm.createContext({
+  window, document, chrome, crypto: webcrypto, TextEncoder, TextDecoder, CustomEvent, setTimeout, clearTimeout,
+  console, Date, MutationObserver: FakeMutationObserver, IntersectionObserver: FakeIntersectionObserver,
+  fetch: async url => ({json: async () => JSON.parse(fs.readFileSync(url.replace('chrome-extension://id/', 'extension/'), 'utf8'))}),
+});
+const pageWorld = vm.createContext({
+  window, document, TextEncoder, CustomEvent, structuredClone, queueMicrotask, setTimeout, clearTimeout,
+  MutationObserver: FakeMutationObserver,
+  setInterval() { return 0; }, clearInterval() {}, console,
+  Event: class { constructor(type) { this.type = type; } },
+  crypto: {subtle: webcrypto.subtle, randomUUID: () => webcrypto.randomUUID()},
+});
+// Every key content.js offers, seen by a listener that takes none of them.
+const offers = [];
+document.addEventListener('shieldai:channel', event => offers.push(event.detail));
+for (const script of order === 'content-first' ? ['content', 'inject'] : ['inject', 'content']) {
+  const source = fs.readFileSync(`extension/${script}.js`, 'utf8');
+  vm.runInContext(script === 'content' ? withShortDelays(source) : source, script === 'content' ? contentWorld : pageWorld);
+}
+const overlayRoot = () => { const host = body.children.find(el => el.shadow); return host ? host.shadow : null; };
+// The Proceed or Sign Anyway button once the overlay shows it enabled.
+async function proceedButton() {
+  for (let i = 0; i < 20; i++) {
+    const button = overlayRoot()?.getElementById('shieldai-proceed');
+    if (button && !button.disabled) return button;
+    await flush();
+  }
+  assert.fail('no enabled Proceed button appeared');
+}
+"""
+)
+
+REACHABLE = ["same-origin-frame", "about-blank", "about-srcdoc", "same-origin-opener"]
+
+
+@pytest.mark.parametrize("order", ["content-first", "inject-first"])
+@pytest.mark.parametrize(
+    "kind", ["top", "cross-origin-frame", "cross-origin-opener", *REACHABLE]
+)
+def test_documents_the_page_can_reach_first_get_no_key_and_reject_requests(kind, order):
+    run_node(
+        FRAME_HARNESS
+        + r"""
+(async () => {
+  assert.equal(offers.length > 0, !reachable, 'content.js offered its token in the wrong kind of document');
+  // A key a page script offers right after document_start is never taken.
+  assert(document.dispatchEvent(new CustomEvent('shieldai:channel', {detail: 'page-token', cancelable: true})));
+  const intercepts = () => posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT');
+  const notices = () => body.children.filter(el => el.shadow && el.shadow.children.some(child => child.className === 'shieldai-notice'));
+  const tx = {to: '0x' + 'a'.repeat(40)};
+  if (reachable) {
+    const message = 'ShieldAI cannot check wallet requests made from this embedded frame or popup. ' +
+      'Open the dApp in its own tab.';
+    for (const args of [
+      {method: 'eth_sendTransaction', params: [tx]},
+      {method: 'personal_sign', params: ['0x68656c6c6f', '0x' + 'b'.repeat(40)]},
+      {method: 'eth_signTypedData_v4', params: ['0x' + 'b'.repeat(40), '{}']},
+      {method: 'wallet_sendCalls', params: [{version: '2.0.0', calls: [tx]}]},
+    ]) {
+      // EIP-1193 4100: Unauthorized.
+      await assert.rejects(provider.request(args), {message, code: 4100});
+    }
+    await flush();
+    assert.equal(intercepts().length, 0);
+    assert.equal(sent.length, 0);
+    // One notice for the document, however many requests were rejected: it informs, with no buttons.
+    assert.equal(notices().length, 1);
+    const notice = notices()[0].shadow.children.find(child => child.className === 'shieldai-notice');
+    assert.equal(notice.attrs.role, 'status');
+    assert.match(notice.textContent, /Open the dApp in its own tab/);
+    assert.equal(notice.querySelectorAll('button').length, 0);
+    // It leaves once its fade-out animation ends.
+    notice.dispatch('animationend');
+    assert.equal(notices().length, 0);
+    return;
+  }
+  // Where requests are checked, the unsigned message that brings the notice is ignored.
+  deliver({type: 'SHIELDAI_UNCHECKABLE'});
+  await flush();
+  assert.equal(notices().length, 0);
+  const pending = provider.request({method: 'eth_sendTransaction', params: [tx]});
+  const proceed = await proceedButton();
+  assert.equal(sent.length, 0, 'the transaction reached the wallet before the user decided');
+  assert.equal(intercepts().length, 1);
+  proceed.dispatch('click', {isTrusted: true});
+  assert.equal(await pending, 'sent');
+  assert.equal(sent.length, 1);
+""",
+        [kind, order, kind in REACHABLE],
+    )
+
+
+@pytest.mark.parametrize("method", ["eth_signTypedData", "eth_signTypedData_v1"])
+def test_legacy_typed_data_is_shown_field_by_field_end_to_end(method):
+    run_node(
+        FRAME_HARNESS.replace("JSON.parse(process.argv[1]);", "['top', 'content-first', false];", 1)
+        + r"""
+(async () => {
+  const method = JSON.parse(process.argv[1]);
+  // MetaMask's legacy form: an array of typed fields first, then the address.
+  const legacy = [{type: 'string', name: 'Message', value: 'Hi there'}, {type: 'uint32', name: 'A number', value: '1337'}];
+  const pending = provider.request({method, params: [legacy, '0x' + 'b'.repeat(40)]});
+  const proceed = await proceedButton();
+  const html = overlayRoot().getElementById('shieldai-overlay').innerHTML;
+  assert(html.includes('<td>Message</td><td>string</td><td>Hi there</td>'), html);
+  assert(html.includes('<td>A number</td><td>uint32</td><td>1337</td>'), html);
+  assert(html.includes('SIGNATURE REQUEST') && !html.includes('UNPARSEABLE'), html);
+  assert.equal(sent.length, 0);
+  proceed.dispatch('click', {isTrusted: true});
+  assert.equal(await pending, 'sent');
+  assert.deepEqual(plain(sent[0].params), plain([legacy, '0x' + 'b'.repeat(40)]));
+""",
+        method,
+    )
+
+
+def test_a_refused_send_or_send_async_call_brings_one_notice():
+    run_node(
+        FRAME_HARNESS.replace("JSON.parse(process.argv[1]);", "['top', 'content-first', false];", 1)
+        + r"""
+(async () => {
+  const legacy = {on() {}, async request() { return '0x38'; }, sendAsync(payload, callback) { callback(null, {}); }, send() {}};
+  for (const fn of windowListeners['eip6963:announceProvider']) {
+    fn(new CustomEvent('eip6963:announceProvider', {detail: {provider: legacy, info: {name: 'legacy'}}}));
+  }
+  const tx = {to: '0x' + 'a'.repeat(40)};
+  legacy.sendAsync({method: 'eth_sendTransaction', params: [tx]}, () => {});
+  legacy.sendAsync({method: 'personal_sign', params: ['0x00', tx.to]}, () => {});
+  assert.throws(() => legacy.send({method: 'eth_sign', params: []}), /send or sendAsync/);
+  for (let i = 0; i < 3; i++) await flush();
+  const notices = body.children.filter(el => el.shadow && el.shadow.children.some(child => child.className === 'shieldai-notice'));
+  assert.equal(notices.length, 1, 'expected one notice however many calls were refused');
+  const notice = notices[0].shadow.children.find(child => child.className === 'shieldai-notice');
+  assert.match(notice.textContent, /older wallet method ShieldAI cannot check/);
+  assert.equal(notice.attrs.role, 'status');
+  // An unchecked call brings none.
+  legacy.sendAsync({method: 'eth_chainId'}, () => {});
+  await flush();
+  assert.equal(body.children.filter(el => el.shadow).length, 1);
+"""
+    )
+
+
+# Switched off in its settings, the extension shows no warning, but what inject.js does without
+# anyone's decision still applies: the frame and popup refusal, and the chain binding.
+@pytest.mark.parametrize("kind", ["top", "cross-origin-frame", *REACHABLE])
+def test_switching_the_extension_off_removes_the_warning_only(kind):
+    run_node(
+        FRAME_HARNESS
+        + r"""
+(async () => {
+  storage.enabled = false;
+  const tx = {to: '0x' + 'a'.repeat(40)};
+  if (reachable) {
+    await assert.rejects(provider.request({method: 'eth_sendTransaction', params: [tx]}),
+      {code: 4100, message: /embedded frame or popup/});
+    assert.equal(sent.length, 0);
+    return;
+  }
+  // No overlay: the transaction goes to the wallet, still named to the analysed chain.
+  assert.equal(await provider.request({method: 'eth_sendTransaction', params: [tx]}), 'sent');
+  assert.equal(sent[0].params[0].chainId, '0x38');
+  assert.equal(body.children.filter(el => el.shadow).length, 0, 'a warning was shown while switched off');
+  // A transaction naming another chain is still rejected.
+  await assert.rejects(provider.request({method: 'eth_sendTransaction', params: [{...tx, chainId: '0x1'}]}), /chain/);
+  assert.equal(sent.length, 1);
+""",
+        [kind, "content-first", kind in REACHABLE],
+    )
+
+
 def test_inject_leaves_no_page_readable_marker_and_logs_nothing():
     run_node(
         INJECT_HARNESS
@@ -867,8 +1523,16 @@ def test_inject_leaves_no_page_readable_marker_and_logs_nothing():
 # Built-ins a page script could replace in its own world before the first wallet call.
 PATCHES = {
     "set-has": "Set.prototype.has = () => false;",
+    "weakmap-get": "WeakMap.prototype.get = () => undefined;",
+    "weakmap-set": "WeakMap.prototype.set = function () { return this; };",
+    "weakmap-delete": "WeakMap.prototype.delete = () => false;",
     "weakset-has": "WeakSet.prototype.has = () => true;",
     "weakset-add": "WeakSet.prototype.add = function () { return this; };",
+    "function-call": "Function.prototype.call = function () { return 'forwarded'; };",
+    "function-to-string": "Function.prototype.toString = () => 'function () { [native code] }';",
+    "object-freeze": "Object.freeze = (value) => value;",
+    "object-is-frozen": "Object.isFrozen = () => true;",
+    "reflect-own-keys": "Reflect.ownKeys = () => [];",
     "define-property": "Object.defineProperty = (target) => target;",
     "object-prototype-accessor": "Object.prototype.get = function () { return undefined; };",
     "function-bind": "Function.prototype.bind = function () { return async () => 'forwarded'; };",
@@ -981,6 +1645,430 @@ def test_the_wallet_gets_the_request_that_was_analysed():
     )
 
 
+@pytest.mark.parametrize("method", ["object", "number", "missing", "inherited"])
+def test_a_request_without_a_string_method_is_rejected(method):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const params = [{to: '0x' + 'a'.repeat(40)}];
+  const args = {
+    // A wallet that turns the method into a string would send the transaction unchecked.
+    object: {method: {toString: () => 'eth_sendTransaction'}, params},
+    number: {method: 1, params},
+    missing: {params},
+    inherited: Object.assign(Object.create({method: 'eth_sendTransaction'}), {params}),
+  }[JSON.parse(process.argv[1])];
+  await assert.rejects(provider.request(args), /string method/);
+  await flush();
+  assert.equal(sent.length, 0);
+  assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').length, 0);
+""",
+        method,
+    )
+
+
+def test_the_wallet_gets_the_method_that_was_checked():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  let reads = 0;
+  const params = [{to: '0x' + 'a'.repeat(40)}];
+  const args = {get method() { return reads++ === 0 ? 'eth_chainId' : 'eth_sendTransaction'; }, params};
+  assert.equal(await provider.request(args), '0x38');
+  assert.equal(sent.length, 0, 'the wallet read a different method than the one checked');
+  // Other methods go through as the page gave them, with params only when it gave some.
+  assert.equal(await provider.request({method: 'eth_getBalance', params: ['0x' + 'b'.repeat(40), 'latest']}), 'sent');
+  assert.equal(await provider.request({method: 'eth_accounts'}), 'sent');
+  assert.deepEqual(plain(sent), [{method: 'eth_getBalance', params: ['0x' + 'b'.repeat(40), 'latest']}, {method: 'eth_accounts'}]);
+  assert(!('params' in sent[1]));
+"""
+    )
+
+
+def test_a_replaced_error_constructor_cannot_stop_a_rejection():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  vm.runInContext("Error = function () { throw new TypeError('page Error'); };", context);
+  const {pending, requestId} = await startRequest();
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'block', proof: await proof(requestId, 'block')});
+  await assert.rejects(pending, /blocked/);
+  await assert.rejects(provider.request({method: 1}), /string method/);
+  assert.equal(sent.length, 0);
+"""
+    )
+
+
+def test_values_the_request_does_not_hold_are_ignored():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  // A page fills in a field its transaction leaves out. The harness's structuredClone makes its
+  // copies in this realm, while a browser makes them in the page's, so both get the getter.
+  let reads = 0;
+  const benign = '0x' + 'b'.repeat(40), drainer = '0x' + 'd'.repeat(40);
+  const prototypes = [Object.prototype, vm.runInContext('Object.prototype', context)];
+  for (const prototype of prototypes) {
+    Object.defineProperty(prototype, 'to', {configurable: true, get() { return reads++ === 0 ? benign : drainer; }});
+  }
+  try {
+    const pending = provider.request({method: 'eth_sendTransaction', params: [{data: '0x60806040'}]});
+    pending.catch(() => {});
+    await flush();
+    const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+    assert.equal(intercept.tx.to, '', 'a value the transaction does not hold was analysed');
+    deliver({type: 'SHIELDAI_TX_VERDICT', requestId: intercept.requestId, action: 'proceed',
+      proof: await proof(intercept.requestId, 'proceed')});
+    await flush();
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].params[0].to, undefined, 'the wallet can read a value the transaction does not hold');
+    assert.equal(sent[0].params[0].data, '0x60806040');
+  } finally {
+    for (const prototype of prototypes) delete prototype.to;
+  }
+"""
+    )
+
+
+@pytest.mark.parametrize("method", ["eth_signTypedData", "eth_signTypedData_v1"])
+@pytest.mark.parametrize("order", ["data-first", "address-first"])
+def test_legacy_typed_data_requests_are_checked(method, order):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const [method, order] = JSON.parse(process.argv[1]);
+  const address = '0x' + 'b'.repeat(40);
+  // MetaMask takes [data, address] for the legacy methods; some wallets take [address, data].
+  const legacy = [{type: 'string', name: 'Message', value: 'Hi'}];
+  const typed = JSON.stringify({primaryType: 'Permit', domain: {}, message: {spender: '0x' + 'e'.repeat(40)}});
+  const params = order === 'data-first' ? [legacy, address] : [address, typed];
+  const pending = provider.request({method, params});
+  pending.catch(() => {});
+  await flush();
+  assert.equal(sent.length, 0, 'the signature request reached the wallet before any decision');
+  const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+  assert.equal(intercept.tx.signMethod, method);
+  if (order === 'data-first') assert.deepEqual(plain(intercept.tx.typedData), legacy);
+  else assert.equal(intercept.tx.typedData.primaryType, 'Permit');
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId: intercept.requestId, action: 'proceed',
+    proof: await proof(intercept.requestId, 'proceed')});
+  assert.equal(await pending, 'sent');
+  assert.deepEqual(plain(sent[0].params), plain(params));
+""",
+        [method, order],
+    )
+
+
+@pytest.mark.parametrize("decision", ["proceed-all", "block-first", "block-second", "wrong-chain"])
+def test_each_call_of_a_batch_is_decided_before_the_batch_is_sent(decision):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const decision = JSON.parse(process.argv[1]);
+  const from = '0x' + 'f'.repeat(40), first = '0x' + 'a'.repeat(40), second = '0x' + 'c'.repeat(40);
+  const calls = [{to: first, data: '0x095ea7b3', value: '0x0'}, {to: second, data: '0xa9059cbb'}];
+  const batch = {version: '2.0.0', from, chainId: decision === 'wrong-chain' ? '0x1' : '0x38', atomicRequired: true, calls};
+  const pending = provider.request({method: 'wallet_sendCalls', params: [batch]});
+  pending.catch(() => {});
+  const intercepts = () => posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT');
+  for (const [index, call] of calls.entries()) {
+    await flush();
+    assert.equal(sent.length, 0, 'the batch reached the wallet before every call was decided');
+    assert.equal(intercepts().length, index + 1);
+    const {requestId, method, tx} = intercepts().at(-1);
+    assert.equal(method, 'wallet_sendCalls');
+    assert.deepEqual(plain(tx), {to: call.to, from, value: call.value || '0x0', data: call.data,
+      chainId: decision === 'wrong-chain' ? null : 56, callIndex: index + 1, callCount: 2});
+    const action = decision === 'block-first' && index === 0 || decision === 'block-second' && index === 1 ? 'block' : 'proceed';
+    deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action, proof: await proof(requestId, action)});
+    if (action === 'block' || decision === 'wrong-chain') break;
+  }
+  if (decision === 'proceed-all') {
+    assert.equal(await pending, 'sent');
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].method, 'wallet_sendCalls');
+    assert.deepEqual(plain(sent[0].params[0].calls), calls);
+  } else {
+    await assert.rejects(pending, decision === 'wrong-chain' ? /chain/ : /blocked/);
+    await flush();
+    assert.equal(sent.length, 0);
+    assert.equal(intercepts().length, decision === 'block-second' ? 2 : 1, 'a call was shown after the batch was rejected');
+  }
+""",
+        decision,
+    )
+
+
+@pytest.mark.parametrize(
+    "method,params",
+    [
+        ("wallet_sendCalls", []),
+        ("wallet_sendCalls", ["0xdeadbeef"]),
+        ("wallet_sendCalls", [{"calls": []}]),
+        ("wallet_sendCalls", [{"calls": "0xdeadbeef"}]),
+        ("wallet_sendCalls", [{"calls": [{"to": "0x" + "a" * 40}, 1]}]),
+        ("eth_sendTransaction", []),
+        ("eth_sendTransaction", ["0xdeadbeef"]),
+    ],
+    ids=["no-batch", "batch-not-object", "no-calls", "calls-not-list", "call-not-object",
+         "no-transaction", "transaction-not-object"],
+)
+def test_a_request_that_cannot_be_read_is_never_forwarded_unseen(method, params):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const [method, params] = JSON.parse(process.argv[1]);
+  const intercepts = () => posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT');
+  for (const action of ['block', 'proceed']) {
+    const pending = provider.request({method, params});
+    pending.catch(() => {});
+    await flush();
+    assert.equal(sent.length, 0, 'the request reached the wallet before any decision');
+    const {requestId, tx} = intercepts().at(-1);
+    assert.equal(tx.unknownStructure, true);
+    deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action, proof: await proof(requestId, action)});
+    if (action === 'block') {
+      await assert.rejects(pending, /blocked/);
+      assert.equal(sent.length, 0);
+    } else {
+      assert.equal(await pending, 'sent');
+      assert.deepEqual(plain(sent), [{method, params}]);
+    }
+  }
+""",
+        [method, params],
+    )
+
+
+@pytest.mark.parametrize("method", ["personal_sign", "eth_signTypedData_v4"])
+def test_a_signature_request_without_params_is_still_shown_first(method):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const method = JSON.parse(process.argv[1]);
+  const pending = provider.request({method, params: []});
+  pending.catch(() => {});
+  await flush();
+  assert.equal(sent.length, 0, 'the request reached the wallet before any decision');
+  const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+  assert.equal(intercept.tx.signMethod, method);
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId: intercept.requestId, action: 'block',
+    proof: await proof(intercept.requestId, 'block')});
+  await assert.rejects(pending, /blocked/);
+""",
+        method,
+    )
+
+
+@pytest.mark.parametrize("given", ["absent", "hex", "number", "batch-absent"])
+def test_the_wallet_is_told_the_chain_that_was_analysed(given):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const given = JSON.parse(process.argv[1]);
+  vm.runInContext("Number.prototype.toString = () => '0';", context);
+  const tx = {to: '0x' + 'a'.repeat(40)};
+  if (given === 'hex') tx.chainId = '0x38';
+  if (given === 'number') tx.chainId = 56;
+  const args = given === 'batch-absent'
+    ? {method: 'wallet_sendCalls', params: [{version: '2.0.0', calls: [tx]}]}
+    : {method: 'eth_sendTransaction', params: [tx]};
+  const pending = provider.request(args);
+  await flush();
+  const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+  assert.equal(intercept.tx.chainId, 56);
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId: intercept.requestId, action: 'proceed',
+    proof: await proof(intercept.requestId, 'proceed')});
+  assert.equal(await pending, 'sent');
+  const named = sent[0].params[0].chainId;
+  assert.equal(named, given === 'hex' || given === 'number' ? tx.chainId : '0x38');
+  assert.deepEqual(Object.keys(args.params[0]).includes('chainId'), given === 'hex' || given === 'number',
+    "the page's own request object was changed");
+""",
+        given,
+    )
+
+
+@pytest.mark.parametrize("field", ["signMethod", "typedData", "unknownStructure", "callCount"])
+def test_fields_on_the_page_transaction_cannot_change_how_it_is_shown(field):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const field = JSON.parse(process.argv[1]);
+  // A signMethod would have content.js show the transaction as a message to sign, with no
+  // analysis; unknownStructure or callCount would change its overlay too.
+  const value = {signMethod: 'personal_sign', typedData: {primaryType: 'Mail'}, unknownStructure: true, callCount: 1}[field];
+  const drainer = '0x' + 'd'.repeat(40);
+  const pending = provider.request({method: 'eth_sendTransaction',
+    params: [{to: drainer, data: '0x095ea7b3', [field]: value, callIndex: 1}]});
+  pending.catch(() => {});
+  await flush();
+  const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+  assert.deepEqual(plain(intercept.tx), {to: drainer, from: '', value: '0x0', data: '0x095ea7b3', chainId: 56});
+""",
+        field,
+    )
+
+
+def test_a_throwing_request_object_rejects_instead_of_throwing():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const args = new Proxy({}, {getOwnPropertyDescriptor() { throw new Error('trap'); }});
+  let pending;
+  assert.doesNotThrow(() => { pending = provider.request(args); }, 'request threw synchronously');
+  await assert.rejects(pending, /trap/);
+  // A value in params the copy cannot take (here a proxy) rejects the request too.
+  await assert.rejects(provider.request({method: 'eth_sendTransaction', params: [new Proxy({to: '0x' + 'a'.repeat(40)}, {})]}),
+    {name: 'DataCloneError'});
+  await flush();
+  assert.equal(sent.length, 0);
+  assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').length, 0);
+"""
+    )
+
+
+def test_a_method_that_is_not_checked_is_forwarded_as_a_plain_object():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  assert.equal(await provider.request({method: 'eth_getBalance', params: ['0x' + 'b'.repeat(40), 'latest']}), 'sent');
+  assert.notEqual(Object.getPrototypeOf(sent[0]), null, 'a request the wallet reads as it is was given no prototype');
+"""
+    )
+
+
+def test_a_provider_is_recorded_as_wrapped_before_it_is_subscribed_to():
+    run_node(
+        INJECT_HARNESS.replace("window.ethereum = provider;\n", "")
+        + r"""
+(async () => {
+  // A provider whose on() announces it again, which reaches the wrapping code a second time.
+  let subscriptions = 0;
+  const wallet = {
+    on() {
+      subscriptions++;
+      for (const fn of windowListeners['eip6963:announceProvider']) {
+        fn(new CustomEvent('eip6963:announceProvider', {detail: {provider: wallet, info: {name: 'again'}}}));
+      }
+    },
+    async request(args) { if (args.method === 'eth_chainId') return '0x38'; sent.push(args); return 'sent'; },
+  };
+  for (const fn of windowListeners['eip6963:announceProvider']) {
+    fn(new CustomEvent('eip6963:announceProvider', {detail: {provider: wallet, info: {name: 'wallet'}}}));
+  }
+  assert.equal(subscriptions, 1, 'the provider was wrapped more than once');
+"""
+    )
+
+
+@pytest.mark.parametrize("call_chain", ["other", "same-hex", "same-number"])
+def test_a_batch_call_naming_another_chain_is_shown_as_unknown_structure_and_rejected(call_chain):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const callChain = {other: '0x1', 'same-hex': '0x38', 'same-number': 56}[JSON.parse(process.argv[1])];
+  const calls = [{to: '0x' + 'a'.repeat(40)}, {to: '0x' + 'c'.repeat(40), chainId: callChain}];
+  const pending = provider.request({method: 'wallet_sendCalls', params: [{version: '2.0.0', chainId: '0x38', calls}]});
+  pending.catch(() => {});
+  const intercepts = () => posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT');
+  await flush();
+  const {requestId, tx} = intercepts().at(-1);
+  if (callChain !== '0x1') {
+    assert.equal(tx.callIndex, 1, 'a call on the bound chain was not analysed');
+    return;
+  }
+  assert.equal(tx.unknownStructure, true);
+  assert.equal(intercepts().length, 1);
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'proceed', proof: await proof(requestId, 'proceed')});
+  await assert.rejects(pending, /chain/);
+  assert.equal(sent.length, 0);
+""",
+        call_chain,
+    )
+
+
+def test_fields_on_a_batch_call_cannot_change_how_it_is_shown():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const call = {to: '0x' + 'd'.repeat(40), data: '0x095ea7b3', signMethod: 'personal_sign', unknownStructure: true,
+    typedData: {primaryType: 'Mail'}, callCount: 9};
+  const pending = provider.request({method: 'wallet_sendCalls', params: [{version: '2.0.0', calls: [call]}]});
+  pending.catch(() => {});
+  await flush();
+  const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+  assert.deepEqual(plain(intercept.tx), {to: call.to, from: '', value: '0x0', data: call.data, chainId: 56,
+    callIndex: 1, callCount: 1});
+"""
+    )
+
+
+def test_the_wallet_gets_the_approved_request_even_if_the_page_changes_it_meanwhile():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const approved = '0x' + 'a'.repeat(40), drainer = '0x' + 'd'.repeat(40);
+  const received = [];
+  // A wallet whose own request checks its arguments with Array.isArray before it reads them, in
+  // the page's world, where the page can replace Array.isArray to run code at that moment.
+  const wallet = {
+    on() {},
+    async request(args) {
+      if (args.method === 'eth_chainId') return '0x38';
+      Array.isArray(args.params);
+      received.push(JSON.parse(JSON.stringify(args)));
+      return 'sent';
+    },
+  };
+  for (const fn of windowListeners['eip6963:announceProvider']) {
+    fn(new CustomEvent('eip6963:announceProvider', {detail: {provider: wallet, info: {name: 'wallet'}}}));
+  }
+  const isArray = Array.isArray;
+  Array.isArray = function (value) {
+    if (isArray(value) && value[0] && typeof value[0] === 'object') {
+      try {
+        value[0].to = drainer;
+        value[0].value = '0xde0b6b3a7640000';
+        value.push({to: drainer});
+      } catch (_) {
+        // A frozen copy refuses the change.
+      }
+    }
+    return isArray(value);
+  };
+  try {
+    const pending = wallet.request({method: 'eth_sendTransaction', params: [{to: approved, value: '0x0'}]});
+    await flush();
+    const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+    assert.equal(intercept.tx.to, approved);
+    deliver({type: 'SHIELDAI_TX_VERDICT', requestId: intercept.requestId, action: 'proceed',
+      proof: await proof(intercept.requestId, 'proceed')});
+    assert.equal(await pending, 'sent');
+  } finally {
+    Array.isArray = isArray;
+  }
+  assert.deepEqual(received, [{method: 'eth_sendTransaction', params: [{to: approved, value: '0x0', chainId: '0x38'}]}],
+    'the wallet was handed values the user did not approve');
+"""
+    )
+
+
 def test_replaced_json_parse_cannot_change_the_typed_data_shown():
     run_node(
         INJECT_HARNESS
@@ -1012,6 +2100,375 @@ def test_a_provider_set_later_is_wrapped_before_the_page_can_use_it():
   assert.equal(sent.length, 0);
   assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').length, 1);
 """
+    )
+
+
+# The provider is shaped like MetaMask's: a class whose request is also bound onto the instance,
+# behind a Proxy. The page's patch, if any, runs before the provider is announced.
+@pytest.mark.parametrize(
+    "patch",
+    [
+        "",
+        "Object.getPrototypeOf = () => null;",
+        "Object.getOwnPropertyDescriptor = () => undefined;",
+        "WeakMap.prototype.get = () => undefined;",
+        "WeakMap.prototype.set = function () { return this; };",
+    ],
+    ids=["unpatched", "get-prototype-of", "get-own-property-descriptor", "weakmap-get", "weakmap-set"],
+)
+def test_a_request_taken_from_the_provider_prototype_is_checked_too(patch):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  vm.runInContext(JSON.parse(process.argv[1]), context);
+  class WalletProvider {
+    constructor() { this.request = this.request.bind(this); }
+    on() {}
+    async request(args) { if (args.method === 'eth_chainId') return '0x38'; sent.push(args); return 'sent'; }
+  }
+  const wallet = new Proxy(new WalletProvider(), {deleteProperty: () => true});
+  for (const fn of windowListeners['eip6963:announceProvider']) {
+    fn(new CustomEvent('eip6963:announceProvider', {detail: {provider: wallet, info: {name: 'wallet'}}}));
+  }
+  const inherited = Object.getPrototypeOf(wallet).request;
+  const tx = {method: 'eth_sendTransaction', params: [{to: '0x' + 'a'.repeat(40)}]};
+  const intercepts = () => posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT');
+  const routes = [
+    () => wallet.request(tx),
+    () => inherited.call(wallet, tx),
+    // An object the page made from the prototype, never announced.
+    () => inherited.call(Object.create(WalletProvider.prototype), tx),
+  ];
+  for (const route of routes) {
+    const before = intercepts().length;
+    const pending = route();
+    pending.catch(() => {});
+    await flush();
+    assert.equal(sent.length, 0, 'the request reached the wallet before any decision');
+    assert.equal(intercepts().length, before + 1, 'the request was not sent for a decision');
+    const {requestId} = intercepts().at(-1);
+    deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'block', proof: await proof(requestId, 'block')});
+    await assert.rejects(pending, /blocked/);
+  }
+  await assert.rejects(inherited.call(undefined, tx), /blocked/);
+  // Called on the prototype itself there is no provider to check for, and the check stays put.
+  const onPrototype = inherited.call(Object.getPrototypeOf(wallet), tx);
+  onPrototype.catch(() => {});
+  await flush();
+  assert.equal(Object.getPrototypeOf(wallet).request, inherited, "a call on the prototype replaced its check");
+  await assert.rejects(onPrototype, /blocked/);
+  // The user's Proceed reaches the wallet once, through the wallet's own request.
+  const pending = inherited.call(wallet, tx);
+  await flush();
+  const {requestId} = intercepts().at(-1);
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'proceed', proof: await proof(requestId, 'proceed')});
+  assert.equal(await pending, 'sent');
+  assert.equal(sent.length, 1);
+  await flush();
+  assert.equal(intercepts().length, 4, 'the forwarded request was checked a second time');
+""",
+        patch,
+    )
+
+
+# Two prototype levels that both define request, the lower one reached through super.
+TWO_LEVEL_WALLET = r"""
+  class Base {
+    on() {}
+    async request(args) { if (args.method === 'eth_chainId') return '0x38'; sent.push(args); return 'base'; }
+  }
+  class Wallet extends Base {
+    async request(args) { return super.request(args); }
+  }
+  const announce = (provider) => {
+    for (const fn of windowListeners['eip6963:announceProvider']) {
+      fn(new CustomEvent('eip6963:announceProvider', {detail: {provider, info: {name: 'wallet'}}}));
+    }
+  };
+  const intercepts = () => posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT');
+  const tx = {method: 'eth_sendTransaction', params: [{to: '0x' + 'a'.repeat(40)}]};
+  // Starts a request, checks it waits for a decision, and answers it.
+  async function decideOn(start, action) {
+    const before = sent.length, shown = intercepts().length;
+    const pending = start();
+    pending.catch(() => {});
+    await flush();
+    assert.equal(sent.length, before, 'the request reached the wallet before any decision');
+    assert.equal(intercepts().length, shown + 1, 'the request was not sent for a decision');
+    const {requestId} = intercepts().at(-1);
+    deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action, proof: await proof(requestId, action)});
+    return pending;
+  }
+"""
+
+
+# A copy that was checked and handed to one provider must not pass unchecked anywhere else, or
+# later: kept and changed, then given to the wallet's prototype request, it is checked again.
+@pytest.mark.parametrize("how", ["kept-by-a-page-provider", "replayed-inside-a-page-provider", "echoed-in-an-error"])
+def test_a_checked_copy_cannot_be_replayed_unchecked(how):
+    run_node(
+        INJECT_HARNESS
+        + TWO_LEVEL_WALLET
+        + r"""
+(async () => {
+  const how = JSON.parse(process.argv[1]);
+  const drainer = '0x' + 'd'.repeat(40);
+  const benign = {method: 'personal_sign', params: ['0x68656c6c6f', '0x' + 'b'.repeat(40)]};
+  // The copy handed on is frozen, so the page's changes do not take; a replay can only resend the
+  // approved request, and even that is checked again.
+  const change = (copy) => { copy.method = 'eth_sendTransaction'; copy.params = [{to: drainer}]; };
+  let kept, replay;
+  const wallet = new Wallet();
+  if (how === 'echoed-in-an-error') {
+    // A wallet whose own request rejects with the request it was given as error.data.
+    Base.prototype.request = async function (args) {
+      if (args.method === 'eth_chainId') return '0x38';
+      if (args.method === 'personal_sign') { const error = new Error('rejected'); error.data = args; throw error; }
+      sent.push(args);
+      return 'base';
+    };
+  }
+  announce(wallet);
+  const pageProvider = {
+    on() {},
+    request(args) {
+      kept = args;
+      if (how === 'replayed-inside-a-page-provider') {
+        change(args);
+        replay = Wallet.prototype.request.call(wallet, args);
+        replay.catch(() => {});
+      }
+      return Promise.resolve('page');
+    },
+  };
+  announce(pageProvider);
+  const target = how === 'echoed-in-an-error' ? wallet : pageProvider;
+  const outcome = await decideOn(() => target.request(benign), 'proceed').then(() => null, error => error);
+  if (how === 'echoed-in-an-error') kept = outcome.data;
+  if (how !== 'replayed-inside-a-page-provider') {
+    change(kept);
+    replay = Wallet.prototype.request.call(wallet, kept);
+    replay.catch(() => {});
+  }
+  await flush();
+  assert.equal(sent.length, 0, 'the replayed copy reached the wallet unchecked');
+  assert.equal(kept.method, 'personal_sign', 'the approved copy could be changed');
+  assert.deepEqual(plain(kept.params), benign.params, 'the approved copy could be changed');
+  assert.equal(intercepts().length, 2, 'the replayed copy was not sent for a decision');
+  const intercept = intercepts().at(-1);
+  assert.equal(intercept.tx.signMethod, 'personal_sign');
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId: intercept.requestId, action: 'block',
+    proof: await proof(intercept.requestId, 'block')});
+  await assert.rejects(replay, /blocked/);
+  assert.equal(sent.length, 0);
+""",
+        how,
+    )
+
+
+def test_every_request_on_the_prototype_chain_is_checked():
+    run_node(
+        INJECT_HARNESS
+        + TWO_LEVEL_WALLET
+        + r"""
+(async () => {
+  const wallet = new Wallet();
+  const originals = [Base.prototype.request, Wallet.prototype.request];
+  announce(wallet);
+  assert.notEqual(Base.prototype.request, originals[0]);
+  assert.notEqual(Wallet.prototype.request, originals[1]);
+  const routes = [
+    () => wallet.request(tx),
+    () => Wallet.prototype.request.call(wallet, tx),
+    () => Base.prototype.request.call(wallet, tx),
+  ];
+  for (const route of routes) {
+    await assert.rejects(decideOn(route, 'block'), /blocked/);
+  }
+  for (const route of routes) {
+    const before = sent.length;
+    assert.equal(await decideOn(route, 'proceed'), 'base');
+    await flush();
+    assert.equal(sent.length, before + 1);
+  }
+  // Six decisions, one per request: the checked copy the subclass hands to super is not shown again.
+  assert.equal(intercepts().length, 6);
+  // A method that is not checked goes through both levels once, without looping.
+  assert.equal(await wallet.request({method: 'eth_accounts'}), 'base');
+  assert.equal(await Wallet.prototype.request.call(wallet, {method: 'eth_accounts'}), 'base');
+  assert.equal(sent.filter(args => args.method === 'eth_accounts').length, 2);
+  // Called on a prototype, there is no provider to check for, and nothing is replaced.
+  const replaced = Wallet.prototype.request;
+  await assert.rejects(Base.prototype.request.call(Wallet.prototype, tx), /blocked/);
+  assert.equal(Wallet.prototype.request, replaced);
+"""
+    )
+
+
+def test_the_prototype_walk_skips_platform_functions():
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  // A class chain with a platform function (native code) between two levels of wallet code.
+  class Top { async request(args) { sent.push(args); return 'top'; } send() {} }
+  class Platform extends Top {}
+  Platform.prototype.request = Array.prototype.push;
+  Platform.prototype.send = Array.prototype.join;
+  class Wallet extends Platform {
+    on() {}
+    async request(args) { if (args.method === 'eth_chainId') return '0x38'; sent.push(args); return 'wallet'; }
+  }
+  const originals = {top: Top.prototype.request, topSend: Top.prototype.send, wallet: Wallet.prototype.request};
+  const wallet = new Wallet();
+  for (const fn of windowListeners['eip6963:announceProvider']) {
+    fn(new CustomEvent('eip6963:announceProvider', {detail: {provider: wallet, info: {name: 'wallet'}}}));
+  }
+  assert.notEqual(Wallet.prototype.request, originals.wallet, 'the wallet code below it was not replaced');
+  assert.equal(Platform.prototype.request, Array.prototype.push, 'a platform function was replaced');
+  assert.equal(Platform.prototype.send, Array.prototype.join, 'a platform function was replaced');
+  // Wallet code above the platform level is still replaced.
+  assert.notEqual(Top.prototype.request, originals.top, 'the walk stopped at a platform function');
+  assert.notEqual(Top.prototype.send, originals.topSend, 'the walk stopped at a platform function');
+"""
+    )
+
+
+def test_a_prototype_request_that_cannot_be_replaced_is_left_as_it_is():
+    run_node(
+        INJECT_HARNESS
+        + TWO_LEVEL_WALLET
+        + r"""
+(async () => {
+  Object.defineProperty(Base.prototype, 'request', {value: Base.prototype.request, writable: false, configurable: false});
+  const locked = Base.prototype.request;
+  const wallet = new Wallet();
+  announce(wallet);
+  // That route stays the wallet's own (the README says so); the others are still checked.
+  assert.equal(Base.prototype.request, locked);
+  await assert.rejects(decideOn(() => wallet.request(tx), 'block'), /blocked/);
+  await assert.rejects(decideOn(() => Wallet.prototype.request.call(wallet, tx), 'block'), /blocked/);
+  // A second provider of the same class is wrapped just the same.
+  const second = new Wallet();
+  announce(second);
+  await assert.rejects(decideOn(() => second.request(tx), 'block'), /blocked/);
+  assert.equal(sent.length, 0);
+"""
+    )
+
+
+# A provider with the older send and sendAsync methods, on its prototype and, as MetaMask does,
+# bound onto the instance too. Every call that reaches it is recorded with its this.
+LEGACY_WALLET = r"""
+  const reached = [];
+  class Legacy {
+    constructor(bind) { if (bind) { this.send = this.send.bind(this); this.sendAsync = this.sendAsync.bind(this); } }
+    on() {}
+    async request(args) { if (args.method === 'eth_chainId') return '0x38'; sent.push(args); return 'sent'; }
+    sendAsync(payload, callback) { reached.push({name: 'sendAsync', self: this, payload}); callback(null, {result: 'async'}); }
+    send(first, second) {
+      reached.push({name: 'send', self: this, payload: first, second});
+      if (typeof first === 'string') return Promise.resolve('promised');
+      if (typeof second === 'function') { second(null, {result: 'called back'}); return undefined; }
+      return {result: 'sync'};
+    }
+  }
+  const tx = {to: '0x' + 'a'.repeat(40)};
+  // Calls the method as the page would: on the provider, or taken from the prototype.
+  const via = (wallet, route, name) => (...args) =>
+    route === 'prototype' ? Legacy.prototype[name].call(wallet, ...args) : wallet[name](...args);
+  const callback = () => { let done; const promise = new Promise(resolve => { done = resolve; });
+    const answer = {promise, called: false};
+    answer.fn = (error, result) => { answer.called = true; done({error, result}); };
+    return answer; };
+  // The harness's timers run only when fired.
+  const fireZeroDelayTimers = () => {
+    for (const [id, timer] of timers) if (timer.delay === 0) { timers.delete(id); timer.fn(); }
+  };
+"""
+
+
+@pytest.mark.parametrize("route", ["instance", "bound-instance", "prototype"])
+def test_send_and_send_async_refuse_checked_or_unreadable_methods(route):
+    run_node(
+        INJECT_HARNESS
+        + LEGACY_WALLET
+        + r"""
+(async () => {
+  const route = JSON.parse(process.argv[1]);
+  const wallet = new Legacy(route === 'bound-instance');
+  for (const fn of windowListeners['eip6963:announceProvider']) {
+    fn(new CustomEvent('eip6963:announceProvider', {detail: {provider: wallet, info: {name: 'legacy'}}}));
+  }
+  const send = via(wallet, route, 'send'), sendAsync = via(wallet, route, 'sendAsync');
+  const refusal = /cannot check wallet requests made with send or sendAsync/;
+  // Callback form: the error arrives through the callback.
+  for (const payload of [
+    {id: 1, jsonrpc: '2.0', method: 'eth_sendTransaction', params: [tx]},
+    [{method: 'eth_chainId'}, {method: 'personal_sign', params: ['0x00', tx.to]}],
+    {id: 2, params: []},
+    [{method: 'eth_chainId'}, 'not a payload'],
+    {method: 'eth_chainId', params: [() => {}]},
+  ]) {
+    const first = callback();
+    assert.equal(sendAsync(payload, first.fn), undefined);
+    const second = callback();
+    send(payload, second.fn);
+    assert(!first.called && !second.called, 'the callback was called before the caller returned');
+    fireZeroDelayTimers();
+    assert.match((await first.promise).error.message, refusal);
+    assert.match((await second.promise).error.message, refusal);
+  }
+  // send(method, params) rejects; send(payload) throws.
+  await assert.rejects(send('eth_sendTransaction', [tx]), refusal);
+  await assert.rejects(send('wallet_sendCalls', [{calls: [tx]}]), refusal);
+  assert.throws(() => send({method: 'eth_sign', params: [tx.to, '0x00']}), refusal);
+  assert.throws(() => send(undefined), refusal);
+  // sendAsync without a callback has no other way to answer.
+  assert.throws(() => sendAsync({method: 'eth_sendTransaction', params: [tx]}), refusal);
+  assert.deepEqual(reached, [], 'a refused call reached the wallet');
+""",
+        route,
+    )
+
+
+@pytest.mark.parametrize("route", ["instance", "bound-instance", "prototype"])
+def test_send_and_send_async_pass_other_methods_to_the_wallet(route):
+    run_node(
+        INJECT_HARNESS
+        + LEGACY_WALLET
+        + r"""
+(async () => {
+  const route = JSON.parse(process.argv[1]);
+  const wallet = new Legacy(route === 'bound-instance');
+  for (const fn of windowListeners['eip6963:announceProvider']) {
+    fn(new CustomEvent('eip6963:announceProvider', {detail: {provider: wallet, info: {name: 'legacy'}}}));
+  }
+  const send = via(wallet, route, 'send'), sendAsync = via(wallet, route, 'sendAsync');
+  const {promise, fn} = callback();
+  sendAsync({id: 1, jsonrpc: '2.0', method: 'eth_chainId'}, fn);
+  assert.deepEqual((await promise).result, {result: 'async'});
+  const batch = callback();
+  sendAsync([{method: 'eth_chainId'}, {method: 'eth_blockNumber'}], batch.fn);
+  assert.deepEqual((await batch.promise).result, {result: 'async'});
+  assert.equal(await send('eth_accounts'), 'promised');
+  assert.deepEqual(send({method: 'net_version'}), {result: 'sync'});
+  // A getter is read once: the wallet gets the copy that was read, with the method that was checked.
+  let reads = 0;
+  const shifty = {get method() { return reads++ === 0 ? 'eth_chainId' : 'eth_sendTransaction'; }};
+  const last = callback();
+  sendAsync(shifty, last.fn);
+  await last.promise;
+  assert.deepEqual(reached.map(call => call.name), ['sendAsync', 'sendAsync', 'send', 'send', 'sendAsync']);
+  assert(reached.every(call => call.self === wallet), 'the wallet method ran with another this');
+  assert.deepEqual(plain(reached[0].payload), {id: 1, jsonrpc: '2.0', method: 'eth_chainId'});
+  assert.equal(reached[2].payload, 'eth_accounts');
+  assert.notEqual(reached.at(-1).payload, shifty, "the wallet was handed the page's own payload");
+  assert.equal(reached.at(-1).payload.method, 'eth_chainId');
+  assert.equal(reads, 1);
+""",
+        route,
     )
 
 

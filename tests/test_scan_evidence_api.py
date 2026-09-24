@@ -394,7 +394,9 @@ def test_the_legacy_fallback_records_what_it_reports_and_no_analyzers(evidence_a
     )
     # The composite pipeline failed, so nothing it measured describes this verdict.
     assert (doc["analyzers"], doc["observed_block"]) == (None, None)
-    assert (doc["risk_level"], doc["policy_mode"], doc["failed_sources"]) == (None, None, None)
+    # It reports its policy mode, but no risk level and no failed sources.
+    assert doc["policy_mode"] == body["policy_mode"] == "BALANCED"
+    assert (doc["risk_level"], doc["failed_sources"]) == (None, None)
 
 
 def test_a_scan_links_its_stored_evidence(evidence_api, monkeypatch):

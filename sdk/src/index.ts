@@ -67,7 +67,7 @@ export interface ScanResult {
   coverage?: Record<string, number>;
   coverage_reasons?: Record<string, string>;
   risk_display?: string;
-  classification: string;
+  classification: 'SAFE' | 'CAUTION' | 'HIGH_RISK' | 'BLOCK_RECOMMENDED';
   risk_score: number;
   danger_signals: string[];
   shield_score?: RiskScore;

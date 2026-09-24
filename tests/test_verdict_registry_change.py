@@ -23,6 +23,7 @@ from tests.test_verdict_publisher import (
     FakeChain,
     decode_record,
     drain_all,
+    lease_expired,
     make_publisher,
     record_once,
     rpc_node,
@@ -110,6 +111,8 @@ async def test_only_a_confirmation_on_the_configured_registry_admits_a_guard_sub
     old = await record_once(db, chain, sender(db))
     assert old["onchain_status"] == "submitted"
     chain.catch_up()
+    # The process restarted with the new registry, so the old one's sender lease has run out.
+    await lease_expired(db)
     publisher = new_sender(db)
     with rpc_node(chain):
         assert await publisher._reconcile() == 0

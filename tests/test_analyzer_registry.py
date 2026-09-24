@@ -170,7 +170,7 @@ class TestMarketProviderCoverage:
             {'chainId': 'robinhood', 'liquidity': {'usd': 1000}, 'volume': {'h24': 200}},
         ]
         response = AsyncMock(status=200)
-        response.json.return_value = {'pairs': pairs}
+        response.json.return_value = pairs
         session = MagicMock()
         session.get.return_value.__aenter__.return_value = response
         with patch('services.dex_service.aiohttp.ClientSession') as session_type, patch(
@@ -190,7 +190,7 @@ class TestMarketProviderCoverage:
         from analyzers.market import MarketAnalyzer
 
         response = AsyncMock(status=200)
-        response.json.return_value = {'pairs': pairs}
+        response.json.return_value = pairs
         session = MagicMock()
         session.get.return_value.__aenter__.return_value = response
         with patch('services.dex_service.aiohttp.ClientSession') as session_type:

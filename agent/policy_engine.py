@@ -4,6 +4,8 @@ import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from core.verdicts import AGENT_ALLOW_BELOW, AGENT_BLOCK_ABOVE, ALLOW, BLOCK, WARN
+
 
 @dataclass
 class PolicyVerdict:
@@ -18,8 +20,8 @@ class PolicyVerdict:
 # Safe defaults when policy fields are missing
 DEFAULTS = {
     "mode": "threshold",
-    "auto_allow_below": 25,
-    "auto_block_above": 70,
+    "auto_allow_below": AGENT_ALLOW_BELOW,
+    "auto_block_above": AGENT_BLOCK_ABOVE,
     "max_spend_per_tx_usd": 1000,
     "max_spend_daily_usd": 10000,
     "max_slippage": 0.10,
@@ -63,7 +65,7 @@ class AgentPolicyEngine:
         # Treat NaN or negative risk scores as maximum risk
         if math.isnan(risk_score) or risk_score < 0:
             return PolicyVerdict(
-                verdict="BLOCK",
+                verdict=BLOCK,
                 checks={"risk_score_validation": f"fail — invalid score ({risk_score})"},
                 failed_checks=["risk_score_validation"],
             )
@@ -90,7 +92,7 @@ class AgentPolicyEngine:
         if target_lower in always_block:
             checks["contract_list"] = "fail — blocklist match"
             return PolicyVerdict(
-                verdict="BLOCK", checks=checks,
+                verdict=BLOCK, checks=checks,
                 failed_checks=["contract_list"],
             )
 
@@ -98,11 +100,11 @@ class AgentPolicyEngine:
             checks["contract_list"] = "pass — allowlist match"
             if uncertain:
                 return PolicyVerdict(
-                    verdict="WARN", checks=checks, failed_checks=uncertain,
+                    verdict=WARN, checks=checks, failed_checks=uncertain,
                     needs_owner_approval=True,
                 )
             return PolicyVerdict(
-                verdict="ALLOW", checks=checks, all_passed=True,
+                verdict=ALLOW, checks=checks, all_passed=True,
             )
 
         checks["contract_list"] = "pass — no list match"
@@ -137,7 +139,7 @@ class AgentPolicyEngine:
         if failed:
             checks["risk_threshold"] = "skip — hard gate failed"
             return PolicyVerdict(
-                verdict="BLOCK", checks=checks, failed_checks=failed,
+                verdict=BLOCK, checks=checks, failed_checks=failed,
             )
 
         # 4. Risk threshold
@@ -148,23 +150,23 @@ class AgentPolicyEngine:
             checks["risk_threshold"] = f"pass — score {risk_score} < {allow_below}"
             if uncertain:
                 return PolicyVerdict(
-                    verdict="WARN", checks=checks, failed_checks=uncertain,
+                    verdict=WARN, checks=checks, failed_checks=uncertain,
                     needs_owner_approval=True,
                 )
             return PolicyVerdict(
-                verdict="ALLOW", checks=checks, all_passed=True,
+                verdict=ALLOW, checks=checks, all_passed=True,
             )
 
         if risk_score > block_above:
             checks["risk_threshold"] = f"fail — score {risk_score} > {block_above}"
             failed.append("risk_threshold")
             return PolicyVerdict(
-                verdict="BLOCK", checks=checks, failed_checks=failed,
+                verdict=BLOCK, checks=checks, failed_checks=failed,
             )
 
         # Middle range → ask owner
         checks["risk_threshold"] = f"warn — score {risk_score} in [{allow_below}, {block_above}]"
         return PolicyVerdict(
-            verdict="WARN", checks=checks, failed_checks=uncertain,
+            verdict=WARN, checks=checks, failed_checks=uncertain,
             needs_owner_approval=True,
         )

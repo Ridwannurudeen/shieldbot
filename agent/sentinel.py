@@ -14,6 +14,7 @@ from typing import Optional
 
 from agent.prompts import HAIKU_MODEL, NARRATIVE_TEMPLATE
 from core.extension_formatter import is_scan_incomplete
+from core.verdicts import BLOCK_MIN
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +40,11 @@ class Sentinel:
     ) -> None:
         """Auto-watch the deployer when a contract is blocked with high risk.
 
-        Skips silently if risk_score < 71 or deployer is unknown.
+        Skips silently if risk_score is below the BLOCK_RECOMMENDED band or deployer is unknown.
         Never raises — all exceptions are caught and logged.
         """
         try:
-            if risk_score < 71 or deployer is None:
+            if risk_score < BLOCK_MIN or deployer is None:
                 return
 
             await self.tools.auto_watch_deployer(
@@ -135,7 +136,7 @@ class Sentinel:
         try:
             result = await self.tools.scan_contract(new_contract, chain_id)
             risk_score = result.get("risk_score", result.get("rug_probability"))
-            if risk_score is not None and risk_score >= 71:
+            if risk_score is not None and risk_score >= BLOCK_MIN:
                 action = "blocked"
             elif risk_score is None or is_scan_incomplete(result):
                 action = "unknown"
