@@ -184,8 +184,9 @@ class CounterpartyService:
                 "observed_at": observed_at,
             }
         key = (chain_id, lower)
-        if key in _FACTS_CACHE:
-            return copy.deepcopy(_FACTS_CACHE[key])
+        cached = _FACTS_CACHE.get(key)
+        if cached is not None:
+            return copy.deepcopy(cached)
         # Concurrent scans of one spender share a single lookup.
         flight_key = (asyncio.get_running_loop(), key)
         if flight_key not in _FACTS_INFLIGHT:

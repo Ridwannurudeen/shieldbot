@@ -305,8 +305,9 @@ class EvmAdapter(ChainAdapter):
         minutes. Only an answer with an age is kept, so a failed or undated lookup is asked again.
         """
         key = (self._chain_id, address.lower())
-        if key in self._creation_infos:
-            return dict(self._creation_infos[key])
+        cached = self._creation_infos.get(key)
+        if cached is not None:
+            return dict(cached)
         flight_key = (asyncio.get_running_loop(), key)
         if flight_key not in self._creation_inflight:
             self._creation_inflight[flight_key] = asyncio.create_task(

@@ -193,8 +193,9 @@ class ScamDatabase:
         if not _ETH_ADDR_RE.fullmatch(address):
             return {'status': 'unknown', 'reason': 'Invalid address', 'data': {}}
         key = address.lower()
-        if key in _GOPLUS_ADDRESS_CACHE:
-            return _GOPLUS_ADDRESS_CACHE[key]
+        cached = _GOPLUS_ADDRESS_CACHE.get(key)
+        if cached is not None:
+            return cached
         flight_key = (asyncio.get_running_loop(), key)
         if flight_key not in _GOPLUS_ADDRESS_INFLIGHT:
             _GOPLUS_ADDRESS_INFLIGHT[flight_key] = asyncio.create_task(
