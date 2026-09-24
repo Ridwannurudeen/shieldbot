@@ -1713,14 +1713,19 @@ async def _with_evidence(response: Dict, endpoint: str, chain_id: int, **trail) 
     evidence_url, where GET /evidence/{hash} shows it.
 
     The document is stored before its URL is returned, so the URL never names a missing document;
-    evidence_url is None when it could not be stored.
+    evidence_url is None when it could not be stored, and both are None when the document could not
+    be serialised. Neither failure withholds the verdict.
     """
-    document = build_scan_evidence(endpoint, chain_id, response, int(time.time()), **trail)
-    digest = evidence_hash(document)
-    url = None
-    if container and container.db:
+    digest = url = None
+    try:
+        document = build_scan_evidence(endpoint, chain_id, response, int(time.time()), **trail)
+        canonical = canonical_bytes(document).decode("utf-8")
+        digest = evidence_hash(document)
+    except (TypeError, ValueError) as e:
+        logger.error("Scan evidence could not be serialised: %s", type(e).__name__)
+    if digest and container and container.db:
         try:
-            await container.db.insert_scan_evidence(digest, canonical_bytes(document).decode("utf-8"))
+            await container.db.insert_scan_evidence(digest, canonical)
             url = f"{container.settings.public_api_url.rstrip('/')}/evidence/{digest}"
         except Exception as e:
             logger.error("Scan evidence store failed: %s", type(e).__name__)

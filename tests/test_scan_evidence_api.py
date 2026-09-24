@@ -288,6 +288,110 @@ def test_a_personal_sign_caller_is_masked_in_any_address_form(
     assert CALLER[2:].lower() not in stored["canonical"].lower()
 
 
+def test_a_document_that_cannot_be_serialised_leaves_the_verdict(evidence_api, monkeypatch):
+    api, client, database = evidence_api
+    monkeypatch.setattr(
+        api, "build_scan_evidence", lambda *args, **kwargs: {"risk_score": float("nan")}
+    )
+    insert = AsyncMock()
+    monkeypatch.setattr(database, "insert_scan_evidence", insert)
+    response = _firewall(client)
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["evidence_hash"], body["evidence_url"]) == (None, None)
+    assert body["classification"]
+    insert.assert_not_awaited()
+
+
+ROUTER = "0x" + "12" * 20
+PATH = ["0x" + "34" * 20, "0x" + "56" * 20]
+
+
+def test_a_router_swap_records_the_analyzers_of_every_path_token(evidence_api, monkeypatch):
+    api, client, _ = evidence_api
+
+    def decode(data):
+        if data.startswith("0x38ed1739"):
+            return {
+                "selector": "38ed1739",
+                "function_name": "swapExactTokensForTokens",
+                "category": "swap",
+                "params": {"param_2": PATH},
+            }
+        return _decode(data)
+
+    monkeypatch.setattr(
+        api,
+        "calldata_decoder",
+        SimpleNamespace(
+            decode=decode,
+            is_whitelisted_target=lambda address, **kwargs: (
+                "Router" if address.lower() == ROUTER else None
+            ),
+        ),
+    )
+    response = client.post(
+        "/api/firewall",
+        json={
+            "to": ROUTER,
+            "from": CALLER,
+            "value": "0",
+            "data": "0x38ed1739" + "00" * 32,
+            "chainId": 56,
+        },
+    )
+    assert response.status_code == 200
+    body, stored = _stored(client, response)
+    doc = stored["evidence"]
+    assert doc["target"] == ROUTER
+    assert set(doc["analyzers"]) == {
+        f"{token}:{name}"
+        for token in PATH
+        for name in ("structural", "market", "behavioral", "honeypot")
+    }
+    assert set(doc["coverage"]) == set(doc["analyzers"])
+    assert doc["observed_block"] == 777
+    assert (doc["classification"], doc["risk_level"]) == (
+        body["classification"],
+        body["shield_score"]["risk_level"],
+    )
+    assert doc["transaction"] is None
+
+
+def test_the_legacy_fallback_records_what_it_reports_and_no_analyzers(evidence_api, monkeypatch):
+    api, client, _ = evidence_api
+    api.container.registry.run_all.side_effect = RuntimeError("registry down")
+    monkeypatch.setattr(
+        api,
+        "token_scanner",
+        SimpleNamespace(
+            check_token=AsyncMock(
+                return_value={
+                    "risk_score": 20,
+                    "is_verified": True,
+                    "scam_matches": [],
+                    "status": "ok",
+                    "coverage": {"is_verified": True, "scam_database": True},
+                    "coverage_reasons": {},
+                }
+            )
+        ),
+    )
+    response = _firewall(client)
+    assert response.status_code == 200
+    body, stored = _stored(client, response)
+    doc = stored["evidence"]
+    assert "shield_score" not in body
+    assert (doc["target"], doc["classification"], doc["risk_score"]) == (
+        TARGET,
+        body["classification"],
+        body["risk_score"],
+    )
+    # The composite pipeline failed, so nothing it measured describes this verdict.
+    assert (doc["analyzers"], doc["observed_block"]) == (None, None)
+    assert (doc["risk_level"], doc["policy_mode"], doc["failed_sources"]) == (None, None, None)
+
+
 def test_a_scan_links_its_stored_evidence(evidence_api, monkeypatch):
     api, client, _ = evidence_api
     monkeypatch.setattr(
