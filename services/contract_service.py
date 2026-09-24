@@ -2,6 +2,8 @@ import asyncio
 import logging
 import time
 
+from utils.scam_db import ScamDatabase
+
 logger = logging.getLogger(__name__)
 
 # Bytecode signatures for dangerous patterns
@@ -80,6 +82,15 @@ class ContractService:
             if failed_providers:
                 results['coverage'] = {'scam_database': False}
                 results['reason'] = 'Scam database unavailable: ' + '; '.join(failed_providers)
+
+            # When the explorer did not answer, GoPlus's record for the token (already fetched for
+            # the scam check) says whether the source is open, which is the same fact.
+            if results['is_verified'] is None:
+                security = await ScamDatabase.fetch_token_security(address, chain_id)
+                open_source = security['data'].get('is_open_source') if security['status'] == 'ok' else None
+                if open_source in ('0', '1'):
+                    results['is_verified'] = open_source == '1'
+                    results['field_providers'] = {'is_verified': 'goplus'}
 
             # Ownership (RPC call, not BscScan)
             ownership = await self.web3_client.get_ownership_info(address, chain_id=chain_id)

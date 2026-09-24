@@ -95,12 +95,14 @@ class ScamDatabase:
         matches = []
         failed_providers = []
 
-        # Check local blacklist
+        # Check local blacklist. Three community reports put an address here, which is not enough
+        # evidence for a block.
         if address.lower() in self.known_scams:
             matches.append({
                 'type': 'Local Blacklist',
                 'reason': 'Known scam address',
-                'source': 'ShieldBot'
+                'source': 'ShieldBot',
+                'severity': 'high',
             })
 
         # Check GoPlus Security
@@ -177,13 +179,24 @@ class ScamDatabase:
         if response['status'] != 'ok' and response['reason'] != _GOPLUS_NO_DATA:
             return ScamMatches(failed_providers=(response['reason'],), observed_at=response.get('observed_at', 0))
         result = response['data']
-        flags = []
+        # GoPlus labels the token itself a scam: block. The optional keys are absent unless set, and
+        # the record is the answer, so an absent key means not flagged. fake_token is an object.
+        block_flags = []
+        if result.get('is_airdrop_scam') == '1':
+            block_flags.append('Airdrop scam token')
+        fake_token = result.get('fake_token')
+        if isinstance(fake_token, dict) and str(fake_token.get('value')) == '1':
+            block_flags.append('Counterfeit of a mainstream token')
+        # A restriction that makes the token dangerous to hold: the 70 floor. is_blacklisted means
+        # the contract has a blacklist function (USDT on Ethereum has one), not that GoPlus has
+        # blacklisted the token. Not open source is the explorer's unverified finding, which
+        # structural scoring already counts. honeypot_with_same_creator describes the deployer,
+        # not the token: GoPlus sets it on Binance-Peg Dogecoin.
+        flags = list(block_flags)
         if result.get('is_blacklisted') == '1':
-            flags.append('Blacklisted token')
+            flags.append('Contract has a blacklist function')
         if result.get('is_honeypot') == '1':
             flags.append('Honeypot (GoPlus)')
-        if result.get('is_open_source') == '0':
-            flags.append('Not open source')
         if result.get('cannot_sell_all') == '1':
             flags.append('Cannot sell all tokens')
         if result.get('owner_change_balance') == '1':
@@ -193,6 +206,7 @@ class ScamDatabase:
                 'type': 'GoPlus Security',
                 'reason': '; '.join(flags),
                 'source': 'gopluslabs.io',
+                'severity': 'block' if block_flags else 'high',
             }], observed_at=response.get('observed_at', 0))
         return ScamMatches(observed_at=response.get('observed_at', 0))
     

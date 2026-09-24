@@ -195,7 +195,7 @@ class RiskEngine:
             if contract_data.get('scam_matches'):
                 composite = max(composite, 70)
 
-        # A block-severity scam match (a GoPlus blacklist) is a BLOCK on every target type.
+        # A block-severity scam match (GoPlus labels the token a scam) is a BLOCK on every target type.
         floor = 90 if any(match.get('severity') == 'block' for match in contract_data.get('scam_matches') or []) else 0
         composite = max(composite, floor)
 
@@ -351,7 +351,7 @@ class RiskEngine:
 
         # Hard floors: a rule an analyzer declares from evidence it owns (an approval to a wallet, a
         # pay-to-claim contract) holds whatever the weighted mean and the discount say, and so does
-        # a block-severity scam match (a GoPlus blacklist).
+        # a block-severity scam match (GoPlus labels the token a scam).
         floor = max((result.data.get('floor') or 0 for result in results if not result.error), default=0)
         if any(match.get('severity') == 'block' for match in contract_data.get('scam_matches') or []):
             floor = max(floor, 90)

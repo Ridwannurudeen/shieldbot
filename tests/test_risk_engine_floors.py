@@ -150,9 +150,9 @@ def test_no_floor_reports_none():
     assert risk["rug_probability"] == 9.6
 
 
-BLACKLISTED = {
+AIRDROP_SCAM = {
     "type": "GoPlus Security",
-    "reason": "Blacklisted token",
+    "reason": "Airdrop scam token",
     "source": "gopluslabs.io",
     "severity": "block",
 }
@@ -183,7 +183,7 @@ def _scam_risk(entrypoint, is_token, match):
 @pytest.mark.parametrize("entrypoint", ["direct", "registry"])
 @pytest.mark.parametrize("is_token", [True, False])
 def test_block_severity_scam_match_floors_at_90_on_both_entry_points(entrypoint, is_token):
-    risk = _scam_risk(entrypoint, is_token, BLACKLISTED)
+    risk = _scam_risk(entrypoint, is_token, AIRDROP_SCAM)
     assert risk["rug_probability"] == 90
     assert risk["risk_level"] == "HIGH"
 
