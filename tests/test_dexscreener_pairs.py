@@ -21,6 +21,7 @@ REPLIES = json.loads(
 )
 API = "https://api.dexscreener.com"
 USDT = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 WBNB = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
 # The approved token in the landing page's honeypot capture; DexScreener lists no pair for it.
 HONEYPOT = "0xdbda907a02750f79cbf0414f7112eabe5091c286"
@@ -96,3 +97,65 @@ async def test_the_deepest_pool_without_a_creation_time_leaves_pair_age_unknown(
     assert result["status"] == "unknown"
     assert result["reason"] == "Missing DexScreener fields: pair_age_hours"
     assert counts(ledger, 56) == {"answered": 1, "unknown": 0, "failed": 0}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "address, chain_id, expected",
+    [
+        (
+            USDT,
+            1,
+            {
+                "token_name": "Tether USD",
+                "token_symbol": "USDT",
+                "price_usd": 0.9996,
+                "price_change_24h": -0.01,
+                "fdv": 88274266419,
+                "liquidity_usd": 50152955.91,
+                "status": "ok",
+            },
+        ),
+        (
+            USDC,
+            8453,
+            {
+                "token_name": "USD Coin",
+                "token_symbol": "USDC",
+                "price_usd": 0.9999,
+                # USDC's deepest own pair, USDC/USDbC on Aerodrome, reports no 24h change.
+                "price_change_24h": None,
+                "fdv": 4262511047,
+                "liquidity_usd": 37153848.31,
+                "status": "unknown",
+            },
+        ),
+    ],
+    ids=["usdt-ethereum", "usdc-base"],
+)
+async def test_the_token_is_described_only_by_pairs_it_is_the_base_token_of(
+    ledger, address, chain_id, expected
+):
+    # A pair's price, 24h change and FDV are its base token's. USDT is the quote token of its
+    # deepest Ethereum pool (USDS/USDT) and USDC of its deepest Base pool (AERO/USDC), whose
+    # liquidity is still theirs; read from those pairs, USDC was Aerodrome at $0.72.
+    result, _ = await market(address, chain_id)
+
+    assert {key: result[key] for key in expected} == expected
+    assert counts(ledger, chain_id) == {"answered": 1, "unknown": 0, "failed": 0}
+
+
+@pytest.mark.asyncio
+async def test_a_token_that_is_only_ever_the_quote_token_has_no_price(ledger):
+    url = f"{API}/token-pairs/v1/ethereum/{USDT}"
+    quoted = [pair for pair in REPLIES[url] if pair["baseToken"]["address"] != USDT]
+    result, _ = await market(USDT, 1, {url: quoted})
+
+    assert result["liquidity_usd"] == 50152955.91
+    assert result["token_symbol"] is None
+    assert result["price_usd"] is None
+    assert result["price_change_24h"] is None
+    assert result["fdv"] is None
+    assert result["status"] == "unknown"
+    assert result["reason"] == "Missing DexScreener fields: price_usd, price_change_24h, fdv"
+    assert counts(ledger, 1) == {"answered": 1, "unknown": 0, "failed": 0}

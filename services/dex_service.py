@@ -67,15 +67,24 @@ class DexService:
                 defaults['reason'] = f'No DexScreener pairs on requested chain ({slug})'
                 return defaults
 
-            # Use the highest-liquidity pair for price/liquidity/FDV metrics
-            pair = max(pairs, key=lambda p: float((p.get('liquidity') or {}).get('usd', 0) or 0))
+            # Deepest pool first. Liquidity and pair age are the deepest pool's, whichever side
+            # of it the token is on.
+            pairs.sort(key=lambda p: float((p.get('liquidity') or {}).get('usd', 0) or 0), reverse=True)
+            deepest = pairs[0]
+            # A pair's price, 24h change, FDV and names are its base token's, so they come from the
+            # deepest pair with the token as base token, and are unknown without one.
+            token = address.lower()
+            pair = next(
+                (p for p in pairs if ((p.get('baseToken') or {}).get('address') or '').lower() == token),
+                {},
+            )
 
             base_token = pair.get('baseToken') or {}
             token_name = base_token.get('name')
             token_symbol = base_token.get('symbol')
             values = {
                 'price_usd': pair.get('priceUsd'),
-                'liquidity_usd': (pair.get('liquidity') or {}).get('usd'),
+                'liquidity_usd': (deepest.get('liquidity') or {}).get('usd'),
                 'price_change_24h': (pair.get('priceChange') or {}).get('h24'),
                 'fdv': pair.get('fdv'),
             }
@@ -97,7 +106,7 @@ class DexService:
                 total = sum(float(v) for v in volumes)
                 volume_24h = total if math.isfinite(total) else None
 
-            pair_created = pair.get('pairCreatedAt')
+            pair_created = deepest.get('pairCreatedAt')
             if pair_created:
                 pair_age_hours = (time.time() * 1000 - pair_created) / (1000 * 3600)
             else:
