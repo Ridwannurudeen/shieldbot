@@ -53,8 +53,10 @@ async def _lookup(scam_db, address=ADDRESS, chain_id=56):
         return await scam_db.check_address(address, chain_id=chain_id)
 
 
-async def _report_three_times(scam_db, address=ADDRESS):
-    results = [await scam_db.report_address(address, f"user-{index}") for index in range(3)]
+async def _report_three_times(scam_db, address=ADDRESS, chain_id=56):
+    results = [
+        await scam_db.report_address(address, f"user-{index}", chain_id) for index in range(3)
+    ]
     return results[-1]
 
 
@@ -69,11 +71,55 @@ async def test_community_entry_survives_a_restart(db_path):
     db, restarted = await _open(db_path)
     try:
         assert await _lookup(restarted) == [COMMUNITY_MATCH]
-        # The bot's reports carry no chain, so the entry covers every chain.
-        assert await _lookup(restarted, chain_id=1) == [COMMUNITY_MATCH]
         [row] = await db.get_active_blacklist(time.time())
-        assert (row["source"], row["chain_id"], row["reports"]) == ("community", None, 3)
+        assert (row["source"], row["chain_id"], row["reports"]) == ("community", 56, 3)
         assert row["expires_at"] == pytest.approx(row["created_at"] + COMMUNITY_BLACKLIST_TTL)
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_a_bsc_report_does_not_list_the_address_on_ethereum(db_path):
+    db, scam_db = await _open(db_path)
+    try:
+        await _report_three_times(scam_db, chain_id=56)
+        assert await _lookup(scam_db, chain_id=56) == [COMMUNITY_MATCH]
+        assert await _lookup(scam_db, chain_id=1) == []
+        # The BSC entry does not count as a listing on Ethereum: a report there starts its own count.
+        other_chain = await scam_db.report_address(ADDRESS, "user-9", 1)
+        assert (other_chain["blacklisted"], other_chain["reports"]) == (False, 1)
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_reporting_a_listed_address_leaves_its_expiry_and_count(db_path):
+    db, scam_db = await _open(db_path)
+    try:
+        await _report_three_times(scam_db)
+        [before] = await db.get_active_blacklist(time.time())
+        with patch("utils.scam_db.time.time", return_value=time.time() + 86400):
+            for index in range(3, 6):
+                result = await scam_db.report_address(ADDRESS, f"user-{index}", 56)
+                assert (result["blacklisted"], result["reports"]) == (True, 3)
+        [after] = await db.get_active_blacklist(time.time())
+        assert after == before
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_pending_reports_age_out_after_thirty_days(db_path):
+    db, scam_db = await _open(db_path)
+    try:
+        start = time.time()
+        with patch("utils.scam_db.time.time", return_value=start):
+            await scam_db.report_address(ADDRESS, "user-0", 56)
+            await scam_db.report_address(ADDRESS, "user-1", 56)
+        with patch("utils.scam_db.time.time", return_value=start + COMMUNITY_BLACKLIST_TTL + 1):
+            result = await scam_db.report_address(ADDRESS, "user-2", 56)
+        assert (result["blacklisted"], result["reports"]) == (False, 1)
+        assert await db.get_active_blacklist(0) == []
     finally:
         await db.close()
 
@@ -109,9 +155,11 @@ async def test_prune_keeps_unexpired_and_admin_entries(db_path):
 async def test_protected_address_is_never_blacklisted(db_path):
     db, scam_db = await _open(db_path)
     try:
-        refused = [await scam_db.report_address(PROTECTED, f"user-{index}") for index in range(3)]
+        refused = [
+            await scam_db.report_address(PROTECTED, f"user-{index}", 56) for index in range(3)
+        ]
         assert not any(result["accepted"] for result in refused)
-        await scam_db.add_to_blacklist(PROTECTED, reports=3)
+        await scam_db.add_to_blacklist(PROTECTED, 3, 56)
         assert await scam_db.confirm_scam(PROTECTED, None, "claimed scam") is False
         assert await db.get_active_blacklist(0) == []
 
@@ -127,7 +175,7 @@ async def test_protected_address_is_never_blacklisted(db_path):
 async def test_admin_confirmation_makes_a_community_entry_a_permanent_full_match(db_path):
     db, scam_db = await _open(db_path)
     await _report_three_times(scam_db)
-    assert await scam_db.confirm_scam(ADDRESS, None, "reviewed")
+    assert await scam_db.confirm_scam(ADDRESS, 56, "reviewed")
     assert await _lookup(scam_db) == [ADMIN_MATCH]
     await db.close()
 
@@ -145,7 +193,7 @@ async def test_admin_confirmation_makes_a_community_entry_a_permanent_full_match
             "reviewed",
         )
         # A later community threshold never downgrades a confirmed entry.
-        await restarted.add_to_blacklist(ADDRESS, reports=3)
+        await restarted.add_to_blacklist(ADDRESS, 3, 56)
         assert await _lookup(restarted) == [ADMIN_MATCH]
     finally:
         await db.close()
@@ -156,10 +204,11 @@ async def test_admin_can_remove_an_entry(db_path):
     db, scam_db = await _open(db_path)
     try:
         await _report_three_times(scam_db)
-        assert await scam_db.remove_from_blacklist(ADDRESS, None) is True
+        assert await scam_db.remove_from_blacklist(ADDRESS, 1) is False
+        assert await scam_db.remove_from_blacklist(ADDRESS, 56) is True
         assert await _lookup(scam_db) == []
         assert await db.get_active_blacklist(0) == []
-        assert await scam_db.remove_from_blacklist(ADDRESS, None) is False
+        assert await scam_db.remove_from_blacklist(ADDRESS, 56) is False
     finally:
         await db.close()
 
@@ -171,12 +220,16 @@ async def test_a_chain_scoped_entry_matches_only_its_chain(db_path):
         assert await scam_db.confirm_scam(ADDRESS, 56, "drainer on BNB Chain")
         assert await _lookup(scam_db, chain_id=56) == [ADMIN_MATCH]
         assert await _lookup(scam_db, chain_id=1) == []
-        # The every-chain community entry and the chain entry are separate rows.
-        await scam_db.add_to_blacklist(ADDRESS, reports=3)
-        assert await _lookup(scam_db, chain_id=56) == [ADMIN_MATCH]
+        # An every-chain admin entry covers chains that have no entry of their own, and outranks a
+        # community entry on the same chain.
+        await scam_db.add_to_blacklist(ADDRESS, 3, 1)
         assert await _lookup(scam_db, chain_id=1) == [COMMUNITY_MATCH]
-        assert await scam_db.remove_from_blacklist(ADDRESS, 56) is True
-        assert await _lookup(scam_db, chain_id=56) == [COMMUNITY_MATCH]
+        assert await scam_db.confirm_scam(ADDRESS, None, "drainer everywhere")
+        assert await _lookup(scam_db, chain_id=1) == [ADMIN_MATCH]
+        assert await _lookup(scam_db, chain_id=137) == [ADMIN_MATCH]
+        assert await scam_db.remove_from_blacklist(ADDRESS, None) is True
+        assert await _lookup(scam_db, chain_id=1) == [COMMUNITY_MATCH]
+        assert await _lookup(scam_db, chain_id=137) == []
     finally:
         await db.close()
 
@@ -289,14 +342,21 @@ def test_admin_confirmation_writes_each_on_chain_record_at_most_once(admin_api):
     _, client, services = admin_api
     for address, chain_id in ((MIXED_CASE, 56), (MIXED_CASE.lower(), 56), (MIXED_CASE, 1)):
         response = client.post(
-            "/api/admin/blacklist", headers=ADMIN_HEADERS, json={"address": address, "chainId": chain_id},
+            "/api/admin/blacklist",
+            headers=ADMIN_HEADERS,
+            json={"address": address, "chainId": chain_id},
         )
         assert response.status_code == 200
     services.onchain_recorder.record_scan_fire_and_forget.assert_awaited_once_with(
-        MIXED_CASE.lower(), "high", "report",
+        MIXED_CASE.lower(),
+        "high",
+        "report",
     )
     services.base_attestor.attest_fire_and_forget.assert_awaited_once_with(
-        MIXED_CASE.lower(), "high", "report", source_chain_id=56,
+        MIXED_CASE.lower(),
+        "high",
+        "report",
+        source_chain_id=56,
     )
 
 
@@ -307,7 +367,9 @@ def test_an_unavailable_writer_is_not_claimed(admin_api):
     services.onchain_recorder.record_scan_fire_and_forget.assert_not_awaited()
     services.onchain_recorder.is_available.return_value = True
     client.post("/api/admin/blacklist", headers=ADMIN_HEADERS, json={"address": ADDRESS})
-    services.onchain_recorder.record_scan_fire_and_forget.assert_awaited_once_with(ADDRESS, "high", "report")
+    services.onchain_recorder.record_scan_fire_and_forget.assert_awaited_once_with(
+        ADDRESS, "high", "report"
+    )
     services.base_attestor.attest_fire_and_forget.assert_awaited_once()
 
 
@@ -337,16 +399,22 @@ async def test_an_on_chain_claim_is_permanent(db_path):
 
 
 @pytest.mark.asyncio
-async def test_a_report_of_a_listed_address_gives_its_count_and_whether_an_admin_confirmed_it(db_path):
+async def test_a_report_of_a_listed_address_gives_its_count_and_whether_an_admin_confirmed_it(
+    db_path,
+):
     db, scam_db = await _open(db_path)
     try:
         await _report_three_times(scam_db)
-        repeat = await scam_db.report_address(ADDRESS, "user-9")
+        repeat = await scam_db.report_address(ADDRESS, "user-9", 56)
         assert (repeat["blacklisted"], repeat["reports"], repeat["confirmed"]) == (True, 3, False)
         other = "0x" + "22" * 20
         assert await scam_db.confirm_scam(other, None, "drainer")
-        confirmed = await scam_db.report_address(other, "user-9")
-        assert (confirmed["blacklisted"], confirmed["reports"], confirmed["confirmed"]) == (True, 0, True)
+        confirmed = await scam_db.report_address(other, "user-9", 56)
+        assert (confirmed["blacklisted"], confirmed["reports"], confirmed["confirmed"]) == (
+            True,
+            0,
+            True,
+        )
     finally:
         await db.close()
 

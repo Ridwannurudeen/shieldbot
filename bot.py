@@ -348,12 +348,15 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "❌ Please provide an address and reason.\n\n"
             "Usage: `/report <address> <reason>`\n"
-            "Example: `/report 0x1234...5678 honeypot scam`",
+            "Example: `/report 0x1234...5678 honeypot scam`\n"
+            "Tip: Use chain prefixes like `/report eth:0x... <reason>`; without one the report is for your current chain.",
             parse_mode='Markdown'
         )
         return
 
-    address = context.args[0]
+    # The report is for the chain a /scan of the same text would check.
+    prefix_chain_id, address = parse_chain_prefix(context.args[0])
+    chain_id = web3_client.validate_chain_id(prefix_chain_id or _get_user_chain_id(context))
     reason = ' '.join(context.args[1:])
 
     if not web3_client.is_valid_address(address):
@@ -361,7 +364,7 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Community report with safeguards
-    result = await scam_db.report_address(address, str(update.effective_user.id))
+    result = await scam_db.report_address(address, str(update.effective_user.id), chain_id)
 
     if not result["accepted"]:
         await update.message.reply_text(f"❌ {result['reason']}")
@@ -377,6 +380,7 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response = f"""✅ **Scam Report — Address Blacklisted**
 
 **Address:** `{address}`
+**Chain:** {get_chain_name(chain_id)}
 **Reason:** {escape_markdown(reason)}
 **Reporter:** User {update.effective_user.id}
 
@@ -386,6 +390,7 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response = f"""📝 **Report Recorded**
 
 **Address:** `{address}`
+**Chain:** {get_chain_name(chain_id)}
 **Reason:** {escape_markdown(reason)}
 **Progress:** {result['reports']}/{result['needed']} independent reports needed to blacklist.
 

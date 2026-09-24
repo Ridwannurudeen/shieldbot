@@ -94,8 +94,8 @@ class ScamDatabase:
         # The Database; the service container sets it. Only blacklist writes and loads use it.
         self.db = None
 
-        # Pending reports: address -> set of (reporter_id, timestamp)
-        self._pending_reports: dict[str, set[tuple[str, float]]] = {}
+        # Pending reports: (chain_id, address) -> set of (reporter_id, timestamp)
+        self._pending_reports: dict[tuple[int, str], set[tuple[str, float]]] = {}
 
         # Per-user rate limiting: reporter_id -> list of timestamps
         self._user_report_times: dict[str, list[float]] = {}
@@ -354,8 +354,10 @@ class ScamDatabase:
         await self.db.prune_scam_blacklist(time.time())
         await self.load_blacklist()
 
-    async def report_address(self, address: str, reporter_id: str) -> dict:
+    async def report_address(self, address: str, reporter_id: str, chain_id: int) -> dict:
         """Community report with rate-limiting, whitelist protection, and multi-report threshold.
+
+        Reports count per chain, and the entry they make lists the address on that chain only.
 
         Returns:
             {"accepted": bool, "reason": str, "blacklisted": bool, "reports": int, "needed": int}
@@ -385,28 +387,32 @@ class ScamDatabase:
         times.append(now)
         self._user_report_times[uid] = times
 
-        # 3. Already blacklisted
-        entry = self._active_entry((None, addr))
-        if entry:
+        # 3. Already blacklisted, on this chain or on every chain; an admin entry answers first
+        entries = [entry for entry in (self._active_entry((chain_id, addr)), self._active_entry((None, addr))) if entry]
+        if entries:
+            entry = min(entries, key=lambda entry: entry['source'] != 'admin')
             return {
                 "accepted": True, "reason": "Already blacklisted.",
                 "blacklisted": True, "reports": entry['reports'], "needed": _REPORT_THRESHOLD,
                 "confirmed": entry['source'] == 'admin',
             }
 
-        # 4. Add to pending reports (deduplicate by reporter)
-        pending = self._pending_reports.setdefault(addr, set())
-        # Remove any prior report from this user
-        pending = {(rid, ts) for rid, ts in pending if rid != uid}
+        # 4. Add to pending reports (deduplicate by reporter). A report older than an entry's lifetime
+        # no longer counts.
+        key = (chain_id, addr)
+        pending = {
+            (rid, ts) for rid, ts in self._pending_reports.get(key, set())
+            if rid != uid and now - ts < COMMUNITY_BLACKLIST_TTL
+        }
         pending.add((uid, now))
-        self._pending_reports[addr] = pending
+        self._pending_reports[key] = pending
 
         unique_reporters = len({rid for rid, _ in pending})
 
         # 5. Threshold check
         if unique_reporters >= _REPORT_THRESHOLD:
-            await self.add_to_blacklist(address, reports=unique_reporters)
-            self._pending_reports.pop(addr, None)
+            await self.add_to_blacklist(address, unique_reporters, chain_id)
+            self._pending_reports.pop(key, None)
             logger.info("Address %s blacklisted after %d independent reports", address, unique_reporters)
             return {
                 "accepted": True, "reason": "Threshold met — address blacklisted.",
@@ -421,7 +427,7 @@ class ScamDatabase:
             "blacklisted": False, "reports": unique_reporters, "needed": _REPORT_THRESHOLD,
         }
 
-    async def add_to_blacklist(self, address: str, reports: int, chain_id: Optional[int] = None):
+    async def add_to_blacklist(self, address: str, reports: int, chain_id: Optional[int]):
         """Add a community entry (skips protected addresses). It expires after COMMUNITY_BLACKLIST_TTL
         unless an admin confirms it, and never replaces an admin entry."""
         addr = address.lower()

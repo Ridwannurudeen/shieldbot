@@ -309,6 +309,26 @@ class TestNoOnChainRecordingPromise:
         attestor.attest_fire_and_forget.assert_not_awaited()
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("raw, user_data, chain_id", [
+        ("eth:0x" + "0" * 39 + "1", {"chain_id": 56}, 1),
+        ("0x" + "0" * 39 + "1", {"chain_id": 8453}, 8453),
+        ("0x" + "0" * 39 + "1", {}, 56),
+    ])
+    async def test_a_report_is_for_the_chain_a_scan_would_use(self, bot_module, monkeypatch, raw, user_data, chain_id):
+        report_address = AsyncMock(return_value={"accepted": True, "blacklisted": False, "reports": 1, "needed": 3})
+        monkeypatch.setattr(bot_module, "scam_db", SimpleNamespace(report_address=report_address))
+        monkeypatch.setattr(bot_module, "web3_client", SimpleNamespace(
+            validate_chain_id=lambda chain: chain, is_valid_address=lambda address: True,
+        ))
+        update = MagicMock(spec=Update)
+        update.message.reply_text = AsyncMock()
+        update.effective_user.id = 42
+
+        await bot_module.report_command(update, SimpleNamespace(args=[raw, "drainer"], user_data=user_data))
+
+        report_address.assert_awaited_once_with("0x" + "0" * 39 + "1", "42", chain_id)
+
+    @pytest.mark.asyncio
     async def test_a_report_of_an_admin_confirmed_address_says_it_is_confirmed(self, bot_module, monkeypatch):
         result = {
             "accepted": True, "reason": "Already blacklisted.", "blacklisted": True, "reports": 0, "needed": 3,
