@@ -11,7 +11,12 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
-from services.rescue_service import APPROVAL_TOPIC, RESULT_CACHE_SECONDS, RescueService
+from services.rescue_service import (
+    APPROVAL_TOPIC,
+    RESULT_CACHE_SECONDS,
+    RPC_UNAVAILABLE_REASON,
+    RescueService,
+)
 
 _real_sleep = asyncio.sleep
 
@@ -249,6 +254,17 @@ async def test_a_wallet_scan_is_reused_for_a_short_time_per_chain():
     assert again is first and repeat_rpc.calls == []
     assert other["chain_id"] == 42161 and other_rpc.calls
     assert fresh is not first and fresh_rpc.calls
+
+
+@pytest.mark.asyncio
+async def test_a_scan_the_rpc_could_not_answer_is_not_reused():
+    service = rescue_service()
+    failed, _, _ = await scan(lambda payload: RATE_LIMITED, 4663, service)
+    retried, retry_rpc, _ = await scan(chain_handler(), 4663, service)
+
+    assert failed["coverage_reasons"] == {"allowances": RPC_UNAVAILABLE_REASON}
+    assert retry_rpc.calls
+    assert [a["risk_level"] for a in retried["approvals"]] == ["HIGH"]
 
 
 @pytest.mark.asyncio
