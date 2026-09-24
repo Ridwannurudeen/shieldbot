@@ -3,7 +3,10 @@
 Every ShieldBot contract deployed to a public chain. Each value below was read from the chain on
 **2026-09-24** with read-only calls (`eth_call`, `eth_getCode`, transaction receipts and blocks) on the
 public RPCs `https://mainnet.base.org` and `https://bsc-dataseed1.binance.org/`; creation transactions and
-event logs of the Base attestor come from base.blockscout.com, and source matches from Sourcify. A
+event logs of the Base attestor come from base.blockscout.com, and source matches from Sourcify. The two
+BSC deployment transactions are the ones the repository already recorded (`docs/DEPLOYMENT.md` for the
+verifier, `bsc.address` for the unused second one); their receipts, read from
+`https://bsc-dataseed1.binance.org/`, show each creating the contract listed below. A
 contract only receives records while the service that writes to it holds its key, so this page says
 what can write to each contract, not whether production is doing so.
 
