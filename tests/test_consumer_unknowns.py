@@ -713,6 +713,52 @@ assert(ctx.approvalsEl.innerHTML.includes('risk-low'));
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.parametrize('stored, chain_id', [({'selectedChainId': 8453}, 8453), ({}, 56)])
+def test_extension_wallet_health_scans_the_selected_chain_and_shows_a_failed_scan_as_unknown(stored, chain_id):
+    import json
+    from pathlib import Path
+    import shutil
+    import subprocess
+
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('Node.js is required for extension JavaScript regression tests')
+    script = '''
+const fs = require('fs');
+const vm = require('vm');
+const assert = require('assert/strict');
+const [stored, chainId] = JSON.parse(process.argv[1]);
+function element() {return {innerHTML: '', textContent: '', style: {}};}
+const requested = [];
+const context = {
+  URLSearchParams, location: {search: ''}, t: key => key, escapeHtml: String,
+  AbortController, setTimeout, clearTimeout,
+  document: {addEventListener() {}, createElement: element, getElementById: element},
+  chrome: {runtime: {sendMessage() {}}, storage: {local: {get(defaults, done) { done({...defaults, ...stored}); }, set() {}}}},
+  fetch: async (url) => { requested.push(url); return {ok: false, status: 503, json: async () => ({})}; },
+};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync('extension/popup.js', 'utf8'), context);
+context.escapeHtml = String;
+const ctx = {compact: true, scoreNumEl: element(), statsEl: element(), approvalsEl: element(),
+  resultEl: element(), loadingEl: element(), errorEl: element()};
+(async () => {
+  await context.runHealthScan('0x' + 'a'.repeat(40), ctx);
+  assert.deepEqual(requested, [`https://api.shieldbotsecurity.online/api/rescue/0x${'a'.repeat(40)}?chain_id=${chainId}`]);
+  assert.notEqual(ctx.errorEl.style.display, 'block');
+  assert.equal(ctx.scoreNumEl.textContent, '?');
+  assert(ctx.approvalsEl.innerHTML.includes('Unknown: Approval scan unavailable (HTTP 503)'));
+  assert.equal(ctx.resultEl.style.display, 'block');
+})().catch((error) => { console.error(error); process.exit(1); });
+'''
+    result = subprocess.run(
+        [node, '-e', script, json.dumps([stored, chain_id])],
+        cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True,
+        encoding='utf-8', check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.parametrize('surface', ['popup-compact', 'popup-dashboard', 'sidepanel-guardian'])
 def test_extension_unknown_value_at_risk_is_never_zero(surface):
     import json
