@@ -1,21 +1,18 @@
 """RPC Proxy FastAPI router — mounted under /rpc/{chain_id}."""
 
-import time
 import logging
-from collections import defaultdict
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from core.rate_limit import RateLimiter
 from utils.web3_client import UnsupportedChainError
 
 logger = logging.getLogger(__name__)
 
 rpc_router = APIRouter()
 
-# Rate limiter: 100 req/min per IP
-_rpc_hits: dict = defaultdict(list)
-_RPC_RPM = 100
-_RPC_WINDOW = 60.0
+# Rate limiter: 100 req/min per IP. A burst equal to the per-minute limit sets no separate burst limit.
+rpc_limiter = RateLimiter(requests_per_minute=100, burst=100)
 
 # Allowlist of permitted JSON-RPC methods.
 # Only safe, read-heavy methods + send/signTransaction (intercepted by firewall).
@@ -56,19 +53,6 @@ def _get_client_ip(request: Request, trusted_proxies: set) -> str:
         if chain:
             return chain[0]
     return client_ip
-
-
-def _rpc_rate_check(client_ip: str) -> bool:
-    """Check RPC rate limit for a client IP."""
-    now = time.monotonic()
-    hits = _rpc_hits[client_ip]
-    cutoff = now - _RPC_WINDOW
-    while hits and hits[0] < cutoff:
-        hits.pop(0)
-    if len(hits) >= _RPC_RPM:
-        return False
-    hits.append(now)
-    return True
 
 
 @rpc_router.post("/rpc/{chain_id}")
@@ -139,7 +123,7 @@ async def rpc_endpoint(chain_id: int, request: Request):
     else:
         trusted = set(proxy._container.settings.trusted_proxies) if proxy else set()
         client_ip = _get_client_ip(request, trusted)
-        if not _rpc_rate_check(client_ip):
+        if not await rpc_limiter.is_allowed(client_ip):
             return JSONResponse(
                 status_code=429,
                 content={

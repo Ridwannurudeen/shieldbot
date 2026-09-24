@@ -128,6 +128,43 @@ tmux new -s shieldbot
 # Ctrl+B then D to detach
 ```
 
+### Shared rate limits in Redis (opt-in)
+
+By default every rate limiter counts in the API process's memory: a restart forgets the counts, and a second
+API process would give each caller a second allowance. With `RATE_LIMIT_BACKEND=redis` the API counts in Redis
+at `REDIS_URL` (default `redis://localhost:6379/0`), one count per caller shared by every API process. With the
+setting unset or `memory`, nothing changes. Any other value stops the API at startup.
+
+| Limiter | Limit | When Redis cannot answer |
+|---|---|---|
+| Every request without an API key (health checks aside), per IP | 30 a minute, 10 in 5 s | let through, error logged |
+| RPC proxy `/rpc/{chain_id}` without a key, per IP | 100 a minute | let through, error logged |
+| API key, per key | the key's per-minute limit | minute limit skipped, error logged; the daily quota (SQLite) still applies and refuses when it cannot be read |
+| `/api/agent/chat` and `/api/agent/explain`, per IP | 50 a minute, 10 in 5 s | refused (429), error logged |
+| `/api/report`, per IP | 5 a minute, 3 in 5 s | refused (429), error logged |
+| `/api/beta-signup`, per IP | 3 a minute, 2 in 5 s | refused (429), error logged |
+| `/api/keys/free`, per IP | 3 a minute, 2 in 5 s | refused (429), error logged |
+| `/api/watch/alerts`, per IP | 10 a minute, 5 in 5 s | refused (429), error logged |
+
+The general limiters let requests through so that a Redis outage does not take the scan API, or wallets that
+use the RPC proxy, down. The others guard AI spend, email sending and writes, so they refuse. The client gives
+Redis 0.5 seconds to connect or reply, so a Redis that hangs adds at most that to a request.
+
+Each limiter keeps a sorted set per caller at `shieldbot:ratelimit:<limiter>:<caller>`, where the caller is the
+client IP (prefixed with the route for some limiters) or the API key's id, never the key itself. Every check
+renews the key's 60 second TTL, so an idle caller's key expires. The limiters write nothing else to Redis.
+
+To turn it on:
+
+1. Run Redis where only the API host can reach it (bound to 127.0.0.1, or a private network with a password in
+   `REDIS_URL`).
+2. Add `RATE_LIMIT_BACKEND=redis` and, if Redis is not on localhost, `REDIS_URL=redis://...` to
+   `/opt/shieldbot/.env`.
+3. Restart the API. Its log says `Rate limits kept in Redis`. After a few requests,
+   `redis-cli --scan --pattern 'shieldbot:ratelimit:*'` lists the callers' keys.
+
+To turn it off, remove the setting and restart the API.
+
 ---
 
 ## BNB Chain Deployment (For Onchain Proof)

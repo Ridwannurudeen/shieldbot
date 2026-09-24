@@ -25,7 +25,7 @@ def mock_container(monkeypatch):
         )
     }
     settings = SimpleNamespace(
-        rpc_proxy_enabled=False, trusted_proxies=[], admin_secret="",
+        rpc_proxy_enabled=False, trusted_proxies=[], admin_secret="", rate_limit_backend="memory",
     )
     container = MagicMock(settings=settings)
     container.startup = AsyncMock()

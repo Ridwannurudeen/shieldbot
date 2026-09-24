@@ -29,9 +29,9 @@ from core.auth import TIER_LIMITS, hash_key
 from core.config import Settings
 from core.container import ServiceContainer
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
-from core.rate_limit import RateLimiter
+from core.rate_limit import RateLimiter, connect as connect_rate_limit_redis
 from core.unknown_ledger import unknown_ledger
-from rpc.router import rpc_router
+from rpc.router import rpc_limiter, rpc_router
 from rpc.proxy import RPCProxy
 
 logging.basicConfig(
@@ -116,6 +116,21 @@ async def lifespan(app: FastAPI):
     container = ServiceContainer(settings)
     _bind_globals(container)
     await container.startup()
+    rate_limit_redis = None
+    if settings.rate_limit_backend == "redis":
+        rate_limit_redis = connect_rate_limit_redis(settings.redis_url)
+        # When Redis cannot answer, the general request limiter and the RPC proxy's let requests
+        # through (logged), so an outage does not take the scan API or users' wallets down. The
+        # abuse-sensitive limiters refuse (core/rate_limit.py).
+        rate_limiter.use_redis(rate_limit_redis, "requests", fail_open=True)
+        rpc_limiter.use_redis(rate_limit_redis, "rpc", fail_open=True)
+        chat_limiter.use_redis(rate_limit_redis, "chat", fail_open=False)
+        _report_limiter.use_redis(rate_limit_redis, "report", fail_open=False)
+        _signup_limiter.use_redis(rate_limit_redis, "signup", fail_open=False)
+        _free_key_limiter.use_redis(rate_limit_redis, "free-key", fail_open=False)
+        _watch_alerts_limiter.use_redis(rate_limit_redis, "watch-alerts", fail_open=False)
+        container.auth_manager.use_redis(rate_limit_redis)
+        logger.info("Rate limits kept in Redis")
     await container.start_mempool_monitor()
     container.verdict_publisher.start()
 
@@ -162,6 +177,8 @@ async def lifespan(app: FastAPI):
     rpc_proxy = getattr(app.state, "rpc_proxy", None)
     if rpc_proxy:
         await rpc_proxy.close()
+    if rate_limit_redis is not None:
+        await rate_limit_redis.aclose()
     logger.info("ShieldAI Firewall API shutting down")
 
 
@@ -276,7 +293,7 @@ async def rate_limit_middleware(request: Request, call_next):
     if random.random() < 0.01:
         rate_limiter.cleanup()
 
-    if not rate_limiter.is_allowed(client_ip):
+    if not await rate_limiter.is_allowed(client_ip):
         logger.warning(f"Rate limit exceeded for {client_ip}")
         return JSONResponse(
             status_code=429,
@@ -516,7 +533,7 @@ async def beta_signup(req: BetaSignupRequest, request: Request):
     """Collect beta signup emails."""
     # Rate limit per IP
     client_ip = _get_client_ip(request)
-    if not _signup_limiter.is_allowed(f"signup:{client_ip}"):
+    if not await _signup_limiter.is_allowed(f"signup:{client_ip}"):
         return JSONResponse(status_code=429, content={"detail": "Too many requests. Please try again later."})
 
     import re
@@ -1546,7 +1563,7 @@ async def community_report(req: CommunityReportRequest, request: Request):
     """Record a community report (false positive, false negative, or scam)."""
     # Rate limit per IP (rightmost = proxy-set, not spoofable)
     client_ip = _get_client_ip(request)
-    if not _report_limiter.is_allowed(f"report:{client_ip}"):
+    if not await _report_limiter.is_allowed(f"report:{client_ip}"):
         return JSONResponse(
             status_code=429,
             content={"detail": "Report rate limit exceeded (5/min)."},
@@ -1652,7 +1669,7 @@ async def request_free_key(req: FreeKeyRequest, request: Request):
     if not container or not container.email_service.is_enabled():
         raise HTTPException(status_code=503, detail="Self-serve keys are not enabled")
     client_ip = _get_client_ip(request)
-    if not _free_key_limiter.is_allowed(f"free-key:{client_ip}"):
+    if not await _free_key_limiter.is_allowed(f"free-key:{client_ip}"):
         return JSONResponse(status_code=429, content={"detail": "Too many requests. Please try again later."})
 
     email = req.email.strip().lower()
@@ -2105,7 +2122,7 @@ async def public_watch_alerts(request: Request):
         raise HTTPException(status_code=503, detail="Watch alerts not available")
 
     client_ip = _get_client_ip(request)
-    if not _watch_alerts_limiter.is_allowed(f"watch-alerts:{client_ip}"):
+    if not await _watch_alerts_limiter.is_allowed(f"watch-alerts:{client_ip}"):
         return JSONResponse(
             status_code=429,
             content={"detail": "Watch alerts rate limit exceeded (10/min)."},
@@ -2132,7 +2149,7 @@ async def agent_chat(req: ChatRequest, request: Request):
         raise HTTPException(503, "Agent not available")
 
     client_ip = _get_client_ip(request)
-    if not chat_limiter.is_allowed(client_ip):
+    if not await chat_limiter.is_allowed(client_ip):
         raise HTTPException(429, "Rate limit exceeded")
 
     # Bind user_id to the caller so users cannot read/poison each other's history: to the install
@@ -2176,7 +2193,7 @@ async def agent_explain(req: ExplainRequest, request: Request):
         raise HTTPException(503, "Agent not available")
 
     client_ip = _get_client_ip(request)
-    if not chat_limiter.is_allowed(client_ip):
+    if not await chat_limiter.is_allowed(client_ip):
         raise HTTPException(429, "Rate limit exceeded")
 
     try:

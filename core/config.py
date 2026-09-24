@@ -1,6 +1,6 @@
 """Centralized configuration via Pydantic Settings."""
 
-from typing import List, Optional
+from typing import List, Literal, Optional
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
@@ -87,6 +87,9 @@ class Settings(BaseSettings):
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
+    # Where the rate limiters count: "memory" (each process on its own, forgotten on restart) or
+    # "redis" (at redis_url, shared by every API process). See core/rate_limit.py.
+    rate_limit_backend: Literal["memory", "redis"] = "memory"
 
     # Calibration
     calibration_config_path: str = "core/calibration_config.json"
