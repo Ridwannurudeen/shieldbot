@@ -26,6 +26,7 @@ from typing import Optional, Dict, Any, List, Literal
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve_selector
 from utils.chain_info import get_chain_name, get_native_symbol
 from utils.web3_client import UnsupportedChainError
+from core.risk_engine import MEDIUM_MATCH_FLOOR, database_matches, medium_matches
 from services import rpc_guard
 from services.counterparty_service import code_kind
 from services.mempool_service import supports_pending_transactions
@@ -2906,7 +2907,8 @@ def _coverage_fields(alert: Dict) -> Dict:
 
 
 def _scam_match_count(scan: Dict) -> Optional[int]:
-    matches = scan.get("scam_matches", [])
+    # A community report is not a scam database match; its reason names it instead.
+    matches = database_matches(scan.get("scam_matches"))
     if matches:
         return len(matches)
     if scan.get("coverage", {}).get("scam_database") is False:
@@ -3008,6 +3010,10 @@ def _build_fallback_response(
     if scam_matches is not None and scam_matches > 0:
         danger_signals.append(f"Found {scam_matches} scam database match(es)")
         risk_score = max(risk_score, 80)
+
+    for match in medium_matches(scan.get("scam_matches")):
+        danger_signals.append(match["reason"])
+        risk_score = max(risk_score, MEDIUM_MATCH_FLOOR)
 
     if is_honeypot:
         danger_signals.append("Honeypot detected — cannot sell after buying")

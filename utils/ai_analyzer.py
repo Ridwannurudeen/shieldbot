@@ -16,6 +16,7 @@ except ImportError:
 
 from utils.firewall_prompt import FIREWALL_SYSTEM_PROMPT
 from utils.chain_info import get_chain_name
+from core.risk_engine import database_matches
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,8 @@ def _get_prompt_chain_name(chain_id: Optional[int]) -> str:
 
 
 def _scam_match_count(scan_data: Dict) -> str:
-    scam_matches = scan_data.get('scam_matches', [])
+    # A community report is not a scam database match; the scan's flags or warnings name it.
+    scam_matches = database_matches(scan_data.get('scam_matches'))
     if scam_matches:
         return str(len(scam_matches))
     if scan_data.get('coverage', {}).get('scam_database') is False:
@@ -481,7 +483,7 @@ Generate the ShieldAI forensic report now."""
 
         # Scam DB
         scam_data = contract_data or data
-        scam_matches = scam_data.get('scam_matches', [])
+        scam_matches = database_matches(scam_data.get('scam_matches'))
         if scam_matches:
             lines.append(f"⚠️ SCAM DATABASE MATCHES: {len(scam_matches)}")
             for m in scam_matches[:3]:
@@ -634,7 +636,7 @@ Return the firewall analysis JSON now."""
             for w in warnings[:8]:
                 lines.append(f"  - {w}")
 
-        scam_matches = contract_scan.get('scam_matches', [])
+        scam_matches = database_matches(contract_scan.get('scam_matches'))
         if scam_matches:
             lines.append("Scam Matches:")
             for m in scam_matches[:5]:

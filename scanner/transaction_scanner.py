@@ -7,6 +7,7 @@ Integrates risk_scorer for numeric scoring and AI analysis
 import logging
 from typing import Dict, List, Optional
 from services.contract_service import push4_operands
+from core.risk_engine import MEDIUM_MATCH_FLOOR, database_matches, medium_matches
 from utils.scam_db import ScamDatabase
 from utils.chain_info import get_chain_name
 from utils.web3_client import UnsupportedChainError
@@ -213,11 +214,15 @@ class TransactionScanner:
         return result
 
     def _apply_scam_match_risk(self, result: Dict):
-        """Floor the score and level for scam database matches, whether or not contract checks ran."""
+        """Floor the score and level for scam database matches, whether or not contract checks ran.
+
+        A community report holds the CAUTION band and adds nothing to the heuristic score.
+        """
         if not result['scam_matches']:
             return
         heuristic_score, _, _ = calculate_risk_score(findings_from_scan_result(result))
-        result['risk_score'] = max(result['risk_score'], heuristic_score)
+        floor = MEDIUM_MATCH_FLOOR if medium_matches(result['scam_matches']) else 0
+        result['risk_score'] = max(result['risk_score'], heuristic_score, floor)
         result['risk_level'] = 'high' if result['risk_score'] >= 71 else 'medium'
 
     async def _check_verification(self, address: str, result: Dict, chain_id: int = 56) -> bool:
@@ -257,10 +262,14 @@ class TransactionScanner:
 
             if matches:
                 result['scam_matches'] = list(matches)
-                result['warnings'].append(f"Found {len(matches)} scam database match(es)")
+            hard_matches = database_matches(matches)
+            if hard_matches:
+                result['warnings'].append(f"Found {len(hard_matches)} scam database match(es)")
                 result['checks']['scam_database_clean'] = False
             else:
                 result['checks']['scam_database_clean'] = None if failed_providers else True
+            # A community report is not a scam database match; its reason names it.
+            result['warnings'].extend(match['reason'] for match in medium_matches(matches))
 
             if failed_providers:
                 result['coverage_reasons']['scam_database'] = (
@@ -359,7 +368,7 @@ class TransactionScanner:
         """Calculate overall risk level based on checks (legacy heuristic)"""
         checks = result['checks']
 
-        if result['scam_matches']:
+        if database_matches(result['scam_matches']):
             return 'high'
 
         if checks.get('verified_source') is False and checks.get('not_too_new') is False:
