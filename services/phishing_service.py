@@ -1,7 +1,9 @@
 import asyncio
+import json
 import time
 import logging
 import aiohttp
+import idna
 from cachetools import TTLCache
 from typing import Optional
 from urllib.parse import quote, urlparse
@@ -18,6 +20,8 @@ METAMASK_REFRESH_SECONDS = 3600
 # After a failed fetch the last good copy stays in use, and the list is asked for again this much sooner.
 METAMASK_RETRY_SECONDS = 300
 METAMASK_TIMEOUT_SECONDS = 60
+# The list was about 2.8 MB on 2026-09-24; a body past this is refused rather than parsed.
+METAMASK_MAX_BYTES = 64 * 1024 * 1024
 
 
 def parse_metamask_config(payload) -> tuple:
@@ -42,6 +46,18 @@ def parse_metamask_config(payload) -> tuple:
         raise ValueError("Empty blacklist")
     fuzzy = tuple((domain, _fuzzy_form(domain)) for domain in lists["fuzzylist"])
     return frozenset(lists["blacklist"]), frozenset(lists["whitelist"]), fuzzy, tolerance
+
+
+def _parse_metamask_body(body: bytes) -> tuple:
+    return parse_metamask_config(json.loads(body))
+
+
+def _ascii_host(host: str) -> str:
+    """A host in the ASCII (punycode) form the list uses, or as given when it is not a valid IDNA name."""
+    try:
+        return idna.encode(host, uts46=True).decode("ascii")
+    except idna.IDNAError:
+        return host
 
 
 def _fuzzy_form(domain: str) -> str:
@@ -79,7 +95,7 @@ class MetaMaskPhishingList:
         if self._lists is None or not host:
             return None
         blocked, allowed, fuzzy, tolerance = self._lists
-        host = host.lower().rstrip(".")
+        host = _ascii_host(host.lower().rstrip("."))
         labels = host.split(".")
         suffixes = [".".join(labels[index:]) for index in range(len(labels))]
         if any(suffix in allowed for suffix in suffixes):
@@ -96,21 +112,32 @@ class MetaMaskPhishingList:
         return None
 
     async def refresh(self) -> bool:
-        """Fetch the list and replace the last good copy; on any failure keep that copy and return False."""
+        """Fetch the list and replace the last good copy; on any failure keep that copy and return False.
+
+        A body larger than METAMASK_MAX_BYTES is refused. The JSON is parsed in a worker thread, so a large
+        list does not hold up the event loop.
+        """
+        kept = "keeping the last good copy" if self._lists is not None else "no copy loaded yet"
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     METAMASK_CONFIG_URL, timeout=aiohttp.ClientTimeout(total=METAMASK_TIMEOUT_SECONDS)
                 ) as resp:
                     if resp.status != 200:
-                        raise ValueError(f"HTTP {resp.status}")
-                    payload = await resp.json(content_type=None)
-            lists = parse_metamask_config(payload)
+                        logger.warning("MetaMask phishing list not refreshed (HTTP %d); %s", resp.status, kept)
+                        return False
+                    body = bytearray()
+                    async for chunk in resp.content.iter_chunked(64 * 1024):
+                        body.extend(chunk)
+                        if len(body) > METAMASK_MAX_BYTES:
+                            logger.error(
+                                "MetaMask phishing list not refreshed (larger than %d bytes); %s",
+                                METAMASK_MAX_BYTES, kept,
+                            )
+                            return False
+            lists = await asyncio.to_thread(_parse_metamask_body, bytes(body))
         except Exception as e:
-            logger.warning(
-                "MetaMask phishing list not refreshed (%s); %s", type(e).__name__,
-                "keeping the last good copy" if self._lists is not None else "no copy loaded yet",
-            )
+            logger.warning("MetaMask phishing list not refreshed (%s); %s", type(e).__name__, kept)
             return False
         self._lists = lists
         logger.info("MetaMask phishing list loaded: %d blocked domains", len(lists[0]))
@@ -130,7 +157,7 @@ class PhishingService:
         self.metamask = MetaMaskPhishingList()
         self._refresh_task = None
 
-    async def start(self):
+    def start(self):
         """Keep MetaMask's list in memory: fetched now, then hourly, and again sooner after a failed fetch."""
         if self._refresh_task is None:
             self._refresh_task = asyncio.create_task(self._refresh_loop())

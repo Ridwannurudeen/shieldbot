@@ -159,7 +159,7 @@ async def lifespan(app: FastAPI):
     await container.startup()
     await container.start_mempool_monitor()
     container.verdict_publisher.start()
-    await container.phishing_service.start()
+    container.phishing_service.start()
 
     # Initialize RPC proxy if enabled
     if settings.rpc_proxy_enabled:

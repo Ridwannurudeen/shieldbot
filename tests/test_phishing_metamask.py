@@ -3,7 +3,7 @@
 tests/fixtures/metamask_phishing_config.json holds entries of
 https://raw.githubusercontent.com/MetaMask/eth-phishing-detect/main/src/config.json exactly as served on
 2026-09-24 (version 2, tolerance 1): its whole fuzzylist and a subset of its whitelist and blacklist,
-including one entry with a path. No test touches the network.
+including one entry with a path and one internationalised (xn--) domain. No test touches the network.
 """
 
 import asyncio
@@ -29,10 +29,17 @@ RECORDED = json.loads(
 LISTED = {"type": "blocklist", "domain": "poly-mark.xyz"}
 
 
-def _serve(payload=None, status=200, error=None):
-    """Patch aiohttp so every GET answers `payload` with `status`, or raises `error`."""
+async def _chunks(body, size):
+    for start in range(0, len(body), size):
+        yield body[start : start + size]
+
+
+def _serve(payload=None, status=200, error=None, body=None):
+    """Patch aiohttp so every GET answers `payload` (or the raw `body`) with `status`, or raises `error`."""
     response = MagicMock(status=status)
     response.json = AsyncMock(return_value=payload)
+    raw = json.dumps(payload).encode("utf-8") if body is None else body
+    response.content.iter_chunked = lambda size: _chunks(raw, size)
     session = MagicMock()
     session.get.return_value.__aenter__ = AsyncMock(return_value=response)
     session.get.side_effect = error
@@ -61,6 +68,13 @@ async def loaded_list(payload=RECORDED):
         ("POLY-MARK.XYZ.", LISTED),
         ("claim.opensea.support", {"type": "blocklist", "domain": "opensea.support"}),
         ("www.opensea.uno", {"type": "blocklist", "domain": "www.opensea.uno"}),
+        # The list holds internationalised names in their ASCII form; a Unicode host is encoded first.
+        ("xn--phntom-jta.com", {"type": "blocklist", "domain": "xn--phntom-jta.com"}),
+        ("ph\u00e0ntom.com", {"type": "blocklist", "domain": "xn--phntom-jta.com"}),
+        ("PH\u00c0NTOM.COM", {"type": "blocklist", "domain": "xn--phntom-jta.com"}),
+        ("app.ph\u00e0ntom.com", {"type": "blocklist", "domain": "xn--phntom-jta.com"}),
+        # Not a valid IDNA name: matched as given, never an error.
+        ("poly_mark.xyz", None),
         # Lookalikes: one edit from a fuzzylist domain's name, after dropping the TLD and a leading www.
         ("metamusk.io", {"type": "fuzzy", "domain": "metamask.io"}),
         ("www.etherscam.io", {"type": "fuzzy", "domain": "etherscan.io"}),
@@ -120,6 +134,62 @@ async def test_a_failed_refresh_keeps_the_last_good_copy(payload, status, error,
         client.stop()
     assert metamask.match("poly-mark.xyz") == LISTED
     assert "keeping the last good copy" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_refused_status_is_logged_with_its_number(caplog):
+    metamask = await loaded_list()
+    client, _ = _serve(None, 429)
+    try:
+        assert not await metamask.refresh()
+    finally:
+        client.stop()
+    record = next(r for r in caplog.records if "not refreshed" in r.getMessage())
+    assert record.args[0] == 429
+    assert "HTTP 429" in record.getMessage()
+    assert metamask.match("poly-mark.xyz") == LISTED
+
+
+@pytest.mark.asyncio
+async def test_a_body_over_the_cap_is_refused_and_the_last_good_copy_kept(monkeypatch, caplog):
+    metamask = await loaded_list()
+    body = json.dumps({**RECORDED, "blacklist": ["other.example"]}).encode("utf-8")
+    monkeypatch.setattr(phishing_service, "METAMASK_MAX_BYTES", len(body) - 1)
+    client, _ = _serve(body=body)
+    try:
+        assert not await metamask.refresh()
+    finally:
+        client.stop()
+    assert f"larger than {len(body) - 1} bytes" in caplog.text
+    assert metamask.match("poly-mark.xyz") == LISTED
+    assert metamask.match("other.example") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [b"", b"<html>not json</html>", b'{"version": 2'])
+async def test_a_body_that_is_not_json_keeps_the_last_good_copy(body, caplog):
+    metamask = await loaded_list()
+    client, _ = _serve(body=body)
+    try:
+        assert not await metamask.refresh()
+    finally:
+        client.stop()
+    assert metamask.match("poly-mark.xyz") == LISTED
+    assert "keeping the last good copy" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_the_list_is_parsed_off_the_event_loop(monkeypatch):
+    threaded = []
+    real_to_thread = asyncio.to_thread
+
+    async def to_thread(function, *args):
+        threaded.append(function)
+        return await real_to_thread(function, *args)
+
+    monkeypatch.setattr(phishing_service.asyncio, "to_thread", to_thread)
+    await loaded_list()
+    assert threaded == [phishing_service._parse_metamask_body]
 
 
 @pytest.mark.asyncio
@@ -215,7 +285,7 @@ async def test_the_list_is_fetched_at_start_hourly_and_sooner_after_a_failure(mo
     monkeypatch.setattr(phishing_service, "METAMASK_RETRY_SECONDS", 0)
     service = PhishingService()
     service.metamask.refresh = AsyncMock(side_effect=[False, True, True])
-    await service.start()
+    service.start()
     for _ in range(20):
         await asyncio.sleep(0)
     # The failed fetch is retried at once (retry delay 0 here); the good one waits an hour.
