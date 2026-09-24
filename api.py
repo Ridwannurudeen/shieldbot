@@ -1721,8 +1721,8 @@ async def request_free_key(req: FreeKeyRequest, request: Request):
 
 @app.get("/api/keys/free/verify", response_class=HTMLResponse, include_in_schema=False)
 async def free_key_page():
-    """Page the emailed link opens. Nothing is created until the reader confirms, so mail scanners
-    that fetch links cannot use up the token or receive the key."""
+    """Page the emailed link opens. Nothing is created until the reader presses its button, so a mail
+    scanner that only fetches the link neither uses up the token nor receives the key."""
     return """<!DOCTYPE html>
 <html lang="en">
 <head>
