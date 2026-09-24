@@ -1450,9 +1450,7 @@ async def firewall(req: FirewallRequest, request: Request):
             if simulation_result:
                 if not simulation_result.get("success") and simulation_result.get("revert_reason"):
                     danger_signals.insert(0, f"Simulation reverted: {simulation_result['revert_reason']}")
-                    # Only escalate to BLOCK if risk is already elevated (>= 30)
-                    # Low-risk reverts are just bad tx params, not malicious
-                    if alert["rug_probability"] >= 30:
+                    if _revert_blocks(alert["rug_probability"], contract_data):
                         classification = "BLOCK_RECOMMENDED"
                 for w in simulation_result.get("warnings", []):
                     if w not in danger_signals:
@@ -2951,6 +2949,16 @@ def _coverage_fields(alert: Dict) -> Dict:
     return {key: alert[key] for key in ('status', 'coverage', 'coverage_reasons', 'risk_display')}
 
 
+def _revert_blocks(rug_probability: float, contract_data: Dict) -> bool:
+    """Whether a reverted simulation escalates a verdict to BLOCK: only a risk already elevated (30 or
+    more). Low-risk reverts are just bad transaction parameters. A score that community reports alone
+    hold at MEDIUM_MATCH_FLOOR is not elevated either: three accounts can arrange it, and a routine
+    revert (slippage, a deadline, an allowance) must not turn it into a block."""
+    return rug_probability >= 30 and (
+        rug_probability > MEDIUM_MATCH_FLOOR or not medium_matches(contract_data.get("scam_matches"))
+    )
+
+
 def _scam_match_count(scan: Dict) -> Optional[int]:
     # A community report is not a scam database match; its reason names it instead.
     matches = database_matches(scan.get("scam_matches"))
@@ -3332,6 +3340,11 @@ async def _analyze_router_swap(
         }
     alert = format_extension_alert(risk_output)
 
+    # Extract service data for the revert rule and raw checks
+    by_name = {r.name: r for r in best["results"]}
+    contract_data = (by_name["structural"].data or {}) if "structural" in by_name else {}
+    honeypot_data = (by_name["honeypot"].data or {}) if "honeypot" in by_name else {}
+
     # Simulation overrides
     danger_signals = list(alert["top_flags"])
     classification = alert["risk_classification"]
@@ -3339,18 +3352,13 @@ async def _analyze_router_swap(
     if sim_result:
         if not sim_result.get("success") and sim_result.get("revert_reason"):
             danger_signals.insert(0, f"Simulation reverted: {sim_result['revert_reason']}")
-            if alert["rug_probability"] >= 30:
+            if _revert_blocks(alert["rug_probability"], contract_data):
                 classification = "BLOCK_RECOMMENDED"
         for w in sim_result.get("warnings", []):
             if w not in danger_signals:
                 danger_signals.append(w)
 
     risk_score = alert["rug_probability"]
-
-    # Extract service data for raw checks
-    by_name = {r.name: r for r in best["results"]}
-    contract_data = (by_name["structural"].data or {}) if "structural" in by_name else {}
-    honeypot_data = (by_name["honeypot"].data or {}) if "honeypot" in by_name else {}
 
     shield_score = {
         **_coverage_fields(alert),
