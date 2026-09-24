@@ -1516,6 +1516,7 @@ async def firewall(req: FirewallRequest, request: Request):
             if tx_specific and firewall_result["classification"] == "SAFE":
                 firewall_result["classification"] = "CAUTION"
                 firewall_result["danger_signals"].append(_TX_CHECKS_UNAVAILABLE)
+                firewall_result["verdict"] = f"CAUTION — {_TX_CHECKS_UNAVAILABLE}"
             return firewall_result
         else:
             return _build_fallback_response(decoded, contract_scan, whitelisted, transaction_specific=tx_specific)

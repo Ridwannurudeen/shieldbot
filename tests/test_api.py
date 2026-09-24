@@ -560,7 +560,8 @@ async def test_legacy_fallback_never_clears_a_transaction_specific_request(cache
     )
     assert response["classification"] == ("CAUTION" if specific else "SAFE")
     assert (TX_CHECKS_UNAVAILABLE in response["danger_signals"]) is specific
-    if not ai:
+    # The verdict line must not contradict the classification, including the AI's own verdict.
+    if specific or not ai:
         assert response["verdict"].startswith(response["classification"])
 
 
