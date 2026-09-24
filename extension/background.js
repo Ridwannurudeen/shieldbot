@@ -21,11 +21,22 @@ chrome.runtime.onInstalled.addListener((details) => {
   }
 });
 
-// In-memory phishing cache: domain -> {result, expiresAt}
+// Phishing cache: host -> {is_phishing, expiresAt}
 // Avoids repeated API calls when navigating across pages on the same site.
+// Chrome stops an idle service worker, so the cache is also kept in
+// chrome.storage.session, which content scripts cannot read and which lasts
+// for the browser session. Only verdicts are kept, under the host alone.
 const _phishingCache = new Map();
 const PHISHING_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 const MAX_PHISHING_CACHE = 500;
+let _phishingCacheLoad = null;
+
+function loadPhishingCache() {
+  _phishingCacheLoad ||= chrome.storage.session.get({ phishingCache: {} }).then(({ phishingCache }) => {
+    for (const [host, entry] of Object.entries(phishingCache)) _phishingCache.set(host, entry);
+  });
+  return _phishingCacheLoad;
+}
 
 // Listen for messages from content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -166,9 +177,10 @@ async function checkPhishing(url) {
     const lookupUrl = `${parsedUrl.protocol}//${parsedUrl.host}/`;
 
     // Check extension-side cache
+    await loadPhishingCache();
     const cached = _phishingCache.get(cacheKey);
     if (cached && Date.now() < cached.expiresAt) {
-      return cached.result;
+      return { is_phishing: cached.is_phishing };
     }
 
     // Get configured API URL — if not set, skip silently
@@ -201,7 +213,8 @@ async function checkPhishing(url) {
       const firstKey = _phishingCache.keys().next().value;
       _phishingCache.delete(firstKey);
     }
-    _phishingCache.set(cacheKey, { result, expiresAt: Date.now() + PHISHING_CACHE_TTL_MS });
+    _phishingCache.set(cacheKey, { is_phishing: result.is_phishing, expiresAt: Date.now() + PHISHING_CACHE_TTL_MS });
+    chrome.storage.session.set({ phishingCache: Object.fromEntries(_phishingCache) });
     return result;
   } catch (err) {
     console.warn("Phishing check failed:", err.message || err);

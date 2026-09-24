@@ -310,3 +310,74 @@ def test_the_explain_button_is_not_offered_on_a_safe_verdict(outcome):
 """,
         outcome,
     )
+
+
+# A service worker that Chrome stopped and started again: a new background.js over the same
+# chrome.storage.session, which lasts for the browser session.
+PHISHING_WORKERS = r"""
+const lookups = [];
+function startWorker() {
+  let onMessage;
+  const worker = vm.createContext({
+    chrome: {
+      runtime: {onInstalled: {addListener() {}}, onMessage: {addListener(fn) { onMessage = fn; }}},
+      storage: {local: area(local), session: area(session)},
+    },
+    URL, AbortSignal, console: {warn() {}, error() {}, log() {}},
+    fetch: async url => { lookups.push(url); return answer(url); },
+  });
+  vm.runInContext(fs.readFileSync('extension/background.js', 'utf8'), worker);
+  return url => new Promise(resolve => onMessage({type: 'SHIELDAI_CHECK_PHISHING', url}, {}, resolve));
+}
+const verdict = isPhishing => async () => ({ok: true, json: async () => ({is_phishing: isPhishing, url: 'https://drainer.example/claim?id=7', sources: ['goplus']})});
+"""
+
+
+def test_a_phishing_verdict_outlives_a_service_worker_restart():
+    run_node(
+        BACKGROUND_HARNESS
+        + PHISHING_WORKERS
+        + r"""
+(async () => {
+  answer = verdict(true);
+  const check = startWorker();
+  assert.equal((await check('https://Drainer.example/claim?id=7')).result.is_phishing, true);
+  assert.equal(lookups.length, 1);
+  // Only the host and the verdict are kept: no path, query or other field of the answer.
+  assert.deepEqual(Object.keys(session.phishingCache), ['drainer.example']);
+  assert.deepEqual(Object.keys(session.phishingCache['drainer.example']).sort(), ['expiresAt', 'is_phishing']);
+  assert(!JSON.stringify(session).includes('claim'));
+  const restarted = startWorker();
+  assert.equal((await restarted('https://drainer.example/other')).result.is_phishing, true);
+  assert.equal(lookups.length, 1, 'the restarted worker asked the API again');
+  // An hour later the verdict has expired and is asked for again.
+  session.phishingCache['drainer.example'].expiresAt = Date.now() - 1;
+  await startWorker()('https://drainer.example/');
+  assert.equal(lookups.length, 2);
+"""
+    )
+
+
+@pytest.mark.parametrize("failure", ["http-error", "no-verdict", "network-error"])
+def test_a_failed_phishing_check_is_never_kept_as_a_verdict(failure):
+    run_node(
+        BACKGROUND_HARNESS
+        + PHISHING_WORKERS
+        + r"""
+(async () => {
+  const failure = JSON.parse(process.argv[1]);
+  answer = {
+    'http-error': async () => ({ok: false, status: 503, json: async () => ({})}),
+    'no-verdict': verdict(null),
+    'network-error': async () => { throw new Error('offline'); },
+  }[failure];
+  const check = startWorker();
+  const {result} = await check('https://site.example/');
+  assert.equal(result.is_phishing, null);
+  assert.equal((session.phishingCache || {})['site.example'], undefined, 'a failed check was kept');
+  answer = verdict(false);
+  assert.equal((await startWorker()('https://site.example/')).result.is_phishing, false);
+  assert.equal(lookups.length, 2, 'the failed check was not asked again');
+""",
+        failure,
+    )
