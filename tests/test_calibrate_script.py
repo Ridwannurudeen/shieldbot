@@ -30,10 +30,12 @@ async def db_path(tmp_path):
     path = (tmp_path / "outcomes.sqlite").as_posix()
     database = Database(path)
     await database.initialize()
-    for key_id, tier in (("sb_partner", "pro"), ("sb_other", "pro"), ("sb_free", "free")):
+    for key_id, tier, active in (
+        ("sb_partner", "pro", 1), ("sb_other", "pro", 1), ("sb_free", "free", 1), ("sb_retired", "pro", 0),
+    ):
         await database._db.execute(
-            "INSERT INTO api_keys (key_id, key_hash, owner, tier, created_at) VALUES (?, ?, ?, ?, ?)",
-            (key_id, f"hash-{key_id}", f"{key_id}@example.com", tier, time.time()),
+            "INSERT INTO api_keys (key_id, key_hash, owner, tier, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (key_id, f"hash-{key_id}", f"{key_id}@example.com", tier, active, time.time()),
         )
     await database._db.commit()
     yield path, database
@@ -70,10 +72,12 @@ async def test_client_rows_are_ignored(tmp_path, db_path):
 
 
 @pytest.mark.asyncio
-async def test_free_tier_and_unknown_key_rows_are_ignored(tmp_path, db_path):
+async def test_free_tier_inactive_and_unknown_key_rows_are_ignored(tmp_path, db_path):
     path, database = db_path
-    # A free key is self-serve, and a key missing from api_keys cannot be checked.
+    # A free key is self-serve, a deactivated key is no longer vouched for, and a key missing from
+    # api_keys cannot be checked.
     await _record(database, 5.0, "scam", "key:sb_free", 30)
+    await _record(database, 5.0, "scam", "key:sb_retired", 30)
     await _record(database, 5.0, "scam", "key:sb_deleted", 30)
     await _record(database, 95.0, "safe", "key:sb_free", 30)
     proposal = _run(tmp_path, path)
@@ -147,6 +151,17 @@ async def test_the_live_config_is_untouched(tmp_path, db_path):
     with pytest.raises(SystemExit):
         calibrate.main(["--db", path, "--out", str(LIVE_CONFIG)])
     assert LIVE_CONFIG.read_bytes() == before
+
+
+@pytest.mark.asyncio
+async def test_a_relative_config_setting_is_read_from_the_repo_root(tmp_path, db_path, monkeypatch):
+    path, _ = db_path
+    monkeypatch.setattr(
+        calibrate, "Settings", lambda: SimpleNamespace(calibration_config_path="core/calibration_config.json")
+    )
+    monkeypatch.chdir(tmp_path)
+    proposal = _run(tmp_path, path)
+    assert proposal["current"]["path"] == LIVE_CONFIG.as_posix()
 
 
 @pytest.mark.asyncio

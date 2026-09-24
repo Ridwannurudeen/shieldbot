@@ -4,9 +4,10 @@
 Trusted labels are:
   - benchmark entries with the scores eval.live_scorer recorded for them (--dataset, --scores). Only
     completed scans count; a safe entry is 'safe' and every malicious class is 'scam'.
-  - outcome events sent with a paid API key (source 'key:<key_id>', a key in api_keys whose tier is not
-    'free') whose outcome is 'safe' or 'scam' and that carry the score of the scan. Rows sent without a
-    key ('client'), with a self-serve free key or with a key no longer in api_keys are never read.
+  - outcome events sent with an active paid API key (source 'key:<key_id>', a key in api_keys that is
+    active and whose tier is not 'free') whose outcome is 'safe' or 'scam' and that carry the score of
+    the scan. Rows sent without a key ('client'), with a self-serve free key, with a deactivated key or
+    with a key no longer in api_keys are never read.
 
 The proposal file gives the proposed HIGH and MEDIUM thresholds (none when the labels are too few),
 the labels in each 10-point score bin, the precision and recall of the current and proposed thresholds,
@@ -40,6 +41,7 @@ from eval.benchmark import json_sha256, load_scores
 from eval.dataset import load_dataset
 
 FORMAT_PROPOSAL = "shieldbot-calibration-proposal/1"
+REPO_ROOT = Path(__file__).resolve().parent.parent
 # A proposed threshold at or below its ceiling is raised to one point above it.
 THRESHOLD_CEILINGS = (
     (
@@ -77,9 +79,9 @@ def benchmark_labels(dataset_path: str, scores_path: str) -> list:
 
 
 def outcome_labels(db_path: str) -> list:
-    """(score, label, source) for each outcome event sent with a key in api_keys that is not a free
-    key, read without writing. Free keys are self-serve, so their rows are no more trusted than a
-    client's."""
+    """(score, label, source) for each outcome event sent with an active key in api_keys that is not a
+    free key, read without writing. Free keys are self-serve, so their rows are no more trusted than a
+    client's, and a deactivated key is no longer vouched for."""
     connection = sqlite3.connect(f"{Path(db_path).resolve().as_uri()}?mode=ro", uri=True)
     try:
         return connection.execute("""
@@ -88,6 +90,7 @@ def outcome_labels(db_path: str) -> list:
             JOIN api_keys ON api_keys.key_id = substr(outcome_events.source, 5)
             WHERE outcome_events.source LIKE 'key:%'
               AND api_keys.tier != 'free'
+              AND api_keys.is_active = 1
               AND outcome_events.outcome IN ('safe', 'scam')
               AND outcome_events.risk_score_at_scan IS NOT NULL
         """).fetchall()
@@ -211,7 +214,8 @@ def main(argv=None):
     )
     parser.add_argument("--scores", help="Scores eval.live_scorer recorded for the dataset")
     args = parser.parse_args(argv)
-    config = args.config or Settings().calibration_config_path
+    # The service reads its setting from the repo root, where it runs, so a relative one is resolved there.
+    config = args.config or str(REPO_ROOT / Settings().calibration_config_path)
     inputs = [args.db, config, args.dataset] + ([args.scores] if args.scores else [])
     if Path(args.out).resolve() in {Path(path).resolve() for path in inputs}:
         parser.error("--out must not be an input (--db, --config, --dataset, --scores); the owner applies a proposal by hand")
