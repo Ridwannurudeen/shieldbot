@@ -247,6 +247,24 @@ async def test_on_result_hears_only_the_analyzers_that_returned(short_deadline):
 
 
 @pytest.mark.asyncio
+async def test_a_listener_that_raises_never_turns_a_result_unavailable(caplog):
+    ctx = AnalysisContext(address="0xabc", chain_id=56)
+    expected = await registry_of(*bsc_analyzers()).run_all(ctx)
+
+    def broken(result):
+        raise RuntimeError("listener down")
+
+    actual = await registry_of(*bsc_analyzers()).run_all(ctx, on_result=broken)
+
+    for previous, current in zip(expected, actual):
+        if not current.error:
+            previous.data["observed_at"] = current.data["observed_at"]
+    assert actual == expected
+    assert [result.error for result in actual].count(None) == 3
+    assert "on_result failed for analyzer structural: RuntimeError" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_on_result_is_called_while_other_analyzers_still_run():
     release = asyncio.Event()
     fast = clean("structural", 0.5)

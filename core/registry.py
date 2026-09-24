@@ -74,14 +74,18 @@ class AnalyzerRegistry:
         ``on_result``, when given, is called with an analyzer's result as soon as that analyzer
         returns normally, never for one that raises or runs past the deadline, so a caller can read
         results while the others still run. It gets the object before weight normalization and the
-        observed_at stamp below, and must not mutate it. The results are the same with or without it.
+        observed_at stamp below, and must not mutate it. The results are the same with or without it: a
+        listener that raises is logged, and the analyzer's result stands.
         """
         observed_at = time.time()
 
         async def analyze(analyzer: Analyzer) -> AnalyzerResult:
             result = await analyzer.analyze(ctx)
             if on_result is not None:
-                on_result(result)
+                try:
+                    on_result(result)
+                except Exception as e:
+                    logger.error("on_result failed for analyzer %s: %s", analyzer.name, type(e).__name__)
             return result
 
         tasks = [asyncio.ensure_future(analyze(a)) for a in self._analyzers]
