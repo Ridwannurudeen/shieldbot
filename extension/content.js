@@ -277,13 +277,14 @@
     (document.body || document.documentElement).appendChild(host);
     _overlayHost = host;
     // If the page removes the overlay, the user can no longer decide here:
-    // reject the request so the dApp is not left waiting.
+    // reject the request so the dApp is not left waiting. The whole document
+    // is watched, so replacing the root element or document.open() counts.
     const observer = new MutationObserver(() => {
       if (host.isConnected) return;
       observer.disconnect();
       if (_overlayHost === host) removeOverlay();
     });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
+    observer.observe(document, { childList: true, subtree: true });
     modal.focus();
     if (requestId) {
       _awaitingRequestId = requestId;

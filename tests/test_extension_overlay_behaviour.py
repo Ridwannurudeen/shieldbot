@@ -23,11 +23,12 @@ FAKE_DOM = r"""
 const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
 const {webcrypto} = require('crypto');
 const posted = [];
-// Page-side mutation observers: every removal notifies them, as a childList change would.
+// Page-side mutation observers: a removal notifies those watching the removed node's former
+// parent or one of its ancestors (they all watch subtrees), as a childList change would.
 const observers = new Set();
 class FakeMutationObserver {
   constructor(callback) { this.callback = callback; }
-  observe() { observers.add(this); }
+  observe(target) { this.target = target; observers.add(this); }
   disconnect() { observers.delete(this); }
 }
 class El {
@@ -61,13 +62,19 @@ class El {
   appendChild(child) { child.parent = this; this.children.push(child); return child; }
   insertBefore(child) { child.parent = this; this.children.unshift(child); return child; }
   remove() {
-    if (this.parent) this.parent.children = this.parent.children.filter(c => c !== this);
+    const parent = this.parent;
+    if (parent) parent.children = parent.children.filter(c => c !== this);
     this.parent = null;
-    for (const observer of [...observers]) queueMicrotask(() => observer.callback([]));
+    const watched = [];
+    for (let node = parent; node; node = node.parent) watched.push(node);
+    for (const observer of [...observers]) {
+      if (watched.includes(observer.target)) queueMicrotask(() => observer.callback([]));
+    }
   }
   get isConnected() {
-    for (let node = this; node; node = node.parent) if (node === body || node === html) return true;
-    return false;
+    let node = this;
+    while (node.parent) node = node.parent;
+    return node === document;
   }
   attachShadow({mode}) {
     const host = this;
@@ -108,13 +115,16 @@ class El {
 }
 const body = new El('body'), head = new El('head'), html = new El('html');
 const document = Object.assign(new EventTarget(), {
-  body, head, documentElement: html, activeElement: body,
+  body, head, documentElement: html, activeElement: body, children: [html],
   createElement: tag => new El(tag),
   // Light DOM only, like the real one: nothing inside a shadow root is found.
   getElementById(id) {
     return [...body.children, ...html.children].find(el => el.id === id) || null;
   },
 });
+html.parent = document;
+body.parent = html;
+head.parent = html;
 const windowListeners = {};
 const window = {
   addEventListener(type, fn) { (windowListeners[type] ||= []).push(fn); },
@@ -652,6 +662,21 @@ def test_removing_the_overlay_rejects_the_request():
   analyze = async () => ({result: scan({})});
   await intercept('request');
   overlayRoot().host.remove();
+  await flush();
+  await assertVerdicts([['request', 'block']]);
+"""
+    )
+
+
+def test_removing_the_whole_document_rejects_the_request():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('request');
+  // What replacing the root element or calling document.open() does to the tree.
+  html.remove();
   await flush();
   await assertVerdicts([['request', 'block']]);
 """
