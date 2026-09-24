@@ -249,10 +249,14 @@ class TokenScanner:
         try:
             liquidity_info = await self.web3.get_liquidity_info(address, chain_id=chain_id)
 
-            is_locked = liquidity_info.get('is_locked', False)
-            lock_percentage = liquidity_info.get('lock_percentage', 0)
-
+            is_locked = liquidity_info.get('is_locked')
             result['checks']['liquidity_locked'] = is_locked
+            if is_locked is None:
+                reason = liquidity_info.get('reason') or 'provider data unavailable'
+                result['risks'].append(f"Liquidity lock unknown: {reason}")
+                return False
+
+            lock_percentage = liquidity_info.get('lock_percentage', 0)
             result['liquidity_lock_percentage'] = lock_percentage
 
             if not is_locked:
@@ -400,6 +404,8 @@ class TokenScanner:
             return 'unknown'
         if result.get('is_honeypot') is None or checks.get('can_sell') is None:
             return 'unknown'
+        if checks.get('liquidity_locked') is None:
+            return 'unknown'
         sell_tax = result.get('sell_tax')
         buy_tax = result.get('buy_tax')
         if sell_tax is not None and sell_tax > 50:
@@ -408,7 +414,7 @@ class TokenScanner:
         warning_count = 0
         if checks.get('ownership_renounced') is False:
             warning_count += 1
-        if not checks.get('liquidity_locked'):
+        if checks.get('liquidity_locked') is False:
             warning_count += 1
         if (buy_tax is not None and buy_tax > 10) or (sell_tax is not None and sell_tax > 10):
             warning_count += 1

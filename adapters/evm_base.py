@@ -53,6 +53,21 @@ FACTORY_ABI = [
     }
 ]
 
+# Solidly-style factories (Aerodrome on Base, Velodrome on Optimism) revert on getPair.
+SOLIDLY_FACTORY_ABI = [
+    {
+        "constant": True,
+        "inputs": [
+            {"name": "tokenA", "type": "address"},
+            {"name": "tokenB", "type": "address"},
+            {"name": "stable", "type": "bool"}
+        ],
+        "name": "getPool",
+        "outputs": [{"name": "pool", "type": "address"}],
+        "type": "function"
+    }
+]
+
 PAIR_ABI = [
     {
         "constant": True, "inputs": [], "name": "totalSupply",
@@ -98,6 +113,7 @@ class EvmAdapter(ChainAdapter):
         quote_tokens: List[Tuple[str, str]] = None,
         factory_address: str = None,
         whitelisted_routers: Dict[str, str] = None,
+        solidly_factory: bool = False,
     ):
         from services.explorer_service import explorer_service
 
@@ -113,6 +129,7 @@ class EvmAdapter(ChainAdapter):
         self._known_lockers = known_lockers or {}
         self._quote_tokens = quote_tokens or []
         self._factory_address = factory_address
+        self._solidly_factory = solidly_factory
         self._whitelisted_routers = whitelisted_routers or {}
 
     @property
@@ -430,34 +447,45 @@ class EvmAdapter(ChainAdapter):
             return result
 
     async def get_liquidity_info(self, address: str) -> Dict:
+        """Lock status of the token's first LP pair against a quote token.
+
+        A lock that cannot be read (no factory, no pair found, any failed call) is status unknown
+        with is_locked None, never "not locked". Solidly factories are asked for the volatile
+        pool, then the stable one.
+        """
+        unknown = {'is_locked': None, 'lock_percentage': None, 'pair': None, 'status': 'unknown'}
         if not self._factory_address:
-            return {'is_locked': False, 'lock_percentage': 0, 'pair': None}
+            return {**unknown, 'reason': 'No pair factory configured for this chain'}
 
         try:
             checksum_addr = Web3.to_checksum_address(address)
             factory = self.w3.eth.contract(
-                address=Web3.to_checksum_address(self._factory_address), abi=FACTORY_ABI,
+                address=Web3.to_checksum_address(self._factory_address),
+                abi=SOLIDLY_FACTORY_ABI if self._solidly_factory else FACTORY_ABI,
             )
             zero_address = '0x0000000000000000000000000000000000000000'
             pair_address = None
             paired_with = None
 
+            lookups = []
             for quote_name, quote_addr in self._quote_tokens:
-                try:
-                    addr = await self._call_with_retry(
-                        factory.functions.getPair(
-                            checksum_addr, Web3.to_checksum_address(quote_addr),
-                        ).call,
-                    )
-                    if addr != zero_address:
-                        pair_address = addr
-                        paired_with = quote_name
-                        break
-                except Exception:
-                    continue
+                quote = Web3.to_checksum_address(quote_addr)
+                if self._solidly_factory:
+                    lookups += [
+                        (quote_name, factory.functions.getPool(checksum_addr, quote, stable).call)
+                        for stable in (False, True)
+                    ]
+                else:
+                    lookups.append((quote_name, factory.functions.getPair(checksum_addr, quote).call))
+            for quote_name, lookup in lookups:
+                addr = await self._call_with_retry(lookup)
+                if addr != zero_address:
+                    pair_address = addr
+                    paired_with = quote_name
+                    break
 
             if not pair_address:
-                return {'is_locked': False, 'lock_percentage': 0, 'pair': None}
+                return {**unknown, 'reason': 'No pair with a known quote token'}
 
             pair_contract = self.w3.eth.contract(
                 address=Web3.to_checksum_address(pair_address), abi=PAIR_ABI,
@@ -469,22 +497,19 @@ class EvmAdapter(ChainAdapter):
             locked_amount = 0
             locker_details = []
             for locker_addr, locker_name in self._known_lockers.items():
-                try:
-                    balance = await self._call_with_retry(
-                        pair_contract.functions.balanceOf(
-                            Web3.to_checksum_address(locker_addr),
-                        ).call,
-                    )
-                    if balance > 0:
-                        pct = (balance / total_supply) * 100
-                        locked_amount += balance
-                        locker_details.append({
-                            'locker': locker_name,
-                            'address': locker_addr,
-                            'percentage': round(pct, 2),
-                        })
-                except Exception:
-                    continue
+                balance = await self._call_with_retry(
+                    pair_contract.functions.balanceOf(
+                        Web3.to_checksum_address(locker_addr),
+                    ).call,
+                )
+                if balance > 0:
+                    pct = (balance / total_supply) * 100
+                    locked_amount += balance
+                    locker_details.append({
+                        'locker': locker_name,
+                        'address': locker_addr,
+                        'percentage': round(pct, 2),
+                    })
 
             lock_percentage = round((locked_amount / total_supply) * 100, 2) if total_supply > 0 else 0
             is_locked = lock_percentage > 50
@@ -498,7 +523,7 @@ class EvmAdapter(ChainAdapter):
             }
         except Exception as e:
             logger.error("[%s] Error getting liquidity info: %s", self._chain_name, type(e).__name__)
-            return {'is_locked': False, 'lock_percentage': 0}
+            return {**unknown, 'reason': f'Liquidity lookup failed ({type(e).__name__})'}
 
     def get_whitelisted_routers(self) -> Dict[str, str]:
         return dict(self._whitelisted_routers)

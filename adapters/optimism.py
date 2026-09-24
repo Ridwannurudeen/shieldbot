@@ -49,4 +49,5 @@ class OptimismAdapter(EvmAdapter):
             quote_tokens=QUOTE_TOKENS,
             factory_address=VELODROME_V2_FACTORY,
             whitelisted_routers=WHITELISTED_ROUTERS,
+            solidly_factory=True,
         )
