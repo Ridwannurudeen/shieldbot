@@ -22,8 +22,9 @@ QUOTE_TOKENS = [
 ]
 
 WHITELISTED_ROUTERS = {
-    "0x8cFe327CEc66d1C090Dd72bd0FF11d690C33a2Eb".lower(): "PancakeSwap V3 Router",
-    "0x10ED43C718714eb63d5aA57B78B54704E256024E".lower(): "PancakeSwap V2 Router",
+    "0x8cFe327CEc66d1C090Dd72bd0FF11d690C33a2Eb".lower(): "PancakeSwap V2 Router",
+    "0x1b81D678ffb9C0263b24A97847620C99d213eB14".lower(): "PancakeSwap V3 Router",
+    "0x678Aa4bF4E210cf2166753e054d5b7c31cc7fa86".lower(): "PancakeSwap V3 Smart Router",
 }
 
 
@@ -39,7 +40,8 @@ class OpBNBAdapter(EvmAdapter):
             chain_name_value="opBNB",
             rpc_url=rpc,
             etherscan_api_key=api_key,
-            honeypot_chain_id=204,
+            # honeypot.is answers HTTP 400 Invalid chain here; sellability comes from GoPlus.
+            honeypot_chain_id=None,
             known_lockers=KNOWN_LOCKERS,
             quote_tokens=QUOTE_TOKENS,
             factory_address=PANCAKESWAP_V2_FACTORY,

@@ -3,11 +3,12 @@
 import pytest
 from core.analyzer import AnalysisContext
 from analyzers.intent import IntentMismatchAnalyzer
+from utils.web3_client import Web3Client
 
 
 @pytest.fixture
 def analyzer():
-    return IntentMismatchAnalyzer()
+    return IntentMismatchAnalyzer(Web3Client())
 
 
 @pytest.mark.asyncio

@@ -83,6 +83,7 @@ async def test_provider_failure_stays_unknown_through_formatters(failure):
     adapter = EvmAdapter.__new__(EvmAdapter)
     adapter._honeypot_chain_id = None if failure == 'unsupported' else 4663
     adapter._chain_name = 'Test chain'
+    adapter._honeypot_is_replies = {}
     client = Web3Client.__new__(Web3Client)
     client._adapters = {4663: adapter}
     response = MagicMock(status=int(failure) if failure.isdigit() else 200)
@@ -343,8 +344,10 @@ async def test_complete_primary_honeypot_score_matches_baseline():
     client.get_tax_info = AsyncMock(return_value={'buy_tax': 0, 'sell_tax': 5})
     with patch.object(ScamDatabase, 'fetch_token_security', new=AsyncMock()) as fetch:
         result = await HoneypotAnalyzer(HoneypotService(client)).analyze(AnalysisContext(ADDRESS))
-    assert result.score == 80
-    assert 'Honeypot detected' in result.flags
+    # A honeypot cannot sell, so the 5% tax no longer marks it sellable: 80 + 60, capped at 100.
+    assert result.score == 100
+    assert result.data['can_sell'] is False
+    assert 'Honeypot detected' in result.flags and 'Cannot sell token' in result.flags
     fetch.assert_not_awaited()
 
 
@@ -355,6 +358,7 @@ async def test_failed_simulation_with_clean_fallback_never_becomes_safe(renounce
     adapter = EvmAdapter.__new__(EvmAdapter)
     adapter._honeypot_chain_id = 56
     adapter._chain_name = 'BSC'
+    adapter._honeypot_is_replies = {}
     client = Web3Client.__new__(Web3Client)
     client._adapters = {56: adapter}
     response = AsyncMock(status=200)

@@ -25,10 +25,9 @@ QUOTE_TOKENS = [
 
 WHITELISTED_ROUTERS = {
     "0xE592427A0AEce92De3Edee1F18E0157C05861564".lower(): "Uniswap V3 Router",
-    "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43".lower(): "Velodrome V2 Router",
+    "0xa062aE8A9c5e11aaA026fc2670B0D65cCc8B2858".lower(): "Velodrome V2 Router",
     "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD".lower(): "Uniswap Universal Router",
     "0x111111125421cA6dc452d289314280a0f8842A65".lower(): "1inch V6 Router",
-    "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506".lower(): "SushiSwap Router",
 }
 
 
@@ -44,9 +43,11 @@ class OptimismAdapter(EvmAdapter):
             chain_name_value="Optimism",
             rpc_url=rpc,
             etherscan_api_key=api_key,
-            honeypot_chain_id=10,
+            # honeypot.is answers HTTP 400 Invalid chain here; sellability comes from GoPlus.
+            honeypot_chain_id=None,
             known_lockers=KNOWN_LOCKERS,
             quote_tokens=QUOTE_TOKENS,
             factory_address=VELODROME_V2_FACTORY,
             whitelisted_routers=WHITELISTED_ROUTERS,
+            solidly_factory=True,
         )

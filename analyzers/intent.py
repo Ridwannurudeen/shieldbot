@@ -26,6 +26,9 @@ class IntentMismatchAnalyzer(Analyzer):
     - Approval to an EOA (spender is not a contract)
     """
 
+    def __init__(self, web3_client):
+        self._web3_client = web3_client
+
     @property
     def name(self) -> str:
         return "intent"
@@ -61,8 +64,9 @@ class IntentMismatchAnalyzer(Analyzer):
         # 2. Unlimited approval to non-whitelisted target
         if decoded.get('is_unlimited_approval'):
             spender = decoded.get('params', {}).get('param_0', '')
-            # Check if spender is whitelisted
-            whitelisted = _decoder.is_whitelisted_target(spender, chain_id=ctx.chain_id)
+            # Check if spender is whitelisted on this chain
+            adapter = self._web3_client._get_adapter(ctx.chain_id)
+            whitelisted = _decoder.is_whitelisted_target(spender, chain_id=ctx.chain_id, adapter=adapter)
             if not whitelisted:
                 score += 35
                 flags.append('Unlimited approval to non-whitelisted contract')

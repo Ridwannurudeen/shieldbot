@@ -132,7 +132,7 @@ class ServiceContainer:
         self.registry.register(MarketAnalyzer(self.dex_service))
         self.registry.register(BehavioralAnalyzer(self.ethos_service))
         self.registry.register(HoneypotAnalyzer(self.honeypot_service))
-        self.registry.register(IntentMismatchAnalyzer())
+        self.registry.register(IntentMismatchAnalyzer(self.web3_client))
         self.registry.register(SignaturePermitAnalyzer())
 
         # Policy engine

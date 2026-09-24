@@ -113,7 +113,7 @@ The MCP adapters have narrower coverage than their names may suggest:
 
 These legacy MCP limits remain open. Consumers must not promote their empty lists, zero counts, regex result or default reputation into an authorization decision.
 
-The scan coverage contract does not cover all auxiliary browser features: phishing-error paths can return `is_phishing: false`, and the side-panel injection renderer defaults a missing score to zero and labels it "Safe". Those displays do not prove that a phishing or injection check completed. They remain separate hardening work and must not be advertised as fail-closed protection.
+The scan coverage contract does not cover all auxiliary browser features. When the phishing check gets no answer from GoPlus (HTTP error, network error, malformed reply), it returns `is_phishing: null` with a `reason`, the server holds that for 45 seconds per domain, and the extension shows no banner; so a missing banner does not prove that a phishing check completed. The side-panel injection renderer defaults a missing score to zero and labels it "Safe", so that display does not prove an injection check completed either. Neither is fail-closed protection and must not be advertised as such.
 
 The browser also retains user overrides: generic incomplete results, API errors and risk overlays offer "Proceed Anyway". The new chain-resolution path independently rejects unknown, mismatched or changed chains, but it does not remove those other overrides. Signature requests use a local heuristic warning instead of the transaction-analysis API, and the popup wallet-health request is explicitly BNB-only (`chain_id=56`). Do not describe this extension as an unbypassable security boundary or claim that every incomplete check prevents signing.
 

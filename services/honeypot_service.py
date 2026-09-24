@@ -57,6 +57,7 @@ class HoneypotService:
             'honeypot_reason': None,
             'simulation_failed': False,
             'low_tax_honeypot': False,
+            'likely_false_positive': False,
             'buy_tax': None,
             'sell_tax': None,
             'can_buy': None,
@@ -71,7 +72,7 @@ class HoneypotService:
                 data['observed_at'] = min(data['observed_at'], response.get('observed_at', data['observed_at']))
                 if response.get('reason'):
                     reasons.append(response['reason'])
-                for field in ('simulation_failed', 'low_tax_honeypot'):
+                for field in ('simulation_failed', 'low_tax_honeypot', 'likely_false_positive'):
                     if response.get(field) is True:
                         data[field] = True
                         data['field_providers'][field] = 'honeypot.is'
@@ -121,6 +122,12 @@ class HoneypotService:
             except Exception as e:
                 logger.error('GoPlus fallback failed for %s: %s', address, type(e).__name__)
                 reasons.append(f'GoPlus fallback failed ({type(e).__name__})')
+
+        # A honeypot verdict is a failed sell, whatever tax or sellability a provider reported with it
+        # (the Robinhood simulator reports a sell that paid out nothing as sellable at 100% tax).
+        if data['is_honeypot'] is True and data['can_sell'] is not False:
+            data['can_sell'] = False
+            data['field_providers']['can_sell'] = data['field_providers']['is_honeypot']
 
         if data['simulation_failed']:
             if data['can_sell'] is True:

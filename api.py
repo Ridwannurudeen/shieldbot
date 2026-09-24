@@ -647,7 +647,8 @@ async def check_phishing(url: str, request: Request):
     """Check if a URL is a known phishing site.
 
     Called by the Chrome extension content script on every page load.
-    Results are cached server-side for 1 hour per domain.
+    Verdicts are cached server-side for 1 hour per domain; when GoPlus gives no answer the
+    result is is_phishing null with a reason, held for 45 seconds per domain.
     No API key required — rate-limited by IP via the existing middleware.
     """
     if not container or not container.phishing_service:

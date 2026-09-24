@@ -1955,15 +1955,35 @@ async def test_legacy_scanner_keeps_a_simulation_proven_honeypot_for_an_old_veri
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["honeypot.is", None])
-async def test_legacy_scanner_still_softens_a_third_party_flag_for_an_old_verified_token(provider):
+async def test_legacy_scanner_keeps_a_third_party_flag_for_an_old_verified_token_and_notes_the_doubt(provider):
+    # Verifying source and waiting 30 days cost a scammer nothing, so they cannot clear a failed sell.
     from scanner.token_scanner import TokenScanner
 
     scanner = TokenScanner(honeypot_web3(provider))
     result = {"checks": {"can_sell": False}, "risks": [], "is_verified": True, "contract_age_days": 400}
     await scanner._check_honeypot(TOKEN, result, chain_id=56)
-    assert result["is_honeypot"] is False
-    assert any("appears legitimate" in risk for risk in result["risks"])
-    assert "HONEYPOT DETECTED - Cannot sell after buying" not in result["risks"]
+    scanner._resolve_conflicts(result)
+    assert result["is_honeypot"] is True
+    assert "HONEYPOT DETECTED - Cannot sell after buying" in result["risks"]
+    assert any("possible false positive" in risk for risk in result["risks"])
+    assert scanner._calculate_safety_level(result) == "danger"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("verified", [True, False])
+async def test_legacy_scanner_reports_a_honeypot_in_one_cannot_sell_line(verified):
+    from scanner.token_scanner import TokenScanner
+
+    scanner = TokenScanner(honeypot_web3("honeypot.is"))
+    result = {"checks": {}, "risks": [], "is_verified": verified, "contract_age_days": 400}
+    await scanner._check_honeypot(TOKEN, result, chain_id=56)
+    scanner._resolve_conflicts(result)
+    assert result["checks"]["can_sell"] is False
+    assert [risk for risk in result["risks"] if "cannot sell" in risk.lower()] == [
+        "HONEYPOT DETECTED - Cannot sell after buying"
+    ]
+    assert result["risks"][1] == "Reason: sell reverted: the token refused the transfer to the pool"
+    assert sum("possible false positive" in risk for risk in result["risks"]) == (1 if verified else 0)
 
 
 @pytest.mark.asyncio

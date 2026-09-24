@@ -36,7 +36,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "SHIELDAI_CHECK_PHISHING") {
     checkPhishing(message.url)
       .then((result) => sendResponse({ result }))
-      .catch(() => sendResponse({ result: { is_phishing: false } }));
+      .catch(() => sendResponse({ result: { is_phishing: null } }));
     return true;
   }
 
@@ -171,7 +171,7 @@ async function checkPhishing(url) {
       apiUrl = await getApiUrl();
     } catch {
       console.warn("Phishing check skipped: no API URL configured");
-      return { is_phishing: false, check_failed: true };
+      return { is_phishing: null, check_failed: true };
     }
 
     const response = await fetch(
@@ -184,10 +184,12 @@ async function checkPhishing(url) {
 
     if (!response.ok) {
       console.warn("Phishing check failed: HTTP", response.status);
-      return { is_phishing: false, check_failed: true };
+      return { is_phishing: null, check_failed: true };
     }
 
     const result = await response.json();
+    // is_phishing null is no verdict: show nothing and ask again next time
+    if (typeof result.is_phishing !== "boolean") return result;
     // Evict oldest entry if cache is full
     if (_phishingCache.size >= MAX_PHISHING_CACHE) {
       const firstKey = _phishingCache.keys().next().value;
@@ -197,7 +199,7 @@ async function checkPhishing(url) {
     return result;
   } catch (err) {
     console.warn("Phishing check failed:", err.message || err);
-    return { is_phishing: false, check_failed: true };
+    return { is_phishing: null, check_failed: true };
   }
 }
 
