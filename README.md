@@ -2,7 +2,7 @@
 
 # ShieldBot
 
-**On-chain guarded transfers for Robinhood Chain, backed by inspectable token-risk evidence.**
+**ShieldBot is the fail-closed security layer that says what it checked.** Every verdict carries its coverage, and on Robinhood Chain a contract or an agent can refuse to act on anything stale or Unknown. We build on GoPlus, honeypot.is and others; we do not pretend to replace them.
 
 [Judge guide](docs/JUDGE_GUIDE.md) · [Recorded simulations](tests/fixtures/robinhood_simulation/) · [Verdict registry source](contracts/base/src/ShieldBotVerdictRegistry.sol) · [Test results](docs/TESTING.md)
 
