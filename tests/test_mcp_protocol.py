@@ -1,6 +1,7 @@
 """MCP protocol conformance (2024-11-05, HTTP+SSE): handshake, ping and notifications."""
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -297,6 +298,97 @@ async def test_a_request_cancelled_while_it_runs_gets_no_response(app, container
             assert (await http.post(url, json=ping, headers=AUTH_HEADERS)).status_code == 200
             assert queue.get_nowait() == {"jsonrpc": "2.0", "id": request_id, "result": {}}
     assert sessions[0].get(session_id)["in_flight"] == {}
+
+
+@pytest.mark.asyncio
+async def test_a_client_session_over_the_sse_stream(app, container, sessions):
+    """GET /sse and POST /messages together: every response arrives on the stream, in order."""
+    container.risk_engine.compute_from_results.return_value = {
+        "rug_probability": 12,
+        "risk_level": "MEDIUM",
+        "status": "unknown",
+        "coverage": {"honeypot": 0},
+        "coverage_reasons": {"honeypot": "Provider unavailable"},
+    }
+    sent = asyncio.Queue()
+    disconnected = asyncio.Event()
+    requested = False
+
+    async def receive():
+        nonlocal requested
+        if not requested:
+            requested = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await disconnected.wait()
+        return {"type": "http.disconnect"}
+
+    # The stream never ends on its own, so it is driven as a raw ASGI call rather than a test client.
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/mcp/sse",
+        "raw_path": b"/mcp/sse",
+        "root_path": "",
+        "query_string": b"",
+        "server": ("testserver", 80),
+        "client": ("127.0.0.1", 50000),
+        "headers": [(b"host", b"testserver"), (b"x-api-key", AUTH_HEADERS["X-API-Key"].encode())],
+    }
+    stream = asyncio.create_task(app(scope, receive, sent.put))
+
+    async def next_event():
+        while True:
+            message = await asyncio.wait_for(sent.get(), 5)
+            if message["type"] == "http.response.body" and message.get("body"):
+                return message["body"].decode()
+
+    async def next_message():
+        event = await next_event()
+        assert event.startswith("event: message\ndata: ")
+        return json.loads(event.split("data: ", 1)[1])
+
+    start = await asyncio.wait_for(sent.get(), 5)
+    assert start["type"] == "http.response.start"
+    assert start["status"] == 200
+    endpoint = await next_event()
+    assert endpoint.startswith("event: endpoint\ndata: /mcp/messages?session_id=")
+    url = endpoint.split("data: ", 1)[1].strip()
+
+    call = {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {"name": "scan_contract", "arguments": {"address": "0x" + "a" * 40, "chain_id": 56}},
+    }
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as http:
+        assert (await http.post(url, json=INITIALIZE, headers=AUTH_HEADERS)).status_code == 200
+        initialized = await next_message()
+        assert initialized["id"] == 0
+        assert initialized["result"]["protocolVersion"] == "2024-11-05"
+
+        notification = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+        assert (await http.post(url, json=notification, headers=AUTH_HEADERS)).status_code == 202
+
+        listing = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+        assert (await http.post(url, json=listing, headers=AUTH_HEADERS)).status_code == 200
+        tools = await next_message()
+        assert tools["id"] == 1
+        assert len(tools["result"]["tools"]) == 9
+
+        assert (await http.post(url, json=call, headers=AUTH_HEADERS)).status_code == 200
+        scanned = await next_message()
+        assert scanned["id"] == 2
+        result = json.loads(scanned["result"]["content"][0]["text"])
+        assert result["status"] == "unknown"
+        assert result["verdict"] == "UNKNOWN"
+        assert result["coverage_reasons"] == {"honeypot": "Provider unavailable"}
+
+    disconnected.set()
+    await asyncio.wait_for(stream, 5)
+    assert sessions[0].count == 0
 
 
 def test_a_session_quiet_for_ten_minutes_is_not_idle():
