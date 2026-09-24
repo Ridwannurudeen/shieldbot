@@ -444,3 +444,83 @@ def test_agent_exposes_complete_risk_metadata(client, mock_container):
     assert response.json()["category_scores"] == {}
     assert response.json()["confidence"] == 0.9
     assert mock_container.cache.set_verdict.call_args.args[2]["risk_level"] == "LOW"
+
+
+def _value_request(value, chain_id=56):
+    request = _make_firewall_request()
+    request["transaction"] = {**request["transaction"], "value": value, "chain_id": chain_id}
+    return request
+
+
+def _complete_cached_verdict(mock_container):
+    mock_container.cache.get_verdict.return_value = {
+        "score": 12, "flags": [], "status": "ok", "coverage": {"honeypot": 1}, "risk_level": "LOW",
+    }
+
+
+@pytest.mark.parametrize("value", ["abc", "", "-1", "1.5", "1e18", "0x", "0xg1", str(2**256), hex(2**256)])
+def test_agent_rejects_a_value_that_is_not_wei(client, mock_container, value):
+    """A value that is not an integer amount of wei from 0 to 2**256 - 1 is refused, never priced as $0."""
+    response = client.post("/api/agent/firewall", json=_value_request(value), headers={"X-API-Key": "sb_testkey"})
+    assert response.status_code == 400
+    mock_container.cache.get_verdict.assert_not_called()
+    mock_container.db.record_agent_firewall_event.assert_not_called()
+
+
+def test_agent_rejects_an_overlong_value_without_a_server_error(client, mock_container):
+    """A 400-digit value used to overflow the float price estimate into an uncaught 5xx."""
+    response = client.post("/api/agent/firewall", json=_value_request("9" * 400), headers={"X-API-Key": "sb_testkey"})
+    assert response.status_code == 422
+    mock_container.cache.get_verdict.assert_not_called()
+
+
+@pytest.mark.parametrize("source", ["fresh", "redis"])
+@pytest.mark.parametrize("chain_id", [56, 204])
+@pytest.mark.parametrize("value", ["1000000000000000000", "0xde0b6b3a7640000", " 0XDE0B6B3A7640000 "])
+def test_agent_prices_bnb_in_decimal_or_hex(client, mock_container, source, chain_id, value):
+    """1 BNB is priced at $600 on BSC and opBNB in either notation, over the fixture's $500 limit."""
+    if source == "redis":
+        _complete_cached_verdict(mock_container)
+    response = client.post("/api/agent/firewall", json=_value_request(value, chain_id), headers={"X-API-Key": "sb_testkey"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["verdict"] == "BLOCK"
+    assert body["policy_check"]["failed"] == ["spending_limit"]
+    assert "$600.00" in body["policy_check"]["checks"]["spending_limit"]
+    mock_container.db.record_agent_spend.assert_not_called()
+
+
+@pytest.mark.parametrize("source", ["fresh", "redis"])
+@pytest.mark.parametrize("chain_id", [1, 8453, 42161, 137, 10, 4663])
+def test_agent_unpriced_native_value_asks_owner(client, mock_container, source, chain_id):
+    """These chains' native tokens have no USD price here, so even 0.001 of one cannot pass the spend limits."""
+    if source == "redis":
+        _complete_cached_verdict(mock_container)
+    response = client.post(
+        "/api/agent/firewall", json=_value_request("1000000000000000", chain_id), headers={"X-API-Key": "sb_testkey"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["verdict"] == "WARN"
+    assert body["policy_check"]["needs_owner_approval"] is True
+    assert {"spending_limit", "daily_limit"} <= set(body["policy_check"]["failed"])
+    mock_container.db.record_agent_spend.assert_not_called()
+
+
+@pytest.mark.parametrize("value", ["0", "0x0"])
+@pytest.mark.parametrize("chain_id", [1, 4663])
+def test_agent_zero_value_is_known_on_every_chain(client, mock_container, value, chain_id):
+    response = client.post("/api/agent/firewall", json=_value_request(value, chain_id), headers={"X-API-Key": "sb_testkey"})
+    assert response.json()["verdict"] == "ALLOW"
+    mock_container.db.record_agent_spend.assert_not_called()
+
+
+@pytest.mark.parametrize("source", ["fresh", "redis"])
+def test_agent_records_allowed_bnb_spend(client, mock_container, source):
+    if source == "redis":
+        _complete_cached_verdict(mock_container)
+    response = client.post(
+        "/api/agent/firewall", json=_value_request("100000000000000000"), headers={"X-API-Key": "sb_testkey"},
+    )
+    assert response.json()["verdict"] == "ALLOW"
+    mock_container.db.record_agent_spend.assert_awaited_once_with("agent:1", pytest.approx(60.0))

@@ -1,6 +1,7 @@
 """Agent Transaction Firewall API — hot plane endpoints."""
 
 import asyncio
+import re
 import time
 import logging
 import traceback
@@ -12,9 +13,17 @@ from pydantic import BaseModel, ConfigDict, Field
 from agent.policy_engine import AgentPolicyEngine
 from core.analyzer import AnalysisContext
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
+from utils.chain_info import get_native_symbol
 from utils.web3_client import UnsupportedChainError
 
 logger = logging.getLogger(__name__)
+
+# A transaction value is an integer amount of wei, decimal or 0x hex, as the SDKs send it.
+_WEI_PATTERN = re.compile(r"0[xX][0-9a-fA-F]+|[0-9]+")
+_MAX_WEI = 2**256 - 1
+
+# USD estimates by native symbol. No price source exists for the others, so their values are unknown.
+_NATIVE_USD_ESTIMATES = {"BNB": 600.0}  # ~$600/BNB estimate -- replace with price feed
 
 
 def _fire_and_forget(coro, label: str = "background"):
@@ -36,7 +45,7 @@ class TransactionData(BaseModel):
     sender: str = Field(alias="from")
     to: str
     data: str = "0x"
-    value: str = "0"
+    value: str = Field(default="0", max_length=80)
     chain_id: int = Field(default=56, alias="chain_id")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -108,6 +117,7 @@ def create_agent_firewall_router(container) -> APIRouter:
         tx = req.transaction
         to_addr = tx.to.lower()
         chain_id = tx.chain_id
+        value_wei = _parse_value_wei(tx.value)
 
         # 1. Check Redis verdict cache
         cached = await container.cache.get_verdict(to_addr, chain_id)
@@ -115,7 +125,7 @@ def create_agent_firewall_router(container) -> APIRouter:
             cached = {**cached, "status": "unknown" if is_scan_incomplete(cached) else cached["status"]}
             # Still run policy check against cached score
             daily_spend = await container.db.get_agent_daily_spend(req.agent_id)
-            tx_value_usd = _estimate_value_usd(tx.value)
+            tx_value_usd = _estimate_value_usd(value_wei, chain_id)
             policy_result = policy_engine.evaluate(
                 policy=agent_policy.get("policy", {}),
                 risk_score=cached["score"],
@@ -147,7 +157,7 @@ def create_agent_firewall_router(container) -> APIRouter:
                 )
 
             # Track spending if allowed (Fix: cached path was missing this)
-            if verdict == "ALLOW" and tx_value_usd > 0:
+            if verdict == "ALLOW" and tx_value_usd:
                 await container.db.record_agent_spend(req.agent_id, tx_value_usd)
 
             alert = format_extension_alert({
@@ -319,7 +329,7 @@ def create_agent_firewall_router(container) -> APIRouter:
 
         # 4. Policy check
         daily_spend = await container.db.get_agent_daily_spend(req.agent_id)
-        tx_value_usd = _estimate_value_usd(tx.value)
+        tx_value_usd = _estimate_value_usd(value_wei, chain_id)
         policy_result = policy_engine.evaluate(
             policy=agent_policy.get("policy", {}),
             risk_score=risk_score,
@@ -353,7 +363,7 @@ def create_agent_firewall_router(container) -> APIRouter:
             )
 
         # Track spending if allowed
-        if verdict == "ALLOW" and tx_value_usd > 0:
+        if verdict == "ALLOW" and tx_value_usd:
             await container.db.record_agent_spend(req.agent_id, tx_value_usd)
 
         alert = format_extension_alert({**risk_output, **metadata, "rug_probability": risk_score})
@@ -454,11 +464,25 @@ def create_agent_firewall_router(container) -> APIRouter:
     return router
 
 
-def _estimate_value_usd(value_wei: str) -> float:
-    """Rough BNB->USD estimate. Replace with oracle in production."""
-    try:
-        wei = int(value_wei) if value_wei else 0
-        bnb = wei / 1e18
-        return bnb * 600  # ~$600/BNB estimate -- replace with price feed
-    except (ValueError, TypeError):
+def _parse_value_wei(value: str) -> int:
+    """Wei amount of a transaction value. Anything but an integer from 0 to 2**256 - 1 is a 400."""
+    text = value.strip()
+    if not _WEI_PATTERN.fullmatch(text):
+        raise HTTPException(
+            status_code=400,
+            detail="transaction.value must be an integer amount of wei (decimal or 0x hex)",
+        )
+    wei = int(text, 16) if text[:2].lower() == "0x" else int(text)
+    if wei > _MAX_WEI:
+        raise HTTPException(status_code=400, detail="transaction.value exceeds 2**256 - 1")
+    return wei
+
+
+def _estimate_value_usd(value_wei: int, chain_id: int) -> Optional[float]:
+    """Rough USD value of a native-token amount; None when the chain's native token has no estimate."""
+    if value_wei == 0:
         return 0.0
+    price = _NATIVE_USD_ESTIMATES.get(get_native_symbol(chain_id))
+    if price is None:
+        return None
+    return value_wei / 10**18 * price

@@ -209,3 +209,44 @@ def test_incomplete_coverage_keeps_existing_blocks(engine, policy, score, tx_val
     assert result.verdict == "BLOCK"
     assert failed_check in result.failed_checks
     assert result.needs_owner_approval is False
+
+
+@pytest.mark.parametrize("allowlisted,score", [(False, 0), (False, 45), (True, 0)])
+def test_unknown_value_asks_owner_instead_of_allowing(engine, default_policy, allowlisted, score):
+    """A value with no USD price cannot be shown to be under the spending limits, so it never passes them."""
+    result = engine.evaluate(
+        status="ok", coverage={"honeypot": 1},
+        policy={**default_policy, "always_allow": ["0xtarget"] if allowlisted else []},
+        risk_score=score,
+        target_address="0xtarget",
+        tx_value_usd=None,
+        daily_spend_usd=0,
+    )
+    assert result.verdict == "WARN"
+    assert result.needs_owner_approval is True
+    assert result.all_passed is False
+    assert {"spending_limit", "daily_limit"} <= set(result.failed_checks)
+    assert result.checks["spending_limit"].startswith("warn")
+    assert result.checks["daily_limit"].startswith("warn")
+
+
+def test_unknown_value_and_incomplete_coverage_are_both_reported(engine, default_policy):
+    result = engine.evaluate(
+        status="unknown", coverage={"honeypot": 0}, coverage_reasons={"honeypot": "Simulation failed"},
+        policy=default_policy, risk_score=0, target_address="0xtarget", tx_value_usd=None,
+    )
+    assert result.verdict == "WARN"
+    assert set(result.failed_checks) == {"coverage", "spending_limit", "daily_limit"}
+
+
+@pytest.mark.parametrize("policy,score,failed_check", [
+    ({"always_block": ["0xtarget"]}, 0, "contract_list"),
+    ({}, 90, "risk_threshold"),
+])
+def test_unknown_value_keeps_existing_blocks(engine, policy, score, failed_check):
+    result = engine.evaluate(
+        status="ok", coverage={"honeypot": 1},
+        policy=policy, risk_score=score, target_address="0xtarget", tx_value_usd=None,
+    )
+    assert result.verdict == "BLOCK"
+    assert failed_check in result.failed_checks
