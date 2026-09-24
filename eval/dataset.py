@@ -27,9 +27,13 @@ CLASSES = (
 )
 # The only providers a v2 source may name, compared without regard to case. None of them is read by
 # anything that computes ShieldBot's score (GoPlus, honeypot.is, TokenSniffer, DexScreener, Ethos,
-# Tenderly, Etherscan, Blockscout), so a label from them does not grade ShieldBot against its own
-# inputs. Add a provider only after checking that. "onchain" is a direct RPC read.
-LABEL_PROVIDERS = frozenset({"onchain", "scamsniffer", "robinhood", "geckoterminal"})
+# Tenderly, Etherscan, Blockscout, Sourcify, MetaMask's phishing list), so a label from them does not
+# grade ShieldBot against its own inputs. Add a provider only after checking that. "onchain" is a direct
+# RPC read. "revokecash" is Revoke.cash's approval exploit list, which the code only links to for users;
+# "uniswap" and "pancakeswap" are those exchanges' own token lists and deployment docs, which no code reads.
+LABEL_PROVIDERS = frozenset({
+    "onchain", "scamsniffer", "robinhood", "geckoterminal", "revokecash", "uniswap", "pancakeswap",
+})
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
 
