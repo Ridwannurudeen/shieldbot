@@ -71,7 +71,7 @@ class HoneypotService:
                 data['observed_at'] = min(data['observed_at'], response.get('observed_at', data['observed_at']))
                 if response.get('reason'):
                     reasons.append(response['reason'])
-                for field in ('simulation_failed', 'low_tax_honeypot'):
+                for field in ('simulation_failed', 'low_tax_honeypot', 'likely_false_positive'):
                     if response.get(field) is True:
                         data[field] = True
                         data['field_providers'][field] = 'honeypot.is'
@@ -100,6 +100,10 @@ class HoneypotService:
 
         if (not data['simulation_failed'] and simulation_success is not False
                 and data['is_honeypot'] is not None):
+            # A honeypot verdict is a failed sell, whatever tax was measured on the way.
+            if data['is_honeypot'] and data['can_sell'] is None:
+                data['can_sell'] = False
+                data['field_providers']['can_sell'] = data['field_providers']['is_honeypot']
             for action, tax in (('can_buy', 'buy_tax'), ('can_sell', 'sell_tax')):
                 if data[action] is None and data[tax] is not None:
                     data[action] = data[tax] < 100

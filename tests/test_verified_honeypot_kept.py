@@ -84,3 +84,42 @@ async def test_verified_low_tax_honeypot_scores_as_a_honeypot():
         contract, result.data, market, {"reputation_score": 80}
     )
     assert risk["risk_level"] == "HIGH"
+
+
+@pytest.mark.asyncio
+async def test_a_verified_low_tax_honeypot_leaves_the_service_unsellable_and_doubted():
+    # The case the risk engine's >$500k-liquidity allowance can wave through: liquidity never reaches
+    # this service, so its output must already say the sell failed and carry the doubt.
+    adapter, session = _adapter(verified=True)
+    web3_client = Web3Client()
+    web3_client.register_adapter(adapter)
+    goplus = AsyncMock()
+    with (
+        patch("adapters.evm_base.aiohttp.ClientSession") as client,
+        patch.object(ScamDatabase, "fetch_token_security", new=goplus),
+    ):
+        client.return_value.__aenter__ = AsyncMock(return_value=session)
+        data = await HoneypotService(web3_client).fetch_honeypot_data(TOKEN, chain_id=56)
+    assert data["is_honeypot"] is True
+    assert data["can_sell"] is False
+    assert data["likely_false_positive"] is True
+    assert data["field_providers"]["can_sell"] == "honeypot.is"
+    assert data["field_providers"]["likely_false_positive"] == "honeypot.is"
+    assert data["can_buy"] is True and data["sell_tax"] == 2.0
+    assert data["status"] == "ok"
+    goplus.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sell_tax", [0, 5, 99.9])
+async def test_a_honeypot_verdict_is_never_turned_sellable_by_its_tax(sell_tax):
+    client = MagicMock()
+    client.get_supported_chain_ids.return_value = [56]
+    client.check_honeypot = AsyncMock(
+        return_value={"is_honeypot": True, "field_providers": {"is_honeypot": "honeypot.is"}}
+    )
+    client.get_tax_info = AsyncMock(return_value={"buy_tax": 0, "sell_tax": sell_tax})
+    with patch.object(ScamDatabase, "fetch_token_security", new=AsyncMock()):
+        data = await HoneypotService(client).fetch_honeypot_data(TOKEN, chain_id=56)
+    assert data["can_sell"] is False
+    assert "likely_false_positive" not in data

@@ -344,8 +344,10 @@ async def test_complete_primary_honeypot_score_matches_baseline():
     client.get_tax_info = AsyncMock(return_value={'buy_tax': 0, 'sell_tax': 5})
     with patch.object(ScamDatabase, 'fetch_token_security', new=AsyncMock()) as fetch:
         result = await HoneypotAnalyzer(HoneypotService(client)).analyze(AnalysisContext(ADDRESS))
-    assert result.score == 80
-    assert 'Honeypot detected' in result.flags
+    # A honeypot cannot sell, so the 5% tax no longer marks it sellable: 80 + 60, capped at 100.
+    assert result.score == 100
+    assert result.data['can_sell'] is False
+    assert 'Honeypot detected' in result.flags and 'Cannot sell token' in result.flags
     fetch.assert_not_awaited()
 
 
