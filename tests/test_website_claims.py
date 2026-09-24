@@ -233,6 +233,22 @@ def test_structured_data_is_valid_and_matches_the_visible_faq():
         assert json.dumps(entity["acceptedAnswer"]["text"], ensure_ascii=False) in faq_source
 
 
+def test_hero_image_describes_its_recorded_api_reply():
+    # landing-src/scripts/capture-hero-overlay.py renders the extension's overlay from this reply.
+    reply = json.loads(read(LANDING_SRC / "scripts" / "hero-overlay-response.json"))
+    hero = read(COMPONENTS / "Hero.tsx")
+    # content.js shows UNKNOWN for an incomplete reply unless it is HIGH_RISK or BLOCK_RECOMMENDED.
+    assert reply["status"] != "ok"
+    assert reply["classification"] not in ("HIGH_RISK", "BLOCK_RECOMMENDED")
+    assert "UNKNOWN" in hero
+    for reason in reply["coverage_reasons"].values():
+        assert f"Why: {reason}" in hero
+    for name in ("hero-overlay.webp", "hero-overlay-mobile.webp"):
+        assert f'"/{name}"' in hero
+        source = (LANDING_SRC / "public" / name).read_bytes()
+        assert (ROOT / "landing" / name).read_bytes() == source, f"landing/{name} is stale"
+
+
 @pytest.mark.parametrize(
     "name",
     [
