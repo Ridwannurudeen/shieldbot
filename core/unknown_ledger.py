@@ -6,7 +6,8 @@ short-lived provider caches is not counted again. Each lookup ends in one outcom
   unknown   the provider replied that it has none for this subject: a 404, no record, no trading
             pairs, no phishing verdict, or a sell simulation that ran but could not decide
   failed    no usable reply: a network error or timeout, any other error status, a refusal, or a
-            body that could not be read
+            body that could not be read; also a lookup not sent because the provider's circuit
+            breaker was open (core.circuit_breaker)
 Etherscan puts both a refusal and "no record" in a status 0 reply. Only its "No data found" reply to
 a contract creation lookup counts as unknown: that text is published (l2beat/l2beat#12965), while
 Etherscan's docs say only that status 0 can be an error or a request with no records. Every other

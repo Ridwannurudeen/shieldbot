@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 import aiohttp
 from cachetools import TTLCache
 
+from core.circuit_breaker import CircuitOpenError, provider_breakers
 from core.unknown_ledger import unknown_ledger
 
 
@@ -75,6 +76,9 @@ class ExplorerService:
         host = urlsplit(url).hostname
 
         async def fetch():
+            # Checked here, inside the host's lock for Blockscout, so a lookup queued behind the
+            # one that opened the breaker sends nothing. It raises CircuitOpenError.
+            provider_breakers.check(provider, chain_id)
             try:
                 async with aiohttp.ClientSession(
                     timeout=aiohttp.ClientTimeout(total=15)
@@ -102,12 +106,14 @@ class ExplorerService:
                                 await asyncio.sleep(2**attempt)
                                 continue
                             if response.status != 200:
+                                provider_breakers.record_status(provider, chain_id, response.status)
                                 return ExplorerResult(
                                     "unknown",
                                     reason=f"HTTP {response.status}",
                                     provider=provider,
                                 )
                             data = await response.json()
+                            provider_breakers.record_status(provider, chain_id, response.status)
                             if not isinstance(data, dict):
                                 return ExplorerResult(
                                     "unknown",
@@ -119,22 +125,27 @@ class ExplorerService:
                                 data = _redact_api_key(data, api_key)
                             return ExplorerResult("known", data=data, provider=provider)
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+                provider_breakers.record_error(provider, chain_id, exc)
                 return ExplorerResult(
                     "unknown", reason=type(exc).__name__, provider=provider
                 )
 
-        if provider == "blockscout":
-            lock = self._blockscout_locks.get(host)
-            if lock is None:
-                lock = self._blockscout_locks[host] = asyncio.Lock()
-            async with lock:
-                if cache_key in self._cache:
-                    return self._cache[cache_key]
+        try:
+            if provider == "blockscout":
+                lock = self._blockscout_locks.get(host)
+                if lock is None:
+                    lock = self._blockscout_locks[host] = asyncio.Lock()
+                async with lock:
+                    if cache_key in self._cache:
+                        return self._cache[cache_key]
+                    result = await fetch()
+                    self._cache[cache_key] = result
+            else:
                 result = await fetch()
                 self._cache[cache_key] = result
-        else:
-            result = await fetch()
-            self._cache[cache_key] = result
+        except CircuitOpenError as exc:
+            # Not cached, so lookups resume as soon as the breaker closes; counted as failed below.
+            result = ExplorerResult("unknown", reason=type(exc).__name__, provider=provider)
         unknown_ledger.record(
             provider,
             chain_id,

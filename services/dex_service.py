@@ -3,6 +3,7 @@ import logging
 import math
 import time
 
+from core.circuit_breaker import provider_breakers
 from core.unknown_ledger import unknown_ledger
 from utils.chain_info import get_dexscreener_slug
 
@@ -40,18 +41,22 @@ class DexService:
             if not slug:
                 defaults['reason'] = f'DexScreener unsupported for chain {chain_id}'
                 return defaults
+            # One breaker for every chain: the request names only the token.
+            provider_breakers.check('dexscreener')
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     DEX_API_URL.format(address=address),
                     timeout=aiohttp.ClientTimeout(total=10)
                 ) as resp:
                     if resp.status != 200:
+                        provider_breakers.record_status('dexscreener', None, resp.status)
                         unknown_ledger.record('dexscreener', chain_id, 'failed')
                         logger.warning("DexScreener returned %s for %s", resp.status, address)
                         defaults['reason'] = f'DexScreener HTTP {resp.status}'
                         return defaults
 
                     data = await resp.json()
+                    provider_breakers.record_status('dexscreener', None, resp.status)
 
             pairs = [p for p in (data.get('pairs') or []) if p.get('chainId') == slug]
             if not pairs:
@@ -129,6 +134,7 @@ class DexService:
             return result
 
         except Exception as e:
+            provider_breakers.record_error('dexscreener', None, e)
             unknown_ledger.record('dexscreener', chain_id, 'failed')
             logger.error("DexScreener fetch failed for %s: %s", address, type(e).__name__)
             defaults['reason'] = f'DexScreener fetch failed: {type(e).__name__}'

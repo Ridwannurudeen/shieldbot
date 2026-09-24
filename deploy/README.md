@@ -72,7 +72,10 @@ It also names the origin branches holding the commit, how far it is ahead of the
 3. checks out the commit and runs `pip install -r requirements.txt` in the venv
 4. starts the API alone (it runs any database migration) and waits for `/api/health`
 5. requires `/api/health` to report `status: ok` with exactly the chains in the deployed
-   `utils/chain_info.py`, and `/api/stats` to answer
+   `utils/chain_info.py`, then `/api/ready` to answer 200 within about a minute (the database answering, and at
+   least one chain's RPC: every chain but Robinhood Chain is asked at once, so one RPC that hangs does not hold
+   the check up), and `/api/stats` to answer. An outage of all those RPCs while the deploy runs therefore rolls
+   it back too; run it again once one of them answers
 6. starts the bot, checks that its running process does not hold the recorder key, and watches both units for
    20 seconds for a crash or restart
 

@@ -14,6 +14,7 @@ import random
 import re
 import traceback
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException, Request
@@ -25,10 +26,13 @@ from typing import Optional, Dict, Any, List
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve_selector
 from utils.chain_info import get_chain_name, get_native_symbol
 from utils.web3_client import UnsupportedChainError
+from services import rpc_guard
 from services.mempool_service import supports_pending_transactions
 from core.auth import TIER_LIMITS, hash_key
+from core.circuit_breaker import CLOSED, provider_breakers
 from core.config import Settings
 from core.container import ServiceContainer
+from core.database import reporter_hash
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
 from core.unknown_ledger import unknown_ledger
 from core.telegram_formatter import escape_markdown
@@ -280,8 +284,8 @@ async def security_headers_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
-    # Skip rate limiting for health checks
-    if request.url.path in ("/", "/api/health", "/test", "/webhook/uptime"):
+    # Skip rate limiting for health and readiness checks
+    if request.url.path in ("/", "/api/health", "/api/ready", "/test", "/webhook/uptime"):
         return await call_next(request)
 
     # Check for API key authentication
@@ -690,6 +694,105 @@ async def health():
         "service": "shieldai-firewall",
         "supported_chains": list(web3_client.get_supported_chain_ids()) if web3_client else [],
     }
+
+
+# /api/ready answers from a result at most READY_CACHE_SECONDS old, so polling it cannot multiply
+# requests to the database or the RPCs, and each of its checks is cut at READY_TIMEOUT_SECONDS.
+READY_CACHE_SECONDS = 5
+READY_TIMEOUT_SECONDS = 2
+_ready_lock = asyncio.Lock()
+_ready_cache = {"body": None, "expires_at": 0.0}
+# The RPC probes' own threads, so a hung RPC never holds a worker of the default pool that scans
+# use. Eight: the seven chains probed at once, and one more for a probe still hanging from the
+# previous check (an RPC request times out after 10 s, twice the cache period).
+_READY_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="readiness")
+
+
+async def _database_answers() -> bool:
+    cursor = await container.db._db.execute("SELECT 1")
+    return await cursor.fetchone() == (1,)
+
+
+async def _any_rpc_answers() -> bool:
+    """Ask every chain's RPC for eth_blockNumber at once; True on the first answer.
+
+    Robinhood Chain is left out: its RPC is paced by the shared RPC guard, which a probe must not
+    bypass. The probes run on _READY_EXECUTOR. Once one answers, or the check is cut at its
+    timeout, the probes still queued for a thread are cancelled; one already sending finishes at
+    the RPC request timeout. Readiness is not a provider lookup, so the Unknown ledger does not
+    count it.
+    """
+    from services.launch_discovery import CHAIN_ID as ROBINHOOD_CHAIN_ID
+
+    loop = asyncio.get_running_loop()
+    web3_client = container.web3_client
+    probes = {
+        loop.run_in_executor(_READY_EXECUTOR, web3_client.get_web3(chain_id).eth.get_block_number): chain_id
+        for chain_id in web3_client.get_supported_chain_ids()
+        if chain_id != ROBINHOOD_CHAIN_ID
+    }
+    try:
+        pending = set(probes)
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for probe in done:
+                if probe.exception() is not None:
+                    logger.warning(
+                        "Readiness: chain %s RPC did not answer: %s",
+                        probes[probe], type(probe.exception()).__name__,
+                    )
+            if any(probe.exception() is None for probe in done):
+                return True
+        return False
+    finally:
+        for probe in probes:
+            probe.cancel()
+
+
+async def _check_within_timeout(check) -> bool:
+    try:
+        return await asyncio.wait_for(check(), READY_TIMEOUT_SECONDS)
+    except Exception as e:
+        logger.warning("Readiness check %s failed: %s", check.__name__, type(e).__name__)
+        return False
+
+
+async def _readiness() -> Dict:
+    if not container:
+        return {"ready": False, "checks": {"database": "failed", "rpc": "failed"}}
+    database, rpc = await asyncio.gather(
+        _check_within_timeout(_database_answers), _check_within_timeout(_any_rpc_answers),
+    )
+    checks = {
+        "database": "ok" if database else "failed",
+        "rpc": "ok" if rpc else "failed",
+        "robinhood_rpc": "ok" if container.robinhood_rpc_guard.state == rpc_guard.CLOSED else "open",
+    }
+    for name, state in provider_breakers.states().items():
+        checks[name] = "ok" if state == CLOSED else "open"
+    return {"ready": database and rpc, "checks": checks}
+
+
+@app.get("/api/ready")
+async def ready():
+    """Readiness: 200 when this process can serve scans, 503 when it cannot.
+
+    Ready means the database answers SELECT 1 and at least one chain's RPC answers eth_blockNumber,
+    each within READY_TIMEOUT_SECONDS; `checks` has each as "ok" or "failed". The RPCs are asked
+    at once and the first answer is enough, so one that hangs cannot hold the check up; Robinhood
+    Chain's is not asked, as its requests go through the shared RPC guard. It also lists the
+    Robinhood Chain RPC guard (`robinhood_rpc`) and every provider circuit breaker used so far
+    (core.circuit_breaker, named provider or provider:chain_id) as "ok" or "open". An open breaker
+    does not make the process unready: that provider's lookups come back Unknown, never clean.
+    The body holds check names only. One result serves every request for READY_CACHE_SECONDS, and
+    concurrent requests share one check. /api/health stays pure liveness.
+    """
+    async with _ready_lock:
+        if time.monotonic() >= _ready_cache["expires_at"]:
+            _ready_cache["body"] = await _readiness()
+            _ready_cache["expires_at"] = time.monotonic() + READY_CACHE_SECONDS
+        body = _ready_cache["body"]
+    return JSONResponse(status_code=200 if body["ready"] else 503, content=body)
 
 
 # The built dashboard inlines its scripts and styles; only Google Fonts is fetched from elsewhere.
@@ -1620,7 +1723,7 @@ async def community_report(req: CommunityReportRequest, request: Request):
                 address=req.address,
                 chain_id=req.chainId,
                 report_type=req.report_type,
-                reporter_id=client_ip,
+                reporter_id=reporter_hash(container.settings.reporter_hash_secret, client_ip),
                 reason=req.reason,
             )
         return {"status": "recorded", "address": req.address, "report_type": req.report_type}
