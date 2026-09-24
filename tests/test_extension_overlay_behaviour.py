@@ -1116,15 +1116,34 @@ const context = vm.createContext({
   setTimeout(fn, delay) { const id = ++nextTimer; timers.set(id, {fn, delay}); return id; },
   clearTimeout(id) { timers.delete(id); }, setInterval() { return 0; }, clearInterval() {},
 });
+// Each HMAC signature inject.js completes wakes whoever waits for it, so a test can wait for
+// inject.js to have checked a proof instead of guessing how long that takes.
+let signatures = 0;
+const signatureWaiters = [];
+function signatureMade() {
+  signatures++;
+  for (const wake of signatureWaiters.splice(0)) wake();
+}
+// Resolves once inject.js has completed `count` signatures since it started, and has run what
+// follows the last one (its promise callbacks all run before the next macrotask).
+async function signaturesMade(count) {
+  while (signatures < count) await new Promise(resolve => signatureWaiters.push(resolve));
+  await new Promise(resolve => setImmediate(resolve));
+}
 // In a browser, crypto's promises belong to the page's world, so a page that replaces its
-// Promise built-ins reaches them too. Make them the context's promises here as well.
-context.crypto = vm.runInContext(`(host) => ({
+// Promise built-ins reaches them too. Make them the context's promises here as well. A signature
+// is counted on the host's own promise, which no page patch reaches.
+context.crypto = vm.runInContext(`(host, signed) => ({
   subtle: {
     importKey: (...args) => Promise.resolve(host.subtle.importKey(...args)),
-    sign: (...args) => Promise.resolve(host.subtle.sign(...args)),
+    sign: (...args) => {
+      const mac = host.subtle.sign(...args);
+      mac.then(signed, signed);
+      return Promise.resolve(mac);
+    },
   },
   randomUUID: () => host.randomUUID(),
-})`, context)(webcrypto);
+})`, context)(webcrypto, signatureMade);
 vm.runInContext(fs.readFileSync('extension/inject.js', 'utf8'), context);
 // Play content.js's side of the handoff: here inject.js started first and is listening.
 const accepted = !document.dispatchEvent(new CustomEvent('shieldai:channel', {detail: 'channel-token', cancelable: true}));
@@ -1132,11 +1151,15 @@ function fireFailClosedTimer() {
   for (const [id, timer] of timers) if (timer.delay === 60000) { timers.delete(id); timer.fn(); return true; }
   return false;
 }
+// Starts a request and waits, a flush at a time and a bounded number of times, for its intercept:
+// inject.js reads the chain and signs the intercept first, which a busy machine can make slow.
 async function startRequest() {
+  const intercepts = () => posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT');
+  const before = intercepts().length;
   const pending = provider.request({method: 'eth_sendTransaction', params: [{to: '0x' + 'a'.repeat(40)}]});
   pending.catch(() => {});
-  await flush();
-  const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+  for (let i = 0; i < 20 && intercepts().length === before; i++) await flush();
+  const intercept = intercepts()[before];
   return {pending, requestId: intercept.requestId, intercept};
 }
 const proof = (requestId, purpose) => proofFor('channel-token', `${requestId}:${purpose}`);
@@ -1161,8 +1184,11 @@ def test_fail_closed_timer_stops_only_for_an_authentic_shown_signal(shown):
     'intercept-proof': intercept.proof,
     'wrong-request': await proof('another-request', 'shown'),
   };
+  const made = signatures;
   if (shown !== 'none') deliver({type: 'SHIELDAI_TX_SHOWN', requestId, proof: proofs[shown]});
-  await flush();
+  // inject.js checks a shown signal's proof with a signature of its own: wait for that check.
+  if (shown === 'none') await flush();
+  else await signaturesMade(made + 1);
   const stopped = !fireFailClosedTimer();
   assert.equal(stopped, shown === 'valid');
   if (shown === 'valid') {
@@ -1224,8 +1250,10 @@ def test_replacing_the_root_element_rejects_a_request_waiting_on_the_overlay():
         + r"""
 (async () => {
   const {pending, requestId} = await startRequest();
-  deliver({type: 'SHIELDAI_TX_SHOWN', requestId, proof: await proof(requestId, 'shown')});
-  await flush();
+  const shownProof = await proof(requestId, 'shown');
+  const made = signatures;
+  deliver({type: 'SHIELDAI_TX_SHOWN', requestId, proof: shownProof});
+  await signaturesMade(made + 1);
   assert(!fireFailClosedTimer(), 'the overlay was shown, so the fail-closed timer should have stopped');
   // What document.open() does: the root element goes, taking the extension's listeners with it,
   // so the Block content.js then posts would never arrive.
