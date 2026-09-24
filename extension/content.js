@@ -100,16 +100,8 @@
     showLoadingOverlay();
 
     try {
-      // Check if API URL is configured
-      if (!settings.apiUrl) {
-        showErrorOverlay(
-          requestId,
-          "ShieldAI Setup Required: Click the extension icon in your toolbar, enter your API server URL, and grant permission when prompted. Then try this transaction again."
-        );
-        return;
-      }
-
-      // Send to background for API analysis
+      // Send to background for API analysis. The background worker owns the
+      // API URL and its default.
       const response = await chrome.runtime.sendMessage({
         type: "SHIELDAI_ANALYZE",
         tx,
@@ -134,7 +126,7 @@
   function getSettings() {
     return new Promise((resolve) => {
       chrome.storage.local.get(
-        { enabled: true, apiUrl: "" },
+        { enabled: true },
         resolve
       );
     });
@@ -660,7 +652,7 @@
   async function runPhishingCheck() {
     try {
       const settings = await getSettings();
-      if (!settings.enabled || !settings.apiUrl) return;
+      if (!settings.enabled) return;
 
       const response = await chrome.runtime.sendMessage({
         type: "SHIELDAI_CHECK_PHISHING",

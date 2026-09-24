@@ -1,0 +1,207 @@
+"""Run the extension's page scripts against small DOM and Chrome doubles.
+
+inject.js runs in the page and holds the dApp's request; content.js runs in the extension's isolated
+world and shows the overlay. These tests drive both through the window messages they exchange.
+"""
+
+import json
+from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+
+# A DOM double: elements parse the tags out of the innerHTML string they are given, which is all
+# content.js needs to find its buttons and its modal.
+FAKE_DOM = r"""
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const {webcrypto} = require('crypto');
+const posted = [], documentListeners = {};
+class El {
+  constructor(tag, root, index) {
+    this.tagName = tag.toUpperCase(); this.attrs = {}; this.listeners = {}; this.style = {};
+    this.children = []; this.parent = null; this.html = ''; this.root = root; this.index = index;
+    this.id = ''; this.className = ''; this.disabled = false; this.hidden = false; this.textContent = '';
+  }
+  set innerHTML(value) { this.html = value; this.parsed = null; }
+  set textContent(value) {
+    this.text = String(value);
+    this.html = this.text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  get textContent() { return this.text; }
+  get innerHTML() { return this.html; }
+  setAttribute(name, value) { this.attrs[name] = String(value); }
+  getAttribute(name) { return name in this.attrs ? this.attrs[name] : null; }
+  addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
+  dispatch(type, event = {}) {
+    event.preventDefault ||= () => { event.defaultPrevented = true; };
+    for (const fn of this.listeners[type] || []) fn(event);
+    return event;
+  }
+  click() { this.dispatch('click'); }
+  focus() { document.activeElement = this; }
+  appendChild(child) { child.parent = this; this.children.push(child); return child; }
+  remove() {
+    if (this.parent) this.parent.children = this.parent.children.filter(c => c !== this);
+    this.parent = null;
+  }
+  descendants() {
+    if (this.root) return this.root.descendants().slice(this.index + 1);
+    if (!this.parsed) {
+      this.parsed = [...this.html.matchAll(/<(\w+)([^>]*)>/g)].map((match, index) => {
+        const el = new El(match[1], this, index);
+        for (const attr of match[2].matchAll(/([\w-]+)="([^"]*)"/g)) el.attrs[attr[1]] = attr[2];
+        el.id = el.attrs.id || ''; el.className = el.attrs.class || '';
+        return el;
+      });
+    }
+    return this.parsed;
+  }
+  querySelectorAll(selector) {
+    const all = this.descendants();
+    if (selector.startsWith('.')) return all.filter(el => el.className.split(/\s+/).includes(selector.slice(1)));
+    const tag = selector.split(':')[0].toUpperCase();
+    return all.filter(el => el.tagName === tag && !(selector.includes(':not([disabled])') && el.disabled));
+  }
+  querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
+}
+const body = new El('body'), head = new El('head');
+const document = {
+  body, head, documentElement: new El('html'), activeElement: body,
+  createElement: tag => new El(tag),
+  getElementById(id) {
+    for (const el of body.children) {
+      if (el.id === id) return el;
+      const found = el.descendants().find(child => child.id === id);
+      if (found) return found;
+    }
+    return null;
+  },
+  addEventListener(type, fn) { (documentListeners[type] ||= []).push(fn); },
+};
+const windowListeners = {};
+const window = {
+  addEventListener(type, fn) { (windowListeners[type] ||= []).push(fn); },
+  removeEventListener(type, fn) { windowListeners[type] = (windowListeners[type] || []).filter(f => f !== fn); },
+  postMessage(data) { posted.push(data); },
+  location: {href: 'https://dapp.example/', hostname: 'dapp.example'},
+  history: {length: 1},
+};
+function deliver(data) { for (const fn of [...(windowListeners.message || [])]) fn({source: window, data}); }
+const flush = () => new Promise(resolve => setTimeout(resolve, 50));
+async function proofFor(token, requestId) {
+  const encoder = new TextEncoder();
+  const key = await webcrypto.subtle.importKey('raw', encoder.encode(token), {name: 'HMAC', hash: 'SHA-256'}, false, ['sign']);
+  const mac = await webcrypto.subtle.sign('HMAC', key, encoder.encode(requestId));
+  return Array.from(new Uint8Array(mac), b => b.toString(16).padStart(2, '0')).join('');
+}
+"""
+
+CONTENT_HARNESS = (
+    FAKE_DOM
+    + r"""
+const storage = {language: 'en'};
+const analyses = [];
+let analyze = async () => ({error: 'API error 503: unavailable'});
+const chrome = {
+  storage: {local: {get(defaults, cb) { cb({...defaults, ...storage}); }}},
+  runtime: {
+    getURL: path => path,
+    async sendMessage(message) {
+      if (message.type === 'SHIELDAI_ANALYZE') { analyses.push(message.tx); return analyze(message.tx); }
+      return {result: {is_phishing: false}};
+    },
+  },
+};
+const context = vm.createContext({
+  window, document, chrome, crypto: webcrypto, TextEncoder, TextDecoder, setTimeout, clearTimeout, console,
+  fetch: async path => ({json: async () => JSON.parse(fs.readFileSync('extension/' + path, 'utf8'))}),
+});
+vm.runInContext(fs.readFileSync('extension/content.js', 'utf8'), context);
+document.head.children[0].onload();
+const token = posted.find(message => message.type === '__SHIELDAI_INIT__')._ct;
+function overlay() { return document.getElementById('shieldai-overlay'); }
+function verdicts() {
+  return JSON.parse(JSON.stringify(posted.filter(message => message.type === 'SHIELDAI_TX_VERDICT')));
+}
+async function intercept(requestId, tx = {to: '0x' + 'a'.repeat(40), chainId: 56}) {
+  deliver({type: 'SHIELDAI_TX_INTERCEPT', requestId, method: 'eth_sendTransaction', tx});
+  await flush();
+}
+const scan = (fields) => ({
+  status: 'ok', partial: false, classification: 'SAFE', risk_score: 0, coverage: {honeypot: 1},
+  coverage_reasons: {}, verdict: 'SAFE', plain_english: 'SAFE', transaction_impact: {}, ...fields,
+});
+"""
+)
+
+
+def run_node(script, argument=None):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for extension JavaScript regression tests")
+    result = subprocess.run(
+        [
+            node,
+            "-e",
+            script
+            + "\n})().then(() => console.log('completed')).catch(error => {console.error(error); process.exitCode = 1;});",
+            "--",
+            json.dumps(argument),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "completed" in result.stdout, result.stdout + result.stderr
+
+
+def test_content_script_uses_the_default_api_when_storage_has_no_url():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('first');
+  assert.equal(analyses.length, 1, 'the transaction was not sent for analysis');
+  assert(!overlay().innerHTML.includes('Setup Required'));
+"""
+    )
+
+
+@pytest.mark.parametrize(
+    "reason,stored,expected",
+    [
+        ("update", {}, "https://api.shieldbotsecurity.online"),
+        ("update", {"apiUrl": "https://self-hosted.example"}, "https://self-hosted.example"),
+        ("install", {}, "https://api.shieldbotsecurity.online"),
+        ("chrome_update", {}, None),
+    ],
+)
+def test_install_and_update_fill_a_missing_api_url_only(reason, stored, expected):
+    run_node(
+        r"""
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+(async () => {
+  const [reason, stored, expected] = JSON.parse(process.argv[1]);
+  let installed; const opened = [], store = {...stored};
+  const context = vm.createContext({
+    chrome: {
+      runtime: {onInstalled: {addListener(fn) { installed = fn; }}, onMessage: {addListener() {}}, getURL: path => path},
+      storage: {local: {get(defaults, cb) { cb({...defaults, ...store}); }, set(value) { Object.assign(store, value); }}},
+      tabs: {create(options) { opened.push(options.url); }},
+    },
+    URL, AbortSignal,
+  });
+  vm.runInContext(fs.readFileSync('extension/background.js', 'utf8'), context);
+  installed({reason});
+  assert.equal(store.apiUrl, expected === null ? undefined : expected);
+  assert.deepEqual(opened, reason === 'install' ? ['welcome.html'] : []);
+""",
+        [reason, stored, None if expected is None else expected],
+    )
