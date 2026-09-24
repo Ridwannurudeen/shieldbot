@@ -207,7 +207,7 @@ let phishing = false, phishingChecks = 0;
 let clock = 1000000;
 let fetchDelays = [];
 const chrome = {
-  storage: {local: {get(defaults, cb) { cb({...defaults, ...storage}); }}},
+  storage: {local: {get(defaults, cb) { cb({...defaults, ...storage}); }, set(value) { Object.assign(storage, value); }}},
   runtime: {
     getURL: path => 'chrome-extension://id/' + path,
     async sendMessage(message) {
@@ -1334,7 +1334,7 @@ window.ethereum = provider;
 window.dispatchEvent = () => {};
 const storage = {language: 'en'};
 const chrome = {
-  storage: {local: {get(defaults, cb) { cb({...defaults, ...storage}); }}},
+  storage: {local: {get(defaults, cb) { cb({...defaults, ...storage}); }, set(value) { Object.assign(storage, value); }}},
   runtime: {
     getURL: path => 'chrome-extension://id/' + path,
     async sendMessage(message) {

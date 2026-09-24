@@ -296,7 +296,9 @@ def test_hero_image_describes_its_recorded_api_reply():
         '? "UNKNOWN" : result.classification || "CAUTION";',
         'const scoreDisplay = incomplete ? "Unknown (incomplete provider coverage)" : '
         '`${_t("overlaySafety")} ${100 - result.risk_score}/100`;',
-        '${escapeHtml(label)}${classification === "UNKNOWN" ? "" : ` &mdash; ${escapeHtml(scoreDisplay)}`}',
+        # A verdict the overlay raised itself (a look-alike or a delegation) shows no score; the
+        # recorded reply has neither, so its badge follows the API's verdict.
+        '${escapeHtml(label)}${classification === "UNKNOWN" || classification !== verdict ? "" : ` &mdash; ${escapeHtml(scoreDisplay)}`}',
         'return Object.values(result.coverage_reasons || {}).filter(Boolean).join("; ") || '
         '_t("unknownNoReason");',
     ):

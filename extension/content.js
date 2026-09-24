@@ -204,16 +204,21 @@
       response = { error: err.message || "Extension communication error. Check extension settings." };
     }
 
+    // A send to an address that looks like one the user sent to before, but
+    // is another (address poisoning).
+    const recipient = isSignature ? null : recipientOf(tx);
+    const lookalike = recipient === null ? null : await pastLookalike(recipient);
+
     if (Date.now() - received > DECISION_WINDOW_MS) {
       showTimedOutOverlay(requestId);
     } else if (isSignature) {
       showSignatureOverlay(requestId, tx, strict, response);
     } else if (response.error) {
       // API error — show warning and let user decide
-      showErrorOverlay(requestId, response.error, strict, tx);
+      showErrorOverlay(requestId, response.error, strict, tx, recipient, lookalike);
     } else {
       // Show analysis overlay
-      showAnalysisOverlay(requestId, response.result, strict, tx);
+      showAnalysisOverlay(requestId, response.result, strict, tx, recipient, lookalike);
     }
   });
 
@@ -314,8 +319,9 @@
   // page script is an untrusted event and is ignored. Proceed also needs the
   // button enabled and the dialog visible without a break for
   // PROCEED_DELAY_MS; when it is not visible, the dialog says so rather than
-  // leave a button that silently does nothing.
-  function onDecision(root, id, requestId, action) {
+  // leave a button that silently does nothing. afterProceed, when given, runs
+  // once Proceed has counted.
+  function onDecision(root, id, requestId, action, afterProceed) {
     const button = root.getElementById(id);
     button.addEventListener("click", (event) => {
       if (!event.isTrusted) return;
@@ -328,6 +334,7 @@
         if (Date.now() - _visibleSince < PROCEED_DELAY_MS) return;
       }
       sendVerdict(requestId, action);
+      if (afterProceed) afterProceed();
     });
   }
 
@@ -336,7 +343,7 @@
   // input; a click alone does nothing and letting go early cancels. The
   // click's rules apply when the hold starts, and the dialog must stay visible
   // until it ends.
-  function onHold(root, requestId) {
+  function onHold(root, requestId, afterProceed) {
     const button = root.getElementById("shieldai-proceed");
     let timer = null;
     const cancel = () => {
@@ -362,6 +369,7 @@
           return;
         }
         sendVerdict(requestId, "proceed");
+        if (afterProceed) afterProceed();
       }, HOLD_TO_CONFIRM_MS);
     };
     const holdKey = (event) => event.key === "Enter" || event.key === " ";
@@ -516,6 +524,61 @@
     if (!tx.callCount) return "";
     const note = _t("overlayBatchCall", { index: tx.callIndex, count: tx.callCount });
     return `<div class="shieldai-section shieldai-sig-note"><p>${escapeHtml(note)}</p></div>`;
+  }
+
+  // The address a transaction sends to: the recipient of a native send (no
+  // call data), or of an ERC-20 transfer or transferFrom, in lower case; null
+  // for any other call.
+  function recipientOf(tx) {
+    const data = String(tx.data || "0x").toLowerCase();
+    if (data === "0x") {
+      return typeof tx.to === "string" && /^0x[0-9a-f]{40}$/i.test(tx.to) ? tx.to.toLowerCase() : null;
+    }
+    const call = /^0xa9059cbb0{24}([0-9a-f]{40})[0-9a-f]{64}$/.exec(data) ||
+      /^0x23b872dd0{24}[0-9a-f]{40}0{24}([0-9a-f]{40})[0-9a-f]{64}$/.exec(data);
+    return call ? `0x${call[1]}` : null;
+  }
+
+  // Recipients the user proceeded with, newest first, kept in this browser
+  // only (chrome.storage.local, never sent anywhere) and capped. A page adds
+  // none: only a Proceed the user chose does.
+  const MAX_SENT_RECIPIENTS = 100;
+
+  function rememberRecipient(recipient) {
+    chrome.storage.local.get({ sentRecipients: [] }, ({ sentRecipients }) => {
+      chrome.storage.local.set({
+        sentRecipients: [recipient, ...sentRecipients.filter((past) => past !== recipient)]
+          .slice(0, MAX_SENT_RECIPIENTS),
+      });
+    });
+  }
+
+  // A past recipient with the same first and last four hex characters as this
+  // one but another middle, or null; none when the user has sent to this very
+  // address before.
+  function pastLookalike(recipient) {
+    return new Promise((resolve) => {
+      chrome.storage.local.get({ sentRecipients: [] }, ({ sentRecipients }) => {
+        resolve(sentRecipients.includes(recipient) ? null : sentRecipients.find((past) =>
+          past.slice(2, 6) === recipient.slice(2, 6) && past.slice(-4) === recipient.slice(-4)) || null);
+      });
+    });
+  }
+
+  // Both addresses in full, the middle of each marked, so the difference shows.
+  function lookalikeSection(recipient, past) {
+    if (!past) return "";
+    const marked = (address) => `${escapeHtml(address.slice(0, 6))}<mark class="shieldai-diff">` +
+      `${escapeHtml(address.slice(6, -4))}</mark>${escapeHtml(address.slice(-4))}`;
+    return `
+      <div class="shieldai-section shieldai-lookalike" role="alert">
+        <h3>${_t("overlayLookalikeTitle")}</h3>
+        <p>${_t("overlayLookalikeNote")}</p>
+        <table class="shieldai-impact">
+          <tr><td>${_t("overlayLookalikeNew")}</td><td class="shieldai-mono">${marked(recipient)}</td></tr>
+          <tr><td>${_t("overlayLookalikePast")}</td><td class="shieldai-mono">${marked(past)}</td></tr>
+        </table>
+      </div>`;
   }
 
   // Where a decision dialog says why a Proceed did nothing: the page is
@@ -831,11 +894,13 @@
     }
   }
 
-  async function showAnalysisOverlay(requestId, result, strict, tx) {
+  async function showAnalysisOverlay(requestId, result, strict, tx, recipient, lookalike) {
     await _loadContentLang();
     removeOverlay();
 
-    const { incomplete, classification } = verdictOf(result);
+    const { incomplete, classification: verdict } = verdictOf(result);
+    // A look-alike recipient is at least High Risk, whatever the API found.
+    const classification = lookalike ? atLeast(verdict, "HIGH_RISK") : verdict;
     const badgeClass = BADGE_CLASSES[classification] || "shieldai-badge-caution";
     const label = classLabel(classification);
     const isBlock = classification === "BLOCK_RECOMMENDED";
@@ -844,7 +909,7 @@
     const chainUnknown = (result.coverage || {}).chain === false;
     // Strict mode leaves no way to send a transaction the firewall recommends
     // blocking or could not fully check.
-    const canProceed = !chainUnknown && !(strict && (isBlock || classification === "UNKNOWN"));
+    const canProceed = !chainUnknown && !(strict && (isBlock || verdict === "UNKNOWN"));
     // On Block Recommended (so Balanced mode), Proceed needs a hold.
     const hold = canProceed && isBlock;
 
@@ -886,11 +951,12 @@
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
 
-        <div class="shieldai-badge ${badgeClass}">${escapeHtml(label)}${classification === "UNKNOWN" ? "" : ` &mdash; ${escapeHtml(scoreDisplay)}`}</div>
+        <div class="shieldai-badge ${badgeClass}">${escapeHtml(label)}${classification === "UNKNOWN" || classification !== verdict ? "" : ` &mdash; ${escapeHtml(scoreDisplay)}`}</div>
         ${incomplete ? `
           <p class="shieldai-unknown-why">${_t("unknownWhy")} ${escapeHtml(unknownReason(result))}</p>
         ` : ""}
         ${batchNote(tx)}
+        ${lookalikeSection(recipient, lookalike)}
 
         ${result.partial ? `
           <div class="shieldai-section" style="background:#78350f;border-radius:6px;padding:8px 12px;margin-bottom:8px;">
@@ -935,7 +1001,7 @@
         </div>
 
         <div class="shieldai-verdict">
-          ${escapeHtml(incomplete ? "Unknown (incomplete provider coverage)" : result.verdict || "")}
+          ${escapeHtml(incomplete ? "Unknown (incomplete provider coverage)" : classification !== verdict ? label : result.verdict || "")}
         </div>
 
         <div class="shieldai-actions">
@@ -985,12 +1051,13 @@
       });
     }
 
-    // Button handlers
+    // Button handlers. A recipient the user proceeds with is remembered.
+    const remember = recipient ? () => rememberRecipient(recipient) : null;
     onDecision(root, "shieldai-block", requestId, "block");
     if (hold) {
-      onHold(root, requestId);
+      onHold(root, requestId, remember);
     } else if (canProceed) {
-      onDecision(root, "shieldai-proceed", requestId, "proceed");
+      onDecision(root, "shieldai-proceed", requestId, "proceed", remember);
     }
 
     // A SAFE verdict has nothing to explain, so it has no "Why is this risky?".
@@ -1034,7 +1101,7 @@
 
   // Shown when no analysis came back (429, 400, timeout, unreachable API). In
   // Strict mode there is no Proceed: an unchecked transaction stays blocked.
-  async function showErrorOverlay(requestId, errorMsg, strict, tx) {
+  async function showErrorOverlay(requestId, errorMsg, strict, tx, recipient, lookalike) {
     await _loadContentLang();
     removeOverlay();
 
@@ -1051,6 +1118,7 @@
           ${_t("overlayAnalysisUnavail")}
         </div>
         ${batchNote(tx)}
+        ${lookalikeSection(recipient, lookalike)}
         <div class="shieldai-section">
           <p>${_t("overlayCannotReach")}</p>
           <p class="shieldai-error">${escapeHtml(errorMsg)}</p>
@@ -1073,7 +1141,7 @@
     const root = mountOverlay(overlay, requestId);
     onDecision(root, "shieldai-block", requestId, "block");
     if (!strict) {
-      onDecision(root, "shieldai-proceed", requestId, "proceed");
+      onDecision(root, "shieldai-proceed", requestId, "proceed", recipient ? () => rememberRecipient(recipient) : null);
     }
   }
 

@@ -171,5 +171,9 @@
   "siweUnreadable": "此消息看起来像“以太坊登录”(Sign-In with Ethereum) 消息，但不符合其标准 (EIP-4361)，因此无法检查它会让您登录哪个网站。",
   "overlayBtnHoldProceed": "按住以继续",
   "overlayBtnHoldSign": "按住以签名",
-  "overlayHoldNote": "建议阻止。如仍要继续，请按住该按钮，或在按钮上按住 Enter 或空格键 1.5 秒。提前松开将取消。"
+  "overlayHoldNote": "建议阻止。如仍要继续，请按住该按钮，或在按钮上按住 Enter 或空格键 1.5 秒。提前松开将取消。",
+  "overlayLookalikeTitle": "相似的收款地址",
+  "overlayLookalikeNote": "此收款地址看起来像您以前转账过的地址，但它是另一个地址。骗子会制造首尾相同的地址，让您复制错误的地址。继续之前请逐个字符核对。",
+  "overlayLookalikeNew": "本次转给",
+  "overlayLookalikePast": "以前转给"
 }

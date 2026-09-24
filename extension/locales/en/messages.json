@@ -171,5 +171,9 @@
   "siweUnreadable": "This message looks like Sign-In with Ethereum but does not follow its standard (EIP-4361), so the site it signs you in to cannot be checked.",
   "overlayBtnHoldProceed": "Hold to Proceed Anyway",
   "overlayBtnHoldSign": "Hold to Sign Anyway",
-  "overlayHoldNote": "Block is recommended. To continue anyway, hold the button down, or hold Enter or Space on it, for 1.5 seconds. Letting go earlier cancels."
+  "overlayHoldNote": "Block is recommended. To continue anyway, hold the button down, or hold Enter or Space on it, for 1.5 seconds. Letting go earlier cancels.",
+  "overlayLookalikeTitle": "Look-alike recipient",
+  "overlayLookalikeNote": "This recipient looks like an address you have sent to before, but is a different address. Scammers make addresses that start and end the same way so that the wrong one gets copied. Compare every character before you continue.",
+  "overlayLookalikeNew": "Sending to",
+  "overlayLookalikePast": "Sent to before"
 }

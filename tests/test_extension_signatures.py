@@ -649,3 +649,122 @@ def test_only_block_recommended_asks_for_a_hold(outcome):
 """,
         outcome,
     )
+
+
+# A recipient the user sent to, and addresses that share its first and last four hex characters.
+LOOKALIKE = r"""
+const past = '0xabcd' + '1'.repeat(32) + 'ef01';
+const poisoned = '0xabcd' + '9'.repeat(32) + 'ef01';
+const transfer = to => '0xa9059cbb' + '0'.repeat(24) + to.slice(2) + '0'.repeat(63) + '1';
+const lookalikeShown = () => overlay().innerHTML.includes('looks like an address you have sent to before');
+"""
+
+
+@pytest.mark.parametrize("kind", ["native", "erc20-transfer", "api-unreachable"])
+def test_a_recipient_that_looks_like_a_past_one_is_warned_about(kind):
+    run_node(
+        CONTENT_HARNESS
+        + LOOKALIKE
+        + r"""
+(async () => {
+  const kind = JSON.parse(process.argv[1]);
+  storage.sentRecipients = [past];
+  analyze = async () => kind === 'api-unreachable' ? {error: 'timeout'} : {result: scan({})};
+  const tx = kind === 'erc20-transfer'
+    ? {to: '0x' + 'c'.repeat(40), data: transfer(poisoned), chainId: 56}
+    : {to: poisoned.toUpperCase().replace('0X', '0x'), data: '0x', chainId: 56};
+  await intercept('request', tx);
+  const html = overlay().innerHTML;
+  assert(lookalikeShown(), html);
+  // Both addresses in full, the middle of each marked.
+  for (const address of [poisoned, past]) {
+    assert(html.includes(`${address.slice(0, 6)}<mark class="shieldai-diff">${address.slice(6, -4)}</mark>${address.slice(-4)}`), html);
+  }
+  if (kind !== 'api-unreachable') {
+    // A SAFE verdict is not shown next to the warning.
+    assert(overlay().querySelector('.shieldai-badge').className.includes('shieldai-badge-high'), html);
+    assert(!/shieldai-verdict">\s*SAFE/.test(html), html);
+  }
+""",
+        kind,
+    )
+
+
+@pytest.mark.parametrize(
+    "recipient",
+    ["the-same-address", "another-start", "another-end", "a-contract-call", "no-history"],
+)
+def test_no_lookalike_warning_without_a_lookalike(recipient):
+    run_node(
+        CONTENT_HARNESS
+        + LOOKALIKE
+        + r"""
+(async () => {
+  const recipient = JSON.parse(process.argv[1]);
+  storage.sentRecipients = recipient === 'no-history' ? [] : [past];
+  analyze = async () => ({result: scan({})});
+  const to = {
+    'the-same-address': past, 'another-start': '0xabce' + '9'.repeat(32) + 'ef01',
+    'another-end': '0xabcd' + '9'.repeat(32) + 'ef02', 'a-contract-call': poisoned, 'no-history': poisoned,
+  }[recipient];
+  // An approve to the look-alike is not a send to it.
+  const data = recipient === 'a-contract-call' ? '0x095ea7b3' + '0'.repeat(24) + poisoned.slice(2) + '0'.repeat(64) : '0x';
+  await intercept('request', {to, data, chainId: 56});
+  assert(!lookalikeShown(), overlay().innerHTML);
+""",
+        recipient,
+    )
+
+
+@pytest.mark.parametrize("decision", ["proceed", "block", "signature"])
+def test_only_a_recipient_the_user_proceeded_with_is_remembered(decision):
+    run_node(
+        CONTENT_HARNESS
+        + LOOKALIKE
+        + r"""
+(async () => {
+  const decision = JSON.parse(process.argv[1]);
+  // A full history keeps its newest hundred.
+  storage.sentRecipients = Array.from({length: 100}, (_, i) => '0x' + i.toString(16).padStart(40, '0'));
+  analyze = async () => ({result: scan({})});
+  if (decision === 'signature') {
+    await intercept('request', {signMethod: 'personal_sign', data: '0x00', to: past, chainId: 56}, 'personal_sign');
+  } else {
+    await intercept('request', {to: '0x' + 'c'.repeat(40), data: transfer(past), chainId: 56});
+  }
+  userClick(byId(decision === 'block' ? 'shieldai-block' : 'shieldai-proceed'));
+  await flush();
+  const kept = decision === 'proceed';
+  assert.equal(storage.sentRecipients[0] === past, kept);
+  assert.equal(storage.sentRecipients.length, 100);
+  if (kept) assert.equal(storage.sentRecipients.at(-1), '0x' + (98).toString(16).padStart(40, '0'));
+""",
+        decision,
+    )
+
+
+def test_a_lookalike_of_a_real_send_is_warned_about_end_to_end():
+    run_node(
+        FRAME_HARNESS.replace("JSON.parse(process.argv[1]);", "['top', 'content-first', false];", 1)
+        + LOOKALIKE.replace(
+            "const lookalikeShown = () => overlay().innerHTML",
+            "const lookalikeShown = () => overlayRoot().getElementById('shieldai-overlay').innerHTML",
+        )
+        + r"""
+(async () => {
+  // The page asks for a send, the user proceeds, and the wallet gets it.
+  const first = provider.request({method: 'eth_sendTransaction', params: [{to: past, value: '0x1'}]});
+  (await proceedButton()).dispatch('click', {isTrusted: true});
+  assert.equal(await first, 'sent');
+  assert.deepEqual(plain(storage.sentRecipients), [past]);
+  // A later send to an address made to look like it is warned about.
+  const second = provider.request({method: 'eth_sendTransaction', params: [{to: poisoned, value: '0x1'}]});
+  second.catch(() => {});
+  await proceedButton();
+  assert(lookalikeShown(), 'no warning for a look-alike of a past recipient');
+  // A page cannot add to the history: a request it only shows or that the user blocks is not kept.
+  overlayRoot().getElementById('shieldai-block').dispatch('click', {isTrusted: true});
+  await assert.rejects(second, /blocked/);
+  assert.deepEqual(plain(storage.sentRecipients), [past]);
+"""
+    )

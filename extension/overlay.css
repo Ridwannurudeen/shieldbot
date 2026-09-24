@@ -313,6 +313,21 @@
   margin: 10px 0 0;
 }
 
+/* A recipient that looks like one sent to before: both in full, middles marked. */
+.shieldai-lookalike {
+  border: 1px solid #dc2626;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.shieldai-lookalike .shieldai-mono {
+  word-break: break-all;
+}
+.shieldai-diff {
+  background: #7f1d1d;
+  color: #fecaca;
+  border-radius: 2px;
+}
+
 /* Loading */
 .shieldai-loading {
   text-align: center;

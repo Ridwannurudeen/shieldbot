@@ -171,5 +171,9 @@
   "siweUnreadable": "Tin nhắn này trông giống Sign-In with Ethereum nhưng không tuân theo tiêu chuẩn của nó (EIP-4361), nên không thể kiểm tra trang web mà nó đăng nhập bạn vào.",
   "overlayBtnHoldProceed": "Giữ để vẫn tiếp tục",
   "overlayBtnHoldSign": "Giữ để vẫn ký",
-  "overlayHoldNote": "Khuyến nghị chặn. Để vẫn tiếp tục, hãy nhấn giữ nút, hoặc giữ phím Enter hoặc Space trên nút, trong 1,5 giây. Thả ra sớm hơn sẽ hủy."
+  "overlayHoldNote": "Khuyến nghị chặn. Để vẫn tiếp tục, hãy nhấn giữ nút, hoặc giữ phím Enter hoặc Space trên nút, trong 1,5 giây. Thả ra sớm hơn sẽ hủy.",
+  "overlayLookalikeTitle": "Người nhận trông giống",
+  "overlayLookalikeNote": "Người nhận này trông giống một địa chỉ bạn từng gửi đến, nhưng là một địa chỉ khác. Kẻ lừa đảo tạo ra các địa chỉ có phần đầu và phần cuối giống nhau để bạn sao chép nhầm. Hãy so sánh từng ký tự trước khi tiếp tục.",
+  "overlayLookalikeNew": "Đang gửi đến",
+  "overlayLookalikePast": "Đã từng gửi đến"
 }
