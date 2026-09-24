@@ -1209,3 +1209,49 @@ def test_just_0x_and_other_text_are_signed_as_written():
   }
 """
     )
+
+
+def test_a_personal_sign_message_that_is_not_a_string_is_high_risk_unreadable_end_to_end():
+    run_node(
+        FRAME_HARNESS.replace("JSON.parse(process.argv[1]);", "['top', 'content-first', false];", 1)
+        + r"""
+(async () => {
+  // A page can pass a list of byte values, which a wallet may sign as bytes; the overlay cannot
+  // read it as text, so it is never shown at the API's SAFE.
+  const pending = provider.request({method: 'personal_sign', params: [[104, 105], '0x' + 'b'.repeat(40)]});
+  pending.catch(() => {});
+  await proceedButton();
+  const dialog = overlayRoot().getElementById('shieldai-overlay');
+  const html = dialog.innerHTML;
+  assert(dialog.querySelector('.shieldai-badge').className.includes('shieldai-badge-high'), html);
+  assert(html.includes('UNREADABLE MESSAGE'), html);
+  assert(!html.includes('>SAFE<'), html);
+"""
+    )
+
+
+def test_a_look_alike_international_domain_is_compared_as_the_browser_sees_it():
+    run_node(
+        BACKGROUND_HARNESS
+        + SIWE
+        + r"""
+(async () => {
+  // A page on a homoglyph of apple.example (Cyrillic a), which the browser reports in punycode,
+  // asks to sign in to the real apple.example: Block, with no API call.
+  const homoglyph = new URL('https://аpple.example').host;
+  assert(homoglyph.startsWith('xn--'), homoglyph);
+  const real = siwe({domain: 'apple.example', uri: 'https://apple.example/login'});
+  const {result: phishing} = await respond(signIn(hex(real)), {origin: `https://${homoglyph}`});
+  assert.equal(phishing.siwe.state, 'mismatch');
+  assert.equal(phishing.siwe.origin, homoglyph);
+  assert.equal(phishing.classification, 'BLOCK_RECOMMENDED');
+  assert.equal(bodies.length, 0);
+  // A site on an international domain signs in with its Unicode name on its own punycode origin:
+  // a match, left to the API.
+  const own = siwe({domain: 'bücher.example', uri: 'https://bücher.example/login'});
+  const {result: match} = await respond(signIn(hex(own)), {origin: 'https://xn--bcher-kva.example'});
+  assert.equal(match.siwe, undefined, JSON.stringify(match.siwe));
+  assert.equal(match.classification, 'SAFE');
+  assert.equal(bodies.length, 1);
+"""
+    )
