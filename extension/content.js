@@ -78,10 +78,7 @@
     const settings = await getSettings();
     if (!settings.enabled) {
       // Extension disabled — auto-proceed
-      window.postMessage(
-        { type: "SHIELDAI_TX_VERDICT", requestId, action: "proceed", _ct: _CHANNEL_TOKEN },
-        "*"
-      );
+      postVerdict(requestId, "proceed");
       return;
     }
 
@@ -134,9 +131,45 @@
 
   // --- Overlay Management ---
 
+  function postVerdict(requestId, action) {
+    window.postMessage(
+      { type: "SHIELDAI_TX_VERDICT", requestId, action, _ct: _CHANNEL_TOKEN },
+      "*"
+    );
+  }
+
   function removeOverlay() {
     const existing = document.getElementById("shieldai-overlay");
     if (existing) existing.remove();
+  }
+
+  function sendVerdict(requestId, action) {
+    removeOverlay();
+    postVerdict(requestId, action);
+  }
+
+  // Show an overlay as a modal dialog: focus moves into it and Tab stays in
+  // it. For a decision overlay, Escape rejects.
+  function mountOverlay(overlay, requestId) {
+    const modal = overlay.querySelector(".shieldai-modal");
+    overlay.tabIndex = -1;
+    overlay.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && requestId) {
+        event.preventDefault();
+        sendVerdict(requestId, "block");
+      } else if (event.key === "Tab") {
+        event.preventDefault();
+        const buttons = Array.from(modal.querySelectorAll("button:not([disabled])"));
+        if (!buttons.length) return;
+        const index = buttons.indexOf(document.activeElement);
+        const next = event.shiftKey
+          ? (index <= 0 ? buttons.length : index) - 1
+          : (index + 1) % buttons.length;
+        buttons[next].focus();
+      }
+    });
+    (document.body || document.documentElement).appendChild(overlay);
+    modal.focus();
   }
 
   async function showLoadingOverlay() {
@@ -147,10 +180,10 @@
     overlay.id = "shieldai-overlay";
     overlay.className = "shieldai-overlay";
     overlay.innerHTML = `
-      <div class="shieldai-modal">
+      <div class="shieldai-modal" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" aria-busy="true" tabindex="-1">
         <div class="shieldai-header">
-          <div class="shieldai-logo">&#128737;</div>
-          <h2>${_t("overlayTitle")}</h2>
+          <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
+          <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
         <div class="shieldai-loading">
           <div class="shieldai-spinner"></div>
@@ -159,7 +192,7 @@
         </div>
       </div>
     `;
-    (document.body || document.documentElement).appendChild(overlay);
+    mountOverlay(overlay);
   }
 
   // --- Helpers ---
@@ -333,7 +366,7 @@
     }
 
     // Risk classification
-    const color = isPermitLike ? "#f97316" : "#eab308";
+    const badgeClass = isPermitLike ? "shieldai-badge-high" : "shieldai-badge-caution";
     const label = isPermitLike ? _t("overlayApprovalSig") : _t("overlaySigRequest");
     const note = isPermitLike ? _t("overlayApprovalNote") : _t("overlaySigNote");
 
@@ -341,13 +374,13 @@
     overlay.id = "shieldai-overlay";
     overlay.className = "shieldai-overlay";
     overlay.innerHTML = `
-      <div class="shieldai-modal">
+      <div class="shieldai-modal" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
         <div class="shieldai-header">
-          <div class="shieldai-logo">&#128737;</div>
-          <h2>${_t("overlayTitle")}</h2>
+          <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
+          <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
 
-        <div class="shieldai-badge" style="background:${color}">${label}</div>
+        <div class="shieldai-badge ${badgeClass}">${label}</div>
 
         <div class="shieldai-section shieldai-sig-note">
           <p>${escapeHtml(note)}</p>
@@ -362,33 +395,21 @@
       </div>
     `;
 
-    (document.body || document.documentElement).appendChild(overlay);
+    mountOverlay(overlay, requestId);
 
-    document.getElementById("shieldai-block").addEventListener("click", () => {
-      removeOverlay();
-      window.postMessage(
-        { type: "SHIELDAI_TX_VERDICT", requestId, action: "block", _ct: _CHANNEL_TOKEN },
-        "*"
-      );
-    });
-    document.getElementById("shieldai-proceed").addEventListener("click", () => {
-      removeOverlay();
-      window.postMessage(
-        { type: "SHIELDAI_TX_VERDICT", requestId, action: "proceed", _ct: _CHANNEL_TOKEN },
-        "*"
-      );
-    });
+    document.getElementById("shieldai-block").addEventListener("click", () => sendVerdict(requestId, "block"));
+    document.getElementById("shieldai-proceed").addEventListener("click", () => sendVerdict(requestId, "proceed"));
   }
 
   async function showAnalysisOverlay(requestId, result) {
     await _loadContentLang();
     removeOverlay();
 
-    const classColors = {
-      BLOCK_RECOMMENDED: "#ef4444",
-      HIGH_RISK: "#f97316",
-      CAUTION: "#eab308",
-      SAFE: "#22c55e",
+    const badgeClasses = {
+      BLOCK_RECOMMENDED: "shieldai-badge-block",
+      HIGH_RISK: "shieldai-badge-high",
+      CAUTION: "shieldai-badge-caution",
+      SAFE: "shieldai-badge-safe",
     };
 
     const classLabels = {
@@ -404,7 +425,7 @@
       Object.values(result.coverage || {}).some(value => Number(value) < 1);
     const classification = incomplete && !["HIGH_RISK", "BLOCK_RECOMMENDED"].includes(result.classification)
       ? "UNKNOWN" : result.classification || "CAUTION";
-    const color = classColors[classification] || "#eab308";
+    const badgeClass = badgeClasses[classification] || "shieldai-badge-caution";
     const label = classLabels[classification] || classification;
     const isBlock = classification === "BLOCK_RECOMMENDED";
 
@@ -440,15 +461,13 @@
     const calldataHtml = buildCalldataSection(result.calldata_details);
 
     overlay.innerHTML = `
-      <div class="shieldai-modal ${isBlock ? "shieldai-modal-danger" : ""}">
+      <div class="shieldai-modal ${isBlock ? "shieldai-modal-danger" : ""}" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
         <div class="shieldai-header">
-          <div class="shieldai-logo">&#128737;</div>
-          <h2>${_t("overlayTitle")}</h2>
+          <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
+          <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
 
-        <div class="shieldai-badge" style="background:${color}">
-          ${escapeHtml(label)} &mdash; ${escapeHtml(scoreDisplay)}
-        </div>
+        <div class="shieldai-badge ${badgeClass}">${escapeHtml(label)} &mdash; ${escapeHtml(scoreDisplay)}</div>
 
         ${result.partial ? `
           <div class="shieldai-section" style="background:#78350f;border-radius:6px;padding:8px 12px;margin-bottom:8px;">
@@ -517,7 +536,7 @@
       </div>
     `;
 
-    (document.body || document.documentElement).appendChild(overlay);
+    mountOverlay(overlay, requestId);
 
     const calldataToggle = document.getElementById("shieldai-calldata-toggle");
     if (calldataToggle) {
@@ -533,23 +552,8 @@
     }
 
     // Button handlers
-    document.getElementById("shieldai-block").addEventListener("click", () => {
-      removeOverlay();
-      window.postMessage(
-        { type: "SHIELDAI_TX_VERDICT", requestId, action: "block", _ct: _CHANNEL_TOKEN },
-        "*"
-      );
-    });
-
-    document
-      .getElementById("shieldai-proceed")
-      .addEventListener("click", () => {
-        removeOverlay();
-        window.postMessage(
-          { type: "SHIELDAI_TX_VERDICT", requestId, action: "proceed", _ct: _CHANNEL_TOKEN },
-          "*"
-        );
-      });
+    document.getElementById("shieldai-block").addEventListener("click", () => sendVerdict(requestId, "block"));
+    document.getElementById("shieldai-proceed").addEventListener("click", () => sendVerdict(requestId, "proceed"));
 
     // "Why is this risky?" handler
     document.getElementById("shieldai-explain").addEventListener("click", () => {
@@ -595,12 +599,12 @@
     overlay.id = "shieldai-overlay";
     overlay.className = "shieldai-overlay";
     overlay.innerHTML = `
-      <div class="shieldai-modal">
+      <div class="shieldai-modal" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
         <div class="shieldai-header">
-          <div class="shieldai-logo">&#128737;</div>
-          <h2>${_t("overlayTitle")}</h2>
+          <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
+          <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
-        <div class="shieldai-badge" style="background:#f97316">
+        <div class="shieldai-badge shieldai-badge-high">
           ${_t("overlayAnalysisUnavail")}
         </div>
         <div class="shieldai-section">
@@ -619,25 +623,10 @@
       </div>
     `;
 
-    (document.body || document.documentElement).appendChild(overlay);
+    mountOverlay(overlay, requestId);
 
-    document.getElementById("shieldai-block").addEventListener("click", () => {
-      removeOverlay();
-      window.postMessage(
-        { type: "SHIELDAI_TX_VERDICT", requestId, action: "block", _ct: _CHANNEL_TOKEN },
-        "*"
-      );
-    });
-
-    document
-      .getElementById("shieldai-proceed")
-      .addEventListener("click", () => {
-        removeOverlay();
-        window.postMessage(
-          { type: "SHIELDAI_TX_VERDICT", requestId, action: "proceed", _ct: _CHANNEL_TOKEN },
-          "*"
-        );
-      });
+    document.getElementById("shieldai-block").addEventListener("click", () => sendVerdict(requestId, "block"));
+    document.getElementById("shieldai-proceed").addEventListener("click", () => sendVerdict(requestId, "proceed"));
   }
 
   function escapeHtml(str) {

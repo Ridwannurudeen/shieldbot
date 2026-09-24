@@ -174,6 +174,45 @@ def test_content_script_uses_the_default_api_when_storage_has_no_url():
     )
 
 
+@pytest.mark.parametrize("kind", ["analysis", "error", "signature"])
+def test_overlay_is_a_modal_dialog_that_keeps_focus_and_rejects_on_escape(kind):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const kind = JSON.parse(process.argv[1]);
+  analyze = async () => kind === 'error' ? {error: 'timeout'} : {result: scan({})};
+  if (kind === 'signature') {
+    deliver({type: 'SHIELDAI_TX_INTERCEPT', requestId: 'request', method: 'personal_sign',
+      tx: {signMethod: 'personal_sign', data: '0x68656c6c6f'}});
+    await flush();
+  } else {
+    await intercept('request');
+  }
+  const modal = overlay().querySelector('.shieldai-modal');
+  assert.equal(modal.attrs.role, 'dialog');
+  assert.equal(modal.attrs['aria-modal'], 'true');
+  assert.equal(document.getElementById(modal.attrs['aria-labelledby']).tagName, 'H2');
+  assert.equal(document.activeElement, modal, 'focus did not move into the dialog');
+  const buttons = modal.querySelectorAll('button');
+  const seen = new Set();
+  for (let i = 0; i < buttons.length + 1; i++) {
+    assert(overlay().dispatch('keydown', {key: 'Tab'}).defaultPrevented);
+    assert(buttons.includes(document.activeElement), 'Tab left the dialog');
+    seen.add(document.activeElement);
+  }
+  assert.equal(seen.size, buttons.length, 'Tab did not reach every button');
+  overlay().dispatch('keydown', {key: 'Tab', shiftKey: true});
+  assert(buttons.includes(document.activeElement));
+  assert.equal(verdicts().length, 0);
+  overlay().dispatch('keydown', {key: 'Escape'});
+  assert.deepEqual(verdicts(), [{type: 'SHIELDAI_TX_VERDICT', requestId: 'request', action: 'block', _ct: token}]);
+  assert.equal(overlay(), null);
+""",
+        kind,
+    )
+
+
 @pytest.mark.parametrize(
     "reason,stored,expected",
     [
