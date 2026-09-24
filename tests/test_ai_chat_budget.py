@@ -1,6 +1,7 @@
 """The daily AI token budget shared by advisor chat and scan explanations."""
 
 import asyncio
+import logging
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -148,8 +149,45 @@ async def test_explain_records_tokens_and_falls_back_to_rules_when_spent(db):
     assert ai.chat_with_usage.await_count == 2
 
 
+@pytest.mark.asyncio
+async def test_failed_usage_record_still_returns_the_chat_reply(db, caplog):
+    advisor, ai = _advisor(db)
+    db.add_ai_tokens_used = AsyncMock(side_effect=RuntimeError("disk I/O error at /srv/private"))
+    result = await advisor.chat("u1", "How does ShieldBot work?")
+    assert result["text"] == "AI answer"
+    assert "RuntimeError" in caplog.text
+    assert "/srv/private" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing", ["get_ai_tokens_used", "add_ai_tokens_used"])
+async def test_explain_falls_back_to_rules_when_the_budget_store_fails(db, caplog, failing):
+    advisor, ai = _advisor(db, reply=("Plain English", 1500))
+    setattr(db, failing, AsyncMock(side_effect=RuntimeError("disk I/O error at /srv/private")))
+    assert "85/100" in await advisor.explain_scan({"risk_score": 85, "risk_level": "HIGH"})
+    assert "/srv/private" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_zero_budget_pauses_ai(db):
+    advisor, ai = _advisor(db, budget=0)
+    assert (await advisor.chat("u1", "hi"))["text"] == AI_CHAT_PAUSED
+    assert "85/100" in await advisor.explain_scan({"risk_score": 85, "risk_level": "HIGH"})
+    ai.chat_with_usage.assert_not_called()
+
+
 def test_default_budget():
     from core.config import Settings
 
     assert Settings.model_fields["ai_daily_token_budget"].default == 1_000_000
+
+
+def test_negative_budget_is_refused_at_startup():
+    from pydantic import ValidationError
+
+    from core.config import Settings
+
+    with pytest.raises(ValidationError, match="ai_daily_token_budget"):
+        Settings(_env_file=None, ai_daily_token_budget=-1)
+    assert Settings(_env_file=None, ai_daily_token_budget=0).ai_daily_token_budget == 0
 

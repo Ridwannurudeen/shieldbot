@@ -195,7 +195,10 @@ class Advisor:
                     "Please try again."
                 )
             else:
-                await self.db.add_ai_tokens_used(_utc_day(), tokens)
+                try:
+                    await self.db.add_ai_tokens_used(_utc_day(), tokens)
+                except Exception as e:
+                    logger.error("AI token usage record failed: %s", type(e).__name__)
 
         # Persist both sides of the conversation; a paused reply would only crowd tomorrow's history
         if response_text != AI_CHAT_PAUSED:
@@ -233,9 +236,10 @@ class Advisor:
     async def explain_scan(self, scan_result: dict) -> str:
         """Generate a plain-English explanation of a scan result.
 
-        Uses Haiku for speed. Falls back to rule-based if AI is disabled or today's budget is spent.
+        Uses Haiku for speed. Falls back to rule-based if AI is disabled, today's budget is spent
+        or the budget store fails.
         """
-        if not self.ai.is_available() or await self._ai_budget_spent():
+        if not self.ai.is_available():
             return self._rule_based_explanation(scan_result)
 
         prompt = EXPLAIN_SCAN_TEMPLATE.format(
@@ -243,18 +247,20 @@ class Advisor:
         )
 
         try:
+            if await self._ai_budget_spent():
+                return self._rule_based_explanation(scan_result)
             explanation, tokens = await self.ai.chat_with_usage(
                 model=self.haiku_model,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=300,
             )
+            await self.db.add_ai_tokens_used(_utc_day(), tokens)
+            return explanation
         except UnsupportedChainError:
             raise
         except Exception as e:
             logger.error("Advisor explain_scan failed: %s", type(e).__name__)
             return self._rule_based_explanation(scan_result)
-        await self.db.add_ai_tokens_used(_utc_day(), tokens)
-        return explanation
 
     # ------------------------------------------------------------------
     # Helpers
