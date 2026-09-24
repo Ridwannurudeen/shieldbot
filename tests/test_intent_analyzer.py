@@ -348,7 +348,7 @@ async def test_paying_an_unverified_contract_floors_by_age(creation, floor, targ
     assert result.data['floor'] == floor
     assert result.data['status'] == ('ok' if known else 'unknown')
     assert result.data['coverage']['counterparty'] is known
-    assert result.flags[0] == f'mint() sends 0.1 native value to {target}'
+    assert result.flags[0] == f'mint(address,uint256) sends 0.1 native value to {target}'
     if not known:
         assert result.flags[-1] == 'Contract age unavailable for a payment to an unverified contract'
 
@@ -369,7 +369,17 @@ async def test_paying_a_contract_of_unknown_verification_is_unknown():
     assert result.data['floor'] == 60
     assert result.data['status'] == 'unknown'
     assert result.data['coverage']['counterparty'] is False
-    assert result.flags[0] == 'mint() sends 0.1 native value to a contract of unknown verification'
+    assert result.flags[0] == 'mint(address,uint256) sends 0.1 native value to a contract of unknown verification'
+
+
+@pytest.mark.asyncio
+async def test_payment_flag_names_the_call_by_its_signature():
+    # The decoder's names can carry their own parentheses ("permit (Permit2)"); the signature is
+    # the call exactly, with nothing appended.
+    from utils.calldata_decoder import KNOWN_SELECTORS
+
+    result, _ = await _payable('0x2b67b570' + '0' * 64, False, {'age_days': 30})
+    assert result.flags[0] == f"{KNOWN_SELECTORS['2b67b570']['signature']} sends 0.1 native value to an unverified contract"
 
 
 @pytest.mark.asyncio

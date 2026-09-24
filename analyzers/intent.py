@@ -46,7 +46,7 @@ class IntentMismatchAnalyzer(Analyzer):
         flags: List[str] = []
 
         calldata = ctx.extra.get('calldata', '0x')
-        value = ctx.extra.get('value', '0')
+        payment = _parse_value(ctx.extra.get('value', '0'))
 
         # Decode calldata
         decoded = _decoder.decode(calldata)
@@ -81,11 +81,9 @@ class IntentMismatchAnalyzer(Analyzer):
                 flags.append(f'Unlimited approval to {whitelisted}')
 
         # 3. Native value > 0 on an approval call
-        if decoded.get('is_approval'):
-            value_int = _parse_value(value)
-            if value_int > 0:
-                score += 30
-                flags.append('Native value sent with approval call (unusual)')
+        if decoded.get('is_approval') and payment > 0:
+            score += 30
+            flags.append('Native value sent with approval call (unusual)')
 
         verification_unknown = False
 
@@ -118,7 +116,6 @@ class IntentMismatchAnalyzer(Analyzer):
             if unknown:
                 counterparty_reasons.append(counterparty['reason'])
         # On a router swap the value goes to the allowlisted router, not to the token scanned here.
-        payment = _parse_value(value)
         if payment > 0 and not ctx.extra.get('whitelisted_router'):
             floor, floor_flag, reason = await self._payment_floor(ctx, decoded, payment)
             floors.append((floor, floor_flag))
@@ -169,7 +166,7 @@ class IntentMismatchAnalyzer(Analyzer):
         """
         is_verified = ctx.extra.get('is_verified')
         claim = decoded.get('category') == 'claim'
-        call = f"{decoded['function_name']}()" if decoded.get('category') != 'unknown' else f"0x{decoded['selector']}"
+        call = decoded.get('signature') or f"0x{decoded['selector']}"
         sends = f'{call} sends {payment / 1e18:g} native value to'
         if is_verified is None:
             reason = 'Contract verification unavailable for a call with native value'
