@@ -544,9 +544,9 @@ class RescueService:
         """Fetch Approval logs from the newest RECENT_LOG_WINDOWS block windows of a public RPC.
 
         Windows of ``window_blocks`` are read newest first, PUBLIC_RPC_CONCURRENCY at a time.
-        Scanning stops after a batch in which a window stayed unavailable; logs already read are
-        kept. Returns the logs, the oldest block of the history read without a gap (the latest
-        block plus one when nothing was read) and the latest block.
+        Scanning stops after a batch in which a window stayed unavailable; the logs read before
+        that window are kept. Returns those logs, the oldest block of the history read without a
+        gap (the latest block plus one when nothing was read) and the latest block.
         """
         topics = [APPROVAL_TOPIC, "0x" + wallet.replace("0x", "").lower().zfill(64)]
         async with aiohttp.ClientSession() as session:
@@ -573,8 +573,9 @@ class RescueService:
                 )
                 for (from_b, to_b), result in zip(batch, results):
                     if isinstance(result, list):
-                        logs.extend(result)
+                        # Logs past a gap are left out, so the approvals match the blocks read.
                         if not gap:
+                            logs.extend(result)
                             scanned_from = from_b
                     else:
                         # Don't log `result` — aiohttp errors embed the RPC URL.

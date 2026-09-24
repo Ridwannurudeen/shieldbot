@@ -379,6 +379,24 @@ async def test_robinhood_log_limit_error_is_not_retried_and_never_reads_clean():
 
 
 @pytest.mark.asyncio
+async def test_logs_after_a_failed_window_are_not_used_so_approvals_match_the_blocks_read():
+    older_log = {**APPROVAL_LOG, "blockNumber": hex(LATEST - 10_005)}
+
+    def logs(to_b):
+        if to_b == LATEST:
+            return LOG_LIMIT_ERROR
+        return ok([older_log] if to_b == LATEST - 10_000 else [])
+
+    result, rpc, sleep = await scan(chain_handler(logs=logs))
+
+    assert len(window_bounds(rpc)) == 4
+    assert result["approvals"] == []
+    assert result["scanned_blocks"] is None
+    assert result["coverage_reasons"] == {"allowances": NOTHING_READ_REASON}
+    assert rpc.methods("eth_call") == []
+
+
+@pytest.mark.asyncio
 async def test_robinhood_unavailable_allowance_is_unknown_and_reasons_combine():
     result, rpc, sleep = await scan(chain_handler(allowance=lambda: RATE_LIMITED))
 
