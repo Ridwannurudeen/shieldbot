@@ -154,17 +154,16 @@ Verified on **2026-09-23** at `main` revision **`27aca4d`**: the main Python sui
 
 For dependency setup and the short copy/paste examples, follow [JUDGE_GUIDE.md](docs/JUDGE_GUIDE.md). No wallet, private key, deployment or broadcast is needed for the offline path.
 
-## ShieldBot has no token
+## ShieldBot does not issue a token
 
-ShieldBot has no token. Any token that uses the ShieldBot name was not created by ShieldBot and is not affiliated with it. Known examples:
+ShieldBot does not issue, sell, control or endorse any token. An earlier extension release used the BNB Chain token `0x4904c02efa081cb7685346968bac854cdf4e7777` (SHIELDBOT) as an access gate for its deployer alert feed; that gate has been removed. Tokens using the ShieldBot name, including the two Robinhood Chain tokens below, are not ShieldBot products.
 
-| Chain | Symbol | Name | Token address |
+| Symbol | Name | Token address | Pool (paired with NVDA, opened 2026-09-15) |
 |---|---|---|---|
-| BNB Chain | SHIELDBOT | ShieldBot | `0x4904c02efa081cb7685346968bac854cdf4e7777` |
-| Robinhood Chain | SBOT | shieldbot | `0x8adba5e2f8ebe8a6f8d9f4c8151fba7ce2328900` |
-| Robinhood Chain | SHIELD | shieldbot_ | `0x7bf4c3cd40710b027282b6b85d86f75acfcbd0f1` |
+| SBOT | shieldbot | `0x8adba5e2f8ebe8a6f8d9f4c8151fba7ce2328900` | `0xc5183c987d5429466e271003c15d333e313e488f` |
+| SHIELD | shieldbot_ | `0x7bf4c3cd40710b027282b6b85d86f75acfcbd0f1` | `0xb4a4085eec22bc088e46a615ddb2f1b327235a86` |
 
-The two Robinhood Chain tokens were paired with NVDA in pools opened on 2026-09-15: SBOT/NVDA `0xc5183c987d5429466e271003c15d333e313e488f` and SHIELD/NVDA `0xb4a4085eec22bc088e46a615ddb2f1b327235a86` (GeckoTerminal, network `robinhood`).
+Token names, symbols and pools as listed by GeckoTerminal (network `robinhood`) and confirmed on-chain.
 
 ## Submission status and measured usage
 

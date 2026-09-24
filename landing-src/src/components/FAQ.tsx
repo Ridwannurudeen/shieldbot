@@ -24,7 +24,7 @@ const faqs = [
   },
   {
     q: "Does ShieldBot have a token?",
-    a: "No. ShieldBot has no token. Any token that uses the ShieldBot name was not created by ShieldBot and is not affiliated with it. Known examples: SHIELDBOT on BNB Chain (0x4904c02efa081cb7685346968bac854cdf4e7777), and on Robinhood Chain SBOT, named shieldbot (0x8adba5e2f8ebe8a6f8d9f4c8151fba7ce2328900), and SHIELD, named shieldbot_ (0x7bf4c3cd40710b027282b6b85d86f75acfcbd0f1), both paired with NVDA in pools opened on 15 September 2026.",
+    a: "No. ShieldBot does not issue, sell, control or endorse any token. An earlier extension release used the BNB Chain token 0x4904c02efa081cb7685346968bac854cdf4e7777 as an access gate; that gate has been removed. Tokens using the ShieldBot name, including SBOT (named shieldbot, 0x8adba5e2f8ebe8a6f8d9f4c8151fba7ce2328900) and SHIELD (named shieldbot_, 0x7bf4c3cd40710b027282b6b85d86f75acfcbd0f1), two Robinhood Chain tokens paired with NVDA in pools opened on 15 September 2026, are not ShieldBot products.",
   },
   {
     q: "Does ShieldBot store my private keys or wallet data?",
