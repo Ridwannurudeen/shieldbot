@@ -148,6 +148,7 @@
   "overlayUnparseableTyped": "无法解析的类型化数据",
   "overlayUnparseableTypedNote": "ShieldAI 无法读取此类型化数据，因此无法显示您将要签名的内容。除非您完全信任该网站，否则请拒绝。",
   "uncheckableNotice": "ShieldAI 已拒绝来自此嵌入框架或弹出窗口的钱包请求，因为无法在此处检查请求。请在单独的标签页中打开该 dApp。",
+  "overlayCoveredNote": "页面正在遮挡或更改此警告，因此在警告完全可见之前，“继续”按钮已停用。",
   "phishingWarning": "ShieldBot 警告：",
   "phishingFlagged": "已被标记为钓鱼网站。您的钱包和资金可能面临风险。",
   "phishingLeavePage": "离开页面",

@@ -513,11 +513,14 @@ def test_proceed_does_nothing_while_the_overlay_is_not_visible(kind):
   assert.deepEqual(plain(observer.options), {trackVisibility: true, delay: 100});
   assert(observer.target.className.includes('shieldai-modal'), 'the dialog itself should be watched');
   // Covered, moved off screen or made see-through by the page: a click there is not the user's choice.
+  assert.equal(byId('shieldai-covered').textContent, '', 'the covered line showed before any click');
   reportVisibility(false);
   userClick(byId('shieldai-proceed'));
   await flush();
   assert.deepEqual(verdicts(), []);
   assert(overlay(), 'the overlay closed');
+  // The button does not just go dead: the dialog says why.
+  assert.match(byId('shieldai-covered').textContent, /covering or altering this warning/);
   reportVisibility(true);
   userClick(byId('shieldai-proceed'));
   await flush();
@@ -544,8 +547,82 @@ def test_proceed_is_enabled_only_half_a_second_after_the_overlay_appears():
   await flush();
   assert.deepEqual(verdicts(), [], 'a click in the first half second counted');
   await new Promise(resolve => setTimeout(resolve, 500));
+  clock += 500;
   assert(!proceed.disabled);
   userClick(proceed);
+  await flush();
+  await assertVerdicts([['request', 'proceed']]);
+"""
+    )
+
+
+# The same overlay code, keeping its real PROCEED_DELAY_MS. The harness's clock only moves when a
+# test moves it.
+REAL_DELAY_HARNESS = CONTENT_HARNESS.replace(
+    "withoutProceedDelay(fs.readFileSync('extension/content.js', 'utf8'))",
+    "fs.readFileSync('extension/content.js', 'utf8')",
+)
+
+
+def test_proceed_needs_the_dialog_visible_without_a_break_for_half_a_second():
+    run_node(
+        REAL_DELAY_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('request');
+  await new Promise(resolve => setTimeout(resolve, 550));
+  const proceed = byId('shieldai-proceed');
+  assert(!proceed.disabled);
+  clock += 600;
+  // Covered a moment ago and uncovered just now: not long enough.
+  reportVisibility(false);
+  userClick(proceed);
+  await flush();
+  assert.match(byId('shieldai-covered').textContent, /covering or altering/);
+  reportVisibility(true);
+  userClick(proceed);
+  clock += 499;
+  userClick(proceed);
+  await flush();
+  assert.deepEqual(verdicts(), [], 'a Proceed counted before the dialog was visible for half a second');
+  clock += 1;
+  userClick(proceed);
+  await flush();
+  await assertVerdicts([['request', 'proceed']]);
+"""
+    )
+
+
+def test_block_works_while_the_dialog_is_not_visible():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('request');
+  reportVisibility(false);
+  userClick(byId('shieldai-block'));
+  await flush();
+  await assertVerdicts([['request', 'block']]);
+"""
+    )
+
+
+def test_a_new_dialog_starts_its_visibility_afresh():
+    run_node(
+        REAL_DELAY_HARNESS
+        + r"""
+(async () => {
+  // The loading screen is up for a second before the result replaces it.
+  analyze = async () => { clock += 1000; return {result: scan({})}; };
+  await intercept('request');
+  await new Promise(resolve => setTimeout(resolve, 550));
+  userClick(byId('shieldai-proceed'));
+  await flush();
+  assert.deepEqual(verdicts(), [], 'the loading screen\'s time on screen counted for the result');
+  clock += 500;
+  userClick(byId('shieldai-proceed'));
   await flush();
   await assertVerdicts([['request', 'proceed']]);
 """

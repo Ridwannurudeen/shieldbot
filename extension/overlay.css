@@ -270,6 +270,18 @@
   margin: 10px 0 0;
 }
 
+/* Why Proceed did nothing: the page is covering or altering the dialog. */
+.shieldai-covered-note {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #fbbf24;
+  margin: 10px 0 0;
+}
+
+.shieldai-covered-note:empty {
+  display: none;
+}
+
 .shieldai-btn-proceed {
   background: transparent;
   color: #94a3b8;

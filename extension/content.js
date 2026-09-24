@@ -246,12 +246,16 @@
   // on Proceed (clickjacking). This cannot be fully prevented; two things
   // make it harder. Proceed and Sign Anyway stay disabled for half a second
   // after an overlay appears, so a click aimed at what was there before does
-  // not land on them. And they do nothing while the dialog is not visible by
-  // the latest IntersectionObserver v2 report (off screen, covered, or made
-  // transparent, filtered or transformed). The dialog is watched rather than
-  // the host, which has no area of its own: its content is position: fixed.
+  // not land on them. And they count only once IntersectionObserver v2 has
+  // reported the dialog visible (on screen, not covered, not made transparent,
+  // filtered or transformed) without a break for that half second: the time
+  // of the last report that it was not (or of its appearing) is kept. The
+  // whole dialog is watched, not only its buttons, so the verdict text
+  // cannot be covered either; and the dialog rather than the host, which
+  // has no area of its own (its content is position: fixed).
   const PROCEED_DELAY_MS = 500;
-  let _overlayVisible = false;
+  let _dialogVisible = false;
+  let _lastNotVisibleAt = 0;
   let _visibilityObserver = null;
 
   // The request whose overlay is waiting for the user. inject.js stops its
@@ -271,7 +275,10 @@
     if (_overlayHost) {
       _overlayHost.remove();
       _overlayHost = null;
+    }
+    if (_visibilityObserver) {
       _visibilityObserver.disconnect();
+      _visibilityObserver = null;
     }
     if (_awaitingRequestId !== null) {
       const requestId = _awaitingRequestId;
@@ -288,12 +295,21 @@
 
   // A decision button acts only on real user input: a synthetic click from a
   // page script is an untrusted event and is ignored. Proceed also needs the
-  // button enabled and the dialog visible (see PROCEED_DELAY_MS).
+  // button enabled and the dialog visible without a break for
+  // PROCEED_DELAY_MS; when it is not visible, the dialog says so rather than
+  // leave a button that silently does nothing.
   function onDecision(root, id, requestId, action) {
     const button = root.getElementById(id);
     button.addEventListener("click", (event) => {
       if (!event.isTrusted) return;
-      if (action === "proceed" && (button.disabled || !_overlayVisible)) return;
+      if (action === "proceed") {
+        if (button.disabled) return;
+        if (!_dialogVisible) {
+          root.getElementById("shieldai-covered").textContent = _t("overlayCoveredNote");
+          return;
+        }
+        if (Date.now() - _lastNotVisibleAt < PROCEED_DELAY_MS) return;
+      }
       sendVerdict(requestId, action);
     });
   }
@@ -337,9 +353,12 @@
         proceed.disabled = false;
       }, PROCEED_DELAY_MS);
     }
-    _overlayVisible = false;
+    _dialogVisible = false;
+    _lastNotVisibleAt = Date.now();
     _visibilityObserver = new IntersectionObserver((entries) => {
-      if (_overlayHost === host) _overlayVisible = entries[entries.length - 1].isVisible === true;
+      if (_overlayHost !== host) return;
+      _dialogVisible = entries[entries.length - 1].isVisible === true;
+      if (!_dialogVisible) _lastNotVisibleAt = Date.now();
     }, { trackVisibility: true, delay: 100 });
     _visibilityObserver.observe(modal);
     // If the page removes the overlay, the user can no longer decide here:
@@ -377,6 +396,10 @@
     const note = _t("overlayBatchCall", { index: tx.callIndex, count: tx.callCount });
     return `<div class="shieldai-section shieldai-sig-note"><p>${escapeHtml(note)}</p></div>`;
   }
+
+  // Where a decision dialog says why a Proceed did nothing: the page is
+  // covering or altering it. Empty (and not shown) until then.
+  const COVERED_NOTE = `<p class="shieldai-covered-note" id="shieldai-covered" role="alert"></p>`;
 
   async function showLoadingOverlay() {
     await _loadContentLang();
@@ -639,6 +662,7 @@
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">${_t("overlayBtnReject")}</button>
           ${canSign ? `<button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">${_t("overlayBtnSignAnyway")}</button>` : ""}
         </div>
+        ${COVERED_NOTE}
         ${canSign ? "" : `<p class="shieldai-strict-note">${_t("overlayStrictNoProceed")}</p>`}
       </div>
     `;
@@ -783,6 +807,7 @@
           </button>
           ` : ""}
         </div>
+        ${COVERED_NOTE}
         ${canProceed ? "" : `<p class="shieldai-strict-note">${_t("overlayStrictNoProceed")}</p>`}
 
         <div class="shieldai-explain-row">
@@ -888,6 +913,7 @@
           </button>
           `}
         </div>
+        ${COVERED_NOTE}
       </div>
     `;
 
@@ -929,6 +955,7 @@
           </button>
           `}
         </div>
+        ${COVERED_NOTE}
       </div>
     `;
 
