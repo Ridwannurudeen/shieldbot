@@ -6,6 +6,7 @@ Runs alongside bot.py on the VPS
 
 import hmac
 import json
+import secrets
 import time
 import asyncio
 import logging
@@ -25,6 +26,7 @@ from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve
 from utils.chain_info import get_chain_name
 from utils.web3_client import UnsupportedChainError
 from services.mempool_service import supports_pending_transactions
+from core.auth import TIER_LIMITS, hash_key
 from core.config import Settings
 from core.container import ServiceContainer
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
@@ -532,6 +534,9 @@ _report_limiter = RateLimiter(requests_per_minute=5, burst=3)
 
 # Beta-signup rate limiter: 3 signups/min per IP
 _signup_limiter = RateLimiter(requests_per_minute=3, burst=2)
+
+# Self-serve free key requests: 3/min per IP; the per-address limit is one unexpired link at a time
+_free_key_limiter = RateLimiter(requests_per_minute=3, burst=2)
 
 # Public watch alerts: 10 requests/min per IP
 _watch_alerts_limiter = RateLimiter(requests_per_minute=10, burst=5)
@@ -1671,6 +1676,131 @@ async def create_api_key(request: Request):
     tier = body.get("tier", "free")
     result = await container.auth_manager.create_key(owner, tier)
     return result
+
+
+FREE_KEY_LINK_TTL_SECONDS = 1800
+
+
+class FreeKeyRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+
+
+class FreeKeyVerifyRequest(BaseModel):
+    token: str = Field(..., min_length=16, max_length=128)
+
+
+@app.post("/api/keys/free")
+async def request_free_key(req: FreeKeyRequest, request: Request):
+    """Email a single-use link that creates one free-tier API key for the address."""
+    if not container or not container.email_service.is_enabled():
+        raise HTTPException(status_code=503, detail="Self-serve keys are not enabled")
+    client_ip = _get_client_ip(request)
+    if not _free_key_limiter.is_allowed(f"free-key:{client_ip}"):
+        return JSONResponse(status_code=429, content={"detail": "Too many requests. Please try again later."})
+
+    email = req.email.strip().lower()
+    if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+        raise HTTPException(status_code=400, detail="Invalid email address")
+    if await container.auth_manager.has_active_key(email, "free"):
+        raise HTTPException(status_code=409, detail="This email already has an active free key.")
+
+    # The link carries the token in its fragment, which browsers never send, so it stays out of access logs.
+    token = secrets.token_urlsafe(32)
+    token_hash = hash_key(token)
+    if not await container.db.add_free_key_request(email, token_hash, time.time() + FREE_KEY_LINK_TTL_SECONDS):
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "A key link was already sent to this address and has not expired. Use it, or wait 30 minutes."},
+        )
+    verify_url = f"{container.settings.public_api_url}/api/keys/free/verify#token={token}"
+    if not await container.email_service.send_free_key_verification(email, verify_url):
+        await container.db.delete_free_key_request(token_hash)
+        raise HTTPException(status_code=503, detail="The email could not be sent. Please try again later.")
+    return {"message": "Check your email for a link that creates your key. It expires in 30 minutes."}
+
+
+@app.get("/api/keys/free/verify", response_class=HTMLResponse, include_in_schema=False)
+async def free_key_page():
+    """Page the emailed link opens. Nothing is created until the reader confirms, so mail scanners
+    that fetch links cannot use up the token or receive the key."""
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ShieldBot free API key</title>
+  <style>
+    body { background: #0a0a0a; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 40px 16px; }
+    main { max-width: 560px; margin: 0 auto; }
+    h1 { color: #00ff88; font-size: 24px; }
+    p { line-height: 1.6; }
+    button { padding: 12px 24px; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; background: #00ff88; color: #000; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    pre { background: #111; border: 1px solid #333; border-radius: 8px; padding: 16px; font-size: 14px; white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ShieldBot free API key</h1>
+    <p id="status">Create the free-tier API key for the address this link was sent to. The key is shown once.</p>
+    <button id="create" type="button">Create my key</button>
+    <pre id="key" hidden></pre>
+  </main>
+  <script>
+    const token = new URLSearchParams(location.hash.slice(1)).get("token");
+    const status = document.getElementById("status");
+    const button = document.getElementById("create");
+    const keyBox = document.getElementById("key");
+    if (!token) {
+      status.textContent = "This link has no token. Open the link from your email again.";
+      button.hidden = true;
+    }
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        const resp = await fetch("/api/keys/free/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token }),
+        });
+        const body = await resp.json();
+        if (!resp.ok) throw new Error(body.detail || `Request failed (HTTP ${resp.status})`);
+        status.textContent = `Your free-tier key (${body.rpm_limit} requests a minute, ${body.daily_limit} a day). ` +
+          "Copy it now: it is not shown again. Send it in the X-API-Key header.";
+        keyBox.textContent = body.key;
+        keyBox.hidden = false;
+        button.hidden = true;
+      } catch (err) {
+        status.textContent = err.message;
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>"""
+
+
+@app.post("/api/keys/free/verify")
+async def verify_free_key(req: FreeKeyVerifyRequest):
+    """Use an emailed link's token once and create the address's free-tier key, shown only in this response."""
+    if not container or not container.auth_manager:
+        raise HTTPException(status_code=503, detail="Auth not available")
+    email = await container.db.claim_free_key_request(hash_key(req.token))
+    if email is None:
+        raise HTTPException(status_code=400, detail="This link is invalid, expired or already used. Request a new one.")
+    if await container.auth_manager.has_active_key(email, "free"):
+        raise HTTPException(status_code=409, detail="This email already has an active free key.")
+    created = await container.auth_manager.create_key(email, "free")
+    return JSONResponse(
+        content={
+            "key": created["key"],
+            "key_id": created["key_id"],
+            "tier": "free",
+            "rpm_limit": TIER_LIMITS["free"]["rpm"],
+            "daily_limit": TIER_LIMITS["free"]["daily"],
+        },
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/api/admin/stats")

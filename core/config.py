@@ -96,6 +96,8 @@ class Settings(BaseSettings):
     # Resend (beta welcome emails)
     resend_api_key: str = ""
     resend_from_email: str = "ShieldBot <noreply@shieldbotsecurity.online>"
+    # Public base URL of this API for links in emails; never taken from a request's Host header.
+    public_api_url: str = "https://api.shieldbotsecurity.online"
 
     # Admin
     admin_secret: str = ""
