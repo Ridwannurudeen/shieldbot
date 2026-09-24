@@ -235,8 +235,8 @@ def _launch_records(decoded) -> List[Dict]:
     return records
 
 
-def _split_combined(logs, start: int, end: int, pairs) -> Tuple[List, List[str]]:
-    """Split one combined eth_getLogs result into decoded source logs and swapped pools.
+def _split_combined(logs, start: int, end: int, pairs) -> Tuple[List, List[Tuple[str, int]]]:
+    """Split one combined eth_getLogs result into decoded source logs and (pool, block) swaps.
 
     The query matches any requested address with any requested topic, so a pairing that is
     neither a source event nor a Swap is legitimately possible and skipped. A log from an address
@@ -259,9 +259,9 @@ def _split_combined(logs, start: int, end: int, pairs) -> Tuple[List, List[str]]
         elif log.get("removed"):
             continue
         elif topic == SWAP_V4_TOPIC and address == POOL_MANAGER_ADDRESS and len(topic_list) > 1:
-            swapped.append(_hash(topic_list[1]))
+            swapped.append((_hash(topic_list[1]), _quantity(log.get("blockNumber"))))
         elif topic == SWAP_V2_TOPIC and address in pairs:
-            swapped.append(address)
+            swapped.append((address, _quantity(log.get("blockNumber"))))
     return decoded, swapped
 
 
@@ -307,8 +307,10 @@ class LaunchDiscovery:
         ``pools`` and for the pools of launches found in the same range. Otherwise the per-source
         sweep catches up and no swaps are counted; so it does when the RPC rejects the combined
         query or returns a log that cannot be trusted, and on the poll after the RPC gave up on
-        one, so a query the RPC keeps failing is never repeated. The chain id is checked once per
-        instance.
+        one, so a query the RPC keeps failing is never repeated. When a launch block of the
+        combined read cannot be confirmed, the poll covers only the blocks before it: the target
+        returned is the block before it, and only swaps up to there are counted, so the next poll
+        reads the rest once. The chain id is checked once per instance.
         """
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
             self._session = session
@@ -334,11 +336,15 @@ class LaunchDiscovery:
             except LaunchDiscoveryError as exc:
                 logger.warning("Launch discovery combined read rejected: %s", type(exc).__name__)
                 return {"target": target, "launches": await self._sweep(target), "swaps": {}}
-            records = await self._store(decoded, {source.name: (cursor, target) for source in SOURCES})
+            records, stop = await self._store(
+                decoded, {source.name: (cursor, target) for source in SOURCES}
+            )
+            if stop is not None:
+                target = stop - 1
             pools.update(record["pool_id"] for record in records if record["pool_id"])
             counts = {}
-            for pool in swapped:
-                if pool in pools:
+            for pool, block in swapped:
+                if pool in pools and block <= target:
                     counts[pool] = counts.get(pool, 0) + 1
             return {"target": target, "launches": records, "swaps": counts}
 
@@ -367,7 +373,11 @@ class LaunchDiscovery:
         return _quantity(await self._call("eth_blockNumber", [])) - CONFIRMATIONS
 
     async def _sweep(self, target: int) -> List[Dict]:
-        """Sweep every source from its own cursor towards ``target`` and store what it finds."""
+        """Sweep every source from its own cursor towards ``target`` and store what it finds.
+
+        Raises LaunchDiscoveryError, after storing the launches before it, when a launch block
+        could not be confirmed.
+        """
         decoded = []
         progress = {}
         for source in SOURCES:
@@ -379,17 +389,21 @@ class LaunchDiscovery:
             logs, done = await self._sweep_source(source, cursor, end)
             decoded += logs
             progress[source.name] = (cursor, done)
-        return await self._store(decoded, progress)
+        records, stop = await self._store(decoded, progress)
+        if stop is not None:
+            raise LaunchDiscoveryError(f"Launch block {stop} not confirmed")
+        return records
 
-    async def _store(self, decoded, progress) -> List[Dict]:
+    async def _store(self, decoded, progress) -> Tuple[List[Dict], Optional[int]]:
         """Confirm launch blocks against canonical headers, then record launches and move cursors.
 
         ``progress`` maps each source to (previous cursor, last block covered without a gap).
         Headers are read oldest first. At the first launch block whose header cannot be read or
         does not match, the launches in older blocks are still recorded and every cursor stops
-        short of that block, so the next read resumes there; then the error is raised. A range
-        too large to confirm in one pass therefore still moves forward instead of being reread
-        from the same cursor forever.
+        short of that block, so the next read resumes there; the failure is logged. A range too
+        large to confirm in one pass therefore still moves forward instead of being reread from
+        the same cursor forever. Returns the launches recorded and that first unconfirmed block,
+        or None when every launch was confirmed.
         """
         records = _launch_records(decoded)
         headers = {}
@@ -424,8 +438,7 @@ class LaunchDiscovery:
             logger.warning(
                 "Launch discovery stopped before block %d: %s", stop, type(failure).__name__
             )
-            raise failure
-        return confirmed
+        return confirmed, stop
 
     async def _sweep_source(self, source: LaunchSource, cursor: int, end: int):
         """Read one source up to ``end``, halving a rejected query down to MIN_CHUNK_BLOCKS.

@@ -343,6 +343,41 @@ async def test_poll_reads_every_source_and_the_triaged_swaps_in_one_request(db, 
 
 
 @pytest.mark.asyncio
+async def test_a_poll_that_confirms_part_of_its_range_counts_that_part_and_resumes_after_it(db, clock):
+    await set_cursors(db, RECENT)
+    rpc = FastRpc()
+    unconfirmed = int(LOGS["doppler_create_weth"]["blockNumber"], 16)
+    missing = {unconfirmed}
+
+    async def headers_missing(payload):
+        status, body = await rpc(payload)
+        if isinstance(payload, list):
+            body = [
+                {**row, "result": None} if int(call["params"][0], 16) in missing else row
+                for call, row in zip(payload, body)
+            ]
+        return status, body
+
+    discovery = guarded(db, headers_missing, clock)
+    first = await discovery.poll(pools=[LONG_POOL, V2_PAIR])
+
+    # The launch block without a header ends the confirmed range; swaps up to it are counted.
+    assert first["target"] == unconfirmed - 1
+    assert first["swaps"] == {LONG_POOL: 1, V2_PAIR: 1}
+    confirmed = {token for token, row in EXPECTED.items() if RECENT < row[3] < unconfirmed}
+    assert {row["token_address"] for row in first["launches"]} == confirmed
+    assert await cursors(db) == {source.name: unconfirmed - 1 for source in SOURCES}
+
+    missing.clear()
+    second = await discovery.poll(pools=[LONG_POOL, V2_PAIR, GENERIC_POOL])
+
+    # The rest of the range is read once: together the two polls count every swap exactly once.
+    assert second["target"] == TARGET
+    assert second["swaps"] == {LONG_POOL: 1, GENERIC_POOL: 1}
+    assert await cursors(db) == {source.name: TARGET for source in SOURCES}
+
+
+@pytest.mark.asyncio
 async def test_later_polls_skip_the_chain_check_and_an_idle_poll_reads_only_the_head(db, clock):
     await set_cursors(db, RECENT)
     rpc = FastRpc()
