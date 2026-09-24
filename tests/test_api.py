@@ -640,6 +640,7 @@ async def test_transaction_verdicts_and_the_target_row(
 
     api, services = cached_firewall_api
     services.sentinel = SimpleNamespace(on_scan_blocked=AsyncMock())
+    services.threat_graph = SimpleNamespace(enrich_from_scan=AsyncMock())
     services.registry.run_all.return_value = [
         AnalyzerResult("honeypot", 0.5, 0, data={
             "is_honeypot": False, "can_sell": True, "buy_tax": 0, "sell_tax": 0,
@@ -659,6 +660,8 @@ async def test_transaction_verdicts_and_the_target_row(
     assert services.db.get_contract_score.await_count == reads
     assert services.db.upsert_contract_score.await_count == writes
     assert services.sentinel.on_scan_blocked.call_count == watches
+    # The threat graph learns only from verdicts that describe the target, like its row.
+    assert services.threat_graph.enrich_from_scan.call_count == writes
 
 
 @pytest.mark.asyncio

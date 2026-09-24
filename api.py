@@ -1419,8 +1419,8 @@ async def firewall(req: FirewallRequest, request: Request):
                 except Exception as e:
                     logger.error(f"DB upsert failed: {type(e).__name__}")
 
-            # Auto-enrich threat graph (fire-and-forget)
-            if container and hasattr(container, 'threat_graph'):
+            # Auto-enrich threat graph (fire-and-forget), from verdicts that describe the target
+            if container and hasattr(container, 'threat_graph') and describes_target:
                 _fire_and_forget(
                     container.threat_graph.enrich_from_scan(
                         to_addr, req.chainId, risk_output,
