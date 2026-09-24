@@ -6,6 +6,10 @@ in `/opt/shieldbot/venv` and its SQLite database at `/opt/shieldbot/shieldbot.db
 - `shieldbot`: the API (`uvicorn api:app` on 127.0.0.1:8000; `shieldbot-api.service` in this repo)
 - `shieldbot-bot`: the Telegram bot
 
+A third unit, `shieldbot-workers` (`python workers.py`; `shieldbot-workers.service.example`), exists only if
+`BACKGROUND_WORKERS=external` was turned on (`docs/DEPLOYMENT.md`); it then runs the background work and holds the
+recorder key. `deploy.sh` does not manage it: stop it before `--cutover` or `--rollback` and start it after.
+
 nginx fronts the API and serves the landing site. Every other unit on the machine, including `rh-census-4663`,
 belongs to other work. `deploy.sh` stops and starts only the two units above. It never touches other units,
 nginx, `.env` or systemd itself (no `daemon-reload`: a changed unit file is applied by hand).

@@ -165,6 +165,84 @@ To turn it on:
 
 To turn it off, remove the setting and restart the API.
 
+### Background workers in their own process (opt-in)
+
+By default the API process also runs ShieldBot's background work, so API requests wait whenever that work
+holds the event loop. With `BACKGROUND_WORKERS=external` the API starts none of it, and `workers.py` runs it as
+a service of its own (`deploy/shieldbot-workers.service.example`). With the setting unset or `api`, nothing
+changes. Any other value stops the API at startup.
+
+| Background work | `api` (default) | `external` |
+|---|---|---|
+| Mempool monitor (txpool polling) | API | workers.py |
+| Robinhood Chain verdict drain (signs and sends registry records) | API | workers.py |
+| Hunter sweep | API | workers.py |
+| Launch watch (Robinhood Chain launch discovery and triaged scans) | API | workers.py |
+| Deployer indexer | API and bot | API, bot and workers.py |
+
+The deployer indexer stays in every process: its queue is in memory and each process fills it with the contracts
+it scans itself. Verdicts the API or the bot publishes are queued in the database as before, and the drain in
+workers.py picks them up on its next poll, at most 10 seconds later when it is idle.
+
+With `external` the API holds none of the workers' memory. It says so instead of reporting zeros:
+
+| Where | Field | With `external` |
+|---|---|---|
+| `GET /api/stats` | `transactions_monitored`, `sandwiches_caught`, `suspicious_approvals`, `chains_protected`, `mempool_chains_observable`, `mempool_chains_unobservable`, `mempool_counting_since` | null, and `background_workers_note` says why |
+| `GET /api/stats` | `unknown_ledger` | the API's own lookups only; the hunter's and the launch watch's are counted in workers.py, which does not serve them |
+| `GET /api/coverage/{chain_id}` | `public_mempool` | `unobservable`, never `yes`, with `background_workers_note` |
+| `GET /api/coverage/{chain_id}` | `provider_health` | the API's own lookups only |
+| `GET /api/mempool/alerts`, `GET /api/mempool/stats` | the whole answer | 503 with the reason, never an empty list; the bot's `/threats` then says live mempool data is unavailable |
+| `GET /api/threats/feed` | mempool alerts | left out, and `mempool_unavailable` gives the reason |
+| `GET /api/admin/stats` | `mempool`, `guard_watch.running`, `guard_watch.rpc_budget` | null, with `background_workers_note` |
+
+Everything the API reads from the database is unchanged: scan and threat counts, launch discovery, evidence and
+registry records, guard subjects and verdict permalinks.
+
+**The recorder key moves with the drain.** With `external`, workers.py is the only process that signs verdict
+transactions. The key file `/etc/shieldbot/recorder.env` must be loaded by the workers unit and removed from the
+API unit. Set `BACKGROUND_WORKERS=external` in the shared `/opt/shieldbot/.env`, which both units read: an API
+that reads `api` beside a running workers.py would be a second sender racing for the recorder's nonces.
+workers.py refuses to start unless it reads `external`, but it cannot see what the API reads.
+
+To turn it on, as root:
+
+```bash
+# 1. Add the line BACKGROUND_WORKERS=external to /opt/shieldbot/.env, which the API and the workers both read.
+
+# 2. The workers unit.
+cp /opt/shieldbot/deploy/shieldbot-workers.service.example /etc/systemd/system/shieldbot-workers.service
+systemctl daemon-reload
+
+# 3. Move the recorder key file (only if the verdict registry is configured).
+systemctl edit shieldbot-workers   # add: [Service] and EnvironmentFile=/etc/shieldbot/recorder.env
+systemctl edit shieldbot           # delete the EnvironmentFile=/etc/shieldbot/recorder.env line
+systemctl cat shieldbot | grep -c recorder.env            # 0: the API no longer loads the key
+systemctl cat shieldbot-bot | grep -c recorder.env        # 0
+systemctl cat shieldbot-workers | grep -c recorder.env    # 1
+
+# 4. Restart the API first, which stops its own background work, then start the workers.
+systemctl restart shieldbot
+systemctl enable --now shieldbot-workers
+```
+
+Check: the API log says `Background work runs in workers.py (BACKGROUND_WORKERS=external)` and never
+`Robinhood verdict registry: sending`; `journalctl -u shieldbot-workers` shows `ShieldBot workers started` and,
+with the registry configured, `Robinhood verdict registry: sending as recorder 0x...`; `/api/stats` carries
+`background_workers_note`.
+
+**Deploys.** `deploy/deploy.sh` stops, backs up and starts only `shieldbot` and `shieldbot-bot`. It does not know
+the workers unit, and its recorder key check looks only at the shared `.env` and the bot, not at whether the API
+unit still loads the key. A cutover or rollback with the workers running would copy the database under a process
+that has it open and leave the workers on the old code.
+Until the script manages the unit, run `systemctl stop shieldbot-workers` before `--cutover` or `--rollback` and
+`systemctl start shieldbot-workers` after it finishes, whether it deployed or rolled back.
+
+To turn it off: `systemctl disable --now shieldbot-workers`, move the recorder key file back to the API unit,
+remove the setting from `/opt/shieldbot/.env` and restart the API.
+
+Neither setting makes a second API process supported: MCP sessions, for one, live in a single process's memory.
+
 ---
 
 ## BNB Chain Deployment (For Onchain Proof)

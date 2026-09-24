@@ -272,6 +272,10 @@ SQLite database; the bot code never reads the key.
 **The API must run as a single uvicorn process: no `--workers` and no `--reload`** (as in `shieldbot-api.service`
 in this repository). Two API processes would be two senders racing for the recorder's nonces.
 
+**With `BACKGROUND_WORKERS=external`** (docs/DEPLOYMENT.md) the drain runs in `workers.py`, under the
+`shieldbot-workers` unit, and the API starts none. Where this section says the API unit, read `shieldbot-workers`:
+it alone loads `recorder.env`, the API unit must not, and its log shows `sending`.
+
 **Only the API service's environment gets `ROBINHOOD_RECORDER_PRIVATE_KEY`.** The API and bot units both load
 `/opt/shieldbot/.env`, so do NOT put the key there. Put it in a separate file that only the API unit loads:
 
