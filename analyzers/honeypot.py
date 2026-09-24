@@ -54,6 +54,9 @@ class HoneypotAnalyzer(Analyzer):
         if d.get('is_honeypot'):
             score += 80
             flags.append('Honeypot detected')
+            # The doubt is explanation only: the simulated sell still failed, so the score stands.
+            if d.get('likely_false_positive'):
+                flags.append('Honeypot flag may be a false positive: the contract is verified and its taxes are normal')
         if d.get('simulation_failed') and not d.get('is_honeypot'):
             score += 40
             flags.append('Honeypot simulation failed — treat as suspicious')

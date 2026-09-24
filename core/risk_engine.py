@@ -123,6 +123,9 @@ class RiskEngine:
         if honeypot_data.get('is_honeypot'):
             honeypot_score += 80
             critical_flags.append('Honeypot detected')
+            # The doubt is explanation only: the simulated sell still failed, so the score stands.
+            if honeypot_data.get('likely_false_positive'):
+                critical_flags.append('Honeypot flag may be a false positive: the contract is verified and its taxes are normal')
         if honeypot_data.get('simulation_failed') and not honeypot_data.get('is_honeypot'):
             honeypot_score += 40
             critical_flags.append('Honeypot simulation failed — treat as suspicious')
