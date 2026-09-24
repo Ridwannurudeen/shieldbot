@@ -856,7 +856,7 @@
       return display;
     }
 
-    function StatCard({ label, value, color, loading }) {
+    function StatCard({ label, value, color, loading, note }) {
       const display = useCountUp(loading || value == null ? 0 : value);
       return (
         <div className="glass rounded-xl p-4 fade-up flex flex-col gap-1 text-center"
@@ -868,6 +868,7 @@
               </div>
           }
           <div className="text-xs font-medium mt-1" style={{ color:'#64748B' }}>{label}</div>
+          {note && <div className="text-xs" style={{ color:'#94A3B8' }}>{note}</div>}
         </div>
       );
     }
@@ -875,12 +876,18 @@
     function PlatformStatsBar({ stats, loading }) {
       const since = stats && stats.mempool_counting_since;
       const anyMissing = stats && STAT_ITEMS.some(s => stats[s.key] == null);
+      // A monitored chain whose mempool could not be read is Unknown; it is not counted as watched.
+      const unobservable = (stats && stats.mempool_chains_unobservable) || [];
+      const mempoolNote = unobservable.length
+        ? 'Unknown: ' + unobservable.map(id => CHAIN_NAMES[id] || `Chain ${id}`).join(', ')
+        : null;
       return (
         <div>
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
             {STAT_ITEMS.map(s => (
               <StatCard key={s.key} label={s.label} value={stats ? stats[s.key] : null}
-                        color={s.color} loading={loading} />
+                        color={s.color} loading={loading}
+                        note={s.key === 'chains_protected' ? mempoolNote : null} />
             ))}
           </div>
           {!loading && (stats === null || since || anyMissing) && (

@@ -1719,6 +1719,9 @@ async def public_stats():
 
     A source that is not running reports null, never 0. Mempool counters live in memory and restart
     from zero with the process; `mempool_counting_since` says when the current count began.
+    `chains_protected` counts only the chains whose mempool the monitor read on its last poll
+    (`mempool_chains_observable`); a monitored chain it could not read is listed in
+    `mempool_chains_unobservable`: its mempool is unknown, not protected.
     `launch_discovery` says how far Robinhood Chain launch discovery has read, from the database
     alone: its lowest source cursor, when a sweep last moved a cursor, and the newest launch block.
     A cursor far below the chain head, or an old `last_sweep_at`, means discovery has stalled.
@@ -1735,8 +1738,11 @@ async def public_stats():
         }
 
     mempool = {}
+    observable = unobservable = None
     if container and container.mempool_monitor:
         mempool = container.mempool_monitor.get_stats()
+        unobservable = mempool["unobservable_chains"]
+        observable = sorted(set(mempool["monitored_chains"]) - set(unobservable))
 
     at = db_stats.get("all_time", {})
     return {
@@ -1746,7 +1752,9 @@ async def public_stats():
         "transactions_blocked":   at.get("transactions_blocked"),
         "sandwiches_caught":      mempool.get("sandwiches_detected"),
         "suspicious_approvals":   mempool.get("suspicious_approvals"),
-        "chains_protected":       len(mempool["monitored_chains"]) if "monitored_chains" in mempool else None,
+        "chains_protected":       len(observable) if observable is not None else None,
+        "mempool_chains_observable": observable,
+        "mempool_chains_unobservable": unobservable,
         "mempool_counting_since": mempool.get("counting_since"),
         "launch_discovery":       launch_discovery,
     }
