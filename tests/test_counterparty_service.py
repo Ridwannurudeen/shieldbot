@@ -228,6 +228,16 @@ LABELS = {"labels": ["phishing_activities", "blacklist_doubt"], "label_source": 
         (_known(labels=None), False, (None, None, True)),
         (_known(is_contract=False, is_verified=None, age_days=None, labels=None), True, (100, WALLET_FLAG, True)),
         (_known(is_contract=None, **LABELS), True, (100, LABEL_FLAG, True)),
+        # Code unknown, explorer answered: the verified-based tiers still fire as a lower bound (an
+        # unverified address may be a wallet, which would be 100), and the verdict stays unknown.
+        (_known(is_contract=None, is_verified=False, age_days=30), True, (85, "Spender contract is unverified", True)),
+        (_known(is_contract=None, is_verified=False, age_days=30), False, (60, "Spender contract is unverified", True)),
+        (_known(is_contract=None, is_verified=False, age_days=2), False,
+         (85, "Spender contract is unverified and 2 days old", True)),
+        (_known(is_contract=None, age_days=3), True, (60, "Spender contract is 3 days old", True)),
+        (_known(is_contract=None, age_days=3), False, (None, None, True)),
+        # A known wallet is 100 whatever the explorer said.
+        (_known(is_contract=False, is_verified=False, age_days=None), False, (100, WALLET_FLAG, False)),
     ],
 )
 def test_judge_spender_table(facts, unlimited, expected):

@@ -106,7 +106,9 @@ def judge_spender(facts: dict, unlimited: bool) -> tuple:
         return 100, "Approval to a wallet address, not a contract (drainer pattern)", unknown
     if facts["delegated"]:
         return 100, "Approval to an EIP-7702 delegated wallet, not a protocol contract", unknown
-    if facts["is_contract"] is None or verified is None:
+    # With the code unknown the rules below still fire on what the explorer said; the address
+    # could be a wallet (100), so their floors are a lower bound and the verdict stays unknown.
+    if verified is None:
         return None, None, True
     if verified is False:
         if age is not None and age < 7:
