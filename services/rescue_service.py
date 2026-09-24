@@ -53,63 +53,49 @@ UNLIMITED_THRESHOLD = 2**128
 # Approvals above this (but below UNLIMITED_THRESHOLD) are considered "large"
 HIGH_APPROVAL = 10**24  # ~1 million tokens at 18 decimals
 
-# Known safe spenders (major DEX routers, aggregators, and lending protocols)
-# Approvals to these are lower risk than unknown contracts.
+# Known safe spenders by chain (major DEX routers, aggregators and lending protocols). Approvals to
+# these are lower risk than to unknown contracts. An address is trusted only on the chains listed:
+# the same address on another chain can hold other code or none. On 2026-09-24 every address held
+# code on each chain it is listed under (eth_getCode on that chain's public RPC). Where a contract
+# exposes one, its own getter also named the expected contract there: factory() with WETH() or
+# WETH9() for the DEX routers (and positionManager() for the PancakeSwap Smart Router),
+# defaultFactory() for Aerodrome and Velodrome, poolManager() for the Uniswap Universal Routers
+# outside Ethereum, name() and underlying() for the Venus markets, and one owner() on both chains
+# for KyberSwap and OpenOcean; the Ethereum Universal Router is in Uniswap's deploy-addresses list.
+# Addresses holding other code on the other chain are left off it: PancakeSwap V2 and ApeSwap on
+# Ethereum, and Uniswap V2 and the Universal Router on BSC, where Uniswap documents other addresses.
 KNOWN_SAFE_SPENDERS = {
-    # --- PancakeSwap ---
-    "0x10ed43c718714eb63d5aa57b78b54704e256024e": "PancakeSwap V2",
-    "0x13f4ea83d0bd40e75c8222255bc855a974568dd4": "PancakeSwap V3 Position Manager",
-    "0x1b81d678ffb9c0263b24a97847620c99d213eb14": "PancakeSwap V3 Swap Router",
-
-    # --- Uniswap ---
-    "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": "Uniswap V2",
-    "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap V3",
-    "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad": "Uniswap Universal Router",
-
-    # --- SushiSwap ---
-    "0x1b02da8cb0d097eb8d57a175b88c7d8b47997506": "SushiSwap",
-
-    # --- 1inch ---
-    "0x111111125421ca6dc452d289314280a0f8842a65": "1inch V6",
-    "0x1111111254eeb25477b68fb85ed929f73a960582": "1inch V5",
-
-    # --- Biswap ---
-    "0x3a6d8ca21d1cf76f653a67577fa0d27453350dd8": "Biswap Router",
-
-    # --- ApeSwap ---
-    "0xcf0febd3f17cef5b47b0cd257acf6025c5bff3b7": "ApeSwap Router",
-
-    # --- KyberSwap ---
-    "0x6131b5fae19ea4f9d964eac0408e4408b66337b5": "KyberSwap Meta Aggregation Router V2",
-
-    # --- OpenOcean ---
-    "0x6352a56caadc4f1e25cd6c75970fa768a3304e64": "OpenOcean Exchange V2",
-
-    # --- MetaMask Swap Router (BSC) ---
-    "0x1a1ec25dc08e98e5e93f1104b5e5cdd298707d31": "MetaMask Swap Router",
-
-    # --- Venus Protocol (vToken contracts — users approve these to supply assets) ---
-    "0xfd5840cd36d94d7229439859c0112a4185bc0255": "Venus Protocol (vUSDT)",
-    "0x95c78222b3d6e262426483d42cfa53685a67ab9d": "Venus Protocol (vBUSD)",
-
-    # --- Radiant Capital ---
-    "0xd50cf00b6e600dd036ba8ef475677d816d6c4281": "Radiant Capital Lending Pool",
-
-    # --- Alpaca Finance ---
-    "0xa625ab01b08ce023b2a342dbb12a16f2c8489a8f": "Alpaca Finance FairLaunch",
-
-    # --- Wombat Exchange ---
-    "0x19609b03c976cca288fbdae5c21d4290e9a4add7": "Wombat Exchange Router",
-
-    # --- Stargate Finance ---
-    "0x4a364f8c717caad9a442737eb7b8a55cc6cf18d8": "Stargate Finance Router",
-}
-
-# Main DEX routers of Base, Optimism, Arbitrum and Polygon, trusted only on their own chain: the
-# same address on another chain can hold other code or none. On 2026-09-24 each one held code on
-# that chain's public RPC, and its factory() (Aerodrome and Velodrome: defaultFactory(); Universal
-# Router: poolManager()) returned the factory the protocol documents for that chain.
-CHAIN_SAFE_SPENDERS = {
+    56: {
+        "0x10ed43c718714eb63d5aa57b78b54704e256024e": "PancakeSwap V2",
+        "0x13f4ea83d0bd40e75c8222255bc855a974568dd4": "PancakeSwap Smart Router",
+        "0x1b81d678ffb9c0263b24a97847620c99d213eb14": "PancakeSwap V3 Swap Router",
+        "0x1b02da8cb0d097eb8d57a175b88c7d8b47997506": "SushiSwap",
+        "0x111111125421ca6dc452d289314280a0f8842a65": "1inch V6",
+        "0x1111111254eeb25477b68fb85ed929f73a960582": "1inch V5",
+        "0x3a6d8ca21d1cf76f653a67577fa0d27453350dd8": "Biswap Router",
+        "0xcf0febd3f17cef5b47b0cd257acf6025c5bff3b7": "ApeSwap Router",
+        "0x6131b5fae19ea4f9d964eac0408e4408b66337b5": "KyberSwap Meta Aggregation Router V2",
+        "0x6352a56caadc4f1e25cd6c75970fa768a3304e64": "OpenOcean Exchange V2",
+        "0x1a1ec25dc08e98e5e93f1104b5e5cdd298707d31": "MetaMask Swap Router",
+        # Venus Protocol vToken markets: users approve these to supply assets
+        "0xfd5840cd36d94d7229439859c0112a4185bc0255": "Venus Protocol (vUSDT)",
+        "0x95c78222b3d6e262426483d42cfa53685a67ab9d": "Venus Protocol (vBUSD)",
+        "0xd50cf00b6e600dd036ba8ef475677d816d6c4281": "Radiant Capital Lending Pool",
+        "0xa625ab01b08ce023b2a342dbb12a16f2c8489a8f": "Alpaca Finance FairLaunch",
+        "0x19609b03c976cca288fbdae5c21d4290e9a4add7": "Wombat Exchange Router",
+        "0x4a364f8c717caad9a442737eb7b8a55cc6cf18d8": "Stargate Finance Router",
+    },
+    1: {
+        "0x13f4ea83d0bd40e75c8222255bc855a974568dd4": "PancakeSwap Smart Router",
+        "0x1b81d678ffb9c0263b24a97847620c99d213eb14": "PancakeSwap V3 Swap Router",
+        "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": "Uniswap V2",
+        "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap V3",
+        "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad": "Uniswap Universal Router",
+        "0x111111125421ca6dc452d289314280a0f8842a65": "1inch V6",
+        "0x1111111254eeb25477b68fb85ed929f73a960582": "1inch V5",
+        "0x6131b5fae19ea4f9d964eac0408e4408b66337b5": "KyberSwap Meta Aggregation Router V2",
+        "0x6352a56caadc4f1e25cd6c75970fa768a3304e64": "OpenOcean Exchange V2",
+    },
     8453: {
         "0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43": "Aerodrome Router",
         "0x2626664c2603336e57b271c5c0b26f421741e481": "Uniswap SwapRouter02",
@@ -152,7 +138,7 @@ STABLECOINS = {
 
 def _known_spender(spender: str, chain_id: int) -> Optional[str]:
     """Label of a known safe spender on ``chain_id``, or None."""
-    return CHAIN_SAFE_SPENDERS.get(chain_id, {}).get(spender) or KNOWN_SAFE_SPENDERS.get(spender)
+    return KNOWN_SAFE_SPENDERS.get(chain_id, {}).get(spender)
 
 
 def _is_rate_limited(error) -> bool:
