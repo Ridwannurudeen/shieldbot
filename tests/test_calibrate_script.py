@@ -1,7 +1,9 @@
 """scripts/calibrate.py proposes thresholds from trusted labels only and never touches the live config."""
 
 import json
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
@@ -15,11 +17,25 @@ ROOT = Path(__file__).resolve().parent.parent
 LIVE_CONFIG = ROOT / "core" / "calibration_config.json"
 
 
+@pytest.fixture(autouse=True)
+def settings(monkeypatch):
+    # The script's --config default is the service's own setting; tests never read a .env for it.
+    monkeypatch.setattr(
+        calibrate, "Settings", lambda: SimpleNamespace(calibration_config_path=str(LIVE_CONFIG))
+    )
+
+
 @pytest_asyncio.fixture
 async def db_path(tmp_path):
     path = (tmp_path / "outcomes.sqlite").as_posix()
     database = Database(path)
     await database.initialize()
+    for key_id, tier in (("sb_partner", "pro"), ("sb_other", "pro"), ("sb_free", "free")):
+        await database._db.execute(
+            "INSERT INTO api_keys (key_id, key_hash, owner, tier, created_at) VALUES (?, ?, ?, ?, ?)",
+            (key_id, f"hash-{key_id}", f"{key_id}@example.com", tier, time.time()),
+        )
+    await database._db.commit()
     yield path, database
     await database.close()
 
@@ -54,6 +70,19 @@ async def test_client_rows_are_ignored(tmp_path, db_path):
 
 
 @pytest.mark.asyncio
+async def test_free_tier_and_unknown_key_rows_are_ignored(tmp_path, db_path):
+    path, database = db_path
+    # A free key is self-serve, and a key missing from api_keys cannot be checked.
+    await _record(database, 5.0, "scam", "key:sb_free", 30)
+    await _record(database, 5.0, "scam", "key:sb_deleted", 30)
+    await _record(database, 95.0, "safe", "key:sb_free", 30)
+    proposal = _run(tmp_path, path)
+    assert proposal["proposed"] is None
+    assert proposal["labels"]["total"] == 0
+    assert proposal["labels"]["outcomes"]["by_source"] == {}
+
+
+@pytest.mark.asyncio
 async def test_api_key_rows_are_read_and_attributed(tmp_path, db_path):
     path, database = db_path
     await _record(database, 5.0, "scam", "client", 50)
@@ -74,6 +103,27 @@ async def test_api_key_rows_are_read_and_attributed(tmp_path, db_path):
 
 
 @pytest.mark.asyncio
+async def test_one_key_supplying_more_than_half_the_labels_is_a_warning(tmp_path, db_path):
+    path, database = db_path
+    await _record(database, 95.0, "scam", "key:sb_partner", 12)
+    await _record(database, 15.0, "safe", "key:sb_partner", 6)
+    await _record(database, 15.0, "safe", "key:sb_other", 6)
+    proposal = _run(tmp_path, path)
+    assert proposal["warnings"] == ["key:sb_partner supplied 18 of the 24 trusted labels"]
+    assert proposal["needs_owner_review"] is True
+
+
+@pytest.mark.asyncio
+async def test_no_warning_when_no_key_supplies_more_than_half(tmp_path, db_path):
+    path, database = db_path
+    await _record(database, 95.0, "scam", "key:sb_partner", 15)
+    await _record(database, 10.0, "safe", "key:sb_other", 15)
+    proposal = _run(tmp_path, path)
+    assert proposal["warnings"] == []
+    assert proposal["needs_owner_review"] is False
+
+
+@pytest.mark.asyncio
 async def test_too_few_trusted_rows_gives_no_proposal(tmp_path, db_path):
     path, database = db_path
     await _record(database, 95.0, "scam", "key:sb_partner", 19)
@@ -88,14 +138,60 @@ async def test_too_few_trusted_rows_gives_no_proposal(tmp_path, db_path):
 async def test_the_live_config_is_untouched(tmp_path, db_path):
     path, database = db_path
     await _record(database, 95.0, "scam", "key:sb_partner", 15)
-    await _record(database, 10.0, "safe", "key:sb_partner", 15)
+    await _record(database, 10.0, "safe", "key:sb_other", 15)
     before = LIVE_CONFIG.read_bytes()
     proposal = _run(tmp_path, path)
     assert proposal["proposed"] is not None
+    assert proposal["current"]["path"] == LIVE_CONFIG.as_posix()
     assert LIVE_CONFIG.read_bytes() == before
     with pytest.raises(SystemExit):
         calibrate.main(["--db", path, "--out", str(LIVE_CONFIG)])
     assert LIVE_CONFIG.read_bytes() == before
+
+
+@pytest.mark.asyncio
+async def test_the_config_defaults_to_the_services_setting(tmp_path, db_path, monkeypatch):
+    path, _ = db_path
+    config = tmp_path / "calibration.json"
+    config.write_text(
+        json.dumps({"high_threshold": 80.0, "medium_threshold": 40.0}), encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        calibrate, "Settings", lambda: SimpleNamespace(calibration_config_path=str(config))
+    )
+    proposal = _run(tmp_path, path)
+    assert proposal["current"]["path"] == config.as_posix()
+    assert (proposal["current"]["high_threshold"], proposal["current"]["medium_threshold"]) == (
+        80.0,
+        40.0,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["db", "config", "dataset", "scores"])
+async def test_the_proposal_never_overwrites_an_input(tmp_path, db_path, target):
+    path, _ = db_path
+    dataset, scores = _benchmark(tmp_path, [])
+    config = tmp_path / "calibration.json"
+    config.write_text(LIVE_CONFIG.read_text(encoding="utf-8"), encoding="utf-8")
+    inputs = {"db": path, "config": str(config), "dataset": dataset, "scores": scores}
+    before = {name: Path(value).read_bytes() for name, value in inputs.items()}
+    with pytest.raises(SystemExit):
+        calibrate.main(
+            [
+                "--db",
+                path,
+                "--config",
+                str(config),
+                "--dataset",
+                dataset,
+                "--scores",
+                scores,
+                "--out",
+                inputs[target],
+            ]
+        )
+    assert {name: Path(value).read_bytes() for name, value in inputs.items()} == before
 
 
 @pytest.mark.asyncio
@@ -105,7 +201,7 @@ async def test_thresholds_the_community_ceiling_could_reach_are_clamped_for_revi
     path, database = db_path
     # Scams scored 35 and safes scored 5 would teach HIGH 30 and MEDIUM 20.
     await _record(database, 35.0, "scam", "key:sb_partner", 15)
-    await _record(database, 5.0, "safe", "key:sb_partner", 10)
+    await _record(database, 5.0, "safe", "key:sb_other", 15)
     proposal = _run(tmp_path, path)
     assert (proposal["proposed"]["high_threshold"], proposal["proposed"]["medium_threshold"]) == (
         41.0,
@@ -127,7 +223,7 @@ async def test_thresholds_the_community_ceiling_could_reach_are_clamped_for_revi
 async def test_a_proposal_above_the_ceilings_is_not_clamped(tmp_path, db_path):
     path, database = db_path
     await _record(database, 95.0, "scam", "key:sb_partner", 15)
-    await _record(database, 10.0, "safe", "key:sb_partner", 15)
+    await _record(database, 10.0, "safe", "key:sb_other", 15)
     proposal = _run(tmp_path, path)
     assert proposal["clamped"] == []
     assert proposal["needs_owner_review"] is False

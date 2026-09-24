@@ -4,15 +4,17 @@
 Trusted labels are:
   - benchmark entries with the scores eval.live_scorer recorded for them (--dataset, --scores). Only
     completed scans count; a safe entry is 'safe' and every malicious class is 'scam'.
-  - outcome events sent with an API key (source 'key:<key_id>') whose outcome is 'safe' or 'scam' and
-    that carry the score of the scan. Rows sent without a key ('client') are never read.
+  - outcome events sent with a paid API key (source 'key:<key_id>', a key in api_keys whose tier is not
+    'free') whose outcome is 'safe' or 'scam' and that carry the score of the scan. Rows sent without a
+    key ('client'), with a self-serve free key or with a key no longer in api_keys are never read.
 
 The proposal file gives the proposed HIGH and MEDIUM thresholds (none when the labels are too few),
 the labels in each 10-point score bin, the precision and recall of the current and proposed thresholds,
 the current thresholds, and where the labels came from, with the outcome rows counted per API key. A
 threshold the labels put too low is raised to its minimum (THRESHOLD_CEILINGS), listed under `clamped`
-with the reason, and the proposal is flagged for review (`needs_owner_review`). The owner reviews it
-and edits core/calibration_config.json by hand (docs/TECHNICAL.md).
+with the reason, and the proposal is flagged for review (`needs_owner_review`), as it is when one key
+supplies more than half the labels (`warnings`). The owner reviews it and edits the live config by
+hand (docs/TECHNICAL.md). The proposal is never written over an input file.
 
 Usage:
     python scripts/calibrate.py --db /opt/shieldbot/shieldbot.db --out calibration-proposal.json
@@ -32,12 +34,12 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.calibration import MIN_LABELS, confidence_boost, load_calibration, propose_thresholds, score_bins
+from core.config import Settings
 from core.risk_engine import MEDIUM_MATCH_FLOOR
 from eval.benchmark import json_sha256, load_scores
 from eval.dataset import load_dataset
 
 FORMAT_PROPOSAL = "shieldbot-calibration-proposal/1"
-LIVE_CONFIG = str(Path(__file__).resolve().parent.parent / "core" / "calibration_config.json")
 # A proposed threshold at or below its ceiling is raised to one point above it.
 THRESHOLD_CEILINGS = (
     (
@@ -75,15 +77,19 @@ def benchmark_labels(dataset_path: str, scores_path: str) -> list:
 
 
 def outcome_labels(db_path: str) -> list:
-    """(score, label, source) for each outcome event sent with an API key, read without writing."""
+    """(score, label, source) for each outcome event sent with a key in api_keys that is not a free
+    key, read without writing. Free keys are self-serve, so their rows are no more trusted than a
+    client's."""
     connection = sqlite3.connect(f"{Path(db_path).resolve().as_uri()}?mode=ro", uri=True)
     try:
         return connection.execute("""
-            SELECT risk_score_at_scan, outcome, source
+            SELECT outcome_events.risk_score_at_scan, outcome_events.outcome, outcome_events.source
             FROM outcome_events
-            WHERE source LIKE 'key:%'
-              AND outcome IN ('safe', 'scam')
-              AND risk_score_at_scan IS NOT NULL
+            JOIN api_keys ON api_keys.key_id = substr(outcome_events.source, 5)
+            WHERE outcome_events.source LIKE 'key:%'
+              AND api_keys.tier != 'free'
+              AND outcome_events.outcome IN ('safe', 'scam')
+              AND outcome_events.risk_score_at_scan IS NOT NULL
         """).fetchall()
     finally:
         connection.close()
@@ -134,6 +140,12 @@ def build_proposal(
     else:
         reason = "No threshold has at least 80% scam labels at or above it"
 
+    by_source = Counter(source for _, _, source in outcomes)
+    warnings = [
+        f"{source} supplied {count} of the {len(labels)} trusted labels"
+        for source, count in sorted(by_source.items()) if count * 2 > len(labels)
+    ]
+
     counts = Counter(label for _, label in labels)
     return {
         "format": FORMAT_PROPOSAL,
@@ -153,7 +165,8 @@ def build_proposal(
         },
         "reason": reason,
         "clamped": clamped,
-        "needs_owner_review": bool(clamped),
+        "warnings": warnings,
+        "needs_owner_review": bool(clamped or warnings),
         "labels": {
             "total": len(labels),
             "safe": counts["safe"],
@@ -166,7 +179,7 @@ def build_proposal(
             "outcomes": {
                 "db": Path(db_path).as_posix(),
                 "rows": len(outcomes),
-                "by_source": dict(sorted(Counter(source for _, _, source in outcomes).items())),
+                "by_source": dict(sorted(by_source.items())),
             },
         },
         "bins": {str(start): counts for start, counts in score_bins(labels).items()},
@@ -189,8 +202,7 @@ def main(argv=None):
     parser.add_argument("--out", required=True, help="Where to write the proposal (JSON)")
     parser.add_argument(
         "--config",
-        default=LIVE_CONFIG,
-        help=f"The live calibration config, read only (default {LIVE_CONFIG})",
+        help="The live calibration config, read only (default: the service's calibration_config_path setting)",
     )
     parser.add_argument(
         "--dataset",
@@ -199,10 +211,12 @@ def main(argv=None):
     )
     parser.add_argument("--scores", help="Scores eval.live_scorer recorded for the dataset")
     args = parser.parse_args(argv)
-    if Path(args.out).resolve() == Path(args.config).resolve():
-        parser.error("--out must not be the live config; the owner applies a proposal by hand")
+    config = args.config or Settings().calibration_config_path
+    inputs = [args.db, config, args.dataset] + ([args.scores] if args.scores else [])
+    if Path(args.out).resolve() in {Path(path).resolve() for path in inputs}:
+        parser.error("--out must not be an input (--db, --config, --dataset, --scores); the owner applies a proposal by hand")
 
-    proposal = build_proposal(args.db, args.config, args.dataset, args.scores)
+    proposal = build_proposal(args.db, config, args.dataset, args.scores)
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(proposal, f, indent=2)
         f.write("\n")
@@ -220,8 +234,10 @@ def main(argv=None):
         )
     for clamp in proposal["clamped"]:
         print(f"Clamped {clamp['field']} from {clamp['learned']:g} to {clamp['proposed']:g}: {clamp['reason']}")
+    for warning in proposal["warnings"]:
+        print(f"Warning: {warning}")
     if proposal["needs_owner_review"]:
-        print("Flagged for owner review: the labels asked for a threshold below its minimum")
+        print("Flagged for owner review")
     print(f"Proposal written to {args.out}; the live config is unchanged")
     return 0
 
