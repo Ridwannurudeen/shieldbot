@@ -19,6 +19,20 @@ BYTECODE_PATTERNS = {
 BSCSCAN_DELAY = 0.25
 
 
+def pushes_selector(bytecode_hex: str, selector: str) -> bool:
+    """True when the bytecode holds PUSH4 <selector> on a byte boundary, as a dispatcher does.
+
+    The same four bytes inside a constant, or across a byte boundary, are not a function.
+    """
+    needle = '63' + selector
+    start = bytecode_hex.find(needle)
+    while start != -1:
+        if start % 2 == 0:
+            return True
+        start = bytecode_hex.find(needle, start + 1)
+    return False
+
+
 class ContractService:
     """Wraps existing scanner + web3_client contract checks."""
 
@@ -111,7 +125,7 @@ class ContractService:
                     if bytecode:
                         bytecode_hex = bytecode.hex() if isinstance(bytecode, bytes) else str(bytecode)
                         for sig, pattern_name in BYTECODE_PATTERNS.items():
-                            if sig in bytecode_hex:
+                            if pushes_selector(bytecode_hex, sig):
                                 bytecode_warnings.append(pattern_name)
                                 if pattern_name == 'mint':
                                     has_mint = True

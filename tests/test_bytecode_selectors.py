@@ -74,7 +74,7 @@ def test_benign_getters_raise_no_legacy_warning():
     assert TransactionScanner(MagicMock())._detect_suspicious_patterns(bytecode) == []
 
 
-async def _contract_data(*selectors):
+async def _contract_data(*selectors, bytecode=None):
     web3_client = MagicMock()
     web3_client.is_contract = AsyncMock(return_value=True)
     web3_client.is_verified_contract = AsyncMock(return_value=(True, "contract Token {}"))
@@ -83,7 +83,7 @@ async def _contract_data(*selectors):
         return_value={"owner": "0x" + "1" * 40, "is_renounced": False}
     )
     web3_client.get_bytecode = AsyncMock(
-        return_value="0x60806040" + "".join("63" + selector for selector in selectors)
+        return_value=bytecode or "0x60806040" + "".join("63" + selector for selector in selectors)
     )
     scam_db = MagicMock()
     scam_db.check_address = AsyncMock(return_value=[])
@@ -153,3 +153,34 @@ def test_destroy_scores_as_an_owner_power_unless_ownership_is_renounced(renounce
     assert ("destroy() function: the owner may be able to delete the contract" in flags) is (
         points > 0
     )
+
+
+# mint(address,uint256) and upgradeTo(address) as data rather than as a dispatcher's PUSH4 operand:
+# inside a PUSH32 constant, after a byte other than 0x63, and off a byte boundary (0x06 0x36 ...).
+SELECTORS_AS_DATA = [
+    "0x60806040" + "7f" + "00" * 28 + "40c10f19",
+    "0x60806040" + "60" + "40c10f19" + "3659cfe6",
+    "0x60806040" + "0" + "63" + "40c10f19" + "0",
+    "0x60806040" + "0" + "63" + "3659cfe6" + "0",
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bytecode", SELECTORS_AS_DATA)
+async def test_selector_bytes_outside_a_push4_raise_no_flag(bytecode):
+    data = await _contract_data(bytecode=bytecode)
+    assert data["bytecode_warnings"] == []
+    assert data["has_mint"] is False and data["has_proxy"] is False
+
+
+@pytest.mark.parametrize("bytecode", SELECTORS_AS_DATA)
+def test_selector_bytes_outside_a_push4_raise_no_legacy_warning(bytecode):
+    assert TransactionScanner(MagicMock())._detect_suspicious_patterns(bytecode) == []
+
+
+@pytest.mark.parametrize("prefix", ["0x", ""])
+def test_a_push4_selector_is_found_with_or_without_the_hex_prefix(prefix):
+    warnings = TransactionScanner(MagicMock())._detect_suspicious_patterns(
+        prefix + "6080604063" + "40c10f19"
+    )
+    assert warnings == [SUSPICIOUS_SIGNATURES["40c10f19"]["warning"]]
