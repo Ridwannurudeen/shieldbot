@@ -6,9 +6,11 @@
 # - uvicorn (0.40.0, pinned in requirements.txt) runs with proxy headers on and trusts X-Forwarded-For from
 #   127.0.0.1 by default (FORWARDED_ALLOW_IPS). It replaces the connecting address with the rightmost entry that
 #   is not a trusted proxy, before api.py sees the request.
-# - api.py and rpc/router.py (_get_client_ip) apply the same rule with TRUSTED_PROXY_IPS (.env.example sets
-#   127.0.0.1): the forwarded chain is honoured only when the connection comes from a trusted proxy, and the
-#   nearest address that is not a trusted proxy is the client.
+# - api.py and rpc/router.py (_get_client_ip) then apply the same rule with TRUSTED_PROXY_IPS: the forwarded
+#   chain is honoured only when the connection comes from a listed proxy, and the nearest address that is not a
+#   listed proxy is the client. The code default is empty (core/config.py), which honours no forwarded chain;
+#   .env.example sets 127.0.0.1. Either way api.py starts from the address uvicorn already took from
+#   X-Forwarded-For.
 # - $proxy_add_x_forwarded_for appends the address nginx sees to whatever the client sent. A client can put fake
 #   addresses in front, but the last entry is always nginx's own view, and that is the one both layers use.
 #   Never forward $http_x_forwarded_for on its own: that lets clients choose their address.

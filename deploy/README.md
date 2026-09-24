@@ -115,6 +115,12 @@ app sends them). To compare:
 grep -nE 'proxy_pass|proxy_set_header|proxy_.*timeout|add_header' /etc/nginx/sites-available/shieldbot
 ```
 
+Before removing CORS headers that the live vhost adds, confirm the app's own allow-list covers every browser
+origin that calls the API. The app allows the origins in `CORS_ALLOW_ORIGINS` in `/opt/shieldbot/.env`, or,
+when that is unset, the defaults in `core/config.py` (`cors_origins`: the two shieldbotsecurity.online hosts
+and three localhost addresses). A site on any other origin that calls the API from the browser starts failing
+once nginx stops adding `Access-Control-Allow-Origin: *`.
+
 After an edit: `nginx -t && systemctl reload nginx`.
 
 ## Nightly backups
