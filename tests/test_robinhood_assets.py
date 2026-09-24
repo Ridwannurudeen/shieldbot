@@ -148,6 +148,8 @@ def test_an_impostor_names_the_official_contract_and_how_it_matched():
         ("TSLA", "Tesla Wrapped", "TSLA", "ticker"),
         ("TSLA", "Tesla Backed", "TSLA", "ticker"),
         ("P", "Everpure", "P", "ticker"),
+        ("NVDA", "NVIDIA Tokenized Stock", "NVDA", "ticker"),
+        ("NVDA", "NVIDIA Tokenised Stock", "NVDA", "ticker"),
     ],
 )
 def test_a_ticker_and_a_name_pointing_at_the_same_official_token_are_an_impostor(
@@ -201,6 +203,12 @@ def test_a_symbol_or_name_claiming_robinhood_for_an_official_token_is_an_imposto
     symbol, name, matched_by, pointer
 ):
     assert _match(symbol, name) == ("impostor", "TSLA", matched_by, pointer, None)
+
+
+@pytest.mark.parametrize("symbol, name", [("APP", "Robinhood App"), ("COIN", "Robinhood Coin")])
+def test_a_common_word_ticker_beside_robinhood_is_an_impostor_by_design(symbol, name):
+    # The known false-positive surface of the Robinhood claim, kept so that TSLA "Robinhood Token" is caught.
+    assert _match(symbol, name) == ("impostor", symbol, "symbol", "ticker", None)
 
 
 @pytest.mark.parametrize(
@@ -619,6 +627,19 @@ async def test_a_shrunken_list_of_another_size_starts_the_count_again(served):
     assert len(await served.service.listed()) == 195
     served.clock += CACHE_TTL_SECONDS
     assert len(await served.service.listed()) == 100
+
+
+@pytest.mark.asyncio
+async def test_a_failed_fetch_between_shrunken_lists_neither_counts_nor_resets(served):
+    await served.service.listed()
+    sizes = []
+    for status in (200, 503, 200, 200):
+        served.clock += CACHE_TTL_SECONDS
+        served.list_status, served.list_body = status, _shortened(100)
+        sizes.append(len(await served.service.listed()))
+
+    assert sizes == [195, 195, 195, 100]
+    assert served.list_requests == 5
 
 
 @pytest.mark.asyncio

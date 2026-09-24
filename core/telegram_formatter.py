@@ -15,6 +15,7 @@ CONTROL_CHARACTERS = re.compile(
 )
 # How a collision's symbol or name pointed at the official token.
 _POINTED_BY = {'ticker': 'same ticker', 'affix': 'ticker with an affix', 'company': 'same company name'}
+_ADDRESS = re.compile(r'0x[0-9a-fA-F]{40}')
 
 
 def escape_markdown(value) -> str:
@@ -39,35 +40,40 @@ def escape_markdown_lines(text: str) -> str:
 
 
 def describe_impostor_check(check: dict) -> str:
-    """A check against the official Robinhood Chain tokens (services.robinhood_assets), in plain words."""
+    """A check against the official Robinhood Chain tokens (services.robinhood_assets), in plain words.
+
+    A check queued for an alert under older rules lacks the newer fields, so those are read with get.
+    """
     status, symbol, contract = check['status'], check['symbol'], check['official_address']
+    pointed_by = _POINTED_BY.get(check.get('pointer'), 'same ticker or name')
     if status == 'unknown':
         return f"Unknown ({check['reason']})"
     if status == 'none':
         return 'No match among official Robinhood Chain tokens'
-    if check['canonical']:
+    if check.get('canonical'):
         if status == 'official':
             return f'The canonical {symbol} of Robinhood Chain'
         if status == 'impostor':
             text = f'Impersonates the canonical {symbol} of Robinhood Chain; canonical contract {contract}'
         else:
             text = (
-                f"Not the canonical {symbol} of Robinhood Chain ({_POINTED_BY[check['pointer']]}); "
+                f"Not the canonical {symbol} of Robinhood Chain ({pointed_by}); "
                 f'canonical contract {contract}'
             )
     elif status == 'official':
         return f'Official {symbol} token (Robinhood)'
     elif status == 'impostor':
         text = f'Impersonates official {symbol} token (Robinhood-issued); official contract {contract}'
-    elif check['third_party']:
+    elif check.get('third_party'):
         text = (
             f"{symbol} token in another issuer's convention ({check['third_party']}), not Robinhood's {symbol}; "
             f'official contract {contract}'
         )
     else:
-        text = f"Not the official {symbol} token ({_POINTED_BY[check['pointer']]}); official contract {contract}"
-    if check['also']:
-        text += f"; also resembles official {check['also']['symbol']} token, contract {check['also']['official_address']}"
+        text = f"Not the official {symbol} token ({pointed_by}); official contract {contract}"
+    also = check.get('also')
+    if also:
+        text += f"; also resembles official {also['symbol']} token, contract {also['official_address']}"
     return text
 
 
@@ -124,8 +130,13 @@ def format_full_report(
     if impostor_check and contract_data.get('is_contract') is not False and (
         has_metadata or impostor_check['status'] in ('official', 'unknown')
     ):
+        detail = escape_markdown(describe_impostor_check(impostor_check))
+        # A contract goes in a code span, which a tap copies; a valid address holds nothing to escape.
+        for contract in {impostor_check['official_address'], (impostor_check.get('also') or {}).get('official_address')}:
+            if contract and _ADDRESS.fullmatch(contract):
+                detail = detail.replace(contract, f'`{contract}`')
         warning = '\U000026A0 ' if impostor else ''
-        lines.append(f'*Official Token Check:* {warning}{escape_markdown(describe_impostor_check(impostor_check))}')
+        lines.append(f'*Official Token Check:* {warning}{detail}')
     lines.append(f'*Risk Archetype:* {archetype.replace("_", " ").title()}')
     probability = 'Unknown (incomplete coverage)' if incomplete else f'{rug_prob}%'
     lines.append(f'*Rug Probability:* {probability}  |  *Risk Level:* {risk_level}')

@@ -295,16 +295,17 @@ async def test_an_impostor_launch_alerts_chats_subscribed_to_blocked_launches(db
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["blocked", "all"])
-async def test_an_impostor_alerts_once_besides_its_blocked_outcome(db, mode):
+async def test_an_impostor_alerts_once_besides_its_blocked_outcome(db, now, mode):
     await _subscribe(db, CHAT_A, mode)
     await _scan(db, TOKEN, "cleared", 10, at=990.0)
     await db.record_launch_impostor_check(CHAIN, TOKEN, IMPOSTOR)
-    for status, score, at in (
-        ("cleared", 10, 990.0),
-        ("watching", 50, 991.0),
-        ("blocked", 90, 992.0),
+    for status, score, at, evidence in (
+        ("cleared", 10, 990.0, None),
+        ("watching", 50, 991.0, None),
+        # Stored with its evidence, so the blocked alert is not held back waiting for it.
+        ("blocked", 90, 992.0, {"critical_flags": ["Honeypot detected"]}),
     ):
-        await _scan(db, TOKEN, status, score, at=at)
+        await _scan(db, TOKEN, status, score, at=at, evidence=evidence)
         await db.enqueue_launch_alerts(CHAIN, 900.0)
 
     pending = await db.get_pending_launch_alerts(1000.0, 3600, 5, 5)
@@ -385,6 +386,23 @@ def test_an_alert_states_an_unknown_or_official_check(bot_module, check, line):
     assert line in _alert(bot_module, CLEARED, check)
 
 
+# An impostor check as stored before rule versions, pointers and canonical tokens.
+ROUND_3_IMPOSTOR = {
+    "status": "impostor",
+    "symbol": "NVDA",
+    "official_address": NVDA,
+    "matched_by": "symbol and name",
+    "third_party": False,
+    "also": None,
+    "reason": None,
+    "list_size": 195,
+}
+
+
+def test_an_alert_queued_under_older_rules_still_formats(bot_module):
+    assert _alert(bot_module, CLEARED, ROUND_3_IMPOSTOR)[0] == IMPOSTOR_HEADER
+
+
 def test_the_official_symbol_in_an_alert_cannot_add_a_line(bot_module):
     symbol = "NV\nDA\N{RIGHT-TO-LEFT OVERRIDE}"
 
@@ -418,6 +436,30 @@ async def test_a_chat_subscribed_to_blocked_launches_receives_the_impostor_alert
     await bot_module.deliver_launch_alerts(alerts.bot)
 
     assert alerts.bot.send_message.await_args.kwargs["text"].splitlines()[0] == IMPOSTOR_HEADER
+
+
+@pytest.mark.asyncio
+async def test_a_cleared_launch_later_found_to_be_an_impostor_alerts_again_once(
+    bot_module, alerts, now
+):
+    await _subscribe(alerts.db, CHAT_A, "all")
+    await _scan(alerts.db, TOKEN, "cleared", 10, at=990.0)
+    await alerts.db.record_launch_impostor_check(CHAIN, TOKEN, NO_MATCH)
+    await alerts.db.enqueue_launch_alerts(CHAIN, 900.0)
+    await bot_module.deliver_launch_alerts(alerts.bot)
+    await alerts.db.record_launch_impostor_check(CHAIN, TOKEN, IMPOSTOR)
+    await _scan(alerts.db, TOKEN, "cleared", 10, at=995.0)
+    for _ in range(2):
+        await alerts.db.enqueue_launch_alerts(CHAIN, 900.0)
+        await bot_module.deliver_launch_alerts(alerts.bot)
+
+    headings = [
+        call.kwargs["text"].splitlines()[0] for call in alerts.bot.send_message.await_args_list
+    ]
+    assert headings == [
+        "\N{LARGE GREEN CIRCLE} CLEARED: a complete scan found no major risks",
+        IMPOSTOR_HEADER,
+    ]
 
 
 # --- Bot /scan and /token reports -------------------------------------------------------------
@@ -489,6 +531,26 @@ def _report(check, contract_data=None, token_info=METADATA, risk=RISK):
 )
 def test_a_report_states_the_check(check, line):
     assert f"Official Token Check: {line}" in assert_literal(_report(check)).splitlines()
+
+
+def test_a_report_puts_the_official_contracts_in_code_spans():
+    report = _report(check_token(TOKEN, "AMD", "Tesla", LISTED))
+
+    assert (
+        f"official contract `{AMD}`; also resembles official TSLA token, contract `{TSLA}`"
+        in report
+    )
+
+
+def test_a_report_on_a_check_stored_under_older_rules_still_formats():
+    collision = {**ROUND_3_IMPOSTOR, "status": "collision", "matched_by": "symbol"}
+
+    rendered = assert_literal(_report(collision)).splitlines()
+
+    assert (
+        f"Official Token Check: Not the official NVDA token (same ticker or name); official contract {NVDA}"
+        in rendered
+    )
 
 
 @pytest.mark.parametrize(

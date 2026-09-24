@@ -9,12 +9,12 @@ canonical.
 A token at an official address is official. Any other token's symbol and name are compared with each
 official token's ticker and company name. A company name drops trailing legal suffixes (Inc., Corp.,
 Holding(s), Limited, N.V., Group, American Depositary Shares, Class A, Common Stock, ETF, Trust...),
-and a token's name may add token, stock, shares, robinhood or rh to it ("Tesla Stock", "NVIDIA •
-Robinhood Token"). The symbol points at an official token when it is the ticker; the ticker with one
-leading or trailing x, w or t, a separated suffix, or another issuer's convention (NVDAX, wNVDA,
-TSLA.d, bTSLA named Backed); the ticker or company with Robinhood's name or its ticker HOOD added (TESLAHOOD); or
-the company name. The name points at it when it is the company name. A ticker of one or two
-characters takes no affix and never points on its own.
+and a token's name may add token, tokenized, stock, shares, robinhood or rh to it ("Tesla Stock",
+"NVIDIA • Robinhood Token"). The symbol points at an official token when it is the ticker; the ticker
+with one leading or trailing x, w or t, a separated suffix, or another issuer's convention (NVDAX,
+wNVDA, TSLA.d, bTSLA named Backed); the ticker or company with Robinhood's name or its ticker HOOD
+added (TESLAHOOD); or the company name. The name points at it when it is the company name. A ticker
+of one or two characters takes no affix and never points on its own.
 
 - impostor: a ticker-based symbol and the name point at the same official token; or the symbol or
   name claims Robinhood while one of them points; or a pointer only matches once look-alike
@@ -23,6 +23,11 @@ characters takes no affix and never points on its own.
   whose initials spell it ("Advanced Micro Dog"); the company name as both symbol and name, which is
   one signal; or a symbol in another issuer's convention (TSLAx named an xStock, TSLA.d, wTSLA,
   bTSLA named Backed), reported with that convention, except for a canonical token.
+
+Known limits, kept deliberately. A name containing "Robinhood" beside an official ticker that is also
+a common word reads as an impostor (APP "Robinhood App", COIN "Robinhood Coin"): the price of catching
+TSLA "Robinhood Token". A ticker that is its own company name (AMD, IBM, SNAP, NU, ASML, IREN) points
+as a ticker, so the one-signal rule for the company name as symbol and name does not cover it.
 - none: nothing points at an official token on the complete list.
 - unknown: without the list only the canonical tokens can be matched, and without the token's
   symbol and name only its address.
@@ -59,7 +64,7 @@ logger = logging.getLogger(__name__)
 OFFICIAL_ASSETS_URL = "https://api.robinhood.com/rhj/assets"
 # Raised whenever the rules change, so that a stored check made under older rules is replaced on the
 # next scan (core.database.record_launch_impostor_check). Checks stored before versioning count as 1.
-RULES_VERSION = 2
+RULES_VERSION = 3
 # Robinhood lists a stock at a time, so the list is refetched every six hours.
 CACHE_TTL_SECONDS = 6 * 3600
 # After a failed fetch the list is not asked for again for five minutes, so scans do not each wait on it.
@@ -69,7 +74,8 @@ TIMEOUT_SECONDS = 10
 MAX_LIST_BYTES = 1_000_000
 MAX_RPC_REPLY_BYTES = 65_536
 # A new list this much smaller than the last good one is taken to be truncated, unless this many
-# fetches in a row return it at the same size.
+# fetches return it at the same size with no other size between; a failed fetch neither counts nor
+# resets the count.
 MIN_LIST_FRACTION = 0.8
 SHRUNK_LIST_CONFIRMATIONS = 3
 # Symbol and name as each contract returned them on 2026-09-24.
@@ -93,7 +99,7 @@ CORPORATE_SUFFIXES = (
     ("etf",),
     ("trust",),
 )
-TOKEN_WORDS = frozenset({"token", "stock", "shares", "robinhood", "rh"})
+TOKEN_WORDS = frozenset({"token", "tokenized", "tokenised", "stock", "shares", "robinhood", "rh"})
 # Words other issuers of tokenised stocks name theirs with ("Tesla xStock", "Tesla, Inc. dShares").
 THIRD_PARTY_MARKERS = frozenset({"xstock", "dshares", "backed", "dinari", "wrapped"})
 # Robinhood's name and its own stock ticker, as a symbol adds them to a ticker or company.
@@ -492,8 +498,9 @@ class RobinhoodAssets:
     """Holds the official token list and checks 4663 tokens against it.
 
     The list is refetched once it is CACHE_TTL_SECONDS old. A failed fetch, or a list under
-    MIN_LIST_FRACTION of the last good one until SHRUNK_LIST_CONFIRMATIONS fetches in a row return it
-    at the same size, keeps the last good list; until one succeeds, checks that need it report unknown.
+    MIN_LIST_FRACTION of the last good one until SHRUNK_LIST_CONFIRMATIONS fetches return it at the same
+    size with no other size between, keeps the last good list; until one succeeds, checks that need it
+    report unknown.
     """
 
     def __init__(self, rpc_url: str):
@@ -501,7 +508,7 @@ class RobinhoodAssets:
         self._listed = None
         self._fetched_at = 0.0
         self._retry_at = 0.0
-        # The size of the last shrunken list fetched, and how many fetches in a row returned it.
+        # The size of the last shrunken list fetched, and how many fetches have returned it since another size.
         self._shrunk = (0, 0)
         self._lock = asyncio.Lock()
 
@@ -539,7 +546,7 @@ class RobinhoodAssets:
                 )
                 return
             logger.warning(
-                "Robinhood official token list: taking %d tokens after %d fetches in a row",
+                "Robinhood official token list: taking %d tokens after %d fetches at that size",
                 len(listed),
                 repeats,
             )
