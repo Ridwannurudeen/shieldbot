@@ -47,6 +47,16 @@ wait_health() {
   return 1
 }
 
+# /api/ready answers 503 until the database and at least one chain's RPC answer (api.py).
+wait_ready() {
+  local i
+  for i in $(seq 1 30); do
+    sleep 2
+    curl -sf --max-time 5 "$API_URL/api/ready" >/dev/null && return 0
+  done
+  return 1
+}
+
 # The recorder key signs on-chain verdicts and belongs to the API alone (contracts/base/DEPLOY_ROBINHOOD.md,
 # section 8). This reads the running bot process itself. grep -z reads the NUL-separated environ without a pipe,
 # and a read error (grep exit 2) counts as a failure, never as a clean result. Nothing is printed from it.
@@ -336,6 +346,7 @@ cutover() {
   systemctl start "$API_UNIT"
   wait_health || { journalctl -u "$API_UNIT" -n 40 --no-pager || true; rollback; }
   check_health
+  wait_ready || { journalctl -u "$API_UNIT" -n 40 --no-pager || true; rollback; }
   check_stats
 
   say "Starting $BOT_UNIT"

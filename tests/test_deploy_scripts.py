@@ -69,6 +69,8 @@ curl() {
       echo "$calls" > "$STATE/health-calls"
       [ "$calls" != "$(cat "$STATE/health-fail-call" 2>/dev/null || true)" ] || return 22
       cat "$STATE/health.json" ;;
+    # unready: /api/ready answers 503 on every poll, which curl -f reports as exit 22.
+    */api/ready) [ ! -e "$STATE/unready" ] || return 22 ;;
     */api/stats) echo '{"contracts_scanned": 1}' ;;
   esac
 }
@@ -444,6 +446,10 @@ def test_cutover_deploys_in_order_and_touches_only_its_two_units(server):
     assert checkout < first(calls, "pip install") < first(calls, "systemctl start shieldbot")
     assert first(calls, "systemctl start shieldbot") < first(calls, "curl")
     assert first(calls, "curl") < first(calls, "systemctl start shieldbot-bot")
+    # Readiness is polled once the health checks pass, before the bot starts.
+    ready = first(calls, "curl -sf --max-time 5 http://127.0.0.1:8000/api/ready")
+    assert first(calls, "curl -sf --max-time 10 http://127.0.0.1:8000/api/health") < ready
+    assert ready < first(calls, "systemctl start shieldbot-bot")
     assert server.active() == UNITS
 
 
@@ -510,6 +516,16 @@ def test_cutover_rolls_back_when_the_api_never_answers(server):
     assert (
         "systemctl start shieldbot-bot" not in server.calls()[: first(server.calls(), "journalctl")]
     )
+
+
+def test_cutover_rolls_back_when_the_api_never_becomes_ready(server):
+    server.flag("unready")
+    code, _, err = server.run("--cutover", server.target)
+    assert_rolled_back(server, code, err)
+    calls = server.calls()
+    assert len([call for call in calls if call.endswith("/api/ready")]) == 30
+    assert "journalctl -u shieldbot -n 40 --no-pager" in calls
+    assert "systemctl start shieldbot-bot" not in calls[: first(calls, "journalctl")]
 
 
 def test_rollback_discards_edits_the_failed_run_made_to_tracked_files(server):
