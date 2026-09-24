@@ -100,6 +100,9 @@ class StructuralAnalyzer(Analyzer):
         if d.get("has_blacklist"):
             score += 10
             flags.append("Blacklist function detected")
+        if d.get("has_destroy") and d.get("ownership_renounced") is not True:
+            score += 15
+            flags.append("destroy() function: the owner may be able to delete the contract")
         if d.get("scam_matches"):
             score += 30
             flags.append(f"Scam DB match ({len(d['scam_matches'])} sources)")

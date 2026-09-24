@@ -40,6 +40,7 @@ class ContractService:
             'has_mint': None,
             'has_pause': None,
             'has_blacklist': None,
+            'has_destroy': None,
             'source_code_patterns': [],
             'bytecode_warnings': [],
         }
@@ -55,6 +56,7 @@ class ContractService:
                     'has_mint': False,
                     'has_pause': False,
                     'has_blacklist': False,
+                    'has_destroy': False,
                 }
 
             results = {'is_contract': True}
@@ -93,6 +95,7 @@ class ContractService:
             has_mint = None
             has_pause = None
             has_blacklist = None
+            has_destroy = None
 
             try:
                 bytecode = await self.web3_client.get_bytecode(address, chain_id=chain_id)
@@ -104,6 +107,7 @@ class ContractService:
                     has_mint = False
                     has_pause = False
                     has_blacklist = False
+                    has_destroy = False
                     if bytecode:
                         bytecode_hex = bytecode.hex() if isinstance(bytecode, bytes) else str(bytecode)
                         for sig, pattern_name in BYTECODE_PATTERNS.items():
@@ -117,6 +121,8 @@ class ContractService:
                                     has_blacklist = True
                                 elif pattern_name == 'proxy_upgrade':
                                     has_proxy = True
+                                elif pattern_name == 'destroy':
+                                    has_destroy = True
             except UnsupportedChainError:
                 raise
             except Exception as e:
@@ -129,6 +135,7 @@ class ContractService:
             results['has_mint'] = has_mint
             results['has_pause'] = has_pause
             results['has_blacklist'] = has_blacklist
+            results['has_destroy'] = has_destroy
 
             # Source code patterns
             source_patterns = []

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from eth_utils import keccak
 
+from analyzers.structural import StructuralAnalyzer
 from core.risk_engine import RiskEngine
 from scanner.transaction_scanner import SUSPICIOUS_SIGNATURES, TransactionScanner
 from services.contract_service import BYTECODE_PATTERNS, ContractService
@@ -129,3 +130,26 @@ async def test_real_upgrade_selector_still_sets_proxy():
     data = await _contract_data("3659cfe6")
     assert data["has_proxy"] is True
     assert data["bytecode_warnings"] == ["proxy_upgrade"]
+
+
+@pytest.mark.asyncio
+async def test_destroy_sets_its_own_flag():
+    assert (await _contract_data("83197ef0"))["has_destroy"] is True
+    assert (await _contract_data("40c10f19"))["has_destroy"] is False
+
+
+@pytest.mark.parametrize(
+    "renounced,points",
+    [(False, 15), (None, 15), (True, 0)],
+)
+def test_destroy_scores_as_an_owner_power_unless_ownership_is_renounced(renounced, points):
+    analyzer = StructuralAnalyzer(MagicMock())
+    base = {"is_contract": True, "is_verified": True, "contract_age_days": 400}
+    without, _ = analyzer._compute({**base, "ownership_renounced": renounced}, {})
+    score, flags = analyzer._compute(
+        {**base, "ownership_renounced": renounced, "has_destroy": True}, {}
+    )
+    assert score - without == points
+    assert ("destroy() function: the owner may be able to delete the contract" in flags) is (
+        points > 0
+    )
