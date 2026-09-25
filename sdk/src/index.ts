@@ -595,7 +595,8 @@ export class ShieldBot {
         this.verdictCache.delete(oldestKey);
       }
     }
-    this.verdictCache.set(key, { verdict, timestamp: Date.now() });
+    // A copy, so a caller changing the verdict check() returned leaves later cache hits as they were.
+    this.verdictCache.set(key, { verdict: { ...verdict }, timestamp: Date.now() });
   }
 
   private _handleFailMode(cacheKey: string, error: Error): Verdict {

@@ -41,6 +41,24 @@ test('identical transaction reuses its cached allowance', async () => {
   assert.equal(cached.cached, true);
 });
 
+test('a caller changing a returned verdict does not change later cache hits', async () => {
+  let calls = 0;
+  global.fetch = async () => { calls++; return { ok: true, json: async () => payload }; };
+  const sdk = new ShieldBot({ agentId: 'agent:1' });
+  const fresh = await sdk.check(transaction);
+  Object.assign(fresh, { verdict: 'BLOCK', allowed: false, blocked: true, score: 99 });
+  const firstHit = await sdk.check(transaction);
+  Object.assign(firstHit, { verdict: 'BLOCK', allowed: false, blocked: true, score: 99 });
+  const secondHit = await sdk.check(transaction);
+  assert.equal(calls, 1);
+  assert.equal(fresh.cached, false);
+  assert.notEqual(secondHit, firstHit);
+  assert.deepEqual(
+    [secondHit.verdict, secondHit.allowed, secondHit.blocked, secondHit.score, secondHit.cached],
+    ['ALLOW', true, false, 5, true],
+  );
+});
+
 test('equivalent transaction encodings reuse the cached allowance', async () => {
   let calls = 0;
   global.fetch = async () => { calls++; return { ok: true, json: async () => payload }; };
