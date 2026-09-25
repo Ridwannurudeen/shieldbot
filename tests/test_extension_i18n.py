@@ -35,6 +35,15 @@ def test_reference_scan_finds_lookups_in_every_form():
     keys = referenced_keys()
     for key in ("tabSettings", "feedHeading", "overlayTitle", "statusChecking", "overlayNotes"):
         assert key in keys
+    # The overlay's own labels are looked up too, not written into content.js in English.
+    for key in (
+        "overlayProtocol",
+        "overlayContract",
+        "overlayChainId",
+        "overlayIncompleteCoverage",
+        "overlayExplainAnalyzing",
+    ):
+        assert keys.get(key) == "content.js", key
 
 
 @pytest.mark.parametrize("language", LANGUAGES)

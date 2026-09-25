@@ -185,5 +185,7 @@
   "overlayOpaqueMessage": "UNREADABLE MESSAGE",
   "overlayOpaqueMessageNote": "This message is not readable text, so you cannot see what you would be signing. Reject it unless you know exactly what it is.",
   "overlayNotes": "Notes",
-  "overlayHoldNoteUnchecked": "This request was not checked. To continue anyway, hold the button down, or hold Enter or Space on it, for 1.5 seconds. Letting go earlier cancels."
+  "overlayHoldNoteUnchecked": "This request was not checked. To continue anyway, hold the button down, or hold Enter or Space on it, for 1.5 seconds. Letting go earlier cancels.",
+  "overlayIncompleteCoverage": "Unknown (incomplete provider coverage)",
+  "overlayExplainAnalyzing": "Analyzing..."
 }

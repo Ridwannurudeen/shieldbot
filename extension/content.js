@@ -835,9 +835,9 @@
 
       // Domain rows
       const domainRows = [];
-      if (domain.name) domainRows.push(`<tr><td>Protocol</td><td>${escapeHtml(domain.name)}</td></tr>`);
-      if (domain.verifyingContract) domainRows.push(`<tr><td>Contract</td><td class="shieldai-mono">${escapeHtml(shortAddr(domain.verifyingContract))}</td></tr>`);
-      if (domain.chainId !== undefined) domainRows.push(`<tr><td>Chain ID</td><td>${escapeHtml(String(domain.chainId))}</td></tr>`);
+      if (domain.name) domainRows.push(`<tr><td>${_t("overlayProtocol")}</td><td>${escapeHtml(domain.name)}</td></tr>`);
+      if (domain.verifyingContract) domainRows.push(`<tr><td>${_t("overlayContract")}</td><td class="shieldai-mono">${escapeHtml(shortAddr(domain.verifyingContract))}</td></tr>`);
+      if (domain.chainId !== undefined) domainRows.push(`<tr><td>${_t("overlayChainId")}</td><td>${escapeHtml(String(domain.chainId))}</td></tr>`);
 
       // Message rows (up to 8 fields)
       const msgRows = Object.entries(message)
@@ -989,7 +989,7 @@
     const hold = canProceed && isBlock;
 
     // Display as safety score (100 - risk) so higher = better
-    const scoreDisplay = incomplete ? "Unknown (incomplete provider coverage)" :
+    const scoreDisplay = incomplete ? _t("overlayIncompleteCoverage") :
       `${_t("overlaySafety")} ${100 - result.risk_score}/100`;
 
     const overlay = document.createElement("div");
@@ -1079,11 +1079,11 @@
 
         <div class="shieldai-section">
           <h3>${_t("overlayAnalysis")}</h3>
-          <p>${escapeHtml(incomplete ? "Unknown (incomplete provider coverage)" : result.plain_english || result.analysis || _t("overlayNoAnalysis"))}</p>
+          <p>${escapeHtml(incomplete ? _t("overlayIncompleteCoverage") : result.plain_english || result.analysis || _t("overlayNoAnalysis"))}</p>
         </div>
 
         <div class="shieldai-verdict">
-          ${escapeHtml(incomplete ? "Unknown (incomplete provider coverage)" : classification !== verdict ? label : result.verdict || "")}
+          ${escapeHtml(incomplete ? _t("overlayIncompleteCoverage") : classification !== verdict ? label : result.verdict || "")}
         </div>
 
         <div class="shieldai-actions">
@@ -1111,7 +1111,7 @@
           </button>
         </div>
         <div class="shieldai-explain-response" id="shieldai-explain-response" style="display:none;">
-          <p class="shieldai-explain-loading" id="shieldai-explain-loading">Analyzing...</p>
+          <p class="shieldai-explain-loading" id="shieldai-explain-loading">${_t("overlayExplainAnalyzing")}</p>
           <p class="shieldai-explain-text" id="shieldai-explain-text"></p>
         </div>
         `}
@@ -1153,7 +1153,7 @@
       const textEl = root.getElementById("shieldai-explain-text");
 
       btn.disabled = true;
-      btn.textContent = "Analyzing...";
+      btn.textContent = _t("overlayExplainAnalyzing");
       responseDiv.style.display = "block";
       loadingEl.style.display = "block";
       textEl.style.display = "none";
@@ -1161,7 +1161,7 @@
       if (incomplete) {
         loadingEl.style.display = "none";
         textEl.style.display = "block";
-        textEl.textContent = "Unknown (incomplete provider coverage). " +
+        textEl.textContent = `${_t("overlayIncompleteCoverage")}. ` +
           Object.values(result.coverage_reasons || {}).join("; ");
         return;
       }
