@@ -500,6 +500,30 @@ def test_content_reads_a_proof_whole_whatever_its_bytes(guess):
     )
 
 
+@pytest.mark.parametrize("simulated", [True, False, None])
+@pytest.mark.parametrize(
+    "delta",
+    ["-1 BNB", "Unable to simulate — cross-chain or complex transaction. Verify manually."],
+    ids=["delta", "not-simulable"],
+)
+def test_the_asset_delta_is_marked_simulated_only_when_the_api_says_so(simulated, delta):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const [simulated, delta] = JSON.parse(process.argv[1]);
+  const fields = {asset_delta: [delta]};
+  if (simulated !== null) fields.simulated = simulated;
+  analyze = async () => ({result: scan(fields)});
+  await intercept('request');
+  const html = overlay().innerHTML;
+  assert(html.includes(delta), html);
+  assert.equal(html.includes('SIMULATED'), simulated === true, html);
+""",
+        [simulated, delta],
+    )
+
+
 @pytest.mark.parametrize("policy", ["STRICT", "BALANCED"])
 @pytest.mark.parametrize("complete", [True, False], ids=["complete", "incomplete"])
 def test_strict_mode_removes_proceed_on_an_incomplete_high_risk_result(policy, complete):

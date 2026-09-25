@@ -1004,11 +1004,15 @@
     // Transaction impact HTML
     const impact = result.transaction_impact || {};
 
-    // Asset delta HTML (simulated token in/out)
+    // Asset delta HTML (token in/out). It is marked SIMULATED only when the API
+    // says a simulation produced it: otherwise it was read from the calldata,
+    // or it is the note that the transaction could not be simulated.
     const assetDelta = result.asset_delta || [];
+    const simulatedBadge = result.simulated === true
+      ? ` <span class="shieldai-sim-badge">${_t("overlaySimulated")}</span>` : "";
     const deltaHtml = assetDelta.length
       ? `<div class="shieldai-section">
-           <h3>${_t("overlayAssetDelta")} <span class="shieldai-sim-badge">${_t("overlaySimulated")}</span></h3>
+           <h3>${_t("overlayAssetDelta")}${simulatedBadge}</h3>
            <ul class="shieldai-delta-list">
              ${assetDelta.map((d) => {
                const isOut = d.startsWith("-");
