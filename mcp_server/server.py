@@ -137,7 +137,7 @@ def _jsonrpc_error(request_id: Any, code: int, message: str, data: Any = None) -
 # Method handlers
 # ---------------------------------------------------------------------------
 
-async def _handle_initialize(container, params: Dict) -> Dict:
+async def _handle_initialize(container, params: Dict, key_info: Dict) -> Dict:
     return {
         "protocolVersion": "2024-11-05",
         "serverInfo": SERVER_INFO,
@@ -145,15 +145,15 @@ async def _handle_initialize(container, params: Dict) -> Dict:
     }
 
 
-async def _handle_ping(container, params: Dict) -> Dict:
+async def _handle_ping(container, params: Dict, key_info: Dict) -> Dict:
     return {}
 
 
-async def _handle_tools_list(container, params: Dict) -> Dict:
+async def _handle_tools_list(container, params: Dict, key_info: Dict) -> Dict:
     return {"tools": TOOL_DEFINITIONS}
 
 
-async def _handle_tools_call(container, params: Dict) -> Dict:
+async def _handle_tools_call(container, params: Dict, key_info: Dict) -> Dict:
     tool_name = params.get("name")
     arguments = params.get("arguments", {})
 
@@ -163,7 +163,7 @@ async def _handle_tools_call(container, params: Dict) -> Dict:
         raise ValueError("'arguments' in tools/call params must be an object")
 
     try:
-        result = await execute_tool(container, tool_name, arguments)
+        result = await execute_tool(container, tool_name, arguments, key_info)
         return {
             "content": [
                 {"type": "text", "text": json.dumps(result)},
@@ -186,20 +186,20 @@ async def _handle_tools_call(container, params: Dict) -> Dict:
         }
 
 
-async def _handle_resources_list(container, params: Dict) -> Dict:
+async def _handle_resources_list(container, params: Dict, key_info: Dict) -> Dict:
     return {"resources": RESOURCE_DEFINITIONS}
 
 
-async def _handle_resource_templates_list(container, params: Dict) -> Dict:
+async def _handle_resource_templates_list(container, params: Dict, key_info: Dict) -> Dict:
     return {"resourceTemplates": RESOURCE_TEMPLATE_DEFINITIONS}
 
 
-async def _handle_resources_read(container, params: Dict) -> Dict:
+async def _handle_resources_read(container, params: Dict, key_info: Dict) -> Dict:
     uri = params.get("uri")
     if not isinstance(uri, str) or not uri:
         raise ValueError("Missing 'uri' in resources/read params")
 
-    result = await read_resource(container, uri)
+    result = await read_resource(container, uri, key_info)
     if result is None:
         raise ValueError(f"Resource not found: {uri}")
 
@@ -214,11 +214,11 @@ async def _handle_resources_read(container, params: Dict) -> Dict:
     }
 
 
-async def _handle_prompts_list(container, params: Dict) -> Dict:
+async def _handle_prompts_list(container, params: Dict, key_info: Dict) -> Dict:
     return {"prompts": PROMPT_DEFINITIONS}
 
 
-async def _handle_prompts_get(container, params: Dict) -> Dict:
+async def _handle_prompts_get(container, params: Dict, key_info: Dict) -> Dict:
     name = params.get("name")
     arguments = params.get("arguments", {})
 
@@ -252,8 +252,9 @@ _METHODS = {
 # Process a single JSON-RPC request
 # ---------------------------------------------------------------------------
 
-async def process_jsonrpc(container, body: Dict) -> Optional[Dict]:
-    """Process a JSON-RPC 2.0 message and return the response dict, or None for a notification.
+async def process_jsonrpc(container, body: Dict, key_info: Dict) -> Optional[Dict]:
+    """Process a JSON-RPC 2.0 message from the API key ``key_info`` and return the response dict, or None
+    for a notification.
 
     A message without an id is a notification, which must never be answered. The ones MCP clients
     send need no action here: notifications/initialized carries no data, and the transport handles
@@ -287,7 +288,7 @@ async def process_jsonrpc(container, body: Dict) -> Optional[Dict]:
         return _jsonrpc_error(request_id, INVALID_PARAMS, "params must be an object")
 
     try:
-        result = await handler(container, params)
+        result = await handler(container, params, key_info)
         return _jsonrpc_result(request_id, result)
     except ValueError as exc:
         return _jsonrpc_error(request_id, INVALID_PARAMS, str(exc))
@@ -421,7 +422,7 @@ def create_mcp_router(container) -> APIRouter:
         if tracked:
             session["in_flight"][request_id] = False
         try:
-            response = await process_jsonrpc(container, body)
+            response = await process_jsonrpc(container, body, key_info)
         finally:
             cancelled = tracked and session["in_flight"].pop(request_id, False)
 

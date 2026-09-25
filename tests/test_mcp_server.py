@@ -110,6 +110,7 @@ def client(app):
 
 
 AUTH_HEADERS = {"X-API-Key": "sb_testkey123456789012345678901234"}
+KEY = {"key_id": "k1"}
 
 
 # ---------------------------------------------------------------------------
@@ -997,7 +998,7 @@ class TestProcessJsonRpc:
         from mcp_server.server import process_jsonrpc
         result = await process_jsonrpc(mock_container, {
             "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {},
-        })
+        }, KEY)
         assert result["jsonrpc"] == "2.0"
         assert result["id"] == 1
         assert "result" in result
@@ -1007,7 +1008,7 @@ class TestProcessJsonRpc:
         from mcp_server.server import process_jsonrpc
         result = await process_jsonrpc(mock_container, {
             "jsonrpc": "1.0", "id": 1, "method": "tools/list", "params": {},
-        })
+        }, KEY)
         assert "error" in result
         assert result["error"]["code"] == -32600
 
@@ -1016,7 +1017,7 @@ class TestProcessJsonRpc:
         from mcp_server.server import process_jsonrpc
         result = await process_jsonrpc(mock_container, {
             "jsonrpc": "2.0", "id": 1, "method": "foo/bar", "params": {},
-        })
+        }, KEY)
         assert "error" in result
         assert result["error"]["code"] == -32601
 
@@ -1027,7 +1028,7 @@ async def test_direct_mcp_tool_rejects_unknown_chain(mock_container):
     with pytest.raises(ValueError, match="Unsupported"):
         await execute_tool(mock_container, "scan_contract", {
             "address": "0x" + "a" * 40, "chain_id": 999999,
-        })
+        }, KEY)
     mock_container.registry.run_all.assert_not_awaited()
 
 
@@ -1053,7 +1054,7 @@ async def test_mcp_maps_engine_keys_and_coverage(mock_container, status, reason,
         "coverage_reasons": {"honeypot": reason} if reason else {},
         "category_scores": {"honeypot": None if reason else 0},
     }
-    result = await handle_scan_contract(mock_container, {"address": "0x" + "a" * 40, "chain_id": 56})
+    result = await handle_scan_contract(mock_container, {"address": "0x" + "a" * 40, "chain_id": 56}, KEY)
     assert result["score"] == score
     assert result["flags"] == ([reason] if reason else [])
     assert result["status"] == status
@@ -1075,7 +1076,7 @@ async def test_mcp_scan_contract_returns_the_engine_notes_apart_from_its_flags(m
         AnalyzerResult("structural", 1.0, 0, data={"status": "ok", "notes": [note]}),
     ]
     mock_container.risk_engine = RiskEngine()
-    result = await handle_scan_contract(mock_container, {"address": "0x" + "a" * 40, "chain_id": 56})
+    result = await handle_scan_contract(mock_container, {"address": "0x" + "a" * 40, "chain_id": 56}, KEY)
     assert result["notes"] == [note]
     assert note not in result["flags"]
 
@@ -1227,7 +1228,7 @@ def test_a_limit_that_is_not_an_integer_is_a_tool_error(client, mock_container, 
 @pytest.mark.asyncio
 async def test_a_null_limit_is_the_default(mock_container):
     from mcp_server.tools import execute_tool
-    await execute_tool(mock_container, "get_threat_feed", {"limit": None})
+    await execute_tool(mock_container, "get_threat_feed", {"limit": None}, KEY)
     mock_container.db.get_agent_findings.assert_awaited_once_with(limit=20)
 
 
@@ -1241,7 +1242,7 @@ def test_scan_for_injection_rejects_an_unknown_depth(client, depth):
 @pytest.mark.parametrize("depth,expected", [(None, "fast"), ("thorough", "thorough")])
 async def test_scan_for_injection_depth_defaults_to_fast(mock_container, depth, expected):
     from mcp_server.tools import execute_tool
-    result = await execute_tool(mock_container, "scan_for_injection", {"content": "hello", "depth": depth})
+    result = await execute_tool(mock_container, "scan_for_injection", {"content": "hello", "depth": depth}, KEY)
     assert result["depth"] == expected
 
 
@@ -1263,3 +1264,57 @@ def test_unknown_results_are_described_to_the_client():
 def test_mcp_prompt_includes_unknown():
     from mcp_server.prompts import get_prompt
     assert "UNKNOWN" in get_prompt("security-analysis")["messages"][0]["content"]["text"]
+
+
+# ---------------------------------------------------------------------------
+# Agent records answer only the key that registered the agent
+# ---------------------------------------------------------------------------
+
+REGISTERED_BY_K1 = {
+    "agent_id": "agent:1",
+    "owner_address": "0xowner",
+    "policy": {"mode": "threshold", "auto_allow_below": 25},
+    "registered_by_key": "k1",
+}
+
+
+def _agent_answers(client, mock_container, key_id, registration):
+    """The agent:1 health resource and reputation tool as the API key ``key_id`` reads them."""
+    mock_container.auth_manager.validate_key = AsyncMock(return_value={"key_id": key_id, "tier": "pro"})
+    mock_container.db.get_agent_policy = AsyncMock(return_value=registration)
+    health = client.post("/mcp/messages", json={
+        "jsonrpc": "2.0", "id": 1, "method": "resources/read",
+        "params": {"uri": "shieldbot://agent/agent:1/health"},
+    }, headers=AUTH_HEADERS).json()
+    reputation = client.post("/mcp/messages", json={
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "check_agent_reputation", "arguments": {"agent_id": "agent:1"}},
+    }, headers=AUTH_HEADERS).json()
+    return (
+        json.loads(health["result"]["contents"][0]["text"]),
+        json.loads(reputation["result"]["content"][0]["text"]),
+    )
+
+
+def test_the_registering_key_reads_its_agent(client, mock_container):
+    health, reputation = _agent_answers(client, mock_container, "k1", REGISTERED_BY_K1)
+
+    assert health["owner_address"] == "0xowner"
+    assert health["policy"] == REGISTERED_BY_K1["policy"]
+    assert len(health["recent_verdicts"]) == 3
+    assert reputation["trust_score"] == 66.7
+
+
+def test_another_key_is_told_the_agent_is_not_registered(client, mock_container):
+    health, reputation = _agent_answers(client, mock_container, "k2", REGISTERED_BY_K1)
+
+    assert health == {"error": "Agent not registered", "agent_id": "agent:1"}
+    assert reputation["note"] == "Agent not registered"
+    assert reputation["trust_score"] is None
+    mock_container.db.get_agent_firewall_history.assert_not_awaited()
+
+
+def test_another_keys_agent_reads_exactly_as_a_missing_one(client, mock_container):
+    assert _agent_answers(client, mock_container, "k2", REGISTERED_BY_K1) == _agent_answers(
+        client, mock_container, "k2", None
+    )

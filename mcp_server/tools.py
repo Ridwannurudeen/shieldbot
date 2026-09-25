@@ -6,7 +6,7 @@ async handler that delegates to the ServiceContainer.
 
 import logging
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from core.analyzer import AnalysisContext
 from core.extension_formatter import format_extension_alert
@@ -78,6 +78,22 @@ def _require_chain_id(container, params: Dict) -> int:
     return _validate_chain_id(container, params["chain_id"])
 
 
+async def readable_agent_policy(container, agent_id: str, key_info: Dict) -> Optional[Dict]:
+    """The agent's registration if this API key may read it, else None, the answer for an agent that
+    is not registered, so another key's agents cannot be told apart from missing ones.
+
+    The key is checked as the REST agent routes check it (agent/firewall.py): the key that registered
+    the agent may read it, and an agent registered before keys were recorded has no key to match.
+    """
+    policy = await container.db.get_agent_policy(agent_id)
+    if not policy:
+        return None
+    registered_key = policy.get("registered_by_key")
+    if registered_key and registered_key != key_info.get("key_id"):
+        return None
+    return policy
+
+
 # ---------------------------------------------------------------------------
 # Tool schema definitions
 # ---------------------------------------------------------------------------
@@ -139,6 +155,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "check_agent_reputation",
         "description": (
             "Look up the trust score and transaction history for an agent registered with ShieldBot's firewall. "
+            "Only the API key that registered the agent can read it; to any other key it is not registered. "
             "An unregistered agent, or one with no firewall history, returns status 'unknown' with coverage_reasons "
             "and a null trust_score. Only the latest 1000 firewall records are read; an agent with that many also "
             "returns status 'unknown', because its counts are a lower bound."
@@ -234,7 +251,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
 # Tool handler implementations
 # ---------------------------------------------------------------------------
 
-async def handle_scan_contract(container, params: Dict) -> Dict:
+async def handle_scan_contract(container, params: Dict, key_info: Dict) -> Dict:
     """Run all analyzers on a contract and return composite risk score."""
     address = _validate_address(_require(params, "address"))
     chain_id = _require_chain_id(container, params)
@@ -259,7 +276,7 @@ async def handle_scan_contract(container, params: Dict) -> Dict:
     }
 
 
-async def handle_simulate_transaction(container, params: Dict) -> Dict:
+async def handle_simulate_transaction(container, params: Dict, key_info: Dict) -> Dict:
     """Simulate a transaction via Tenderly."""
     from_addr = _validate_address(_require(params, "from"))
     to_addr = _validate_address(_require(params, "to"))
@@ -327,7 +344,7 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
     }
 
 
-async def handle_check_deployer(container, params: Dict) -> Dict:
+async def handle_check_deployer(container, params: Dict, key_info: Dict) -> Dict:
     """Look up deployer history for a contract."""
     address = _validate_address(_require(params, "address"))
     chain_id = _require_chain_id(container, params)
@@ -356,11 +373,11 @@ async def handle_check_deployer(container, params: Dict) -> Dict:
     }
 
 
-async def handle_check_agent_reputation(container, params: Dict) -> Dict:
+async def handle_check_agent_reputation(container, params: Dict, key_info: Dict) -> Dict:
     """Look up agent trust score from firewall history."""
     agent_id = _require(params, "agent_id")
 
-    policy = await container.db.get_agent_policy(agent_id)
+    policy = await readable_agent_policy(container, agent_id, key_info)
     if not policy:
         return {
             "agent_id": agent_id,
@@ -408,7 +425,7 @@ async def handle_check_agent_reputation(container, params: Dict) -> Dict:
     }
 
 
-async def handle_check_approval_risk(container, params: Dict) -> Dict:
+async def handle_check_approval_risk(container, params: Dict, key_info: Dict) -> Dict:
     """Report unavailable MCP approval coverage without claiming no approvals."""
     wallet = _validate_address(_require(params, "wallet_address"))
     return {
@@ -422,7 +439,7 @@ async def handle_check_approval_risk(container, params: Dict) -> Dict:
     }
 
 
-async def handle_scan_for_injection(container, params: Dict) -> Dict:
+async def handle_scan_for_injection(container, params: Dict, key_info: Dict) -> Dict:
     """Basic regex-based prompt injection detection."""
     content = _require(params, "content")
     depth = params.get("depth")
@@ -455,7 +472,7 @@ async def handle_scan_for_injection(container, params: Dict) -> Dict:
     }
 
 
-async def handle_query_threat_graph(container, params: Dict) -> Dict:
+async def handle_query_threat_graph(container, params: Dict, key_info: Dict) -> Dict:
     """Report unavailable MCP graph coverage without claiming no connections."""
     address = _validate_address(_require(params, "address"))
     return {
@@ -471,7 +488,7 @@ async def handle_query_threat_graph(container, params: Dict) -> Dict:
     }
 
 
-async def handle_get_threat_feed(container, params: Dict) -> Dict:
+async def handle_get_threat_feed(container, params: Dict, key_info: Dict) -> Dict:
     """Retrieve latest flagged contracts from agent findings."""
     limit = _page_limit(params)
 
@@ -491,7 +508,7 @@ async def handle_get_threat_feed(container, params: Dict) -> Dict:
     return {"threats": threats}
 
 
-async def handle_get_robinhood_launches(container, params: Dict) -> Dict:
+async def handle_get_robinhood_launches(container, params: Dict, key_info: Dict) -> Dict:
     """Recent launches with their latest scan outcome, from the query behind /api/launches."""
     chain_id = _validate_chain_id(container, params.get("chain_id", LAUNCH_CHAIN_ID))
     limit = _page_limit(params)
@@ -524,12 +541,12 @@ _HANDLERS = {
 }
 
 
-async def execute_tool(container, tool_name: str, params: Dict) -> Dict:
-    """Dispatch a tool call to the appropriate handler.
+async def execute_tool(container, tool_name: str, params: Dict, key_info: Dict) -> Dict:
+    """Dispatch a tool call from the API key ``key_info`` to the appropriate handler.
 
     Returns the tool result dict or raises ValueError for unknown tools.
     """
     handler = _HANDLERS.get(tool_name)
     if handler is None:
         raise ValueError(f"Unknown tool: {tool_name}")
-    return await handler(container, params or {})
+    return await handler(container, params or {}, key_info)

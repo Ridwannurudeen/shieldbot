@@ -44,7 +44,7 @@ Every tool result is JSON in a single `text` content item.
 | `scan_contract` | `address`, `chain_id` | All analyzers and the risk engine. Incomplete coverage gives `status: "unknown"`, `verdict: "UNKNOWN"`, `risk_display: "Unknown (incomplete provider coverage)"` and `coverage_reasons`. |
 | `simulate_transaction` | `from`, `to`, `data`, `chain_id` | Tenderly simulation. `from` and `to` must be addresses; `data` must be `0x` hex calldata of whole bytes, at most 200,000 characters (the HTTP firewall's cap); the optional `value` is wei below 2**256 as a decimal (up to 78 digits) or `0x` hex (up to 64 digits) string, default `"0"` (also when null), passed to the simulator as a decimal; anything else is a tool error rather than a simulation with value 0. Approval changes are not measured (`approvals_granted` is always null), so every result is `status: "unknown"` with `coverage_reasons.approvals`. When Tenderly is not configured or the simulation fails, `coverage_reasons.simulation` says so and every measurement is null. |
 | `check_deployer` | `address`, `chain_id` | Local deployer index. Always `status: "unknown"`: see below. An unindexed contract has null counts. Counts span every chain the deployer is indexed on, and `flagged_count` counts only contracts with a stored HIGH score. `funded_by` is always null. |
-| `check_agent_reputation` | `agent_id` | Block rate over the latest 1,000 local firewall records at most. An unregistered agent, or one with no firewall history, gives `status: "unknown"` with null `trust_score` and `block_rate`. With fewer than 1,000 records the result is `status: "ok"`; at 1,000 it is `status: "unknown"`, because older records were not read and `total_transactions` is a lower bound. |
+| `check_agent_reputation` | `agent_id` | Block rate over the latest 1,000 local firewall records at most. Only the API key that registered the agent can read it; to any other key the agent reads exactly as an unregistered one. An unregistered agent, or one with no firewall history, gives `status: "unknown"` with null `trust_score` and `block_rate`. With fewer than 1,000 records the result is `status: "ok"`; at 1,000 it is `status: "unknown"`, because older records were not read and `total_transactions` is a lower bound. |
 | `check_approval_risk` | `wallet_address`, `chain_id` | Not implemented: always `status: "unknown"` with null `approvals`. |
 | `scan_for_injection` | `content` | A fixed regex list. `clean: true` means no listed pattern matched, not that the text is safe. The optional `depth` must be `"fast"` (default) or `"thorough"`; it is echoed back and does not change the scan. |
 | `query_threat_graph` | `address`, `chain_id` | Not implemented: always `status: "unknown"` with null connections. |
@@ -74,7 +74,7 @@ A tool call:
 | URI | Listed by | Content |
 |-----|-----------|---------|
 | `shieldbot://threat-feed` | `resources/list` | The 50 latest agent findings. |
-| `shieldbot://agent/{agent_id}/health` | `resources/templates/list` | Policy and the 20 latest firewall verdicts of a registered agent. |
+| `shieldbot://agent/{agent_id}/health` | `resources/templates/list` | Policy and the 20 latest firewall verdicts of a registered agent, for the API key that registered it; to any other key it reads exactly as an unregistered agent. |
 | `shieldbot://wallet/{address}/guardian` | `resources/templates/list` | Not implemented: always `status: "unknown"` with null `approvals`. |
 
 The two parameterised resources are URI templates (`uriTemplate`); substitute the value before calling `resources/read`.

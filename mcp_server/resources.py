@@ -6,6 +6,8 @@ Resources expose ShieldBot data that MCP clients can read/subscribe to.
 import logging
 from typing import Any, Dict, List, Optional
 
+from mcp_server.tools import readable_agent_policy
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -26,7 +28,10 @@ RESOURCE_TEMPLATE_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "uriTemplate": "shieldbot://agent/{agent_id}/health",
         "name": "Agent Health",
-        "description": "Policy configuration and recent firewall verdicts for a registered agent.",
+        "description": (
+            "Policy configuration and recent firewall verdicts for a registered agent. Only the API key that "
+            "registered the agent can read it; to any other key it is not registered."
+        ),
         "mimeType": "application/json",
     },
     {
@@ -45,8 +50,8 @@ RESOURCE_TEMPLATE_DEFINITIONS: List[Dict[str, Any]] = [
 # Resource readers
 # ---------------------------------------------------------------------------
 
-async def read_resource(container, uri: str) -> Optional[Dict]:
-    """Read a resource by URI. Returns content dict or None if not found."""
+async def read_resource(container, uri: str, key_info: Dict) -> Optional[Dict]:
+    """Read a resource by URI for the API key ``key_info``. Returns content dict or None if not found."""
     if uri == "shieldbot://threat-feed":
         return await _read_threat_feed(container)
 
@@ -55,7 +60,7 @@ async def read_resource(container, uri: str) -> Optional[Dict]:
         parts = uri.split("/")
         if len(parts) >= 4:
             agent_id = parts[3]
-            return await _read_agent_health(container, agent_id)
+            return await _read_agent_health(container, agent_id, key_info)
 
     if uri.startswith("shieldbot://wallet/") and uri.endswith("/guardian"):
         parts = uri.split("/")
@@ -89,9 +94,9 @@ async def _read_threat_feed(container) -> Dict:
     }
 
 
-async def _read_agent_health(container, agent_id: str) -> Dict:
+async def _read_agent_health(container, agent_id: str, key_info: Dict) -> Dict:
     """Read agent policy and recent verdicts."""
-    policy = await container.db.get_agent_policy(agent_id)
+    policy = await readable_agent_policy(container, agent_id, key_info)
     if not policy:
         return {
             "uri": f"shieldbot://agent/{agent_id}/health",
