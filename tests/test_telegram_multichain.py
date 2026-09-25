@@ -735,3 +735,27 @@ async def test_bot_advisor_reply_ends_with_the_scans_own_verdict(bot_chain_funct
                              effective_user=SimpleNamespace(id=123))
     await ns['_handle_advisor_chat'](update, 'Scan 0x' + 'a' * 40, chain_id=56)
     assert typing.edit_text.call_args.args[0].splitlines()[-1] == line
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('scan_chain, saved_chain', [(4663, 56), (56, 4663)])
+async def test_the_token_button_checks_the_chain_the_scan_ran_on(bot_chain_functions, scan_chain, saved_chain):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    ns = bot_chain_functions
+    address = '0x' + 'a' * 40
+    (button,) = ns['_scan_buttons'](address, scan_chain).inline_keyboard[-1]
+    ns['check_token'] = AsyncMock()
+    query = SimpleNamespace(data=button.callback_data, answer=AsyncMock(),
+                            message=SimpleNamespace(reply_text=AsyncMock()))
+
+    await ns['button_callback'](SimpleNamespace(callback_query=query),
+                                SimpleNamespace(user_data={'chain_id': saved_chain}))
+
+    ns['check_token'].assert_awaited_once_with(query, address, chain_id=scan_chain)
+
+
+def test_the_token_button_fits_telegrams_callback_data_limit(bot_chain_functions):
+    for chain_id in (1, 56, 4663, 42161, 11155111):
+        (button,) = bot_chain_functions['_scan_buttons']('0x' + 'a' * 40, chain_id).inline_keyboard[-1]
+        assert len(button.callback_data.encode()) <= 64

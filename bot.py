@@ -1289,13 +1289,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"All scans will now target {chain_name}.",
         )
     elif query.data.startswith('token_'):
-        address = query.data.replace('token_', '')
-        if not web3_client.is_valid_address(address):
+        # The button names the chain its scan ran on, which the user's current chain may no longer be.
+        chain_text, _, address = query.data[len('token_'):].rpartition('_')
+        if not chain_text.isdigit() or not web3_client.is_valid_address(address):
             await query.message.reply_text("❌ Invalid address format.")
             return
-        user_chain_id = _get_user_chain_id(context)
+        chain_id = web3_client.validate_chain_id(int(chain_text))
         await query.message.reply_text(f"🔍 Running token safety check for `{address}`...", parse_mode='Markdown')
-        await check_token(query, address, chain_id=user_chain_id)
+        await check_token(query, address, chain_id=chain_id)
 
 
 def _scan_buttons(address: str, chain_id: int = 56) -> InlineKeyboardMarkup:
@@ -1305,7 +1306,8 @@ def _scan_buttons(address: str, chain_id: int = 56) -> InlineKeyboardMarkup:
     keyboard = []
     if explorer:
         keyboard.append([InlineKeyboardButton(f"🔍 View on {chain_name} Explorer", url=f"{explorer}/address/{address}")])
-    keyboard.append([InlineKeyboardButton("💰 Check Token Safety", callback_data=f"token_{address}")])
+    # "token_<chain id>_<address>" is 57 bytes with an eight-digit chain id; Telegram allows 64.
+    keyboard.append([InlineKeyboardButton("💰 Check Token Safety", callback_data=f"token_{chain_id}_{address}")])
     return InlineKeyboardMarkup(keyboard)
 
 
