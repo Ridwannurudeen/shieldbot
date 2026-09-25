@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const { ShieldBot, ShieldBotError, SUPPORTED_CHAIN_IDS, isSupportedChainId } = require('../dist/index.js');
 
 const complete = { verdict: 'ALLOW', score: 0, status: 'ok', coverage: { honeypot: 1 } };
+const wallet = '0x' + 'a'.repeat(40);
+const target = '0x' + 'b'.repeat(40);
 
 test('Robinhood Chain is a supported chain', () => {
   assert.ok(SUPPORTED_CHAIN_IDS.includes(4663));
@@ -21,8 +23,8 @@ for (const [name, call] of [
   ['scan', sdk => sdk.scan('0xb')],
   ['firewall', sdk => sdk.firewall('0xb', { from: '0xa' })],
   ['check', sdk => sdk.check({ from: '0xa', to: '0xb' })],
-  ['rescue', sdk => sdk.rescue('0xa')],
-  ['queryThreatGraph', sdk => sdk.queryThreatGraph('0xb')],
+  ['rescue', sdk => sdk.rescue(wallet)],
+  ['queryThreatGraph', sdk => sdk.queryThreatGraph(target)],
 ]) {
   test(`${name} without a chain is rejected before any request`, async () => {
     let calls = 0;
@@ -33,7 +35,6 @@ for (const [name, call] of [
   });
 }
 
-const target = '0x' + 'b'.repeat(40);
 for (const [name, call] of [
   ['scan', (sdk, chainId) => sdk.scan(target, { chainId })],
   ['firewall', (sdk, chainId) => sdk.firewall(target, { chainId })],
@@ -62,8 +63,8 @@ test('the requested chain reaches the API unchanged', async () => {
   await sdk.scan('0xb', { chainId: 4663 });
   await sdk.firewall('0xb', { chainId: 4663 });
   await sdk.check({ from: '0xa', to: '0xb', chainId: 4663 });
-  await sdk.rescue('0xa', 4663);
-  await sdk.queryThreatGraph('0xb', { chainId: 4663 });
+  await sdk.rescue(wallet, 4663);
+  await sdk.queryThreatGraph(target, { chainId: 4663 });
   assert.equal(requests[0].body.chainId, 4663);
   assert.equal(requests[1].body.chainId, 4663);
   assert.equal(requests[2].body.transaction.chain_id, 4663);

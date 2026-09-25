@@ -31,6 +31,8 @@ Nothing was ever published, but code built from earlier copies of this repositor
 - `health()` is typed with `supported_chains`, the field the API actually returns, instead of `chains`.
 - `check()` and `firewall()` send `value` as decimal wei and throw `INVALID_VALUE` for anything that is not an integer from 0 to 2^256 - 1. They used to forward it unchanged.
 - `rescue()` results are typed with `status`, `coverage`, `coverage_reasons`, `scanned_blocks` and `total_value_at_risk_usd`, and `rescue()` throws `SCAN_UNAVAILABLE` when the scan read nothing, instead of returning an empty approval list.
+- `rescue`, `getCampaign` and `queryThreatGraph` throw `INVALID_ADDRESS` before any request for an address that is not `0x` and 40 hex digits. They used to put any string in the request path: an address ending in `#` dropped the chain (the API then read BNB Chain), one ending in `?chain_id=1&` replaced it, and `../` reached other routes with your API key.
+- `rescue` and `queryThreatGraph` throw `CHAIN_MISMATCH` (status 502) when the answer's `chain_id` is not the chain asked for.
 
 ## API key
 
@@ -81,6 +83,8 @@ if (!verdict.allowed) {
 | `getMempoolAlerts(chainId?, limit?)` | `GET /api/mempool/alerts` | optional |
 | `getThreats({ chainId?, limit?, since? })` | `GET /api/threats/feed` | optional |
 | `health()` | `GET /api/health` | no |
+
+`rescue()`, `getCampaign()` and `queryThreatGraph()` put the address in the request path, so they take only `0x` followed by 40 hex digits (upper, lower or mixed case), and throw `ShieldBotError` with code `INVALID_ADDRESS` before any request for anything else. `rescue()` and `queryThreatGraph()` also throw code `CHAIN_MISMATCH` (status 502) if the answer's `chain_id` is not the chain they asked for.
 
 `value` for `check()` and `firewall()` is wei as a decimal or `0x` hex string; omitted or `null` means `0`. The SDK sends it as a decimal string and throws `ShieldBotError` with code `INVALID_VALUE` before any request for anything that is not an integer from 0 to 2^256 - 1, so the API never prices an unreadable value as zero. The API answers `check()` with 404 until the agent is registered with the same API key; a different key gets 403.
 

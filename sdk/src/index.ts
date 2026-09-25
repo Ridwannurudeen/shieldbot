@@ -294,6 +294,7 @@ const DEFAULT_BASE_URL = 'https://api.shieldbotsecurity.online';
 const DEFAULT_TIMEOUT = 10_000;
 const DEFAULT_FINAL_TIMEOUT = 30_000;
 const MAX_WEI = 2n ** 256n - 1n;
+const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
 export class ShieldBot {
   private baseUrl: string;
@@ -368,9 +369,11 @@ export class ShieldBot {
    * Scan a wallet's active approvals and get revoke transactions (Rescue Mode).
    */
   async rescue(walletAddress: string, chainId: number): Promise<RescueResult> {
+    const chain = this._requireChainId(chainId, 'rescue');
     const result = await this._get<RescueResult>(
-      `/api/rescue/${walletAddress}?chain_id=${this._requireChainId(chainId, 'rescue')}`,
+      `/api/rescue/${this._requireAddress(walletAddress, 'rescue')}?chain_id=${chain}`,
     );
+    this._checkAnsweredChain(result.chain_id, chain, 'rescue');
     if (result.status === 'unknown' && result.scanned_blocks == null) {
       const reasons = Object.values(result.coverage_reasons || {}).join('; ') || 'no blocks were read';
       throw new ShieldBotError(`Approval scan unavailable: ${reasons}`, 503, 'SCAN_UNAVAILABLE');
@@ -382,7 +385,7 @@ export class ShieldBot {
    * Get the campaign/entity graph for an address.
    */
   async getCampaign(address: string): Promise<CampaignGraph> {
-    return this._get<CampaignGraph>(`/api/campaign/${address}`);
+    return this._get<CampaignGraph>(`/api/campaign/${this._requireAddress(address, 'getCampaign')}`);
   }
 
   /**
@@ -509,11 +512,13 @@ export class ShieldBot {
    * Query the threat graph for an address.
    */
   async queryThreatGraph(address: string, options: ThreatGraphOptions): Promise<Record<string, unknown>> {
-    const params = new URLSearchParams({
-      chain_id: String(this._requireChainId(options?.chainId, 'queryThreatGraph')),
-      max_depth: String(options.maxDepth ?? 3),
-    });
-    return this._get(`/api/graph/check/${address}?${params}`);
+    const chainId = this._requireChainId(options?.chainId, 'queryThreatGraph');
+    const params = new URLSearchParams({ chain_id: String(chainId), max_depth: String(options.maxDepth ?? 3) });
+    const result = await this._get<Record<string, unknown>>(
+      `/api/graph/check/${this._requireAddress(address, 'queryThreatGraph')}?${params}`,
+    );
+    this._checkAnsweredChain(result.chain_id, chainId, 'queryThreatGraph');
+    return result;
   }
 
   /**
@@ -533,6 +538,25 @@ export class ShieldBot {
       throw new ShieldBotError(`chainId for ${method}() must be a positive integer`, 400, 'INVALID_CHAIN_ID');
     }
     return chainId;
+  }
+
+  /** An address that goes into a request path: anything but 0x and 40 hex digits could end or leave the path. */
+  private _requireAddress(address: string, method: string): string {
+    if (!ADDRESS.test(address)) {
+      throw new ShieldBotError(`address for ${method}() must be 0x followed by 40 hex digits`, 400, 'INVALID_ADDRESS');
+    }
+    return address;
+  }
+
+  /** Throws CHAIN_MISMATCH when an answer names a chain other than the one asked for. */
+  private _checkAnsweredChain(answered: unknown, requested: number, method: string): void {
+    if (answered != null && answered !== requested) {
+      throw new ShieldBotError(
+        `${method}() asked about chain ${requested} but the API answered for chain ${answered}`,
+        502,
+        'CHAIN_MISMATCH',
+      );
+    }
   }
 
   private _weiValue(value: unknown, method: string): string {
