@@ -6,8 +6,11 @@ from unittest.mock import AsyncMock
 
 from eth_abi import encode
 
+from core import verdicts
 from core.analyzer import AnalyzerResult
+from core.policy import PolicyEngine
 from core.risk_engine import RiskEngine
+from tests.test_strict_cache import _firewall, strict_api  # noqa: F401  (pytest fixture)
 from utils.calldata_decoder import CalldataDecoder
 from utils.web3_client import Web3Client
 
@@ -146,3 +149,42 @@ async def test_strict_router_swap_blocks_only_on_a_required_gap(monkeypatch, con
     assert (resp["classification"] == "BLOCK_RECOMMENDED") is blocked
     assert resp["policy_mode"] == "STRICT"
     assert resp["failed_sources"] == (["structural"] if blocked else [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "server_mode, header, mode",
+    [("BALANCED", None, "BALANCED"), ("BALANCED", "STRICT", "STRICT"), ("STRICT", None, "STRICT")],
+    ids=["balanced", "strict-header", "strict-server"],
+)
+async def test_a_swap_whose_path_tokens_were_not_analysed_answers_in_the_requests_policy_mode(
+    strict_api, monkeypatch, server_mode, header, mode  # noqa: F811
+):
+    api, services = strict_api
+    services.policy_engine = PolicyEngine(server_mode)
+    # A trusted router's swap whose token path cannot be decoded.
+    monkeypatch.setattr(api, "calldata_decoder", SimpleNamespace(
+        decode=lambda data: {"selector": "deadbeef", "function_name": "multicall", "category": "swap", "params": {}},
+        is_whitelisted_target=lambda *args, **kwargs: "PancakeSwap Router",
+    ))
+    request = SimpleNamespace(headers={"X-Policy-Mode": header} if header else {}, state=SimpleNamespace())
+
+    response = await _firewall(api, request)
+
+    services.registry.run_all.assert_not_awaited()
+    assert (response["policy_mode"], response["status"], response["coverage"]) == (mode, "unknown", {"token_path": 0})
+    if mode == "STRICT":
+        assert (response["classification"], response["risk_score"], response["shield_score"]["risk_level"]) == (
+            verdicts.BLOCK_RECOMMENDED,
+            verdicts.STRICT_BLOCK_SCORE,
+            verdicts.HIGH,
+        )
+        assert response["danger_signals"][0].startswith("Policy override")
+    else:
+        assert (response["classification"], response["shield_score"]["risk_level"]) == (
+            verdicts.CAUTION,
+            verdicts.UNKNOWN,
+        )
+        assert verdicts.classify(response["risk_score"]) == verdicts.CAUTION
+        assert not any(signal.startswith("Policy override") for signal in response["danger_signals"])
+    assert response["shield_score"]["overall"] == response["raw_checks"]["risk_score_heuristic"] == response["risk_score"]

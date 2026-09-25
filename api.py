@@ -1541,6 +1541,8 @@ async def _firewall_verdict(
                 typed_data=req.typedData,
             )
 
+        policy_mode = _policy_mode(request)
+
         # 2. If the target is a trusted router that answers for the swap (router_answers above), analyze
         # the swap path tokens instead of bypassing.
         if router_answers:
@@ -1552,13 +1554,12 @@ async def _firewall_verdict(
                 whitelisted=whitelisted,
                 value_bnb=value_bnb,
                 policy_override=request.headers.get("X-Policy-Mode"),
+                policy_mode=policy_mode,
                 trail=trail,
                 progress=progress,
             )
             if router_response:
                 return router_response
-
-        policy_mode = _policy_mode(request)
 
         # 2b. Check cache for recent result. A row is up to five minutes old and keeps no scam matches,
         # so a target with a local blacklist entry (admin or community: both set a floor) is scanned
@@ -3558,9 +3559,10 @@ def _select_router_tokens(path: List[str]) -> List[str]:
 
 def _build_unverified_swap_response(
     req: FirewallRequest, to_addr: str, decoded: Dict, whitelisted: str, value_bnb: float,
-    source: str, reason: str,
+    source: str, reason: str, policy_mode: str = "BALANCED",
 ) -> Dict:
-    """Build a CAUTION response for a trusted-router swap whose path tokens were not analyzed.
+    """Build a CAUTION response for a trusted-router swap whose path tokens were not analyzed. Under
+    STRICT it blocks, as the legacy fallback does a degraded analysis.
 
     Returning None instead would make the main pipeline analyse the whitelisted
     router itself, which always scores safe, while the swapped tokens are never checked.
@@ -3571,15 +3573,21 @@ def _build_unverified_swap_response(
         "coverage_reasons": {source: reason},
         "risk_display": 'Unknown (incomplete provider coverage)',
     }
+    classification = verdicts.CAUTION
+    risk_score = verdicts.CAUTION_MIN
+    danger_signals = [f"Swap via trusted router ({whitelisted}) but {reason.lower()} — token safety unverified"]
+    strict = policy_mode == 'STRICT'
+    if strict:
+        classification = verdicts.BLOCK_RECOMMENDED
+        risk_score = verdicts.STRICT_BLOCK_SCORE
+        danger_signals.insert(0, 'Policy override: swap path tokens not analysed')
     return {
-        "classification": verdicts.CAUTION,
+        "classification": classification,
         **coverage_fields,
-        "risk_score": 35,
+        "risk_score": risk_score,
         "decoded_action": _format_decoded_action(decoded, req.chainId),
         "calldata_details": _build_calldata_details(decoded),
-        "danger_signals": [
-            f"Swap via trusted router ({whitelisted}) but {reason.lower()} — token safety unverified",
-        ],
+        "danger_signals": danger_signals,
         "transaction_impact": {
             "sending": _sending(decoded, value_bnb, req.chainId, "Tokens (via router)"),
             "granting_access": _granting_access(decoded),
@@ -3594,22 +3602,23 @@ def _build_unverified_swap_response(
             "This transaction goes to a trusted DEX router, but the tokens in the swap "
             "path could not be checked. Verify the tokens manually before proceeding."
         ),
-        "verdict": f"{verdicts.CAUTION} — Token safety unverifiable",
+        "verdict": f"{classification} — Token safety unverifiable",
         "raw_checks": {
             "is_verified": None,
             "scam_matches": None,
             "contract_age_days": None,
             "is_honeypot": None,
             "ownership_renounced": None,
-            "risk_score_heuristic": 35,
+            "risk_score_heuristic": risk_score,
             "whitelisted_router": whitelisted,
             "tokens_analyzed": [],
         },
         "shield_score": {
             **coverage_fields,
-            "overall": 35,
+            "overall": risk_score,
             "category_scores": {},
-            "risk_level": verdicts.UNKNOWN,
+            # As core.policy sets it when STRICT blocks.
+            "risk_level": verdicts.HIGH if strict else verdicts.UNKNOWN,
             "threat_type": "unknown",
             "critical_flags": [],
             "confidence": 30,
@@ -3621,7 +3630,7 @@ def _build_unverified_swap_response(
         "network": _chain_id_to_name(req.chainId),
         "partial": True,
         "failed_sources": [source],
-        "policy_mode": "BALANCED",
+        "policy_mode": policy_mode,
         "notes": [],
     }
 
@@ -3636,8 +3645,10 @@ async def _analyze_router_swap(
     policy_override: Optional[str] = None,
     trail: Optional[Dict] = None,
     progress: Optional[FirstVerdictProgress] = None,
+    policy_mode: str = "BALANCED",
 ) -> Optional[Dict]:
-    """Analyze swap path tokens when interacting with a trusted router.
+    """Analyze swap path tokens when interacting with a trusted router. `policy_mode` is the
+    effective mode `policy_override` selects, which a response for unanalysed tokens reports.
 
     When it returns a verdict from the tokens' analyzers, it records their outcomes, keyed
     "token:analyzer" like the response's coverage, and the observed block in `trail`.
@@ -3646,7 +3657,7 @@ async def _analyze_router_swap(
     if not container or not container.registry or not risk_engine:
         return _build_unverified_swap_response(
             req, to_addr, decoded, whitelisted, value_bnb,
-            'token_analysis', 'Token analyzers are unavailable',
+            'token_analysis', 'Token analyzers are unavailable', policy_mode,
         )
 
     path = _extract_swap_path(decoded, req.data)
@@ -3654,7 +3665,7 @@ async def _analyze_router_swap(
         # Cannot decode the swap path (e.g. Uniswap V3 / aggregator calldata).
         return _build_unverified_swap_response(
             req, to_addr, decoded, whitelisted, value_bnb,
-            'token_path', 'Token path could not be decoded',
+            'token_path', 'Token path could not be decoded', policy_mode,
         )
 
     candidates = _select_router_tokens(path)
