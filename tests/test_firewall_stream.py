@@ -1245,3 +1245,18 @@ async def test_a_fallback_address_scan_that_reports_the_admin_entry_counts_it_on
     assert (plain["classification"], plain["risk_score"]) == (verdicts.BLOCK_RECOMMENDED, 90)
     assert plain["raw_checks"]["scam_matches"] == 1
     assert final == plain
+
+
+@pytest.mark.asyncio
+async def test_an_admin_entry_the_structural_analyzer_reported_is_one_flag(stream_api):
+    api, services = stream_api
+    blacklist(api)
+    services.registry = registry(structural=returns("structural", [ADMIN_MATCH]))
+
+    final, plain = await final_and_plain(api, BODY)
+
+    flags = plain["shield_score"]["critical_flags"]
+    assert (plain["classification"], plain["risk_score"]) == (verdicts.BLOCK_RECOMMENDED, 90)
+    assert "Scam DB match (1 sources)" in flags
+    assert "Confirmed scam address" not in flags
+    assert final == plain

@@ -70,11 +70,12 @@ def scam_match_floor(matches) -> int:
     return MEDIUM_MATCH_FLOOR if medium_matches(matches) else 0
 
 
-def apply_local_match(risk_output: dict, match: Optional[dict]) -> dict:
-    """risk_output with the target's local blacklist match (ScamDatabase.local_match) applied as
-    compute_from_results applies a scam match. The structural analyzer reports the match among its
-    scam matches only when it returns, so one that failed or ran past the deadline would drop an
-    admin entry's Block. Applying a match the analyzer did report changes nothing: the floor is a max.
+def apply_local_match(risk_output: dict, match: Optional[dict], results: List["AnalyzerResult"]) -> dict:
+    """risk_output, computed from `results`, with the target's local blacklist match
+    (ScamDatabase.local_match) applied as compute_from_results applies a scam match. The structural
+    analyzer reports the match among its scam matches only when it returns, so one that failed or ran
+    past the deadline would drop an admin entry's Block. Applying a match the analyzer did report
+    changes nothing: the floor is a max, and its flag already names the match.
 
     A block floor makes the level HIGH and is a hard floor. A community match holds the CAUTION band
     and is never HIGH on its own, and score_before_community_floor stays without it."""
@@ -91,8 +92,10 @@ def apply_local_match(risk_output: dict, match: Optional[dict]) -> dict:
         output['transaction_floor'] = max(output['transaction_floor'] or 0, floor)
     elif output['risk_level'] == LOW:
         output['risk_level'] = MEDIUM
-    # The match's reason leads, as a fired floor's does.
-    if match['reason'] not in output['critical_flags']:
+    # The match's reason leads, as a fired floor's does, unless a returned analyzer reported the match:
+    # its flag names it already (a database match's "Scam DB match", a community report's reason).
+    reported = any(not result.error and match in (result.data.get('scam_matches') or ()) for result in results)
+    if not reported and match['reason'] not in output['critical_flags']:
         output['critical_flags'] = [match['reason'], *output['critical_flags']]
     return output
 

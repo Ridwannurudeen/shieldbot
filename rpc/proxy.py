@@ -149,7 +149,9 @@ class RPCProxy:
             # The calls the firewall makes: the target's local blacklist entry holds even when the
             # structural analyzer failed, and the server's policy mode decides a failed required check
             # (STRICT blocks it).
-            risk_output = apply_local_match(risk_output, self._container.scam_db.local_match(to_addr, chain_id))
+            risk_output = apply_local_match(
+                risk_output, self._container.scam_db.local_match(to_addr, chain_id), analyzer_results,
+            )
             risk_output = self._container.policy_engine.apply(analyzer_results, risk_output)
 
             # An analysis that names no level is Unknown, which is never forwarded.

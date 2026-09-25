@@ -242,7 +242,7 @@ def test_a_local_match_the_failed_structural_analyzer_never_reported_is_applied_
     results[0] = AnalyzerResult(
         "structural", WEIGHTS["structural"], 50, error="structural analysis unavailable (TimeoutError)"
     )
-    risk = apply_local_match(RiskEngine().compute_from_results(results), match)
+    risk = apply_local_match(RiskEngine().compute_from_results(results), match, results)
     # A community match stays out of the score the revert gate reads, and is never HIGH on its own.
     assert (
         risk["rug_probability"],

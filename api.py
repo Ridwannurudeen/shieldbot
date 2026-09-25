@@ -1658,7 +1658,7 @@ async def _firewall_verdict(
                 risk_output = risk_engine.compute_from_results(analyzer_results, is_token=is_token)
                 # The target's local blacklist entry holds even when the structural analyzer, which
                 # reports it, failed or ran past the deadline.
-                risk_output = apply_local_match(risk_output, local_match)
+                risk_output = apply_local_match(risk_output, local_match, analyzer_results)
 
                 # Apply policy mode (handles partial failures)
                 if container and container.policy_engine:
