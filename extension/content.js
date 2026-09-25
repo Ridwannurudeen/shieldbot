@@ -893,10 +893,13 @@
       : unparseable || opaque ? atLeast(verdict, "HIGH_RISK") : verdict;
     const why = response.error ? `${_t("overlayCannotReach")} ${response.error}` : incomplete ? unknownReason(result) : "";
     // A signature whose chain could not be read, or is not supported, was
-    // not analysed, and inject.js rejects it: there is no Sign Anyway.
+    // not analysed, and inject.js rejects it: there is no Sign Anyway. Strict
+    // mode leaves none either on a result that is not complete, whatever the
+    // badge says: the API unreachable, an Unknown verdict, or High Risk with
+    // checks missing, including when what the overlay sees raises it.
     const chainUnknown = Boolean(result) && (result.coverage || {}).chain === false;
     const canSign = !chainUnknown &&
-      !(strict && (unparseable || classification === "UNKNOWN" || classification === "BLOCK_RECOMMENDED"));
+      !(strict && (incomplete || unparseable || classification === "BLOCK_RECOMMENDED"));
     const hold = canSign && classification === "BLOCK_RECOMMENDED";
     // What background.js found in a Sign-In with Ethereum message leads.
     const signIn = (result && result.siwe) || {};
@@ -979,8 +982,9 @@
     // not one the API supports: nothing was analysed, and there is no Proceed.
     const chainUnknown = (result.coverage || {}).chain === false;
     // Strict mode leaves no way to send a transaction the firewall recommends
-    // blocking or could not fully check.
-    const canProceed = !chainUnknown && !(strict && (isBlock || verdict === "UNKNOWN"));
+    // blocking or could not fully check: an incomplete result, whether it is
+    // shown as Unknown or as High Risk with checks missing.
+    const canProceed = !chainUnknown && !(strict && (isBlock || incomplete));
     // On Block Recommended (so Balanced mode), Proceed needs a hold.
     const hold = canProceed && isBlock;
 

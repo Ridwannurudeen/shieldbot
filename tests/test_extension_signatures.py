@@ -126,6 +126,37 @@ def test_strict_mode_removes_sign_anyway_on_unknown_and_block_signature_verdicts
     )
 
 
+# A personal_sign message that is not readable text is raised to High Risk by the overlay, whatever
+# the API says. The raise must not hide from Strict mode that the API's result is incomplete.
+@pytest.mark.parametrize("policy", ["STRICT", "BALANCED"])
+@pytest.mark.parametrize("api", ["unknown", "unreachable", "incomplete-high-risk", "complete-high-risk"])
+def test_strict_mode_removes_sign_anyway_whenever_the_api_result_is_incomplete(policy, api):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const [policy, api] = JSON.parse(process.argv[1]);
+  storage.policyMode = policy;
+  const incomplete = {status: 'unknown', coverage: {signature: 0}, coverage_reasons: {signature: 'Spender facts unknown'}};
+  analyze = async () => ({
+    unknown: {result: scan(incomplete)},
+    unreachable: {error: 'API error 503: unavailable'},
+    'incomplete-high-risk': {result: scan({...incomplete, classification: 'HIGH_RISK', risk_score: 75})},
+    'complete-high-risk': {result: scan({classification: 'HIGH_RISK', risk_score: 75})},
+  })[api];
+  // 0xff is not UTF-8, so the message is not readable text.
+  await intercept('request', {signMethod: 'personal_sign', data: '0x00ff', chainId: 56}, 'personal_sign');
+  const html = overlay().innerHTML;
+  assert(html.includes('UNREADABLE MESSAGE'), html);
+  assert(overlay().querySelector('.shieldai-badge').className.includes('shieldai-badge-high'), html);
+  const removed = policy === 'STRICT' && api !== 'complete-high-risk';
+  assert.equal(html.includes('id="shieldai-proceed"'), !removed, html);
+  assert.equal(html.includes('Strict mode is on'), removed);
+""",
+        [policy, api],
+    )
+
+
 @pytest.mark.parametrize("outcome", ["SAFE", "error"])
 def test_eth_sign_is_always_block_recommended_and_says_why(outcome):
     run_node(

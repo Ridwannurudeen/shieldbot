@@ -495,6 +495,31 @@ def test_content_reads_a_proof_whole_whatever_its_bytes(guess):
 
 
 @pytest.mark.parametrize("policy", ["STRICT", "BALANCED"])
+@pytest.mark.parametrize("complete", [True, False], ids=["complete", "incomplete"])
+def test_strict_mode_removes_proceed_on_an_incomplete_high_risk_result(policy, complete):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const [policy, complete] = JSON.parse(process.argv[1]);
+  storage.policyMode = policy;
+  // An incomplete result keeps its High Risk badge, with the reason checks are missing.
+  analyze = async () => ({result: scan(complete ? {classification: 'HIGH_RISK', risk_score: 75}
+    : {classification: 'HIGH_RISK', risk_score: 75, status: 'unknown', coverage: {honeypot: 0},
+       coverage_reasons: {honeypot: 'No provider'}})});
+  await intercept('request');
+  const html = overlay().innerHTML;
+  assert(overlay().querySelector('.shieldai-badge').className.includes('shieldai-badge-high'), html);
+  assert.equal(html.includes('Why: No provider'), !complete, html);
+  const removed = policy === 'STRICT' && !complete;
+  assert.equal(html.includes('id="shieldai-proceed"'), !removed, html);
+  assert.equal(html.includes('Strict mode is on'), removed);
+""",
+        [policy, complete],
+    )
+
+
+@pytest.mark.parametrize("policy", ["STRICT", "BALANCED"])
 @pytest.mark.parametrize("outcome", ["error", "BLOCK_RECOMMENDED", "CAUTION", "UNKNOWN"])
 def test_strict_mode_removes_proceed_on_errors_block_and_unknown_verdicts(policy, outcome):
     run_node(

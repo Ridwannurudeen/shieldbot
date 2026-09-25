@@ -114,9 +114,11 @@ second limit below is the case where they did not.
   count), the request is rejected. `document.open()` also
   removes the extension's message listeners, so later checked requests in that document fail
   closed only when the 60-second timer runs out. Strict mode leaves no Proceed or Sign Anyway
-  button when the analysis failed, the verdict is Unknown or Block Recommended, the structure is
-  unknown, or typed data cannot be read. A verdict the overlay raised itself (a look-alike
-  recipient) keeps Strict mode's reading of the API's verdict: an Unknown stays without Proceed.
+  button when the analysis failed, the result is incomplete (shown as Unknown, or as High Risk with
+  the reason checks are missing), the verdict is Block Recommended, the structure is unknown, or
+  typed data cannot be read. A verdict the overlay raised itself (a look-alike recipient, a message
+  that is not readable text) keeps Strict mode's reading of the API's result: an incomplete one
+  stays without Proceed or Sign Anyway.
 - When the wallet's chain cannot be read, does not match the request, or is one the API does not
   support (it refuses it as `Unsupported chain ID`), the overlay offers only Block, in Balanced and
   in Strict mode, and says why. This holds for transactions, signatures and a `wallet_sendCalls`
