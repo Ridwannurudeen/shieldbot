@@ -41,7 +41,7 @@ Slither **0.11.5**, `--exclude-informational --fail-high`, with Solidity **0.8.2
 | `ShieldBotVerdictGuard.sol` | 5 contracts, 80 detectors, 1 result | Same known OpenZeppelin finding |
 | `ShieldBotGuardedTransfer.sol` | 12 contracts, 80 detectors, 1 result | Same known OpenZeppelin finding |
 
-The OpenZeppelin finding is `Ownable2Step.transferOwnership(address).newOwner` lacking a zero check; zero cancels a pending ownership transfer. No new findings were introduced. The verifier, attestor and registry sources are unchanged from `fff633f`. The all-five run does **not** support a claim that the entire project has only the OpenZeppelin finding: the attestor's two LOW event-reentrancy findings also exist. They were not suppressed or changed.
+The OpenZeppelin finding is `Ownable2Step.transferOwnership(address).newOwner` lacking a zero check; zero cancels a pending ownership transfer. No new findings were introduced. The attestor and registry sources are unchanged from `fff633f`; the verifier differs from it only by a removed header comment. The all-five run does **not** support a claim that the entire project has only the OpenZeppelin finding: the attestor's two LOW event-reentrancy findings also exist. They were not suppressed or changed.
 
 The CI workflow explicitly analyzes both new contracts. To run the same check locally, with the same remaps and severity gate, from the repository root:
 

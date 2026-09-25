@@ -6,8 +6,6 @@ pragma solidity ^0.8.24;
  * @dev Simple onchain verification contract for ShieldBot scans
  * @notice Records security scans on BNB Chain for transparency
  * 
- * Hackathon: Good Vibes Only - OpenClaw Edition
- * Project: ShieldBot - Your BNB Chain Shield
  * GitHub: https://github.com/Ridwannurudeen/shieldbot
  */
 contract ShieldBotVerifier {
