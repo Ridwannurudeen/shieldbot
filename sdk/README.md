@@ -27,6 +27,7 @@ Nothing was ever published, but code built from earlier copies of this repositor
 
 - `scan`, `firewall`, `check`, `rescue` and `queryThreatGraph` require a chain and throw `MISSING_CHAIN_ID` without one. They used to fall back to BNB Chain (56).
 - A chain must be a positive integer `number`: anything else, including a string such as `'56'`, throws `INVALID_CHAIN_ID` before any request. A string chain used to be sent as it was.
+- The optional chain filter of `getMempoolAlerts` and `getThreats` is checked the same way when it is given. A filter of `0` used to be dropped, which asked for every chain, and a string was sent as it was.
 - `queryThreatGraph(address, { chainId, maxDepth? })` takes the chain and the depth in an options object, and the chain is required. It used to take `maxDepth` as its second argument and send no chain at all, which the API treated as BNB Chain. A call still written that way, such as `queryThreatGraph(address, 1)`, throws `MISSING_CHAIN_ID` instead of reading the depth as a chain.
 - `health()` is typed with `supported_chains`, the field the API actually returns, instead of `chains`.
 - `check()` and `firewall()` send `value` as decimal wei and throw `INVALID_VALUE` for anything that is not an integer from 0 to 2^256 - 1. They used to forward it unchanged.
@@ -134,7 +135,7 @@ const result = await shield.firewall('0xTarget', {
 
 ## Supported chains
 
-`scan`, `firewall`, `check`, `rescue` and `queryThreatGraph` require a chain. The SDK never assumes one: without it they throw `ShieldBotError` with code `MISSING_CHAIN_ID` before sending anything. Chain parameters take a plain `number`, such as a wallet's chain ID, and it must be a positive integer: a string such as `'56'` or `'0x38'`, a fraction, zero or a negative number throws `ShieldBotError` with code `INVALID_CHAIN_ID`, also before sending anything.
+`scan`, `firewall`, `check`, `rescue` and `queryThreatGraph` require a chain. The SDK never assumes one: without it they throw `ShieldBotError` with code `MISSING_CHAIN_ID` before sending anything. Chain parameters take a plain `number`, such as a wallet's chain ID, and it must be a positive integer: a string such as `'56'` or `'0x38'`, a fraction, zero or a negative number throws `ShieldBotError` with code `INVALID_CHAIN_ID`, also before sending anything. `getMempoolAlerts` and `getThreats` take an optional chain filter, checked the same way when it is given; leaving it out asks for every chain.
 
 The chains below are exported as `SUPPORTED_CHAIN_IDS` (type `ChainId`), and `isSupportedChainId()` checks a number against them:
 

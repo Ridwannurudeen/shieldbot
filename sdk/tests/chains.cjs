@@ -53,6 +53,29 @@ for (const [name, call] of [
   }
 }
 
+const feeds = {
+  getMempoolAlerts: (sdk, chainId) => sdk.getMempoolAlerts(chainId),
+  getThreats: (sdk, chainId) => sdk.getThreats({ chainId }),
+};
+for (const [name, call] of Object.entries(feeds)) {
+  for (const chainId of ['56', 56.5, 0, -1, NaN, 2 ** 53, 56n, true]) {
+    test(`${name} rejects a ${typeof chainId} chain filter ${String(chainId)} before any request`, async () => {
+      let calls = 0;
+      global.fetch = async () => { calls++; return { ok: true, json: async () => ({ alerts: [], threats: [] }) }; };
+      await assert.rejects(call(new ShieldBot(), chainId), error => error instanceof ShieldBotError && error.code === 'INVALID_CHAIN_ID');
+      assert.equal(calls, 0);
+    });
+  }
+
+  test(`${name} sends a valid chain filter and none when it is omitted`, async () => {
+    const urls = [];
+    global.fetch = async (url) => { urls.push(new URL(url)); return { ok: true, json: async () => ({ alerts: [], threats: [] }) }; };
+    await call(new ShieldBot(), 4663);
+    await call(new ShieldBot(), undefined);
+    assert.deepEqual(urls.map((url) => url.searchParams.get('chain_id')), ['4663', null]);
+  });
+}
+
 test('the requested chain reaches the API unchanged', async () => {
   const requests = [];
   global.fetch = async (url, init) => {

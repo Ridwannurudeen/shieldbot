@@ -365,7 +365,7 @@ export class ShieldBot {
    */
   async getMempoolAlerts(chainId?: number, limit = 50): Promise<MempoolAlert[]> {
     const params = new URLSearchParams();
-    if (chainId) params.set('chain_id', String(chainId));
+    if (chainId != null) params.set('chain_id', String(this._requireChainId(chainId, 'getMempoolAlerts')));
     params.set('limit', String(limit));
     const result = await this._get<{ alerts: MempoolAlert[] }>(
       `/api/mempool/alerts?${params}`,
@@ -401,7 +401,7 @@ export class ShieldBot {
    */
   async getThreats(options: { chainId?: number; limit?: number; since?: number } = {}): Promise<ThreatFeedItem[]> {
     const params = new URLSearchParams();
-    if (options.chainId) params.set('chain_id', String(options.chainId));
+    if (options.chainId != null) params.set('chain_id', String(this._requireChainId(options.chainId, 'getThreats')));
     if (options.limit) params.set('limit', String(options.limit));
     if (options.since) params.set('since', String(options.since));
     const result = await this._get<{ threats: ThreatFeedItem[] }>(
