@@ -219,7 +219,7 @@ Content scripts are injected at document_start to ensure transaction interceptio
 **Answer:**
 
 ```
-Provide real-time security analysis of blockchain transactions on 8 EVM chains (BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, Optimism and Robinhood Chain), warning users about malicious contracts, phishing sites and scams before they sign.
+Provide pre-signature security analysis of blockchain transactions on 8 EVM chains (BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, Optimism and Robinhood Chain), warning users about malicious contracts, phishing sites and scams before they sign.
 ```
 
 ---

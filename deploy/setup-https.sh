@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SUPERSEDED: production uses nginx with certbot (deploy/README.md). Kept for history; do not run.
 # Setup HTTPS via Caddy on VPS for shieldbotsecurity.online
 # Prerequisites: DNS A record for shieldbotsecurity.online must point to the current VPS_IP.
 # Run: VPS_IP=<current public IPv4> bash /opt/shieldbot/deploy/setup-https.sh

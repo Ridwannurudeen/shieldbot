@@ -60,7 +60,7 @@ NO-GO when:
 - a tracked file in `/opt/shieldbot` was edited on the server
 - the recorder key (`ROBINHOOD_RECORDER_PRIVATE_KEY`) is set in the shared `/opt/shieldbot/.env`, the bot unit
   loads `recorder.env` or sets the key, or the running bot process has the key in its environment (or its
-  environment cannot be read). Only the API may hold that key: `contracts/base/DEPLOY_ROBINHOOD.md`, section 8.
+  environment cannot be read). Only the process that runs the verdict drain may hold that key (the API by default): `contracts/base/DEPLOY_ROBINHOOD.md`, section 8.
 - `BACKGROUND_WORKERS=external` is set in the shared `.env` and the API unit still loads `recorder.env` or sets
   the key: the workers unit holds it then (`docs/DEPLOYMENT.md`)
 - the commit does not exist after `git fetch`, or is on no `origin` branch (a commit made only on the server)
@@ -102,7 +102,7 @@ nothing else.
 
 The API, the bot and workers.py each bring the database schema up to date when they start
 (`Database.initialize()` in `core/database.py`), so on new code the first of them to start runs any migration.
-That setup writes to the database: its seven migrations each run in their own `BEGIN IMMEDIATE` transaction,
+That setup writes to the database: its `_migrate_*` migrations each run in their own `BEGIN IMMEDIATE` transaction,
 and every write waits at most the connection's `busy_timeout`, 5 seconds, for SQLite's write lock. `deploy.sh`
 stops the bot first and starts the API alone (steps 1 and 4), so the API migrates with no other writer, provided
 the workers unit, if there is one, was stopped first as the top of this page says.
