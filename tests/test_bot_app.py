@@ -663,11 +663,19 @@ async def _states(db):
     return [tuple(row) for row in await cursor.fetchall()]
 
 
-def _message(chat_id, args=()):
+SENDER = 4242
+
+
+def _message(chat_id, args=(), chat_type="private", member_status=None, sender_chat=None):
+    """A command sent to a chat, and its context, whose bot reports the sender's ``member_status`` there."""
     update = MagicMock(spec=Update)
     update.effective_chat.id = chat_id
+    update.effective_chat.type = chat_type
+    update.effective_user.id = SENDER
+    update.message.sender_chat = sender_chat
     update.message.reply_text = AsyncMock()
-    return update, SimpleNamespace(args=list(args))
+    bot = SimpleNamespace(get_chat_member=AsyncMock(return_value=SimpleNamespace(status=member_status)))
+    return update, SimpleNamespace(args=list(args), bot=bot)
 
 
 @pytest_asyncio.fixture
@@ -722,6 +730,61 @@ class TestLaunchAlertCommands:
         assert (await cursor.fetchone())[0] == 0
         assert "off" in first.message.reply_text.await_args.args[0]
         assert "not subscribed" in second.message.reply_text.await_args.args[0]
+
+
+    async def _subscriptions(self, alerts):
+        cursor = await alerts.db._db.execute("SELECT chat_id, mode FROM launch_alert_subscriptions")
+        return [tuple(row) for row in await cursor.fetchall()]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("chat_type", ["group", "supergroup"])
+    @pytest.mark.parametrize("member_status", ["member", "restricted", "left"])
+    @pytest.mark.parametrize("command, args", [("launch_alerts_command", ("all",)), ("stop_alerts_command", ())])
+    async def test_in_a_group_only_an_administrator_changes_launch_alerts(
+        self, bot_module, alerts, chat_type, member_status, command, args
+    ):
+        await _subscribe(alerts.db, CHAT_A, "blocked")
+        update, context = _message(CHAT_A, args, chat_type=chat_type, member_status=member_status)
+
+        await getattr(bot_module, command)(update, context)
+
+        assert await self._subscriptions(alerts) == [(CHAT_A, "blocked")]
+        context.bot.get_chat_member.assert_awaited_once_with(CHAT_A, SENDER)
+        assert update.message.reply_text.await_args.args[0] == (
+            "Only an administrator of this group can turn launch alerts on or off."
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("member_status", ["administrator", "creator"])
+    async def test_a_group_administrator_or_creator_changes_launch_alerts(self, bot_module, alerts, member_status):
+        update, context = _message(CHAT_B, ("all",), chat_type="supergroup", member_status=member_status)
+
+        await bot_module.launch_alerts_command(update, context)
+        assert await self._subscriptions(alerts) == [(CHAT_B, "all")]
+
+        update, context = _message(CHAT_B, chat_type="supergroup", member_status=member_status)
+        await bot_module.stop_alerts_command(update, context)
+        assert await self._subscriptions(alerts) == []
+
+    @pytest.mark.asyncio
+    async def test_an_anonymous_administrator_posting_as_the_group_changes_launch_alerts(self, bot_module, alerts):
+        update, context = _message(
+            CHAT_B, chat_type="supergroup", member_status="member", sender_chat=SimpleNamespace(id=CHAT_B)
+        )
+
+        await bot_module.launch_alerts_command(update, context)
+
+        assert await self._subscriptions(alerts) == [(CHAT_B, "blocked")]
+        context.bot.get_chat_member.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_private_chat_needs_no_administrator(self, bot_module, alerts):
+        update, context = _message(CHAT_B, ("all",))
+
+        await bot_module.launch_alerts_command(update, context)
+
+        assert await self._subscriptions(alerts) == [(CHAT_B, "all")]
+        context.bot.get_chat_member.assert_not_awaited()
 
 
 class TestLaunchAlertDelivery:

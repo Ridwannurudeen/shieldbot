@@ -15,7 +15,7 @@ import traceback
 import aiohttp
 
 try:
-    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram import Chat, ChatMember, Update, InlineKeyboardButton, InlineKeyboardMarkup
     from telegram.error import BadRequest, ChatMigrated, Forbidden, NetworkError, RetryAfter, TelegramError
     from telegram.ext import (
         Application,
@@ -729,8 +729,29 @@ async def campaign_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text("❌ Error investigating campaign. Please try again later.")
 
 
+async def _may_change_launch_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Whether the sender may turn this chat's launch alerts on or off, and if not say so.
+
+    Anyone may in a private chat; in a group only an administrator or the creator, including an
+    anonymous administrator, whose message comes from the group itself.
+    """
+    chat = update.effective_chat
+    if chat.type not in (Chat.GROUP, Chat.SUPERGROUP):
+        return True
+    sender_chat = update.message.sender_chat
+    if sender_chat is not None and sender_chat.id == chat.id:
+        return True
+    member = await context.bot.get_chat_member(chat.id, update.effective_user.id)
+    if member.status in (ChatMember.ADMINISTRATOR, ChatMember.OWNER):
+        return True
+    await update.message.reply_text("Only an administrator of this group can turn launch alerts on or off.")
+    return False
+
+
 async def launch_alerts_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /launchalerts — alert this chat to new Robinhood Chain launch verdicts."""
+    if not await _may_change_launch_alerts(update, context):
+        return
     mode = context.args[0].lower() if context.args else 'blocked'
     if mode not in ('blocked', 'all'):
         await update.message.reply_text(
@@ -755,6 +776,8 @@ async def launch_alerts_command(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def stop_alerts_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /stopalerts — stop launch alerts for this chat."""
+    if not await _may_change_launch_alerts(update, context):
+        return
     if await container.db.unsubscribe_launch_alerts(update.effective_chat.id, LAUNCH_CHAIN_ID):
         await update.message.reply_text("🔕 Robinhood Chain launch alerts are off for this chat.")
     else:
