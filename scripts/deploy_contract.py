@@ -141,6 +141,9 @@ Next steps:
        {account.address}
   3. If bot wallet differs from deployer, run:
        python scripts/update_verifier.py
+  4. Record the address, deployment transaction and owner in
+       docs/DEPLOYMENTS.md, and update CONTRACT_ADDRESS in
+       utils/onchain_recorder.py, which has the old address built in.
 ------------------------------------------------------------
 """)
 

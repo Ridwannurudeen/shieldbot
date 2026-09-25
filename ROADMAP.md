@@ -2,7 +2,7 @@
 
 Historical March 2026 planning record. Repository checklists below are not current deployment evidence. Current repository coverage and the shipped extension limitation are in [README.md](README.md) and [docs/TECHNICAL.md](docs/TECHNICAL.md). Future targets below are proposals, not measured outcomes.
 
-ShieldBot is a **cross-chain security intelligence network**. Shared observations can inform later scans; missing observations remain unknown.
+ShieldBot is a transaction security service for eight EVM chains. The V2 plan below frames it as a **cross-chain security intelligence network**; shared observations can inform later scans, and missing observations remain unknown.
 
 ---
 
@@ -77,7 +77,7 @@ This phase captures users and closes the feature gaps that remain.
 ### Capture the Vacuum
 - [x] **Landing page**: Historical URL https://shieldbotsecurity.online; deployment is not verified here.
 - [x] **Chrome Web Store listing** — Listing title, description and screenshots; the text prepared for the next release is in [docs/store-listing.md](docs/store-listing.md).
-- [ ] **Community launch** — Announce on X/Twitter, BNB community channels, crypto security groups targeting users migrating from defunct tools.
+- [ ] **Community launch** — Announce on X/Twitter, the community channels of each supported chain, crypto security groups targeting users migrating from defunct tools.
 - [ ] **AvengerDAO membership** — Apply to BNB Chain's official community security coalition. Membership = ecosystem credibility, DappBay visibility, and referral from BNB Chain itself. GoPlus and HashDit are members.
 - [x] **Extension onboarding flow** — First-time user tutorial and guided first scan. Welcome tab on install, auto-fills API URL, Connect & Protect flow. Historical version claim; current release status not verified here.
 - [x] **Beta waitlist** — Email/wallet collection for early access to new features. Historical deployment claim; current availability not verified here.
@@ -101,7 +101,7 @@ This phase captures users and closes the feature gaps that remain.
 
 ### Monetization
 - [ ] **Consumer Pro tier** — $9-15/month for unlimited scans, all chains, priority analysis, post-deploy alerts.
-- [ ] **B2B API partnerships** — Onboard the first wallet or DEX integrating the ShieldBot API. Target: PancakeSwap, Biswap.
+- [ ] **B2B API partnerships** — Onboard the first wallet or DEX integrating the ShieldBot API. Target: PancakeSwap, Uniswap and other DEXs.
 - [ ] **Insurance protocol partnerships** — Revenue share on premium reductions for protected wallets.
 
 ### UX & Localization
@@ -129,7 +129,7 @@ Proposed detection and distribution work; these items are not release claims.
 
 ### Ecosystem Integrations
 - [ ] **Trading bot integrations** — Integrate ShieldBot's `/token` scan into their pre-trade flow. ShieldBot already has the Telegram bot infrastructure; this is a partnership + API integration.
-- [ ] **DEX security widgets** — Embeddable ShieldBot token safety badge for PancakeSwap, Biswap and other DEXs. Display the ShieldScore directly in the swap UI.
+- [ ] **DEX security widgets** — Embeddable ShieldBot token safety badge for PancakeSwap, Uniswap and other DEXs. Display the ShieldScore directly in the swap UI.
 - [ ] **Autonomous rescue execution (Tier 3)** — Auto-revoke dangerous approvals with user consent. Extend Rescue Mode from advisory to action.
 - [ ] **On-chain reputation token** — Tokenized security scores for DeFi composability.
 

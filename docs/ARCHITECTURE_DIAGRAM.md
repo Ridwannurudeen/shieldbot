@@ -1,6 +1,6 @@
 # ShieldBot - Architecture Diagram
 
-These are simplified February 2026 illustrations of the BNB Smart Chain and opBNB path, not evidence that every provider is available. The current chain list is in [the README](../README.md); the extension's shipped-chain limitation and current source-tree coverage contract are described in [TECHNICAL.md](TECHNICAL.md).
+These are simplified illustrations of the original BNB Smart Chain and opBNB path, with later coverage corrections; they are not evidence that every provider is available. The current chain list is in [the README](../README.md); the extension's shipped-chain limitation and current source-tree coverage contract are described in [TECHNICAL.md](TECHNICAL.md).
 
 ## System Architecture
 
