@@ -94,7 +94,6 @@ async def test_equivalent_transaction_encodings_reuse_cache(sb):
             **transaction,
             "from": transaction["from"].lower(),
             "to": transaction["to"].lower(),
-            "chain_id": "056",
             "data": transaction["data"].lower(),
             "value": "0x0",
         })
@@ -193,6 +192,17 @@ async def test_unparseable_value_is_rejected_before_any_request(value):
     with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock) as post:
         with pytest.raises(ValueError, match="value must be"):
             await client.check({"from": "0xA", "to": "0xB", "chain_id": 56, "value": value})
+    post.assert_not_awaited()
+    await client.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", ["56", "0x38", " 56 ", 56.0, 0, -1, True, Wei(56)])
+async def test_chain_id_that_is_not_a_positive_int_is_rejected_before_any_request(chain_id):
+    client = ShieldBot(api_key="sb_test", agent_id="agent:1", fail_mode="open")
+    with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock) as post:
+        with pytest.raises(ValueError, match="chain_id must be a positive int"):
+            await client.check({"from": "0xA", "to": "0xB", "chain_id": chain_id})
     post.assert_not_awaited()
     await client.close()
 

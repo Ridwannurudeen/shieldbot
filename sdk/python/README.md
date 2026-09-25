@@ -23,6 +23,12 @@ After publication it will install with `pip install shieldbot` (planned name, no
 
 Requires Python 3.9 or later. The only dependency is `httpx`.
 
+## Changes since the unpublished 3.0.0 tree
+
+Nothing was ever published, but code built from earlier copies of this repository behaves differently:
+
+- `chain_id` must be a positive `int`. Anything else, including a string such as `"56"`, a `bool` or a `float`, raises `ValueError` before any request. A string chain used to be sent as it was.
+
 ## Before you call check()
 
 - **API key.** `check()` needs an API key (`X-API-Key`). There is no self-serve signup yet; keys are issued by the ShieldBot operator.
@@ -62,7 +68,7 @@ asyncio.run(main())
 |-----|----------|-------|
 | `from` | yes | Sender address |
 | `to` | yes | Target address |
-| `chain_id` | yes | Integer chain ID from the table below. The SDK never assumes a chain: without it `check()` raises `ValueError` before sending anything. |
+| `chain_id` | yes | Chain ID from the table below, as a positive `int`. The SDK never assumes a chain: without it, or with anything but a positive `int` (a string such as `"56"`, a `bool`, a `float`), `check()` raises `ValueError` before sending anything. |
 | `data` | no | Calldata as a hex string, default `"0x"` |
 | `value` | no | Wei from 0 to 2**256 - 1, as an `int` or a decimal or `0x` hex string; omitted or `None` means `"0"`. The SDK sends it as a decimal string; anything else raises `ValueError` before sending, so the API never prices an unreadable value as zero. |
 

@@ -33,6 +33,25 @@ for (const [name, call] of [
   });
 }
 
+const target = '0x' + 'b'.repeat(40);
+for (const [name, call] of [
+  ['scan', (sdk, chainId) => sdk.scan(target, { chainId })],
+  ['firewall', (sdk, chainId) => sdk.firewall(target, { chainId })],
+  ['check', (sdk, chainId) => sdk.check({ from: '0xa', to: target, chainId })],
+  ['rescue', (sdk, chainId) => sdk.rescue(target, chainId)],
+  ['queryThreatGraph', (sdk, chainId) => sdk.queryThreatGraph(target, chainId)],
+]) {
+  for (const chainId of ['56', '0x38', 56.5, 0, -1, NaN, Infinity, 2 ** 53, 56n, true]) {
+    test(`${name} rejects ${typeof chainId} chain ${String(chainId)} before any request`, async () => {
+      let calls = 0;
+      global.fetch = async () => { calls++; return { ok: true, json: async () => complete }; };
+      const sdk = new ShieldBot({ agentId: 'agent:1', failMode: 'open' });
+      await assert.rejects(call(sdk, chainId), error => error instanceof ShieldBotError && error.code === 'INVALID_CHAIN_ID');
+      assert.equal(calls, 0);
+    });
+  }
+}
+
 test('the requested chain reaches the API unchanged', async () => {
   const requests = [];
   global.fetch = async (url, init) => {

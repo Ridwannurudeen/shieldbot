@@ -138,10 +138,12 @@ class ShieldBot:
 
         Raises:
             ValueError: before any request when chain_id is missing (the SDK never assumes a chain)
-                or value is not an integer amount of wei from 0 to 2**256 - 1.
+                or is not a positive int, or value is not an integer amount of wei from 0 to 2**256 - 1.
         """
         if transaction.get("chain_id") is None:
             raise ValueError("chain_id is required")
+        if type(transaction["chain_id"]) is not int or transaction["chain_id"] <= 0:
+            raise ValueError("chain_id must be a positive int")
         transaction = {**transaction, "value": _decimal_wei(transaction.get("value"))}
         to_addr = transaction.get("to", "")
         cache_key = self._cache_key(transaction)

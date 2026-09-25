@@ -57,7 +57,6 @@ test('equivalent transaction encodings reuse the cached allowance', async () => 
     ...mixedCase,
     from: mixedCase.from.toLowerCase(),
     to: mixedCase.to.toLowerCase(),
-    chainId: '56',
     data: mixedCase.data.toLowerCase(),
     value: '0x0',
   });

@@ -36,7 +36,7 @@ export function isSupportedChainId(chainId: number): chainId is ChainId {
 }
 
 export interface ScanOptions {
-  /** Chain to analyze. Required: the SDK never assumes a chain, and the API rejects an unsupported one with 400. */
+  /** Chain to analyze, a positive integer. Required: the SDK never assumes a chain, and the API rejects an unsupported one with 400. */
   chainId: number;
 }
 
@@ -415,23 +415,10 @@ export class ShieldBot {
     const chainId = this._requireChainId(transaction.chainId, 'check');
     const value = this._weiValue(transaction.value, 'check');
 
-    const canonicalInteger = (value: unknown): string => {
-      if (
-        !['string', 'number', 'bigint'].includes(typeof value) ||
-        (typeof value === 'string' && value.trim() === '')
-      ) {
-        return `raw:${typeof value}:${String(value)}`;
-      }
-      try {
-        return BigInt(value as string | number | bigint).toString();
-      } catch {
-        return `raw:${typeof value}:${String(value)}`;
-      }
-    };
     const cacheKey = JSON.stringify([
       transaction.from?.toLowerCase(),
       transaction.to?.toLowerCase(),
-      canonicalInteger(chainId),
+      chainId,
       (transaction.data || '0x').toLowerCase(),
       value,
     ]);
@@ -534,6 +521,9 @@ export class ShieldBot {
   private _requireChainId(chainId: number | undefined, method: string): number {
     if (chainId == null) {
       throw new ShieldBotError(`chainId required for ${method}()`, 400, 'MISSING_CHAIN_ID');
+    }
+    if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+      throw new ShieldBotError(`chainId for ${method}() must be a positive integer`, 400, 'INVALID_CHAIN_ID');
     }
     return chainId;
   }
