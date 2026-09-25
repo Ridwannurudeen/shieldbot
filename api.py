@@ -41,6 +41,7 @@ from core.container import ServiceContainer
 from core.database import SCAN_EVIDENCE_RETENTION_DAYS, reporter_hash
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
 from core.first_verdict import IN_PROGRESS, FirstVerdictProgress, build_first_verdict
+from core.policy import PolicyMode
 from core.rate_limit import RateLimiter, connect as connect_rate_limit_redis
 from core.registry import FIRST_VERDICT_SECONDS
 from core.scan_evidence import (
@@ -1248,7 +1249,7 @@ async def _build_signature_only_response(
     ) and result.data.get('status') != 'unknown'
     # As core.policy does, STRICT turns an unavailable or incomplete analysis into a block.
     policy = container.policy_engine if container and container.policy_engine else PolicyEngine()
-    strict_block = not covered and policy.apply([], {}, mode_override=policy_override)['policy_mode'] == 'STRICT'
+    strict_block = not covered and policy.apply([], {}, mode_override=policy_override)['policy_mode'] == PolicyMode.STRICT.value
     if strict_block:
         risk_score = max(risk_score, verdicts.STRICT_BLOCK_SCORE)
         classification = verdicts.BLOCK_RECOMMENDED
@@ -1325,7 +1326,7 @@ async def _build_signature_only_response(
         "network": _chain_id_to_name(req.chainId),
         "partial": not covered,
         "failed_sources": [] if covered else ["signature"],
-        "policy_mode": "STRICT" if strict_block else "SIGNATURE_ONLY",
+        "policy_mode": PolicyMode.STRICT.value if strict_block else "SIGNATURE_ONLY",
         "notes": [],
     }
 
@@ -1345,7 +1346,7 @@ async def firewall(req: FirewallRequest, request: Request):
     if request.headers.get("accept", "").startswith("text/event-stream"):
         started = time.monotonic()
         policy_mode = _policy_mode(request)
-        if policy_mode != "STRICT":
+        if policy_mode != PolicyMode.STRICT.value:
             # A bad request is refused before the stream's headers go out.
             if not _is_signature_only_request(req) and not web3_client.is_valid_address(req.to):
                 raise HTTPException(status_code=400, detail="Invalid 'to' address")
@@ -1569,7 +1570,7 @@ async def _firewall_verdict(
             if cached and cached.get('category_scores', {}).get('_scan_metadata', {}).get('coverage'):
                 # A full rescan costs provider calls, so only a caller with a valid API key can force one
                 # with STRICT. Anyone else is answered from the cached facts in STRICT mode.
-                if policy_mode != "STRICT" or not getattr(request.state, "api_key_info", None):
+                if policy_mode != PolicyMode.STRICT.value or not getattr(request.state, "api_key_info", None):
                     trail['cached_scan_at'] = cached['last_scanned_at']
                     return _build_cached_response(
                         cached, decoded, value_bnb, req.chainId, to_addr=to_addr, policy_mode=policy_mode,
@@ -1776,7 +1777,7 @@ async def _firewall_verdict(
                 "network": _chain_id_to_name(req.chainId),
                 "partial": alert['status'] == 'unknown' or risk_output.get("partial", False),
                 "failed_sources": risk_output.get("failed_sources", []),
-                "policy_mode": risk_output.get("policy_mode", "BALANCED"),
+                "policy_mode": risk_output.get("policy_mode", PolicyMode.BALANCED.value),
                 "campaign_context": _deployer_ctx,
                 "notes": risk_output.get("notes", []),
             }
@@ -3365,7 +3366,7 @@ def _build_cached_response(
     failed = bool(failed_sources) if failed_sources is not None else is_scan_incomplete(
         {**metadata, 'risk_level': risk_level}
     )
-    if policy_mode == 'STRICT' and failed:
+    if policy_mode == PolicyMode.STRICT.value and failed:
         risk_score = max(risk_score, verdicts.STRICT_BLOCK_SCORE)
         risk_level = verdicts.HIGH
         flags = ['Policy override: cached analysis unavailable or incomplete', *flags]
@@ -3490,7 +3491,7 @@ def _build_fallback_response(
 
     # STRICT blocks a degraded analysis, as core.policy does an incomplete one. The fallback has no
     # policy engine to say which required checks failed, so under STRICT it blocks whatever it covers.
-    strict = policy_mode == 'STRICT'
+    strict = policy_mode == PolicyMode.STRICT.value
     if strict:
         risk_score = max(risk_score, verdicts.STRICT_BLOCK_SCORE)
         danger_signals.insert(0, 'Policy override: composite analysis unavailable')
@@ -3578,7 +3579,7 @@ def _build_unverified_swap_response(
     classification = verdicts.CAUTION
     risk_score = verdicts.CAUTION_MIN
     danger_signals = [f"Swap via trusted router ({whitelisted}) but {reason.lower()} — token safety unverified"]
-    strict = policy_mode == 'STRICT'
+    strict = policy_mode == PolicyMode.STRICT.value
     if strict:
         classification = verdicts.BLOCK_RECOMMENDED
         risk_score = verdicts.STRICT_BLOCK_SCORE
@@ -3851,7 +3852,7 @@ async def _analyze_router_swap(
         "network": _chain_id_to_name(req.chainId),
         "partial": alert['status'] == 'unknown' or risk_output.get("partial", False),
         "failed_sources": risk_output.get("failed_sources", []),
-        "policy_mode": risk_output.get("policy_mode", "BALANCED"),
+        "policy_mode": risk_output.get("policy_mode", PolicyMode.BALANCED.value),
         "notes": notes,
     }
 
