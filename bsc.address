@@ -56,7 +56,7 @@
     "status": "LIVE",
     "implementation": "utils/web3_client.py lines 77-84, 116-120"
   },
-  "frontendUrl": "http://localhost:8000/test",
+  "frontendUrl": "https://shieldbotsecurity.online",
   "backendApi": "http://localhost:8000/api",
   "telegramBot": "@shieldbot_bnb_bot",
   "demoVideo": "https://youtu.be/a-PbFsZz0Ds",

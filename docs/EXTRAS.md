@@ -49,7 +49,7 @@ Pages: [X] slides
 
 ### Chrome Extension
 - **Installation:** See `docs/TECHNICAL.md` for setup instructions
-- **Test Page:** `http://localhost:8000/test` (requires local API)
+- **Test dApp:** https://metamask.github.io/test-dapp/ (the extension checks https pages only)
 - **Status:** Repository can be sideloaded; shipped omitted-chain limitation remains, and the provider-chain repair is unreleased
 
 ### API Endpoint
@@ -62,9 +62,10 @@ Pages: [X] slides
 
 ## Social Media & Updates
 
-### Developer Contact
-- **Telegram:** [@Ggudman](https://t.me/Ggudman)
-- **Twitter:** [@Ggudman1](https://twitter.com/Ggudman1)
+### Contact
+- **Issues:** https://github.com/Ridwannurudeen/shieldbot/issues
+- **Email:** support@shieldbotsecurity.online
+- **Founder (Telegram):** [@Ggudman](https://t.me/Ggudman)
 - **GitHub:** [Ridwannurudeen](https://github.com/Ridwannurudeen)
 
 ### Project Links

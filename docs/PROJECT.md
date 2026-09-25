@@ -275,8 +275,9 @@ See [JUDGE_GUIDE.md](JUDGE_GUIDE.md) for offline Robinhood fixture replay and in
 
 ## Contact & Links
 
-- **Telegram**: [@Ggudman](https://t.me/Ggudman)
-- **Twitter**: [@Ggudman1](https://twitter.com/Ggudman1)
+- **Issues**: https://github.com/Ridwannurudeen/shieldbot/issues
+- **Email**: support@shieldbotsecurity.online
+- **Founder (Telegram)**: [@Ggudman](https://t.me/Ggudman)
 - **GitHub**: [Ridwannurudeen](https://github.com/Ridwannurudeen)
 - **Historical Demo Bot Link (availability unverified)**: [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)
 - **Repository**: https://github.com/Ridwannurudeen/shieldbot

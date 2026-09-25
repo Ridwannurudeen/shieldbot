@@ -445,7 +445,7 @@ shieldbot/
 **Minimum setup to test core features:**
 1. **Only BSCSCAN_API_KEY is required** (free at [bscscan.com/myapikey](https://bscscan.com/myapikey))
 2. Run: `uvicorn api:app --host 0.0.0.0 --port 8000`
-3. Visit: `http://localhost:8000/test`
+3. Visit: `http://localhost:8000/docs` (the interactive API docs)
 4. Available checks run with the configured providers; missing or unsupported provider coverage must remain unknown. A BscScan key alone does not provide every risk check.
 
 **Features that require optional API keys:**
@@ -547,7 +547,6 @@ python bot.py
 **Verify Services**:
 - FastAPI: http://localhost:8000/docs (Swagger UI)
 - Health: http://localhost:8000/api/health
-- Test Page: http://localhost:8000/test
 
 ### 6. Install Chrome Extension
 
@@ -560,10 +559,8 @@ python bot.py
 7. Restart FastAPI backend
 
 **Verify Extension**:
-- Visit http://localhost:8000/test
-- Click "Test BLOCK Verdict" → Should show red modal
-- Click "Test WARN Verdict" → Should show orange overlay
-- Click "Test ALLOW Verdict" → Should pass through silently
+- Visit https://metamask.github.io/test-dapp/ (the extension checks https pages only)
+- Use a Send button: the ShieldBot overlay appears before the wallet does
 
 ---
 
@@ -700,25 +697,8 @@ Market Metrics:
 - FastAPI backend running on port 8000
 - CORS configured correctly
 
-**Test Page Demo** (http://localhost:8000/test):
-
-1. **BLOCK Verdict**:
-   - Click "Test BLOCK Verdict (Honeypot Token)"
-   - Full-screen **red modal** appears
-   - Shows risk score 85/100, critical flags
-   - Choosing Block rejects the transaction; the proceed override forwards it to the wallet
-
-2. **WARN Verdict**:
-   - Click "Test WARN Verdict (Unverified Contract)"
-   - **Orange warning overlay** appears
-   - Shows risk score 45/100, medium risk
-   - Two buttons: "Proceed Anyway" or "Cancel Transaction"
-
-3. **ALLOW Verdict**:
-   - Click "Test ALLOW Verdict (PancakeSwap)"
-   - **No overlay** appears
-   - Transaction passes through silently
-   - MetaMask popup appears immediately
+**Test dApp Demo**: follow the smoke test in [store-listing.md](store-listing.md) section 3, which
+uses https://metamask.github.io/test-dapp/ for a native send.
 
 **Live dApp Demo** (PancakeSwap):
 
@@ -803,7 +783,7 @@ pytest tests/ --cov=. --cov-report=term-missing
 
 **Extension**:
 - [ ] Loads without errors in Chrome
-- [ ] Intercepts transactions on test page
+- [ ] Intercepts transactions on https://metamask.github.io/test-dapp/
 - [ ] Shows correct verdict modals (BLOCK/WARN/ALLOW)
 - [ ] Allows user to cancel WARN verdicts
 - [ ] Router swap tokens are analyzed; undecodable or unscanned swap paths remain unknown
@@ -821,7 +801,6 @@ pytest tests/ --cov=. --cov-report=term-missing
 - [ ] A streamed /api/firewall request (`Accept: text/event-stream`, Balanced mode) sends its `first` event about 3 s after the handler starts (sooner on a known Block floor, none when the scan finishes first or for a signature request), never `SAFE`, then the final verdict; its analyzers stop at the same 25 s deadline, which starts after the handler's own lookups
 - [ ] /api/scan returns composite risk data
 - [ ] /api/health shows service status
-- [ ] /test page renders correctly
 - [ ] CORS allows extension requests
 - [ ] Handles network errors gracefully (external APIs down)
 
@@ -1020,7 +999,7 @@ Side panel chats are stored under a hash of the install or IP and the chat id, w
 2. Verify CORS_ALLOW_ORIGINS includes extension ID
 3. Restart FastAPI backend after .env changes
 4. Check console for errors: Right-click extension → Inspect
-5. Test on http://localhost:8000/test first
+5. Test on https://metamask.github.io/test-dapp/ first (the extension checks https pages only)
 
 ### Telegram Bot Not Responding
 
@@ -1073,8 +1052,8 @@ MIT License - see LICENSE file for details
 ## Contact & Support
 
 - **Issues**: https://github.com/Ridwannurudeen/shieldbot/issues
-- **Telegram**: [@Ggudman](https://t.me/Ggudman)
-- **Twitter**: [@Ggudman1](https://twitter.com/Ggudman1)
+- **Email**: support@shieldbotsecurity.online
+- **Founder (Telegram)**: [@Ggudman](https://t.me/Ggudman)
 
 ---
 

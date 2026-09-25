@@ -154,7 +154,6 @@ See full privacy policy: [PRIVACY_POLICY.md](PRIVACY_POLICY.md)
 
 - **GitHub Issues:** https://github.com/Ridwannurudeen/shieldbot/issues
 - **Email:** support@shieldbotsecurity.online
-- **Twitter:** [@Ggudman1](https://twitter.com/Ggudman1)
 
 ---
 
