@@ -15,18 +15,31 @@ CONTROL_CHARACTERS = re.compile(
     r'[\x00-\x1f\x7f-\x9f\xad\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069'
     r'\u3164\ufeff\uffa0]'
 )
+# Telegram turns a bare domain, an @mention and a /command into a link in any message, plain text or
+# escaped Markdown alike, so untrusted text shows the character that starts one as a look-alike: a dot
+# between word characters (or the ideographic and fullwidth dots Telegram also reads as one) as ONE DOT
+# LEADER, and an @ or / starting a word as FULLWIDTH COMMERCIAL AT or DIVISION SLASH.
+_LINK_STARTS = re.compile(r'(?<=\w)[.\u3002\uff0e\uff61](?=\w)|(?<!\w)@(?=\w)|(?<![\w/<>])/(?=\w)')
+_LINK_LOOKALIKES = {'@': '\N{FULLWIDTH COMMERCIAL AT}', '/': '\N{DIVISION SLASH}'}
 # How a collision's symbol or name pointed at the official token.
 _POINTED_BY = {'ticker': 'same ticker', 'affix': 'ticker with an affix', 'company': 'same company name'}
 _ADDRESS = re.compile(r'0x[0-9a-fA-F]{40}')
 
 
+def unlinked(value) -> str:
+    """An untrusted value as one line of text Telegram cannot turn into a link, a mention or a command,
+    with the characters that could hide or reorder it blanked."""
+    text = CONTROL_CHARACTERS.sub(' ', str(value))
+    return _LINK_STARTS.sub(lambda match: _LINK_LOOKALIKES.get(match.group(), '\N{ONE DOT LEADER}'), text)
+
+
 def escape_markdown(value) -> str:
-    """Show an untrusted value literally in a legacy Markdown message, with no markup or line breaks.
+    """Show an untrusted value in a legacy Markdown message, with no markup, links or line breaks.
 
     Legacy Markdown has no escape for a backslash, and one ending a value would escape the markup
     after it, so a backslash is shown as the look-alike SET MINUS.
     """
-    text = CONTROL_CHARACTERS.sub(' ', str(value)).replace('\\', '\N{SET MINUS}')
+    text = unlinked(value).replace('\\', '\N{SET MINUS}')
     return _MARKUP.sub(r'\\\1', text)
 
 

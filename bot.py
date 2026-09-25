@@ -32,7 +32,7 @@ except ImportError:
 from core.config import Settings
 from core.container import ServiceContainer
 from core.telegram_formatter import (
-    CONTROL_CHARACTERS, describe_impostor_check, escape_markdown, escape_markdown_lines, format_full_report,
+    describe_impostor_check, escape_markdown, escape_markdown_lines, format_full_report, unlinked,
 )
 from core.extension_formatter import is_scan_incomplete
 from core.registry import RUN_ALL_DEADLINE_SECONDS
@@ -781,7 +781,7 @@ def format_launch_alert(item: dict) -> str:
     if check.get('status') == 'impostor':
         # The official symbol comes from Robinhood's list, so it is stripped like any other text.
         label = describe_impostor_check(check)
-        headings = [_IMPOSTOR_LAUNCH_HEADER.format(CONTROL_CHARACTERS.sub(' ', label))]
+        headings = [_IMPOSTOR_LAUNCH_HEADER.format(unlinked(label))]
         if header != _LAUNCH_ALERT_HEADERS['cleared']:
             headings.append(header)
         # A blocked launch's evidence repeats the heading as its first flag.
@@ -791,16 +791,16 @@ def format_launch_alert(item: dict) -> str:
     lines = [*headings, f"Token: {item['token_address']}", f"Launchpad: {item['launchpad']}"]
     if header != _UNKNOWN_LAUNCH_HEADER and scan['risk_score'] is not None:
         lines.append(f"Risk score: {scan['risk_score']:g}/100")
-    lines += [f"• {CONTROL_CHARACTERS.sub(' ', flag)[:150]}" for flag in flags[:3]]
+    lines += [f"• {unlinked(flag)[:150]}" for flag in flags[:3]]
     if scan['status'] != 'ok':
         reasons = '; '.join(dict.fromkeys(
-            CONTROL_CHARACTERS.sub(' ', reason) for reason in scan['coverage_reasons'].values()
+            unlinked(reason) for reason in scan['coverage_reasons'].values()
         )) or 'Provider data unavailable or incomplete'
         lines.append(f"Unknown: {reasons[:300]}")
     if check.get('status') == 'unknown':
-        lines.append(f"Official token check: unknown ({CONTROL_CHARACTERS.sub(' ', check['reason'])})")
+        lines.append(f"Official token check: unknown ({unlinked(check['reason'])})")
     elif check.get('status') in ('official', 'collision'):
-        lines.append(CONTROL_CHARACTERS.sub(' ', describe_impostor_check(check)))
+        lines.append(unlinked(describe_impostor_check(check)))
     lines.append(f"Evidence: {VERDICT_BASE_URL}{item['verdict_url']}")
     explorer = get_explorer_url(item['chain_id'])
     if explorer:
@@ -930,7 +930,7 @@ async def _handle_advisor_chat(update: Update, message: str, chain_id: int = 56)
     try:
         response = await container.advisor.chat(user_id, message, chain_id=chain_id)
         scan_data = response.get('scan_data')
-        response_text = response['text']
+        response_text = '\n'.join(unlinked(line) for line in response['text'].split('\n'))
         # The model's text never sets a verdict: a contract check ends with the scan's own.
         if scan_data is not None:
             if is_scan_incomplete(scan_data):

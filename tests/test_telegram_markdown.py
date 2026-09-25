@@ -618,3 +618,73 @@ async def test_watch_alerts_show_the_watch_record_literally(monkeypatch):
     )
     assert sent[0]["parse_mode"] == "Markdown"
     assert_literal(sent[0]["text"], HOSTILE)
+
+
+# --- Telegram links domains, @mentions and /commands in any text; untrusted text cannot make one -----
+
+LURE = "Claim at evil.com or t\N{IDEOGRAPHIC FULL STOP}me/x, ask @scam_admin, send /start"
+SHOWN = (
+    "Claim at evil\N{ONE DOT LEADER}com or t\N{ONE DOT LEADER}me/x, "
+    "ask \N{FULLWIDTH COMMERCIAL AT}scam_admin, send \N{DIVISION SLASH}start"
+)
+# The parts of LURE Telegram would turn into a link, a mention or a command.
+LINKED = ("evil.com", "t\N{IDEOGRAPHIC FULL STOP}me", "@scam_admin", "/start")
+
+
+def _assert_unlinked(text):
+    assert SHOWN in text
+    for part in LINKED:
+        assert part not in text, part
+
+
+def test_a_report_shows_untrusted_domains_mentions_and_commands_unlinked():
+    rendered = assert_literal(
+        _report(
+            True,
+            token_info={"name": LURE, "symbol": "@evil"},
+            ai_analysis=f"Summary\n{LURE}",
+            contract_data={"is_contract": True, "bytecode_warnings": [LURE]},
+        )
+    )
+
+    assert f"Token: {SHOWN} (\N{FULLWIDTH COMMERCIAL AT}evil)" in rendered
+    assert f"Bytecode Warnings: {SHOWN}" in rendered
+    assert f"Summary\n{SHOWN}" in rendered
+    _assert_unlinked(rendered)
+
+
+def test_ordinary_text_keeps_its_characters():
+    rendered = assert_literal(_report(True, token_info={"name": "Moon / Sun. Tax: 5 @ 10%", "symbol": "MS"}))
+
+    assert "Token: Moon / Sun. Tax: 5 @ 10% (MS)" in rendered
+
+
+def test_a_launch_alert_shows_untrusted_flags_and_reasons_unlinked(bot_module):
+    scan = {
+        "outcome": "blocked",
+        "status": "unknown",
+        "risk_level": "HIGH",
+        "risk_score": 90,
+        "coverage_reasons": {"honeypot": LURE},
+        "flags": [LURE],
+        "scanned_at": 990.0,
+    }
+    item = {"chain_id": 4663, "token_address": ADDRESS, "launchpad": "LONG", "verdict_url": "/v", "scan": scan}
+
+    text = bot_module.format_launch_alert(item)
+
+    assert f"• {SHOWN}" in text.splitlines()
+    assert f"Unknown: {SHOWN}" in text.splitlines()
+    _assert_unlinked(text)
+
+
+@pytest.mark.asyncio
+async def test_an_advisor_reply_shows_the_models_text_unlinked(bot_module):
+    bot_module.container.advisor.chat = AsyncMock(return_value={"text": f"Line one\n{LURE}"})
+    typing = SimpleNamespace(edit_text=AsyncMock())
+    update = _update()
+    update.message.reply_text = AsyncMock(return_value=typing)
+
+    await bot_module._handle_advisor_chat(update, "What is new?")
+
+    assert typing.edit_text.await_args.args[0] == f"Line one\n{SHOWN}"
