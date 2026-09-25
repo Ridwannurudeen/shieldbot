@@ -137,3 +137,15 @@ def test_page_script_is_a_main_world_content_script():
     resources = [item for entry in MANIFEST["web_accessible_resources"] for item in entry["resources"]]
     assert "inject.js" not in resources
 
+
+def test_readme_names_every_way_a_page_can_tell_the_extension_is_there():
+    readme = (EXTENSION / "README.md").read_text(encoding="utf-8")
+    section = readme.split("## What a page can tell", 1)[1].split("\n## ", 1)[0]
+    # Every file a page can fetch by the extension's ID.
+    for entry in MANIFEST["web_accessible_resources"]:
+        for resource in entry["resources"]:
+            assert f"`{resource}`" in section, resource
+    # The other surfaces: the message channel, the wrapped request and the window.ethereum accessor.
+    for surface in ("`SHIELDAI_TX_VERDICT`", "`request`", "`window.ethereum`", "accessor", "use_dynamic_url"):
+        assert surface in section, surface
+

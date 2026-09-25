@@ -231,6 +231,28 @@ that stops the scripts altogether would need them unregistered through `chrome.s
 - With the wallet on a network the API does not support, nothing can be sent or signed through the
   overlay, which offers only Block: switch networks, or switch the extension off.
 
+## What a page can tell
+
+A page can find out that the extension is installed, in these ways:
+
+- The window messages between `inject.js` and `content.js` (`SHIELDAI_TX_INTERCEPT`,
+  `SHIELDAI_TX_SHOWN`, `SHIELDAI_TX_VERDICT`, `SHIELDAI_UNCHECKABLE` and `SHIELDAI_LEGACY_REFUSED`)
+  reach every `message` listener of the page. They carry proofs, never the key, so the page can read
+  them but not make them. While a warning shows, its host element is in the page's DOM (what it
+  holds is in a closed shadow root).
+- The files `manifest.json` lists under `web_accessible_resources` (`overlay.css`, `welcome.html`,
+  `i18n.js`, `locales/en/messages.json`, `locales/zh/messages.json` and `locales/vi/messages.json`)
+  can be fetched by any https page from `chrome-extension://<extension id>/`. The ID of a Web Store
+  install is the same for everyone, so a fetch that succeeds shows the extension is there. Chrome's
+  `use_dynamic_url` would put them behind a per-session ID instead; it is not used.
+- A wrapped provider's `request` becomes a property of the provider itself (a wallet's usually comes
+  from its prototype), holding a function that is not native code, and `send` and `sendAsync` are
+  replaced the same way, on the provider and its prototypes. `Object.getOwnPropertyDescriptor` or
+  `Function.prototype.toString` shows the wrapper.
+- When the page has no `window.ethereum` at startup, `inject.js` defines `window.ethereum` as an
+  accessor (a getter and a setter) until a provider is assigned to it, and as a plain value from one
+  task after that. A page can see the accessor, on a page without a wallet too.
+
 ## Translations awaiting review
 
 The Vietnamese and Chinese texts of these keys in `extension/locales/vi` and `extension/locales/zh`
