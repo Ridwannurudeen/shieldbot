@@ -14,7 +14,7 @@ export interface ShieldBotConfig {
   agentId?: string;
   /** Base URL of the ShieldBot API. Defaults to production. */
   baseUrl?: string;
-  /** Request timeout in milliseconds. Default: 10000. */
+  /** Request timeout in milliseconds, positive and at most 2^31 - 1; anything else throws INVALID_TIMEOUT. Default: 10000. */
   timeout?: number;
   /** Local verdict cache size. Default: 10000. */
   cacheSize?: number;
@@ -62,6 +62,7 @@ export interface FirewallOptions extends ScanOptions {
   /**
    * With onFirst: milliseconds to wait for the response and then for each next event before the
    * request is aborted (TIMEOUT). It replaces `timeout` for a streamed request. Default: 30000.
+   * Like `timeout`, it must be positive and at most 2^31 - 1, or firewall() throws INVALID_TIMEOUT.
    */
   finalTimeout?: number;
 }
@@ -295,6 +296,8 @@ const DEFAULT_BASE_URL = 'https://api.shieldbotsecurity.online';
 const DEFAULT_TIMEOUT = 10_000;
 const DEFAULT_FINAL_TIMEOUT = 30_000;
 const MAX_WEI = 2n ** 256n - 1n;
+/** The longest delay setTimeout keeps: a longer one fires at once. */
+const MAX_TIMEOUT = 2 ** 31 - 1;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
 export class ShieldBot {
@@ -311,7 +314,7 @@ export class ShieldBot {
     this.baseUrl = (config.baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, '');
     this.apiKey = config.apiKey;
     this.agentId = config.agentId;
-    this.timeout = config.timeout || DEFAULT_TIMEOUT;
+    this.timeout = this._timeout(config.timeout ?? DEFAULT_TIMEOUT, 'timeout');
     this.failMode = config.failMode || 'cached';
     this.cacheSize = config.cacheSize || 10000;
     this.cacheTtl = (config.cacheTtl ?? 60) * 1000; // convert to ms
@@ -349,7 +352,7 @@ export class ShieldBot {
     }
     return this._request<FirewallResult>('POST', '/api/firewall', body, {
       onFirst: options.onFirst,
-      timeout: options.finalTimeout ?? DEFAULT_FINAL_TIMEOUT,
+      timeout: this._timeout(options.finalTimeout ?? DEFAULT_FINAL_TIMEOUT, 'finalTimeout'),
     });
   }
 
@@ -558,6 +561,13 @@ export class ShieldBot {
         'CHAIN_MISMATCH',
       );
     }
+  }
+
+  private _timeout(value: number, name: string): number {
+    if (!Number.isFinite(value) || value <= 0 || value > MAX_TIMEOUT) {
+      throw new ShieldBotError(`${name} must be a positive number of milliseconds, at most 2^31 - 1`, 400, 'INVALID_TIMEOUT');
+    }
+    return value;
   }
 
   private _weiValue(value: unknown, method: string): string {

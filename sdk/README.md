@@ -33,6 +33,7 @@ Nothing was ever published, but code built from earlier copies of this repositor
 - `rescue()` results are typed with `status`, `coverage`, `coverage_reasons`, `scanned_blocks` and `total_value_at_risk_usd`, and `rescue()` throws `SCAN_UNAVAILABLE` when the scan read nothing, instead of returning an empty approval list.
 - `rescue`, `getCampaign` and `queryThreatGraph` throw `INVALID_ADDRESS` before any request for an address that is not `0x` and 40 hex digits. They used to put any string in the request path: an address ending in `#` dropped the chain (the API then read BNB Chain), one ending in `?chain_id=1&` replaced it, and `../` reached other routes with your API key.
 - `rescue` and `queryThreatGraph` throw `CHAIN_MISMATCH` (status 502) when the answer's `chain_id` is not the chain asked for.
+- `timeout` must be a positive number of milliseconds, at most 2^31 - 1, or the constructor throws `INVALID_TIMEOUT`. `timeout: 0` used to mean the default. `finalTimeout` follows the same rule, checked by `firewall()` before any request.
 
 ## API key
 
@@ -122,7 +123,7 @@ const result = await shield.firewall('0xTarget', {
 - The interim verdict (`FirstVerdict`) comes as soon as a hard floor already puts the transaction in `BLOCK_RECOMMENDED` (an address the ShieldBot operator confirmed as a scam, for example), otherwise about 3 seconds after the API starts on the request, and only while the analysis is still running. A fast analysis sends only the final.
 - It always has `status: 'unknown'` and is never `SAFE`. Its `risk_score` and `classification` come only from floors already known, never from a partial average, so they never overstate the final verdict's band; `CAUTION` with `risk_score` 0 means nothing is known yet. It lists `pending_sources` (the analyzers still running) and `elapsed_ms`, and has no `evidence_hash` or `evidence_url`: only the final is recorded.
 - Under a STRICT policy the API sends no interim verdict. It answers with the plain JSON, which `firewall()` returns as it is, and `onFirst` is not called.
-- `finalTimeout` (default 30000 ms) replaces `timeout` for a streamed call: it bounds the wait for the response and then for each next event.
+- `finalTimeout` (default 30000 ms) replaces `timeout` for a streamed call: it bounds the wait for the response and then for each next event. Like `timeout`, it must be positive and at most 2^31 - 1 ms, or `firewall()` throws `INVALID_TIMEOUT` before any request.
 - An `error` event rejects with `ShieldBotError` code `STREAM_ERROR` and the API's HTTP status, or 500 when the event carries none. A stream that ends without a final rejects with code `NETWORK_ERROR`.
 - `GET /api/verdicts` publishes this contract as `first_verdict`.
 - The SDK holds the API to it: a `first` event whose `status` is not `'unknown'`, whose `classification` is `SAFE` or whose `final` is not `false` is dropped, and `onFirst` is not called for it. The API never sends one.
@@ -163,7 +164,7 @@ const shield = new ShieldBot({
   apiKey: 'sb_...',          // Required for check() and register()
   agentId: 'my-agent',       // Required for check() and register()
   baseUrl: 'https://...',    // Custom API URL (default: https://api.shieldbotsecurity.online)
-  timeout: 10000,            // Request timeout in ms
+  timeout: 10000,            // Request timeout in ms: positive, at most 2^31 - 1 (else INVALID_TIMEOUT)
   cacheSize: 10000,          // Local verdict cache entries
   cacheTtl: 60,              // Cache TTL in seconds (bounds stale decisions to one minute)
   failMode: 'cached',        // 'cached' | 'open' | 'closed'
