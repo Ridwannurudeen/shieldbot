@@ -891,7 +891,7 @@ Run exactly one API process when verdict publication is configured. The API life
 ```nginx
 server {
     listen 80;
-    server_name api.shieldbot.xyz;
+    server_name api.shieldbotsecurity.online;
 
     location /.well-known/acme-challenge/ {
         root /var/www/html;
@@ -911,7 +911,7 @@ The API takes the client address from X-Forwarded-For; without it every user sha
 
 **SSL Certificate**:
 ```bash
-sudo certbot certonly --webroot -w /var/www/html -d api.shieldbot.xyz
+sudo certbot certonly --webroot -w /var/www/html -d api.shieldbotsecurity.online
 ```
 
 Serve the challenge location above before requesting the certificate, then configure TLS explicitly in the vhost. Use webroot issuance on the shared VPS; do not let Certbot rewrite its nginx listeners.

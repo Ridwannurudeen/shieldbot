@@ -13,7 +13,7 @@
 1. **Click the extension icon** in your Chrome toolbar
 2. You'll see the popup with a blue setup guide
 3. **Enter your API server URL** in the "API Endpoint" field
-   - Example: `https://api.shieldbot.io:8000`
+   - Example: `https://api.shieldbotsecurity.online`
    - Must be HTTPS (or localhost for development)
 4. Make sure "Enable Firewall" toggle is ON (default)
 
@@ -28,7 +28,7 @@
    │  wants to:                           │
    │                                      │
    │  • Access your data on               │
-   │    api.shieldbot.io                  │
+   │    api.shieldbotsecurity.online      │
    │                                      │
    │  [Deny]              [Allow]  ←──────┤ Click this!
    └──────────────────────────────────────┘
