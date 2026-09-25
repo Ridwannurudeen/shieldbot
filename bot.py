@@ -104,6 +104,7 @@ _LAUNCH_ALERT_HEADERS = {
 }
 _UNKNOWN_LAUNCH_HEADER = '⚪ UNKNOWN: scan incomplete, not a safety verdict'
 _IMPOSTOR_LAUNCH_HEADER = '🚨 IMPOSTOR: {}'
+_COLLISION_LAUNCH_HEADER = '⚠️ NOT OFFICIAL: shares a ticker or name with an official Robinhood token'
 _launch_alert_task = None
 _blacklist_reload_task = None
 
@@ -766,7 +767,9 @@ def format_launch_alert(item: dict) -> str:
 
     An incomplete scan is headed UNKNOWN unless it is blocked, so it never reads as safe, and
     its partial score is not shown. An impostor of an official Robinhood token is headed IMPOSTOR,
-    whatever its scan found, and never under a CLEARED heading.
+    whatever its scan found, and never under a CLEARED heading. A token that shares an official
+    token's ticker or name without impersonating it (a collision) names the official token, and a
+    cleared one is headed NOT OFFICIAL instead of CLEARED.
     """
     scan = item['scan']
     header = _LAUNCH_ALERT_HEADERS.get(scan['outcome'])
@@ -782,6 +785,8 @@ def format_launch_alert(item: dict) -> str:
             headings.append(header)
         # A blocked launch's evidence repeats the heading as its first flag.
         flags = [flag for flag in flags if flag != label]
+    elif check.get('status') == 'collision' and header == _LAUNCH_ALERT_HEADERS['cleared']:
+        headings = [_COLLISION_LAUNCH_HEADER]
     lines = [*headings, f"Token: {item['token_address']}", f"Launchpad: {item['launchpad']}"]
     if header != _UNKNOWN_LAUNCH_HEADER and scan['risk_score'] is not None:
         lines.append(f"Risk score: {scan['risk_score']:g}/100")
@@ -793,7 +798,7 @@ def format_launch_alert(item: dict) -> str:
         lines.append(f"Unknown: {reasons[:300]}")
     if check.get('status') == 'unknown':
         lines.append(f"Official token check: unknown ({CONTROL_CHARACTERS.sub(' ', check['reason'])})")
-    elif check.get('status') == 'official':
+    elif check.get('status') in ('official', 'collision'):
         lines.append(CONTROL_CHARACTERS.sub(' ', describe_impostor_check(check)))
     lines.append(f"Evidence: {VERDICT_BASE_URL}{item['verdict_url']}")
     explorer = get_explorer_url(item['chain_id'])

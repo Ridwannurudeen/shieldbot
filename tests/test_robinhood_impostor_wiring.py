@@ -416,12 +416,44 @@ def test_the_official_symbol_in_an_alert_cannot_add_a_line(bot_module):
     assert "Official NV DA  token (Robinhood)" in official
 
 
-@pytest.mark.parametrize("check", [None, NO_MATCH, COLLISION])
+@pytest.mark.parametrize("check", [None, NO_MATCH])
 def test_other_launches_carry_no_check_line(bot_module, check):
     lines = _alert(bot_module, CLEARED, check)
 
     assert lines[0].startswith("\N{LARGE GREEN CIRCLE} CLEARED")
     assert not any("mpersonates" in line or "fficial" in line for line in lines)
+
+
+COLLISION_HEADER = (
+    "\N{WARNING SIGN}\N{VARIATION SELECTOR-16} NOT OFFICIAL: "
+    "shares a ticker or name with an official Robinhood token"
+)
+COLLISION_LINE = f"Not the official AMD token (same ticker); official contract {AMD}"
+
+
+@pytest.mark.parametrize(
+    "check, line",
+    [
+        (COLLISION, COLLISION_LINE),
+        (
+            check_token(TOKEN, "TSLAx", "Tesla xStock", LISTED),
+            f"TSLA token in another issuer's convention (xStock), not Robinhood's TSLA; official contract {TSLA}",
+        ),
+    ],
+)
+def test_a_collision_is_never_alerted_under_a_cleared_heading(bot_module, check, line):
+    lines = _alert(bot_module, CLEARED, check)
+
+    assert lines[:3] == [COLLISION_HEADER, f"Token: {TOKEN}", "Launchpad: LONG"]
+    assert line in lines
+    assert not any("CLEARED" in text or text.startswith("\N{LARGE GREEN CIRCLE}") for text in lines)
+
+
+def test_a_collision_keeps_its_scan_heading_and_names_the_official_token(bot_module):
+    lines = _alert(bot_module, {**CLEARED, "outcome": "watching", "risk_score": 45}, COLLISION)
+
+    assert lines[0] == "\N{LARGE YELLOW CIRCLE} WATCHING: medium-risk Robinhood Chain launch"
+    assert COLLISION_LINE in lines
 
 
 @pytest.mark.asyncio
