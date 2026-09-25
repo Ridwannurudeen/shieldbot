@@ -5,8 +5,8 @@ Every ShieldBot contract deployed to a public chain. Each value below was read f
 public RPCs `https://mainnet.base.org` and `https://bsc-dataseed1.binance.org/`; creation transactions and
 event logs of the Base attestor come from base.blockscout.com, and source matches from Sourcify. The two
 BSC deployment transactions are the ones the repository already recorded (`docs/DEPLOYMENT.md` for the
-verifier, `bsc.address` for the unused second one); their receipts, read from
-`https://bsc-dataseed1.binance.org/`, show each creating the contract listed below. A
+verifier, the since-removed `bsc.address` metadata file for the unused second one); their receipts, read
+from `https://bsc-dataseed1.binance.org/`, show each creating the contract listed below. A
 contract only receives records while the service that writes to it holds its key, so this page says
 what can write to each contract, not whether production is doing so.
 
@@ -78,8 +78,8 @@ Every owner below is an externally owned account (`eth_getCode` returns no code)
   block 84,252,849, 2026-03-02 13:57:22 UTC, from `0xfE3f3cEAb7266b5de5Ae8738727b6cf82F7Be76c`.
 - **Owner and recorder:** `owner()` and `verifier()` are both `0xfE3f3cEAb7266b5de5Ae8738727b6cf82F7Be76c`.
 - **Records:** `totalScans()` = 0.
-- **Source:** no Sourcify match. [bsc.address](../bsc.address) (hackathon metadata) lists this address as
-  the verifier; no code in this repository writes to it or reads from it.
+- **Source:** no Sourcify match. The since-removed `bsc.address` metadata file listed this address as the
+  verifier; no code in this repository writes to it or reads from it.
 
 ## Robinhood Chain (4663): not deployed
 

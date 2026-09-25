@@ -18,8 +18,8 @@ nano .env
 ### 2. Get Telegram Bot Token
 1. Open Telegram and search for [@BotFather](https://t.me/BotFather)
 2. Send `/newbot`
-3. Choose a name (e.g., "ShieldBot BNB")
-4. Choose a username (e.g., "shieldbot_bnb_bot")
+3. Choose a name (e.g., "ShieldBot")
+4. Choose a username (e.g., "your_shieldbot_bot")
 5. Copy the token and add to `.env`:
    ```
    TELEGRAM_BOT_TOKEN=your_token_here
@@ -42,7 +42,7 @@ nano .env
 
 Test in Telegram:
 - Send `/start` to your bot
-- Send a BSC contract address to scan
+- Send a contract address to scan
 
 ---
 
@@ -221,8 +221,8 @@ Neither setting makes a second API process supported: MCP sessions, for one, liv
 
 ## Earlier versions of this guide
 
-The hackathon version of this guide described a `shieldbot.service` that ran `bot.py`, Docker and screen setups,
-a health check on port 8080, a verifier contract deployed from Remix and a submission checklist. None of that
+An earlier version of this guide described a `shieldbot.service` that ran `bot.py`, Docker and screen setups,
+a health check on port 8080, a verifier contract deployed from Remix and a checklist. None of that
 describes production any more, so it was removed; it is in the git history. Its checklist recorded the BNB Smart
 Chain verifier, which [DEPLOYMENTS.md](DEPLOYMENTS.md) describes:
 

@@ -2,9 +2,7 @@
 
 Historical March 2026 planning record. Repository checklists below are not current deployment evidence. Current repository coverage and the shipped extension limitation are in [README.md](README.md) and [docs/TECHNICAL.md](docs/TECHNICAL.md). Future targets below are proposals, not measured outcomes.
 
-ShieldBot is evolving from a BNB Chain transaction scanner into a **cross-chain security intelligence network**. Shared observations can inform later scans; missing observations remain unknown.
-
-**Historical award claim:** Good Vibes Only Builders Track placement requires owner-supplied evidence before reuse.
+ShieldBot is a **cross-chain security intelligence network**. Shared observations can inform later scans; missing observations remain unknown.
 
 ---
 
@@ -78,7 +76,7 @@ This phase captures users and closes the feature gaps that remain.
 
 ### Capture the Vacuum
 - [x] **Landing page**: Historical URL https://shieldbotsecurity.online; deployment is not verified here.
-- [x] **Chrome Web Store SEO** — Optimize listing title, description, and screenshots for: "BNB Chain security", "BSC transaction protection", "honeypot detector".
+- [x] **Chrome Web Store listing** — Listing title, description and screenshots; the text prepared for the next release is in [docs/store-listing.md](docs/store-listing.md).
 - [ ] **Community launch** — Announce on X/Twitter, BNB community channels, crypto security groups targeting users migrating from defunct tools.
 - [ ] **AvengerDAO membership** — Apply to BNB Chain's official community security coalition. Membership = ecosystem credibility, DappBay visibility, and referral from BNB Chain itself. GoPlus and HashDit are members.
 - [x] **Extension onboarding flow** — First-time user tutorial and guided first scan. Welcome tab on install, auto-fills API URL, Connect & Protect flow. Historical version claim; current release status not verified here.
@@ -97,13 +95,13 @@ This phase captures users and closes the feature gaps that remain.
 - [ ] **CI/CD pipeline** — Automated tests and deployment on push.
 
 ### Grants and Funding
-- [ ] **BNB Chain MVB / Kickstart grant** — Apply only with owner-verified award, deployment and usage evidence.
+- [ ] **BNB Chain MVB / Kickstart grant** — Apply only with owner-verified deployment and usage evidence.
 - [ ] **Base Ecosystem Fund** — Base adapter exists in the repository; verify deployment before using it as grant evidence; apply for ecosystem grant.
 - [ ] **Arbitrum Foundation grant** — Arbitrum adapter exists in the repository; verify deployment before using it as grant evidence; apply for STIP/ecosystem grant.
 
 ### Monetization
 - [ ] **Consumer Pro tier** — $9-15/month for unlimited scans, all chains, priority analysis, post-deploy alerts.
-- [ ] **B2B API partnerships** — Onboard first BSC wallet or DEX integrating ShieldBot API. Target: PancakeSwap, Biswap.
+- [ ] **B2B API partnerships** — Onboard the first wallet or DEX integrating the ShieldBot API. Target: PancakeSwap, Biswap.
 - [ ] **Insurance protocol partnerships** — Revenue share on premium reductions for protected wallets.
 
 ### UX & Localization
@@ -119,7 +117,7 @@ This phase captures users and closes the feature gaps that remain.
 Proposed detection and distribution work; these items are not release claims.
 
 ### New Detection Capabilities
-- [ ] **Post-deployment contract monitoring** — Background watcher that periodically re-scans high-traffic BSC tokens for state changes: ownership transfers, tax rate changes, blacklist additions, new mint functions. Push Telegram alerts to users who previously scanned the token.
+- [ ] **Post-deployment contract monitoring** — Background watcher that periodically re-scans high-traffic tokens for state changes: ownership transfers, tax rate changes, blacklist additions, new mint functions. Push Telegram alerts to users who previously scanned the token.
 - [ ] **Asset soft-locking** — Let users designate specific tokens or NFTs as "protected". Any transaction involving a protected asset triggers an elevated confirmation step.
 - [ ] **ML-based phishing detection** — Move beyond blocklists to behavioral pattern detection: homoglyph URLs, newly registered domains, impersonation patterns.
 
@@ -130,8 +128,8 @@ Proposed detection and distribution work; these items are not release claims.
 - [ ] **Mobile native app** — Dedicated mobile experience beyond RPC proxy.
 
 ### Ecosystem Integrations
-- [ ] **BSC trading bot integrations** — Integrate ShieldBot's `/token` scan into their pre-trade flow. ShieldBot already has the Telegram bot infrastructure; this is a partnership + API integration.
-- [ ] **DEX security widgets** — Embeddable ShieldBot token safety badge for PancakeSwap, Biswap, and other BSC DEXs. Display the ShieldScore directly in the swap UI.
+- [ ] **Trading bot integrations** — Integrate ShieldBot's `/token` scan into their pre-trade flow. ShieldBot already has the Telegram bot infrastructure; this is a partnership + API integration.
+- [ ] **DEX security widgets** — Embeddable ShieldBot token safety badge for PancakeSwap, Biswap and other DEXs. Display the ShieldScore directly in the swap UI.
 - [ ] **Autonomous rescue execution (Tier 3)** — Auto-revoke dangerous approvals with user consent. Extend Rescue Mode from advisory to action.
 - [ ] **On-chain reputation token** — Tokenized security scores for DeFi composability.
 

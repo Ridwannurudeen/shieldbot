@@ -7,7 +7,6 @@ Usage:
     python scripts/deploy_contract.py
 
 Reads BOT_WALLET_PRIVATE_KEY from .env -- that wallet becomes owner + initial verifier.
-After deploy, updates bsc.address with the new contract address.
 """
 
 import json
@@ -26,7 +25,6 @@ load_dotenv(ROOT / ".env")
 BSC_RPC      = os.getenv("BSC_RPC_URL", "https://bsc-dataseed1.binance.org/")
 PRIVATE_KEY  = os.getenv("BOT_WALLET_PRIVATE_KEY", "")
 CONTRACT_SOL = ROOT / "contracts" / "ShieldBotVerifier.sol"
-BSC_ADDRESS  = ROOT / "bsc.address"
 
 
 def compile_contract() -> tuple:
@@ -97,31 +95,6 @@ def deploy(w3, account, bytecode, abi):
     return address, tx_hash.hex(), abi
 
 
-def update_bsc_address(new_address, tx_hash):
-    """Update bsc.address JSON with new contract address."""
-    data = json.loads(BSC_ADDRESS.read_text())
-    old_address = None
-
-    for contract in data.get("contracts", []):
-        if contract.get("name") == "ShieldBotVerifier":
-            old_address = contract["address"]
-            contract["address"]          = new_address
-            contract["explorerLink"]     = f"https://bscscan.com/address/{new_address}#code"
-            contract["deploymentTxHash"] = tx_hash
-            contract["deploymentTxLink"] = f"https://bscscan.com/tx/{tx_hash}"
-            contract["description"]      = (
-                "On-chain scan recording contract. Status: Deployed on BSC Mainnet. "
-                "Source verification pending on BscScan."
-            )
-            break
-
-    BSC_ADDRESS.write_text(json.dumps(data, indent=2))
-    print(f"\n[*] bsc.address updated")
-    print(f"    Old: {old_address}")
-    print(f"    New: {new_address}")
-    return old_address
-
-
 def save_abi(abi, address):
     """Save ABI to contracts/ for future interaction scripts."""
     abi_path = ROOT / "contracts" / "ShieldBotVerifier.abi.json"
@@ -149,7 +122,6 @@ def main():
 
     new_address, tx_hash, abi = deploy(w3, account, bytecode, abi)
 
-    old_address = update_bsc_address(new_address, tx_hash)
     save_abi(abi, new_address)
 
     print(f"""
@@ -157,7 +129,6 @@ def main():
 DEPLOYMENT COMPLETE
 
   New contract : {new_address}
-  Old contract : {old_address}
   TX hash      : {tx_hash}
   BscScan      : https://bscscan.com/address/{new_address}
 
