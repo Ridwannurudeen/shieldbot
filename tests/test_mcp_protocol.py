@@ -14,6 +14,7 @@ from tests.test_chain_routing import routing_api  # noqa: F401  (pytest fixture)
 from utils.web3_client import Web3Client
 
 AUTH_HEADERS = {"X-API-Key": "sb_testkey123456789012345678901234"}
+KEY = {"key_id": "k1"}
 PING = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
 INITIALIZE = {
     "jsonrpc": "2.0",
@@ -65,7 +66,7 @@ def client(app):
 
 @pytest.mark.asyncio
 async def test_initialize_answers_with_the_one_supported_version(container):
-    response = await server.process_jsonrpc(container, INITIALIZE)
+    response = await server.process_jsonrpc(container, INITIALIZE, KEY)
 
     assert response == {
         "jsonrpc": "2.0",
@@ -89,7 +90,7 @@ def test_every_declared_capability_is_served():
 @pytest.mark.parametrize("request_id", ["123", 0, 7])
 async def test_ping_returns_an_empty_result(container, request_id):
     response = await server.process_jsonrpc(
-        container, {"jsonrpc": "2.0", "id": request_id, "method": "ping"}
+        container, {"jsonrpc": "2.0", "id": request_id, "method": "ping"}, KEY
     )
 
     assert response == {"jsonrpc": "2.0", "id": request_id, "result": {}}
@@ -112,13 +113,13 @@ async def test_ping_returns_an_empty_result(container, request_id):
     ],
 )
 async def test_a_message_without_an_id_gets_no_response(container, message):
-    assert await server.process_jsonrpc(container, message) is None
+    assert await server.process_jsonrpc(container, message, KEY) is None
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("body", [[{"jsonrpc": "2.0", "id": 1, "method": "ping"}], [], "id", 1])
 async def test_a_body_that_is_not_one_request_object_is_an_invalid_request(container, body):
-    response = await server.process_jsonrpc(container, body)
+    response = await server.process_jsonrpc(container, body, KEY)
 
     assert response["id"] is None
     assert response["error"]["code"] == -32600
@@ -127,7 +128,7 @@ async def test_a_body_that_is_not_one_request_object_is_an_invalid_request(conta
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method", [5, "", [], {}, None])
 async def test_a_method_that_is_not_a_string_is_an_invalid_request(container, method):
-    response = await server.process_jsonrpc(container, {"jsonrpc": "2.0", "id": 4, "method": method})
+    response = await server.process_jsonrpc(container, {"jsonrpc": "2.0", "id": 4, "method": method}, KEY)
 
     assert response["id"] == 4
     assert response["error"]["code"] == -32600
@@ -149,7 +150,7 @@ async def test_a_method_that_is_not_a_string_is_an_invalid_request(container, me
     ],
 )
 async def test_malformed_params_are_invalid_params_without_a_traceback(container, message, caplog):
-    response = await server.process_jsonrpc(container, {"jsonrpc": "2.0", "id": 8, **message})
+    response = await server.process_jsonrpc(container, {"jsonrpc": "2.0", "id": 8, **message}, KEY)
 
     assert response["id"] == 8
     assert response["error"]["code"] == -32602
@@ -167,7 +168,7 @@ async def test_a_tool_call_without_an_id_runs_nothing(container):
         },
     }
 
-    assert await server.process_jsonrpc(container, message) is None
+    assert await server.process_jsonrpc(container, message, KEY) is None
     container.registry.run_all.assert_not_awaited()
 
 
@@ -242,7 +243,7 @@ def test_another_keys_session_looks_like_an_unknown_one(client, sessions):
 @pytest.mark.parametrize("request_id", [True, False, 1.5, None, [1], {"a": 1}])
 async def test_an_id_that_is_not_a_string_or_integer_is_an_invalid_request(container, request_id):
     response = await server.process_jsonrpc(
-        container, {"jsonrpc": "2.0", "id": request_id, "method": "ping"}
+        container, {"jsonrpc": "2.0", "id": request_id, "method": "ping"}, KEY
     )
 
     assert response["id"] is None

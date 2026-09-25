@@ -14,6 +14,7 @@ from utils.web3_client import Web3Client
 
 
 AUTH_HEADERS = {"X-API-Key": "sb_testkey123456789012345678901234"}
+KEY = {"key_id": "k1"}
 TOKEN = "0x" + "12" * 20
 TOOLS = {tool["name"]: tool for tool in TOOL_DEFINITIONS}
 
@@ -125,7 +126,7 @@ async def test_launch_tool_returns_the_feed_query_page(db):
     await db.record_launch_scan(4663, TOKEN, "unknown", 40)
     expected, next_cursor = await db.get_launch_feed(4663, 20)
 
-    result = await execute_tool(_container(db), "get_robinhood_launches", {})
+    result = await execute_tool(_container(db), "get_robinhood_launches", {}, KEY)
 
     assert result == {
         "launches": expected,
@@ -144,7 +145,7 @@ async def test_launch_tool_bounds_the_page_size(requested, expected):
     db = MagicMock(get_launch_feed=AsyncMock(return_value=([], "100:" + TOKEN)))
 
     result = await execute_tool(
-        _container(db), "get_robinhood_launches", {"limit": requested, "cursor": "7:" + TOKEN}
+        _container(db), "get_robinhood_launches", {"limit": requested, "cursor": "7:" + TOKEN}, KEY
     )
 
     db.get_launch_feed.assert_awaited_once_with(4663, expected, "7:" + TOKEN)
@@ -159,7 +160,7 @@ async def test_launch_tool_reports_a_malformed_cursor_as_a_tool_error(db, cursor
     response = await process_jsonrpc(_container(db), {
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": {"name": "get_robinhood_launches", "arguments": {"cursor": cursor}},
-    })
+    }, KEY)
 
     result = response["result"]
     assert result["isError"] is True
@@ -182,7 +183,7 @@ def test_launch_tool_rejects_an_unsupported_chain_before_the_database():
 async def test_launch_tool_says_discovery_is_unavailable_on_other_chains():
     db = MagicMock(get_launch_feed=AsyncMock())
 
-    result = await execute_tool(_container(db), "get_robinhood_launches", {"chain_id": 56})
+    result = await execute_tool(_container(db), "get_robinhood_launches", {"chain_id": 56}, KEY)
 
     assert result == {
         "launches": [],

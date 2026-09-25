@@ -191,12 +191,7 @@ ALLOWED = {
     ): "a level default in prompt text, outside api.py, rpc/ and core/ (follow-up: verdicts.UNKNOWN)",
 }
 # Files whose every match is allowed, and why.
-ALLOWED_FILES = {
-    "core/telegram_formatter.py": (
-        "another branch owns this file: the follow-up reads its risk levels from core/verdicts.py once "
-        "that branch merges"
-    ),
-}
+ALLOWED_FILES = {}
 
 
 def _python_sources():

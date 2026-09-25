@@ -1,10 +1,12 @@
 """Formats composite risk data into a full Telegram intelligence report."""
 
 import re
+import sys
+import unicodedata
 
 from core.extension_formatter import is_scan_incomplete
 from core.risk_engine import database_matches, medium_matches
-from core.verdicts import BLOCK_RECOMMENDED, CAUTION, HIGH, HIGH_RISK, MEDIUM, SAFE, classify
+from core.verdicts import BLOCK_RECOMMENDED, CAUTION, HIGH, HIGH_RISK, MEDIUM, SAFE, UNKNOWN, classify
 
 # Replies are sent with Telegram's legacy Markdown, where these characters start an entity.
 _MARKUP = re.compile(r'([_*`\[])')
@@ -15,19 +17,61 @@ CONTROL_CHARACTERS = re.compile(
     r'[\x00-\x1f\x7f-\x9f\xad\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069'
     r'\u3164\ufeff\uffa0]'
 )
+
+
+def _combining_marks() -> str:
+    """The body of a regex character class matching every combining mark (Unicode category M)."""
+    ranges = []
+    for code in range(sys.maxunicode + 1):
+        if unicodedata.category(chr(code)).startswith('M'):
+            if ranges and ranges[-1][1] == code - 1:
+                ranges[-1][1] = code
+            else:
+                ranges.append([code, code])
+    return ''.join(f'{re.escape(chr(low))}-{re.escape(chr(high))}' for low, high in ranges)
+
+
+# Telegram turns a bare domain, a URI with a scheme, an @mention and a /command into a link in any
+# message, plain text or escaped Markdown alike, so untrusted text shows the character that starts one
+# as a look-alike: a dot (or an ideographic or fullwidth dot, which Telegram also reads as one) between
+# a word character and a letter, where a domain's next label starts, as ONE DOT LEADER; the colon of
+# any scheme:// (tg, ton, http, even with a dotless host) as RATIO; and an @ or / starting a word as
+# FULLWIDTH COMMERCIAL AT or DIVISION SLASH. A dot before a digit and a colon not followed by // are
+# left alone, so numbers, versions and times (12.5%, $0.0023, v1.2, 12:30) read and copy as written.
+# Text is composed (NFC) first, and a combining mark before a dot counts as the end of a label as the
+# letter under it does, so an accent written as a separate mark (l + U+0301) cannot keep a domain whole.
+_LINK_STARTS = re.compile(
+    rf'(?<=[\w{_combining_marks()}])[.\u3002\uff0e\uff61](?=[^\W\d_])'
+    r'|(?<=[\w+.\-]):(?=//)|(?<!\w)@(?=\w)|(?<![\w/<>])/(?=\w)'
+)
+_LINK_LOOKALIKES = {'@': '\N{FULLWIDTH COMMERCIAL AT}', '/': '\N{DIVISION SLASH}', ':': '\N{RATIO}'}
 # How a collision's symbol or name pointed at the official token.
 _POINTED_BY = {'ticker': 'same ticker', 'affix': 'ticker with an affix', 'company': 'same company name'}
 _ADDRESS = re.compile(r'0x[0-9a-fA-F]{40}')
 
 
+def unlinked(value) -> str:
+    """An untrusted value as one line of text Telegram cannot turn into a link, a mention or a command,
+    with the characters that could hide or reorder it blanked."""
+    text = unicodedata.normalize('NFC', CONTROL_CHARACTERS.sub(' ', str(value)))
+    return _LINK_STARTS.sub(lambda match: _LINK_LOOKALIKES.get(match.group(), '\N{ONE DOT LEADER}'), text)
+
+
 def escape_markdown(value) -> str:
-    """Show an untrusted value literally in a legacy Markdown message, with no markup or line breaks.
+    """Show a value literally in a legacy Markdown message, with no markup or line breaks.
 
     Legacy Markdown has no escape for a backslash, and one ending a value would escape the markup
-    after it, so a backslash is shown as the look-alike SET MINUS.
+    after it, so a backslash is shown as the look-alike SET MINUS. Links stay tappable, as the
+    operator's own alerts need; text from a token, a provider, a user or the model goes through
+    escape_untrusted instead.
     """
     text = CONTROL_CHARACTERS.sub(' ', str(value)).replace('\\', '\N{SET MINUS}')
     return _MARKUP.sub(r'\\\1', text)
+
+
+def escape_untrusted(value) -> str:
+    """escape_markdown for text from a token, a provider, a user or the model, which is also unlinked."""
+    return escape_markdown(unlinked(value))
 
 
 def escape_markdown_lines(text: str) -> str:
@@ -37,7 +81,7 @@ def escape_markdown_lines(text: str) -> str:
     both are dropped rather than shown as markup characters.
     """
     return '\n'.join(
-        escape_markdown(line) for line in text.replace('**', '').replace('`', '').split('\n')
+        escape_untrusted(line) for line in text.replace('**', '').replace('`', '').split('\n')
     )
 
 
@@ -90,7 +134,7 @@ def format_full_report(
     token_info: dict = None,
 ) -> str:
     rug_prob = risk_output.get('rug_probability', 0)
-    risk_level = risk_output.get('risk_level', 'UNKNOWN')
+    risk_level = risk_output.get('risk_level', UNKNOWN)
     archetype = risk_output.get('risk_archetype', 'unknown')
     confidence = risk_output.get('confidence_level', 0)
     flags = risk_output.get('critical_flags', [])
@@ -99,8 +143,10 @@ def format_full_report(
     incomplete = is_scan_incomplete(risk_output) or bool(
         honeypot_data and honeypot_data.get('simulation_failed')
     )
-    if incomplete and risk_level == 'LOW':
-        risk_level = 'UNKNOWN'
+    # An incomplete scan's level is not known either: the engine raises missing data to a MEDIUM floor,
+    # and its band still sets the icon and the final verdict.
+    if incomplete:
+        risk_level = UNKNOWN
     coverage_reasons = risk_output.get('coverage_reasons', {})
     impostor_check = risk_output.get('impostor_check')
     impostor = impostor_check is not None and impostor_check['status'] == 'impostor'
@@ -124,17 +170,14 @@ def format_full_report(
 
     # Target (with token name and symbol if available)
     if token_info and token_info.get('name') and token_info.get('symbol'):
-        lines.append(f'*Token:* {escape_markdown(token_info["name"])} ({escape_markdown(token_info["symbol"])})')
+        lines.append(f'*Token:* {escape_untrusted(token_info["name"])} ({escape_untrusted(token_info["symbol"])})')
         lines.append(f'*Address:* `{address}`')
     else:
         lines.append(f'*Target:* `{address}`')
-    has_metadata = bool(token_info and (token_info.get('name') or token_info.get('symbol')))
-    # A wallet has no token to check, and without its name and symbol only an official or unknown check
-    # can be stated.
-    if impostor_check and contract_data.get('is_contract') is not False and (
-        has_metadata or impostor_check['status'] in ('official', 'unknown')
-    ):
-        detail = escape_markdown(describe_impostor_check(impostor_check))
+    # A wallet has no token to check. The check reads the token's symbol and name itself, so it is stated
+    # whether or not the report has them.
+    if impostor_check and contract_data.get('is_contract') is not False:
+        detail = escape_untrusted(describe_impostor_check(impostor_check))
         # A contract goes in a code span, which a tap copies; a valid address holds nothing to escape.
         for contract in {impostor_check['official_address'], (impostor_check.get('also') or {}).get('official_address')}:
             if contract and _ADDRESS.fullmatch(contract):
@@ -151,14 +194,14 @@ def format_full_report(
     if flags:
         lines.append('*\U000026A0 Critical Flags:*')
         for flag in flags:
-            lines.append(f'  \u2022 {escape_markdown(flag)}')
+            lines.append(f'  \u2022 {escape_untrusted(flag)}')
         lines.append('')
 
     # Notes name a check that could not run and only adds risk: information, not a danger signal.
     if notes:
         lines.append('*\u2139 Notes:*')
         for note in notes:
-            lines.append(f'  \u2022 {escape_markdown(note)}')
+            lines.append(f'  \u2022 {escape_untrusted(note)}')
         lines.append('')
 
     # Category scores
@@ -168,7 +211,7 @@ def format_full_report(
         value = f'{score}/100' if score is not None else 'Unknown'
         reason = coverage_reasons.get(category)
         if reason:
-            value += f' ({escape_markdown(reason)})'
+            value += f' ({escape_untrusted(reason)})'
         lines.append(f'  {category.title()}: {value}')
     lines.append('')
 
@@ -188,10 +231,10 @@ def format_full_report(
 
     bytecode_warnings = contract_data.get('bytecode_warnings', [])
     if bytecode_warnings:
-        lines.append(f'  Bytecode Warnings: {escape_markdown(", ".join(bytecode_warnings))}')
+        lines.append(f'  Bytecode Warnings: {escape_untrusted(", ".join(bytecode_warnings))}')
     source_patterns = contract_data.get('source_code_patterns', [])
     if source_patterns:
-        lines.append(f'  Source Patterns: {escape_markdown(", ".join(source_patterns))}')
+        lines.append(f'  Source Patterns: {escape_untrusted(", ".join(source_patterns))}')
     scam_matches = database_matches(contract_data.get('scam_matches'))
     if scam_matches:
         lines.append(f'  Scam DB Hits: {len(scam_matches)}')
@@ -199,12 +242,12 @@ def format_full_report(
         lines.append('  Scam DB Hits: Unknown')
     # A community report is not a scam database hit; it is named on its own.
     for match in medium_matches(contract_data.get('scam_matches')):
-        lines.append(f'  {escape_markdown(match["reason"])}')
+        lines.append(f'  {escape_untrusted(match["reason"])}')
     lines.append('')
 
     # Market intelligence
     lines.append('*\U0001F4CA Market Intelligence:*')
-    market_reason = escape_markdown(dex_data.get('reason') or 'Provider data unavailable')
+    market_reason = escape_untrusted(dex_data.get('reason') or 'Provider data unavailable')
     for key, label in (('liquidity_usd', 'Liquidity'), ('volume_24h', '24h Volume'), ('fdv', 'FDV')):
         value = dex_data.get(key)
         rendered = f'${value:,.0f}' if value is not None else f'Unknown ({market_reason})'
@@ -230,12 +273,16 @@ def format_full_report(
 
     # Wallet reputation
     lines.append('*\U0001F464 Wallet Reputation (Ethos):*')
-    rep_score = ethos_data.get('reputation_score', 50)
-    trust = escape_markdown(ethos_data.get('trust_level', 'unknown'))
-    lines.append(f'  Score: {rep_score}  |  Trust: {trust}')
+    # A failed lookup, or an address Ethos has no score for, has no reputation to show, not a neutral one.
+    if ethos_data.get('status') == 'unknown' or ethos_data.get('ethos_raw_score') is None:
+        reason = ethos_data.get('reason')
+        lines.append('  Score: Unknown  |  Trust: Unknown' + (f' ({escape_untrusted(reason)})' if reason else ''))
+    else:
+        trust = escape_untrusted(ethos_data['trust_level'])
+        lines.append(f"  Score: {ethos_data['reputation_score']}  |  Trust: {trust}")
     ethos_flags = ethos_data.get('scam_flags', [])
     if ethos_flags:
-        lines.append(f'  Scam Flags: {escape_markdown(", ".join(str(f) for f in ethos_flags))}')
+        lines.append(f'  Scam Flags: {escape_untrusted(", ".join(str(f) for f in ethos_flags))}')
     linked = ethos_data.get('linked_wallets', [])
     if linked:
         lines.append(f'  Linked Wallets: {len(linked)}')
@@ -244,7 +291,7 @@ def format_full_report(
     # Trade simulation
     if honeypot_data is not None:
         lines.append('*\U0001F9EA Trade Simulation:*')
-        reason = escape_markdown(
+        reason = escape_untrusted(
             honeypot_data.get('reason') or honeypot_data.get('honeypot_reason') or 'Provider data unavailable'
         )
         is_honeypot = honeypot_data.get('is_honeypot')
@@ -279,7 +326,7 @@ def format_full_report(
         claimed = 'the canonical' if impostor_check['canonical'] else 'official'
         caveat = '; unknown risk: provider coverage incomplete' if incomplete else ''
         lines.append(
-            f'{verdict_icon} Impersonates {claimed} {escape_markdown(impostor_check["symbol"])}: '
+            f'{verdict_icon} Impersonates {claimed} {escape_untrusted(impostor_check["symbol"])}: '
             f'do not treat as the real token{caveat}'
         )
     elif band == BLOCK_RECOMMENDED:

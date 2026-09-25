@@ -31,6 +31,15 @@ AI_CHAT_PAUSED = (
 )
 
 
+def _untagged(text: str) -> str:
+    """Text that cannot open or close the <tool_results> and <user_message> tags around it.
+
+    Token names come from DexScreener and messages are pasted text, so < and > are written as the
+    JSON escapes \\u003c and \\u003e, which JSON tool data decodes back to the same characters.
+    """
+    return text.replace("<", "\\u003c").replace(">", "\\u003e")
+
+
 def _utc_day() -> int:
     return int(time.time() // 86400)
 
@@ -139,23 +148,23 @@ class Advisor:
         context = await self._gather_context(intent, data, chain_id=chain_id)
 
         # Build the user content — inject context when available.
-        # Wrap in XML delimiters to mitigate prompt injection via API data.
+        # Wrap in XML delimiters to mitigate prompt injection via API data; nothing inside can close them.
         if context:
             user_content = (
                 "<tool_results>\n"
-                f"{json.dumps(context, default=str)}\n"
+                f"{_untagged(json.dumps(context, default=str))}\n"
                 "</tool_results>\n\n"
-                f"<user_message>{message}</user_message>"
+                f"<user_message>{_untagged(message)}</user_message>"
             )
         else:
-            user_content = f"<user_message>{message}</user_message>"
+            user_content = f"<user_message>{_untagged(message)}</user_message>"
 
-        # Build messages list from history + new message
+        # Build messages list from history + new message; stored messages cannot open the tags either.
         messages: List[Dict] = []
         for entry in history:
             messages.append({
                 "role": entry["role"],
-                "content": entry["message"],
+                "content": _untagged(entry["message"]),
             })
         messages.append({"role": "user", "content": user_content})
 
@@ -225,6 +234,7 @@ class Advisor:
                     "coverage_reasons": scan.get("coverage_reasons", {}),
                     "honeypot": context.get("honeypot", {}),
                     "market": context.get("market", {}),
+                    "impostor_check": scan.get("impostor_check"),
                 }
 
         return result

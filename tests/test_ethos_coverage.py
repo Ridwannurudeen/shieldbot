@@ -374,3 +374,58 @@ async def test_firewall_fallback_scores_the_same_counterparty(fallback_firewall)
         await fallback_firewall.firewall(request, SimpleNamespace(headers={}))
     assert session.get.call_count == 1
     assert session.get.call_args.args[0].endswith(f"address:{SPENDER}")
+
+
+@pytest.mark.asyncio
+async def test_a_score_of_zero_is_the_lowest_score_not_a_neutral_one():
+    # Ethos scores run from 0 (Untrusted) to 2800; new profiles start at 1200.
+    data = await _fetch(payload={**PROFILE, "score": 0, "status": "ACTIVE"})
+
+    assert data["reputation_score"] == 0
+    assert data["ethos_raw_score"] == 0
+    assert data["trust_level"] == "very_low"
+    assert data["severe_reputation_flag"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_profile_without_a_score_is_unknown_not_untrusted():
+    payload = {key: value for key, value in PROFILE.items() if key != "score"}
+
+    assert await _fetch(payload=payload) == {
+        **NEUTRAL,
+        "status": "unknown",
+        "reason": "Ethos profile has no score",
+    }
+
+
+def _reputation_line(ethos):
+    from core.telegram_formatter import format_full_report
+
+    report = format_full_report(
+        {"rug_probability": 5, "risk_level": "LOW", "status": "ok", "coverage": {"behavioral": 1}},
+        {}, {}, ethos, address="0x" + "a" * 40,
+    ).splitlines()
+    return report[report.index("*\U0001F464 Wallet Reputation (Ethos):*") + 1]
+
+
+@pytest.mark.parametrize(
+    "ethos, line",
+    [
+        (
+            {**NEUTRAL, "status": "unknown", "reason": "Ethos HTTP 503"},
+            "  Score: Unknown  |  Trust: Unknown (Ethos HTTP 503)",
+        ),
+        (dict(NEUTRAL), "  Score: Unknown  |  Trust: Unknown"),
+        ({}, "  Score: Unknown  |  Trust: Unknown"),
+        (
+            {**NEUTRAL, "reputation_score": 50.0, "ethos_raw_score": 1400, "trust_level": "medium"},
+            "  Score: 50.0  |  Trust: medium",
+        ),
+        (
+            {**NEUTRAL, "reputation_score": 0.0, "ethos_raw_score": 0, "trust_level": "very_low"},
+            "  Score: 0.0  |  Trust: very\\_low",
+        ),
+    ],
+)
+def test_the_report_shows_a_reputation_only_when_ethos_scored_the_address(ethos, line):
+    assert _reputation_line(ethos) == line
