@@ -988,6 +988,57 @@ if (surface === 'sidepanel-guardian') {
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.parametrize('score', ['missing', 'null', 'nan', 'string', 0, 50, 80])
+def test_extension_injection_scan_without_a_score_is_unknown_never_safe(score):
+    import json
+    from pathlib import Path
+    import shutil
+    import subprocess
+
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('Node.js is required for extension JavaScript regression tests')
+    script = r'''
+const fs = require('fs');
+const vm = require('vm');
+const assert = require('assert/strict');
+const score = JSON.parse(process.argv[1]);
+const cards = [];
+const context = {
+  escapeHtml: String,
+  document: {createElement() { return {className: '', innerHTML: ''}; }},
+  scannerResults: {prepend(card) { cards.push(card); }},
+};
+vm.createContext(context);
+const source = fs.readFileSync('extension/sidepanel.js', 'utf8').replace(/\r\n/g, '\n');
+const start = source.indexOf('  function renderInjectionResult');
+const end = source.indexOf('  // Event listeners', start);
+assert(start >= 0 && end > start);
+vm.runInContext(source.slice(start, end), context);
+const data = {matched_patterns: [], confidence: 0};
+if (score === 'null') data.risk_score = null;
+else if (score === 'nan') data.risk_score = NaN;
+else if (score === 'string') data.risk_score = '85';
+else if (score !== 'missing') data.risk_score = score;
+context.renderInjectionResult(data);
+const html = cards[0].innerHTML;
+if (typeof score === 'number') {
+  assert(html.includes(`>${score}<`), html);
+  assert(html.includes({0: '>Safe<', 50: '>Suspicious<', 80: '>Injection Detected<'}[score]), html);
+  assert.equal(html.includes('No patterns matched'), true);
+} else {
+  assert(html.includes('scan-score-badge unknown') && html.includes('>?<') && html.includes('>Unknown<'), html);
+  assert(!html.includes('Safe') && !html.includes('No patterns matched'), html);
+}
+'''
+    result = subprocess.run(
+        [node, '-e', script, json.dumps(score)],
+        cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True,
+        encoding='utf-8', check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.asyncio
 async def test_api_rescans_legacy_row_from_real_database(consumer_api, incomplete_output):
     from core.database import Database

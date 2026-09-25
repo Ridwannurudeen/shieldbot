@@ -592,10 +592,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function renderInjectionResult(data) {
-    const score = Number(data.risk_score) || 0;
+    // A result without a score the scanner measured is Unknown, never Safe.
+    const known = Number.isFinite(data.risk_score);
+    const score = known ? data.risk_score : "?";
     let level = "safe";
     let label = "Safe";
-    if (score >= 70) { level = "danger"; label = "Injection Detected"; }
+    if (!known) { level = "unknown"; label = "Unknown"; }
+    else if (score >= 70) { level = "danger"; label = "Injection Detected"; }
     else if (score >= 30) { level = "warning"; label = "Suspicious"; }
 
     const patterns = Array.isArray(data.matched_patterns) ? data.matched_patterns : [];
@@ -613,7 +616,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           <div class="scan-result-sublabel">Confidence: ${Number(data.confidence || 0).toFixed(1)}%</div>
         </div>
       </div>
-      ${patternTags ? `<ul class="pattern-list">${patternTags}</ul>` : '<ul class="pattern-list"><li class="pattern-tag safe">No patterns matched</li></ul>'}
+      ${patternTags ? `<ul class="pattern-list">${patternTags}</ul>` : known ? '<ul class="pattern-list"><li class="pattern-tag safe">No patterns matched</li></ul>' : ""}
     `;
     scannerResults.prepend(card);
   }
