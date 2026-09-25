@@ -1022,7 +1022,7 @@ NOTHING_FOUND = {
 
 @pytest.mark.parametrize('answer', [
     'detected', 'nothing-found', 'http-error', 'network-error', 'old-shape', 'empty', 'no-detections-field',
-    'level-disagrees',
+    'level-disagrees', 'none-with-detections',
 ])
 def test_extension_injection_scan_shows_what_the_scanner_found_and_never_safe(answer):
     import json
@@ -1042,6 +1042,7 @@ def test_extension_injection_scan_shows_what_the_scanner_found_and_never_safe(an
         'empty': {'status': 200, 'body': {}},
         'no-detections-field': {'status': 200, 'body': {'clean': True, 'risk_level': 'NONE'}},
         'level-disagrees': {'status': 200, 'body': {**NOTHING_FOUND, 'risk_level': 'HIGH'}},
+        'none-with-detections': {'status': 200, 'body': {**DETECTED, 'risk_level': 'NONE'}},
     }
     script = r'''
 const fs = require('fs');
@@ -1083,7 +1084,7 @@ vm.runInContext(source.slice(start, end), context);
     assert(!html.includes('danger') && !html.includes('classUnknown'), html);
   } else {
     assert(html.includes('scan-score-badge unknown') && html.includes('>?<') && html.includes('classUnknown'), html);
-    assert(!html.includes('scanNoInjectionPatterns'), html);
+    assert(!html.includes('scanNoInjectionPatterns') && !html.includes('scanInjectionFound'), html);
     if (answer === 'http-error') assert(html.includes('HTTP 500'), html);
     if (answer === 'network-error') assert(html.includes('Failed to fetch'), html);
   }

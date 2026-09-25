@@ -596,7 +596,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   // The scanner answers with its risk_level (NONE to CRITICAL) and the known
   // injection patterns it found (detections). Finding none is a pattern match,
   // not a safety verdict, so nothing here is shown as Safe. An answer without
-  // those fields, or no answer (failure says why), is Unknown.
+  // those fields, one whose level and detections disagree (NONE with patterns
+  // found, or another level with none), or no answer (failure says why), is
+  // Unknown.
   function renderInjectionResult(data, failure) {
     const detections = data && Array.isArray(data.detections) ? data.detections : null;
     const riskLevel = data && typeof data.risk_level === "string" ? data.risk_level : null;
@@ -604,12 +606,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     let badge = "?";
     let label = t("classUnknown");
     let note = failure || t("unknownNoReason");
-    if (detections && riskLevel && detections.length) {
+    if (detections && riskLevel && riskLevel !== "NONE" && detections.length) {
       state = "danger";
       badge = "!";
       label = t("scanInjectionFound", { level: riskLevel });
       note = typeof data.recommendation === "string" ? data.recommendation : "";
-    } else if (detections && riskLevel === "NONE") {
+    } else if (detections && riskLevel === "NONE" && !detections.length) {
       state = "neutral";
       badge = "\u2013";
       label = t("scanNoInjectionPatterns");
