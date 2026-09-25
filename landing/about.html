@@ -131,7 +131,7 @@
     <!-- BLOCK 5: Transaction simulation -->
     <h2>Pre-Sign Transaction Simulation</h2>
     <p>When transaction simulation is enabled, ShieldAI sends the transaction to Tenderly for simulation on a copy of the chain state. Tenderly runs it in a sandbox and returns the tokens and amounts that would leave or enter your wallet.</p>
-    <p>ShieldAI displays this asset delta before the wallet signature dialog appears. For example: <em>"You will send 2.5 BNB and receive 10,000 TOKEN."</em> Tokens the simulation shows leaving your wallet are listed as warnings beside the verdict; they do not change the verdict itself. If the transaction reverts in the simulation, the result is incomplete and cannot be SAFE, and a revert on a contract whose risk score is already 30 or more is BLOCK RECOMMENDED.</p>
+    <p>ShieldAI displays this asset delta before the wallet signature dialog appears. For example: <em>"You will send 2.5 BNB and receive 10,000 TOKEN."</em> Tokens the simulation shows leaving your wallet are listed among the danger signals; they do not change the verdict itself. If the transaction reverts in the simulation, the result is incomplete and cannot be SAFE, and a revert on a contract whose own risk score, before community reports and campaign boosts, is already 30 or more is BLOCK RECOMMENDED.</p>
 
     <!-- BLOCK 6: Comparison -->
     <h2>ShieldAI vs. Browser Phishing Warnings</h2>
@@ -160,7 +160,7 @@
 
     <!-- BLOCK 7: Privacy / Trust -->
     <h2>What Data ShieldAI Collects</h2>
-    <p>The extension sends only what a check needs to the ShieldAI API, over HTTPS. For a transaction, or each call of a batch, that is the recipient, sender, value, calldata and chain ID, and for an EIP-7702 transaction each delegate's address, never the signed authorization. For a typed-data signature it is the signing method, any EIP-712 typed data, your address and the chain ID. For <code>personal_sign</code> and <code>eth_sign</code> it is only the signing method and the chain ID: never the message or hash you sign, and not your address. Each of these checks carries your Balanced or Strict setting. The phishing check sends only the origin (scheme, host and port) of the site you open. When you use Wallet Health, the wallet address you enter is sent too.</p>
+    <p>The extension sends only what a check needs to the ShieldAI API, over HTTPS. For a transaction, or each call of a batch, that is the recipient, sender, value, calldata and chain ID, and for an EIP-7702 transaction each delegate's address, never the signed authorization. For a typed-data signature it is the signing method, any EIP-712 typed data, your address and the chain ID. For <code>personal_sign</code> and <code>eth_sign</code> it is only the signing method and the chain ID: never the message or hash you sign, and not your address. Each of these checks carries your Balanced or Strict setting. The phishing check sends only the origin (scheme, host and port) of the site you open. When you use Wallet Health, the wallet address you enter and the chain you selected are sent too.</p>
     <ul>
       <li>Scan results are stored by contract address and chain, <strong>not</strong> with your IP address</li>
       <li>Scan history (last 50 results) is stored locally in <code>chrome.storage.local</code> — never uploaded</li>

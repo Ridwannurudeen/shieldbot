@@ -445,6 +445,22 @@ def test_built_landing_bundle_contains_the_current_faq():
     assert stated and {int(n) for n in stated} == {mempool_chain_count()}
 
 
+@pytest.mark.parametrize("component", ["HowItWorks.tsx", "AgentSecurity.tsx"])
+def test_built_landing_bundle_contains_the_current_feature_copy(component):
+    # The claims these sections make (what the extension refuses, ERC-20 approvals only) ship only in the
+    # built bundle, so an edit to the source without `npm run build` must fail here, not go out stale.
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    descriptions = re.findall(r'^\s+desc: "([^"]+)",', read(COMPONENTS / component), re.MULTILINE)
+    assert bundle and descriptions
+    for text in descriptions:
+        # The source may write a character as a JavaScript escape (0\\u2013100), which the build decodes.
+        text = re.sub(r"\\u([0-9a-fA-F]{4})", lambda match: chr(int(match.group(1), 16)), text)
+        escaped = "".join(ch if ord(ch) < 128 else f"\\u{ord(ch):04x}" for ch in text)
+        assert text in bundle or escaped in bundle, (
+            f"landing bundle is stale: missing {component} text {text[:60]!r}"
+        )
+
+
 def test_built_dashboard_contains_the_current_source_strings():
     built = read(ROOT / "dashboard" / "index.html")
     labels = re.findall(r"label:'([^']+)'", read(DASHBOARD_SRC))
