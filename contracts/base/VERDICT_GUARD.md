@@ -154,7 +154,7 @@ outer consumer call overhead and transaction intrinsic gas. They are local Cancu
 fee estimate. The test asserts the 4,000-gas storage-access difference and persists the measured values
 in `snapshots/ShieldBotVerdictGuardTest.json`.
 
-## Formatting and static-analysis caveats
+## Static-analysis caveats
 
 Slither was run separately on both the unchanged registry and the new guard with the CI flags:
 

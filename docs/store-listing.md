@@ -74,8 +74,7 @@ has passed with them.
 1. Merge the release branches into main and run `python -m pytest -q -p no:cacheprovider`.
 2. Confirm `extension/manifest.json` says `"version": "3.1.0"`. The store refuses a package whose
    version is not higher than the published 3.0.1.
-3. Build the package from the `extension` folder, leaving out `screenshots/` (capture notes, not
-   extension code) and `README.md`. `manifest.json` must sit at the root of the zip. This command,
+3. Build the package from the `extension` folder, leaving out `README.md`. `manifest.json` must sit at the root of the zip. This command,
    run from the repository root, writes it with forward-slash entry names on any system:
 
    ```

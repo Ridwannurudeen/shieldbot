@@ -1,7 +1,7 @@
 """Campaign Graph Radar v1 — cross-chain entity correlation for scam campaign detection.
 
 Links deployers across chains, detects coordinated scam campaigns by clustering
-contracts based on shared funders, deployers, code similarity, and temporal patterns.
+contracts based on shared funders, deployers and temporal patterns.
 """
 
 import asyncio

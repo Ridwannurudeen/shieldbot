@@ -41,9 +41,9 @@ Slither **0.11.5**, `--exclude-informational --fail-high`, with Solidity **0.8.2
 | `ShieldBotVerdictGuard.sol` | 5 contracts, 80 detectors, 1 result | Same known OpenZeppelin finding |
 | `ShieldBotGuardedTransfer.sol` | 12 contracts, 80 detectors, 1 result | Same known OpenZeppelin finding |
 
-The OpenZeppelin finding is `Ownable2Step.transferOwnership(address).newOwner` lacking a zero check; zero cancels a pending ownership transfer. No new findings were introduced. The verifier, attestor and registry sources are unchanged from `fff633f`. The all-five run does **not** support a claim that the entire project has only the OpenZeppelin finding: the attestor's two LOW event-reentrancy findings also exist. They were not suppressed or changed in WP9.
+The OpenZeppelin finding is `Ownable2Step.transferOwnership(address).newOwner` lacking a zero check; zero cancels a pending ownership transfer. No new findings were introduced. The verifier, attestor and registry sources are unchanged from `fff633f`. The all-five run does **not** support a claim that the entire project has only the OpenZeppelin finding: the attestor's two LOW event-reentrancy findings also exist. They were not suppressed or changed.
 
-The CI workflow now explicitly analyzes both new contracts. Local reproduction used installed native solc binaries rather than downloading/selecting compilers, with the same remaps and severity gate. Example from the repository root:
+The CI workflow explicitly analyzes both new contracts. To run the same check locally, with the same remaps and severity gate, from the repository root:
 
 ```bash
 slither contracts/base/src/ShieldBotGuardedTransfer.sol --compile-force-framework solc --solc-remaps "@openzeppelin/=contracts/base/lib/openzeppelin-contracts/ forge-std/=contracts/base/lib/forge-std/src/" --exclude-informational --fail-high
@@ -57,7 +57,7 @@ The requested Python selection excludes `tests/test_bot_app.py`; Telegram is abs
 
 Installed tools checked in this pass: Python **3.12.10**, pytest **8.3.3**, pytest-asyncio **1.3.0**, web3 **7.16.0**, eth-utils **6.0.0**, eth-abi **5.2.0**, httpx **0.28.1**, Forge **1.7.1**, Solidity **0.8.28**, Slither **0.11.5**. Several Python versions differ from `requirements.txt`; this is not a clean pinned-environment installation result. Python reports existing deprecation/configuration warnings. The touched-file formatting result does not assert an unqualified whole-checkout format pass across preexisting Windows line endings.
 
-No standalone TypeScript SDK suite or live-chain test was run in WP9. The existing Python tests use fabricated cryptographic fixtures, including fixture-only signing; transport is mocked. Foundry deployment-script tests run only in its local VM.
+No live-chain test is part of these suites. The existing Python tests use fabricated cryptographic fixtures, including fixture-only signing; transport is mocked. Foundry deployment-script tests run only in its local VM.
 
 The timing figures and the Paxos USDG exact-delivery observation were recorded earlier and were not re-probed live. The judge-guide Python classifier and Solidity consumer examples are separate offline checks; they do not establish a deployed end-to-end publication. The earlier synthetic receipt-verifier exercise is historical and was not rerun here.
 

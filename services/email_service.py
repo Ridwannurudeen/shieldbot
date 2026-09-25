@@ -212,7 +212,7 @@ def _build_beta_welcome_html(email: str) -> str:
             <td style="padding:24px 40px;text-align:center;">
               <p style="margin:0;color:#4a5568;font-size:12px;line-height:1.6;">
                 ShieldBot &mdash; Real-time Web3 transaction security<br>
-                You received this because you signed up for the beta at shieldbot.xyz
+                You received this because you signed up for the beta at shieldbotsecurity.online
               </p>
             </td>
           </tr>
