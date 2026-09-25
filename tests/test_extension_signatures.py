@@ -695,6 +695,45 @@ def test_proceed_on_a_transaction_the_api_did_not_analyse_needs_a_hold(policy):
     )
 
 
+# A page can make the API refuse a signature (typed data past its size limit gets a 422); the
+# unanswered signature's Sign Anyway is then a hold, never one click.
+@pytest.mark.parametrize("policy", ["BALANCED", "STRICT"])
+@pytest.mark.parametrize("kind", ["personal_sign", "typed-data"])
+def test_sign_anyway_on_a_signature_the_api_did_not_analyse_needs_a_hold(policy, kind):
+    run_node(
+        CONTENT_HARNESS
+        + HOLD
+        + r"""
+(async () => {
+  const [policy, kind] = JSON.parse(process.argv[1]);
+  storage.policyMode = policy;
+  analyze = async () => ({error: 'API error 422: typedData is too large'});
+  if (kind === 'typed-data') {
+    await intercept('request', {signMethod: 'eth_signTypedData_v4', chainId: 1,
+      typedData: {primaryType: 'Mail', domain: {name: 'Mail'}, message: {contents: 'hi'}}}, 'eth_signTypedData_v4');
+  } else {
+    await intercept('request', {signMethod: 'personal_sign', data: '0x68656c6c6f', chainId: 1}, 'personal_sign');
+  }
+  const html = overlay().innerHTML;
+  assert(overlay().querySelector('.shieldai-badge').className.includes('shieldai-badge-unknown'), html);
+  if (policy === 'STRICT') {
+    assert(!html.includes('id="shieldai-proceed"'), html);
+    return;
+  }
+  const proceed = byId('shieldai-proceed');
+  assert(html.includes('Hold to Sign Anyway') && html.includes('This request was not checked'), html);
+  assert(byId(proceed.attrs['aria-describedby']), 'the hold is not explained to assistive technology');
+  userClick(proceed);
+  await flush();
+  assert.deepEqual(verdicts(), [], 'a click signed a request the API did not analyse');
+  press(proceed, 'pointer');
+  await heldVerdict();
+  await assertVerdicts([['request', 'proceed']]);
+""",
+        [policy, kind],
+    )
+
+
 @pytest.mark.parametrize(
     "value, sent",
     [

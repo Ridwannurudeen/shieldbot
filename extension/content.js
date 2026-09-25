@@ -900,7 +900,10 @@
     const chainUnknown = Boolean(result) && (result.coverage || {}).chain === false;
     const canSign = !chainUnknown &&
       !(strict && (incomplete || unparseable || classification === "BLOCK_RECOMMENDED"));
-    const hold = canSign && classification === "BLOCK_RECOMMENDED";
+    // Sign Anyway needs a hold on Block Recommended, and when the API gave no
+    // answer: a page can make it fail (typed data past its size limit, say),
+    // and an unchecked signature must not go through on one click.
+    const hold = canSign && (classification === "BLOCK_RECOMMENDED" || Boolean(response.error));
     // What background.js found in a Sign-In with Ethereum message leads.
     const signIn = (result && result.siwe) || {};
     const signInSignals = signIn.state === "mismatch"
@@ -951,7 +954,7 @@
             ? `<button class="shieldai-btn shieldai-btn-proceed shieldai-btn-hold" id="shieldai-proceed" aria-describedby="shieldai-hold-note">${_t("overlayBtnHoldSign")}</button>`
             : `<button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">${_t("overlayBtnSignAnyway")}</button>`}
         </div>
-        ${hold ? `<p class="shieldai-hold-note" id="shieldai-hold-note">${_t("overlayHoldNote")}</p>` : ""}
+        ${hold ? `<p class="shieldai-hold-note" id="shieldai-hold-note">${classification === "BLOCK_RECOMMENDED" ? _t("overlayHoldNote") : _t("overlayHoldNoteUnchecked")}</p>` : ""}
         ${COVERED_NOTE}
         ${canSign ? "" : `<p class="shieldai-strict-note">${chainUnknown ? _t("overlayChainNoProceed") : _t("overlayStrictNoProceed")}</p>`}
       </div>

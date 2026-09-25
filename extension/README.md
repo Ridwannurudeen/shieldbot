@@ -128,12 +128,12 @@ second limit below is the case where they did not.
   support (it refuses it as `Unsupported chain ID`), the overlay offers only Block, in Balanced and
   in Strict mode, and says why. This holds for transactions, signatures and a `wallet_sendCalls`
   batch with a call on another chain.
-- On a Block Recommended overlay in Balanced mode, and on a transaction the API did not analyse (it
-  could not be reached, or refused the request), Proceed or Sign Anyway counts only when held down
-  for 1.5 seconds, with the pointer or with Enter or Space, by real input: a click does nothing,
-  letting go early cancels, and a fill shows the progress. The half-second delay and visibility rule
-  below apply when the hold starts, and the dialog must stay visible until it ends. Block and Reject
-  stay a single click.
+- On a Block Recommended overlay in Balanced mode, and on a transaction or signature the API did not
+  analyse (it could not be reached, or refused the request), Proceed or Sign Anyway counts only when
+  held down for 1.5 seconds, with the pointer or with Enter or Space, by real input: a click does
+  nothing, letting go early cancels, and a fill shows the progress. The half-second delay and
+  visibility rule below apply when the hold starts, and the dialog must stay visible until it ends.
+  Block and Reject stay a single click.
 - A page cannot make it approve a request on the user's behalf: only real input (a trusted click or
   key press) on the warning decides, and a verdict counts only with a proof the page cannot make.
 - It rejects every request it checks from a document that the page can script before the key
