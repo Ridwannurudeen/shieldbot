@@ -121,6 +121,7 @@ def build_first_verdict(progress: FirstVerdictProgress, transaction: Dict, elaps
         'failed_sources': [],
         'policy_mode': progress.policy_mode,
         'notes': notes,
+        'simulated': False,
         'final': False,
         'pending_sources': pending,
         'elapsed_ms': elapsed_ms,

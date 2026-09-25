@@ -262,3 +262,8 @@ def test_a_router_swaps_interim_names_each_notes_path_token():
 
 def test_an_interim_before_any_note_has_none():
     assert first(progress_of([]))["notes"] == []
+
+
+def test_the_interim_never_claims_a_simulation():
+    # The transaction simulation runs with the analyzers and reaches only the final.
+    assert first(progress_of([clean("structural")], ADMIN))["simulated"] is False

@@ -1317,6 +1317,7 @@ async def _build_signature_only_response(
         },
         "simulation": None,
         "asset_delta": [],
+        "simulated": False,
         "greenfield_url": None,
         "chain_id": req.chainId,
         "network": _chain_id_to_name(req.chainId),
@@ -1768,6 +1769,7 @@ async def _firewall_verdict(
                 "shield_score": shield_score,
                 "simulation": simulation_result,
                 "asset_delta": _build_asset_delta(simulation_result, decoded, value_bnb, req.chainId),
+                "simulated": _simulated(simulation_result),
                 "greenfield_url": None,
                 "chain_id": req.chainId,
                 "network": _chain_id_to_name(req.chainId),
@@ -3301,6 +3303,13 @@ def _build_asset_delta_fallback(decoded: Dict, value_bnb: float, chain_id: int) 
     return deltas
 
 
+def _simulated(simulation_result: Optional[Dict]) -> bool:
+    """Whether a response's asset changes are a Tenderly simulation's: one ran, succeeded and returned
+    them. The extension labels asset changes simulated only then; otherwise they are read from the
+    calldata, or a notice."""
+    return bool(simulation_result and simulation_result.get("success") and simulation_result.get("asset_deltas"))
+
+
 def _build_asset_delta(
     simulation_result: Optional[Dict], decoded: Dict, value_bnb: float, chain_id: int,
 ) -> List:
@@ -3404,6 +3413,7 @@ def _build_cached_response(
         },
         "simulation": None,
         "asset_delta": _build_asset_delta_fallback(decoded, value_bnb, chain_id),
+        "simulated": False,
         "greenfield_url": None,
         "cached": True,
         "chain_id": chain_id,
@@ -3523,6 +3533,7 @@ def _build_fallback_response(
                     else f"{classification} — Risk score {risk_score}/100"),
         "raw_checks": _extract_raw_checks(scan),
         "asset_delta": [],
+        "simulated": False,
         "policy_mode": policy_mode,
         "notes": [],
     }
@@ -3625,6 +3636,7 @@ def _build_unverified_swap_response(
         },
         "simulation": None,
         "asset_delta": _build_asset_delta_fallback(decoded, value_bnb, req.chainId),
+        "simulated": False,
         "greenfield_url": None,
         "chain_id": req.chainId,
         "network": _chain_id_to_name(req.chainId),
@@ -3844,6 +3856,7 @@ async def _analyze_router_swap(
             if sim_result and sim_result.get("asset_deltas")
             else _build_asset_delta_fallback(decoded, value_bnb, req.chainId)
         ),
+        "simulated": _simulated(sim_result),
         "greenfield_url": None,
         "chain_id": req.chainId,
         "network": _chain_id_to_name(req.chainId),

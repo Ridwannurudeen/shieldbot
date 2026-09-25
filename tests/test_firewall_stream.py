@@ -1109,3 +1109,90 @@ async def test_a_community_listed_target_whose_structural_analyzer_times_out_hol
     )
     assert plain["danger_signals"][0] == "Reported by 3 users"
     assert final == plain
+
+
+# A Tenderly simulation that ran, succeeded and returned the sender's asset changes.
+SIMULATION = {
+    "success": True,
+    "revert_reason": None,
+    "gas_used": 21000,
+    "warnings": [],
+    "asset_deltas": [
+        {"token_symbol": "BNB", "display": "-1.0000 BNB", "direction": "out", "amount": 1.0, "dollar_value": ""}
+    ],
+}
+SIMULATIONS = {
+    "ran": (SIMULATION, True),
+    "reverted": ({**SIMULATION, "success": False, "revert_reason": "execution reverted"}, False),
+    "no-changes": ({**SIMULATION, "asset_deltas": []}, False),
+    "unavailable": (None, False),
+}
+
+
+def simulator(result):
+    return SimpleNamespace(is_enabled=lambda: True, simulate_transaction=AsyncMock(return_value=result))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", sorted(SIMULATIONS))
+async def test_simulated_is_true_only_when_a_simulation_returned_the_asset_changes(stream_api, monkeypatch, case):
+    api, _ = stream_api
+    simulation, simulated = SIMULATIONS[case]
+    monkeypatch.setattr(api, "tenderly_simulator", simulator(simulation))
+
+    final, plain = await final_and_plain(api, BODY)
+
+    assert plain["simulated"] is simulated
+    assert (plain["asset_delta"] == ["-1.0000 BNB"]) is simulated
+    assert final == plain
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", sorted(SIMULATIONS))
+async def test_a_router_swap_says_whether_its_asset_changes_were_simulated(stream_api, monkeypatch, case):
+    api, services = stream_api
+    simulation, simulated = SIMULATIONS[case]
+    body, _ = router_swap(monkeypatch, api, services)
+    monkeypatch.setattr(api, "tenderly_simulator", simulator(simulation))
+
+    final, plain = await final_and_plain(api, body)
+
+    assert plain["raw_checks"]["whitelisted_router"] == "Uniswap Router"
+    assert plain["simulated"] is simulated
+    assert final == plain
+
+
+@pytest.mark.asyncio
+async def test_an_answer_that_ran_no_simulation_says_so(stream_api, monkeypatch):
+    api, services = stream_api
+    # A simulator that would succeed: none of these answers runs it.
+    monkeypatch.setattr(api, "tenderly_simulator", simulator(SIMULATION))
+    answers = {}
+    services.db.get_contract_score.return_value = SAFE_ROW
+    answers["cached"] = (await post(api)).json()
+    services.db.get_contract_score.return_value = None
+    answers["signature"] = (await post(api, {**BODY, "to": "", "signMethod": "personal_sign"})).json()
+    monkeypatch.setattr(
+        api,
+        "calldata_decoder",
+        SimpleNamespace(
+            decode=lambda data: {"selector": "deadbeef", "function_name": "multicall", "category": "swap", "params": {}},
+            is_whitelisted_target=lambda *args, **kwargs: "PancakeSwap Router",
+        ),
+    )
+    answers["unanalysed-swap"] = (await post(api)).json()
+    monkeypatch.setattr(
+        api, "calldata_decoder",
+        SimpleNamespace(decode=lambda data: {"selector": None}, is_whitelisted_target=lambda *args, **kwargs: None),
+    )
+    gate = asyncio.Event()
+    gate.set()
+    services.registry = FailingRegistry(gate)
+    monkeypatch.setattr(api, "token_scanner", SimpleNamespace(check_token=AsyncMock(return_value={"risk_score": 0})))
+    answers["fallback"] = (await post(api)).json()
+
+    assert answers["cached"]["cached"] is True
+    assert answers["signature"]["policy_mode"] == "SIGNATURE_ONLY"
+    assert answers["unanalysed-swap"]["coverage"] == {"token_path": 0}
+    assert answers["fallback"]["analysis"] == "AI analysis unavailable. Showing heuristic results only."
+    assert {name: answer["simulated"] for name, answer in answers.items()} == dict.fromkeys(answers, False)
