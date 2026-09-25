@@ -1396,3 +1396,20 @@ def test_the_injection_and_reputation_tools_describe_their_unknowns():
     assert "incomplete coverage" in tools["check_agent_reputation"]
     assert "status 'unknown'" in tools["scan_for_injection"]
     assert "coverage_reasons" in tools["scan_for_injection"]
+
+
+
+def test_agent_access_is_described_as_the_registering_key_rule_applies_it():
+    """Agents registered before keys were recorded have no key to match, so any key reads them."""
+    from pathlib import Path
+
+    from mcp_server.resources import RESOURCE_TEMPLATE_DEFINITIONS
+    from mcp_server.tools import TOOL_DEFINITIONS
+
+    tools = {tool["name"]: tool["description"] for tool in TOOL_DEFINITIONS}
+    resources = {resource["uriTemplate"]: resource["description"] for resource in RESOURCE_TEMPLATE_DEFINITIONS}
+    readme = (Path(__file__).resolve().parents[1] / "mcp_server" / "README.md").read_text(encoding="utf-8")
+    for text in (tools["check_agent_reputation"], resources["shieldbot://agent/{agent_id}/health"], readme):
+        assert "Only the API key that registered the agent can read it" not in text
+        assert "registered with an API key is readable only by that key" in text
+        assert "registered before keys were recorded is readable by any key" in text

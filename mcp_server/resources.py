@@ -29,8 +29,10 @@ RESOURCE_TEMPLATE_DEFINITIONS: List[Dict[str, Any]] = [
         "uriTemplate": "shieldbot://agent/{agent_id}/health",
         "name": "Agent Health",
         "description": (
-            "Policy configuration and recent firewall verdicts for a registered agent. Only the API key that "
-            "registered the agent can read it; to any other key it is not registered."
+            "Policy configuration and recent firewall verdicts for a registered agent. "
+            "An agent registered with an API key is readable only by that key, and to any other key reads exactly "
+            "as an unregistered one; an agent registered before keys were recorded is readable by any key, as on "
+            "the REST agent routes."
         ),
         "mimeType": "application/json",
     },

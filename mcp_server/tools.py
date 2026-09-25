@@ -156,7 +156,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "check_agent_reputation",
         "description": (
             "Look up the trust score and transaction history for an agent registered with ShieldBot's firewall. "
-            "Only the API key that registered the agent can read it; to any other key it is not registered. "
+            "An agent registered with an API key is readable only by that key, and to any other key reads exactly "
+            "as an unregistered one; an agent registered before keys were recorded is readable by any key, as on "
+            "the REST agent routes. "
             "An unregistered agent, or one with no firewall history, returns status 'unknown' with coverage_reasons "
             "and a null trust_score. Only the latest 1000 firewall records are read; an agent with that many also "
             "returns status 'unknown', because its counts are a lower bound, and so does one with any record whose "
