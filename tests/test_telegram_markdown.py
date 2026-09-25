@@ -688,3 +688,141 @@ async def test_an_advisor_reply_shows_the_models_text_unlinked(bot_module):
     await bot_module._handle_advisor_chat(update, "What is new?")
 
     assert typing.edit_text.await_args.args[0] == f"Line one\n{SHOWN}"
+
+
+
+# A dot is defused only where a domain's next label starts with a letter, so numbers keep their dots.
+NUMBERS = "Sell tax 12.5%, price $0.0023, router v1.2, 1.2.3.4"
+
+
+@pytest.mark.parametrize(
+    "text, shown",
+    [
+        (NUMBERS, NUMBERS),
+        ("Moon / Sun. Tax: 5 @ 10%", "Moon / Sun. Tax: 5 @ 10%"),
+        ("evil.com", "evil\N{ONE DOT LEADER}com"),
+        ("rh-claim.io", "rh-claim\N{ONE DOT LEADER}io"),
+        ("x.co/abc", "x\N{ONE DOT LEADER}co/abc"),
+        ("1.com", "1\N{ONE DOT LEADER}com"),
+        ("@scam_admin", "\N{FULLWIDTH COMMERCIAL AT}scam_admin"),
+        ("/start", "\N{DIVISION SLASH}start"),
+    ],
+)
+def test_unlinked_defuses_domains_mentions_and_commands_but_not_numbers(text, shown):
+    from core.telegram_formatter import unlinked
+
+    assert unlinked(text) == shown
+
+
+def test_numbers_and_versions_keep_their_dots_in_untrusted_text(bot_module):
+    rendered = assert_literal(
+        _report(
+            True,
+            token_info={"name": NUMBERS, "symbol": "V1.2"},
+            ai_analysis=NUMBERS,
+            contract_data={"is_contract": True, "bytecode_warnings": [NUMBERS]},
+        )
+    )
+    alert = bot_module.format_launch_alert({
+        "chain_id": 4663, "token_address": ADDRESS, "launchpad": "LONG", "verdict_url": "/v",
+        "scan": {
+            "outcome": "blocked", "status": "ok", "risk_level": "HIGH", "risk_score": 90,
+            "coverage_reasons": {}, "flags": [NUMBERS], "scanned_at": 990.0,
+        },
+    })
+
+    assert f"Token: {NUMBERS} (V1.2)" in rendered
+    assert f"Bytecode Warnings: {NUMBERS}" in rendered
+    assert f"\n{NUMBERS}\n" in rendered
+    assert f"• {NUMBERS}" in alert.splitlines()
+
+
+def test_an_operator_uptime_alert_keeps_its_monitor_url_tappable(client, monkeypatch):
+    import httpx
+
+    import api as api_module
+
+    sent = []
+
+    class Telegram:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, json):
+            sent.append(json)
+
+    monkeypatch.setattr(httpx, "AsyncClient", Telegram)
+    monkeypatch.setattr(
+        api_module,
+        "container",
+        SimpleNamespace(
+            settings=SimpleNamespace(
+                webhook_secret="s",
+                webhook_allow_query_secret=False,
+                telegram_bot_token="t",
+                telegram_alert_chat_id="1",
+            )
+        ),
+    )
+
+    response = client.post(
+        "/webhook/uptime",
+        data={
+            "alertType": "1",
+            "monitorFriendlyName": "api.shieldbotsecurity.online",
+            "monitorURL": "https://api.shieldbotsecurity.online/health",
+            "alertDetails": "Timeout",
+        },
+        headers={"x-webhook-secret": "s"},
+    )
+
+    assert response.status_code == 200
+    (message,) = sent
+    rendered = assert_literal(message["text"])
+    assert "URL: https://api.shieldbotsecurity.online/health" in rendered
+    assert "api.shieldbotsecurity.online is unreachable." in rendered
+
+
+@pytest.mark.asyncio
+async def test_an_operator_watch_alert_keeps_its_text(monkeypatch):
+    import aiohttp
+
+    from core.indexer import DeployerIndexer
+
+    sent = []
+
+    class Response:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def post(self, url, json, timeout):
+            sent.append(json)
+            return Response()
+
+    monkeypatch.setattr(aiohttp, "ClientSession", Session)
+    indexer = DeployerIndexer(
+        MagicMock(),
+        MagicMock(),
+        SimpleNamespace(telegram_bot_token="t", telegram_alert_chat_id="1"),
+    )
+    reason = "Linked to rh-claim.io, see ops.example.com/runbook"
+
+    assert await indexer._send_watch_alert(
+        ADDRESS, 56, ADDRESS, {"watch_reason": reason, "risk_severity": "high"}
+    )
+    assert f"Watch reason: {reason} | Severity: high" in assert_literal(sent[0]["text"])

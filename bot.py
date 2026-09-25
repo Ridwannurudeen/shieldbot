@@ -32,7 +32,7 @@ except ImportError:
 from core.config import Settings
 from core.container import ServiceContainer
 from core.telegram_formatter import (
-    describe_impostor_check, escape_markdown, escape_markdown_lines, format_full_report, unlinked,
+    describe_impostor_check, escape_markdown_lines, escape_untrusted, format_full_report, unlinked,
 )
 from core.extension_formatter import is_scan_incomplete
 from core.registry import RUN_ALL_DEADLINE_SECONDS
@@ -390,7 +390,7 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 **Address:** `{address}`
 **Chain:** {get_chain_name(chain_id)}
-**Reason:** {escape_markdown(reason)}
+**Reason:** {escape_untrusted(reason)}
 **Reporter:** User {update.effective_user.id}
 
 {status}
@@ -400,7 +400,7 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 **Address:** `{address}`
 **Chain:** {get_chain_name(chain_id)}
-**Reason:** {escape_markdown(reason)}
+**Reason:** {escape_untrusted(reason)}
 **Progress:** {result['reports']}/{result['needed']} independent reports needed before scans show it as community-reported.
 
 Thank you — more reports from different users are needed before scans show this address as community-reported.
@@ -458,7 +458,7 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if incomplete:
             reasons = '; '.join(dict.fromkeys(result.get('coverage_reasons', {}).values())) or 'Approval data unavailable'
             response += f"🔴 High Risk: {high} | 🟡 Medium: {medium} | ⚪ Unconfirmed: {lower_risk}\n"
-            response += f"⚠️ **Scan incomplete:** {escape_markdown(reasons)}\n"
+            response += f"⚠️ **Scan incomplete:** {escape_untrusted(reasons)}\n"
         else:
             response += f"🔴 High Risk: {high} | 🟡 Medium: {medium} | Lower risk: {lower_risk}\n"
 
@@ -477,9 +477,9 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 risk_icon = '🔴' if a['risk_level'] == 'HIGH' else '🟡'
                 symbol = a.get('token_symbol', '???')
                 spender_label = a.get('spender_label') or a.get('spender', '')[:10] + '...'
-                response += f"{risk_icon} {escape_markdown(symbol)} → {escape_markdown(spender_label)}"
+                response += f"{risk_icon} {escape_untrusted(symbol)} → {escape_untrusted(spender_label)}"
                 if a.get('risk_reason'):
-                    response += f" — {escape_markdown(a['risk_reason'])}"
+                    response += f" — {escape_untrusted(a['risk_reason'])}"
                 response += "\n"
 
         # Show alerts
@@ -487,10 +487,10 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if alerts:
             response += "\n**Alerts:**\n"
             for alert in alerts[:5]:
-                response += f"⚠️ **{escape_markdown(alert.get('title', 'Alert'))}**\n"
-                response += f"  {escape_markdown(alert.get('description', ''))}\n"
+                response += f"⚠️ **{escape_untrusted(alert.get('title', 'Alert'))}**\n"
+                response += f"  {escape_untrusted(alert.get('description', ''))}\n"
                 if alert.get('what_you_can_do'):
-                    response += f"  💡 {escape_markdown(alert['what_you_can_do'])}\n"
+                    response += f"  💡 {escape_untrusted(alert['what_you_can_do'])}\n"
 
         # Revoke instructions
         revoke_txs = result.get('revoke_txs', [])
@@ -603,8 +603,8 @@ async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 sev_icon = '🔴' if sev == 'HIGH' else '🟡'
                 atype = alert.get('alert_type', 'unknown').replace('_', ' ').title()
                 chain_name = get_chain_name(alert.get('chain_id', 56))
-                response += f"\n{sev_icon} **{escape_markdown(atype)}** ({chain_name})\n"
-                response += f"  {escape_markdown(alert.get('description', 'No details'))}\n"
+                response += f"\n{sev_icon} **{escape_untrusted(atype)}** ({chain_name})\n"
+                response += f"  {escape_untrusted(alert.get('description', 'No details'))}\n"
                 if alert.get('attacker_addr'):
                     response += f"  Attacker: `{alert['attacker_addr'][:16]}...`\n"
         else:
@@ -679,7 +679,7 @@ async def campaign_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if indicators:
             response += "\n**Indicators:**\n"
             for ind in indicators[:8]:
-                response += f"• {escape_markdown(ind)}\n"
+                response += f"• {escape_untrusted(ind)}\n"
 
         # Cross-chain contracts
         xchain = graph.get('cross_chain_contracts', [])
@@ -1375,33 +1375,33 @@ def format_scan_result(result: dict) -> str:
     if scam_matches:
         response += f"\n⚠️ **Warning:** Found {len(scam_matches)} scam database match(es)\n"
         for match in scam_matches[:3]:
-            response += f"• {escape_markdown(match['type'])}: {escape_markdown(match['reason'])}\n"
+            response += f"• {escape_untrusted(match['type'])}: {escape_untrusted(match['reason'])}\n"
 
     # A community report is not a scam database match; it is named on its own, once.
     reported = [match['reason'] for match in medium_matches(result.get('scam_matches'))]
     for reason in reported:
-        response += f"\n⚠️ {escape_markdown(reason)}\n"
+        response += f"\n⚠️ {escape_untrusted(reason)}\n"
 
     warnings = [warning for warning in result.get('warnings', []) if warning not in reported]
     if warnings:
         response += "\n**Warnings:**\n"
         for warning in warnings[:5]:
-            response += f"• {escape_markdown(warning)}\n"
+            response += f"• {escape_untrusted(warning)}\n"
 
     # AI structured risk score
     ai_risk = result.get('ai_risk_score')
     if ai_risk and not incomplete:
         response += f"\n🤖 **AI Risk Assessment:**\n"
         response += (
-            f"Score: {escape_markdown(ai_risk.get('risk_score', 'N/A'))}/100 | "
-            f"Level: {escape_markdown(ai_risk.get('risk_level', 'N/A'))}\n"
+            f"Score: {escape_untrusted(ai_risk.get('risk_score', 'N/A'))}/100 | "
+            f"Level: {escape_untrusted(ai_risk.get('risk_level', 'N/A'))}\n"
         )
         findings = ai_risk.get('key_findings', [])
         for f in findings[:3]:
-            response += f"• {escape_markdown(f)}\n"
+            response += f"• {escape_untrusted(f)}\n"
         rec = ai_risk.get('recommendation', '')
         if rec:
-            response += f"💡 {escape_markdown(rec)}\n"
+            response += f"💡 {escape_untrusted(rec)}\n"
 
     # Narrative AI analysis
     if result.get('ai_analysis') and not incomplete:
@@ -1439,7 +1439,7 @@ def format_token_result(result: dict) -> str:
     response = f"""
 💰 **Token Safety Report**
 
-**Token:** {escape_markdown(result.get('name', 'Unknown'))} ({escape_markdown(result.get('symbol', 'N/A'))})
+**Token:** {escape_untrusted(result.get('name', 'Unknown'))} ({escape_untrusted(result.get('symbol', 'N/A'))})
 **Address:** `{result['address']}`
 **Safety:** {emoji} {safety_level.upper()}
 **Risk Score:** {score} (Confidence: {result.get('confidence', 'N/A')}%)
@@ -1462,7 +1462,7 @@ def format_token_result(result: dict) -> str:
     if result.get('risks'):
         response += "\n**Risks Detected:**\n"
         for risk in result['risks'][:6]:
-            response += f"• {escape_markdown(risk)}\n"
+            response += f"• {escape_untrusted(risk)}\n"
 
     buy_tax = result.get('buy_tax')
     sell_tax = result.get('sell_tax')
@@ -1475,15 +1475,15 @@ def format_token_result(result: dict) -> str:
     if ai_risk and not incomplete:
         response += f"\n🤖 **AI Risk Assessment:**\n"
         response += (
-            f"Score: {escape_markdown(ai_risk.get('risk_score', 'N/A'))}/100 | "
-            f"Level: {escape_markdown(ai_risk.get('risk_level', 'N/A'))}\n"
+            f"Score: {escape_untrusted(ai_risk.get('risk_score', 'N/A'))}/100 | "
+            f"Level: {escape_untrusted(ai_risk.get('risk_level', 'N/A'))}\n"
         )
         findings = ai_risk.get('key_findings', [])
         for f in findings[:3]:
-            response += f"• {escape_markdown(f)}\n"
+            response += f"• {escape_untrusted(f)}\n"
         rec = ai_risk.get('recommendation', '')
         if rec:
-            response += f"💡 {escape_markdown(rec)}\n"
+            response += f"💡 {escape_untrusted(rec)}\n"
 
     # Narrative AI analysis
     if result.get('ai_analysis') and not incomplete:

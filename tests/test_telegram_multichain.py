@@ -114,7 +114,7 @@ def bot_chain_functions():
     import asyncio
     from utils.web3_client import UnsupportedChainError, Web3Client
     from core.extension_formatter import is_scan_incomplete
-    from core.telegram_formatter import escape_markdown, unlinked
+    from core.telegram_formatter import escape_untrusted, unlinked
     from services.robinhood_assets import with_impostor_check
     from services.mempool_service import supports_pending_transactions
     from core.verdicts import UNKNOWN
@@ -146,7 +146,7 @@ def bot_chain_functions():
     namespace = {
         'asyncio': asyncio,
         'is_scan_incomplete': is_scan_incomplete,
-        'escape_markdown': escape_markdown,
+        'escape_untrusted': escape_untrusted,
         'unlinked': unlinked,
         'with_impostor_check': with_impostor_check,
         'UNKNOWN': UNKNOWN,
