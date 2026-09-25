@@ -1177,6 +1177,13 @@ async def test_a_router_swap_says_whether_its_asset_changes_were_simulated(strea
 
     assert plain["raw_checks"]["whitelisted_router"] == "Uniswap Router"
     assert plain["simulated"] is simulated
+    # A reverted simulation's changes are not shown as the swap's: the main path's notice is.
+    assert plain["asset_delta"] == {
+        "ran": ["-1.0000 BNB"],
+        "reverted": ["Unable to simulate — cross-chain or complex transaction. Verify manually."],
+        "no-changes": [],
+        "unavailable": [],
+    }[case]
     assert final == plain
 
 

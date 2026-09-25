@@ -3859,11 +3859,7 @@ async def _analyze_router_swap(
         },
         "shield_score": shield_score,
         "simulation": sim_result,
-        "asset_delta": (
-            [d["display"] for d in sim_result["asset_deltas"]]
-            if sim_result and sim_result.get("asset_deltas")
-            else _build_asset_delta_fallback(decoded, value_bnb, req.chainId)
-        ),
+        "asset_delta": _build_asset_delta(sim_result, decoded, value_bnb, req.chainId),
         "simulated": _simulated(sim_result),
         "greenfield_url": None,
         "chain_id": req.chainId,
