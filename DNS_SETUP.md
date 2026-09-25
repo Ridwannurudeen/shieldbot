@@ -75,15 +75,7 @@ Once DNS is configured:
 1. Wait 5-10 minutes for propagation
 2. Test: `ping api.shieldbotsecurity.online`
 3. Should return: `<CURRENT_VPS_PUBLIC_IPV4>`
-4. Proceed to Caddy installation
+4. Proceed to the nginx configuration below
 
 For nginx, no script writes the configuration: compare the server's vhost with the reference in
 `deploy/nginx-api.conf.example` (see `deploy/README.md`).
-
-The Caddy setup script requires `VPS_IP` in the environment and stops if it is unset or empty.
-Replace the placeholder before running it on the intended server:
-
-```bash
-export VPS_IP='<CURRENT_VPS_PUBLIC_IPV4>'
-bash deploy/setup-https.sh  # Caddy
-```

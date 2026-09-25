@@ -1,4 +1,0 @@
-# SUPERSEDED: production serves the site through nginx (deploy/README.md). Kept for history.
-shieldbotsecurity.online {
-    reverse_proxy localhost:8000
-}

@@ -162,8 +162,7 @@ once nginx stops adding `Access-Control-Allow-Origin: *`.
 
 After an edit: `nginx -t && systemctl reload nginx`.
 
-The landing vhost's reference is `nginx-shieldbotsecurity-new.conf` (below). `nginx-shieldbotsecurity.conf`,
-`Caddyfile` and `setup-https.sh` are superseded and kept only for history: do not install them.
+The landing vhost's reference is `nginx-shieldbotsecurity-new.conf` (below).
 
 ### Landing analytics (Plausible)
 
@@ -176,8 +175,8 @@ Content-Security-Policy stays `'self'` and no third-party script is loaded. To t
    `https://plausible.io/js/pa-....js` before `.js`).
 3. In the live landing vhost, copy the two `location` blocks from `nginx-shieldbotsecurity-new.conf` and replace
    `pa-SITE_ID` with that name. `-new.conf` is the one with the www-to-bare-domain redirect, which is live since
-   2026-09-23; confirm the live file has that redirect and falls back with `=404`, not `/index.html` (the older
-   `nginx-shieldbotsecurity.conf` does, and would answer `/js/script.js` with the page itself). The server needs
+   2026-09-23; confirm the live file has that redirect and falls back with `=404`, not `/index.html` (a
+   fallback to `/index.html` would answer `/js/script.js` with the page itself). The server needs
    outbound DNS to 9.9.9.9 and HTTPS to plausible.io. Then `nginx -t && systemctl reload nginx`.
 4. Check:
    - `curl -sI https://shieldbotsecurity.online/js/script.js` answers 200 with a JavaScript content type;
