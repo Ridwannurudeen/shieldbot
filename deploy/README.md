@@ -161,6 +161,9 @@ once nginx stops adding `Access-Control-Allow-Origin: *`.
 
 After an edit: `nginx -t && systemctl reload nginx`.
 
+The landing vhost's reference is `nginx-shieldbotsecurity-new.conf` (below). `nginx-shieldbotsecurity.conf`,
+`Caddyfile` and `setup-https.sh` are superseded and kept only for history: do not install them.
+
 ### Landing analytics (Plausible)
 
 The landing pages load `/js/plausible-init.js` and `/js/script.js`, and send page views to `/stats/event`. The

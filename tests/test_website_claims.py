@@ -257,7 +257,7 @@ def test_dashboard_chain_tables_cover_every_scan_chain():
 
 
 def test_dashboard_names_the_url_the_site_sends_visitors_to_as_canonical():
-    nginx = read(ROOT / "deploy" / "nginx-shieldbotsecurity.conf")
+    nginx = read(ROOT / "deploy" / "nginx-shieldbotsecurity-new.conf")
     target = re.search(r"location = /dashboard \{\s*return 301 (\S+);", nginx).group(1)
     for page in (DASHBOARD_SRC, ROOT / "dashboard" / "index.html"):
         html = read(page)
