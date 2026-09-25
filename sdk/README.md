@@ -34,6 +34,7 @@ Nothing was ever published, but code built from earlier copies of this repositor
 - `rescue`, `getCampaign` and `queryThreatGraph` throw `INVALID_ADDRESS` before any request for an address that is not `0x` and 40 hex digits. They used to put any string in the request path: an address ending in `#` dropped the chain (the API then read BNB Chain), one ending in `?chain_id=1&` replaced it, and `../` reached other routes with your API key.
 - `rescue` and `queryThreatGraph` throw `CHAIN_MISMATCH` (status 502) when the answer's `chain_id` is not the chain asked for.
 - `timeout` must be a positive number of milliseconds, at most 2^31 - 1, or the constructor throws `INVALID_TIMEOUT`. `timeout: 0` used to mean the default. `finalTimeout` follows the same rule, checked by `firewall()` before any request.
+- `firewall()` with `onFirst`: an `error` event rejects with code `STREAM_ERROR` (status 500 when the event has none) instead of no code; `onFirst` may return a promise, which is awaited, and its rejection rejects the call instead of going unhandled; and a `first` event that is not an interim verdict (`status` not `'unknown'`, `classification` `SAFE`, or `final` not `false`) is dropped instead of passed to `onFirst`.
 
 ## API key
 
