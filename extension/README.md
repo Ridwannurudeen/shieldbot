@@ -36,7 +36,10 @@ version.
   The two scripts share a per-document key, handed over once at document_start, and every message
   between them carries an HMAC proof made with it; the key itself is never posted.
 - Transactions and signature requests are sent to the API (`/api/firewall`, through
-  `background.js`) for analysis, and the overlay shows the API's verdict. A signature's overlay also
+  `background.js`) for analysis, and the overlay shows the API's verdict. A transaction's value is
+  sent as minimal 0x-hex whatever form the page wrote it in (a decimal or 0x-hex string, or a safe
+  integer); a value in any other form, or not below 2^256, is not analysed, and the overlay says
+  the analysis failed. A signature's overlay also
   shows what would be signed: MetaMask's legacy typed-data form (a list of fields, for
   `eth_signTypedData` and `_v1`) field by field, EIP-712 typed data by domain and message, and a
   `personal_sign` message as text. What the overlay sees for itself only raises the API's verdict:
@@ -123,7 +126,8 @@ second limit below is the case where they did not.
   support (it refuses it as `Unsupported chain ID`), the overlay offers only Block, in Balanced and
   in Strict mode, and says why. This holds for transactions, signatures and a `wallet_sendCalls`
   batch with a call on another chain.
-- On a Block Recommended overlay in Balanced mode, Proceed or Sign Anyway counts only when held down
+- On a Block Recommended overlay in Balanced mode, and on a transaction the API did not analyse (it
+  could not be reached, or refused the request), Proceed or Sign Anyway counts only when held down
   for 1.5 seconds, with the pointer or with Enter or Space, by real input: a click does nothing,
   letting go early cancels, and a fill shows the progress. The half-second delay and visibility rule
   below apply when the hold starts, and the dialog must stay visible until it ends. Block and Reject
@@ -235,7 +239,8 @@ were written without a native speaker and need the owner's review before release
 `overlayBtnHoldProceed`, `overlayBtnHoldSign`, `overlayHoldNote`, `overlayLookalikeTitle`,
 `overlayLookalikeNote`, `overlayLookalikeNew`, `overlayLookalikePast`, `overlayDelegationTitle`,
 `overlayDelegationNote`, `overlayDelegate`, `overlayDelegateUnreadable`, `overlayHashMessage`,
-`overlayHashMessageNote`, `overlayOpaqueMessage`, `overlayOpaqueMessageNote`, `overlayNotes`.
+`overlayHashMessageNote`, `overlayOpaqueMessage`, `overlayOpaqueMessageNote`, `overlayNotes`,
+`overlayHoldNoteUnchecked`.
 
 ## Tests
 

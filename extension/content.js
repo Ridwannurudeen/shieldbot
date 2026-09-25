@@ -1179,12 +1179,15 @@
 
   // Shown when no analysis came back (429, 400, timeout, unreachable API). In
   // Strict mode there is no Proceed: an unchecked transaction stays blocked.
+  // In Balanced mode Proceed needs a hold, as on Block Recommended: a page can
+  // shape a request the API refuses, and an unchecked transaction must not go
+  // through on one click.
   async function showErrorOverlay(requestId, errorMsg, strict, tx, recipient, lookalike) {
     await _loadContentLang();
     removeOverlay();
     // An EIP-7702 delegation is Block Recommended without the API too.
     const delegation = Array.isArray(tx.authorizationList);
-    const hold = delegation && !strict;
+    const hold = !strict;
 
     const overlay = document.createElement("div");
     overlay.id = "shieldai-overlay";
@@ -1210,17 +1213,13 @@
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">
             ${_t("overlayBtnBlock")}
           </button>
-          ${strict ? "" : hold ? `
+          ${hold ? `
           <button class="shieldai-btn shieldai-btn-proceed shieldai-btn-hold" id="shieldai-proceed" aria-describedby="shieldai-hold-note">
             ${_t("overlayBtnHoldProceed")}
           </button>
-          ` : `
-          <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">
-            ${_t("overlayBtnProceed")}
-          </button>
-          `}
+          ` : ""}
         </div>
-        ${hold ? `<p class="shieldai-hold-note" id="shieldai-hold-note">${_t("overlayHoldNote")}</p>` : ""}
+        ${hold ? `<p class="shieldai-hold-note" id="shieldai-hold-note">${delegation ? _t("overlayHoldNote") : _t("overlayHoldNoteUnchecked")}</p>` : ""}
         ${COVERED_NOTE}
       </div>
     `;
@@ -1228,11 +1227,7 @@
     const root = mountOverlay(overlay, requestId);
     const remember = recipient ? () => rememberRecipient(recipient) : null;
     onDecision(root, "shieldai-block", requestId, "block");
-    if (hold) {
-      onHold(root, requestId, remember);
-    } else if (!strict) {
-      onDecision(root, "shieldai-proceed", requestId, "proceed", remember);
-    }
+    if (hold) onHold(root, requestId, remember);
   }
 
   // Shown for a request inject.js could not read (a transaction that is not

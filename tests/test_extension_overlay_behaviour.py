@@ -366,8 +366,14 @@ def test_synthetic_input_cannot_decide_for_the_user(kind):
   await flush();
   assert.deepEqual(verdicts(), [], 'a synthetic event decided the request');
   assert(overlay(), 'a synthetic event closed the overlay');
-  userClick(byId('shieldai-proceed'));
-  await flush();
+  if (kind === 'error') {
+    // Proceed on a transaction the API did not analyse is held down, not clicked.
+    byId('shieldai-proceed').dispatch('pointerdown', {isTrusted: true, button: 0, isPrimary: true});
+    for (let i = 0; i < 10 && verdicts().length === 0; i++) await flush();
+  } else {
+    userClick(byId('shieldai-proceed'));
+    await flush();
+  }
   await assertVerdicts([['request', 'proceed']]);
 """,
         kind,

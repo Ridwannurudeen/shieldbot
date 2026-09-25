@@ -379,6 +379,18 @@ function judgeSignIn(data, origin) {
   return uriHost && uriHost !== host ? mismatch(uriHost) : { state: "match", domain: token };
 }
 
+// The value a transaction sends, as minimal 0x-hex: a decimal or 0x-hex string,
+// or a safe integer, of whole wei below 2^256. The page chooses how it writes
+// the value, and one the wallet takes but the API refuses (a zero-padded hex
+// past the API's length limit, a number) would come back as an error the user
+// could click through. null for any other value.
+function weiHex(value) {
+  let wei = null;
+  if (typeof value === "string" && /^(0x[0-9a-f]+|[0-9]+)$/i.test(value)) wei = BigInt(value);
+  else if (Number.isSafeInteger(value)) wei = BigInt(value);
+  return wei !== null && wei >= 0n && wei < 2n ** 256n ? `0x${wei.toString(16)}` : null;
+}
+
 async function handleAnalyze(tx, sender) {
   const validChainId = typeof tx.chainId === "number" ||
     (typeof tx.chainId === "string" && /^(0x[0-9a-f]+|[0-9]+)$/i.test(tx.chainId));
@@ -415,13 +427,18 @@ async function handleAnalyze(tx, sender) {
 
   const endpoint = `${apiUrl}/api/firewall`;
 
+  const value = weiHex(tx.value || "0x0");
+  if (value === null) {
+    throw new Error("The transaction's value is not an amount ShieldAI can read, so it was not analyzed.");
+  }
+
   // A message or hash to sign, and its signer, stay in the browser: the API
   // judges personal_sign and eth_sign by their method and reads neither.
   const byMethod = signMethod === "personal_sign" || signMethod === "eth_sign";
   const body = {
     to: tx.to || "",
     from: byMethod ? "" : tx.from || "",
-    value: tx.value || "0x0",
+    value,
     data: byMethod ? "0x" : tx.data || "0x",
     chainId,
   };

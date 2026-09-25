@@ -184,5 +184,6 @@
   "overlayHashMessageNote": "This asks you to sign 32 bytes that are not text. They can be the hash of an order, a permit or a transaction that a contract will accept as signed by you. No ordinary site needs this.",
   "overlayOpaqueMessage": "UNREADABLE MESSAGE",
   "overlayOpaqueMessageNote": "This message is not readable text, so you cannot see what you would be signing. Reject it unless you know exactly what it is.",
-  "overlayNotes": "Notes"
+  "overlayNotes": "Notes",
+  "overlayHoldNoteUnchecked": "This request was not checked. To continue anyway, hold the button down, or hold Enter or Space on it, for 1.5 seconds. Letting go earlier cancels."
 }

@@ -664,6 +664,83 @@ def test_proceed_on_block_recommended_needs_a_hold(kind, how):
     )
 
 
+# A page can shape a request the API refuses (a value past its length limit, say); what comes back
+# is an error, never a one-click Proceed.
+@pytest.mark.parametrize("policy", ["BALANCED", "STRICT"])
+def test_proceed_on_a_transaction_the_api_did_not_analyse_needs_a_hold(policy):
+    run_node(
+        CONTENT_HARNESS
+        + HOLD
+        + r"""
+(async () => {
+  storage.policyMode = JSON.parse(process.argv[1]);
+  analyze = async () => ({error: 'API error 422: value too long'});
+  await intercept('request');
+  const html = overlay().innerHTML;
+  if (storage.policyMode === 'STRICT') {
+    assert(!html.includes('id="shieldai-proceed"'), html);
+    return;
+  }
+  const proceed = byId('shieldai-proceed');
+  assert(html.includes('Hold to Proceed Anyway') && html.includes('This request was not checked'), html);
+  assert(byId(proceed.attrs['aria-describedby']), 'the hold is not explained to assistive technology');
+  userClick(proceed);
+  await flush();
+  assert.deepEqual(verdicts(), [], 'a click proceeded with an unanalysed transaction');
+  press(proceed, 'pointer');
+  await heldVerdict();
+  await assertVerdicts([['request', 'proceed']]);
+""",
+        policy,
+    )
+
+
+@pytest.mark.parametrize(
+    "value, sent",
+    [
+        ("0x" + "0" * 100 + "1", "0x1"),
+        ("0X1F", "0x1f"),
+        ("1000", "0x3e8"),
+        (5, "0x5"),
+        ("0x0", "0x0"),
+        (None, "0x0"),
+        ("0x" + "f" * 64, "0x" + "f" * 64),
+    ],
+)
+def test_a_transaction_value_goes_to_the_api_as_minimal_hex(value, sent):
+    run_node(
+        BACKGROUND_HARNESS
+        + r"""
+(async () => {
+  const [value, sent] = JSON.parse(process.argv[1]);
+  const {result, error} = await respond({type: 'SHIELDAI_ANALYZE', tx: {to: '0x' + 'a'.repeat(40), value, chainId: 56}});
+  assert.equal(error, undefined);
+  assert(result);
+  assert.equal(bodies[0].value, sent);
+""",
+        [value, sent],
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["abc", "1.5", "-1", "0x", " 12", "1e18", "0x" + "1" + "0" * 64, 1.5, -1, 2**53, True, {}, []],
+)
+def test_a_transaction_value_that_cannot_be_read_is_an_analysis_error(value):
+    run_node(
+        BACKGROUND_HARNESS
+        + r"""
+(async () => {
+  const value = JSON.parse(process.argv[1]);
+  const {result, error} = await respond({type: 'SHIELDAI_ANALYZE', tx: {to: '0x' + 'a'.repeat(40), value, chainId: 56}});
+  assert.equal(result, undefined);
+  assert.match(error, /value/);
+  assert.equal(bodies.length, 0, 'an unreadable value was sent to the API');
+""",
+        value,
+    )
+
+
 @pytest.mark.parametrize("cover", ["covered-throughout", "covered-and-uncovered-during-the-hold"])
 def test_a_hold_counts_only_while_the_dialog_stays_visible(cover):
     run_node(
