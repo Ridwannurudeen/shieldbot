@@ -4,6 +4,8 @@ import json
 import re
 import time
 import logging
+import math
+import dataclasses
 from typing import Dict, Optional
 from collections import OrderedDict
 
@@ -56,6 +58,10 @@ class ShieldBot:
         fail_mode: str = "cached",
         timeout: float = 10.0,
     ):
+        if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or not 0 < timeout < math.inf:
+            raise ValueError("timeout must be a positive number of seconds")
+        if not isinstance(cache_size, int) or isinstance(cache_size, bool) or cache_size < 0:
+            raise ValueError("cache_size must be an int of 0 or more (0 turns the cache off)")
         self.api_key = api_key
         self.agent_id = agent_id
         self.base_url = base_url.rstrip("/")
@@ -100,17 +106,18 @@ class ShieldBot:
         ], separators=(",", ":"), ensure_ascii=False)
 
     def _get_cached(self, key: str) -> Optional[Verdict]:
+        """A copy of the unexpired cached verdict, marked cached, so a caller changing it leaves the cache as it was."""
         if key in self._cache:
             entry = self._cache[key]
             if time.time() - entry["ts"] < self._cache_ttl:
                 self._cache.move_to_end(key)
-                return entry["verdict"]
+                return dataclasses.replace(entry["verdict"], cached=True)
             else:
                 del self._cache[key]
         return None
 
     def _set_cached(self, key: str, verdict: Verdict):
-        self._cache[key] = {"verdict": verdict, "ts": time.time()}
+        self._cache[key] = {"verdict": dataclasses.replace(verdict), "ts": time.time()}
         if len(self._cache) > self._cache_size:
             self._cache.popitem(last=False)
 
@@ -138,11 +145,14 @@ class ShieldBot:
 
         Raises:
             ValueError: before any request when chain_id is missing (the SDK never assumes a chain)
-                or value is not an integer amount of wei from 0 to 2**256 - 1.
+                or is not a positive int, or value is not an integer amount of wei from 0 to 2**256 - 1.
         """
         if transaction.get("chain_id") is None:
             raise ValueError("chain_id is required")
-        transaction = {**transaction, "value": _decimal_wei(transaction.get("value"))}
+        chain_id = transaction["chain_id"]
+        if not isinstance(chain_id, int) or isinstance(chain_id, bool) or chain_id <= 0:
+            raise ValueError("chain_id must be a positive int")
+        transaction = {**transaction, "chain_id": int(chain_id), "value": _decimal_wei(transaction.get("value"))}
         to_addr = transaction.get("to", "")
         cache_key = self._cache_key(transaction)
 

@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="shieldbot",
-    version="3.0.0",
+    version="3.1.0",
     description="Async client for the ShieldBot agent transaction firewall, with a local verdict cache and explicit fail modes",
     long_description=Path(__file__).with_name("README.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",

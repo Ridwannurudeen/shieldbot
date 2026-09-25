@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { ShieldBot } = require('../dist/index.js');
+const { ShieldBot, ShieldBotError } = require('../dist/index.js');
 
 const spender = '1'.repeat(40).padStart(64, '0');
 const transaction = {
@@ -41,6 +41,60 @@ test('identical transaction reuses its cached allowance', async () => {
   assert.equal(cached.cached, true);
 });
 
+test('a caller changing a returned verdict does not change later cache hits', async () => {
+  let calls = 0;
+  global.fetch = async () => { calls++; return { ok: true, json: async () => payload }; };
+  const sdk = new ShieldBot({ agentId: 'agent:1' });
+  const fresh = await sdk.check(transaction);
+  Object.assign(fresh, { verdict: 'BLOCK', allowed: false, blocked: true, score: 99 });
+  const firstHit = await sdk.check(transaction);
+  Object.assign(firstHit, { verdict: 'BLOCK', allowed: false, blocked: true, score: 99 });
+  const secondHit = await sdk.check(transaction);
+  assert.equal(calls, 1);
+  assert.equal(fresh.cached, false);
+  assert.notEqual(secondHit, firstHit);
+  assert.deepEqual(
+    [secondHit.verdict, secondHit.allowed, secondHit.blocked, secondHit.score, secondHit.cached],
+    ['ALLOW', true, false, 5, true],
+  );
+});
+
+test('cacheSize 0 turns the cache off, even for fail mode', async () => {
+  let calls = 0;
+  global.fetch = async () => {
+    calls++;
+    if (calls > 2) throw new Error('offline');
+    return { ok: true, json: async () => payload };
+  };
+  const sdk = new ShieldBot({ agentId: 'agent:1', cacheSize: 0 });
+  await sdk.check(transaction);
+  const second = await sdk.check(transaction);
+  const offline = await sdk.check(transaction);
+  assert.equal(calls, 3);
+  assert.equal(second.cached, false);
+  assert.deepEqual([offline.verdict, offline.cached, offline.analysis_unavailable], ['WARN', false, true]);
+});
+
+test('a positive cacheSize keeps that many verdicts, dropping the oldest', async () => {
+  let calls = 0;
+  global.fetch = async () => { calls++; return { ok: true, json: async () => payload }; };
+  const sdk = new ShieldBot({ agentId: 'agent:1', cacheSize: 1 });
+  await sdk.check(transaction);
+  assert.equal((await sdk.check(transaction)).cached, true);
+  await sdk.check({ ...transaction, to: '0xc' });
+  assert.equal((await sdk.check(transaction)).cached, false);
+  assert.equal(calls, 3);
+});
+
+for (const cacheSize of [-1, 1.5, NaN, Infinity, 2 ** 53, '10']) {
+  test(`a cacheSize of ${typeof cacheSize} ${String(cacheSize)} is rejected`, () => {
+    assert.throws(
+      () => new ShieldBot({ agentId: 'agent:1', cacheSize }),
+      error => error instanceof ShieldBotError && error.code === 'INVALID_CACHE_SIZE' && error.status === 400,
+    );
+  });
+}
+
 test('equivalent transaction encodings reuse the cached allowance', async () => {
   let calls = 0;
   global.fetch = async () => { calls++; return { ok: true, json: async () => payload }; };
@@ -57,7 +111,6 @@ test('equivalent transaction encodings reuse the cached allowance', async () => 
     ...mixedCase,
     from: mixedCase.from.toLowerCase(),
     to: mixedCase.to.toLowerCase(),
-    chainId: '56',
     data: mixedCase.data.toLowerCase(),
     value: '0x0',
   });

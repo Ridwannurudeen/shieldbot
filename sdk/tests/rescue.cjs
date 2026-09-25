@@ -2,8 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { ShieldBot, ShieldBotError } = require('../dist/index.js');
 
+const wallet = '0x' + 'a'.repeat(40);
 const base = {
-  wallet: '0xa', chain_id: 56, total_approvals: 0, high_risk: 0, medium_risk: 0,
+  wallet, chain_id: 56, total_approvals: 0, high_risk: 0, medium_risk: 0,
   approvals: [], alerts: [], revoke_txs: [],
 };
 const complete = {
@@ -28,7 +29,7 @@ const respond = body => { global.fetch = async () => ({ ok: true, json: async ()
 
 test('a complete rescue scan is returned as ok', async () => {
   respond(complete);
-  const result = await new ShieldBot().rescue('0xa', 56);
+  const result = await new ShieldBot().rescue(wallet, 56);
   assert.equal(result.status, 'ok');
   assert.deepEqual(result.scanned_blocks, complete.scanned_blocks);
   assert.equal(result.total_value_at_risk_usd, 0);
@@ -36,7 +37,7 @@ test('a complete rescue scan is returned as ok', async () => {
 
 test('a partial rescue scan is returned with its unknown status', async () => {
   respond(partial);
-  const result = await new ShieldBot().rescue('0xa', 56);
+  const result = await new ShieldBot().rescue(wallet, 56);
   assert.equal(result.status, 'unknown');
   assert.deepEqual(result.coverage_reasons, partial.coverage_reasons);
   assert.deepEqual(result.scanned_blocks, partial.scanned_blocks);
@@ -46,7 +47,7 @@ test('a partial rescue scan is returned with its unknown status', async () => {
 test('a rescue scan that read nothing throws instead of returning an empty list', async () => {
   respond(nothingRead);
   await assert.rejects(
-    new ShieldBot().rescue('0xa', 56),
+    new ShieldBot().rescue(wallet, 56),
     error => error instanceof ShieldBotError && error.code === 'SCAN_UNAVAILABLE' && /could not be read/.test(error.message),
   );
 });
