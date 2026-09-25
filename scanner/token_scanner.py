@@ -15,7 +15,7 @@ from utils.risk_scorer import (
 
 logger = logging.getLogger(__name__)
 
-# Source code patterns ported from scanner/token.py for honeypot detection
+# Source code patterns for honeypot detection
 SOURCE_CODE_PATTERNS = [
     {"pattern": "onlyOwner", "severity": "medium", "message": "Owner-only functions present"},
     {"pattern": "blacklist", "severity": "high", "message": "Blacklist mechanism detected"},
@@ -349,7 +349,7 @@ class TokenScanner:
             return False
 
     def _analyze_source_code(self, source_code: str, result: Dict):
-        """Run local pattern matching on verified source code (ported from scanner/token.py)."""
+        """Run local pattern matching on verified source code."""
         detected = []
         source_lower = source_code.lower()
 

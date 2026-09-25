@@ -18,9 +18,6 @@ logger = logging.getLogger(__name__)
 # Minimum contracts from same deployer/funder to flag as campaign
 CAMPAIGN_THRESHOLD = 3
 
-# Bytecode similarity threshold (% of matching 4-byte selectors)
-CODE_SIMILARITY_THRESHOLD = 0.7
-
 
 class CampaignService:
     """Cross-chain campaign detection and entity correlation."""

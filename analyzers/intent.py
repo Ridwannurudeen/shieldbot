@@ -13,10 +13,6 @@ from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD
 
 logger = logging.getLogger(__name__)
 
-# Dangerous selectors that should never appear under benign names
-DANGEROUS_SELECTORS = {"095ea7b3", "a22cb465", "23b872dd"}
-# approve, setApprovalForAll, transferFrom
-
 _decoder = CalldataDecoder()
 
 

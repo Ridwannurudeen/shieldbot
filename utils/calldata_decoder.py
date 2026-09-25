@@ -574,22 +574,6 @@ class CalldataDecoder:
         return None
 
 
-def format_approval_summary(decoded: Dict, token_symbol: str = "tokens") -> str:
-    """Format a human-readable summary of an approval transaction."""
-    if not decoded.get("is_approval"):
-        return ""
-
-    spender = decoded["params"].get("param_0", "Unknown")
-    if decoded["is_unlimited_approval"]:
-        return f"UNLIMITED {token_symbol} approval to {spender}"
-
-    amount = decoded["params"].get("param_1", "Unknown")
-    if isinstance(amount, int):
-        return f"Approving {amount} {token_symbol} to {spender}"
-
-    return f"Approval to {spender}"
-
-
 # --- Dynamic Selector Resolution via OpenChain API ---
 import time
 import aiohttp

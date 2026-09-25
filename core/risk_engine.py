@@ -19,15 +19,6 @@ class _EmptyResult:
 
 _EMPTY_RESULT = _EmptyResult()
 
-RISK_ARCHETYPES = {
-    'honeypot': 'Honeypot',
-    'rug_pull': 'Rug Pull',
-    'wash_traded': 'Wash Traded',
-    'high_risk_contract': 'High-Risk Contract',
-    'legitimate': 'Legitimate',
-    'unknown': 'Unknown',
-}
-
 # Category weights
 WEIGHT_STRUCTURAL = 0.40
 WEIGHT_MARKET = 0.25

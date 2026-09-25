@@ -92,11 +92,6 @@ def score_level_from_int(score: int) -> str:
     return level_from_score(score)
 
 
-def recommendation_from_score(score: int) -> str:
-    """Get recommendation text from numeric score."""
-    return RECOMMENDATIONS[level_from_score(score)]
-
-
 def findings_from_scan_result(result: Dict) -> List[Dict]:
     """
     Convert a scan result dict (from TransactionScanner or TokenScanner)
@@ -152,25 +147,3 @@ def findings_from_scan_result(result: Dict) -> List[Dict]:
         findings.append({"severity": "critical", "message": "Cannot sell token"})
 
     return findings
-
-
-def format_risk_report(analysis: dict) -> str:
-    """Format analysis results into human-readable Markdown report."""
-    findings = analysis.get("findings", [])
-    risk_score, risk_level, recommendation = calculate_risk_score(findings)
-
-    report = f"*Security Analysis Report*\n\n"
-    report += f"*Risk Level:* {risk_level}\n"
-    report += f"*Risk Score:* {risk_score}/100\n\n"
-
-    if findings:
-        report += "*Findings:*\n"
-        for finding in findings:
-            severity = finding.get("severity", "info").upper()
-            message = finding.get("message", "Unknown issue")
-            report += f"  [{severity}] {message}\n"
-        report += "\n"
-
-    report += f"*Recommendation:*\n{recommendation}\n"
-
-    return report
