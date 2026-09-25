@@ -194,6 +194,8 @@ def test_sdk_vocabularies_match_the_published_ones():
     assert _ts_union(typescript, "verdict") == set(verdicts.AGENT_VERDICTS)
     assert _ts_union(typescript, "classification") == set(verdicts.CLASSIFICATIONS)
     assert "classification: string" not in typescript
+    interim = re.search(r"const FIRST_CLASSIFICATIONS[^=]*= \[([^\]]*)\]", typescript).group(1)
+    assert set(re.findall(r"'([A-Z_]+)'", interim)) == set(verdicts.CLASSIFICATIONS) - {verdicts.SAFE}
     assert set(re.findall(r"verdict: '([A-Z_]+)'", typescript)) <= set(verdicts.AGENT_VERDICTS)
     models = (ROOT / "sdk" / "python" / "shieldbot" / "models.py").read_text(encoding="utf-8")
     documented = re.search(r'verdict: str  # ("[A-Z]+"(?: \| "[A-Z]+")*)', models).group(1)

@@ -299,6 +299,8 @@ const MAX_WEI = 2n ** 256n - 1n;
 /** The longest delay setTimeout keeps: a longer one fires at once. */
 const MAX_TIMEOUT = 2 ** 31 - 1;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+/** The classifications an interim verdict may carry: every band but SAFE, spelled exactly. */
+const FIRST_CLASSIFICATIONS: readonly FirstVerdict['classification'][] = ['CAUTION', 'HIGH_RISK', 'BLOCK_RECOMMENDED'];
 
 export class ShieldBot {
   private baseUrl: string;
@@ -744,8 +746,8 @@ export class ShieldBot {
    * Reads a streamed firewall response: `first` goes to onFirst, `final` resolves, and `error`
    * throws a ShieldBotError STREAM_ERROR with the API's status (500 if it has none). onEvent runs
    * on every event. Lines may end in LF, CRLF or CR, and an event's `data:` lines are joined with
-   * LF. A `first` that is not an interim verdict (status 'unknown', not SAFE, final false) is
-   * dropped: the API never sends one.
+   * LF. A `first` that is not an interim verdict (status 'unknown', a band other than SAFE, final
+   * false) is dropped: the API never sends one.
    */
   private async _readStream(
     response: Response,
@@ -785,7 +787,7 @@ export class ShieldBot {
             onEvent();
             const payload = JSON.parse(text);
             if (name === 'first') {
-              if (payload?.status !== 'unknown' || payload.classification === 'SAFE' || payload.final !== false) {
+              if (payload?.status !== 'unknown' || !FIRST_CLASSIFICATIONS.includes(payload.classification) || payload.final !== false) {
                 continue;
               }
               try {

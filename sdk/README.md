@@ -37,7 +37,7 @@ Nothing was ever published, but code built from earlier copies of this repositor
 - `timeout` must be a positive number of milliseconds, at most 2^31 - 1, or the constructor throws `INVALID_TIMEOUT`. `timeout: 0` used to mean the default. `finalTimeout` follows the same rule, checked by `firewall()` before any request.
 - `cacheSize: 0` turns the local verdict cache off. It used to mean the default of 10000 entries. A size that is not a whole number of 0 or more throws `INVALID_CACHE_SIZE`.
 - `check()` caches a copy of the verdict it returns, and every cache hit is a copy too. It used to cache the returned object itself, so a caller that set a field on it changed what later cache hits returned.
-- `firewall()` with `onFirst`: an `error` event rejects with code `STREAM_ERROR` (status 500 when the event has none) instead of no code; `onFirst` may return a promise, which is awaited, and its rejection rejects the call instead of going unhandled; and a `first` event that is not an interim verdict (`status` not `'unknown'`, `classification` `SAFE`, or `final` not `false`) is dropped instead of passed to `onFirst`.
+- `firewall()` with `onFirst`: an `error` event rejects with code `STREAM_ERROR` (status 500 when the event has none) instead of no code; `onFirst` may return a promise, which is awaited, and its rejection rejects the call instead of going unhandled; and a `first` event that is not an interim verdict (`status` not `'unknown'`, `classification` not one of `CAUTION`, `HIGH_RISK` and `BLOCK_RECOMMENDED`, or `final` not `false`) is dropped instead of passed to `onFirst`.
 
 ## API key
 
@@ -130,7 +130,7 @@ const result = await shield.firewall('0xTarget', {
 - `finalTimeout` (default 30000 ms) replaces `timeout` for a streamed call: it bounds the wait for the response and then for each next event. Like `timeout`, it must be positive and at most 2^31 - 1 ms, or `firewall()` throws `INVALID_TIMEOUT` before any request.
 - An `error` event rejects with `ShieldBotError` code `STREAM_ERROR` and the API's HTTP status, or 500 when the event carries none. A stream that ends without a final rejects with code `NETWORK_ERROR`.
 - `GET /api/verdicts` publishes this contract as `first_verdict`.
-- The SDK holds the API to it: a `first` event whose `status` is not `'unknown'`, whose `classification` is `SAFE` or whose `final` is not `false` is dropped, and `onFirst` is not called for it. The API never sends one.
+- The SDK holds the API to it: a `first` event whose `status` is not `'unknown'`, whose `classification` is not exactly `CAUTION`, `HIGH_RISK` or `BLOCK_RECOMMENDED`, or whose `final` is not `false` is dropped, and `onFirst` is not called for it. The API never sends one.
 - An exception thrown by `onFirst`, or the rejection of a promise it returns, is not caught: `firewall()` rejects with it and stops reading the stream. A promise `onFirst` returns is awaited before the stream is read on, and the time it takes counts toward `finalTimeout`.
 
 ## Supported chains

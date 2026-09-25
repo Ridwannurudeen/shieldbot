@@ -276,6 +276,10 @@ for (const [name, first] of [
   ['status ok', { ...FIRST, status: 'ok' }],
   ['no status', withoutKey('status')],
   ['classification SAFE', { ...FIRST, classification: 'SAFE' }],
+  ['classification safe', { ...FIRST, classification: 'safe' }],
+  ['classification caution', { ...FIRST, classification: 'caution' }],
+  ['classification UNKNOWN', { ...FIRST, classification: 'UNKNOWN' }],
+  ['no classification', withoutKey('classification')],
   ['final true', { ...FIRST, final: true }],
   ['no final', withoutKey('final')],
   ['final as a string', { ...FIRST, final: 'false' }],
@@ -293,6 +297,22 @@ for (const [name, first] of [
 
     assert.deepEqual(firsts, [FIRST]);
     assert.deepEqual(result, FINAL);
+  });
+}
+
+for (const classification of ['CAUTION', 'HIGH_RISK', 'BLOCK_RECOMMENDED']) {
+  test(`a first classified ${classification} reaches onFirst`, async () => {
+    const stream = streamingFetch();
+    global.fetch = stream.fetch;
+    const first = { ...FIRST, classification };
+    stream.write(sse('first', first));
+    stream.write(sse('final', FINAL));
+    stream.end();
+    const firsts = [];
+
+    await new ShieldBot().firewall('0xb', { chainId: 56, onFirst: (seen) => firsts.push(seen) });
+
+    assert.deepEqual(firsts, [first]);
   });
 }
 
