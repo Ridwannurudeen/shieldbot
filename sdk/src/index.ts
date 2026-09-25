@@ -724,7 +724,8 @@ export class ShieldBot {
   /**
    * Reads a streamed firewall response: `first` goes to onFirst, `final` resolves, and `error`
    * throws a ShieldBotError with the API's status. onEvent runs on every event. Lines may end in
-   * LF, CRLF or CR, and an event's `data:` lines are joined with LF.
+   * LF, CRLF or CR, and an event's `data:` lines are joined with LF. A `first` that is not an
+   * interim verdict (status 'unknown', not SAFE, final false) is dropped: the API never sends one.
    */
   private async _readStream(
     response: Response,
@@ -764,6 +765,9 @@ export class ShieldBot {
             onEvent();
             const payload = JSON.parse(text);
             if (name === 'first') {
+              if (payload?.status !== 'unknown' || payload.classification === 'SAFE' || payload.final !== false) {
+                continue;
+              }
               try {
                 onFirst(payload as FirstVerdict);
               } catch (error) {

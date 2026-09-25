@@ -215,6 +215,31 @@ test('an empty line ends an event: the next one does not inherit its name', asyn
   assert.deepEqual(result, FINAL);
 });
 
+const withoutKey = (key) => { const copy = { ...FIRST }; delete copy[key]; return copy; };
+for (const [name, first] of [
+  ['status ok', { ...FIRST, status: 'ok' }],
+  ['no status', withoutKey('status')],
+  ['classification SAFE', { ...FIRST, classification: 'SAFE' }],
+  ['final true', { ...FIRST, final: true }],
+  ['no final', withoutKey('final')],
+  ['final as a string', { ...FIRST, final: 'false' }],
+]) {
+  test(`a first event with ${name} never reaches onFirst`, async () => {
+    const stream = streamingFetch();
+    global.fetch = stream.fetch;
+    stream.write(sse('first', first));
+    stream.write(sse('first', FIRST));
+    stream.write(sse('final', FINAL));
+    stream.end();
+    const firsts = [];
+
+    const result = await new ShieldBot().firewall('0xb', { chainId: 56, onFirst: (seen) => firsts.push(seen) });
+
+    assert.deepEqual(firsts, [FIRST]);
+    assert.deepEqual(result, FINAL);
+  });
+}
+
 test('a plain JSON answer to a streamed request (STRICT) resolves with it', async () => {
   const strict = { ...FINAL, policy_mode: 'STRICT' };
   delete strict.final;

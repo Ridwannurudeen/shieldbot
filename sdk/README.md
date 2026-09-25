@@ -125,6 +125,7 @@ const result = await shield.firewall('0xTarget', {
 - `finalTimeout` (default 30000 ms) replaces `timeout` for a streamed call: it bounds the wait for the response and then for each next event.
 - An `error` event rejects with `ShieldBotError` and the API's HTTP status. A stream that ends without a final rejects with code `NETWORK_ERROR`.
 - `GET /api/verdicts` publishes this contract as `first_verdict`.
+- The SDK holds the API to it: a `first` event whose `status` is not `'unknown'`, whose `classification` is `SAFE` or whose `final` is not `false` is dropped, and `onFirst` is not called for it. The API never sends one.
 - An exception thrown by `onFirst` is not caught: `firewall()` rejects with it and stops reading the stream.
 
 ## Supported chains
