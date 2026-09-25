@@ -7,7 +7,7 @@ const agentFeatures = [
     desc: "Risk checks for autonomous agents before they send a transaction. The policy engine applies risk thresholds and per transaction and daily spend limits, and returns ALLOW, WARN or BLOCK. Incomplete data never returns ALLOW.",
     code: `const verdict = await shield.check({
   from: '0xAgent', to: '0xTarget',
-  data: '0x...', value: '0', chainId: 56,
+  data: '0x...', value: '0', chainId: 1,
 });
 if (verdict.blocked) stop();`,
   },
@@ -29,7 +29,7 @@ if (verdict.blocked) stop();`,
     desc: "SDKs for both ecosystems in the GitHub repository (not yet published to npm or PyPI). Scan contracts, check agent transactions, query reputation scores and scan for prompt injection. The caller enforces the returned decision.",
     code: `import { ShieldBot } from '@shieldbot/sdk';
 const shield = new ShieldBot({ apiKey: 'sb_...' });
-const scan = await shield.scan('0x...', { chainId: 56 });`,
+const scan = await shield.scan('0x...', { chainId: 1 });`,
   },
   {
     version: "V3.3",

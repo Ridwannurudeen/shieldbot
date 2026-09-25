@@ -46,7 +46,7 @@ def mempool_chain_count() -> int:
 def test_every_chain_count_on_the_site_matches_the_registry():
     statements = 0
     for name, text in landing_texts().items():
-        for match in re.finditer(r"\b(\d+)[ -](?:chains?|blockchains)\b", text):
+        for match in re.finditer(r"\b(\d+)[ -](?:EVM\s+)?(?:chains?|blockchains)\b", text):
             # "N chains with a public mempool" and "N-chain mempool" count mempool chains; every
             # other count is scan chains.
             following = text[match.end() : match.end() + 40].lstrip().lower()
