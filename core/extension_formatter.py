@@ -17,7 +17,7 @@ def is_scan_incomplete(risk_output: dict) -> bool:
 
 def format_extension_alert(risk_output: dict) -> dict:
     rug_prob = risk_output.get('rug_probability', 0)
-    risk_level = risk_output.get('risk_level', 'UNKNOWN')
+    risk_level = risk_output.get('risk_level', UNKNOWN)
     archetype = risk_output.get('risk_archetype', 'unknown')
     confidence = risk_output.get('confidence_level', 0)
     flags = risk_output.get('critical_flags', [])

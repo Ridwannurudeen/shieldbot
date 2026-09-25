@@ -48,6 +48,11 @@ COMPARISON_LITERAL = re.compile(
     r"(?:==|!=)\s*" + _COMPARED_WORD + r"|" + _COMPARED_WORD + r"\s*(?:==|!=)|\bin\s*[(\[{][^)\]}]*" + _COMPARED_WORD
 )
 POLICY_LITERAL = re.compile(r"['\"]policy_mode['\"]\s*:[^#]*['\"][A-Z_]+['\"]")
+# A risk level as a .get() default, a policy mode as a parameter or attribute default, and a policy mode
+# returned as a literal.
+LEVEL_DEFAULT = re.compile(r"risk_level['\"]\s*,\s*['\"](?:LOW|MEDIUM|HIGH|UNKNOWN)['\"]")
+MODE_DEFAULT = re.compile(r"\w*mode\s*(?::\s*[\w\[\]]+\s*)?=\s*['\"](?:STRICT|BALANCED)['\"]")
+RETURNED_MODE = re.compile(r"\breturn\s+['\"](?:STRICT|BALANCED)['\"]")
 PATTERNS = (
     SCORE_COMPARISON,
     CLASSIFICATION_LITERAL,
@@ -55,6 +60,9 @@ PATTERNS = (
     AGENT_LITERAL,
     COMPARISON_LITERAL,
     POLICY_LITERAL,
+    LEVEL_DEFAULT,
+    MODE_DEFAULT,
+    RETURNED_MODE,
 )
 
 # Lines the scan matches that are not a verdict producer restating the table, and why.
@@ -161,6 +169,26 @@ ALLOWED = {
         "services/campaign_service.py",
         "high_risk = [c for c in cross_chain if c.get('risk_level') == 'HIGH']",
     ): "reads the stored verdict level; outside api.py, rpc/ and core/ (follow-up: verdicts.HIGH)",
+    (
+        "agent/advisor.py",
+        'level = scan_result.get("risk_level", "UNKNOWN")',
+    ): "a level default outside api.py, rpc/ and core/ (follow-up: verdicts.UNKNOWN)",
+    (
+        "agent/firewall.py",
+        'risk_level=risk_output.get("risk_level", "UNKNOWN"),',
+    ): "a level default outside api.py, rpc/ and core/ (follow-up: verdicts.UNKNOWN)",
+    (
+        "agent/firewall.py",
+        '"risk_level": risk_output.get("risk_level", "UNKNOWN"),',
+    ): "a level default outside api.py, rpc/ and core/ (follow-up: verdicts.UNKNOWN)",
+    (
+        "services/guardian.py",
+        'risk_level = self._map_risk_level(a.get("risk_level", "UNKNOWN"))',
+    ): "the rescue scan's approval tiers, mapped to wallet health's own words (follow-up to align)",
+    (
+        "utils/ai_analyzer.py",
+        "f\"Risk Level: {risk_output.get('risk_level', 'UNKNOWN')}\",",
+    ): "a level default in prompt text, outside api.py, rpc/ and core/ (follow-up: verdicts.UNKNOWN)",
 }
 # Files whose every match is allowed, and why.
 ALLOWED_FILES = {
@@ -221,6 +249,12 @@ def test_the_scan_catches_a_restated_band():
         "or str(level).upper() == 'UNKNOWN'",
         'if policy_mode != "STRICT":',
         '"policy_mode": risk_output.get("policy_mode", "BALANCED"),',
+        "risk_level = cached.get('risk_level', 'UNKNOWN')",
+        '"risk_level": risk_output.get("risk_level", "LOW"),',
+        'to_addr: str = "", policy_mode: str = "BALANCED",',
+        'def __init__(self, mode: str = "BALANCED"):',
+        'policy_mode: str = "BALANCED"',
+        'return "BALANCED"',
     ):
         assert any(pattern.search(line) for pattern in PATTERNS), line
 

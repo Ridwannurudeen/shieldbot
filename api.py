@@ -1373,7 +1373,7 @@ def _policy_mode(request: Request) -> str:
         return container.policy_engine.apply(
             [], {}, mode_override=request.headers.get("X-Policy-Mode"),
         )['policy_mode']
-    return "BALANCED"
+    return PolicyMode.BALANCED.value
 
 
 def _sse(event: str, data: Dict) -> str:
@@ -3363,11 +3363,11 @@ def _scam_match_count(scan: Dict) -> Optional[int]:
 
 def _build_cached_response(
     cached: Dict, decoded: Dict, value_bnb: float, chain_id: int = 56,
-    to_addr: str = "", policy_mode: str = "BALANCED",
+    to_addr: str = "", policy_mode: str = PolicyMode.BALANCED.value,
 ) -> Dict:
     """Build a firewall response from a cached DB row."""
     risk_score = cached['risk_score']
-    risk_level = cached.get('risk_level', 'UNKNOWN')
+    risk_level = cached.get('risk_level', verdicts.UNKNOWN)
     flags = cached.get('flags', [])
     archetype = cached.get('archetype', 'unknown')
 
@@ -3460,7 +3460,7 @@ _FULL_ANALYSIS_UNAVAILABLE = (
 
 def _build_fallback_response(
     decoded: Dict, scan: Dict, whitelisted: Optional[str], chain_id: int, transaction_specific: bool = False,
-    policy_mode: str = "BALANCED",
+    policy_mode: str = PolicyMode.BALANCED.value,
 ) -> Dict:
     """Build a firewall response from the legacy scan when the analysis pipeline failed. The score and
     classification come from the scan's heuristics and the band table only."""
@@ -3578,7 +3578,7 @@ def _select_router_tokens(path: List[str]) -> List[str]:
 
 def _build_unverified_swap_response(
     req: FirewallRequest, to_addr: str, decoded: Dict, whitelisted: str, value_bnb: float,
-    source: str, reason: str, policy_mode: str = "BALANCED",
+    source: str, reason: str, policy_mode: str = PolicyMode.BALANCED.value,
 ) -> Dict:
     """Build a CAUTION response for a trusted-router swap whose path tokens were not analyzed. Under
     STRICT it blocks, as the legacy fallback does a degraded analysis.
@@ -3665,7 +3665,7 @@ async def _analyze_router_swap(
     policy_override: Optional[str] = None,
     trail: Optional[Dict] = None,
     progress: Optional[FirstVerdictProgress] = None,
-    policy_mode: str = "BALANCED",
+    policy_mode: str = PolicyMode.BALANCED.value,
 ) -> Optional[Dict]:
     """Analyze swap path tokens when interacting with a trusted router. `policy_mode` is the
     effective mode `policy_override` selects, which a response for unanalysed tokens reports.
@@ -3755,7 +3755,7 @@ async def _analyze_router_swap(
             **_coverage_fields(format_extension_alert(risk_output)),
             "address": token_addr,
             "risk_score": risk_output.get("rug_probability", 0),
-            "risk_level": risk_output.get("risk_level", "UNKNOWN"),
+            "risk_level": risk_output.get("risk_level", verdicts.UNKNOWN),
         })
         outcomes.update({
             f"{token_addr}:{name}": outcome
@@ -3819,7 +3819,7 @@ async def _analyze_router_swap(
         **_coverage_fields(alert),
         "overall": risk_score,
         "category_scores": risk_output.get("category_scores", {}),
-        "risk_level": risk_output.get("risk_level", "UNKNOWN"),
+        "risk_level": risk_output.get("risk_level", verdicts.UNKNOWN),
         "threat_type": risk_output.get("risk_archetype", "unknown"),
         "critical_flags": risk_output.get("critical_flags", []),
         "confidence": alert["confidence"],

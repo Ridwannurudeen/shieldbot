@@ -49,7 +49,7 @@ class PolicyMode(Enum):
 class PolicyEngine:
     """Applies policy rules to analysis results."""
 
-    def __init__(self, mode: str = "BALANCED"):
+    def __init__(self, mode: str = PolicyMode.BALANCED.value):
         self.mode = PolicyMode(mode.upper())
 
     def apply(
