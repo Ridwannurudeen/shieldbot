@@ -16,7 +16,9 @@ from core.telegram_formatter import format_full_report
 from tests.test_api import client  # noqa: F401
 from tests.test_bot_app import MEMPOOL_ALERT, MEMPOOL_STATS, bot_module, mempool_api  # noqa: F401
 
-HOSTILE = "*_[evil](http://x)"
+# Markup that would open bold and italic and make a text link. Its link target has no scheme, because
+# untrusted text now shows a scheme's colon as a look-alike (test_unlinked_defuses_every_uri_scheme...).
+HOSTILE = "*_[evil](x)"
 ADDRESS = "0x" + "a" * 40
 _ENTITY_TYPES = {"_": "italic", "*": "bold", "`": "code", "[": "text_link"}
 
@@ -826,3 +828,21 @@ async def test_an_operator_watch_alert_keeps_its_text(monkeypatch):
         ADDRESS, 56, ADDRESS, {"watch_reason": reason, "risk_severity": "high"}
     )
     assert f"Watch reason: {reason} | Severity: high" in assert_literal(sent[0]["text"])
+
+
+
+@pytest.mark.parametrize(
+    "text, shown",
+    [
+        ("tg://resolve?domain=x", "tg\N{RATIO}//resolve?domain=x"),
+        ("ton://x", "ton\N{RATIO}//x"),
+        ("http://intranet/login", "http\N{RATIO}//intranet/login"),
+        ("https://x.co", "https\N{RATIO}//x\N{ONE DOT LEADER}co"),
+        ("open svn+ssh://host now", "open svn+ssh\N{RATIO}//host now"),
+        ("Note: 12:30, ratio 3:1, see 10:00-12:30", "Note: 12:30, ratio 3:1, see 10:00-12:30"),
+    ],
+)
+def test_unlinked_defuses_every_uri_scheme_but_not_ordinary_colons(text, shown):
+    from core.telegram_formatter import unlinked
+
+    assert unlinked(text) == shown

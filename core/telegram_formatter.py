@@ -15,14 +15,17 @@ CONTROL_CHARACTERS = re.compile(
     r'[\x00-\x1f\x7f-\x9f\xad\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069'
     r'\u3164\ufeff\uffa0]'
 )
-# Telegram turns a bare domain, an @mention and a /command into a link in any message, plain text or
-# escaped Markdown alike, so untrusted text shows the character that starts one as a look-alike: a dot
-# (or an ideographic or fullwidth dot, which Telegram also reads as one) between a word character and
-# a letter, where a domain's next label starts, as ONE DOT LEADER, and an @ or / starting a word as
-# FULLWIDTH COMMERCIAL AT or DIVISION SLASH. A dot before a digit is left alone, so numbers and
-# versions (12.5%, $0.0023, v1.2) read and copy as written.
-_LINK_STARTS = re.compile(r'(?<=\w)[.\u3002\uff0e\uff61](?=[^\W\d_])|(?<!\w)@(?=\w)|(?<![\w/<>])/(?=\w)')
-_LINK_LOOKALIKES = {'@': '\N{FULLWIDTH COMMERCIAL AT}', '/': '\N{DIVISION SLASH}'}
+# Telegram turns a bare domain, a URI with a scheme, an @mention and a /command into a link in any
+# message, plain text or escaped Markdown alike, so untrusted text shows the character that starts one
+# as a look-alike: a dot (or an ideographic or fullwidth dot, which Telegram also reads as one) between
+# a word character and a letter, where a domain's next label starts, as ONE DOT LEADER; the colon of
+# any scheme:// (tg, ton, http, even with a dotless host) as RATIO; and an @ or / starting a word as
+# FULLWIDTH COMMERCIAL AT or DIVISION SLASH. A dot before a digit and a colon not followed by // are
+# left alone, so numbers, versions and times (12.5%, $0.0023, v1.2, 12:30) read and copy as written.
+_LINK_STARTS = re.compile(
+    r'(?<=\w)[.\u3002\uff0e\uff61](?=[^\W\d_])|(?<=[\w+.\-]):(?=//)|(?<!\w)@(?=\w)|(?<![\w/<>])/(?=\w)'
+)
+_LINK_LOOKALIKES = {'@': '\N{FULLWIDTH COMMERCIAL AT}', '/': '\N{DIVISION SLASH}', ':': '\N{RATIO}'}
 # How a collision's symbol or name pointed at the official token.
 _POINTED_BY = {'ticker': 'same ticker', 'affix': 'ticker with an affix', 'company': 'same company name'}
 _ADDRESS = re.compile(r'0x[0-9a-fA-F]{40}')
