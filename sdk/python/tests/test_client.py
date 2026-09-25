@@ -3,6 +3,7 @@
 import pytest
 import json
 import httpx
+from enum import IntEnum
 from unittest.mock import AsyncMock, patch, MagicMock
 from shieldbot.client import ShieldBot, ShieldBotError
 from shieldbot.models import Verdict
@@ -218,7 +219,7 @@ async def test_unparseable_value_is_rejected_before_any_request(value):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("chain_id", ["56", "0x38", " 56 ", 56.0, 0, -1, True, Wei(56)])
+@pytest.mark.parametrize("chain_id", ["56", "0x38", " 56 ", 56.0, 0, -1, True, False, Wei(0)])
 async def test_chain_id_that_is_not_a_positive_int_is_rejected_before_any_request(chain_id):
     client = ShieldBot(api_key="sb_test", agent_id="agent:1", fail_mode="open")
     with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock) as post:
@@ -226,6 +227,34 @@ async def test_chain_id_that_is_not_a_positive_int_is_rejected_before_any_reques
             await client.check({"from": "0xA", "to": "0xB", "chain_id": chain_id})
     post.assert_not_awaited()
     await client.close()
+
+
+class Chain(IntEnum):
+    BSC = 56
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [56, Wei(56), Chain.BSC])
+async def test_an_int_chain_id_including_a_subclass_is_sent_as_a_plain_int(sb, chain_id):
+    response = MagicMock(status_code=200)
+    response.json.return_value = {"status": "ok", "coverage": {"honeypot": 1}, "verdict": "ALLOW", "score": 5}
+    with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response) as post:
+        verdict = await sb.check({"from": "0xA", "to": "0xB", "chain_id": chain_id})
+    sent = post.await_args.kwargs["json"]["transaction"]["chain_id"]
+    assert (sent, type(sent)) == (56, int)
+    assert verdict.allowed
+
+
+@pytest.mark.asyncio
+async def test_an_intenum_chain_shares_the_cache_entry_of_its_int(sb):
+    response = MagicMock(status_code=200)
+    response.json.return_value = {"status": "ok", "coverage": {"honeypot": 1}, "verdict": "ALLOW", "score": 5}
+    transaction = {"from": "0xA", "to": "0xB", "chain_id": 56}
+    with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response) as post:
+        await sb.check(transaction)
+        hit = await sb.check({**transaction, "chain_id": Chain.BSC})
+    assert post.await_count == 1
+    assert hit.cached is True
 
 
 @pytest.mark.asyncio

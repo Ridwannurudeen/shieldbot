@@ -144,9 +144,10 @@ class ShieldBot:
         """
         if transaction.get("chain_id") is None:
             raise ValueError("chain_id is required")
-        if type(transaction["chain_id"]) is not int or transaction["chain_id"] <= 0:
+        chain_id = transaction["chain_id"]
+        if not isinstance(chain_id, int) or isinstance(chain_id, bool) or chain_id <= 0:
             raise ValueError("chain_id must be a positive int")
-        transaction = {**transaction, "value": _decimal_wei(transaction.get("value"))}
+        transaction = {**transaction, "chain_id": int(chain_id), "value": _decimal_wei(transaction.get("value"))}
         to_addr = transaction.get("to", "")
         cache_key = self._cache_key(transaction)
 
