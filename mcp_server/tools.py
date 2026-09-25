@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from core.analyzer import AnalysisContext
 from core.extension_formatter import format_extension_alert
-from core.verdicts import HIGH, LOW, MEDIUM, UNKNOWN
+from core.verdicts import HIGH, MEDIUM, UNKNOWN
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 
 logger = logging.getLogger(__name__)
@@ -159,7 +159,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "Only the API key that registered the agent can read it; to any other key it is not registered. "
             "An unregistered agent, or one with no firewall history, returns status 'unknown' with coverage_reasons "
             "and a null trust_score. Only the latest 1000 firewall records are read; an agent with that many also "
-            "returns status 'unknown', because its counts are a lower bound."
+            "returns status 'unknown', because its counts are a lower bound, and so does one with any record whose "
+            "scan had incomplete coverage, which is not evidence that the transaction was clean."
         ),
         "inputSchema": {
             "type": "object",
@@ -183,7 +184,11 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "scan_for_injection",
-        "description": "Detect prompt injection patterns in text content. (Basic regex in V3.1, full ML in V3.4.)",
+        "description": (
+            "Detect prompt injection patterns in text content with a few regular expressions (V3.1; full ML in V3.4). "
+            "They cannot show text is free of injection, so every result has status 'unknown' with coverage_reasons; "
+            f"matched says whether any pattern matched, and without a match risk_level is '{UNKNOWN}', never clean."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -409,6 +414,9 @@ async def handle_check_agent_reputation(container, params: Dict, key_info: Dict)
         }
     blocked = sum(1 for h in history if h.get("verdict") == "BLOCK")
     block_rate = blocked / total
+    # The policy engine records a "coverage" check when a scan's coverage was incomplete (and then gives a
+    # WARN, not an ALLOW); such a record, or one that does not say, is not evidence of a clean transaction.
+    unclear = sum(1 for h in history if not h.get("policy_result") or "coverage" in h["policy_result"])
 
     # Simple trust heuristic: 100 - block_rate*100, floored at 0
     trust_score = max(0, round(100 - block_rate * 100, 1))
@@ -419,14 +427,22 @@ async def handle_check_agent_reputation(container, params: Dict, key_info: Dict)
         "total_transactions": total,
         "block_rate": round(block_rate, 4),
     }
-    if total < _REPUTATION_WINDOW:
-        return {**result, "status": "ok", "coverage": {"history": 1}, "coverage_reasons": {}}
+    reasons = []
+    if unclear:
+        reasons.append(
+            f"{unclear} of the {total} firewall records read do not show a scan with complete coverage, "
+            "so they are not evidence the agent's transactions were clean"
+        )
     # A full window means older records were not read: the count is a lower bound.
+    if total >= _REPUTATION_WINDOW:
+        reasons.append(f"Only the latest {_REPUTATION_WINDOW} firewall records are read, so total_transactions is a lower bound")
+    if not reasons:
+        return {**result, "status": "ok", "coverage": {"history": 1}, "coverage_reasons": {}}
     return {
         **result,
         "status": "unknown",
         "coverage": {"history": 0},
-        "coverage_reasons": {"history": f"Only the latest {_REPUTATION_WINDOW} firewall records are read, so total_transactions is a lower bound"},
+        "coverage_reasons": {"history": "; ".join(reasons)},
     }
 
 
@@ -462,17 +478,22 @@ async def handle_scan_for_injection(container, params: Dict, key_info: Dict) -> 
                 "count": len(matches),
             })
 
-    clean = len(detections) == 0
+    # A few regular expressions cannot show text is free of injection: no match is unknown, never clean.
     if detections:
         risk_level = HIGH if len(detections) >= 3 else MEDIUM
     else:
-        risk_level = LOW
+        risk_level = UNKNOWN
 
     return {
-        "clean": clean,
+        "matched": bool(detections),
         "risk_level": risk_level,
         "detections": detections,
         "depth": depth,
+        "status": "unknown",
+        "coverage": {"injection": 0},
+        "coverage_reasons": {
+            "injection": "Only a few regular expressions are checked, so text they do not match is not shown to be free of injection"
+        },
         "note": "Basic regex detection (V3.1). ML-based detection coming in V3.4.",
     }
 

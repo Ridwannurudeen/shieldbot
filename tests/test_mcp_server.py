@@ -18,6 +18,10 @@ from fastapi.testclient import TestClient
 # Fixtures
 # ---------------------------------------------------------------------------
 
+# The policy engine's checks for a firewall record whose scan had complete coverage.
+COMPLETE_CHECKS = {"contract_list": "pass — no list match", "risk_threshold": "pass — score 10 < 25"}
+
+
 @pytest.fixture
 def mock_container():
     """Mock ServiceContainer with all dependencies needed by MCP server."""
@@ -61,9 +65,9 @@ def mock_container():
         "registered_by_key": "k1",
     })
     c.db.get_agent_firewall_history = AsyncMock(return_value=[
-        {"verdict": "ALLOW", "score": 10},
-        {"verdict": "ALLOW", "score": 15},
-        {"verdict": "BLOCK", "score": 85},
+        {"verdict": "ALLOW", "score": 10, "policy_result": COMPLETE_CHECKS},
+        {"verdict": "ALLOW", "score": 15, "policy_result": COMPLETE_CHECKS},
+        {"verdict": "BLOCK", "score": 85, "policy_result": COMPLETE_CHECKS},
     ])
     c.db.get_agent_findings = AsyncMock(return_value=[
         {
@@ -332,7 +336,8 @@ class TestToolExecution:
     def test_check_agent_reputation_over_a_full_window_is_a_lower_bound(self, client, mock_container):
         """At the query cap the agent may have more records than were read."""
         mock_container.db.get_agent_firewall_history = AsyncMock(
-            return_value=[{"verdict": "ALLOW"}] * 999 + [{"verdict": "BLOCK"}]
+            return_value=[{"verdict": "ALLOW", "policy_result": COMPLETE_CHECKS}] * 999
+            + [{"verdict": "BLOCK", "policy_result": COMPLETE_CHECKS}]
         )
         resp = client.post("/mcp/messages", json={
             "jsonrpc": "2.0", "id": 6, "method": "tools/call",
@@ -406,8 +411,8 @@ class TestToolExecution:
         assert content["coverage_reasons"]["approvals"]
         assert is_scan_incomplete(content)
 
-    def test_scan_for_injection_clean(self, client):
-        """scan_for_injection with clean content returns clean=True."""
+    def test_scan_for_injection_without_a_match_is_unknown_never_clean(self, client):
+        """Six regular expressions cannot show that text is free of injection."""
         resp = client.post("/mcp/messages", json={
             "jsonrpc": "2.0", "id": 9, "method": "tools/call",
             "params": {
@@ -416,8 +421,15 @@ class TestToolExecution:
             },
         }, headers=AUTH_HEADERS)
         content = json.loads(resp.json()["result"]["content"][0]["text"])
-        assert content["clean"] is True
-        assert content["risk_level"] == "LOW"
+        from core.extension_formatter import is_scan_incomplete
+        assert "clean" not in content
+        assert content["matched"] is False
+        assert content["detections"] == []
+        assert content["risk_level"] == "UNKNOWN"
+        assert content["status"] == "unknown"
+        assert content["coverage"] == {"injection": 0}
+        assert content["coverage_reasons"]["injection"]
+        assert is_scan_incomplete(content)
 
     def test_scan_for_injection_detected(self, client):
         """scan_for_injection detects common injection patterns."""
@@ -431,8 +443,11 @@ class TestToolExecution:
             },
         }, headers=AUTH_HEADERS)
         content = json.loads(resp.json()["result"]["content"][0]["text"])
-        assert content["clean"] is False
+        assert "clean" not in content
+        assert content["matched"] is True
         assert len(content["detections"]) >= 1
+        assert content["risk_level"] == "MEDIUM"
+        assert content["status"] == "unknown"
 
     def test_query_threat_graph_stub(self, client):
         """Unimplemented graph queries cannot report absence of threat links."""
@@ -1321,3 +1336,48 @@ def test_another_keys_agent_reads_exactly_as_a_missing_one(client, mock_containe
     assert _agent_answers(client, mock_container, "k2", REGISTERED_BY_K1) == _agent_answers(
         client, mock_container, "k2", None
     )
+
+
+def _reputation(client, mock_container, history):
+    mock_container.db.get_agent_firewall_history = AsyncMock(return_value=history)
+    resp = client.post("/mcp/messages", json={
+        "jsonrpc": "2.0", "id": 6, "method": "tools/call",
+        "params": {"name": "check_agent_reputation", "arguments": {"agent_id": "agent:1"}},
+    }, headers=AUTH_HEADERS)
+    return json.loads(resp.json()["result"]["content"][0]["text"])
+
+
+@pytest.mark.parametrize(
+    "unclear",
+    [
+        # A WARN the policy engine gave because the scan's coverage was incomplete.
+        {"verdict": "WARN", "policy_result": {
+            "coverage": "warn — incomplete coverage: Simulation failed",
+            "contract_list": "pass — no list match",
+            "risk_threshold": "pass — score 5 < 25",
+        }},
+        # A record that does not say what its scan covered.
+        {"verdict": "ALLOW", "policy_result": None},
+    ],
+)
+def test_reputation_over_records_without_complete_coverage_is_unknown(client, mock_container, unclear):
+    from core.extension_formatter import is_scan_incomplete
+
+    content = _reputation(client, mock_container, [{"verdict": "ALLOW", "policy_result": COMPLETE_CHECKS}, unclear])
+
+    assert content["trust_score"] == 100
+    assert content["status"] == "unknown"
+    assert content["coverage"] == {"history": 0}
+    assert content["coverage_reasons"] == {
+        "history": "1 of the 2 firewall records read do not show a scan with complete coverage, so they are not evidence the agent's transactions were clean"
+    }
+    assert is_scan_incomplete(content)
+
+
+def test_the_injection_and_reputation_tools_describe_their_unknowns():
+    from mcp_server.tools import TOOL_DEFINITIONS
+
+    tools = {tool["name"]: tool["description"] for tool in TOOL_DEFINITIONS}
+    assert "incomplete coverage" in tools["check_agent_reputation"]
+    assert "status 'unknown'" in tools["scan_for_injection"]
+    assert "coverage_reasons" in tools["scan_for_injection"]
