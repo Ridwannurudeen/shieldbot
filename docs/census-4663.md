@@ -42,8 +42,8 @@ python -m scripts.census_4663.collect --data-dir /var/lib/shieldbot-census-4663 
 
 Those block numbers illustrate a 54,000-block replay, not a permanently recent
 range. Choose a recent range ending at least 60 blocks behind the current tip.
-On Windows, use a directory outside the checkout, such as
-`%LOCALAPPDATA%/Temp/shieldbot-census-4663`, instead of `/var/lib/...`.
+On Windows, use a directory outside the checkout, such as a
+`shieldbot-census-4663` folder in your user temp directory, instead of `/var/lib/...`.
 The tool rejects data directories inside a git checkout.
 Never commit the SQLite database, provider responses, reports or smoke results.
 
@@ -240,12 +240,12 @@ avoid concurrent append races. These commands never call a comparator service.
 
 ## Operations and known limits
 
-`deploy/census-4663.service` is an **example only**. Before a coordinator installs
+`deploy/census-4663.service` is an **example only**. Before an operator installs
 it, provision the unprivileged `shieldbot-census` account, validate the interpreter
 and checkout paths, and provide `/etc/shieldbot/census-4663.env` using the operator's
 existing environment/secret mechanism. The unit keeps writable state in
 `/var/lib/shieldbot-census-4663`, uses `Restart=on-failure`, and embeds no secrets.
-There is no automatic seven-day stop: the coordinator controls the observation
+There is no automatic seven-day stop: the operator controls the observation
 start/end and stops the service after the intended period.
 
 The public RPC is non-archive. This collector uses recent logs, block headers,

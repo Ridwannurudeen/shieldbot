@@ -44,6 +44,8 @@ This is a live product with real monitoring volume and a small number of complet
 
 Revision **`27aca4d`** was deployed to production on **2026-09-23**. After deployment, a live Robinhood Chain scan returned `contract_age_days: 145`, `is_verified: true`, and `status: ok`. `/api/health` listed chain 4663.
 
+## External validation
+
 **OWNER_FILL_EXTERNAL_FEEDBACK_STATUS** — Before submission, replace with either a dated, consented summary of an actual reply (distinguishing interest from an integration commitment), or: **"As of the submission date, no reply has been received; external validation remains outstanding."** A lack of replies is an explicit outcome, not a reason to imply endorsement.
 
 ## Deployment evidence — owner must complete

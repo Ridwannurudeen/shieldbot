@@ -53,9 +53,9 @@ Guard and registry use the same pattern. Attestor additionally maps `@eas/=contr
 
 ## Qualifications
 
-The requested Python selection excludes `tests/test_bot_app.py`; Telegram is absent locally, and the separate bot import case is skipped. This is not a passing claim for the excluded Telegram suite. Real Telegram delivery, live wallets and browser behavior were not tested.
+The Python baseline excludes `tests/test_bot_app.py`; Telegram is absent locally, and the separate bot import case is skipped. This is not a passing claim for the excluded Telegram suite. Real Telegram delivery, live wallets and browser behavior were not tested.
 
-Installed tools checked in this pass: Python **3.12.10**, pytest **8.3.3**, pytest-asyncio **1.3.0**, web3 **7.16.0**, eth-utils **6.0.0**, eth-abi **5.2.0**, httpx **0.28.1**, Forge **1.7.1**, Solidity **0.8.28**, Slither **0.11.5**. Several Python versions differ from `requirements.txt`; this is not a clean pinned-environment installation result. Python reports existing deprecation/configuration warnings. The touched-file formatting result does not assert an unqualified whole-checkout format pass across preexisting Windows line endings.
+Installed tools: Python **3.12.10**, pytest **8.3.3**, pytest-asyncio **1.3.0**, web3 **7.16.0**, eth-utils **6.0.0**, eth-abi **5.2.0**, httpx **0.28.1**, Forge **1.7.1**, Solidity **0.8.28**, Slither **0.11.5**. Several Python versions differ from `requirements.txt`; this is not a clean pinned-environment installation result. Python reports existing deprecation/configuration warnings.
 
 No live-chain test is part of these suites. The existing Python tests use fabricated cryptographic fixtures, including fixture-only signing; transport is mocked. Foundry deployment-script tests run only in its local VM.
 

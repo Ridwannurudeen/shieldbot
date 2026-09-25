@@ -131,7 +131,7 @@ it is local Cancun execution with the ordinary mock ERC-20, not live USDG gas or
 
 ## Slither
 
-From the repository root, the same forced-solc command was used on the unchanged guard and registry,
+From the repository root, a forced-solc Slither run equivalent to the CI command was used on the unchanged guard and registry,
 then on the new transfer:
 
 ```bash

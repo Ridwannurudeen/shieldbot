@@ -74,11 +74,12 @@ has passed with them.
 1. Merge the release branches into main and run `python -m pytest -q -p no:cacheprovider`.
 2. Confirm `extension/manifest.json` says `"version": "3.1.0"`. The store refuses a package whose
    version is not higher than the published 3.0.1.
-3. Build the package from the `extension` folder, leaving out `README.md`. `manifest.json` must sit at the root of the zip. This command,
+3. Build the package from the `extension` folder, leaving out `README.md`. `manifest.json` must
+   sit at the root of the zip. This command,
    run from the repository root, writes it with forward-slash entry names on any system:
 
    ```
-   python -c "import pathlib, zipfile; root = pathlib.Path('extension'); z = zipfile.ZipFile('shieldbot-extension-v3.1.0.zip', 'w', zipfile.ZIP_DEFLATED); [z.write(p, p.relative_to(root).as_posix()) for p in sorted(root.rglob('*')) if p.is_file() and 'screenshots' not in p.relative_to(root).parts and p.relative_to(root).as_posix() != 'README.md']; z.close()"
+   python -c "import pathlib, zipfile; root = pathlib.Path('extension'); z = zipfile.ZipFile('shieldbot-extension-v3.1.0.zip', 'w', zipfile.ZIP_DEFLATED); [z.write(p, p.relative_to(root).as_posix()) for p in sorted(root.rglob('*')) if p.is_file() and p.relative_to(root).as_posix() != 'README.md']; z.close()"
    ```
 
 4. In a clean Chrome profile (Chrome 111 or later, which the manifest now requires) open

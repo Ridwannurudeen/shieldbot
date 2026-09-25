@@ -18,10 +18,6 @@ __pycache__/
 *.swp
 *.swo
 
-# AI tool configuration
-CLAUDE.md
-.claude/
-
 # Logs
 *.log
 logs/
