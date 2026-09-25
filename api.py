@@ -46,6 +46,7 @@ from core.rate_limit import RateLimiter, connect as connect_rate_limit_redis
 from core.registry import FIRST_VERDICT_SECONDS
 from core.scan_evidence import (
     analyzer_outcomes, build_scan_evidence, oldest_simulation_block, render_evidence_page, transaction_evidence,
+    without_caller,
 )
 from core.unknown_ledger import unknown_ledger
 from core.telegram_formatter import escape_markdown
@@ -1882,15 +1883,16 @@ async def _firewall_verdict(
         contract_scan.pop("forensic_report", None)
         contract_scan.pop("source_code", None)
 
-        tx_data = {
+        # The AI provider gets no wallet address: not the sender, nor a mention of it in the calldata
+        # (a swap's recipient), which is masked as the evidence document masks it.
+        tx_data = without_caller({
             "to": to_addr,
-            "from": from_addr,
             "value": req.value,
             "data": req.data,
             "chainId": req.chainId,
             "decoded_calldata": decoded,
             "whitelisted_router": whitelisted,
-        }
+        }, from_addr)
 
         # The trusted-router discount applies only where the router shortcut would have answered: never
         # to a delegation or to a router an admin has listed.
