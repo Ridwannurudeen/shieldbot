@@ -1,12 +1,12 @@
 # ShieldBot - Technical Documentation
 
-Coverage and operational corrections below describe the current source tree. The original February 2026 diagrams and demo outputs are illustrative, not evidence of a deployed version or a complete scan.
+Coverage and operational corrections below describe the current source tree. The February 2026 demo outputs are illustrative, not evidence of a deployed version or a complete scan.
 
 ## Architecture Overview
 
 ### System Design
 
-ShieldBot follows a **3-tier architecture**:
+ShieldBot follows a **3-tier architecture**. The delivery, intelligence and data-service layers below are the February 2026 design (the RPC proxy in `rpc/proxy.py`, the MCP server in `mcp_server/` and the SDKs in `sdk/` are not drawn); the BLOCKCHAIN LAYER lists the eight adapters in `adapters/` that `core/container.py` and `utils/web3_client.py` configure today:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -393,6 +393,8 @@ shieldbot/
 │
 ├── docs/
 │   ├── TECHNICAL.md             # This file (architecture, setup)
+│   ├── ARCHITECTURE.md          # Historical architecture sketch
+│   ├── ARCHITECTURE_DIAGRAM.md  # Historical diagrams
 │   ├── DEPLOYMENT.md            # Production deployment guide
 │   └── DEPLOYMENTS.md           # Deployed contracts
 │
@@ -479,26 +481,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env`:
-
-```env
-# REQUIRED: Telegram Bot
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-
-# REQUIRED: Blockchain
-BSCSCAN_API_KEY=your_bscscan_api_key
-BSC_RPC_URL=https://bsc-dataseed1.binance.org/
-OPBNB_RPC_URL=https://opbnb-mainnet-rpc.bnbchain.org
-
-# OPTIONAL: Advanced Features
-TENDERLY_API_KEY=your_tenderly_key
-TENDERLY_PROJECT_ID=your_tenderly_project_id
-GREENFIELD_PRIVATE_KEY=your_greenfield_private_key
-AI_API_KEY=your_ai_api_key
-
-# OPTIONAL: Extension CORS
-CORS_ALLOW_ORIGINS=chrome-extension://YOUR_EXTENSION_ID,http://localhost:8000
-```
+Then fill in `.env`. `.env.example` is the source of truth for every setting, including the per-chain RPC URLs and the Blockscout key for Robinhood Chain explorer data.
 
 **How to Get API Keys**:
 
@@ -1019,7 +1002,3 @@ MIT License - see LICENSE file for details
 - **Issues**: https://github.com/Ridwannurudeen/shieldbot/issues
 - **Email**: support@shieldbotsecurity.online
 - **Founder**: Ridwan Nurudeen ([@Ggudman](https://t.me/Ggudman) on Telegram)
-
----
-
-**Last Updated**: February 2026
