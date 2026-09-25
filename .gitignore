@@ -65,10 +65,6 @@ dashboard/build/tw.css
 # Build scripts (local tooling)
 scripts/build_*.py
 
-# X poster local files
-scripts/chrome_profile/
-scripts/x_session.json
-
 # Screenshots and zips
 *.png
 !/landing-src/public/*.png
