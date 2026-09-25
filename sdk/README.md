@@ -34,6 +34,7 @@ Nothing was ever published, but code built from earlier copies of this repositor
 - `rescue`, `getCampaign` and `queryThreatGraph` throw `INVALID_ADDRESS` before any request for an address that is not `0x` and 40 hex digits. They used to put any string in the request path: an address ending in `#` dropped the chain (the API then read BNB Chain), one ending in `?chain_id=1&` replaced it, and `../` reached other routes with your API key.
 - `rescue` and `queryThreatGraph` throw `CHAIN_MISMATCH` (status 502) when the answer's `chain_id` is not the chain asked for.
 - `timeout` must be a positive number of milliseconds, at most 2^31 - 1, or the constructor throws `INVALID_TIMEOUT`. `timeout: 0` used to mean the default. `finalTimeout` follows the same rule, checked by `firewall()` before any request.
+- `cacheSize: 0` turns the local verdict cache off. It used to mean the default of 10000 entries. A size that is not a whole number of 0 or more throws `INVALID_CACHE_SIZE`.
 - `check()` caches a copy of the verdict it returns, and every cache hit is a copy too. It used to cache the returned object itself, so a caller that set a field on it changed what later cache hits returned.
 - `firewall()` with `onFirst`: an `error` event rejects with code `STREAM_ERROR` (status 500 when the event has none) instead of no code; `onFirst` may return a promise, which is awaited, and its rejection rejects the call instead of going unhandled; and a `first` event that is not an interim verdict (`status` not `'unknown'`, `classification` `SAFE`, or `final` not `false`) is dropped instead of passed to `onFirst`.
 
@@ -167,7 +168,7 @@ const shield = new ShieldBot({
   agentId: 'my-agent',       // Required for check() and register()
   baseUrl: 'https://...',    // Custom API URL (default: https://api.shieldbotsecurity.online)
   timeout: 10000,            // Request timeout in ms: positive, at most 2^31 - 1 (else INVALID_TIMEOUT)
-  cacheSize: 10000,          // Local verdict cache entries
+  cacheSize: 10000,          // Local verdict cache entries, a whole number >= 0; 0 turns the cache off
   cacheTtl: 60,              // Cache TTL in seconds (bounds stale decisions to one minute)
   failMode: 'cached',        // 'cached' | 'open' | 'closed'
 });
@@ -181,7 +182,7 @@ The fail mode applies to `check()` when the API is unreachable, times out or ret
 - **`open`**: allow the transaction (`analysis_unavailable: true`).
 - **`closed`**: block the transaction (`analysis_unavailable: true`).
 
-`check()` keeps verdicts in a local cache (`cacheSize`, `cacheTtl`), and a verdict from it has `cached: true`. Each call gets its own `Verdict` object, so setting a field on one does not change what later calls get. The objects and arrays inside it (`flags`, `coverage`, `coverage_reasons`, `category_scores`, `policy_check`) are shared with the cache, so treat them as read-only.
+`check()` keeps verdicts in a local cache (`cacheSize`, `cacheTtl`), and a verdict from it has `cached: true`. With `cacheSize: 0` nothing is cached: every call asks the API, and the `cached` fail mode has no verdict to fall back on, so it returns `WARN`. Each call gets its own `Verdict` object, so setting a field on one does not change what later calls get. The objects and arrays inside it (`flags`, `coverage`, `coverage_reasons`, `category_scores`, `policy_check`) are shared with the cache, so treat them as read-only.
 
 4xx responses to `check()` (invalid key, unregistered agent, unsupported chain, rate limit) are thrown as `ShieldBotError`, never turned into a verdict. The other methods throw `ShieldBotError` on every failure; `status` holds the HTTP status (408 with code `TIMEOUT`, 0 with code `NETWORK_ERROR`).
 

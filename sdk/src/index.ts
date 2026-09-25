@@ -16,7 +16,7 @@ export interface ShieldBotConfig {
   baseUrl?: string;
   /** Request timeout in milliseconds, positive and at most 2^31 - 1; anything else throws INVALID_TIMEOUT. Default: 10000. */
   timeout?: number;
-  /** Local verdict cache size. Default: 10000. */
+  /** Local verdict cache size in entries, a whole number of 0 or more (0 turns the cache off); anything else throws INVALID_CACHE_SIZE. Default: 10000. */
   cacheSize?: number;
   /** Local verdict cache TTL in seconds. Default: 60 (bounds stale decisions to one minute). */
   cacheTtl?: number;
@@ -316,7 +316,10 @@ export class ShieldBot {
     this.agentId = config.agentId;
     this.timeout = this._timeout(config.timeout ?? DEFAULT_TIMEOUT, 'timeout');
     this.failMode = config.failMode || 'cached';
-    this.cacheSize = config.cacheSize || 10000;
+    this.cacheSize = config.cacheSize ?? 10000;
+    if (!Number.isSafeInteger(this.cacheSize) || this.cacheSize < 0) {
+      throw new ShieldBotError('cacheSize must be a whole number of entries, 0 or more (0 turns the cache off)', 400, 'INVALID_CACHE_SIZE');
+    }
     this.cacheTtl = (config.cacheTtl ?? 60) * 1000; // convert to ms
     this.verdictCache = new Map();
   }
@@ -588,6 +591,9 @@ export class ShieldBot {
   }
 
   private _cacheVerdict(key: string, verdict: Verdict): void {
+    if (this.cacheSize === 0) {
+      return;
+    }
     // Evict oldest if at capacity
     if (this.verdictCache.size >= this.cacheSize) {
       const oldestKey = this.verdictCache.keys().next().value;
