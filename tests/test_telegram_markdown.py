@@ -16,7 +16,9 @@ from core.telegram_formatter import format_full_report
 from tests.test_api import client  # noqa: F401
 from tests.test_bot_app import MEMPOOL_ALERT, MEMPOOL_STATS, bot_module, mempool_api  # noqa: F401
 
-HOSTILE = "*_[evil](http://x)"
+# Markup that would open bold and italic and make a text link. Its link target has no scheme, because
+# untrusted text now shows a scheme's colon as a look-alike (test_unlinked_defuses_every_uri_scheme...).
+HOSTILE = "*_[evil](x)"
 ADDRESS = "0x" + "a" * 40
 _ENTITY_TYPES = {"_": "italic", "*": "bold", "`": "code", "[": "text_link"}
 
@@ -139,7 +141,12 @@ def _report(complete, **overrides):
             "source_code_patterns": [HOSTILE],
         },
         "dex_data": {"reason": HOSTILE},
-        "ethos_data": {"reputation_score": 10, "trust_level": HOSTILE, "scam_flags": [HOSTILE]},
+        "ethos_data": {
+            "reputation_score": 10,
+            "ethos_raw_score": 280,
+            "trust_level": HOSTILE,
+            "scam_flags": [HOSTILE],
+        },
         "honeypot_data": {"is_honeypot": None, "reason": HOSTILE},
         "address": ADDRESS,
         "ai_analysis": f"**Risk Score:** 90/100\n{HOSTILE}\nSee `set_fee`",
@@ -360,6 +367,50 @@ async def test_campaign_reply_shows_indicators_literally(bot_module):
     assert f"• {HOSTILE}\n" in assert_literal(_reply(update), HOSTILE)
 
 
+def _graph(deployer=None, contracts_deployed=()):
+    """An entity graph as campaign_service builds it for an address with no campaign indicators."""
+    return {
+        "address": ADDRESS,
+        "deployer": deployer,
+        "funder": None,
+        "funder_value_wei": "0",
+        "contracts_deployed": list(contracts_deployed),
+        "total_deployed": len(contracts_deployed),
+        "cross_chain_contracts": [],
+        "funder_cluster": [],
+        "campaign": {"is_campaign": False, "severity": "NONE", "indicators": []},
+    }
+
+
+@pytest.mark.asyncio
+async def test_campaign_for_an_address_the_index_has_never_seen_is_unknown(bot_module):
+    bot_module.container.campaign_service.get_entity_graph = AsyncMock(return_value=_graph())
+    update = _update()
+
+    await bot_module.campaign_command(update, SimpleNamespace(args=[ADDRESS]))
+
+    rendered = assert_literal(_reply(update))
+    assert "Campaign Detected: Unknown (not indexed yet)" in rendered
+    assert "isolated" not in rendered
+    assert "Campaign Detected: No" not in rendered
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "graph",
+    [_graph(deployer="0x" + "d" * 40), _graph(contracts_deployed=[{"contract": ADDRESS, "tx_hash": "0x1"}])],
+)
+async def test_campaign_for_an_indexed_address_without_links_says_isolated(bot_module, graph):
+    bot_module.container.campaign_service.get_entity_graph = AsyncMock(return_value=graph)
+    update = _update()
+
+    await bot_module.campaign_command(update, SimpleNamespace(args=[ADDRESS]))
+
+    rendered = assert_literal(_reply(update))
+    assert "Campaign Detected: No" in rendered
+    assert "No campaign links found" in rendered
+
+
 def test_launch_alerts_are_plain_text_and_show_flags_as_written(bot_module):
     scan = {
         "outcome": "blocked",
@@ -569,3 +620,247 @@ async def test_watch_alerts_show_the_watch_record_literally(monkeypatch):
     )
     assert sent[0]["parse_mode"] == "Markdown"
     assert_literal(sent[0]["text"], HOSTILE)
+
+
+# --- Telegram links domains, @mentions and /commands in any text; untrusted text cannot make one -----
+
+LURE = "Claim at evil.com or t\N{IDEOGRAPHIC FULL STOP}me/x, ask @scam_admin, send /start"
+SHOWN = (
+    "Claim at evil\N{ONE DOT LEADER}com or t\N{ONE DOT LEADER}me/x, "
+    "ask \N{FULLWIDTH COMMERCIAL AT}scam_admin, send \N{DIVISION SLASH}start"
+)
+# The parts of LURE Telegram would turn into a link, a mention or a command.
+LINKED = ("evil.com", "t\N{IDEOGRAPHIC FULL STOP}me", "@scam_admin", "/start")
+
+
+def _assert_unlinked(text):
+    assert SHOWN in text
+    for part in LINKED:
+        assert part not in text, part
+
+
+def test_a_report_shows_untrusted_domains_mentions_and_commands_unlinked():
+    rendered = assert_literal(
+        _report(
+            True,
+            token_info={"name": LURE, "symbol": "@evil"},
+            ai_analysis=f"Summary\n{LURE}",
+            contract_data={"is_contract": True, "bytecode_warnings": [LURE]},
+        )
+    )
+
+    assert f"Token: {SHOWN} (\N{FULLWIDTH COMMERCIAL AT}evil)" in rendered
+    assert f"Bytecode Warnings: {SHOWN}" in rendered
+    assert f"Summary\n{SHOWN}" in rendered
+    _assert_unlinked(rendered)
+
+
+def test_ordinary_text_keeps_its_characters():
+    rendered = assert_literal(_report(True, token_info={"name": "Moon / Sun. Tax: 5 @ 10%", "symbol": "MS"}))
+
+    assert "Token: Moon / Sun. Tax: 5 @ 10% (MS)" in rendered
+
+
+def test_a_launch_alert_shows_untrusted_flags_and_reasons_unlinked(bot_module):
+    scan = {
+        "outcome": "blocked",
+        "status": "unknown",
+        "risk_level": "HIGH",
+        "risk_score": 90,
+        "coverage_reasons": {"honeypot": LURE},
+        "flags": [LURE],
+        "scanned_at": 990.0,
+    }
+    item = {"chain_id": 4663, "token_address": ADDRESS, "launchpad": "LONG", "verdict_url": "/v", "scan": scan}
+
+    text = bot_module.format_launch_alert(item)
+
+    assert f"• {SHOWN}" in text.splitlines()
+    assert f"Unknown: {SHOWN}" in text.splitlines()
+    _assert_unlinked(text)
+
+
+@pytest.mark.asyncio
+async def test_an_advisor_reply_shows_the_models_text_unlinked(bot_module):
+    bot_module.container.advisor.chat = AsyncMock(return_value={"text": f"Line one\n{LURE}"})
+    typing = SimpleNamespace(edit_text=AsyncMock())
+    update = _update()
+    update.message.reply_text = AsyncMock(return_value=typing)
+
+    await bot_module._handle_advisor_chat(update, "What is new?")
+
+    assert typing.edit_text.await_args.args[0] == f"Line one\n{SHOWN}"
+
+
+
+# A dot is defused only where a domain's next label starts with a letter, so numbers keep their dots.
+NUMBERS = "Sell tax 12.5%, price $0.0023, router v1.2, 1.2.3.4"
+
+
+@pytest.mark.parametrize(
+    "text, shown",
+    [
+        (NUMBERS, NUMBERS),
+        ("Moon / Sun. Tax: 5 @ 10%", "Moon / Sun. Tax: 5 @ 10%"),
+        ("evil.com", "evil\N{ONE DOT LEADER}com"),
+        ("rh-claim.io", "rh-claim\N{ONE DOT LEADER}io"),
+        ("x.co/abc", "x\N{ONE DOT LEADER}co/abc"),
+        ("1.com", "1\N{ONE DOT LEADER}com"),
+        ("@scam_admin", "\N{FULLWIDTH COMMERCIAL AT}scam_admin"),
+        ("/start", "\N{DIVISION SLASH}start"),
+    ],
+)
+def test_unlinked_defuses_domains_mentions_and_commands_but_not_numbers(text, shown):
+    from core.telegram_formatter import unlinked
+
+    assert unlinked(text) == shown
+
+
+def test_numbers_and_versions_keep_their_dots_in_untrusted_text(bot_module):
+    rendered = assert_literal(
+        _report(
+            True,
+            token_info={"name": NUMBERS, "symbol": "V1.2"},
+            ai_analysis=NUMBERS,
+            contract_data={"is_contract": True, "bytecode_warnings": [NUMBERS]},
+        )
+    )
+    alert = bot_module.format_launch_alert({
+        "chain_id": 4663, "token_address": ADDRESS, "launchpad": "LONG", "verdict_url": "/v",
+        "scan": {
+            "outcome": "blocked", "status": "ok", "risk_level": "HIGH", "risk_score": 90,
+            "coverage_reasons": {}, "flags": [NUMBERS], "scanned_at": 990.0,
+        },
+    })
+
+    assert f"Token: {NUMBERS} (V1.2)" in rendered
+    assert f"Bytecode Warnings: {NUMBERS}" in rendered
+    assert f"\n{NUMBERS}\n" in rendered
+    assert f"• {NUMBERS}" in alert.splitlines()
+
+
+def test_an_operator_uptime_alert_keeps_its_monitor_url_tappable(client, monkeypatch):
+    import httpx
+
+    import api as api_module
+
+    sent = []
+
+    class Telegram:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, json):
+            sent.append(json)
+
+    monkeypatch.setattr(httpx, "AsyncClient", Telegram)
+    monkeypatch.setattr(
+        api_module,
+        "container",
+        SimpleNamespace(
+            settings=SimpleNamespace(
+                webhook_secret="s",
+                webhook_allow_query_secret=False,
+                telegram_bot_token="t",
+                telegram_alert_chat_id="1",
+            )
+        ),
+    )
+
+    response = client.post(
+        "/webhook/uptime",
+        data={
+            "alertType": "1",
+            "monitorFriendlyName": "api.shieldbotsecurity.online",
+            "monitorURL": "https://api.shieldbotsecurity.online/health",
+            "alertDetails": "Timeout",
+        },
+        headers={"x-webhook-secret": "s"},
+    )
+
+    assert response.status_code == 200
+    (message,) = sent
+    rendered = assert_literal(message["text"])
+    assert "URL: https://api.shieldbotsecurity.online/health" in rendered
+    assert "api.shieldbotsecurity.online is unreachable." in rendered
+
+
+@pytest.mark.asyncio
+async def test_an_operator_watch_alert_keeps_its_text(monkeypatch):
+    import aiohttp
+
+    from core.indexer import DeployerIndexer
+
+    sent = []
+
+    class Response:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def post(self, url, json, timeout):
+            sent.append(json)
+            return Response()
+
+    monkeypatch.setattr(aiohttp, "ClientSession", Session)
+    indexer = DeployerIndexer(
+        MagicMock(),
+        MagicMock(),
+        SimpleNamespace(telegram_bot_token="t", telegram_alert_chat_id="1"),
+    )
+    reason = "Linked to rh-claim.io, see ops.example.com/runbook"
+
+    assert await indexer._send_watch_alert(
+        ADDRESS, 56, ADDRESS, {"watch_reason": reason, "risk_severity": "high"}
+    )
+    assert f"Watch reason: {reason} | Severity: high" in assert_literal(sent[0]["text"])
+
+
+
+@pytest.mark.parametrize(
+    "text, shown",
+    [
+        ("tg://resolve?domain=x", "tg\N{RATIO}//resolve?domain=x"),
+        ("ton://x", "ton\N{RATIO}//x"),
+        ("http://intranet/login", "http\N{RATIO}//intranet/login"),
+        ("https://x.co", "https\N{RATIO}//x\N{ONE DOT LEADER}co"),
+        ("open svn+ssh://host now", "open svn+ssh\N{RATIO}//host now"),
+        ("Note: 12:30, ratio 3:1, see 10:00-12:30", "Note: 12:30, ratio 3:1, see 10:00-12:30"),
+    ],
+)
+def test_unlinked_defuses_every_uri_scheme_but_not_ordinary_colons(text, shown):
+    from core.telegram_formatter import unlinked
+
+    assert unlinked(text) == shown
+
+
+
+@pytest.mark.parametrize(
+    "text, shown",
+    [
+        # l and a combining acute accent, which composes to one letter.
+        ("evil\N{COMBINING ACUTE ACCENT}.com", "evi\N{LATIN SMALL LETTER L WITH ACUTE}\N{ONE DOT LEADER}com"),
+        # x and a combining acute accent, which has no composed form, so the mark stays before the dot.
+        ("x\N{COMBINING ACUTE ACCENT}.com", "x\N{COMBINING ACUTE ACCENT}\N{ONE DOT LEADER}com"),
+        ("e\N{COMBINING ACUTE ACCENT}\N{COMBINING DOT BELOW}.io", "\N{LATIN SMALL LETTER E WITH DOT BELOW}\N{COMBINING ACUTE ACCENT}\N{ONE DOT LEADER}io"),
+        ("v1\N{COMBINING ACUTE ACCENT}.2", "v1\N{COMBINING ACUTE ACCENT}.2"),
+    ],
+)
+def test_a_combining_mark_before_a_domains_dot_does_not_keep_it_linkable(text, shown):
+    from core.telegram_formatter import unlinked
+
+    assert unlinked(text) == shown

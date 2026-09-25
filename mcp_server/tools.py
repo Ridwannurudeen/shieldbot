@@ -6,11 +6,11 @@ async handler that delegates to the ServiceContainer.
 
 import logging
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from core.analyzer import AnalysisContext
 from core.extension_formatter import format_extension_alert
-from core.verdicts import HIGH, LOW, MEDIUM, UNKNOWN
+from core.verdicts import HIGH, MEDIUM, UNKNOWN
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 
 logger = logging.getLogger(__name__)
@@ -78,6 +78,22 @@ def _require_chain_id(container, params: Dict) -> int:
     return _validate_chain_id(container, params["chain_id"])
 
 
+async def readable_agent_policy(container, agent_id: str, key_info: Dict) -> Optional[Dict]:
+    """The agent's registration if this API key may read it, else None, the answer for an agent that
+    is not registered, so another key's agents cannot be told apart from missing ones.
+
+    The key is checked as the REST agent routes check it (agent/firewall.py): the key that registered
+    the agent may read it, and an agent registered before keys were recorded has no key to match.
+    """
+    policy = await container.db.get_agent_policy(agent_id)
+    if not policy:
+        return None
+    registered_key = policy.get("registered_by_key")
+    if registered_key and registered_key != key_info.get("key_id"):
+        return None
+    return policy
+
+
 # ---------------------------------------------------------------------------
 # Tool schema definitions
 # ---------------------------------------------------------------------------
@@ -88,7 +104,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "description": (
             "Run all ShieldBot analyzers on a contract address and return a composite risk score with flags and risk level. "
             "Incomplete provider coverage is never reported as safe: the result then has status 'unknown', "
-            "verdict 'UNKNOWN', risk_display 'Unknown (incomplete provider coverage)' and coverage_reasons naming the missing data."
+            f"verdict '{UNKNOWN}', risk_level '{UNKNOWN}', a null score, risk_display 'Unknown (incomplete provider coverage)' "
+            "and coverage_reasons naming the missing data; critical flags still list any adverse evidence found."
         ),
         "inputSchema": {
             "type": "object",
@@ -139,9 +156,14 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "check_agent_reputation",
         "description": (
             "Look up the trust score and transaction history for an agent registered with ShieldBot's firewall. "
+            "An agent registered with an API key is readable only by that key, and to any other key reads exactly "
+            "as an unregistered one; an agent registered before keys were recorded is readable by any key, as on "
+            "the REST agent routes. "
             "An unregistered agent, or one with no firewall history, returns status 'unknown' with coverage_reasons "
             "and a null trust_score. Only the latest 1000 firewall records are read; an agent with that many also "
-            "returns status 'unknown', because its counts are a lower bound."
+            "returns status 'unknown', because its counts are a lower bound, and so does one with any record whose "
+            "scan had incomplete coverage, which is not evidence that the transaction was clean; its trust_score "
+            "and block_rate are then null."
         ),
         "inputSchema": {
             "type": "object",
@@ -165,7 +187,11 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "scan_for_injection",
-        "description": "Detect prompt injection patterns in text content. (Basic regex in V3.1, full ML in V3.4.)",
+        "description": (
+            "Detect prompt injection patterns in text content with a few regular expressions (V3.1; full ML in V3.4). "
+            "They cannot show text is free of injection, so every result has status 'unknown' with coverage_reasons; "
+            f"matched says whether any pattern matched, and without a match risk_level is '{UNKNOWN}', never clean."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -234,7 +260,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
 # Tool handler implementations
 # ---------------------------------------------------------------------------
 
-async def handle_scan_contract(container, params: Dict) -> Dict:
+async def handle_scan_contract(container, params: Dict, key_info: Dict) -> Dict:
     """Run all analyzers on a contract and return composite risk score."""
     address = _validate_address(_require(params, "address"))
     chain_id = _require_chain_id(container, params)
@@ -244,9 +270,13 @@ async def handle_scan_contract(container, params: Dict) -> Dict:
     score_data = container.risk_engine.compute_from_results(results)
 
     alert = format_extension_alert(score_data)
+    # An incomplete scan's number is not a score (a fully failed scan's is 0) and its level can be just
+    # the engine's floor for missing data, so neither is reported beside an UNKNOWN verdict; its flags
+    # keep any adverse evidence.
+    incomplete = alert["status"] == "unknown"
     return {
-        "verdict": UNKNOWN if alert["status"] == "unknown" else score_data.get("risk_level", UNKNOWN),
-        "score": score_data["rug_probability"],
+        "verdict": UNKNOWN if incomplete else score_data.get("risk_level", UNKNOWN),
+        "score": None if incomplete else score_data["rug_probability"],
         "flags": score_data.get("critical_flags", []),
         "notes": score_data.get("notes", []),
         "status": alert["status"],
@@ -254,12 +284,12 @@ async def handle_scan_contract(container, params: Dict) -> Dict:
         "coverage_reasons": alert["coverage_reasons"],
         "confidence": score_data.get("confidence_level"),
         "risk_display": alert["risk_display"],
-        "risk_level": score_data.get("risk_level", UNKNOWN),
+        "risk_level": UNKNOWN if incomplete else score_data.get("risk_level", UNKNOWN),
         "categories": score_data.get("category_scores", {}),
     }
 
 
-async def handle_simulate_transaction(container, params: Dict) -> Dict:
+async def handle_simulate_transaction(container, params: Dict, key_info: Dict) -> Dict:
     """Simulate a transaction via Tenderly."""
     from_addr = _validate_address(_require(params, "from"))
     to_addr = _validate_address(_require(params, "to"))
@@ -327,7 +357,7 @@ async def handle_simulate_transaction(container, params: Dict) -> Dict:
     }
 
 
-async def handle_check_deployer(container, params: Dict) -> Dict:
+async def handle_check_deployer(container, params: Dict, key_info: Dict) -> Dict:
     """Look up deployer history for a contract."""
     address = _validate_address(_require(params, "address"))
     chain_id = _require_chain_id(container, params)
@@ -356,11 +386,11 @@ async def handle_check_deployer(container, params: Dict) -> Dict:
     }
 
 
-async def handle_check_agent_reputation(container, params: Dict) -> Dict:
+async def handle_check_agent_reputation(container, params: Dict, key_info: Dict) -> Dict:
     """Look up agent trust score from firewall history."""
     agent_id = _require(params, "agent_id")
 
-    policy = await container.db.get_agent_policy(agent_id)
+    policy = await readable_agent_policy(container, agent_id, key_info)
     if not policy:
         return {
             "agent_id": agent_id,
@@ -387,28 +417,40 @@ async def handle_check_agent_reputation(container, params: Dict) -> Dict:
         }
     blocked = sum(1 for h in history if h.get("verdict") == "BLOCK")
     block_rate = blocked / total
+    # The policy engine records a "coverage" check when a scan's coverage was incomplete (and then gives a
+    # WARN, not an ALLOW); such a record, or one that does not say, is not evidence of a clean transaction.
+    unclear = sum(1 for h in history if not h.get("policy_result") or "coverage" in h["policy_result"])
 
     # Simple trust heuristic: 100 - block_rate*100, floored at 0
     trust_score = max(0, round(100 - block_rate * 100, 1))
 
     result = {
         "agent_id": agent_id,
-        "trust_score": trust_score,
+        # Over records that cannot show a clean transaction the score and rate would read as trust.
+        "trust_score": None if unclear else trust_score,
         "total_transactions": total,
-        "block_rate": round(block_rate, 4),
+        "block_rate": None if unclear else round(block_rate, 4),
     }
-    if total < _REPUTATION_WINDOW:
-        return {**result, "status": "ok", "coverage": {"history": 1}, "coverage_reasons": {}}
+    reasons = []
+    if unclear:
+        reasons.append(
+            f"{unclear} of the {total} firewall records read do not show a scan with complete coverage, "
+            "so they are not evidence the agent's transactions were clean"
+        )
     # A full window means older records were not read: the count is a lower bound.
+    if total >= _REPUTATION_WINDOW:
+        reasons.append(f"Only the latest {_REPUTATION_WINDOW} firewall records are read, so total_transactions is a lower bound")
+    if not reasons:
+        return {**result, "status": "ok", "coverage": {"history": 1}, "coverage_reasons": {}}
     return {
         **result,
         "status": "unknown",
         "coverage": {"history": 0},
-        "coverage_reasons": {"history": f"Only the latest {_REPUTATION_WINDOW} firewall records are read, so total_transactions is a lower bound"},
+        "coverage_reasons": {"history": "; ".join(reasons)},
     }
 
 
-async def handle_check_approval_risk(container, params: Dict) -> Dict:
+async def handle_check_approval_risk(container, params: Dict, key_info: Dict) -> Dict:
     """Report unavailable MCP approval coverage without claiming no approvals."""
     wallet = _validate_address(_require(params, "wallet_address"))
     return {
@@ -422,7 +464,7 @@ async def handle_check_approval_risk(container, params: Dict) -> Dict:
     }
 
 
-async def handle_scan_for_injection(container, params: Dict) -> Dict:
+async def handle_scan_for_injection(container, params: Dict, key_info: Dict) -> Dict:
     """Basic regex-based prompt injection detection."""
     content = _require(params, "content")
     depth = params.get("depth")
@@ -440,22 +482,27 @@ async def handle_scan_for_injection(container, params: Dict) -> Dict:
                 "count": len(matches),
             })
 
-    clean = len(detections) == 0
+    # A few regular expressions cannot show text is free of injection: no match is unknown, never clean.
     if detections:
         risk_level = HIGH if len(detections) >= 3 else MEDIUM
     else:
-        risk_level = LOW
+        risk_level = UNKNOWN
 
     return {
-        "clean": clean,
+        "matched": bool(detections),
         "risk_level": risk_level,
         "detections": detections,
         "depth": depth,
+        "status": "unknown",
+        "coverage": {"injection": 0},
+        "coverage_reasons": {
+            "injection": "Only a few regular expressions are checked, so text they do not match is not shown to be free of injection"
+        },
         "note": "Basic regex detection (V3.1). ML-based detection coming in V3.4.",
     }
 
 
-async def handle_query_threat_graph(container, params: Dict) -> Dict:
+async def handle_query_threat_graph(container, params: Dict, key_info: Dict) -> Dict:
     """Report unavailable MCP graph coverage without claiming no connections."""
     address = _validate_address(_require(params, "address"))
     return {
@@ -471,7 +518,7 @@ async def handle_query_threat_graph(container, params: Dict) -> Dict:
     }
 
 
-async def handle_get_threat_feed(container, params: Dict) -> Dict:
+async def handle_get_threat_feed(container, params: Dict, key_info: Dict) -> Dict:
     """Retrieve latest flagged contracts from agent findings."""
     limit = _page_limit(params)
 
@@ -491,7 +538,7 @@ async def handle_get_threat_feed(container, params: Dict) -> Dict:
     return {"threats": threats}
 
 
-async def handle_get_robinhood_launches(container, params: Dict) -> Dict:
+async def handle_get_robinhood_launches(container, params: Dict, key_info: Dict) -> Dict:
     """Recent launches with their latest scan outcome, from the query behind /api/launches."""
     chain_id = _validate_chain_id(container, params.get("chain_id", LAUNCH_CHAIN_ID))
     limit = _page_limit(params)
@@ -524,12 +571,12 @@ _HANDLERS = {
 }
 
 
-async def execute_tool(container, tool_name: str, params: Dict) -> Dict:
-    """Dispatch a tool call to the appropriate handler.
+async def execute_tool(container, tool_name: str, params: Dict, key_info: Dict) -> Dict:
+    """Dispatch a tool call from the API key ``key_info`` to the appropriate handler.
 
     Returns the tool result dict or raises ValueError for unknown tools.
     """
     handler = _HANDLERS.get(tool_name)
     if handler is None:
         raise ValueError(f"Unknown tool: {tool_name}")
-    return await handler(container, params or {})
+    return await handler(container, params or {}, key_info)

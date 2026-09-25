@@ -28,9 +28,12 @@ Known limits, kept deliberately. A name containing "Robinhood" beside an officia
 a common word reads as an impostor (APP "Robinhood App", COIN "Robinhood Coin"): the price of catching
 TSLA "Robinhood Token". A ticker that is its own company name (AMD, IBM, SNAP, NU, ASML, IREN) points
 as a ticker, so the one-signal rule for the company name as symbol and name does not cover it.
-- none: nothing points at an official token on the complete list.
+- none: nothing points at an official token on the complete list, and every letter of the symbol and
+  name folds to a plain Latin one.
 - unknown: without the list only the canonical tokens can be matched, and without the token's
-  symbol and name only its address.
+  symbol and name only its address. A symbol or name that matched nothing but has a letter that does
+  not fold to a plain Latin one (Lisu, Cherokee or small capitals drawn like TSLA) may still imitate an
+  official token, so it is unknown too.
 
 Folding reads accents, compatibility forms and Cyrillic and Greek letters drawn like Latin ones as
 those letters, then treats characters that pass for each other within a case as one: a lowercase l,
@@ -64,7 +67,7 @@ logger = logging.getLogger(__name__)
 OFFICIAL_ASSETS_URL = "https://api.robinhood.com/rhj/assets"
 # Raised whenever the rules change, so that a stored check made under older rules is replaced on the
 # next scan (core.database.record_launch_impostor_check). Checks stored before versioning count as 1.
-RULES_VERSION = 3
+RULES_VERSION = 4
 # Robinhood lists a stock at a time, so the list is refetched every six hours.
 CACHE_TTL_SECONDS = 6 * 3600
 # After a failed fetch the list is not asked for again for five minutes, so scans do not each wait on it.
@@ -202,12 +205,17 @@ def _plain(word: str) -> str:
     return _NOT_ALPHANUMERIC.sub("", word.casefold())
 
 
+def _as_latin(text: str) -> str:
+    """Text without accents, with compatibility forms and Cyrillic and Greek look-alikes read as Latin."""
+    decomposed = unicodedata.normalize("NFD", unicodedata.normalize("NFKC", text))
+    unmarked = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return unmarked.translate(_LOOKALIKE_LETTERS)
+
+
 def _folded(words: List[str]) -> str:
     """Words joined, with every look-alike character read as the one it passes for."""
-    decomposed = unicodedata.normalize("NFD", unicodedata.normalize("NFKC", "".join(words)))
-    unmarked = "".join(char for char in decomposed if not unicodedata.combining(char))
     return _NOT_ALPHANUMERIC.sub(
-        "", unmarked.translate(_LOOKALIKE_LETTERS).translate(_CONFUSABLES).casefold()
+        "", _as_latin("".join(words)).translate(_CONFUSABLES).casefold()
     )
 
 
@@ -459,6 +467,14 @@ def check_token(
         return _result("unknown", reason="Official Robinhood token list unavailable")
     if symbol is None or name is None:
         return _result("unknown", reason="Token symbol or name unavailable", list_size=list_size)
+    if any(
+        char.isalpha() and not char.isascii() for text in (symbol, name) for char in _as_latin(text)
+    ):
+        return _result(
+            "unknown",
+            reason="Symbol or name has letters other than plain Latin ones, which may imitate an official token",
+            list_size=list_size,
+        )
     return _result("none", list_size=list_size)
 
 

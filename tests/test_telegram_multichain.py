@@ -114,9 +114,11 @@ def bot_chain_functions():
     import asyncio
     from utils.web3_client import UnsupportedChainError, Web3Client
     from core.extension_formatter import is_scan_incomplete
-    from core.telegram_formatter import escape_markdown
+    from core.telegram_formatter import describe_impostor_check, escape_untrusted, unlinked
     from services.robinhood_assets import with_impostor_check
     from services.mempool_service import supports_pending_transactions
+    from core.verdicts import UNKNOWN
+    from core.registry import RUN_ALL_DEADLINE_SECONDS
 
     # Load the real menu handlers without importing the optional Telegram package.
     tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
@@ -134,7 +136,7 @@ def bot_chain_functions():
     services.registry.run_all = AsyncMock(return_value=[])
     services.advisor.chat = AsyncMock(return_value={'text': 'Analysis complete.'})
     services.rescue_service.scan_approvals = AsyncMock(return_value={})
-    services.robinhood_assets.check = AsyncMock(return_value={
+    services.robinhood_assets.check_onchain = AsyncMock(return_value={
         'status': 'none', 'symbol': None, 'official_address': None, 'reason': None,
     })
     ai = MagicMock()
@@ -144,8 +146,12 @@ def bot_chain_functions():
     namespace = {
         'asyncio': asyncio,
         'is_scan_incomplete': is_scan_incomplete,
-        'escape_markdown': escape_markdown,
+        'escape_untrusted': escape_untrusted,
+        'unlinked': unlinked,
+        'describe_impostor_check': describe_impostor_check,
         'with_impostor_check': with_impostor_check,
+        'UNKNOWN': UNKNOWN,
+        'RUN_ALL_DEADLINE_SECONDS': RUN_ALL_DEADLINE_SECONDS,
         'UnsupportedChainError': UnsupportedChainError,
         'logger': MagicMock(),
         'container': services,
@@ -706,3 +712,129 @@ async def test_bot_campaign_preserves_routing_error(bot_chain_functions):
         await ns['campaign_command'](update, SimpleNamespace(args=['0x' + 'a' * 40], user_data={}))
     assert exc.value is error
     status_msg.edit_text.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('scan_data, line', [
+    ({'status': 'ok', 'coverage': {'honeypot': 1}, 'risk_level': 'HIGH', 'risk_score': 85},
+     'ShieldBot scan verdict: risk level HIGH, score 85/100, status ok'),
+    ({'status': 'ok', 'coverage': {'honeypot': 1}, 'risk_level': 'LOW', 'risk_score': 12.5},
+     'ShieldBot scan verdict: risk level LOW, score 12.5/100, status ok'),
+    ({'status': 'unknown', 'coverage': {'honeypot': 0}, 'risk_level': 'MEDIUM', 'risk_score': 0},
+     'ShieldBot scan verdict: risk level UNKNOWN, score unknown, status unknown'),
+])
+async def test_bot_advisor_reply_ends_with_the_scans_own_verdict(bot_chain_functions, scan_data, line):
+    """The model's text never sets the verdict: the scan's own line closes every contract-check reply."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    ns = bot_chain_functions
+    ns['container'].advisor.chat.return_value = {
+        'text': 'Verdict: SAFE, risk level LOW, score 0/100.', 'scan_data': scan_data,
+    }
+    typing = SimpleNamespace(edit_text=AsyncMock())
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock(return_value=typing)),
+                             effective_user=SimpleNamespace(id=123))
+    await ns['_handle_advisor_chat'](update, 'Scan 0x' + 'a' * 40, chain_id=56)
+    assert typing.edit_text.call_args.args[0].splitlines()[-1] == line
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('scan_chain, saved_chain', [(4663, 56), (56, 4663)])
+async def test_the_token_button_checks_the_chain_the_scan_ran_on(bot_chain_functions, scan_chain, saved_chain):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    ns = bot_chain_functions
+    address = '0x' + 'a' * 40
+    (button,) = ns['_scan_buttons'](address, scan_chain).inline_keyboard[-1]
+    ns['check_token'] = AsyncMock()
+    query = SimpleNamespace(data=button.callback_data, answer=AsyncMock(),
+                            message=SimpleNamespace(reply_text=AsyncMock()))
+
+    await ns['button_callback'](SimpleNamespace(callback_query=query),
+                                SimpleNamespace(user_data={'chain_id': saved_chain}))
+
+    ns['check_token'].assert_awaited_once_with(query, address, chain_id=scan_chain)
+
+
+def test_the_token_button_fits_telegrams_callback_data_limit(bot_chain_functions):
+    for chain_id in (1, 56, 4663, 42161, 11155111):
+        (button,) = bot_chain_functions['_scan_buttons']('0x' + 'a' * 40, chain_id).inline_keyboard[-1]
+        assert len(button.callback_data.encode()) <= 64
+
+
+@pytest.mark.parametrize('status, coverage, level, shown', [
+    ('unknown', {'honeypot': 0}, 'MEDIUM', 'Rug Probability:* Unknown (incomplete coverage)  |  *Risk Level:* UNKNOWN'),
+    ('unknown', {'honeypot': 0}, 'HIGH', 'Rug Probability:* Unknown (incomplete coverage)  |  *Risk Level:* UNKNOWN'),
+    ('ok', {'honeypot': 1}, 'MEDIUM', 'Rug Probability:* 40%  |  *Risk Level:* MEDIUM'),
+])
+def test_an_incomplete_report_reads_unknown_for_probability_and_level(status, coverage, level, shown):
+    from core.telegram_formatter import format_full_report
+    report = format_full_report(
+        {'rug_probability': 40, 'risk_level': level, 'status': status, 'coverage': coverage},
+        {}, {}, {}, address='0x' + 'a' * 40,
+    )
+    assert shown in report
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('check, lead', [
+    (('NVDA', 'NVIDIA'),
+     '\N{WARNING SIGN} Impersonates official NVDA token (Robinhood-issued); official contract '
+     '0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec; '),
+    (('AMD', 'Moon'),
+     'Not the official AMD token (same ticker); official contract 0x86923f96303d656e4aa86d9d42d1e57ad2023fdc; '),
+    (('MOON', 'Moon'), ''),
+])
+async def test_the_advisor_verdict_line_leads_with_the_official_token_warning(bot_chain_functions, check, lead):
+    """A complete LOW scan of an impostor still ends with the warning the full report shows."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from services.robinhood_assets import check_token
+    from tests.test_robinhood_assets import LISTED
+    ns = bot_chain_functions
+    scan_data = {
+        'status': 'ok', 'coverage': {'honeypot': 1}, 'risk_level': 'LOW', 'risk_score': 5,
+        'impostor_check': check_token('0x' + 'a' * 40, *check, LISTED),
+    }
+    ns['container'].advisor.chat.return_value = {'text': 'Looks fine.', 'scan_data': scan_data}
+    typing = SimpleNamespace(edit_text=AsyncMock())
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock(return_value=typing)),
+                             effective_user=SimpleNamespace(id=123))
+
+    await ns['_handle_advisor_chat'](update, 'Scan 0x' + 'a' * 40, chain_id=4663)
+
+    assert typing.edit_text.call_args.args[0].splitlines()[-1] == (
+        f'ShieldBot scan verdict: {lead}risk level LOW, score 5/100, status ok'
+    )
+
+
+
+def _press(ns, data, saved_chain):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    ns['check_token'] = AsyncMock()
+    query = SimpleNamespace(data=data, answer=AsyncMock(), message=SimpleNamespace(reply_text=AsyncMock()))
+    return query, ns['button_callback'](SimpleNamespace(callback_query=query),
+                                        SimpleNamespace(user_data={'chain_id': saved_chain}))
+
+
+@pytest.mark.asyncio
+async def test_a_token_button_sent_before_it_carried_a_chain_checks_the_users_chain(bot_chain_functions):
+    address = '0x' + 'a' * 40
+    query, press = _press(bot_chain_functions, f'token_{address}', 4663)
+
+    await press
+
+    bot_chain_functions['check_token'].assert_awaited_once_with(query, address, chain_id=4663)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain', ['\N{SUPERSCRIPT TWO}', '\N{ARABIC-INDIC DIGIT FIVE}6', '5 6', '-56'])
+async def test_a_token_button_with_a_chain_that_is_not_ascii_digits_is_rejected(bot_chain_functions, chain):
+    query, press = _press(bot_chain_functions, f'token_{chain}_0x' + 'a' * 40, 56)
+
+    await press
+
+    bot_chain_functions['check_token'].assert_not_awaited()
+    assert query.message.reply_text.await_args.args == ('\N{CROSS MARK} Invalid address format.',)

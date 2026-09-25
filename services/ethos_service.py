@@ -60,9 +60,12 @@ class EthosService:
 
                     data = await resp.json()
 
-            # Ethos score is 0-2800; normalize to 0-100 for our engine
-            raw_score = data.get('score', 0)
-            normalized = round((raw_score / 2800) * 100, 1) if raw_score else 50
+            # Ethos score is 0-2800 (0 is its lowest level, Untrusted); normalize to 0-100 for our engine.
+            # A profile without a score has none to normalize.
+            raw_score = data.get('score')
+            if raw_score is None:
+                return {**defaults, 'status': 'unknown', 'reason': 'Ethos profile has no score'}
+            normalized = round((raw_score / 2800) * 100, 1)
 
             # Extract stats
             stats = data.get('stats', {})

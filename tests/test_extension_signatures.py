@@ -126,6 +126,37 @@ def test_strict_mode_removes_sign_anyway_on_unknown_and_block_signature_verdicts
     )
 
 
+# A personal_sign message that is not readable text is raised to High Risk by the overlay, whatever
+# the API says. The raise must not hide from Strict mode that the API's result is incomplete.
+@pytest.mark.parametrize("policy", ["STRICT", "BALANCED"])
+@pytest.mark.parametrize("api", ["unknown", "unreachable", "incomplete-high-risk", "complete-high-risk"])
+def test_strict_mode_removes_sign_anyway_whenever_the_api_result_is_incomplete(policy, api):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const [policy, api] = JSON.parse(process.argv[1]);
+  storage.policyMode = policy;
+  const incomplete = {status: 'unknown', coverage: {signature: 0}, coverage_reasons: {signature: 'Spender facts unknown'}};
+  analyze = async () => ({
+    unknown: {result: scan(incomplete)},
+    unreachable: {error: 'API error 503: unavailable'},
+    'incomplete-high-risk': {result: scan({...incomplete, classification: 'HIGH_RISK', risk_score: 75})},
+    'complete-high-risk': {result: scan({classification: 'HIGH_RISK', risk_score: 75})},
+  })[api];
+  // 0xff is not UTF-8, so the message is not readable text.
+  await intercept('request', {signMethod: 'personal_sign', data: '0x00ff', chainId: 56}, 'personal_sign');
+  const html = overlay().innerHTML;
+  assert(html.includes('UNREADABLE MESSAGE'), html);
+  assert(overlay().querySelector('.shieldai-badge').className.includes('shieldai-badge-high'), html);
+  const removed = policy === 'STRICT' && api !== 'complete-high-risk';
+  assert.equal(html.includes('id="shieldai-proceed"'), !removed, html);
+  assert.equal(html.includes('Strict mode is on'), removed);
+""",
+        [policy, api],
+    )
+
+
 @pytest.mark.parametrize("outcome", ["SAFE", "error"])
 def test_eth_sign_is_always_block_recommended_and_says_why(outcome):
     run_node(
@@ -566,6 +597,26 @@ def test_the_overlay_names_both_domains_of_a_sign_in_mismatch(policy):
     )
 
 
+# The domain a sign-in message claims is the page's text: it is shown as written, not expanded as a
+# replacement pattern ($') or filled in as another placeholder ({origin}).
+@pytest.mark.parametrize("domain", ["wallet-login.example$'", "wallet-login.example$`", "{origin}"])
+def test_the_overlay_shows_a_claimed_domain_as_written(domain):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const domain = JSON.parse(process.argv[1]);
+  analyze = async () => ({result: {status: 'ok', partial: false, classification: 'BLOCK_RECOMMENDED', risk_score: 100,
+    coverage: {siwe: 1}, coverage_reasons: {}, siwe: {state: 'mismatch', domain, origin: 'dapp.example'}}});
+  await intercept('request', {signMethod: 'personal_sign', data: '0x00', chainId: 1}, 'personal_sign');
+  const html = overlay().innerHTML;
+  assert(html.includes(`This sign-in message is for ${domain}, but the page asking you to sign it is dapp.example. ` +
+    'A page that asks you to sign in to another site is likely phishing.'), html);
+""",
+        domain,
+    )
+
+
 # A Block Recommended overlay in Balanced mode, a transaction's or a signature's, and the ways to
 # press and let go of its Proceed or Sign Anyway button.
 HOLD = r"""
@@ -630,6 +681,124 @@ def test_proceed_on_block_recommended_needs_a_hold(kind, how):
   await assertVerdicts([['request', 'proceed']]);
 """,
         [kind, how],
+    )
+
+
+# A page can shape a request the API refuses (a value past its length limit, say); what comes back
+# is an error, never a one-click Proceed.
+@pytest.mark.parametrize("policy", ["BALANCED", "STRICT"])
+def test_proceed_on_a_transaction_the_api_did_not_analyse_needs_a_hold(policy):
+    run_node(
+        CONTENT_HARNESS
+        + HOLD
+        + r"""
+(async () => {
+  storage.policyMode = JSON.parse(process.argv[1]);
+  analyze = async () => ({error: 'API error 422: value too long'});
+  await intercept('request');
+  const html = overlay().innerHTML;
+  if (storage.policyMode === 'STRICT') {
+    assert(!html.includes('id="shieldai-proceed"'), html);
+    return;
+  }
+  const proceed = byId('shieldai-proceed');
+  assert(html.includes('Hold to Proceed Anyway') && html.includes('This request was not checked'), html);
+  assert(byId(proceed.attrs['aria-describedby']), 'the hold is not explained to assistive technology');
+  userClick(proceed);
+  await flush();
+  assert.deepEqual(verdicts(), [], 'a click proceeded with an unanalysed transaction');
+  press(proceed, 'pointer');
+  await heldVerdict();
+  await assertVerdicts([['request', 'proceed']]);
+""",
+        policy,
+    )
+
+
+# A page can make the API refuse a signature (typed data past its size limit gets a 422); the
+# unanswered signature's Sign Anyway is then a hold, never one click.
+@pytest.mark.parametrize("policy", ["BALANCED", "STRICT"])
+@pytest.mark.parametrize("kind", ["personal_sign", "typed-data"])
+def test_sign_anyway_on_a_signature_the_api_did_not_analyse_needs_a_hold(policy, kind):
+    run_node(
+        CONTENT_HARNESS
+        + HOLD
+        + r"""
+(async () => {
+  const [policy, kind] = JSON.parse(process.argv[1]);
+  storage.policyMode = policy;
+  analyze = async () => ({error: 'API error 422: typedData is too large'});
+  if (kind === 'typed-data') {
+    await intercept('request', {signMethod: 'eth_signTypedData_v4', chainId: 1,
+      typedData: {primaryType: 'Mail', domain: {name: 'Mail'}, message: {contents: 'hi'}}}, 'eth_signTypedData_v4');
+  } else {
+    await intercept('request', {signMethod: 'personal_sign', data: '0x68656c6c6f', chainId: 1}, 'personal_sign');
+  }
+  const html = overlay().innerHTML;
+  assert(overlay().querySelector('.shieldai-badge').className.includes('shieldai-badge-unknown'), html);
+  if (policy === 'STRICT') {
+    assert(!html.includes('id="shieldai-proceed"'), html);
+    return;
+  }
+  const proceed = byId('shieldai-proceed');
+  assert(html.includes('Hold to Sign Anyway') && html.includes('This request was not checked'), html);
+  assert(byId(proceed.attrs['aria-describedby']), 'the hold is not explained to assistive technology');
+  userClick(proceed);
+  await flush();
+  assert.deepEqual(verdicts(), [], 'a click signed a request the API did not analyse');
+  press(proceed, 'pointer');
+  await heldVerdict();
+  await assertVerdicts([['request', 'proceed']]);
+""",
+        [policy, kind],
+    )
+
+
+@pytest.mark.parametrize(
+    "value, sent",
+    [
+        ("0x" + "0" * 100 + "1", "0x1"),
+        ("0X1F", "0x1f"),
+        ("0x0", "0x0"),
+        (None, "0x0"),
+        ("0x" + "f" * 64, "0x" + "f" * 64),
+    ],
+)
+def test_a_transaction_value_goes_to_the_api_as_minimal_hex(value, sent):
+    run_node(
+        BACKGROUND_HARNESS
+        + r"""
+(async () => {
+  const [value, sent] = JSON.parse(process.argv[1]);
+  const {result, error} = await respond({type: 'SHIELDAI_ANALYZE', tx: {to: '0x' + 'a'.repeat(40), value, chainId: 56}});
+  assert.equal(error, undefined);
+  assert(result);
+  assert.equal(bodies[0].value, sent);
+""",
+        [value, sent],
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "abc", "1.5", "-1", "0x", " 12", "1e18", "0x" + "1" + "0" * 64, 1.5, -1, 2**53, True, {}, [],
+        # A decimal string or a number: wallets read these differently, one may take "1000" as hex.
+        "1000", "1000000000000000000", "0", 5, 1000,
+    ],
+)
+def test_a_transaction_value_that_cannot_be_read_is_an_analysis_error(value):
+    run_node(
+        BACKGROUND_HARNESS
+        + r"""
+(async () => {
+  const value = JSON.parse(process.argv[1]);
+  const {result, error} = await respond({type: 'SHIELDAI_ANALYZE', tx: {to: '0x' + 'a'.repeat(40), value, chainId: 56}});
+  assert.equal(result, undefined);
+  assert.match(error, /value/);
+  assert.equal(bodies.length, 0, 'an unreadable value was sent to the API');
+""",
+        value,
     )
 
 

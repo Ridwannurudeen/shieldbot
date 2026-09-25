@@ -741,3 +741,48 @@ async def test_a_check_that_outlasts_its_time_is_unknown(served):
         "reason": "Official token check timed out",
         "list_size": None,
     }
+
+
+LISU_TSLA = (
+    "\N{LISU LETTER TA}\N{LISU LETTER SA}\N{LISU LETTER LA}\N{LISU LETTER A}"
+)
+CHEROKEE_TSLA = (
+    "\N{CHEROKEE LETTER I}\N{CHEROKEE LETTER DU}\N{CHEROKEE LETTER TLE}\N{CHEROKEE LETTER GO}"
+)
+SMALL_CAPITAL_TSLA = (
+    "\N{LATIN LETTER SMALL CAPITAL T}\N{LATIN LETTER SMALL CAPITAL S}"
+    "\N{LATIN LETTER SMALL CAPITAL L}\N{LATIN LETTER SMALL CAPITAL A}"
+)
+
+
+@pytest.mark.parametrize(
+    "symbol, name",
+    [
+        (LISU_TSLA, "Moon"),
+        (CHEROKEE_TSLA, "Moon"),
+        (SMALL_CAPITAL_TSLA, "Moon"),
+        ("MOON", SMALL_CAPITAL_TSLA + " Robinhood Token"),
+    ],
+)
+def test_letters_that_do_not_fold_to_plain_latin_leave_the_check_unknown(symbol, name):
+    # Folding cannot read these as TSLA, so no match is not evidence that there is none.
+    assert check_token(OTHER, symbol, name, LISTED) == {
+        **NO_MATCH,
+        "status": "unknown",
+        "reason": "Symbol or name has letters other than plain Latin ones, which may imitate an official token",
+    }
+
+
+@pytest.mark.parametrize(
+    "symbol, name, status",
+    [
+        # Accents and Cyrillic or Greek look-alikes still fold, so these are decided as before.
+        ("MOON", "Caf\N{LATIN SMALL LETTER E WITH ACUTE}", "none"),
+        ("\N{CYRILLIC CAPITAL LETTER ER}", "Moon", "none"),
+        ("\N{CYRILLIC CAPITAL LETTER TE}SL\N{CYRILLIC CAPITAL LETTER A}", "Moon", "impostor"),
+        # A match found first is kept, whatever else the name holds.
+        ("AMD", "Moon " + LISU_TSLA, "collision"),
+    ],
+)
+def test_letters_that_fold_are_still_decided(symbol, name, status):
+    assert check_token(OTHER, symbol, name, LISTED)["status"] == status

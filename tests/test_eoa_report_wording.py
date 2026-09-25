@@ -8,7 +8,7 @@ import pytest
 
 from core.extension_formatter import is_scan_incomplete
 from core.risk_engine import database_matches, medium_matches
-from core.telegram_formatter import escape_markdown, escape_markdown_lines, format_full_report
+from core.telegram_formatter import escape_markdown_lines, escape_untrusted, format_full_report
 from scanner.transaction_scanner import TransactionScanner
 
 
@@ -29,7 +29,7 @@ def format_scan_result():
     )
     namespace = {
         "is_scan_incomplete": is_scan_incomplete,
-        "escape_markdown": escape_markdown,
+        "escape_untrusted": escape_untrusted,
         "escape_markdown_lines": escape_markdown_lines,
         "database_matches": database_matches,
         "medium_matches": medium_matches,

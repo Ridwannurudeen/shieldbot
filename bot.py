@@ -15,7 +15,7 @@ import traceback
 import aiohttp
 
 try:
-    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram import Chat, ChatMember, Update, InlineKeyboardButton, InlineKeyboardMarkup
     from telegram.error import BadRequest, ChatMigrated, Forbidden, NetworkError, RetryAfter, TelegramError
     from telegram.ext import (
         Application,
@@ -32,10 +32,12 @@ except ImportError:
 from core.config import Settings
 from core.container import ServiceContainer
 from core.telegram_formatter import (
-    CONTROL_CHARACTERS, describe_impostor_check, escape_markdown, escape_markdown_lines, format_full_report,
+    describe_impostor_check, escape_markdown_lines, escape_untrusted, format_full_report, unlinked,
 )
 from core.extension_formatter import is_scan_incomplete
+from core.registry import RUN_ALL_DEADLINE_SECONDS
 from core.risk_engine import database_matches, medium_matches
+from core.verdicts import UNKNOWN
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 from services.robinhood_assets import with_impostor_check
 from services.mempool_service import supports_pending_transactions
@@ -103,6 +105,7 @@ _LAUNCH_ALERT_HEADERS = {
 }
 _UNKNOWN_LAUNCH_HEADER = '⚪ UNKNOWN: scan incomplete, not a safety verdict'
 _IMPOSTOR_LAUNCH_HEADER = '🚨 IMPOSTOR: {}'
+_COLLISION_LAUNCH_HEADER = '⚠️ NOT OFFICIAL: shares a ticker or name with an official Robinhood token'
 _launch_alert_task = None
 _blacklist_reload_task = None
 
@@ -382,11 +385,12 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"This address now shows as reported by {result['reports']} users in scans. "
                 "It is not confirmed as a scam."
             )
-        response = f"""✅ **Scam Report — Address Blacklisted**
+        heading = "Address Blacklisted" if result.get("confirmed") else "Community-Reported Address"
+        response = f"""✅ **Scam Report — {heading}**
 
 **Address:** `{address}`
 **Chain:** {get_chain_name(chain_id)}
-**Reason:** {escape_markdown(reason)}
+**Reason:** {escape_untrusted(reason)}
 **Reporter:** User {update.effective_user.id}
 
 {status}
@@ -396,10 +400,10 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 **Address:** `{address}`
 **Chain:** {get_chain_name(chain_id)}
-**Reason:** {escape_markdown(reason)}
-**Progress:** {result['reports']}/{result['needed']} independent reports needed to blacklist.
+**Reason:** {escape_untrusted(reason)}
+**Progress:** {result['reports']}/{result['needed']} independent reports needed before scans show it as community-reported.
 
-Thank you — more reports from different users are needed before this address is blacklisted.
+Thank you — more reports from different users are needed before scans show this address as community-reported.
 """
 
     await update.message.reply_text(response, parse_mode='Markdown', disable_web_page_preview=True)
@@ -454,7 +458,7 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if incomplete:
             reasons = '; '.join(dict.fromkeys(result.get('coverage_reasons', {}).values())) or 'Approval data unavailable'
             response += f"🔴 High Risk: {high} | 🟡 Medium: {medium} | ⚪ Unconfirmed: {lower_risk}\n"
-            response += f"⚠️ **Scan incomplete:** {escape_markdown(reasons)}\n"
+            response += f"⚠️ **Scan incomplete:** {escape_untrusted(reasons)}\n"
         else:
             response += f"🔴 High Risk: {high} | 🟡 Medium: {medium} | Lower risk: {lower_risk}\n"
 
@@ -473,9 +477,9 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 risk_icon = '🔴' if a['risk_level'] == 'HIGH' else '🟡'
                 symbol = a.get('token_symbol', '???')
                 spender_label = a.get('spender_label') or a.get('spender', '')[:10] + '...'
-                response += f"{risk_icon} {escape_markdown(symbol)} → {escape_markdown(spender_label)}"
+                response += f"{risk_icon} {escape_untrusted(symbol)} → {escape_untrusted(spender_label)}"
                 if a.get('risk_reason'):
-                    response += f" — {escape_markdown(a['risk_reason'])}"
+                    response += f" — {escape_untrusted(a['risk_reason'])}"
                 response += "\n"
 
         # Show alerts
@@ -483,10 +487,10 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if alerts:
             response += "\n**Alerts:**\n"
             for alert in alerts[:5]:
-                response += f"⚠️ **{escape_markdown(alert.get('title', 'Alert'))}**\n"
-                response += f"  {escape_markdown(alert.get('description', ''))}\n"
+                response += f"⚠️ **{escape_untrusted(alert.get('title', 'Alert'))}**\n"
+                response += f"  {escape_untrusted(alert.get('description', ''))}\n"
                 if alert.get('what_you_can_do'):
-                    response += f"  💡 {escape_markdown(alert['what_you_can_do'])}\n"
+                    response += f"  💡 {escape_untrusted(alert['what_you_can_do'])}\n"
 
         # Revoke instructions
         revoke_txs = result.get('revoke_txs', [])
@@ -599,8 +603,8 @@ async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 sev_icon = '🔴' if sev == 'HIGH' else '🟡'
                 atype = alert.get('alert_type', 'unknown').replace('_', ' ').title()
                 chain_name = get_chain_name(alert.get('chain_id', 56))
-                response += f"\n{sev_icon} **{escape_markdown(atype)}** ({chain_name})\n"
-                response += f"  {escape_markdown(alert.get('description', 'No details'))}\n"
+                response += f"\n{sev_icon} **{escape_untrusted(atype)}** ({chain_name})\n"
+                response += f"  {escape_untrusted(alert.get('description', 'No details'))}\n"
                 if alert.get('attacker_addr'):
                     response += f"  Attacker: `{alert['attacker_addr'][:16]}...`\n"
         else:
@@ -651,11 +655,16 @@ async def campaign_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         is_campaign = campaign.get('is_campaign', False)
         severity = campaign.get('severity', 'NONE')
         sev_icon = {'CRITICAL': '🔴', 'HIGH': '🔴', 'MEDIUM': '🟡', 'LOW': '🟢'}.get(severity, '⚪')
+        # An address in no deployer or funder record has not been indexed: its links are unknown, not absent.
+        indexed = bool(graph.get('deployer') or graph.get('funder') or graph.get('contracts_deployed'))
 
         response = "🕵️ **Campaign Radar**\n\n"
         response += f"**Address:** `{address}`\n"
-        response += f"**Campaign Detected:** {'Yes' if is_campaign else 'No'}\n"
-        response += f"**Severity:** {sev_icon} {severity}\n"
+        if indexed:
+            response += f"**Campaign Detected:** {'Yes' if is_campaign else 'No'}\n"
+            response += f"**Severity:** {sev_icon} {severity}\n"
+        else:
+            response += "**Campaign Detected:** Unknown (not indexed yet)\n"
 
         # Deployer / funder from graph
         deployer = graph.get('deployer')
@@ -670,7 +679,7 @@ async def campaign_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if indicators:
             response += "\n**Indicators:**\n"
             for ind in indicators[:8]:
-                response += f"• {escape_markdown(ind)}\n"
+                response += f"• {escape_untrusted(ind)}\n"
 
         # Cross-chain contracts
         xchain = graph.get('cross_chain_contracts', [])
@@ -697,7 +706,12 @@ async def campaign_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if total_contracts:
                 response += f"  Total contracts: {total_contracts} (🔴 {high_risk} high risk)\n"
 
-        if not is_campaign and not xchain and not cluster:
+        if not indexed:
+            response += (
+                "\n⚪ ShieldBot has not indexed this address yet, so its deployer, funder and "
+                "campaign links are unknown.\n"
+            )
+        elif not is_campaign and not xchain and not cluster:
             response += "\n✅ No campaign links found — address appears isolated.\n"
 
         try:
@@ -716,11 +730,36 @@ async def campaign_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text("❌ Error investigating campaign. Please try again later.")
 
 
+async def _may_change_launch_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Whether the sender may turn this chat's launch alerts on or off, and if not say so.
+
+    Anyone may in a private chat; in a group only an administrator or the creator, including an
+    anonymous administrator, whose message comes from the group itself.
+    """
+    chat, message = update.effective_chat, update.effective_message
+    if chat.type not in (Chat.GROUP, Chat.SUPERGROUP):
+        return True
+    if message.sender_chat is not None and message.sender_chat.id == chat.id:
+        return True
+    try:
+        member = await context.bot.get_chat_member(chat.id, update.effective_user.id)
+        allowed = member.status in (ChatMember.ADMINISTRATOR, ChatMember.OWNER)
+    except TelegramError:
+        # A membership Telegram does not confirm is not an administrator's; the sender is still answered.
+        allowed = False
+    if allowed:
+        return True
+    await message.reply_text("Only an administrator of this group can turn launch alerts on or off.")
+    return False
+
+
 async def launch_alerts_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /launchalerts — alert this chat to new Robinhood Chain launch verdicts."""
+    if not await _may_change_launch_alerts(update, context):
+        return
     mode = context.args[0].lower() if context.args else 'blocked'
     if mode not in ('blocked', 'all'):
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             "Usage: /launchalerts for blocked launches, or /launchalerts all for every scanned launch."
         )
         return
@@ -737,15 +776,17 @@ async def launch_alerts_command(update: Update, context: ContextTypes.DEFAULT_TY
             "high-risk tokens) and impostors of official Robinhood tokens.\n\n"
             "Send /launchalerts all for every scanned launch, or /stopalerts to stop."
         )
-    await update.message.reply_text(text)
+    await update.effective_message.reply_text(text)
 
 
 async def stop_alerts_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /stopalerts — stop launch alerts for this chat."""
+    if not await _may_change_launch_alerts(update, context):
+        return
     if await container.db.unsubscribe_launch_alerts(update.effective_chat.id, LAUNCH_CHAIN_ID):
-        await update.message.reply_text("🔕 Robinhood Chain launch alerts are off for this chat.")
+        await update.effective_message.reply_text("🔕 Robinhood Chain launch alerts are off for this chat.")
     else:
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             "This chat is not subscribed to launch alerts. Send /launchalerts to subscribe."
         )
 
@@ -755,7 +796,9 @@ def format_launch_alert(item: dict) -> str:
 
     An incomplete scan is headed UNKNOWN unless it is blocked, so it never reads as safe, and
     its partial score is not shown. An impostor of an official Robinhood token is headed IMPOSTOR,
-    whatever its scan found, and never under a CLEARED heading.
+    whatever its scan found, and never under a CLEARED heading. A token that shares an official
+    token's ticker or name without impersonating it (a collision) names the official token, and a
+    cleared one is headed NOT OFFICIAL instead of CLEARED.
     """
     scan = item['scan']
     header = _LAUNCH_ALERT_HEADERS.get(scan['outcome'])
@@ -766,24 +809,26 @@ def format_launch_alert(item: dict) -> str:
     if check.get('status') == 'impostor':
         # The official symbol comes from Robinhood's list, so it is stripped like any other text.
         label = describe_impostor_check(check)
-        headings = [_IMPOSTOR_LAUNCH_HEADER.format(CONTROL_CHARACTERS.sub(' ', label))]
+        headings = [_IMPOSTOR_LAUNCH_HEADER.format(unlinked(label))]
         if header != _LAUNCH_ALERT_HEADERS['cleared']:
             headings.append(header)
         # A blocked launch's evidence repeats the heading as its first flag.
         flags = [flag for flag in flags if flag != label]
+    elif check.get('status') == 'collision' and header == _LAUNCH_ALERT_HEADERS['cleared']:
+        headings = [_COLLISION_LAUNCH_HEADER]
     lines = [*headings, f"Token: {item['token_address']}", f"Launchpad: {item['launchpad']}"]
     if header != _UNKNOWN_LAUNCH_HEADER and scan['risk_score'] is not None:
         lines.append(f"Risk score: {scan['risk_score']:g}/100")
-    lines += [f"• {CONTROL_CHARACTERS.sub(' ', flag)[:150]}" for flag in flags[:3]]
+    lines += [f"• {unlinked(flag)[:150]}" for flag in flags[:3]]
     if scan['status'] != 'ok':
         reasons = '; '.join(dict.fromkeys(
-            CONTROL_CHARACTERS.sub(' ', reason) for reason in scan['coverage_reasons'].values()
+            unlinked(reason) for reason in scan['coverage_reasons'].values()
         )) or 'Provider data unavailable or incomplete'
         lines.append(f"Unknown: {reasons[:300]}")
     if check.get('status') == 'unknown':
-        lines.append(f"Official token check: unknown ({CONTROL_CHARACTERS.sub(' ', check['reason'])})")
-    elif check.get('status') == 'official':
-        lines.append(CONTROL_CHARACTERS.sub(' ', describe_impostor_check(check)))
+        lines.append(f"Official token check: unknown ({unlinked(check['reason'])})")
+    elif check.get('status') in ('official', 'collision'):
+        lines.append(unlinked(describe_impostor_check(check)))
     lines.append(f"Evidence: {VERDICT_BASE_URL}{item['verdict_url']}")
     explorer = get_explorer_url(item['chain_id'])
     if explorer:
@@ -913,9 +958,23 @@ async def _handle_advisor_chat(update: Update, message: str, chain_id: int = 56)
     try:
         response = await container.advisor.chat(user_id, message, chain_id=chain_id)
         scan_data = response.get('scan_data')
-        response_text = response['text']
-        if scan_data is not None and is_scan_incomplete(scan_data):
-            response_text = 'Unknown risk: provider coverage incomplete. Review the missing data before proceeding.'
+        response_text = '\n'.join(unlinked(line) for line in response['text'].split('\n'))
+        # The model's text never sets a verdict: a contract check ends with the scan's own.
+        if scan_data is not None:
+            if is_scan_incomplete(scan_data):
+                response_text = 'Unknown risk: provider coverage incomplete. Review the missing data before proceeding.'
+                verdict = f'risk level {UNKNOWN}, score unknown, status unknown'
+            else:
+                verdict = (
+                    f"risk level {scan_data['risk_level']}, score {scan_data['risk_score']}/100, "
+                    f"status {scan_data['status']}"
+                )
+            # An impostor, or a token sharing an official ticker or name, leads with the report's warning.
+            check = scan_data.get('impostor_check') or {}
+            if check.get('status') in ('impostor', 'collision'):
+                warning = '\N{WARNING SIGN} ' if check['status'] == 'impostor' else ''
+                verdict = f'{warning}{unlinked(describe_impostor_check(check))}; {verdict}'
+            response_text += f'\n\nShieldBot scan verdict: {verdict}'
         await typing_msg.edit_text(response_text)
     except UnsupportedChainError:
         raise
@@ -993,16 +1052,17 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
             from core.analyzer import AnalysisContext
 
             ctx = AnalysisContext(address=address, chain_id=chain_id)
-            analyzer_results, token_info = await asyncio.gather(
-                container.registry.run_all(ctx),
-                web3_client.get_token_info(address, chain_id=chain_id),
-            )
+            reads = [container.registry.run_all(ctx), web3_client.get_token_info(address, chain_id=chain_id)]
+            if chain_id == 4663:
+                # The official-token check reads symbol() and name() itself, alongside the analyzers, as the
+                # launch hunter's does: the token info read comes back empty when decimals() or totalSupply()
+                # reverts, which a token can arrange.
+                reads.append(container.robinhood_assets.check_onchain(address, RUN_ALL_DEADLINE_SECONDS))
+            analyzer_results, token_info, *impostor_check = await asyncio.gather(*reads)
 
             risk_output = risk_engine.compute_from_results(analyzer_results)
-            if chain_id == 4663:
-                risk_output = with_impostor_check(risk_output, await container.robinhood_assets.check(
-                    address, token_info.get('symbol'), token_info.get('name'),
-                ))
+            if impostor_check:
+                risk_output = with_impostor_check(risk_output, impostor_check[0])
 
             # Extract service data for report formatting
             by_name = {r.name: r for r in analyzer_results}
@@ -1120,16 +1180,17 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
             from core.analyzer import AnalysisContext
 
             ctx = AnalysisContext(address=address, chain_id=chain_id)
-            analyzer_results, token_info = await asyncio.gather(
-                container.registry.run_all(ctx),
-                web3_client.get_token_info(address, chain_id=chain_id),
-            )
+            reads = [container.registry.run_all(ctx), web3_client.get_token_info(address, chain_id=chain_id)]
+            if chain_id == 4663:
+                # The official-token check reads symbol() and name() itself, alongside the analyzers, as the
+                # launch hunter's does: the token info read comes back empty when decimals() or totalSupply()
+                # reverts, which a token can arrange.
+                reads.append(container.robinhood_assets.check_onchain(address, RUN_ALL_DEADLINE_SECONDS))
+            analyzer_results, token_info, *impostor_check = await asyncio.gather(*reads)
 
             risk_output = risk_engine.compute_from_results(analyzer_results)
-            if chain_id == 4663:
-                risk_output = with_impostor_check(risk_output, await container.robinhood_assets.check(
-                    address, token_info.get('symbol'), token_info.get('name'),
-                ))
+            if impostor_check:
+                risk_output = with_impostor_check(risk_output, impostor_check[0])
 
             by_name = {r.name: r for r in analyzer_results}
             contract_data = by_name["structural"].data if "structural" in by_name else {}
@@ -1238,13 +1299,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"All scans will now target {chain_name}.",
         )
     elif query.data.startswith('token_'):
-        address = query.data.replace('token_', '')
-        if not web3_client.is_valid_address(address):
+        # The button names the chain its scan ran on, which the user's current chain may no longer be. A
+        # button sent before it carried the chain names none, and checks on the user's current chain.
+        chain_text, _, address = query.data[len('token_'):].rpartition('_')
+        if not web3_client.is_valid_address(address) or (
+            chain_text and not (chain_text.isascii() and chain_text.isdecimal())
+        ):
             await query.message.reply_text("❌ Invalid address format.")
             return
-        user_chain_id = _get_user_chain_id(context)
+        chain_id = web3_client.validate_chain_id(int(chain_text)) if chain_text else _get_user_chain_id(context)
         await query.message.reply_text(f"🔍 Running token safety check for `{address}`...", parse_mode='Markdown')
-        await check_token(query, address, chain_id=user_chain_id)
+        await check_token(query, address, chain_id=chain_id)
 
 
 def _scan_buttons(address: str, chain_id: int = 56) -> InlineKeyboardMarkup:
@@ -1254,7 +1319,8 @@ def _scan_buttons(address: str, chain_id: int = 56) -> InlineKeyboardMarkup:
     keyboard = []
     if explorer:
         keyboard.append([InlineKeyboardButton(f"🔍 View on {chain_name} Explorer", url=f"{explorer}/address/{address}")])
-    keyboard.append([InlineKeyboardButton("💰 Check Token Safety", callback_data=f"token_{address}")])
+    # "token_<chain id>_<address>" is 57 bytes with an eight-digit chain id; Telegram allows 64.
+    keyboard.append([InlineKeyboardButton("💰 Check Token Safety", callback_data=f"token_{chain_id}_{address}")])
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -1321,33 +1387,33 @@ def format_scan_result(result: dict) -> str:
     if scam_matches:
         response += f"\n⚠️ **Warning:** Found {len(scam_matches)} scam database match(es)\n"
         for match in scam_matches[:3]:
-            response += f"• {escape_markdown(match['type'])}: {escape_markdown(match['reason'])}\n"
+            response += f"• {escape_untrusted(match['type'])}: {escape_untrusted(match['reason'])}\n"
 
     # A community report is not a scam database match; it is named on its own, once.
     reported = [match['reason'] for match in medium_matches(result.get('scam_matches'))]
     for reason in reported:
-        response += f"\n⚠️ {escape_markdown(reason)}\n"
+        response += f"\n⚠️ {escape_untrusted(reason)}\n"
 
     warnings = [warning for warning in result.get('warnings', []) if warning not in reported]
     if warnings:
         response += "\n**Warnings:**\n"
         for warning in warnings[:5]:
-            response += f"• {escape_markdown(warning)}\n"
+            response += f"• {escape_untrusted(warning)}\n"
 
     # AI structured risk score
     ai_risk = result.get('ai_risk_score')
     if ai_risk and not incomplete:
         response += f"\n🤖 **AI Risk Assessment:**\n"
         response += (
-            f"Score: {escape_markdown(ai_risk.get('risk_score', 'N/A'))}/100 | "
-            f"Level: {escape_markdown(ai_risk.get('risk_level', 'N/A'))}\n"
+            f"Score: {escape_untrusted(ai_risk.get('risk_score', 'N/A'))}/100 | "
+            f"Level: {escape_untrusted(ai_risk.get('risk_level', 'N/A'))}\n"
         )
         findings = ai_risk.get('key_findings', [])
         for f in findings[:3]:
-            response += f"• {escape_markdown(f)}\n"
+            response += f"• {escape_untrusted(f)}\n"
         rec = ai_risk.get('recommendation', '')
         if rec:
-            response += f"💡 {escape_markdown(rec)}\n"
+            response += f"💡 {escape_untrusted(rec)}\n"
 
     # Narrative AI analysis
     if result.get('ai_analysis') and not incomplete:
@@ -1385,7 +1451,7 @@ def format_token_result(result: dict) -> str:
     response = f"""
 💰 **Token Safety Report**
 
-**Token:** {escape_markdown(result.get('name', 'Unknown'))} ({escape_markdown(result.get('symbol', 'N/A'))})
+**Token:** {escape_untrusted(result.get('name', 'Unknown'))} ({escape_untrusted(result.get('symbol', 'N/A'))})
 **Address:** `{result['address']}`
 **Safety:** {emoji} {safety_level.upper()}
 **Risk Score:** {score} (Confidence: {result.get('confidence', 'N/A')}%)
@@ -1408,7 +1474,7 @@ def format_token_result(result: dict) -> str:
     if result.get('risks'):
         response += "\n**Risks Detected:**\n"
         for risk in result['risks'][:6]:
-            response += f"• {escape_markdown(risk)}\n"
+            response += f"• {escape_untrusted(risk)}\n"
 
     buy_tax = result.get('buy_tax')
     sell_tax = result.get('sell_tax')
@@ -1421,15 +1487,15 @@ def format_token_result(result: dict) -> str:
     if ai_risk and not incomplete:
         response += f"\n🤖 **AI Risk Assessment:**\n"
         response += (
-            f"Score: {escape_markdown(ai_risk.get('risk_score', 'N/A'))}/100 | "
-            f"Level: {escape_markdown(ai_risk.get('risk_level', 'N/A'))}\n"
+            f"Score: {escape_untrusted(ai_risk.get('risk_score', 'N/A'))}/100 | "
+            f"Level: {escape_untrusted(ai_risk.get('risk_level', 'N/A'))}\n"
         )
         findings = ai_risk.get('key_findings', [])
         for f in findings[:3]:
-            response += f"• {escape_markdown(f)}\n"
+            response += f"• {escape_untrusted(f)}\n"
         rec = ai_risk.get('recommendation', '')
         if rec:
-            response += f"💡 {escape_markdown(rec)}\n"
+            response += f"💡 {escape_untrusted(rec)}\n"
 
     # Narrative AI analysis
     if result.get('ai_analysis') and not incomplete:

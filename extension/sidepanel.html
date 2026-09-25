@@ -586,9 +586,9 @@
       color: #fff;
       flex-shrink: 0;
     }
-    .scan-score-badge.safe { background: #22c55e; }
-    .scan-score-badge.warning { background: #eab308; }
     .scan-score-badge.danger { background: #ef4444; }
+    .scan-score-badge.neutral { background: #475569; }
+    .scan-score-badge.unknown { background: #64748b; }
     .scan-result-label {
       font-size: 13px;
       font-weight: 600;
@@ -615,11 +615,6 @@
       border-radius: 4px;
       color: #fca5a5;
       font-size: 11px;
-    }
-    .pattern-tag.safe {
-      background: rgba(34,197,94,0.15);
-      border-color: rgba(34,197,94,0.3);
-      color: #86efac;
     }
   </style>
 </head>
@@ -652,6 +647,7 @@
         <option value="137">Poly</option>
         <option value="204">opBNB</option>
         <option value="10">OP</option>
+        <option value="4663">Robinhood</option>
       </select>
       <input type="text" id="chatInput" placeholder="Ask about a token, contract, or threat...">
       <button id="sendBtn">Send</button>
@@ -676,6 +672,7 @@
     <div id="scannerResults"></div>
   </div>
 
+  <script src="i18n.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>
