@@ -60,7 +60,7 @@ NO-GO when:
 - a tracked file in `/opt/shieldbot` was edited on the server
 - the recorder key (`ROBINHOOD_RECORDER_PRIVATE_KEY`) is set in the shared `/opt/shieldbot/.env`, the bot unit
   loads `recorder.env` or sets the key, or the running bot process has the key in its environment (or its
-  environment cannot be read). Only the API may hold that key: `contracts/base/DEPLOY_ROBINHOOD.md`, section 8.
+  environment cannot be read). Only the process that runs the verdict drain may hold that key (the API by default): `contracts/base/DEPLOY_ROBINHOOD.md`, section 8.
 - `BACKGROUND_WORKERS=external` is set in the shared `.env` and the API unit still loads `recorder.env` or sets
   the key: the workers unit holds it then (`docs/DEPLOYMENT.md`)
 - the commit does not exist after `git fetch`, or is on no `origin` branch (a commit made only on the server)
@@ -97,6 +97,26 @@ taken, there is no copy to restore and the database is left as it is (the new co
 The script prints no secret values (it looks for the recorder key by name) and never copies `.env`. Running
 `--cutover` again for the commit that is already deployed repeats the backup, restart and checks and changes
 nothing else.
+
+### Startup migrations
+
+The API, the bot and workers.py each bring the database schema up to date when they start
+(`Database.initialize()` in `core/database.py`), so on new code the first of them to start runs any migration.
+That setup writes to the database: its `_migrate_*` migrations each run in their own `BEGIN IMMEDIATE` transaction,
+and every write waits at most the connection's `busy_timeout`, 5 seconds, for SQLite's write lock. `deploy.sh`
+stops the bot first and starts the API alone (steps 1 and 4), so the API migrates with no other writer, provided
+the workers unit, if there is one, was stopped first as the top of this page says.
+
+A plain `systemctl restart shieldbot` leaves the bot, and the workers unit if there is one, running. If one of
+them holds the write lock for more than 5 seconds while the API starts, the API fails at startup with
+`database is locked` and, with `Restart=always` as in `shieldbot-api.service`, systemd starts it again 5 seconds
+later, over and over until the lock is free. Deploy with the script, or stop the bot (and the workers) before
+restarting the API.
+
+Two migrations cannot be undone. `_migrate_reporter_ips` clears every community report `reporter_id` that is
+a raw IP address, and `_migrate_contract_score_levels` raises each stored risk level that is below the band of
+its score. Neither keeps the old value, so deploying an older commit afterwards leaves the rows as migrated; the
+deploy backup is the only way back, through `--rollback`.
 
 ## Roll back
 
@@ -141,6 +161,9 @@ and three localhost addresses). A site on any other origin that calls the API fr
 once nginx stops adding `Access-Control-Allow-Origin: *`.
 
 After an edit: `nginx -t && systemctl reload nginx`.
+
+The landing vhost's reference is `nginx-shieldbotsecurity-new.conf` (below). `nginx-shieldbotsecurity.conf`,
+`Caddyfile` and `setup-https.sh` are superseded and kept only for history: do not install them.
 
 ### Landing analytics (Plausible)
 

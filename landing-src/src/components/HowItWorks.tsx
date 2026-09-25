@@ -16,7 +16,7 @@ const steps: { num: string; title: string; desc: string; icon: ReactNode }[] = [
   {
     num: "02",
     title: "Check",
-    desc: "Decodes the call, scans the contract (code, market data, on-chain reputation and a buy and sell simulation) and checks scam databases.",
+    desc: "Decodes the call, scans the contract (code, market data, on-chain reputation and, where the chain has one, a buy and sell simulation) and checks scam databases.",
     icon: (
       <>
         <circle cx="11" cy="11" r="7" />
@@ -27,7 +27,7 @@ const steps: { num: string; title: string; desc: string; icon: ReactNode }[] = [
   {
     num: "03",
     title: "Report",
-    desc: "Shows SAFE, CAUTION, HIGH RISK or BLOCK RECOMMENDED with the reasons, or UNKNOWN with the reason a check could not run. For a warning you choose to cancel or sign; a request that times out, or whose wallet chain is unknown or differs from the transaction's, is refused.",
+    desc: "Shows SAFE, CAUTION, HIGH RISK or BLOCK RECOMMENDED with the reasons, or UNKNOWN with the reason a check could not run. For a warning you choose to cancel or sign (Strict mode removes that choice for BLOCK RECOMMENDED, UNKNOWN and any result whose checks did not all run). A request it cannot check is refused, such as one that times out, one whose wallet chain is unknown or differs from the transaction's, or one sent through an older wallet method or from a frame or popup the page can script.",
     icon: (
       <>
         <path d="M12 3 4 6v6c0 5 3.4 8.6 8 9.9 4.6-1.3 8-4.9 8-9.9V6l-8-3Z" />
@@ -44,8 +44,8 @@ const checks = [
     desc: "Checks the sites you visit against the GoPlus phishing database and shows a red banner on a known phishing site, before you connect your wallet.",
   },
   {
-    title: "Wallet Shield",
-    desc: "Scans your wallet's token approvals, explains which ones are risky, and prepares revoke transactions for you to review and sign.",
+    title: "Wallet Health",
+    desc: "Scans your wallet's ERC-20 token approvals and explains which ones are risky. Revoking stays with you: the API includes an unsigned revoke transaction for each risky approval.",
   },
   {
     title: "Campaign graph",

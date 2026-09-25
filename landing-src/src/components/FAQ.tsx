@@ -8,7 +8,7 @@ const faqs = [
   },
   {
     q: "How does ShieldBot detect rug pulls and scams?",
-    a: "It combines contract code checks (including bytecode patterns for unverified contracts), market and liquidity data, on-chain reputation, a buy and sell simulation that catches honeypots, and scam databases. Optional AI analysis adds a written summary. If one of these checks cannot run, the result says Unknown instead of Safe.",
+    a: "It combines contract code checks (including bytecode patterns for unverified contracts), market and liquidity data, on-chain reputation, honeypot checks (a buy and sell simulation where the chain has one, GoPlus's honeypot flags elsewhere) and scam databases. Optional AI analysis adds a written summary. If one of these checks cannot run, the result says Unknown instead of Safe.",
   },
   {
     q: "Which blockchains does ShieldBot support?",
@@ -32,7 +32,7 @@ const faqs = [
   },
   {
     q: "What happens when ShieldBot detects a threat?",
-    a: "Before you sign, ShieldBot shows the verdict, a safety score and a plain-English explanation of what it found. On a known phishing site, a red banner appears on the page. For a warning, you choose whether to cancel or sign anyway. The extension refuses a request on its own only when the request times out after 60 seconds, when it cannot identify your wallet's chain or that chain differs from the chain the transaction names, or when that chain changes during the check; you can then retry.",
+    a: "Before you sign, ShieldBot shows the verdict, a safety score and a plain-English explanation of what it found. On a known phishing site, a red banner appears on the page. For a warning, you choose whether to cancel or sign anyway; Strict mode takes that choice away for Block Recommended and Unknown results and when the check could not run. The extension also refuses a request on its own when the check times out after 60 seconds, when your wallet's chain is unknown, unsupported, different from the transaction's or changes during the check (including a wallet_sendCalls batch with a call on another chain), when the request comes from a frame or popup the page can script, or when the site uses the older send or sendAsync methods.",
   },
   {
     q: "What is the safety score?",
@@ -40,7 +40,7 @@ const faqs = [
   },
   {
     q: "How is ShieldBot different from other crypto security tools?",
-    a: "Many tools only check a URL or a token list. ShieldBot checks the actual transaction before you sign, simulates buys and sells to catch honeypots, and tells you plainly when it could not check something. It also works through Telegram, an API and an MCP server for AI agents.",
+    a: "Many tools only check a URL or a token list. ShieldBot checks the actual transaction before you sign, simulates buys and sells to catch honeypots where the chain allows it, and tells you plainly when it could not check something. It also works through Telegram, an API and an MCP server for AI agents.",
   },
   {
     q: "How do I install ShieldBot?",

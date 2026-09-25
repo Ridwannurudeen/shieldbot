@@ -57,8 +57,9 @@ wait_ready() {
   return 1
 }
 
-# The recorder key signs on-chain verdicts and belongs to the API alone (contracts/base/DEPLOY_ROBINHOOD.md,
-# section 8). This reads the running bot process itself. grep -z reads the NUL-separated environ without a pipe,
+# The recorder key signs on-chain verdicts and belongs to the API alone, or with BACKGROUND_WORKERS=external to
+# the workers unit alone; never to the bot (contracts/base/DEPLOY_ROBINHOOD.md, section 8, and docs/DEPLOYMENT.md).
+# This reads the running bot process itself. grep -z reads the NUL-separated environ without a pipe,
 # and a read error (grep exit 2) counts as a failure, never as a clean result. Nothing is printed from it.
 bot_process_clean() {
   local pid rc=0
