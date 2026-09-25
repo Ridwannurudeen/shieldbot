@@ -365,6 +365,50 @@ async def test_campaign_reply_shows_indicators_literally(bot_module):
     assert f"• {HOSTILE}\n" in assert_literal(_reply(update), HOSTILE)
 
 
+def _graph(deployer=None, contracts_deployed=()):
+    """An entity graph as campaign_service builds it for an address with no campaign indicators."""
+    return {
+        "address": ADDRESS,
+        "deployer": deployer,
+        "funder": None,
+        "funder_value_wei": "0",
+        "contracts_deployed": list(contracts_deployed),
+        "total_deployed": len(contracts_deployed),
+        "cross_chain_contracts": [],
+        "funder_cluster": [],
+        "campaign": {"is_campaign": False, "severity": "NONE", "indicators": []},
+    }
+
+
+@pytest.mark.asyncio
+async def test_campaign_for_an_address_the_index_has_never_seen_is_unknown(bot_module):
+    bot_module.container.campaign_service.get_entity_graph = AsyncMock(return_value=_graph())
+    update = _update()
+
+    await bot_module.campaign_command(update, SimpleNamespace(args=[ADDRESS]))
+
+    rendered = assert_literal(_reply(update))
+    assert "Campaign Detected: Unknown (not indexed yet)" in rendered
+    assert "isolated" not in rendered
+    assert "Campaign Detected: No" not in rendered
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "graph",
+    [_graph(deployer="0x" + "d" * 40), _graph(contracts_deployed=[{"contract": ADDRESS, "tx_hash": "0x1"}])],
+)
+async def test_campaign_for_an_indexed_address_without_links_says_isolated(bot_module, graph):
+    bot_module.container.campaign_service.get_entity_graph = AsyncMock(return_value=graph)
+    update = _update()
+
+    await bot_module.campaign_command(update, SimpleNamespace(args=[ADDRESS]))
+
+    rendered = assert_literal(_reply(update))
+    assert "Campaign Detected: No" in rendered
+    assert "No campaign links found" in rendered
+
+
 def test_launch_alerts_are_plain_text_and_show_flags_as_written(bot_module):
     scan = {
         "outcome": "blocked",

@@ -652,11 +652,16 @@ async def campaign_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         is_campaign = campaign.get('is_campaign', False)
         severity = campaign.get('severity', 'NONE')
         sev_icon = {'CRITICAL': '🔴', 'HIGH': '🔴', 'MEDIUM': '🟡', 'LOW': '🟢'}.get(severity, '⚪')
+        # An address in no deployer or funder record has not been indexed: its links are unknown, not absent.
+        indexed = bool(graph.get('deployer') or graph.get('funder') or graph.get('contracts_deployed'))
 
         response = "🕵️ **Campaign Radar**\n\n"
         response += f"**Address:** `{address}`\n"
-        response += f"**Campaign Detected:** {'Yes' if is_campaign else 'No'}\n"
-        response += f"**Severity:** {sev_icon} {severity}\n"
+        if indexed:
+            response += f"**Campaign Detected:** {'Yes' if is_campaign else 'No'}\n"
+            response += f"**Severity:** {sev_icon} {severity}\n"
+        else:
+            response += "**Campaign Detected:** Unknown (not indexed yet)\n"
 
         # Deployer / funder from graph
         deployer = graph.get('deployer')
@@ -698,7 +703,12 @@ async def campaign_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if total_contracts:
                 response += f"  Total contracts: {total_contracts} (🔴 {high_risk} high risk)\n"
 
-        if not is_campaign and not xchain and not cluster:
+        if not indexed:
+            response += (
+                "\n⚪ ShieldBot has not indexed this address yet, so its deployer, funder and "
+                "campaign links are unknown.\n"
+            )
+        elif not is_campaign and not xchain and not cluster:
             response += "\n✅ No campaign links found — address appears isolated.\n"
 
         try:
