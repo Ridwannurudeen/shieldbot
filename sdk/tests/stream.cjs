@@ -150,11 +150,29 @@ test('an error event rejects with the API status and no final', async () => {
 
   await assert.rejects(
     new ShieldBot().firewall('0xb', { chainId: 56, onFirst: (first) => firsts.push(first) }),
-    (error) => error instanceof ShieldBotError && error.status === 500 && /Internal server error/.test(error.message),
+    (error) => error instanceof ShieldBotError && error.status === 500 && error.code === 'STREAM_ERROR' && /Internal server error/.test(error.message),
   );
   assert.equal(firsts.length, 1);
   assert.equal(stream.cancelled(), true);
 });
+
+for (const [name, data, status, message] of [
+  ['a 4xx status', { status: 400, detail: 'Invalid calldata' }, 400, /Invalid calldata/],
+  ['no status', { detail: 'Scan failed' }, 500, /Scan failed/],
+  ['no status or detail', {}, 500, /HTTP 500/],
+]) {
+  test(`an error event with ${name} rejects with code STREAM_ERROR and status ${status}`, async () => {
+    const stream = streamingFetch();
+    global.fetch = stream.fetch;
+    stream.write(sse('error', data));
+    stream.end();
+
+    await assert.rejects(
+      new ShieldBot().firewall('0xb', { chainId: 56, onFirst: () => {} }),
+      (error) => error instanceof ShieldBotError && error.code === 'STREAM_ERROR' && error.status === status && message.test(error.message),
+    );
+  });
+}
 
 test('a stream with only the final never calls onFirst', async () => {
   const stream = streamingFetch();

@@ -123,7 +123,7 @@ const result = await shield.firewall('0xTarget', {
 - It always has `status: 'unknown'` and is never `SAFE`. Its `risk_score` and `classification` come only from floors already known, never from a partial average, so they never overstate the final verdict's band; `CAUTION` with `risk_score` 0 means nothing is known yet. It lists `pending_sources` (the analyzers still running) and `elapsed_ms`, and has no `evidence_hash` or `evidence_url`: only the final is recorded.
 - Under a STRICT policy the API sends no interim verdict. It answers with the plain JSON, which `firewall()` returns as it is, and `onFirst` is not called.
 - `finalTimeout` (default 30000 ms) replaces `timeout` for a streamed call: it bounds the wait for the response and then for each next event.
-- An `error` event rejects with `ShieldBotError` and the API's HTTP status. A stream that ends without a final rejects with code `NETWORK_ERROR`.
+- An `error` event rejects with `ShieldBotError` code `STREAM_ERROR` and the API's HTTP status, or 500 when the event carries none. A stream that ends without a final rejects with code `NETWORK_ERROR`.
 - `GET /api/verdicts` publishes this contract as `first_verdict`.
 - The SDK holds the API to it: a `first` event whose `status` is not `'unknown'`, whose `classification` is `SAFE` or whose `final` is not `false` is dropped, and `onFirst` is not called for it. The API never sends one.
 - An exception thrown by `onFirst` is not caught: `firewall()` rejects with it and stops reading the stream.
