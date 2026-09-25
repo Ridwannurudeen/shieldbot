@@ -336,7 +336,8 @@ export class ShieldBot {
    *
    * With `onFirst` the answer is streamed: `onFirst` gets the interim verdict (always Unknown,
    * never SAFE) if the API sends one before the final, and the promise resolves with the final
-   * verdict, `final: true`. The API sends no interim verdict under a STRICT policy.
+   * verdict, `final: true`. The API sends no interim verdict when its own policy mode is STRICT
+   * (the SDK sends no X-Policy-Mode header).
    */
   async firewall(toAddress: string, options: FirewallOptions): Promise<FirewallResult> {
     const chainId = this._requireChainId(options?.chainId, 'firewall');
