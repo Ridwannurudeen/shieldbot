@@ -41,14 +41,14 @@
     await _loadBundle(_lang);
   }
 
+  // Placeholders are filled in one pass by a function, so a value is used as
+  // written: its $ patterns ($' and the like) are not expanded, and a value
+  // that holds another placeholder's name is not filled in again.
   function t(key, replacements) {
-    let str = _tr[key] !== undefined ? _tr[key] : key;
-    if (replacements) {
-      Object.entries(replacements).forEach(([k, v]) => {
-        str = str.replace(`{${k}}`, v);
-      });
-    }
-    return str;
+    const str = _tr[key] !== undefined ? _tr[key] : key;
+    if (!replacements) return str;
+    return str.replace(/\{(\w+)\}/g, (placeholder, name) =>
+      Object.hasOwn(replacements, name) ? String(replacements[name]) : placeholder);
   }
 
   async function setLanguage(lang) {

@@ -209,6 +209,60 @@ def test_popup_tabs_and_controls_have_accessible_names():
     assert chain.get("aria-label")
 
 
+@pytest.mark.parametrize("stored, name", [(None, "BSC"), (4663, "Robinhood Chain"), (8453, "Base")])
+def test_wallet_health_names_the_chain_it_scans(stored, name):
+    run_popup(r"""
+  const [stored, name] = JSON.parse(process.argv[1]);
+  context.t = (key, values) => values ? `${key}:${values.chain}` : key;
+  context.chrome.storage.local.get = (defaults, cb) => cb(stored === null ? defaults : {...defaults, selectedChainId: stored});
+  await ready();
+  context.initDashboard();
+  for (const id of ['healthChainHint', 'dash-healthChainHint']) {
+    assert.equal(byId(id).textContent, `healthScanSubtext:${name}`, id);
+  }
+""", [stored, name])
+
+
+def test_wallet_health_names_no_fixed_chain_and_claims_no_full_history():
+    html = (EXTENSION / "popup.html").read_text(encoding="utf-8")
+    assert "BNB Chain" not in html and "full history" not in html.lower() and "full approval" not in html.lower()
+    by_id = {element["id"]: element for element in parse("popup.html") if element.get("id")}
+    for hint in ("healthChainHint", "dash-healthChainHint"):
+        # popup.js writes the chain's name there; a data-i18n text would overwrite it.
+        assert "data-i18n" not in by_id[hint], hint
+    full = {"en": "full", "vi": "toàn bộ", "zh": "完整"}
+    for language in ("en", "vi", "zh"):
+        messages = json.loads((EXTENSION / "locales" / language / "messages.json").read_text(encoding="utf-8"))
+        assert "{chain}" in messages["healthScanSubtext"] and "BNB" not in messages["healthScanSubtext"], language
+        for key in ("healthScanSubtext", "healthScanning"):
+            assert full[language] not in messages[key].lower(), (language, key)
+
+
+def test_side_panel_chain_selector_offers_every_supported_chain():
+    select = re.search(r'<select id="chainSelect"[^>]*>(.*?)</select>', (EXTENSION / "sidepanel.html").read_text(encoding="utf-8"), re.S)
+    offered = set(re.findall(r'<option value="(\d+)"', select.group(1)))
+    assert offered == {str(chain_id) for chain_id in CHAIN_INFO}
+
+
+def test_extension_copy_claims_only_what_it_does():
+    # A deployer's record raises the risk score (the firewall's campaign boost); it blocks nothing.
+    # Only requests a page sends through the wallet provider are seen, not sends started in the
+    # wallet itself.
+    block = {"en": "block", "vi": "chặn", "zh": "拦截"}
+    raises = {"en": "raises the risk score", "vi": "tăng điểm rủi ro", "zh": "风险分数"}
+    every = {"en": "every transaction", "vi": "mỗi giao dịch", "zh": "每笔交易"}
+    not_checked = {"en": "not checked", "vi": "không được kiểm tra", "zh": "不会被检查"}
+    for language in ("en", "vi", "zh"):
+        messages = json.loads((EXTENSION / "locales" / language / "messages.json").read_text(encoding="utf-8"))
+        deployer, step = messages["dashDeployerBlockSub"].lower(), messages["step1Desc"].lower()
+        assert block[language] not in deployer and raises[language] in deployer, (language, deployer)
+        assert every[language] not in step and not_checked[language] in step, (language, step)
+    english = json.loads((EXTENSION / "locales" / "en" / "messages.json").read_text(encoding="utf-8"))
+    for page, key in (("popup.html", "dashDeployerBlockSub"), ("welcome.html", "step1Desc")):
+        shown = next(element for element in parse(page) if element.get("data-i18n") == key)
+        assert shown["text"].strip() == english[key], (page, key)
+
+
 def test_popup_markup_claims_no_protection_before_a_scan():
     html = (EXTENSION / "popup.html").read_text(encoding="utf-8")
     assert ">PROTECTED<" not in html

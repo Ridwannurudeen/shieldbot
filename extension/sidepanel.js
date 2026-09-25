@@ -8,6 +8,7 @@ const SUGGESTED_PROMPTS = [
 ];
 
 document.addEventListener("DOMContentLoaded", async () => {
+  await initI18n();
   const messagesEl = document.getElementById("messages");
   const inputEl = document.getElementById("chatInput");
   const sendBtn = document.getElementById("sendBtn");
@@ -584,36 +585,56 @@ document.addEventListener("DOMContentLoaded", async () => {
       const data = await resp.json();
       renderInjectionResult(data);
     } catch (err) {
-      scannerResults.innerHTML = `<div class="placeholder-msg">Scan failed: ${escapeHtml(err.message)}</div>`;
+      // No answer is Unknown, never a clean scan.
+      renderInjectionResult(null, err.message);
     } finally {
       scanInjectionBtn.disabled = false;
       scanInjectionBtn.textContent = "Scan for Injection";
     }
   }
 
-  function renderInjectionResult(data) {
-    const score = Number(data.risk_score) || 0;
-    let level = "safe";
-    let label = "Safe";
-    if (score >= 70) { level = "danger"; label = "Injection Detected"; }
-    else if (score >= 30) { level = "warning"; label = "Suspicious"; }
+  // The scanner answers with its risk_level (NONE to CRITICAL) and the known
+  // injection patterns it found (detections). Finding none is a pattern match,
+  // not a safety verdict, so nothing here is shown as Safe. An answer without
+  // those fields, one whose level and detections disagree (NONE with patterns
+  // found, or another level with none), or no answer (failure says why), is
+  // Unknown.
+  function renderInjectionResult(data, failure) {
+    const detections = data && Array.isArray(data.detections) ? data.detections : null;
+    const riskLevel = data && typeof data.risk_level === "string" ? data.risk_level : null;
+    let state = "unknown";
+    let badge = "?";
+    let label = t("classUnknown");
+    let note = failure || t("unknownNoReason");
+    if (detections && riskLevel && riskLevel !== "NONE" && detections.length) {
+      state = "danger";
+      badge = "!";
+      label = t("scanInjectionFound", { level: riskLevel });
+      note = typeof data.recommendation === "string" ? data.recommendation : "";
+    } else if (detections && riskLevel === "NONE" && !detections.length) {
+      state = "neutral";
+      badge = "\u2013";
+      label = t("scanNoInjectionPatterns");
+      note = "";
+    }
 
-    const patterns = Array.isArray(data.matched_patterns) ? data.matched_patterns : [];
-    const patternTags = patterns.map(p =>
-      `<li class="pattern-tag">${escapeHtml(p)}</li>`
+    const categories = new Set((detections || []).map((detection) => detection && detection.pattern_category)
+      .filter((category) => typeof category === "string"));
+    const patternTags = [...categories].map((category) =>
+      `<li class="pattern-tag">${escapeHtml(category)}</li>`
     ).join("");
 
     const card = document.createElement("div");
     card.className = "scan-result-card";
     card.innerHTML = `
       <div class="scan-result-header">
-        <div class="scan-score-badge ${level}">${score}</div>
+        <div class="scan-score-badge ${state}">${badge}</div>
         <div>
           <div class="scan-result-label">${escapeHtml(label)}</div>
-          <div class="scan-result-sublabel">Confidence: ${Number(data.confidence || 0).toFixed(1)}%</div>
+          ${note ? `<div class="scan-result-sublabel">${escapeHtml(note)}</div>` : ""}
         </div>
       </div>
-      ${patternTags ? `<ul class="pattern-list">${patternTags}</ul>` : '<ul class="pattern-list"><li class="pattern-tag safe">No patterns matched</li></ul>'}
+      ${patternTags ? `<ul class="pattern-list">${patternTags}</ul>` : ""}
     `;
     scannerResults.prepend(card);
   }

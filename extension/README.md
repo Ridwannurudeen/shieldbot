@@ -36,7 +36,12 @@ version.
   The two scripts share a per-document key, handed over once at document_start, and every message
   between them carries an HMAC proof made with it; the key itself is never posted.
 - Transactions and signature requests are sent to the API (`/api/firewall`, through
-  `background.js`) for analysis, and the overlay shows the API's verdict. A signature's overlay also
+  `background.js`) for analysis, and the overlay shows the API's verdict. A transaction's value is
+  read only as a 0x-hex string (either case of the prefix), JSON-RPC's form for a quantity, and
+  sent as minimal 0x-hex. A decimal string or a number is not analysed, because wallets read those
+  differently (one may take a decimal string as hex) and the analysis could judge another amount
+  than the wallet sends; nor is any other form, or a value not below 2^256. The overlay then says
+  the analysis failed. A signature's overlay also
   shows what would be signed: MetaMask's legacy typed-data form (a list of fields, for
   `eth_signTypedData` and `_v1`) field by field, EIP-712 typed data by domain and message, and a
   `personal_sign` message as text. What the overlay sees for itself only raises the API's verdict:
@@ -114,18 +119,21 @@ second limit below is the case where they did not.
   count), the request is rejected. `document.open()` also
   removes the extension's message listeners, so later checked requests in that document fail
   closed only when the 60-second timer runs out. Strict mode leaves no Proceed or Sign Anyway
-  button when the analysis failed, the verdict is Unknown or Block Recommended, the structure is
-  unknown, or typed data cannot be read. A verdict the overlay raised itself (a look-alike
-  recipient) keeps Strict mode's reading of the API's verdict: an Unknown stays without Proceed.
+  button when the analysis failed, the result is incomplete (shown as Unknown, or as High Risk with
+  the reason checks are missing), the verdict is Block Recommended, the structure is unknown, or
+  typed data cannot be read. A verdict the overlay raised itself (a look-alike recipient, a message
+  that is not readable text) keeps Strict mode's reading of the API's result: an incomplete one
+  stays without Proceed or Sign Anyway.
 - When the wallet's chain cannot be read, does not match the request, or is one the API does not
   support (it refuses it as `Unsupported chain ID`), the overlay offers only Block, in Balanced and
   in Strict mode, and says why. This holds for transactions, signatures and a `wallet_sendCalls`
   batch with a call on another chain.
-- On a Block Recommended overlay in Balanced mode, Proceed or Sign Anyway counts only when held down
-  for 1.5 seconds, with the pointer or with Enter or Space, by real input: a click does nothing,
-  letting go early cancels, and a fill shows the progress. The half-second delay and visibility rule
-  below apply when the hold starts, and the dialog must stay visible until it ends. Block and Reject
-  stay a single click.
+- On a Block Recommended overlay in Balanced mode, and on a transaction or signature the API did not
+  analyse (it could not be reached, or refused the request), Proceed or Sign Anyway counts only when
+  held down for 1.5 seconds, with the pointer or with Enter or Space, by real input: a click does
+  nothing, letting go early cancels, and a fill shows the progress. The half-second delay and
+  visibility rule below apply when the hold starts, and the dialog must stay visible until it ends.
+  Block and Reject stay a single click.
 - A page cannot make it approve a request on the user's behalf: only real input (a trusted click or
   key press) on the warning decides, and a verdict counts only with a proof the page cannot make.
 - It rejects every request it checks from a document that the page can script before the key
@@ -225,6 +233,28 @@ that stops the scripts altogether would need them unregistered through `chrome.s
 - With the wallet on a network the API does not support, nothing can be sent or signed through the
   overlay, which offers only Block: switch networks, or switch the extension off.
 
+## What a page can tell
+
+A page can find out that the extension is installed, in these ways:
+
+- The window messages between `inject.js` and `content.js` (`SHIELDAI_TX_INTERCEPT`,
+  `SHIELDAI_TX_SHOWN`, `SHIELDAI_TX_VERDICT`, `SHIELDAI_UNCHECKABLE` and `SHIELDAI_LEGACY_REFUSED`)
+  reach every `message` listener of the page. They carry proofs, never the key, so the page can read
+  them but not make them. While a warning shows, its host element is in the page's DOM (what it
+  holds is in a closed shadow root).
+- The files `manifest.json` lists under `web_accessible_resources` (`overlay.css`, `welcome.html`,
+  `i18n.js`, `locales/en/messages.json`, `locales/zh/messages.json` and `locales/vi/messages.json`)
+  can be fetched by any https page from `chrome-extension://<extension id>/`. The ID of a Web Store
+  install is the same for everyone, so a fetch that succeeds shows the extension is there. Chrome's
+  `use_dynamic_url` would put them behind a per-session ID instead; it is not used.
+- A wrapped provider's `request` becomes a property of the provider itself (a wallet's usually comes
+  from its prototype), holding a function that is not native code, and `send` and `sendAsync` are
+  replaced the same way, on the provider and its prototypes. `Object.getOwnPropertyDescriptor` or
+  `Function.prototype.toString` shows the wrapper.
+- When the page has no `window.ethereum` at startup, `inject.js` defines `window.ethereum` as an
+  accessor (a getter and a setter) until a provider is assigned to it, and as a plain value from one
+  task after that. A page can see the accessor, on a page without a wallet too.
+
 ## Translations awaiting review
 
 The Vietnamese and Chinese texts of these keys in `extension/locales/vi` and `extension/locales/zh`
@@ -233,7 +263,10 @@ were written without a native speaker and need the owner's review before release
 `overlayBtnHoldProceed`, `overlayBtnHoldSign`, `overlayHoldNote`, `overlayLookalikeTitle`,
 `overlayLookalikeNote`, `overlayLookalikeNew`, `overlayLookalikePast`, `overlayDelegationTitle`,
 `overlayDelegationNote`, `overlayDelegate`, `overlayDelegateUnreadable`, `overlayHashMessage`,
-`overlayHashMessageNote`, `overlayOpaqueMessage`, `overlayOpaqueMessageNote`, `overlayNotes`.
+`overlayHashMessageNote`, `overlayOpaqueMessage`, `overlayOpaqueMessageNote`, `overlayNotes`,
+`overlayHoldNoteUnchecked`, `overlayIncompleteCoverage`, `overlayExplainAnalyzing`,
+`healthNoApprovals`, `healthNoApprovalsDash`, `healthScanSubtext`, `healthScanning`,
+`dashDeployerBlockSub`, `step1Desc`, `scanInjectionFound`, `scanNoInjectionPatterns`.
 
 ## Tests
 
