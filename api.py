@@ -1162,6 +1162,8 @@ def _checksum_if_possible(value: str) -> str:
 
 
 def _extract_signature_target(req: FirewallRequest) -> str:
+    """The signature's target: `to`, then the typed data's addresses. The evidence document records
+    it, so it is never the signer's own address."""
     candidates: List[str] = [req.to]
 
     typed_data = req.typedData if isinstance(req.typedData, dict) else {}
@@ -1175,7 +1177,6 @@ def _extract_signature_target(req: FirewallRequest) -> str:
         message.get("spender"),
         message.get("token"),
         details.get("token"),
-        req.sender,
     ):
         if isinstance(value, str):
             candidates.append(value)
@@ -1213,12 +1214,7 @@ async def _build_signature_only_response(
     from core.analyzer import AnalysisContext
     from core.policy import PolicyEngine
 
-    fallback_target = (
-        _checksum_if_possible(req.sender)
-        if _is_valid_evm_address(req.sender)
-        else "0x0000000000000000000000000000000000000000"
-    )
-    target = _extract_signature_target(req) or fallback_target
+    target = _extract_signature_target(req) or "0x0000000000000000000000000000000000000000"
     ctx = AnalysisContext(
         address=target,
         chain_id=req.chainId,
