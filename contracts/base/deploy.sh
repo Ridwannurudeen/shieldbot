@@ -10,7 +10,7 @@
 # Usage (run from your terminal):
 #   export BASESCAN_API_KEY=<from https://basescan.org/myapikey>
 #   export BASE_RPC_URL=https://mainnet.base.org      # or paid endpoint
-#   export VPS_HOST=root@75.119.153.252               # optional — enables auto-VPS update
+#   export VPS_HOST=root@<vps-host>                   # optional — enables auto-VPS update
 #   bash contracts/base/deploy.sh
 #
 # Prereqs:
@@ -178,7 +178,7 @@ if [[ -n "${VPS_HOST:-}" ]]; then
   echo "VPS updated and service restarted."
 else
   echo
-  echo "── 7. VPS update skipped (set VPS_HOST=root@75.119.153.252 to enable) ──"
+  echo "── 7. VPS update skipped (set VPS_HOST=root@<vps-host> to enable) ──"
 fi
 
 # ─── 8. Fund the verifier ────────────────────────────────────────────────────

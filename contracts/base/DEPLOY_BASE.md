@@ -80,7 +80,7 @@ Send ~0.001 ETH to the verifier address (step 4) on Base. The one attestation po
 
 ## 8. Wire VPS
 
-SSH to `root@75.119.153.252`, edit `/opt/shieldbot/.env`:
+SSH to your server (`root@<vps-host>`), edit `/opt/shieldbot/.env`:
 ```
 BASE_RPC_URL=https://mainnet.base.org
 BASE_ATTESTOR_ADDRESS=0x...           # from step 5
