@@ -86,7 +86,7 @@ Increasing `maxAge` cannot permit a fresh UNKNOWN. This is intentional fail-clos
 scheduler defect to hide. Choose a demo subject whose scans complete reliably. A proven honeypot
 still maps to HONEYPOT even with unrelated missing fields.
 
-These source line numbers were checked on 2026-09-22 for WP9. See the
+These source line numbers were checked on 2026-09-22. See the
 [guard policy](../contracts/base/VERDICT_GUARD.md) and
 [exact-credit worked consumer](../contracts/base/GUARDED_TRANSFER.md).
 

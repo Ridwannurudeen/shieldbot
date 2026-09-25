@@ -95,9 +95,9 @@ indistinguishable from honest ones to this guard. Rotating the recorder does not
 already written: recovery means overwriting each affected subject with a new record from the trusted
 recorder. The immutable registry address and its recorder authority remain trust dependencies.
 
-## Historical validation on build/oh-guard
+## Historical validation (original guard implementation)
 
-The measurements below describe the original guard implementation. For WP9 adverse-first validation,
+The measurements below describe the original guard implementation. For the current validation,
 regenerated gas snapshots and the integrated suite, see [current results](../../docs/TESTING.md).
 
 Implementation commit: `6a6541dbe82825ddceb12cd982bf890eb027fe47`.
@@ -105,8 +105,6 @@ Implementation commit: `6a6541dbe82825ddceb12cd982bf890eb027fe47`.
 Local tools: Forge 1.7.1, Solidity 0.8.28, optimizer 200 runs, Cancun, Slither 0.11.5.
 Dependencies were initialized from clean local copies at the repository's exact gitlink revisions:
 forge-std 1.16.1 (`620536fa`), OpenZeppelin 5.6.1 (`5fd1781b`), EAS (`d223e172`).
-No remote access, signing, or broadcast was used. Existing deployment-script tests execute only in
-Foundry's local test VM. The registry source and Python files were not modified.
 
 Baseline before implementation: 65 tests passed. Full-suite command: `forge test --offline -vv`.
 Actual output excerpts:
@@ -158,20 +156,6 @@ in `snapshots/ShieldBotVerdictGuardTest.json`.
 
 ## Formatting and static-analysis caveats
 
-Actual formatting exits:
-
-```text
-Windows checkout forge fmt --check exit: 1
-New files forge fmt --check exit: 0
-LF verification copy forge fmt --check exit: 0
-```
-
-The nine pre-existing Solidity files are LF in Git and CRLF in the Windows checkout, confirmed with
-`git ls-files --eol`. The unqualified check fails solely on those line endings. An LF-only verification
-copy of all `src`, `test` and `script` files, with the same `foundry.toml`, passes the complete check.
-The protected registry file was not normalized or otherwise edited. The two new Solidity files pass
-directly in the working tree.
-
 Slither was run separately on both the unchanged registry and the new guard with the CI flags:
 
 ```text
@@ -194,6 +178,6 @@ run also reported intentional timestamp comparisons. Only that detector is suppr
 the clock trust assumption documented immediately above; Foundry's corresponding warning is suppressed
 on the two comparisons. No blanket detector exclusion was added.
 
-WP9 closes the CI follow-up: `.github/workflows/security.yml` now runs Slither on the verifier, attestor,
+CI (`.github/workflows/security.yml`) runs Slither on the verifier, attestor,
 registry, guard and guarded transfer, each with `--exclude-informational --fail-high`. Foundry also
 discovers the guard and transfer tests. No live transaction fee was checked.

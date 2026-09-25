@@ -1,6 +1,6 @@
 # Local test results and reproduction
 
-Measured on **2026-09-22**, on `build/oh-integration`, with WP9 changes over `fff633f`. Start with [JUDGE_GUIDE.md](JUDGE_GUIDE.md) for the offline honeypot replay and real-contract transfer demonstration.
+Measured on **2026-09-22**. Start with [JUDGE_GUIDE.md](JUDGE_GUIDE.md) for the offline honeypot replay and real-contract transfer demonstration.
 
 ## Measured results
 
@@ -45,8 +45,8 @@ The OpenZeppelin finding is `Ownable2Step.transferOwnership(address).newOwner` l
 
 The CI workflow now explicitly analyzes both new contracts. Local reproduction used installed native solc binaries rather than downloading/selecting compilers, with the same remaps and severity gate. Example from the repository root:
 
-```powershell
-& C:/Users/gudma/AppData/Roaming/Python/Python312/Scripts/slither.exe contracts/base/src/ShieldBotGuardedTransfer.sol --compile-force-framework solc --solc C:/Users/gudma/AppData/Roaming/svm/0.8.28/solc-0.8.28 --solc-remaps '@openzeppelin/=contracts/base/lib/openzeppelin-contracts/ forge-std/=contracts/base/lib/forge-std/src/' --exclude-informational --fail-high
+```bash
+slither contracts/base/src/ShieldBotGuardedTransfer.sol --compile-force-framework solc --solc-remaps "@openzeppelin/=contracts/base/lib/openzeppelin-contracts/ forge-std/=contracts/base/lib/forge-std/src/" --exclude-informational --fail-high
 ```
 
 Guard and registry use the same pattern. Attestor additionally maps `@eas/=contracts/base/lib/eas-contracts/contracts/`. The verifier uses `contracts/ShieldBotVerifier.sol`, the installed 0.8.24 compiler and no remaps.
@@ -57,9 +57,9 @@ The requested Python selection excludes `tests/test_bot_app.py`; Telegram is abs
 
 Installed tools checked in this pass: Python **3.12.10**, pytest **8.3.3**, pytest-asyncio **1.3.0**, web3 **7.16.0**, eth-utils **6.0.0**, eth-abi **5.2.0**, httpx **0.28.1**, Forge **1.7.1**, Solidity **0.8.28**, Slither **0.11.5**. Several Python versions differ from `requirements.txt`; this is not a clean pinned-environment installation result. Python reports existing deprecation/configuration warnings. The touched-file formatting result does not assert an unqualified whole-checkout format pass across preexisting Windows line endings.
 
-No standalone TypeScript SDK suite or live-chain test was run in WP9. The existing Python tests use fabricated cryptographic fixtures, including fixture-only signing; transport is mocked. Foundry deployment-script tests run only in its local VM. No real private key, keystore, mnemonic or protected deployment-output file was accessed; no deployment, live signing, broadcast, remote-server access, push or PR was performed.
+No standalone TypeScript SDK suite or live-chain test was run in WP9. The existing Python tests use fabricated cryptographic fixtures, including fixture-only signing; transport is mocked. Foundry deployment-script tests run only in its local VM.
 
-The coordinator's timing figures and Paxos USDG exact-delivery observation are supplied evidence, not live probes repeated in WP9. The judge-guide Python classifier and Solidity consumer examples are separate offline checks; they do not establish a deployed end-to-end publication. The earlier synthetic receipt-verifier exercise is historical and was not rerun here.
+The timing figures and the Paxos USDG exact-delivery observation were recorded earlier and were not re-probed live. The judge-guide Python classifier and Solidity consumer examples are separate offline checks; they do not establish a deployed end-to-end publication. The earlier synthetic receipt-verifier exercise is historical and was not rerun here.
 
 ## Manual checks still required
 

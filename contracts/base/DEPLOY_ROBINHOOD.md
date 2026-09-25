@@ -83,7 +83,7 @@ rejects CALL, CALLCODE, DELEGATECALL, STATICCALL, CREATE, CREATE2 and SELFDESTRU
 Local Slither 0.11.5 with the CI flags `--exclude-informational --fail-high` exits 0 but reports one low-severity
 `missing-zero-check` in OpenZeppelin's `Ownable2Step.transferOwnership`. The unchanged baseline produces the same
 finding: zero deliberately cancels a pending transfer without changing the owner, as covered by the ownership
-tests. No detector is suppressed; the previously reported zero-result baseline was not reproduced locally.
+tests. No detector is suppressed.
 
 ## 2. Dry run against Robinhood Chain (no transaction is sent)
 

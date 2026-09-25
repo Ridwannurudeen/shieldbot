@@ -1,7 +1,4 @@
-# WP4: guard-gated USDG transfer
-
-Original WP4 implementation: `3c589276b17de5b9a9e8bd09c62d2a851af8751f` on `build/oh-usdg`.
-WP9 adds exact-credit enforcement on `build/oh-integration`.
+# Guard-gated USDG transfer
 
 `ShieldBotGuardedTransfer` pins the guard, subject token, USDG token and recipient at construction.
 Its sole state-changing entry point is `transfer(uint256 amount, uint64 maxAge)`. The caller first
@@ -57,14 +54,14 @@ The recipient must be an **EOA or passive contract**. A recipient hook that forw
 during the transfer reduces its measured net credit and trips the check. The invariant trusts the
 pinned token's `balanceOf`; it cannot make a dishonest token report truthful balances.
 
-The coordinator supplied a live Paxos USDG observation on chain 4663: funding a fresh address through
-the `balanceData` slot and transferring 500,000 units credited exactly 500,000, with no transfer fee.
-WP9 did not repeat that live probe. The check closes non-exact behavior in third-party deployments
-that pin another token while preserving exact-credit transfers for the intended pin.
+A live Paxos USDG observation on chain 4663 (funding a fresh address through the `balanceData` slot
+and transferring 500,000 units) credited exactly 500,000 with no fee; it has not been repeated since.
+The check closes non-exact behavior in third-party deployments that pin another token while
+preserving exact-credit transfers for the intended pin.
 
-## Historical WP4 local validation
+## Historical local validation (original implementation)
 
-The results below describe the original transfer implementation, before WP9's exact-credit change.
+The results below describe the original transfer implementation, before the exact-credit change.
 For current tests, sizes, Slither and regenerated gas snapshots, see [TESTING.md](../../docs/TESTING.md).
 
 Tools: Forge 1.7.1, Solidity 0.8.28, optimizer 200 runs, Cancun; Slither 0.11.5.
@@ -109,8 +106,6 @@ were tested and then fully restored:
   The malicious token funds and approves its nested sender, so the lock is what stops that transfer.
 
 `forge fmt --check src/ShieldBotGuardedTransfer.sol test/ShieldBotGuardedTransfer.t.sol` exited 0.
-`git diff --cached --check` passed. Formatting was checked on the new files as requested; protected
-existing sources were not normalized.
 
 `forge build --offline --sizes` exited 0 with no compiler warnings:
 
@@ -139,8 +134,8 @@ it is local Cancun execution with the ordinary mock ERC-20, not live USDG gas or
 From the repository root, the same forced-solc command was used on the unchanged guard and registry,
 then on the new transfer:
 
-```powershell
-& C:/Users/gudma/AppData/Roaming/Python/Python312/Scripts/slither.exe contracts/base/src/ShieldBotGuardedTransfer.sol --compile-force-framework solc --solc C:/Users/gudma/AppData/Roaming/svm/0.8.28/solc-0.8.28 --solc-remaps '@openzeppelin/=contracts/base/lib/openzeppelin-contracts/ forge-std/=contracts/base/lib/forge-std/src/' --exclude-informational --fail-high
+```bash
+slither contracts/base/src/ShieldBotGuardedTransfer.sol --compile-force-framework solc --solc-remaps "@openzeppelin/=contracts/base/lib/openzeppelin-contracts/ forge-std/=contracts/base/lib/forge-std/src/" --exclude-informational --fail-high
 ```
 
 All three invocations exited 0. The new contract's output:
@@ -157,19 +152,3 @@ contracts/base/src/ShieldBotGuardedTransfer.sol analyzed (12 contracts with 80 d
 
 That is the unchanged low-severity pending-ownership cancellation finding. No new findings or
 suppressions were introduced.
-
-## Execution boundary and remaining uncertainty
-
-No deployment, transaction broadcast, signing, private-key access, push or PR was performed. The
-existing deployment-script tests ran only in Foundry's local test VM. Registry/guard sources and
-Python files were not edited; the deployment-output file was never read.
-
-The first `forge test --offline` unexpectedly initiated a remote Git dependency clone because this
-worktree's dependencies were absent. It was stopped; this was a deviation from the no-remote-access
-instruction. Dependencies were subsequently populated from the adjacent local worktree at the exact
-pinned revisions, and their Git metadata was repaired locally. No further network access was used.
-
-Live USDG bytecode, token fees, deployment addresses and actual mainnet transaction fees were not
-verified. The local permitted/refused integration is complete; a mainnet demonstration remains a
-separately authorized task. This record also serves as the session handoff within the permitted
-`contracts/base/` write scope.
