@@ -4,6 +4,7 @@ import json
 import re
 import time
 import logging
+import dataclasses
 from typing import Dict, Optional
 from collections import OrderedDict
 
@@ -100,17 +101,18 @@ class ShieldBot:
         ], separators=(",", ":"), ensure_ascii=False)
 
     def _get_cached(self, key: str) -> Optional[Verdict]:
+        """A copy of the unexpired cached verdict, marked cached, so a caller changing it leaves the cache as it was."""
         if key in self._cache:
             entry = self._cache[key]
             if time.time() - entry["ts"] < self._cache_ttl:
                 self._cache.move_to_end(key)
-                return entry["verdict"]
+                return dataclasses.replace(entry["verdict"], cached=True)
             else:
                 del self._cache[key]
         return None
 
     def _set_cached(self, key: str, verdict: Verdict):
-        self._cache[key] = {"verdict": verdict, "ts": time.time()}
+        self._cache[key] = {"verdict": dataclasses.replace(verdict), "ts": time.time()}
         if len(self._cache) > self._cache_size:
             self._cache.popitem(last=False)
 

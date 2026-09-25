@@ -36,6 +36,7 @@ async def test_incomplete_verdict_preserves_metadata_in_cache(reason, fraction):
         assert verdict.confidence == 20
         assert "Unknown" in verdict.risk_display
         assert verdict.analysis_unavailable is False
+    assert (fresh.cached, cached.cached) == (False, True)
     await client.close()
 
 

@@ -28,6 +28,7 @@ Requires Python 3.9 or later. The only dependency is `httpx`.
 Nothing was ever published, but code built from earlier copies of this repository behaves differently:
 
 - `chain_id` must be a positive `int`. Anything else, including a string such as `"56"`, a `bool` or a `float`, raises `ValueError` before any request. A string chain used to be sent as it was.
+- A verdict from the local cache is a copy with `cached=True`, as in the TypeScript SDK. It used to be the cached object itself, with the API's `cached` value, so a caller that changed a returned verdict changed what later calls got.
 
 ## Before you call check()
 
@@ -75,6 +76,8 @@ asyncio.run(main())
 ## Verdicts and unknown results
 
 `check()` returns a `Verdict` with `verdict` (`"ALLOW"`, `"WARN"` or `"BLOCK"`), the `allowed` and `blocked` shortcuts, `score`, `flags`, `evidence`, `policy_check`, `status`, `coverage`, `coverage_reasons`, `risk_display`, `risk_level`, `category_scores`, `confidence`, `cached`, `latency_ms` and `analysis_unavailable`.
+
+`cached` is `True` for a verdict from the local cache. Each call gets its own `Verdict`, so setting a field on one does not change what later calls get; the lists and dicts inside it (`flags`, `coverage` and the like) are shared with the cache, so treat them as read-only.
 
 Incomplete analysis is never reported as safe. When `status` is not `"ok"`, `risk_level` is `"UNKNOWN"`, or coverage is missing or incomplete, the verdict has `status == "unknown"`, `risk_display` starting with `"Unknown"`, and an ALLOW from the API is downgraded to WARN.
 

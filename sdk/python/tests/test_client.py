@@ -72,6 +72,27 @@ async def test_local_cache_hit(sb):
 
 
 @pytest.mark.asyncio
+async def test_a_cache_hit_is_a_copy_marked_cached_that_callers_cannot_poison(sb):
+    response = MagicMock(status_code=200)
+    response.json.return_value = {
+        "status": "ok", "coverage": {"honeypot": 1}, "verdict": "ALLOW", "score": 5, "cached": False,
+    }
+    transaction = {"from": "0xA", "to": "0xB", "chain_id": 56}
+    with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response) as post:
+        fresh = await sb.check(transaction)
+        fresh.verdict, fresh.score = "BLOCK", 99
+        first_hit = await sb.check(transaction)
+        first_hit.verdict, first_hit.score = "BLOCK", 99
+        second_hit = await sb.check(transaction)
+    assert post.await_count == 1
+    assert fresh.cached is False
+    assert first_hit.cached is True
+    assert second_hit is not first_hit
+    assert (second_hit.verdict, second_hit.score, second_hit.cached) == ("ALLOW", 5, True)
+    assert (second_hit.status, second_hit.risk_display, second_hit.allowed) == ("ok", "5%", True)
+
+
+@pytest.mark.asyncio
 async def test_equivalent_transaction_encodings_reuse_cache(sb):
     response = MagicMock(status_code=200)
     response.json.return_value = {
