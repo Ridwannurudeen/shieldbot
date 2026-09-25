@@ -36,6 +36,7 @@ from core.telegram_formatter import (
 )
 from core.extension_formatter import is_scan_incomplete
 from core.risk_engine import database_matches, medium_matches
+from core.verdicts import UNKNOWN
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 from services.robinhood_assets import with_impostor_check
 from services.mempool_service import supports_pending_transactions
@@ -914,8 +915,17 @@ async def _handle_advisor_chat(update: Update, message: str, chain_id: int = 56)
         response = await container.advisor.chat(user_id, message, chain_id=chain_id)
         scan_data = response.get('scan_data')
         response_text = response['text']
-        if scan_data is not None and is_scan_incomplete(scan_data):
-            response_text = 'Unknown risk: provider coverage incomplete. Review the missing data before proceeding.'
+        # The model's text never sets a verdict: a contract check ends with the scan's own.
+        if scan_data is not None:
+            if is_scan_incomplete(scan_data):
+                response_text = 'Unknown risk: provider coverage incomplete. Review the missing data before proceeding.'
+                verdict = f'risk level {UNKNOWN}, score unknown, status unknown'
+            else:
+                verdict = (
+                    f"risk level {scan_data['risk_level']}, score {scan_data['risk_score']}/100, "
+                    f"status {scan_data['status']}"
+                )
+            response_text += f'\n\nShieldBot scan verdict: {verdict}'
         await typing_msg.edit_text(response_text)
     except UnsupportedChainError:
         raise

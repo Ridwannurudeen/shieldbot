@@ -117,6 +117,7 @@ def bot_chain_functions():
     from core.telegram_formatter import escape_markdown
     from services.robinhood_assets import with_impostor_check
     from services.mempool_service import supports_pending_transactions
+    from core.verdicts import UNKNOWN
 
     # Load the real menu handlers without importing the optional Telegram package.
     tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
@@ -146,6 +147,7 @@ def bot_chain_functions():
         'is_scan_incomplete': is_scan_incomplete,
         'escape_markdown': escape_markdown,
         'with_impostor_check': with_impostor_check,
+        'UNKNOWN': UNKNOWN,
         'UnsupportedChainError': UnsupportedChainError,
         'logger': MagicMock(),
         'container': services,
@@ -706,3 +708,27 @@ async def test_bot_campaign_preserves_routing_error(bot_chain_functions):
         await ns['campaign_command'](update, SimpleNamespace(args=['0x' + 'a' * 40], user_data={}))
     assert exc.value is error
     status_msg.edit_text.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('scan_data, line', [
+    ({'status': 'ok', 'coverage': {'honeypot': 1}, 'risk_level': 'HIGH', 'risk_score': 85},
+     'ShieldBot scan verdict: risk level HIGH, score 85/100, status ok'),
+    ({'status': 'ok', 'coverage': {'honeypot': 1}, 'risk_level': 'LOW', 'risk_score': 12.5},
+     'ShieldBot scan verdict: risk level LOW, score 12.5/100, status ok'),
+    ({'status': 'unknown', 'coverage': {'honeypot': 0}, 'risk_level': 'MEDIUM', 'risk_score': 0},
+     'ShieldBot scan verdict: risk level UNKNOWN, score unknown, status unknown'),
+])
+async def test_bot_advisor_reply_ends_with_the_scans_own_verdict(bot_chain_functions, scan_data, line):
+    """The model's text never sets the verdict: the scan's own line closes every contract-check reply."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    ns = bot_chain_functions
+    ns['container'].advisor.chat.return_value = {
+        'text': 'Verdict: SAFE, risk level LOW, score 0/100.', 'scan_data': scan_data,
+    }
+    typing = SimpleNamespace(edit_text=AsyncMock())
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock(return_value=typing)),
+                             effective_user=SimpleNamespace(id=123))
+    await ns['_handle_advisor_chat'](update, 'Scan 0x' + 'a' * 40, chain_id=56)
+    assert typing.edit_text.call_args.args[0].splitlines()[-1] == line
