@@ -60,7 +60,7 @@ Pages: [X] slides
 
 ---
 
-## Social Media & Updates
+## Contact & Links
 
 ### Contact
 - **Issues:** https://github.com/Ridwannurudeen/shieldbot/issues

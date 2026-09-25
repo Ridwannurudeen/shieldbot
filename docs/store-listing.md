@@ -65,8 +65,8 @@ Do not add claims the 3.1.0 extension does not make good on: no "blocks", no sim
 change claims (they depend on a server-side Tenderly key that is not confirmed), no claim that
 signatures are analysed beyond what the text above says (the server reads permits, Permit2, Seaport
 and Blur orders; any other typed data is Unknown), no wallet approval scanning (the Health tab's
-approval scan has not been confirmed working in production), and no wallet names until the smoke test in
-section 3 has passed with them.
+approval scan has not been confirmed working in production), and no wallet names until the
+smoke test in section 3 has passed with them.
 
 ## 2. Release checklist (owner)
 

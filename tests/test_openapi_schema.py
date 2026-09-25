@@ -69,7 +69,7 @@ def test_hidden_routes_are_still_served():
 
 
 @pytest.mark.parametrize("path", ["/test", "/test-phishing"])
-def test_removed_test_pages_are_not_served(path):
+def test_removed_test_pages_have_no_route(path):
     import api
 
     assert path not in {getattr(route, "path", None) for route in api.app.routes}

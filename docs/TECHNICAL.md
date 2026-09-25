@@ -693,12 +693,9 @@ Market Metrics:
 ### Chrome Extension Demo
 
 **Prerequisites**:
-- Extension installed and enabled
-- FastAPI backend running on port 8000
-- CORS configured correctly
+- Extension loaded unpacked with the default API (see [store-listing.md](store-listing.md) section 3)
 
-**Test dApp Demo**: follow the smoke test in [store-listing.md](store-listing.md) section 3, which
-uses https://metamask.github.io/test-dapp/ for a native send.
+**Test dApp Demo**: follow the smoke test in [store-listing.md](store-listing.md) section 3, which uses https://metamask.github.io/test-dapp/ for a native send.
 
 **Live dApp Demo** (PancakeSwap):
 
