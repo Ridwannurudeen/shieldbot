@@ -807,3 +807,34 @@ async def test_the_advisor_verdict_line_leads_with_the_official_token_warning(bo
     assert typing.edit_text.call_args.args[0].splitlines()[-1] == (
         f'ShieldBot scan verdict: {lead}risk level LOW, score 5/100, status ok'
     )
+
+
+
+def _press(ns, data, saved_chain):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    ns['check_token'] = AsyncMock()
+    query = SimpleNamespace(data=data, answer=AsyncMock(), message=SimpleNamespace(reply_text=AsyncMock()))
+    return query, ns['button_callback'](SimpleNamespace(callback_query=query),
+                                        SimpleNamespace(user_data={'chain_id': saved_chain}))
+
+
+@pytest.mark.asyncio
+async def test_a_token_button_sent_before_it_carried_a_chain_checks_the_users_chain(bot_chain_functions):
+    address = '0x' + 'a' * 40
+    query, press = _press(bot_chain_functions, f'token_{address}', 4663)
+
+    await press
+
+    bot_chain_functions['check_token'].assert_awaited_once_with(query, address, chain_id=4663)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain', ['\N{SUPERSCRIPT TWO}', '\N{ARABIC-INDIC DIGIT FIVE}6', '5 6', '-56'])
+async def test_a_token_button_with_a_chain_that_is_not_ascii_digits_is_rejected(bot_chain_functions, chain):
+    query, press = _press(bot_chain_functions, f'token_{chain}_0x' + 'a' * 40, 56)
+
+    await press
+
+    bot_chain_functions['check_token'].assert_not_awaited()
+    assert query.message.reply_text.await_args.args == ('\N{CROSS MARK} Invalid address format.',)

@@ -1295,12 +1295,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"All scans will now target {chain_name}.",
         )
     elif query.data.startswith('token_'):
-        # The button names the chain its scan ran on, which the user's current chain may no longer be.
+        # The button names the chain its scan ran on, which the user's current chain may no longer be. A
+        # button sent before it carried the chain names none, and checks on the user's current chain.
         chain_text, _, address = query.data[len('token_'):].rpartition('_')
-        if not chain_text.isdigit() or not web3_client.is_valid_address(address):
+        if not web3_client.is_valid_address(address) or (
+            chain_text and not (chain_text.isascii() and chain_text.isdecimal())
+        ):
             await query.message.reply_text("❌ Invalid address format.")
             return
-        chain_id = web3_client.validate_chain_id(int(chain_text))
+        chain_id = web3_client.validate_chain_id(int(chain_text)) if chain_text else _get_user_chain_id(context)
         await query.message.reply_text(f"🔍 Running token safety check for `{address}`...", parse_mode='Markdown')
         await check_token(query, address, chain_id=chain_id)
 
