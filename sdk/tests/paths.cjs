@@ -54,8 +54,8 @@ for (const method of ['rescue', 'queryThreatGraph']) {
     );
   });
 
-  test(`${method} accepts an answer that names the chain asked for, or none`, async () => {
-    for (const answer of [rescued, (({ chain_id, ...rest }) => rest)(rescued)]) {
+  test(`${method} accepts an answer that names the chain asked for, as a number or a string, or none`, async () => {
+    for (const answer of [rescued, { ...rescued, chain_id: '4663' }, (({ chain_id, ...rest }) => rest)(rescued)]) {
       global.fetch = async () => ({ ok: true, json: async () => answer });
       assert.deepEqual(await calls[method](new ShieldBot(), address), answer);
     }

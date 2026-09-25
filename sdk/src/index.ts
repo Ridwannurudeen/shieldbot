@@ -556,9 +556,9 @@ export class ShieldBot {
     return address;
   }
 
-  /** Throws CHAIN_MISMATCH when an answer names a chain other than the one asked for. */
+  /** Throws CHAIN_MISMATCH when an answer names a chain other than the one asked for, as a number or a string. */
   private _checkAnsweredChain(answered: unknown, requested: number, method: string): void {
-    if (answered != null && answered !== requested) {
+    if (answered != null && String(answered) !== String(requested)) {
       throw new ShieldBotError(
         `${method}() asked about chain ${requested} but the API answered for chain ${answered}`,
         502,

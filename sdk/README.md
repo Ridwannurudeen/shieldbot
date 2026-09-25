@@ -32,7 +32,7 @@ Nothing was ever published, but code built from earlier copies of this repositor
 - `check()` and `firewall()` send `value` as decimal wei and throw `INVALID_VALUE` for anything that is not an integer from 0 to 2^256 - 1. They used to forward it unchanged.
 - `rescue()` results are typed with `status`, `coverage`, `coverage_reasons`, `scanned_blocks` and `total_value_at_risk_usd`, and `rescue()` throws `SCAN_UNAVAILABLE` when the scan read nothing, instead of returning an empty approval list.
 - `rescue`, `getCampaign` and `queryThreatGraph` throw `INVALID_ADDRESS` before any request for an address that is not `0x` and 40 hex digits. They used to put any string in the request path: an address ending in `#` dropped the chain (the API then read BNB Chain), one ending in `?chain_id=1&` replaced it, and `../` reached other routes with your API key.
-- `rescue` and `queryThreatGraph` throw `CHAIN_MISMATCH` (status 502) when the answer's `chain_id` is not the chain asked for.
+- `rescue` and `queryThreatGraph` throw `CHAIN_MISMATCH` (status 502) when the answer's `chain_id` is not the chain asked for (the number, or the same digits as a string).
 - `timeout` must be a positive number of milliseconds, at most 2^31 - 1, or the constructor throws `INVALID_TIMEOUT`. `timeout: 0` used to mean the default. `finalTimeout` follows the same rule, checked by `firewall()` before any request.
 - `cacheSize: 0` turns the local verdict cache off. It used to mean the default of 10000 entries. A size that is not a whole number of 0 or more throws `INVALID_CACHE_SIZE`.
 - `check()` caches a copy of the verdict it returns, and every cache hit is a copy too. It used to cache the returned object itself, so a caller that set a field on it changed what later cache hits returned.
