@@ -229,3 +229,5 @@ async def test_strict_gives_a_cached_scan_the_answer_it_gave_the_fresh_one(stric
         assert (response["classification"] == verdicts.BLOCK_RECOMMENDED, overridden) == (blocked, blocked)
     assert fresh["classification"] == cached["classification"]
     assert fresh["risk_score"] == cached["risk_score"]
+    # The cached answer names the failed required checks the fresh one named.
+    assert cached["failed_sources"] == fresh["failed_sources"] == (["honeypot"] if blocked else [])

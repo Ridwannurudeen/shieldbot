@@ -3427,7 +3427,7 @@ def _build_cached_response(
         "chain_id": chain_id,
         "network": _chain_id_to_name(chain_id),
         "partial": alert['status'] == 'unknown',
-        "failed_sources": [],
+        "failed_sources": metadata.get('failed_sources', []),
         "policy_mode": policy_mode,
         "notes": metadata.get('notes', []),
     }

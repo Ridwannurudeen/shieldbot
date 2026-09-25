@@ -32,6 +32,15 @@ def _required_unknown(result: AnalyzerResult) -> bool:
     return any(coverage.get(field) is False for field in fields)
 
 
+def failed_sources(results: List[AnalyzerResult]) -> List[str]:
+    """The analyzers that failed: each that raised, then each missing a required field. Providers
+    swallow their failures into unknown results, so an analyzer missing a required field has failed as
+    surely as one that raised. Skipped analyzers are covered."""
+    return [r.name for r in results if r.error is not None] + [
+        r.name for r in results if r.error is None and _required_unknown(r)
+    ]
+
+
 class PolicyMode(Enum):
     STRICT = "STRICT"
     BALANCED = "BALANCED"
@@ -68,10 +77,7 @@ class PolicyEngine:
             except ValueError:
                 pass
 
-        # Providers swallow their failures into unknown results, so an analyzer missing a required
-        # field has failed as surely as one that raised. Skipped analyzers are covered.
-        failed_names = [r.name for r in results if r.error is not None]
-        failed_names += [r.name for r in results if r.error is None and _required_unknown(r)]
+        failed_names = failed_sources(results)
         is_partial = len(failed_names) > 0
 
         output = dict(risk_output)

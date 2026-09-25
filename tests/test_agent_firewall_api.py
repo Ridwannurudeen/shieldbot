@@ -551,3 +551,21 @@ def test_agent_records_allowed_bnb_spend(client, mock_container, source):
     )
     assert response.json()["verdict"] == "ALLOW"
     mock_container.db.record_agent_spend.assert_awaited_once_with("agent:1", pytest.approx(60.0))
+
+
+@pytest.mark.parametrize("can_sell_known, failed", [(True, []), (False, ["honeypot"])])
+def test_an_agent_scan_row_names_its_failed_required_checks(client, mock_container, can_sell_known, failed):
+    # The firewall's STRICT check reads them from the row, as it does from its own scans' rows.
+    from core.analyzer import AnalyzerResult
+
+    mock_container.registry.run_all = AsyncMock(return_value=[
+        AnalyzerResult("honeypot", 1.0, 0, data={
+            "is_honeypot": False, "can_sell": True if can_sell_known else None,
+            "coverage": {"is_honeypot": True, "can_sell": can_sell_known},
+        }),
+    ])
+    resp = client.post("/api/agent/firewall", json=_make_firewall_request(), headers={"X-API-Key": "sb_testkey"})
+
+    assert resp.status_code == 200
+    stored = mock_container.db.upsert_contract_score.await_args.kwargs["category_scores"]["_scan_metadata"]
+    assert stored["failed_sources"] == failed
