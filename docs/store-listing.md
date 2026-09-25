@@ -89,9 +89,8 @@ has passed with them.
    to 29) has passed on both MetaMask and Rabby.
 5. Developer Dashboard, Package tab: upload the zip.
 6. Store listing tab: paste the description above. Replace the screenshots with real 3.1.0 captures
-   (see `extension/screenshots/CAPTURE-GUIDE.md`). Do not upload any image that shows screens the
-   extension does not have, such as the light "Threat Dashboard" mock, or the promo tile that says
-   v1.0.8 and BNB Chain only.
+   (capture them at 1280×800 with the extension loaded unpacked). Do not upload any image that
+   shows screens the extension does not have, such as the light "Threat Dashboard" mock.
 7. Privacy practices tab: `docs/CHROME_WEB_STORE_DISCLOSURE.md` still says the chain-resolution fix
    is unreleased; with 3.1.0 it ships, so update that sentence before copying from the file.
 8. Submit for review. After approval, confirm the listing shows 3.1.0 and the new text, and that
