@@ -23,6 +23,14 @@ After publication it will install with `pip install shieldbot` (planned name, no
 
 Requires Python 3.9 or later. The only dependency is `httpx`.
 
+## Changes since the unpublished 3.0.0 tree
+
+Nothing was ever published, but code built from earlier copies of this repository behaves differently:
+
+- `chain_id` must be a positive `int`; an `int` subclass such as an `IntEnum` member counts, and is sent as a plain `int`. Anything else, including a string such as `"56"`, a `bool` or a `float`, raises `ValueError` before any request. A string chain used to be sent as it was.
+- The constructor raises `ValueError` for a `timeout` that is not a positive, finite number of seconds and for a `cache_size` that is not an `int` of 0 or more. `timeout=0` and a negative `cache_size` used to be accepted.
+- A verdict from the local cache is a copy with `cached=True`, as in the TypeScript SDK. It used to be the cached object itself, with the API's `cached` value, so a caller that changed a returned verdict changed what later calls got.
+
 ## Before you call check()
 
 - **API key.** `check()` needs an API key (`X-API-Key`). There is no self-serve signup yet; keys are issued by the ShieldBot operator.
@@ -62,13 +70,15 @@ asyncio.run(main())
 |-----|----------|-------|
 | `from` | yes | Sender address |
 | `to` | yes | Target address |
-| `chain_id` | yes | Integer chain ID from the table below. The SDK never assumes a chain: without it `check()` raises `ValueError` before sending anything. |
+| `chain_id` | yes | Chain ID from the table below, as a positive `int` (an `IntEnum` member works). The SDK never assumes a chain: without it, or with anything but a positive `int` (a string such as `"56"`, a `bool`, a `float`), `check()` raises `ValueError` before sending anything. |
 | `data` | no | Calldata as a hex string, default `"0x"` |
 | `value` | no | Wei from 0 to 2**256 - 1, as an `int` or a decimal or `0x` hex string; omitted or `None` means `"0"`. The SDK sends it as a decimal string; anything else raises `ValueError` before sending, so the API never prices an unreadable value as zero. |
 
 ## Verdicts and unknown results
 
 `check()` returns a `Verdict` with `verdict` (`"ALLOW"`, `"WARN"` or `"BLOCK"`), the `allowed` and `blocked` shortcuts, `score`, `flags`, `evidence`, `policy_check`, `status`, `coverage`, `coverage_reasons`, `risk_display`, `risk_level`, `category_scores`, `confidence`, `cached`, `latency_ms` and `analysis_unavailable`.
+
+`cached` is `True` for a verdict from the local cache. Each call gets its own `Verdict`, so setting a field on one does not change what later calls get; the lists and dicts inside it (`flags`, `coverage` and the like) are shared with the cache, so treat them as read-only.
 
 Incomplete analysis is never reported as safe. When `status` is not `"ok"`, `risk_level` is `"UNKNOWN"`, or coverage is missing or incomplete, the verdict has `status == "unknown"`, `risk_display` starting with `"Unknown"`, and an ALLOW from the API is downgraded to WARN.
 
@@ -89,12 +99,14 @@ ShieldBot(
     api_key="sb_...",
     agent_id="my-agent",
     base_url="https://api.shieldbotsecurity.online",  # default
-    cache_size=10000,    # local verdict cache entries
+    cache_size=10000,    # local verdict cache entries, an int >= 0; 0 turns the cache off
     cache_ttl=60,        # seconds a cached verdict stays valid
     fail_mode="cached",  # "cached" | "open" | "closed"
-    timeout=10.0,        # seconds
+    timeout=10.0,        # seconds, a positive finite number
 )
 ```
+
+`cache_size=0` turns the local cache off: every `check()` asks the API, and the `"cached"` fail mode has no verdict to fall back on, so it returns WARN. A `timeout` that is not a positive, finite number of seconds, or a `cache_size` that is not an `int` of 0 or more, raises `ValueError` when the client is created.
 
 ## Supported chains
 
