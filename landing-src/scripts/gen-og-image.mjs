@@ -1,5 +1,4 @@
 import sharp from "sharp";
-import { writeFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 
@@ -137,7 +136,6 @@ const svg = `
 `;
 
 const outPath = join(__dir, "../public/og-image.png");
-writeFileSync(join(__dir, "../public/og-image.svg"), svg);
 
 await sharp(Buffer.from(svg))
   .resize(W, H)
