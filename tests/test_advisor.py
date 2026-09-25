@@ -602,3 +602,11 @@ async def test_earlier_messages_cannot_open_the_tags_either(advisor, mock_db, mo
 
     messages = mock_ai.chat_with_usage.call_args.kwargs["messages"]
     assert not any("<" in message["content"] or ">" in message["content"] for message in messages[:2])
+
+
+
+def test_advisor_prompt_says_notes_are_information_not_danger():
+    from agent.prompts import ADVISOR_SYSTEM_PROMPT
+
+    assert "notes" in ADVISOR_SYSTEM_PROMPT
+    assert "information, not danger signals" in ADVISOR_SYSTEM_PROMPT

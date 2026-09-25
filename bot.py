@@ -385,7 +385,8 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"This address now shows as reported by {result['reports']} users in scans. "
                 "It is not confirmed as a scam."
             )
-        response = f"""✅ **Scam Report — Address Blacklisted**
+        heading = "Address Blacklisted" if result.get("confirmed") else "Community-Reported Address"
+        response = f"""✅ **Scam Report — {heading}**
 
 **Address:** `{address}`
 **Chain:** {get_chain_name(chain_id)}
@@ -400,9 +401,9 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **Address:** `{address}`
 **Chain:** {get_chain_name(chain_id)}
 **Reason:** {escape_markdown(reason)}
-**Progress:** {result['reports']}/{result['needed']} independent reports needed to blacklist.
+**Progress:** {result['reports']}/{result['needed']} independent reports needed before scans show it as community-reported.
 
-Thank you — more reports from different users are needed before this address is blacklisted.
+Thank you — more reports from different users are needed before scans show this address as community-reported.
 """
 
     await update.message.reply_text(response, parse_mode='Markdown', disable_web_page_preview=True)

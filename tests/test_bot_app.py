@@ -308,7 +308,9 @@ class TestNoOnChainRecordingPromise:
         }
         text, recorder, attestor = await self._report(bot_module, monkeypatch, result)
 
-        assert "Address Blacklisted" in text
+        # A crowd entry is community-reported until an admin confirms it, not blacklisted.
+        assert "Scam Report — Community-Reported Address" in text
+        assert "lacklist" not in text
         assert sentence in text
         assert "known scam" not in text
         assert "On-chain recording" not in text
@@ -344,6 +346,7 @@ class TestNoOnChainRecordingPromise:
         }
         text, recorder, attestor = await self._report(bot_module, monkeypatch, result)
 
+        assert "Scam Report — Address Blacklisted" in text
         assert "This address is confirmed as a scam." in text
         assert "reported by 0 users" not in text
         recorder.record_scan_fire_and_forget.assert_not_awaited()
@@ -1157,3 +1160,24 @@ class TestLaunchAlertLoop:
         assert [call.args for call in db.enqueue_launch_alerts.await_args_list] == [
             (CHAIN, 1000.0 - 3600), (CHAIN, 1000.0 - 60), (CHAIN, 945.0),
         ]
+
+
+
+@pytest.mark.asyncio
+async def test_a_pending_report_does_not_promise_a_blacklisting(bot_module, monkeypatch):
+    monkeypatch.setattr(bot_module, "scam_db", SimpleNamespace(report_address=AsyncMock(
+        return_value={"accepted": True, "blacklisted": False, "reports": 1, "needed": 3},
+    )))
+    monkeypatch.setattr(bot_module, "web3_client", SimpleNamespace(
+        validate_chain_id=lambda chain: chain, is_valid_address=lambda address: True,
+    ))
+    update = MagicMock(spec=Update)
+    update.message.reply_text = AsyncMock()
+    update.effective_user.id = 42
+
+    await bot_module.report_command(update, SimpleNamespace(args=["0x" + "0" * 39 + "1", "drainer"], user_data={}))
+
+    text = update.message.reply_text.await_args.args[0]
+    assert "1/3 independent reports" in text
+    assert "community-reported" in text
+    assert "lacklist" not in text

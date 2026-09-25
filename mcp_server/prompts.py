@@ -7,6 +7,8 @@ arguments and present to the user or feed to an LLM.
 import logging
 from typing import Any, Dict, List, Optional
 
+from core.verdicts import CLASSIFICATIONS, UNKNOWN
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -94,7 +96,7 @@ def _render_security_analysis(args: Dict[str, str]) -> Dict:
         f"Steps:\n"
         f"{''.join(tool_calls) if tool_calls else 'Ask the user to provide a contract address or transaction hash.'}\n\n"
         f"After gathering data, provide:\n"
-        f"- Overall risk verdict (SAFE / CAUTION / DANGER / UNKNOWN; use UNKNOWN when coverage is incomplete)\n"
+        f"- Overall risk verdict ({' / '.join((*CLASSIFICATIONS, UNKNOWN))}; use {UNKNOWN} when coverage is incomplete)\n"
         f"- Never present an incomplete numeric score as evidence of safety\n"
         f"- Key risk flags identified\n"
         f"- Deployer reputation assessment\n"

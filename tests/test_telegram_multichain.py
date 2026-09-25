@@ -759,3 +759,17 @@ def test_the_token_button_fits_telegrams_callback_data_limit(bot_chain_functions
     for chain_id in (1, 56, 4663, 42161, 11155111):
         (button,) = bot_chain_functions['_scan_buttons']('0x' + 'a' * 40, chain_id).inline_keyboard[-1]
         assert len(button.callback_data.encode()) <= 64
+
+
+@pytest.mark.parametrize('status, coverage, level, shown', [
+    ('unknown', {'honeypot': 0}, 'MEDIUM', 'Rug Probability:* Unknown (incomplete coverage)  |  *Risk Level:* UNKNOWN'),
+    ('unknown', {'honeypot': 0}, 'HIGH', 'Rug Probability:* Unknown (incomplete coverage)  |  *Risk Level:* UNKNOWN'),
+    ('ok', {'honeypot': 1}, 'MEDIUM', 'Rug Probability:* 40%  |  *Risk Level:* MEDIUM'),
+])
+def test_an_incomplete_report_reads_unknown_for_probability_and_level(status, coverage, level, shown):
+    from core.telegram_formatter import format_full_report
+    report = format_full_report(
+        {'rug_probability': 40, 'risk_level': level, 'status': status, 'coverage': coverage},
+        {}, {}, {}, address='0x' + 'a' * 40,
+    )
+    assert shown in report

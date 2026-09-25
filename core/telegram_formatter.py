@@ -4,7 +4,7 @@ import re
 
 from core.extension_formatter import is_scan_incomplete
 from core.risk_engine import database_matches, medium_matches
-from core.verdicts import BLOCK_RECOMMENDED, CAUTION, HIGH, HIGH_RISK, MEDIUM, SAFE, classify
+from core.verdicts import BLOCK_RECOMMENDED, CAUTION, HIGH, HIGH_RISK, MEDIUM, SAFE, UNKNOWN, classify
 
 # Replies are sent with Telegram's legacy Markdown, where these characters start an entity.
 _MARKUP = re.compile(r'([_*`\[])')
@@ -103,7 +103,7 @@ def format_full_report(
     token_info: dict = None,
 ) -> str:
     rug_prob = risk_output.get('rug_probability', 0)
-    risk_level = risk_output.get('risk_level', 'UNKNOWN')
+    risk_level = risk_output.get('risk_level', UNKNOWN)
     archetype = risk_output.get('risk_archetype', 'unknown')
     confidence = risk_output.get('confidence_level', 0)
     flags = risk_output.get('critical_flags', [])
@@ -112,8 +112,10 @@ def format_full_report(
     incomplete = is_scan_incomplete(risk_output) or bool(
         honeypot_data and honeypot_data.get('simulation_failed')
     )
-    if incomplete and risk_level == 'LOW':
-        risk_level = 'UNKNOWN'
+    # An incomplete scan's level is not known either: the engine raises missing data to a MEDIUM floor,
+    # and its band still sets the icon and the final verdict.
+    if incomplete:
+        risk_level = UNKNOWN
     coverage_reasons = risk_output.get('coverage_reasons', {})
     impostor_check = risk_output.get('impostor_check')
     impostor = impostor_check is not None and impostor_check['status'] == 'impostor'

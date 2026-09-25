@@ -1284,6 +1284,18 @@ def test_mcp_prompt_includes_unknown():
     assert "UNKNOWN" in get_prompt("security-analysis")["messages"][0]["content"]["text"]
 
 
+def test_the_analysis_prompt_asks_for_the_published_verdict_words():
+    import re
+
+    from core.verdicts import CLASSIFICATIONS, UNKNOWN
+    from mcp_server.prompts import get_prompt
+
+    text = get_prompt("security-analysis", {"contract_address": "0x" + "a" * 40})["messages"][0]["content"]["text"]
+    asked = re.search(r"Overall risk verdict \(([A-Z_ /]+);", text).group(1).split(" / ")
+    assert asked == [*CLASSIFICATIONS, UNKNOWN]
+    assert "DANGER" not in text
+
+
 # ---------------------------------------------------------------------------
 # Agent records answer only the key that registered the agent
 # ---------------------------------------------------------------------------
