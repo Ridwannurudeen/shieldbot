@@ -2916,7 +2916,8 @@ async def threat_feed(
     limit = max(1, min(limit, 200))  # cap between 1 and 200
     threats = []
 
-    # Recent high-risk contract scans from DB: the rows the threat counts in core.database count.
+    # Recent high-risk contract scans from DB: the rows the threat counts in core.database count. The
+    # queries interpolate only the code constant verdicts.THREAT_CONDITION, never user input.
     try:
         if source == "mempool":
             cursor = None
@@ -2928,7 +2929,7 @@ async def threat_feed(
                 WHERE {verdicts.THREAT_CONDITION} AND chain_id = ?
                 ORDER BY last_scanned_at DESC
                 LIMIT ?
-            """, (int(chain_id), limit))
+            """, (int(chain_id), limit))  # nosec B608
         else:
             cursor = await container.db._db.execute(f"""
                 SELECT address, chain_id, risk_score, risk_level, archetype, flags,
@@ -2937,7 +2938,7 @@ async def threat_feed(
                 WHERE {verdicts.THREAT_CONDITION}
                 ORDER BY last_scanned_at DESC
                 LIMIT ?
-            """, (limit,))
+            """, (limit,))  # nosec B608
         rows = await cursor.fetchall() if cursor else []
 
         import json as _json

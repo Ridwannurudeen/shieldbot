@@ -1053,9 +1053,10 @@ class Database:
         unique_contracts = row[0] or 0
         total_scan_events = int(row[1] or 0)
 
-        # The threat feed (api.py) lists the same rows.
+        # The threat feed (api.py) lists the same rows. The interpolated value is the code constant
+        # verdicts.THREAT_CONDITION, never user input.
         cur = await self._db.execute(
-            f"SELECT COUNT(*) FROM contract_scores WHERE {THREAT_CONDITION}"
+            f"SELECT COUNT(*) FROM contract_scores WHERE {THREAT_CONDITION}"  # nosec B608
         )
         threats_detected = (await cur.fetchone())[0] or 0
 
@@ -1107,8 +1108,9 @@ class Database:
             )
             scans = (await cur.fetchone())[0] or 0
 
+            # The interpolated value is the code constant verdicts.THREAT_CONDITION, never user input.
             cur = await self._db.execute(
-                f"SELECT COUNT(*) FROM contract_scores WHERE last_scanned_at > ? AND {THREAT_CONDITION}",
+                f"SELECT COUNT(*) FROM contract_scores WHERE last_scanned_at > ? AND {THREAT_CONDITION}",  # nosec B608
                 (cutoff,)
             )
             threats = (await cur.fetchone())[0] or 0
@@ -1180,6 +1182,7 @@ class Database:
             return None
         deployer = row[0]
 
+        # The interpolated value is the code constant verdicts.HIGH, never user input.
         cursor = await self._db.execute(f"""
             SELECT
                 COUNT(DISTINCT d.contract_address),
@@ -1188,7 +1191,7 @@ class Database:
             LEFT JOIN contract_scores cs
                 ON cs.address = d.contract_address AND cs.chain_id = d.chain_id
             WHERE d.deployer_address = ?
-        """, (deployer,))
+        """, (deployer,))  # nosec B608
         stats = await cursor.fetchone()
         return {
             "deployer_address": deployer,
@@ -2513,6 +2516,7 @@ class Database:
         cannot turn an impostor, official or collision finding into none or unknown, and an official
         finding is not replaced by a check made from a shorter list. One UPDATE decides and writes.
         """
+        # The interpolated value is the code constant _STORED_IMPOSTOR_CHECK_RANK, never user input.
         await self._db.execute(f"""
             UPDATE discovered_launches SET impostor_check = :check
             WHERE chain_id = :chain_id AND token_address = :token AND (
@@ -2527,7 +2531,7 @@ class Database:
                     )
                 )
             )
-        """, {
+        """, {  # nosec B608
             "check": json.dumps(check), "chain_id": chain_id, "token": token_address, "rules": check["rules"],
             "rank": _IMPOSTOR_CHECK_RANK[check["status"]], "list_size": check["list_size"],
         })
