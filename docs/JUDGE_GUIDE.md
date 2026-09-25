@@ -16,7 +16,7 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-The commands below use Bash heredocs (Linux, macOS or Git Bash on Windows). For a Windows-created environment, activate with `source .venv/Scripts/activate` instead. The measured local results and installed-version differences are in [TESTING.md](TESTING.md); a clean installation of the pinned environment was not verified in this documentation pass.
+The commands below use Bash heredocs (Linux, macOS or Git Bash on Windows). For a Windows-created environment, activate with `source .venv/Scripts/activate` instead. The measured local results and installed-version differences are in [TESTING.md](TESTING.md); a clean installation of the pinned environment has not been verified.
 
 ## 1. Replay the recorded honeypot offline
 
@@ -212,4 +212,4 @@ Hash the **served string**, not a freshly serialized `evidence` object: JSON num
 
 A match establishes that the designated recorder committed those bytes. It does not establish scanner accuracy, issuer authenticity or future sellability. RPC receipt inclusion is also not independent verification of parent-chain finality. `off`, `pending`, `sending`, `submitted`, `unconfirmed`, `failed` and `reverted` do not satisfy this check; a 404 means no stored verdict for that address.
 
-The verification block was checked locally against synthetic evidence and receipts, including mismatch cases. **No live endpoint, deployment or registry event was verified in this documentation pass.**
+The verification block was checked locally against synthetic evidence and receipts, including mismatch cases. **No live endpoint, deployment or registry event has been verified yet.**

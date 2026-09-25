@@ -42,9 +42,9 @@ python -m scripts.census_4663.collect --data-dir /var/lib/shieldbot-census-4663 
 
 Those block numbers illustrate a 54,000-block replay, not a permanently recent
 range. Choose a recent range ending at least 60 blocks behind the current tip.
-On Windows, use an external directory such as
-`C:/Users/gudma/AppData/Local/Temp/shieldbot-census-4663` instead of `/var/lib/...`.
-The tool rejects data directories inside a git checkout, including this worktree.
+On Windows, use a directory outside the checkout, such as
+`%LOCALAPPDATA%/Temp/shieldbot-census-4663`, instead of `/var/lib/...`.
+The tool rejects data directories inside a git checkout.
 Never commit the SQLite database, provider responses, reports or smoke results.
 
 With no existing cursor and no `--from-block`, collection starts at the latest
