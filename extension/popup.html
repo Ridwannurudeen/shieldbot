@@ -492,9 +492,9 @@
   <div class="tab-content" id="tab-health" role="tabpanel" aria-labelledby="tab-health-button">
     <div class="field"><label data-i18n="labelYourWallet">Your Wallet Address</label><input type="text" id="healthAddress" placeholder="0x..."></div>
     <button class="btn btn-save" id="healthScanBtn" data-i18n="btnScanApprovals">Scan Approvals</button>
-    <div style="font-size:11px;color:#475569;text-align:center;margin-top:4px;" data-i18n="healthScanSubtext">BNB Chain (BSC) · Full history scan</div>
+    <div id="healthChainHint" style="font-size:11px;color:#475569;text-align:center;margin-top:4px;"></div>
     <div id="healthError" style="display:none;color:#ef4444;font-size:12px;margin-top:6px;"></div>
-    <div id="healthLoading" style="display:none;text-align:center;padding:20px 0;color:#64748b;font-size:13px;">Scanning full approval history...<br><span style="font-size:11px;color:#334155;">This may take 20–40 seconds</span></div>
+    <div id="healthLoading" style="display:none;text-align:center;padding:20px 0;color:#64748b;font-size:13px;">Scanning approval history...<br><span style="font-size:11px;color:#334155;">This may take 20–40 seconds</span></div>
     <div id="healthResult" style="display:none;margin-top:10px;">
       <div class="health-score-row"><div id="healthScoreNum" class="health-score-num">--</div><div class="health-score-label">Wallet Health Score</div></div>
       <div id="healthStats" class="health-stats"></div>
@@ -554,7 +554,7 @@
           <div class="dk-title" data-i18n="dashWalletHealth">Wallet Health</div>
           <input type="text" class="wh-input" id="dash-healthAddr" placeholder="0x... paste wallet address">
           <button class="wh-btn" id="dash-healthScanBtn">&#128269; Scan Approvals</button>
-          <div class="wh-hint" data-i18n="dashBnbHint">BNB Chain · Full approval history</div>
+          <div class="wh-hint" id="dash-healthChainHint"></div>
           <div class="wh-error" id="dash-healthError"></div>
           <div class="wh-loading" id="dash-healthLoading">&#9203; Scanning... (20–40s)</div>
           <div class="wh-result" id="dash-healthResult">
