@@ -852,6 +852,24 @@ assert(ctx.approvalsEl.innerHTML.includes('risk-low'));
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.parametrize('language', ['en', 'vi', 'zh'])
+def test_extension_wallet_health_claims_only_the_erc20_approvals_it_scans(language):
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    # The approval scan reads ERC-20 Approval events only, not ApprovalForAll: a wallet with none
+    # found is not shown as clean or safe, and the text says NFT approvals are not checked.
+    rescue = (root / 'services' / 'rescue_service.py').read_text(encoding='utf-8')
+    assert rescue.count('APPROVAL_FOR_ALL_TOPIC') == 1, 'the scan reads ApprovalForAll now; reword the texts below'
+    messages = json.loads((root / 'extension' / 'locales' / language / 'messages.json').read_text(encoding='utf-8'))
+    for key in ('healthNoApprovals', 'healthNoApprovalsDash'):
+        text = messages[key]
+        assert 'ERC-20' in text and 'NFT' in text, (key, text)
+        for claim in ('clean', 'an toàn', '安全'):
+            assert claim not in text.lower(), (key, text)
+
+
 @pytest.mark.parametrize('stored, chain_id', [({'selectedChainId': 8453}, 8453), ({}, 56)])
 def test_extension_wallet_health_scans_the_selected_chain_and_shows_a_failed_scan_as_unknown(stored, chain_id):
     import json
