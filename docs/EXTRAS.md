@@ -92,14 +92,10 @@ Pages: [X] slides
 ## Media Assets
 
 ### Screenshots
-See `docs/SCREENSHOTS.md` for guide on capturing demonstration screenshots.
-
 **Priority Screenshots:**
 1. Extension BLOCK verdict (red modal)
 2. Telegram bot token scan (showing token names)
 3. BNB Greenfield forensic report JSON
-
-**Location:** `docs/images/` (when available)
 
 ### Architecture Diagrams
 See `docs/ARCHITECTURE_DIAGRAM.md` for:
@@ -121,7 +117,6 @@ See `docs/ARCHITECTURE_DIAGRAM.md` for:
 - **DEPLOYMENT.md** - Production deployment guide
 - **TESTING.md** - Test strategy and coverage
 - **ARCHITECTURE_DIAGRAM.md** - Visual system diagrams
-- **SCREENSHOTS.md** - Screenshot capture guide
 
 ### Quick References
 - **README.md** - Project overview and quick start
