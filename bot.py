@@ -965,6 +965,11 @@ async def _handle_advisor_chat(update: Update, message: str, chain_id: int = 56)
                     f"risk level {scan_data['risk_level']}, score {scan_data['risk_score']}/100, "
                     f"status {scan_data['status']}"
                 )
+            # An impostor, or a token sharing an official ticker or name, leads with the report's warning.
+            check = scan_data.get('impostor_check') or {}
+            if check.get('status') in ('impostor', 'collision'):
+                warning = '\N{WARNING SIGN} ' if check['status'] == 'impostor' else ''
+                verdict = f'{warning}{unlinked(describe_impostor_check(check))}; {verdict}'
             response_text += f'\n\nShieldBot scan verdict: {verdict}'
         await typing_msg.edit_text(response_text)
     except UnsupportedChainError:

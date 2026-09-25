@@ -114,7 +114,7 @@ def bot_chain_functions():
     import asyncio
     from utils.web3_client import UnsupportedChainError, Web3Client
     from core.extension_formatter import is_scan_incomplete
-    from core.telegram_formatter import escape_untrusted, unlinked
+    from core.telegram_formatter import describe_impostor_check, escape_untrusted, unlinked
     from services.robinhood_assets import with_impostor_check
     from services.mempool_service import supports_pending_transactions
     from core.verdicts import UNKNOWN
@@ -148,6 +148,7 @@ def bot_chain_functions():
         'is_scan_incomplete': is_scan_incomplete,
         'escape_untrusted': escape_untrusted,
         'unlinked': unlinked,
+        'describe_impostor_check': describe_impostor_check,
         'with_impostor_check': with_impostor_check,
         'UNKNOWN': UNKNOWN,
         'RUN_ALL_DEADLINE_SECONDS': RUN_ALL_DEADLINE_SECONDS,
@@ -773,3 +774,36 @@ def test_an_incomplete_report_reads_unknown_for_probability_and_level(status, co
         {}, {}, {}, address='0x' + 'a' * 40,
     )
     assert shown in report
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('check, lead', [
+    (('NVDA', 'NVIDIA'),
+     '\N{WARNING SIGN} Impersonates official NVDA token (Robinhood-issued); official contract '
+     '0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec; '),
+    (('AMD', 'Moon'),
+     'Not the official AMD token (same ticker); official contract 0x86923f96303d656e4aa86d9d42d1e57ad2023fdc; '),
+    (('MOON', 'Moon'), ''),
+])
+async def test_the_advisor_verdict_line_leads_with_the_official_token_warning(bot_chain_functions, check, lead):
+    """A complete LOW scan of an impostor still ends with the warning the full report shows."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from services.robinhood_assets import check_token
+    from tests.test_robinhood_assets import LISTED
+    ns = bot_chain_functions
+    scan_data = {
+        'status': 'ok', 'coverage': {'honeypot': 1}, 'risk_level': 'LOW', 'risk_score': 5,
+        'impostor_check': check_token('0x' + 'a' * 40, *check, LISTED),
+    }
+    ns['container'].advisor.chat.return_value = {'text': 'Looks fine.', 'scan_data': scan_data}
+    typing = SimpleNamespace(edit_text=AsyncMock())
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock(return_value=typing)),
+                             effective_user=SimpleNamespace(id=123))
+
+    await ns['_handle_advisor_chat'](update, 'Scan 0x' + 'a' * 40, chain_id=4663)
+
+    assert typing.edit_text.call_args.args[0].splitlines()[-1] == (
+        f'ShieldBot scan verdict: {lead}risk level LOW, score 5/100, status ok'
+    )

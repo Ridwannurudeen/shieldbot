@@ -610,3 +610,14 @@ def test_advisor_prompt_says_notes_are_information_not_danger():
 
     assert "notes" in ADVISOR_SYSTEM_PROMPT
     assert "information, not danger signals" in ADVISOR_SYSTEM_PROMPT
+
+
+
+@pytest.mark.asyncio
+async def test_scan_data_carries_the_official_token_check(advisor, mock_tools, mock_ai):
+    check = {"status": "impostor", "symbol": "NVDA", "official_address": "0x" + "d" * 40}
+    mock_tools.scan_contract.return_value = {**mock_tools.scan_contract.return_value, "impostor_check": check}
+
+    result = await advisor.chat("u1", "Check 0x" + "a" * 40, chain_id=4663)
+
+    assert result["scan_data"]["impostor_check"] == check

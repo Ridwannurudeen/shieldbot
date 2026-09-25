@@ -234,6 +234,7 @@ class Advisor:
                     "coverage_reasons": scan.get("coverage_reasons", {}),
                     "honeypot": context.get("honeypot", {}),
                     "market": context.get("market", {}),
+                    "impostor_check": scan.get("impostor_check"),
                 }
 
         return result
