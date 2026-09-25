@@ -1,4 +1,4 @@
-"""Admin and test routes are left out of the public API schema and still answer."""
+"""Admin and webhook routes are left out of the public API schema and still answer; the old test pages are gone."""
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -9,8 +9,6 @@ from fastapi.testclient import TestClient
 
 HIDDEN_PATHS = {
     "/webhook/uptime": {"post"},
-    "/test-phishing": {"get"},
-    "/test": {"get"},
     "/api/keys": {"post"},
     "/api/admin/stats": {"get"},
     "/api/admin/signups": {"get"},
@@ -50,7 +48,7 @@ def schema_paths():
     api.app.openapi_schema = None
 
 
-def test_admin_and_test_routes_are_not_in_the_public_schema(schema_paths):
+def test_admin_routes_are_not_in_the_public_schema(schema_paths):
     for path in HIDDEN_PATHS:
         assert path not in schema_paths, path
 
@@ -68,6 +66,13 @@ def test_hidden_routes_are_still_served():
         if getattr(route, "path", None) in HIDDEN_PATHS:
             served.setdefault(route.path, set()).update(method.lower() for method in route.methods)
     assert served == HIDDEN_PATHS
+
+
+@pytest.mark.parametrize("path", ["/test", "/test-phishing"])
+def test_removed_test_pages_are_not_served(path):
+    import api
+
+    assert path not in {getattr(route, "path", None) for route in api.app.routes}
 
 
 @pytest.mark.parametrize("headers", [{}, {"x-admin-secret": "wrong"}], ids=["no-secret", "wrong-secret"])
