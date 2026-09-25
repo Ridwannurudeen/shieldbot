@@ -160,7 +160,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "An unregistered agent, or one with no firewall history, returns status 'unknown' with coverage_reasons "
             "and a null trust_score. Only the latest 1000 firewall records are read; an agent with that many also "
             "returns status 'unknown', because its counts are a lower bound, and so does one with any record whose "
-            "scan had incomplete coverage, which is not evidence that the transaction was clean."
+            "scan had incomplete coverage, which is not evidence that the transaction was clean; its trust_score "
+            "and block_rate are then null."
         ),
         "inputSchema": {
             "type": "object",
@@ -423,9 +424,10 @@ async def handle_check_agent_reputation(container, params: Dict, key_info: Dict)
 
     result = {
         "agent_id": agent_id,
-        "trust_score": trust_score,
+        # Over records that cannot show a clean transaction the score and rate would read as trust.
+        "trust_score": None if unclear else trust_score,
         "total_transactions": total,
-        "block_rate": round(block_rate, 4),
+        "block_rate": None if unclear else round(block_rate, 4),
     }
     reasons = []
     if unclear:

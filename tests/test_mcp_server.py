@@ -1377,7 +1377,10 @@ def test_reputation_over_records_without_complete_coverage_is_unknown(client, mo
 
     content = _reputation(client, mock_container, [{"verdict": "ALLOW", "policy_result": COMPLETE_CHECKS}, unclear])
 
-    assert content["trust_score"] == 100
+    # A score and a rate over records that cannot show a clean transaction would read as trust.
+    assert content["trust_score"] is None
+    assert content["block_rate"] is None
+    assert content["total_transactions"] == 2
     assert content["status"] == "unknown"
     assert content["coverage"] == {"history": 0}
     assert content["coverage_reasons"] == {
