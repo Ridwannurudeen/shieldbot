@@ -27,14 +27,14 @@
       _ct18n = {};
     }
   }
+  // Placeholders are filled as i18n.js fills them: in one pass, by a function,
+  // so a value (a sign-in message's domain, which the page writes) is used as
+  // written, $ patterns and other placeholders' names included.
   function _t(key, repl) {
-    let s = _ct18n[key] !== undefined ? _ct18n[key] : key;
-    if (repl) {
-      Object.entries(repl).forEach(([k, v]) => {
-        s = s.replace(`{${k}}`, v);
-      });
-    }
-    return s;
+    const s = _ct18n[key] !== undefined ? _ct18n[key] : key;
+    if (!repl) return s;
+    return s.replace(/\{(\w+)\}/g, (placeholder, name) =>
+      Object.hasOwn(repl, name) ? String(repl[name]) : placeholder);
   }
 
   // Per-document secret shared with inject.js, which runs in the page's own
@@ -58,14 +58,20 @@
     return new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(`${requestId}:${purpose}`)));
   }
 
-  // Compare a received proof with the expected one byte by byte, as inject.js
-  // does.
+  // Compare a received proof with the expected one as inject.js does: all 32
+  // values are read first, once each and in order whatever they are, then
+  // compared with no early exit. Anything but 32 byte values fails.
   function sameProof(expected, received) {
     if (typeof received !== "object" || received === null) return false;
+    const values = { __proto__: null };
+    for (let i = 0; i < 32; i++) values[i] = received[i];
+    let difference = 0;
     for (let i = 0; i < 32; i++) {
-      if (received[i] !== expected[i]) return false;
+      const value = values[i];
+      if (!Number.isSafeInteger(value) || value < 0 || value > 255) difference = 1;
+      else difference |= value ^ expected[i];
     }
-    return true;
+    return difference === 0;
   }
 
   // Whether another script of this page can reach this document before the
@@ -115,10 +121,11 @@
   // sendAsync. The messages are unsigned (a page can post them too), so all
   // they do is show the user a notice, once per kind per document; a notice
   // has no buttons and decides nothing. The frame notice is shown only where
-  // this script made the same refusal decision.
+  // this script made the same refusal decision. As with every message here,
+  // only one the browser dispatched counts, never an event a page made itself.
   const _shownNotices = new Set();
   window.addEventListener("message", (event) => {
-    if (event.source !== window || !event.data) return;
+    if (!event.isTrusted || event.source !== window || !event.data) return;
     const type = event.data.type;
     const key = type === "SHIELDAI_LEGACY_REFUSED" ? "legacyRefusedNotice"
       : type === "SHIELDAI_UNCHECKABLE" && reachable ? "uncheckableNotice" : null;
@@ -145,6 +152,7 @@
   // Listen for intercepted transactions from inject.js
   window.addEventListener("message", async (event) => {
     if (
+      !event.isTrusted ||
       event.source !== window ||
       !event.data ||
       event.data.type !== "SHIELDAI_TX_INTERCEPT"
@@ -827,9 +835,9 @@
 
       // Domain rows
       const domainRows = [];
-      if (domain.name) domainRows.push(`<tr><td>Protocol</td><td>${escapeHtml(domain.name)}</td></tr>`);
-      if (domain.verifyingContract) domainRows.push(`<tr><td>Contract</td><td class="shieldai-mono">${escapeHtml(shortAddr(domain.verifyingContract))}</td></tr>`);
-      if (domain.chainId !== undefined) domainRows.push(`<tr><td>Chain ID</td><td>${escapeHtml(String(domain.chainId))}</td></tr>`);
+      if (domain.name) domainRows.push(`<tr><td>${_t("overlayProtocol")}</td><td>${escapeHtml(domain.name)}</td></tr>`);
+      if (domain.verifyingContract) domainRows.push(`<tr><td>${_t("overlayContract")}</td><td class="shieldai-mono">${escapeHtml(shortAddr(domain.verifyingContract))}</td></tr>`);
+      if (domain.chainId !== undefined) domainRows.push(`<tr><td>${_t("overlayChainId")}</td><td>${escapeHtml(String(domain.chainId))}</td></tr>`);
 
       // Message rows (up to 8 fields)
       const msgRows = Object.entries(message)
@@ -885,11 +893,17 @@
       : unparseable || opaque ? atLeast(verdict, "HIGH_RISK") : verdict;
     const why = response.error ? `${_t("overlayCannotReach")} ${response.error}` : incomplete ? unknownReason(result) : "";
     // A signature whose chain could not be read, or is not supported, was
-    // not analysed, and inject.js rejects it: there is no Sign Anyway.
+    // not analysed, and inject.js rejects it: there is no Sign Anyway. Strict
+    // mode leaves none either on a result that is not complete, whatever the
+    // badge says: the API unreachable, an Unknown verdict, or High Risk with
+    // checks missing, including when what the overlay sees raises it.
     const chainUnknown = Boolean(result) && (result.coverage || {}).chain === false;
     const canSign = !chainUnknown &&
-      !(strict && (unparseable || classification === "UNKNOWN" || classification === "BLOCK_RECOMMENDED"));
-    const hold = canSign && classification === "BLOCK_RECOMMENDED";
+      !(strict && (incomplete || unparseable || classification === "BLOCK_RECOMMENDED"));
+    // Sign Anyway needs a hold on Block Recommended, and when the API gave no
+    // answer: a page can make it fail (typed data past its size limit, say),
+    // and an unchecked signature must not go through on one click.
+    const hold = canSign && (classification === "BLOCK_RECOMMENDED" || Boolean(response.error));
     // What background.js found in a Sign-In with Ethereum message leads.
     const signIn = (result && result.siwe) || {};
     const signInSignals = signIn.state === "mismatch"
@@ -940,7 +954,7 @@
             ? `<button class="shieldai-btn shieldai-btn-proceed shieldai-btn-hold" id="shieldai-proceed" aria-describedby="shieldai-hold-note">${_t("overlayBtnHoldSign")}</button>`
             : `<button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">${_t("overlayBtnSignAnyway")}</button>`}
         </div>
-        ${hold ? `<p class="shieldai-hold-note" id="shieldai-hold-note">${_t("overlayHoldNote")}</p>` : ""}
+        ${hold ? `<p class="shieldai-hold-note" id="shieldai-hold-note">${classification === "BLOCK_RECOMMENDED" ? _t("overlayHoldNote") : _t("overlayHoldNoteUnchecked")}</p>` : ""}
         ${COVERED_NOTE}
         ${canSign ? "" : `<p class="shieldai-strict-note">${chainUnknown ? _t("overlayChainNoProceed") : _t("overlayStrictNoProceed")}</p>`}
       </div>
@@ -971,13 +985,14 @@
     // not one the API supports: nothing was analysed, and there is no Proceed.
     const chainUnknown = (result.coverage || {}).chain === false;
     // Strict mode leaves no way to send a transaction the firewall recommends
-    // blocking or could not fully check.
-    const canProceed = !chainUnknown && !(strict && (isBlock || verdict === "UNKNOWN"));
+    // blocking or could not fully check: an incomplete result, whether it is
+    // shown as Unknown or as High Risk with checks missing.
+    const canProceed = !chainUnknown && !(strict && (isBlock || incomplete));
     // On Block Recommended (so Balanced mode), Proceed needs a hold.
     const hold = canProceed && isBlock;
 
     // Display as safety score (100 - risk) so higher = better
-    const scoreDisplay = incomplete ? "Unknown (incomplete provider coverage)" :
+    const scoreDisplay = incomplete ? _t("overlayIncompleteCoverage") :
       `${_t("overlaySafety")} ${100 - result.risk_score}/100`;
 
     const overlay = document.createElement("div");
@@ -992,11 +1007,15 @@
     // Transaction impact HTML
     const impact = result.transaction_impact || {};
 
-    // Asset delta HTML (simulated token in/out)
+    // Asset delta HTML (token in/out). It is marked SIMULATED only when the API
+    // says a simulation produced it: otherwise it was read from the calldata,
+    // or it is the note that the transaction could not be simulated.
     const assetDelta = result.asset_delta || [];
+    const simulatedBadge = result.simulated === true
+      ? ` <span class="shieldai-sim-badge">${_t("overlaySimulated")}</span>` : "";
     const deltaHtml = assetDelta.length
       ? `<div class="shieldai-section">
-           <h3>${_t("overlayAssetDelta")} <span class="shieldai-sim-badge">${_t("overlaySimulated")}</span></h3>
+           <h3>${_t("overlayAssetDelta")}${simulatedBadge}</h3>
            <ul class="shieldai-delta-list">
              ${assetDelta.map((d) => {
                const isOut = d.startsWith("-");
@@ -1063,11 +1082,11 @@
 
         <div class="shieldai-section">
           <h3>${_t("overlayAnalysis")}</h3>
-          <p>${escapeHtml(incomplete ? "Unknown (incomplete provider coverage)" : result.plain_english || result.analysis || _t("overlayNoAnalysis"))}</p>
+          <p>${escapeHtml(incomplete ? _t("overlayIncompleteCoverage") : result.plain_english || result.analysis || _t("overlayNoAnalysis"))}</p>
         </div>
 
         <div class="shieldai-verdict">
-          ${escapeHtml(incomplete ? "Unknown (incomplete provider coverage)" : classification !== verdict ? label : result.verdict || "")}
+          ${escapeHtml(incomplete ? _t("overlayIncompleteCoverage") : classification !== verdict ? label : result.verdict || "")}
         </div>
 
         <div class="shieldai-actions">
@@ -1095,7 +1114,7 @@
           </button>
         </div>
         <div class="shieldai-explain-response" id="shieldai-explain-response" style="display:none;">
-          <p class="shieldai-explain-loading" id="shieldai-explain-loading">Analyzing...</p>
+          <p class="shieldai-explain-loading" id="shieldai-explain-loading">${_t("overlayExplainAnalyzing")}</p>
           <p class="shieldai-explain-text" id="shieldai-explain-text"></p>
         </div>
         `}
@@ -1137,7 +1156,7 @@
       const textEl = root.getElementById("shieldai-explain-text");
 
       btn.disabled = true;
-      btn.textContent = "Analyzing...";
+      btn.textContent = _t("overlayExplainAnalyzing");
       responseDiv.style.display = "block";
       loadingEl.style.display = "block";
       textEl.style.display = "none";
@@ -1145,7 +1164,7 @@
       if (incomplete) {
         loadingEl.style.display = "none";
         textEl.style.display = "block";
-        textEl.textContent = "Unknown (incomplete provider coverage). " +
+        textEl.textContent = `${_t("overlayIncompleteCoverage")}. ` +
           Object.values(result.coverage_reasons || {}).join("; ");
         return;
       }
@@ -1167,12 +1186,15 @@
 
   // Shown when no analysis came back (429, 400, timeout, unreachable API). In
   // Strict mode there is no Proceed: an unchecked transaction stays blocked.
+  // In Balanced mode Proceed needs a hold, as on Block Recommended: a page can
+  // shape a request the API refuses, and an unchecked transaction must not go
+  // through on one click.
   async function showErrorOverlay(requestId, errorMsg, strict, tx, recipient, lookalike) {
     await _loadContentLang();
     removeOverlay();
     // An EIP-7702 delegation is Block Recommended without the API too.
     const delegation = Array.isArray(tx.authorizationList);
-    const hold = delegation && !strict;
+    const hold = !strict;
 
     const overlay = document.createElement("div");
     overlay.id = "shieldai-overlay";
@@ -1198,17 +1220,13 @@
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">
             ${_t("overlayBtnBlock")}
           </button>
-          ${strict ? "" : hold ? `
+          ${hold ? `
           <button class="shieldai-btn shieldai-btn-proceed shieldai-btn-hold" id="shieldai-proceed" aria-describedby="shieldai-hold-note">
             ${_t("overlayBtnHoldProceed")}
           </button>
-          ` : `
-          <button class="shieldai-btn shieldai-btn-proceed" id="shieldai-proceed">
-            ${_t("overlayBtnProceed")}
-          </button>
-          `}
+          ` : ""}
         </div>
-        ${hold ? `<p class="shieldai-hold-note" id="shieldai-hold-note">${_t("overlayHoldNote")}</p>` : ""}
+        ${hold ? `<p class="shieldai-hold-note" id="shieldai-hold-note">${delegation ? _t("overlayHoldNote") : _t("overlayHoldNoteUnchecked")}</p>` : ""}
         ${COVERED_NOTE}
       </div>
     `;
@@ -1216,11 +1234,7 @@
     const root = mountOverlay(overlay, requestId);
     const remember = recipient ? () => rememberRecipient(recipient) : null;
     onDecision(root, "shieldai-block", requestId, "block");
-    if (hold) {
-      onHold(root, requestId, remember);
-    } else if (!strict) {
-      onDecision(root, "shieldai-proceed", requestId, "proceed", remember);
-    }
+    if (hold) onHold(root, requestId, remember);
   }
 
   // Shown for a request inject.js could not read (a transaction that is not

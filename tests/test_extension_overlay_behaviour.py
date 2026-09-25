@@ -151,7 +151,12 @@ window.top = window;
 // A top-level document without an opener; frame tests change these.
 window.frameElement = null;
 window.opener = null;
-function deliver(data) { for (const fn of [...(windowListeners.message || [])]) fn({source: window, data}); }
+// A window message as the browser dispatches it (trusted), or, with isTrusted false, a MessageEvent
+// a page script made and dispatched itself: its source is the window and its data the page's own
+// live object, not a copy.
+function deliver(data, isTrusted = true) {
+  for (const fn of [...(windowListeners.message || [])]) fn({source: window, data, isTrusted});
+}
 const flush = () => new Promise(resolve => setTimeout(resolve, 60));
 // Taken now, so the tests' own proofs stay right after a test replaces page built-ins.
 const hImport = webcrypto.subtle.importKey.bind(webcrypto.subtle), hSign = webcrypto.subtle.sign.bind(webcrypto.subtle);
@@ -361,8 +366,14 @@ def test_synthetic_input_cannot_decide_for_the_user(kind):
   await flush();
   assert.deepEqual(verdicts(), [], 'a synthetic event decided the request');
   assert(overlay(), 'a synthetic event closed the overlay');
-  userClick(byId('shieldai-proceed'));
-  await flush();
+  if (kind === 'error') {
+    // Proceed on a transaction the API did not analyse is held down, not clicked.
+    byId('shieldai-proceed').dispatch('pointerdown', {isTrusted: true, button: 0, isPrimary: true});
+    for (let i = 0; i < 10 && verdicts().length === 0; i++) await flush();
+  } else {
+    userClick(byId('shieldai-proceed'));
+    await flush();
+  }
   await assertVerdicts([['request', 'proceed']]);
 """,
         kind,
@@ -427,6 +438,114 @@ def test_forged_and_replayed_intercepts_are_ignored(forgery):
   assert.equal(posted.length, replay, 'a replayed request id changed what was shown');
 """,
         forgery,
+    )
+
+
+def test_an_intercept_a_page_dispatched_itself_is_ignored_even_with_a_correct_proof():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  deliver({type: 'SHIELDAI_TX_INTERCEPT', requestId: 'request', method: 'eth_sendTransaction',
+    tx: {to: '0x' + 'a'.repeat(40), chainId: 56}, proof: await proofFor(token, 'request:intercept')}, false);
+  await flush();
+  assert.equal(overlay(), null, 'an untrusted message opened an overlay');
+  assert.equal(analyses.length, 0);
+  // It did not use up the request id either.
+  await intercept('request');
+  assert.equal(analyses.length, 1);
+  assert(overlay());
+"""
+    )
+
+
+def test_a_notice_message_a_page_dispatched_itself_shows_no_notice():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const notices = () => body.children.filter(el => el.shadow && el.shadow.children.some(child => child.className === 'shieldai-notice'));
+  deliver({type: 'SHIELDAI_LEGACY_REFUSED'}, false);
+  await flush();
+  assert.equal(notices().length, 0, 'an untrusted message brought a notice');
+  deliver({type: 'SHIELDAI_LEGACY_REFUSED'});
+  await flush();
+  assert.equal(notices().length, 1);
+"""
+    )
+
+
+@pytest.mark.parametrize("guess", ["first-half-right", "all-wrong"])
+def test_content_reads_a_proof_whole_whatever_its_bytes(guess):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const guess = JSON.parse(process.argv[1]);
+  analyze = async () => ({result: scan({})});
+  const right = bytes(await proofFor(token, 'request:intercept'));
+  const values = right.map((byte, i) => guess === 'first-half-right' && i < 16 ? byte : (byte + 1) % 256);
+  const reads = [];
+  const proof = {};
+  for (let i = 0; i < 32; i++) Object.defineProperty(proof, i, {get() { reads.push(i); return values[i]; }});
+  deliver({type: 'SHIELDAI_TX_INTERCEPT', requestId: 'request', method: 'eth_sendTransaction',
+    tx: {to: '0x' + 'a'.repeat(40), chainId: 56}, proof});
+  await flush();
+  assert.deepEqual(reads, Array.from({length: 32}, (_, i) => i), 'the reads depend on how much of the proof is right');
+  assert.equal(overlay(), null);
+  assert.equal(analyses.length, 0);
+""",
+        guess,
+    )
+
+
+@pytest.mark.parametrize("simulated", [True, False, None])
+@pytest.mark.parametrize(
+    "delta",
+    ["-1 BNB", "Unable to simulate — cross-chain or complex transaction. Verify manually."],
+    ids=["delta", "not-simulable"],
+)
+def test_the_asset_delta_is_marked_simulated_only_when_the_api_says_so(simulated, delta):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const [simulated, delta] = JSON.parse(process.argv[1]);
+  const fields = {asset_delta: [delta]};
+  if (simulated !== null) fields.simulated = simulated;
+  analyze = async () => ({result: scan(fields)});
+  await intercept('request');
+  const html = overlay().innerHTML;
+  assert(html.includes(delta), html);
+  assert.equal(html.includes('SIMULATED'), simulated === true, html);
+""",
+        [simulated, delta],
+    )
+
+
+@pytest.mark.parametrize("policy", ["STRICT", "BALANCED"])
+@pytest.mark.parametrize("complete", [True, False], ids=["complete", "incomplete"])
+def test_strict_mode_removes_proceed_on_an_incomplete_high_risk_result(policy, complete):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const [policy, complete] = JSON.parse(process.argv[1]);
+  storage.policyMode = policy;
+  // An incomplete result keeps its High Risk badge, with the reason checks are missing.
+  analyze = async () => ({result: scan(complete ? {classification: 'HIGH_RISK', risk_score: 75}
+    : {classification: 'HIGH_RISK', risk_score: 75, status: 'unknown', coverage: {honeypot: 0},
+       coverage_reasons: {honeypot: 'No provider'}})});
+  await intercept('request');
+  const html = overlay().innerHTML;
+  assert(overlay().querySelector('.shieldai-badge').className.includes('shieldai-badge-high'), html);
+  assert.equal(html.includes('Why: No provider'), !complete, html);
+  const removed = policy === 'STRICT' && !complete;
+  assert.equal(html.includes('id="shieldai-proceed"'), !removed, html);
+  assert.equal(html.includes('Strict mode is on'), removed);
+""",
+        [policy, complete],
     )
 
 
@@ -1308,6 +1427,93 @@ def test_forged_verdicts_are_ignored(forgery):
   assert.equal(sent.length, 0);
 """,
         forgery,
+    )
+
+
+@pytest.mark.parametrize("kind", ["SHIELDAI_TX_SHOWN", "SHIELDAI_TX_VERDICT"])
+def test_a_message_a_page_dispatched_itself_decides_nothing_even_with_a_correct_proof(kind):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const kind = JSON.parse(process.argv[1]);
+  const {pending, requestId} = await startRequest();
+  const made = signatures;
+  const purpose = kind === 'SHIELDAI_TX_SHOWN' ? 'shown' : 'proceed';
+  deliver({type: kind, requestId, action: 'proceed', proof: await proof(requestId, purpose)}, false);
+  await flush();
+  assert.equal(signatures, made, 'inject.js checked the proof of an untrusted message');
+  assert(fireFailClosedTimer(), 'an untrusted shown signal stopped the fail-closed timer');
+  await assert.rejects(pending, /blocked/);
+  assert.equal(sent.length, 0, 'an untrusted verdict sent the transaction');
+""",
+        kind,
+    )
+
+
+# A page cannot post live getters (a posted message is a copy), but reading a proof must not depend
+# on how the page shaped it: the page could hand inject.js its own object through a replaced
+# built-in, and each getter would see which reads happen.
+@pytest.mark.parametrize("guess", ["first-byte-right", "first-half-right", "all-wrong", "all-right"])
+def test_a_proof_is_read_whole_whatever_its_bytes(guess):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const guess = JSON.parse(process.argv[1]);
+  const {pending, requestId} = await startRequest();
+  const right = bytes(await proof(requestId, 'proceed'));
+  const correct = {'first-byte-right': 1, 'first-half-right': 16, 'all-wrong': 0, 'all-right': 32}[guess];
+  const values = right.map((byte, i) => i < correct ? byte : (byte + 1) % 256);
+  const reads = [];
+  const forged = {};
+  for (let i = 0; i < 32; i++) Object.defineProperty(forged, i, {get() { reads.push(i); return values[i]; }});
+  const made = signatures;
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'proceed', proof: forged});
+  await signaturesMade(made + 1);
+  assert.deepEqual(reads, Array.from({length: 32}, (_, i) => i), 'the reads depend on how much of the proof is right');
+  if (guess === 'all-right') {
+    assert.equal(await pending, 'sent');
+    return;
+  }
+  assert.equal(sent.length, 0, 'a wrong proof sent the transaction');
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'block', proof: await proof(requestId, 'block')});
+  await assert.rejects(pending, /blocked/);
+  assert.equal(sent.length, 0);
+""",
+        guess,
+    )
+
+
+@pytest.mark.parametrize("shape", ["fractions", "strings", "value-of", "short", "over-255"])
+def test_a_proof_that_is_not_32_byte_values_fails(shape):
+    run_node(
+        INJECT_HARNESS
+        + r"""
+(async () => {
+  const shape = JSON.parse(process.argv[1]);
+  const {pending, requestId} = await startRequest();
+  const right = bytes(await proof(requestId, 'proceed'));
+  // Each of these compares equal to the right proof byte by byte under XOR or loose equality.
+  const converted = [];
+  const forged = {
+    fractions: () => right.map(byte => byte + 0.5),
+    strings: () => right.map(String),
+    'value-of': () => right.map(byte => ({valueOf() { converted.push(byte); return byte; }})),
+    short: () => right.slice(0, 31),
+    'over-255': () => right.map(byte => byte + 256 * 4096 * 4096),
+  }[shape]();
+  if (shape === 'over-255') assert.equal((forged[0] ^ right[0]) & 0xff, 0);
+  const made = signatures;
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'proceed', proof: forged});
+  await signaturesMade(made + 1);
+  assert.equal(sent.length, 0, 'a proof that is not 32 byte values sent the transaction');
+  assert.deepEqual(converted, [], 'comparing the proof ran page code');
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'block', proof: await proof(requestId, 'block')});
+  await assert.rejects(pending, /blocked/);
+  assert.equal(sent.length, 0);
+""",
+        shape,
     )
 
 

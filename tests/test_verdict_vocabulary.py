@@ -1,8 +1,9 @@
 """One verdict vocabulary and band table, owned by core/verdicts.py.
 
 No Python verdict producer outside that module restates a band number or writes a classification,
-risk level or agent decision as a literal, and the extension and the SDKs use the words GET
-/api/verdicts publishes.
+risk level or agent decision as a literal, compares with one (==, != or in) or writes a policy mode
+(core.policy.PolicyMode) as a literal, and the extension and the SDKs use the words GET /api/verdicts
+publishes.
 """
 
 import re
@@ -15,6 +16,7 @@ import pytest
 from agent.policy_engine import AgentPolicyEngine
 from core import verdicts
 from core.registry import FIRST_VERDICT_SECONDS
+from core.risk_engine import MEDIUM_MATCH_FLOOR
 
 ROOT = Path(__file__).resolve().parents[1]
 # Tests restate bands on purpose; the SDKs are separate packages checked below; the rest is not Python
@@ -37,8 +39,31 @@ SCORE_COMPARISON = re.compile(
     r"(?:score|\brs\b|rug_prob\w*|probability|composite|floor)['\"]?(?:\]|,[^)]*\))?\s*(?:>=|<=|>|<)\s*\d"
 )
 CLASSIFICATION_LITERAL = re.compile(r"['\"](?:SAFE|CAUTION|HIGH_RISK|BLOCK_RECOMMENDED)['\"]")
-LEVEL_LITERAL = re.compile(r"risk_level['\"]?\]?\s*(?:=|:)\s*['\"](?:LOW|MEDIUM|HIGH)['\"]")
+LEVEL_LITERAL = re.compile(r"risk_level['\"]?\]?\s*(?:=|:)\s*['\"](?:LOW|MEDIUM|HIGH|UNKNOWN)['\"]")
 AGENT_LITERAL = re.compile(r"verdict\s*=\s*['\"](?:ALLOW|WARN|BLOCK)['\"]")
+# A risk level or policy mode compared as a literal; CLASSIFICATION_LITERAL catches a classification
+# anywhere.
+_COMPARED_WORD = r"['\"](?:LOW|MEDIUM|HIGH|UNKNOWN|STRICT|BALANCED)['\"]"
+COMPARISON_LITERAL = re.compile(
+    r"(?:==|!=)\s*" + _COMPARED_WORD + r"|" + _COMPARED_WORD + r"\s*(?:==|!=)|\bin\s*[(\[{][^)\]}]*" + _COMPARED_WORD
+)
+POLICY_LITERAL = re.compile(r"['\"]policy_mode['\"]\s*:[^#]*['\"][A-Z_]+['\"]")
+# A risk level as a .get() default, a policy mode as a parameter or attribute default, and a policy mode
+# returned as a literal.
+LEVEL_DEFAULT = re.compile(r"risk_level['\"]\s*,\s*['\"](?:LOW|MEDIUM|HIGH|UNKNOWN)['\"]")
+MODE_DEFAULT = re.compile(r"\w*mode\s*(?::\s*[\w\[\]]+\s*)?=\s*['\"](?:STRICT|BALANCED)['\"]")
+RETURNED_MODE = re.compile(r"\breturn\s+['\"](?:STRICT|BALANCED)['\"]")
+PATTERNS = (
+    SCORE_COMPARISON,
+    CLASSIFICATION_LITERAL,
+    LEVEL_LITERAL,
+    AGENT_LITERAL,
+    COMPARISON_LITERAL,
+    POLICY_LITERAL,
+    LEVEL_DEFAULT,
+    MODE_DEFAULT,
+    RETURNED_MODE,
+)
 
 # Lines the scan matches that are not a verdict producer restating the table, and why.
 ALLOWED = {
@@ -105,6 +130,72 @@ ALLOWED = {
         "services/injection_scanner.py",
         "if switch_score > 0.6:",
     ): "prompt-injection heuristic, not a risk score",
+    (
+        "api.py",
+        '"policy_mode": PolicyMode.STRICT.value if strict_block else "SIGNATURE_ONLY",',
+    ): "SIGNATURE_ONLY is the signature path's published policy_mode value, not a PolicyMode",
+    (
+        "bot.py",
+        "risky = [a for a in approvals if a.get('risk_level') in ('HIGH', 'MEDIUM')]",
+    ): "the rescue scan's approval tiers (services/rescue_service.py), their own words (follow-up to align)",
+    (
+        "bot.py",
+        "risk_icon = '\U0001f534' if a['risk_level'] == 'HIGH' else '\U0001f7e1'",
+    ): "the rescue scan's approval tiers (services/rescue_service.py), their own words (follow-up to align)",
+    ("bot.py", "sev_icon = '\U0001f534' if sev == 'HIGH' else '\U0001f7e1'"): (
+        "a deployer watch alert's severity, not a verdict level (follow-up to align)"
+    ),
+    (
+        "services/rescue_service.py",
+        'if approval.risk_level in ("HIGH", "MEDIUM"):',
+    ): "approval tiers of the rescue scan, their own words (follow-up to align)",
+    (
+        "services/rescue_service.py",
+        'if approval.risk_level == "HIGH":',
+    ): "approval tiers of the rescue scan, their own words (follow-up to align)",
+    (
+        "services/rescue_service.py",
+        'elif approval.risk_level == "MEDIUM":',
+    ): "approval tiers of the rescue scan, their own words (follow-up to align)",
+    (
+        "services/rescue_service.py",
+        'if approval.risk_level == "LOW":',
+    ): "approval tiers of the rescue scan, their own words (follow-up to align)",
+    (
+        "services/campaign_service.py",
+        "high_risk_count = sum(1 for s in scores if s[1] == 'HIGH')",
+    ): "reads the stored verdict level; outside api.py, rpc/ and core/ (follow-up: verdicts.HIGH)",
+    (
+        "services/campaign_service.py",
+        "high_risk = [c for c in cross_chain if c.get('risk_level') == 'HIGH']",
+    ): "reads the stored verdict level; outside api.py, rpc/ and core/ (follow-up: verdicts.HIGH)",
+    (
+        "agent/advisor.py",
+        'level = scan_result.get("risk_level", "UNKNOWN")',
+    ): "a level default outside api.py, rpc/ and core/ (follow-up: verdicts.UNKNOWN)",
+    (
+        "agent/firewall.py",
+        'risk_level=risk_output.get("risk_level", "UNKNOWN"),',
+    ): "a level default outside api.py, rpc/ and core/ (follow-up: verdicts.UNKNOWN)",
+    (
+        "agent/firewall.py",
+        '"risk_level": risk_output.get("risk_level", "UNKNOWN"),',
+    ): "a level default outside api.py, rpc/ and core/ (follow-up: verdicts.UNKNOWN)",
+    (
+        "services/guardian.py",
+        'risk_level = self._map_risk_level(a.get("risk_level", "UNKNOWN"))',
+    ): "the rescue scan's approval tiers, mapped to wallet health's own words (follow-up to align)",
+    (
+        "utils/ai_analyzer.py",
+        "f\"Risk Level: {risk_output.get('risk_level', 'UNKNOWN')}\",",
+    ): "a level default in prompt text, outside api.py, rpc/ and core/ (follow-up: verdicts.UNKNOWN)",
+}
+# Files whose every match is allowed, and why.
+ALLOWED_FILES = {
+    "core/telegram_formatter.py": (
+        "another branch owns this file: the follow-up reads its risk levels from core/verdicts.py once "
+        "that branch merges"
+    ),
 }
 
 
@@ -122,28 +213,25 @@ def _matches():
             stripped = line.strip()
             if stripped.startswith("#"):
                 continue
-            if any(
-                pattern.search(line)
-                for pattern in (
-                    SCORE_COMPARISON,
-                    CLASSIFICATION_LITERAL,
-                    LEVEL_LITERAL,
-                    AGENT_LITERAL,
-                )
-            ):
+            if any(pattern.search(line) for pattern in PATTERNS):
                 found.add((relative, stripped))
     return found
 
 
 def test_no_python_producer_restates_a_band_or_a_verdict_word():
-    unexplained = sorted(_matches() - set(ALLOWED))
+    unexplained = sorted(
+        match for match in _matches() - set(ALLOWED) if match[0] not in ALLOWED_FILES
+    )
     assert not unexplained, (
-        "read these from core/verdicts.py, or allow them here with a reason: " + repr(unexplained)
+        "read these from core/verdicts.py (a policy mode from core.policy.PolicyMode), or allow them "
+        "here with a reason: " + repr(unexplained)
     )
 
 
-def test_every_allowed_line_still_exists():
-    assert not set(ALLOWED) - _matches()
+def test_every_allowed_line_and_file_still_exists():
+    matches = _matches()
+    assert not set(ALLOWED) - matches
+    assert not set(ALLOWED_FILES) - {relative for relative, _ in matches}
 
 
 def test_the_scan_catches_a_restated_band():
@@ -154,11 +242,25 @@ def test_the_scan_catches_a_restated_band():
         'classification = "SAFE"',
         "result['risk_level'] = 'HIGH'",
         'return PolicyVerdict(verdict="BLOCK")',
+        "risk_level = 'UNKNOWN'",
+        'if risk_level == "HIGH":',
+        "if 'MEDIUM' != level:",
+        'return Verdict[level] if level in ("LOW", "MEDIUM", "HIGH") else None',
+        "or str(level).upper() == 'UNKNOWN'",
+        'if policy_mode != "STRICT":',
+        '"policy_mode": risk_output.get("policy_mode", "BALANCED"),',
+        "risk_level = cached.get('risk_level', 'UNKNOWN')",
+        '"risk_level": risk_output.get("risk_level", "LOW"),',
+        'to_addr: str = "", policy_mode: str = "BALANCED",',
+        'def __init__(self, mode: str = "BALANCED"):',
+        'policy_mode: str = "BALANCED"',
+        'return "BALANCED"',
     ):
-        assert any(
-            pattern.search(line)
-            for pattern in (SCORE_COMPARISON, CLASSIFICATION_LITERAL, LEVEL_LITERAL, AGENT_LITERAL)
-        ), line
+        assert any(pattern.search(line) for pattern in PATTERNS), line
+
+
+def test_the_community_floor_is_in_the_caution_band():
+    assert verdicts.classify(MEDIUM_MATCH_FLOOR) == verdicts.CAUTION
 
 
 def _js_object_keys(source: str, name: str) -> set:
@@ -194,6 +296,8 @@ def test_sdk_vocabularies_match_the_published_ones():
     assert _ts_union(typescript, "verdict") == set(verdicts.AGENT_VERDICTS)
     assert _ts_union(typescript, "classification") == set(verdicts.CLASSIFICATIONS)
     assert "classification: string" not in typescript
+    interim = re.search(r"const FIRST_CLASSIFICATIONS[^=]*= \[([^\]]*)\]", typescript).group(1)
+    assert set(re.findall(r"'([A-Z_]+)'", interim)) == set(verdicts.CLASSIFICATIONS) - {verdicts.SAFE}
     assert set(re.findall(r"verdict: '([A-Z_]+)'", typescript)) <= set(verdicts.AGENT_VERDICTS)
     models = (ROOT / "sdk" / "python" / "shieldbot" / "models.py").read_text(encoding="utf-8")
     documented = re.search(r'verdict: str  # ("[A-Z]+"(?: \| "[A-Z]+")*)', models).group(1)

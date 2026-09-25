@@ -14,9 +14,9 @@ export interface ShieldBotConfig {
   agentId?: string;
   /** Base URL of the ShieldBot API. Defaults to production. */
   baseUrl?: string;
-  /** Request timeout in milliseconds. Default: 10000. */
+  /** Request timeout in milliseconds, positive and at most 2^31 - 1; anything else throws INVALID_TIMEOUT. Default: 10000. */
   timeout?: number;
-  /** Local verdict cache size. Default: 10000. */
+  /** Local verdict cache size in entries, a whole number of 0 or more (0 turns the cache off); anything else throws INVALID_CACHE_SIZE. Default: 10000. */
   cacheSize?: number;
   /** Local verdict cache TTL in seconds. Default: 60 (bounds stale decisions to one minute). */
   cacheTtl?: number;
@@ -36,8 +36,13 @@ export function isSupportedChainId(chainId: number): chainId is ChainId {
 }
 
 export interface ScanOptions {
-  /** Chain to analyze. Required: the SDK never assumes a chain, and the API rejects an unsupported one with 400. */
+  /** Chain to analyze, a positive integer. Required: the SDK never assumes a chain, and the API rejects an unsupported one with 400. */
   chainId: number;
+}
+
+export interface ThreatGraphOptions extends ScanOptions {
+  /** How many hops to follow from the address. Default: 3. The API bounds it to 1 through 5. */
+  maxDepth?: number;
 }
 
 export interface FirewallOptions extends ScanOptions {
@@ -50,12 +55,14 @@ export interface FirewallOptions extends ScanOptions {
   /**
    * Asks for the streamed answer (Accept: text/event-stream) and is called with the interim verdict
    * if the API sends one before the final. firewall() still resolves with the final verdict. Without
-   * it, firewall() makes the plain request.
+   * it, firewall() makes the plain request. A promise it returns is awaited before the stream is read
+   * on, and its rejection rejects firewall() as a throw does.
    */
-  onFirst?: (first: FirstVerdict) => void;
+  onFirst?: (first: FirstVerdict) => void | Promise<void>;
   /**
    * With onFirst: milliseconds to wait for the response and then for each next event before the
    * request is aborted (TIMEOUT). It replaces `timeout` for a streamed request. Default: 30000.
+   * Like `timeout`, it must be positive and at most 2^31 - 1, or firewall() throws INVALID_TIMEOUT.
    */
   finalTimeout?: number;
 }
@@ -280,7 +287,7 @@ class ShieldBotError extends Error {
 
 export { ShieldBotError };
 
-/** Carries an exception thrown by the caller's onFirst through _request's error mapping unchanged. */
+/** Carries an exception thrown by the caller's onFirst, or its rejection, through _request's error mapping unchanged. */
 class ListenerError {
   constructor(public error: unknown) {}
 }
@@ -289,6 +296,11 @@ const DEFAULT_BASE_URL = 'https://api.shieldbotsecurity.online';
 const DEFAULT_TIMEOUT = 10_000;
 const DEFAULT_FINAL_TIMEOUT = 30_000;
 const MAX_WEI = 2n ** 256n - 1n;
+/** The longest delay setTimeout keeps: a longer one fires at once. */
+const MAX_TIMEOUT = 2 ** 31 - 1;
+const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+/** The classifications an interim verdict may carry: every band but SAFE, spelled exactly. */
+const FIRST_CLASSIFICATIONS: readonly FirstVerdict['classification'][] = ['CAUTION', 'HIGH_RISK', 'BLOCK_RECOMMENDED'];
 
 export class ShieldBot {
   private baseUrl: string;
@@ -304,9 +316,12 @@ export class ShieldBot {
     this.baseUrl = (config.baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, '');
     this.apiKey = config.apiKey;
     this.agentId = config.agentId;
-    this.timeout = config.timeout || DEFAULT_TIMEOUT;
+    this.timeout = this._timeout(config.timeout ?? DEFAULT_TIMEOUT, 'timeout');
     this.failMode = config.failMode || 'cached';
-    this.cacheSize = config.cacheSize || 10000;
+    this.cacheSize = config.cacheSize ?? 10000;
+    if (!Number.isSafeInteger(this.cacheSize) || this.cacheSize < 0) {
+      throw new ShieldBotError('cacheSize must be a whole number of entries, 0 or more (0 turns the cache off)', 400, 'INVALID_CACHE_SIZE');
+    }
     this.cacheTtl = (config.cacheTtl ?? 60) * 1000; // convert to ms
     this.verdictCache = new Map();
   }
@@ -326,7 +341,8 @@ export class ShieldBot {
    *
    * With `onFirst` the answer is streamed: `onFirst` gets the interim verdict (always Unknown,
    * never SAFE) if the API sends one before the final, and the promise resolves with the final
-   * verdict, `final: true`. The API sends no interim verdict under a STRICT policy.
+   * verdict, `final: true`. The API sends no interim verdict when its own policy mode is STRICT
+   * (the SDK sends no X-Policy-Mode header).
    */
   async firewall(toAddress: string, options: FirewallOptions): Promise<FirewallResult> {
     const chainId = this._requireChainId(options?.chainId, 'firewall');
@@ -342,7 +358,7 @@ export class ShieldBot {
     }
     return this._request<FirewallResult>('POST', '/api/firewall', body, {
       onFirst: options.onFirst,
-      timeout: options.finalTimeout ?? DEFAULT_FINAL_TIMEOUT,
+      timeout: this._timeout(options.finalTimeout ?? DEFAULT_FINAL_TIMEOUT, 'finalTimeout'),
     });
   }
 
@@ -351,7 +367,7 @@ export class ShieldBot {
    */
   async getMempoolAlerts(chainId?: number, limit = 50): Promise<MempoolAlert[]> {
     const params = new URLSearchParams();
-    if (chainId) params.set('chain_id', String(chainId));
+    if (chainId != null) params.set('chain_id', String(this._requireChainId(chainId, 'getMempoolAlerts')));
     params.set('limit', String(limit));
     const result = await this._get<{ alerts: MempoolAlert[] }>(
       `/api/mempool/alerts?${params}`,
@@ -363,9 +379,11 @@ export class ShieldBot {
    * Scan a wallet's active approvals and get revoke transactions (Rescue Mode).
    */
   async rescue(walletAddress: string, chainId: number): Promise<RescueResult> {
+    const chain = this._requireChainId(chainId, 'rescue');
     const result = await this._get<RescueResult>(
-      `/api/rescue/${walletAddress}?chain_id=${this._requireChainId(chainId, 'rescue')}`,
+      `/api/rescue/${this._requireAddress(walletAddress, 'rescue')}?chain_id=${chain}`,
     );
+    this._checkAnsweredChain(result.chain_id, chain, 'rescue');
     if (result.status === 'unknown' && result.scanned_blocks == null) {
       const reasons = Object.values(result.coverage_reasons || {}).join('; ') || 'no blocks were read';
       throw new ShieldBotError(`Approval scan unavailable: ${reasons}`, 503, 'SCAN_UNAVAILABLE');
@@ -377,7 +395,7 @@ export class ShieldBot {
    * Get the campaign/entity graph for an address.
    */
   async getCampaign(address: string): Promise<CampaignGraph> {
-    return this._get<CampaignGraph>(`/api/campaign/${address}`);
+    return this._get<CampaignGraph>(`/api/campaign/${this._requireAddress(address, 'getCampaign')}`);
   }
 
   /**
@@ -385,7 +403,7 @@ export class ShieldBot {
    */
   async getThreats(options: { chainId?: number; limit?: number; since?: number } = {}): Promise<ThreatFeedItem[]> {
     const params = new URLSearchParams();
-    if (options.chainId) params.set('chain_id', String(options.chainId));
+    if (options.chainId != null) params.set('chain_id', String(this._requireChainId(options.chainId, 'getThreats')));
     if (options.limit) params.set('limit', String(options.limit));
     if (options.since) params.set('since', String(options.since));
     const result = await this._get<{ threats: ThreatFeedItem[] }>(
@@ -415,23 +433,10 @@ export class ShieldBot {
     const chainId = this._requireChainId(transaction.chainId, 'check');
     const value = this._weiValue(transaction.value, 'check');
 
-    const canonicalInteger = (value: unknown): string => {
-      if (
-        !['string', 'number', 'bigint'].includes(typeof value) ||
-        (typeof value === 'string' && value.trim() === '')
-      ) {
-        return `raw:${typeof value}:${String(value)}`;
-      }
-      try {
-        return BigInt(value as string | number | bigint).toString();
-      } catch {
-        return `raw:${typeof value}:${String(value)}`;
-      }
-    };
     const cacheKey = JSON.stringify([
       transaction.from?.toLowerCase(),
       transaction.to?.toLowerCase(),
-      canonicalInteger(chainId),
+      chainId,
       (transaction.data || '0x').toLowerCase(),
       value,
     ]);
@@ -516,10 +521,14 @@ export class ShieldBot {
   /**
    * Query the threat graph for an address.
    */
-  async queryThreatGraph(address: string, chainId: number, maxDepth = 3): Promise<Record<string, unknown>> {
-    return this._get(
-      `/api/graph/check/${address}?chain_id=${this._requireChainId(chainId, 'queryThreatGraph')}&max_depth=${maxDepth}`,
+  async queryThreatGraph(address: string, options: ThreatGraphOptions): Promise<Record<string, unknown>> {
+    const chainId = this._requireChainId(options?.chainId, 'queryThreatGraph');
+    const params = new URLSearchParams({ chain_id: String(chainId), max_depth: String(options.maxDepth ?? 3) });
+    const result = await this._get<Record<string, unknown>>(
+      `/api/graph/check/${this._requireAddress(address, 'queryThreatGraph')}?${params}`,
     );
+    this._checkAnsweredChain(result.chain_id, chainId, 'queryThreatGraph');
+    return result;
   }
 
   /**
@@ -535,7 +544,36 @@ export class ShieldBot {
     if (chainId == null) {
       throw new ShieldBotError(`chainId required for ${method}()`, 400, 'MISSING_CHAIN_ID');
     }
+    if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+      throw new ShieldBotError(`chainId for ${method}() must be a positive integer`, 400, 'INVALID_CHAIN_ID');
+    }
     return chainId;
+  }
+
+  /** An address that goes into a request path: anything but 0x and 40 hex digits could end or leave the path. */
+  private _requireAddress(address: string, method: string): string {
+    if (!ADDRESS.test(address)) {
+      throw new ShieldBotError(`address for ${method}() must be 0x followed by 40 hex digits`, 400, 'INVALID_ADDRESS');
+    }
+    return address;
+  }
+
+  /** Throws CHAIN_MISMATCH when an answer names a chain other than the one asked for, as a number or a string. */
+  private _checkAnsweredChain(answered: unknown, requested: number, method: string): void {
+    if (answered != null && String(answered) !== String(requested)) {
+      throw new ShieldBotError(
+        `${method}() asked about chain ${requested} but the API answered for chain ${answered}`,
+        502,
+        'CHAIN_MISMATCH',
+      );
+    }
+  }
+
+  private _timeout(value: number, name: string): number {
+    if (!Number.isFinite(value) || value <= 0 || value > MAX_TIMEOUT) {
+      throw new ShieldBotError(`${name} must be a positive number of milliseconds, at most 2^31 - 1`, 400, 'INVALID_TIMEOUT');
+    }
+    return value;
   }
 
   private _weiValue(value: unknown, method: string): string {
@@ -555,6 +593,9 @@ export class ShieldBot {
   }
 
   private _cacheVerdict(key: string, verdict: Verdict): void {
+    if (this.cacheSize === 0) {
+      return;
+    }
     // Evict oldest if at capacity
     if (this.verdictCache.size >= this.cacheSize) {
       const oldestKey = this.verdictCache.keys().next().value;
@@ -562,7 +603,8 @@ export class ShieldBot {
         this.verdictCache.delete(oldestKey);
       }
     }
-    this.verdictCache.set(key, { verdict, timestamp: Date.now() });
+    // A copy, so a caller changing the verdict check() returned leaves later cache hits as they were.
+    this.verdictCache.set(key, { verdict: { ...verdict }, timestamp: Date.now() });
   }
 
   private _handleFailMode(cacheKey: string, error: Error): Verdict {
@@ -637,7 +679,7 @@ export class ShieldBot {
     method: string,
     path: string,
     body?: Record<string, unknown>,
-    stream?: { onFirst: (first: FirstVerdict) => void; timeout: number },
+    stream?: { onFirst: (first: FirstVerdict) => void | Promise<void>; timeout: number },
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const headers: Record<string, string> = {
@@ -702,12 +744,14 @@ export class ShieldBot {
 
   /**
    * Reads a streamed firewall response: `first` goes to onFirst, `final` resolves, and `error`
-   * throws a ShieldBotError with the API's status. onEvent runs on every event. Lines may end in
-   * LF, CRLF or CR, and an event's `data:` lines are joined with LF.
+   * throws a ShieldBotError STREAM_ERROR with the API's status (500 if it has none). onEvent runs
+   * on every event. Lines may end in LF, CRLF or CR, and an event's `data:` lines are joined with
+   * LF. A `first` that is not an interim verdict (status 'unknown', a band other than SAFE, final
+   * false) is dropped: the API never sends one.
    */
   private async _readStream(
     response: Response,
-    onFirst: (first: FirstVerdict) => void,
+    onFirst: (first: FirstVerdict) => void | Promise<void>,
     onEvent: () => void,
   ): Promise<FirewallResult> {
     const reader = response.body!.getReader();
@@ -743,15 +787,19 @@ export class ShieldBot {
             onEvent();
             const payload = JSON.parse(text);
             if (name === 'first') {
+              if (payload?.status !== 'unknown' || !FIRST_CLASSIFICATIONS.includes(payload.classification) || payload.final !== false) {
+                continue;
+              }
               try {
-                onFirst(payload as FirstVerdict);
+                await onFirst(payload as FirstVerdict);
               } catch (error) {
                 throw new ListenerError(error);
               }
             } else if (name === 'final') {
               return payload as FirewallResult;
             } else if (name === 'error') {
-              throw new ShieldBotError(`ShieldBot API error: ${payload.detail || `HTTP ${payload.status}`}`, payload.status);
+              const status = payload?.status ?? 500;
+              throw new ShieldBotError(`ShieldBot API error: ${payload?.detail || `HTTP ${status}`}`, status, 'STREAM_ERROR');
             }
           }
         }

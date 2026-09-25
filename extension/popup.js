@@ -62,6 +62,17 @@ function fmtUsd(val) {
   return "$" + val.toFixed(2);
 }
 
+const CHAIN_NAMES = { 56: "BSC", 1: "ETH", 137: "Polygon", 42161: "Arbitrum", 8453: "Base", 10: "Optimism", 204: "opBNB", 4663: "Robinhood Chain" };
+
+// Wallet Health scans the chain chosen in the side panel's chain selector:
+// name it on the hint line.
+function showHealthChain(hintEl) {
+  chrome.storage.local.get({ selectedChainId: 56 }, ({ selectedChainId }) => {
+    const chainId = parseInt(selectedChainId) || 56;
+    hintEl.textContent = t("healthScanSubtext", { chain: CHAIN_NAMES[chainId] || `Chain ${chainId}` });
+  });
+}
+
 function showMsg(el, text, isError) {
   el.textContent = text;
   el.style.color = isError ? "#ef4444" : "";
@@ -174,6 +185,7 @@ function initCompact() {
   });
 
   // Language selector
+  const healthChainHint = document.getElementById("healthChainHint");
   const langSel = document.getElementById("langSelect");
   if (langSel) {
     langSel.value = getCurrentLang ? getCurrentLang() : "en";
@@ -181,11 +193,13 @@ function initCompact() {
       if (typeof setLanguage === "function") {
         await setLanguage(langSel.value);
         applyTranslations();
+        showHealthChain(healthChainHint);
       }
     });
   }
 
   // Health tab
+  showHealthChain(healthChainHint);
   const healthScanBtn = document.getElementById("healthScanBtn");
   const healthAddress = document.getElementById("healthAddress");
 
@@ -427,6 +441,7 @@ function initDashboard() {
   });
 
   // Language selector
+  const dashHealthChainHint = document.getElementById("dash-healthChainHint");
   const dashLangSel = document.getElementById("dash-langSelect");
   if (dashLangSel) {
     dashLangSel.value = getCurrentLang ? getCurrentLang() : "en";
@@ -434,6 +449,7 @@ function initDashboard() {
       if (typeof setLanguage === "function") {
         await setLanguage(dashLangSel.value);
         applyTranslations();
+        showHealthChain(dashHealthChainHint);
       }
     });
   }
@@ -448,6 +464,7 @@ function initDashboard() {
   });
 
   // Wallet health
+  showHealthChain(dashHealthChainHint);
   const whAddr    = document.getElementById("dash-healthAddr");
   const whScanBtn = document.getElementById("dash-healthScanBtn");
   const whResult  = document.getElementById("dash-healthResult");
@@ -653,8 +670,6 @@ function renderDeployerAlerts(alerts, listEl) {
     listEl.innerHTML = `<div class="feed-empty-msg">${t("feedNoAlerts") || "No deployer alerts yet"}</div>`;
     return;
   }
-
-  const CHAIN_NAMES = { 56: "BSC", 1: "ETH", 137: "Polygon", 42161: "Arbitrum", 8453: "Base", 10: "Optimism", 204: "opBNB", 4663: "Robinhood Chain" };
 
   listEl.innerHTML = alerts.map((a) => {
     const chain    = CHAIN_NAMES[a.chain_id] || `Chain ${a.chain_id}`;

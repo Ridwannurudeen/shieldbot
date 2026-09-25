@@ -15,6 +15,7 @@ from eth_utils import keccak
 
 from adapters.robinhood import SIMULATION_PROVIDER
 from core.extension_formatter import is_scan_incomplete
+from core.verdicts import HIGH, LOW, MEDIUM
 
 SCHEMA_VERSION = 1
 
@@ -73,7 +74,7 @@ def verdict_for(scan_result: dict, honeypot: Optional[dict] = None) -> Verdict:
     if is_scan_incomplete(scan_result):
         return Verdict.UNKNOWN
     level = str(scan_result.get("risk_level") or "").upper()
-    return Verdict[level] if level in ("LOW", "MEDIUM", "HIGH") else Verdict.UNKNOWN
+    return Verdict[level] if level in (LOW, MEDIUM, HIGH) else Verdict.UNKNOWN
 
 
 def build_evidence(
