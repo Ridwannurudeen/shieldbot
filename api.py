@@ -1882,6 +1882,12 @@ async def _firewall_verdict(
 
         contract_scan.pop("forensic_report", None)
         contract_scan.pop("source_code", None)
+        # The target's local blacklist entry, which the token scanner never asks for: an admin entry's
+        # Block holds here as on the composite path. The address scanner's scam lookup already reports
+        # the same match, which is not added twice.
+        scam_matches = list(contract_scan.get("scam_matches") or [])
+        if local_match and local_match not in scam_matches:
+            contract_scan["scam_matches"] = [*scam_matches, local_match]
 
         # The AI provider gets no wallet address: not the sender, nor a mention of it in the calldata
         # (a swap's recipient), which is masked as the evidence document masks it.

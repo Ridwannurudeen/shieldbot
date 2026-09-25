@@ -889,7 +889,8 @@ async def test_the_legacy_fallback_denies_the_router_discount_the_router_shortcu
         body = {**body, "authorizationList": [{"address": "0x" + "de" * 20}]}
     else:
         api.scam_db.known_scams[(None, TARGET)] = {"source": "admin", "reports": 0, "expires_at": None}
-    # The composite pipeline fails, so the legacy scanner's heuristic score answers.
+    # The composite pipeline fails, so the legacy scanner's heuristic score answers. The token scanner
+    # asks no scam database, so the admin entry reaches the fallback only as the target's local match.
     gate = asyncio.Event()
     gate.set()
     services.registry = FailingRegistry(gate)
@@ -900,8 +901,25 @@ async def test_the_legacy_fallback_denies_the_router_discount_the_router_shortcu
     final, plain = await final_and_plain(api, body)
 
     assert plain["analysis"] == "AI analysis unavailable. Showing heuristic results only."
-    assert plain["risk_score"] == 40
+    # No discount: 40, and the admin entry's Block floor of 90 (70 had the discount applied).
+    if case == "delegation":
+        assert plain["risk_score"] == 40
+    else:
+        assert (plain["classification"], plain["risk_score"]) == (verdicts.BLOCK_RECOMMENDED, 90)
+        assert "Found 1 scam database match(es)" in plain["danger_signals"]
     assert final == plain
+
+    if case == "admin-listed":
+        # Streamed, the first is the admin entry's Block, and the fallback's final is never below it.
+        timer(monkeypatch, api, FIRST_VERDICT_SECONDS / SCALE)
+        gate.clear()
+        events = events_of(api, body)
+        kind, first = await next_event(events)
+        assert (kind, first["classification"], first["risk_score"]) == ("first", verdicts.BLOCK_RECOMMENDED, 90)
+        gate.set()
+        kind, streamed = await next_event(events)
+        assert (kind, streamed["classification"]) == ("final", verdicts.BLOCK_RECOMMENDED)
+        assert band_rank(first["risk_score"]) <= band_rank(streamed["risk_score"])
 
 
 @pytest.mark.asyncio
@@ -1196,3 +1214,27 @@ async def test_an_answer_that_ran_no_simulation_says_so(stream_api, monkeypatch)
     assert answers["unanalysed-swap"]["coverage"] == {"token_path": 0}
     assert answers["fallback"]["analysis"] == "AI analysis unavailable. Showing heuristic results only."
     assert {name: answer["simulated"] for name, answer in answers.items()} == dict.fromkeys(answers, False)
+
+
+@pytest.mark.asyncio
+async def test_a_fallback_address_scan_that_reports_the_admin_entry_counts_it_once(stream_api, monkeypatch, mock_web3_client):
+    api, services = stream_api
+    blacklist(api)
+    mock_web3_client.is_token_contract = AsyncMock(return_value=False)
+    gate = asyncio.Event()
+    gate.set()
+    services.registry = FailingRegistry(gate)
+    # The address scanner's scam lookup reports the entry itself, as check_address does.
+    monkeypatch.setattr(
+        api,
+        "tx_scanner",
+        SimpleNamespace(scan_address=AsyncMock(return_value={
+            "risk_score": 90, "is_verified": True, "scam_matches": [dict(ADMIN_MATCH)],
+        })),
+    )
+
+    final, plain = await final_and_plain(api, BODY)
+
+    assert (plain["classification"], plain["risk_score"]) == (verdicts.BLOCK_RECOMMENDED, 90)
+    assert plain["raw_checks"]["scam_matches"] == 1
+    assert final == plain
