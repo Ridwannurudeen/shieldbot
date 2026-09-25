@@ -104,7 +104,8 @@ The API, the bot and workers.py each bring the database schema up to date when t
 (`Database.initialize()` in `core/database.py`), so on new code the first of them to start runs any migration.
 That setup writes to the database: its seven migrations each run in their own `BEGIN IMMEDIATE` transaction,
 and every write waits at most the connection's `busy_timeout`, 5 seconds, for SQLite's write lock. `deploy.sh`
-stops the bot first and starts the API alone (steps 1 and 4), so the API migrates with no other writer.
+stops the bot first and starts the API alone (steps 1 and 4), so the API migrates with no other writer, provided
+the workers unit, if there is one, was stopped first as the top of this page says.
 
 A plain `systemctl restart shieldbot` leaves the bot, and the workers unit if there is one, running. If one of
 them holds the write lock for more than 5 seconds while the API starts, the API fails at startup with
