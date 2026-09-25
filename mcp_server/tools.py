@@ -104,7 +104,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "description": (
             "Run all ShieldBot analyzers on a contract address and return a composite risk score with flags and risk level. "
             "Incomplete provider coverage is never reported as safe: the result then has status 'unknown', "
-            "verdict 'UNKNOWN', risk_display 'Unknown (incomplete provider coverage)' and coverage_reasons naming the missing data."
+            f"verdict '{UNKNOWN}', risk_level '{UNKNOWN}', a null score, risk_display 'Unknown (incomplete provider coverage)' "
+            "and coverage_reasons naming the missing data; critical flags still list any adverse evidence found."
         ),
         "inputSchema": {
             "type": "object",
@@ -261,9 +262,13 @@ async def handle_scan_contract(container, params: Dict, key_info: Dict) -> Dict:
     score_data = container.risk_engine.compute_from_results(results)
 
     alert = format_extension_alert(score_data)
+    # An incomplete scan's number is not a score (a fully failed scan's is 0) and its level can be just
+    # the engine's floor for missing data, so neither is reported beside an UNKNOWN verdict; its flags
+    # keep any adverse evidence.
+    incomplete = alert["status"] == "unknown"
     return {
-        "verdict": UNKNOWN if alert["status"] == "unknown" else score_data.get("risk_level", UNKNOWN),
-        "score": score_data["rug_probability"],
+        "verdict": UNKNOWN if incomplete else score_data.get("risk_level", UNKNOWN),
+        "score": None if incomplete else score_data["rug_probability"],
         "flags": score_data.get("critical_flags", []),
         "notes": score_data.get("notes", []),
         "status": alert["status"],
@@ -271,7 +276,7 @@ async def handle_scan_contract(container, params: Dict, key_info: Dict) -> Dict:
         "coverage_reasons": alert["coverage_reasons"],
         "confidence": score_data.get("confidence_level"),
         "risk_display": alert["risk_display"],
-        "risk_level": score_data.get("risk_level", UNKNOWN),
+        "risk_level": UNKNOWN if incomplete else score_data.get("risk_level", UNKNOWN),
         "categories": score_data.get("category_scores", {}),
     }
 

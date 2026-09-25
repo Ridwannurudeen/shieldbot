@@ -1055,7 +1055,10 @@ async def test_mcp_maps_engine_keys_and_coverage(mock_container, status, reason,
         "category_scores": {"honeypot": None if reason else 0},
     }
     result = await handle_scan_contract(mock_container, {"address": "0x" + "a" * 40, "chain_id": 56}, KEY)
-    assert result["score"] == score
+    # An incomplete scan's number is not a score (a fully failed scan's is 0), so it is null and the
+    # level is UNKNOWN; its flags still carry any adverse evidence.
+    assert result["score"] == (None if reason else score)
+    assert result["risk_level"] == ("UNKNOWN" if reason else "LOW")
     assert result["flags"] == ([reason] if reason else [])
     assert result["status"] == status
     assert result["confidence"] == 40
