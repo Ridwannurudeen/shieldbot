@@ -29,7 +29,7 @@ from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve
 from utils.chain_info import get_chain_name, get_native_symbol
 from utils.web3_client import UnsupportedChainError
 from utils.scam_db import BLACKLIST_RELOAD_SECONDS
-from core.risk_engine import MEDIUM_MATCH_FLOOR, database_matches, medium_matches
+from core.risk_engine import MEDIUM_MATCH_FLOOR, apply_local_match, database_matches, medium_matches
 from services import rpc_guard
 from services.counterparty_service import code_kind
 from services.mempool_service import supports_pending_transactions
@@ -1656,6 +1656,9 @@ async def _firewall_verdict(
             # Compute risk from analyzer results
             if analyzer_results is not None:
                 risk_output = risk_engine.compute_from_results(analyzer_results, is_token=is_token)
+                # The target's local blacklist entry holds even when the structural analyzer, which
+                # reports it, failed or ran past the deadline.
+                risk_output = apply_local_match(risk_output, local_match)
 
                 # Apply policy mode (handles partial failures)
                 if container and container.policy_engine:

@@ -4,7 +4,7 @@ import pytest
 
 from core.analyzer import AnalyzerResult
 from core.calibration import CalibrationConfig
-from core.risk_engine import RiskEngine
+from core.risk_engine import RiskEngine, apply_local_match
 
 # The weights the registry normalises the container's six analyzers to.
 WEIGHTS = {
@@ -221,3 +221,33 @@ def test_confirmed_honeypot_floors_at_80_whatever_the_liquidity(entrypoint, has_
     assert risk["rug_probability"] == 80
     assert risk["risk_level"] == "HIGH"
     assert risk["risk_archetype"] == "honeypot"
+
+
+@pytest.mark.parametrize(
+    "match, expected",
+    [
+        (
+            {"type": "Local Blacklist", "reason": "Confirmed scam address", "source": "ShieldBot", "severity": "block"},
+            (90, 90, "HIGH", 90),
+        ),
+        (
+            {"type": "community_reports", "reason": "Reported by 3 users", "source": "ShieldBot", "severity": "medium"},
+            (40, 0, "MEDIUM", None),
+        ),
+    ],
+    ids=["admin", "community"],
+)
+def test_a_local_match_the_failed_structural_analyzer_never_reported_is_applied_as_the_engine_would(match, expected):
+    results = _results()
+    results[0] = AnalyzerResult(
+        "structural", WEIGHTS["structural"], 50, error="structural analysis unavailable (TimeoutError)"
+    )
+    risk = apply_local_match(RiskEngine().compute_from_results(results), match)
+    # A community match stays out of the score the revert gate reads, and is never HIGH on its own.
+    assert (
+        risk["rug_probability"],
+        risk["score_before_community_floor"],
+        risk["risk_level"],
+        risk["transaction_floor"],
+    ) == expected
+    assert risk["critical_flags"][0] == match["reason"]

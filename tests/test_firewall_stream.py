@@ -17,7 +17,7 @@ from core import verdicts
 from core.analyzer import AnalyzerResult
 from core.policy import PolicyEngine
 from core.registry import FIRST_VERDICT_SECONDS, AnalyzerRegistry
-from core.risk_engine import RiskEngine
+from core.risk_engine import MEDIUM_MATCH_FLOOR, RiskEngine
 from tests.test_strict_cache import strict_api  # noqa: F401  (pytest fixture)
 from utils.scam_db import ScamDatabase
 from utils.web3_client import UnsupportedChainError
@@ -1047,3 +1047,65 @@ async def test_no_middleware_buffers_the_stream(stream_api, monkeypatch):
     assert events[0][1]["status"] == "unknown"
     assert events[1][1]["final"] is True
     assert services.db.upsert_contract_score.await_count == 1
+
+
+def times_out():
+    async def analyze(ctx):
+        raise asyncio.TimeoutError()
+    return analyze
+
+
+@pytest.mark.asyncio
+async def test_an_admin_listed_target_blocks_when_its_structural_analyzer_times_out(stream_api):
+    api, services = stream_api
+    blacklist(api)
+    # The structural analyzer reports the entry among its scam matches, but it never returns.
+    services.registry = registry(structural=times_out())
+
+    final, plain = await final_and_plain(api, BODY)
+
+    assert (plain["classification"], plain["risk_score"], plain["shield_score"]["risk_level"]) == (
+        verdicts.BLOCK_RECOMMENDED,
+        90,
+        verdicts.HIGH,
+    )
+    assert plain["danger_signals"][0] == "Confirmed scam address"
+    assert plain["failed_sources"] == ["structural"]
+    assert final == plain
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_admin_listed_target_whose_structural_analyzer_times_out_ends_no_lower_than_its_first(
+    stream_api, monkeypatch
+):
+    api, services = stream_api
+    blacklist(api)
+    timer(monkeypatch, api, FIRST_VERDICT_SECONDS / SCALE)
+    gate = asyncio.Event()
+    services.registry = registry(structural=times_out(), honeypot=held("honeypot", gate))
+
+    events = events_of(api)
+    kind, first = await next_event(events)
+    assert (kind, first["classification"], first["risk_score"]) == ("first", verdicts.BLOCK_RECOMMENDED, 90)
+    gate.set()
+    kind, final = await next_event(events)
+
+    assert (kind, final["classification"], final["risk_score"]) == ("final", verdicts.BLOCK_RECOMMENDED, 90)
+    assert band_rank(first["risk_score"]) <= band_rank(final["risk_score"])
+
+
+@pytest.mark.asyncio
+async def test_a_community_listed_target_whose_structural_analyzer_times_out_holds_caution_never_high(stream_api):
+    api, services = stream_api
+    api.scam_db.known_scams[(56, TARGET)] = {"source": "community", "reports": 3, "expires_at": None}
+    services.registry = registry(structural=times_out())
+
+    final, plain = await final_and_plain(api, BODY)
+
+    assert (plain["classification"], plain["risk_score"], plain["shield_score"]["risk_level"]) == (
+        verdicts.CAUTION,
+        MEDIUM_MATCH_FLOOR,
+        verdicts.MEDIUM,
+    )
+    assert plain["danger_signals"][0] == "Reported by 3 users"
+    assert final == plain
