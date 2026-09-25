@@ -46,87 +46,15 @@ Test in Telegram:
 
 ---
 
-## Production Deployment (VPS/Server)
+## Production
 
-**API sender constraint:** `shieldbot-api.service` runs one uvicorn process without `--workers`. Preserve that topology: the API lifespan starts the verdict publisher, and its nonce lock is process-local. Multiple API processes, workers or replicas can compete for the same recorder. The bot examples below are not instructions to replicate the API sender.
+Production is a git checkout in `/opt/shieldbot` on one VPS, run by systemd units: `shieldbot`, the API
+(`uvicorn api:app` on 127.0.0.1:8000; `shieldbot-api.service` in this repo), and `shieldbot-bot`, the Telegram
+bot, plus `shieldbot-workers` when the background work runs in its own process (below).
+[deploy/README.md](../deploy/README.md) covers deploying a commit, rolling back, nginx, nightly backups and
+restoring one.
 
-### Option 1: systemd Service (Recommended)
-
-1. **Create service file:**
-```bash
-sudo nano /etc/systemd/system/shieldbot.service
-```
-
-2. **Add configuration:**
-```ini
-[Unit]
-Description=ShieldBot - BNB Chain Security Bot
-After=network.target
-
-[Service]
-Type=simple
-User=your_username
-WorkingDirectory=/path/to/shieldbot
-Environment="PATH=/path/to/shieldbot/venv/bin"
-ExecStart=/path/to/shieldbot/venv/bin/python bot.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-3. **Enable and start:**
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable shieldbot
-sudo systemctl start shieldbot
-sudo systemctl status shieldbot
-```
-
-4. **View logs:**
-```bash
-sudo journalctl -u shieldbot -f
-```
-
-### Option 2: Docker Deployment
-
-1. **Create Dockerfile:**
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-CMD ["python", "bot.py"]
-```
-
-2. **Build and run:**
-```bash
-docker build -t shieldbot .
-docker run -d --name shieldbot --env-file .env shieldbot
-```
-
-### Option 3: Screen/tmux Session
-
-```bash
-# Using screen
-screen -S shieldbot
-./run.sh
-# Ctrl+A then D to detach
-
-# Reattach later
-screen -r shieldbot
-
-# Or using tmux
-tmux new -s shieldbot
-./run.sh
-# Ctrl+B then D to detach
-```
+**API sender constraint:** `shieldbot-api.service` runs one uvicorn process without `--workers`. Preserve that topology: the API lifespan starts the verdict publisher, and its nonce lock is process-local. Multiple API processes, workers or replicas can compete for the same recorder.
 
 ### Shared rate limits in Redis (opt-in)
 
@@ -183,6 +111,7 @@ changes. Any other value stops the API at startup.
 | Mempool monitor (txpool polling) | API | workers.py |
 | Robinhood Chain verdict drain (signs and sends registry records) | API | workers.py |
 | Hunter sweep | API | workers.py |
+| Retention pruning, part of the hunter sweep (chat history, API usage and AI token counts, scan evidence, expired free key requests, expired community blacklist entries) | API | workers.py |
 | Launch watch (Robinhood Chain launch discovery and triaged scans) | API | workers.py |
 | Deployer indexer | API and bot | API, bot and workers.py |
 
@@ -191,6 +120,10 @@ it scans itself. Verdicts the API or the bot publishes are queued in the databas
 workers.py picks them up on its next poll, at most 10 seconds later when it is idle. With `external` the API
 rereads the scam blacklist itself every 30 minutes, as the bot does, since the hunter sweep that reloads it runs in
 workers.py.
+
+Retention pruning (`docs/TECHNICAL.md`, Data Privacy) is part of the hunter sweep, so with `external` only
+workers.py prunes: while the `shieldbot-workers` unit is stopped nothing is deleted, and the API's blacklist
+reread prunes nothing. What fell due meanwhile goes at the first sweep after the unit starts again.
 
 With `external` the API holds none of the workers' memory. It says so instead of reporting zeros:
 
@@ -286,133 +219,14 @@ Neither setting makes a second API process supported: MCP sessions, for one, liv
 
 ---
 
-## BNB Chain Deployment (For Onchain Proof)
+## Earlier versions of this guide
 
-### Deploy Verification Contract
+The hackathon version of this guide described a `shieldbot.service` that ran `bot.py`, Docker and screen setups,
+a health check on port 8080, a verifier contract deployed from Remix and a submission checklist. None of that
+describes production any more, so it was removed; it is in the git history. Its checklist recorded the BNB Smart
+Chain verifier, which [DEPLOYMENTS.md](DEPLOYMENTS.md) describes:
 
-ShieldBot needs an onchain component for hackathon submission:
-
-1. **Create simple verification contract:**
-```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
-
-contract ShieldBotVerifier {
-    event AddressScanned(address indexed scannedAddress, uint8 riskLevel, uint256 timestamp);
-    
-    function recordScan(address _address, uint8 _riskLevel) external {
-        emit AddressScanned(_address, _riskLevel, block.timestamp);
-    }
-}
-```
-
-2. **Deploy using Remix:**
-   - Go to [remix.ethereum.org](https://remix.ethereum.org)
-   - Connect MetaMask to BSC or opBNB
-   - Deploy the contract
-   - Copy contract address
-
-3. **Add to bot** (optional integration):
-   - Create `contracts/verifier.py` to interact with the contract
-   - Record scans onchain for transparency
-
----
-
-## Configuration
-
-### Environment Variables
-
-```bash
-# Required
-TELEGRAM_BOT_TOKEN=your_bot_token
-
-# Recommended
-BSCSCAN_API_KEY=your_api_key
-
-# Optional (defaults provided)
-BSC_RPC_URL=https://bsc-dataseed1.binance.org/
-OPBNB_RPC_URL=https://opbnb-mainnet-rpc.bnbchain.org
-```
-
-### Performance Tuning
-
-For high traffic:
-1. Add rate limiting
-2. Use caching (Redis) for scanned addresses
-3. Do not replicate the API while its verdict sender is embedded in each API process
-4. Use webhook mode instead of polling
-
----
-
-## Monitoring
-
-### Health Check
-```bash
-curl http://localhost:8080/health  # If health endpoint added
-```
-
-### Logs
-```bash
-tail -f logs/shieldbot.log
-```
-
-### Metrics (Optional)
-- Add Prometheus metrics
-- Set up Grafana dashboard
-- Monitor API rate limits
-
----
-
-## Troubleshooting
-
-### Bot doesn't respond
-- Check bot token is correct
-- Verify bot is running: `systemctl status shieldbot`
-- Check logs for errors
-
-### "Invalid API Key" errors
-- Verify BscScan API key is active
-- Check rate limits (5 calls/sec for free tier)
-- Consider upgrading to paid tier for production
-
-### Slow responses
-- Check RPC endpoint health
-- Use faster RPC (QuickNode, Alchemy, etc.)
-- Add caching for repeated scans
-
----
-
-## Security Best Practices
-
-1. **Never commit `.env` to git**
-2. **Use environment variables for secrets**
-3. **Keep dependencies updated:** `pip install --upgrade -r requirements.txt`
-4. **Monitor bot usage** for abuse
-5. **Set rate limits** per user
-6. **Use HTTPS** for webhooks (production)
-
----
-
-## Hackathon Submission Checklist
-
-- [ ] Bot running and tested
-- [ ] Public GitHub repo with code
-- [ ] README.md with demo instructions
-- [x] Verification contract deployed on BSC (opBNB pending)
-- [x] Contract source verified on BscScan
 - [x] Contract address documented: https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795#code
 - [x] Deployment tx documented: https://bscscan.com/tx/0x021fb404910c2621497bcda167ffcc70e8ece846d1ade8066ab5ad87f13b6bbd
-- [ ] Demo video/screenshots prepared
-- [ ] Submission on DoraHacks platform
 
----
-
-## Support
-
-- **GitHub Issues:** [Create an issue](https://github.com/Ridwannurudeen/shieldbot/issues)
-- **Telegram:** @Ggudman
-- **Discord:** Good Vibes Only #vibe-coding
-
----
-
-Built for Good Vibes Only: OpenClaw Edition Hackathon 🛡️
+The main settings are listed in `.env.example`.
