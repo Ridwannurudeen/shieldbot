@@ -37,8 +37,10 @@ version.
   between them carries an HMAC proof made with it; the key itself is never posted.
 - Transactions and signature requests are sent to the API (`/api/firewall`, through
   `background.js`) for analysis, and the overlay shows the API's verdict. A transaction's value is
-  sent as minimal 0x-hex whatever form the page wrote it in (a decimal or 0x-hex string, or a safe
-  integer); a value in any other form, or not below 2^256, is not analysed, and the overlay says
+  read only as a 0x-hex string (either case of the prefix), JSON-RPC's form for a quantity, and
+  sent as minimal 0x-hex. A decimal string or a number is not analysed, because wallets read those
+  differently (one may take a decimal string as hex) and the analysis could judge another amount
+  than the wallet sends; nor is any other form, or a value not below 2^256. The overlay then says
   the analysis failed. A signature's overlay also
   shows what would be signed: MetaMask's legacy typed-data form (a list of fields, for
   `eth_signTypedData` and `_v1`) field by field, EIP-712 typed data by domain and message, and a

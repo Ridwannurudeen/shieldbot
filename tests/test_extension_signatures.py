@@ -700,8 +700,6 @@ def test_proceed_on_a_transaction_the_api_did_not_analyse_needs_a_hold(policy):
     [
         ("0x" + "0" * 100 + "1", "0x1"),
         ("0X1F", "0x1f"),
-        ("1000", "0x3e8"),
-        (5, "0x5"),
         ("0x0", "0x0"),
         (None, "0x0"),
         ("0x" + "f" * 64, "0x" + "f" * 64),
@@ -724,7 +722,11 @@ def test_a_transaction_value_goes_to_the_api_as_minimal_hex(value, sent):
 
 @pytest.mark.parametrize(
     "value",
-    ["abc", "1.5", "-1", "0x", " 12", "1e18", "0x" + "1" + "0" * 64, 1.5, -1, 2**53, True, {}, []],
+    [
+        "abc", "1.5", "-1", "0x", " 12", "1e18", "0x" + "1" + "0" * 64, 1.5, -1, 2**53, True, {}, [],
+        # A decimal string or a number: wallets read these differently, one may take "1000" as hex.
+        "1000", "1000000000000000000", "0", 5, 1000,
+    ],
 )
 def test_a_transaction_value_that_cannot_be_read_is_an_analysis_error(value):
     run_node(

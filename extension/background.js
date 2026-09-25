@@ -379,16 +379,17 @@ function judgeSignIn(data, origin) {
   return uriHost && uriHost !== host ? mismatch(uriHost) : { state: "match", domain: token };
 }
 
-// The value a transaction sends, as minimal 0x-hex: a decimal or 0x-hex string,
-// or a safe integer, of whole wei below 2^256. The page chooses how it writes
-// the value, and one the wallet takes but the API refuses (a zero-padded hex
-// past the API's length limit, a number) would come back as an error the user
-// could click through. null for any other value.
+// The value a transaction sends, as minimal 0x-hex, read only from a 0x-hex
+// string (JSON-RPC's form for a quantity) of whole wei below 2^256. The page
+// chooses how it writes the value: one the wallet takes but the API refuses
+// (a zero-padded hex past the API's length limit) would come back as an error
+// the user could click through, and wallets read a decimal string or a number
+// differently (one may take "1000" as hex), so the analysis could judge another
+// amount than the wallet sends. null for any other value.
 function weiHex(value) {
-  let wei = null;
-  if (typeof value === "string" && /^(0x[0-9a-f]+|[0-9]+)$/i.test(value)) wei = BigInt(value);
-  else if (Number.isSafeInteger(value)) wei = BigInt(value);
-  return wei !== null && wei >= 0n && wei < 2n ** 256n ? `0x${wei.toString(16)}` : null;
+  if (typeof value !== "string" || !/^0x[0-9a-f]+$/i.test(value)) return null;
+  const wei = BigInt(value);
+  return wei < 2n ** 256n ? `0x${wei.toString(16)}` : null;
 }
 
 async function handleAnalyze(tx, sender) {
