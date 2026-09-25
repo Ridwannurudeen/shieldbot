@@ -128,12 +128,9 @@ def format_full_report(
         lines.append(f'*Address:* `{address}`')
     else:
         lines.append(f'*Target:* `{address}`')
-    has_metadata = bool(token_info and (token_info.get('name') or token_info.get('symbol')))
-    # A wallet has no token to check, and without its name and symbol only an official or unknown check
-    # can be stated.
-    if impostor_check and contract_data.get('is_contract') is not False and (
-        has_metadata or impostor_check['status'] in ('official', 'unknown')
-    ):
+    # A wallet has no token to check. The check reads the token's symbol and name itself, so it is stated
+    # whether or not the report has them.
+    if impostor_check and contract_data.get('is_contract') is not False:
         detail = escape_markdown(describe_impostor_check(impostor_check))
         # A contract goes in a code span, which a tap copies; a valid address holds nothing to escape.
         for contract in {impostor_check['official_address'], (impostor_check.get('also') or {}).get('official_address')}:

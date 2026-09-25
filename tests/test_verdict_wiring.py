@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from core.config import Settings
 from core.database import Database
 from core.extension_formatter import is_scan_incomplete
+from core.registry import RUN_ALL_DEADLINE_SECONDS
 from services.robinhood_assets import with_impostor_check
 from services.verdict_publisher import MAX_SEND_ATTEMPTS, VerdictPublisher
 from utils.web3_client import UnsupportedChainError, Web3Client
@@ -222,7 +223,7 @@ def bot_scan_functions():
     services.registry.run_all = AsyncMock(
         return_value=[SimpleNamespace(name="honeypot", data=HONEYPOT_DATA)]
     )
-    services.robinhood_assets.check = AsyncMock(return_value=NO_MATCH)
+    services.robinhood_assets.check_onchain = AsyncMock(return_value=NO_MATCH)
     recorder = MagicMock()
     recorder.is_available.return_value = True
     recorder.record_scan_fire_and_forget = AsyncMock()
@@ -231,6 +232,7 @@ def bot_scan_functions():
         "asyncio": asyncio,
         "is_scan_incomplete": is_scan_incomplete,
         "with_impostor_check": with_impostor_check,
+        "RUN_ALL_DEADLINE_SECONDS": RUN_ALL_DEADLINE_SECONDS,
         "UnsupportedChainError": UnsupportedChainError,
         "logger": MagicMock(),
         "container": services,

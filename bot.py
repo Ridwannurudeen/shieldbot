@@ -35,6 +35,7 @@ from core.telegram_formatter import (
     CONTROL_CHARACTERS, describe_impostor_check, escape_markdown, escape_markdown_lines, format_full_report,
 )
 from core.extension_formatter import is_scan_incomplete
+from core.registry import RUN_ALL_DEADLINE_SECONDS
 from core.risk_engine import database_matches, medium_matches
 from core.verdicts import UNKNOWN
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
@@ -1018,16 +1019,17 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
             from core.analyzer import AnalysisContext
 
             ctx = AnalysisContext(address=address, chain_id=chain_id)
-            analyzer_results, token_info = await asyncio.gather(
-                container.registry.run_all(ctx),
-                web3_client.get_token_info(address, chain_id=chain_id),
-            )
+            reads = [container.registry.run_all(ctx), web3_client.get_token_info(address, chain_id=chain_id)]
+            if chain_id == 4663:
+                # The official-token check reads symbol() and name() itself, alongside the analyzers, as the
+                # launch hunter's does: the token info read comes back empty when decimals() or totalSupply()
+                # reverts, which a token can arrange.
+                reads.append(container.robinhood_assets.check_onchain(address, RUN_ALL_DEADLINE_SECONDS))
+            analyzer_results, token_info, *impostor_check = await asyncio.gather(*reads)
 
             risk_output = risk_engine.compute_from_results(analyzer_results)
-            if chain_id == 4663:
-                risk_output = with_impostor_check(risk_output, await container.robinhood_assets.check(
-                    address, token_info.get('symbol'), token_info.get('name'),
-                ))
+            if impostor_check:
+                risk_output = with_impostor_check(risk_output, impostor_check[0])
 
             # Extract service data for report formatting
             by_name = {r.name: r for r in analyzer_results}
@@ -1145,16 +1147,17 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
             from core.analyzer import AnalysisContext
 
             ctx = AnalysisContext(address=address, chain_id=chain_id)
-            analyzer_results, token_info = await asyncio.gather(
-                container.registry.run_all(ctx),
-                web3_client.get_token_info(address, chain_id=chain_id),
-            )
+            reads = [container.registry.run_all(ctx), web3_client.get_token_info(address, chain_id=chain_id)]
+            if chain_id == 4663:
+                # The official-token check reads symbol() and name() itself, alongside the analyzers, as the
+                # launch hunter's does: the token info read comes back empty when decimals() or totalSupply()
+                # reverts, which a token can arrange.
+                reads.append(container.robinhood_assets.check_onchain(address, RUN_ALL_DEADLINE_SECONDS))
+            analyzer_results, token_info, *impostor_check = await asyncio.gather(*reads)
 
             risk_output = risk_engine.compute_from_results(analyzer_results)
-            if chain_id == 4663:
-                risk_output = with_impostor_check(risk_output, await container.robinhood_assets.check(
-                    address, token_info.get('symbol'), token_info.get('name'),
-                ))
+            if impostor_check:
+                risk_output = with_impostor_check(risk_output, impostor_check[0])
 
             by_name = {r.name: r for r in analyzer_results}
             contract_data = by_name["structural"].data if "structural" in by_name else {}

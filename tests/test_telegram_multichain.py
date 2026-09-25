@@ -118,6 +118,7 @@ def bot_chain_functions():
     from services.robinhood_assets import with_impostor_check
     from services.mempool_service import supports_pending_transactions
     from core.verdicts import UNKNOWN
+    from core.registry import RUN_ALL_DEADLINE_SECONDS
 
     # Load the real menu handlers without importing the optional Telegram package.
     tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
@@ -135,7 +136,7 @@ def bot_chain_functions():
     services.registry.run_all = AsyncMock(return_value=[])
     services.advisor.chat = AsyncMock(return_value={'text': 'Analysis complete.'})
     services.rescue_service.scan_approvals = AsyncMock(return_value={})
-    services.robinhood_assets.check = AsyncMock(return_value={
+    services.robinhood_assets.check_onchain = AsyncMock(return_value={
         'status': 'none', 'symbol': None, 'official_address': None, 'reason': None,
     })
     ai = MagicMock()
@@ -148,6 +149,7 @@ def bot_chain_functions():
         'escape_markdown': escape_markdown,
         'with_impostor_check': with_impostor_check,
         'UNKNOWN': UNKNOWN,
+        'RUN_ALL_DEADLINE_SECONDS': RUN_ALL_DEADLINE_SECONDS,
         'UnsupportedChainError': UnsupportedChainError,
         'logger': MagicMock(),
         'container': services,

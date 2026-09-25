@@ -635,9 +635,13 @@ def test_a_report_on_a_wallet_or_without_a_check_has_no_line(check, contract_dat
     [
         (OFFICIAL, "Official NVDA token (Robinhood)"),
         (UNKNOWN, "Unknown (Token symbol or name unavailable)"),
+        # The check reads the token's symbol and name itself, so it stands without the report's.
+        (IMPOSTOR, f"\N{WARNING SIGN} {IMPOSTOR_FLAG}"),
+        (COLLISION, f"Not the official AMD token (same ticker); official contract {AMD}"),
+        (NO_MATCH, "No match among official Robinhood Chain tokens"),
     ],
 )
-def test_an_official_or_unknown_check_is_stated_without_metadata(check, line):
+def test_a_check_is_stated_without_the_reports_metadata(check, line):
     assert (
         f"Official Token Check: {line}"
         in assert_literal(_report(check, token_info={})).splitlines()
@@ -655,26 +659,48 @@ def test_an_official_or_unknown_check_is_stated_without_metadata(check, line):
         ({"name": "Tesla, Inc. dShares", "symbol": "TSLA.d"}, "collision", False),
     ],
 )
-async def test_a_4663_bot_scan_checks_the_token_it_read(
+async def test_a_4663_bot_scan_checks_the_symbol_and_name_it_reads_itself(
     bot_scan_functions, handler, metadata, status, flagged
 ):
     ns = bot_scan_functions
     ns["format_full_report"] = format_full_report
-    ns["web3_client"].get_token_info = AsyncMock(return_value=metadata)
-    ns["container"].robinhood_assets.check = AsyncMock(
-        side_effect=lambda *args: check_token(*args, LISTED)
+    # The token info read fails whole when decimals() or totalSupply() reverts, which an impostor can
+    # arrange; the check reads symbol() and name() on its own, as the launch hunter's does.
+    ns["web3_client"].get_token_info = AsyncMock(return_value={})
+    ns["container"].robinhood_assets.check_onchain = AsyncMock(
+        return_value=check_token(TOKEN, metadata["symbol"], metadata["name"], LISTED)
     )
     message = update()
 
     await ns[handler](message, TOKEN, chain_id=4663)
 
-    ns["container"].robinhood_assets.check.assert_awaited_once_with(
-        TOKEN, metadata["symbol"], metadata["name"]
+    ns["container"].robinhood_assets.check_onchain.assert_awaited_once_with(
+        TOKEN, RUN_ALL_DEADLINE_SECONDS
     )
     report = message.message.reply_text.await_args.args[0]
     assert ("\N{BULLET} Impersonates official" in report) is flagged
+    assert "*Official Token Check:*" in report
     published = ns["container"].verdict_publisher.publish_fire_and_forget.call_args.args[2]
     assert published["impostor_check"]["status"] == status
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handler", ["scan_contract", "check_token"])
+async def test_a_4663_bot_scan_checks_alongside_the_analyzers(bot_scan_functions, handler):
+    ns = bot_scan_functions
+    checking = asyncio.Event()
+
+    async def run_all(ctx):
+        await asyncio.wait_for(checking.wait(), 1)
+        return []
+
+    ns["container"].registry.run_all = run_all
+    ns["container"].robinhood_assets.check_onchain = AsyncMock(side_effect=lambda *args: checking.set() or IMPOSTOR)
+
+    await ns[handler](update(), TOKEN, chain_id=4663)
+
+    published = ns["container"].verdict_publisher.publish_fire_and_forget.call_args.args[2]
+    assert published["impostor_check"] == IMPOSTOR
 
 
 @pytest.mark.asyncio
@@ -682,4 +708,4 @@ async def test_a_4663_bot_scan_checks_the_token_it_read(
 async def test_other_chain_bot_scans_are_not_checked(bot_scan_functions, handler):
     await bot_scan_functions[handler](update(), TOKEN, chain_id=56)
 
-    bot_scan_functions["container"].robinhood_assets.check.assert_not_awaited()
+    bot_scan_functions["container"].robinhood_assets.check_onchain.assert_not_awaited()
