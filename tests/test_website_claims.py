@@ -154,12 +154,43 @@ def welcome_text() -> str:
 
 
 def test_welcome_page_does_not_claim_the_extension_blocks():
-    # The extension warns and lets the user decide. It refuses a request on its own only when the request
-    # times out or the wallet chain is unknown or changes (extension/inject.js), which the page may say.
+    # The extension warns and lets the user decide. It refuses some requests on its own (a timeout, an unknown or
+    # mismatched chain, a frame or popup the page can script, send and sendAsync; extension/inject.js), which the
+    # page may say.
     text = " ".join(welcome_text().split()).lower()
     overclaims = ("stopped in their tracks", "blocks the transaction", "blocks transactions", "are blocked")
     claims = [phrase for phrase in overclaims if phrase in text]
     assert not claims, f"welcome.html claims the extension blocks transactions: {claims}"
+
+
+def test_no_page_says_the_extension_refuses_only_in_some_cases():
+    # inject.js refuses more than a timeout and a chain it cannot confirm: a request from a frame or popup the
+    # page can script, a checked method sent through send or sendAsync, and a wallet_sendCalls batch with a call
+    # on another chain. No page may present its list of refusals as the only ones.
+    inject = read(ROOT / "extension" / "inject.js")
+    for refusal in ('type: "SHIELDAI_UNCHECKABLE"', 'type: "SHIELDAI_LEGACY_REFUSED"', "const callsOnAnotherChain = "):
+        assert refusal in inject, refusal
+    for name, text in {**landing_texts(), "welcome.html": welcome_text()}.items():
+        for sentence in re.split(r"(?<=[.;:])\s", " ".join(text.split())):
+            if re.search(r"\brefuse[sd]?\b", sentence, re.IGNORECASE):
+                assert not re.search(r"\bonly\b", sentence, re.IGNORECASE), f"{name}: {sentence!r}"
+    faq = " ".join(read(COMPONENTS / "FAQ.tsx").split())
+    for case in ("frame or popup the page can script", "send or sendAsync", "wallet_sendCalls", "Strict mode"):
+        assert case in faq, case
+
+
+def test_approval_scans_are_described_as_erc20_only():
+    # Wallet Health and the Portfolio Guardian read approvals from services/rescue_service.py, which asks the
+    # chain for the ERC-20 Approval event only: NFT approvals (ApprovalForAll) are never scanned.
+    rescue = read(ROOT / "services" / "rescue_service.py")
+    assert rescue.count("APPROVAL_FOR_ALL_TOPIC") == 1, "rescue_service.py now uses ApprovalForAll: update the site"
+    statements = 0
+    for name, text in landing_texts().items():
+        prose = " ".join(text.split())
+        for match in re.finditer(r"\btoken approvals\b", prose):
+            assert prose[: match.start()].endswith("ERC-20 "), f"{name}: {prose[match.start() - 40 : match.end()]!r}"
+            statements += 1
+    assert statements, "the site should say which approvals it scans"
 
 
 def extension_chain_ids() -> set:

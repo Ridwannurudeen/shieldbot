@@ -20,7 +20,7 @@ if (verdict.blocked) stop();`,
   {
     version: "V3.2",
     title: "Portfolio Guardian",
-    desc: "Continuous wallet health monitoring with 5-component scoring: dangerous approvals, flagged token exposure, approval staleness, concentration risk, and deployer risk — from 0 to 100.",
+    desc: "Continuous wallet health monitoring with 5-component scoring: dangerous ERC-20 token approvals, flagged token exposure, approval staleness, concentration risk, and deployer risk — from 0 to 100.",
     code: null,
   },
   {

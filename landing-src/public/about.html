@@ -88,17 +88,17 @@
 
     <div class="hero">
       <h1>How ShieldAI Protects Your Wallet</h1>
-      <p>ShieldAI checks blockchain transactions before your wallet signs them, combining contract analysis, a buy and sell simulation and threat intelligence into one risk score. If a check cannot run, it says Unknown instead of Safe.</p>
+      <p>ShieldAI checks blockchain transactions before your wallet signs them, combining contract analysis, a buy and sell simulation where the chain has one, and threat intelligence into one risk score. If a check cannot run, it says Unknown instead of Safe.</p>
     </div>
 
     <div class="callout">
-      ShieldAI operates at the transaction layer, not the URL layer. It intercepts <code>eth_sendTransaction</code> in the browser's page context before your wallet ever receives the signature request.
+      ShieldAI operates at the transaction layer, not the URL layer. In the browser's page context, before your wallet receives the request, it intercepts transactions (<code>eth_sendTransaction</code>, <code>eth_signTransaction</code>), batches (<code>wallet_sendCalls</code>) and signature requests (<code>eth_signTypedData</code> and its <code>_v1</code>, <code>_v3</code> and <code>_v4</code> forms, <code>personal_sign</code> and <code>eth_sign</code>).
     </div>
 
     <!-- BLOCK 1: What it is -->
     <h2>What ShieldAI Does</h2>
     <p>ShieldAI is a Chrome browser extension that acts as a transaction firewall for Web3 wallets. Every time you initiate a transaction on a DApp — a swap, a token purchase, an NFT mint — ShieldAI intercepts it before your wallet receives the signature request.</p>
-    <p>The risk score combines four weighted checks: contract code (including bytecode patterns for unverified contracts), market and liquidity data, on-chain reputation, and a buy and sell simulation, together with scam databases such as GoPlus. The result is a risk score from 0 to 100 with a plain-English explanation of what was found. You always choose whether to cancel or sign.</p>
+    <p>The risk score combines four weighted checks: contract code (including bytecode patterns for unverified contracts), market and liquidity data, on-chain reputation, and honeypot checks (a buy and sell simulation where the chain has one), together with scam databases such as GoPlus. The result is a risk score from 0 to 100 with a plain-English explanation of what was found. For a warning, you choose whether to cancel or sign.</p>
 
     <!-- BLOCK 2: Risk score -->
     <h2>How Risk Is Rated</h2>
@@ -126,12 +126,12 @@
     <!-- BLOCK 4: Honeypot detection -->
     <h2>Honeypot Detection</h2>
     <p>A honeypot token allows users to buy but contains hidden code that blocks all sell transactions. The token appears to have liquidity and price action, but holders can never exit.</p>
-    <p>ShieldAI looks for honeypots in two ways: it simulates a buy and a sell of the token, and it checks the contract's bytecode for known honeypot patterns, which works even for unverified contracts. If the sell simulation cannot run, the result is Unknown rather than Safe.</p>
+    <p>ShieldAI looks for honeypots in two ways. It simulates a buy and a sell of the token where the chain has a simulator: honeypot.is on BNB Chain, Ethereum and Base, and ShieldBot's own simulation on supported Robinhood Chain pool routes. On the other chains it uses GoPlus's honeypot and tax flags instead. It also checks the contract's bytecode for owner powers a honeypot can use, such as a blacklist or a pause switch, which works even for unverified contracts. If a simulation fails, or neither source answers, the result is Unknown rather than Safe.</p>
 
     <!-- BLOCK 5: Transaction simulation -->
     <h2>Pre-Sign Transaction Simulation</h2>
     <p>When transaction simulation is enabled, ShieldAI sends the transaction to Tenderly for simulation on a copy of the chain state. Tenderly runs it in a sandbox and returns the tokens and amounts that would leave or enter your wallet.</p>
-    <p>ShieldAI displays this asset delta before the wallet signature dialog appears. For example: <em>"You will send 2.5 BNB and receive 10,000 TOKEN."</em> If the simulation shows unexpected asset loss, the transaction is flagged HIGH RISK or BLOCK.</p>
+    <p>ShieldAI displays this asset delta before the wallet signature dialog appears. For example: <em>"You will send 2.5 BNB and receive 10,000 TOKEN."</em> Tokens the simulation shows leaving your wallet are listed as warnings beside the verdict; they do not change the verdict itself. If the transaction reverts in the simulation, the result is incomplete and cannot be SAFE, and a revert on a contract whose risk score is already 30 or more is BLOCK RECOMMENDED.</p>
 
     <!-- BLOCK 6: Comparison -->
     <h2>ShieldAI vs. Browser Phishing Warnings</h2>
@@ -149,7 +149,7 @@
       <div class="compare-card shield">
         <h4>ShieldAI Transaction Firewall</h4>
         <ul>
-          <li>Intercepts at <code>eth_sendTransaction</code></li>
+          <li>Intercepts the transaction, batch and signature methods listed above</li>
           <li>Analyzes contract bytecode for honeypot/rug patterns</li>
           <li>Simulates the asset change before signing, when enabled</li>
           <li>Scores deployer history across past deployments</li>
@@ -160,7 +160,7 @@
 
     <!-- BLOCK 7: Privacy / Trust -->
     <h2>What Data ShieldAI Collects</h2>
-    <p>ShieldAI collects the minimum data required to perform a security scan: the transaction's recipient address, sender address, value, calldata, chainId, and any EIP-712 typed data. This data is sent to the ShieldAI API over HTTPS for risk analysis.</p>
+    <p>The extension sends only what a check needs to the ShieldAI API, over HTTPS. For a transaction, or each call of a batch, that is the recipient, sender, value, calldata and chain ID, and for an EIP-7702 transaction each delegate's address, never the signed authorization. For a typed-data signature it is the signing method, any EIP-712 typed data, your address and the chain ID. For <code>personal_sign</code> and <code>eth_sign</code> it is only the signing method and the chain ID: never the message or hash you sign, and not your address. Each of these checks carries your Balanced or Strict setting. The phishing check sends only the origin (scheme, host and port) of the site you open. When you use Wallet Health, the wallet address you enter is sent too.</p>
     <ul>
       <li>Scan results are stored by contract address and chain, <strong>not</strong> with your IP address</li>
       <li>Scan history (last 50 results) is stored locally in <code>chrome.storage.local</code> — never uploaded</li>
