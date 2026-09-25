@@ -391,9 +391,9 @@ shieldbot/
 ├── api.py                       # FastAPI backend entry point
 │
 ├── docs/
-│   ├── PROJECT.md               # Problem, solution, impact, roadmap
 │   ├── TECHNICAL.md             # This file (architecture, setup)
-│   └── EXTRAS.md                # Additional documentation (optional)
+│   ├── DEPLOYMENT.md            # Production deployment guide
+│   └── DEPLOYMENTS.md           # Deployed contracts
 │
 ├── scanner/
 │   ├── transaction_scanner.py  # Pre-tx security checks
@@ -1050,7 +1050,7 @@ MIT License - see LICENSE file for details
 
 - **Issues**: https://github.com/Ridwannurudeen/shieldbot/issues
 - **Email**: support@shieldbotsecurity.online
-- **Founder (Telegram)**: [@Ggudman](https://t.me/Ggudman)
+- **Founder**: Ridwan Nurudeen ([@Ggudman](https://t.me/Ggudman) on Telegram)
 
 ---
 
