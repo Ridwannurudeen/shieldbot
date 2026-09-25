@@ -4,6 +4,7 @@ import pytest
 from utils.risk_scorer import (
     calculate_risk_score,
     compute_confidence,
+    findings_from_scan_result,
     score_level_from_int,
 )
 
@@ -134,3 +135,13 @@ class TestScoreLevelFromInt:
 
     def test_low_at_0(self):
         assert score_level_from_int(0) == "LOW"
+
+
+def test_ai_source_analysis_never_becomes_score_points():
+    # The AI explains a verdict and never sets a score, so an AI severity in a scan result adds nothing.
+    result = {
+        "source_analysis": {
+            "dangerous_patterns": [{"severity": "critical", "pattern": "selfdestruct", "detail": "owner can destroy"}],
+        },
+    }
+    assert findings_from_scan_result(result) == []
