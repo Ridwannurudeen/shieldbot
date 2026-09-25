@@ -16,8 +16,6 @@ Three contracts connect that evidence to an application action:
 
 The intended users are people inspecting Robinhood launches and applications that want to make a payment conditional on a recorded risk policy. The contract consumer adds enforcement for that specific payment path; advisory interfaces and other wallet transactions have different behavior. This is a working implementation and reproducible test path, not a claim of measured adoption or detection accuracy.
 
-**Demand surface: launchpads, routers and agents.** The owner's September 22 market investigation found that **no mainnet lender on 4663 accepts arbitrary collateral**: Morpho on 4663 is the Robinhood Earn back end with curated markets; anora lends against curated originators; `squeeze` is unbuilt; Nokturn is undeployed with a four-token allowlist. This is an owner-supplied finding, not an independent market survey performed in this documentation pass. The guard is aimed at launchpads, routers and agents; no existing arbitrary-collateral lending market or lender integration is claimed.
-
 ## Robinhood Chain observation census
 
 From **2026-09-14T02:18:58Z** to **2026-09-22T17:19:08Z**, about 8.6 days, the standalone collector recorded **68,666 tokens** first appearing in observed liquidity pool creation events on Robinhood Chain, about 8,000 a day. These are first observed pool appearances, not token deployments or ShieldBot scans. V4 accounted for 57,142 and V2 for 11,674. V3 was not measured, and source counts can overlap.
@@ -45,10 +43,6 @@ This is a live product with real monitoring volume and a small number of complet
 **The `chains_protected: 7` counter is stale.** The owner's same-day production observation from **GET https://api.shieldbotsecurity.online/api/health** reports `supported_chains: [56,1,8453,42161,137,204,10,4663]`: eight configured chains including Robinhood. **GET https://api.shieldbotsecurity.online/api/launches/4663** returned **HTTP 200**. Availability of a route is not equal provider coverage across chains.
 
 Revision **`27aca4d`** was deployed to production on **2026-09-23**. After deployment, a live Robinhood Chain scan returned `contract_age_days: 145`, `is_verified: true`, and `status: ok`. `/api/health` listed chain 4663.
-
-## External validation — sought, no reply received
-
-As of **2026-09-22**, the owner reports outreach to prospective integrators in the categories **launchpads, routers and trading agents on 4663**. **No reply has been received.** No external endorsement, accepted integration or validated customer demand is claimed. Parties are not named without their consent; outreach is evidence of seeking feedback, not evidence that the product has been validated externally.
 
 **OWNER_FILL_EXTERNAL_FEEDBACK_STATUS** — Before submission, replace with either a dated, consented summary of an actual reply (distinguishing interest from an integration commitment), or: **"As of the submission date, no reply has been received; external validation remains outstanding."** A lack of replies is an explicit outcome, not a reason to imply endorsement.
 
