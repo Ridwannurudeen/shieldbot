@@ -229,6 +229,44 @@ async def test_chain_id_that_is_not_a_positive_int_is_rejected_before_any_reques
     await client.close()
 
 
+@pytest.mark.parametrize("timeout", [0, -1, 0.0, float("nan"), float("inf"), "10", None, True])
+def test_a_timeout_that_is_not_a_positive_number_is_rejected(timeout):
+    with pytest.raises(ValueError, match="timeout must be a positive number of seconds"):
+        ShieldBot(api_key="sb_test", agent_id="agent:1", timeout=timeout)
+
+
+@pytest.mark.parametrize("cache_size", [-1, 1.5, "10", None, True])
+def test_a_cache_size_that_is_not_an_int_of_0_or_more_is_rejected(cache_size):
+    with pytest.raises(ValueError, match="cache_size must be an int of 0 or more"):
+        ShieldBot(api_key="sb_test", agent_id="agent:1", cache_size=cache_size)
+
+
+@pytest.mark.parametrize("options", [
+    {"timeout": 0.5}, {"timeout": 10}, {"cache_size": 0}, {"cache_size": 1}, {"cache_size": Wei(5)},
+])
+def test_a_positive_timeout_and_a_cache_size_of_0_or_more_are_accepted(options):
+    ShieldBot(api_key="sb_test", agent_id="agent:1", **options)
+
+
+@pytest.mark.asyncio
+async def test_cache_size_0_turns_the_cache_off():
+    client = ShieldBot(api_key="sb_test", agent_id="agent:1", cache_size=0)
+    response = MagicMock(status_code=200)
+    response.json.return_value = {"status": "ok", "coverage": {"honeypot": 1}, "verdict": "ALLOW", "score": 5}
+    transaction = {"from": "0xA", "to": "0xB", "chain_id": 56}
+    with patch(
+        "shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock,
+        side_effect=[response, response, httpx.ConnectError("offline")],
+    ) as post:
+        await client.check(transaction)
+        second = await client.check(transaction)
+        offline = await client.check(transaction)
+    assert post.await_count == 3
+    assert second.cached is False
+    assert (offline.verdict, offline.cached, offline.analysis_unavailable) == ("WARN", False, True)
+    await client.close()
+
+
 class Chain(IntEnum):
     BSC = 56
 

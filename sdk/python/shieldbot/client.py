@@ -4,6 +4,7 @@ import json
 import re
 import time
 import logging
+import math
 import dataclasses
 from typing import Dict, Optional
 from collections import OrderedDict
@@ -57,6 +58,10 @@ class ShieldBot:
         fail_mode: str = "cached",
         timeout: float = 10.0,
     ):
+        if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or not 0 < timeout < math.inf:
+            raise ValueError("timeout must be a positive number of seconds")
+        if not isinstance(cache_size, int) or isinstance(cache_size, bool) or cache_size < 0:
+            raise ValueError("cache_size must be an int of 0 or more (0 turns the cache off)")
         self.api_key = api_key
         self.agent_id = agent_id
         self.base_url = base_url.rstrip("/")
