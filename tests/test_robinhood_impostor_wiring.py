@@ -206,6 +206,17 @@ def _older(check):
         (_older(IMPOSTOR), NO_MATCH, NO_MATCH),
         ({key: value for key, value in IMPOSTOR.items() if key != "rules"}, NO_MATCH, NO_MATCH),
         (NO_MATCH, _older(IMPOSTOR), NO_MATCH),
+        # A newer check that could not decide (a timeout, a failed read) never replaces a decided one.
+        (_older(IMPOSTOR), UNKNOWN, _older(IMPOSTOR)),
+        (_older(COLLISION), UNKNOWN, _older(COLLISION)),
+        (_older(OFFICIAL), UNKNOWN, _older(OFFICIAL)),
+        (
+            {key: value for key, value in IMPOSTOR.items() if key != "rules"},
+            UNKNOWN,
+            {key: value for key, value in IMPOSTOR.items() if key != "rules"},
+        ),
+        # A "none" made under older rules may be one the newer rules would not decide, so it is replaced.
+        (_older(NO_MATCH), UNKNOWN, UNKNOWN),
         # An official finding is not replaced from a shorter list.
         (OFFICIAL, {**IMPOSTOR, "list_size": 150}, OFFICIAL),
         (OFFICIAL, {**OFFICIAL, "list_size": 150}, OFFICIAL),

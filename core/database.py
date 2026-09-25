@@ -2507,17 +2507,25 @@ class Database:
     async def record_launch_impostor_check(self, chain_id: int, token_address: str, check: Dict):
         """Store a launch's check against the official Robinhood tokens (services.robinhood_assets).
 
-        A check made under newer rules replaces the stored one outright, so a corrected rule corrects the
-        stored labels on the next scan; checks stored before rule versions count as rules 1. Under the
-        same rules a check never replaces a more decided one (_IMPOSTOR_CHECK_RANK), so a failed read
-        cannot turn an impostor, official or collision finding into none or unknown, and an official
-        finding is not replaced by a check made from a shorter list. One UPDATE decides and writes.
+        A check made under newer rules replaces the stored one, so a corrected rule corrects the stored
+        labels on the next scan, unless it is unknown and the stored one is decided (impostor, collision
+        or official): a failed read or a timeout under the new rules decides nothing. Checks stored before
+        rule versions count as rules 1. Under the same rules a check never replaces a more decided one
+        (_IMPOSTOR_CHECK_RANK), so a failed read cannot turn an impostor, official or collision finding
+        into none or unknown, and an official finding is not replaced by a check made from a shorter
+        list. One UPDATE decides and writes.
         """
         await self._db.execute(f"""
             UPDATE discovered_launches SET impostor_check = :check
             WHERE chain_id = :chain_id AND token_address = :token AND (
                 impostor_check IS NULL
-                OR COALESCE(json_extract(impostor_check, '$.rules'), 1) < :rules
+                OR (
+                    COALESCE(json_extract(impostor_check, '$.rules'), 1) < :rules
+                    AND (
+                        :rank > {_IMPOSTOR_CHECK_RANK["unknown"]}
+                        OR {_STORED_IMPOSTOR_CHECK_RANK} <= {_IMPOSTOR_CHECK_RANK["none"]}
+                    )
+                )
                 OR (
                     COALESCE(json_extract(impostor_check, '$.rules'), 1) = :rules
                     AND {_STORED_IMPOSTOR_CHECK_RANK} <= :rank
