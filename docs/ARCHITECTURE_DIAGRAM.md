@@ -1,6 +1,6 @@
 # ShieldBot - Architecture Diagram
 
-These are simplified BNB architecture illustrations, not evidence that every provider is available. The extension's shipped-chain limitation and current source-tree coverage contract are described in [TECHNICAL.md](TECHNICAL.md).
+These are simplified February 2026 illustrations of the BNB Smart Chain and opBNB path, not evidence that every provider is available. The current chain list is in [the README](../README.md); the extension's shipped-chain limitation and current source-tree coverage contract are described in [TECHNICAL.md](TECHNICAL.md).
 
 ## System Architecture
 
@@ -44,7 +44,7 @@ flowchart TB
 
 ## Transaction Flow
 
-Simplified historical BNB path. Optional services can be disabled or fail. Greenfield creates an object record on-chain and stores report bytes with a storage provider; it is separate from the Robinhood verdict registry.
+Simplified historical BNB Smart Chain path. Optional services can be disabled or fail. Greenfield creates an object record on-chain and stores report bytes with a storage provider; it is separate from the Robinhood verdict registry.
 
 ```mermaid
 sequenceDiagram

@@ -40,9 +40,10 @@ ShieldBot follows a **3-tier architecture**:
 ┌─────────────────────────────────────────────────────────────────┐
 │                       BLOCKCHAIN LAYER                           │
 ├─────────────────────────────────────────────────────────────────┤
-│  • BSC Mainnet (chain ID 56)                                     │
-│  • opBNB Mainnet (chain ID 204)                                  │
-│  • BNB Greenfield (decentralized storage)                        │
+│  • Configured chain adapters: BNB Smart Chain (56), opBNB (204), │
+│    Ethereum (1), Base (8453), Arbitrum One (42161),              │
+│    Polygon PoS (137), Optimism (10), Robinhood Chain (4663)      │
+│  • BNB Greenfield (optional report storage)                      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -265,7 +266,7 @@ The routes that feed these loops are open to anyone, so nothing they send can bl
 
 The analyzer registry schedules applicable checks concurrently. The historical direct-call sketch below omits explicit chain routing; use `bot.py` and `core/registry.py` for the current path.
 
-**Historical BNB-only sketch**:
+**Historical direct-call sketch**:
 ```python
 contract_data, honeypot_data, dex_data, ethos_data, token_info = await asyncio.gather(
     contract_service.fetch_contract_data(address),
@@ -438,29 +439,6 @@ shieldbot/
 
 ## Setup & Installation
 
-### ⚠️ Important Note for Judges/Evaluators
-
-**You don't need all API keys to evaluate ShieldBot!**
-
-**Minimum setup to test core features:**
-1. **Only BSCSCAN_API_KEY is required** (free at [bscscan.com/myapikey](https://bscscan.com/myapikey))
-2. Run: `uvicorn api:app --host 0.0.0.0 --port 8000`
-3. Visit: `http://localhost:8000/docs` (the interactive API docs)
-4. Available checks run with the configured providers; missing or unsupported provider coverage must remain unknown. A BscScan key alone does not provide every risk check.
-
-**Features that require optional API keys:**
-- **Telegram Bot**: Requires TELEGRAM_BOT_TOKEN → **Historical bot link: [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot), availability unverified here**
-- **BNB Greenfield**: Requires GREENFIELD_PRIVATE_KEY → Optional, only for report uploads
-- **Tenderly Simulation**: Requires TENDERLY_API_KEY → Optional, core features work without it
-- **AI Analysis**: Requires AI_API_KEY → Optional enhancement
-
-**Easiest evaluation methods:**
-1. **Historical Telegram link** (availability unverified here): [@shieldbot_bnb_bot](https://t.me/shieldbot_bnb_bot)
-2. **Demo Video** (3 minutes): [Watch on YouTube](https://youtu.be/a-PbFsZz0Ds)
-3. **Local API** (BscScan key only): Follow setup below
-
----
-
 ### Prerequisites
 
 - **Python 3.11+** ([download](https://www.python.org/downloads/))
@@ -565,16 +543,6 @@ python bot.py
 ---
 
 ## Demo Guide
-
-### 🎥 Video Walkthrough
-
-**Watch the complete 3-minute demo:** [View on YouTube](https://youtu.be/a-PbFsZz0Ds)
-
-The video shows:
-- Chrome extension intercepting and blocking honeypot transactions
-- Telegram bot displaying token names and symbols
-- Real-time risk analysis with composite ShieldScore
-- BNB Greenfield forensic report storage
 
 ### Illustrative Output Examples
 
