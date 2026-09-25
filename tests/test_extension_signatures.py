@@ -597,6 +597,26 @@ def test_the_overlay_names_both_domains_of_a_sign_in_mismatch(policy):
     )
 
 
+# The domain a sign-in message claims is the page's text: it is shown as written, not expanded as a
+# replacement pattern ($') or filled in as another placeholder ({origin}).
+@pytest.mark.parametrize("domain", ["wallet-login.example$'", "wallet-login.example$`", "{origin}"])
+def test_the_overlay_shows_a_claimed_domain_as_written(domain):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const domain = JSON.parse(process.argv[1]);
+  analyze = async () => ({result: {status: 'ok', partial: false, classification: 'BLOCK_RECOMMENDED', risk_score: 100,
+    coverage: {siwe: 1}, coverage_reasons: {}, siwe: {state: 'mismatch', domain, origin: 'dapp.example'}}});
+  await intercept('request', {signMethod: 'personal_sign', data: '0x00', chainId: 1}, 'personal_sign');
+  const html = overlay().innerHTML;
+  assert(html.includes(`This sign-in message is for ${domain}, but the page asking you to sign it is dapp.example. ` +
+    'A page that asks you to sign in to another site is likely phishing.'), html);
+""",
+        domain,
+    )
+
+
 # A Block Recommended overlay in Balanced mode, a transaction's or a signature's, and the ways to
 # press and let go of its Proceed or Sign Anyway button.
 HOLD = r"""

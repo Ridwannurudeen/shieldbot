@@ -27,14 +27,14 @@
       _ct18n = {};
     }
   }
+  // Placeholders are filled as i18n.js fills them: in one pass, by a function,
+  // so a value (a sign-in message's domain, which the page writes) is used as
+  // written, $ patterns and other placeholders' names included.
   function _t(key, repl) {
-    let s = _ct18n[key] !== undefined ? _ct18n[key] : key;
-    if (repl) {
-      Object.entries(repl).forEach(([k, v]) => {
-        s = s.replace(`{${k}}`, v);
-      });
-    }
-    return s;
+    const s = _ct18n[key] !== undefined ? _ct18n[key] : key;
+    if (!repl) return s;
+    return s.replace(/\{(\w+)\}/g, (placeholder, name) =>
+      Object.hasOwn(repl, name) ? String(repl[name]) : placeholder);
   }
 
   // Per-document secret shared with inject.js, which runs in the page's own
