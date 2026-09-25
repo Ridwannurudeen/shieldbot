@@ -123,7 +123,7 @@ const window = {
     if (scenario === 'changed-back') change('0x1237');
     if (scenario === 'changed-without-event') chain = '0x38';
     proofFor(`${message.requestId}:proceed`).then(proof => window.dispatchEvent({type: 'message', source: window,
-      data: {type: 'SHIELDAI_TX_VERDICT', requestId: message.requestId, action: 'proceed', proof}}));
+      isTrusted: true, data: {type: 'SHIELDAI_TX_VERDICT', requestId: message.requestId, action: 'proceed', proof}}));
   },
 };
 const context = vm.createContext({

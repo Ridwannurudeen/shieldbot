@@ -220,14 +220,24 @@
     });
   }
 
-  // Compare a received proof with the expected one byte by byte, using no
-  // built-in a page could replace.
+  // Compare a received proof with the expected one, using no built-in a page
+  // could replace. A proof can be the page's own object, whose values are
+  // getters that see each read, so all 32 values are read first, once each
+  // and in order whatever they are, into an object with no prototype (an
+  // array's could hold a setter the page put there). Only then are they
+  // compared, with no early exit, so which reads happen says nothing about
+  // how much of a guess was right. Anything but 32 byte values fails.
   function sameProof(expected, received) {
     if (typeof received !== "object" || received === null) return false;
+    const values = { __proto__: null };
+    for (let i = 0; i < 32; i++) values[i] = received[i];
+    let difference = 0;
     for (let i = 0; i < 32; i++) {
-      if (received[i] !== expected[i]) return false;
+      const value = values[i];
+      if (!isSafeInteger(value) || value < 0 || value > 255) difference = 1;
+      else difference |= value ^ expected[i];
     }
-    return true;
+    return difference === 0;
   }
 
   /**
@@ -686,6 +696,12 @@
     };
 
     function handleMessage(event) {
+      // Only a message the browser dispatched counts. A page can dispatch a
+      // MessageEvent it made itself, with the window as its source and data
+      // that is its own live object rather than a copy; such an event is never
+      // trusted, and isTrusted is the event's own property, which the page
+      // cannot change.
+      if (ownValue(event, "isTrusted") !== true) return;
       // Anything read here comes from a page-visible message and counts only
       // once its proof checks out.
       const data = event.data;

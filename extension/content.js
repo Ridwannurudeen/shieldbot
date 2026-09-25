@@ -58,14 +58,20 @@
     return new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(`${requestId}:${purpose}`)));
   }
 
-  // Compare a received proof with the expected one byte by byte, as inject.js
-  // does.
+  // Compare a received proof with the expected one as inject.js does: all 32
+  // values are read first, once each and in order whatever they are, then
+  // compared with no early exit. Anything but 32 byte values fails.
   function sameProof(expected, received) {
     if (typeof received !== "object" || received === null) return false;
+    const values = { __proto__: null };
+    for (let i = 0; i < 32; i++) values[i] = received[i];
+    let difference = 0;
     for (let i = 0; i < 32; i++) {
-      if (received[i] !== expected[i]) return false;
+      const value = values[i];
+      if (!Number.isSafeInteger(value) || value < 0 || value > 255) difference = 1;
+      else difference |= value ^ expected[i];
     }
-    return true;
+    return difference === 0;
   }
 
   // Whether another script of this page can reach this document before the
@@ -115,10 +121,11 @@
   // sendAsync. The messages are unsigned (a page can post them too), so all
   // they do is show the user a notice, once per kind per document; a notice
   // has no buttons and decides nothing. The frame notice is shown only where
-  // this script made the same refusal decision.
+  // this script made the same refusal decision. As with every message here,
+  // only one the browser dispatched counts, never an event a page made itself.
   const _shownNotices = new Set();
   window.addEventListener("message", (event) => {
-    if (event.source !== window || !event.data) return;
+    if (!event.isTrusted || event.source !== window || !event.data) return;
     const type = event.data.type;
     const key = type === "SHIELDAI_LEGACY_REFUSED" ? "legacyRefusedNotice"
       : type === "SHIELDAI_UNCHECKABLE" && reachable ? "uncheckableNotice" : null;
@@ -145,6 +152,7 @@
   // Listen for intercepted transactions from inject.js
   window.addEventListener("message", async (event) => {
     if (
+      !event.isTrusted ||
       event.source !== window ||
       !event.data ||
       event.data.type !== "SHIELDAI_TX_INTERCEPT"
