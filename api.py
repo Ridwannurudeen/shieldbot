@@ -1780,8 +1780,12 @@ async def _firewall_verdict(
                 "notes": risk_output.get("notes", []),
             }
 
-            # Persist contract score to DB
+            # Persist contract score to DB. The row keeps the policy engine's failed_sources, the
+            # required checks STRICT decides on, so a cached answer is judged as this one was.
             if container and container.db and describes_target:
+                scan_metadata = {**_coverage_fields(alert), 'notes': risk_output.get('notes', [])}
+                if 'failed_sources' in risk_output:
+                    scan_metadata['failed_sources'] = risk_output['failed_sources']
                 try:
                     await container.db.upsert_contract_score(
                         address=to_addr,
@@ -1791,7 +1795,7 @@ async def _firewall_verdict(
                         archetype=risk_output.get("risk_archetype"),
                         category_scores={
                             **risk_output.get("category_scores", {}),
-                            '_scan_metadata': {**_coverage_fields(alert), 'notes': risk_output.get('notes', [])},
+                            '_scan_metadata': scan_metadata,
                         },
                         flags=risk_output.get("critical_flags"),
                         confidence=alert.get("confidence"),
@@ -3353,9 +3357,14 @@ def _build_cached_response(
 
     category_scores = dict(cached.get('category_scores', {}))
     metadata = category_scores.pop('_scan_metadata', {})
-    # STRICT blocks on Unknown, as core.policy does for a fresh scan. A cached row keeps its coverage
-    # but not which fields were missing, so any Unknown in it blocks.
-    if policy_mode == 'STRICT' and is_scan_incomplete({**metadata, 'risk_level': risk_level}):
+    # STRICT blocks what core.policy blocked on the fresh scan: a failed required check, which the row
+    # keeps as failed_sources. A row written without them (before they were stored, or by a path with
+    # no policy engine) does not say which fields were missing, so any Unknown in it blocks.
+    failed_sources = metadata.get('failed_sources')
+    failed = bool(failed_sources) if failed_sources is not None else is_scan_incomplete(
+        {**metadata, 'risk_level': risk_level}
+    )
+    if policy_mode == 'STRICT' and failed:
         risk_score = max(risk_score, verdicts.STRICT_BLOCK_SCORE)
         risk_level = verdicts.HIGH
         flags = ['Policy override: cached analysis unavailable or incomplete', *flags]
@@ -3476,7 +3485,8 @@ def _build_fallback_response(
     if whitelisted:
         risk_score = max(0, risk_score - 20)
 
-    # STRICT blocks a degraded analysis, as core.policy does an incomplete one.
+    # STRICT blocks a degraded analysis, as core.policy does an incomplete one. The fallback has no
+    # policy engine to say which required checks failed, so under STRICT it blocks whatever it covers.
     strict = policy_mode == 'STRICT'
     if strict:
         risk_score = max(risk_score, verdicts.STRICT_BLOCK_SCORE)
