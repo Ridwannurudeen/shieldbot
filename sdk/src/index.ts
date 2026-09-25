@@ -40,6 +40,11 @@ export interface ScanOptions {
   chainId: number;
 }
 
+export interface ThreatGraphOptions extends ScanOptions {
+  /** How many hops to follow from the address. Default: 3. The API bounds it to 1 through 5. */
+  maxDepth?: number;
+}
+
 export interface FirewallOptions extends ScanOptions {
   /** Sender address. */
   from?: string;
@@ -503,10 +508,12 @@ export class ShieldBot {
   /**
    * Query the threat graph for an address.
    */
-  async queryThreatGraph(address: string, chainId: number, maxDepth = 3): Promise<Record<string, unknown>> {
-    return this._get(
-      `/api/graph/check/${address}?chain_id=${this._requireChainId(chainId, 'queryThreatGraph')}&max_depth=${maxDepth}`,
-    );
+  async queryThreatGraph(address: string, options: ThreatGraphOptions): Promise<Record<string, unknown>> {
+    const params = new URLSearchParams({
+      chain_id: String(this._requireChainId(options?.chainId, 'queryThreatGraph')),
+      max_depth: String(options.maxDepth ?? 3),
+    });
+    return this._get(`/api/graph/check/${address}?${params}`);
   }
 
   /**

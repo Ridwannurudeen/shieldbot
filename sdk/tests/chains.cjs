@@ -39,7 +39,7 @@ for (const [name, call] of [
   ['firewall', (sdk, chainId) => sdk.firewall(target, { chainId })],
   ['check', (sdk, chainId) => sdk.check({ from: '0xa', to: target, chainId })],
   ['rescue', (sdk, chainId) => sdk.rescue(target, chainId)],
-  ['queryThreatGraph', (sdk, chainId) => sdk.queryThreatGraph(target, chainId)],
+  ['queryThreatGraph', (sdk, chainId) => sdk.queryThreatGraph(target, { chainId })],
 ]) {
   for (const chainId of ['56', '0x38', 56.5, 0, -1, NaN, Infinity, 2 ** 53, 56n, true]) {
     test(`${name} rejects ${typeof chainId} chain ${String(chainId)} before any request`, async () => {
@@ -63,10 +63,32 @@ test('the requested chain reaches the API unchanged', async () => {
   await sdk.firewall('0xb', { chainId: 4663 });
   await sdk.check({ from: '0xa', to: '0xb', chainId: 4663 });
   await sdk.rescue('0xa', 4663);
-  await sdk.queryThreatGraph('0xb', 4663);
+  await sdk.queryThreatGraph('0xb', { chainId: 4663 });
   assert.equal(requests[0].body.chainId, 4663);
   assert.equal(requests[1].body.chainId, 4663);
   assert.equal(requests[2].body.transaction.chain_id, 4663);
   assert.equal(new URL(requests[3].url).searchParams.get('chain_id'), '4663');
   assert.equal(new URL(requests[4].url).searchParams.get('chain_id'), '4663');
+});
+
+test('queryThreatGraph takes its chain and depth as options', async () => {
+  const urls = [];
+  global.fetch = async (url) => { urls.push(new URL(url)); return { ok: true, json: async () => ({}) }; };
+  const sdk = new ShieldBot();
+  await sdk.queryThreatGraph(target, { chainId: 4663, maxDepth: 2 });
+  await sdk.queryThreatGraph(target, { chainId: 1 });
+  assert.deepEqual(
+    urls.map((url) => [url.searchParams.get('chain_id'), url.searchParams.get('max_depth')]),
+    [['4663', '2'], ['1', '3']],
+  );
+});
+
+test('queryThreatGraph written the old way, with a depth second, is rejected instead of read as a chain', async () => {
+  let calls = 0;
+  global.fetch = async () => { calls++; return { ok: true, json: async () => ({}) }; };
+  await assert.rejects(
+    new ShieldBot().queryThreatGraph(target, 1),
+    error => error instanceof ShieldBotError && error.code === 'MISSING_CHAIN_ID',
+  );
+  assert.equal(calls, 0);
 });

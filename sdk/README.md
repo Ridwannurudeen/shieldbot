@@ -27,7 +27,7 @@ Nothing was ever published, but code built from earlier copies of this repositor
 
 - `scan`, `firewall`, `check`, `rescue` and `queryThreatGraph` require a chain and throw `MISSING_CHAIN_ID` without one. They used to fall back to BNB Chain (56).
 - A chain must be a positive integer `number`: anything else, including a string such as `'56'`, throws `INVALID_CHAIN_ID` before any request. A string chain used to be sent as it was.
-- `queryThreatGraph(address, chainId, maxDepth?)` takes the chain as a new second argument, so `maxDepth` moved to third. It used to send no chain at all, which the API treated as BNB Chain.
+- `queryThreatGraph(address, { chainId, maxDepth? })` takes the chain and the depth in an options object, and the chain is required. It used to take `maxDepth` as its second argument and send no chain at all, which the API treated as BNB Chain. A call still written that way, such as `queryThreatGraph(address, 1)`, throws `MISSING_CHAIN_ID` instead of reading the depth as a chain.
 - `health()` is typed with `supported_chains`, the field the API actually returns, instead of `chains`.
 - `check()` and `firewall()` send `value` as decimal wei and throw `INVALID_VALUE` for anything that is not an integer from 0 to 2^256 - 1. They used to forward it unchanged.
 - `rescue()` results are typed with `status`, `coverage`, `coverage_reasons`, `scanned_blocks` and `total_value_at_risk_usd`, and `rescue()` throws `SCAN_UNAVAILABLE` when the scan read nothing, instead of returning an empty approval list.
@@ -74,7 +74,7 @@ if (!verdict.allowed) {
 | `check({ from, to, chainId, data?, value? })` | `POST /api/agent/firewall` | required, with `agentId` and a registered agent |
 | `register(ownerAddress, policy?)` | `POST /api/agent/register` | required, with `agentId` |
 | `checkReputation(agentId?)` | `GET /api/reputation/{agentId}` | optional |
-| `queryThreatGraph(address, chainId, maxDepth?)` | `GET /api/graph/check/{address}` | optional |
+| `queryThreatGraph(address, { chainId, maxDepth? })` | `GET /api/graph/check/{address}` | optional |
 | `scanForInjection(content, depth?)` | `POST /api/scan/injection` | optional |
 | `getCampaign(address)` | `GET /api/campaign/{address}` | optional |
 | `rescue(walletAddress, chainId)` | `GET /api/rescue/{walletAddress}` | optional |
