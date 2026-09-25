@@ -126,7 +126,7 @@ const result = await shield.firewall('0xTarget', {
 - An `error` event rejects with `ShieldBotError` code `STREAM_ERROR` and the API's HTTP status, or 500 when the event carries none. A stream that ends without a final rejects with code `NETWORK_ERROR`.
 - `GET /api/verdicts` publishes this contract as `first_verdict`.
 - The SDK holds the API to it: a `first` event whose `status` is not `'unknown'`, whose `classification` is `SAFE` or whose `final` is not `false` is dropped, and `onFirst` is not called for it. The API never sends one.
-- An exception thrown by `onFirst` is not caught: `firewall()` rejects with it and stops reading the stream.
+- An exception thrown by `onFirst`, or the rejection of a promise it returns, is not caught: `firewall()` rejects with it and stops reading the stream. A promise `onFirst` returns is awaited before the stream is read on, and the time it takes counts toward `finalTimeout`.
 
 ## Supported chains
 

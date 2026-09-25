@@ -130,6 +130,44 @@ test('an exception from onFirst rejects the call unchanged and releases the stre
   assert.equal(stream.cancelled(), true);
 });
 
+test('a promise from onFirst that rejects rejects the call with its error and releases the stream', async () => {
+  const stream = streamingFetch();
+  global.fetch = stream.fetch;
+  stream.write(sse('first', FIRST));
+  stream.write(sse('final', FINAL));
+  stream.end();
+  const failure = new TypeError('the caller broke later');
+
+  await assert.rejects(
+    new ShieldBot().firewall('0xb', { chainId: 56, onFirst: async () => { await flush(); throw failure; } }),
+    (error) => error === failure,
+  );
+  assert.equal(stream.cancelled(), true);
+});
+
+test('the stream is read on only once a promise from onFirst settles', async () => {
+  const stream = streamingFetch();
+  global.fetch = stream.fetch;
+  stream.write(sse('first', FIRST));
+  stream.write(sse('final', FINAL));
+  stream.end();
+  let finish;
+  const seen = [];
+
+  const pending = new ShieldBot().firewall('0xb', {
+    chainId: 56,
+    onFirst: () => new Promise((resolve) => { finish = resolve; }),
+  });
+  pending.then(() => seen.push('resolved'));
+  await flush();
+  await flush();
+  seen.push('listener settles');
+  finish();
+
+  assert.deepEqual(await pending, FINAL);
+  assert.deepEqual(seen, ['listener settles', 'resolved']);
+});
+
 test('the stream is released once the final arrives', async () => {
   const stream = streamingFetch();
   global.fetch = stream.fetch;

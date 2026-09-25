@@ -55,9 +55,10 @@ export interface FirewallOptions extends ScanOptions {
   /**
    * Asks for the streamed answer (Accept: text/event-stream) and is called with the interim verdict
    * if the API sends one before the final. firewall() still resolves with the final verdict. Without
-   * it, firewall() makes the plain request.
+   * it, firewall() makes the plain request. A promise it returns is awaited before the stream is read
+   * on, and its rejection rejects firewall() as a throw does.
    */
-  onFirst?: (first: FirstVerdict) => void;
+  onFirst?: (first: FirstVerdict) => void | Promise<void>;
   /**
    * With onFirst: milliseconds to wait for the response and then for each next event before the
    * request is aborted (TIMEOUT). It replaces `timeout` for a streamed request. Default: 30000.
@@ -285,7 +286,7 @@ class ShieldBotError extends Error {
 
 export { ShieldBotError };
 
-/** Carries an exception thrown by the caller's onFirst through _request's error mapping unchanged. */
+/** Carries an exception thrown by the caller's onFirst, or its rejection, through _request's error mapping unchanged. */
 class ListenerError {
   constructor(public error: unknown) {}
 }
@@ -658,7 +659,7 @@ export class ShieldBot {
     method: string,
     path: string,
     body?: Record<string, unknown>,
-    stream?: { onFirst: (first: FirstVerdict) => void; timeout: number },
+    stream?: { onFirst: (first: FirstVerdict) => void | Promise<void>; timeout: number },
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const headers: Record<string, string> = {
@@ -730,7 +731,7 @@ export class ShieldBot {
    */
   private async _readStream(
     response: Response,
-    onFirst: (first: FirstVerdict) => void,
+    onFirst: (first: FirstVerdict) => void | Promise<void>,
     onEvent: () => void,
   ): Promise<FirewallResult> {
     const reader = response.body!.getReader();
@@ -770,7 +771,7 @@ export class ShieldBot {
                 continue;
               }
               try {
-                onFirst(payload as FirstVerdict);
+                await onFirst(payload as FirstVerdict);
               } catch (error) {
                 throw new ListenerError(error);
               }
