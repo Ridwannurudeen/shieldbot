@@ -186,5 +186,7 @@
   "overlayNotes": "Ghi chú",
   "overlayHoldNoteUnchecked": "Yêu cầu này chưa được kiểm tra. Để vẫn tiếp tục, hãy nhấn giữ nút, hoặc giữ phím Enter hoặc Space trên nút, trong 1,5 giây. Thả ra sớm hơn sẽ hủy.",
   "overlayIncompleteCoverage": "Không xác định (dữ liệu từ các nguồn kiểm tra chưa đầy đủ)",
-  "overlayExplainAnalyzing": "Đang phân tích..."
+  "overlayExplainAnalyzing": "Đang phân tích...",
+  "scanInjectionFound": "Rủi ro chèn lệnh: {level}",
+  "scanNoInjectionPatterns": "Không tìm thấy mẫu chèn lệnh đã biết nào"
 }

@@ -264,7 +264,7 @@ were written without a native speaker and need the owner's review before release
 `overlayHashMessageNote`, `overlayOpaqueMessage`, `overlayOpaqueMessageNote`, `overlayNotes`,
 `overlayHoldNoteUnchecked`, `overlayIncompleteCoverage`, `overlayExplainAnalyzing`,
 `healthNoApprovals`, `healthNoApprovalsDash`, `healthScanSubtext`, `healthScanning`,
-`dashDeployerBlockSub`, `step1Desc`.
+`dashDeployerBlockSub`, `step1Desc`, `scanInjectionFound`, `scanNoInjectionPatterns`.
 
 ## Tests
 

@@ -586,9 +586,8 @@
       color: #fff;
       flex-shrink: 0;
     }
-    .scan-score-badge.safe { background: #22c55e; }
-    .scan-score-badge.warning { background: #eab308; }
     .scan-score-badge.danger { background: #ef4444; }
+    .scan-score-badge.neutral { background: #475569; }
     .scan-score-badge.unknown { background: #64748b; }
     .scan-result-label {
       font-size: 13px;
@@ -616,11 +615,6 @@
       border-radius: 4px;
       color: #fca5a5;
       font-size: 11px;
-    }
-    .pattern-tag.safe {
-      background: rgba(34,197,94,0.15);
-      border-color: rgba(34,197,94,0.3);
-      color: #86efac;
     }
   </style>
 </head>
@@ -678,6 +672,7 @@
     <div id="scannerResults"></div>
   </div>
 
+  <script src="i18n.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>

@@ -186,5 +186,7 @@
   "overlayNotes": "备注",
   "overlayHoldNoteUnchecked": "此请求未经检查。如仍要继续，请按住该按钮，或在按钮上按住 Enter 或空格键 1.5 秒。提前松开将取消。",
   "overlayIncompleteCoverage": "未知（数据源覆盖不完整）",
-  "overlayExplainAnalyzing": "正在分析..."
+  "overlayExplainAnalyzing": "正在分析...",
+  "scanInjectionFound": "注入风险：{level}",
+  "scanNoInjectionPatterns": "未发现已知的注入模式"
 }

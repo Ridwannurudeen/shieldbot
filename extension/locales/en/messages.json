@@ -186,5 +186,7 @@
   "overlayNotes": "Notes",
   "overlayHoldNoteUnchecked": "This request was not checked. To continue anyway, hold the button down, or hold Enter or Space on it, for 1.5 seconds. Letting go earlier cancels.",
   "overlayIncompleteCoverage": "Unknown (incomplete provider coverage)",
-  "overlayExplainAnalyzing": "Analyzing..."
+  "overlayExplainAnalyzing": "Analyzing...",
+  "scanInjectionFound": "Injection risk: {level}",
+  "scanNoInjectionPatterns": "No known injection patterns found"
 }
