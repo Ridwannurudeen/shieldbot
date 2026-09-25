@@ -155,7 +155,7 @@ chain is rejected, and the chain is named in the forwarded request), a signature
 the wallet does not say which chain it is on, requests without a string
 method are rejected, and checked methods sent through `send` or `sendAsync` are refused. A switch
 that stops the scripts altogether would need them unregistered through `chrome.scripting` (and the
-`scripting` permission); that is an owner decision.
+`scripting` permission); that has not been decided.
 
 ## What it does not do
 
@@ -258,7 +258,7 @@ A page can find out that the extension is installed, in these ways:
 ## Translations awaiting review
 
 The Vietnamese and Chinese texts of these keys in `extension/locales/vi` and `extension/locales/zh`
-were written without a native speaker and need the owner's review before release:
+were written without a native speaker and need review by one before release:
 `overlayEthSign`, `overlayEthSignNote`, `overlayChainNoProceed`, `siweMismatch`, `siweUnreadable`,
 `overlayBtnHoldProceed`, `overlayBtnHoldSign`, `overlayHoldNote`, `overlayLookalikeTitle`,
 `overlayLookalikeNote`, `overlayLookalikeNew`, `overlayLookalikePast`, `overlayDelegationTitle`,
