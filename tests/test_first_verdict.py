@@ -232,3 +232,33 @@ def test_the_interim_band_never_exceeds_the_final_band_for_the_same_evidence():
         assert verdict["status"] == "unknown"
         assert verdict["classification"] == (verdicts.CAUTION if band == verdicts.SAFE else band)
         assert RANK[band] <= RANK[final_classification(final)], (finished, local_match)
+
+
+HOLDERS_UNKNOWN = "Top-10 holder share unknown: no readable GoPlus holder list"
+
+
+def test_the_interim_carries_the_returned_analyzers_notes_apart_from_its_danger_signals():
+    structural = clean("structural", [GOPLUS_BLOCK])
+    structural.data["notes"] = [HOLDERS_UNKNOWN]
+    structural.flags = ["Scam DB match (1 sources)"]
+    verdict = first(progress_of([structural, clean("market")]))
+
+    assert verdict["notes"] == [HOLDERS_UNKNOWN]
+    assert HOLDERS_UNKNOWN not in verdict["danger_signals"]
+    # The final carries the same notes for the same results.
+    assert verdict["notes"] == RiskEngine().compute_from_results([structural, clean("market")])["notes"]
+
+
+def test_a_router_swaps_interim_names_each_notes_path_token():
+    token = "0x" + "11" * 20
+    progress = progress_of([], pending=["structural"])
+    progress.expect(token, ["structural"])
+    structural = clean("structural")
+    structural.data["notes"] = [HOLDERS_UNKNOWN]
+    progress.add_result(structural, token=token)
+
+    assert first(progress)["notes"] == [f"{token}: {HOLDERS_UNKNOWN}"]
+
+
+def test_an_interim_before_any_note_has_none():
+    assert first(progress_of([]))["notes"] == []
