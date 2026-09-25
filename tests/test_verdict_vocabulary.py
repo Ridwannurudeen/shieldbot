@@ -70,11 +70,11 @@ ALLOWED = {
     (
         "agent/advisor.py",
         "if score >= 70:",
-    ): "wording tiers of the rule-based explanation when AI is off, not a verdict (owner decision to align)",
+    ): "wording tiers of the rule-based explanation when AI is off, not a verdict (follow-up to align)",
     (
         "agent/advisor.py",
         "if score >= 40:",
-    ): "wording tiers of the rule-based explanation when AI is off, not a verdict (owner decision to align)",
+    ): "wording tiers of the rule-based explanation when AI is off, not a verdict (follow-up to align)",
     (
         "agent/policy_engine.py",
         "if math.isnan(risk_score) or risk_score < 0:",
@@ -101,10 +101,10 @@ ALLOWED = {
         "Uploads forensic reports as immutable JSON objects when risk score >= 50.",
     ): "module docstring; the caller compares with verdicts.HIGH_RISK_MIN",
     ("services/guardian.py", "if rs >= 70:"): (
-        "approval spender tiers of wallet health, a separate surface with its own words (owner decision to align)"
+        "approval spender tiers of wallet health, a separate surface with its own words (follow-up to align)"
     ),
     ("services/guardian.py", 'elif rs >= 50 and risk_level not in ("critical",):'): (
-        "approval spender tiers of wallet health, a separate surface with its own words (owner decision to align)"
+        "approval spender tiers of wallet health, a separate surface with its own words (follow-up to align)"
     ),
     (
         "services/guardian.py",
@@ -125,7 +125,7 @@ ALLOWED = {
     (
         "services/guardian.py",
         'if score_data and score_data.get("risk_score", 0) >= 70:',
-    ): "wallet health risk points for a held token (owner decision to align with BLOCK_MIN)",
+    ): "wallet health risk points for a held token (follow-up to align with BLOCK_MIN)",
     (
         "services/injection_scanner.py",
         "if switch_score > 0.6:",
