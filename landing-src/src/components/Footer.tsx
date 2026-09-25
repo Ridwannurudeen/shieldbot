@@ -169,7 +169,7 @@ export default function Footer() {
         </div>
 
         <div className="text-center text-xs text-gray-400 mt-12">
-          &copy; 2026 ShieldBot. Transaction security for EVM chains, including BNB Chain and Robinhood Chain.
+          &copy; 2026 ShieldBot. Transaction security for 8 EVM chains.
         </div>
       </div>
     </footer>
