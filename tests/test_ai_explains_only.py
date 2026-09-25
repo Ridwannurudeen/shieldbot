@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from web3 import Web3
 
 from core.telegram_formatter import CONTROL_CHARACTERS
 from scanner.transaction_scanner import TransactionScanner
@@ -217,7 +218,7 @@ async def test_a_token_name_reaches_the_prompt_only_as_bounded_quoted_data():
     }
 
     await analyzer.generate_firewall_report(
-        {"to": "0x" + "a" * 40, "from": INJECTION, "value": INJECTION, "decoded_calldata": decoded},
+        {"to": "0x" + "a" * 40, "value": INJECTION, "decoded_calldata": decoded},
         scan,
         "HIGH_RISK",
         60,
@@ -228,8 +229,8 @@ async def test_a_token_name_reaches_the_prompt_only_as_bounded_quoted_data():
     assert "\u202e" not in prompt
     assert "A" * 101 not in prompt
     quoted = json.dumps(CONTROL_CHARACTERS.sub(" ", INJECTION)[:100], ensure_ascii=False)
-    # Name, symbol, spender label, parameter, warning, scam type and reason, sender and value.
-    assert prompt.count(quoted) == 9
+    # Name, symbol, spender label, parameter, warning, scam type and reason, and value.
+    assert prompt.count(quoted) == 8
     amount = "UNLIMITED " + CONTROL_CHARACTERS.sub(" ", INJECTION)
     assert json.dumps(amount[:100], ensure_ascii=False) in prompt
     assert "Classification: HIGH_RISK" in prompt
@@ -312,3 +313,35 @@ async def test_the_legacy_scan_score_is_not_blended_with_an_ai_score(
 
     assert (result["status"], result["risk_score"], result["risk_level"]) == ("ok", 0, "low")
     mock_ai_analyzer.compute_ai_risk_score.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_ai_provider_never_gets_the_senders_wallet(fallback_api, monkeypatch):
+    api, _ = fallback_api
+    sender = "0x" + "5c" * 20
+    analyzer = _analyzer(json.dumps(AI_REPLY))
+    monkeypatch.setattr(api, "ai_analyzer", analyzer)
+    # A swap whose recipient is the sender's own wallet, checksummed as calldata decoding gives it.
+    monkeypatch.setattr(
+        api,
+        "calldata_decoder",
+        SimpleNamespace(
+            decode=lambda _: {
+                "selector": "38ed1739",
+                "function_name": "swapExactTokensForTokens",
+                "category": "swap",
+                "params": {"param_3": Web3.to_checksum_address(sender)},
+            },
+            is_whitelisted_target=lambda *args, **kwargs: None,
+        ),
+    )
+
+    response = await api.firewall(
+        api.FirewallRequest(to="0x" + "a" * 40, sender=sender), SimpleNamespace(headers={})
+    )
+
+    prompt = analyzer.client.messages.create.await_args.kwargs["messages"][0]["content"]
+    assert sender[2:] not in prompt.lower()
+    assert "From:" not in prompt
+    assert '"[caller]"' in prompt
+    assert response["analysis"] == AI_REPLY["analysis"]

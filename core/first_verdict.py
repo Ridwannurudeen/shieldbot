@@ -81,6 +81,13 @@ def build_first_verdict(progress: FirstVerdictProgress, transaction: Dict, elaps
     floor = max([_result_floor(result) for result in results] + [scam_match_floor(progress.local_matches)])
     flags = [flag for result in results if _result_floor(result) for flag in result.flags]
     flags += [match['reason'] for match in progress.local_matches]
+    # The returned analyzers' notes, worded as the final's (a router swap names each note's path
+    # token). Like the final's, they are information and never danger signals.
+    notes = [
+        f'{token}: {note}' if token else note
+        for token, result in progress.results if not result.error
+        for note in result.data.get('notes', ())
+    ]
     pending = sorted(progress.pending)
     # Each returned analyzer's coverage as the engine measures it, per token on a router swap; the
     # pending ones have none.
@@ -113,6 +120,8 @@ def build_first_verdict(progress: FirstVerdictProgress, transaction: Dict, elaps
         'partial': True,
         'failed_sources': [],
         'policy_mode': progress.policy_mode,
+        'notes': notes,
+        'simulated': False,
         'final': False,
         'pending_sources': pending,
         'elapsed_ms': elapsed_ms,

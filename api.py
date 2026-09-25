@@ -29,7 +29,7 @@ from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve
 from utils.chain_info import get_chain_name, get_native_symbol
 from utils.web3_client import UnsupportedChainError
 from utils.scam_db import BLACKLIST_RELOAD_SECONDS
-from core.risk_engine import MEDIUM_MATCH_FLOOR, database_matches, medium_matches
+from core.risk_engine import HONEYPOT_FLOOR, apply_local_match, database_matches, medium_matches, scam_match_floor
 from services import rpc_guard
 from services.counterparty_service import code_kind
 from services.mempool_service import supports_pending_transactions
@@ -41,10 +41,12 @@ from core.container import ServiceContainer
 from core.database import SCAN_EVIDENCE_RETENTION_DAYS, reporter_hash
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
 from core.first_verdict import IN_PROGRESS, FirstVerdictProgress, build_first_verdict
+from core.policy import PolicyMode
 from core.rate_limit import RateLimiter, connect as connect_rate_limit_redis
 from core.registry import FIRST_VERDICT_SECONDS
 from core.scan_evidence import (
     analyzer_outcomes, build_scan_evidence, oldest_simulation_block, render_evidence_page, transaction_evidence,
+    without_caller,
 )
 from core.unknown_ledger import unknown_ledger
 from core.telegram_formatter import escape_markdown
@@ -1161,6 +1163,8 @@ def _checksum_if_possible(value: str) -> str:
 
 
 def _extract_signature_target(req: FirewallRequest) -> str:
+    """The signature's target: `to`, then the typed data's addresses. The evidence document records
+    it, so it is never the signer's own address."""
     candidates: List[str] = [req.to]
 
     typed_data = req.typedData if isinstance(req.typedData, dict) else {}
@@ -1174,7 +1178,6 @@ def _extract_signature_target(req: FirewallRequest) -> str:
         message.get("spender"),
         message.get("token"),
         details.get("token"),
-        req.sender,
     ):
         if isinstance(value, str):
             candidates.append(value)
@@ -1212,12 +1215,7 @@ async def _build_signature_only_response(
     from core.analyzer import AnalysisContext
     from core.policy import PolicyEngine
 
-    fallback_target = (
-        _checksum_if_possible(req.sender)
-        if _is_valid_evm_address(req.sender)
-        else "0x0000000000000000000000000000000000000000"
-    )
-    target = _extract_signature_target(req) or fallback_target
+    target = _extract_signature_target(req) or "0x0000000000000000000000000000000000000000"
     ctx = AnalysisContext(
         address=target,
         chain_id=req.chainId,
@@ -1248,7 +1246,7 @@ async def _build_signature_only_response(
     ) and result.data.get('status') != 'unknown'
     # As core.policy does, STRICT turns an unavailable or incomplete analysis into a block.
     policy = container.policy_engine if container and container.policy_engine else PolicyEngine()
-    strict_block = not covered and policy.apply([], {}, mode_override=policy_override)['policy_mode'] == 'STRICT'
+    strict_block = not covered and policy.apply([], {}, mode_override=policy_override)['policy_mode'] == PolicyMode.STRICT.value
     if strict_block:
         risk_score = max(risk_score, verdicts.STRICT_BLOCK_SCORE)
         classification = verdicts.BLOCK_RECOMMENDED
@@ -1320,12 +1318,13 @@ async def _build_signature_only_response(
         },
         "simulation": None,
         "asset_delta": [],
+        "simulated": False,
         "greenfield_url": None,
         "chain_id": req.chainId,
         "network": _chain_id_to_name(req.chainId),
         "partial": not covered,
         "failed_sources": [] if covered else ["signature"],
-        "policy_mode": "STRICT" if strict_block else "SIGNATURE_ONLY",
+        "policy_mode": PolicyMode.STRICT.value if strict_block else "SIGNATURE_ONLY",
         "notes": [],
     }
 
@@ -1345,7 +1344,7 @@ async def firewall(req: FirewallRequest, request: Request):
     if request.headers.get("accept", "").startswith("text/event-stream"):
         started = time.monotonic()
         policy_mode = _policy_mode(request)
-        if policy_mode != "STRICT":
+        if policy_mode != PolicyMode.STRICT.value:
             # A bad request is refused before the stream's headers go out.
             if not _is_signature_only_request(req) and not web3_client.is_valid_address(req.to):
                 raise HTTPException(status_code=400, detail="Invalid 'to' address")
@@ -1374,7 +1373,7 @@ def _policy_mode(request: Request) -> str:
         return container.policy_engine.apply(
             [], {}, mode_override=request.headers.get("X-Policy-Mode"),
         )['policy_mode']
-    return "BALANCED"
+    return PolicyMode.BALANCED.value
 
 
 def _sse(event: str, data: Dict) -> str:
@@ -1541,6 +1540,8 @@ async def _firewall_verdict(
                 typed_data=req.typedData,
             )
 
+        policy_mode = _policy_mode(request)
+
         # 2. If the target is a trusted router that answers for the swap (router_answers above), analyze
         # the swap path tokens instead of bypassing.
         if router_answers:
@@ -1552,13 +1553,12 @@ async def _firewall_verdict(
                 whitelisted=whitelisted,
                 value_bnb=value_bnb,
                 policy_override=request.headers.get("X-Policy-Mode"),
+                policy_mode=policy_mode,
                 trail=trail,
                 progress=progress,
             )
             if router_response:
                 return router_response
-
-        policy_mode = _policy_mode(request)
 
         # 2b. Check cache for recent result. A row is up to five minutes old and keeps no scam matches,
         # so a target with a local blacklist entry (admin or community: both set a floor) is scanned
@@ -1568,7 +1568,7 @@ async def _firewall_verdict(
             if cached and cached.get('category_scores', {}).get('_scan_metadata', {}).get('coverage'):
                 # A full rescan costs provider calls, so only a caller with a valid API key can force one
                 # with STRICT. Anyone else is answered from the cached facts in STRICT mode.
-                if policy_mode != "STRICT" or not getattr(request.state, "api_key_info", None):
+                if policy_mode != PolicyMode.STRICT.value or not getattr(request.state, "api_key_info", None):
                     trail['cached_scan_at'] = cached['last_scanned_at']
                     return _build_cached_response(
                         cached, decoded, value_bnb, req.chainId, to_addr=to_addr, policy_mode=policy_mode,
@@ -1656,6 +1656,9 @@ async def _firewall_verdict(
             # Compute risk from analyzer results
             if analyzer_results is not None:
                 risk_output = risk_engine.compute_from_results(analyzer_results, is_token=is_token)
+                # The target's local blacklist entry holds even when the structural analyzer, which
+                # reports it, failed or ran past the deadline.
+                risk_output = apply_local_match(risk_output, local_match, analyzer_results)
 
                 # Apply policy mode (handles partial failures)
                 if container and container.policy_engine:
@@ -1767,18 +1770,23 @@ async def _firewall_verdict(
                 "shield_score": shield_score,
                 "simulation": simulation_result,
                 "asset_delta": _build_asset_delta(simulation_result, decoded, value_bnb, req.chainId),
+                "simulated": _simulated(simulation_result),
                 "greenfield_url": None,
                 "chain_id": req.chainId,
                 "network": _chain_id_to_name(req.chainId),
                 "partial": alert['status'] == 'unknown' or risk_output.get("partial", False),
                 "failed_sources": risk_output.get("failed_sources", []),
-                "policy_mode": risk_output.get("policy_mode", "BALANCED"),
+                "policy_mode": risk_output.get("policy_mode", PolicyMode.BALANCED.value),
                 "campaign_context": _deployer_ctx,
                 "notes": risk_output.get("notes", []),
             }
 
-            # Persist contract score to DB
+            # Persist contract score to DB. The row keeps the policy engine's failed_sources, the
+            # required checks STRICT decides on, so a cached answer is judged as this one was.
             if container and container.db and describes_target:
+                scan_metadata = {**_coverage_fields(alert), 'notes': risk_output.get('notes', [])}
+                if 'failed_sources' in risk_output:
+                    scan_metadata['failed_sources'] = risk_output['failed_sources']
                 try:
                     await container.db.upsert_contract_score(
                         address=to_addr,
@@ -1788,7 +1796,7 @@ async def _firewall_verdict(
                         archetype=risk_output.get("risk_archetype"),
                         category_scores={
                             **risk_output.get("category_scores", {}),
-                            '_scan_metadata': {**_coverage_fields(alert), 'notes': risk_output.get('notes', [])},
+                            '_scan_metadata': scan_metadata,
                         },
                         flags=risk_output.get("critical_flags"),
                         confidence=alert.get("confidence"),
@@ -1874,16 +1882,23 @@ async def _firewall_verdict(
 
         contract_scan.pop("forensic_report", None)
         contract_scan.pop("source_code", None)
+        # The target's local blacklist entry, which the token scanner never asks for: an admin entry's
+        # Block holds here as on the composite path. The address scanner's scam lookup already reports
+        # the same match, which is not added twice.
+        scam_matches = list(contract_scan.get("scam_matches") or [])
+        if local_match and local_match not in scam_matches:
+            contract_scan["scam_matches"] = [*scam_matches, local_match]
 
-        tx_data = {
+        # The AI provider gets no wallet address: not the sender, nor a mention of it in the calldata
+        # (a swap's recipient), which is masked as the evidence document masks it.
+        tx_data = without_caller({
             "to": to_addr,
-            "from": from_addr,
             "value": req.value,
             "data": req.data,
             "chainId": req.chainId,
             "decoded_calldata": decoded,
             "whitelisted_router": whitelisted,
-        }
+        }, from_addr)
 
         # The trusted-router discount applies only where the router shortcut would have answered: never
         # to a delegation or to a router an admin has listed.
@@ -2907,7 +2922,8 @@ async def threat_feed(
     limit = max(1, min(limit, 200))  # cap between 1 and 200
     threats = []
 
-    # Recent high-risk contract scans from DB: the rows the threat counts in core.database count.
+    # Recent high-risk contract scans from DB: the rows the threat counts in core.database count. The
+    # queries interpolate only the code constant verdicts.THREAT_CONDITION, never user input.
     try:
         if source == "mempool":
             cursor = None
@@ -2919,7 +2935,7 @@ async def threat_feed(
                 WHERE {verdicts.THREAT_CONDITION} AND chain_id = ?
                 ORDER BY last_scanned_at DESC
                 LIMIT ?
-            """, (int(chain_id), limit))
+            """, (int(chain_id), limit))  # nosec B608
         else:
             cursor = await container.db._db.execute(f"""
                 SELECT address, chain_id, risk_score, risk_level, archetype, flags,
@@ -2928,7 +2944,7 @@ async def threat_feed(
                 WHERE {verdicts.THREAT_CONDITION}
                 ORDER BY last_scanned_at DESC
                 LIMIT ?
-            """, (limit,))
+            """, (limit,))  # nosec B608
         rows = await cursor.fetchall() if cursor else []
 
         import json as _json
@@ -3295,6 +3311,13 @@ def _build_asset_delta_fallback(decoded: Dict, value_bnb: float, chain_id: int) 
     return deltas
 
 
+def _simulated(simulation_result: Optional[Dict]) -> bool:
+    """Whether a response's asset changes are a Tenderly simulation's: one ran, succeeded and returned
+    them. The extension labels asset changes simulated only then; otherwise they are read from the
+    calldata, or a notice."""
+    return bool(simulation_result and simulation_result.get("success") and simulation_result.get("asset_deltas"))
+
+
 def _build_asset_delta(
     simulation_result: Optional[Dict], decoded: Dict, value_bnb: float, chain_id: int,
 ) -> List:
@@ -3340,19 +3363,24 @@ def _scam_match_count(scan: Dict) -> Optional[int]:
 
 def _build_cached_response(
     cached: Dict, decoded: Dict, value_bnb: float, chain_id: int = 56,
-    to_addr: str = "", policy_mode: str = "BALANCED",
+    to_addr: str = "", policy_mode: str = PolicyMode.BALANCED.value,
 ) -> Dict:
     """Build a firewall response from a cached DB row."""
     risk_score = cached['risk_score']
-    risk_level = cached.get('risk_level', 'UNKNOWN')
+    risk_level = cached.get('risk_level', verdicts.UNKNOWN)
     flags = cached.get('flags', [])
     archetype = cached.get('archetype', 'unknown')
 
     category_scores = dict(cached.get('category_scores', {}))
     metadata = category_scores.pop('_scan_metadata', {})
-    # STRICT blocks on Unknown, as core.policy does for a fresh scan. A cached row keeps its coverage
-    # but not which fields were missing, so any Unknown in it blocks.
-    if policy_mode == 'STRICT' and is_scan_incomplete({**metadata, 'risk_level': risk_level}):
+    # STRICT blocks what core.policy blocked on the fresh scan: a failed required check, which the row
+    # keeps as failed_sources. A row written without them (before they were stored, or by a path with
+    # no policy engine) does not say which fields were missing, so any Unknown in it blocks.
+    failed_sources = metadata.get('failed_sources')
+    failed = bool(failed_sources) if failed_sources is not None else is_scan_incomplete(
+        {**metadata, 'risk_level': risk_level}
+    )
+    if policy_mode == PolicyMode.STRICT.value and failed:
         risk_score = max(risk_score, verdicts.STRICT_BLOCK_SCORE)
         risk_level = verdicts.HIGH
         flags = ['Policy override: cached analysis unavailable or incomplete', *flags]
@@ -3393,12 +3421,13 @@ def _build_cached_response(
         },
         "simulation": None,
         "asset_delta": _build_asset_delta_fallback(decoded, value_bnb, chain_id),
+        "simulated": False,
         "greenfield_url": None,
         "cached": True,
         "chain_id": chain_id,
         "network": _chain_id_to_name(chain_id),
         "partial": alert['status'] == 'unknown',
-        "failed_sources": [],
+        "failed_sources": metadata.get('failed_sources', []),
         "policy_mode": policy_mode,
         "notes": metadata.get('notes', []),
     }
@@ -3431,7 +3460,7 @@ _FULL_ANALYSIS_UNAVAILABLE = (
 
 def _build_fallback_response(
     decoded: Dict, scan: Dict, whitelisted: Optional[str], chain_id: int, transaction_specific: bool = False,
-    policy_mode: str = "BALANCED",
+    policy_mode: str = PolicyMode.BALANCED.value,
 ) -> Dict:
     """Build a firewall response from the legacy scan when the analysis pipeline failed. The score and
     classification come from the scan's heuristics and the band table only."""
@@ -3449,17 +3478,19 @@ def _build_fallback_response(
 
     danger_signals = []
 
+    # The engine's floors for the same evidence, so a scam match or a honeypot scores here what it
+    # scores on the composite path.
     if scam_matches is not None and scam_matches > 0:
         danger_signals.append(f"Found {scam_matches} scam database match(es)")
-        risk_score = max(risk_score, 80)
 
     for match in medium_matches(scan.get("scam_matches")):
         danger_signals.append(match["reason"])
-        risk_score = max(risk_score, MEDIUM_MATCH_FLOOR)
+
+    risk_score = max(risk_score, scam_match_floor(scan.get("scam_matches")))
 
     if is_honeypot:
         danger_signals.append("Honeypot detected — cannot sell after buying")
-        risk_score = max(risk_score, 90)
+        risk_score = max(risk_score, HONEYPOT_FLOOR)
 
     if is_unlimited_approval and is_verified is False:
         danger_signals.append("Unlimited approval to unverified contract")
@@ -3473,8 +3504,9 @@ def _build_fallback_response(
     if whitelisted:
         risk_score = max(0, risk_score - 20)
 
-    # STRICT blocks a degraded analysis, as core.policy does an incomplete one.
-    strict = policy_mode == 'STRICT'
+    # STRICT blocks a degraded analysis, as core.policy does an incomplete one. The fallback has no
+    # policy engine to say which required checks failed, so under STRICT it blocks whatever it covers.
+    strict = policy_mode == PolicyMode.STRICT.value
     if strict:
         risk_score = max(risk_score, verdicts.STRICT_BLOCK_SCORE)
         danger_signals.insert(0, 'Policy override: composite analysis unavailable')
@@ -3509,6 +3541,7 @@ def _build_fallback_response(
                     else f"{classification} — Risk score {risk_score}/100"),
         "raw_checks": _extract_raw_checks(scan),
         "asset_delta": [],
+        "simulated": False,
         "policy_mode": policy_mode,
         "notes": [],
     }
@@ -3545,9 +3578,10 @@ def _select_router_tokens(path: List[str]) -> List[str]:
 
 def _build_unverified_swap_response(
     req: FirewallRequest, to_addr: str, decoded: Dict, whitelisted: str, value_bnb: float,
-    source: str, reason: str,
+    source: str, reason: str, policy_mode: str = PolicyMode.BALANCED.value,
 ) -> Dict:
-    """Build a CAUTION response for a trusted-router swap whose path tokens were not analyzed.
+    """Build a CAUTION response for a trusted-router swap whose path tokens were not analyzed. Under
+    STRICT it blocks, as the legacy fallback does a degraded analysis.
 
     Returning None instead would make the main pipeline analyse the whitelisted
     router itself, which always scores safe, while the swapped tokens are never checked.
@@ -3558,15 +3592,21 @@ def _build_unverified_swap_response(
         "coverage_reasons": {source: reason},
         "risk_display": 'Unknown (incomplete provider coverage)',
     }
+    classification = verdicts.CAUTION
+    risk_score = verdicts.CAUTION_MIN
+    danger_signals = [f"Swap via trusted router ({whitelisted}) but {reason.lower()} — token safety unverified"]
+    strict = policy_mode == PolicyMode.STRICT.value
+    if strict:
+        classification = verdicts.BLOCK_RECOMMENDED
+        risk_score = verdicts.STRICT_BLOCK_SCORE
+        danger_signals.insert(0, 'Policy override: swap path tokens not analysed')
     return {
-        "classification": verdicts.CAUTION,
+        "classification": classification,
         **coverage_fields,
-        "risk_score": 35,
+        "risk_score": risk_score,
         "decoded_action": _format_decoded_action(decoded, req.chainId),
         "calldata_details": _build_calldata_details(decoded),
-        "danger_signals": [
-            f"Swap via trusted router ({whitelisted}) but {reason.lower()} — token safety unverified",
-        ],
+        "danger_signals": danger_signals,
         "transaction_impact": {
             "sending": _sending(decoded, value_bnb, req.chainId, "Tokens (via router)"),
             "granting_access": _granting_access(decoded),
@@ -3581,34 +3621,36 @@ def _build_unverified_swap_response(
             "This transaction goes to a trusted DEX router, but the tokens in the swap "
             "path could not be checked. Verify the tokens manually before proceeding."
         ),
-        "verdict": f"{verdicts.CAUTION} — Token safety unverifiable",
+        "verdict": f"{classification} — Token safety unverifiable",
         "raw_checks": {
             "is_verified": None,
             "scam_matches": None,
             "contract_age_days": None,
             "is_honeypot": None,
             "ownership_renounced": None,
-            "risk_score_heuristic": 35,
+            "risk_score_heuristic": risk_score,
             "whitelisted_router": whitelisted,
             "tokens_analyzed": [],
         },
         "shield_score": {
             **coverage_fields,
-            "overall": 35,
+            "overall": risk_score,
             "category_scores": {},
-            "risk_level": verdicts.UNKNOWN,
+            # As core.policy sets it when STRICT blocks.
+            "risk_level": verdicts.HIGH if strict else verdicts.UNKNOWN,
             "threat_type": "unknown",
             "critical_flags": [],
             "confidence": 30,
         },
         "simulation": None,
         "asset_delta": _build_asset_delta_fallback(decoded, value_bnb, req.chainId),
+        "simulated": False,
         "greenfield_url": None,
         "chain_id": req.chainId,
         "network": _chain_id_to_name(req.chainId),
         "partial": True,
         "failed_sources": [source],
-        "policy_mode": "BALANCED",
+        "policy_mode": policy_mode,
         "notes": [],
     }
 
@@ -3623,8 +3665,10 @@ async def _analyze_router_swap(
     policy_override: Optional[str] = None,
     trail: Optional[Dict] = None,
     progress: Optional[FirstVerdictProgress] = None,
+    policy_mode: str = PolicyMode.BALANCED.value,
 ) -> Optional[Dict]:
-    """Analyze swap path tokens when interacting with a trusted router.
+    """Analyze swap path tokens when interacting with a trusted router. `policy_mode` is the
+    effective mode `policy_override` selects, which a response for unanalysed tokens reports.
 
     When it returns a verdict from the tokens' analyzers, it records their outcomes, keyed
     "token:analyzer" like the response's coverage, and the observed block in `trail`.
@@ -3633,7 +3677,7 @@ async def _analyze_router_swap(
     if not container or not container.registry or not risk_engine:
         return _build_unverified_swap_response(
             req, to_addr, decoded, whitelisted, value_bnb,
-            'token_analysis', 'Token analyzers are unavailable',
+            'token_analysis', 'Token analyzers are unavailable', policy_mode,
         )
 
     path = _extract_swap_path(decoded, req.data)
@@ -3641,7 +3685,7 @@ async def _analyze_router_swap(
         # Cannot decode the swap path (e.g. Uniswap V3 / aggregator calldata).
         return _build_unverified_swap_response(
             req, to_addr, decoded, whitelisted, value_bnb,
-            'token_path', 'Token path could not be decoded',
+            'token_path', 'Token path could not be decoded', policy_mode,
         )
 
     candidates = _select_router_tokens(path)
@@ -3711,7 +3755,7 @@ async def _analyze_router_swap(
             **_coverage_fields(format_extension_alert(risk_output)),
             "address": token_addr,
             "risk_score": risk_output.get("rug_probability", 0),
-            "risk_level": risk_output.get("risk_level", "UNKNOWN"),
+            "risk_level": risk_output.get("risk_level", verdicts.UNKNOWN),
         })
         outcomes.update({
             f"{token_addr}:{name}": outcome
@@ -3775,7 +3819,7 @@ async def _analyze_router_swap(
         **_coverage_fields(alert),
         "overall": risk_score,
         "category_scores": risk_output.get("category_scores", {}),
-        "risk_level": risk_output.get("risk_level", "UNKNOWN"),
+        "risk_level": risk_output.get("risk_level", verdicts.UNKNOWN),
         "threat_type": risk_output.get("risk_archetype", "unknown"),
         "critical_flags": risk_output.get("critical_flags", []),
         "confidence": alert["confidence"],
@@ -3815,17 +3859,14 @@ async def _analyze_router_swap(
         },
         "shield_score": shield_score,
         "simulation": sim_result,
-        "asset_delta": (
-            [d["display"] for d in sim_result["asset_deltas"]]
-            if sim_result and sim_result.get("asset_deltas")
-            else _build_asset_delta_fallback(decoded, value_bnb, req.chainId)
-        ),
+        "asset_delta": _build_asset_delta(sim_result, decoded, value_bnb, req.chainId),
+        "simulated": _simulated(sim_result),
         "greenfield_url": None,
         "chain_id": req.chainId,
         "network": _chain_id_to_name(req.chainId),
         "partial": alert['status'] == 'unknown' or risk_output.get("partial", False),
         "failed_sources": risk_output.get("failed_sources", []),
-        "policy_mode": risk_output.get("policy_mode", "BALANCED"),
+        "policy_mode": risk_output.get("policy_mode", PolicyMode.BALANCED.value),
         "notes": notes,
     }
 

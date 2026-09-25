@@ -7,6 +7,8 @@ import aiohttp
 import rlp
 from eth_account import Account
 
+from core import verdicts
+from core.risk_engine import apply_local_match
 from services.counterparty_service import code_kind
 from utils.web3_client import UnsupportedChainError
 
@@ -20,8 +22,9 @@ class RPCProxy:
     """JSON-RPC proxy that intercepts transactions for firewall analysis.
 
     All non-intercepted methods are transparently forwarded to the upstream RPC.
-    For eth_sendTransaction, the firewall pipeline runs first and blocks
-    HIGH-risk transactions.
+    For eth_sendTransaction, the firewall pipeline runs first, with the firewall's local blacklist
+    floor and the server's policy mode, and forwards only a LOW or MEDIUM verdict that no policy
+    override blocked.
     """
 
     def __init__(self, container):
@@ -143,8 +146,16 @@ class RPCProxy:
 
             analyzer_results = await self._container.registry.run_all(ctx)
             risk_output = self._container.risk_engine.compute_from_results(analyzer_results, is_token=is_token)
+            # The calls the firewall makes: the target's local blacklist entry holds even when the
+            # structural analyzer failed, and the server's policy mode decides a failed required check
+            # (STRICT blocks it).
+            risk_output = apply_local_match(
+                risk_output, self._container.scam_db.local_match(to_addr, chain_id), analyzer_results,
+            )
+            risk_output = self._container.policy_engine.apply(analyzer_results, risk_output)
 
-            risk_level = risk_output.get("risk_level", "LOW")
+            # An analysis that names no level is Unknown, which is never forwarded.
+            risk_level = risk_output.get("risk_level", verdicts.UNKNOWN)
             risk_score = risk_output.get("rug_probability", 0)
 
             logger.info(
@@ -152,7 +163,7 @@ class RPCProxy:
                 f"risk={risk_score}, level={risk_level}, chain={chain_id}"
             )
 
-            if risk_level == "HIGH":
+            if risk_level == verdicts.HIGH or risk_output.get("policy_override"):
                 logger.warning(
                     f"RPC Proxy BLOCKED tx to {to_addr} "
                     f"(risk={risk_score}, chain={chain_id})"
@@ -165,7 +176,7 @@ class RPCProxy:
 
             # A delegation's floor makes its verdict HIGH, blocked above. One that is not HIGH means
             # the floor never reached the verdict (an analyzer error, say): it is refused, not forwarded.
-            if authorization_list is not None and risk_level != "HIGH":
+            if authorization_list is not None and risk_level != verdicts.HIGH:
                 logger.warning(f"RPC Proxy BLOCKED EIP-7702 tx to {to_addr} (risk={risk_score}, chain={chain_id})")
                 return self._error_response(
                     rpc_id, -32003,
@@ -173,8 +184,16 @@ class RPCProxy:
                     f"EIP-7702 delegation not forwarded ({risk_level})"
                 )
 
+            if risk_level not in (verdicts.LOW, verdicts.MEDIUM):
+                logger.warning(f"RPC Proxy BLOCKED tx to {to_addr} (level={risk_level}, chain={chain_id})")
+                return self._error_response(
+                    rpc_id, -32003,
+                    f"Transaction blocked by ShieldBot firewall — "
+                    f"risk level {risk_level}, not forwarded"
+                )
+
             # MEDIUM or LOW: forward to upstream
-            if risk_level == "MEDIUM":
+            if risk_level == verdicts.MEDIUM:
                 logger.info(f"RPC Proxy WARN tx to {to_addr} (risk={risk_score})")
 
             return await self._forward(upstream_rpc, payload, chain_id)

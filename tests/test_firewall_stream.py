@@ -17,7 +17,7 @@ from core import verdicts
 from core.analyzer import AnalyzerResult
 from core.policy import PolicyEngine
 from core.registry import FIRST_VERDICT_SECONDS, AnalyzerRegistry
-from core.risk_engine import RiskEngine
+from core.risk_engine import MEDIUM_MATCH_FLOOR, RiskEngine
 from tests.test_strict_cache import strict_api  # noqa: F401  (pytest fixture)
 from utils.scam_db import ScamDatabase
 from utils.web3_client import UnsupportedChainError
@@ -889,7 +889,8 @@ async def test_the_legacy_fallback_denies_the_router_discount_the_router_shortcu
         body = {**body, "authorizationList": [{"address": "0x" + "de" * 20}]}
     else:
         api.scam_db.known_scams[(None, TARGET)] = {"source": "admin", "reports": 0, "expires_at": None}
-    # The composite pipeline fails, so the legacy scanner's heuristic score answers.
+    # The composite pipeline fails, so the legacy scanner's heuristic score answers. The token scanner
+    # asks no scam database, so the admin entry reaches the fallback only as the target's local match.
     gate = asyncio.Event()
     gate.set()
     services.registry = FailingRegistry(gate)
@@ -900,8 +901,25 @@ async def test_the_legacy_fallback_denies_the_router_discount_the_router_shortcu
     final, plain = await final_and_plain(api, body)
 
     assert plain["analysis"] == "AI analysis unavailable. Showing heuristic results only."
-    assert plain["risk_score"] == 40
+    # No discount: 40, and the admin entry's Block floor of 90 (70 had the discount applied).
+    if case == "delegation":
+        assert plain["risk_score"] == 40
+    else:
+        assert (plain["classification"], plain["risk_score"]) == (verdicts.BLOCK_RECOMMENDED, 90)
+        assert "Found 1 scam database match(es)" in plain["danger_signals"]
     assert final == plain
+
+    if case == "admin-listed":
+        # Streamed, the first is the admin entry's Block, and the fallback's final is never below it.
+        timer(monkeypatch, api, FIRST_VERDICT_SECONDS / SCALE)
+        gate.clear()
+        events = events_of(api, body)
+        kind, first = await next_event(events)
+        assert (kind, first["classification"], first["risk_score"]) == ("first", verdicts.BLOCK_RECOMMENDED, 90)
+        gate.set()
+        kind, streamed = await next_event(events)
+        assert (kind, streamed["classification"]) == ("final", verdicts.BLOCK_RECOMMENDED)
+        assert band_rank(first["risk_score"]) <= band_rank(streamed["risk_score"])
 
 
 @pytest.mark.asyncio
@@ -1047,3 +1065,198 @@ async def test_no_middleware_buffers_the_stream(stream_api, monkeypatch):
     assert events[0][1]["status"] == "unknown"
     assert events[1][1]["final"] is True
     assert services.db.upsert_contract_score.await_count == 1
+
+
+def times_out():
+    async def analyze(ctx):
+        raise asyncio.TimeoutError()
+    return analyze
+
+
+@pytest.mark.asyncio
+async def test_an_admin_listed_target_blocks_when_its_structural_analyzer_times_out(stream_api):
+    api, services = stream_api
+    blacklist(api)
+    # The structural analyzer reports the entry among its scam matches, but it never returns.
+    services.registry = registry(structural=times_out())
+
+    final, plain = await final_and_plain(api, BODY)
+
+    assert (plain["classification"], plain["risk_score"], plain["shield_score"]["risk_level"]) == (
+        verdicts.BLOCK_RECOMMENDED,
+        90,
+        verdicts.HIGH,
+    )
+    assert plain["danger_signals"][0] == "Confirmed scam address"
+    assert plain["failed_sources"] == ["structural"]
+    assert final == plain
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_admin_listed_target_whose_structural_analyzer_times_out_ends_no_lower_than_its_first(
+    stream_api, monkeypatch
+):
+    api, services = stream_api
+    blacklist(api)
+    timer(monkeypatch, api, FIRST_VERDICT_SECONDS / SCALE)
+    gate = asyncio.Event()
+    services.registry = registry(structural=times_out(), honeypot=held("honeypot", gate))
+
+    events = events_of(api)
+    kind, first = await next_event(events)
+    assert (kind, first["classification"], first["risk_score"]) == ("first", verdicts.BLOCK_RECOMMENDED, 90)
+    gate.set()
+    kind, final = await next_event(events)
+
+    assert (kind, final["classification"], final["risk_score"]) == ("final", verdicts.BLOCK_RECOMMENDED, 90)
+    assert band_rank(first["risk_score"]) <= band_rank(final["risk_score"])
+
+
+@pytest.mark.asyncio
+async def test_a_community_listed_target_whose_structural_analyzer_times_out_holds_caution_never_high(stream_api):
+    api, services = stream_api
+    api.scam_db.known_scams[(56, TARGET)] = {"source": "community", "reports": 3, "expires_at": None}
+    services.registry = registry(structural=times_out())
+
+    final, plain = await final_and_plain(api, BODY)
+
+    assert (plain["classification"], plain["risk_score"], plain["shield_score"]["risk_level"]) == (
+        verdicts.CAUTION,
+        MEDIUM_MATCH_FLOOR,
+        verdicts.MEDIUM,
+    )
+    assert plain["danger_signals"][0] == "Reported by 3 users"
+    assert final == plain
+
+
+# A Tenderly simulation that ran, succeeded and returned the sender's asset changes.
+SIMULATION = {
+    "success": True,
+    "revert_reason": None,
+    "gas_used": 21000,
+    "warnings": [],
+    "asset_deltas": [
+        {"token_symbol": "BNB", "display": "-1.0000 BNB", "direction": "out", "amount": 1.0, "dollar_value": ""}
+    ],
+}
+SIMULATIONS = {
+    "ran": (SIMULATION, True),
+    "reverted": ({**SIMULATION, "success": False, "revert_reason": "execution reverted"}, False),
+    "no-changes": ({**SIMULATION, "asset_deltas": []}, False),
+    "unavailable": (None, False),
+}
+
+
+def simulator(result):
+    return SimpleNamespace(is_enabled=lambda: True, simulate_transaction=AsyncMock(return_value=result))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", sorted(SIMULATIONS))
+async def test_simulated_is_true_only_when_a_simulation_returned_the_asset_changes(stream_api, monkeypatch, case):
+    api, _ = stream_api
+    simulation, simulated = SIMULATIONS[case]
+    monkeypatch.setattr(api, "tenderly_simulator", simulator(simulation))
+
+    final, plain = await final_and_plain(api, BODY)
+
+    assert plain["simulated"] is simulated
+    assert (plain["asset_delta"] == ["-1.0000 BNB"]) is simulated
+    assert final == plain
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", sorted(SIMULATIONS))
+async def test_a_router_swap_says_whether_its_asset_changes_were_simulated(stream_api, monkeypatch, case):
+    api, services = stream_api
+    simulation, simulated = SIMULATIONS[case]
+    body, _ = router_swap(monkeypatch, api, services)
+    monkeypatch.setattr(api, "tenderly_simulator", simulator(simulation))
+
+    final, plain = await final_and_plain(api, body)
+
+    assert plain["raw_checks"]["whitelisted_router"] == "Uniswap Router"
+    assert plain["simulated"] is simulated
+    # A reverted simulation's changes are not shown as the swap's: the main path's notice is.
+    assert plain["asset_delta"] == {
+        "ran": ["-1.0000 BNB"],
+        "reverted": ["Unable to simulate — cross-chain or complex transaction. Verify manually."],
+        "no-changes": [],
+        "unavailable": [],
+    }[case]
+    assert final == plain
+
+
+@pytest.mark.asyncio
+async def test_an_answer_that_ran_no_simulation_says_so(stream_api, monkeypatch):
+    api, services = stream_api
+    # A simulator that would succeed: none of these answers runs it.
+    monkeypatch.setattr(api, "tenderly_simulator", simulator(SIMULATION))
+    answers = {}
+    services.db.get_contract_score.return_value = SAFE_ROW
+    answers["cached"] = (await post(api)).json()
+    services.db.get_contract_score.return_value = None
+    answers["signature"] = (await post(api, {**BODY, "to": "", "signMethod": "personal_sign"})).json()
+    monkeypatch.setattr(
+        api,
+        "calldata_decoder",
+        SimpleNamespace(
+            decode=lambda data: {"selector": "deadbeef", "function_name": "multicall", "category": "swap", "params": {}},
+            is_whitelisted_target=lambda *args, **kwargs: "PancakeSwap Router",
+        ),
+    )
+    answers["unanalysed-swap"] = (await post(api)).json()
+    monkeypatch.setattr(
+        api, "calldata_decoder",
+        SimpleNamespace(decode=lambda data: {"selector": None}, is_whitelisted_target=lambda *args, **kwargs: None),
+    )
+    gate = asyncio.Event()
+    gate.set()
+    services.registry = FailingRegistry(gate)
+    monkeypatch.setattr(api, "token_scanner", SimpleNamespace(check_token=AsyncMock(return_value={"risk_score": 0})))
+    answers["fallback"] = (await post(api)).json()
+
+    assert answers["cached"]["cached"] is True
+    assert answers["signature"]["policy_mode"] == "SIGNATURE_ONLY"
+    assert answers["unanalysed-swap"]["coverage"] == {"token_path": 0}
+    assert answers["fallback"]["analysis"] == "AI analysis unavailable. Showing heuristic results only."
+    assert {name: answer["simulated"] for name, answer in answers.items()} == dict.fromkeys(answers, False)
+
+
+@pytest.mark.asyncio
+async def test_a_fallback_address_scan_that_reports_the_admin_entry_counts_it_once(stream_api, monkeypatch, mock_web3_client):
+    api, services = stream_api
+    blacklist(api)
+    mock_web3_client.is_token_contract = AsyncMock(return_value=False)
+    gate = asyncio.Event()
+    gate.set()
+    services.registry = FailingRegistry(gate)
+    # The address scanner's scam lookup reports the entry itself, as check_address does.
+    monkeypatch.setattr(
+        api,
+        "tx_scanner",
+        SimpleNamespace(scan_address=AsyncMock(return_value={
+            "risk_score": 90, "is_verified": True, "scam_matches": [dict(ADMIN_MATCH)],
+        })),
+    )
+
+    final, plain = await final_and_plain(api, BODY)
+
+    assert (plain["classification"], plain["risk_score"]) == (verdicts.BLOCK_RECOMMENDED, 90)
+    assert plain["raw_checks"]["scam_matches"] == 1
+    assert final == plain
+
+
+@pytest.mark.asyncio
+async def test_an_admin_entry_the_structural_analyzer_reported_is_one_flag(stream_api):
+    api, services = stream_api
+    blacklist(api)
+    services.registry = registry(structural=returns("structural", [ADMIN_MATCH]))
+
+    final, plain = await final_and_plain(api, BODY)
+
+    flags = plain["shield_score"]["critical_flags"]
+    assert (plain["classification"], plain["risk_score"]) == (verdicts.BLOCK_RECOMMENDED, 90)
+    assert "Scam DB match (1 sources)" in flags
+    assert "Confirmed scam address" not in flags
+    assert final == plain
