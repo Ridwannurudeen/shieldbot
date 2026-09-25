@@ -230,9 +230,13 @@ def format_full_report(
 
     # Wallet reputation
     lines.append('*\U0001F464 Wallet Reputation (Ethos):*')
-    rep_score = ethos_data.get('reputation_score', 50)
-    trust = escape_markdown(ethos_data.get('trust_level', 'unknown'))
-    lines.append(f'  Score: {rep_score}  |  Trust: {trust}')
+    # A failed lookup, or an address Ethos has no score for, has no reputation to show, not a neutral one.
+    if ethos_data.get('status') == 'unknown' or ethos_data.get('ethos_raw_score') is None:
+        reason = ethos_data.get('reason')
+        lines.append('  Score: Unknown  |  Trust: Unknown' + (f' ({escape_markdown(reason)})' if reason else ''))
+    else:
+        trust = escape_markdown(ethos_data['trust_level'])
+        lines.append(f"  Score: {ethos_data['reputation_score']}  |  Trust: {trust}")
     ethos_flags = ethos_data.get('scam_flags', [])
     if ethos_flags:
         lines.append(f'  Scam Flags: {escape_markdown(", ".join(str(f) for f in ethos_flags))}')

@@ -139,7 +139,12 @@ def _report(complete, **overrides):
             "source_code_patterns": [HOSTILE],
         },
         "dex_data": {"reason": HOSTILE},
-        "ethos_data": {"reputation_score": 10, "trust_level": HOSTILE, "scam_flags": [HOSTILE]},
+        "ethos_data": {
+            "reputation_score": 10,
+            "ethos_raw_score": 280,
+            "trust_level": HOSTILE,
+            "scam_flags": [HOSTILE],
+        },
         "honeypot_data": {"is_honeypot": None, "reason": HOSTILE},
         "address": ADDRESS,
         "ai_analysis": f"**Risk Score:** 90/100\n{HOSTILE}\nSee `set_fee`",
