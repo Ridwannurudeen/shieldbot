@@ -241,7 +241,8 @@ were written without a native speaker and need the owner's review before release
 `overlayDelegationNote`, `overlayDelegate`, `overlayDelegateUnreadable`, `overlayHashMessage`,
 `overlayHashMessageNote`, `overlayOpaqueMessage`, `overlayOpaqueMessageNote`, `overlayNotes`,
 `overlayHoldNoteUnchecked`, `overlayIncompleteCoverage`, `overlayExplainAnalyzing`,
-`healthNoApprovals`, `healthNoApprovalsDash`, `healthScanSubtext`, `healthScanning`.
+`healthNoApprovals`, `healthNoApprovalsDash`, `healthScanSubtext`, `healthScanning`,
+`dashDeployerBlockSub`, `step1Desc`.
 
 ## Tests
 

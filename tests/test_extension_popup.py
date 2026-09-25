@@ -244,6 +244,25 @@ def test_side_panel_chain_selector_offers_every_supported_chain():
     assert offered == {str(chain_id) for chain_id in CHAIN_INFO}
 
 
+def test_extension_copy_claims_only_what_it_does():
+    # A deployer's record raises the risk score (the firewall's campaign boost); it blocks nothing.
+    # Only requests a page sends through the wallet provider are seen, not sends started in the
+    # wallet itself.
+    block = {"en": "block", "vi": "chặn", "zh": "拦截"}
+    raises = {"en": "raises the risk score", "vi": "tăng điểm rủi ro", "zh": "风险分数"}
+    every = {"en": "every transaction", "vi": "mỗi giao dịch", "zh": "每笔交易"}
+    not_checked = {"en": "not checked", "vi": "không được kiểm tra", "zh": "不会被检查"}
+    for language in ("en", "vi", "zh"):
+        messages = json.loads((EXTENSION / "locales" / language / "messages.json").read_text(encoding="utf-8"))
+        deployer, step = messages["dashDeployerBlockSub"].lower(), messages["step1Desc"].lower()
+        assert block[language] not in deployer and raises[language] in deployer, (language, deployer)
+        assert every[language] not in step and not_checked[language] in step, (language, step)
+    english = json.loads((EXTENSION / "locales" / "en" / "messages.json").read_text(encoding="utf-8"))
+    for page, key in (("popup.html", "dashDeployerBlockSub"), ("welcome.html", "step1Desc")):
+        shown = next(element for element in parse(page) if element.get("data-i18n") == key)
+        assert shown["text"].strip() == english[key], (page, key)
+
+
 def test_popup_markup_claims_no_protection_before_a_scan():
     html = (EXTENSION / "popup.html").read_text(encoding="utf-8")
     assert ">PROTECTED<" not in html
