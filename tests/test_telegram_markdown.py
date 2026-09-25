@@ -846,3 +846,21 @@ def test_unlinked_defuses_every_uri_scheme_but_not_ordinary_colons(text, shown):
     from core.telegram_formatter import unlinked
 
     assert unlinked(text) == shown
+
+
+
+@pytest.mark.parametrize(
+    "text, shown",
+    [
+        # l and a combining acute accent, which composes to one letter.
+        ("evil\N{COMBINING ACUTE ACCENT}.com", "evi\N{LATIN SMALL LETTER L WITH ACUTE}\N{ONE DOT LEADER}com"),
+        # x and a combining acute accent, which has no composed form, so the mark stays before the dot.
+        ("x\N{COMBINING ACUTE ACCENT}.com", "x\N{COMBINING ACUTE ACCENT}\N{ONE DOT LEADER}com"),
+        ("e\N{COMBINING ACUTE ACCENT}\N{COMBINING DOT BELOW}.io", "\N{LATIN SMALL LETTER E WITH DOT BELOW}\N{COMBINING ACUTE ACCENT}\N{ONE DOT LEADER}io"),
+        ("v1\N{COMBINING ACUTE ACCENT}.2", "v1\N{COMBINING ACUTE ACCENT}.2"),
+    ],
+)
+def test_a_combining_mark_before_a_domains_dot_does_not_keep_it_linkable(text, shown):
+    from core.telegram_formatter import unlinked
+
+    assert unlinked(text) == shown
