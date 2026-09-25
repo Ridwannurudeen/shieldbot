@@ -88,8 +88,10 @@ Every owner below is an externally owned account (`eth_getCode` returns no code)
 `ROBINHOOD_VERDICT_REGISTRY` is empty in [.env.example](../.env.example), and verdict publishing stays
 `off` while it is. [DEPLOY_ROBINHOOD.md](../contracts/base/DEPLOY_ROBINHOOD.md) has the deployment steps
 and `scripts/verify_deployment.py` checks a deployment. Once deployed, the registry is written only by the
-API process's verdict drain (`services/verdict_publisher.py`) with `ROBINHOOD_RECORDER_PRIVATE_KEY`; add
-each contract's address, owner, recorder, deployment transaction and date here.
+verdict drain (`services/verdict_publisher.py`) with `ROBINHOOD_RECORDER_PRIVATE_KEY`. The drain runs in the
+API process, or in `workers.py` with `BACKGROUND_WORKERS=external`, and only the unit that runs it holds the
+key ([DEPLOYMENT.md](DEPLOYMENT.md)). Add each contract's address, owner, recorder, deployment transaction and
+date here.
 
 ## Checking these values
 
