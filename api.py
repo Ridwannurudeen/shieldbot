@@ -29,7 +29,7 @@ from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve
 from utils.chain_info import get_chain_name, get_native_symbol
 from utils.web3_client import UnsupportedChainError
 from utils.scam_db import BLACKLIST_RELOAD_SECONDS
-from core.risk_engine import MEDIUM_MATCH_FLOOR, apply_local_match, database_matches, medium_matches
+from core.risk_engine import HONEYPOT_FLOOR, apply_local_match, database_matches, medium_matches, scam_match_floor
 from services import rpc_guard
 from services.counterparty_service import code_kind
 from services.mempool_service import supports_pending_transactions
@@ -3462,17 +3462,19 @@ def _build_fallback_response(
 
     danger_signals = []
 
+    # The engine's floors for the same evidence, so a scam match or a honeypot scores here what it
+    # scores on the composite path.
     if scam_matches is not None and scam_matches > 0:
         danger_signals.append(f"Found {scam_matches} scam database match(es)")
-        risk_score = max(risk_score, 80)
 
     for match in medium_matches(scan.get("scam_matches")):
         danger_signals.append(match["reason"])
-        risk_score = max(risk_score, MEDIUM_MATCH_FLOOR)
+
+    risk_score = max(risk_score, scam_match_floor(scan.get("scam_matches")))
 
     if is_honeypot:
         danger_signals.append("Honeypot detected — cannot sell after buying")
-        risk_score = max(risk_score, 90)
+        risk_score = max(risk_score, HONEYPOT_FLOOR)
 
     if is_unlimited_approval and is_verified is False:
         danger_signals.append("Unlimited approval to unverified contract")

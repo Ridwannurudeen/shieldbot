@@ -40,6 +40,9 @@ WEIGHT_HONEYPOT = 0.15
 # send reports can create. It raises a score to MEDIUM_MATCH_FLOOR, inside the CAUTION band, is shown
 # by its reason, and is never counted as a scam database match.
 MEDIUM_MATCH_FLOOR = 40
+# A confirmed honeypot's floor on a token: deep liquidity and low taxes do not make a token that cannot
+# be sold safe to buy.
+HONEYPOT_FLOOR = 80
 
 
 def _is_medium(match) -> bool:
@@ -244,10 +247,9 @@ class RiskEngine:
             if contract_data.get('is_contract') is False and honeypot_data.get('simulation_failed'):
                 composite = max(composite, 80)
 
-            # A confirmed honeypot floors at 80: deep liquidity and low taxes do not make a token
-            # that cannot be sold safe to buy.
+            # A confirmed honeypot floors at HONEYPOT_FLOOR.
             if honeypot_data.get('is_honeypot'):
-                composite = max(composite, 80)
+                composite = max(composite, HONEYPOT_FLOOR)
 
             if ethos_data.get('severe_reputation_flag'):
                 pair_age = dex_data.get('pair_age_hours')
@@ -398,10 +400,9 @@ class RiskEngine:
             if contract_data.get('is_contract') is False and honeypot_data.get('simulation_failed'):
                 composite = max(composite, 80)
 
-            # Honeypot escalation — floor at 80 if confirmed. Deep liquidity and low taxes do not
-            # make a token that cannot be sold safe to buy.
+            # Honeypot escalation — floor at HONEYPOT_FLOOR if confirmed.
             if honeypot_data.get('is_honeypot'):
-                composite = max(composite, 80)
+                composite = max(composite, HONEYPOT_FLOOR)
 
             if ethos_data.get('severe_reputation_flag'):
                 pair_age = dex_data.get('pair_age_hours')

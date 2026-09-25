@@ -187,8 +187,8 @@ class TestFirewallFallback:
         }
 
         data = api_module._build_fallback_response({}, scan, None, 56)
-        assert data["classification"] == "BLOCK_RECOMMENDED"
-        assert data["risk_score"] >= 80
+        # The engine's floor for a scam database match, as on the composite path.
+        assert (data["classification"], data["risk_score"]) == ("HIGH_RISK", 70)
         assert "Found 1 scam database match(es)" in data["danger_signals"]
         assert data["raw_checks"]["scam_matches"] == 1
 
@@ -897,3 +897,42 @@ async def test_agent_endpoint_preserves_routing_error(routing_error_api, monkeyp
     with pytest.raises(UnsupportedChainError) as exc:
         await getattr(api, endpoint)(req, request)
     assert exc.value is error
+
+
+_FALLBACK_EVIDENCE = {
+    "admin": {"scam_matches": [{"type": "Local Blacklist", "reason": "Confirmed scam address", "source": "ShieldBot", "severity": "block"}]},
+    "goplus-high": {"scam_matches": [{"type": "GoPlus Security", "reason": "Owner can change balance", "source": "gopluslabs.io", "severity": "high"}]},
+    "community": {"scam_matches": [{"type": "community_reports", "reason": "Reported by 3 users", "source": "ShieldBot", "severity": "medium", "reports": 3}]},
+    "honeypot": {"is_honeypot": True},
+}
+
+
+@pytest.mark.parametrize("evidence", sorted(_FALLBACK_EVIDENCE))
+def test_the_same_evidence_scores_the_same_on_the_fallback_and_the_composite_path(evidence):
+    import api as api_module
+    from core.analyzer import AnalyzerResult
+    from core.risk_engine import RiskEngine
+
+    facts = _FALLBACK_EVIDENCE[evidence]
+    # A verified, established token that is clean apart from `facts`.
+    structural = {
+        "is_contract": True, "is_verified": True, "contract_age_days": 400,
+        "scam_matches": facts.get("scam_matches", []),
+        "coverage": {"is_verified": True, "contract_age_days": True, "scam_database": True},
+    }
+    honeypot = {
+        "is_honeypot": facts.get("is_honeypot", False), "can_sell": not facts.get("is_honeypot"),
+        "buy_tax": 0, "sell_tax": 0,
+    }
+    composite = RiskEngine().compute_from_results([
+        AnalyzerResult("structural", 0.40, 30 if api_module.database_matches(structural["scam_matches"]) else 0, data=structural),
+        AnalyzerResult("market", 0.25, 0, data={"liquidity_usd": 50_000}),
+        AnalyzerResult("behavioral", 0.20, 0, data={"reputation_score": 50}),
+        AnalyzerResult("honeypot", 0.15, 80 if facts.get("is_honeypot") else 0, data=honeypot),
+    ])
+    scan = {"address": "0x" + "d" * 40, "risk_score": 0, "is_verified": True, "is_contract": True, "status": "ok",
+            "coverage": {"scam_database": True}, **facts}
+
+    fallback = api_module._build_fallback_response({}, scan, None, 56)
+
+    assert fallback["risk_score"] == composite["rug_probability"]
