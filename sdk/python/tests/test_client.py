@@ -3,6 +3,7 @@
 import pytest
 import json
 import httpx
+from enum import IntEnum
 from unittest.mock import AsyncMock, patch, MagicMock
 from shieldbot.client import ShieldBot, ShieldBotError
 from shieldbot.models import Verdict
@@ -72,6 +73,27 @@ async def test_local_cache_hit(sb):
 
 
 @pytest.mark.asyncio
+async def test_a_cache_hit_is_a_copy_marked_cached_that_callers_cannot_poison(sb):
+    response = MagicMock(status_code=200)
+    response.json.return_value = {
+        "status": "ok", "coverage": {"honeypot": 1}, "verdict": "ALLOW", "score": 5, "cached": False,
+    }
+    transaction = {"from": "0xA", "to": "0xB", "chain_id": 56}
+    with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response) as post:
+        fresh = await sb.check(transaction)
+        fresh.verdict, fresh.score = "BLOCK", 99
+        first_hit = await sb.check(transaction)
+        first_hit.verdict, first_hit.score = "BLOCK", 99
+        second_hit = await sb.check(transaction)
+    assert post.await_count == 1
+    assert fresh.cached is False
+    assert first_hit.cached is True
+    assert second_hit is not first_hit
+    assert (second_hit.verdict, second_hit.score, second_hit.cached) == ("ALLOW", 5, True)
+    assert (second_hit.status, second_hit.risk_display, second_hit.allowed) == ("ok", "5%", True)
+
+
+@pytest.mark.asyncio
 async def test_equivalent_transaction_encodings_reuse_cache(sb):
     response = MagicMock(status_code=200)
     response.json.return_value = {
@@ -94,7 +116,6 @@ async def test_equivalent_transaction_encodings_reuse_cache(sb):
             **transaction,
             "from": transaction["from"].lower(),
             "to": transaction["to"].lower(),
-            "chain_id": "056",
             "data": transaction["data"].lower(),
             "value": "0x0",
         })
@@ -195,6 +216,83 @@ async def test_unparseable_value_is_rejected_before_any_request(value):
             await client.check({"from": "0xA", "to": "0xB", "chain_id": 56, "value": value})
     post.assert_not_awaited()
     await client.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", ["56", "0x38", " 56 ", 56.0, 0, -1, True, False, Wei(0)])
+async def test_chain_id_that_is_not_a_positive_int_is_rejected_before_any_request(chain_id):
+    client = ShieldBot(api_key="sb_test", agent_id="agent:1", fail_mode="open")
+    with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock) as post:
+        with pytest.raises(ValueError, match="chain_id must be a positive int"):
+            await client.check({"from": "0xA", "to": "0xB", "chain_id": chain_id})
+    post.assert_not_awaited()
+    await client.close()
+
+
+@pytest.mark.parametrize("timeout", [0, -1, 0.0, float("nan"), float("inf"), "10", None, True])
+def test_a_timeout_that_is_not_a_positive_number_is_rejected(timeout):
+    with pytest.raises(ValueError, match="timeout must be a positive number of seconds"):
+        ShieldBot(api_key="sb_test", agent_id="agent:1", timeout=timeout)
+
+
+@pytest.mark.parametrize("cache_size", [-1, 1.5, "10", None, True])
+def test_a_cache_size_that_is_not_an_int_of_0_or_more_is_rejected(cache_size):
+    with pytest.raises(ValueError, match="cache_size must be an int of 0 or more"):
+        ShieldBot(api_key="sb_test", agent_id="agent:1", cache_size=cache_size)
+
+
+@pytest.mark.parametrize("options", [
+    {"timeout": 0.5}, {"timeout": 10}, {"cache_size": 0}, {"cache_size": 1}, {"cache_size": Wei(5)},
+])
+def test_a_positive_timeout_and_a_cache_size_of_0_or_more_are_accepted(options):
+    ShieldBot(api_key="sb_test", agent_id="agent:1", **options)
+
+
+@pytest.mark.asyncio
+async def test_cache_size_0_turns_the_cache_off():
+    client = ShieldBot(api_key="sb_test", agent_id="agent:1", cache_size=0)
+    response = MagicMock(status_code=200)
+    response.json.return_value = {"status": "ok", "coverage": {"honeypot": 1}, "verdict": "ALLOW", "score": 5}
+    transaction = {"from": "0xA", "to": "0xB", "chain_id": 56}
+    with patch(
+        "shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock,
+        side_effect=[response, response, httpx.ConnectError("offline")],
+    ) as post:
+        await client.check(transaction)
+        second = await client.check(transaction)
+        offline = await client.check(transaction)
+    assert post.await_count == 3
+    assert second.cached is False
+    assert (offline.verdict, offline.cached, offline.analysis_unavailable) == ("WARN", False, True)
+    await client.close()
+
+
+class Chain(IntEnum):
+    BSC = 56
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [56, Wei(56), Chain.BSC])
+async def test_an_int_chain_id_including_a_subclass_is_sent_as_a_plain_int(sb, chain_id):
+    response = MagicMock(status_code=200)
+    response.json.return_value = {"status": "ok", "coverage": {"honeypot": 1}, "verdict": "ALLOW", "score": 5}
+    with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response) as post:
+        verdict = await sb.check({"from": "0xA", "to": "0xB", "chain_id": chain_id})
+    sent = post.await_args.kwargs["json"]["transaction"]["chain_id"]
+    assert (sent, type(sent)) == (56, int)
+    assert verdict.allowed
+
+
+@pytest.mark.asyncio
+async def test_an_intenum_chain_shares_the_cache_entry_of_its_int(sb):
+    response = MagicMock(status_code=200)
+    response.json.return_value = {"status": "ok", "coverage": {"honeypot": 1}, "verdict": "ALLOW", "score": 5}
+    transaction = {"from": "0xA", "to": "0xB", "chain_id": 56}
+    with patch("shieldbot.client.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response) as post:
+        await sb.check(transaction)
+        hit = await sb.check({**transaction, "chain_id": Chain.BSC})
+    assert post.await_count == 1
+    assert hit.cached is True
 
 
 @pytest.mark.asyncio

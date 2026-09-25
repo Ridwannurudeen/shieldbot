@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from core.analyzer import AnalyzerResult
+from core.policy import PolicyEngine
 from core.risk_engine import RiskEngine
 from utils.scam_db import ScamDatabase
 
@@ -173,6 +174,8 @@ async def test_rpc_preserves_token_identification(mock_web3_client, identificati
         web3_client=mock_web3_client,
         registry=SimpleNamespace(run_all=AsyncMock(return_value=[])),
         risk_engine=MagicMock(),
+        policy_engine=PolicyEngine(),
+        scam_db=ScamDatabase(),
     )
     services.risk_engine.compute_from_results.return_value = {
         'risk_level': 'HIGH', 'rug_probability': 95,

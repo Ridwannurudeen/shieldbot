@@ -130,6 +130,44 @@ test('an exception from onFirst rejects the call unchanged and releases the stre
   assert.equal(stream.cancelled(), true);
 });
 
+test('a promise from onFirst that rejects rejects the call with its error and releases the stream', async () => {
+  const stream = streamingFetch();
+  global.fetch = stream.fetch;
+  stream.write(sse('first', FIRST));
+  stream.write(sse('final', FINAL));
+  stream.end();
+  const failure = new TypeError('the caller broke later');
+
+  await assert.rejects(
+    new ShieldBot().firewall('0xb', { chainId: 56, onFirst: async () => { await flush(); throw failure; } }),
+    (error) => error === failure,
+  );
+  assert.equal(stream.cancelled(), true);
+});
+
+test('the stream is read on only once a promise from onFirst settles', async () => {
+  const stream = streamingFetch();
+  global.fetch = stream.fetch;
+  stream.write(sse('first', FIRST));
+  stream.write(sse('final', FINAL));
+  stream.end();
+  let finish;
+  const seen = [];
+
+  const pending = new ShieldBot().firewall('0xb', {
+    chainId: 56,
+    onFirst: () => new Promise((resolve) => { finish = resolve; }),
+  });
+  pending.then(() => seen.push('resolved'));
+  await flush();
+  await flush();
+  seen.push('listener settles');
+  finish();
+
+  assert.deepEqual(await pending, FINAL);
+  assert.deepEqual(seen, ['listener settles', 'resolved']);
+});
+
 test('the stream is released once the final arrives', async () => {
   const stream = streamingFetch();
   global.fetch = stream.fetch;
@@ -150,11 +188,29 @@ test('an error event rejects with the API status and no final', async () => {
 
   await assert.rejects(
     new ShieldBot().firewall('0xb', { chainId: 56, onFirst: (first) => firsts.push(first) }),
-    (error) => error instanceof ShieldBotError && error.status === 500 && /Internal server error/.test(error.message),
+    (error) => error instanceof ShieldBotError && error.status === 500 && error.code === 'STREAM_ERROR' && /Internal server error/.test(error.message),
   );
   assert.equal(firsts.length, 1);
   assert.equal(stream.cancelled(), true);
 });
+
+for (const [name, data, status, message] of [
+  ['a 4xx status', { status: 400, detail: 'Invalid calldata' }, 400, /Invalid calldata/],
+  ['no status', { detail: 'Scan failed' }, 500, /Scan failed/],
+  ['no status or detail', {}, 500, /HTTP 500/],
+]) {
+  test(`an error event with ${name} rejects with code STREAM_ERROR and status ${status}`, async () => {
+    const stream = streamingFetch();
+    global.fetch = stream.fetch;
+    stream.write(sse('error', data));
+    stream.end();
+
+    await assert.rejects(
+      new ShieldBot().firewall('0xb', { chainId: 56, onFirst: () => {} }),
+      (error) => error instanceof ShieldBotError && error.code === 'STREAM_ERROR' && error.status === status && message.test(error.message),
+    );
+  });
+}
 
 test('a stream with only the final never calls onFirst', async () => {
   const stream = streamingFetch();
@@ -214,6 +270,51 @@ test('an empty line ends an event: the next one does not inherit its name', asyn
   assert.equal(called, false);
   assert.deepEqual(result, FINAL);
 });
+
+const withoutKey = (key) => { const copy = { ...FIRST }; delete copy[key]; return copy; };
+for (const [name, first] of [
+  ['status ok', { ...FIRST, status: 'ok' }],
+  ['no status', withoutKey('status')],
+  ['classification SAFE', { ...FIRST, classification: 'SAFE' }],
+  ['classification safe', { ...FIRST, classification: 'safe' }],
+  ['classification caution', { ...FIRST, classification: 'caution' }],
+  ['classification UNKNOWN', { ...FIRST, classification: 'UNKNOWN' }],
+  ['no classification', withoutKey('classification')],
+  ['final true', { ...FIRST, final: true }],
+  ['no final', withoutKey('final')],
+  ['final as a string', { ...FIRST, final: 'false' }],
+]) {
+  test(`a first event with ${name} never reaches onFirst`, async () => {
+    const stream = streamingFetch();
+    global.fetch = stream.fetch;
+    stream.write(sse('first', first));
+    stream.write(sse('first', FIRST));
+    stream.write(sse('final', FINAL));
+    stream.end();
+    const firsts = [];
+
+    const result = await new ShieldBot().firewall('0xb', { chainId: 56, onFirst: (seen) => firsts.push(seen) });
+
+    assert.deepEqual(firsts, [FIRST]);
+    assert.deepEqual(result, FINAL);
+  });
+}
+
+for (const classification of ['CAUTION', 'HIGH_RISK', 'BLOCK_RECOMMENDED']) {
+  test(`a first classified ${classification} reaches onFirst`, async () => {
+    const stream = streamingFetch();
+    global.fetch = stream.fetch;
+    const first = { ...FIRST, classification };
+    stream.write(sse('first', first));
+    stream.write(sse('final', FINAL));
+    stream.end();
+    const firsts = [];
+
+    await new ShieldBot().firewall('0xb', { chainId: 56, onFirst: (seen) => firsts.push(seen) });
+
+    assert.deepEqual(firsts, [first]);
+  });
+}
 
 test('a plain JSON answer to a streamed request (STRICT) resolves with it', async () => {
   const strict = { ...FINAL, policy_mode: 'STRICT' };

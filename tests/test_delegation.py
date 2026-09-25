@@ -11,9 +11,11 @@ import pytest
 from analyzers.intent import IntentMismatchAnalyzer
 from core.analyzer import AnalysisContext, AnalyzerResult
 from core.extension_formatter import format_extension_alert
+from core.policy import PolicyEngine
 from core.risk_engine import RiskEngine
 from services.counterparty_service import judge_delegate
 from tests.test_consumer_unknowns import consumer_api  # noqa: F401
+from utils.scam_db import ScamDatabase
 
 DELEGATE = "0x" + "7" * 40
 SENDER = "0x" + "b" * 40
@@ -233,6 +235,8 @@ async def test_the_rpc_proxy_passes_the_authorization_list_to_the_analyzers():
                 "rug_probability": 100,
             }
         ),
+        policy_engine=PolicyEngine(),
+        scam_db=ScamDatabase(),
     )
     proxy = RPCProxy(container)
     authorizations = [{"address": DELEGATE, "chainId": "0x1", "nonce": "0x0"}]
@@ -282,6 +286,8 @@ def _proxy(risk_level):
         risk_engine=SimpleNamespace(
             compute_from_results=lambda results, is_token: {"risk_level": risk_level, "rug_probability": 40},
         ),
+        policy_engine=PolicyEngine(),
+        scam_db=ScamDatabase(),
     )
     proxy = RPCProxy(container)
     proxy._forward = AsyncMock(return_value={"jsonrpc": "2.0", "id": 1, "result": "0xhash"})

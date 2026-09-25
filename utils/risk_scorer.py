@@ -151,13 +151,6 @@ def findings_from_scan_result(result: Dict) -> List[Dict]:
     if result.get('checks', {}).get('can_sell') is False:
         findings.append({"severity": "critical", "message": "Cannot sell token"})
 
-    # Source code dangerous patterns (from AI source analysis)
-    for pattern in result.get('source_analysis', {}).get('dangerous_patterns', []):
-        findings.append({
-            "severity": pattern.get("severity", "medium"),
-            "message": f"Source: {pattern.get('pattern', 'unknown')} - {pattern.get('detail', '')}"
-        })
-
     return findings
 
 

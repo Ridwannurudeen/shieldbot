@@ -277,8 +277,8 @@ def test_a_personal_sign_caller_is_masked_in_any_address_form(
     evidence_api, mock_web3_client, sender
 ):
     _, client, _ = evidence_api
-    # web3 7 accepts these forms as addresses (web3 6.15.1 does not), and then the signature target
-    # falls back to the sender.
+    # web3 7 accepts these forms as addresses (web3 6.15.1 does not). The signature target is never the
+    # sender, so with no other address it is the zero address, and the caller appears nowhere.
     mock_web3_client.is_valid_address.side_effect = lambda value: bool(
         re.fullmatch(r"(?:0[xX])?[0-9a-fA-F]{40}", value)
     )
@@ -297,7 +297,7 @@ def test_a_personal_sign_caller_is_masked_in_any_address_form(
     )
     assert response.status_code == 200
     _, stored = _stored(client, response)
-    assert stored["evidence"]["target"] == "[caller]"
+    assert stored["evidence"]["target"] == "0x" + "0" * 40
     assert CALLER[2:].lower() not in stored["canonical"].lower()
 
 

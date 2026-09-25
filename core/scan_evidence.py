@@ -140,6 +140,15 @@ def transaction_evidence(
     }
 
 
+def without_caller(value, caller: Optional[str]):
+    """`value` with every mention of the caller's address, in any form the API accepts, replaced with
+    CALLER_PLACEHOLDER; unchanged when `caller` is not an address."""
+    caller_hex = _CALLER.fullmatch(caller.strip()) if caller else None
+    if not caller_hex:
+        return value
+    return _without_caller(value, re.compile(f"(?:0x)?{caller_hex.group(1)}", re.IGNORECASE))
+
+
 def _without_caller(value, caller: re.Pattern):
     if isinstance(value, str):
         return caller.sub(CALLER_PLACEHOLDER, value)
@@ -198,11 +207,7 @@ def build_scan_evidence(
         "shieldbot_commit": SHIELDBOT_COMMIT,
         "scanned_at": scanned_at if cached_scan_at is None else int(cached_scan_at),
     }
-    caller_hex = _CALLER.fullmatch(caller.strip()) if caller else None
-    if caller_hex:
-        pattern = re.compile(f"(?:0x)?{caller_hex.group(1)}", re.IGNORECASE)
-        document = _without_caller(document, pattern)
-    return document
+    return without_caller(document, caller)
 
 
 _SUMMARY = (

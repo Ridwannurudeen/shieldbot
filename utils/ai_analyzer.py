@@ -419,7 +419,6 @@ Return the explanation JSON now."""
         """Build context string for the firewall prompt."""
         lines = [
             "=== TRANSACTION DATA ===",
-            f"From: {_untrusted(tx_data.get('from', 'unknown'))}",
             f"To: {tx_data.get('to', 'unknown')}",
             f"Value: {_untrusted(tx_data.get('value', '0'))} wei",
             f"Chain ID: {tx_data.get('chainId') if tx_data.get('chainId') is not None else 'Unknown'}",

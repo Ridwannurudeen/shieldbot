@@ -129,3 +129,23 @@ def test_a_signature_sent_without_its_signer_keeps_its_verdict_and_stores_no_add
     if sign_method == "eth_sign":
         assert body["risk_score"] >= verdicts.BLIND_SIGN_MIN
         assert body["danger_signals"][0].startswith("eth_sign signs a raw hash")
+
+
+@pytest.mark.parametrize("sign_method", ["personal_sign", "eth_sign"])
+def test_a_signature_with_a_signer_and_no_target_stores_no_address_as_its_target(
+    evidence_api, mock_web3_client, sign_method  # noqa: F811
+):
+    # An SDK or API caller sends its wallet in "from". The evidence target is never the signer: with no
+    # `to` and no typed-data address it is the zero address, not the wallet nor a placeholder for it.
+    _, client, _ = evidence_api
+    mock_web3_client.is_valid_address.side_effect = lambda value: bool(re.fullmatch(r"0x[0-9a-fA-F]{40}", value))
+    mock_web3_client.to_checksum_address.side_effect = lambda value: value
+    signer = "0x" + "5b" * 20
+    response = client.post(
+        "/api/firewall",
+        json={"to": "", "from": signer, "data": "0x", "chainId": 56, "signMethod": sign_method},
+    )
+    assert response.status_code == 200
+    _, stored = _stored(client, response)
+    assert stored["evidence"]["target"] == "0x" + "0" * 40
+    assert signer[2:] not in stored["canonical"].lower()

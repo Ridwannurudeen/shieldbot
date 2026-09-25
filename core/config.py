@@ -4,6 +4,8 @@ from typing import List, Literal, Optional
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
+from core.policy import PolicyMode
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
@@ -80,7 +82,7 @@ class Settings(BaseSettings):
     shieldbot_api_url: str = "http://127.0.0.1:8000"
 
     # Policy mode (STRICT or BALANCED)
-    policy_mode: str = "BALANCED"
+    policy_mode: str = PolicyMode.BALANCED.value
 
     # Database
     database_path: str = "shieldbot.db"

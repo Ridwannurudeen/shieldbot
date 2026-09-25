@@ -4,7 +4,11 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from eth_account import Account
 from web3 import Web3
+from core.analyzer import AnalyzerResult
+from core.policy import PolicyEngine
+from core.risk_engine import RiskEngine
 from rpc.proxy import RPCProxy
+from utils.scam_db import ScamDatabase
 from utils.web3_client import Web3Client
 
 
@@ -23,6 +27,8 @@ def mock_container():
 
     # Mock registry
     container.registry.run_all = AsyncMock(return_value=[])
+    container.policy_engine = PolicyEngine()
+    container.scam_db = ScamDatabase()
 
     # Mock risk engine
     container.risk_engine.compute_from_results.return_value = {
@@ -333,3 +339,103 @@ async def test_rpc_failures_log_chain_and_class_without_secrets(proxy, mock_cont
     assert expected in caplog.text
     if failure == "forward":
         assert "4663" in caplog.text
+
+
+TARGET = "0x" + "c" * 40
+SEND = {
+    "jsonrpc": "2.0", "id": 1, "method": "eth_sendTransaction",
+    "params": [{"to": TARGET, "from": "0x" + "b" * 40, "value": "0x0"}],
+}
+
+
+def _analysis(gap=None, failed=None):
+    """The four target analyzers' results, fully covered except `gap` (analyzer, field), with
+    `failed` an analyzer that ran past the deadline."""
+    data = {
+        "structural": {
+            "is_contract": True, "is_verified": True, "contract_age_days": 400, "scam_matches": [],
+            "coverage": {"is_verified": True, "contract_age_days": True, "scam_database": True},
+        },
+        "market": {"liquidity_usd": 50_000},
+        "behavioral": {"reputation_score": 50},
+        "honeypot": {
+            "is_honeypot": False, "can_sell": True, "buy_tax": 0, "sell_tax": 0,
+            "coverage": {"is_honeypot": True, "can_sell": True, "buy_tax": True, "sell_tax": True},
+        },
+    }
+    weights = {"structural": 0.40, "market": 0.25, "behavioral": 0.20, "honeypot": 0.15}
+    results = []
+    for name, weight in weights.items():
+        if name == failed:
+            results.append(AnalyzerResult(name, weight, 50, error=f"{name} analysis unavailable (TimeoutError)"))
+            continue
+        fields = {**data[name], "status": "ok"}
+        if gap and gap[0] == name:
+            fields = {**fields, gap[1]: None, "coverage": {**fields["coverage"], gap[1]: False}, "status": "unknown"}
+        results.append(AnalyzerResult(name, weight, 0, data=fields))
+    return results
+
+
+def _judging(mock_container, mode, results):
+    """The proxy with the real risk engine, a policy engine in `mode` and the analyzers' `results`."""
+    mock_container.registry.run_all = AsyncMock(return_value=results)
+    mock_container.risk_engine = RiskEngine()
+    mock_container.policy_engine = PolicyEngine(mode)
+    mock_container.scam_db = ScamDatabase()
+    proxy = RPCProxy(mock_container)
+    proxy._forward = AsyncMock(return_value={"jsonrpc": "2.0", "id": 1, "result": "0xhash"})
+    return proxy
+
+
+@pytest.mark.asyncio
+async def test_a_strict_server_refuses_a_transaction_whose_required_check_is_unknown(mock_container):
+    proxy = _judging(mock_container, "STRICT", _analysis(gap=("honeypot", "can_sell")))
+
+    result = await proxy.handle_request(56, SEND)
+
+    assert result["error"]["code"] == -32003
+    proxy._forward.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_strict_server_still_forwards_a_complete_low_risk_transaction(mock_container):
+    proxy = _judging(mock_container, "STRICT", _analysis())
+
+    result = await proxy.handle_request(56, SEND)
+
+    assert result == {"jsonrpc": "2.0", "id": 1, "result": "0xhash"}
+
+
+@pytest.mark.asyncio
+async def test_an_admin_listed_target_is_refused_even_when_its_structural_analyzer_times_out(mock_container):
+    proxy = _judging(mock_container, "BALANCED", _analysis(failed="structural"))
+    proxy._container.scam_db.known_scams[(None, TARGET)] = {"source": "admin", "reports": 0, "expires_at": None}
+
+    result = await proxy.handle_request(56, SEND)
+
+    assert result["error"]["code"] == -32003
+    assert "(HIGH)" in result["error"]["message"]
+    proxy._forward.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_balanced_server_forwards_a_medium_risk_transaction(mock_container):
+    proxy = _judging(mock_container, "BALANCED", [])
+    mock_container.risk_engine = MagicMock()
+    mock_container.risk_engine.compute_from_results.return_value = {'rug_probability': 40, 'risk_level': 'MEDIUM'}
+
+    result = await proxy.handle_request(56, SEND)
+
+    assert result == {"jsonrpc": "2.0", "id": 1, "result": "0xhash"}
+
+
+@pytest.mark.asyncio
+async def test_an_analysis_without_a_risk_level_is_never_forwarded(mock_container):
+    proxy = _judging(mock_container, "BALANCED", [])
+    mock_container.risk_engine = MagicMock()
+    mock_container.risk_engine.compute_from_results.return_value = {'rug_probability': 10}
+
+    result = await proxy.handle_request(56, SEND)
+
+    assert result["error"]["code"] == -32003
+    proxy._forward.assert_not_awaited()

@@ -1,13 +1,19 @@
 """X-Policy-Mode: STRICT skips the score cache only for a caller with a valid API key. Anyone else is
-answered from the cached facts in STRICT mode, which still blocks on Unknown."""
+answered from the cached facts in STRICT mode, which blocks on a failed required check, as a fresh scan
+does, and on any Unknown in a row that does not name them."""
 
+import json
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from core import verdicts
+from core.analyzer import AnalyzerResult
 from core.policy import PolicyEngine
+from core.registry import AnalyzerRegistry
+from core.risk_engine import RiskEngine
 from utils.scam_db import ScamDatabase
 
 UNKNOWN_ROW = {
@@ -146,3 +152,82 @@ async def test_authenticated_strict_bypasses_the_cache(strict_api):
 
     services.registry.run_all.assert_awaited_once()
     assert "cached" not in response
+
+
+# Fully covered analyzer data; a test makes one field unknown.
+COVERED = {
+    "structural": {
+        "is_contract": True,
+        "is_verified": True,
+        "contract_age_days": 400,
+        "scam_matches": [],
+        "coverage": {"is_verified": True, "contract_age_days": True, "scam_database": True},
+    },
+    "market": {"liquidity_usd": 50_000, "pair_age_hours": 100, "coverage": {"liquidity_usd": True, "pair_age_hours": True}},
+    "behavioral": {"reputation_score": 50},
+    "honeypot": {
+        "is_honeypot": False,
+        "can_sell": True,
+        "buy_tax": 0,
+        "sell_tax": 0,
+        "coverage": {"is_honeypot": True, "can_sell": True, "buy_tax": True, "sell_tax": True},
+    },
+}
+WEIGHTS = {"structural": 0.40, "market": 0.25, "behavioral": 0.20, "honeypot": 0.15}
+
+
+def _registry(gap):
+    """The four target analyzers, fully covered except the (analyzer, field) `gap`."""
+    registry = AnalyzerRegistry()
+    for name, weight in WEIGHTS.items():
+        data = {**COVERED[name], "status": "ok"}
+        if name == gap[0]:
+            data = {**data, "coverage": {**data["coverage"], gap[1]: False}, "status": "unknown", gap[1]: None}
+        analyzer = MagicMock()
+        analyzer.name = name
+        analyzer.weight = weight
+
+        async def analyze(ctx, result=AnalyzerResult(name, weight, 0, data=data)):
+            return result
+
+        analyzer.analyze = analyze
+        registry.register(analyzer)
+    return registry
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "gap, blocked",
+    [(("market", "pair_age_hours"), False), (("honeypot", "can_sell"), True)],
+    ids=["informational-gap", "required-gap"],
+)
+async def test_strict_gives_a_cached_scan_the_answer_it_gave_the_fresh_one(strict_api, monkeypatch, gap, blocked):
+    api, services = strict_api
+    monkeypatch.setattr(api, "risk_engine", RiskEngine())
+    services.registry = _registry(gap)
+    services.db.get_contract_score.return_value = None
+
+    fresh = await _firewall(api, _request())
+    # The row the fresh scan wrote, as the database returns it.
+    stored = services.db.upsert_contract_score.await_args.kwargs
+    services.db.get_contract_score.return_value = {
+        "risk_score": stored["risk_score"],
+        "risk_level": stored["risk_level"],
+        "flags": stored["flags"],
+        "archetype": stored["archetype"],
+        "confidence": stored["confidence"],
+        "scan_count": 1,
+        "last_scanned_at": time.time(),
+        "category_scores": json.loads(json.dumps(stored["category_scores"])),
+    }
+    cached = await _firewall(api, _request())
+
+    assert "cached" not in fresh and cached["cached"] is True
+    assert fresh["status"] == cached["status"] == "unknown"
+    for response in (fresh, cached):
+        overridden = any(signal.startswith("Policy override") for signal in response["danger_signals"])
+        assert (response["classification"] == verdicts.BLOCK_RECOMMENDED, overridden) == (blocked, blocked)
+    assert fresh["classification"] == cached["classification"]
+    assert fresh["risk_score"] == cached["risk_score"]
+    # The cached answer names the failed required checks the fresh one named.
+    assert cached["failed_sources"] == fresh["failed_sources"] == (["honeypot"] if blocked else [])

@@ -1,6 +1,6 @@
 """Formats composite risk data into a compact JSON dict for the Chrome extension."""
 
-from core.verdicts import BLOCK_RECOMMENDED, CAUTION, HIGH, HIGH_RISK, MEDIUM, SAFE, classify
+from core.verdicts import BLOCK_RECOMMENDED, CAUTION, HIGH, HIGH_RISK, MEDIUM, SAFE, UNKNOWN, classify
 
 
 def is_scan_incomplete(risk_output: dict) -> bool:
@@ -8,7 +8,7 @@ def is_scan_incomplete(risk_output: dict) -> bool:
     return (
         risk_output.get('status') != 'ok'
         or risk_output.get('partial') is True
-        or str(risk_output.get('risk_level', '')).upper() == 'UNKNOWN'
+        or str(risk_output.get('risk_level', '')).upper() == UNKNOWN
         or bool(risk_output.get('simulation_failed'))
         or not coverage
         or any(value is None or value < 1 for value in coverage.values())
@@ -17,7 +17,7 @@ def is_scan_incomplete(risk_output: dict) -> bool:
 
 def format_extension_alert(risk_output: dict) -> dict:
     rug_prob = risk_output.get('rug_probability', 0)
-    risk_level = risk_output.get('risk_level', 'UNKNOWN')
+    risk_level = risk_output.get('risk_level', UNKNOWN)
     archetype = risk_output.get('risk_archetype', 'unknown')
     confidence = risk_output.get('confidence_level', 0)
     flags = risk_output.get('critical_flags', [])
