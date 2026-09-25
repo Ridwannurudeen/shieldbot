@@ -669,14 +669,18 @@ async def _states(db):
 SENDER = 4242
 
 
-def _message(chat_id, args=(), chat_type="private", member_status=None, sender_chat=None):
-    """A command sent to a chat, and its context, whose bot reports the sender's ``member_status`` there."""
+def _message(chat_id, args=(), chat_type="private", member_status=None, sender_chat=None, edited=False):
+    """A command sent to a chat, and its context, whose bot reports the sender's ``member_status`` there.
+
+    An edited command reaches its handler with no update.message, only update.effective_message.
+    """
     update = MagicMock(spec=Update)
     update.effective_chat.id = chat_id
     update.effective_chat.type = chat_type
     update.effective_user.id = SENDER
-    update.message.sender_chat = sender_chat
-    update.message.reply_text = AsyncMock()
+    update.effective_message.sender_chat = sender_chat
+    update.effective_message.reply_text = AsyncMock()
+    update.message = None if edited else update.effective_message
     bot = SimpleNamespace(get_chat_member=AsyncMock(return_value=SimpleNamespace(status=member_status)))
     return update, SimpleNamespace(args=list(args), bot=bot)
 
@@ -779,6 +783,34 @@ class TestLaunchAlertCommands:
 
         assert await self._subscriptions(alerts) == [(CHAT_B, "blocked")]
         context.bot.get_chat_member.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("chat_type, member_status", [("private", None), ("supergroup", "administrator")])
+    async def test_an_edited_command_is_answered_on_its_own_message(self, bot_module, alerts, chat_type, member_status):
+        update, context = _message(CHAT_B, ("all",), chat_type=chat_type, member_status=member_status, edited=True)
+
+        await bot_module.launch_alerts_command(update, context)
+        assert await self._subscriptions(alerts) == [(CHAT_B, "all")]
+        assert "every scanned launch" in update.effective_message.reply_text.await_args.args[0]
+
+        update, context = _message(CHAT_B, chat_type=chat_type, member_status=member_status, edited=True)
+        await bot_module.stop_alerts_command(update, context)
+        assert await self._subscriptions(alerts) == []
+        assert "off" in update.effective_message.reply_text.await_args.args[0]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("command, args", [("launch_alerts_command", ("all",)), ("stop_alerts_command", ())])
+    async def test_a_membership_lookup_that_fails_is_refused_out_loud(self, bot_module, alerts, command, args):
+        await _subscribe(alerts.db, CHAT_A, "blocked")
+        update, context = _message(CHAT_A, args, chat_type="group")
+        context.bot.get_chat_member = AsyncMock(side_effect=BadRequest("User not found"))
+
+        await getattr(bot_module, command)(update, context)
+
+        assert await self._subscriptions(alerts) == [(CHAT_A, "blocked")]
+        assert update.message.reply_text.await_args.args[0] == (
+            "Only an administrator of this group can turn launch alerts on or off."
+        )
 
     @pytest.mark.asyncio
     async def test_a_private_chat_needs_no_administrator(self, bot_module, alerts):

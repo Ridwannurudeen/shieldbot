@@ -736,16 +736,20 @@ async def _may_change_launch_alerts(update: Update, context: ContextTypes.DEFAUL
     Anyone may in a private chat; in a group only an administrator or the creator, including an
     anonymous administrator, whose message comes from the group itself.
     """
-    chat = update.effective_chat
+    chat, message = update.effective_chat, update.effective_message
     if chat.type not in (Chat.GROUP, Chat.SUPERGROUP):
         return True
-    sender_chat = update.message.sender_chat
-    if sender_chat is not None and sender_chat.id == chat.id:
+    if message.sender_chat is not None and message.sender_chat.id == chat.id:
         return True
-    member = await context.bot.get_chat_member(chat.id, update.effective_user.id)
-    if member.status in (ChatMember.ADMINISTRATOR, ChatMember.OWNER):
+    try:
+        member = await context.bot.get_chat_member(chat.id, update.effective_user.id)
+        allowed = member.status in (ChatMember.ADMINISTRATOR, ChatMember.OWNER)
+    except TelegramError:
+        # A membership Telegram does not confirm is not an administrator's; the sender is still answered.
+        allowed = False
+    if allowed:
         return True
-    await update.message.reply_text("Only an administrator of this group can turn launch alerts on or off.")
+    await message.reply_text("Only an administrator of this group can turn launch alerts on or off.")
     return False
 
 
@@ -755,7 +759,7 @@ async def launch_alerts_command(update: Update, context: ContextTypes.DEFAULT_TY
         return
     mode = context.args[0].lower() if context.args else 'blocked'
     if mode not in ('blocked', 'all'):
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             "Usage: /launchalerts for blocked launches, or /launchalerts all for every scanned launch."
         )
         return
@@ -772,7 +776,7 @@ async def launch_alerts_command(update: Update, context: ContextTypes.DEFAULT_TY
             "high-risk tokens) and impostors of official Robinhood tokens.\n\n"
             "Send /launchalerts all for every scanned launch, or /stopalerts to stop."
         )
-    await update.message.reply_text(text)
+    await update.effective_message.reply_text(text)
 
 
 async def stop_alerts_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -780,9 +784,9 @@ async def stop_alerts_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not await _may_change_launch_alerts(update, context):
         return
     if await container.db.unsubscribe_launch_alerts(update.effective_chat.id, LAUNCH_CHAIN_ID):
-        await update.message.reply_text("🔕 Robinhood Chain launch alerts are off for this chat.")
+        await update.effective_message.reply_text("🔕 Robinhood Chain launch alerts are off for this chat.")
     else:
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             "This chat is not subscribed to launch alerts. Send /launchalerts to subscribe."
         )
 
