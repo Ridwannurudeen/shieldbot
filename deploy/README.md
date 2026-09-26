@@ -3,7 +3,7 @@
 Production is one VPS shared with other projects. The app is a git checkout in `/opt/shieldbot`, with its venv
 in `/opt/shieldbot/venv` and its SQLite database at `/opt/shieldbot/shieldbot.db`. Two systemd units run it:
 
-- `shieldbot`: the API (`uvicorn api:app` on 127.0.0.1:8000; `shieldbot-api.service` in this repo)
+- `shieldbot`: the API (`uvicorn api:app` on 127.0.0.1:8000; `shieldbot-api.service` at the repository root)
 - `shieldbot-bot`: the Telegram bot
 
 A third unit, `shieldbot-workers` (`python workers.py`; `shieldbot-workers.service.example`), exists only if
