@@ -81,7 +81,7 @@
   "feedHeading": "Cảnh báo người triển khai · hợp đồng mới từ những người triển khai đang được theo dõi",
   "feedLoading": "Đang tải cảnh báo người triển khai...",
   "welcomeTitle": "Chào mừng đến với ShieldBot",
-  "welcomeSubtitle": "Kiểm tra giao dịch của bạn trên 8 chuỗi EVM trước khi bạn ký: BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, Optimism và Robinhood Chain.",
+  "welcomeSubtitle": "Kiểm tra giao dịch của bạn trên 8 chuỗi EVM trước khi bạn ký: Ethereum, BNB Chain, opBNB, Base, Arbitrum, Polygon, Optimism và Robinhood Chain.",
   "step1Title": "Phân tích",
   "step1Desc": "Các giao dịch và yêu cầu ký mà trang web gửi đến ví của bạn được kiểm tra để phát hiện honeypot, rug pull và hợp đồng rút cạn trước khi bạn xác nhận. Các giao dịch bạn tự tạo trong cửa sổ của ví không được kiểm tra.",
   "step2Title": "Mô phỏng",

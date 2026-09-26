@@ -81,7 +81,7 @@
   "feedHeading": "Deployer alerts · new contracts from watched deployers",
   "feedLoading": "Loading deployer alerts...",
   "welcomeTitle": "Welcome to ShieldBot",
-  "welcomeSubtitle": "Checks your transactions on 8 EVM chains before you sign: BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, Optimism and Robinhood Chain.",
+  "welcomeSubtitle": "Checks your transactions on 8 EVM chains before you sign: Ethereum, BNB Chain, opBNB, Base, Arbitrum, Polygon, Optimism and Robinhood Chain.",
   "step1Title": "Analyze",
   "step1Desc": "Transactions and signature requests a page sends to your wallet are checked for honeypots, rug pulls and drainer contracts before you confirm. Sends you start in your wallet's own window are not checked.",
   "step2Title": "Simulate",

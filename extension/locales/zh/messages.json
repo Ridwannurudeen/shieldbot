@@ -81,7 +81,7 @@
   "feedHeading": "部署者警报 · 被监控的部署者部署的新合约",
   "feedLoading": "正在加载部署者警报...",
   "welcomeTitle": "欢迎使用 ShieldBot",
-  "welcomeSubtitle": "在您签名前检查您在 8 条 EVM 链上的交易：BNB Chain、opBNB、Ethereum、Base、Arbitrum、Polygon、Optimism 和 Robinhood Chain。",
+  "welcomeSubtitle": "在您签名前检查您在 8 条 EVM 链上的交易：Ethereum、BNB Chain、opBNB、Base、Arbitrum、Polygon、Optimism 和 Robinhood Chain。",
   "step1Title": "分析",
   "step1Desc": "网页发送到您钱包的交易和签名请求会在您确认前接受检查，检测蜜罐、跑路和钱包清空合约。您在钱包自身窗口中发起的转账不会被检查。",
   "step2Title": "模拟",
