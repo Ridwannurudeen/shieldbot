@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # One-shot Base mainnet deploy for ShieldBotAttestor.
 #
+# RETIRED on 2026-09-26: the bot no longer attests scans and nothing reads
+# BASE_VERIFIER_PRIVATE_KEY, so a new attestor would receive no records and
+# step 7 would restart the service for a log line that no longer exists. Kept
+# as the record of how the live attestor was deployed.
+#
 # Signs with the Foundry keystore account base-deployer (DEPLOY_BASE.md step 1);
 # cast and forge ask for its password. The deployer key is never passed on the
 # command line or held in an environment variable. Generates a fresh verifier

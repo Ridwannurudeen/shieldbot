@@ -1,5 +1,9 @@
 # Deploy ShieldBotAttestor on Base mainnet
 
+**Retired on 2026-09-26: no new records are written.** The bot no longer attests scans, nothing reads
+`BASE_VERIFIER_PRIVATE_KEY`, and the `Base EAS Attestor` log line in step 8 no longer exists. This runbook is
+kept as the record of how the live attestor was deployed; `/api/base/attestations` still reads its records.
+
 End-to-end runbook. Total time: ~10 minutes once the keystore is set up. Total cost: <$5 in Base ETH.
 
 ## Prerequisites
@@ -115,6 +119,6 @@ https://base.easscan.org/attestations?attester=<BASE_ATTESTOR_ADDRESS>
 
 ## What this gives you
 
-- **Base integration** — Telegram bot scans with a complete result, and `/report` blacklistings, request an EAS attestation when the attestor is configured. API, extension, MCP and SDK scans never attest. On 2026-09-24 the live attestor held one attestation (`totalAttestations()` = 1), posted on deployment day; it is queryable on `base.easscan.org`.
+- **Base integration** — until the retirement on 2026-09-26, Telegram bot scans with a complete result requested an EAS attestation when the attestor was configured; API, extension, MCP and SDK scans never attested. On 2026-09-24 the live attestor held one attestation (`totalAttestations()` = 1), posted on deployment day; it is queryable on `base.easscan.org`.
 - **Cross-chain field** — `sourceChainId` records the chain of the scanned address, so an attestation on Base can describe a contract on another chain.
 - **Same primitive Coinbase Verifications uses** — EAS schema `0xf8b05c79...0de9` (Verified Account) lives on the same contract.
