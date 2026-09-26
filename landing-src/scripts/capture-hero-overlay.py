@@ -3,7 +3,7 @@
 The extension in ../../extension is loaded unpacked into Playwright's bundled Chromium. A test page
 with a stub wallet sends the transaction in hero-overlay-request.json; the extension's
 POST /api/firewall is answered with hero-overlay-response.json, the verbatim reply of
-https://api.shieldbotsecurity.online/api/firewall to that same request on 2026-09-26 at 06:28 UTC.
+https://api.shieldbotsecurity.online/api/firewall to that same request on 2026-09-26 at 07:14 UTC.
 No other API request is answered, so the capture never reaches the network.
 
 Writes ../public/hero-overlay.webp (desktop) and ../public/hero-overlay-mobile.webp.
