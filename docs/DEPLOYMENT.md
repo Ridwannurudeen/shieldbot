@@ -108,7 +108,7 @@ changes. Any other value stops the API at startup.
 
 | Background work | `api` (default) | `external` |
 |---|---|---|
-| Mempool monitor (txpool polling) | API | workers.py |
+| Mempool monitor (txpool polling, or pending-block polling where the pool exceeds 8 MB per read) | API | workers.py |
 | Robinhood Chain verdict drain (signs and sends registry records) | API | workers.py |
 | Hunter sweep | API | workers.py |
 | Retention pruning, part of the hunter sweep (chat history, API usage and AI token counts, scan evidence, expired free key requests, expired community blacklist entries) | API | workers.py |

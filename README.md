@@ -140,7 +140,7 @@ The [container](core/container.py) and [Web3 client](utils/web3_client.py) confi
 | Optimism | 10 |
 | opBNB | 204 |
 
-Provider availability varies by chain. Robinhood uses its own `eth_simulateV1` path; it is excluded from pending-transaction mempool monitoring, as are Base, Arbitrum and Optimism, which have no public mempool. A configured adapter does not establish supported honeypot simulation, reputation or liquidity data for every token.
+Provider availability varies by chain. Robinhood uses its own `eth_simulateV1` path; it is excluded from pending-transaction mempool monitoring, as are Base, Arbitrum and Optimism, which have no public mempool. A pool larger than 8 MB per read (Ethereum's and Polygon's today) is watched through the node's pending block, the transactions about to be mined, rather than the whole pool. A configured adapter does not establish supported honeypot simulation, reputation or liquidity data for every token.
 
 ## Run the local evidence path
 
