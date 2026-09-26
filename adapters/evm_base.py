@@ -445,7 +445,10 @@ class EvmAdapter(ChainAdapter):
             return None
         if not self._etherscan_refusal_logged:
             self._etherscan_refusal_logged = True
-            logger.warning("[%s] Creation not answered by Etherscan; asking Sourcify", self._chain_name)
+            logger.warning(
+                "[%s] Creation not answered by Etherscan (%s); asking Sourcify",
+                self._chain_name, data.get('message'),
+            )
         deployment = await self._explorer_service.get_sourcify_deployment(address, self._chain_id)
         if deployment.status == 'unknown':
             logger.warning("[%s] Creation unknown: Sourcify %s", self._chain_name, deployment.reason)

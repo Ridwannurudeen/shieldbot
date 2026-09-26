@@ -253,7 +253,7 @@ async def test_a_refused_chain_is_dated_from_sourcify_s_deployment_with_one_head
     ]
     assert session.get.call_args.kwargs["params"] == {"fields": "deployment"}
     # The refusal is logged, so the journal says why an age came from Sourcify; the key is not.
-    assert "[BSC] Creation not answered by Etherscan; asking Sourcify" in caplog.text
+    assert "[BSC] Creation not answered by Etherscan (NOTOK); asking Sourcify" in caplog.text
     assert "test-key" not in caplog.text
 
 

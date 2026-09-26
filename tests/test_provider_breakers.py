@@ -70,11 +70,15 @@ def etherscan_adapter() -> EvmAdapter:
     adapter._honeypot_is_replies = {}
     adapter._creation_infos = {}
     adapter._creation_inflight = {}
+    adapter._etherscan_refusal_logged = False
     # Verification asks Sourcify when Etherscan did not verify, and reads the code for the clone
-    # check; neither goes through the Etherscan session under test.
-    adapter._explorer_service = MagicMock(get_sourcify_verification=AsyncMock(
-        return_value=ExplorerResult("unknown", reason="not asked here", provider="sourcify"),
-    ))
+    # check; a creation lookup Etherscan did not answer asks Sourcify's deployment record. None of
+    # them goes through the Etherscan session under test.
+    not_asked = ExplorerResult("unknown", reason="not asked here", provider="sourcify")
+    adapter._explorer_service = MagicMock(
+        get_sourcify_verification=AsyncMock(return_value=not_asked),
+        get_sourcify_deployment=AsyncMock(return_value=not_asked),
+    )
     adapter.get_bytecode = AsyncMock(return_value="0x6080")
     return adapter
 
