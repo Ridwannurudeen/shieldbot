@@ -50,7 +50,7 @@ async def test_another_chains_router_is_not_whitelisted():
             "0x" + "a" * 40, chain_id=1, extra={"calldata": _unlimited_approve(pancake_v2)}
         )
     )
-    assert result.flags[0] == "Unlimited approval to non-whitelisted contract"
+    assert result.flags[0] == "Unlimited approval to non-whitelisted address"
     assert result.score == 35
     # With no counterparty service the spender's facts are unknown, so the verdict is too.
     assert result.data["status"] == "unknown"

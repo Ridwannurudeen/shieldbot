@@ -424,3 +424,27 @@ async def test_claim_without_value_has_no_floor():
     assert 'floor' not in result.data
     assert result.data['status'] == 'ok'
     assert result.data['coverage'] == {'selector_verification': True}
+
+
+SPENDER_WORDINGS = {
+    'Unlimited approval to non-whitelisted contract',
+    'Unlimited approval to a wallet address',
+    'Unlimited approval to non-whitelisted address',
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('facts, wording', [
+    (_facts(), 'Unlimited approval to non-whitelisted contract'),
+    (_facts(is_contract=False, is_verified=None, age_days=None), 'Unlimited approval to a wallet address'),
+    (_facts(is_contract=False, is_verified=None, age_days=None, labels=['stealing_attack'],
+            label_source='SlowMist,BlockSec'), 'Unlimited approval to a wallet address'),
+    (_facts(delegated=True, is_verified=None, age_days=None), 'Unlimited approval to a wallet address'),
+    (_facts(is_contract=None, reason='Spender facts unknown: code (RPC)'),
+     'Unlimited approval to non-whitelisted address'),
+], ids=['contract', 'wallet', 'labelled-wallet', 'delegated-wallet', 'unknown'])
+async def test_unlimited_approval_names_what_the_spender_is(facts, wording):
+    # A wallet is never called a contract, and a spender whose code is unknown is neither.
+    result, _ = await _intent(UNLIMITED, facts)
+    assert [flag for flag in result.flags if flag in SPENDER_WORDINGS] == [wording]
+    assert result.score == 35

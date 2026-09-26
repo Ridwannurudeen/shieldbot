@@ -71,12 +71,21 @@ class IntentMismatchAnalyzer(Analyzer):
         # Permit2, checked against the spender the call grants (a permit names the owner first).
         grant = approval_grant(decoded)
         whitelisted = self._counterparty.allowlisted_name(grant[0], ctx.chain_id) if grant else None
+        # The spender's facts, looked up once: they name the spender below and set its floor in 5.
+        counterparty = await self._counterparty.fetch(grant[0], ctx.chain_id) if grant and not whitelisted else None
 
         # 2. Unlimited approval to non-whitelisted target
         if decoded.get('is_unlimited_approval'):
             if not whitelisted:
                 score += 35
-                flags.append('Unlimited approval to non-whitelisted contract')
+                # A wallet (EIP-7702 delegated or not) is never called a contract; unknown code is neither.
+                if counterparty and (counterparty['delegated'] or counterparty['is_contract'] is False):
+                    spender = 'a wallet address'
+                elif counterparty and counterparty['is_contract']:
+                    spender = 'non-whitelisted contract'
+                else:
+                    spender = 'non-whitelisted address'
+                flags.append(f'Unlimited approval to {spender}')
             else:
                 # Even unlimited approval to a known router is lower risk but notable
                 score += 5
@@ -107,11 +116,9 @@ class IntentMismatchAnalyzer(Analyzer):
         # 5. Hard floors. A positive grant to a spender outside the allowlist is judged on the
         # spender's facts; native value paid with a call is judged on the target's.
         floors = []
-        counterparty = None
         counterparty_known = None
         counterparty_reasons = []
-        if grant and not whitelisted:
-            counterparty = await self._counterparty.fetch(grant[0], ctx.chain_id)
+        if counterparty is not None:
             floor, floor_flag, unknown = judge_spender(counterparty, grant[1])
             floors.append((floor, floor_flag))
             counterparty_known = not unknown
