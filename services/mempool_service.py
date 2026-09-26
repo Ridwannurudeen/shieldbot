@@ -123,6 +123,8 @@ class MempoolMonitor:
 
         # Recent pending txs by chain: {chain_id: {tx_hash: PendingTx}}
         self._pending: Dict[int, Dict[str, PendingTx]] = defaultdict(dict)
+        # Where each chain's last snapshot came from: "txpool" or "block"
+        self._pending_source: Dict[int, str] = {}
 
         # Recent swap txs for sandwich detection: {(chain_id, token): [PendingTx]}
         self._swap_queue: Dict[tuple, List[PendingTx]] = defaultdict(list)
@@ -210,9 +212,11 @@ class MempoolMonitor:
 
         try:
             # Try txpool_content first (Geth nodes)
+            source = "txpool"
             pending_txs = await self._get_txpool_content(w3, chain_id)
             if not pending_txs:
                 # Fallback: get pending block
+                source = "block"
                 pending_txs = await self._get_pending_block(w3, chain_id)
             if pending_txs is None:
                 self._unobservable_chains.add(chain_id)
@@ -221,10 +225,14 @@ class MempoolMonitor:
 
             # The pool is exactly this snapshot: what left it is dropped, what stayed keeps its entry,
             # and only what joined is counted and analysed, so a long-lived transaction is seen once.
+            # A snapshot from the other source (one failed txpool read) is a different view of the
+            # pool, so the poll that switches drops nothing; the next poll from the same source does.
             snapshot = {tx.tx_hash: tx for tx in pending_txs}
             pending = self._pending[chain_id]
-            for tx_hash in [h for h in pending if h not in snapshot]:
-                del pending[tx_hash]
+            if self._pending_source.get(chain_id) == source:
+                for tx_hash in [h for h in pending if h not in snapshot]:
+                    del pending[tx_hash]
+            self._pending_source[chain_id] = source
             added = 0
             for tx_hash, tx in snapshot.items():
                 if tx_hash in pending:
@@ -235,6 +243,13 @@ class MempoolMonitor:
                 added += 1
                 if added % ANALYSIS_YIELD_EVERY == 0:
                     await asyncio.sleep(0)
+
+            # _check_sandwich prunes a swap queue only when a swap arrives on its key, so a queue
+            # whose newest swap is past the 30 s window is dropped here, with its reported pairs.
+            now = time.time()
+            for key in [k for k, q in self._swap_queue.items() if not q or now - q[-1].seen_at >= 30]:
+                del self._swap_queue[key]
+                self._reported_sandwiches.pop(key, None)
 
         except Exception as e:
             self._unobservable_chains.add(chain_id)
@@ -356,8 +371,12 @@ class MempoolMonitor:
             token = self._extract_token_from_swap(tx.data)
             if token:
                 key = (tx.chain_id, token)
-                self._swap_queue[key].append(tx)
-                await self._check_sandwich(key, tx)
+                queue = self._swap_queue[key]
+                # A transaction that left a snapshot and came back is analysed again; queued twice,
+                # its two copies would pair up as a front-run and a back-run.
+                if all(queued.tx_hash != tx.tx_hash for queued in queue):
+                    queue.append(tx)
+                    await self._check_sandwich(key, tx)
 
         # Check for suspicious approvals
         if selector in APPROVE_SELECTORS:

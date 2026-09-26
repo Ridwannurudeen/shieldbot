@@ -174,6 +174,46 @@ TXPOOL_WITH_ONE_TX = {"result": {"pending": {SENDER: {"7": {
 }}}}}
 
 
+@pytest.mark.asyncio
+async def test_switching_between_the_txpool_and_the_pending_block_counts_nothing_twice():
+    # A failed txpool read falls back to the pending block. The switch there and back must not drop
+    # the pool's transactions and then count them again as new.
+    client = MagicMock()
+    w3 = client.get_web3.return_value = _w3_with_endpoint()
+    w3.eth.get_block.return_value = _pending_block()
+    monitor = MempoolMonitor(client)
+
+    with _serve_txpool(TXPOOL_WITH_ONE_TX, 502, TXPOOL_WITH_ONE_TX, TXPOOL_WITH_ONE_TX):
+        await monitor._poll_pending(56)  # the txpool: 04
+        await monitor._poll_pending(56)  # the txpool fails, so the pending block: 01, 02, 03
+        await monitor._poll_pending(56)  # the txpool again: 04 is not new
+        assert monitor.get_stats()["total_pending_seen"] == 4
+        await monitor._poll_pending(56)  # the same source twice: what left the pool is dropped
+
+    assert monitor.get_stats()["pending_count"] == {56: 1}
+    assert monitor.get_stats()["total_pending_seen"] == 4
+
+
+@pytest.mark.asyncio
+async def test_a_poll_drops_swap_queues_that_have_gone_quiet():
+    client = MagicMock()
+    client.get_web3.return_value = _w3_with_endpoint()
+    monitor = MempoolMonitor(client)
+    quiet, busy = (56, "0x" + "aa" * 20), (56, "0x" + "bb" * 20)
+    for key, age, tx_hash in ((quiet, 31, "0x" + "05" * 32), (busy, 1, "0x" + "06" * 32)):
+        monitor._swap_queue[key].append(PendingTx(
+            tx_hash=tx_hash, from_addr=SENDER.lower(), to_addr=TOKEN, value=0, gas_price=1,
+            data="0x", chain_id=56, seen_at=time.time() - age,
+        ))
+    monitor._reported_sandwiches[quiet].add(("0x" + "07" * 32, "0x" + "08" * 32))
+
+    with _serve_txpool(TXPOOL_WITH_ONE_TX):
+        await monitor._poll_pending(56)
+
+    assert list(monitor._swap_queue) == [busy]
+    assert quiet not in monitor._reported_sandwiches
+
+
 TXPOOL_UNSUPPORTED = {"error": {"code": -32601, "message": "the method txpool_content does not exist"}}
 
 
