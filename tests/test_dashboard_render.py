@@ -233,6 +233,25 @@ APPROVAL = {
 }
 
 
+NO_ATTESTATIONS = {"available": False, "attestations": [], "summary": {}}
+ATTESTOR = "0x" + "ee" * 20
+ATTESTATIONS = {
+    "available": True,
+    "attestor": ATTESTOR,
+    "explorer": f"https://base.easscan.org/address/{ATTESTOR}",
+    "attestations": [],
+    "summary": {"total_recent": 0, "by_risk": {}, "by_source_chain": {}, "attestor": ATTESTOR},
+}
+ATTESTATION = {
+    "uid": "0x" + "ab" * 32,
+    "risk_label": "DANGER",
+    "scan_type": "token",
+    "scanned_address": "0x" + "ab" * 20,
+    "source_chain_id": 56,
+    "timestamp": 1_790_000_000,
+}
+
+
 def short(addr):
     return addr[:6] + "…" + addr[-4:]
 
@@ -243,6 +262,7 @@ def render(
     mempool_reply=None,
     campaigns_reply=(200, {"campaigns": []}),
     report_reply=(200, {"status": "recorded"}),
+    attestations_reply=(200, NO_ATTESTATIONS),
     steps=TEXT,
 ):
     node = shutil.which("node")
@@ -259,7 +279,7 @@ def render(
         ],
         "/api/threats/feed?source=mempool": [200, mempool_reply or {"threats": [], "count": 0}],
         "/api/campaigns/top": list(campaigns_reply),
-        "/api/base/attestations": [200, {"available": False, "attestations": [], "summary": {}}],
+        "/api/base/attestations": list(attestations_reply),
         "/api/report": list(report_reply),
     }
     script = f"{HARNESS}\nasync function steps() {{\n{steps}\n}}\n"
@@ -463,3 +483,28 @@ def test_a_contract_row_is_its_contract():
     assert f"Address{CONTRACT['address']}" in result["dialog"]
     assert "Attacker Address" not in result["dialog"]
     assert result["report"]["address"] == CONTRACT["address"]
+
+
+RETIRED_LINE = "Retired on 26 Sep 2026: no new attestations are written; past ones stay on chain."
+
+
+def test_a_retired_attestor_reads_as_history():
+    text = render(attestations_reply=(200, {**ATTESTATIONS, "retired_on": "2026-09-26"}))
+    assert RETIRED_LINE in text
+    assert "No attestations on record." in text
+    assert "No attestations yet." not in text
+
+
+def test_a_retired_attestor_still_lists_its_past_attestations():
+    reply = {**ATTESTATIONS, "attestations": [ATTESTATION], "retired_on": "2026-09-26"}
+    text = render(attestations_reply=(200, reply))
+    assert RETIRED_LINE in text
+    assert "DANGER" in text
+    assert "EAS ↗" in text
+    assert "No attestations" not in text
+
+
+def test_an_attestor_that_is_not_retired_reads_as_today():
+    text = render(attestations_reply=(200, ATTESTATIONS))
+    assert "Retired on" not in text
+    assert "No attestations yet." in text

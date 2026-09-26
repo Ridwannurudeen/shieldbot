@@ -1487,12 +1487,20 @@ function BaseAttestationsPanel({
   const chainName = id => CHAIN_NAMES[id] || `chain ${id}`;
   const list = data.attestations || [];
   const summary = data.summary || {};
+  // A retired attestor writes nothing new, so the panel is a record. A date-only ISO string is a UTC
+  // day and toUTCString is locale-independent, so '2026-09-26' reads '26 Sep 2026' for every viewer.
+  const retired = data.retired_on ? new Date(data.retired_on).toUTCString().slice(5, 16) : null;
   return /*#__PURE__*/React.createElement("div", {
     className: "glass rounded-xl p-4 md:p-5",
     style: {
       border: '1px solid #334155'
     }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, retired && /*#__PURE__*/React.createElement("div", {
+    className: "text-xs mb-4",
+    style: {
+      color: '#CBD5E1'
+    }
+  }, "Retired on ", retired, ": no new attestations are written; past ones stay on chain."), /*#__PURE__*/React.createElement("div", {
     className: "flex flex-wrap items-center gap-x-3 mb-4 text-xs",
     style: {
       color: '#94A3B8'
@@ -1523,7 +1531,7 @@ function BaseAttestationsPanel({
     style: {
       color: '#94A3B8'
     }
-  }, "No attestations yet.") : /*#__PURE__*/React.createElement("div", {
+  }, retired ? 'No attestations on record.' : 'No attestations yet.') : /*#__PURE__*/React.createElement("div", {
     className: "space-y-2"
   }, list.map(a => /*#__PURE__*/React.createElement("div", {
     key: a.uid,

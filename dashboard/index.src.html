@@ -717,8 +717,16 @@
       const chainName = (id) => CHAIN_NAMES[id] || `chain ${id}`;
       const list = data.attestations || [];
       const summary = data.summary || {};
+      // A retired attestor writes nothing new, so the panel is a record. A date-only ISO string is a UTC
+      // day and toUTCString is locale-independent, so '2026-09-26' reads '26 Sep 2026' for every viewer.
+      const retired = data.retired_on ? new Date(data.retired_on).toUTCString().slice(5, 16) : null;
       return (
         <div className="glass rounded-xl p-4 md:p-5" style={{ border: '1px solid #334155' }}>
+          {retired && (
+            <div className="text-xs mb-4" style={{ color: '#CBD5E1' }}>
+              Retired on {retired}: no new attestations are written; past ones stay on chain.
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-x-3 mb-4 text-xs" style={{ color: '#94A3B8' }}>
             <span>Attestor:&nbsp;
               <a href={`https://basescan.org/address/${data.attestor}`} target="_blank" rel="noreferrer"
@@ -732,7 +740,9 @@
                className="inline-flex items-center min-h-[44px] md:min-h-0" style={{ color: '#60A5FA' }}>View on EAS Scan ↗</a>
           </div>
           {list.length === 0 ? (
-            <div className="text-center py-8 text-sm" style={{ color: '#94A3B8' }}>No attestations yet.</div>
+            <div className="text-center py-8 text-sm" style={{ color: '#94A3B8' }}>
+              {retired ? 'No attestations on record.' : 'No attestations yet.'}
+            </div>
           ) : (
             <div className="space-y-2">
               {list.map((a) => (
