@@ -21,7 +21,6 @@ MEMPOOL_ALERT = {
 MEMPOOL_STATS = {
     "total_pending_seen": 1200,
     "sandwiches_detected": 3,
-    "frontruns_detected": 0,
     "suspicious_approvals": 40,
     "monitored_chains": [1, 56],
     "unobservable_chains": [],

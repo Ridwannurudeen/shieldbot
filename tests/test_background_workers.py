@@ -32,7 +32,6 @@ from tests.test_lifespan import mock_container  # noqa: F401  (pytest fixture)
 IDLE_MEMPOOL = {
     "total_pending_seen": 0,
     "sandwiches_detected": 0,
-    "frontruns_detected": 0,
     "suspicious_approvals": 0,
     "counting_since": 1_790_000_000.0,
     "monitored_chains": [],

@@ -363,7 +363,7 @@ export class ShieldBot {
   }
 
   /**
-   * Get recent mempool alerts (sandwich attacks, frontrunning).
+   * Get recent mempool alerts (sandwich attacks, suspicious approvals).
    */
   async getMempoolAlerts(chainId?: number, limit = 50): Promise<MempoolAlert[]> {
     const params = new URLSearchParams();

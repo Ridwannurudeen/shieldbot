@@ -194,7 +194,7 @@ Send me a token address, and I'll analyze:
 
 **🚨 Advanced Security**
 • Rescue mode — find risky token approvals in your wallet
-• Mempool threats — live sandwich & frontrun detection
+• Mempool threats — live sandwich attack & suspicious approval detection
 • Campaign radar — link addresses to coordinated scam campaigns
 
 **How to use:**
@@ -581,7 +581,6 @@ async def threats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response += "**Stats:**\n"
         response += f"• Pending txs seen: {stats.get('total_pending_seen', 0):,}\n"
         response += f"• Sandwiches detected: {stats.get('sandwiches_detected', 0)}\n"
-        response += f"• Frontruns detected: {stats.get('frontruns_detected', 0)}\n"
         response += f"• Suspicious approvals: {stats.get('suspicious_approvals', 0)}\n"
         monitored = stats.get('monitored_chains', [])
         # A chain whose mempool the API could not read is unknown, never clear. Stats that do not

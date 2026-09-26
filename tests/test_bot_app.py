@@ -399,7 +399,7 @@ MEMPOOL_ALERT = {
     "chain_id": 56, "created_at": 1000.0,
 }
 MEMPOOL_STATS = {
-    "total_pending_seen": 12345, "sandwiches_detected": 2, "frontruns_detected": 0,
+    "total_pending_seen": 12345, "sandwiches_detected": 2,
     "suspicious_approvals": 7, "counting_since": 900.0, "monitored_chains": [56, 1],
     "unobservable_chains": [], "pending_count": {"56": 10, "1": 20}, "active_alerts": 1,
 }
@@ -452,10 +452,22 @@ class TestThreatsCommand:
         assert mempool_api.requests == [("/api/mempool/alerts", query), ("/api/mempool/stats", {})]
         text = update.message.reply_text.await_args.args[0]
         assert "• Pending txs seen: 12,345\n" in text
+        assert "• Sandwiches detected: 2\n" in text
         assert "• Suspicious approvals: 7\n" in text
+        assert "Frontrun" not in text
         assert "• Monitoring: BSC, Ethereum\n" in text
         assert "🔴 **Suspicious Approval** (BSC)\n  Unlimited token approval pending\n" in text
         assert not bot_module.container.mempool_monitor.mock_calls
+
+    @pytest.mark.asyncio
+    async def test_start_names_only_the_threats_the_monitor_detects(self, bot_module):
+        update = _threats_update()
+
+        await bot_module.start(update, MagicMock())
+
+        text = update.message.reply_text.await_args.args[0]
+        assert "• Mempool threats — live sandwich attack & suspicious approval detection\n" in text
+        assert "frontrun" not in text.lower()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("args, unobservable, lines, absent", [

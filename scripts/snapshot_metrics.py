@@ -94,7 +94,6 @@ def format_snapshot(data: dict, timestamp: str) -> str:
         f"|--------|-------|",
         f"| Transactions monitored | {mp.get('total_pending_seen', 0):,} |",
         f"| Sandwiches detected | {mp.get('sandwiches_detected', 0):,} |",
-        f"| Frontrun detected | {mp.get('frontruns_detected', 0):,} |",
         f"| Suspicious approvals | {mp.get('suspicious_approvals', 0):,} |",
         f"| Chains monitored | {len(mp.get('monitored_chains', []))} |",
         "",

@@ -2577,7 +2577,7 @@ async def agent_explain(req: ExplainRequest, request: Request):
 
 @app.get("/api/mempool/alerts")
 async def mempool_alerts(request: Request, chain_id: int = None, limit: int = 50):
-    """Get recent mempool alerts (sandwich attacks, frontrunning, suspicious approvals)."""
+    """Get recent mempool alerts (sandwich attacks, suspicious approvals)."""
     if chain_id is not None:
         _validate_chain_id(chain_id)
         if not supports_pending_transactions(chain_id):
