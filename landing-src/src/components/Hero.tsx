@@ -73,17 +73,17 @@ export default function Hero() {
             <img
               src="/hero-overlay.webp"
               width={490}
-              height={904}
-              alt="The ShieldBot extension's warning dialog for a request that approves unlimited spending of a BNB Chain token. The verdict badge reads BLOCK RECOMMENDED — Unknown (incomplete provider coverage), with the line: Why: Structural data unknown: contract_age_days; No DexScreener pairs on requested chain (bsc). The danger signals include Honeypot detected."
+              height={954}
+              alt="The ShieldBot extension's warning dialog for a request that approves unlimited USDC spending on Ethereum. The verdict badge reads BLOCK RECOMMENDED — Safety: 0/100. The danger signals include Spender flagged by GoPlus: stealing_attack (SlowMist,BlockSec)."
               className="w-full h-auto rounded-2xl ring-1 ring-white/10 shadow-[0_25px_50px_rgba(0,0,0,0.5)] max-md:rounded-b-none max-md:[mask-image:linear-gradient(to_bottom,#000_94%,transparent)]"
             />
           </picture>
           <figcaption className="text-sm text-gray-400 mt-4 leading-relaxed">
             The extension's 3.1.0 overlay (listed on the Chrome Web Store as
             ShieldAI Transaction Firewall; the 3.1.0 update is pending), fed the
-            API's reply for this request on 24 September 2026. It recommends
-            blocking a detected honeypot and names the two checks it could not
-            run.
+            API's reply for this request on 26 September 2026. It recommends
+            blocking an unlimited USDC approval to the wallet behind the 2021
+            BadgerDAO front-end attack, which GoPlus flags for stealing attacks.
           </figcaption>
         </figure>
       </div>

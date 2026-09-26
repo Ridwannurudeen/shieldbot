@@ -3,7 +3,7 @@
 The extension in ../../extension is loaded unpacked into Playwright's bundled Chromium. A test page
 with a stub wallet sends the transaction in hero-overlay-request.json; the extension's
 POST /api/firewall is answered with hero-overlay-response.json, the verbatim reply of
-https://api.shieldbotsecurity.online/api/firewall to that same request on 2026-09-24 at 12:28 UTC.
+https://api.shieldbotsecurity.online/api/firewall to that same request on 2026-09-26 at 06:28 UTC.
 No other API request is answered, so the capture never reaches the network.
 
 Writes ../public/hero-overlay.webp (desktop) and ../public/hero-overlay-mobile.webp.
@@ -111,8 +111,10 @@ def capture(context, width, keep_height):
     modal = find_node(document, "shieldai-modal")
     assert modal, "no overlay dialog on the page"
     html = cdp.send("DOM.getOuterHTML", {"nodeId": modal["nodeId"]})["outerHTML"]
-    reason = next(iter(json.loads(RESPONSE)["coverage_reasons"].values()))
-    assert reason in html, "the overlay does not show the recorded response"
+    reply = json.loads(RESPONSE)
+    # A reply with full coverage has no coverage reason; the overlay lists its danger signals.
+    shown = next(iter(reply["coverage_reasons"].values()), None) or reply["danger_signals"][0]
+    assert shown in html, "the overlay does not show the recorded response"
     quad = cdp.send("DOM.getBoxModel", {"nodeId": modal["nodeId"]})["model"]["border"]
     x, y, right, bottom = quad[0], quad[1], quad[4], quad[5]
     height = bottom - y if keep_height is None else min(keep_height, bottom - y)
