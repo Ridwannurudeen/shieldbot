@@ -104,7 +104,7 @@ wallet. Reject every wallet popup unless you mean to spend.
 1. **Swap** (about 3 minutes). On PancakeSwap or Uniswap start a small swap. The overlay appears
    before the wallet: it has keyboard focus, Tab cycles its buttons, Escape rejects and the dApp
    reports a rejection. Start again, wait at least 70 seconds with the overlay open, then press
-   Proceed: the wallet popup must still appear. The Sending row names the chain's coin (BNB, ETH
+   Proceed: the wallet popup must still appear. The Sending row names the chain's coin (ETH, BNB
    or POL), never BNB on another chain.
 2. **Approve** (2 minutes). Approve a token with a custom limited amount (the dApp's approval
    step or revoke.cash). Granting Access reads "Limited approval: <amount>", an unlimited approval
