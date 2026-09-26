@@ -174,7 +174,7 @@ export default function Chains() {
         <ul className="text-sm text-gray-400 leading-relaxed mt-6 space-y-2 max-w-3xl mx-auto">
           <li>
             <span className="text-gray-200">Sell simulation:</span> honeypot.is
-            simulates a buy and a sell on BNB Chain, Ethereum and Base, and
+            simulates a buy and a sell on Ethereum, BNB Chain and Base, and
             ShieldBot runs its own on supported Robinhood Chain pool routes.
             Where it says None, honeypot and tax flags come from GoPlus alone,
             and they read Unknown when GoPlus has no answer.

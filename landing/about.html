@@ -126,7 +126,7 @@
     <!-- BLOCK 4: Honeypot detection -->
     <h2>Honeypot Detection</h2>
     <p>A honeypot token allows users to buy but contains hidden code that blocks all sell transactions. The token appears to have liquidity and price action, but holders can never exit.</p>
-    <p>ShieldAI looks for honeypots in two ways. It simulates a buy and a sell of the token where the chain has a simulator: honeypot.is on BNB Chain, Ethereum and Base, and ShieldBot's own simulation on supported Robinhood Chain pool routes. On the other chains it uses GoPlus's honeypot and tax flags instead. It also checks the contract's bytecode for owner powers a honeypot can use, such as a blacklist or a pause switch, which works even for unverified contracts. If a simulation fails, or neither source answers, the result is Unknown rather than Safe.</p>
+    <p>ShieldAI looks for honeypots in two ways. It simulates a buy and a sell of the token where the chain has a simulator: honeypot.is on Ethereum, BNB Chain and Base, and ShieldBot's own simulation on supported Robinhood Chain pool routes. On the other chains it uses GoPlus's honeypot and tax flags instead. It also checks the contract's bytecode for owner powers a honeypot can use, such as a blacklist or a pause switch, which works even for unverified contracts. If a simulation fails, or neither source answers, the result is Unknown rather than Safe.</p>
 
     <!-- BLOCK 5: Transaction simulation -->
     <h2>Pre-Sign Transaction Simulation</h2>

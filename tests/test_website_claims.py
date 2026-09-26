@@ -125,6 +125,8 @@ def test_chains_section_coverage_matches_the_code():
 
     def listed(provider):
         names = [name for name, chain_id in ids.items() if simulator[chain_id] == provider]
+        # The site leads every chain list with Ethereum; the rest keep the registry's order.
+        names = sorted(names, key=lambda name: name != "Ethereum")
         return " and ".join([", ".join(names[:-1]), names[-1]]) if len(names) > 1 else names[0]
 
     prose = " ".join(read(COMPONENTS / "Chains.tsx").split())
