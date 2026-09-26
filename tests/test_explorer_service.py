@@ -621,6 +621,17 @@ async def test_existing_etherscan_creation_request_and_result_unchanged(http, ch
 
 
 @pytest.mark.asyncio
+async def test_an_etherscan_reply_naming_the_block_reads_only_its_header(http):
+    http[0]({"status": "1", "result": [{"contractCreator": FUNDER, "txHash": TX_HASH, "blockNumber": "1"}]})
+    adapter = EvmAdapter(56, "Existing", "https://rpc.invalid", etherscan_api_key="test-key")
+    adapter._call_with_retry = AsyncMock(side_effect=[{"timestamp": 1704067200}])
+    result = await adapter.get_contract_creation_info(ADDRESS)
+    assert result["creator"] == FUNDER and result["tx_hash"] == TX_HASH
+    assert result["creation_time"] == "2024-01-01T00:00:00+00:00"
+    adapter._call_with_retry.assert_awaited_once_with(adapter.w3.eth.get_block, 1)
+
+
+@pytest.mark.asyncio
 async def test_robinhood_adapter_missing_creator_skips_rpc(http):
     adapter = EvmAdapter(4663, "Robinhood Chain", "https://rpc.invalid")
     adapter._explorer_service = ExplorerService()

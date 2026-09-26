@@ -213,19 +213,50 @@ async def test_unknown_creation_leaves_age_unknown(http, adapter_class):
     adapter._call_with_retry.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_bsc_creation_stays_on_etherscan(http):
-    respond, session = http
-    respond(
-        {
-            "status": "0",
-            "message": "NOTOK",
-            "result": "Free API access is not supported for this chain",
-        }
-    )
+REFUSED = {
+    "status": "0",
+    "message": "NOTOK",
+    "result": "Free API access is not supported for this chain",
+}
+
+
+def _bsc_adapter(http, deployment):
+    """BSC asks Etherscan first, which refuses on the free tier, then Sourcify's deployment record:
+    no public Blockscout serves chain 56."""
+    http[0](REFUSED)
     adapter = _adapter(
         BscAdapter, ExplorerResult("known", data={"creator": CREATOR, "tx_hash": TX_HASH})
     )
-    assert await adapter.get_contract_creation_info(ADDRESS) is None
+    adapter._explorer_service.get_sourcify_deployment = AsyncMock(return_value=deployment)
+    adapter._call_with_retry = AsyncMock(side_effect=[{"timestamp": 1704067200}])
+    return adapter
+
+
+@pytest.mark.asyncio
+async def test_a_chain_etherscan_refuses_is_dated_from_sourcify_s_deployment(http):
+    adapter = _bsc_adapter(
+        http,
+        ExplorerResult(
+            "known",
+            data={"creator": CREATOR, "tx_hash": TX_HASH, "block_number": 693963},
+            provider="sourcify",
+        ),
+    )
+    result = await adapter.get_contract_creation_info(ADDRESS)
+    assert result["creator"] == CREATOR and result["tx_hash"] == TX_HASH
+    assert result["creation_time"] == "2024-01-01T00:00:00+00:00"
+    assert result["age_days"] >= 0
+    assert http[1].get.call_args.args == ("https://api.etherscan.io/v2/api",)
+    adapter._explorer_service.get_sourcify_deployment.assert_awaited_once_with(ADDRESS, 56)
     adapter._explorer_service.get_contract_creation_info.assert_not_awaited()
-    assert session.get.call_args.args == ("https://api.etherscan.io/v2/api",)
+    # One header read dates the deployment; the transaction is never read.
+    adapter._call_with_retry.assert_awaited_once_with(adapter.w3.eth.get_block, 693963)
+
+
+@pytest.mark.asyncio
+async def test_a_contract_sourcify_has_not_verified_stays_unknown_where_etherscan_refuses(http):
+    adapter = _bsc_adapter(
+        http, ExplorerResult("unknown", reason="not verified", provider="sourcify")
+    )
+    assert await adapter.get_contract_creation_info(ADDRESS) is None
+    adapter._call_with_retry.assert_not_awaited()

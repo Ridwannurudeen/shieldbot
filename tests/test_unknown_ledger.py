@@ -244,7 +244,6 @@ async def test_etherscan_verification_lookups_are_counted(ledger, reply, outcome
     "reply, outcome",
     [
         ((200, NO_RECORD), "unknown"),
-        ((200, REFUSED), "failed"),
         ((503, None), "failed"),
         (aiohttp.ClientError(), "failed"),
         ((200, ValueError("Expecting value")), "failed"),
@@ -254,7 +253,6 @@ async def test_etherscan_verification_lookups_are_counted(ledger, reply, outcome
     ],
     ids=[
         "no-record",
-        "refused",
         "server-error",
         "network-error",
         "unreadable-body",
@@ -284,10 +282,56 @@ async def test_a_creation_time_rpc_failure_is_the_rpc_s_not_etherscan_s(ledger):
         adapter = EvmAdapter(56, "BSC", "https://rpc.invalid", etherscan_api_key="test-key")
         adapter.w3 = MagicMock()
         adapter.w3.eth.get_transaction.side_effect = requests.exceptions.ConnectionError()
-        assert await adapter.get_contract_creation_info(TOKEN) is None
+        result = await adapter.get_contract_creation_info(TOKEN)
     finally:
         patcher.stop()
+    assert result["creator"] == TOKEN and result["age_days"] is None
     assert _chain_counts(ledger, 56) == {"etherscan": _counts(answered=1), "rpc": _counts(failed=1)}
+
+
+# Sourcify v2's deployment record for a verified contract (fields=deployment); the values are synthetic.
+SOURCIFY_DEPLOYMENT = {
+    "match": "exact_match", "creationMatch": "exact_match", "runtimeMatch": "exact_match",
+    "chainId": "56", "address": TOKEN,
+    "deployment": {
+        "transactionHash": "0x" + "12" * 32, "blockNumber": "693963", "transactionIndex": "0", "deployer": TOKEN,
+    },
+}
+SOURCIFY_NOT_VERIFIED = {"match": None, "creationMatch": None, "runtimeMatch": None, "chainId": "56", "address": TOKEN}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reply, sourcify, rpc",
+    [
+        ((200, SOURCIFY_DEPLOYMENT), "answered", _counts(answered=1)),
+        ((404, SOURCIFY_NOT_VERIFIED), "unknown", None),
+        ((503, None), "failed", None),
+    ],
+    ids=["deployment", "not-verified", "server-error"],
+)
+async def test_a_refused_creation_lookup_counts_etherscan_s_refusal_and_sourcify_s_answer(
+    ledger, reply, sourcify, rpc
+):
+    from adapters.evm_base import EvmAdapter
+    from services.explorer_service import ExplorerService
+
+    # Etherscan's free tier refuses the lookup on BNB Chain, which counts as Etherscan failing;
+    # Sourcify's deployment record is asked next, and one it knows is dated from a block header.
+    patcher = _aiohttp("adapters.evm_base", (200, REFUSED), reply)
+    try:
+        adapter = EvmAdapter(56, "BSC", "https://rpc.invalid", etherscan_api_key="test-key")
+        adapter._explorer_service = ExplorerService()
+        adapter.w3 = MagicMock()
+        adapter.w3.eth.get_block.return_value = {"timestamp": 1600753669}
+        result = await adapter.get_contract_creation_info(TOKEN)
+    finally:
+        patcher.stop()
+    assert (result is not None) == (rpc is not None)
+    expected = {"etherscan": _counts(failed=1), "sourcify": {**_counts(), sourcify: 1}}
+    if rpc:
+        expected["rpc"] = rpc
+    assert _chain_counts(ledger, 56) == expected
 
 
 # --- Sourcify and Blockscout ------------------------------------------------------------------
