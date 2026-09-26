@@ -258,6 +258,42 @@ async def test_a_refused_chain_is_dated_from_sourcify_s_deployment_with_one_head
 
 
 @pytest.mark.asyncio
+async def test_a_refusal_sent_as_an_http_error_is_asked_of_sourcify_too(http):
+    # Whether Etherscan's free tier refuses with a status 0 or with an HTTP error, a contract
+    # Sourcify knows is dated.
+    enqueue, session = http
+    enqueue(REFUSED, status=403)
+    enqueue(SOURCIFY_CAKE)
+    adapter = _adapter(56, "BSC")
+    adapter.w3.eth.get_block.return_value = {"timestamp": 0x5F699005}
+    result = await adapter.get_contract_creation_info(CAKE)
+    assert result["creation_time"] == CAKE_CREATED
+    adapter.w3.eth.get_block.assert_called_once_with(693963)
+    assert [call.args[0] for call in session.get.call_args_list] == [
+        ETHERSCAN_URL,
+        f"https://sourcify.dev/server/v2/contract/56/{CAKE.lower()}",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_etherscan_s_refusal_is_logged_once_per_chain(http, caplog):
+    # The free tier's refusal is permanent, so repeating it for every BNB Chain lookup would only
+    # fill the journal.
+    enqueue, session = http
+    enqueue(REFUSED)
+    enqueue(SOURCIFY_CAKE)
+    enqueue(REFUSED)
+    enqueue(_not_verified(ADDRESS), status=404)
+    adapter = _adapter(56, "BSC")
+    adapter.w3.eth.get_block.return_value = {"timestamp": 0x5F699005}
+    caplog.set_level(logging.WARNING, logger="adapters.evm_base")
+    await adapter.get_contract_creation_info(CAKE)
+    await adapter.get_contract_creation_info(ADDRESS)
+    assert session.get.call_count == 4
+    assert caplog.text.count("Creation not answered by Etherscan") == 1
+
+
+@pytest.mark.asyncio
 async def test_a_contract_sourcify_does_not_know_stays_unknown(http, caplog):
     enqueue, session = http
     enqueue(REFUSED)

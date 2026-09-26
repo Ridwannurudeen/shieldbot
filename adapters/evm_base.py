@@ -163,6 +163,8 @@ class EvmAdapter(ChainAdapter):
         self._honeypot_is_replies = TTLCache(maxsize=1024, ttl=HONEYPOT_IS_REPLY_TTL_SECONDS)
         self._creation_infos = TTLCache(maxsize=1024, ttl=CREATION_INFO_TTL_SECONDS)
         self._creation_inflight = {}
+        # Etherscan's refusal on a chain (its free tier) is permanent, so it is logged once.
+        self._etherscan_refusal_logged = False
 
     @property
     def chain_id(self) -> int:
@@ -399,9 +401,11 @@ class EvmAdapter(ChainAdapter):
         the creation block and timestamp. When Etherscan does not answer (a status 0 that is not
         "No data found": its free tier refuses getcontractcreation on BNB Chain), Sourcify's
         deployment record is asked instead, so a contract verified there is still dated; its
-        breaker, cache and ledger entries are the explorer service's. The refusal still counts as
-        Etherscan failing, and is logged so the journal says where an age came from. An error in
-        Etherscan's request or reply is counted against Etherscan and raised to the caller.
+        breaker, cache and ledger entries are the explorer service's. A refusal sent as an HTTP
+        error is treated the same way. The refusal still counts as Etherscan failing, and is
+        logged once per chain so the journal says where ages come from. An error in Etherscan's
+        request or reply, including its open breaker, is counted against Etherscan and raised
+        to the caller without asking Sourcify.
         """
         try:
             provider_breakers.check('etherscan', self._chain_id)
@@ -414,12 +418,11 @@ class EvmAdapter(ChainAdapter):
                     'apikey': self.etherscan_api_key,
                 }
                 async with session.get(self.etherscan_api_url, params=params) as resp:
-                    if resp.status != 200:
-                        provider_breakers.record_status('etherscan', self._chain_id, resp.status)
-                        unknown_ledger.record('etherscan', self._chain_id, 'failed')
-                        logger.warning("[%s] Creation unknown: HTTP %s", self._chain_name, resp.status)
-                        return None
-                    data = await resp.json()
+                    if resp.status == 200:
+                        data = await resp.json()
+                    else:
+                        # A refusal can come as an HTTP error as well as a status 0: both ask Sourcify.
+                        data = {'status': '0', 'message': f'HTTP {resp.status}'}
                     provider_breakers.record_status('etherscan', self._chain_id, resp.status)
                     if data['status'] == '1' and data['result']:
                         result = data['result'][0]
@@ -440,7 +443,9 @@ class EvmAdapter(ChainAdapter):
             raise
         if no_record:
             return None
-        logger.warning("[%s] Creation not answered by Etherscan; asking Sourcify", self._chain_name)
+        if not self._etherscan_refusal_logged:
+            self._etherscan_refusal_logged = True
+            logger.warning("[%s] Creation not answered by Etherscan; asking Sourcify", self._chain_name)
         deployment = await self._explorer_service.get_sourcify_deployment(address, self._chain_id)
         if deployment.status == 'unknown':
             logger.warning("[%s] Creation unknown: Sourcify %s", self._chain_name, deployment.reason)

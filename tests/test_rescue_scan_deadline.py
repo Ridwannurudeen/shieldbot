@@ -129,7 +129,7 @@ async def test_a_logs_rpc_serving_chunks_slowly_keeps_the_newest_ones_read_by_th
     latest = 100 * CHUNK + 10  # 101 chunks: two batches of 50 and one of 1
     service = rescue_service(logs_rpc=ARCHIVE)
     result, rpc, elapsed = await scan(
-        delayed(archive_handler(latest), 0.1), 56, service, history=0.25
+        delayed(archive_handler(latest), 0.2), 56, service, history=0.45
     )
 
     assert elapsed < 1

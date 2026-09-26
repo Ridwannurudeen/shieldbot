@@ -2176,7 +2176,8 @@ async def chain_coverage(chain_id: int):
     `router_allowlist` counts the swap routers configured as trusted on this chain; `public_mempool` is
     yes when the mempool monitor read this chain on its last poll, unobservable when the chain has a
     public mempool that was not read, and no when it has none; `approvals` says whether a rescue scan
-    reads the full approval history or only the newest `window_blocks` blocks.
+    tries the full approval history (within its deadline; each result's `scanned_blocks` says what
+    was read) or only the newest `window_blocks` blocks.
     `provider_health` is this chain's Unknown ledger (core.unknown_ledger): per provider, how many
     lookups were answered, came back unknown or failed since `counting_since`, and the latest outcome;
     `chain_independent` holds providers asked about no chain. A provider with no entry has not been

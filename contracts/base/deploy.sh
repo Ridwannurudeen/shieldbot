@@ -25,6 +25,9 @@
 #   - Deployer wallet 0xfE3f3cEAb7266b5de5Ae8738727b6cf82F7Be76c funded with
 #     ~0.005 ETH on Base mainnet
 
+echo "contracts/base/deploy.sh is retired (2026-09-26): the Base attestor receives no records." >&2
+exit 1
+
 set -euo pipefail
 
 DEPLOYER_ACCOUNT="base-deployer"
