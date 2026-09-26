@@ -1,4 +1,4 @@
-"""Sourcify v2 verification and Blockscout PRO contract enrichment."""
+"""Sourcify v2 verification and deployment records, and Blockscout contract enrichment."""
 
 import asyncio
 import os
@@ -263,6 +263,54 @@ class ExplorerService:
         return ExplorerResult(
             "unknown",
             reason="Missing or mismatched verification evidence",
+            provider="sourcify",
+        )
+
+    async def get_sourcify_deployment(
+        self, address: str, chain_id: int
+    ) -> ExplorerResult:
+        """Sourcify's deployment record for a contract verified there: its deployer, creation
+        transaction and block, from which the chain's RPC dates it without reading the transaction.
+        A 404 is Sourcify not knowing the contract; a reply that names another contract or lacks the
+        record is unknown. The record is cached apart from the verification reply, which lacks it."""
+        if not _is_address(address):
+            return ExplorerResult("unknown", reason="Invalid address")
+        address = address.lower()
+        sourcify = await self._request(
+            "sourcify",
+            f"https://sourcify.dev/server/v2/contract/{chain_id}/{address}",
+            {"fields": "deployment"},
+            chain_id,
+        )
+        if sourcify.status != "known":
+            return sourcify
+        if sourcify.reason == "HTTP 404":
+            return ExplorerResult("unknown", reason="not verified", provider="sourcify")
+        data = sourcify.data
+        deployment = data.get("deployment")
+        if not isinstance(deployment, dict):
+            deployment = {}
+        deployer = deployment.get("deployer")
+        tx_hash = deployment.get("transactionHash")
+        block = deployment.get("blockNumber")
+        if (
+            data.get("chainId") == str(chain_id)
+            and isinstance(data.get("address"), str)
+            and data["address"].lower() == address
+            and _is_address(deployer)
+            and isinstance(tx_hash, str)
+            and re.fullmatch(r"0x[0-9a-fA-F]{64}", tx_hash)
+            and isinstance(block, str)
+            and re.fullmatch(r"[0-9]{1,20}", block)
+        ):
+            return ExplorerResult(
+                "known",
+                data={"creator": deployer, "tx_hash": tx_hash, "block_number": int(block)},
+                provider="sourcify",
+            )
+        return ExplorerResult(
+            "unknown",
+            reason="Missing or mismatched deployment evidence",
             provider="sourcify",
         )
 

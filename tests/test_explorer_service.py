@@ -113,6 +113,113 @@ async def test_sourcify_malformed_or_wrong_identity_unknown(http, payload):
     ).status == "unknown"
 
 
+# Recorded keyless from Sourcify v2 on 2026-09-26 (chain, address, block and creation transaction
+# of PancakeSwap's CAKE); the deployer, index and verifiedAt are synthetic.
+# https://docs.sourcify.dev/docs/api/ (GET /v2/contract/{chainId}/{address}?fields=deployment)
+CAKE = "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82"
+SOURCIFY_DEPLOYMENT = {
+    "matchId": "1",
+    "creationMatch": "exact_match",
+    "runtimeMatch": "exact_match",
+    "verifiedAt": "2021-01-01T00:00:00Z",
+    "match": "exact_match",
+    "chainId": "56",
+    "address": CAKE,
+    "deployment": {
+        "transactionHash": "0x" + "7dd36f3b6d38f8a6b2f2fb0c850a75d57114a1b2fdcd350eaeee609cf3d827ae",
+        "blockNumber": "693963",
+        "transactionIndex": "0",
+        "deployer": FUNDER,
+    },
+}
+
+
+def _deployment(**changes):
+    return {**SOURCIFY_DEPLOYMENT, "deployment": {**SOURCIFY_DEPLOYMENT["deployment"], **changes}}
+
+
+@pytest.mark.asyncio
+async def test_sourcify_deployment_request_result_and_cache(http):
+    enqueue, session, _ = http
+    enqueue(SOURCIFY_DEPLOYMENT)
+    service = ExplorerService()
+    result = await service.get_sourcify_deployment(CAKE, 56)
+    again = await service.get_sourcify_deployment(CAKE.lower(), 56)
+    assert result.status == "known" and result.provider == "sourcify"
+    assert result.data == {
+        "creator": FUNDER,
+        "tx_hash": SOURCIFY_DEPLOYMENT["deployment"]["transactionHash"],
+        "block_number": 693963,
+    }
+    assert again == result
+    session.get.assert_called_once_with(
+        f"https://sourcify.dev/server/v2/contract/56/{CAKE.lower()}",
+        params={"fields": "deployment"},
+        allow_redirects=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_sourcify_deployment_and_verification_lookups_are_cached_apart(http):
+    enqueue, session, _ = http
+    enqueue({**SOURCIFY_ROUTER, "chainId": "56", "address": CAKE})
+    enqueue(SOURCIFY_DEPLOYMENT)
+    service = ExplorerService()
+    assert (await service.get_sourcify_verification(CAKE, 56)).status == "verified"
+    assert (await service.get_sourcify_deployment(CAKE, 56)).status == "known"
+    assert [call.kwargs["params"] for call in session.get.call_args_list] == [
+        {},
+        {"fields": "deployment"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_sourcify_deployment_404_is_a_contract_sourcify_does_not_know(http):
+    enqueue, session, _ = http
+    enqueue({**SOURCIFY_FACTORY, "chainId": "56", "address": CAKE}, 404)
+    result = await ExplorerService().get_sourcify_deployment(CAKE, 56)
+    assert result.status == "unknown" and result.reason == "not verified"
+    assert result.data is None and result.provider == "sourcify"
+    assert session.get.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_sourcify_deployment_http_error_is_unknown(http):
+    http[0]({}, 503)
+    result = await ExplorerService().get_sourcify_deployment(CAKE, 56)
+    assert result.status == "unknown" and result.reason == "HTTP 503"
+
+
+@pytest.mark.asyncio
+async def test_sourcify_deployment_invalid_address_sends_nothing(http):
+    result = await ExplorerService().get_sourcify_deployment("0xnope", 56)
+    assert result.status == "unknown" and result.reason == "Invalid address"
+    http[1].get.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        [],
+        {**SOURCIFY_DEPLOYMENT, "chainId": "1"},
+        {**SOURCIFY_DEPLOYMENT, "address": FUNDER},
+        {key: value for key, value in SOURCIFY_DEPLOYMENT.items() if key != "deployment"},
+        {**SOURCIFY_DEPLOYMENT, "deployment": None},
+        _deployment(blockNumber=693963),
+        _deployment(blockNumber="0xa96cb"),
+        _deployment(blockNumber=""),
+        _deployment(deployer=None),
+        _deployment(transactionHash="0x" + "a" * 63),
+    ],
+)
+async def test_sourcify_deployment_missing_or_mismatched_evidence_unknown(http, payload):
+    http[0](payload)
+    result = await ExplorerService().get_sourcify_deployment(CAKE, 56)
+    assert result.status == "unknown" and result.data is None and result.reason
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("verified", [True, False])
 async def test_blockscout_fallback_and_shared_address_cache(http, verified):
