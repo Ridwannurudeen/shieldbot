@@ -99,14 +99,6 @@ export default function Footer() {
                   Threat Dashboard
                 </a>
                 <a
-                  href="https://youtu.be/NN95rom10R8"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center min-h-[44px] md:min-h-0 text-sm text-gray-300 hover:text-neon transition-colors"
-                >
-                  Demo Video
-                </a>
-                <a
                   href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk"
                   target="_blank"
                   rel="noopener noreferrer"
