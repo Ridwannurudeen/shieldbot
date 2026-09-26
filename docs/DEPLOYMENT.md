@@ -49,7 +49,7 @@ Test in Telegram:
 ## Production
 
 Production is a git checkout in `/opt/shieldbot` on one VPS, run by systemd units: `shieldbot`, the API
-(`uvicorn api:app` on 127.0.0.1:8000; `shieldbot-api.service` in this repo), and `shieldbot-bot`, the Telegram
+(`uvicorn api:app` on 127.0.0.1:8000; `shieldbot-api.service` at the repository root), and `shieldbot-bot`, the Telegram
 bot, plus `shieldbot-workers` when the background work runs in its own process (below).
 [deploy/README.md](../deploy/README.md) covers deploying a commit, rolling back, nginx, nightly backups and
 restoring one.

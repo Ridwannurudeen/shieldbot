@@ -111,11 +111,12 @@ Precedence is `NO_RECORD → HIGH/HONEYPOT → FUTURE_TIMESTAMP → EXPIRED → 
 
 ### On-chain transfer demonstration (offline)
 
-With Foundry and the pinned Solidity dependencies already installed, run these from the repository root in Bash/Git Bash. The first command reproduces the proven honeypot classifier from section 1; the Foundry command separately records each verdict into the real registry and exercises the real guard and transfer with a mock ERC-20. It is an offline composition of classifier evidence and consumer enforcement, not a live scan-to-publication transaction.
+With Foundry installed, run these from the repository root in Bash/Git Bash. The pinned Solidity dependencies are git submodules; the `git submodule` line fetches them into `contracts/base/lib/` when the clone was made without `--recursive`. The first command reproduces the proven honeypot classifier from section 1; the Foundry command separately records each verdict into the real registry and exercises the real guard and transfer with a mock ERC-20. It is an offline composition of classifier evidence and consumer enforcement, not a live scan-to-publication transaction.
 
 ```bash
 python -m pytest tests/test_robinhood_simulation.py::test_live_honeypot_is_proven_unsellable tests/test_robinhood_simulation.py::test_4663_proven_honeypot_is_flagged_through_the_analyzer -v -p no:cacheprovider
 export PATH="$HOME/.foundry/bin:$PATH"
+git submodule update --init --recursive
 cd contracts/base
 forge test --offline --match-contract ShieldBotGuardedTransferTest --match-test 'test_Transfer_(FreshLow|HoneypotDeniesBeforeTokenCall|UnknownDeniesBeforeTokenCall|ExpiredDeniesBeforeTokenCall)' -vv
 ```
@@ -187,7 +188,7 @@ assert doc['registry'].lower() == registry and doc['tx_hash'].lower() == tx
 
 def rpc(method, params):
     body = json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params}).encode()
-    request = Request(rpc_url, data=body, headers={'Content-Type': 'application/json'})
+    request = Request(rpc_url, data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'shieldbot-verify/1.0'})
     with urlopen(request, timeout=30) as response:
         result = json.load(response)
     assert 'error' not in result, result.get('error')

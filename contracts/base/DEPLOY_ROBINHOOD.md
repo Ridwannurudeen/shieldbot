@@ -60,9 +60,9 @@ forge fmt --check
 forge snapshot --check --no-match-test 'testFuzz|invariant_'
 ```
 
-The committed `.gas-snapshot` uses Foundry 1.7.1 and the 55 deterministic tests. Fuzz gas summaries varied even
+The committed `.gas-snapshot` uses Foundry 1.7.1 and the 102 deterministic tests. Fuzz gas summaries varied even
 with a fixed seed, so fuzz and invariant tests run in the full `forge test` suite rather than the gas snapshot.
-The full suite passes 65 tests, including two invariants with 256 runs of 500 calls each and zero unexpected
+The full suite passes 114 tests, including two invariants with 256 runs of 500 calls each and zero unexpected
 reverts. Test-harness gas in the snapshot is distinct from contract-call gas in `forge test --gas-report`.
 With Solidity 0.8.28, optimizer 200 and Cancun, hoisting the
 global counter update out of the loop reduced a 50-new-subject `recordBatch` from 3,617,479 to 3,606,945 reported
@@ -270,7 +270,7 @@ bot, and every other path, only stores evidence and queues Robinhood Chain verdi
 SQLite database; the bot code never reads the key.
 
 **The API must run as a single uvicorn process: no `--workers` and no `--reload`** (as in `shieldbot-api.service`
-in this repository). Two API processes would be two drains. Only the holder of the sender lease in the database
+at the repository root). Two API processes would be two drains. Only the holder of the sender lease in the database
 stores and broadcasts, and a send goes on only while that lease still has its broadcast phase to run, so no other
 drain can take the lease before the broadcast ends (docs/DEPLOYMENT.md). One process is still the supported setup.
 After a crash, the restarted process sends nothing until the dead process's lease expires, up to 90 seconds.
