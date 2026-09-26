@@ -26,6 +26,10 @@ The sections below describe the separate **Base EAS attestor**. Its risk codes a
 
 ## Base EAS attestor
 
+**Retired on 2026-09-26: no new records are written.** Nothing in this repository writes to the attestor any
+more; `/api/base/attestations` still reads the attestations it holds. The sections below describe the contract
+as deployed.
+
 Threat-attestation contract for ShieldBot scans, posted to the Ethereum Attestation Service on Base mainnet.
 
 ## Architecture

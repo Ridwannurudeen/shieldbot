@@ -298,11 +298,7 @@ def admin_api(monkeypatch):
             confirm_scam=AsyncMock(return_value=True),
             remove_from_blacklist=AsyncMock(return_value=True),
         ),
-        onchain_recorder=MagicMock(record_scan_fire_and_forget=AsyncMock()),
-        base_attestor=MagicMock(attest_fire_and_forget=AsyncMock()),
     )
-    services.onchain_recorder.is_available.return_value = True
-    services.base_attestor.is_available.return_value = True
     monkeypatch.setattr(api, "container", services)
     monkeypatch.setattr(api, "web3_client", registry)
     monkeypatch.setattr(api, "rate_limiter", api.RateLimiter(1000, 1000))
@@ -343,19 +339,6 @@ def test_admin_confirms_an_entry(admin_api):
     )
     assert response.status_code == 200
     services.scam_db.confirm_scam.assert_awaited_once_with(ADDRESS, 56, "drainer")
-
-
-@pytest.mark.parametrize("confirmed", [True, False])
-def test_an_admin_confirmation_writes_nothing_on_chain(admin_api, confirmed):
-    # Only the bot sends from the recorder and attestor wallets, so the API never does.
-    _, client, services = admin_api
-    services.scam_db.confirm_scam.return_value = confirmed
-    for chain_id in (56, 1):
-        client.post(
-            "/api/admin/blacklist", headers=ADMIN_HEADERS, json={"address": ADDRESS, "chainId": chain_id}
-        )
-    services.onchain_recorder.record_scan_fire_and_forget.assert_not_awaited()
-    services.base_attestor.attest_fire_and_forget.assert_not_awaited()
 
 
 @pytest.mark.asyncio

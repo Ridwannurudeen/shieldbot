@@ -6,14 +6,14 @@ public RPCs `https://mainnet.base.org` and `https://bsc-dataseed1.binance.org/`;
 event logs of the Base attestor come from base.blockscout.com, and source matches from Sourcify. The two
 BSC deployment transactions are the ones the repository already recorded (`docs/DEPLOYMENT.md` for the
 verifier, the since-removed `bsc.address` metadata file for the unused second one); their receipts, read
-from `https://bsc-dataseed1.binance.org/`, show each creating the contract listed below. A
-contract only receives records while the service that writes to it holds its key, so this page says
-what can write to each contract, not whether production is doing so.
+from `https://bsc-dataseed1.binance.org/`, show each creating the contract listed below. The Base
+attestor and the BNB Smart Chain verifier were retired on 2026-09-26: nothing in this repository writes
+to either any more, so no new records are written. The records already on both chains stay.
 
 | Contract | Chain | Address | Deployed (UTC) | Records on 2026-09-24 | Written by |
 |---|---|---|---|---|---|
-| `ShieldBotAttestor` | Base (8453) | [`0xA4A192510FB8Ad1B6C92972a15BfAba73E7a655B`](https://basescan.org/address/0xA4A192510FB8Ad1B6C92972a15BfAba73E7a655B) | 2026-05-05 15:23:51 | 1 attestation | `bot.py` through `utils/base_attestor.py` |
-| `ShieldBotVerifier` | BNB Smart Chain (56) | [`0x867aE7449af56BB56a4978c758d7E88066E1f795`](https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795) | 2026-02-12 11:25:33 | 20 scans | `bot.py` through `utils/onchain_recorder.py` |
+| `ShieldBotAttestor` | Base (8453) | [`0xA4A192510FB8Ad1B6C92972a15BfAba73E7a655B`](https://basescan.org/address/0xA4A192510FB8Ad1B6C92972a15BfAba73E7a655B) | 2026-05-05 15:23:51 | 1 attestation | nothing: retired on 2026-09-26 |
+| `ShieldBotVerifier` | BNB Smart Chain (56) | [`0x867aE7449af56BB56a4978c758d7E88066E1f795`](https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795) | 2026-02-12 11:25:33 | 20 scans | nothing: retired on 2026-09-26 |
 | `ShieldBotVerifier` (second, unused) | BNB Smart Chain (56) | [`0x0AD4E23f5762CEd4D3278Da958e109F2A09337B2`](https://bscscan.com/address/0x0AD4E23f5762CEd4D3278Da958e109F2A09337B2) | 2026-03-02 13:57:22 | 0 scans | nothing in this repository |
 | `ShieldBotVerdictRegistry` | Robinhood Chain (4663) | not deployed | | | |
 | `ShieldBotVerdictGuard` | Robinhood Chain (4663) | not deployed | | | |
@@ -46,9 +46,10 @@ Every owner below is an externally owned account (`eth_getCode` returns no code)
   was posted at 2026-05-05 15:43:55 UTC, twenty minutes after deployment, with scan type `approval` and
   source chain 1. No code in this repository sends the scan type `approval`.
 - **Risk codes:** 0 = LOW, 1 = MEDIUM, 2 = HIGH, 3 = SAFE, 4 = WARNING, 5 = DANGER.
-- **Writes:** `utils/base_attestor.py` (`attest_fire_and_forget`), called from `bot.py` for `/report` and
-  for contract and token scans, only when `BASE_ATTESTOR_ADDRESS` and `BASE_VERIFIER_PRIVATE_KEY` are set.
-  `services/base_attestation_service.py` reads its attestations through the EAS GraphQL API when
+- **Writes:** none. Retired on 2026-09-26; no new records are written. Until then `bot.py` attested
+  contract and token scans through the since-removed `utils/base_attestor.py` when
+  `BASE_ATTESTOR_ADDRESS` and `BASE_VERIFIER_PRIVATE_KEY` were set. `services/base_attestation_service.py`
+  still reads its attestations through the EAS GraphQL API (`/api/base/attestations`) when
   `BASE_ATTESTOR_ADDRESS` is set.
 
 ## ShieldBotVerifier on BNB Smart Chain
@@ -59,7 +60,8 @@ Every owner below is an externally owned account (`eth_getCode` returns no code)
   block 80,777,511, 2026-02-12 11:25:33 UTC, from `0xfE3f3cEAb7266b5de5Ae8738727b6cf82F7Be76c`.
 - **Owner and recorder:** `owner()` and `verifier()` are both `0xc62A8ae13a2Ea84F443dA5681501e7aaC43dC6F5`,
   so one key both records scans and owns the contract: if it leaks, no other key can rotate the recorder
-  away from it.
+  away from it. Since the retirement no service needs that key; whoever holds it can still write records
+  that nothing reads.
 - **Records:** `totalScans()` = 20; `getStats()` returns (20, 20).
 - **Source:** Sourcify partial match (verified 2026-05-21), not an exact one. The deployed contract is not
   [contracts/ShieldBotVerifier.sol](../contracts/ShieldBotVerifier.sol) as it stands: that source declares
@@ -67,8 +69,10 @@ Every owner below is an externally owned account (`eth_getCode` returns no code)
 - **Risk codes** (in the repository source): 0 = LOW, 1 = MEDIUM, 2 = HIGH, 3 = SAFE, 4 = WARNING,
   5 = DANGER. An address never recorded also reads 0 (LOW) from `latestScans`, so read
   `hasBeenScanned(address)` first.
-- **Writes:** `utils/onchain_recorder.py`, which has this address built in, called from `bot.py` for
-  `/report` and for contract and token scans, only when `BOT_WALLET_PRIVATE_KEY` is set.
+- **Writes:** none. Retired on 2026-09-26; no new records are written. Until then `bot.py` recorded
+  contract and token scans through the since-removed `utils/onchain_recorder.py` when
+  `BOT_WALLET_PRIVATE_KEY` was set. Nothing in this repository reads the contract either; its records
+  are on BscScan.
 
 ## Second ShieldBotVerifier on BNB Smart Chain (unused)
 

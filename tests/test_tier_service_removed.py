@@ -16,7 +16,6 @@ def test_container_builds_without_tier_service():
         patch("core.container.AIAnalyzer"),
         patch("core.container.ScamDatabase"),
         patch("core.container.CalldataDecoder"),
-        patch("core.container.OnchainRecorder"),
         patch("core.container.TransactionScanner"),
         patch("core.container.TokenScanner"),
         patch("core.container.DexService"),

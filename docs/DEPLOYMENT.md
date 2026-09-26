@@ -224,7 +224,8 @@ Neither setting makes a second API process supported: MCP sessions, for one, liv
 An earlier version of this guide described a `shieldbot.service` that ran `bot.py`, Docker and screen setups,
 a health check on port 8080, a verifier contract deployed from Remix and a checklist. None of that
 describes production any more, so it was removed; it is in the git history. Its checklist recorded the BNB Smart
-Chain verifier, which [DEPLOYMENTS.md](DEPLOYMENTS.md) describes:
+Chain verifier, which [DEPLOYMENTS.md](DEPLOYMENTS.md) describes and which was retired on 2026-09-26 (no new
+records are written):
 
 - [x] Contract address documented: https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795#code
 - [x] Deployment tx documented: https://bscscan.com/tx/0x021fb404910c2621497bcda167ffcc70e8ece846d1ade8066ab5ad87f13b6bbd

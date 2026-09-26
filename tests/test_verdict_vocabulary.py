@@ -89,10 +89,6 @@ ALLOWED = {
         "services/base_attestation_service.py",
         'RISK_LABELS = {0: "LOW", 1: "MEDIUM", 2: "HIGH", 3: "SAFE", 4: "WARNING", 5: "DANGER"}',
     ): "labels of the deployed contract's record format, which is not changed",
-    (
-        "utils/onchain_recorder.py",
-        "risk_names = {0: 'LOW', 1: 'MEDIUM', 2: 'HIGH', 3: 'SAFE', 4: 'WARNING', 5: 'DANGER'}",
-    ): "labels of the deployed contract's record format, which is not changed",
     ("services/ethos_service.py", "if raw_score >= 1800:"): "Ethos's own reputation scale",
     ("services/ethos_service.py", "elif raw_score >= 1000:"): "Ethos's own reputation scale",
     ("services/ethos_service.py", "elif raw_score >= 500:"): "Ethos's own reputation scale",

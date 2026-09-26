@@ -249,7 +249,7 @@ The routes that feed these loops are open to anyone, so nothing they send can bl
 
   Protected addresses (the BNB Chain routers, WBNB, BUSD and USDT) are refused everywhere and ignored if found in the table. The API and the bot load the unexpired entries at startup and reload them every 30 minutes: the API in its hunter sweep, which first deletes expired entries, and the bot on its own timer. A change made in one process can take up to 30 minutes to reach the other.
 
-  Nothing on the blacklist is written on chain. A community blacklisting writes no record, and an admin confirmation is an off-chain full scam match only: the bot is the one process that sends from the BSC recorder and Base attestor wallets, and a second sender would collide with its nonces. Confirmed scams are not recorded on chain until the owner decides whether to retire those legacy writers.
+  Nothing on the blacklist is written on chain. A community blacklisting writes no record, and an admin confirmation is an off-chain full scam match only. The BSC verifier and the Base attestor were retired on 2026-09-26, so no scan or confirmation is recorded on either; the one on-chain writer left is the Robinhood Chain verdict publisher, which writes to the verdict registry when one is configured.
 
   `POST /api/report` stores reports in `community_reports` and does not feed the blacklist. Those reports are anonymous web reports keyed by a hash of the client IP, and IPs are cheap to multiply, so they stay evidence for the admin to read, not a signal in scores.
 - **Calibration**: the HIGH and MEDIUM thresholds, and a confidence boost, come from `core/calibration_config.json` (or `CALIBRATION_CONFIG_PATH`), read at startup. `scripts/calibrate.py` proposes new values from trusted labels only: benchmark entries with recorded scores (`--scores`, see `eval/README.md`) and outcome rows sent with an active paid API key (a key in `api_keys` that is active and whose tier is not `free`). It never reads `client` rows, rows from self-serve free keys, rows from deactivated keys or rows from keys no longer in `api_keys`. It reads the config the service reads (`calibration_config_path`, resolved against the repository root when relative, as the service runs from there) unless `--config` names another, and refuses an `--out` that is one of its inputs, so it never writes the config. With fewer than 20 trusted labels it proposes nothing. It never proposes a HIGH at or below 40 (three community reports alone would then be HIGH, which the RPC proxy blocks) or a MEDIUM at or below 30 (below the extension's CAUTION band): such a value is raised to 41 or 31, listed under `clamped` with the reason, and the proposal is marked `needs_owner_review`. It is also marked, with a line under `warnings`, when one key supplied more than half the trusted labels.
@@ -422,8 +422,7 @@ shieldbot/
 │   ├── risk_scorer.py          # Heuristic scoring logic
 │   ├── web3_client.py          # Web3 + liquidity lock detection
 │   ├── scam_db.py              # Multi-source scam database
-│   ├── firewall_prompt.py      # AI system prompt
-│   └── onchain_recorder.py     # On-chain scan recording
+│   └── firewall_prompt.py      # AI system prompt
 │
 ├── extension/
 │   ├── manifest.json           # Extension config (V3)
@@ -435,7 +434,7 @@ shieldbot/
 │   └── overlay.css             # Firewall modal styles
 │
 └── contracts/
-    └── ShieldBotVerifier.sol   # On-chain verification contract (deployed on BSC Mainnet)
+    └── ShieldBotVerifier.sol   # BSC verifier contract, retired on 2026-09-26 (no new records are written)
 ```
 
 ---

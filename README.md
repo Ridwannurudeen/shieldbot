@@ -168,7 +168,7 @@ Token names, symbols and pools as listed by GeckoTerminal (network `robinhood`) 
 
 ## Submission status and measured usage
 
-- **Registry deployment:** pending. The Robinhood Chain verdict registry, guard and guarded transfer are not deployed yet, so no contract address is listed. The contracts that are deployed, on Base and BNB Smart Chain, are listed with their owners and record counts in [DEPLOYMENTS.md](docs/DEPLOYMENTS.md).
+- **Registry deployment:** pending. The Robinhood Chain verdict registry, guard and guarded transfer are not deployed yet, so no contract address is listed. The contracts that are deployed, on Base and BNB Smart Chain, are listed with their owners and record counts in [DEPLOYMENTS.md](docs/DEPLOYMENTS.md); both were retired on 2026-09-26, and no new records are written to them.
 - **Measured usage:** the `GET /api/stats` snapshot supplied on **2026-09-22** is recorded in [SUBMISSION.md](docs/SUBMISSION.md); its time of day and the revision serving it were not supplied. Dashboard loading values and historical projections are not usage evidence.
 - **Release boundary:** this README describes this repository snapshot. Deployment, live evidence URLs and the browser-store release must be verified separately.
 

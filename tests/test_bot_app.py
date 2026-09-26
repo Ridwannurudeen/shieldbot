@@ -251,7 +251,7 @@ Stay safe! 🛡️
 
 
 class TestNoOnChainRecordingPromise:
-    """The BSC recorder holds a handful of records, so the bot must not promise on-chain history."""
+    """The BSC recorder and the Base attestor are retired, so the bot must not promise on-chain history."""
 
     @pytest.mark.asyncio
     async def test_start_does_not_promise_on_chain_history(self, bot_module):
@@ -265,9 +265,7 @@ class TestNoOnChainRecordingPromise:
         assert "/history" not in text
 
     @pytest.mark.asyncio
-    async def test_history_says_on_chain_history_is_not_available(self, bot_module, monkeypatch):
-        recorder = MagicMock(get_latest_scan=AsyncMock())
-        monkeypatch.setattr(bot_module, "onchain_recorder", recorder)
+    async def test_history_says_on_chain_history_is_not_available(self, bot_module):
         update = MagicMock(spec=Update)
         update.message.reply_text = AsyncMock()
         context = MagicMock(args=["0x0000000000000000000000000000000000000001"])
@@ -277,36 +275,29 @@ class TestNoOnChainRecordingPromise:
         update.message.reply_text.assert_awaited_once_with(
             "On-chain scan history is not available. Use /scan or /token to check an address."
         )
-        recorder.get_latest_scan.assert_not_awaited()
 
     @staticmethod
     async def _report(bot_module, monkeypatch, result):
-        recorder = MagicMock(record_scan_fire_and_forget=AsyncMock())
-        recorder.is_available.return_value = True
-        attestor = MagicMock(attest_fire_and_forget=AsyncMock())
-        attestor.is_available.return_value = True
-        monkeypatch.setattr(bot_module, "onchain_recorder", recorder)
-        monkeypatch.setattr(bot_module, "base_attestor", attestor)
         monkeypatch.setattr(bot_module, "scam_db", SimpleNamespace(report_address=AsyncMock(return_value=result)))
         update = MagicMock(spec=Update)
         update.message.reply_text = AsyncMock()
         update.effective_user.id = 42
         await bot_module.report_command(update, MagicMock(args=["0x" + "0" * 39 + "1", "honeypot"]))
-        return update.message.reply_text.await_args.args[0], recorder, attestor
+        return update.message.reply_text.await_args.args[0]
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("already_listed, sentence", [
         (False, "This address now shows as reported by 3 users in scans. It is not confirmed as a scam."),
         (True, "This address is already reported by 3 users in scans. It is not confirmed as a scam."),
     ])
-    async def test_a_community_blacklisting_writes_nothing_on_chain(
+    async def test_a_community_blacklisting_is_reported_not_confirmed(
         self, bot_module, monkeypatch, already_listed, sentence,
     ):
         result = {
             "accepted": True, "reason": "", "blacklisted": True, "reports": 3, "needed": 3, "confirmed": False,
             "already_listed": already_listed,
         }
-        text, recorder, attestor = await self._report(bot_module, monkeypatch, result)
+        text = await self._report(bot_module, monkeypatch, result)
 
         # A crowd entry is community-reported until an admin confirms it, not blacklisted.
         assert "Scam Report — Community-Reported Address" in text
@@ -315,8 +306,6 @@ class TestNoOnChainRecordingPromise:
         assert "known scam" not in text
         assert "On-chain recording" not in text
         assert "bscscan.com" not in text
-        recorder.record_scan_fire_and_forget.assert_not_awaited()
-        attestor.attest_fire_and_forget.assert_not_awaited()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("raw, user_data, chain_id", [
@@ -344,13 +333,11 @@ class TestNoOnChainRecordingPromise:
             "accepted": True, "reason": "Already blacklisted.", "blacklisted": True, "reports": 0, "needed": 3,
             "confirmed": True,
         }
-        text, recorder, attestor = await self._report(bot_module, monkeypatch, result)
+        text = await self._report(bot_module, monkeypatch, result)
 
         assert "Scam Report — Address Blacklisted" in text
         assert "This address is confirmed as a scam." in text
         assert "reported by 0 users" not in text
-        recorder.record_scan_fire_and_forget.assert_not_awaited()
-        attestor.attest_fire_and_forget.assert_not_awaited()
 
 
 COMMUNITY_MATCH = {
@@ -412,7 +399,7 @@ MEMPOOL_ALERT = {
     "chain_id": 56, "created_at": 1000.0,
 }
 MEMPOOL_STATS = {
-    "total_pending_seen": 12345, "sandwiches_detected": 2, "frontruns_detected": 0,
+    "total_pending_seen": 12345, "sandwiches_detected": 2,
     "suspicious_approvals": 7, "counting_since": 900.0, "monitored_chains": [56, 1],
     "unobservable_chains": [], "pending_count": {"56": 10, "1": 20}, "active_alerts": 1,
 }
@@ -465,10 +452,22 @@ class TestThreatsCommand:
         assert mempool_api.requests == [("/api/mempool/alerts", query), ("/api/mempool/stats", {})]
         text = update.message.reply_text.await_args.args[0]
         assert "• Pending txs seen: 12,345\n" in text
+        assert "• Sandwiches detected: 2\n" in text
         assert "• Suspicious approvals: 7\n" in text
+        assert "Frontrun" not in text
         assert "• Monitoring: BSC, Ethereum\n" in text
         assert "🔴 **Suspicious Approval** (BSC)\n  Unlimited token approval pending\n" in text
         assert not bot_module.container.mempool_monitor.mock_calls
+
+    @pytest.mark.asyncio
+    async def test_start_names_only_the_threats_the_monitor_detects(self, bot_module):
+        update = _threats_update()
+
+        await bot_module.start(update, MagicMock())
+
+        text = update.message.reply_text.await_args.args[0]
+        assert "• Mempool threats — live sandwich attack & suspicious approval detection\n" in text
+        assert "frontrun" not in text.lower()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("args, unobservable, lines, absent", [

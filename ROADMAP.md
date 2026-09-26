@@ -57,7 +57,7 @@ ShieldBot is a transaction security service for eight EVM chains. The V2 plan be
 ## Historical Phase 3: Moat Features + Growth (repository checklist, not deployment evidence)
 
 - [x] **Campaign Graph Radar v1** — Cross-chain entity correlation: deployers, funders, contract factories.
-- [x] **Mempool monitoring v1** — Sandwich attack, frontrunning, and suspicious approval detection.
+- [x] **Mempool monitoring v1** — Sandwich attack and suspicious approval detection. The frontrun rule planned here was never built.
 - [x] **Rescue Mode Tier 1** — Alerts with plain-language risk explanations.
 - [x] **Rescue Mode Tier 2** — Pre-built revoke transactions. One-click approval cleanup.
 - [x] **Arbitrum, Polygon, Optimism, opBNB adapters** — Backend adapters exist; per-provider coverage is incomplete and differs by chain. See the current README chain table.

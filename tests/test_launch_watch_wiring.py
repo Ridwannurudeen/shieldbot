@@ -9,7 +9,7 @@ from core.config import Settings
 from services.rpc_guard import RPC_BUDGET_RPS, RpcGuard
 
 PATCHED = (
-    "Web3Client", "AIAnalyzer", "ScamDatabase", "CalldataDecoder", "OnchainRecorder",
+    "Web3Client", "AIAnalyzer", "ScamDatabase", "CalldataDecoder",
     "TransactionScanner", "TokenScanner", "DexService", "EthosService", "HoneypotService",
     "ContractService", "GreenfieldService", "TenderlySimulator", "RiskEngine",
 )

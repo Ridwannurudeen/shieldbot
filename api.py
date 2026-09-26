@@ -2218,12 +2218,14 @@ async def chain_coverage(chain_id: int):
 
 @app.get("/api/base/attestations")
 async def base_attestations(limit: int = 25):
-    """Recent ShieldBot threat attestations on Base EAS. Newest first."""
+    """ShieldBot's attestations on Base EAS, newest first. The attestor was retired on 2026-09-26: no new
+    records are written, so this is history."""
     if not container or not container.base_attestation_reader.is_available():
         return {"available": False, "attestations": [], "summary": {}}
     reader = container.base_attestation_reader
     return {
         "available": True,
+        "retired_on": "2026-09-26",
         "attestor": reader.attestor_address,
         "explorer": f"https://base.easscan.org/address/{reader.attestor_address}",
         "attestations": await reader.get_recent(limit=limit),
@@ -2453,7 +2455,7 @@ async def blacklist_confirm(req: BlacklistConfirmRequest, request: Request):
         raise HTTPException(status_code=400, detail="Invalid address")
     if not await container.scam_db.confirm_scam(req.address, req.chainId, req.reason):
         raise HTTPException(status_code=409, detail="This address is a known legitimate contract and cannot be blacklisted")
-    # Off chain only: the bot is the one process that sends from the recorder and attestor wallets.
+    # Off chain only: the BSC verifier and the Base attestor were retired on 2026-09-26; nothing writes to them.
     return {"ok": True, "address": req.address.lower(), "chain_id": req.chainId, "source": "admin"}
 
 
@@ -2575,7 +2577,7 @@ async def agent_explain(req: ExplainRequest, request: Request):
 
 @app.get("/api/mempool/alerts")
 async def mempool_alerts(request: Request, chain_id: int = None, limit: int = 50):
-    """Get recent mempool alerts (sandwich attacks, frontrunning, suspicious approvals)."""
+    """Get recent mempool alerts (sandwich attacks, suspicious approvals)."""
     if chain_id is not None:
         _validate_chain_id(chain_id)
         if not supports_pending_transactions(chain_id):

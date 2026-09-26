@@ -7,29 +7,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
-import requests
 
 import utils.scam_db as scam_db
 from utils.ai_analyzer import AIAnalyzer
-from utils.onchain_recorder import OnchainRecorder
 from utils.scam_db import ScamDatabase
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 GUARDED_FILES = (
-    "utils/scam_db.py", "utils/onchain_recorder.py", "utils/ai_analyzer.py",
+    "utils/scam_db.py", "utils/ai_analyzer.py",
     "analyzers/signature.py", "sdk/python/shieldbot/client.py", "services/guardian.py",
     "services/verdict_publisher.py",
 )
 ADDRESS = "0x89e5db8b5aa49aa85ac63f691524311aeb649eba"
 TEST_KEY = "utils-log-test-key"
 LOG_METHODS = {"debug", "info", "warning", "error", "critical", "exception", "log"}
-
-
-def _rpc_error():
-    return requests.exceptions.HTTPError(
-        f"429 Client Error: Too Many Requests for url: https://rpc.invalid/v2/{TEST_KEY}"
-    )
 
 
 def _connection_error():
@@ -51,41 +43,6 @@ async def test_goplus_failure_logs_class_only(caplog, goplus_cache):
     assert result["reason"] == "GoPlus request failed (ClientConnectionError)"
     assert TEST_KEY not in caplog.text
     assert "ClientConnectionError" in caplog.text
-
-
-def _recorder():
-    recorder = OnchainRecorder.__new__(OnchainRecorder)
-    recorder.web3 = MagicMock()
-    recorder.account = MagicMock(address=ADDRESS)
-    recorder.contract = MagicMock()
-    recorder.web3.eth.get_transaction_count.side_effect = _rpc_error()
-    recorder.contract.functions.hasBeenScanned.return_value.call.side_effect = _rpc_error()
-    recorder.contract.functions.totalScans.return_value.call.side_effect = _rpc_error()
-    return recorder
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("method,args", [
-    ("record_scan", (ADDRESS, "low", "contract")),
-    ("get_latest_scan", (ADDRESS,)),
-    ("get_stats", ()),
-])
-async def test_onchain_recorder_rpc_failure_logs_class_only(caplog, method, args):
-    recorder = _recorder()
-    caplog.set_level(logging.DEBUG, logger="utils.onchain_recorder")
-    assert await getattr(recorder, method)(*args) is None
-    assert TEST_KEY not in caplog.text
-    assert "HTTPError" in caplog.text
-
-
-@pytest.mark.asyncio
-async def test_onchain_recorder_background_failure_logs_class_only(caplog):
-    recorder = _recorder()
-    recorder.record_scan = AsyncMock(side_effect=_rpc_error())
-    caplog.set_level(logging.DEBUG, logger="utils.onchain_recorder")
-    await recorder._safe_record(ADDRESS, "low", "contract")
-    assert TEST_KEY not in caplog.text
-    assert "HTTPError" in caplog.text
 
 
 @pytest.mark.asyncio

@@ -43,7 +43,6 @@ def test_container_exposes_the_verdict_publisher(monkeypatch):
     with (
         patch("core.container.Web3Client"),
         patch("core.container.AIAnalyzer"),
-        patch("core.container.OnchainRecorder"),
         patch("core.container.GreenfieldService"),
         patch("core.container.TenderlySimulator"),
     ):
@@ -196,7 +195,7 @@ def test_permalink_is_placed_right_after_the_base_attestations_handler():
 
 
 # ---------------------------------------------------------------------------
-# Bot: 4663 scan paths publish; other chains and the BSC recorder are unchanged
+# Bot: 4663 scan paths publish; other chains never publish
 # ---------------------------------------------------------------------------
 
 HONEYPOT_DATA = {"is_honeypot": True, "field_providers": {"is_honeypot": "eth_simulateV1"}}
@@ -224,10 +223,6 @@ def bot_scan_functions():
         return_value=[SimpleNamespace(name="honeypot", data=HONEYPOT_DATA)]
     )
     services.robinhood_assets.check_onchain = AsyncMock(return_value=NO_MATCH)
-    recorder = MagicMock()
-    recorder.is_available.return_value = True
-    recorder.record_scan_fire_and_forget = AsyncMock()
-    recorder.attest_fire_and_forget = AsyncMock()
     namespace = {
         "asyncio": asyncio,
         "is_scan_incomplete": is_scan_incomplete,
@@ -238,8 +233,6 @@ def bot_scan_functions():
         "container": services,
         "ai_analyzer": MagicMock(is_available=MagicMock(return_value=False)),
         "risk_engine": MagicMock(compute_from_results=MagicMock(return_value=dict(COMPLETE_HIGH))),
-        "onchain_recorder": recorder,
-        "base_attestor": recorder,
         "tx_scanner": SimpleNamespace(scan_address=AsyncMock(return_value={"risk_level": "low"})),
         "token_scanner": SimpleNamespace(
             check_token=AsyncMock(return_value={"safety_level": "safe"})
@@ -303,12 +296,10 @@ async def test_cached_robinhood_scans_are_not_published_again(bot_scan_functions
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("handler", ["scan_contract", "check_token"])
-async def test_other_chains_never_publish_and_keep_bsc_recording(bot_scan_functions, handler):
+async def test_other_chains_never_publish(bot_scan_functions, handler):
     ns = bot_scan_functions
     await ns[handler](update(), TOKEN, chain_id=56)
     ns["container"].verdict_publisher.publish_fire_and_forget.assert_not_called()
-    ns["onchain_recorder"].record_scan_fire_and_forget.assert_awaited_once()
-    ns["base_attestor"].attest_fire_and_forget.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

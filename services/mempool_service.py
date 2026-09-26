@@ -1,4 +1,4 @@
-"""Mempool monitoring v1 — detect sandwich attacks, frontrunning, and suspicious pending transactions."""
+"""Mempool monitoring v1 — detect sandwich attacks and suspicious pending approvals."""
 
 import asyncio
 import json
@@ -125,7 +125,7 @@ class QueuedSwap:
 @dataclass
 class MempoolAlert:
     """An alert generated from mempool analysis."""
-    alert_type: str  # sandwich_frontrun, sandwich_backrun, frontrun, suspicious_approval
+    alert_type: str  # sandwich_attack, suspicious_approval
     severity: str  # HIGH, MEDIUM, LOW
     description: str
     victim_tx: Optional[str] = None
@@ -137,7 +137,7 @@ class MempoolAlert:
 
 
 class MempoolMonitor:
-    """Monitors pending transactions for sandwich attacks and frontrunning.
+    """Monitors pending transactions for sandwich attacks and suspicious approvals.
 
     Polls txpool_content on each chain and falls back to eth_getBlock('pending') where the RPC does
     not serve it. A pool larger than MAX_TXPOOL_BYTES is watched through the pending block as well:
@@ -192,7 +192,6 @@ class MempoolMonitor:
         self._stats = {
             'total_pending_seen': 0,
             'sandwiches_detected': 0,
-            'frontruns_detected': 0,
             'suspicious_approvals': 0,
         }
 
