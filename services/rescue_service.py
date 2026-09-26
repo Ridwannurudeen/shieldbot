@@ -29,9 +29,10 @@ APPROVAL_FOR_ALL_TOPIC = Web3.keccak(text="ApprovalForAll(address,address,bool)"
 # blocks, newest first (240,000 blocks; about 6.7 hours on Robinhood Chain at ~0.1 s per block,
 # whose public Blockscout API answers server clients with a Cloudflare challenge). Measured on
 # 2026-09-24, the default public RPCs of Robinhood Chain, Arbitrum, Optimism and opBNB serve such
-# windows and Base's serves 2,000 blocks at a time; BSC's answers "limit exceeded" to any range,
-# and Ethereum's and Polygon's refuse a query without a contract address, so on those three
-# nothing is read and the scan stays unknown.
+# windows and Base's serves 2,000 blocks at a time; BSC's answers "limit exceeded" to any range
+# (re-measured 2026-09-26: every range from 10 to 10,000 blocks, at the head or 30M blocks back,
+# within 1.2 s), and Ethereum's and Polygon's refuse a query without a contract address, so on
+# those three nothing is read and the scan stays unknown.
 RECENT_LOG_WINDOW_BLOCKS = 10_000
 # Public RPCs that cap an eth_getLogs range below RECENT_LOG_WINDOW_BLOCKS, by chain.
 PUBLIC_LOG_WINDOW_BLOCKS = {8453: 2_000}
@@ -39,6 +40,20 @@ RECENT_LOG_WINDOWS = 24
 PUBLIC_RPC_CONCURRENCY = 4
 PUBLIC_RPC_ATTEMPTS = 3
 RATE_LIMIT_TERMS = ("rate limit", "rate-limit", "too many requests")
+
+# A scan answers within SCAN_DEADLINE_SECONDS or says it did not finish: nginx closes the API's
+# connection at 60 s (deploy/nginx-api.conf.example) and the extension's Health tab gives up at
+# 60 s (extension/popup.js), so a scan that ran on answered nobody. On 2026-09-26 production's BSC
+# scan did just that: with no deadline, a logs RPC's full history is 2,484 chunks at BSC's 124M
+# blocks, each request allowed 15 s, and the window fallback adds up to 6 batches of 48 s. 30 s
+# keeps the same headroom as the token scan's 25 s analyzer deadline (core/registry.py). The
+# approval-history read gets HISTORY_DEADLINE_SECONDS of it: it keeps the batches read by then and
+# coverage names the oldest block read, so the allowance, balance, price and metadata reads that
+# follow keep at least 10 s.
+SCAN_DEADLINE_SECONDS = 30
+HISTORY_DEADLINE_SECONDS = 20
+# Reason given when the scan as a whole did not finish within SCAN_DEADLINE_SECONDS.
+SCAN_TIMEOUT_REASON = f"Approval scan did not finish within {SCAN_DEADLINE_SECONDS} s"
 
 # A wallet's scan result is reused this long, so repeated calls do not re-run a history scan
 # (a full archive scan sends thousands of requests), while a revoke still shows within minutes.
@@ -272,6 +287,10 @@ class RescueService:
           balances or prices are incomplete, including when the chain's RPC could not be read
         - scanned_blocks: the block range whose approval history was read, or None when none was
 
+        The scan answers within SCAN_DEADLINE_SECONDS: the approval-history read stops at
+        HISTORY_DEADLINE_SECONDS and keeps what it read by then, and a scan whose later steps did
+        not finish either is "unknown" with SCAN_TIMEOUT_REASON.
+
         A result is reused for RESULT_CACHE_SECONDS per wallet and chain once some approval history
         was read. A scan that read none is not: that is often a passing timeout or rate limit, so
         the next call tries again.
@@ -281,7 +300,13 @@ class RescueService:
         if cached is not None:
             return cached
         try:
-            approvals, coverage_reasons, scanned_blocks = await self._fetch_approvals(wallet, chain_id)
+            async with asyncio.timeout(SCAN_DEADLINE_SECONDS):
+                approvals, coverage_reasons, scanned_blocks = await self._fetch_approvals(wallet, chain_id)
+        except TimeoutError:
+            logger.warning(
+                "Approval scan on chain %s did not finish within %s s", chain_id, SCAN_DEADLINE_SECONDS
+            )
+            approvals, coverage_reasons, scanned_blocks = [], {"allowances": SCAN_TIMEOUT_REASON}, None
         except RuntimeError:
             approvals, coverage_reasons, scanned_blocks = [], {"allowances": RPC_UNAVAILABLE_REASON}, None
 
@@ -350,9 +375,10 @@ class RescueService:
         Raises RuntimeError when the chain's RPC could not be read.
 
         Pipeline:
-          1. eth_getLogs — the whole history from a configured logs RPC at CONCURRENCY=50, or
-             the newest RECENT_LOG_WINDOWS windows from the chain's public RPC, or from the logs
-             RPC when it could not serve the whole history
+          1. eth_getLogs — the history from a configured logs RPC, newest first at CONCURRENCY=50,
+             or the newest RECENT_LOG_WINDOWS windows from the chain's public RPC, or from the logs
+             RPC when it served none of its chunks; the read stops at HISTORY_DEADLINE_SECONDS and
+             keeps the blocks read by then
           2. Deduplicate to latest event per (token, spender)
           3. eth_call allowance() — verify each pair is still non-zero on-chain
           4. eth_call balanceOf() — get wallet's token balances
@@ -368,29 +394,36 @@ class RescueService:
             logger.warning(f"No logs RPC configured for chain {chain_id}")
             raise RuntimeError(f"Approval scan unavailable: no logs RPC configured for chain {chain_id}")
         public_rpc = chain_id not in self._logs_rpcs
+        deadline = asyncio.get_running_loop().time() + HISTORY_DEADLINE_SECONDS
         try:
-            all_logs = None
             if not public_rpc:
+                budget = asyncio.timeout_at(deadline)
                 try:
-                    all_logs, latest = await self._fetch_all_approval_logs(wallet, rpc_url)
-                    scanned_blocks = {"from_block": 0, "to_block": latest}
+                    all_logs, scanned_from, latest = await self._fetch_all_approval_logs(
+                        wallet, rpc_url, budget
+                    )
                 except UnsupportedChainError:
                     raise
                 except Exception as e:
                     # Read what the logs RPC can serve instead, the rate-limit-aware way.
                     logger.warning("Full approval history unavailable: %s", type(e).__name__)
                     public_rpc = True
-            if all_logs is None:
+                else:
+                    # A logs RPC that served none of its chunks is read that way too, unless the
+                    # deadline stopped the read: then nothing more is asked of it.
+                    public_rpc = scanned_from > latest and not budget.expired()
+            if public_rpc:
                 all_logs, scanned_from, latest = await self._fetch_recent_approval_logs(
-                    wallet, rpc_url, PUBLIC_LOG_WINDOW_BLOCKS.get(chain_id, RECENT_LOG_WINDOW_BLOCKS)
+                    wallet, rpc_url, PUBLIC_LOG_WINDOW_BLOCKS.get(chain_id, RECENT_LOG_WINDOW_BLOCKS),
+                    asyncio.timeout_at(deadline),
                 )
-                if scanned_from > latest:
-                    coverage_reasons["allowances"] = NOTHING_READ_REASON
-                elif scanned_from > 0:
-                    coverage_reasons["allowances"] = f"Approvals before block {scanned_from} not scanned"
-                scanned_blocks = (
-                    {"from_block": scanned_from, "to_block": latest} if scanned_from <= latest else None
-                )
+            if scanned_from > latest:
+                coverage_reasons["allowances"] = NOTHING_READ_REASON
+            elif scanned_from > 0:
+                coverage_reasons["allowances"] = f"Approvals before block {scanned_from} not scanned"
+            scanned_blocks = (
+                {"from_block": scanned_from, "to_block": latest} if scanned_from <= latest else None
+            )
 
             # Step 3: Keep latest event per (token, spender)
             latest_events: Dict[tuple, Dict] = {}
@@ -525,14 +558,26 @@ class RescueService:
         )
         return approvals, coverage_reasons, scanned_blocks
 
-    async def _fetch_all_approval_logs(self, wallet: str, rpc_url: str) -> Tuple[list, int]:
-        """Fetch Approval logs from genesis to the latest block of a logs RPC, and that block.
+    async def _fetch_all_approval_logs(
+        self, wallet: str, rpc_url: str, budget: asyncio.Timeout
+    ) -> Tuple[list, int, int]:
+        """Fetch Approval logs from the latest block of a logs RPC back towards genesis.
 
-        Raises when any chunk is unavailable, since a gap in the middle of the history cannot be
-        reported as a block range.
+        Chunks of CHUNK_SIZE blocks are read newest first, CONCURRENCY at a time, until genesis, a
+        batch in which a chunk stayed unavailable, or ``budget`` (an asyncio timeout, entered here)
+        expires, when the batch in flight is dropped. The logs read before that are kept, so what
+        was read has no gap.
+        Returns those logs, the oldest block of the history read (the latest block plus one when
+        nothing was read) and the latest block. Raises when the latest block could not be read.
         """
+        from utils.web3_client import UnsupportedChainError
+
+        CHUNK_SIZE = 49_999
+        CONCURRENCY = 50
+        topic0 = APPROVAL_TOPIC
+        topic1 = "0x" + wallet.replace("0x", "").lower().zfill(64)
+
         async with aiohttp.ClientSession() as session:
-            # Step 1: Get latest block
             async with session.post(
                 rpc_url,
                 json={"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
@@ -542,84 +587,104 @@ class RescueService:
             if "error" in bn_data or "result" not in bn_data:
                 raise RuntimeError(f"eth_blockNumber failed: {bn_data.get('error', bn_data)}")
             latest = int(bn_data["result"], 16)
+            chunks = [
+                (max(to_b - CHUNK_SIZE + 1, 0), to_b) for to_b in range(latest, -1, -CHUNK_SIZE)
+            ]
 
-        # Step 2: Scan ALL blocks from genesis with CONCURRENCY=50
-        # ~1680 chunks on BSC / 50 concurrent = 34 batches ≈ 10-25s
-        CHUNK_SIZE = 49_999
-        CONCURRENCY = 50
-        chunks = [
-            (hex(b), hex(min(b + CHUNK_SIZE - 1, latest)))
-            for b in range(0, latest + 1, CHUNK_SIZE)
-        ]
-
-        topic0 = APPROVAL_TOPIC
-        topic1 = "0x" + wallet.replace("0x", "").lower().zfill(64)
-
-        all_logs: list = []
-        async with aiohttp.ClientSession() as session:
-            for i in range(0, len(chunks), CONCURRENCY):
-                batch = chunks[i: i + CONCURRENCY]
-                batch_results = await asyncio.gather(
-                    *[
-                        self._fetch_log_chunk(session, rpc_url, topic0, topic1, from_b, to_b)
-                        for from_b, to_b in batch
-                    ],
-                    return_exceptions=True,
+            logs: list = []
+            scanned_from = latest + 1
+            try:
+                async with budget:
+                    for i in range(0, len(chunks), CONCURRENCY):
+                        batch = chunks[i: i + CONCURRENCY]
+                        results = await asyncio.gather(
+                            *[
+                                self._fetch_log_chunk(
+                                    session, rpc_url, topic0, topic1, hex(from_b), hex(to_b)
+                                )
+                                for from_b, to_b in batch
+                            ],
+                            return_exceptions=True,
+                        )
+                        gap = False
+                        for (from_b, to_b), result in zip(batch, results):
+                            if isinstance(result, UnsupportedChainError):
+                                raise result
+                            # Logs past a gap are left out, so the approvals match the blocks read.
+                            if isinstance(result, list) and not gap:
+                                logs.extend(result)
+                                scanned_from = from_b
+                            else:
+                                gap = True
+                        if gap:
+                            break
+            except TimeoutError:
+                logger.warning(
+                    "Approval history read stopped at its %s s deadline; blocks before %s not read",
+                    HISTORY_DEADLINE_SECONDS, scanned_from,
                 )
-                for result in batch_results:
-                    if isinstance(result, Exception):
-                        raise result
-                    if isinstance(result, list):
-                        all_logs.extend(result)
-        return all_logs, latest
+        return logs, scanned_from, latest
 
     async def _fetch_recent_approval_logs(
-        self, wallet: str, rpc_url: str, window_blocks: int
+        self, wallet: str, rpc_url: str, window_blocks: int, budget: asyncio.Timeout
     ) -> Tuple[list, int, int]:
         """Fetch Approval logs from the newest RECENT_LOG_WINDOWS block windows of a public RPC.
 
         Windows of ``window_blocks`` are read newest first, PUBLIC_RPC_CONCURRENCY at a time.
-        Scanning stops after a batch in which a window stayed unavailable; the logs read before
-        that window are kept. Returns those logs, the oldest block of the history read without a
-        gap (the latest block plus one when nothing was read) and the latest block.
+        Scanning stops after a batch in which a window stayed unavailable, or when ``budget`` (an
+        asyncio timeout, entered here) expires, when the batch in flight is dropped; the logs read
+        before that are kept. Returns those logs, the oldest block of the history read without a
+        gap (the latest block plus one when nothing was read) and the latest block. Raises when the
+        latest block was not read before the budget expired.
         """
         topics = [APPROVAL_TOPIC, "0x" + wallet.replace("0x", "").lower().zfill(64)]
         async with aiohttp.ClientSession() as session:
-            latest = int(await self._public_rpc(session, rpc_url, "eth_blockNumber", []), 16)
-            oldest = max(latest - window_blocks * RECENT_LOG_WINDOWS + 1, 0)
-            windows = [
-                (max(to_b - window_blocks + 1, oldest), to_b)
-                for to_b in range(latest, oldest - 1, -window_blocks)
-            ]
+            latest = None
             logs: list = []
-            scanned_from = latest + 1
-            gap = False
-            for i in range(0, len(windows), PUBLIC_RPC_CONCURRENCY):
-                batch = windows[i: i + PUBLIC_RPC_CONCURRENCY]
-                results = await asyncio.gather(
-                    *[
-                        self._public_rpc(
-                            session, rpc_url, "eth_getLogs",
-                            [{"topics": topics, "fromBlock": hex(from_b), "toBlock": hex(to_b)}],
+            try:
+                async with budget:
+                    latest = int(await self._public_rpc(session, rpc_url, "eth_blockNumber", []), 16)
+                    oldest = max(latest - window_blocks * RECENT_LOG_WINDOWS + 1, 0)
+                    windows = [
+                        (max(to_b - window_blocks + 1, oldest), to_b)
+                        for to_b in range(latest, oldest - 1, -window_blocks)
+                    ]
+                    scanned_from = latest + 1
+                    gap = False
+                    for i in range(0, len(windows), PUBLIC_RPC_CONCURRENCY):
+                        batch = windows[i: i + PUBLIC_RPC_CONCURRENCY]
+                        results = await asyncio.gather(
+                            *[
+                                self._public_rpc(
+                                    session, rpc_url, "eth_getLogs",
+                                    [{"topics": topics, "fromBlock": hex(from_b), "toBlock": hex(to_b)}],
+                                )
+                                for from_b, to_b in batch
+                            ],
+                            return_exceptions=True,
                         )
-                        for from_b, to_b in batch
-                    ],
-                    return_exceptions=True,
+                        for (from_b, to_b), result in zip(batch, results):
+                            if isinstance(result, list):
+                                # Logs past a gap are left out, so the approvals match the blocks read.
+                                if not gap:
+                                    logs.extend(result)
+                                    scanned_from = from_b
+                            else:
+                                # Don't log `result` — aiohttp errors embed the RPC URL.
+                                logger.warning(
+                                    "Approval log window %s-%s unavailable: %s",
+                                    from_b, to_b, type(result).__name__,
+                                )
+                                gap = True
+                        if gap:
+                            break
+            except TimeoutError:
+                if latest is None:
+                    raise RuntimeError("Approval history unavailable before the scan deadline")
+                logger.warning(
+                    "Approval history read stopped at its %s s deadline; blocks before %s not read",
+                    HISTORY_DEADLINE_SECONDS, scanned_from,
                 )
-                for (from_b, to_b), result in zip(batch, results):
-                    if isinstance(result, list):
-                        # Logs past a gap are left out, so the approvals match the blocks read.
-                        if not gap:
-                            logs.extend(result)
-                            scanned_from = from_b
-                    else:
-                        # Don't log `result` — aiohttp errors embed the RPC URL.
-                        logger.warning(
-                            "Approval log window %s-%s unavailable: %s", from_b, to_b, type(result).__name__
-                        )
-                        gap = True
-                if gap:
-                    break
         return logs, scanned_from, latest
 
     async def _public_rpc(
