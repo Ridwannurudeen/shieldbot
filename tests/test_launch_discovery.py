@@ -496,7 +496,6 @@ def test_container_wires_launch_discovery_into_the_hunter():
         "AIAnalyzer",
         "ScamDatabase",
         "CalldataDecoder",
-        "OnchainRecorder",
         "TransactionScanner",
         "TokenScanner",
         "DexService",

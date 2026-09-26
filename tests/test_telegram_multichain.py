@@ -141,8 +141,6 @@ def bot_chain_functions():
     })
     ai = MagicMock()
     ai.generate_forensic_report = AsyncMock(return_value='Analysis')
-    recorder = MagicMock()
-    recorder.is_available.return_value = False
     namespace = {
         'asyncio': asyncio,
         'is_scan_incomplete': is_scan_incomplete,
@@ -160,8 +158,6 @@ def bot_chain_functions():
             'status': 'ok', 'coverage': {'structural': 1, 'honeypot': 1},
             'risk_level': 'LOW', 'rug_probability': 0,
         })),
-        'onchain_recorder': recorder,
-        'base_attestor': recorder,
         'tx_scanner': SimpleNamespace(scan_address=AsyncMock(return_value={})),
         'token_scanner': SimpleNamespace(check_token=AsyncMock(return_value={})),
         '_get_cached': MagicMock(return_value=None),
@@ -466,7 +462,7 @@ def test_telegram_failed_simulation_overrides_raw_sellability():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('handler', ['scan_contract', 'check_token'])
-async def test_bot_caches_uncertainty_and_does_not_attest_as_low(bot_chain_functions, handler):
+async def test_bot_caches_uncertainty_and_skips_the_ai_report(bot_chain_functions, handler):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
     ns = bot_chain_functions
@@ -475,10 +471,6 @@ async def test_bot_caches_uncertainty_and_does_not_attest_as_low(bot_chain_funct
         'status': 'unknown', 'coverage': coverage, 'coverage_reasons': {'honeypot': 'Simulation failed'},
         'risk_level': 'LOW', 'rug_probability': 0,
     }
-    recorder = ns['onchain_recorder']
-    recorder.is_available.return_value = True
-    recorder.record_scan_fire_and_forget = AsyncMock()
-    recorder.attest_fire_and_forget = AsyncMock()
     update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock()))
     await ns[handler](update, '0x' + 'a' * 40, chain_id=4663)
     cached = ns['_set_cache'].call_args.args[2]
@@ -486,24 +478,6 @@ async def test_bot_caches_uncertainty_and_does_not_attest_as_low(bot_chain_funct
     assert cached['coverage'] == coverage
     assert cached['risk_level'] == 'unknown'
     ns['ai_analyzer'].generate_forensic_report.assert_not_called()
-    recorder.record_scan_fire_and_forget.assert_not_called()
-    recorder.attest_fire_and_forget.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('handler', ['scan_contract', 'check_token'])
-async def test_bot_records_a_complete_scan_without_promising_it_on_chain(bot_chain_functions, handler):
-    from types import SimpleNamespace
-    from unittest.mock import AsyncMock
-    ns = bot_chain_functions
-    recorder = ns['onchain_recorder']
-    recorder.is_available.return_value = True
-    recorder.record_scan_fire_and_forget = AsyncMock()
-    recorder.attest_fire_and_forget = AsyncMock()
-    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock()))
-    await ns[handler](update, '0x' + 'a' * 40, chain_id=56)
-    recorder.record_scan_fire_and_forget.assert_awaited_once()
-    assert 'On-chain recording' not in update.message.reply_text.call_args.args[0]
 
 
 @pytest.mark.asyncio

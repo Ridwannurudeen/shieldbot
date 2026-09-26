@@ -7,8 +7,6 @@ from utils.web3_client import Web3Client
 from utils.ai_analyzer import AIAnalyzer
 from utils.scam_db import ScamDatabase
 from utils.calldata_decoder import CalldataDecoder
-from utils.onchain_recorder import OnchainRecorder
-from utils.base_attestor import BaseAttestor
 from services.base_attestation_service import BaseAttestationService
 from scanner.transaction_scanner import TransactionScanner
 from scanner.token_scanner import TokenScanner
@@ -61,8 +59,7 @@ class ServiceContainer:
         self.ai_analyzer = AIAnalyzer()
         self.scam_db = ScamDatabase()
         self.calldata_decoder = CalldataDecoder()
-        self.onchain_recorder = OnchainRecorder()
-        self.base_attestor = BaseAttestor()
+        # Reads the Base attestor's records; the attestor was retired on 2026-09-26 and nothing writes to it.
         self.base_attestation_reader = BaseAttestationService(
             attestor_address=settings.base_attestor_address or None,
             schema_uid=settings.base_attestor_schema_uid or None,

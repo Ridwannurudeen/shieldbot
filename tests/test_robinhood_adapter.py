@@ -77,8 +77,6 @@ def test_container_registers_robinhood_from_settings():
     with patch('core.container.Web3Client') as client, \
          patch('core.container.AIAnalyzer'), \
          patch('core.container.ScamDatabase'), \
-         patch('core.container.OnchainRecorder'), \
-         patch('core.container.BaseAttestor'), \
          patch('adapters.evm_base.Web3') as web3:
         container = ServiceContainer(Settings(
             _env_file=None, robinhood_rpc_url='https://setting.example',

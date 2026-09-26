@@ -12,7 +12,6 @@ class TestServiceContainer:
              patch("core.container.AIAnalyzer") as MockAI, \
              patch("core.container.ScamDatabase"), \
              patch("core.container.CalldataDecoder"), \
-             patch("core.container.OnchainRecorder"), \
              patch("core.container.TransactionScanner"), \
              patch("core.container.TokenScanner"), \
              patch("core.container.DexService"), \
@@ -49,7 +48,6 @@ class TestServiceContainer:
              patch("core.container.AIAnalyzer") as MockAI, \
              patch("core.container.ScamDatabase") as MockScamDB, \
              patch("core.container.CalldataDecoder"), \
-             patch("core.container.OnchainRecorder"), \
              patch("core.container.TransactionScanner"), \
              patch("core.container.TokenScanner"), \
              patch("core.container.DexService"), \

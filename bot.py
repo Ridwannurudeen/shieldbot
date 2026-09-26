@@ -2,7 +2,7 @@
 """
 ShieldBot Telegram bot
 Pre-transaction scanning and token safety checks on every supported chain
-Features: AI risk scoring, on-chain recording, caching, progress indicators
+Features: AI risk scoring, caching, progress indicators
 """
 
 import os
@@ -65,8 +65,6 @@ web3_client = container.web3_client
 ai_analyzer = container.ai_analyzer
 tx_scanner = container.tx_scanner
 token_scanner = container.token_scanner
-onchain_recorder = container.onchain_recorder
-base_attestor = container.base_attestor
 scam_db = container.scam_db
 dex_service = container.dex_service
 ethos_service = container.ethos_service
@@ -1047,7 +1045,6 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
 
         # Try new composite pipeline first
         response = None
-        risk_level = 'medium'
         try:
             from core.analyzer import AnalysisContext
 
@@ -1116,15 +1113,9 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
             _set_cache(cache_key, 'contract', result)
             verdict_scan, verdict_honeypot = result, None
             response = format_scan_result(result)
-            risk_level = 'unknown' if is_scan_incomplete(result) else result.get('risk_level', 'medium')
 
         keyboard = _scan_buttons(address, chain_id)
 
-        # Record on-chain (fire-and-forget — non-blocking)
-        if risk_level != 'unknown' and onchain_recorder.is_available():
-            await onchain_recorder.record_scan_fire_and_forget(address, risk_level, 'contract')
-        if risk_level != 'unknown' and base_attestor.is_available():
-            await base_attestor.attest_fire_and_forget(address, risk_level, 'contract', source_chain_id=chain_id)
         if chain_id == 4663:
             container.verdict_publisher.publish_fire_and_forget(
                 chain_id, address, verdict_scan, honeypot_data=verdict_honeypot,
@@ -1175,7 +1166,6 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
 
         # Try new composite pipeline first
         response = None
-        risk_level = 'warning'
         try:
             from core.analyzer import AnalysisContext
 
@@ -1242,15 +1232,9 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
             _set_cache(cache_key, 'token', result)
             verdict_scan, verdict_honeypot = result, None
             response = format_token_result(result)
-            risk_level = 'unknown' if is_scan_incomplete(result) else result.get('safety_level', 'warning')
 
         keyboard = _token_buttons(address, chain_id)
 
-        # Record on-chain (fire-and-forget — non-blocking)
-        if risk_level != 'unknown' and onchain_recorder.is_available():
-            await onchain_recorder.record_scan_fire_and_forget(address, risk_level, 'token')
-        if risk_level != 'unknown' and base_attestor.is_available():
-            await base_attestor.attest_fire_and_forget(address, risk_level, 'token', source_chain_id=chain_id)
         if chain_id == 4663:
             container.verdict_publisher.publish_fire_and_forget(
                 chain_id, address, verdict_scan, honeypot_data=verdict_honeypot,
@@ -1549,8 +1533,6 @@ def main():
     # Start the bot
     logger.info("🛡️ ShieldBot starting...")
     logger.info(f"AI Analysis: {'enabled' if ai_analyzer.is_available() else 'disabled'}")
-    logger.info(f"On-chain Recording: {'enabled' if onchain_recorder.is_available() else 'disabled'}")
-    logger.info(f"Base EAS Attestor: {'enabled' if base_attestor.is_available() else 'disabled'}")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

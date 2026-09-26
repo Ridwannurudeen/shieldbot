@@ -27,9 +27,6 @@ class Settings(BaseSettings):
     # 0 pauses AI chat and explanations (a kill switch); a negative value stops startup.
     ai_daily_token_budget: int = Field(default=1_000_000, ge=0)
 
-    # On-chain recording
-    bot_wallet_private_key: str = ""
-
     # RPC endpoints
     bsc_rpc_url: str = "https://bsc-dataseed.binance.org/"
     # Archive RPC for eth_getLogs queries (approval scanning).
@@ -37,7 +34,8 @@ class Settings(BaseSettings):
     logs_rpc_url: str = ""           # BSC archive (chain 56), back-compat
     base_logs_rpc_url: str = ""      # Base archive (chain 8453)
 
-    # Base EAS attestor (set after deploying ShieldBotAttestor)
+    # Base EAS attestor, retired on 2026-09-26: nothing writes to it, and /api/base/attestations
+    # reads its records while the address is set
     base_attestor_address: str = ""
     base_attestor_schema_uid: str = ""    # EAS schema UID — defense-in-depth filter on indexer reads
     opbnb_rpc_url: str = "https://opbnb-mainnet-rpc.bnbchain.org"
