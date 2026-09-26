@@ -66,19 +66,26 @@ def coverage(monkeypatch):
     client.close()
 
 
-def test_bsc_simulates_sells_reads_etherscan_and_knows_its_lockers(coverage):
+def test_bsc_simulates_sells_ages_through_etherscan_then_sourcify_and_knows_its_lockers(coverage):
     body = coverage.get(56).json()
     assert body["chain_id"] == 56
     assert body["chain_name"] == "BSC"
     assert body["capabilities"] == {
         "sell_simulation": "honeypot.is",
-        "contract_age": "etherscan",
+        # Etherscan's free tier refuses getcontractcreation on BNB Chain; Sourcify's deployment record
+        # is asked next, so both are named, in the order asked, as for verification.
+        "contract_age": "etherscan+sourcify",
         "verification": "etherscan+sourcify",
         "liquidity_lock": {"lockers": "known", "known_lockers": ["PinkLock", "Unicrypt"]},
         "router_allowlist": {"present": True, "routers": 6},
         "public_mempool": "yes",
         "approvals": {"history": "full", "window_blocks": None},
     }
+
+
+@pytest.mark.parametrize("chain_id", [1, 42161])
+def test_every_etherscan_chain_names_sourcify_as_its_second_age_source(coverage, chain_id):
+    assert coverage.get(chain_id).json()["capabilities"]["contract_age"] == "etherscan+sourcify"
 
 
 def test_robinhood_simulates_with_eth_simulate_and_reads_blockscout(coverage, monkeypatch):

@@ -47,8 +47,10 @@ BURN_ADDRESSES = {
     '0x000000000000000000000000000000000000dead',
 }
 
-# 'etherscan_blockscout': verification from Etherscan, creation from Blockscout, because Etherscan's
-# free tier refuses getcontractcreation on Base and Optimism.
+# 'etherscan': verification and creation from Etherscan, with Sourcify's deployment record dating a
+# contract when Etherscan does not answer (its free tier refuses getcontractcreation on BNB Chain,
+# which no public Blockscout serves). 'etherscan_blockscout': verification from Etherscan, creation
+# from Blockscout, because Etherscan's free tier refuses getcontractcreation on Base and Optimism.
 EXPLORER_BACKENDS = {
     1: 'etherscan', 56: 'etherscan', 8453: 'etherscan_blockscout',
     42161: 'etherscan', 137: 'etherscan', 10: 'etherscan_blockscout', 204: 'etherscan',
@@ -60,6 +62,12 @@ def _get_explorer_backend(chain_id: int) -> str:
     if chain_id not in EXPLORER_BACKENDS:
         raise ValueError(f"Unsupported explorer chain: {chain_id}")
     return EXPLORER_BACKENDS[chain_id]
+
+
+def _decimal(value) -> Optional[int]:
+    """An explorer's decimal-string number (Etherscan's blockNumber and timestamp) as an int; None
+    for a missing, empty or non-decimal value."""
+    return int(value) if isinstance(value, str) and re.fullmatch(r'[0-9]{1,20}', value) else None
 
 FACTORY_ABI = [
     {
@@ -366,23 +374,36 @@ class EvmAdapter(ChainAdapter):
         return info
 
     async def _fetch_creation_info(self, address: str) -> Optional[Dict]:
-        etherscan_answered = False
+        """The contract's creator and creation transaction from its explorer, dated by _date_creation.
+        None when no source knows the contract; undated when a source knows it but it could not be
+        dated, so the next caller asks again.
+        """
         try:
             if self._explorer_backend in ('sourcify_blockscout', 'etherscan_blockscout'):
                 result = await self._explorer_service.get_contract_creation_info(address, self._chain_id)
                 if result.status == 'unknown':
                     logger.warning("[%s] Creation unknown: %s", self._chain_name, result.reason)
                     return None
-                creation_info = {**result.data, 'creation_time': None, 'age_days': None}
-                try:
-                    tx = await self._call_with_retry(self.w3.eth.get_transaction, creation_info['tx_hash'])
-                    block = await self._call_with_retry(self.w3.eth.get_block, tx['blockNumber'])
-                    creation_time = datetime.fromtimestamp(block['timestamp'], tz=timezone.utc)
-                    creation_info['creation_time'] = creation_time.isoformat()
-                    creation_info['age_days'] = (datetime.now(timezone.utc) - creation_time).days
-                except Exception as e:
-                    logger.warning("[%s] Creation time unknown: %s", self._chain_name, type(e).__name__)
-                return creation_info
+                creation = dict(result.data)
+            else:
+                creation = await self._etherscan_creation(address)
+                if creation is None:
+                    return None
+        except Exception as e:
+            logger.error("[%s] Error getting creation info: %s", self._chain_name, type(e).__name__)
+            return None
+        return await self._date_creation(creation)
+
+    async def _etherscan_creation(self, address: str) -> Optional[Dict]:
+        """Etherscan's creation record: the creator, the transaction and, when its reply names them,
+        the creation block and timestamp. When Etherscan does not answer (a status 0 that is not
+        "No data found": its free tier refuses getcontractcreation on BNB Chain), Sourcify's
+        deployment record is asked instead, so a contract verified there is still dated; its
+        breaker, cache and ledger entries are the explorer service's. The refusal still counts as
+        Etherscan failing, and is logged so the journal says where an age came from. An error in
+        Etherscan's request or reply is counted against Etherscan and raised to the caller.
+        """
+        try:
             provider_breakers.check('etherscan', self._chain_id)
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
                 params = {
@@ -402,31 +423,56 @@ class EvmAdapter(ChainAdapter):
                     provider_breakers.record_status('etherscan', self._chain_id, resp.status)
                     if data['status'] == '1' and data['result']:
                         result = data['result'][0]
-                        tx_hash = result.get('txHash')
-                        etherscan_answered = True
-                        unknown_ledger.record('etherscan', self._chain_id, 'answered')
-                        tx = await self._call_with_retry(self.w3.eth.get_transaction, tx_hash)
-                        block = await self._call_with_retry(self.w3.eth.get_block, tx['blockNumber'])
-                        creation_time = datetime.fromtimestamp(block['timestamp'], tz=timezone.utc)
-                        age_days = (datetime.now(timezone.utc) - creation_time).days
-                        return {
-                            'tx_hash': tx_hash,
+                        creation = {
+                            'tx_hash': result.get('txHash'),
                             'creator': result.get('contractCreator'),
-                            'creation_time': creation_time.isoformat(),
-                            'age_days': age_days,
+                            'block_number': _decimal(result.get('blockNumber')),
+                            'timestamp': _decimal(result.get('timestamp')),
                         }
+                        unknown_ledger.record('etherscan', self._chain_id, 'answered')
+                        return creation
             # Etherscan answers "No data found" for an address it holds no creation record for.
             no_record = data['status'] == '0' and data.get('message') == 'No data found'
             unknown_ledger.record('etherscan', self._chain_id, 'unknown' if no_record else 'failed')
-            return None
         except Exception as e:
-            # Before Etherscan has answered, an error is its request or reply failing; after, it comes from
-            # the creation time's RPC reads, which count as rpc.
-            if self._explorer_backend == 'etherscan' and not etherscan_answered:
-                provider_breakers.record_error('etherscan', self._chain_id, e)
-                unknown_ledger.record('etherscan', self._chain_id, 'failed')
-            logger.error("[%s] Error getting creation info: %s", self._chain_name, type(e).__name__)
+            provider_breakers.record_error('etherscan', self._chain_id, e)
+            unknown_ledger.record('etherscan', self._chain_id, 'failed')
+            raise
+        if no_record:
             return None
+        logger.warning("[%s] Creation not answered by Etherscan; asking Sourcify", self._chain_name)
+        deployment = await self._explorer_service.get_sourcify_deployment(address, self._chain_id)
+        if deployment.status == 'unknown':
+            logger.warning("[%s] Creation unknown: Sourcify %s", self._chain_name, deployment.reason)
+            return None
+        return dict(deployment.data)
+
+    async def _date_creation(self, creation: Dict) -> Dict:
+        """creation with its creation_time and age_days: from the explorer's own timestamp when it
+        gave one, else from the creation block's header, else from the creation transaction's block.
+        Every node keeps every header, but a node indexes only its recent transactions (Geth about a
+        year of them by default), so the transaction is read only when the explorer named neither,
+        and an old creation is dated from its header alone. A creation that cannot be dated is
+        returned undated, with a class-only warning, and is not cached.
+        """
+        timestamp = creation.pop('timestamp', None)
+        block_number = creation.pop('block_number', None)
+        creation.update({'creation_time': None, 'age_days': None})
+        try:
+            if timestamp:
+                creation_time = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+            else:
+                if block_number is None:
+                    tx = await self._call_with_retry(self.w3.eth.get_transaction, creation['tx_hash'])
+                    block_number = tx['blockNumber']
+                block = await self._call_with_retry(self.w3.eth.get_block, block_number)
+                creation_time = datetime.fromtimestamp(block['timestamp'], tz=timezone.utc)
+        except Exception as e:
+            logger.warning("[%s] Creation time unknown: %s", self._chain_name, type(e).__name__)
+            return creation
+        creation['creation_time'] = creation_time.isoformat()
+        creation['age_days'] = (datetime.now(timezone.utc) - creation_time).days
+        return creation
 
     async def get_token_info(self, address: str) -> Dict:
         try:
@@ -717,8 +763,11 @@ class EvmAdapter(ChainAdapter):
         blockscout = self._explorer_service.can_reach_blockscout(self._chain_id)
         return {
             'sell_simulation': 'honeypot.is' if self._honeypot_chain_id is not None else 'goplus_reported',
+            # Etherscan, then Sourcify's deployment record when Etherscan does not answer (its free
+            # tier refuses the lookup on BNB Chain): the sources in the order asked, as for verification.
             'contract_age': (
-                'etherscan' if self._explorer_backend == 'etherscan' else 'blockscout' if blockscout else None
+                'etherscan+sourcify' if self._explorer_backend == 'etherscan'
+                else 'blockscout' if blockscout else None
             ),
             # VERIFICATION_SOURCES in the order they are asked; on Robinhood Chain, Sourcify then
             # Blockscout where a Blockscout request can be sent. Verified when any source says so,

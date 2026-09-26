@@ -83,6 +83,29 @@ async def test_creation_time_enrichment_retries_do_not_log_key(caplog):
     assert "HTTPError" in caplog.text
 
 
+@pytest.mark.asyncio
+async def test_header_read_retries_on_an_etherscan_chain_do_not_log_key(caplog):
+    # Etherscan named the creation block, so its header is read and the transaction never is.
+    reply = {"status": "1", "result": [{"contractCreator": FUNDER, "txHash": TX_HASH, "blockNumber": "4634748"}]}
+    response = MagicMock(status=200)
+    response.json = AsyncMock(return_value=reply)
+    session = MagicMock()
+    session.get.return_value.__aenter__ = AsyncMock(return_value=response)
+    adapter = EvmAdapter(56, "BSC", "https://rpc.invalid", etherscan_api_key=TEST_KEY)
+    adapter.w3 = MagicMock()
+    adapter.w3.eth.get_block.side_effect = _provider_error("429")
+    caplog.set_level(logging.DEBUG, logger="adapters.evm_base")
+    with patch("adapters.evm_base.aiohttp.ClientSession") as client:
+        client.return_value.__aenter__ = AsyncMock(return_value=session)
+        with patch("adapters.evm_base.asyncio.sleep", new_callable=AsyncMock):
+            result = await adapter.get_contract_creation_info(ADDRESS)
+    assert result["creator"] == FUNDER and result["creation_time"] is None
+    assert adapter.w3.eth.get_block.call_count == 3
+    adapter.w3.eth.get_transaction.assert_not_called()
+    assert TEST_KEY not in caplog.text
+    assert "HTTPError" in caplog.text
+
+
 def _rpc_rate_limit():
     return _http_error(429, f"429 Client Error: Too Many Requests for url: {RPC_URL}", RPC_URL)
 
