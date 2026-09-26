@@ -84,6 +84,8 @@ export default function Hero() {
             API's reply for this request on 26 September 2026. It recommends
             blocking an unlimited USDC approval to the wallet behind the 2021
             BadgerDAO front-end attack, which GoPlus flags for stealing attacks.
+            The Proxy/upgradeable contract signal describes USDC's own
+            contract, an upgradeable proxy, not the spender.
           </figcaption>
         </figure>
       </div>

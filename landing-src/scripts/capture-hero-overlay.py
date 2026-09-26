@@ -113,8 +113,9 @@ def capture(context, width, keep_height):
     html = cdp.send("DOM.getOuterHTML", {"nodeId": modal["nodeId"]})["outerHTML"]
     reply = json.loads(RESPONSE)
     # A reply with full coverage has no coverage reason; the overlay lists its danger signals.
-    shown = next(iter(reply["coverage_reasons"].values()), None) or reply["danger_signals"][0]
-    assert shown in html, "the overlay does not show the recorded response"
+    markers = [*filter(None, reply["coverage_reasons"].values()), *reply.get("danger_signals", [])]
+    assert markers, "the recorded reply has no coverage reason or danger signal to look for"
+    assert markers[0] in html, "the overlay does not show the recorded response"
     quad = cdp.send("DOM.getBoxModel", {"nodeId": modal["nodeId"]})["model"]["border"]
     x, y, right, bottom = quad[0], quad[1], quad[4], quad[5]
     height = bottom - y if keep_height is None else min(keep_height, bottom - y)

@@ -366,6 +366,8 @@ def test_hero_image_describes_its_recorded_api_reply():
         )
         label = f"{label} — {score_display}"
     assert f"The verdict badge reads {label}" in hero
+    if reply.get("danger_signals"):
+        assert f"The danger signals include {reply['danger_signals'][0]}" in hero
     if incomplete:
         reasons = "; ".join(filter(None, reply["coverage_reasons"].values()))
         assert f"{messages['unknownWhy']} {reasons or messages['unknownNoReason']}" in hero
