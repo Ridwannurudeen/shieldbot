@@ -15,7 +15,7 @@ from hexbytes import HexBytes
 from web3.datastructures import AttributeDict
 
 from services import mempool_service
-from services.mempool_service import ANALYSIS_YIELD_EVERY, MempoolMonitor, PendingTx
+from services.mempool_service import ANALYSIS_YIELD_EVERY, MempoolMonitor, PendingTx, QueuedSwap
 from utils.scam_db import ScamDatabase
 from utils.web3_client import Web3Client
 
@@ -206,12 +206,13 @@ async def test_a_poll_drops_swap_queues_that_have_gone_quiet():
     client = MagicMock()
     client.get_web3.return_value = _w3_with_endpoint()
     monitor = MempoolMonitor(client)
-    quiet, busy = (56, "0x" + "aa" * 20), (56, "0x" + "bb" * 20)
+    quiet, busy = (56, "0x" + "aa" * 20, "0x" + "bb" * 20), (56, "0x" + "aa" * 20, "0x" + "cc" * 20)
     for key, age, tx_hash in ((quiet, 31, "0x" + "05" * 32), (busy, 1, "0x" + "06" * 32)):
-        monitor._swap_queue[key].append(PendingTx(
+        tx = PendingTx(
             tx_hash=tx_hash, from_addr=SENDER.lower(), to_addr=TOKEN, value=0, gas_price=1,
             data="0x", chain_id=56, seen_at=time.time() - age,
-        ))
+        )
+        monitor._swap_queue[key].append(QueuedSwap(tx, key[1], key[2]))
     monitor._reported_sandwiches[quiet].add(("0x" + "07" * 32, "0x" + "08" * 32))
 
     with _serve_txpool(TXPOOL_WITH_ONE_TX):

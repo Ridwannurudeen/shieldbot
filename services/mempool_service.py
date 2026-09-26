@@ -62,21 +62,20 @@ SWAP_SELECTORS = {
     "0x414bf389": "exactInputSingle (V3 legacy)",
 }
 
-# Where each swap keeps the token its sandwich queue is keyed on: the token traded against the chain's
-# coin where the function name says which side that is (the last entry of a V2 `address[] path` for a
-# coin-in swap, the first for a coin-out swap), else the output token: the last path entry of a
-# token-to-token V2 swap, the `tokenOut` word of a V3 exactInputSingle, or the last 20 bytes of a V3
-# exactInput packed path (20-byte tokens joined by 3-byte fees).
-V2_PATH_TOKEN = {  # selector: (word holding the offset of `path`, index into the path)
-    "0x38ed1739": (2, -1),  # swapExactTokensForTokens(amountIn, amountOutMin, path, to, deadline)
-    "0x8803dbee": (2, -1),  # swapTokensForExactTokens(amountOut, amountInMax, path, to, deadline)
-    "0x5c11d795": (2, -1),  # swapExactTokensForTokensSupportingFeeOnTransferTokens(amountIn, amountOutMin, path, to, deadline)
-    "0x7ff36ab5": (1, -1),  # swapExactETHForTokens(amountOutMin, path, to, deadline)
-    "0xfb3bdb41": (1, -1),  # swapETHForExactTokens(amountOut, path, to, deadline)
-    "0xb6f9de95": (1, -1),  # swapExactETHForTokensSupportingFeeOnTransferTokens(amountOutMin, path, to, deadline)
-    "0x4a25d94a": (2, 0),  # swapTokensForExactETH(amountOut, amountInMax, path, to, deadline)
-    "0x18cbafe5": (2, 0),  # swapExactTokensForETH(amountIn, amountOutMin, path, to, deadline)
-    "0x791ac947": (2, 0),  # swapExactTokensForETHSupportingFeeOnTransferTokens(amountIn, amountOutMin, path, to, deadline)
+# Where each V2 swap keeps the offset of its `address[] path`: the swap sells path[0] and buys
+# path[-1], and the coin-in and coin-out functions list the chain's wrapped coin at that end. A V3
+# exactInputSingle names tokenIn and tokenOut in its first two words; a V3 exactInput packs its path
+# as 20-byte tokens joined by 3-byte fees, so it sells the first 20 bytes and buys the last.
+V2_PATH_OFFSET_WORD = {  # selector: word holding the offset of `path`
+    "0x38ed1739": 2,  # swapExactTokensForTokens(amountIn, amountOutMin, path, to, deadline)
+    "0x8803dbee": 2,  # swapTokensForExactTokens(amountOut, amountInMax, path, to, deadline)
+    "0x5c11d795": 2,  # swapExactTokensForTokensSupportingFeeOnTransferTokens(amountIn, amountOutMin, path, to, deadline)
+    "0x7ff36ab5": 1,  # swapExactETHForTokens(amountOutMin, path, to, deadline)
+    "0xfb3bdb41": 1,  # swapETHForExactTokens(amountOut, path, to, deadline)
+    "0xb6f9de95": 1,  # swapExactETHForTokensSupportingFeeOnTransferTokens(amountOutMin, path, to, deadline)
+    "0x4a25d94a": 2,  # swapTokensForExactETH(amountOut, amountInMax, path, to, deadline)
+    "0x18cbafe5": 2,  # swapExactTokensForETH(amountIn, amountOutMin, path, to, deadline)
+    "0x791ac947": 2,  # swapExactTokensForETHSupportingFeeOnTransferTokens(amountIn, amountOutMin, path, to, deadline)
 }
 V3_EXACT_INPUT_SINGLE_SELECTORS = frozenset({"0x04e45aaf", "0x414bf389"})
 V3_EXACT_INPUT_SELECTOR = "0xb858183f"
@@ -91,6 +90,17 @@ APPROVE_SELECTORS = {
 UNLIMITED_APPROVAL = 2**256 - 1
 
 
+def _token_address(word: Optional[int]) -> Optional[str]:
+    """A calldata word as a token address, or None when it is not one.
+
+    An address word has its high 12 bytes zero, and no token lives below 2**64, where a plain
+    number, an ABI offset (0x20, 0x40, 0x60) or the zero word would be.
+    """
+    if word is None or word >> 160 or word < 2**64:
+        return None
+    return f"0x{word:040x}"
+
+
 @dataclass
 class PendingTx:
     """A pending transaction in the mempool."""
@@ -102,6 +112,14 @@ class PendingTx:
     data: str
     chain_id: int
     seen_at: float = field(default_factory=time.time)
+
+
+@dataclass
+class QueuedSwap:
+    """A pending swap in a sandwich queue: the transaction and the tokens it sells and buys."""
+    tx: PendingTx
+    token_in: str
+    token_out: str
 
 
 @dataclass
@@ -141,8 +159,9 @@ class MempoolMonitor:
         # Where each chain's last snapshot came from: "txpool" or "block"
         self._pending_source: Dict[int, str] = {}
 
-        # Recent swap txs for sandwich detection: {(chain_id, token): [PendingTx]}
-        self._swap_queue: Dict[tuple, List[PendingTx]] = defaultdict(list)
+        # Recent swaps for sandwich detection, in the order they were seen, per chain and unordered
+        # token pair: {(chain_id, token, token): [QueuedSwap]}
+        self._swap_queue: Dict[tuple, List[QueuedSwap]] = defaultdict(list)
         # Sandwiches already reported per queue key, as (front-run tx hash, victim tx hash)
         self._reported_sandwiches: Dict[tuple, Set[tuple]] = defaultdict(set)
 
@@ -270,7 +289,7 @@ class MempoolMonitor:
             # _check_sandwich prunes a swap queue only when a swap arrives on its key, so a queue
             # whose newest swap is past the 30 s window is dropped here, with its reported pairs.
             now = time.time()
-            for key in [k for k, q in self._swap_queue.items() if not q or now - q[-1].seen_at >= 30]:
+            for key in [k for k, q in self._swap_queue.items() if not q or now - q[-1].tx.seen_at >= 30]:
                 del self._swap_queue[key]
                 self._reported_sandwiches.pop(key, None)
 
@@ -429,25 +448,28 @@ class MempoolMonitor:
 
         # Check for swap transactions (sandwich detection)
         if selector in SWAP_SELECTORS:
-            token = self._extract_token_from_swap(tx.data)
-            if token:
-                key = (tx.chain_id, token)
+            tokens = self._swap_tokens(tx.data)
+            if tokens:
+                # Both legs of a sandwich and the victim between them trade one pair, whichever way.
+                key = (tx.chain_id, *sorted(tokens))
                 queue = self._swap_queue[key]
-                # A transaction that left a snapshot and came back is analysed again; queued twice,
-                # its two copies would pair up as a front-run and a back-run.
-                if all(queued.tx_hash != tx.tx_hash for queued in queue):
-                    queue.append(tx)
-                    await self._check_sandwich(key, tx)
+                # A transaction that left a snapshot and came back is analysed again; it is queued once.
+                if all(queued.tx.tx_hash != tx.tx_hash for queued in queue):
+                    swap = QueuedSwap(tx, *tokens)
+                    queue.append(swap)
+                    await self._check_sandwich(key, swap)
 
         # Check for suspicious approvals
         if selector in APPROVE_SELECTORS:
             await self._check_suspicious_approval(tx)
 
-    def _extract_token_from_swap(self, data: str) -> Optional[str]:
-        """The token a swap's sandwich queue is keyed on, or None when its calldata holds none.
+    def _swap_tokens(self, data: str) -> Optional[tuple]:
+        """(token_in, token_out) from a swap's own ABI, or None when its calldata names no pair.
 
-        The selector's ABI says where the token is (V2_PATH_TOKEN and the V3 selectors), and a word
-        keys a queue only when it is an address, so an amount, an ABI offset or a zero word never does.
+        The selector says where the tokens are (V2_PATH_OFFSET_WORD and the V3 selectors); each end
+        counts only when its word is an address, so an amount, an ABI offset or a zero word never
+        does, and a swap of a token for itself is no pair. Malformed calldata gives None: every
+        read is bounds-checked and a chunk that is not hex is caught.
         """
         selector = data[:10].lower()
         args = data[10:].lower()
@@ -457,17 +479,16 @@ class MempoolMonitor:
             return int(chunk, 16) if len(chunk) == 64 else None
 
         try:
-            if selector in V2_PATH_TOKEN:
-                offset_word, position = V2_PATH_TOKEN[selector]
-                offset = word(offset_word)
+            if selector in V2_PATH_OFFSET_WORD:
+                offset = word(V2_PATH_OFFSET_WORD[selector])
                 if offset is None or offset % 32:
                     return None
                 length = word(offset // 32)
                 if length is None or not 2 <= length <= MAX_SWAP_PATH_LENGTH:
                     return None
-                token = word(offset // 32 + 1 + (length - 1 if position == -1 else 0))
+                token_in, token_out = word(offset // 32 + 1), word(offset // 32 + length)
             elif selector in V3_EXACT_INPUT_SINGLE_SELECTORS:
-                token = word(1)
+                token_in, token_out = word(0), word(1)
             elif selector == V3_EXACT_INPUT_SELECTOR:
                 params = word(0)
                 path = word(params // 32) if params is not None and params % 32 == 0 else None
@@ -479,75 +500,84 @@ class MempoolMonitor:
                 if length is None or not 43 <= length <= longest or (length - 20) % 23:
                     return None
                 packed = args[(start + 1) * 64:(start + 1) * 64 + length * 2]
-                token = int(packed[-40:], 16) if len(packed) == length * 2 else None
+                if len(packed) != length * 2:
+                    return None
+                token_in, token_out = int(packed[:40], 16), int(packed[-40:], 16)
             else:
                 return None
         except ValueError:
             return None
-        # An address word has its high 12 bytes zero, and no token lives below 2**64, where a plain
-        # number, an ABI offset (0x20, 0x40, 0x60) or the zero word would be.
-        if token is None or token >> 160 or token < 2**64:
+        tokens = (_token_address(token_in), _token_address(token_out))
+        if None in tokens or tokens[0] == tokens[1]:
             return None
-        return f"0x{token:040x}"
+        return tokens
 
-    async def _check_sandwich(self, key: tuple, newest: PendingTx):
-        """Report the sandwiches the newest swap on this key completes.
+    async def _check_sandwich(self, key: tuple, newest: QueuedSwap):
+        """Report the sandwiches the newest swap on this pair completes as their back-run.
 
-        A sandwich attack consists of:
-        1. Attacker frontrun: large swap to move price
-        2. Victim swap: executes at worse price
-        3. Attacker backrun: reverse swap to capture profit
-
-        Only the newest swap can be a back-run, so only its sender is tried as the attacker, and a
-        (front-run, victim) pair is reported once however many back-runs follow it.
+        A sandwich is, in the order the swaps were seen: the attacker's front-run, a swap by
+        another sender in the same direction that the front-run outbid on gas price (the victim),
+        and the attacker's back-run, the reverse trade. Only the newest swap can be a back-run, so
+        only its sender is tried as the attacker, only the sender's reverse trades before the
+        victim are tried as the front-run (the nearest one that outbid the victim), and a
+        (front-run, victim) pair is reported once however many back-runs follow it. The back-run's
+        gas price is not compared: it lands after the victim by construction. A sender that trades
+        one way again and again (a DCA bot, an aggregator's solver) reverses nothing and is never
+        an attacker, whoever trades between its swaps.
         """
-        chain_id, token = key
+        chain_id = key[0]
         queue = self._swap_queue[key]
 
         # Prune old entries (> 30 seconds), and the reported pairs whose victim left the queue
         now = time.time()
-        queue[:] = [tx for tx in queue if now - tx.seen_at < 30]
-        live = {tx.tx_hash for tx in queue}
+        queue[:] = [swap for swap in queue if now - swap.tx.seen_at < 30]
+        live = {swap.tx.tx_hash for swap in queue}
         reported = self._reported_sandwiches[key]
         reported.difference_update([pair for pair in reported if pair[1] not in live])
-
-        attacker = newest.from_addr
-        attacker_txs = [tx for tx in queue if tx.from_addr == attacker]
-        if len(attacker_txs) < 2:
+        if not queue or queue[-1] is not newest:
             return
 
-        # Check if there's a victim tx between attacker's txs
-        for victim_tx in queue:
-            if victim_tx.from_addr == attacker:
+        attacker = newest.tx.from_addr
+        # The front-run and the victim trade the reverse of the back-run.
+        direction = (newest.token_out, newest.token_in)
+        fronts = [
+            (index, swap) for index, swap in enumerate(queue)
+            if swap.tx.from_addr == attacker and (swap.token_in, swap.token_out) == direction
+        ]
+        if not fronts:
+            return
+
+        for victim_index, victim in enumerate(queue[:-1]):
+            if victim.tx.from_addr == attacker or (victim.token_in, victim.token_out) != direction:
                 continue
-
-            front = None
-            back = None
-            for atx in attacker_txs:
-                if atx.gas_price > victim_tx.gas_price and atx.seen_at <= victim_tx.seen_at:
-                    front = atx
-                elif atx.seen_at > victim_tx.seen_at:
-                    back = atx
-
-            if front and back and (front.tx_hash, victim_tx.tx_hash) not in reported:
-                reported.add((front.tx_hash, victim_tx.tx_hash))
-                alert = MempoolAlert(
-                    alert_type="sandwich_attack",
-                    severity="HIGH",
-                    description=(
-                        f"Sandwich attack detected on {token[:10]}... — "
-                        f"attacker {attacker[:10]}... front-running victim "
-                        f"{victim_tx.from_addr[:10]}... with higher gas price"
-                    ),
-                    victim_tx=victim_tx.tx_hash,
-                    attacker_tx=front.tx_hash,
-                    attacker_addr=attacker,
-                    target_token=token,
-                    chain_id=chain_id,
-                )
-                self._add_alert(alert)
-                self._stats['sandwiches_detected'] += 1
-                logger.warning(f"Sandwich detected: {alert.description}")
+            front = next(
+                (
+                    swap for index, swap in reversed(fronts)
+                    if index < victim_index and swap.tx.gas_price > victim.tx.gas_price
+                ),
+                None,
+            )
+            if front is None or (front.tx.tx_hash, victim.tx.tx_hash) in reported:
+                continue
+            reported.add((front.tx.tx_hash, victim.tx.tx_hash))
+            alert = MempoolAlert(
+                alert_type="sandwich_attack",
+                severity="HIGH",
+                description=(
+                    f"Sandwich attack detected on {victim.token_out[:10]}... — "
+                    f"attacker {attacker[:10]}... front-ran victim {victim.tx.from_addr[:10]}... "
+                    f"buying {victim.token_out[:10]}... with {victim.token_in[:10]}... at a higher "
+                    f"gas price, then reversed the trade"
+                ),
+                victim_tx=victim.tx.tx_hash,
+                attacker_tx=front.tx.tx_hash,
+                attacker_addr=attacker,
+                target_token=victim.token_out,
+                chain_id=chain_id,
+            )
+            self._add_alert(alert)
+            self._stats['sandwiches_detected'] += 1
+            logger.warning(f"Sandwich detected: {alert.description}")
 
     async def _check_suspicious_approval(self, tx: PendingTx):
         """Alert on a pending approve() whose spender the process already knows to be bad.
