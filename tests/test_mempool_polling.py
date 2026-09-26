@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import threading
 import time
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -223,7 +224,11 @@ TXPOOL_UNSUPPORTED = {"error": {"code": -32601, "message": "the method txpool_co
     (TXPOOL_UNSUPPORTED, _pending_block(sealed=True)),
     (EMPTY_TXPOOL, TimeoutError("RPC timeout")),
     (aiohttp.ClientError("connection reset"), TimeoutError("RPC timeout")),
-], ids=["empty-txpool-sealed-block", "txpool-unsupported-sealed-block", "empty-txpool-block-error", "both-fail"])
+    (b"not json", TimeoutError("RPC timeout")),
+], ids=[
+    "empty-txpool-sealed-block", "txpool-unsupported-sealed-block", "empty-txpool-block-error", "both-fail",
+    "malformed-txpool-block-error",
+])
 async def test_a_chain_whose_mempool_cannot_be_read_is_unobservable_until_it_can(txpool, pending_block):
     client = MagicMock()
     w3 = client.get_web3.return_value = _w3_with_endpoint()
@@ -283,7 +288,29 @@ async def test_a_sealed_block_answered_for_pending_is_skipped_with_one_warning_p
 
 
 @pytest.mark.asyncio
-async def test_a_txpool_body_under_the_cap_is_parsed_into_pending_transactions():
+async def test_a_sealed_pending_chain_is_asked_again_after_the_retry_interval():
+    # One sealed answer (a load-balanced RPC can have one odd backend) must not blind the chain
+    # until the process restarts.
+    w3 = MagicMock()
+    w3.eth.get_block.side_effect = [_pending_block(sealed=True), _pending_block()]
+    monitor = MempoolMonitor(MagicMock())
+
+    assert await monitor._get_pending_block(w3, 1) is None
+    monitor._sealed_pending_until[1] = time.monotonic() - 1  # the retry interval has passed
+    txs = await monitor._get_pending_block(w3, 1)
+
+    assert [tx.tx_hash for tx in txs] == ["0x" + "01" * 32, "0x" + "02" * 32, "0x" + "03" * 32]
+
+
+@pytest.mark.asyncio
+async def test_a_txpool_body_under_the_cap_is_parsed_into_pending_transactions(monkeypatch):
+    parsed_on = []
+
+    def recording_loads(body):
+        parsed_on.append(threading.get_ident())
+        return json.loads(body)
+
+    monkeypatch.setattr(mempool_service, "json", SimpleNamespace(loads=recording_loads))
     monitor = MempoolMonitor(MagicMock())
     with _serve_txpool({"result": {"pending": {SENDER: {"7": {
         "hash": "0x" + "04" * 32, "from": SENDER, "to": TOKEN, "value": "0x10",
@@ -297,9 +324,13 @@ async def test_a_txpool_body_under_the_cap_is_parsed_into_pending_transactions()
     (url,), request = session.post.call_args.args, session.post.call_args.kwargs
     assert url == RPC_URL
     assert request["json"] == {"jsonrpc": "2.0", "id": 1, "method": "txpool_content", "params": []}
-    # The same per-operation timeout as the web3 provider's requests session.
+    # The same per-operation timeout as the web3 provider's requests session, and a cut for the whole
+    # read so a slow-dripping RPC cannot hold the other chains' polls.
     assert (request["timeout"].sock_connect, request["timeout"].sock_read) == (10, 10)
-    assert monitor._oversized_txpool_chains == set()
+    assert request["timeout"].total == 60
+    assert monitor._txpool_oversized_until == {}
+    # The body is parsed on an executor thread, never on the event loop's.
+    assert parsed_on and threading.get_ident() not in parsed_on
 
 
 @pytest.mark.asyncio
@@ -327,13 +358,13 @@ async def test_an_oversized_txpool_body_is_abandoned_unparsed_and_marks_the_chai
     with _serve_txpool(oversized, oversized) as session, caplog.at_level(logging.DEBUG):
         assert await monitor._get_txpool_content(_w3_with_endpoint(), 1) == []
         assert session.responses[0].close.called
-        assert monitor._oversized_txpool_chains == {1}
+        assert set(monitor._txpool_oversized_until) == {1}
         # The chain is not asked for its txpool again.
         assert await monitor._get_txpool_content(_w3_with_endpoint(), 1) == []
     assert session.post.call_count == 1
     loads.assert_not_called()
     warned = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert [r.args for r in warned] == [(1, 1024)]
+    assert [r.args for r in warned] == [(1, 1024, 600)]
     assert "secret-key" not in caplog.text and "rpc.example" not in caplog.text
 
 
@@ -348,7 +379,7 @@ async def test_a_marked_chain_is_watched_through_its_pending_block(monkeypatch, 
 
     with _serve_txpool(b"x" * 64) as session:
         await monitor._poll_pending(1)
-        assert monitor._oversized_txpool_chains == {1}
+        assert set(monitor._txpool_oversized_until) == {1}
         await monitor._poll_pending(1)
 
     assert session.post.call_count == 1
@@ -385,14 +416,50 @@ async def test_txpool_reads_never_log_the_rpc_url(monkeypatch, caplog):
     w3 = client.get_web3.return_value = _w3_with_endpoint()
     w3.eth.get_block.side_effect = TimeoutError(f"timed out reading {RPC_URL}")
     monitor = MempoolMonitor(client)
-    answers = [aiohttp.ClientError(f"cannot connect to {RPC_URL}"), 502, b"{}" * 64, b"not json"]
+    answers = [aiohttp.ClientError(f"cannot connect to {RPC_URL}"), 502, b"not json", b"{}" * 64]
 
     with _serve_txpool(*answers), caplog.at_level(logging.DEBUG):
         for _ in range(len(answers)):
             await monitor._poll_pending(1)
 
-    assert monitor._oversized_txpool_chains == {1}
+    assert set(monitor._txpool_oversized_until) == {1}
     assert caplog.records
+    assert "secret-key" not in caplog.text and "rpc.example" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_an_oversized_chain_is_asked_for_its_txpool_again_after_the_retry_interval(monkeypatch, caplog):
+    monkeypatch.setattr(mempool_service, "MAX_TXPOOL_BYTES", 16)
+    monitor = MempoolMonitor(MagicMock())
+
+    with _serve_txpool(b"x" * 64, b"x" * 64) as session, caplog.at_level(
+        logging.WARNING, logger="services.mempool_service"
+    ):
+        assert await monitor._get_txpool_content(_w3_with_endpoint(), 1) == []
+        # Within the retry interval the chain is not asked again.
+        assert await monitor._get_txpool_content(_w3_with_endpoint(), 1) == []
+        assert session.post.call_count == 1
+        monitor._txpool_oversized_until[1] = time.monotonic() - 1  # the interval has passed
+        assert await monitor._get_txpool_content(_w3_with_endpoint(), 1) == []
+
+    assert session.post.call_count == 2
+    # Still too large: marked again, and warned about only once.
+    assert monitor._txpool_oversized_until[1] > time.monotonic()
+    assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_txpool_is_warned_about_once_per_chain(caplog):
+    monitor = MempoolMonitor(MagicMock())
+
+    with _serve_txpool(403, 403, aiohttp.ClientError(f"cannot connect to {RPC_URL}"), 403), caplog.at_level(
+        logging.WARNING, logger="services.mempool_service"
+    ):
+        for chain_id in (56, 56, 56, 204):
+            assert await monitor._get_txpool_content(_w3_with_endpoint(), chain_id) == []
+
+    warned = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert [r.args[0] for r in warned] == [56, 204]
     assert "secret-key" not in caplog.text and "rpc.example" not in caplog.text
 
 

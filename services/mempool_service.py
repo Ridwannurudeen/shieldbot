@@ -33,6 +33,11 @@ ANALYSIS_YIELD_EVERY = 256
 MAX_TXPOOL_BYTES = 8 * 1024 * 1024
 # Per socket operation, matching the request timeout of the web3 provider (adapters/evm_base.py).
 TXPOOL_TIMEOUT_SECONDS = 10
+# A whole txpool read is cut here, so an RPC that drips its answer cannot hold the other chains' polls.
+TXPOOL_READ_SECONDS = 60
+# A chain marked oversized or sealed is asked again after this long, so one spike or one odd backend
+# behind a load-balanced RPC does not leave the chain unobserved until the process restarts.
+MARK_RETRY_SECONDS = 600
 
 # Known DEX router selectors
 SWAP_SELECTORS = {
@@ -136,11 +141,14 @@ class MempoolMonitor:
 
         # Chains to monitor (only chains with txpool or pending block support)
         self._monitored_chains: Set[int] = set()
-        # Chains whose RPC answered "pending" with a sealed block: warned about once, not asked again.
-        self._sealed_pending_chains: Set[int] = set()
-        # Chains whose txpool_content body passed MAX_TXPOOL_BYTES: warned about once, read through
-        # the pending block from then on.
-        self._oversized_txpool_chains: Set[int] = set()
+        # Chains whose RPC answered "pending" with a sealed block, until when (time.monotonic()) the
+        # pending block is not asked for again. Warned about once per chain.
+        self._sealed_pending_until: Dict[int, float] = {}
+        # Chains whose txpool_content body passed MAX_TXPOOL_BYTES, until when they are read through
+        # the pending block without asking for the txpool. Warned about once per chain.
+        self._txpool_oversized_until: Dict[int, float] = {}
+        # Chains whose txpool_content request failed or was refused, warned about once.
+        self._txpool_warned: Set[int] = set()
         # Monitored chains whose last poll read neither a txpool nor a genuine pending block. Their
         # mempool is unknown, so they must not be reported as free of threats.
         self._unobservable_chains: Set[int] = set()
@@ -259,12 +267,12 @@ class MempoolMonitor:
         """Fetch pending txs via txpool_content RPC; [] sends _poll_pending to the pending block.
 
         The body is streamed and abandoned as soon as it passes MAX_TXPOOL_BYTES, and the chain takes
-        the pending-block route for the life of the process: a pool that large is the chain's normal
-        size, so a retry would download tens of megabytes for nothing. A body under the cap is parsed
-        and built in the executor. A provider without an HTTP endpoint, a failed or non-200 request
-        and an oversized body all give [].
+        the pending-block route for MARK_RETRY_SECONDS before its txpool is asked for again: a pool
+        that large is usually the chain's normal size, so asking every poll would download megabytes
+        for nothing. A body under the cap is parsed and built in the executor. A provider without an
+        HTTP endpoint, a failed or non-200 request and an oversized body all give [].
         """
-        if chain_id in self._oversized_txpool_chains:
+        if self._txpool_oversized_until.get(chain_id, 0) > time.monotonic():
             return []
         endpoint = getattr(w3.provider, "endpoint_uri", None)
         if not isinstance(endpoint, str) or not endpoint.startswith(("http://", "https://")):
@@ -276,28 +284,46 @@ class MempoolMonitor:
                     endpoint,
                     json={"jsonrpc": "2.0", "id": 1, "method": "txpool_content", "params": []},
                     timeout=aiohttp.ClientTimeout(
-                        sock_connect=TXPOOL_TIMEOUT_SECONDS, sock_read=TXPOOL_TIMEOUT_SECONDS
+                        total=TXPOOL_READ_SECONDS,
+                        sock_connect=TXPOOL_TIMEOUT_SECONDS,
+                        sock_read=TXPOOL_TIMEOUT_SECONDS,
                     ),
                 ) as resp:
                     if resp.status != 200:
-                        logger.debug("txpool_content answered HTTP %d on chain %s", resp.status, chain_id)
+                        self._warn_txpool_unreadable(chain_id, f"HTTP {resp.status}")
                         return []
                     async for chunk in resp.content.iter_chunked(64 * 1024):
                         body.extend(chunk)
                         if len(body) > MAX_TXPOOL_BYTES:
                             resp.close()
-                            self._oversized_txpool_chains.add(chain_id)
-                            logger.warning(
-                                "Chain %s's txpool is larger than %d bytes; it is watched through its "
-                                "pending block from now on",
-                                chain_id, MAX_TXPOOL_BYTES,
-                            )
+                            first = chain_id not in self._txpool_oversized_until
+                            self._txpool_oversized_until[chain_id] = time.monotonic() + MARK_RETRY_SECONDS
+                            if first:
+                                logger.warning(
+                                    "Chain %s's txpool is larger than %d bytes; it is watched through its "
+                                    "pending block, and its txpool is asked for again every %d s",
+                                    chain_id, MAX_TXPOOL_BYTES, MARK_RETRY_SECONDS,
+                                )
                             return []
         except Exception as e:
-            logger.debug("txpool_content read failed for chain %s: %s", chain_id, type(e).__name__)
+            self._warn_txpool_unreadable(chain_id, type(e).__name__)
             return []
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._parse_txpool_content, bytes(body), chain_id)
+
+    def _warn_txpool_unreadable(self, chain_id: int, reason: str):
+        """Warn once per chain that its txpool_content could not be read; later failures log at debug.
+
+        The reason is an HTTP status or an exception's type, never its text, which can hold the RPC URL.
+        """
+        if chain_id in self._txpool_warned:
+            logger.debug("txpool_content read failed for chain %s: %s", chain_id, reason)
+            return
+        self._txpool_warned.add(chain_id)
+        logger.warning(
+            "Chain %s's txpool_content could not be read (%s); its pending block is read instead",
+            chain_id, reason,
+        )
 
     @staticmethod
     def _parse_txpool_content(body: bytes, chain_id: int) -> List[PendingTx]:
@@ -326,7 +352,7 @@ class MempoolMonitor:
         Returns None when no genuine pending block was read (the call failed, or the RPC answered
         with a sealed block), which leaves the chain's mempool unobserved.
         """
-        if chain_id in self._sealed_pending_chains:
+        if self._sealed_pending_until.get(chain_id, 0) > time.monotonic():
             return None
         txs = []
         try:
@@ -338,11 +364,14 @@ class MempoolMonitor:
             # block. A genuine pending block has no hash yet; a sealed one holds only mined
             # transactions, which can no longer be front-run, so it is not read as a mempool.
             if block.get("hash") is not None:
-                self._sealed_pending_chains.add(chain_id)
-                logger.warning(
-                    "Chain %s answers 'pending' with a sealed block; its pending-block fallback is skipped",
-                    chain_id,
-                )
+                first = chain_id not in self._sealed_pending_until
+                self._sealed_pending_until[chain_id] = time.monotonic() + MARK_RETRY_SECONDS
+                if first:
+                    logger.warning(
+                        "Chain %s answers 'pending' with a sealed block; its pending-block fallback is "
+                        "skipped and asked for again every %d s",
+                        chain_id, MARK_RETRY_SECONDS,
+                    )
                 return None
             for tx in (block.get("transactions") or []):
                 # web3 returns each transaction as an AttributeDict, which is a Mapping but not a dict.
