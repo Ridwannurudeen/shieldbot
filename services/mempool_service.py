@@ -3,10 +3,10 @@
 import asyncio
 import logging
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Deque, Dict, List, Optional, Set
 
 import aiohttp
 from web3 import Web3
@@ -41,6 +41,27 @@ SWAP_SELECTORS = {
     "0xb858183f": "exactInput (V3)",
     "0x414bf389": "exactInputSingle (V3 legacy)",
 }
+
+# Where each swap keeps the token its sandwich queue is keyed on: the token traded against the chain's
+# coin where the function name says which side that is (the last entry of a V2 `address[] path` for a
+# coin-in swap, the first for a coin-out swap), else the output token: the last path entry of a
+# token-to-token V2 swap, the `tokenOut` word of a V3 exactInputSingle, or the last 20 bytes of a V3
+# exactInput packed path (20-byte tokens joined by 3-byte fees).
+V2_PATH_TOKEN = {  # selector: (word holding the offset of `path`, index into the path)
+    "0x38ed1739": (2, -1),  # swapExactTokensForTokens(amountIn, amountOutMin, path, to, deadline)
+    "0x8803dbee": (2, -1),  # swapTokensForExactTokens(amountOut, amountInMax, path, to, deadline)
+    "0x5c11d795": (2, -1),  # swapExactTokensForTokensSupportingFeeOnTransferTokens(amountIn, amountOutMin, path, to, deadline)
+    "0x7ff36ab5": (1, -1),  # swapExactETHForTokens(amountOutMin, path, to, deadline)
+    "0xfb3bdb41": (1, -1),  # swapETHForExactTokens(amountOut, path, to, deadline)
+    "0xb6f9de95": (1, -1),  # swapExactETHForTokensSupportingFeeOnTransferTokens(amountOutMin, path, to, deadline)
+    "0x4a25d94a": (2, 0),  # swapTokensForExactETH(amountOut, amountInMax, path, to, deadline)
+    "0x18cbafe5": (2, 0),  # swapExactTokensForETH(amountIn, amountOutMin, path, to, deadline)
+    "0x791ac947": (2, 0),  # swapExactTokensForETHSupportingFeeOnTransferTokens(amountIn, amountOutMin, path, to, deadline)
+}
+V3_EXACT_INPUT_SINGLE_SELECTORS = frozenset({"0x04e45aaf", "0x414bf389"})
+V3_EXACT_INPUT_SELECTOR = "0xb858183f"
+# A router swap has a handful of hops; a longer path is not one.
+MAX_SWAP_PATH_LENGTH = 8
 
 APPROVE_SELECTORS = {
     "0x095ea7b3": "approve",
@@ -96,10 +117,11 @@ class MempoolMonitor:
 
         # Recent swap txs for sandwich detection: {(chain_id, token): [PendingTx]}
         self._swap_queue: Dict[tuple, List[PendingTx]] = defaultdict(list)
+        # Sandwiches already reported per queue key, as (front-run tx hash, victim tx hash)
+        self._reported_sandwiches: Dict[tuple, Set[tuple]] = defaultdict(set)
 
-        # Active alerts
-        self._alerts: List[MempoolAlert] = []
-        self._max_alerts = 1000
+        # The newest alerts; the deque drops the oldest past its cap.
+        self._alerts: Deque[MempoolAlert] = deque(maxlen=1000)
 
         # Chains to monitor (only chains with txpool or pending block support)
         self._monitored_chains: Set[int] = set()
@@ -288,94 +310,117 @@ class MempoolMonitor:
             if token:
                 key = (tx.chain_id, token)
                 self._swap_queue[key].append(tx)
-                await self._check_sandwich(key)
+                await self._check_sandwich(key, tx)
 
         # Check for suspicious approvals
         if selector in APPROVE_SELECTORS:
             await self._check_suspicious_approval(tx)
 
     def _extract_token_from_swap(self, data: str) -> Optional[str]:
-        """Extract the target token address from swap calldata."""
-        try:
-            # Most swap functions have the path parameter containing token addresses
-            # The last token in the path is typically the output token
-            if len(data) < 74:
-                return None
-            # For V2 routers, path starts at different offsets depending on function
-            # Simplified: extract first address parameter after selector
-            raw = data.replace("0x", "")
-            if len(raw) >= 72:
-                # First address param (after selector) is often amountIn or similar
-                # Second address param is often the token
-                addr = "0x" + raw[32:72][-40:]
-                if Web3.is_address(addr):
-                    return addr.lower()
-        except Exception:
-            pass
-        return None
+        """The token a swap's sandwich queue is keyed on, or None when its calldata holds none.
 
-    async def _check_sandwich(self, key: tuple):
-        """Check for sandwich attack patterns in the swap queue.
+        The selector's ABI says where the token is (V2_PATH_TOKEN and the V3 selectors), and a word
+        keys a queue only when it is an address, so an amount, an ABI offset or a zero word never does.
+        """
+        selector = data[:10].lower()
+        args = data[10:].lower()
+
+        def word(index: int) -> Optional[int]:
+            chunk = args[index * 64:(index + 1) * 64]
+            return int(chunk, 16) if len(chunk) == 64 else None
+
+        try:
+            if selector in V2_PATH_TOKEN:
+                offset_word, position = V2_PATH_TOKEN[selector]
+                offset = word(offset_word)
+                if offset is None or offset % 32:
+                    return None
+                length = word(offset // 32)
+                if length is None or not 2 <= length <= MAX_SWAP_PATH_LENGTH:
+                    return None
+                token = word(offset // 32 + 1 + (length - 1 if position == -1 else 0))
+            elif selector in V3_EXACT_INPUT_SINGLE_SELECTORS:
+                token = word(1)
+            elif selector == V3_EXACT_INPUT_SELECTOR:
+                params = word(0)
+                path = word(params // 32) if params is not None and params % 32 == 0 else None
+                if path is None or path % 32:
+                    return None
+                start = (params + path) // 32
+                length = word(start)
+                longest = 20 + 23 * (MAX_SWAP_PATH_LENGTH - 1)
+                if length is None or not 43 <= length <= longest or (length - 20) % 23:
+                    return None
+                packed = args[(start + 1) * 64:(start + 1) * 64 + length * 2]
+                token = int(packed[-40:], 16) if len(packed) == length * 2 else None
+            else:
+                return None
+        except ValueError:
+            return None
+        # An address word has its high 12 bytes zero, and no token lives below 2**64, where a plain
+        # number, an ABI offset (0x20, 0x40, 0x60) or the zero word would be.
+        if token is None or token >> 160 or token < 2**64:
+            return None
+        return f"0x{token:040x}"
+
+    async def _check_sandwich(self, key: tuple, newest: PendingTx):
+        """Report the sandwiches the newest swap on this key completes.
 
         A sandwich attack consists of:
         1. Attacker frontrun: large swap to move price
         2. Victim swap: executes at worse price
         3. Attacker backrun: reverse swap to capture profit
+
+        Only the newest swap can be a back-run, so only its sender is tried as the attacker, and a
+        (front-run, victim) pair is reported once however many back-runs follow it.
         """
         chain_id, token = key
         queue = self._swap_queue[key]
 
-        # Need at least 2 swaps in quick succession to detect
-        if len(queue) < 2:
-            return
-
-        # Prune old entries (> 30 seconds)
+        # Prune old entries (> 30 seconds), and the reported pairs whose victim left the queue
         now = time.time()
         queue[:] = [tx for tx in queue if now - tx.seen_at < 30]
+        live = {tx.tx_hash for tx in queue}
+        reported = self._reported_sandwiches[key]
+        reported.difference_update([pair for pair in reported if pair[1] not in live])
 
-        if len(queue) < 2:
+        attacker = newest.from_addr
+        attacker_txs = [tx for tx in queue if tx.from_addr == attacker]
+        if len(attacker_txs) < 2:
             return
 
-        # Look for same-sender pairs (frontrun + backrun) around different-sender tx
-        senders = defaultdict(list)
-        for tx in queue:
-            senders[tx.from_addr].append(tx)
-
-        for attacker, attacker_txs in senders.items():
-            if len(attacker_txs) < 2:
+        # Check if there's a victim tx between attacker's txs
+        for victim_tx in queue:
+            if victim_tx.from_addr == attacker:
                 continue
 
-            # Check if there's a victim tx between attacker's txs
-            for victim_tx in queue:
-                if victim_tx.from_addr == attacker:
-                    continue
+            front = None
+            back = None
+            for atx in attacker_txs:
+                if atx.gas_price > victim_tx.gas_price and atx.seen_at <= victim_tx.seen_at:
+                    front = atx
+                elif atx.seen_at > victim_tx.seen_at:
+                    back = atx
 
-                front = None
-                back = None
-                for atx in attacker_txs:
-                    if atx.gas_price > victim_tx.gas_price and atx.seen_at <= victim_tx.seen_at:
-                        front = atx
-                    elif atx.seen_at > victim_tx.seen_at:
-                        back = atx
-
-                if front and back:
-                    alert = MempoolAlert(
-                        alert_type="sandwich_attack",
-                        severity="HIGH",
-                        description=(
-                            f"Sandwich attack detected on {token[:10]}... — "
-                            f"attacker {attacker[:10]}... front-running victim "
-                            f"{victim_tx.from_addr[:10]}... with higher gas price"
-                        ),
-                        victim_tx=victim_tx.tx_hash,
-                        attacker_tx=front.tx_hash,
-                        attacker_addr=attacker,
-                        target_token=token,
-                        chain_id=chain_id,
-                    )
-                    self._add_alert(alert)
-                    self._stats['sandwiches_detected'] += 1
-                    logger.warning(f"Sandwich detected: {alert.description}")
+            if front and back and (front.tx_hash, victim_tx.tx_hash) not in reported:
+                reported.add((front.tx_hash, victim_tx.tx_hash))
+                alert = MempoolAlert(
+                    alert_type="sandwich_attack",
+                    severity="HIGH",
+                    description=(
+                        f"Sandwich attack detected on {token[:10]}... — "
+                        f"attacker {attacker[:10]}... front-running victim "
+                        f"{victim_tx.from_addr[:10]}... with higher gas price"
+                    ),
+                    victim_tx=victim_tx.tx_hash,
+                    attacker_tx=front.tx_hash,
+                    attacker_addr=attacker,
+                    target_token=token,
+                    chain_id=chain_id,
+                )
+                self._add_alert(alert)
+                self._stats['sandwiches_detected'] += 1
+                logger.warning(f"Sandwich detected: {alert.description}")
 
     async def _check_suspicious_approval(self, tx: PendingTx):
         """Check for suspicious token approvals in pending transactions."""
@@ -425,10 +470,8 @@ class MempoolMonitor:
             logger.debug("Approval analysis error: %s", type(e).__name__)
 
     def _add_alert(self, alert: MempoolAlert):
-        """Add an alert and maintain max size."""
+        """Add an alert; the deque drops the oldest past its cap."""
         self._alerts.append(alert)
-        if len(self._alerts) > self._max_alerts:
-            self._alerts = self._alerts[-self._max_alerts:]
 
     def get_alerts(self, chain_id: int = None, limit: int = 50) -> List[Dict]:
         """Get recent alerts, optionally filtered by chain."""
@@ -436,7 +479,7 @@ class MempoolMonitor:
             self._web3_client.validate_chain_id(chain_id)
             if not supports_pending_transactions(chain_id):
                 raise ValueError("pending-transaction monitoring is not available on this chain")
-        alerts = self._alerts
+        alerts = list(self._alerts)
         if chain_id is not None:
             alerts = [a for a in alerts if a.chain_id == chain_id]
         return [
