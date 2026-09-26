@@ -453,9 +453,10 @@ async def test_bsc_rescue_keeps_full_history_chunks_concurrency_and_archive_rpc(
 
     ranges = [(c.args[1], c.args[4], c.args[5]) for c in service._fetch_log_chunk.await_args_list]
     assert len(ranges) == 51
-    assert ranges[0] == ("https://archive.invalid", hex(0), hex(49_998))
-    assert ranges[1] == ("https://archive.invalid", hex(49_999), hex(99_997))
-    assert ranges[-1] == ("https://archive.invalid", hex(50 * 49_999), hex(latest))
+    # Newest first, so a read stopped by a refusal or the deadline keeps a contiguous newest range.
+    assert ranges[0] == ("https://archive.invalid", hex(latest - 49_998), hex(latest))
+    assert ranges[1] == ("https://archive.invalid", hex(latest - 2 * 49_999 + 1), hex(latest - 49_999))
+    assert ranges[-1] == ("https://archive.invalid", hex(0), hex(10))
     assert in_flight["max"] == 50
     assert rpc.urls == {"https://archive.invalid"}
     assert result["status"] == "ok"
