@@ -26,7 +26,7 @@ Discovery latency across 106,914 pool events was p50 55.4 seconds and p90 138.2 
 
 ## Live usage evidence — measured September 22, 2026
 
-The owner supplied this snapshot from **GET https://api.shieldbotsecurity.online/api/stats**, measured **2026-09-22**. The complete supplied block is reproduced verbatim; the endpoint is public and can be fetched again. No time of day was supplied, and these counters were not re-fetched or estimated during this local-only preparation.
+The owner supplied this snapshot from **GET https://api.shieldbotsecurity.online/api/stats**, measured **2026-09-22**. The complete supplied block is reproduced verbatim. No time of day was supplied. The endpoint is public, but several of its counters no longer measure what they measured on that date, so these figures cannot be reproduced from it: see the correction below.
 
 ```text
 transactions_monitored : 496628
@@ -38,11 +38,19 @@ sandwiches_caught      : 0
 chains_protected       : 7
 ```
 
-This is a live product with real monitoring volume and a small number of completed contract scans: **496,628 transactions monitored**, **2,091 suspicious approvals**, **86 contracts scanned**, **1 threat detected**, **1 transaction blocked**, and **0 sandwiches caught**. These product-wide counters do not establish unique users, detection accuracy, Buildathon-only usage, Robinhood-only usage, or adoption of the undeployed guard.
+The contract counters (**86 contracts scanned**, **1 threat detected**, **1 transaction blocked**) come from the database; on 2026-09-26, after the deployment below, they read 87, 1 and 1 (`threats_detected` under the definition given in the correction below). The mempool counters (transactions monitored, suspicious approvals, sandwiches caught) are superseded by the correction below and are not cited as evidence. None of these counters establish unique users, detection accuracy, Buildathon-only usage, Robinhood-only usage, or adoption of the undeployed guard.
 
 **The `chains_protected: 7` counter is stale.** The owner's same-day production observation from **GET https://api.shieldbotsecurity.online/api/health** reports `supported_chains: [56,1,8453,42161,137,204,10,4663]`: eight configured chains including Robinhood. **GET https://api.shieldbotsecurity.online/api/launches/4663** returned **HTTP 200**. Availability of a route is not equal provider coverage across chains.
 
 Revision **`27aca4d`** was deployed to production on **2026-09-23**. After deployment, a live Robinhood Chain scan returned `contract_age_days: 145`, `is_verified: true`, and `status: ok`. `/api/health` listed chain 4663.
+
+Production has since moved on: it runs **`5ac17f1`**, deployed on **2026-09-26**. After that deployment, `/api/health` listed the same eight chains and `/api/ready` answered 200 to ten requests over about 18 seconds. A live Robinhood Chain scan of USDG (`0x5fc5360d0400a0fd4f2af552add042d716f1d168`) returned `contract_age_days: 144`, `is_verified: true`, and `status: ok`; the September 23 scan above was of a token this document does not name. BNB Chain scans of CAKE and USDT returned `status: ok` with contract ages of 2,195 and 2,213 days. Before this deployment both came back UNKNOWN, because Etherscan refuses creation lookups on BNB Chain for the configured key; BNB Chain ages now come from Sourcify's deployment record when Etherscan refuses and Sourcify has verified the contract, and otherwise stay UNKNOWN. An Ethereum USDC scan returned `status: ok`.
+
+**Correction, 2026-09-26.** Changes made after the September 22 snapshot, and faults found in the code that produced it, mean some of its counters must not be read as first presented:
+
+- In the code that served the snapshot, unchanged in this respect through `27aca4d`, the mempool counters were held in memory and restarted with the API process, so 496,628 was a count since the process had last started, not an all-time total. It also counted a transaction again each time it stayed in the pool for more than 60 seconds, because the pending set was pruned by age and refilled from the pool on every poll; commit `048d820` (2026-09-26) keys the set by pool membership instead. Commit `1a74293`, in production since the later 2026-09-23 deployment of `e820c2e`, added `mempool_counting_since`, the moment the current count began, and made a source that is not running in the API process report `null`. The 496,628 figure has no current equivalent.
+- Since the **2026-09-26** deployments, `chains_protected` (merge `2f81d0b`) counts only the chains whose public mempool is currently observable (4 on 2026-09-26: Ethereum, BNB Chain, Polygon and opBNB), so it is not comparable with the 7 above. `threats_detected` (merge `7c0e144`) now counts the contracts whose stored risk level is HIGH, where it counted scores of 71 or more.
+- In the code that served the snapshot, the approval counter added one for every pending unlimited or very large `approve()`, whoever the spender was, so ordinary approvals to DEX routers were counted, and a pending approval was counted again each time it was re-read after 60 seconds. Since commit `66e617b` (2026-09-26, in production the same day) the monitor alerts only when the spender is already known to be bad: an admin blacklist entry, a GoPlus theft label, or a wallet rather than a contract. The 2,091 figure is therefore a count of large pending approvals, repeats included, not of approvals whose spender was known to be an attacker.
 
 ## External validation
 
@@ -50,7 +58,7 @@ Revision **`27aca4d`** was deployed to production on **2026-09-23**. After deplo
 
 ## Deployment evidence — owner must complete
 
-**THE THREE VERDICT CONTRACTS ARE NOT DEPLOYED AS OF THIS DRAFT (2026-09-22).** The backend's live usage above does not establish their deployment. No live contract verification or live guarded USDG payment is claimed. Complete every field below from the actual chain-4663 deployment and completed source-verification results. A submitted explorer verification request is not a completed result.
+**THE THREE VERDICT CONTRACTS ARE NOT DEPLOYED AS OF THIS DRAFT (2026-09-26).** The backend's live usage above does not establish their deployment. No live contract verification or live guarded USDG payment is claimed. Complete every field below from the actual chain-4663 deployment and completed source-verification results. A submitted explorer verification request is not a completed result.
 
 | Contract | Deployed address | Deployment transaction hash |
 |---|---|---|
@@ -88,6 +96,12 @@ The local `main` history through **`27aca4d`** contains these **eleven in-window
 | September 22 | `c452b72` | Transaction-specific SDK cache keys, a 60 second default cache lifetime, and no cached score for STRICT policy. |
 | September 23 | `27aca4d` | A genuinely failed Robinhood pool simulation now leaves the combined result incomplete. |
 
+After `27aca4d`, `main` gained **102 further first-parent commits**, authored from September 22 to September 26 and all inside the window, through `5ac17f1`, the revision in production. Most are platform work across all supported chains rather than Robinhood-specific features; the rest are documentation and site changes:
+
+- **September 23 to 24:** audit-driven fixes. Unmeasured scan fields report UNKNOWN instead of clean; one verdict vocabulary and a scoring redesign with declared floors; a coverage endpoint and an Unknown ledger; provider circuit breakers, a readiness endpoint and a gated deploy script with rollback; server-judged signatures and hardening of the repository extension (manifest 3.1.0, not released); SDK and MCP validation fixes; transactional database writes; an evidence document per scan.
+- **September 25:** repository and documentation cleanup; the site and docs present ShieldBot as a multichain product.
+- **September 26:** mempool monitor fixes (API stalls from oversized txpool reads, evidence-only approval alerts, directional sandwich detection); a deadline on Wallet Health scans that reports the unread block range as partial coverage; the BNB Chain verifier and Base attestor writers retired; BNB Chain contract ages dated from Sourcify when Etherscan refuses.
+
 Reproduce the history boundary from the repository root:
 
 ```bash
@@ -96,9 +110,11 @@ git log 27aca4d --first-parent --since=2026-09-14 --until=2026-10-05 --format='%
 git log 27aca4d --merges --since=2026-09-14 --until=2026-10-05 --oneline
 git show --stat a60fc45 00b3c81 9ca9c31 04203be 3a5bc0e 98c2d4e 0a0276c 5673c7c 18b87c7 c452b72 27aca4d
 git diff --name-only 04203be 27aca4d
+git log 27aca4d..5ac17f1 --first-parent --format='%h %ad %s' --date=short
+git log 27aca4d..5ac17f1 --first-parent --merges --oneline
 ```
 
-In particular, waves 2 to 3 (`9ca9c31`) and the guard, guarded transfer and freshness chain (`04203be`) both landed inside the window. The former `chore/oh-final` work is included in `main` through the later commits above. This submission update is documentation work on `docs/oh-submission`, based on `main` at `27aca4d`. It does not establish deployment of the three verdict contracts or a released extension.
+In particular, waves 2 to 3 (`9ca9c31`) and the guard, guarded transfer and freshness chain (`04203be`) both landed inside the window. The former `chore/oh-final` work is included in `main` through the later commits above. This document was last brought up to date on 2026-09-26 against `main` at `5ac17f1`. It does not establish deployment of the three verdict contracts or a released extension.
 
 ## Pre-submission review
 
@@ -127,6 +143,8 @@ A pre-submission review found three fail-closed gaps in the Python pipeline. Com
 Start with [docs/JUDGE_GUIDE.md](JUDGE_GUIDE.md): replay the recorded honeypot and decision semantics offline, then run the registry/guard/transfer tests in Foundry. After the owner supplies deployment evidence, its read-only path compares the served canonical document with the designated registry's receipt event. Recorded RPC replay checks this implementation against saved responses; it is not archival EVM execution. The [test report](TESTING.md) states measured results, commands and exclusions.
 
 Verified on **2026-09-23** at `main` revision **`27aca4d`**: the main suite completed with **3,054 passed, 1 skipped**, excluding the bot app suite. The Python SDK completed with **32 passed**. The TypeScript SDK completed with **21 passed**. CI run **35863129734** passed Foundry tests, Solidity security, Python tests and security, and the SDK audit and build. Tests do not establish live usage or contract deployment.
+
+Re-verified on **2026-09-26** at **`5ac17f1`**: `python -m pytest -q -p no:cacheprovider --ignore=tests/test_import_order.py --ignore=tests/test_integration_imports.py` completed with **5,942 passed**, and the two excluded fresh-process import test files, `tests/test_import_order.py` and `tests/test_integration_imports.py`, with **112 passed**. CI run **36266495465** passed all four jobs. The SDK suites were not re-run locally for this update.
 
 ## Owner completion checklist: 16 distinct placeholders
 
