@@ -494,6 +494,24 @@ function short(addr) {
   if (!addr) return '—';
   return addr.slice(0, 6) + '…' + addr.slice(-4);
 }
+
+// A contract detection is its contract. A mempool alert is its attacker: the sandwich's front-runner
+// or the approval's spender. Its target_token is the token the victim buys or approves, so a sell-side
+// sandwich's is the quote asset (WBNB, WETH, USDT), not the threat.
+function threatAddress(t) {
+  if (t.address) return {
+    addr: t.address,
+    role: null
+  };
+  if (t.attacker_addr) return {
+    addr: t.attacker_addr,
+    role: 'Attacker'
+  };
+  return {
+    addr: t.target_token || '',
+    role: null
+  };
+}
 function bucketByHour(threats, hrs = 24) {
   const now = Date.now() / 1000;
   const buckets = Array(hrs).fill(0);
@@ -667,7 +685,10 @@ function FlagModal({
     };
   }, [threat]);
   if (!threat) return null;
-  const addr = threat.address || threat.target_token || '';
+  const {
+    addr,
+    role
+  } = threatAddress(threat);
   const type = (threat.type || threat.alert_type || 'unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   const canSend = Boolean(addr && threat.chain_id) && !sending;
   async function submit() {
@@ -759,7 +780,7 @@ function FlagModal({
     style: {
       color: '#94A3B8'
     }
-  }, "Address"), /*#__PURE__*/React.createElement("div", {
+  }, role ? `${role} Address` : 'Address'), /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-mono break-all",
     style: {
       color: '#60A5FA',
@@ -853,7 +874,10 @@ function ThreatRow({
   const sev = SEV[rawSev] ? rawSev : 'UNKNOWN';
   const sc = SEV[sev];
   const type = (t.type || t.alert_type || 'unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-  const addr = t.address || t.target_token || '';
+  const {
+    addr,
+    role
+  } = threatAddress(t);
   const chain = CHAIN_NAMES[t.chain_id] || (t.chain_id ? `Chain ${t.chain_id}` : 'Unknown');
   const cColor = CHAIN_COLORS[t.chain_id] || '#64748B';
   const exp = EXPLORERS[t.chain_id] || '';
@@ -905,7 +929,17 @@ function ThreatRow({
       color: '#60A5FA',
       fontFamily: 'JetBrains Mono,monospace'
     }
-  }, addr ? short(addr) : '—')), /*#__PURE__*/React.createElement("div", {
+  }, role && /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#94A3B8'
+    }
+  }, role, " "), addr ? short(addr) : '—'), role && t.target_token && /*#__PURE__*/React.createElement("div", {
+    className: "text-xs mt-0.5 font-mono",
+    style: {
+      color: '#94A3B8',
+      fontFamily: 'JetBrains Mono,monospace'
+    }
+  }, "Target token ", short(t.target_token))), /*#__PURE__*/React.createElement("div", {
     className: "text-xs shrink-0",
     style: {
       color: '#94A3B8'
@@ -1016,7 +1050,7 @@ const CHAIN_FILTERS = [{
   val: '4663'
 }];
 function threatKey(t) {
-  return [t.type, t.chain_id, t.address || t.target_token || '', t.victim_tx || t.attacker_tx || '', t.detected_at || t.created_at || ''].join(':');
+  return [t.type, t.chain_id, threatAddress(t).addr, t.victim_tx || t.attacker_tx || '', t.detected_at || t.created_at || ''].join(':');
 }
 function ThreatLogTable({
   threats,
