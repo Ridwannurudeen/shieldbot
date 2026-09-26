@@ -16,11 +16,13 @@ from web3.datastructures import AttributeDict
 
 from services import mempool_service
 from services.mempool_service import ANALYSIS_YIELD_EVERY, MempoolMonitor, PendingTx
+from utils.scam_db import ScamDatabase
 from utils.web3_client import Web3Client
 
 SENDER = "0xAbCdEf0123456789aBcDeF0123456789AbCdEf01"
 TOKEN = "0x" + "22" * 20
-APPROVE_UNLIMITED = "0x095ea7b3" + "00" * 12 + "11" * 20 + "ff" * 32
+SPENDER = "0x" + "11" * 20
+APPROVE_UNLIMITED = "0x095ea7b3" + "00" * 12 + SPENDER[2:] + "ff" * 32
 # An RPC URL as production configures them, carrying a key that must never reach the logs.
 RPC_URL = "https://rpc.example/secret-key"
 EMPTY_TXPOOL = {"result": {"pending": {}}}
@@ -156,7 +158,11 @@ async def test_pending_block_fallback_feeds_the_analysis():
     client = MagicMock()
     w3 = client.get_web3.return_value = _w3_with_endpoint()
     w3.eth.get_block.return_value = _pending_block()
-    monitor = MempoolMonitor(client)
+    # The approval's spender is on the loaded blacklist, so the analysis alerts on it.
+    scam_db = ScamDatabase()
+    scam_db.known_scams = {(None, SPENDER): {"source": "admin", "reports": 0, "expires_at": None}}
+    counterparty = SimpleNamespace(allowlisted_name=lambda address, chain_id: None, cached=lambda address, chain_id: None)
+    monitor = MempoolMonitor(client, scam_db=scam_db, counterparty=counterparty)
 
     with _serve_txpool(EMPTY_TXPOOL):
         await monitor._poll_pending(56)

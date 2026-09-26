@@ -1,12 +1,18 @@
-"""Mempool analysis: which token a swap is keyed on, how sandwiches are reported, how alerts are kept."""
+"""Mempool analysis: which tokens a swap trades, how sandwiches are reported, which approvals are alerted, how alerts are kept."""
 
 import random
 import time
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import services.counterparty_service as counterparty_module
+from adapters.eth import EthAdapter
+from services.counterparty_service import PERMIT2, CounterpartyService, unknown_facts
 from services.mempool_service import MempoolAlert, MempoolMonitor, PendingTx
+from utils.scam_db import ScamDatabase
+from utils.web3_client import Web3Client
 
 WETH = "0x" + "aa" * 20
 TOKEN = "0x" + "bb" * 20
@@ -252,3 +258,199 @@ def test_the_newest_thousand_alerts_are_kept_and_read_newest_last():
         "chain_id",
         "created_at",
     }
+
+
+# --- Approvals: only a spender the process already knows to be bad is alerted --------------------
+
+PANCAKESWAP_V2_ROUTER = "0x10ed43c718714eb63d5aa57b78b54704e256024e"
+UNISWAP_V2_ROUTER = "0x7a250d5630b4cf539739df2c5dacb4c659f2488d"
+SPENDER = "0x" + "55" * 20
+OWNER = "0x" + "66" * 20
+UNLIMITED = 2**256 - 1
+
+
+@pytest.fixture(autouse=True)
+def facts_cache():
+    counterparty_module._FACTS_CACHE.clear()
+    yield counterparty_module._FACTS_CACHE
+    counterparty_module._FACTS_CACHE.clear()
+
+
+def _approve(spender: str, amount: int, chain_id: int = 56, index: int = 0) -> PendingTx:
+    return PendingTx(
+        tx_hash="0x" + f"{index + 1:064x}",
+        from_addr=OWNER,
+        to_addr=TOKEN,
+        value=0,
+        gas_price=5,
+        data=APPROVE + _address(spender) + _word(amount),
+        chain_id=chain_id,
+    )
+
+
+def _blacklist(entries) -> ScamDatabase:
+    """The in-memory blacklist as load_blacklist fills it; every lookup it could make is recorded."""
+    scam_db = ScamDatabase()
+    scam_db.known_scams = {
+        (None, address): {"source": source, "reports": reports, "expires_at": None}
+        for address, source, reports in entries
+    }
+    scam_db.check_address = AsyncMock()
+    scam_db.fetch_address_security = AsyncMock()
+    return scam_db
+
+
+def _wired_monitor(blacklist=()):
+    """A monitor wired like the container's: the scanner's counterparty service and blacklist.
+
+    The web3 stub answers the allowlist from memory and records every read it is asked for.
+    """
+    adapter = SimpleNamespace(
+        get_whitelisted_routers=lambda: {PANCAKESWAP_V2_ROUTER: "PancakeSwap V2 Router"}
+    )
+    web3 = SimpleNamespace(
+        _get_adapter=MagicMock(return_value=adapter),
+        get_bytecode=AsyncMock(),
+        is_verified_contract=AsyncMock(),
+        get_contract_creation_info=AsyncMock(),
+    )
+    scam_db = _blacklist(blacklist)
+    counterparty = CounterpartyService(web3, scam_db)
+    counterparty.fetch = AsyncMock()
+    return MempoolMonitor(web3, scam_db=scam_db, counterparty=counterparty), web3, scam_db, counterparty
+
+
+def _assert_no_lookup(web3, scam_db, counterparty):
+    """The monitor runs over every pending approval on four chains: it never asks a provider."""
+    for mock in (
+        web3.get_bytecode,
+        web3.is_verified_contract,
+        web3.get_contract_creation_info,
+        scam_db.check_address,
+        scam_db.fetch_address_security,
+        counterparty.fetch,
+    ):
+        assert mock.mock_calls == []
+
+
+def _facts(**overrides) -> dict:
+    return {
+        **unknown_facts(SPENDER),
+        "is_contract": True,
+        "delegated": False,
+        "is_verified": True,
+        "age_days": 400,
+        "labels": [],
+        "coverage": {"code": True, "verification": True, "age": True, "labels": True},
+        "reason": None,
+        **overrides,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id, spender", [
+    (56, PANCAKESWAP_V2_ROUTER),
+    (1, UNISWAP_V2_ROUTER),
+    (56, PERMIT2),
+    (1, PERMIT2),
+], ids=["pancakeswap-v2-on-bsc", "uniswap-v2-on-ethereum", "permit2-on-bsc", "permit2-on-ethereum"])
+async def test_an_unlimited_approval_to_an_allowlisted_spender_is_never_an_alert(chain_id, spender):
+    # The chain adapters' own allowlist, as the scanner reads it; a blacklist entry for a router
+    # (anyone can file reports) does not outrank it.
+    client = Web3Client()
+    client.register_adapter(EthAdapter())
+    scam_db = _blacklist([(spender, "admin", 0)])
+    monitor = MempoolMonitor(client, scam_db=scam_db)
+
+    await monitor._analyze_pending_tx(_approve(spender, UNLIMITED, chain_id=chain_id))
+
+    assert monitor.get_alerts() == []
+    assert monitor.get_stats()["suspicious_approvals"] == 0
+    assert scam_db.check_address.mock_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("amount, wording", [(UNLIMITED, "unlimited"), (10**18, "limited")])
+async def test_an_approval_to_a_confirmed_scam_address_is_a_high_alert(amount, wording):
+    monitor, web3, scam_db, counterparty = _wired_monitor(blacklist=[(SPENDER, "admin", 0)])
+    approval = _approve(SPENDER, amount)
+
+    await monitor._analyze_pending_tx(approval)
+
+    (alert,) = monitor.get_alerts()
+    assert (alert["alert_type"], alert["severity"], alert["chain_id"]) == ("suspicious_approval", "HIGH", 56)
+    assert (alert["victim_tx"], alert["attacker_tx"], alert["attacker_addr"], alert["target_token"]) == (
+        approval.tx_hash, None, SPENDER, TOKEN,
+    )
+    assert "confirmed scam address" in alert["description"]
+    assert f" for {wording} tokens" in alert["description"]
+    assert monitor.get_stats()["suspicious_approvals"] == 1
+    _assert_no_lookup(web3, scam_db, counterparty)
+
+
+@pytest.mark.asyncio
+async def test_a_community_reported_spender_is_not_a_public_alert():
+    # Three reports can be manufactured by anyone; the public feed names no attacker on them.
+    monitor, *_ = _wired_monitor(blacklist=[(SPENDER, "community", 3)])
+
+    await monitor._analyze_pending_tx(_approve(SPENDER, UNLIMITED))
+
+    assert monitor.get_alerts() == []
+    assert monitor.get_stats()["suspicious_approvals"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_revoke_grants_nothing_and_is_not_an_alert():
+    monitor, *_ = _wired_monitor(blacklist=[(SPENDER, "admin", 0)])
+
+    await monitor._analyze_pending_tx(_approve(SPENDER, 0))
+
+    assert monitor.get_alerts() == []
+    assert monitor.get_stats()["suspicious_approvals"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("facts, severity, wording", [
+    (_facts(is_contract=False, is_verified=None, age_days=None), "HIGH", "a wallet, not a contract"),
+    (_facts(delegated=True, is_verified=None, age_days=None), "HIGH", "a wallet, not a contract"),
+    (_facts(labels=["phishing_activities", "blacklist_doubt"], label_source="SlowMist,GoPlus"), "HIGH", "phishing_activities, blacklist_doubt (SlowMist,GoPlus)"),
+    (_facts(), None, None),
+    (_facts(is_verified=False, age_days=2), None, None),
+    (None, None, None),
+], ids=[
+    "cached-wallet", "cached-delegated-wallet", "cached-goplus-labels", "cached-verified-contract",
+    "cached-unverified-young-contract", "uncached",
+])
+async def test_cached_counterparty_facts_decide_the_alert_without_a_lookup(facts_cache, facts, severity, wording):
+    # The facts a scan already fetched for this spender (five-minute cache) are read in memory. An
+    # unverified or unknown contract is a risk, not evidence of an attack: no public alert.
+    monitor, web3, scam_db, counterparty = _wired_monitor()
+    if facts is not None:
+        facts_cache[(56, SPENDER)] = facts
+
+    await monitor._analyze_pending_tx(_approve(SPENDER, UNLIMITED))
+
+    alerts = monitor.get_alerts()
+    if severity is None:
+        assert alerts == []
+    else:
+        (alert,) = alerts
+        assert (alert["severity"], alert["attacker_addr"]) == (severity, SPENDER)
+        assert wording in alert["description"]
+    assert monitor.get_stats()["suspicious_approvals"] == len(alerts)
+    _assert_no_lookup(web3, scam_db, counterparty)
+
+
+@pytest.mark.asyncio
+async def test_the_approval_counter_counts_alerts_only(facts_cache):
+    scam = "0x" + "77" * 20
+    monitor, web3, scam_db, counterparty = _wired_monitor(blacklist=[(scam, "admin", 0)])
+    facts_cache[(56, SPENDER)] = _facts(is_contract=False, is_verified=None, age_days=None)
+    unknown = "0x" + "88" * 20
+
+    for index, spender in enumerate((PANCAKESWAP_V2_ROUTER, unknown, scam, SPENDER, unknown)):
+        await monitor._analyze_pending_tx(_approve(spender, UNLIMITED, index=index))
+
+    assert [a["attacker_addr"] for a in monitor.get_alerts()] == [scam, SPENDER]
+    assert monitor.get_stats()["suspicious_approvals"] == 2
+    _assert_no_lookup(web3, scam_db, counterparty)

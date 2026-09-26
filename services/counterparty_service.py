@@ -226,6 +226,11 @@ class CounterpartyService:
     def allowlisted_name(self, address: str, chain_id: int) -> Optional[str]:
         return _allowlisted_name(self._web3, address, chain_id)
 
+    def cached(self, address: str, chain_id: int) -> Optional[dict]:
+        """The facts a lookup already fetched for this spender, or None; nothing is looked up."""
+        cached = _FACTS_CACHE.get((chain_id, address.lower()))
+        return copy.deepcopy(cached) if cached is not None else None
+
     async def fetch(self, address: str, chain_id: int) -> dict:
         lower = address.lower()
         observed_at = time.time()
@@ -321,6 +326,9 @@ class UnavailableCounterparty:
 
     def allowlisted_name(self, address: str, chain_id: int) -> Optional[str]:
         return _allowlisted_name(self._web3, address, chain_id)
+
+    def cached(self, address: str, chain_id: int) -> Optional[dict]:
+        return None
 
     async def fetch(self, address: str, chain_id: int) -> dict:
         return unknown_facts(address)

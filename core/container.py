@@ -152,7 +152,9 @@ class ServiceContainer:
         self.robinhood_assets = RobinhoodAssets(rpc_url=settings.robinhood_rpc_url)
 
         # Mempool monitor + Rescue mode + Campaign detection
-        self.mempool_monitor = MempoolMonitor(self.web3_client, self.db)
+        self.mempool_monitor = MempoolMonitor(
+            self.web3_client, self.db, scam_db=self.scam_db, counterparty=self.counterparty_service,
+        )
         logs_rpcs = {}
         if settings.logs_rpc_url:
             logs_rpcs[56] = settings.logs_rpc_url

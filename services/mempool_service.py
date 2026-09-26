@@ -12,6 +12,8 @@ from typing import Deque, Dict, List, Optional, Set
 import aiohttp
 from web3 import Web3
 
+from services.counterparty_service import UnavailableCounterparty
+
 logger = logging.getLogger(__name__)
 
 # Chains whose RPC serves a public mempool through txpool_content. Base, Arbitrum, Optimism and
@@ -87,7 +89,6 @@ APPROVE_SELECTORS = {
 }
 
 UNLIMITED_APPROVAL = 2**256 - 1
-HIGH_APPROVAL = 2**128
 
 
 @dataclass
@@ -125,9 +126,13 @@ class MempoolMonitor:
     the transactions about to be mined rather than the whole pool.
     """
 
-    def __init__(self, web3_client, db=None):
+    def __init__(self, web3_client, db=None, scam_db=None, counterparty=None):
         self._web3_client = web3_client
         self._db = db
+        # What is already known about an approval's spender, read in memory: the chain adapters'
+        # router allowlist and Permit2, the loaded blacklist, and the facts a scan fetched.
+        self._scam_db = scam_db
+        self._counterparty = counterparty if counterparty is not None else UnavailableCounterparty(web3_client)
         self._running = False
         self._task: Optional[asyncio.Task] = None
 
@@ -545,7 +550,14 @@ class MempoolMonitor:
                 logger.warning(f"Sandwich detected: {alert.description}")
 
     async def _check_suspicious_approval(self, tx: PendingTx):
-        """Check for suspicious token approvals in pending transactions."""
+        """Alert on a pending approve() whose spender the process already knows to be bad.
+
+        An approval is evidence of an attack only through its spender: a confirmed scam address,
+        an address GoPlus labels a drainer, or a wallet rather than a contract (the drainer
+        pattern), read from what is loaded in memory. An unlimited approval to an unknown
+        contract is not one, and an allowlisted router or Permit2 never is. The counter counts
+        alerts only.
+        """
         try:
             data = tx.data.replace("0x", "")
             if len(data) < 136:
@@ -553,43 +565,55 @@ class MempoolMonitor:
 
             selector = "0x" + data[:8]
             if selector == "0x095ea7b3":
-                # approve(spender, amount)
+                # approve(spender, amount); amount 0 is a revoke and grants nothing.
                 spender = "0x" + data[32:72][-40:]
                 amount = int(data[72:136], 16)
-
-                if amount >= UNLIMITED_APPROVAL:
-                    alert = MempoolAlert(
-                        alert_type="suspicious_approval",
-                        severity="HIGH",
-                        description=(
-                            f"Unlimited token approval pending — "
-                            f"{tx.from_addr[:10]}... approving {spender[:10]}... "
-                            f"for unlimited tokens on contract {tx.to_addr[:10]}..."
-                        ),
-                        victim_tx=tx.tx_hash,
-                        attacker_addr=spender,
-                        target_token=tx.to_addr,
-                        chain_id=tx.chain_id,
-                    )
-                    self._add_alert(alert)
-                    self._stats['suspicious_approvals'] += 1
-                elif amount >= HIGH_APPROVAL:
-                    alert = MempoolAlert(
-                        alert_type="suspicious_approval",
-                        severity="MEDIUM",
-                        description=(
-                            f"Very large token approval pending — "
-                            f"{tx.from_addr[:10]}... approving {spender[:10]}..."
-                        ),
-                        victim_tx=tx.tx_hash,
-                        attacker_addr=spender,
-                        target_token=tx.to_addr,
-                        chain_id=tx.chain_id,
-                    )
-                    self._add_alert(alert)
-                    self._stats['suspicious_approvals'] += 1
+                if amount == 0:
+                    return
+                evidence = self._spender_evidence(spender, tx.chain_id)
+                if evidence is None:
+                    return
+                grant = "unlimited" if amount >= UNLIMITED_APPROVAL else "limited"
+                alert = MempoolAlert(
+                    alert_type="suspicious_approval",
+                    severity="HIGH",
+                    description=(
+                        f"Token approval pending to {evidence} — "
+                        f"{tx.from_addr[:10]}... approving {spender[:10]}... "
+                        f"for {grant} tokens on contract {tx.to_addr[:10]}..."
+                    ),
+                    victim_tx=tx.tx_hash,
+                    attacker_addr=spender,
+                    target_token=tx.to_addr,
+                    chain_id=tx.chain_id,
+                )
+                self._add_alert(alert)
+                self._stats['suspicious_approvals'] += 1
         except Exception as e:
             logger.debug("Approval analysis error: %s", type(e).__name__)
+
+    def _spender_evidence(self, spender: str, chain_id: int) -> Optional[str]:
+        """What marks this spender as an attacker, or None; nothing is looked up.
+
+        The chain's allowlist answers first, so a router that anyone can file reports against
+        is never alerted. A community blacklist entry is three reports anyone can manufacture,
+        not evidence, so only an admin entry counts. The counterparty facts are those a scan
+        already fetched for this spender on this chain, judged as the scanner judges them.
+        """
+        if self._counterparty.allowlisted_name(spender, chain_id):
+            return None
+        match = self._scam_db.local_match(spender, chain_id) if self._scam_db else None
+        if match and match['severity'] == 'block':
+            return "a confirmed scam address (ShieldBot blacklist)"
+        facts = self._counterparty.cached(spender, chain_id)
+        if facts is None:
+            return None
+        if facts["labels"]:
+            source = f" ({facts['label_source']})" if facts["label_source"] else ""
+            return f"an address flagged by GoPlus: {', '.join(facts['labels'])}{source}"
+        if facts["is_contract"] is False or facts["delegated"]:
+            return "a wallet, not a contract (drainer pattern)"
+        return None
 
     def _add_alert(self, alert: MempoolAlert):
         """Add an alert; the deque drops the oldest past its cap."""
