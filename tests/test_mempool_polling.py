@@ -303,6 +303,24 @@ async def test_a_sealed_pending_chain_is_asked_again_after_the_retry_interval():
 
 
 @pytest.mark.asyncio
+async def test_a_sealed_answer_from_a_chain_that_serves_pending_blocks_costs_one_poll(caplog):
+    # Ethereum's load-balanced RPC answers 'pending' with a genuine block, and now and then with a sealed
+    # one. That one answer observes nothing, but the next poll asks again instead of waiting 10 minutes.
+    w3 = MagicMock()
+    w3.eth.get_block.side_effect = [_pending_block(), _pending_block(sealed=True), _pending_block()]
+    monitor = MempoolMonitor(MagicMock())
+
+    with caplog.at_level(logging.WARNING, logger="services.mempool_service"):
+        assert len(await monitor._get_pending_block(w3, 1)) == 3
+        assert await monitor._get_pending_block(w3, 1) is None
+        assert len(await monitor._get_pending_block(w3, 1)) == 3
+
+    assert w3.eth.get_block.call_count == 3
+    assert 1 not in monitor._sealed_pending_until
+    assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+
+
+@pytest.mark.asyncio
 async def test_a_txpool_body_under_the_cap_is_parsed_into_pending_transactions(monkeypatch):
     parsed_on = []
 

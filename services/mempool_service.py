@@ -144,6 +144,8 @@ class MempoolMonitor:
         # Chains whose RPC answered "pending" with a sealed block, until when (time.monotonic()) the
         # pending block is not asked for again. Warned about once per chain.
         self._sealed_pending_until: Dict[int, float] = {}
+        # Chains whose RPC has answered "pending" with a genuine pending block at least once.
+        self._genuine_pending_chains: Set[int] = set()
         # Chains whose txpool_content body passed MAX_TXPOOL_BYTES, until when they are read through
         # the pending block without asking for the txpool. Warned about once per chain.
         self._txpool_oversized_until: Dict[int, float] = {}
@@ -364,6 +366,11 @@ class MempoolMonitor:
             # block. A genuine pending block has no hash yet; a sealed one holds only mined
             # transactions, which can no longer be front-run, so it is not read as a mempool.
             if block.get("hash") is not None:
+                if chain_id in self._genuine_pending_chains:
+                    # This RPC serves genuine pending blocks, so a sealed answer came from one backend
+                    # of a load-balanced endpoint: this poll observes nothing and the next asks again.
+                    logger.debug("Chain %s answered 'pending' with a sealed block this poll", chain_id)
+                    return None
                 first = chain_id not in self._sealed_pending_until
                 self._sealed_pending_until[chain_id] = time.monotonic() + MARK_RETRY_SECONDS
                 if first:
@@ -373,6 +380,7 @@ class MempoolMonitor:
                         chain_id, MARK_RETRY_SECONDS,
                     )
                 return None
+            self._genuine_pending_chains.add(chain_id)
             for tx in (block.get("transactions") or []):
                 # web3 returns each transaction as an AttributeDict, which is a Mapping but not a dict.
                 if isinstance(tx, Mapping):
