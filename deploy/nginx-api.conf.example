@@ -56,8 +56,9 @@ server {
 
         # uvicorn listens on this machine, so a slow connect means it is down: fail fast with a 502.
         proxy_connect_timeout 5s;
-        # A scan stops its analyzers at 25 s (RUN_ALL_DEADLINE_SECONDS in core/registry.py), the extension gives
-        # up at 30 s and the AI chat waits up to 30 s for the model (agent/advisor.py). 60 s leaves headroom
+        # A scan stops its analyzers at 25 s (RUN_ALL_DEADLINE_SECONDS in core/registry.py), an approval scan
+        # answers within 30 s (SCAN_DEADLINE_SECONDS in services/rescue_service.py), the extension gives up at
+        # 30 s and the AI chat waits up to 30 s for the model (agent/advisor.py). 60 s leaves headroom
         # without holding dead connections open for long.
         proxy_send_timeout 60s;
         proxy_read_timeout 60s;
