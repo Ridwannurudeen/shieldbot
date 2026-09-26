@@ -111,7 +111,9 @@ class Document extends Node {
   getElementById(id) { return id === 'root' ? this.root : null; }
 }
 const document = new Document();
-async function fetch(url) {
+const requests = [];
+async function fetch(url, options) {
+  requests.push([url, options]);
   const path = url.slice('http://dashboard.test'.length);
   const key = Object.keys(replies).find(prefix => path.startsWith(prefix));
   const [status, body] = key ? replies[key] : [404, {detail: 'Not Found'}];
@@ -128,7 +130,8 @@ const context = vm.createContext({
 context.window = context.self = context;
 const html = fs.readFileSync(file, 'utf8');
 for (const [, script] of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) vm.runInContext(script, context);
-// What a test's steps can use: find elements anywhere in the document, click them and press keys.
+// What a test's steps can use: find elements anywhere in the document, click them, press keys and
+// read the requests the page sent.
 const find = test => descendants(document).find(test) || null;
 const byLabel = prefix => find(el => (el.getAttribute('aria-label') || '').startsWith(prefix));
 const byRole = role => find(el => el.getAttribute('role') === role);
@@ -200,6 +203,57 @@ CONTRACT = {
     "flags": ["High sell tax"],
     "detected_at": 1_790_000_000,
 }
+# A sell-side sandwich: the victim sells a token for WETH, so target_token (what the victim buys) is WETH.
+SANDWICH = {
+    "type": "mempool_sandwich_attack",
+    "alert_type": "sandwich_attack",
+    "severity": "HIGH",
+    "description": "Sandwich attack detected on 0xaaaaaaaa... — attacker 0x11111111... front-ran victim "
+    "0x22222222... buying 0xaaaaaaaa... with 0xbbbbbbbb... at a higher gas price, then reversed the trade",
+    "victim_tx": "0x" + "b1" * 32,
+    "attacker_tx": "0x" + "a1" * 32,
+    "attacker_addr": "0x" + "11" * 20,
+    "target_token": "0x" + "aa" * 20,
+    "chain_id": 1,
+    "created_at": 1_790_000_000,
+}
+# An approval to a known-bad spender: target_token is the approved token contract.
+APPROVAL = {
+    "type": "mempool_suspicious_approval",
+    "alert_type": "suspicious_approval",
+    "severity": "HIGH",
+    "description": "Token approval pending to a confirmed scam address (ShieldBot blacklist) — 0x22222222... "
+    "approving 0x33333333... for unlimited tokens on contract 0xcccccccc...",
+    "victim_tx": "0x" + "b2" * 32,
+    "attacker_tx": None,
+    "attacker_addr": "0x" + "33" * 20,
+    "target_token": "0x" + "cc" * 20,
+    "chain_id": 56,
+    "created_at": 1_790_000_000,
+}
+
+
+NO_ATTESTATIONS = {"available": False, "attestations": [], "summary": {}}
+ATTESTOR = "0x" + "ee" * 20
+ATTESTATIONS = {
+    "available": True,
+    "attestor": ATTESTOR,
+    "explorer": f"https://base.easscan.org/address/{ATTESTOR}",
+    "attestations": [],
+    "summary": {"total_recent": 0, "by_risk": {}, "by_source_chain": {}, "attestor": ATTESTOR},
+}
+ATTESTATION = {
+    "uid": "0x" + "ab" * 32,
+    "risk_label": "DANGER",
+    "scan_type": "token",
+    "scanned_address": "0x" + "ab" * 20,
+    "source_chain_id": 56,
+    "timestamp": 1_790_000_000,
+}
+
+
+def short(addr):
+    return addr[:6] + "…" + addr[-4:]
 
 
 def render(
@@ -208,6 +262,7 @@ def render(
     mempool_reply=None,
     campaigns_reply=(200, {"campaigns": []}),
     report_reply=(200, {"status": "recorded"}),
+    attestations_reply=(200, NO_ATTESTATIONS),
     steps=TEXT,
 ):
     node = shutil.which("node")
@@ -224,7 +279,7 @@ def render(
         ],
         "/api/threats/feed?source=mempool": [200, mempool_reply or {"threats": [], "count": 0}],
         "/api/campaigns/top": list(campaigns_reply),
-        "/api/base/attestations": [200, {"available": False, "attestations": [], "summary": {}}],
+        "/api/base/attestations": list(attestations_reply),
         "/api/report": list(report_reply),
     }
     script = f"{HARNESS}\nasync function steps() {{\n{steps}\n}}\n"
@@ -379,3 +434,77 @@ def test_the_page_behind_the_open_dialog_is_inert_and_escape_hands_focus_back():
         "closed": {"dialog": False, "inert": False, "focusBack": True},
     }
 
+
+# Reads the first row's address controls, opens its Flag dialog and submits it.
+ROW_AND_REPORT = """
+  const investigate = byLabel('Investigate '), copy = byLabel('Copy '), flag = byLabel('Flag ');
+  const text = document.root.textContent;
+  flag.focus();
+  await click(flag);
+  const dialog = byRole('dialog').textContent;
+  await click(byText('Submit Report'));
+  const [, options] = requests.find(([url]) => url.endsWith('/api/report'));
+  return {
+    text, dialog, href: investigate.getAttribute('href'),
+    copy: copy.getAttribute('aria-label'), flag: flag.getAttribute('aria-label'),
+    report: JSON.parse(options.body),
+  };
+"""
+
+
+@pytest.mark.parametrize(
+    "alert, explorer",
+    [(SANDWICH, "https://etherscan.io"), (APPROVAL, "https://bscscan.com")],
+    ids=["sell-side sandwich", "suspicious approval"],
+)
+def test_a_mempool_alert_row_is_its_attacker_and_notes_the_token(alert, explorer):
+    attacker, token = alert["attacker_addr"], alert["target_token"]
+    result = render(mempool_reply={"threats": [alert], "count": 1}, steps=ROW_AND_REPORT)
+    assert f"Attacker {short(attacker)}" in result["text"]
+    assert f"Target token {short(token)}" in result["text"]
+    assert result["href"] == f"{explorer}/address/{attacker}"
+    assert result["copy"] == f"Copy {short(attacker)} to the clipboard"
+    assert result["flag"] == f"Flag {short(attacker)} as a false positive"
+    assert f"Attacker Address{attacker}" in result["dialog"]
+    assert token not in result["dialog"]
+    assert result["report"] == {
+        "address": attacker,
+        "chainId": alert["chain_id"],
+        "report_type": "false_positive",
+        "reason": None,
+    }
+
+
+def test_a_contract_row_is_its_contract():
+    result = render(contracts=[CONTRACT], steps=ROW_AND_REPORT)
+    assert "Attacker" not in result["text"]
+    assert "Target token" not in result["text"]
+    assert result["href"] == f"https://bscscan.com/address/{CONTRACT['address']}"
+    assert f"Address{CONTRACT['address']}" in result["dialog"]
+    assert "Attacker Address" not in result["dialog"]
+    assert result["report"]["address"] == CONTRACT["address"]
+
+
+RETIRED_LINE = "Retired on 26 Sep 2026: no new attestations are written; past ones stay on chain."
+
+
+def test_a_retired_attestor_reads_as_history():
+    text = render(attestations_reply=(200, {**ATTESTATIONS, "retired_on": "2026-09-26"}))
+    assert RETIRED_LINE in text
+    assert "No attestations on record." in text
+    assert "No attestations yet." not in text
+
+
+def test_a_retired_attestor_still_lists_its_past_attestations():
+    reply = {**ATTESTATIONS, "attestations": [ATTESTATION], "retired_on": "2026-09-26"}
+    text = render(attestations_reply=(200, reply))
+    assert RETIRED_LINE in text
+    assert "DANGER" in text
+    assert "EAS ↗" in text
+    assert "No attestations" not in text
+
+
+def test_an_attestor_that_is_not_retired_reads_as_today():
+    text = render(attestations_reply=(200, ATTESTATIONS))
+    assert "Retired on" not in text
+    assert "No attestations yet." in text
