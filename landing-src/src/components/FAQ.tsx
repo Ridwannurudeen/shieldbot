@@ -12,7 +12,7 @@ const faqs = [
   },
   {
     q: "Which blockchains does ShieldBot support?",
-    a: "BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, Optimism and Robinhood Chain. Contract scans work on all 8. Mempool monitoring covers the 4 chains with a public mempool: BNB Chain, opBNB, Ethereum and Polygon. Base, Arbitrum, Optimism and Robinhood Chain have none, so contract scans cover them, and ShieldBot also scans new Robinhood Chain launches. Coverage depends on each chain's data providers, and missing data is reported as Unknown.",
+    a: "Ethereum, BNB Chain, opBNB, Base, Arbitrum, Polygon, Optimism and Robinhood Chain. Contract scans work on all 8. Mempool monitoring covers the 4 chains with a public mempool: Ethereum, BNB Chain, opBNB and Polygon. Base, Arbitrum, Optimism and Robinhood Chain have none, so contract scans cover them, and ShieldBot also scans new Robinhood Chain launches. Coverage depends on each chain's data providers, and missing data is reported as Unknown.",
   },
   {
     q: "What does ShieldBot do on Robinhood Chain?",

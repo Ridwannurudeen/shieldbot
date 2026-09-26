@@ -14,18 +14,6 @@ interface Chain {
 
 const chains: Chain[] = [
   {
-    name: "BNB Chain",
-    simulation: "honeypot.is",
-    mempool: true,
-    launches: false,
-    logo: (
-      <svg viewBox="0 0 32 32" fill="none" className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0" aria-hidden="true">
-        <circle cx="16" cy="16" r="16" fill="#F3BA2F"/>
-        <path d="M12.116 14.404 16 10.52l3.886 3.886 2.26-2.26L16 6l-6.144 6.144 2.26 2.26zM6 16l2.26-2.26L10.52 16l-2.26 2.26L6 16zm6.116 1.596L16 21.48l3.886-3.886 2.26 2.259L16 26l-6.144-6.144-.002-.003 2.262-2.257zM21.48 16l2.26-2.26L26 16l-2.26 2.26L21.48 16zm-3.188-.002h.002V16L16 18.292 13.708 16v-.004L16 13.708l2.292 2.29z" fill="#fff"/>
-      </svg>
-    ),
-  },
-  {
     name: "Ethereum",
     simulation: "honeypot.is",
     mempool: true,
@@ -39,6 +27,18 @@ const chains: Chain[] = [
         <path d="M16.498 27.995v-6.028L9 17.616l7.498 10.379z" fill="#fff"/>
         <path d="m16.498 20.573 7.497-4.353-7.497-3.348v7.701z" fill="#fff" fillOpacity=".2"/>
         <path d="m9 16.22 7.498 4.353v-7.701L9 16.22z" fill="#fff" fillOpacity=".6"/>
+      </svg>
+    ),
+  },
+  {
+    name: "BNB Chain",
+    simulation: "honeypot.is",
+    mempool: true,
+    launches: false,
+    logo: (
+      <svg viewBox="0 0 32 32" fill="none" className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0" aria-hidden="true">
+        <circle cx="16" cy="16" r="16" fill="#F3BA2F"/>
+        <path d="M12.116 14.404 16 10.52l3.886 3.886 2.26-2.26L16 6l-6.144 6.144 2.26 2.26zM6 16l2.26-2.26L10.52 16l-2.26 2.26L6 16zm6.116 1.596L16 21.48l3.886-3.886 2.26 2.259L16 26l-6.144-6.144-.002-.003 2.262-2.257zM21.48 16l2.26-2.26L26 16l-2.26 2.26L21.48 16zm-3.188-.002h.002V16L16 18.292 13.708 16v-.004L16 13.708l2.292 2.29z" fill="#fff"/>
       </svg>
     ),
   },
