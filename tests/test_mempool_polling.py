@@ -277,14 +277,15 @@ async def test_a_sealed_block_answered_for_pending_is_skipped_with_one_warning_p
     monitor = MempoolMonitor(MagicMock())
 
     with caplog.at_level(logging.WARNING, logger="services.mempool_service"):
-        assert await monitor._get_pending_block(w3, 56) is None
-        assert await monitor._get_pending_block(w3, 56) is None
-        assert await monitor._get_pending_block(w3, 204) is None
+        for _ in range(mempool_service.SEALED_MARK_AFTER + 1):
+            assert await monitor._get_pending_block(w3, 56) is None
+        for _ in range(mempool_service.SEALED_MARK_AFTER):
+            assert await monitor._get_pending_block(w3, 204) is None
 
     warned = [r.args[0] for r in caplog.records if r.levelno == logging.WARNING]
     assert warned == [56, 204]
-    # Once a chain is known to answer with a sealed block, its full block is not fetched again.
-    assert w3.eth.get_block.call_count == 2
+    # Once a chain is marked, its full block is not fetched again within the retry interval.
+    assert w3.eth.get_block.call_count == 2 * mempool_service.SEALED_MARK_AFTER
 
 
 @pytest.mark.asyncio
@@ -292,14 +293,54 @@ async def test_a_sealed_pending_chain_is_asked_again_after_the_retry_interval():
     # One sealed answer (a load-balanced RPC can have one odd backend) must not blind the chain
     # until the process restarts.
     w3 = MagicMock()
-    w3.eth.get_block.side_effect = [_pending_block(sealed=True), _pending_block()]
+    marks_after = mempool_service.SEALED_MARK_AFTER
+    w3.eth.get_block.side_effect = [_pending_block(sealed=True)] * marks_after + [_pending_block()]
     monitor = MempoolMonitor(MagicMock())
 
-    assert await monitor._get_pending_block(w3, 1) is None
+    for _ in range(marks_after):
+        assert await monitor._get_pending_block(w3, 1) is None
+    assert monitor._sealed_pending_until[1] > time.monotonic()
     monitor._sealed_pending_until[1] = time.monotonic() - 1  # the retry interval has passed
     txs = await monitor._get_pending_block(w3, 1)
 
     assert [tx.tx_hash for tx in txs] == ["0x" + "01" * 32, "0x" + "02" * 32, "0x" + "03" * 32]
+
+
+@pytest.mark.asyncio
+async def test_one_sealed_answer_before_any_pending_block_does_not_mark_the_chain(caplog):
+    # After a restart Ethereum has not served a genuine block yet; one unlucky sealed answer then
+    # must not cost the 10-minute mark.
+    w3 = MagicMock()
+    w3.eth.get_block.side_effect = [_pending_block(sealed=True), _pending_block()]
+    monitor = MempoolMonitor(MagicMock())
+
+    with caplog.at_level(logging.WARNING, logger="services.mempool_service"):
+        assert await monitor._get_pending_block(w3, 1) is None
+        assert len(await monitor._get_pending_block(w3, 1)) == 3
+
+    assert w3.eth.get_block.call_count == 2
+    assert 1 not in monitor._sealed_pending_until
+    assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+
+
+@pytest.mark.asyncio
+async def test_a_run_of_sealed_answers_from_a_pending_block_chain_is_warned_about_once_per_run(caplog):
+    # An RPC that served pending blocks and then turned to sealed answers leaves the chain unobserved;
+    # that must reach the journal once per run, not on every poll and not never.
+    warn_after = mempool_service.SEALED_WARN_AFTER
+    sealed = _pending_block(sealed=True)
+    w3 = MagicMock()
+    answers = [_pending_block()] + [sealed] * (warn_after + 2) + [_pending_block()] + [sealed] * warn_after
+    w3.eth.get_block.side_effect = answers
+    monitor = MempoolMonitor(MagicMock())
+
+    with caplog.at_level(logging.WARNING, logger="services.mempool_service"):
+        for _ in answers:
+            await monitor._get_pending_block(w3, 1)
+
+    warned = [r.args for r in caplog.records if r.levelno == logging.WARNING]
+    assert warned == [(1, warn_after), (1, warn_after)]
+    assert 1 not in monitor._sealed_pending_until
 
 
 @pytest.mark.asyncio
