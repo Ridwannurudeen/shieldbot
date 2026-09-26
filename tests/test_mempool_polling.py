@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import threading
+import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -10,7 +11,7 @@ from hexbytes import HexBytes
 from web3.datastructures import AttributeDict
 
 from services import mempool_service
-from services.mempool_service import MempoolMonitor, PendingTx
+from services.mempool_service import ANALYSIS_YIELD_EVERY, MempoolMonitor, PendingTx
 from utils.web3_client import Web3Client
 
 SENDER = "0xAbCdEf0123456789aBcDeF0123456789AbCdEf01"
@@ -248,3 +249,87 @@ async def test_each_chain_poll_logs_its_duration(caplog):
     polled = [r for r in caplog.records if r.msg == "Polled chain %s in %.2f s"]
     assert sorted(r.args[0] for r in polled) == [1, 56]
     assert all(r.levelno == logging.DEBUG and r.args[1] >= 0 for r in polled)
+
+
+def _tx(tx_hash, chain_id=1, seen_at=None):
+    """A plain transfer as the txpool reader builds it; seen_at defaults to now."""
+    fields = dict(tx_hash=tx_hash, from_addr=SENDER.lower(), to_addr=TOKEN, value=0, gas_price=5, data="0x", chain_id=chain_id)
+    return PendingTx(**fields) if seen_at is None else PendingTx(**fields, seen_at=seen_at)
+
+
+HASH_1, HASH_2, HASH_3 = ("0x" + "0a" * 32, "0x" + "0b" * 32, "0x" + "0c" * 32)
+
+
+@pytest.mark.asyncio
+async def test_a_transaction_that_stays_in_the_pool_is_analysed_once_and_counted_once(monkeypatch):
+    """Two loop cycles: HASH_1 has been in the pool for over a minute and stays, HASH_2 leaves, HASH_3 joins."""
+    monitor = MempoolMonitor(MagicMock())
+    monitor._running = True
+    monitor._monitored_chains = {1}
+    monitor._analyze_pending_tx = AsyncMock()
+    stuck = _tx(HASH_1, seen_at=time.time() - 61)
+    monitor._get_txpool_content = AsyncMock(side_effect=[
+        [stuck, _tx(HASH_2)],
+        [stuck, _tx(HASH_3)],
+        asyncio.CancelledError(),
+    ])
+    monkeypatch.setattr("services.mempool_service.asyncio.sleep", AsyncMock())
+
+    await monitor._monitor_loop()
+
+    assert [call.args[0].tx_hash for call in monitor._analyze_pending_tx.await_args_list] == [HASH_1, HASH_2, HASH_3]
+    assert monitor.get_stats()["total_pending_seen"] == 3
+    assert monitor.get_stats()["pending_count"] == {1: 2}
+    assert set(monitor._pending[1]) == {HASH_1, HASH_3}
+
+
+@pytest.mark.asyncio
+async def test_a_transaction_that_left_the_pool_is_dropped():
+    monitor = MempoolMonitor(MagicMock())
+    monitor._get_txpool_content = AsyncMock(side_effect=[[_tx(HASH_1), _tx(HASH_2)], [_tx(HASH_2)]])
+
+    await monitor._poll_pending(1)
+    assert monitor.get_stats()["pending_count"] == {1: 2}
+    await monitor._poll_pending(1)
+
+    assert monitor.get_stats()["pending_count"] == {1: 1}
+    assert list(monitor._pending[1]) == [HASH_2]
+    assert monitor.get_stats()["total_pending_seen"] == 2
+
+
+@pytest.mark.asyncio
+async def test_a_failed_poll_keeps_the_pending_set():
+    """A poll that raises, or reads neither a txpool nor a pending block, is not an empty pool."""
+    monitor = MempoolMonitor(MagicMock())
+    monitor._get_txpool_content = AsyncMock(side_effect=[[_tx(HASH_1)], RuntimeError("RPC timeout"), []])
+    monitor._get_pending_block = AsyncMock(return_value=None)
+
+    await monitor._poll_pending(1)
+    assert monitor.get_stats()["unobservable_chains"] == []
+    for _ in range(2):
+        await monitor._poll_pending(1)
+        assert monitor.get_stats()["unobservable_chains"] == [1]
+        assert monitor.get_stats()["pending_count"] == {1: 1}
+    assert monitor.get_stats()["total_pending_seen"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_large_snapshot_lets_other_tasks_run_while_it_is_added():
+    monitor = MempoolMonitor(MagicMock())
+    monitor._get_txpool_content = AsyncMock(return_value=[_tx("0x" + f"{i:064x}") for i in range(20_000)])
+    ticks = 0
+
+    async def ticker():
+        nonlocal ticks
+        while True:
+            ticks += 1
+            await asyncio.sleep(0)
+
+    task = asyncio.create_task(ticker())
+    try:
+        await monitor._poll_pending(1)
+    finally:
+        task.cancel()
+
+    assert monitor.get_stats()["pending_count"] == {1: 20_000}
+    assert ticks >= 20_000 // ANALYSIS_YIELD_EVERY

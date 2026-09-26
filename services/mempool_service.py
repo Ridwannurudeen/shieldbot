@@ -21,6 +21,11 @@ PENDING_TRANSACTION_CHAINS = frozenset({56, 1, 137, 204})
 def supports_pending_transactions(chain_id: int) -> bool:
     return chain_id in PENDING_TRANSACTION_CHAINS
 
+
+# New transactions analysed between yields to the event loop, so requests are served while a large
+# first snapshot is added.
+ANALYSIS_YIELD_EVERY = 256
+
 # Known DEX router selectors
 SWAP_SELECTORS = {
     "0x38ed1739": "swapExactTokensForTokens",
@@ -153,7 +158,6 @@ class MempoolMonitor:
                 for chain_id in self._monitored_chains:
                     started = time.monotonic()
                     await self._poll_pending(chain_id)
-                    self._prune_stale(chain_id)
                     logger.debug("Polled chain %s in %.2f s", chain_id, time.monotonic() - started)
                 await asyncio.sleep(2)  # Poll every 2 seconds
             except asyncio.CancelledError:
@@ -181,11 +185,22 @@ class MempoolMonitor:
                 return
             self._unobservable_chains.discard(chain_id)
 
-            for tx in pending_txs:
-                if tx.tx_hash not in self._pending[chain_id]:
-                    self._pending[chain_id][tx.tx_hash] = tx
-                    self._stats['total_pending_seen'] += 1
-                    await self._analyze_pending_tx(tx)
+            # The pool is exactly this snapshot: what left it is dropped, what stayed keeps its entry,
+            # and only what joined is counted and analysed, so a long-lived transaction is seen once.
+            snapshot = {tx.tx_hash: tx for tx in pending_txs}
+            pending = self._pending[chain_id]
+            for tx_hash in [h for h in pending if h not in snapshot]:
+                del pending[tx_hash]
+            added = 0
+            for tx_hash, tx in snapshot.items():
+                if tx_hash in pending:
+                    continue
+                pending[tx_hash] = tx
+                self._stats['total_pending_seen'] += 1
+                await self._analyze_pending_tx(tx)
+                added += 1
+                if added % ANALYSIS_YIELD_EVERY == 0:
+                    await asyncio.sleep(0)
 
         except Exception as e:
             self._unobservable_chains.add(chain_id)
@@ -414,13 +429,6 @@ class MempoolMonitor:
         self._alerts.append(alert)
         if len(self._alerts) > self._max_alerts:
             self._alerts = self._alerts[-self._max_alerts:]
-
-    def _prune_stale(self, chain_id: int):
-        """Remove pending txs older than 60 seconds."""
-        now = time.time()
-        stale = [h for h, tx in self._pending[chain_id].items() if now - tx.seen_at > 60]
-        for h in stale:
-            del self._pending[chain_id][h]
 
     def get_alerts(self, chain_id: int = None, limit: int = 50) -> List[Dict]:
         """Get recent alerts, optionally filtered by chain."""
