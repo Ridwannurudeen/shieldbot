@@ -314,6 +314,27 @@ async def test_the_nearest_outbidding_front_run_before_the_victim_is_the_one_rep
 
 
 @pytest.mark.asyncio
+async def test_a_trade_the_attacker_already_reversed_is_not_the_front_run_of_a_later_victim():
+    # A bot that buys and sells in turn around other people's trades had closed its position before the
+    # later buyer traded, so that buyer was not sandwiched: the front-run is the attacker's latest swap
+    # before the victim, whichever way it traded.
+    monitor = MempoolMonitor(MagicMock())
+    now = time.time()
+    buy = _swap("0x" + "a1" * 32, ATTACKER, gas_price=10, seen_at=now - 5)
+    victim = _swap("0x" + "b1" * 32, VICTIM, gas_price=5, seen_at=now - 4)
+    sell = _swap("0x" + "a2" * 32, ATTACKER, gas_price=10, seen_at=now - 3, data=SELL_TOKEN)
+    later_buyer = _swap("0x" + "c1" * 32, BYSTANDER, gas_price=5, seen_at=now - 2)
+    sell_again = _swap("0x" + "a3" * 32, ATTACKER, gas_price=10, seen_at=now - 1, data=SELL_TOKEN)
+
+    for tx in (buy, victim, sell, later_buyer, sell_again):
+        await monitor._analyze_pending_tx(tx)
+
+    assert _sandwich_alerts(monitor) == [
+        ("sandwich_attack", buy.tx_hash, victim.tx_hash, ATTACKER, TOKEN, 56),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_two_hundred_same_pair_swaps_report_each_pair_once():
     monitor = MempoolMonitor(MagicMock())
     recorded = []

@@ -518,8 +518,9 @@ class MempoolMonitor:
         A sandwich is, in the order the swaps were seen: the attacker's front-run, a swap by
         another sender in the same direction that the front-run outbid on gas price (the victim),
         and the attacker's back-run, the reverse trade. Only the newest swap can be a back-run, so
-        only its sender is tried as the attacker, only the sender's reverse trades before the
-        victim are tried as the front-run (the nearest one that outbid the victim), and a
+        only its sender is tried as the attacker. The front-run is the attacker's latest swap before
+        the victim, whichever way it traded: it counts only if it trades the victim's way and outbid
+        the victim, so a position the attacker already reversed never front-runs a later victim. A
         (front-run, victim) pair is reported once however many back-runs follow it. The back-run's
         gas price is not compared: it lands after the victim by construction. A sender that trades
         one way again and again (a DCA bot, an aggregator's solver) reverses nothing and is never
@@ -540,24 +541,19 @@ class MempoolMonitor:
         attacker = newest.tx.from_addr
         # The front-run and the victim trade the reverse of the back-run.
         direction = (newest.token_out, newest.token_in)
-        fronts = [
-            (index, swap) for index, swap in enumerate(queue)
-            if swap.tx.from_addr == attacker and (swap.token_in, swap.token_out) == direction
-        ]
-        if not fronts:
-            return
-
-        for victim_index, victim in enumerate(queue[:-1]):
-            if victim.tx.from_addr == attacker or (victim.token_in, victim.token_out) != direction:
+        front = None  # the attacker's latest swap before this position, whichever way it trades
+        for victim in queue[:-1]:
+            if victim.tx.from_addr == attacker:
+                front = victim
                 continue
-            front = next(
-                (
-                    swap for index, swap in reversed(fronts)
-                    if index < victim_index and swap.tx.gas_price > victim.tx.gas_price
-                ),
-                None,
-            )
-            if front is None or (front.tx.tx_hash, victim.tx.tx_hash) in reported:
+            if (victim.token_in, victim.token_out) != direction:
+                continue
+            if (
+                front is None
+                or (front.token_in, front.token_out) != direction
+                or front.tx.gas_price <= victim.tx.gas_price
+                or (front.tx.tx_hash, victim.tx.tx_hash) in reported
+            ):
                 continue
             reported.add((front.tx.tx_hash, victim.tx.tx_hash))
             alert = MempoolAlert(
@@ -586,7 +582,8 @@ class MempoolMonitor:
         an address GoPlus labels a drainer, or a wallet rather than a contract (the drainer
         pattern), read from what is loaded in memory. An unlimited approval to an unknown
         contract is not one, and an allowlisted router or Permit2 never is. The counter counts
-        alerts only.
+        alerts only. The cached facts are this process's own: with BACKGROUND_WORKERS=external the
+        monitor runs in workers.py, where only spenders that process looked up are cached.
         """
         try:
             data = tx.data.replace("0x", "")
