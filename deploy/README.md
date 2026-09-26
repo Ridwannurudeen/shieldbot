@@ -10,8 +10,8 @@ A third unit, `shieldbot-workers` (`python workers.py`; `shieldbot-workers.servi
 `BACKGROUND_WORKERS=external` was turned on (`docs/DEPLOYMENT.md`); it then runs the background work and holds the
 recorder key. `deploy.sh` does not manage it: stop it before `--cutover` or `--rollback` and start it after.
 
-nginx fronts the API and serves the landing site. Every other unit on the machine, including `rh-census-4663`,
-belongs to other work. `deploy.sh` stops and starts only the two units above. It never touches other units,
+nginx fronts the API and serves the landing site. Every other unit on the machine, including `rh-census-4663`
+(stopped and disabled on 2026-09-26, see `docs/census-4663.md`), belongs to other work. `deploy.sh` stops and starts only the two units above. It never touches other units,
 nginx, `.env` or systemd itself (no `daemon-reload`: a changed unit file is applied by hand).
 
 ## Deploy a commit

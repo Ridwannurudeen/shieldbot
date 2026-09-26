@@ -1,15 +1,20 @@
 # Robinhood Chain observation census
 
 This standalone tooling observes chain **4663** without sending transactions. It
-does not modify ShieldBot's adapters or call competitor scanners. The live collector
+does not modify ShieldBot's adapters or call competitor scanners. The deployed collector
 is described below, and the results of the completed report window are in
 [SUBMISSION.md](SUBMISSION.md#robinhood-chain-observation-census). These commands do
 not install the example service.
 
-## Live deployment
+## Deployment
 
-The observation census **is** now running. The paths in the examples below are
-illustrative; the deployed instance uses different ones:
+The observation census ran on the ShieldBot server from 2026-09-14 until 2026-09-26, when it
+was stopped and disabled. Its report window had closed, and it shared the public 4663 RPC's
+rate limit with launch discovery, whose RPC breaker opened on HTTP 429 106 times in the six
+hours before the census stopped and 4 times in the twelve hours after. Its data stays in place.
+`systemctl enable --now rh-census-4663` starts it again; it resumes from its saved cursor, so
+it first catches up on every block since it stopped, competing with launch discovery for that RPC.
+The paths in the examples below are illustrative; the deployed instance uses these:
 
 | | value |
 |---|---|
@@ -18,7 +23,7 @@ illustrative; the deployed instance uses different ones:
 | interpreter | `/opt/rh-census-4663/venv/bin/python` |
 | data directory | `/var/lib/rh-census-4663` |
 
-So the report against the live data is:
+So the report against the collected data is:
 
 ```bash
 cd /opt/rh-census-4663/app
