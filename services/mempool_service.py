@@ -1,6 +1,7 @@
 """Mempool monitoring v1 — detect sandwich attacks, frontrunning, and suspicious pending transactions."""
 
 import asyncio
+import json
 import logging
 import time
 from collections import defaultdict, deque
@@ -25,6 +26,13 @@ def supports_pending_transactions(chain_id: int) -> bool:
 # New transactions analysed between yields to the event loop, so requests are served while a large
 # first snapshot is added.
 ANALYSIS_YIELD_EVERY = 256
+
+# A txpool_content body larger than this is not parsed: json.loads holds the GIL for about a second
+# per 80 MB, which freezes the event loop, and Ethereum's pool runs to that size. A chain whose pool
+# exceeds the cap is watched through the node's pending block instead.
+MAX_TXPOOL_BYTES = 8 * 1024 * 1024
+# Per socket operation, matching the request timeout of the web3 provider (adapters/evm_base.py).
+TXPOOL_TIMEOUT_SECONDS = 10
 
 # Known DEX router selectors
 SWAP_SELECTORS = {
@@ -102,8 +110,9 @@ class MempoolAlert:
 class MempoolMonitor:
     """Monitors pending transactions for sandwich attacks and frontrunning.
 
-    Uses a polling approach to txpool_content/txpool_inspect RPCs.
-    Falls back to eth_getBlock('pending') for chains without txpool support.
+    Polls txpool_content on each chain and falls back to eth_getBlock('pending') where the RPC does
+    not serve it. A pool larger than MAX_TXPOOL_BYTES is watched through the pending block as well:
+    the transactions about to be mined rather than the whole pool.
     """
 
     def __init__(self, web3_client, db=None):
@@ -127,6 +136,9 @@ class MempoolMonitor:
         self._monitored_chains: Set[int] = set()
         # Chains whose RPC answered "pending" with a sealed block: warned about once, not asked again.
         self._sealed_pending_chains: Set[int] = set()
+        # Chains whose txpool_content body passed MAX_TXPOOL_BYTES: warned about once, read through
+        # the pending block from then on.
+        self._oversized_txpool_chains: Set[int] = set()
         # Monitored chains whose last poll read neither a txpool nor a genuine pending block. Their
         # mempool is unknown, so they must not be reported as free of threats.
         self._unobservable_chains: Set[int] = set()
@@ -229,20 +241,54 @@ class MempoolMonitor:
             logger.debug("Pending poll failed for chain %s: %s", chain_id, type(e).__name__)
 
     async def _get_txpool_content(self, w3: Web3, chain_id: int) -> List[PendingTx]:
-        """Fetch pending txs via txpool_content RPC.
+        """Fetch pending txs via txpool_content RPC; [] sends _poll_pending to the pending block.
 
-        Ethereum's txpool runs to tens of megabytes, so the fetch, the parse and the PendingTx build
-        all run in the executor; the event loop only receives the finished list.
+        The body is streamed and abandoned as soon as it passes MAX_TXPOOL_BYTES, and the chain takes
+        the pending-block route for the life of the process: a pool that large is the chain's normal
+        size, so a retry would download tens of megabytes for nothing. A body under the cap is parsed
+        and built in the executor. A provider without an HTTP endpoint, a failed or non-200 request
+        and an oversized body all give [].
         """
+        if chain_id in self._oversized_txpool_chains:
+            return []
+        endpoint = getattr(w3.provider, "endpoint_uri", None)
+        if not isinstance(endpoint, str) or not endpoint.startswith(("http://", "https://")):
+            return []
+        body = bytearray()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    endpoint,
+                    json={"jsonrpc": "2.0", "id": 1, "method": "txpool_content", "params": []},
+                    timeout=aiohttp.ClientTimeout(
+                        sock_connect=TXPOOL_TIMEOUT_SECONDS, sock_read=TXPOOL_TIMEOUT_SECONDS
+                    ),
+                ) as resp:
+                    if resp.status != 200:
+                        logger.debug("txpool_content answered HTTP %d on chain %s", resp.status, chain_id)
+                        return []
+                    async for chunk in resp.content.iter_chunked(64 * 1024):
+                        body.extend(chunk)
+                        if len(body) > MAX_TXPOOL_BYTES:
+                            resp.close()
+                            self._oversized_txpool_chains.add(chain_id)
+                            logger.warning(
+                                "Chain %s's txpool is larger than %d bytes; it is watched through its "
+                                "pending block from now on",
+                                chain_id, MAX_TXPOOL_BYTES,
+                            )
+                            return []
+        except Exception as e:
+            logger.debug("txpool_content read failed for chain %s: %s", chain_id, type(e).__name__)
+            return []
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._read_txpool_content, w3, chain_id)
+        return await loop.run_in_executor(None, self._parse_txpool_content, bytes(body), chain_id)
 
     @staticmethod
-    def _read_txpool_content(w3: Web3, chain_id: int) -> List[PendingTx]:
+    def _parse_txpool_content(body: bytes, chain_id: int) -> List[PendingTx]:
         txs = []
         try:
-            result = w3.provider.make_request("txpool_content", [])
-            pending = result.get("result", {}).get("pending", {})
+            pending = json.loads(body).get("result", {}).get("pending", {})
             for sender, nonces in pending.items():
                 for nonce, tx_data in nonces.items():
                     txs.append(PendingTx(
@@ -254,8 +300,9 @@ class MempoolMonitor:
                         data=tx_data.get("input", "0x"),
                         chain_id=chain_id,
                     ))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("txpool_content parse failed for chain %s: %s", chain_id, type(e).__name__)
+            return []
         return txs
 
     async def _get_pending_block(self, w3: Web3, chain_id: int) -> Optional[List[PendingTx]]:

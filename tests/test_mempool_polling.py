@@ -1,11 +1,14 @@
 """Mempool polling: how pending transactions are read, parsed and handed to the analysis."""
 
 import asyncio
+import json
 import logging
-import threading
 import time
-from unittest.mock import AsyncMock, MagicMock
+from contextlib import contextmanager
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
 import pytest
 from hexbytes import HexBytes
 from web3.datastructures import AttributeDict
@@ -17,6 +20,57 @@ from utils.web3_client import Web3Client
 SENDER = "0xAbCdEf0123456789aBcDeF0123456789AbCdEf01"
 TOKEN = "0x" + "22" * 20
 APPROVE_UNLIMITED = "0x095ea7b3" + "00" * 12 + "11" * 20 + "ff" * 32
+# An RPC URL as production configures them, carrying a key that must never reach the logs.
+RPC_URL = "https://rpc.example/secret-key"
+EMPTY_TXPOOL = {"result": {"pending": {}}}
+
+
+async def _chunks(body, size, error=None):
+    for start in range(0, len(body), size):
+        yield body[start:start + size]
+    if error is not None:
+        raise error
+
+
+@contextmanager
+def _serve_txpool(*answers):
+    """Patch aiohttp so each txpool_content POST answers the next item.
+
+    An item is a payload dict or raw bytes served with HTTP 200, an int served as the HTTP status with
+    an empty body, an exception the POST raises, or a (bytes, exception) pair whose stream raises after
+    the bytes. The session keeps every response built in `responses`.
+    """
+    def response_for(answer):
+        if isinstance(answer, Exception):
+            return answer
+        error = None
+        if isinstance(answer, tuple):
+            answer, error = answer
+        status = answer if isinstance(answer, int) else 200
+        if isinstance(answer, int):
+            body = b""
+        elif isinstance(answer, bytes):
+            body = answer
+        else:
+            body = json.dumps(answer).encode("utf-8")
+        response = MagicMock(status=status)
+        response.content.iter_chunked = lambda size: _chunks(body, size, error)
+        response.__aenter__ = AsyncMock(return_value=response)
+        response.__aexit__ = AsyncMock(return_value=False)
+        return response
+
+    session = MagicMock()
+    session.responses = [response_for(answer) for answer in answers]
+    session.post.side_effect = list(session.responses)
+    with patch("services.mempool_service.aiohttp.ClientSession") as client:
+        client.return_value.__aenter__ = AsyncMock(return_value=session)
+        yield session
+
+
+def _w3_with_endpoint():
+    w3 = MagicMock()
+    w3.provider.endpoint_uri = RPC_URL
+    return w3
 
 
 def _pending_block(sealed=False):
@@ -99,12 +153,12 @@ async def test_pending_block_fallback_parses_web3_attribute_dicts():
 @pytest.mark.asyncio
 async def test_pending_block_fallback_feeds_the_analysis():
     client = MagicMock()
-    w3 = client.get_web3.return_value
-    w3.provider.make_request.return_value = {"result": {"pending": {}}}
+    w3 = client.get_web3.return_value = _w3_with_endpoint()
     w3.eth.get_block.return_value = _pending_block()
     monitor = MempoolMonitor(client)
 
-    await monitor._poll_pending(56)
+    with _serve_txpool(EMPTY_TXPOOL):
+        await monitor._poll_pending(56)
 
     assert monitor.get_stats()["pending_count"] == {56: 3}
     assert monitor.get_stats()["unobservable_chains"] == []
@@ -120,25 +174,28 @@ TXPOOL_WITH_ONE_TX = {"result": {"pending": {SENDER: {"7": {
 }}}}}
 
 
+TXPOOL_UNSUPPORTED = {"error": {"code": -32601, "message": "the method txpool_content does not exist"}}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("txpool, pending_block", [
-    ({"result": {"pending": {}}}, _pending_block(sealed=True)),
-    (RuntimeError("txpool_content is not available"), _pending_block(sealed=True)),
-    ({"result": {"pending": {}}}, TimeoutError("RPC timeout")),
-    (RuntimeError("txpool_content is not available"), TimeoutError("RPC timeout")),
-], ids=["empty-txpool-sealed-block", "txpool-error-sealed-block", "empty-txpool-block-error", "both-fail"])
+    (EMPTY_TXPOOL, _pending_block(sealed=True)),
+    (TXPOOL_UNSUPPORTED, _pending_block(sealed=True)),
+    (EMPTY_TXPOOL, TimeoutError("RPC timeout")),
+    (aiohttp.ClientError("connection reset"), TimeoutError("RPC timeout")),
+], ids=["empty-txpool-sealed-block", "txpool-unsupported-sealed-block", "empty-txpool-block-error", "both-fail"])
 async def test_a_chain_whose_mempool_cannot_be_read_is_unobservable_until_it_can(txpool, pending_block):
     client = MagicMock()
-    w3 = client.get_web3.return_value
-    w3.provider.make_request.side_effect = [txpool, TXPOOL_WITH_ONE_TX]
+    w3 = client.get_web3.return_value = _w3_with_endpoint()
     w3.eth.get_block.side_effect = [pending_block]
     monitor = MempoolMonitor(client)
 
-    await monitor._poll_pending(56)
-    assert monitor.get_stats()["unobservable_chains"] == [56]
-    assert monitor.get_stats()["pending_count"] == {}
+    with _serve_txpool(txpool, TXPOOL_WITH_ONE_TX):
+        await monitor._poll_pending(56)
+        assert monitor.get_stats()["unobservable_chains"] == [56]
+        assert monitor.get_stats()["pending_count"] == {}
 
-    await monitor._poll_pending(56)
+        await monitor._poll_pending(56)
     assert monitor.get_stats()["unobservable_chains"] == []
     assert monitor.get_stats()["pending_count"] == {56: 1}
 
@@ -146,13 +203,13 @@ async def test_a_chain_whose_mempool_cannot_be_read_is_unobservable_until_it_can
 @pytest.mark.asyncio
 async def test_a_genuine_empty_pending_block_is_an_observation():
     client = MagicMock()
-    w3 = client.get_web3.return_value
-    w3.provider.make_request.return_value = {"result": {"pending": {}}}
+    w3 = client.get_web3.return_value = _w3_with_endpoint()
     w3.eth.get_block.return_value = AttributeDict({"hash": None, "miner": None, "transactions": []})
     monitor = MempoolMonitor(client)
     monitor._unobservable_chains = {1}
 
-    await monitor._poll_pending(1)
+    with _serve_txpool(EMPTY_TXPOOL):
+        await monitor._poll_pending(1)
 
     assert monitor.get_stats()["unobservable_chains"] == []
 
@@ -186,27 +243,117 @@ async def test_a_sealed_block_answered_for_pending_is_skipped_with_one_warning_p
 
 
 @pytest.mark.asyncio
-async def test_txpool_content_is_parsed_and_built_off_the_event_loop(monkeypatch):
-    built_on = []
-
-    def recording_pending_tx(**fields):
-        built_on.append(threading.get_ident())
-        return PendingTx(**fields)
-
-    monkeypatch.setattr(mempool_service, "PendingTx", recording_pending_tx)
-    w3 = MagicMock()
-    w3.provider.make_request.return_value = {"result": {"pending": {SENDER: {"7": {
+async def test_a_txpool_body_under_the_cap_is_parsed_into_pending_transactions():
+    monitor = MempoolMonitor(MagicMock())
+    with _serve_txpool({"result": {"pending": {SENDER: {"7": {
         "hash": "0x" + "04" * 32, "from": SENDER, "to": TOKEN, "value": "0x10",
         "gasPrice": "0x5", "input": APPROVE_UNLIMITED,
-    }}}}}
+    }}}}}) as session:
+        txs = await monitor._get_txpool_content(_w3_with_endpoint(), 1)
 
-    txs = await MempoolMonitor(MagicMock())._get_txpool_content(w3, 1)
-
-    w3.provider.make_request.assert_called_once_with("txpool_content", [])
     assert [_fields(tx) for tx in txs] == [
         ("0x" + "04" * 32, SENDER.lower(), TOKEN, 16, 5, APPROVE_UNLIMITED, 1),
     ]
-    assert built_on and threading.get_ident() not in built_on
+    (url,), request = session.post.call_args.args, session.post.call_args.kwargs
+    assert url == RPC_URL
+    assert request["json"] == {"jsonrpc": "2.0", "id": 1, "method": "txpool_content", "params": []}
+    # The same per-operation timeout as the web3 provider's requests session.
+    assert (request["timeout"].sock_connect, request["timeout"].sock_read) == (10, 10)
+    assert monitor._oversized_txpool_chains == set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", [
+    SimpleNamespace(endpoint_uri="wss://rpc.example/ws"),
+    SimpleNamespace(endpoint_uri=None),
+    SimpleNamespace(),
+], ids=["websocket-endpoint", "no-endpoint", "no-endpoint-attribute"])
+async def test_a_provider_without_an_http_endpoint_is_read_through_the_pending_block(provider):
+    monitor = MempoolMonitor(MagicMock())
+    with _serve_txpool() as session:
+        assert await monitor._get_txpool_content(SimpleNamespace(provider=provider), 1) == []
+    session.post.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_an_oversized_txpool_body_is_abandoned_unparsed_and_marks_the_chain(monkeypatch, caplog):
+    monkeypatch.setattr(mempool_service, "MAX_TXPOOL_BYTES", 1024)
+    loads = MagicMock(side_effect=AssertionError("an oversized body must not be parsed"))
+    monkeypatch.setattr(mempool_service, "json", SimpleNamespace(loads=loads))
+    monitor = MempoolMonitor(MagicMock())
+    # Three 64 KiB chunks; reading past the first would raise, so the mark proves the read stopped there.
+    oversized = (b"{" + b" " * (3 * 64 * 1024), RuntimeError("read past the cap"))
+
+    with _serve_txpool(oversized, oversized) as session, caplog.at_level(logging.DEBUG):
+        assert await monitor._get_txpool_content(_w3_with_endpoint(), 1) == []
+        assert session.responses[0].close.called
+        assert monitor._oversized_txpool_chains == {1}
+        # The chain is not asked for its txpool again.
+        assert await monitor._get_txpool_content(_w3_with_endpoint(), 1) == []
+    assert session.post.call_count == 1
+    loads.assert_not_called()
+    warned = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert [r.args for r in warned] == [(1, 1024)]
+    assert "secret-key" not in caplog.text and "rpc.example" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sealed", [False, True], ids=["genuine-pending-block", "sealed-block"])
+async def test_a_marked_chain_is_watched_through_its_pending_block(monkeypatch, sealed):
+    monkeypatch.setattr(mempool_service, "MAX_TXPOOL_BYTES", 16)
+    client = MagicMock()
+    w3 = client.get_web3.return_value = _w3_with_endpoint()
+    w3.eth.get_block.return_value = _pending_block(sealed=sealed)
+    monitor = MempoolMonitor(client)
+
+    with _serve_txpool(b"x" * 64) as session:
+        await monitor._poll_pending(1)
+        assert monitor._oversized_txpool_chains == {1}
+        await monitor._poll_pending(1)
+
+    assert session.post.call_count == 1
+    assert monitor.get_stats()["unobservable_chains"] == ([1] if sealed else [])
+    assert monitor.get_stats()["pending_count"] == ({} if sealed else {1: 3})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [
+    aiohttp.ClientError("connection reset"),
+    TimeoutError("socket read timed out"),
+    (b'{"result": {"pending": {', RuntimeError("stream closed")),
+    502,
+], ids=["post-error", "timeout", "mid-stream-error", "http-502"])
+async def test_a_failed_txpool_read_does_not_wipe_the_pending_set(failure):
+    client = MagicMock()
+    w3 = client.get_web3.return_value = _w3_with_endpoint()
+    w3.eth.get_block.side_effect = TimeoutError("RPC timeout")
+    monitor = MempoolMonitor(client)
+
+    with _serve_txpool(TXPOOL_WITH_ONE_TX, failure):
+        await monitor._poll_pending(56)
+        assert monitor.get_stats()["pending_count"] == {56: 1}
+        await monitor._poll_pending(56)
+
+    assert monitor.get_stats()["pending_count"] == {56: 1}
+    assert monitor.get_stats()["unobservable_chains"] == [56]
+
+
+@pytest.mark.asyncio
+async def test_txpool_reads_never_log_the_rpc_url(monkeypatch, caplog):
+    monkeypatch.setattr(mempool_service, "MAX_TXPOOL_BYTES", 16)
+    client = MagicMock()
+    w3 = client.get_web3.return_value = _w3_with_endpoint()
+    w3.eth.get_block.side_effect = TimeoutError(f"timed out reading {RPC_URL}")
+    monitor = MempoolMonitor(client)
+    answers = [aiohttp.ClientError(f"cannot connect to {RPC_URL}"), 502, b"{}" * 64, b"not json"]
+
+    with _serve_txpool(*answers), caplog.at_level(logging.DEBUG):
+        for _ in range(len(answers)):
+            await monitor._poll_pending(1)
+
+    assert monitor._oversized_txpool_chains == {1}
+    assert caplog.records
+    assert "secret-key" not in caplog.text and "rpc.example" not in caplog.text
 
 
 @pytest.mark.asyncio
