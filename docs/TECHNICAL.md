@@ -40,9 +40,10 @@ ShieldBot follows a **3-tier architecture**. The delivery, intelligence and data
 ┌─────────────────────────────────────────────────────────────────┐
 │                       BLOCKCHAIN LAYER                           │
 ├─────────────────────────────────────────────────────────────────┤
-│  • Configured chain adapters: BNB Smart Chain (56), opBNB (204), │
-│    Ethereum (1), Base (8453), Arbitrum One (42161),              │
-│    Polygon PoS (137), Optimism (10), Robinhood Chain (4663)      │
+│  • Configured chain adapters: Ethereum (1),                      │
+│    BNB Smart Chain (56), opBNB (204), Base (8453),               │
+│    Arbitrum One (42161), Polygon PoS (137), Optimism (10),       │
+│    Robinhood Chain (4663)                                        │
 │  • BNB Greenfield (optional report storage)                      │
 └─────────────────────────────────────────────────────────────────┘
 ```

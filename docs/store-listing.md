@@ -30,7 +30,7 @@ When a website asks your wallet to send a transaction, the extension shows an ov
 When a check cannot finish, for example because a data provider did not answer or a contract's age is not available, the verdict is Unknown and the overlay says why. An incomplete check is never shown as Safe.
 
 What it covers
-• Transactions on 8 EVM chains: BNB Chain, opBNB, Ethereum, Base, Arbitrum, Polygon, Optimism and Robinhood Chain.
+• Transactions on 8 EVM chains: Ethereum, BNB Chain, opBNB, Base, Arbitrum, Polygon, Optimism and Robinhood Chain.
 • Wallets that give web pages a standard provider (window.ethereum or EIP-6963).
 • Signature requests are checked by the server like transactions and shown in readable form: permits, Permit2, and Seaport and Blur marketplace orders (including Seaport bulk orders) that give your NFTs away for nothing or pay someone else. Blur listings sign only a summary of what is listed, not its prices, so they are shown as High Risk. A Sign-In with Ethereum message made for another site than the one asking is flagged Block Recommended, and so is every eth_sign request, which can sign a transaction. A message that is not readable text is flagged High Risk, and 32 bytes of it, which can be a hash signed in your name, Block Recommended. The text of a message you sign is never sent.
 • EIP-7702 delegations: a transaction that hands your account to a contract is flagged Block Recommended, with the contract's address and whether it is verified and how old it is.

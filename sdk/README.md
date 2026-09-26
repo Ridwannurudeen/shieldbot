@@ -150,8 +150,8 @@ if (!isSupportedChainId(chainId)) {
 
 | Chain | ID |
 |-------|-----|
-| BNB Smart Chain | 56 |
 | Ethereum | 1 |
+| BNB Smart Chain | 56 |
 | Base | 8453 |
 | Arbitrum | 42161 |
 | Polygon | 137 |

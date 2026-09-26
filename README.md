@@ -131,9 +131,9 @@ The [container](core/container.py) and [Web3 client](utils/web3_client.py) confi
 
 | Chain | ID |
 |---|---:|
+| Ethereum | 1 |
 | Robinhood Chain | 4663 |
 | BNB Smart Chain | 56 |
-| Ethereum | 1 |
 | Base | 8453 |
 | Arbitrum One | 42161 |
 | Polygon PoS | 137 |
