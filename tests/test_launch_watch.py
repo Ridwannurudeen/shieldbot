@@ -10,6 +10,7 @@ import pytest_asyncio
 
 from agent.hunter import Hunter
 from agent.launch_watch import (
+    HEAD_STALE_SECONDS,
     LAG_RECOVERED_BLOCKS,
     LAG_WARN_BLOCKS,
     POLL_INTERVAL_SECONDS,
@@ -438,6 +439,49 @@ async def test_falling_behind_and_catching_up_each_send_one_operator_alert(db):
     # Telegram accepts both as legacy Markdown and shows the figures outside the bold heading.
     assert_literal(sent[0], f"{LAG_WARN_BLOCKS + 1:,} blocks (about 1.0 hours)")
     assert_literal(sent[1], f"{LAG_RECOVERED_BLOCKS:,} blocks (about 30 minutes)")
+
+
+async def head_read(db, seconds_ago):
+    """A confirmed head at TARGET, read ``seconds_ago``."""
+    await db.set_launch_confirmed_head(4663, TARGET)
+    await db._db.execute("UPDATE launch_discovery_heads SET read_at = ?", (time.time() - seconds_ago,))
+    await db._db.commit()
+
+
+@pytest.mark.asyncio
+async def test_an_hour_without_a_head_read_alerts_once_even_while_the_breaker_keeps_the_poll_off(db):
+    # An RPC that stays down keeps the breaker open, so the poll that reads the head and checks
+    # the lag never runs; only the age of the last head read shows discovery has stopped.
+    alert = AsyncMock(return_value=True)
+    watch = make_watch(db, alert=alert)
+    watch.hunter.rpc_ready = AsyncMock(return_value=False)
+    await head_read(db, HEAD_STALE_SECONDS + 60)
+
+    await watch.cycle()
+    await watch.cycle()
+    await head_read(db, 5)
+    await watch.cycle()
+    await watch.cycle()
+
+    assert watch.hunter.discovery.poll.await_count == 0
+    sent = [call.args[0] for call in alert.await_args_list]
+    assert [text.splitlines()[0] for text in sent] == [
+        "\u26a0\ufe0f *ShieldBot: Robinhood Chain launch discovery stopped reading the chain*",
+        "\u2705 *ShieldBot: Robinhood Chain launch discovery is reading the chain again*",
+    ]
+    assert_literal(sent[0], "about 1.0 hours")
+    assert_literal(sent[1])
+
+
+@pytest.mark.asyncio
+async def test_a_recent_head_read_sends_no_stopped_reading_alert(db):
+    alert = AsyncMock(return_value=True)
+    watch = make_watch(db, alert=alert)
+    await head_read(db, HEAD_STALE_SECONDS - 60)
+
+    await watch.cycle()
+
+    alert.assert_not_awaited()
 
 
 @pytest.mark.asyncio

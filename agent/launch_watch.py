@@ -52,6 +52,10 @@ LAG_WARN_BLOCKS = BLOCKS_PER_HOUR
 # Discovery counts as caught up only once back within this, so a lag hovering at the warning
 # threshold does not send a behind and caught-up pair every few cycles.
 LAG_RECOVERED_BLOCKS = LAG_WARN_BLOCKS // 2
+# No confirmed head read for this long means discovery is not reading the chain at all: an RPC
+# that keeps failing holds the breaker open, so the poll that reads the head and checks the lag
+# never runs, and a wrong-chain RPC pauses the watch.
+HEAD_STALE_SECONDS = 3_600
 
 
 class LaunchWatch:
@@ -72,6 +76,7 @@ class LaunchWatch:
         self._guard_attempted = set()
         self._guard_jobs_since_recheck = 0
         self._lagging = False
+        self._head_stale = False
 
     @property
     def is_running(self) -> bool:
@@ -119,8 +124,10 @@ class LaunchWatch:
         Nothing runs while the RPC breaker is open; once its cooldown has passed, the hunter
         sends the one probe. A scan the breaker refuses is left pending, not recorded. An RPC
         that answers for another chain pauses all 4663 work, with the pause doubling from the
-        breaker's base cooldown to its cap and one log line per pause.
+        breaker's base cooldown to its cap and one log line per pause. Before any of that, the age
+        of the last chain head read is checked, since an open breaker or a pause keeps the poll off.
         """
+        await self._note_stale_head()
         if self._clock() < self._paused_until:
             return
         deadline = self._clock() + POLL_INTERVAL_SECONDS
@@ -207,6 +214,30 @@ class LaunchWatch:
                 "\u2705 *ShieldBot: Robinhood Chain launch discovery caught up*\n"
                 f"It is back within {LAG_RECOVERED_BLOCKS:,} blocks (about "
                 f"{LAG_RECOVERED_BLOCKS * 60 // BLOCKS_PER_HOUR} minutes) of the confirmed chain head."
+            )
+
+    async def _note_stale_head(self):
+        """Log and alert the operator once when discovery has read no confirmed head for
+        HEAD_STALE_SECONDS, and once when it reads one again; the state changes before the alert
+        is sent, as in _note_lag.
+        """
+        read_at = (await self.hunter.db.get_launch_discovery_status(CHAIN_ID))["confirmed_head_at"]
+        if read_at is None:
+            return
+        age = time.time() - read_at
+        if not self._head_stale and age > HEAD_STALE_SECONDS:
+            self._head_stale = True
+            logger.warning("Launch discovery has read no chain head for %d minutes", age // 60)
+            await self._send_alert(
+                "\u26a0\ufe0f *ShieldBot: Robinhood Chain launch discovery stopped reading the chain*\n"
+                f"It has read no chain head for about {age / 3_600:.1f} hours, so no launches are being "
+                "found. The shieldbot journal has the cause."
+            )
+        elif self._head_stale and age <= HEAD_STALE_SECONDS:
+            self._head_stale = False
+            logger.info("Launch discovery is reading the chain head again")
+            await self._send_alert(
+                "\u2705 *ShieldBot: Robinhood Chain launch discovery is reading the chain again*"
             )
 
     async def _send_alert(self, text: str):
