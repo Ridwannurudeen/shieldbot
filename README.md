@@ -111,7 +111,7 @@ Chain adapters / provider lookups / Robinhood eth_simulateV1
                          exact recipient credit
 ```
 
-The registry publication path is wired to Robinhood Telegram scans and hunter scans, not every REST request. Launch discovery and its feed are 4663-specific. Backend services use FastAPI, async HTTP and SQLite; contract, market, behavioral, honeypot, intent and signature analyzers have different data requirements. Consumer policy and display behavior differ.
+The registry publication path is wired to Robinhood Telegram scans and hunter scans, not every REST request. With `PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0`, the hunter's launch and recheck verdicts are stored and served but recorded on-chain only when blocked; guard rescans are always recorded. Launch discovery and its feed are 4663-specific. Backend services use FastAPI, async HTTP and SQLite; contract, market, behavioral, honeypot, intent and signature analyzers have different data requirements. Consumer policy and display behavior differ.
 
 | Interface in the repository | Entry point and scope |
 |---|---|

@@ -408,6 +408,20 @@ async def test_other_chains_are_stored_but_never_queued(db):
 
 
 @pytest.mark.asyncio
+async def test_a_robinhood_verdict_kept_off_chain_is_stored_but_never_queued(db):
+    publisher = sender(db)
+    with rpc_node(FakeChain()) as factory:
+        summary = await publisher.publish(4663, TOKEN, COMPLETE, onchain=False)
+        assert await publisher.drain_once() == "idle"
+    factory.assert_not_called()
+    stored = await db.get_latest_verdict_evidence(4663, TOKEN)
+    assert summary["onchain_status"] == stored["onchain_status"] == "off"
+    assert stored["registry"] is None
+    # An off-chain row is no deduplication anchor: the same verdict published on-chain is queued.
+    assert (await publisher.publish(4663, TOKEN, COMPLETE))["onchain_status"] == "pending"
+
+
+@pytest.mark.asyncio
 async def test_subject_is_stored_lowercase(db):
     await make_publisher(db, registry="").publish(4663, to_checksum_address(TOKEN), COMPLETE)
     assert (await db.get_latest_verdict_evidence(4663, TOKEN))["subject"] == TOKEN

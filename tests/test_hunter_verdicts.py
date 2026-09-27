@@ -17,14 +17,18 @@ LAUNCH_TOKEN = "0x" + "0" * 39 + "1"
 
 
 class FakePublisher:
-    """Stand-in with the publisher's contract: publish(chain_id, subject, scan_result, honeypot_data=None)."""
+    """Stand-in with the publisher's contract: publish(chain_id, subject, scan_result, honeypot_data=None,
+    onchain=True). Each call's `onchain` is kept in its own list.
+    """
 
     def __init__(self, error=None):
         self.calls = []
+        self.onchain = []
         self.error = error
 
-    async def publish(self, chain_id, subject, scan_result, honeypot_data=None):
+    async def publish(self, chain_id, subject, scan_result, honeypot_data=None, onchain=True):
         self.calls.append((chain_id, subject, scan_result))
+        self.onchain.append(onchain)
         if self.error is not None:
             raise self.error
         return {"subject": subject}
@@ -208,6 +212,71 @@ async def test_a_recheck_that_fails_after_scanning_reports_the_verdict_it_droppe
     [dropped] = dropped_verdicts(caplog)
     assert "0xrh" in dropped and "4663" in dropped
     assert "secret detail" not in caplog.text
+
+
+# --- launch recording off (PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0) ---
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recording", [True, False])
+@pytest.mark.parametrize("outcome,status", [
+    (result(85), "blocked"), (result(10, False), "unknown"), (result(50), "watching"), (result(10), "cleared"),
+])
+async def test_a_first_scan_is_recorded_on_chain_while_launch_recording_is_on_or_when_it_is_blocked(
+    db, monkeypatch, recording, outcome, status
+):
+    monkeypatch.setattr("agent.hunter.PUBLISH_LAUNCH_VERDICTS_ONCHAIN", recording)
+    await db.upsert_discovered_launches(4663, [launch()])
+    publisher = FakePublisher()
+    hunter = make_hunter(db, publisher)
+    hunter.tools.scan_contract = AsyncMock(return_value=outcome)
+
+    assert await hunter.scan_launch("inv", launch()) == status
+
+    # Stored either way; only the on-chain record depends on the switch.
+    assert publisher.calls == [(4663, LAUNCH_TOKEN, outcome)]
+    assert publisher.onchain == [recording or status == "blocked"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recording", [True, False])
+@pytest.mark.parametrize("outcome,blocked", [
+    (result(85), True), (result(10), False), (result(50), False), (result(10, False), False),
+])
+async def test_a_recheck_is_recorded_on_chain_while_launch_recording_is_on_or_when_it_blocks(
+    db, monkeypatch, recording, outcome, blocked
+):
+    monkeypatch.setattr("agent.hunter.PUBLISH_LAUNCH_VERDICTS_ONCHAIN", recording)
+    await watching(db, "0xrh", 4663)
+    publisher = FakePublisher()
+    hunter = make_hunter(db, publisher)
+    hunter.tools.scan_contract = AsyncMock(return_value=outcome)
+
+    await hunter._recheck_warn_contracts("sweep")
+
+    assert publisher.calls == [(4663, "0xrh", outcome)]
+    assert publisher.onchain == [recording or blocked]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recording,mode", [
+    (True, "are recorded on-chain"),
+    (False, "are stored only, except blocked ones (PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0)"),
+])
+async def test_start_names_the_launch_recording_mode(db, monkeypatch, caplog, recording, mode):
+    monkeypatch.setattr("agent.hunter.PUBLISH_LAUNCH_VERDICTS_ONCHAIN", recording)
+    publisher = FakePublisher()
+    publisher.is_onchain_enabled = lambda: True
+    hunter = make_hunter(db, publisher)
+    hunter.sweep = AsyncMock(return_value=[])
+
+    with caplog.at_level(logging.INFO, logger="agent.hunter"):
+        await hunter.start(interval_seconds=3600)
+        await hunter.stop()
+
+    assert [r.getMessage() for r in caplog.records if "recheck verdicts" in r.getMessage()] == [
+        f"Hunter: launch and recheck verdicts {mode}"
+    ]
 
 
 # --- a failing publisher ---

@@ -314,3 +314,26 @@ async def test_stats_show_ages_due_subjects_and_budget_pressure(db, now):
     assert snapshot["due_count"] == 1
     assert snapshot["rpc_budget"]["wait_seconds"] == SCAN_REQUEST_COST
     assert snapshot["rpc_budget"]["saturated"] is True
+
+
+@pytest.mark.asyncio
+async def test_with_launch_recording_off_the_guard_rescan_is_queued_and_the_launch_only_stored(
+    db, now, monkeypatch
+):
+    monkeypatch.setattr(hunter_module, "PUBLISH_LAUNCH_VERDICTS_ONCHAIN", False)
+    publisher = publisher_for(db)
+    await confirmed(db, publisher, token(20), 600)
+    await db.upsert_discovered_launches(4663, [launch(0)])
+    watch = make_watch(db, Polls({pool(0): 1}), scan=lambda *a, **k: measurement(now[0]))
+    watch.hunter.verdict_publisher = publisher
+
+    for _ in range(3):
+        await watch.cycle()
+
+    assert sorted(scanned(watch)) == sorted([token(20), token(0)])
+    guarded = await db.get_latest_verdict_evidence(4663, token(20))
+    launched = await db.get_latest_verdict_evidence(4663, token(0))
+    assert (guarded["onchain_status"], guarded["registry"]) == ("pending", publisher.registry)
+    assert (launched["onchain_status"], launched["registry"]) == ("off", None)
+    # Never recorded, the launch is never confirmed, so it cannot take a guard slot.
+    assert [row["subject"] for row in await db.get_guard_subjects(4663)] == [token(20)]

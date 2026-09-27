@@ -15,7 +15,8 @@ every 4663 scan reserves its worst-case request count first, and while the break
 4663 discovery or scan runs and nothing is recorded. When the fast launch watch
 (agent.launch_watch) is running it owns all 4663 work, so the sweep leaves launches to it and
 hands it the 4663 pairs due a recheck. Each final 4663 scan result, a launch's first scan or a
-later recheck, goes to the optional verdict publisher.
+later recheck, goes to the optional verdict publisher. With PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0 it
+stores those without recording them on-chain, except a blocked one; guard rescans are always recorded.
 
 Every public method is wrapped in try/except so it never crashes the caller.
 """
@@ -23,6 +24,7 @@ Every public method is wrapped in try/except so it never crashes the caller.
 import asyncio
 import json
 import logging
+import os
 import time
 import traceback
 
@@ -72,6 +74,10 @@ GUARD_RESCAN_RETRY_SECONDS = 30
 # interval (20 s) instead of the SDK's 600 s timeout with two retries. On timeout the finding is
 # stored without a narrative.
 NARRATIVE_TIMEOUT_SECONDS = 20
+# 0 stores launch and recheck verdicts without recording them on-chain unless they are blocked, so
+# the recorder pays only for guard rescans, blocked launches and bot scans. Read once at import, like
+# core.database.GUARD_WATCH_MAX_SUBJECTS.
+PUBLISH_LAUNCH_VERDICTS_ONCHAIN = int(os.getenv("PUBLISH_LAUNCH_VERDICTS_ONCHAIN", "1")) != 0
 
 
 class Hunter:
@@ -110,6 +116,12 @@ class Hunter:
         self._running = True
         self._task = asyncio.create_task(self._loop(interval_seconds))
         logger.info("Hunter started (interval=%ds)", interval_seconds)
+        if self.verdict_publisher is not None and self.verdict_publisher.is_onchain_enabled():
+            logger.info(
+                "Hunter: launch and recheck verdicts %s",
+                "are recorded on-chain" if PUBLISH_LAUNCH_VERDICTS_ONCHAIN
+                else "are stored only, except blocked ones (PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0)",
+            )
 
     async def stop(self):
         """Cancel the background task."""
@@ -138,15 +150,16 @@ class Hunter:
     def _watch_running(self) -> bool:
         return self.launch_watch is not None and self.launch_watch.is_running
 
-    async def _publish_verdict(self, chain_id: int, subject: str, result: dict):
+    async def _publish_verdict(self, chain_id: int, subject: str, result: dict, onchain: bool = True):
         """Hand a final 4663 scan result to the verdict publisher, when one is wired in.
 
-        A publisher failure never breaks a scan; it is logged by exception class only.
+        With `onchain` False the publisher stores it without recording it on-chain. A publisher
+        failure never breaks a scan; it is logged by exception class only.
         """
         if self.verdict_publisher is None or chain_id != LAUNCH_CHAIN_ID:
             return
         try:
-            return await self.verdict_publisher.publish(chain_id, subject, result)
+            return await self.verdict_publisher.publish(chain_id, subject, result, onchain=onchain)
         except Exception as exc:
             logger.error(
                 "Hunter: verdict publishing failed for %s: %s\n%s", subject,
@@ -457,7 +470,9 @@ class Hunter:
             # else: still WARN, leave as watching
             # FINAL RECHECK VERDICT: the rescan's result supersedes the launch's earlier one.
             if not published:
-                await self._publish_verdict(chain_id, pair["token_address"], result)
+                await self._publish_verdict(
+                    chain_id, pair["token_address"], result, onchain=PUBLISH_LAUNCH_VERDICTS_ONCHAIN
+                )
         except BreakerOpenError:
             raise
         except Exception as exc:
@@ -556,8 +571,10 @@ class Hunter:
             await self.db.upsert_tracked_pair(token, token_address=token, chain_id=LAUNCH_CHAIN_ID)
         await self.db.record_launch_scan(LAUNCH_CHAIN_ID, token, status, risk_score)
         # FINAL LAUNCH VERDICT: a launch's first scan result is final here; recheck_pair publishes
-        # the results of later rescans.
-        await self._publish_verdict(LAUNCH_CHAIN_ID, token, result)
+        # the results of later rescans. A blocked launch is recorded on-chain even with launch recording off.
+        await self._publish_verdict(
+            LAUNCH_CHAIN_ID, token, result, onchain=PUBLISH_LAUNCH_VERDICTS_ONCHAIN or status == "blocked"
+        )
         return status
 
     # ------------------------------------------------------------------

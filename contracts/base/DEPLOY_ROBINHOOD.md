@@ -231,8 +231,10 @@ record on a fresh registry, rather than a per-subject cost inside a warm batch. 
 `test_Record_LatestIsOverwrittenAndCountsAccumulate` measured 48,299; the full-suite median of 24,740 includes
 reverting calls and must not be used to budget successful repeat records. Use `.gas-snapshot` for local regression
 checks and the live estimate in step 5, with current fees, for funding.
-A saturated launch watch is mostly first records, so fund for those. This example sends 0.05 ETH; its duration
-depends on the live estimate and recording rate:
+A saturated launch watch is mostly first records, so fund for those. With `PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0`
+(step 8) launch and recheck verdicts are stored but recorded only when blocked, so the recorder pays mainly for
+guard rescans, one overwrite per watched subject every 300 seconds, and Telegram scans. This example sends
+0.05 ETH; its duration depends on the live estimate and recording rate:
 
 ```bash
 cast send $RECORDER --value 0.05ether --rpc-url $RH_RPC --account robinhood-owner
@@ -301,6 +303,7 @@ Add to the shared `/opt/shieldbot/.env` (both services may read these; neither i
 ```
 ROBINHOOD_VERDICT_REGISTRY=0x...          # $REGISTRY from step 3
 ROBINHOOD_RPC_URL=https://rpc.mainnet.chain.robinhood.com   # optional; this is the default
+PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0        # optional; records launch and recheck verdicts only when blocked
 ```
 
 **Hard stop: before restarting anything, check that only the API unit can see the key.** Each command must print
@@ -314,7 +317,8 @@ systemctl cat shieldbot | grep ExecStart                        # uvicorn api:ap
 ```
 
 Restart both services. The logs show:
-- API: `Robinhood verdict registry: sending as recorder 0x...`
+- API: `Robinhood verdict registry: sending as recorder 0x...`, and `Hunter: launch and recheck verdicts ...`
+  naming whether they are recorded on-chain.
 - bot: `Robinhood verdict registry: verdicts queued for 0x...`, and never `sending`.
 
 With `ROBINHOOD_VERDICT_REGISTRY` missing, evidence is still stored and served at `/api/verdict/...` but nothing

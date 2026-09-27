@@ -17,7 +17,7 @@ registry address changes, a row queued for the old one is dropped (RegistryChang
 compares rows queued for the new one, so every row names the contract that holds its record.
 
 Each row moves through onchain_status:
-  off          stored only (another chain, or no registry configured)
+  off          stored only (another chain, no registry configured, or its caller passed onchain=False)
   pending      waiting for the drain
   dropped      observation missing, stale, future-dated or superseded, or queued for another registry;
                never broadcast again
@@ -240,10 +240,12 @@ class VerdictPublisher:
         self._spawn(self.publish(chain_id, subject, scan_result, honeypot_data))
 
     async def publish(
-        self, chain_id: int, subject: str, scan_result: dict, honeypot_data: Optional[dict] = None
+        self, chain_id: int, subject: str, scan_result: dict, honeypot_data: Optional[dict] = None,
+        onchain: bool = True,
     ) -> Optional[dict]:
         """Store the evidence for one scan; a Robinhood Chain verdict is queued for the drain.
 
+        With `onchain` False it is stored as `off`, like a verdict on another chain, and never sent.
         Returns the stored evidence id, hash, verdict and on-chain status, or None if nothing could be
         stored. Reusing the same measurement returns its record. A newer unchanged measurement is retained
         for supersession, but only refreshes a confirmed verdict after VERDICT_REFRESH_SECONDS.
@@ -256,7 +258,7 @@ class VerdictPublisher:
             payload = build_evidence(chain_id, subject, scan_result, honeypot_data)
             canonical = canonical_bytes(payload)
             evidence_hash = "0x" + keccak(canonical).hex()
-            queued = chain_id == CHAIN_ID and self.is_onchain_enabled()
+            queued = onchain and chain_id == CHAIN_ID and self.is_onchain_enabled()
             status = "pending" if queued else "off"
             if queued:
                 previous = await self._db.get_newest_verdict_observation(
