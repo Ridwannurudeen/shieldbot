@@ -337,3 +337,26 @@ async def test_with_launch_recording_off_the_guard_rescan_is_queued_and_the_laun
     assert (launched["onchain_status"], launched["registry"]) == ("off", None)
     # Never recorded, the launch is never confirmed, so it cannot take a guard slot.
     assert [row["subject"] for row in await db.get_guard_subjects(4663)] == [token(20)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("site", ["launch", "recheck"])
+async def test_with_launch_recording_off_a_guard_watched_subject_is_still_recorded(db, now, monkeypatch, site):
+    """A stored-only row newer than the guard's queued record would supersede it, costing a refresh."""
+    monkeypatch.setattr(hunter_module, "PUBLISH_LAUNCH_VERDICTS_ONCHAIN", False)
+    publisher = publisher_for(db)
+    await confirmed(db, publisher, token(0), 600)
+    watch = make_watch(db, scan=lambda *a, **k: measurement(now[0]))
+    watch.hunter.verdict_publisher = publisher
+
+    if site == "launch":
+        await db.upsert_discovered_launches(4663, [launch(0)])
+        assert await watch.hunter.scan_launch("sweep", launch(0)) == "cleared"
+    else:
+        await db.upsert_tracked_pair(token(0), token_address=token(0), chain_id=4663)
+        await watch.hunter.recheck_pair(
+            "sweep", {"pair_address": token(0), "token_address": token(0), "chain_id": 4663}
+        )
+
+    row = await db.get_latest_verdict_evidence(4663, token(0))
+    assert (row["onchain_status"], row["registry"]) == ("pending", publisher.registry)

@@ -261,7 +261,7 @@ async def test_a_recheck_is_recorded_on_chain_while_launch_recording_is_on_or_wh
 @pytest.mark.asyncio
 @pytest.mark.parametrize("recording,mode", [
     (True, "are recorded on-chain"),
-    (False, "are stored only, except blocked ones (PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0)"),
+    (False, "are stored only, except blocked or guard-watched ones (PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0)"),
 ])
 async def test_start_names_the_launch_recording_mode(db, monkeypatch, caplog, recording, mode):
     monkeypatch.setattr("agent.hunter.PUBLISH_LAUNCH_VERDICTS_ONCHAIN", recording)

@@ -232,9 +232,10 @@ record on a fresh registry, rather than a per-subject cost inside a warm batch. 
 reverting calls and must not be used to budget successful repeat records. Use `.gas-snapshot` for local regression
 checks and the live estimate in step 5, with current fees, for funding.
 A saturated launch watch is mostly first records, so fund for those. With `PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0`
-(step 8) launch and recheck verdicts are stored but recorded only when blocked, so the recorder pays mainly for
-guard rescans, one overwrite per watched subject every 300 seconds, and Telegram scans. This example sends
-0.05 ETH; its duration depends on the live estimate and recording rate:
+(step 8) launch and recheck verdicts are stored but recorded only when blocked or watched by the guard, so the
+recorder pays for guard rescans (one overwrite per watched subject every 300 seconds), blocked launches and
+rechecks, and Telegram scans. Blocked launches are first records and their rate follows launch activity.
+This example sends 0.05 ETH; its duration depends on the live estimate and recording rate:
 
 ```bash
 cast send $RECORDER --value 0.05ether --rpc-url $RH_RPC --account robinhood-owner
@@ -298,12 +299,17 @@ In the editor, add:
 EnvironmentFile=/etc/shieldbot/recorder.env
 ```
 
-Add to the shared `/opt/shieldbot/.env` (both services may read these; neither is secret):
+Add to the shared `/opt/shieldbot/.env` (both services may read these; neither is secret). systemd's
+`EnvironmentFile=` keeps anything after the `=`, a trailing `# comment` included, so every comment stays on
+its own line:
 
 ```
-ROBINHOOD_VERDICT_REGISTRY=0x...          # $REGISTRY from step 3
-ROBINHOOD_RPC_URL=https://rpc.mainnet.chain.robinhood.com   # optional; this is the default
-PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0        # optional; records launch and recheck verdicts only when blocked
+# $REGISTRY from step 3
+ROBINHOOD_VERDICT_REGISTRY=0x...
+# optional; this is the default
+ROBINHOOD_RPC_URL=https://rpc.mainnet.chain.robinhood.com
+# optional; records launch and recheck verdicts only when blocked or watched by the guard (step 7)
+PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0
 ```
 
 **Hard stop: before restarting anything, check that only the API unit can see the key.** Each command must print

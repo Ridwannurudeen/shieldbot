@@ -16,7 +16,8 @@ every 4663 scan reserves its worst-case request count first, and while the break
 (agent.launch_watch) is running it owns all 4663 work, so the sweep leaves launches to it and
 hands it the 4663 pairs due a recheck. Each final 4663 scan result, a launch's first scan or a
 later recheck, goes to the optional verdict publisher. With PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0 it
-stores those without recording them on-chain, except a blocked one; guard rescans are always recorded.
+stores those without recording them on-chain, except a blocked one or one whose subject the guard
+watches; guard rescans are always recorded.
 
 Every public method is wrapped in try/except so it never crashes the caller.
 """
@@ -74,9 +75,9 @@ GUARD_RESCAN_RETRY_SECONDS = 30
 # interval (20 s) instead of the SDK's 600 s timeout with two retries. On timeout the finding is
 # stored without a narrative.
 NARRATIVE_TIMEOUT_SECONDS = 20
-# 0 stores launch and recheck verdicts without recording them on-chain unless they are blocked, so
-# the recorder pays only for guard rescans, blocked launches and bot scans. Read once at import, like
-# core.database.GUARD_WATCH_MAX_SUBJECTS.
+# 0 stores launch and recheck verdicts without recording them on-chain unless they are blocked or the
+# guard watches their subject, so the recorder pays for guard rescans, blocked launches and rechecks,
+# and bot scans. Read once at import, like core.database.GUARD_WATCH_MAX_SUBJECTS.
 PUBLISH_LAUNCH_VERDICTS_ONCHAIN = int(os.getenv("PUBLISH_LAUNCH_VERDICTS_ONCHAIN", "1")) != 0
 
 
@@ -120,7 +121,8 @@ class Hunter:
             logger.info(
                 "Hunter: launch and recheck verdicts %s",
                 "are recorded on-chain" if PUBLISH_LAUNCH_VERDICTS_ONCHAIN
-                else "are stored only, except blocked ones (PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0)",
+                else "are stored only, except blocked or guard-watched ones "
+                "(PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0)",
             )
 
     async def stop(self):
@@ -153,12 +155,16 @@ class Hunter:
     async def _publish_verdict(self, chain_id: int, subject: str, result: dict, onchain: bool = True):
         """Hand a final 4663 scan result to the verdict publisher, when one is wired in.
 
-        With `onchain` False the publisher stores it without recording it on-chain. A publisher
-        failure never breaks a scan; it is logged by exception class only.
+        With `onchain` False the publisher stores it without recording it on-chain, unless the guard
+        watches the subject: a newer stored-only row would supersede the guard's queued record. A
+        publisher failure never breaks a scan; it is logged by exception class only.
         """
         if self.verdict_publisher is None or chain_id != LAUNCH_CHAIN_ID:
             return
         try:
+            if not onchain:
+                watched = await self.db.get_guard_subjects(chain_id)
+                onchain = subject.lower() in {row["subject"] for row in watched}
             return await self.verdict_publisher.publish(chain_id, subject, result, onchain=onchain)
         except Exception as exc:
             logger.error(
