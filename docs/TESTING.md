@@ -1,35 +1,40 @@
 # Local test results and reproduction
 
-Measured on **2026-09-22**. Start with [JUDGE_GUIDE.md](JUDGE_GUIDE.md) for the offline honeypot replay and real-contract transfer demonstration.
+Measured on **2026-09-27** at commit `8dc2e1e`, the last code change before this document. Start with [JUDGE_GUIDE.md](JUDGE_GUIDE.md) for the offline honeypot replay and the offline registry, guard and transfer demonstration (real contracts, mock ERC-20).
 
 ## Measured results
 
 | Check | Command / scope | Result |
 |---|---|---|
-| Integrated Python baseline | `python -m pytest tests/ -q -p no:cacheprovider --ignore=tests/test_bot_app.py` | **2917 passed, 1 skipped**, 4 warnings, 111.80 s |
-| Hunter/rescan regression subset | `tests/test_guard_rescan.py tests/test_hunter.py tests/test_hunter_rpc_guard.py tests/test_hunter_verdicts.py tests/test_verdict_hunter_path.py` with `python -m pytest ... -q -p no:cacheprovider` | **93 passed**, 1 warning, 5.10 s |
-| Robinhood simulation and USDG | `python -m pytest tests/test_robinhood_simulation.py tests/test_robinhood_simulation_usdg.py -q -p no:cacheprovider` | **192 passed**, 1 warning, 2.44 s |
-| Judge-guide proven honeypot | `test_live_honeypot_is_proven_unsellable` and `test_4663_proven_honeypot_is_flagged_through_the_analyzer` in `tests/test_robinhood_simulation.py` | **2 passed**, 1 warning, 1.97 s |
-| Python SDK | `python -m pytest sdk/python/tests/ -q -p no:cacheprovider` | **21 passed**, 3.17 s; separate from baseline |
-| Foundry full suite | From `contracts/base`: `forge test --offline -vv` | **114 passed, 0 failed, 0 skipped**, 39.42 s |
+| Python suite without the fresh-process import files | `python -m pytest -q -p no:cacheprovider --ignore=tests/test_import_order.py --ignore=tests/test_integration_imports.py` (collects `tests/` and `sdk/python/tests/`, the default paths in `pytest.ini`) | **5964 passed**, 6 warnings, 278.75 s |
+| Fresh-process import tests | `python -m pytest tests/test_import_order.py tests/test_integration_imports.py -q -p no:cacheprovider` | **113 passed**, 54.91 s |
+| `tests/` alone | `python -m pytest tests/ -q -p no:cacheprovider --ignore=tests/test_import_order.py --ignore=tests/test_integration_imports.py` | **5870 passed**, 6 warnings, 266.35 s |
+| Python SDK alone | `python -m pytest sdk/python/tests/ -q -p no:cacheprovider` | **94 passed**, 9.37 s |
+| Hunter/rescan regression subset | `tests/test_guard_rescan.py tests/test_hunter.py tests/test_hunter_rpc_guard.py tests/test_hunter_verdicts.py tests/test_verdict_hunter_path.py` with `python -m pytest ... -q -p no:cacheprovider` | **95 passed**, 1 warning, 6.05 s |
+| Robinhood simulation and USDG | `python -m pytest tests/test_robinhood_simulation.py tests/test_robinhood_simulation_usdg.py -q -p no:cacheprovider` | **199 passed**, 1 warning, 2.41 s |
+| Judge-guide proven honeypot | `python -m pytest tests/test_robinhood_simulation.py -q -p no:cacheprovider -k "test_live_honeypot_is_proven_unsellable or test_4663_proven_honeypot_is_flagged_through_the_analyzer"` | **2 passed**, 1 warning, 1.78 s |
+| Foundry full suite | From `contracts/base`: `forge test --offline` | **114 passed, 0 failed, 0 skipped**, 33.27 s |
 | Judge-guide transfer cases | Exact Foundry command in [the guide](JUDGE_GUIDE.md#on-chain-transfer-demonstration-offline) | **4 passed, 0 failed, 0 skipped** |
 | Contract size build | `forge build --offline --sizes` | **Exit 0**; guard runtime 1,048 B, transfer runtime 1,616 B |
 | Touched Solidity formatting | `forge fmt --check src/ShieldBotVerdictGuard.sol src/ShieldBotGuardedTransfer.sol test/ShieldBotVerdictGuard.t.sol test/ShieldBotGuardedTransfer.t.sol` | **Exit 0** |
 
-Real full-suite summaries:
+Verbatim summary lines:
 
 ```text
-2917 passed, 1 skipped, 4 warnings in 111.80s (0:01:51)
-Ran 7 test suites in 39.42s (71.02s CPU time): 114 tests passed, 0 failed, 0 skipped (114 total tests)
+5964 passed, 6 warnings in 278.75s (0:04:38)
+113 passed in 54.91s
+Ran 7 test suites in 33.27s (85.80s CPU time): 114 tests passed, 0 failed, 0 skipped (114 total tests)
 ```
 
-Both unchanged allowed-iff fuzz properties passed **10,000 runs each**. Both registry invariants passed **256 runs / 128,000 calls / zero reverts each**. The three reason-precedence regressions and fee/excess-delivery regressions failed against the old implementation before passing with the fixes. The LOW expiry/future denial tests remain unchanged and pass. New tests also cover exact credit to an already funded recipient and rejection of self-transfer with zero net credit.
+Both allowed-iff fuzz properties are configured inline for **10,000 runs each**, and both registry invariants run with `fail-on-revert`; all of them are among the 114 Foundry tests that passed on 2026-09-27. On 2026-09-22 the invariants reported **256 runs / 128,000 calls / zero reverts each**, and the following regressions were recorded that day. The three reason-precedence regressions and fee/excess-delivery regressions failed against the old implementation before passing with the fixes. The LOW expiry/future denial tests remain unchanged and pass. New tests also cover exact credit to an already funded recipient and rejection of self-transfer with zero net credit.
 
-Both per-contract gas snapshots were regenerated: `check_cold_registry = 6985`, `check_warm_registry = 2985`, and `transfer_low_cold = 58013`. These are local Cancun callee-gas measurements under the existing test setup, not live USDG gas or Orbit fees. The guard's registry account is warm in both measurements; its record slots are cold then warm. The transfer measurement cools all four accounts and starts with a zero recipient balance and finite allowance.
+The per-contract gas snapshots regenerated by the 2026-09-27 run matched the committed values: `check_cold_registry = 6985`, `check_warm_registry = 2985`, and `transfer_low_cold = 58013`. These are local Cancun callee-gas measurements under the existing test setup, not live USDG gas or Orbit fees. The guard's registry account is warm in both measurements; its record slots are cold then warm. The transfer measurement cools all four accounts and starts with a zero recipient balance and finite allowance.
 
-Do not add subset counts to the baseline. The baseline explicitly selects `tests/`, excluding `sdk/python/tests/` even though both are default paths in `pytest.ini`. Add Foundry to PATH before running its commands: Bash `export PATH="$HOME/.foundry/bin:$PATH"`; PowerShell `$env:PATH = "$HOME/.foundry/bin;$env:PATH"`.
+Do not add the rows together: the first row already contains `tests/` and the SDK (5,870 + 94 = 5,964), and every subset row below the import row is part of that run. The only row outside it is the fresh-process import row: those 113 tests are excluded from the first run and executed separately, so 6,077 Python tests ran in total. Add Foundry to PATH before running its commands: Bash `export PATH="$HOME/.foundry/bin:$PATH"`; PowerShell `$env:PATH = "$HOME/.foundry/bin;$env:PATH"`.
 
 ## Static analysis across all five contracts
+
+Recorded on **2026-09-22** and not re-run locally for this update: this machine has no `solc` on PATH for Slither (Forge uses its own compiler cache). On `main` the contract sources changed after `04203be` (2026-09-22) only by a removed two-line header comment in the verifier (`7bdd3cc`), and they are identical in `509e21a` and `8dc2e1e`. CI's Solidity security job (`.github/workflows/security.yml`) runs Slither on all five contracts with the same severity gate on every push to `main` and every pull request against `main`; it passed on `509e21a` in run 36324408066. CI installs Slither unpinned.
 
 Slither **0.11.5**, `--exclude-informational --fail-high`, with Solidity **0.8.24** for the verifier and **0.8.28** for the other four. Every invocation exited **0**.
 
@@ -41,7 +46,7 @@ Slither **0.11.5**, `--exclude-informational --fail-high`, with Solidity **0.8.2
 | `ShieldBotVerdictGuard.sol` | 5 contracts, 80 detectors, 1 result | Same known OpenZeppelin finding |
 | `ShieldBotGuardedTransfer.sol` | 12 contracts, 80 detectors, 1 result | Same known OpenZeppelin finding |
 
-The OpenZeppelin finding is `Ownable2Step.transferOwnership(address).newOwner` lacking a zero check; zero cancels a pending ownership transfer. No new findings were introduced. The attestor and registry sources are unchanged from `fff633f`; the verifier differs from it only by a removed header comment. The all-five run does **not** support a claim that the entire project has only the OpenZeppelin finding: the attestor's two LOW event-reentrancy findings also exist. They were not suppressed or changed.
+The OpenZeppelin finding is `Ownable2Step.transferOwnership(address).newOwner` lacking a zero check; zero cancels a pending ownership transfer. No new findings were introduced. The attestor and registry sources are unchanged since `04203be` (2026-09-22) on `main`; the verifier differs from it only by the removed header comment (`7bdd3cc`). The all-five run does **not** support a claim that the entire project has only the OpenZeppelin finding: the attestor's two LOW event-reentrancy findings also exist. They were not suppressed or changed.
 
 The CI workflow explicitly analyzes both new contracts. To run the same check locally, with the same remaps and severity gate, from the repository root:
 
@@ -49,17 +54,17 @@ The CI workflow explicitly analyzes both new contracts. To run the same check lo
 slither contracts/base/src/ShieldBotGuardedTransfer.sol --compile-force-framework solc --solc-remaps "@openzeppelin/=contracts/base/lib/openzeppelin-contracts/ forge-std/=contracts/base/lib/forge-std/src/" --exclude-informational --fail-high
 ```
 
-Guard and registry use the same pattern. Attestor additionally maps `@eas/=contracts/base/lib/eas-contracts/contracts/`. The verifier uses `contracts/ShieldBotVerifier.sol`, the installed 0.8.24 compiler and no remaps.
+Guard and registry use the same pattern. Attestor additionally maps `@eas/=contracts/base/lib/eas-contracts/contracts/`. The verifier uses `contracts/ShieldBotVerifier.sol`, solc 0.8.24 (CI selects it with `solc-select`) and no remaps.
 
 ## Qualifications
 
-The Python baseline excludes `tests/test_bot_app.py`; Telegram is absent locally, and the separate bot import case is skipped. This is not a passing claim for the excluded Telegram suite. Real Telegram delivery, live wallets and browser behavior were not tested.
+The suites include `tests/test_bot_app.py`: python-telegram-bot is installed locally. Real Telegram delivery, live wallets and browser behavior were not tested.
 
-Installed tools: Python **3.12.10**, pytest **8.3.3**, pytest-asyncio **1.3.0**, web3 **7.16.0**, eth-utils **6.0.0**, eth-abi **5.2.0**, httpx **0.28.1**, Forge **1.7.1**, Solidity **0.8.28**, Slither **0.11.5**. Several Python versions differ from `requirements.txt`; this is not a clean pinned-environment installation result. Python reports existing deprecation/configuration warnings.
+Installed tools: Python **3.12.10**, pytest **8.3.3**, pytest-asyncio **1.3.0**, web3 **7.16.0**, eth-utils **6.0.0**, eth-abi **5.2.0**, httpx **0.25.2**, aiohttp **3.14.3**, python-telegram-bot **20.7**, Forge **1.7.1**, Slither **0.11.5** (installed, but it cannot compile here without a `solc` on PATH). Three installed versions differ from `requirements.txt`: web3 7.16.0 (pinned 6.15.1), eth-utils 6.0.0 (pinned 2.3.1) and pytest 8.3.3 (pinned 9.0.3); eth-abi is unpinned. This is not a clean pinned-environment installation result. CI installs `requirements.txt` on Python 3.11 and runs `python -m pytest -q`, the two import files included, on every push to `main` and every pull request against `main`. The TypeScript SDK suite (`node --test tests/*.cjs`) was not run locally; CI runs it. Python reports existing deprecation/configuration warnings.
 
 No live-chain test is part of these suites. The existing Python tests use fabricated cryptographic fixtures, including fixture-only signing; transport is mocked. Foundry deployment-script tests run only in its local VM.
 
-The timing figures and the Paxos USDG exact-delivery observation were recorded earlier and were not re-probed live. The judge-guide Python classifier and Solidity consumer examples are separate offline checks; they do not establish a deployed end-to-end publication. The earlier synthetic receipt-verifier exercise is historical and was not rerun here.
+The Paxos USDG exact-delivery observation was recorded earlier and was not re-probed live. The judge-guide Python classifier and Solidity consumer examples are separate offline checks; they do not establish a deployed end-to-end publication. The earlier synthetic receipt-verifier exercise is historical and was not rerun here.
 
 ## Manual checks still required
 
