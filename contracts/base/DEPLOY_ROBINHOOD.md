@@ -300,8 +300,7 @@ EnvironmentFile=/etc/shieldbot/recorder.env
 ```
 
 Add to the shared `/opt/shieldbot/.env` (both services may read these; neither is secret). systemd's
-`EnvironmentFile=` keeps anything after the `=`, a trailing `# comment` included, so every comment stays on
-its own line:
+`EnvironmentFile=` keeps a trailing `# comment` as part of the value, so every comment stays on its own line:
 
 ```
 # $REGISTRY from step 3
