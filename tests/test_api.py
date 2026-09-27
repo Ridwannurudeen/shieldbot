@@ -227,6 +227,25 @@ class TestWebhookAuth:
         )
         assert resp.status_code == 403
 
+    def test_a_failed_telegram_post_still_answers_the_monitor(self, client, monkeypatch):
+        import aiohttp
+        import api as api_module
+        monkeypatch.setattr(api_module, "container", SimpleNamespace(
+            settings=SimpleNamespace(
+                webhook_secret="testsecret",
+                webhook_allow_query_secret=False,
+                telegram_bot_token="t",
+                telegram_alert_chat_id="1",
+            )
+        ))
+        monkeypatch.setattr(aiohttp, "ClientSession", MagicMock(side_effect=aiohttp.ClientError("down")))
+        resp = client.post(
+            "/webhook/uptime",
+            data={"alertType": "1"},
+            headers={"x-webhook-secret": "testsecret"},
+        )
+        assert resp.status_code == 200
+
     def test_webhook_allows_query_secret_when_enabled(self, client, monkeypatch):
         import api as api_module
         api_module.container = SimpleNamespace(

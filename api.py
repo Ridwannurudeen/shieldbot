@@ -49,6 +49,7 @@ from core.scan_evidence import (
     without_caller,
 )
 from core.unknown_ledger import unknown_ledger
+from core.telegram_alert import send_alert
 from core.telegram_formatter import escape_markdown
 from core.verdict_evidence import canonical_bytes, evidence_hash
 from rpc.router import rpc_limiter, rpc_router
@@ -654,8 +655,9 @@ async def uptime_webhook(request: Request, secret: str = ""):
 
     Authentication: prefer X-Webhook-Secret header (WEBHOOK_SECRET).
     Optional legacy support for ?secret= query param if WEBHOOK_ALLOW_QUERY_SECRET=true.
+    The alert goes through core.telegram_alert.send_alert, so a Telegram failure is logged and the
+    monitor still gets its 200.
     """
-    import httpx
     expected_secret = container.settings.webhook_secret if container else ""
     header_secret = request.headers.get("x-webhook-secret", "")
     provided = ""
@@ -706,17 +708,8 @@ async def uptime_webhook(request: Request, secret: str = ""):
     else:
         return {"ok": True}
 
-    bot_token = container.settings.telegram_bot_token if container else ""
-    chat_id   = container.settings.telegram_alert_chat_id if container else ""
-    if not bot_token or not chat_id:
-        logger.warning("Telegram alert not sent — TELEGRAM_BOT_TOKEN or TELEGRAM_ALERT_CHAT_ID not configured")
-        return {"ok": True}
-
-    async with httpx.AsyncClient() as client:
-        await client.post(
-            f"https://api.telegram.org/bot{bot_token}/sendMessage",
-            json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
-        )
+    # Reaching here means the secret matched, which needs the container's settings.
+    await send_alert(container.settings, msg)
     return {"ok": True}
 
 

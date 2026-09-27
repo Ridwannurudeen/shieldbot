@@ -531,23 +531,15 @@ def test_invisible_and_filler_characters_are_blanked(code):
 
 @pytest.mark.parametrize("alert_type", ["1", "2"])
 def test_uptime_alerts_show_monitor_text_literally(client, monkeypatch, alert_type):
-    import httpx
-
     import api as api_module
 
     sent = []
 
-    class Telegram:
-        async def __aenter__(self):
-            return self
+    async def record(settings, text):
+        sent.append(text)
+        return True
 
-        async def __aexit__(self, *exc):
-            return False
-
-        async def post(self, url, json):
-            sent.append(json)
-
-    monkeypatch.setattr(httpx, "AsyncClient", Telegram)
+    monkeypatch.setattr(api_module, "send_alert", record)
     monkeypatch.setattr(
         api_module,
         "container",
@@ -574,8 +566,7 @@ def test_uptime_alerts_show_monitor_text_literally(client, monkeypatch, alert_ty
 
     assert response.status_code == 200
     (message,) = sent
-    assert message["parse_mode"] == "Markdown"
-    assert_literal(message["text"], HOSTILE)
+    assert_literal(message, HOSTILE)
 
 
 @pytest.mark.asyncio
@@ -738,23 +729,15 @@ def test_numbers_and_versions_keep_their_dots_in_untrusted_text(bot_module):
 
 
 def test_an_operator_uptime_alert_keeps_its_monitor_url_tappable(client, monkeypatch):
-    import httpx
-
     import api as api_module
 
     sent = []
 
-    class Telegram:
-        async def __aenter__(self):
-            return self
+    async def record(settings, text):
+        sent.append(text)
+        return True
 
-        async def __aexit__(self, *exc):
-            return False
-
-        async def post(self, url, json):
-            sent.append(json)
-
-    monkeypatch.setattr(httpx, "AsyncClient", Telegram)
+    monkeypatch.setattr(api_module, "send_alert", record)
     monkeypatch.setattr(
         api_module,
         "container",
@@ -781,7 +764,7 @@ def test_an_operator_uptime_alert_keeps_its_monitor_url_tappable(client, monkeyp
 
     assert response.status_code == 200
     (message,) = sent
-    rendered = assert_literal(message["text"])
+    rendered = assert_literal(message)
     assert "URL: https://api.shieldbotsecurity.online/health" in rendered
     assert "api.shieldbotsecurity.online is unreachable." in rendered
 
