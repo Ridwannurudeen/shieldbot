@@ -227,7 +227,9 @@ class TestWebhookAuth:
         )
         assert resp.status_code == 403
 
-    def test_a_failed_telegram_post_still_answers_the_monitor(self, client, monkeypatch):
+    def test_a_failed_telegram_post_still_answers_the_monitor(self, client, monkeypatch, caplog):
+        import logging
+
         import aiohttp
         import api as api_module
         monkeypatch.setattr(api_module, "container", SimpleNamespace(
@@ -239,12 +241,15 @@ class TestWebhookAuth:
             )
         ))
         monkeypatch.setattr(aiohttp, "ClientSession", MagicMock(side_effect=aiohttp.ClientError("down")))
-        resp = client.post(
-            "/webhook/uptime",
-            data={"alertType": "1"},
-            headers={"x-webhook-secret": "testsecret"},
-        )
+        with caplog.at_level(logging.ERROR, logger="core.telegram_alert"):
+            resp = client.post(
+                "/webhook/uptime",
+                data={"alertType": "1"},
+                headers={"x-webhook-secret": "testsecret"},
+            )
         assert resp.status_code == 200
+        # The send was attempted and failed, rather than skipped.
+        assert "Telegram alert failed: ClientError" in caplog.text
 
     def test_webhook_allows_query_secret_when_enabled(self, client, monkeypatch):
         import api as api_module

@@ -77,6 +77,7 @@ class LaunchWatch:
         self._guard_jobs_since_recheck = 0
         self._lagging = False
         self._head_stale = False
+        self._started_at = time.time()
 
     @property
     def is_running(self) -> bool:
@@ -119,15 +120,21 @@ class LaunchWatch:
             await asyncio.sleep(max(0.0, started + POLL_INTERVAL_SECONDS - self._clock()))
 
     async def cycle(self):
+        """Poll and scan once, then check the age of the last chain head read. The check comes after
+        the poll so a restart after a long stop reads a fresh head before judging it, and on every
+        path, since an open breaker or a pause returns before the poll.
+        """
+        await self._poll_and_scan()
+        await self._note_stale_head()
+
+    async def _poll_and_scan(self):
         """Poll discovery once, then scan until the next poll is due or nothing is eligible.
 
         Nothing runs while the RPC breaker is open; once its cooldown has passed, the hunter
         sends the one probe. A scan the breaker refuses is left pending, not recorded. An RPC
         that answers for another chain pauses all 4663 work, with the pause doubling from the
-        breaker's base cooldown to its cap and one log line per pause. Before any of that, the age
-        of the last chain head read is checked, since an open breaker or a pause keeps the poll off.
+        breaker's base cooldown to its cap and one log line per pause.
         """
-        await self._note_stale_head()
         if self._clock() < self._paused_until:
             return
         deadline = self._clock() + POLL_INTERVAL_SECONDS
@@ -219,15 +226,15 @@ class LaunchWatch:
     async def _note_stale_head(self):
         """Log and alert the operator once when discovery has read no confirmed head for
         HEAD_STALE_SECONDS, and once when it reads one again; the state changes before the alert
-        is sent, as in _note_lag.
+        is sent, as in _note_lag. A watch that has never read a head counts from its own start, so an
+        RPC that fails from the first boot still alerts. A real read time is never replaced by the
+        start time, so a service restarting in a loop against a dead RPC still alerts.
         """
         read_at = (await self.hunter.db.get_launch_discovery_status(CHAIN_ID))["confirmed_head_at"]
-        if read_at is None:
-            return
-        age = time.time() - read_at
+        age = time.time() - (read_at if read_at is not None else self._started_at)
         if not self._head_stale and age > HEAD_STALE_SECONDS:
             self._head_stale = True
-            logger.warning("Launch discovery has read no chain head for %d minutes", age // 60)
+            logger.warning("Launch discovery has read no chain head for %d minutes", int(age // 60))
             await self._send_alert(
                 "\u26a0\ufe0f *ShieldBot: Robinhood Chain launch discovery stopped reading the chain*\n"
                 f"It has read no chain head for about {age / 3_600:.1f} hours, so no launches are being "

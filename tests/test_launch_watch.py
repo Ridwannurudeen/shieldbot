@@ -391,7 +391,9 @@ def lag_lines(caplog):
     return [
         (record.levelname, record.getMessage())
         for record in caplog.records
-        if record.name == "agent.launch_watch" and record.getMessage().startswith("Launch discovery is")
+        if record.name == "agent.launch_watch"
+        and record.getMessage().startswith("Launch discovery is")
+        and "blocks" in record.getMessage()
     ]
 
 
@@ -471,6 +473,53 @@ async def test_an_hour_without_a_head_read_alerts_once_even_while_the_breaker_ke
     ]
     assert_literal(sent[0], "about 1.0 hours")
     assert_literal(sent[1])
+
+
+@pytest.mark.asyncio
+async def test_a_wrong_chain_pause_still_alerts_that_the_chain_is_not_being_read(db):
+    alert = AsyncMock(return_value=True)
+    watch = make_watch(db, alert=alert)
+    watch._paused_until = float("inf")
+    await head_read(db, HEAD_STALE_SECONDS + 60)
+
+    await watch.cycle()
+
+    assert watch.hunter.discovery.poll.await_count == 0
+    assert alert.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_watch_that_never_read_a_head_alerts_an_hour_after_it_started(db):
+    # A fresh database and an RPC that fails from the first boot: no head row ever appears.
+    alert = AsyncMock(return_value=True)
+    watch = make_watch(db, alert=alert)
+    watch.hunter.rpc_ready = AsyncMock(return_value=False)
+
+    await watch.cycle()
+    alert.assert_not_awaited()
+
+    watch._started_at -= HEAD_STALE_SECONDS + 60
+    await watch.cycle()
+    assert alert.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_restart_after_a_long_stop_with_a_healthy_rpc_sends_no_stopped_reading_alert(db):
+    # The poll reads a fresh head before the age is judged, so a service that was simply down for
+    # hours does not report that discovery stopped reading the chain.
+    alert = AsyncMock(return_value=True)
+    await head_read(db, 3 * HEAD_STALE_SECONDS)
+
+    async def poll_reading_the_head(pools=()):
+        await db.set_launch_confirmed_head(4663, TARGET)
+        return {"target": TARGET, "launches": [], "swaps": {}}
+
+    discovery = MagicMock(poll=AsyncMock(side_effect=poll_reading_the_head), probe=AsyncMock(return_value=False))
+    watch = make_watch(db, discovery=discovery, alert=alert)
+
+    await watch.cycle()
+
+    alert.assert_not_awaited()
 
 
 @pytest.mark.asyncio
