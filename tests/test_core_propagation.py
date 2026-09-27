@@ -778,6 +778,7 @@ PROVIDER_PATH_MODULES = [
     'core/auth.py',
     'core/indexer.py',
     'core/registry.py',
+    'core/telegram_alert.py',
     'scanner/token_scanner.py',
     'scanner/transaction_scanner.py',
     'rpc/router.py',

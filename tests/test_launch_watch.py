@@ -9,11 +9,18 @@ import pytest
 import pytest_asyncio
 
 from agent.hunter import Hunter
-from agent.launch_watch import LAG_WARN_BLOCKS, POLL_INTERVAL_SECONDS, TRIAGE_WINDOW_BLOCKS, LaunchWatch
+from agent.launch_watch import (
+    LAG_RECOVERED_BLOCKS,
+    LAG_WARN_BLOCKS,
+    POLL_INTERVAL_SECONDS,
+    TRIAGE_WINDOW_BLOCKS,
+    LaunchWatch,
+)
 from core.database import Database
 from core.registry import BACKGROUND_SCAN_DEADLINE_SECONDS
 from services.launch_discovery import SOURCES, LaunchDiscovery, RpcUnavailableError, WrongChainError
 from services.rpc_guard import BREAKER_BASE_COOLDOWN_SECONDS, BREAKER_FAILURE_THRESHOLD, OPEN, RpcGuard
+from tests.test_telegram_markdown import assert_literal
 
 _real_sleep = asyncio.sleep
 TARGET = 65_100_000
@@ -71,7 +78,7 @@ class Polls:
         return {"target": TARGET, "launches": [], "swaps": self.swaps.pop(0) if self.swaps else {}}
 
 
-def make_watch(db, polls=None, scan=None, guard=None, discovery=None, clock=time.monotonic):
+def make_watch(db, polls=None, scan=None, guard=None, discovery=None, clock=time.monotonic, alert=None):
     tools = MagicMock()
     tools.scan_contract = AsyncMock(side_effect=scan) if scan else AsyncMock(return_value=incomplete())
     tools.auto_watch_deployer = AsyncMock()
@@ -82,7 +89,7 @@ def make_watch(db, polls=None, scan=None, guard=None, discovery=None, clock=time
         tools=tools, db=db, ai_analyzer=MagicMock(is_available=MagicMock(return_value=False)),
         sentinel=MagicMock(), discovery=discovery, rpc_guard=guard,
     )
-    watch = LaunchWatch(hunter, clock=clock)
+    watch = LaunchWatch(hunter, clock=clock, alert=alert)
     hunter.launch_watch = watch
     return watch
 
@@ -394,14 +401,43 @@ async def test_discovery_falling_behind_is_logged_once_and_its_recovery_once(db,
         await behind(db, LAG_WARN_BLOCKS + 1)
         await watch.cycle()
         await watch.cycle()
+        # Between the two thresholds it is still behind: no recovery, and no second warning
+        # when it drifts back over the warning threshold.
         await behind(db, LAG_WARN_BLOCKS)
+        await watch.cycle()
+        await behind(db, LAG_RECOVERED_BLOCKS + 1)
+        await watch.cycle()
+        await behind(db, LAG_WARN_BLOCKS + 1)
+        await watch.cycle()
+        await behind(db, LAG_RECOVERED_BLOCKS)
         await watch.cycle()
         await watch.cycle()
 
     assert lag_lines(caplog) == [
         ("WARNING", f"Launch discovery is {LAG_WARN_BLOCKS + 1} blocks behind the confirmed head"),
-        ("INFO", f"Launch discovery is back within {LAG_WARN_BLOCKS} blocks of the confirmed head"),
+        ("INFO", f"Launch discovery is back within {LAG_RECOVERED_BLOCKS} blocks of the confirmed head"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_falling_behind_and_catching_up_each_send_one_operator_alert(db):
+    alert = AsyncMock(return_value=True)
+    watch = make_watch(db, alert=alert)
+    await behind(db, LAG_WARN_BLOCKS + 1)
+    await watch.cycle()
+    await watch.cycle()
+    await behind(db, 0)
+    await watch.cycle()
+    await watch.cycle()
+
+    sent = [call.args[0] for call in alert.await_args_list]
+    assert [text.splitlines()[0] for text in sent] == [
+        "\u26a0\ufe0f *ShieldBot: Robinhood Chain launch discovery is behind*",
+        "\u2705 *ShieldBot: Robinhood Chain launch discovery caught up*",
+    ]
+    # Telegram accepts both as legacy Markdown and shows the figures outside the bold heading.
+    assert_literal(sent[0], f"{LAG_WARN_BLOCKS + 1:,} blocks (about 1.0 hours)")
+    assert_literal(sent[1], f"{LAG_RECOVERED_BLOCKS:,} blocks (about 30 minutes)")
 
 
 @pytest.mark.asyncio

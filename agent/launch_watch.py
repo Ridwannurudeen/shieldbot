@@ -44,17 +44,24 @@ POLL_INTERVAL_SECONDS = 20
 TRIAGE_WINDOW_BLOCKS = 9_000
 # Unscanned launches read per selection, newest first; fifteen minutes hold about 150.
 CANDIDATE_LIMIT = 500
-# One hour at 0.1 s per block. Further behind the confirmed head than this, discovery is logged as
-# lagging: on 2026-09-26 it fell two days behind while every cycle still moved a cursor a little.
-LAG_WARN_BLOCKS = 36_000
+# 0.1 s per block, as measured for CONFIRMATIONS in services.launch_discovery.
+BLOCKS_PER_HOUR = 36_000
+# Further behind the confirmed head than this, discovery is logged and alerted as lagging: on
+# 2026-09-26 it fell two days behind while every cycle still moved a cursor a little.
+LAG_WARN_BLOCKS = BLOCKS_PER_HOUR
+# Discovery counts as caught up only once back within this, so a lag hovering at the warning
+# threshold does not send a behind and caught-up pair every few cycles.
+LAG_RECOVERED_BLOCKS = LAG_WARN_BLOCKS // 2
 
 
 class LaunchWatch:
     """Poll 4663 discovery on a short interval and scan triaged launches between polls."""
 
-    def __init__(self, hunter, clock=time.monotonic):
+    def __init__(self, hunter, clock=time.monotonic, alert=None):
         self.hunter = hunter
         self._clock = clock
+        # Async callable taking one Telegram Markdown message for the operator, or None.
+        self._alert = alert
         self._task = None
         self._pause = 0
         self._paused_until = 0.0
@@ -177,18 +184,34 @@ class LaunchWatch:
                 self._last_job = kind
 
     async def _note_lag(self):
-        """Log once when discovery falls more than LAG_WARN_BLOCKS behind the confirmed head it last
-        read, and once when it is back within them; a failed poll has usually read the head first.
+        """Log and alert the operator once when discovery falls more than LAG_WARN_BLOCKS behind the
+        confirmed head it last read, and once when it is back within LAG_RECOVERED_BLOCKS; a failed
+        poll has usually read the head first. The state changes before the alert is sent, so an
+        alert that fails is not retried every cycle.
         """
         lag = (await self.hunter.db.get_launch_discovery_status(CHAIN_ID))["lag_blocks"]
         if lag is None:
             return
-        lagging = lag > LAG_WARN_BLOCKS
-        if lagging and not self._lagging:
+        if not self._lagging and lag > LAG_WARN_BLOCKS:
+            self._lagging = True
             logger.warning("Launch discovery is %d blocks behind the confirmed head", lag)
-        elif self._lagging and not lagging:
-            logger.info("Launch discovery is back within %d blocks of the confirmed head", LAG_WARN_BLOCKS)
-        self._lagging = lagging
+            await self._send_alert(
+                "\u26a0\ufe0f *ShieldBot: Robinhood Chain launch discovery is behind*\n"
+                f"It is {lag:,} blocks (about {lag / BLOCKS_PER_HOUR:.1f} hours) behind the confirmed "
+                "chain head, so new launches are found late. The shieldbot journal has the cause."
+            )
+        elif self._lagging and lag <= LAG_RECOVERED_BLOCKS:
+            self._lagging = False
+            logger.info("Launch discovery is back within %d blocks of the confirmed head", LAG_RECOVERED_BLOCKS)
+            await self._send_alert(
+                "\u2705 *ShieldBot: Robinhood Chain launch discovery caught up*\n"
+                f"It is back within {LAG_RECOVERED_BLOCKS:,} blocks (about "
+                f"{LAG_RECOVERED_BLOCKS * 60 // BLOCKS_PER_HOUR} minutes) of the confirmed chain head."
+            )
+
+    async def _send_alert(self, text: str):
+        if self._alert is not None:
+            await self._alert(text)
 
     async def _window(self):
         """Unscanned launches whose block is inside the triage window, newest first."""

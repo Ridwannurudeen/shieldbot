@@ -42,6 +42,17 @@ def test_discovery_hunter_and_watch_share_one_guard_at_the_budget_rate():
 
 
 @pytest.mark.asyncio
+async def test_the_watch_alerts_the_operator_chat_named_in_the_settings(monkeypatch):
+    container = build_container()
+    sent = AsyncMock(return_value=True)
+    monkeypatch.setattr("core.container.send_alert", sent)
+
+    await container.launch_watch._alert("text")
+
+    sent.assert_awaited_once_with(container.settings, "text")
+
+
+@pytest.mark.asyncio
 async def test_shutdown_stops_the_watch_before_the_hunter():
     container = build_container()
     order = MagicMock()

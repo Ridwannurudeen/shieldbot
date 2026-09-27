@@ -7,6 +7,7 @@ import time
 from typing import Optional
 
 from adapters.evm_base import _get_explorer_backend
+from core.telegram_alert import send_alert
 from core.telegram_formatter import escape_markdown
 from services.explorer_service import _is_address, explorer_service
 from utils.web3_client import UnsupportedChainError
@@ -148,11 +149,6 @@ class DeployerIndexer:
         """Send a Telegram notification when a watched deployer creates a new contract."""
         if not self._settings:
             return False
-        bot_token = getattr(self._settings, "telegram_bot_token", "")
-        chat_id = getattr(self._settings, "telegram_alert_chat_id", "")
-        if not bot_token or not chat_id:
-            logger.warning("Watch alert not sent — Telegram not configured")
-            return False
 
         chain_names = {56: "BNB Chain", 1: "Ethereum", 8453: "Base", 42161: "Arbitrum",
                        137: "Polygon", 10: "Optimism", 204: "opBNB"}
@@ -165,20 +161,7 @@ class DeployerIndexer:
             f"Contract: `{new_contract}`\n"
             f"Watch reason: {escape_markdown(reason)} | Severity: {escape_markdown(severity)}"
         )
-        try:
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                    json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
-                    timeout=aiohttp.ClientTimeout(total=5),
-                ) as resp:
-                    return resp.status == 200
-        except UnsupportedChainError:
-            raise
-        except Exception as e:
-            logger.error("Telegram watch alert failed: %s", type(e).__name__)
-            return False
+        return await send_alert(self._settings, msg)
 
     async def _fetch_funder(self, deployer_address: str, chain_id: int) -> Optional[dict]:
         """Fetch the first funding transaction to a deployer address."""

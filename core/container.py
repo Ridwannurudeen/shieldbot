@@ -17,6 +17,7 @@ from services import (
     EmailService, PhishingService, TokenSnifferService,
 )
 from core.risk_engine import RiskEngine
+from core.telegram_alert import send_alert
 from core.calibration import load_calibration
 from core.database import Database
 from core.registry import AnalyzerRegistry
@@ -211,7 +212,7 @@ class ServiceContainer:
             scam_db=self.scam_db,
         )
         # Fast 4663 launch discovery and triaged scans; the lifespan starts and stops it.
-        self.launch_watch = LaunchWatch(self.hunter)
+        self.launch_watch = LaunchWatch(self.hunter, alert=lambda text: send_alert(self.settings, text))
         self.hunter.launch_watch = self.launch_watch
 
         # Optional services (need async init)
