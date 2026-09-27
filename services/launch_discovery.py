@@ -371,7 +371,10 @@ class LaunchDiscovery:
             raise WrongChainError("RPC is not Robinhood Chain")
 
     async def _confirmed_head(self) -> int:
-        return _quantity(await self._call("eth_blockNumber", [])) - CONFIRMATIONS
+        """The chain head less CONFIRMATIONS, stored so the lag behind it can be reported."""
+        head = _quantity(await self._call("eth_blockNumber", [])) - CONFIRMATIONS
+        await self.db.set_launch_confirmed_head(CHAIN_ID, head)
+        return head
 
     async def _sweep(self, target: int) -> List[Dict]:
         """Sweep every source from its own cursor towards ``target`` and store what it finds.

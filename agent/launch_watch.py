@@ -44,6 +44,9 @@ POLL_INTERVAL_SECONDS = 20
 TRIAGE_WINDOW_BLOCKS = 9_000
 # Unscanned launches read per selection, newest first; fifteen minutes hold about 150.
 CANDIDATE_LIMIT = 500
+# One hour at 0.1 s per block. Further behind the confirmed head than this, discovery is logged as
+# lagging: on 2026-09-26 it fell two days behind while every cycle still moved a cursor a little.
+LAG_WARN_BLOCKS = 36_000
 
 
 class LaunchWatch:
@@ -61,6 +64,7 @@ class LaunchWatch:
         self._last_job = None
         self._guard_attempted = set()
         self._guard_jobs_since_recheck = 0
+        self._lagging = False
 
     @property
     def is_running(self) -> bool:
@@ -137,6 +141,7 @@ class LaunchWatch:
                 self._target = polled["target"]
                 for pool, count in polled["swaps"].items():
                     self._swaps[pool] = self._swaps.get(pool, 0) + count
+            await self._note_lag()
             window = await self._window()
             pools = {row["pool_id"] for row in window}
             self._swaps = {pool: count for pool, count in self._swaps.items() if pool in pools}
@@ -170,6 +175,20 @@ class LaunchWatch:
                 except BreakerOpenError:
                     return
                 self._last_job = kind
+
+    async def _note_lag(self):
+        """Log once when discovery falls more than LAG_WARN_BLOCKS behind the confirmed head it last
+        read, and once when it is back within them; a failed poll has usually read the head first.
+        """
+        lag = (await self.hunter.db.get_launch_discovery_status(CHAIN_ID))["lag_blocks"]
+        if lag is None:
+            return
+        lagging = lag > LAG_WARN_BLOCKS
+        if lagging and not self._lagging:
+            logger.warning("Launch discovery is %d blocks behind the confirmed head", lag)
+        elif self._lagging and not lagging:
+            logger.info("Launch discovery is back within %d blocks of the confirmed head", LAG_WARN_BLOCKS)
+        self._lagging = lagging
 
     async def _window(self):
         """Unscanned launches whose block is inside the triage window, newest first."""

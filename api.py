@@ -2076,8 +2076,12 @@ async def public_stats():
     (`mempool_chains_observable`); a monitored chain it could not read is listed in
     `mempool_chains_unobservable`: its mempool is unknown, not protected.
     `launch_discovery` says how far Robinhood Chain launch discovery has read, from the database
-    alone: its lowest source cursor, when a sweep last moved a cursor, and the newest launch block.
-    A cursor far below the chain head, or an old `last_sweep_at`, means discovery has stalled.
+    alone: its lowest source cursor, when a sweep last moved a cursor, the newest launch block, the
+    confirmed head discovery last read and when (`confirmed_head`, `confirmed_head_at`), and
+    `lag_blocks`, how far the cursor is behind that head (negative if the RPC reported a head behind
+    a cursor). A large `lag_blocks` means discovery is behind; `last_sweep_at` alone does not show
+    it, since any source that reads a single chunk moves its cursor. An old `confirmed_head_at`
+    means discovery has stopped reading the chain.
     Its `scanned_share` counts the launches whose block is in the last 24 hours and how many of
     them have any scan outcome. `evidence_documents` counts the stored verdict evidence documents
     per chain; `registry_records_confirmed` counts those whose record in the Robinhood Chain

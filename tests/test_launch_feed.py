@@ -365,6 +365,9 @@ async def test_discovery_status_is_empty_before_discovery_has_run(db):
         "cursor": None,
         "last_sweep_at": None,
         "last_discovered_block": None,
+        "confirmed_head": None,
+        "confirmed_head_at": None,
+        "lag_blocks": None,
     }
 
 
@@ -386,7 +389,37 @@ async def test_discovery_status_reports_the_lowest_cursor_last_sweep_and_newest_
         "cursor": 700,
         "last_sweep_at": 2000.0,
         "last_discovered_block": 880,
+        "confirmed_head": None,
+        "confirmed_head_at": None,
+        "lag_blocks": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_discovery_status_reports_the_lag_behind_the_confirmed_head_it_last_read(db):
+    # A cursor that keeps moving a little still has a recent last_sweep_at; only the head it
+    # is measured against shows how far behind the chain it is.
+    await db.set_launch_cursor(CHAIN, "long", 900)
+    await db.set_launch_cursor(CHAIN, "uniswap_v4", 700)
+    await db.set_launch_confirmed_head(CHAIN, 1_000)
+    await db.set_launch_confirmed_head(CHAIN, 1_200)
+    await db.set_launch_confirmed_head(56, 9_000)
+
+    status = await db.get_launch_discovery_status(CHAIN)
+
+    assert status["confirmed_head"] == 1_200
+    assert status["lag_blocks"] == 500
+    assert 0 <= time.time() - status["confirmed_head_at"] < 60
+
+
+@pytest.mark.asyncio
+async def test_a_head_without_a_cursor_has_no_lag(db):
+    await db.set_launch_confirmed_head(CHAIN, 1_000)
+
+    status = await db.get_launch_discovery_status(CHAIN)
+
+    assert status["confirmed_head"] == 1_000
+    assert status["lag_blocks"] is None
 
 
 @pytest.mark.asyncio

@@ -9,10 +9,10 @@ import pytest
 import pytest_asyncio
 
 from agent.hunter import Hunter
-from agent.launch_watch import POLL_INTERVAL_SECONDS, TRIAGE_WINDOW_BLOCKS, LaunchWatch
+from agent.launch_watch import LAG_WARN_BLOCKS, POLL_INTERVAL_SECONDS, TRIAGE_WINDOW_BLOCKS, LaunchWatch
 from core.database import Database
 from core.registry import BACKGROUND_SCAN_DEADLINE_SECONDS
-from services.launch_discovery import LaunchDiscovery, RpcUnavailableError, WrongChainError
+from services.launch_discovery import SOURCES, LaunchDiscovery, RpcUnavailableError, WrongChainError
 from services.rpc_guard import BREAKER_BASE_COOLDOWN_SECONDS, BREAKER_FAILURE_THRESHOLD, OPEN, RpcGuard
 
 _real_sleep = asyncio.sleep
@@ -367,6 +367,66 @@ async def test_stopping_mid_scan_cancels_it_and_records_nothing(db):
     assert not watch.is_running
     assert await unscanned(db) == [token(0)]
     assert not watch.hunter.launch_lock.locked()
+
+
+# --- lag ---
+
+
+async def behind(db, blocks):
+    """Every source cursor ``blocks`` behind a recorded confirmed head at TARGET."""
+    for source in SOURCES:
+        await db.set_launch_cursor(4663, source.name, TARGET - blocks)
+    await db.set_launch_confirmed_head(4663, TARGET)
+
+
+def lag_lines(caplog):
+    return [
+        (record.levelname, record.getMessage())
+        for record in caplog.records
+        if record.name == "agent.launch_watch" and record.getMessage().startswith("Launch discovery is")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_discovery_falling_behind_is_logged_once_and_its_recovery_once(db, caplog):
+    watch = make_watch(db)
+    with caplog.at_level(logging.INFO, logger="agent.launch_watch"):
+        await behind(db, LAG_WARN_BLOCKS + 1)
+        await watch.cycle()
+        await watch.cycle()
+        await behind(db, LAG_WARN_BLOCKS)
+        await watch.cycle()
+        await watch.cycle()
+
+    assert lag_lines(caplog) == [
+        ("WARNING", f"Launch discovery is {LAG_WARN_BLOCKS + 1} blocks behind the confirmed head"),
+        ("INFO", f"Launch discovery is back within {LAG_WARN_BLOCKS} blocks of the confirmed head"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_discovery_lag_is_logged_even_when_the_poll_fails(db, caplog):
+    # In the 2026-09-26 stall every poll failed after reading the head.
+    watch = make_watch(db)
+    watch.hunter.discovery.poll = AsyncMock(side_effect=RpcUnavailableError("RPC breaker open"))
+    await behind(db, LAG_WARN_BLOCKS + 1)
+    with caplog.at_level(logging.INFO, logger="agent.launch_watch"):
+        await watch.cycle()
+
+    assert lag_lines(caplog) == [
+        ("WARNING", f"Launch discovery is {LAG_WARN_BLOCKS + 1} blocks behind the confirmed head"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_no_lag_is_logged_before_discovery_has_read_a_head(db, caplog):
+    watch = make_watch(db)
+    for source in SOURCES:
+        await db.set_launch_cursor(4663, source.name, 1)
+    with caplog.at_level(logging.INFO, logger="agent.launch_watch"):
+        await watch.cycle()
+
+    assert lag_lines(caplog) == []
 
 
 @pytest.mark.asyncio

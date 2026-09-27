@@ -412,6 +412,24 @@ async def test_throttled_source_keeps_its_cursor_while_other_sources_advance(db,
 
 
 @pytest.mark.asyncio
+async def test_every_sweep_records_the_confirmed_head_so_the_lag_behind_it_is_known(db):
+    # A sweep that cannot move every cursor still records the head it read, so a source that
+    # keeps failing shows as lag rather than passing for a recent sweep.
+    rpc = FakeRpc()
+    rpc.throttled.add(SOURCE["long"].address)
+    await discovery_with(db, rpc).run()
+
+    status = await db.get_launch_discovery_status(CHAIN_ID)
+    assert (status["confirmed_head"], status["cursor"]) == (TARGET, ANCHOR)
+    assert status["lag_blocks"] == TARGET - ANCHOR
+
+    rpc.throttled.clear()
+    await discovery_with(db, rpc).run()
+
+    assert (await db.get_launch_discovery_status(CHAIN_ID))["lag_blocks"] == 0
+
+
+@pytest.mark.asyncio
 async def test_failure_mid_range_stops_after_the_last_completed_chunk(db):
     rpc = FakeRpc()
     rpc.failing_ranges.add((SOURCE["uniswap_v2"].address, ANCHOR + 1 + CHUNK_BLOCKS))

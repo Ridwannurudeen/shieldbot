@@ -2365,6 +2365,12 @@ class Database:
                 PRIMARY KEY (chain_id, source)
             );
 
+            CREATE TABLE IF NOT EXISTS launch_discovery_heads (
+                chain_id INTEGER PRIMARY KEY,
+                confirmed_head INTEGER NOT NULL,
+                read_at REAL NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS discovered_launches (
                 chain_id INTEGER NOT NULL,
                 token_address TEXT NOT NULL,
@@ -2421,12 +2427,26 @@ class Database:
         """, (chain_id, source, last_block, time.time()))
         await self._db.commit()
 
+    async def set_launch_confirmed_head(self, chain_id: int, confirmed_head: int):
+        """Store the confirmed head launch discovery last read, which its lag is measured against."""
+        await self._db.execute("""
+            INSERT INTO launch_discovery_heads (chain_id, confirmed_head, read_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(chain_id) DO UPDATE SET
+                confirmed_head = excluded.confirmed_head,
+                read_at = excluded.read_at
+        """, (chain_id, confirmed_head, time.time()))
+        await self._db.commit()
+
     async def get_launch_discovery_status(self, chain_id: int) -> Dict:
         """Report how far launch discovery has read, from its stored cursors and launches.
 
         ``cursor`` is the lowest source cursor, the block through which every source has been
         read; ``last_sweep_at`` is when a sweep last moved a cursor; ``last_discovered_block`` is
-        the newest launch recorded. Each is None until discovery has stored one.
+        the newest launch recorded; ``confirmed_head`` is the confirmed head discovery last read,
+        at ``confirmed_head_at``, and ``lag_blocks`` how far ``cursor`` is behind it (negative if the
+        RPC reported a head behind a cursor). Each is None until discovery has stored what it
+        depends on.
         """
         cursor = await self._db.execute(
             "SELECT MIN(last_block), MAX(updated_at) FROM launch_discovery_cursors WHERE chain_id = ?",
@@ -2437,7 +2457,20 @@ class Database:
             "SELECT MAX(block_number) FROM discovered_launches WHERE chain_id = ?", (chain_id,)
         )
         newest = (await cursor.fetchone())[0]
-        return {"cursor": lowest, "last_sweep_at": last_sweep_at, "last_discovered_block": newest}
+        cursor = await self._db.execute(
+            "SELECT confirmed_head, read_at FROM launch_discovery_heads WHERE chain_id = ?", (chain_id,)
+        )
+        confirmed_head, confirmed_head_at = await cursor.fetchone() or (None, None)
+        return {
+            "cursor": lowest,
+            "last_sweep_at": last_sweep_at,
+            "last_discovered_block": newest,
+            "confirmed_head": confirmed_head,
+            "confirmed_head_at": confirmed_head_at,
+            "lag_blocks": (
+                confirmed_head - lowest if confirmed_head is not None and lowest is not None else None
+            ),
+        }
 
     async def upsert_discovered_launches(self, chain_id: int, launches: List[Dict]):
         """Record launches idempotently, one row per token.

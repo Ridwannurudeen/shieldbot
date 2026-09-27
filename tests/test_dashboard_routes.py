@@ -30,6 +30,9 @@ DISCOVERY = {
     "cursor": 70_706_607,
     "last_sweep_at": 1_790_217_346.4,
     "last_discovered_block": 70_756_543,
+    "confirmed_head": 70_756_900,
+    "confirmed_head_at": 1_790_217_350.2,
+    "lag_blocks": 50_293,
 }
 
 

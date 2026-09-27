@@ -192,6 +192,11 @@ async def test_a_failed_header_read_keeps_the_launches_confirmed_before_it(db):
             await discovery.poll()
 
         first_unconfirmed = rpc.failed_batches[0][0]
+        # The 2026-09-26 stall: the poll failed after moving every cursor a little, which kept
+        # last_sweep_at fresh. The head it read before failing is what shows the lag.
+        status = await db.get_launch_discovery_status(CHAIN_ID)
+        assert status["confirmed_head"] == TARGET
+        assert status["lag_blocks"] == TARGET - (first_unconfirmed - 1)
         confirmed = [number for number in LAUNCH_BLOCKS if number < first_unconfirmed]
         assert confirmed
         assert await recorded(db) == {token_of(number) for number in confirmed}
