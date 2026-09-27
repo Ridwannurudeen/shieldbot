@@ -12,17 +12,19 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import aiohttp
 from cachetools import TTLCache
+from eth_utils import keccak
 from web3 import Web3
 
 from utils.chain_info import get_dexscreener_slug
 
 logger = logging.getLogger(__name__)
 
-# ERC-20 Approval event topic
-APPROVAL_TOPIC = Web3.keccak(text="Approval(address,address,uint256)").hex()
+# ERC-20 Approval event topic. eth_utils' keccak returns bytes, whose hex() never has the 0x that
+# web3 7's HexBytes.hex() dropped, so the topic is prefixed the same way under any web3 version.
+APPROVAL_TOPIC = "0x" + keccak(text="Approval(address,address,uint256)").hex()
 
 # ApprovalForAll event topic (ERC-721/1155)
-APPROVAL_FOR_ALL_TOPIC = Web3.keccak(text="ApprovalForAll(address,address,bool)").hex()
+APPROVAL_FOR_ALL_TOPIC = "0x" + keccak(text="ApprovalForAll(address,address,bool)").hex()
 
 # A chain without a configured logs RPC is read through its adapter's public RPC, which serves no
 # archive history, so rescue reads only recent approval history there: 24 windows of 10,000

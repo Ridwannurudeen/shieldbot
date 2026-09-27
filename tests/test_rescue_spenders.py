@@ -1,8 +1,9 @@
 """Known safe spenders are trusted only on the chains where each was verified."""
 
 import pytest
+from web3 import Web3
 
-from services.rescue_service import APPROVAL_TOPIC, KNOWN_SAFE_SPENDERS
+from services.rescue_service import APPROVAL_FOR_ALL_TOPIC, APPROVAL_TOPIC, KNOWN_SAFE_SPENDERS
 from tests.test_rescue_bounded_history import (
     LATEST,
     OWNER_TOPIC,
@@ -12,6 +13,17 @@ from tests.test_rescue_bounded_history import (
     ok,
     scan,
 )
+
+@pytest.mark.parametrize("topic, event", [
+    (APPROVAL_TOPIC, "Approval(address,address,uint256)"),
+    (APPROVAL_FOR_ALL_TOPIC, "ApprovalForAll(address,address,bool)"),
+])
+def test_the_approval_event_topics_keep_their_0x_prefix_under_any_web3_version(topic, event):
+    # web3 7's HexBytes.hex() drops the 0x that web3 6 keeps, and a public RPC rejects an
+    # unprefixed topic, so every eth_getLogs of a rescue scan would fail.
+    assert topic.startswith("0x") and len(topic) == 66
+    assert topic == "0x" + bytes(Web3.keccak(text=event)).hex()
+
 
 AERODROME_ROUTER = "0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43"
 QUICKSWAP_ROUTER = "0xa5e0829caced8ffdd4de3c43696c57f7d7a678ff"
