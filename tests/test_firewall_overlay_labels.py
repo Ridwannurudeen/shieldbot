@@ -377,6 +377,33 @@ async def test_approval_amount_is_formatted_without_eating_the_symbol(labels_api
     assert decoded["formatted_amount"] == "1 USD0"
 
 
+@pytest.mark.asyncio
+async def test_an_approval_spender_is_labelled_from_its_own_chains_allowlist(labels_api):
+    from adapters.bsc import BscAdapter
+    from adapters.eth import EthAdapter
+    from services.counterparty_service import CounterpartyService
+    from utils.web3_client import Web3Client
+
+    api = labels_api
+    client = Web3Client()
+    client.register_adapter(EthAdapter())
+    client.register_adapter(BscAdapter())
+    api.container.counterparty_service = CounterpartyService(client, None)
+    uniswap = "0x23617e59a5925b2a4bf75d73ff6711cd0b29de85"
+    # PancakeSwap's V2 router is listed for BNB Chain only.
+    pancake = "0x10ed43c718714eb63d5aa57b78b54704e256024e"
+    cases = [
+        (uniswap, 1, "Uniswap Universal Router V2.1.2"),
+        (pancake, 1, None),
+        (pancake, 56, "PancakeSwap V2 Router"),
+        ("0x000000000022d473030f116ddee9f6b43ac78ba3", 1, "Permit2"),
+    ]
+    for spender, chain_id, label in cases:
+        decoded = DECODER.decode(calldata("095ea7b3", ["address", "uint256"], [spender, MAX]))
+        await api._enrich_decoded(decoded, "0x" + "7" * 40, chain_id=chain_id)
+        assert decoded.get("spender_label") == label, (spender, chain_id)
+
+
 def test_permit_shows_its_spender_and_grant_not_the_owner(labels_api):
     api = labels_api
     spender = Web3.to_checksum_address(SPENDER)

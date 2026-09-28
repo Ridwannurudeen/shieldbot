@@ -26,6 +26,17 @@ WHITELISTED_ROUTERS = {
     "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43".lower(): "Aerodrome Router",
     "0x327Df1E6de05895d2ab08513aaDD9313Fe505d86".lower(): "BaseSwap Router",
     "0x111111125421cA6dc452d289314280a0f8842A65".lower(): "1inch V6 Router",
+    "0x6fF5693b99212Da76ad316178A184AB56D299b43".lower(): "Uniswap Universal Router V2",
+    "0xFdf682F51FE81Aa4898F0AE2163d8A55c127fbC7".lower(): "Uniswap Universal Router V2.1.1",
+    "0xd6145b2D3F379919E8CdEda7B97e37c4b2Ca9c40".lower(): "Uniswap Universal Router V2.1.2",
+    "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24".lower(): "Uniswap V2 Router02",
+}
+
+# Protocol contracts a wallet approves or signs a permit for that are not swap entry points: they name
+# the spender (services.counterparty_service), but never take a transaction down the router path.
+KNOWN_SPENDERS = {
+    "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1".lower(): "Uniswap V3 NonfungiblePositionManager",
+    "0x7C5f5A4bBd8fD63184577525326123B519429bDc".lower(): "Uniswap V4 PositionManager",
 }
 
 
@@ -46,5 +57,6 @@ class BaseChainAdapter(EvmAdapter):
             quote_tokens=QUOTE_TOKENS,
             factory_address=AERODROME_FACTORY,
             whitelisted_routers=WHITELISTED_ROUTERS,
+            known_spenders=KNOWN_SPENDERS,
             solidly_factory=True,
         )

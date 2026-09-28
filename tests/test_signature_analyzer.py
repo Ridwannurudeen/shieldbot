@@ -477,6 +477,36 @@ async def test_a_readable_permit_to_a_known_spender_is_covered():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("primary_type,message,types,score,flags", [
+    ("Permit", {"owner": "0x" + "a" * 40, "spender": UNIVERSAL_ROUTER, "value": MAX, "nonce": "0", "deadline": "0"},
+     EIP2612_TYPES, 5, ["Permit: unlimited token approval to Uniswap Universal Router"]),
+    ("PermitBatch", {"details": [{"token": "0x" + "c" * 40, "amount": MAX, "expiration": "0", "nonce": "0"},
+                                 {"token": "0x" + "d" * 40, "amount": MAX, "expiration": "0", "nonce": "0"}],
+                     "spender": UNIVERSAL_ROUTER, "sigDeadline": "0"},
+     PERMIT2_TYPES, 10, [f'Permit2 Batch: unlimited amount for token #{i} to Uniswap Universal Router' for i in (1, 2)]),
+    ("PermitTransferFrom", {"permitted": {"token": "0x" + "c" * 40, "amount": MAX}, "spender": UNIVERSAL_ROUTER,
+                            "nonce": "0", "deadline": "0"},
+     PERMIT2_TYPES, 5, ["Permit2 transfer: unlimited amount to Uniswap Universal Router"]),
+])
+async def test_an_unlimited_grant_to_a_known_spender_scores_5_and_names_it(primary_type, message, types, score, flags):
+    result = await _analyze(SignaturePermitAnalyzer(_service()), _typed(primary_type, message, types))
+    assert result.score == score
+    assert result.flags == flags
+    assert result.data["spender_name"] == "Uniswap Universal Router"
+
+
+@pytest.mark.asyncio
+async def test_an_amount_that_cannot_be_read_is_never_discounted_for_a_known_spender():
+    typed = _typed("PermitSingle", {
+        "details": {"token": "0x" + "c" * 40, "amount": 1.5, "expiration": "0", "nonce": "0"},
+        "spender": UNIVERSAL_ROUTER, "sigDeadline": "0",
+    })
+    result = await _analyze(SignaturePermitAnalyzer(_service()), typed)
+    assert result.score == 25
+    assert result.flags == ["Permit2: amount could not be read; treated as unlimited"]
+
+
+@pytest.mark.asyncio
 async def test_unknown_spender_facts_are_unknown_not_clean():
     typed = _typed("PermitSingle", {
         "details": {"token": "0x" + "c" * 40, "amount": "1000", "expiration": "0", "nonce": "0"},
@@ -493,8 +523,11 @@ async def test_unknown_spender_facts_are_unknown_not_clean():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("chain_id", [8453, 42161])
-async def test_chain_adapter_router_is_allowlisted(chain_id):
+@pytest.mark.parametrize("chain_id,router,name", [
+    (8453, UNIVERSAL_ROUTER, "Uniswap Universal Router"),
+    (42161, "0x2d01411773c8C24805306E89A41F7855C3c4Fe65", "Uniswap Universal Router V2.1.2"),
+])
+async def test_chain_adapter_router_is_allowlisted(chain_id, router, name):
     from adapters.arbitrum import ArbitrumAdapter
     from adapters.base_chain import BaseChainAdapter
     from services.counterparty_service import CounterpartyService
@@ -505,9 +538,12 @@ async def test_chain_adapter_router_is_allowlisted(chain_id):
     client.register_adapter(ArbitrumAdapter())
     typed = _typed("PermitSingle", {
         "details": {"token": "0x" + "c" * 40, "amount": MAX, "expiration": "0", "nonce": "0"},
-        "spender": UNIVERSAL_ROUTER, "sigDeadline": "0",
+        "spender": router, "sigDeadline": "0",
     })
     result = await _analyze(SignaturePermitAnalyzer(CounterpartyService(client, None)), typed, chain_id)
-    # Only the unlimited amount counts: no lookup, no spender points.
-    assert result.score == 25
+    # The unlimited amount a router is asked for as a matter of course scores 5 and names it: no
+    # lookup, no spender points.
+    assert result.score == 5
+    assert result.flags == [f"Permit2: unlimited amount to {name}"]
+    assert result.data["spender_name"] == name
     assert "status" not in result.data

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Check that every allowlisted router and liquidity locker has contract code on its chain.
+"""Check that every allowlisted router, known protocol contract and liquidity locker has contract
+code on its chain.
 
 Read-only network check (eth_getCode through each adapter's RPC), run by hand from the repo root:
 
@@ -42,9 +43,12 @@ REQUEST_SPACING_SECONDS = 1.0
 
 
 def allowlisted(adapter):
-    """(address, kind, label) for every router and non-burn locker the adapter trusts."""
+    """(address, kind, label) for every router, known spender and non-burn locker the adapter trusts."""
     rows = [
         (address, "router", label) for address, label in adapter.get_whitelisted_routers().items()
+    ]
+    rows += [
+        (address, "spender", label) for address, label in adapter.get_known_spenders().items()
     ]
     rows += [
         (address, "locker", label)

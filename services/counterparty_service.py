@@ -120,10 +120,12 @@ def unknown_facts(address: str) -> dict:
 
 
 def _allowlisted_name(web3_client, address: str, chain_id: int) -> Optional[str]:
-    """The scanned chain adapter's router name, or Permit2, which no adapter lists."""
+    """The scanned chain adapter's router or known protocol contract name, or Permit2, which no
+    adapter lists."""
     lower = address.lower()
-    routers = web3_client._get_adapter(chain_id).get_whitelisted_routers() if web3_client else {}
-    return routers.get(lower) or ("Permit2" if lower == PERMIT2 else None)
+    adapter = web3_client._get_adapter(chain_id) if web3_client else None
+    known = {**adapter.get_whitelisted_routers(), **adapter.get_known_spenders()} if adapter else {}
+    return known.get(lower) or ("Permit2" if lower == PERMIT2 else None)
 
 
 def approval_grant(decoded: dict) -> Optional[tuple]:

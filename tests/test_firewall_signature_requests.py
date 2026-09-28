@@ -34,6 +34,49 @@ async def test_typed_data_that_did_not_arrive_as_an_object_is_an_unknown_signatu
 
 
 @pytest.mark.asyncio
+async def test_uniswaps_own_swap_permit_is_safe_and_names_its_router(consumer_api):  # noqa: F811
+    # What app.uniswap.org asks a wallet to sign before a swap on Ethereum: Permit2 lets Uniswap's
+    # current Universal Router spend up to MaxUint160 for 30 days.
+    import time
+
+    from adapters.eth import EthAdapter
+    from services.counterparty_service import CounterpartyService
+    from utils.web3_client import Web3Client
+
+    api, services = consumer_api
+    client = Web3Client()
+    client.register_adapter(EthAdapter())
+    services.counterparty_service = CounterpartyService(client, None)
+    now = int(time.time())
+    member = lambda name, kind: {"name": name, "type": kind}  # noqa: E731
+    typed = {
+        "types": {
+            "PermitDetails": [member("token", "address"), member("amount", "uint160"),
+                              member("expiration", "uint48"), member("nonce", "uint48")],
+            "PermitSingle": [member("details", "PermitDetails"), member("spender", "address"),
+                             member("sigDeadline", "uint256")],
+        },
+        "primaryType": "PermitSingle",
+        "domain": {"name": "Permit2", "chainId": 1, "verifyingContract": "0x000000000022D473030F116dDEE9F6B43aC78BA3"},
+        "message": {
+            "details": {"token": "0xdAC17F958D2ee523a2206206994597C13D831ec7", "amount": str(2**160 - 1),
+                        "expiration": str(now + 30 * 86400), "nonce": "0"},
+            "spender": "0x23617e59A5925b2A4Bf75d73ff6711cD0b29De85",
+            "sigDeadline": str(now + 1800),
+        },
+    }
+    req = api.FirewallRequest(
+        to="", sender="0x" + "b" * 40, chainId=1, signMethod="eth_signTypedData_v4", typedData=typed,
+    )
+    response = await api._build_signature_only_response(req)
+    assert response["classification"] == verdicts.SAFE
+    assert response["risk_score"] == 5
+    assert response["danger_signals"] == ["Permit2: unlimited amount to Uniswap Universal Router V2.1.2"]
+    fields = {field["label"]: field["value"] for field in response["calldata_details"]["fields"]}
+    assert fields["Spender"] == "Uniswap Universal Router V2.1.2"
+
+
+@pytest.mark.asyncio
 async def test_eth_sign_is_block_recommended_and_says_it_can_sign_a_transaction(consumer_api):  # noqa: F811
     api, _ = consumer_api
     req = api.FirewallRequest(to="", sender="0x" + "b" * 40, signMethod="eth_sign")

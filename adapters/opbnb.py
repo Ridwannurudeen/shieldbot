@@ -25,6 +25,12 @@ WHITELISTED_ROUTERS = {
     "0x8cFe327CEc66d1C090Dd72bd0FF11d690C33a2Eb".lower(): "PancakeSwap V2 Router",
     "0x1b81D678ffb9C0263b24A97847620C99d213eB14".lower(): "PancakeSwap V3 Router",
     "0x678Aa4bF4E210cf2166753e054d5b7c31cc7fa86".lower(): "PancakeSwap V3 Smart Router",
+    "0xB89a6778D1efE7a5b7096757A21b810CC2886fa1".lower(): "PancakeSwap V3 Universal Router",
+}
+
+# Protocol contracts a wallet approves or signs a permit for that are not swap entry points: they name
+# the spender (services.counterparty_service), but never take a transaction down the router path.
+KNOWN_SPENDERS = {
 }
 
 
@@ -46,4 +52,5 @@ class OpBNBAdapter(EvmAdapter):
             quote_tokens=QUOTE_TOKENS,
             factory_address=PANCAKESWAP_V2_FACTORY,
             whitelisted_routers=WHITELISTED_ROUTERS,
+            known_spenders=KNOWN_SPENDERS,
         )

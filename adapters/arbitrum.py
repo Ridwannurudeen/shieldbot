@@ -24,9 +24,20 @@ QUOTE_TOKENS = [
 WHITELISTED_ROUTERS = {
     "0xE592427A0AEce92De3Edee1F18E0157C05861564".lower(): "Uniswap V3 Router",
     "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506".lower(): "SushiSwap Router",
-    "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD".lower(): "Uniswap Universal Router",
     "0xc873fEcbd354f5A56E00E710B90EF4201db2448d".lower(): "Camelot Router",
     "0x111111125421cA6dc452d289314280a0f8842A65".lower(): "1inch V6 Router",
+    "0xA51afAFe0263b40EdaEf0Df8781eA9aa03E381a3".lower(): "Uniswap Universal Router V2",
+    "0x8B844f885672f333Bc0042cB669255f93a4C1E6b".lower(): "Uniswap Universal Router V2.1.1",
+    "0x2d01411773c8C24805306E89A41F7855C3c4Fe65".lower(): "Uniswap Universal Router V2.1.2",
+    "0x5E325eDA8064b456f4781070C0738d849c824258".lower(): "Uniswap Universal Router V1.2",
+    "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45".lower(): "Uniswap V3 SwapRouter02",
+}
+
+# Protocol contracts a wallet approves or signs a permit for that are not swap entry points: they name
+# the spender (services.counterparty_service), but never take a transaction down the router path.
+KNOWN_SPENDERS = {
+    "0xC36442b4a4522E871399CD717aBDD847Ab11FE88".lower(): "Uniswap V3 NonfungiblePositionManager",
+    "0xd88F38F930b7952f2DB2432Cb002E7abbF3dD869".lower(): "Uniswap V4 PositionManager",
 }
 
 
@@ -48,4 +59,5 @@ class ArbitrumAdapter(EvmAdapter):
             quote_tokens=QUOTE_TOKENS,
             factory_address=SUSHISWAP_V2_FACTORY,
             whitelisted_routers=WHITELISTED_ROUTERS,
+            known_spenders=KNOWN_SPENDERS,
         )

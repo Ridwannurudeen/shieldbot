@@ -1010,6 +1010,7 @@ async def _build_signature_only_response(
                 {"label": "Method", "value": sign_method},
                 {"label": "Signature Type", "value": sig_type},
                 {"label": "Target", "value": target or "N/A"},
+                *([{"label": "Spender", "value": result.data["spender_name"]}] if result.data.get("spender_name") else []),
             ],
         },
         "danger_signals": danger_signals,
@@ -3688,7 +3689,12 @@ async def _enrich_decoded(decoded: Dict, to_addr: str, chain_id: int = 56):
             # Resolve the spender address
             spender = params.get(spender_param) if spender_param else None
             if spender:
-                spender_name = calldata_decoder.is_whitelisted_target(spender)
+                # The chain's own allowlist, as the analyzers use it: routers, known protocol contracts, Permit2.
+                counterparty = container.counterparty_service if container else None
+                spender_name = (
+                    counterparty.allowlisted_name(spender, chain_id) if counterparty
+                    else calldata_decoder.is_whitelisted_target(spender, chain_id=chain_id)
+                )
                 if spender_name:
                     decoded["spender_label"] = spender_name
 

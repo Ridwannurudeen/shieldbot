@@ -23,7 +23,18 @@ QUOTE_TOKENS = [
 
 WHITELISTED_ROUTERS = {
     UNISWAP_V2_ROUTER.lower(): 'Uniswap V2 Router02',
-    UNISWAP_V4_UNIVERSAL_ROUTER.lower(): 'Uniswap V4 Universal Router',
+    UNISWAP_V4_UNIVERSAL_ROUTER.lower(): 'Uniswap Universal Router V2.1.1',
+    '0x204FAca1764B154221e35c0d20aBb3c525710498'.lower(): 'Uniswap Universal Router V2.1.2',
+    '0x57fc55F719DF19B4b90A03F9D78E1177D002E504'.lower(): 'PancakeSwap Infinity Universal Router',
+    '0xE28c0e44F4016b073db20cF28971CAc6ce3664D3'.lower(): 'PancakeSwap V3 Universal Router',
+    '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4'.lower(): 'PancakeSwap V3 Smart Router',
+    '0x1b81D678ffb9C0263b24A97847620C99d213eB14'.lower(): 'PancakeSwap V3 SwapRouter',
+}
+
+# Protocol contracts a wallet approves or signs a permit for that are not swap entry points: they name
+# the spender (services.counterparty_service), but never take a transaction down the router path.
+KNOWN_SPENDERS = {
+    '0x58daec3116aae6D93017bAAea7749052E8a04fA7'.lower(): 'Uniswap V4 PositionManager',
 }
 
 SIMULATION_PROVIDER = 'eth_simulateV1'
@@ -61,6 +72,7 @@ class RobinhoodAdapter(EvmAdapter):
             quote_tokens=QUOTE_TOKENS,
             factory_address=UNISWAP_V2_FACTORY,
             whitelisted_routers=WHITELISTED_ROUTERS,
+            known_spenders=KNOWN_SPENDERS,
         )
         self._simulator = RobinhoodSimulator(rpc)
 

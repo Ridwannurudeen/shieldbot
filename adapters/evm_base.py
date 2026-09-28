@@ -142,6 +142,7 @@ class EvmAdapter(ChainAdapter):
         quote_tokens: List[Tuple[str, str]] = None,
         factory_address: str = None,
         whitelisted_routers: Dict[str, str] = None,
+        known_spenders: Dict[str, str] = None,
         solidly_factory: bool = False,
     ):
         from services.explorer_service import explorer_service
@@ -160,6 +161,7 @@ class EvmAdapter(ChainAdapter):
         self._factory_address = factory_address
         self._solidly_factory = solidly_factory
         self._whitelisted_routers = whitelisted_routers or {}
+        self._known_spenders = known_spenders or {}
         self._honeypot_is_replies = TTLCache(maxsize=1024, ttl=HONEYPOT_IS_REPLY_TTL_SECONDS)
         self._creation_infos = TTLCache(maxsize=1024, ttl=CREATION_INFO_TTL_SECONDS)
         self._creation_inflight = {}
@@ -752,6 +754,9 @@ class EvmAdapter(ChainAdapter):
 
     def get_whitelisted_routers(self) -> Dict[str, str]:
         return dict(self._whitelisted_routers)
+
+    def get_known_spenders(self) -> Dict[str, str]:
+        return dict(self._known_spenders)
 
     def get_known_lockers(self) -> Dict[str, str]:
         """Return {lowercase_address: locker_name} for this chain, burn addresses included."""

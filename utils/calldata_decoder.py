@@ -320,7 +320,7 @@ class CalldataDecoder:
 
     def decode_universal_router_path(self, calldata: str) -> List[str]:
         """
-        Decode the token swap path from a Universal Router execute(bytes,bytes[],uint256) call.
+        Decode the tokens a Universal Router execute(bytes,bytes[],uint256) call swaps.
 
         The Universal Router encodes swap instructions as:
           commands: packed bytes where each byte is a command type
@@ -328,8 +328,11 @@ class CalldataDecoder:
 
         V2 commands (0x08 / 0x09) encode the path as address[].
         V3 commands (0x00 / 0x01) encode the path as packed bytes (token+fee+token...).
+        V4_SWAP (0x10) encodes the V4 router's actions and their params (_decode_v4_ur_input).
 
-        Returns a list of token addresses in swap order, or [] on failure.
+        Returns the tokens of every swap command, each once, in the order the commands name them, or []
+        on failure. A swap command whose tokens cannot be read fails the whole path, so a token is
+        never left out of the tokens a firewall scans.
         """
         try:
             data = calldata[2:] if calldata.startswith("0x") else calldata
@@ -360,59 +363,44 @@ class CalldataDecoder:
                 return []
             commands = bytes.fromhex(cmds_hex[:cmds_len * 2])
 
-            # Find the first V2 or V3 swap command.
             # Top 2 bits are flags (FLAG_ALLOW_REVERT etc.) — mask them off.
             V2_CMDS = {0x08, 0x09}  # V2_SWAP_EXACT_IN, V2_SWAP_EXACT_OUT
             V3_CMDS = {0x00, 0x01}  # V3_SWAP_EXACT_IN, V3_SWAP_EXACT_OUT
+            V4_SWAP = 0x10
 
-            swap_idx = None
-            is_v3 = False
+            # ABI bytes[] encoding: [count][offset_0 ... offset_n][elem_0_len][elem_0_data]...
+            inputs_count = int(words[ptr_inputs], 16)
+            path: List[str] = []
             for i, byte in enumerate(commands):
                 cmd = byte & 0x3f
-                if cmd in V2_CMDS:
-                    swap_idx = i
-                    break
+                if cmd not in V2_CMDS and cmd not in V3_CMDS and cmd != V4_SWAP:
+                    continue
+                if i >= inputs_count:
+                    return []
+                elem_hex = self._abi_bytes_element(words, ptr_inputs + 1, i)
                 if cmd in V3_CMDS:
-                    swap_idx = i
-                    is_v3 = True
-                    break
-
-            if swap_idx is None:
-                return []
-
-            # --- Decode inputs[] at ptr_inputs ---
-            # ABI bytes[] encoding: [count][offset_0 ... offset_n][elem_0_len][elem_0_data]...
-            # All offsets are in bytes relative to the count word (ptr_inputs).
-            inputs_count = int(words[ptr_inputs], 16)
-            if swap_idx >= inputs_count:
-                return []
-
-            offset_word_idx = ptr_inputs + 1 + swap_idx
-            if offset_word_idx >= len(words):
-                return []
-
-            elem_offset_bytes = int(words[offset_word_idx], 16)
-            # Offsets in bytes[] are relative to the first offset word (ptr_inputs+1),
-            # not the count word (ptr_inputs).
-            elem_word_idx = (ptr_inputs + 1) + elem_offset_bytes // 32
-            if elem_word_idx >= len(words):
-                return []
-
-            elem_len = int(words[elem_word_idx], 16)
-            if elem_len == 0:
-                return []
-
-            elem_words = (elem_len + 31) // 32
-            elem_hex = "".join(words[elem_word_idx + 1: elem_word_idx + 1 + elem_words])
-            elem_hex = elem_hex[:elem_len * 2]
-
-            if is_v3:
-                return self._decode_v3_ur_input(elem_hex)
-            else:
-                return self._decode_v2_ur_input(elem_hex)
+                    tokens = self._decode_v3_ur_input(elem_hex)
+                elif cmd in V2_CMDS:
+                    tokens = self._decode_v2_ur_input(elem_hex)
+                else:
+                    tokens = self._decode_v4_ur_input(elem_hex)
+                if not tokens:
+                    return []
+                path += tokens
+            return list(dict.fromkeys(token.lower() for token in path))
 
         except Exception:
             return []
+
+    @staticmethod
+    def _abi_bytes_element(words: List[str], first_offset_word: int, index: int) -> str:
+        """Hex of element `index` of an ABI bytes[] whose offset words start at `first_offset_word`.
+
+        Each offset counts bytes from the first offset word, not from the count word before it.
+        """
+        start = first_offset_word + int(words[first_offset_word + index], 16) // 32
+        length = int(words[start], 16)
+        return "".join(words[start + 1: start + 1 + (length + 31) // 32])[:length * 2]
 
     def _decode_v2_ur_input(self, input_hex: str) -> List[str]:
         """
@@ -473,6 +461,53 @@ class CalldataDecoder:
                 else:
                     break
             return addrs if len(addrs) >= 2 else []
+        except Exception:
+            return []
+
+    def _decode_v4_ur_input(self, input_hex: str) -> List[str]:
+        """
+        Decode the tokens of a V4_SWAP input: abi.encode(bytes actions, bytes[] params), the V4 router's
+        actions (v4-periphery Actions) and the ABI-encoded params of each. Every params struct holds
+        dynamic hookData, so each starts with the offset of its struct.
+          SWAP_EXACT_IN_SINGLE / SWAP_EXACT_OUT_SINGLE (0x06 / 0x08): (PoolKey poolKey, bool zeroForOne,
+            ...), the PoolKey's currency0 and currency1 in its first two words;
+          SWAP_EXACT_IN (0x07): (Currency currencyIn, PathKey[] path, ...), each PathKey's first word its
+            intermediate currency, in swap order;
+          SWAP_EXACT_OUT (0x09): (Currency currencyOut, PathKey[] path, ...), the path read from the input
+            currency to the one before currencyOut.
+        Native ETH (address 0) is not a token and is left out. Returns [] when no swap action is read.
+        """
+        try:
+            iw = [input_hex[i:i + 64] for i in range(0, len(input_hex), 64)]
+            ptr_actions = int(iw[0], 16) // 32
+            ptr_params = int(iw[1], 16) // 32
+            actions_len = int(iw[ptr_actions], 16)
+            actions = bytes.fromhex(
+                "".join(iw[ptr_actions + 1: ptr_actions + 1 + (actions_len + 31) // 32])[:actions_len * 2]
+            )
+            if int(iw[ptr_params], 16) < len(actions):
+                return []
+
+            currencies: List[str] = []
+            for i, action in enumerate(actions):
+                if action not in (0x06, 0x07, 0x08, 0x09):
+                    continue
+                param_hex = self._abi_bytes_element(iw, ptr_params + 1, i)
+                pw = [param_hex[j:j + 64] for j in range(0, len(param_hex), 64)]
+                base = int(pw[0], 16) // 32
+                if action in (0x06, 0x08):
+                    currency0, currency1 = "0x" + pw[base][24:], "0x" + pw[base + 1][24:]
+                    zero_for_one = int(pw[base + 5], 16) == 1
+                    currencies += [currency0, currency1] if zero_for_one else [currency1, currency0]
+                else:
+                    head = "0x" + pw[base][24:]
+                    path_word = base + int(pw[base + 1], 16) // 32
+                    hops = [
+                        "0x" + pw[path_word + 1 + int(pw[path_word + 1 + j], 16) // 32][24:]
+                        for j in range(int(pw[path_word], 16))
+                    ]
+                    currencies += [head, *hops] if action == 0x07 else [*hops, head]
+            return [currency for currency in currencies if int(currency, 16) != 0]
         except Exception:
             return []
 

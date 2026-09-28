@@ -1,4 +1,5 @@
-"""Every allowlisted router and locker must be one that was seen with contract code on its chain.
+"""Every allowlisted router, known spender and locker must be one that was seen with contract code
+on its chain.
 
 The fixture records `python -m scripts.check_allowlist_code` run against public RPCs; rerun it
 whenever an allowlist changes.

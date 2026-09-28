@@ -49,8 +49,9 @@ class SignaturePermitAnalyzer(Analyzer):
       listing that signs only a root of its listings (an Order with listingsRoot, or a bulk Root) is
       Unknown
 
-    Every permit's spender is judged like a calldata approval's: the chain adapter's routers and
-    Permit2 are allowlisted, and any other spender's counterparty facts can set a hard floor.
+    Every permit's spender is judged like a calldata approval's: the chain adapter's routers and known
+    protocol contracts, and Permit2, are allowlisted, and an unlimited grant to one of them scores 5
+    and names it; any other spender's counterparty facts can set a hard floor.
     """
 
     def __init__(self, counterparty_service=None):
@@ -81,6 +82,8 @@ class SignaturePermitAnalyzer(Analyzer):
         permit = None
         spender_data = {}
         floor = None
+        # The allowlisted name of a permit's declared spender, or None.
+        known = None
         # Why the typed data could not be read, if it could not.
         unreadable = None
 
@@ -101,17 +104,20 @@ class SignaturePermitAnalyzer(Analyzer):
             # EIP-2612 Permit
             if primary_type == 'Permit':
                 sig_type = 'eip2612_permit'
-                permit = self._check_permit(message, types)
+                known = self._known_spender(message, types, 'Permit', ctx.chain_id)
+                permit = self._check_permit(message, types, known)
 
             # Permit2 AllowanceTransfer — PermitSingle or PermitBatch
             elif primary_type in ('PermitSingle', 'PermitBatch'):
                 sig_type = 'permit2'
-                permit = self._check_permit2(message, primary_type, types)
+                known = self._known_spender(message, types, primary_type, ctx.chain_id)
+                permit = self._check_permit2(message, primary_type, types, known)
 
             # Permit2 SignatureTransfer
             elif primary_type in SIGNATURE_TRANSFER_TYPES:
                 sig_type = 'permit2_transfer'
-                permit = self._check_permit2_transfer(message, primary_type, types)
+                known = self._known_spender(message, types, primary_type, ctx.chain_id)
+                permit = self._check_permit2_transfer(message, primary_type, types, known)
 
             # Seaport: one order, or a bulk order's tree of them
             elif primary_type in ('OrderComponents', 'BulkOrder'):
@@ -178,8 +184,19 @@ class SignaturePermitAnalyzer(Analyzer):
                     'reason': '; '.join(filter(None, (unreadable, spender_data.get('reason')))),
                 }),
                 **({'floor': floor} if floor else {}),
+                **({'spender_name': known} if known else {}),
             },
         )
+
+    def _known_spender(self, message: Dict, types, type_name: str, chain_id: int) -> Optional[str]:
+        """The allowlisted name of the permit's declared spender, or None.
+
+        A router, known protocol contract or Permit2 is asked for an unlimited grant as a matter of
+        course, so the checks score that grant the way analyzers/intent.py scores an unlimited
+        calldata approval to one: 5 points, with its name.
+        """
+        spender = _declared_spender(message, _members(types, type_name) or {})
+        return self._counterparty.allowlisted_name(spender, chain_id) if spender else None
 
     async def _judge_spender(self, spender: str, unlimited: bool, sig_type: str, chain_id: int) -> tuple:
         """Score a permit's spender: (points, flags, floor or None, result data)."""
@@ -206,9 +223,9 @@ class SignaturePermitAnalyzer(Analyzer):
         }
         return points, flags, floor, data
 
-    def _check_permit(self, message: Dict, types) -> tuple:
+    def _check_permit(self, message: Dict, types, known: Optional[str] = None) -> tuple:
         """Check EIP-2612 Permit for dangerous patterns: (score, flags, spender, unlimited, granted,
-        whether its declared type could be read)."""
+        whether its declared type could be read). An unlimited grant to a `known` spender scores 5."""
         score = 0.0
         flags = []
 
@@ -239,8 +256,8 @@ class SignaturePermitAnalyzer(Analyzer):
             score += 30
             flags.append('Permit: amount could not be read; treated as unlimited')
         elif unlimited:
-            score += 30
-            flags.append('Permit: unlimited token approval')
+            score += 5 if known else 30
+            flags.append(f'Permit: unlimited token approval to {known}' if known else 'Permit: unlimited token approval')
 
         # Far-future deadline
         import time
@@ -251,9 +268,9 @@ class SignaturePermitAnalyzer(Analyzer):
 
         return score, flags, spender, unlimited, granted, not mismatch
 
-    def _check_permit2(self, message: Dict, primary_type: str, types) -> tuple:
+    def _check_permit2(self, message: Dict, primary_type: str, types, known: Optional[str] = None) -> tuple:
         """Check a Permit2 AllowanceTransfer: (score, flags, spender, unlimited, granted, whether its
-        declared type could be read)."""
+        declared type could be read). An unlimited grant to a `known` spender scores 5 per token."""
         score = 0.0
         flags = []
         members = _members(types, primary_type) or {}
@@ -276,8 +293,8 @@ class SignaturePermitAnalyzer(Analyzer):
                 score += 25
                 flags.append('Permit2: amount could not be read; treated as unlimited')
             elif unlimited:
-                score += 25
-                flags.append('Permit2: unlimited amount')
+                score += 5 if known else 25
+                flags.append(f'Permit2: unlimited amount to {known}' if known else 'Permit2: unlimited amount')
 
             import time
             now = int(time.time())
@@ -298,14 +315,14 @@ class SignaturePermitAnalyzer(Analyzer):
                     flags.append(f'Permit2 Batch: amount for token #{i+1} could not be read; treated as unlimited')
                 elif amount >= UNLIMITED_THRESHOLD:
                     unlimited = True
-                    score += 15
-                    flags.append(f'Permit2 Batch: unlimited amount for token #{i+1}')
+                    score += 5 if known else 15
+                    flags.append(f'Permit2 Batch: unlimited amount for token #{i+1}' + (f' to {known}' if known else ''))
 
         return score, flags, spender, unlimited, granted, True
 
-    def _check_permit2_transfer(self, message: Dict, primary_type: str, types) -> tuple:
+    def _check_permit2_transfer(self, message: Dict, primary_type: str, types, known: Optional[str] = None) -> tuple:
         """Check a Permit2 SignatureTransfer: (score, flags, spender, unlimited, granted, whether its
-        declared type could be read)."""
+        declared type could be read). An unlimited grant to a `known` spender scores 5."""
         score = 0.0
         flags = []
         members = _members(types, primary_type) or {}
@@ -325,8 +342,8 @@ class SignaturePermitAnalyzer(Analyzer):
             score += 20
             flags.append('Permit2 transfer: amount could not be read; treated as unlimited')
         elif unlimited:
-            score += 20
-            flags.append('Permit2 transfer: unlimited amount')
+            score += 5 if known else 20
+            flags.append(f'Permit2 transfer: unlimited amount to {known}' if known else 'Permit2 transfer: unlimited amount')
         if len(permitted) >= 3:
             score += 15
             flags.append(f'Permit2 transfer: {len(permitted)} tokens in one signature')
