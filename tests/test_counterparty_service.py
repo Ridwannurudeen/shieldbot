@@ -46,7 +46,9 @@ def caches():
 
 
 def _service(code="0x6080", verified=True, age=400, labels=None, goplus=None):
-    adapter = SimpleNamespace(get_whitelisted_routers=lambda: {ROUTER: "PancakeSwap V2 Router"})
+    adapter = SimpleNamespace(
+        get_whitelisted_routers=lambda: {ROUTER: "PancakeSwap V2 Router"}, get_known_spenders=dict,
+    )
     web3 = SimpleNamespace(
         _get_adapter=MagicMock(return_value=adapter),
         get_bytecode=AsyncMock(return_value=code),

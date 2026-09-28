@@ -43,6 +43,8 @@ def routing_api(monkeypatch):
     services.auth_manager.check_rate_limit = AsyncMock(return_value=True)
     services.auth_manager.record_usage = AsyncMock()
     services.db.record_outcome = AsyncMock()
+    # Every spender reads as allowlisted, by name, as a real counterparty service answers.
+    services.counterparty_service.allowlisted_name.return_value = "Allowlisted Router"
     services.db.record_community_report = AsyncMock()
     services.db.add_watched_deployer = AsyncMock()
     services.db.remove_watched_deployer = AsyncMock()

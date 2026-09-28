@@ -34,7 +34,7 @@ class TestBscConstants:
         assert '0x0000000000000000000000000000000000000000' in KNOWN_LOCKERS
 
     def test_whitelisted_routers_count(self):
-        assert len(WHITELISTED_ROUTERS) == 6
+        assert len(WHITELISTED_ROUTERS) == 12
 
 
 class TestCalldataDecoderChainId:

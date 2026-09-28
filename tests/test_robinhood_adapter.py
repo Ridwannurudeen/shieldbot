@@ -24,6 +24,11 @@ def test_robinhood_adapter_configuration():
     assert set(routers) == {
         '0x89e5db8b5aa49aa85ac63f691524311aeb649eba',
         '0x8876789976decbfcbbbe364623c63652db8c0904',
+        '0x204faca1764b154221e35c0d20abb3c525710498',
+        '0x57fc55f719df19b4b90a03f9d78e1177d002e504',
+        '0xe28c0e44f4016b073db20cf28971cac6ce3664d3',
+        '0x13f4ea83d0bd40e75c8222255bc855a974568dd4',
+        '0x1b81d678ffb9c0263b24a97847620c99d213eb14',
     }
     assert PERMIT2_ADDRESS.lower() not in routers
     assert POOL_MANAGER_ADDRESS.lower() not in routers

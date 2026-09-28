@@ -27,7 +27,7 @@ def _unlimited_approve(spender):
     "chain_id,spender,router",
     [
         (1, "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D", "Uniswap V2 Router"),
-        (1, "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD", "Uniswap Universal Router V2"),
+        (1, "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD", "Uniswap Universal Router V1.2"),
         (10, "0xa062aE8A9c5e11aaA026fc2670B0D65cCc8B2858", "Velodrome V2 Router"),
         (56, "0x10ED43C718714eb63d5aA57B78B54704E256024E", "PancakeSwap V2 Router"),
     ],

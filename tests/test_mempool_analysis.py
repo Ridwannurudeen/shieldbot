@@ -490,7 +490,8 @@ def _wired_monitor(blacklist=()):
     The web3 stub answers the allowlist from memory and records every read it is asked for.
     """
     adapter = SimpleNamespace(
-        get_whitelisted_routers=lambda: {PANCAKESWAP_V2_ROUTER: "PancakeSwap V2 Router"}
+        get_whitelisted_routers=lambda: {PANCAKESWAP_V2_ROUTER: "PancakeSwap V2 Router"},
+        get_known_spenders=dict,
     )
     web3 = SimpleNamespace(
         _get_adapter=MagicMock(return_value=adapter),

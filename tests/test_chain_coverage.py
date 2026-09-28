@@ -77,7 +77,7 @@ def test_bsc_simulates_sells_ages_through_etherscan_then_sourcify_and_knows_its_
         "contract_age": "etherscan+sourcify",
         "verification": "etherscan+sourcify",
         "liquidity_lock": {"lockers": "known", "known_lockers": ["PinkLock", "Unicrypt"]},
-        "router_allowlist": {"present": True, "routers": 6},
+        "router_allowlist": {"present": True, "routers": 12},
         "public_mempool": "yes",
         "approvals": {"history": "full", "window_blocks": None},
     }
@@ -96,7 +96,7 @@ def test_robinhood_simulates_with_eth_simulate_and_reads_blockscout(coverage, mo
     assert capabilities["verification"] == "sourcify+blockscout"
     # Only burn addresses are known, so an unlocked pool cannot be told from one held by an unlisted locker.
     assert capabilities["liquidity_lock"] == {"lockers": "unknown", "known_lockers": []}
-    assert capabilities["router_allowlist"] == {"present": True, "routers": 2}
+    assert capabilities["router_allowlist"] == {"present": True, "routers": 7}
     assert capabilities["public_mempool"] == "no"
     assert capabilities["approvals"] == {"history": "recent", "window_blocks": 240_000}
 
