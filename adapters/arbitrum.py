@@ -11,6 +11,8 @@ KNOWN_LOCKERS = {
 
 # SushiSwap V2 factory on Arbitrum
 SUSHISWAP_V2_FACTORY = '0xc35DADB65012eC5796536bD9864eD8773aBc74C4'
+# Uniswap's V2 factory on this chain, which its Universal Routers swap V2 hops through.
+UNISWAP_V2_FACTORY = '0xf1D7CC64Fb4452F05c498126312eBE29f30Fbcf9'
 WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'
 USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
 USDT_ADDRESS = '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9'
@@ -40,6 +42,14 @@ KNOWN_SPENDERS = {
     "0xd88F38F930b7952f2DB2432Cb002E7abbF3dD869".lower(): "Uniswap V4 PositionManager",
 }
 
+# The V2 factory each Universal Router swaps V2 hops through, as its bytecode and its deploy parameters
+# name it (checked 2026-09-28). A route that hands a swap's output straight to the next hop's V2 pool
+# pays that factory's pool (api._analyze_router_swap confirms it on chain).
+ROUTER_V2_FACTORIES = {
+    router: UNISWAP_V2_FACTORY.lower()
+    for router, name in WHITELISTED_ROUTERS.items() if name.startswith('Uniswap Universal Router')
+}
+
 
 class ArbitrumAdapter(EvmAdapter):
     """Arbitrum One adapter — chain_id=42161."""
@@ -60,4 +70,5 @@ class ArbitrumAdapter(EvmAdapter):
             factory_address=SUSHISWAP_V2_FACTORY,
             whitelisted_routers=WHITELISTED_ROUTERS,
             known_spenders=KNOWN_SPENDERS,
+            router_v2_factories=ROUTER_V2_FACTORIES,
         )

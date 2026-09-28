@@ -3281,9 +3281,10 @@ def _build_fallback_response(
 
 def _extract_swap_path(
     decoded: Dict, raw_calldata: str = "", sender: str = "", router: str = "", router_name: str = "",
-) -> Tuple[List[str], Optional[str]]:
+) -> Tuple[List[str], Optional[str], List[Tuple[str, str, str]]]:
     """Extract token swap path from decoded calldata, with why the swap cannot be judged by its tokens
-    alone, or None.
+    alone, or None, and the V2 pools a Universal Router call pays that must be confirmed as the
+    router's pools for their tokens (calldata_decoder.decode_universal_router_path).
 
     For Universal Router (execute selector 3593564c), delegates to the dedicated
     parser that walks the nested commands/inputs ABI structure and refuses a call that sends funds to
@@ -3292,7 +3293,7 @@ def _extract_swap_path(
     recipient, must be `sender`.
     """
     if not decoded:
-        return [], None
+        return [], None, []
 
     # Universal Router: path is buried inside inputs[i] bytes — needs dedicated decode
     if decoded.get("selector") == "3593564c" and raw_calldata and calldata_decoder:
@@ -3306,9 +3307,9 @@ def _extract_swap_path(
         if isinstance(v, list) and v and all(isinstance(x, str) and x.startswith("0x") for x in v):
             recipient = values[i + 1] if i + 1 < len(values) else None
             if isinstance(recipient, str) and recipient.lower() != sender.lower():
-                return [], f"Its tokens go to {recipient}, not the sender"
-            return v, None
-    return [], None
+                return [], f"Its tokens go to {recipient}, not the sender", []
+            return v, None, []
+    return [], None, []
 
 
 def _select_router_tokens(path: List[str]) -> List[str]:
@@ -3420,7 +3421,19 @@ async def _analyze_router_swap(
             'token_analysis', 'Token analyzers are unavailable', policy_mode,
         )
 
-    path, refusal = _extract_swap_path(decoded, req.data, from_addr, to_addr, whitelisted)
+    path, refusal, pools = _extract_swap_path(decoded, req.data, from_addr, to_addr, whitelisted)
+    # A mixed route pays the next hop's pool, which only the router's V2 factory can vouch for.
+    for pool, token_a, token_b in [] if refusal else pools:
+        try:
+            confirmed = await web3_client.router_v2_pool(to_addr, token_a, token_b, chain_id=req.chainId)
+        except UnsupportedChainError:
+            raise
+        except Exception as e:
+            refusal = f"Could not confirm that {pool} is the pool of its next swap ({type(e).__name__})"
+            break
+        if confirmed != pool:
+            refusal = f"Its funds go to {pool}, not the sender"
+            break
     if refusal or not path or not any(web3_client.is_valid_address(token) for token in path):
         # Cannot decode the swap path (e.g. Uniswap V3 / aggregator calldata), or it pays someone else.
         return _build_unverified_swap_response(

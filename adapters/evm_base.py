@@ -143,6 +143,7 @@ class EvmAdapter(ChainAdapter):
         factory_address: str = None,
         whitelisted_routers: Dict[str, str] = None,
         known_spenders: Dict[str, str] = None,
+        router_v2_factories: Dict[str, str] = None,
         solidly_factory: bool = False,
     ):
         from services.explorer_service import explorer_service
@@ -162,6 +163,7 @@ class EvmAdapter(ChainAdapter):
         self._solidly_factory = solidly_factory
         self._whitelisted_routers = whitelisted_routers or {}
         self._known_spenders = known_spenders or {}
+        self._router_v2_factories = router_v2_factories or {}
         self._honeypot_is_replies = TTLCache(maxsize=1024, ttl=HONEYPOT_IS_REPLY_TTL_SECONDS)
         self._creation_infos = TTLCache(maxsize=1024, ttl=CREATION_INFO_TTL_SECONDS)
         self._creation_inflight = {}
@@ -757,6 +759,16 @@ class EvmAdapter(ChainAdapter):
 
     def get_known_spenders(self) -> Dict[str, str]:
         return dict(self._known_spenders)
+
+    async def router_v2_pool(self, router: str, token_a: str, token_b: str) -> Optional[str]:
+        factory_address = self._router_v2_factories.get(router.lower())
+        if not factory_address:
+            return None
+        factory = self.w3.eth.contract(address=Web3.to_checksum_address(factory_address), abi=FACTORY_ABI)
+        pool = await self._call_with_retry(factory.functions.getPair(
+            Web3.to_checksum_address(token_a), Web3.to_checksum_address(token_b),
+        ).call)
+        return None if int(pool, 16) == 0 else pool.lower()
 
     def get_known_lockers(self) -> Dict[str, str]:
         """Return {lowercase_address: locker_name} for this chain, burn addresses included."""

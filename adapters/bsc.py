@@ -13,6 +13,8 @@ KNOWN_LOCKERS = {
 }
 
 PANCAKESWAP_V2_FACTORY = '0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73'
+# Uniswap's V2 factory on this chain, which its Universal Routers swap V2 hops through.
+UNISWAP_V2_FACTORY = '0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6'
 WBNB_ADDRESS = '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c'
 BUSD_ADDRESS = '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56'
 USDT_ADDRESS = '0x55d398326f99059fF775485246999027B3197955'
@@ -45,6 +47,14 @@ KNOWN_SPENDERS = {
     "0x7A4a5c919aE2541AeD11041A1AEeE68f1287f95b".lower(): "Uniswap V4 PositionManager",
 }
 
+# The V2 factory each Universal Router swaps V2 hops through, as its bytecode and its deploy parameters
+# name it (checked 2026-09-28). A route that hands a swap's output straight to the next hop's V2 pool
+# pays that factory's pool (api._analyze_router_swap confirms it on chain).
+ROUTER_V2_FACTORIES = {
+    router: (PANCAKESWAP_V2_FACTORY if name.startswith('PancakeSwap') else UNISWAP_V2_FACTORY).lower()
+    for router, name in WHITELISTED_ROUTERS.items() if 'Universal Router' in name
+}
+
 
 class BscAdapter(EvmAdapter):
     """BNB Smart Chain (BSC) adapter — chain_id=56."""
@@ -64,4 +74,5 @@ class BscAdapter(EvmAdapter):
             factory_address=PANCAKESWAP_V2_FACTORY,
             whitelisted_routers=WHITELISTED_ROUTERS,
             known_spenders=KNOWN_SPENDERS,
+            router_v2_factories=ROUTER_V2_FACTORIES,
         )

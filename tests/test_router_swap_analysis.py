@@ -202,8 +202,8 @@ ATTACKER = "0x" + "ad" * 20
 @pytest.mark.parametrize(
     "recipient, expected",
     [
-        ("0x" + "ab" * 20, ([WBNB, TOKEN], None)),
-        (ATTACKER, ([], f"Its tokens go to {ATTACKER}, not the sender")),
+        ("0x" + "ab" * 20, ([WBNB, TOKEN], None, [])),
+        (ATTACKER, ([], f"Its tokens go to {ATTACKER}, not the sender", [])),
     ],
     ids=["sender", "someone-else"],
 )
@@ -228,11 +228,11 @@ def test_only_a_uniswap_v2_universal_router_reads_command_0x10_as_a_v4_swap(monk
     import api as api_module
 
     monkeypatch.setattr(api_module, "calldata_decoder", CalldataDecoder())
-    path, reason = api_module._extract_swap_path(
+    path, reason, pools = api_module._extract_swap_path(
         {"selector": "3593564c"}, "0x" + V4_SWAP["calldata_hex"], V4_SWAP["sender"], V4_SWAP["router"], router_name,
     )
 
-    assert reason == refusal
+    assert (reason, pools) == (refusal, [])
     assert (sorted(path) == V4_SWAP["tokens"]) is (refusal is None)
 
 
@@ -267,3 +267,58 @@ async def test_a_router_swap_that_pays_someone_else_is_not_judged_by_its_tokens(
         f"Swap via trusted router (PancakeSwap V2 Router) but its tokens go to {ATTACKER}, not the sender"
         " — token safety unverified"
     ]
+
+
+MIXED_ROUTE = json.loads(
+    (Path(__file__).parent / "fixtures" / "universal_router_mixed_routes.json").read_text(encoding="utf-8")
+)["swaps"][0]
+POOL, POOL_TOKEN_A, POOL_TOKEN_B = MIXED_ROUTE["pools"][0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "pool_lookup, refusal",
+    [
+        (AsyncMock(return_value=POOL), None),
+        (AsyncMock(return_value=ATTACKER), f"Its funds go to {POOL}, not the sender"),
+        (AsyncMock(return_value=None), f"Its funds go to {POOL}, not the sender"),
+        (
+            AsyncMock(side_effect=TimeoutError()),
+            f"Could not confirm that {POOL} is the pool of its next swap (TimeoutError)",
+        ),
+    ],
+    ids=["confirmed", "another-pool", "no-pool", "lookup-failed"],
+)
+async def test_a_mixed_route_pays_only_a_pool_its_router_confirms(monkeypatch, pool_lookup, refusal):
+    import api as api_module
+
+    registry = SimpleNamespace(run_all=AsyncMock(side_effect=lambda ctx: _swap_results(True)))
+    chain_registry = Web3Client.__new__(Web3Client)
+    chain_registry._adapters = {1: SimpleNamespace()}
+    monkeypatch.setattr(api_module, "container", SimpleNamespace(
+        registry=registry, policy_engine=PolicyEngine("BALANCED"),
+    ))
+    monkeypatch.setattr(api_module, "risk_engine", RiskEngine())
+    monkeypatch.setattr(api_module, "calldata_decoder", CalldataDecoder())
+    monkeypatch.setattr(api_module, "web3_client", SimpleNamespace(
+        validate_chain_id=chain_registry.validate_chain_id,
+        is_valid_address=lambda a: True,
+        to_checksum_address=lambda a: a,
+        is_verified_contract=AsyncMock(return_value=(True, None)),
+        router_v2_pool=pool_lookup,
+    ))
+    monkeypatch.setattr(api_module, "tenderly_simulator", SimpleNamespace(is_enabled=lambda: False))
+    calldata = "0x" + MIXED_ROUTE["calldata_hex"]
+    req = api_module.FirewallRequest(to=MIXED_ROUTE["router"], sender=MIXED_ROUTE["sender"], value="0x0", data=calldata, chainId=1)
+
+    resp = await api_module._analyze_router_swap(
+        req, req.to, req.sender, CalldataDecoder().decode(calldata), "Uniswap Universal Router V2.1.2", 0.0,
+    )
+
+    pool_lookup.assert_awaited_once_with(MIXED_ROUTE["router"], POOL_TOKEN_A, POOL_TOKEN_B, chain_id=1)
+    if refusal is None:
+        assert registry.run_all.await_count == len(MIXED_ROUTE["tokens"])
+        assert "token_path" not in resp["coverage"]
+    else:
+        registry.run_all.assert_not_awaited()
+        assert resp["coverage_reasons"] == {"token_path": refusal}

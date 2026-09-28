@@ -12,6 +12,8 @@ KNOWN_LOCKERS = {
 
 # Base uses Uniswap V3 — no V2 factory for getPair. Use Aerodrome's factory for V2 pairs.
 AERODROME_FACTORY = '0x420DD381b31aEf6683db6B902084cB0FFECe40Da'
+# Uniswap's V2 factory on this chain, which its Universal Routers swap V2 hops through.
+UNISWAP_V2_FACTORY = '0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6'
 WETH_ADDRESS = '0x4200000000000000000000000000000000000006'
 USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 
@@ -39,6 +41,14 @@ KNOWN_SPENDERS = {
     "0x7C5f5A4bBd8fD63184577525326123B519429bDc".lower(): "Uniswap V4 PositionManager",
 }
 
+# The V2 factory each Universal Router swaps V2 hops through, as its bytecode and its deploy parameters
+# name it (checked 2026-09-28). A route that hands a swap's output straight to the next hop's V2 pool
+# pays that factory's pool (api._analyze_router_swap confirms it on chain).
+ROUTER_V2_FACTORIES = {
+    router: UNISWAP_V2_FACTORY.lower()
+    for router, name in WHITELISTED_ROUTERS.items() if name.startswith('Uniswap Universal Router')
+}
+
 
 class BaseChainAdapter(EvmAdapter):
     """Base chain adapter — chain_id=8453."""
@@ -58,5 +68,6 @@ class BaseChainAdapter(EvmAdapter):
             factory_address=AERODROME_FACTORY,
             whitelisted_routers=WHITELISTED_ROUTERS,
             known_spenders=KNOWN_SPENDERS,
+            router_v2_factories=ROUTER_V2_FACTORIES,
             solidly_factory=True,
         )

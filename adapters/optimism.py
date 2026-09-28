@@ -11,6 +11,8 @@ KNOWN_LOCKERS = {
 
 # Velodrome V2 factory on Optimism (largest DEX)
 VELODROME_V2_FACTORY = '0xF1046053aa5682b4F9a81b5481394DA16BE5FF5a'
+# Uniswap's V2 factory on this chain, which its Universal Routers swap V2 hops through.
+UNISWAP_V2_FACTORY = '0x0c3c1c532F1e39EdF36BE9Fe0bE1410313E074Bf'
 WETH_ADDRESS = '0x4200000000000000000000000000000000000006'
 USDC_ADDRESS = '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85'
 USDT_ADDRESS = '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'
@@ -41,6 +43,14 @@ KNOWN_SPENDERS = {
     "0x3C3Ea4B57a46241e54610e5f022E5c45859A1017".lower(): "Uniswap V4 PositionManager",
 }
 
+# The V2 factory each Universal Router swaps V2 hops through, as its bytecode and its deploy parameters
+# name it (checked 2026-09-28). A route that hands a swap's output straight to the next hop's V2 pool
+# pays that factory's pool (api._analyze_router_swap confirms it on chain).
+ROUTER_V2_FACTORIES = {
+    router: UNISWAP_V2_FACTORY.lower()
+    for router, name in WHITELISTED_ROUTERS.items() if name.startswith('Uniswap Universal Router')
+}
+
 
 class OptimismAdapter(EvmAdapter):
     """Optimism adapter — chain_id=10."""
@@ -61,5 +71,6 @@ class OptimismAdapter(EvmAdapter):
             factory_address=VELODROME_V2_FACTORY,
             whitelisted_routers=WHITELISTED_ROUTERS,
             known_spenders=KNOWN_SPENDERS,
+            router_v2_factories=ROUTER_V2_FACTORIES,
             solidly_factory=True,
         )

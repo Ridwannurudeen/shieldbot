@@ -12,6 +12,7 @@ from eth_abi import encode
 from utils.calldata_decoder import CalldataDecoder
 
 DECODER = CalldataDecoder()
+FIXTURES = Path(__file__).parent / "fixtures"
 SWAPS = json.loads(
     (Path(__file__).parent / "fixtures" / "universal_router_v4_swaps.json").read_text(
         encoding="utf-8"
@@ -78,10 +79,10 @@ def v3_input(*tokens, recipient=MSG_SENDER):
     )
 
 
-def v2_input(*tokens, recipient=MSG_SENDER):
+def v2_input(*tokens, recipient=MSG_SENDER, amount_in=10**18):
     return encode(
         ["address", "uint256", "uint256", "address[]", "bool"],
-        [recipient, 10**18, 0, list(tokens), True],
+        [recipient, amount_in, 0, list(tokens), True],
     )
 
 
@@ -125,24 +126,24 @@ def v4_swap_then(action, params):
 
 @pytest.mark.parametrize("swap", SWAPS, ids=[swap["tx"] for swap in SWAPS])
 def test_real_v4_swaps_decode_to_the_tokens_they_move(swap):
-    tokens, refusal = DECODER.decode_universal_router_path(
+    tokens, refusal, pools = DECODER.decode_universal_router_path(
         "0x" + swap["calldata_hex"], swap["sender"], swap["router"], v4=True
     )
-    assert (sorted(tokens), refusal) == (swap["tokens"], None)
+    assert (sorted(tokens), refusal, pools) == (swap["tokens"], None, [])
 
 
 def test_native_eth_is_not_a_token():
     calldata = execute(
         [V4_SWAP], [v4_input([SWAP_EXACT_IN_SINGLE], [single(NATIVE, TOKEN_A, True)])]
     )
-    assert decode(calldata) == ([TOKEN_A], None)
+    assert decode(calldata) == ([TOKEN_A], None, [])
 
 
 def test_a_single_swap_is_read_in_its_direction():
     calldata = execute(
         [V4_SWAP], [v4_input([SWAP_EXACT_IN_SINGLE], [single(TOKEN_A, TOKEN_B, False)])]
     )
-    assert decode(calldata) == ([TOKEN_B, TOKEN_A], None)
+    assert decode(calldata) == ([TOKEN_B, TOKEN_A], None, [])
 
 
 @pytest.mark.parametrize(
@@ -161,7 +162,7 @@ def test_a_multi_hop_swap_names_every_currency_from_input_to_output(action, para
             )
         ],
     )
-    assert decode(calldata) == (expected, None)
+    assert decode(calldata) == (expected, None, [])
 
 
 def test_every_swap_command_is_read_not_only_the_first():
@@ -174,7 +175,7 @@ def test_every_swap_command_is_read_not_only_the_first():
             v4_input([SWAP_EXACT_IN_SINGLE], [single(TOKEN_C, NATIVE, True)]),
         ],
     )
-    assert decode(calldata) == ([TOKEN_A, TOKEN_B, TOKEN_C], None)
+    assert decode(calldata) == ([TOKEN_A, TOKEN_B, TOKEN_C], None, [])
 
 
 @pytest.mark.parametrize(
@@ -196,11 +197,11 @@ def test_every_swap_command_is_read_not_only_the_first():
 )
 def test_a_swap_command_that_cannot_be_read_fails_the_whole_path(command, command_input):
     calldata = execute([V3_SWAP_EXACT_IN, command], [v3_input(TOKEN_A, TOKEN_B), command_input])
-    assert decode(calldata) == ([], UNDECODABLE)
+    assert decode(calldata) == ([], UNDECODABLE, [])
 
 
 def test_a_call_without_a_swap_command_has_no_path():
-    assert decode(execute([PERMIT2_PERMIT], [permit_input(ROUTER)])) == ([], UNDECODABLE)
+    assert decode(execute([PERMIT2_PERMIT], [permit_input(ROUTER)])) == ([], UNDECODABLE, [])
 
 
 def test_a_command_without_an_input_fails_the_path():
@@ -211,7 +212,7 @@ def test_a_command_without_an_input_fails_the_path():
             [bytes([V3_SWAP_EXACT_IN, SWEEP]), [v3_input(TOKEN_A, TOKEN_B)], 2**32],
         ).hex()
     )
-    assert decode(calldata) == ([], UNDECODABLE)
+    assert decode(calldata) == ([], UNDECODABLE, [])
 
 
 @pytest.mark.parametrize(
@@ -238,13 +239,18 @@ def test_a_command_the_decoder_does_not_check_refuses_the_call(command, command_
     assert decode(calldata) == (
         [],
         f"It runs router command 0x{code:02x}, which ShieldBot does not check",
+        [],
     )
 
 
 def test_the_mask_keeps_the_seventh_bit():
     """0x40 is a bridge deposit on a current router, not a V3 swap with a flag set."""
     calldata = execute([0x40], [v3_input(TOKEN_A, TOKEN_B)])
-    assert decode(calldata) == ([], "It runs router command 0x40, which ShieldBot does not check")
+    assert decode(calldata) == (
+        [],
+        "It runs router command 0x40, which ShieldBot does not check",
+        [],
+    )
 
 
 FUND_MOVES = {
@@ -270,7 +276,7 @@ FUND_MOVES = {
 def test_funds_sent_to_anyone_but_the_sender_refuse_the_call(move):
     command, command_input = FUND_MOVES[move](ATTACKER)
     calldata = execute([V3_SWAP_EXACT_IN, command], [v3_input(TOKEN_A, TOKEN_B), command_input])
-    assert decode(calldata) == ([], f"Its funds go to {ATTACKER}, not the sender")
+    assert decode(calldata) == ([], f"Its funds go to {ATTACKER}, not the sender", [])
 
 
 @pytest.mark.parametrize("recipient", [SENDER, MSG_SENDER, ADDRESS_THIS])
@@ -279,10 +285,10 @@ def test_funds_kept_with_the_sender_or_the_router_are_allowed(move, recipient):
     """The sender is matched in any letter case."""
     command, command_input = FUND_MOVES[move](recipient)
     calldata = execute([V3_SWAP_EXACT_IN, command], [v3_input(TOKEN_A, TOKEN_B), command_input])
-    tokens, refusal = DECODER.decode_universal_router_path(
+    tokens, refusal, pools = DECODER.decode_universal_router_path(
         calldata, "0x" + SENDER[2:].upper(), ROUTER, v4=True
     )
-    assert (tokens[:2], refusal) == ([TOKEN_A, TOKEN_B], None)
+    assert (tokens[:2], refusal, pools) == ([TOKEN_A, TOKEN_B], None, [])
 
 
 def portion(command, share, recipient=ATTACKER):
@@ -322,20 +328,20 @@ def test_other_addresses_may_take_up_to_one_percent_in_all(portions, refused):
         [v3_input(TOKEN_A, TOKEN_B)] + [command_input for _, command_input in portions],
     )
     expected = f"It pays more than 1% of its tokens to other addresses, {ATTACKER} among them"
-    assert decode(calldata) == (([], expected) if refused else ([TOKEN_A, TOKEN_B], None))
+    assert decode(calldata) == (([], expected, []) if refused else ([TOKEN_A, TOKEN_B], None, []))
 
 
 def test_a_permit_for_anyone_but_the_router_refuses_the_call():
     calldata = execute(
         [PERMIT2_PERMIT, V3_SWAP_EXACT_IN], [permit_input(ATTACKER), v3_input(TOKEN_A, TOKEN_B)]
     )
-    assert decode(calldata) == ([], f"Its Permit2 permit is for {ATTACKER}, not the router")
+    assert decode(calldata) == ([], f"Its Permit2 permit is for {ATTACKER}, not the router", [])
 
 
 def test_a_balance_check_is_allowed():
     check = encode(["address", "address", "uint256"], [SENDER, TOKEN_B, 1])
     calldata = execute([V3_SWAP_EXACT_IN, BALANCE_CHECK_ERC20], [v3_input(TOKEN_A, TOKEN_B), check])
-    assert decode(calldata) == ([TOKEN_A, TOKEN_B], None)
+    assert decode(calldata) == ([TOKEN_A, TOKEN_B], None, [])
 
 
 def test_an_older_router_does_not_read_command_0x10_as_a_v4_swap():
@@ -345,6 +351,7 @@ def test_an_older_router_does_not_read_command_0x10_as_a_v4_swap():
     assert decode(calldata, v4=False) == (
         [],
         "It runs router command 0x10, which ShieldBot does not check",
+        [],
     )
 
 
@@ -361,4 +368,140 @@ def test_a_v4_action_the_router_does_not_run_refuses_the_call(action, params):
     assert decode(calldata) == (
         [],
         f"It runs V4 action 0x{action:02x}, which ShieldBot does not check",
+        [],
     )
+
+
+MIXED_ROUTES = json.loads(
+    (FIXTURES / "universal_router_mixed_routes.json").read_text(encoding="utf-8")
+)["swaps"]
+POOL = "0x" + "9f" * 20
+V3_SWAP_EXACT_OUT, CONTRACT_BALANCE = 0x01, 2**255
+
+
+@pytest.mark.parametrize("swap", MIXED_ROUTES, ids=[swap["tx"] for swap in MIXED_ROUTES])
+def test_a_real_mixed_route_names_the_pool_it_pays(swap):
+    tokens, refusal, pools = DECODER.decode_universal_router_path(
+        "0x" + swap["calldata_hex"], swap["sender"], swap["router"], v4=True
+    )
+    assert (sorted(tokens), refusal, [list(pool) for pool in pools]) == (
+        swap["tokens"],
+        None,
+        swap["pools"],
+    )
+    assert swap["tokens"] == swap["receipt_tokens"]
+
+
+@pytest.mark.parametrize(
+    "first,first_input",
+    [
+        (V3_SWAP_EXACT_IN, v3_input(TOKEN_A, TOKEN_B, recipient=POOL)),
+        (V2_SWAP_EXACT_IN, v2_input(TOKEN_A, TOKEN_B, recipient=POOL)),
+    ],
+    ids=["v3-first", "v2-first"],
+)
+@pytest.mark.parametrize(
+    "amount_in", [0, CONTRACT_BALANCE, 10**18], ids=["already-paid", "contract-balance", "amount"]
+)
+def test_an_exact_in_swap_may_pay_the_pool_its_next_v2_swap_starts_from(
+    first, first_input, amount_in
+):
+    calldata = execute(
+        [first, V2_SWAP_EXACT_IN], [first_input, v2_input(TOKEN_B, TOKEN_C, amount_in=amount_in)]
+    )
+    assert decode(calldata) == ([TOKEN_A, TOKEN_B, TOKEN_C], None, [(POOL, TOKEN_B, TOKEN_C)])
+
+
+@pytest.mark.parametrize(
+    "commands,inputs,paid",
+    [
+        ([V3_SWAP_EXACT_IN], [v3_input(TOKEN_A, TOKEN_B, recipient=POOL)], POOL),
+        (
+            [V3_SWAP_EXACT_IN, V2_SWAP_EXACT_IN | ALLOW_REVERT],
+            [v3_input(TOKEN_A, TOKEN_B, recipient=POOL), v2_input(TOKEN_B, TOKEN_C)],
+            POOL,
+        ),
+        (
+            [V3_SWAP_EXACT_IN, V2_SWAP_EXACT_IN],
+            [v3_input(TOKEN_A, TOKEN_B, recipient=POOL), v2_input(TOKEN_C, TOKEN_B)],
+            POOL,
+        ),
+        (
+            [V3_SWAP_EXACT_IN, V3_SWAP_EXACT_IN],
+            [v3_input(TOKEN_A, TOKEN_B, recipient=POOL), v3_input(TOKEN_B, TOKEN_C)],
+            POOL,
+        ),
+        (
+            [V3_SWAP_EXACT_OUT, V2_SWAP_EXACT_IN],
+            [v3_input(TOKEN_A, TOKEN_B, recipient=POOL), v2_input(TOKEN_B, TOKEN_C)],
+            POOL,
+        ),
+        (
+            [V3_SWAP_EXACT_IN, V2_SWAP_EXACT_IN],
+            [
+                v3_input(TOKEN_A, TOKEN_B, recipient=POOL),
+                v2_input(TOKEN_B, TOKEN_C, recipient=ATTACKER),
+            ],
+            ATTACKER,
+        ),
+    ],
+    ids=[
+        "no-next-swap",
+        "next-may-revert",
+        "next-starts-elsewhere",
+        "next-is-v3",
+        "exact-out-first",
+        "next-pays-someone-else",
+    ],
+)
+def test_a_swap_paying_anything_but_its_next_hops_pool_is_refused(commands, inputs, paid):
+    assert decode(execute(commands, inputs)) == ([], f"Its funds go to {paid}, not the sender", [])
+
+
+def test_a_v4_take_may_pay_the_pool_its_next_v2_swap_starts_from():
+    calldata = execute(
+        [V4_SWAP, V2_SWAP_EXACT_IN],
+        [
+            v4_swap_then(TAKE, take(TOKEN_B, POOL)),
+            v2_input(TOKEN_B, TOKEN_C, amount_in=CONTRACT_BALANCE),
+        ],
+    )
+    assert decode(calldata) == ([TOKEN_A, TOKEN_B, TOKEN_C], None, [(POOL, TOKEN_B, TOKEN_C)])
+
+
+@pytest.mark.parametrize(
+    "v4,commands,inputs",
+    [
+        (v4_swap_then(TAKE, take(TOKEN_B, POOL)), [V4_SWAP], []),
+        (
+            v4_swap_then(TAKE, take(TOKEN_A, POOL)),
+            [V4_SWAP, V2_SWAP_EXACT_IN],
+            [v2_input(TOKEN_B, TOKEN_C)],
+        ),
+        (
+            v4_swap_then(
+                TAKE_PORTION, encode(["address", "address", "uint256"], [TOKEN_B, POOL, 1])
+            ),
+            [V4_SWAP, V2_SWAP_EXACT_IN],
+            [v2_input(TOKEN_B, TOKEN_C)],
+        ),
+        (
+            v4_swap_then(TAKE, take(TOKEN_B, POOL)),
+            [V4_SWAP, V2_SWAP_EXACT_IN | ALLOW_REVERT],
+            [v2_input(TOKEN_B, TOKEN_C)],
+        ),
+    ],
+    ids=["no-next-swap", "takes-another-currency", "take-portion", "next-may-revert"],
+)
+def test_a_v4_take_paying_anything_but_its_next_hops_pool_is_refused(v4, commands, inputs):
+    assert decode(execute(commands, [v4, *inputs])) == (
+        [],
+        f"Its funds go to {POOL}, not the sender",
+        [],
+    )
+
+
+def test_calldata_in_capital_letters_reads_the_same():
+    sweep = encode(["address", "address", "uint256"], [TOKEN_B, SENDER, 0])
+    calldata = execute([V3_SWAP_EXACT_IN, SWEEP], [v3_input(TOKEN_A, TOKEN_B), sweep])
+    assert decode("0x" + calldata[2:].upper()) == ([TOKEN_A, TOKEN_B], None, [])

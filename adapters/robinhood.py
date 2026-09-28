@@ -11,6 +11,8 @@ KNOWN_LOCKERS = {
 }
 
 UNISWAP_V2_FACTORY = '0x8bceaa40b9acdfaedf85adf4ff01f5ad6517937f'
+# PancakeSwap's V2 factory on this chain, which its Universal Routers swap V2 hops through.
+PANCAKESWAP_V2_FACTORY = '0x02a84c1b3BBD7401a5f7fa98a384EBC70bB5749E'
 UNISWAP_V2_ROUTER = '0x89e5db8b5aa49aa85ac63f691524311aeb649eba'
 UNISWAP_V4_UNIVERSAL_ROUTER = '0x8876789976decbfcbbbe364623c63652db8c0904'
 WETH_ADDRESS = '0x0bd7d308f8e1639fab988df18a8011f41eacad73'
@@ -37,6 +39,14 @@ WHITELISTED_ROUTERS = {
 # the spender (services.counterparty_service), but never take a transaction down the router path.
 KNOWN_SPENDERS = {
     '0x58daec3116aae6D93017bAAea7749052E8a04fA7'.lower(): 'Uniswap V4 PositionManager',
+}
+
+# The V2 factory each Universal Router swaps V2 hops through, as its bytecode and its deploy parameters
+# name it (checked 2026-09-28). A route that hands a swap's output straight to the next hop's V2 pool
+# pays that factory's pool (api._analyze_router_swap confirms it on chain).
+ROUTER_V2_FACTORIES = {
+    router: (PANCAKESWAP_V2_FACTORY if name.startswith('PancakeSwap') else UNISWAP_V2_FACTORY).lower()
+    for router, name in WHITELISTED_ROUTERS.items() if 'Universal Router' in name
 }
 
 SIMULATION_PROVIDER = 'eth_simulateV1'
@@ -75,6 +85,7 @@ class RobinhoodAdapter(EvmAdapter):
             factory_address=UNISWAP_V2_FACTORY,
             whitelisted_routers=WHITELISTED_ROUTERS,
             known_spenders=KNOWN_SPENDERS,
+            router_v2_factories=ROUTER_V2_FACTORIES,
         )
         self._simulator = RobinhoodSimulator(rpc)
 

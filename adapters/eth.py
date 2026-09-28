@@ -45,6 +45,14 @@ KNOWN_SPENDERS = {
     "0xbD216513d74C8cf14cf4747E6AaA6420FF64ee9e".lower(): "Uniswap V4 PositionManager",
 }
 
+# The V2 factory each Universal Router swaps V2 hops through, as its bytecode and its deploy parameters
+# name it (checked 2026-09-28). A route that hands a swap's output straight to the next hop's V2 pool
+# pays that factory's pool (api._analyze_router_swap confirms it on chain).
+ROUTER_V2_FACTORIES = {
+    router: UNISWAP_V2_FACTORY.lower()
+    for router, name in WHITELISTED_ROUTERS.items() if name.startswith('Uniswap Universal Router')
+}
+
 
 class EthAdapter(EvmAdapter):
     """Ethereum Mainnet adapter — chain_id=1."""
@@ -64,4 +72,5 @@ class EthAdapter(EvmAdapter):
             factory_address=UNISWAP_V2_FACTORY,
             whitelisted_routers=WHITELISTED_ROUTERS,
             known_spenders=KNOWN_SPENDERS,
+            router_v2_factories=ROUTER_V2_FACTORIES,
         )

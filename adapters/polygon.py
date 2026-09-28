@@ -11,6 +11,8 @@ KNOWN_LOCKERS = {
 
 # QuickSwap V2 factory on Polygon
 QUICKSWAP_V2_FACTORY = '0x5757371414417b8C6CAad45bAeF941aBc7d3Ab32'
+# Uniswap's V2 factory on this chain, which its Universal Routers swap V2 hops through.
+UNISWAP_V2_FACTORY = '0x9e5A52f57b3038F1B8EeE45F28b3C1967e22799C'
 WMATIC_ADDRESS = '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270'
 USDC_ADDRESS = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359'
 USDT_ADDRESS = '0xc2132D05D31c914a87C6611C10748AEb04B58e8F'
@@ -41,6 +43,14 @@ KNOWN_SPENDERS = {
     "0x1Ec2eBf4F37E7363FDfe3551602425af0B3ceef9".lower(): "Uniswap V4 PositionManager",
 }
 
+# The V2 factory each Universal Router swaps V2 hops through, as its bytecode and its deploy parameters
+# name it (checked 2026-09-28). A route that hands a swap's output straight to the next hop's V2 pool
+# pays that factory's pool (api._analyze_router_swap confirms it on chain).
+ROUTER_V2_FACTORIES = {
+    router: UNISWAP_V2_FACTORY.lower()
+    for router, name in WHITELISTED_ROUTERS.items() if name.startswith('Uniswap Universal Router')
+}
+
 
 class PolygonAdapter(EvmAdapter):
     """Polygon PoS adapter — chain_id=137."""
@@ -61,4 +71,5 @@ class PolygonAdapter(EvmAdapter):
             factory_address=QUICKSWAP_V2_FACTORY,
             whitelisted_routers=WHITELISTED_ROUTERS,
             known_spenders=KNOWN_SPENDERS,
+            router_v2_factories=ROUTER_V2_FACTORIES,
         )

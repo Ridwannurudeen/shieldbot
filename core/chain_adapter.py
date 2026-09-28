@@ -66,6 +66,11 @@ class ChainAdapter(ABC):
         """Return {lowercase_address: name} of this chain's known protocol contracts that are not swap routers."""
         return {}
 
+    async def router_v2_pool(self, router: str, token_a: str, token_b: str) -> Optional[str]:
+        """The lowercase V2 pool `router` swaps token_a and token_b through (its V2 factory's getPair), or
+        None when the router has no V2 factory on file or the factory has no such pool."""
+        return None
+
     @abstractmethod
     def capabilities(self) -> Dict:
         """What this chain's configuration lets a scan check, for GET /api/coverage/{chain_id}."""
