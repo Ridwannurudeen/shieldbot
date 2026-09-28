@@ -46,7 +46,9 @@ Revision **`27aca4d`** was deployed to production on **2026-09-23**. After deplo
 
 Production has since moved on: it runs **`5ac17f1`**, deployed on **2026-09-26**. After that deployment, `/api/health` listed the same eight chains and `/api/ready` answered 200 to ten requests over about 18 seconds. A live Robinhood Chain scan of USDG (`0x5fc5360d0400a0fd4f2af552add042d716f1d168`) returned `contract_age_days: 144`, `is_verified: true`, and `status: ok`; the September 23 scan above was of a token this document does not name. BNB Chain scans of CAKE and USDT returned `status: ok` with contract ages of 2,195 and 2,213 days. Before this deployment both came back UNKNOWN, because Etherscan refuses creation lookups on BNB Chain for the configured key; BNB Chain ages now come from Sourcify's deployment record when Etherscan refuses and Sourcify has verified the contract, and otherwise stay UNKNOWN. An Ethereum USDC scan returned `status: ok`.
 
-Production now runs **`c9ae9c9`**, deployed on **2026-09-27**, with the verdict registry below wired in. It records the Robinhood Chain verdicts of Telegram scans, guard rescans, and launches or rechecks that are blocked or guard-watched; with `PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0` it stores other launch verdicts as `off`, which is not on-chain evidence.
+On **2026-09-27** production moved to **`c9ae9c9`**, which wired in the verdict registry below. It records the Robinhood Chain verdicts of Telegram scans, guard rescans, and launches or rechecks that are blocked or guard-watched; with `PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0` it stores other launch verdicts as `off`, which is not on-chain evidence.
+
+Production now runs **`dc9f015`**, deployed on **2026-09-28**, which keeps that wiring and adds protocol recognition. Uniswap's current routers and position managers are recognised on every supported chain, so an unlimited Permit2 permit for one of them is named and scored as a known protocol instead of raising CAUTION. A trusted router's swap is judged by its tokens only when every command it runs is one ShieldBot checks and pays the sender; otherwise it answers CAUTION and names where the funds go. After that deployment `/api/health` listed the same eight chains.
 
 **Correction, 2026-09-26.** Changes made after the September 22 snapshot, and faults found in the code that produced it, mean some of its counters must not be read as first presented:
 
@@ -151,6 +153,8 @@ Verified on **2026-09-23** at `main` revision **`27aca4d`**: the main suite comp
 Re-verified on **2026-09-26** at **`5ac17f1`**: `python -m pytest -q -p no:cacheprovider --ignore=tests/test_import_order.py --ignore=tests/test_integration_imports.py` completed with **5,942 passed**, and the two excluded fresh-process import test files, `tests/test_import_order.py` and `tests/test_integration_imports.py`, with **112 passed**. CI run **36266495465** passed all four jobs. The SDK suites were not re-run locally for this update.
 
 Re-verified on **2026-09-27** at **`c9ae9c9`**: the same two commands completed with **5,986 passed** and **113 passed**, and CI run **36345012629** passed all four jobs.
+
+Re-verified on **2026-09-28** at **`dc9f015`**: the same two commands completed with **6,131 passed, 1 failed** and **113 passed**. The failure is a timing test of the rescue scan's deadline, `tests/test_rescue_scan_deadline.py`, which this change did not touch; run alone it failed once and then passed five times in a row. CI run **36480532540** passed all four jobs.
 
 ## Owner completion checklist: 17 items, all done
 
