@@ -1,6 +1,6 @@
 # ShieldBot — Arbitrum Open House Singapore submission draft
 
-**DO NOT SUBMIT WITH ANY `OWNER_FILL_...` FIELD REMAINING.** The three contracts were deployed on Robinhood Chain (4663) on 2026-09-27; see [Deployment evidence](#deployment-evidence).
+The three contracts were deployed on Robinhood Chain (4663) on 2026-09-27; see [Deployment evidence](#deployment-evidence).
 
 Buildathon window: **September 14–October 4, 2026**, as supplied by the owner. The owner quotes the rules as allowing entrants to "bring an existing project or start from scratch"; the rules were not independently fetched during this local-only preparation. The history below distinguishes the existing product from work landed during that window.
 
@@ -56,7 +56,7 @@ Production now runs **`c9ae9c9`**, deployed on **2026-09-27**, with the verdict 
 
 ## External validation
 
-**OWNER_FILL_EXTERNAL_FEEDBACK_STATUS** — Before submission, replace with either a dated, consented summary of an actual reply (distinguishing interest from an integration commitment), or: **"As of the submission date, no reply has been received; external validation remains outstanding."** A lack of replies is an explicit outcome, not a reason to imply endorsement.
+**As of 2026-09-28**, from the owner's message records: on 2026-09-17 the ecosystem team of an EVM layer-1 chain contacted ShieldBot, unprompted, about bringing its wallet scan and approval management to their chain. On 2026-09-24 they agreed to a private demonstration of approval management: a Telegram-triggered wallet scan, the approvals it finds, and a revoke the user signs in their own wallet. They offered test wallets, test gas and RPC details for it. This is interest in a demonstration, not an integration commitment: no agreement has been signed, no payment has been made, and the demonstration has not taken place yet. The team is not named because it has not agreed to be named in this document.
 
 ## Deployment evidence
 
@@ -152,9 +152,9 @@ Re-verified on **2026-09-26** at **`5ac17f1`**: `python -m pytest -q -p no:cache
 
 Re-verified on **2026-09-27** at **`c9ae9c9`**: the same two commands completed with **5,986 passed** and **113 passed**, and CI run **36345012629** passed all four jobs.
 
-## Owner completion checklist: 17 items, 1 open
+## Owner completion checklist: 17 items, all done
 
-The **15 deployment-evidence fields** (3 contract addresses, 3 deployment transaction hashes, 9 explorer/source-verification links) were filled on 2026-09-27 and 2026-09-28 from the deployment receipts, the chain and the explorers. Each remaining identifier appears once in the body and once in this checklist; fill both occurrences together.
+The **15 deployment-evidence fields** (3 contract addresses, 3 deployment transaction hashes, 9 explorer/source-verification links) were filled on 2026-09-27 and 2026-09-28 from the deployment receipts, the chain and the explorers. The external validation status was filled on 2026-09-28.
 
 - [x] Registry address
 - [x] Registry deployment transaction
@@ -172,4 +172,4 @@ The **15 deployment-evidence fields** (3 contract addresses, 3 deployment transa
 - [x] Transfer Blockscout link
 - [x] Transfer Sourcify link
 - [x] `BLOCKSCOUT_API_KEY` configured in production on 2026-09-22 and verified by a live scan on 2026-09-23.
-- [ ] **OWNER_FILL_EXTERNAL_FEEDBACK_STATUS**
+- [x] External validation status
