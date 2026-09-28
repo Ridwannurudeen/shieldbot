@@ -2,7 +2,7 @@
 
 # ShieldBot
 
-**ShieldBot is the security layer that says what it checked.** Every verdict carries its coverage, and an agent can refuse to act on anything stale or Unknown; the verdict registry and guard that let a Robinhood Chain contract do the same are built and tested, with deployment in progress. We build on GoPlus, honeypot.is and others; we do not pretend to replace them.
+**ShieldBot is the security layer that says what it checked.** Every verdict carries its coverage, and an agent can refuse to act on anything stale or Unknown; the verdict registry and guard that let a Robinhood Chain contract do the same are built, tested and deployed on Robinhood Chain ([addresses](docs/DEPLOYMENTS.md)). We build on GoPlus, honeypot.is and others; we do not pretend to replace them.
 
 [Judge guide](docs/JUDGE_GUIDE.md) · [Recorded simulations](tests/fixtures/robinhood_simulation/) · [Verdict registry source](contracts/base/src/ShieldBotVerdictRegistry.sol) · [Deployed contracts](docs/DEPLOYMENTS.md) · [Test results](docs/TESTING.md)
 
@@ -40,7 +40,7 @@ The worked consumer is [`ShieldBotGuardedTransfer`](contracts/base/GUARDED_TRANS
 - **Simulation is route-bounded:** Robinhood support covers the implemented native/WETH v4 routes, Doppler-hooked v4 routes, and WETH-quoted V2 pairs. USDG is supported only for Doppler-hooked v4 pools. Hookless USDG pools are explicitly unsupported; the V2 adapter discovers WETH pairs, not USDG pairs. No V2 USDG route is covered. Whether any V2 USDG pairs exist has not been rechecked.
 - **Unknown is an outcome:** RPC failure, unsupported routes, insufficient liquidity, unattributed reverts or unmeasurable fields must not be read as a clean bill of health. A successful simulated round-trip describes that amount, route and recorded state, not future sellability.
 - **Coverage is partial across surfaces:** scan metadata reaches the REST, MCP, Telegram and SDK paths, but auxiliary MCP tools, phishing checks, signature heuristics and dashboard summaries do not all have equivalent coverage semantics. The dashboard is not an evidence viewer. See [the detailed limitations](docs/TECHNICAL.md).
-- **On-chain publication is pending deployment:** the registry and publisher are in this checkout. No deployment address or live confirmation is asserted here. An evidence document with `onchain_status: off` is stored locally only.
+- **On-chain publication covers a bounded set:** the registry is live on Robinhood Chain ([DEPLOYMENTS.md](docs/DEPLOYMENTS.md)). Production records Telegram scans, guard rescans, and launches or rechecks that are blocked or guard-watched; other launch verdicts are stored with `onchain_status: off`, which is not on-chain evidence.
 
 ## What is different
 
@@ -168,7 +168,7 @@ Token names, symbols and pools as listed by GeckoTerminal (network `robinhood`) 
 
 ## Submission status and measured usage
 
-- **Registry deployment:** pending. The Robinhood Chain verdict registry, guard and guarded transfer are not deployed yet, so no contract address is listed. The contracts that are deployed, on Base and BNB Smart Chain, are listed with their owners and record counts in [DEPLOYMENTS.md](docs/DEPLOYMENTS.md); both were retired on 2026-09-26, and no new records are written to them.
+- **Registry deployment:** the Robinhood Chain verdict registry, guard and guarded transfer were deployed on 2026-09-27. Their addresses, owner, recorder and deployment transactions are in [DEPLOYMENTS.md](docs/DEPLOYMENTS.md), with the Base and BNB Smart Chain contracts, which were retired on 2026-09-26 and receive no new records.
 - **Measured usage:** the `GET /api/stats` snapshot supplied on **2026-09-22** is recorded in [SUBMISSION.md](docs/SUBMISSION.md); its time of day and the revision serving it were not supplied. Dashboard loading values and historical projections are not usage evidence.
 - **Release boundary:** this README describes this repository snapshot. Deployment, live evidence URLs and the browser-store release must be verified separately.
 

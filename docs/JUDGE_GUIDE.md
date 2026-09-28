@@ -4,7 +4,7 @@
 
 The RPC proxy only sees requests routed through it; contract creation bypasses analysis, and raw transactions are already signed. On-chain enforcement is explicit: `ShieldBotVerdictGuard` reads the registry, and `ShieldBotGuardedTransfer` requires an allowed verdict before moving funds.
 
-Sections 1–2 work **offline, without an API key**, once dependencies are installed. Section 3 is a **read-only online check pending deployment**, not a live proof supplied by this checkout. Allow about three minutes each for replay, decision semantics and hash verification, excluding dependency installation.
+Sections 1–2 work **offline, without an API key**, once dependencies are installed. Section 3 is a **read-only online check against the live Robinhood Chain deployment**; run it rather than trusting the values it starts from. Allow about three minutes each for replay, decision semantics and hash verification, excluding dependency installation.
 
 ## Preparation
 
@@ -139,25 +139,27 @@ An allowed result does not check that the evidence document exists or matches it
 
 ## 3. Verify a verdict without trusting the API
 
-**Pending owner deployment.** Fill this table before using the online portion; the placeholders are not addresses or evidence of deployment.
+Values from the deployment on **2026-09-27**:
 
-| Item | Owner must supply |
+| Item | Value |
 |---|---|
 | Chain | Robinhood Chain, 4663 |
-| `ShieldBotVerdictRegistry` | **OWNER TODO: registry address** |
-| Deployment provenance | **OWNER TODO: deployment transaction, explorer/source-verification link, deployed source revision** |
-| API serving that revision | **OWNER TODO: verified API base URL** |
-| Published example | **OWNER TODO: token address with a confirmed verdict and its recording transaction hash** |
-| Independent read RPC | **OWNER TODO: chain-4663 RPC URL** |
+| `ShieldBotVerdictRegistry` | [`0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138`](https://robin.etherscan.io/address/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138) |
+| Deployment provenance | transaction [`0x14275435a6f9cff13681b15b230f69c7c40579a4e308a7cc503d25ff1b731fef`](https://robin.etherscan.io/tx/0x14275435a6f9cff13681b15b230f69c7c40579a4e308a7cc503d25ff1b731fef) (block 74,214,980); source [exact match](https://sourcify.dev/server/v2/contract/4663/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138) on Sourcify and [verified source](https://robinhoodchain.blockscout.com/address/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138?tab=contract) on Blockscout; built from `main` at `c9ae9c9` |
+| API serving that revision | `https://api.shieldbotsecurity.online` (the owner deployed `c9ae9c9` on 2026-09-27; the API does not report its revision) |
+| Published example | WOOD `0xf8bc08092c06db6148114dcf82af881f1085f92b`, recorded in transaction [`0x7578ca9edfa48c07a217ba8c6d589d6b779d567cd62fb1bc4998671df0c772a4`](https://robin.etherscan.io/tx/0x7578ca9edfa48c07a217ba8c6d589d6b779d567cd62fb1bc4998671df0c772a4) |
+| Independent read RPC | `https://robinhood-rpc.publicnode.com`, which the API does not use; any chain-4663 RPC works |
+
+The example token is outside the guard watch, so its record is not republished. If anyone scans it again, `/api/verdict/4663/0xf8bc08092c06db6148114dcf82af881f1085f92b` serves the newer document: when it reports `onchain_status: confirmed`, use its `tx_hash` as `RECORD_TX`; until then the check fails.
 
 Pin the registry address from the deployment record, independently of the API response. The commands fetch the served evidence document, hash its exact `canonical` UTF-8 string, then retrieve the receipt from the chosen RPC and match its event. They require no API key, wallet, signing or broadcast.
 
 ```bash
-export API_BASE='OWNER_FILL_VERIFIED_API_BASE'
-export RPC_URL='OWNER_FILL_INDEPENDENT_4663_RPC'
-export REGISTRY='OWNER_FILL_REGISTRY_ADDRESS'
-export SUBJECT='OWNER_FILL_PUBLISHED_TOKEN_ADDRESS'
-export RECORD_TX='OWNER_FILL_RECORDING_TRANSACTION_HASH'
+export API_BASE='https://api.shieldbotsecurity.online'
+export RPC_URL='https://robinhood-rpc.publicnode.com'
+export REGISTRY='0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138'
+export SUBJECT='0xf8bc08092c06db6148114dcf82af881f1085f92b'
+export RECORD_TX='0x7578ca9edfa48c07a217ba8c6d589d6b779d567cd62fb1bc4998671df0c772a4'
 python - <<'PY'
 import json
 import os
@@ -209,8 +211,8 @@ print('evidenceHash:', digest)
 PY
 ```
 
-Hash the **served string**, not a freshly serialized `evidence` object: JSON numbers such as `1.0` can serialize differently across languages. Use Ethereum keccak256, not SHA3-256. The event comparison remains useful after `latestRecord(subject)` changes; if the latest API document has changed since the pinned example, obtain its new recording transaction from the owner and repeat.
+Hash the **served string**, not a freshly serialized `evidence` object: JSON numbers such as `1.0` can serialize differently across languages. Use Ethereum keccak256, not SHA3-256. The event comparison remains useful after `latestRecord(subject)` changes; if the latest API document has changed since the pinned example, read its new recording transaction from `/api/verdict` as above and repeat.
 
-A match establishes that the designated recorder committed those bytes. It does not establish scanner accuracy, issuer authenticity or future sellability. RPC receipt inclusion is also not independent verification of parent-chain finality. `off`, `pending`, `sending`, `submitted`, `unconfirmed`, `failed` and `reverted` do not satisfy this check; a 404 means no stored verdict for that address.
+A match establishes that the designated recorder committed those bytes. It does not establish scanner accuracy, issuer authenticity or future sellability. RPC receipt inclusion is also not independent verification of parent-chain finality. `off`, `deduplicated`, `dropped`, `pending`, `sending`, `submitted`, `unconfirmed`, `failed` and `reverted` do not satisfy this check; a 404 means no stored verdict for that address.
 
-The verification block was checked locally against synthetic evidence and receipts, including mismatch cases. **No live endpoint, deployment or registry event has been verified yet.**
+The verification block was checked locally against synthetic evidence and receipts, including mismatch cases. **On 2026-09-27 this block, run from a fresh shell with the values above, printed `MATCH: canonical evidence, chain 4663, registry, subject, verdict, evidenceHash and observed block`.**

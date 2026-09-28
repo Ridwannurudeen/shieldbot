@@ -1,6 +1,6 @@
 # ShieldBot — Arbitrum Open House Singapore submission draft
 
-**DO NOT SUBMIT WITH ANY `OWNER_FILL_...` FIELD REMAINING. All three contract deployments are pending.**
+**DO NOT SUBMIT WITH ANY `OWNER_FILL_...` FIELD REMAINING.** The three contracts were deployed on Robinhood Chain (4663) on 2026-09-27; see [Deployment evidence](#deployment-evidence).
 
 Buildathon window: **September 14–October 4, 2026**, as supplied by the owner. The owner quotes the rules as allowing entrants to "bring an existing project or start from scratch"; the rules were not independently fetched during this local-only preparation. The history below distinguishes the existing product from work landed during that window.
 
@@ -46,6 +46,8 @@ Revision **`27aca4d`** was deployed to production on **2026-09-23**. After deplo
 
 Production has since moved on: it runs **`5ac17f1`**, deployed on **2026-09-26**. After that deployment, `/api/health` listed the same eight chains and `/api/ready` answered 200 to ten requests over about 18 seconds. A live Robinhood Chain scan of USDG (`0x5fc5360d0400a0fd4f2af552add042d716f1d168`) returned `contract_age_days: 144`, `is_verified: true`, and `status: ok`; the September 23 scan above was of a token this document does not name. BNB Chain scans of CAKE and USDT returned `status: ok` with contract ages of 2,195 and 2,213 days. Before this deployment both came back UNKNOWN, because Etherscan refuses creation lookups on BNB Chain for the configured key; BNB Chain ages now come from Sourcify's deployment record when Etherscan refuses and Sourcify has verified the contract, and otherwise stay UNKNOWN. An Ethereum USDC scan returned `status: ok`.
 
+Production now runs **`c9ae9c9`**, deployed on **2026-09-27**, with the verdict registry below wired in. It records the Robinhood Chain verdicts of Telegram scans, guard rescans, and launches or rechecks that are blocked or guard-watched; with `PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0` it stores other launch verdicts as `off`, which is not on-chain evidence.
+
 **Correction, 2026-09-26.** Changes made after the September 22 snapshot, and faults found in the code that produced it, mean some of its counters must not be read as first presented:
 
 - In the code that served the snapshot, unchanged in this respect through `27aca4d`, the mempool counters were held in memory and restarted with the API process, so 496,628 was a count since the process had last started, not an all-time total. It also counted a transaction again each time it stayed in the pool for more than 60 seconds, because the pending set was pruned by age and refilled from the pool on every poll; commit `048d820` (2026-09-26) keys the set by pool membership instead. Commit `1a74293`, in production since the later 2026-09-23 deployment of `e820c2e`, added `mempool_counting_since`, the moment the current count began, and made a source that is not running in the API process report `null`. The 496,628 figure has no current equivalent.
@@ -56,25 +58,27 @@ Production has since moved on: it runs **`5ac17f1`**, deployed on **2026-09-26**
 
 **OWNER_FILL_EXTERNAL_FEEDBACK_STATUS** — Before submission, replace with either a dated, consented summary of an actual reply (distinguishing interest from an integration commitment), or: **"As of the submission date, no reply has been received; external validation remains outstanding."** A lack of replies is an explicit outcome, not a reason to imply endorsement.
 
-## Deployment evidence — owner must complete
+## Deployment evidence
 
-**THE THREE VERDICT CONTRACTS ARE NOT DEPLOYED AS OF THIS DRAFT (2026-09-26).** The backend's live usage above does not establish their deployment. No live contract verification or live guarded USDG payment is claimed. Complete every field below from the actual chain-4663 deployment and completed source-verification results. A submitted explorer verification request is not a completed result.
+The three contracts were deployed on Robinhood Chain (4663) on **2026-09-27** from `0x8d02b6ECffed8A3e1e5C3649AA4670c72C366ae4`, the registry's owner, built from `main` at `c9ae9c9`; the contract sources are unchanged since `04203be`. The registry's recorder is `0xc68a90dcdfE8FBf770a7f29904B928cA6D00F453`. The transfer's subject is VIRTUAL (`0xc6911796042b15d7Fa4F6CDe69e245DdCd3d9c31`), its token is Paxos USDG (`0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168`) and its recipient is the owner. No live guarded USDG payment is claimed.
 
 | Contract | Deployed address | Deployment transaction hash |
 |---|---|---|
-| ShieldBotVerdictRegistry | **OWNER_FILL_REGISTRY_ADDRESS** | **OWNER_FILL_REGISTRY_DEPLOY_TX_HASH** |
-| ShieldBotVerdictGuard | **OWNER_FILL_GUARD_ADDRESS** | **OWNER_FILL_GUARD_DEPLOY_TX_HASH** |
-| ShieldBotGuardedTransfer | **OWNER_FILL_TRANSFER_ADDRESS** | **OWNER_FILL_TRANSFER_DEPLOY_TX_HASH** |
+| ShieldBotVerdictRegistry | [`0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138`](https://robin.etherscan.io/address/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138) | [`0x14275435a6f9cff13681b15b230f69c7c40579a4e308a7cc503d25ff1b731fef`](https://robin.etherscan.io/tx/0x14275435a6f9cff13681b15b230f69c7c40579a4e308a7cc503d25ff1b731fef) |
+| ShieldBotVerdictGuard | [`0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e`](https://robin.etherscan.io/address/0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e) | [`0xad4ada88dc23df69351ecd378dcab7033aaec71fd3edca711b9c05962b9565b3`](https://robin.etherscan.io/tx/0xad4ada88dc23df69351ecd378dcab7033aaec71fd3edca711b9c05962b9565b3) |
+| ShieldBotGuardedTransfer | [`0x336254bA85406D9af39357101b688E2B757751b3`](https://robin.etherscan.io/address/0x336254bA85406D9af39357101b688E2B757751b3) | [`0x7ee90d6204f182526870c0323e131b87dd7ad5e15ffafcffaeb1c2f0748e26f7`](https://robin.etherscan.io/tx/0x7ee90d6204f182526870c0323e131b87dd7ad5e15ffafcffaeb1c2f0748e26f7) |
 
 | Contract | Etherscan verified source link | Blockscout verified source link | Sourcify match link |
 |---|---|---|---|
-| ShieldBotVerdictRegistry | **OWNER_FILL_REGISTRY_ETHERSCAN_VERIFICATION_LINK** | **OWNER_FILL_REGISTRY_BLOCKSCOUT_VERIFICATION_LINK** | **OWNER_FILL_REGISTRY_SOURCIFY_VERIFICATION_LINK** |
-| ShieldBotVerdictGuard | **OWNER_FILL_GUARD_ETHERSCAN_VERIFICATION_LINK** | **OWNER_FILL_GUARD_BLOCKSCOUT_VERIFICATION_LINK** | **OWNER_FILL_GUARD_SOURCIFY_VERIFICATION_LINK** |
-| ShieldBotGuardedTransfer | **OWNER_FILL_TRANSFER_ETHERSCAN_VERIFICATION_LINK** | **OWNER_FILL_TRANSFER_BLOCKSCOUT_VERIFICATION_LINK** | **OWNER_FILL_TRANSFER_SOURCIFY_VERIFICATION_LINK** |
+| ShieldBotVerdictRegistry | [verified source](https://robin.etherscan.io/address/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138#code) | [verified source](https://robinhoodchain.blockscout.com/address/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138?tab=contract) | [exact match](https://sourcify.dev/server/v2/contract/4663/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138) |
+| ShieldBotVerdictGuard | [verified source](https://robin.etherscan.io/address/0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e#code) | [verified source](https://robinhoodchain.blockscout.com/address/0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e?tab=contract) | [exact match](https://sourcify.dev/server/v2/contract/4663/0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e) |
+| ShieldBotGuardedTransfer | [verified source](https://robin.etherscan.io/address/0x336254bA85406D9af39357101b688E2B757751b3#code) | [verified source](https://robinhoodchain.blockscout.com/address/0x336254bA85406D9af39357101b688E2B757751b3?tab=contract) | [exact match](https://sourcify.dev/server/v2/contract/4663/0x336254bA85406D9af39357101b688E2B757751b3) |
 
-Follow the [deployment runbook](../contracts/base/DEPLOY_ROBINHOOD.md) and fill the additional online-evidence fields in the [judge guide](JUDGE_GUIDE.md#3-verify-a-verdict-without-trusting-the-api). Reconcile this draft's deployment status with those records before submitting. With `ROBINHOOD_VERDICT_REGISTRY` unset, evidence is still stored and served, but publication is off; an `off` result is not on-chain evidence. With `PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0`, the hunter's launch and recheck verdicts are likewise stored and served as `off` unless blocked or watched by the guard, while guard rescans and Telegram scans are recorded.
+Sourcify holds full exact matches (creation and runtime code) for all three. Blockscout shows each contract through its Sourcify lookup; a first page load can show "Verify & publish" before that match appears.
 
-**Deployment verifier is ready for deploy day.** The owner dry-ran [`scripts/verify_deployment.py`](../scripts/verify_deployment.py) against live 4663 on **2026-09-22**. It correctly reported `PASS RPC chain id: 4663`, correctly detected no code at undeployed addresses, correctly matched USDG to the Paxos proxy used by the simulation, and exited non-zero with `SUMMARY: FAIL (2 passed, 11 failed)`. These are the owner's measured results, not a live run repeated here. The expected failures expose missing deployments; they are not a successful deployment check. The repository also contains [mocked RPC verifier tests](../tests/test_verify_deployment.py).
+The [judge guide](JUDGE_GUIDE.md#3-verify-a-verdict-without-trusting-the-api) checks a published verdict against these contracts without trusting the API; the [deployment runbook](../contracts/base/DEPLOY_ROBINHOOD.md) has the steps that were followed. With `ROBINHOOD_VERDICT_REGISTRY` unset, evidence is still stored and served, but publication is off; an `off` result is not on-chain evidence. With `PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0`, the hunter's launch and recheck verdicts are likewise stored and served as `off` unless blocked or watched by the guard, while guard rescans and Telegram scans are recorded.
+
+**Deployment verifier: PASS.** On **2026-09-27**, [`scripts/verify_deployment.py`](../scripts/verify_deployment.py) run against the live contracts with `--max-age 900` reported `SUMMARY: PASS (13 passed, 0 failed)`, including `guard.check(subject, maxAge): allowed=True, reason=0` for VIRTUAL. The guard watch refreshes that subject's record (`GUARD_WATCH_MAX_SUBJECTS=1`, one record about every 350 seconds); a later run can deny if refreshes fail. The repository also contains [mocked RPC verifier tests](../tests/test_verify_deployment.py).
 
 ## What was produced during the Buildathon
 
@@ -96,7 +100,7 @@ The local `main` history through **`27aca4d`** contains these **eleven in-window
 | September 22 | `c452b72` | Transaction-specific SDK cache keys, a 60 second default cache lifetime, and no cached score for STRICT policy. |
 | September 23 | `27aca4d` | A genuinely failed Robinhood pool simulation now leaves the combined result incomplete. |
 
-After `27aca4d`, `main` gained **102 further first-parent commits**, authored from September 22 to September 26 and all inside the window, through `5ac17f1`, the revision in production. Most are platform work across all supported chains rather than Robinhood-specific features; the rest are documentation and site changes:
+After `27aca4d`, `main` gained **102 further first-parent commits**, authored from September 22 to September 26 and all inside the window, through `5ac17f1`, the revision in production on 2026-09-26. Most are platform work across all supported chains rather than Robinhood-specific features; the rest are documentation and site changes:
 
 - **September 23 to 24:** audit-driven fixes. Unmeasured scan fields report UNKNOWN instead of clean; one verdict vocabulary and a scoring redesign with declared floors; a coverage endpoint and an Unknown ledger; provider circuit breakers, a readiness endpoint and a gated deploy script with rollback; server-judged signatures and hardening of the repository extension (manifest 3.1.0, not released); SDK and MCP validation fixes; transactional database writes; an evidence document per scan.
 - **September 25:** repository and documentation cleanup; the site and docs present ShieldBot as a multichain product.
@@ -114,7 +118,7 @@ git log 27aca4d..5ac17f1 --first-parent --format='%h %ad %s' --date=short
 git log 27aca4d..5ac17f1 --first-parent --merges --oneline
 ```
 
-In particular, waves 2 to 3 (`9ca9c31`) and the guard, guarded transfer and freshness chain (`04203be`) both landed inside the window. The former `chore/oh-final` work is included in `main` through the later commits above. This document was last brought up to date on 2026-09-26 against `main` at `5ac17f1`. It does not establish deployment of the three verdict contracts or a released extension.
+In particular, waves 2 to 3 (`9ca9c31`) and the guard, guarded transfer and freshness chain (`04203be`) both landed inside the window. The former `chore/oh-final` work is included in `main` through the later commits above. This history was last brought up to date on 2026-09-26 against `main` at `5ac17f1`, and the deployment section on 2026-09-27 against `c9ae9c9`. It does not establish a released extension.
 
 ## Pre-submission review
 
@@ -140,30 +144,32 @@ A pre-submission review found three fail-closed gaps in the Python pipeline. Com
 
 ## Reproducible verification
 
-Start with [docs/JUDGE_GUIDE.md](JUDGE_GUIDE.md): replay the recorded honeypot and decision semantics offline, then run the registry/guard/transfer tests in Foundry. After the owner supplies deployment evidence, its read-only path compares the served canonical document with the designated registry's receipt event. Recorded RPC replay checks this implementation against saved responses; it is not archival EVM execution. The [test report](TESTING.md) states measured results, commands and exclusions.
+Start with [docs/JUDGE_GUIDE.md](JUDGE_GUIDE.md): replay the recorded honeypot and decision semantics offline, then run the registry/guard/transfer tests in Foundry. Its read-only online path (section 3) compares the served canonical document with the designated registry's receipt event. Recorded RPC replay checks this implementation against saved responses; it is not archival EVM execution. The [test report](TESTING.md) states measured results, commands and exclusions.
 
 Verified on **2026-09-23** at `main` revision **`27aca4d`**: the main suite completed with **3,054 passed, 1 skipped**, excluding the bot app suite. The Python SDK completed with **32 passed**. The TypeScript SDK completed with **21 passed**. CI run **35863129734** passed Foundry tests, Solidity security, Python tests and security, and the SDK audit and build. Tests do not establish live usage or contract deployment.
 
 Re-verified on **2026-09-26** at **`5ac17f1`**: `python -m pytest -q -p no:cacheprovider --ignore=tests/test_import_order.py --ignore=tests/test_integration_imports.py` completed with **5,942 passed**, and the two excluded fresh-process import test files, `tests/test_import_order.py` and `tests/test_integration_imports.py`, with **112 passed**. CI run **36266495465** passed all four jobs. The SDK suites were not re-run locally for this update.
 
-## Owner completion checklist: 16 distinct placeholders
+Re-verified on **2026-09-27** at **`c9ae9c9`**: the same two commands completed with **5,986 passed** and **113 passed**, and CI run **36345012629** passed all four jobs.
 
-There are **15 deployment-evidence fields** (3 contract addresses, 3 deployment transaction hashes, 9 explorer/source-verification links) and **1 status field** below. Each identifier appears once in the body and once in this checklist: **32 concrete placeholder occurrences**. Fill both occurrences together. No contract address, deployment transaction hash or explorer evidence URL has been invented. The judge guide has its own additional online-evidence fields; those are outside this document's count.
+## Owner completion checklist: 17 items, 1 open
 
-- [ ] **OWNER_FILL_REGISTRY_ADDRESS**
-- [ ] **OWNER_FILL_REGISTRY_DEPLOY_TX_HASH**
-- [ ] **OWNER_FILL_GUARD_ADDRESS**
-- [ ] **OWNER_FILL_GUARD_DEPLOY_TX_HASH**
-- [ ] **OWNER_FILL_TRANSFER_ADDRESS**
-- [ ] **OWNER_FILL_TRANSFER_DEPLOY_TX_HASH**
-- [ ] **OWNER_FILL_REGISTRY_ETHERSCAN_VERIFICATION_LINK**
-- [ ] **OWNER_FILL_REGISTRY_BLOCKSCOUT_VERIFICATION_LINK**
-- [ ] **OWNER_FILL_REGISTRY_SOURCIFY_VERIFICATION_LINK**
-- [ ] **OWNER_FILL_GUARD_ETHERSCAN_VERIFICATION_LINK**
-- [ ] **OWNER_FILL_GUARD_BLOCKSCOUT_VERIFICATION_LINK**
-- [ ] **OWNER_FILL_GUARD_SOURCIFY_VERIFICATION_LINK**
-- [ ] **OWNER_FILL_TRANSFER_ETHERSCAN_VERIFICATION_LINK**
-- [ ] **OWNER_FILL_TRANSFER_BLOCKSCOUT_VERIFICATION_LINK**
-- [ ] **OWNER_FILL_TRANSFER_SOURCIFY_VERIFICATION_LINK**
+The **15 deployment-evidence fields** (3 contract addresses, 3 deployment transaction hashes, 9 explorer/source-verification links) were filled on 2026-09-27 and 2026-09-28 from the deployment receipts, the chain and the explorers. Each remaining identifier appears once in the body and once in this checklist; fill both occurrences together.
+
+- [x] Registry address
+- [x] Registry deployment transaction
+- [x] Guard address
+- [x] Guard deployment transaction
+- [x] Transfer address
+- [x] Transfer deployment transaction
+- [x] Registry Etherscan link
+- [x] Registry Blockscout link
+- [x] Registry Sourcify link
+- [x] Guard Etherscan link
+- [x] Guard Blockscout link
+- [x] Guard Sourcify link
+- [x] Transfer Etherscan link
+- [x] Transfer Blockscout link
+- [x] Transfer Sourcify link
 - [x] `BLOCKSCOUT_API_KEY` configured in production on 2026-09-22 and verified by a live scan on 2026-09-23.
 - [ ] **OWNER_FILL_EXTERNAL_FEEDBACK_STATUS**

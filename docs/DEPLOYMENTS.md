@@ -8,16 +8,17 @@ BSC deployment transactions are the ones the repository already recorded (`docs/
 verifier, the since-removed `bsc.address` metadata file for the unused second one); their receipts, read
 from `https://bsc-dataseed1.binance.org/`, show each creating the contract listed below. The Base
 attestor and the BNB Smart Chain verifier were retired on 2026-09-26: nothing in this repository writes
-to either any more, so no new records are written. The records already on both chains stay.
+to either any more, so no new records are written. The records already on both chains stay. The Robinhood
+Chain (4663) rows were read the same way on **2026-09-27** from `https://rpc.mainnet.chain.robinhood.com`.
 
-| Contract | Chain | Address | Deployed (UTC) | Records on 2026-09-24 | Written by |
+| Contract | Chain | Address | Deployed (UTC) | Records (when read) | Written by |
 |---|---|---|---|---|---|
-| `ShieldBotAttestor` | Base (8453) | [`0xA4A192510FB8Ad1B6C92972a15BfAba73E7a655B`](https://basescan.org/address/0xA4A192510FB8Ad1B6C92972a15BfAba73E7a655B) | 2026-05-05 15:23:51 | 1 attestation | nothing: retired on 2026-09-26 |
-| `ShieldBotVerifier` | BNB Smart Chain (56) | [`0x867aE7449af56BB56a4978c758d7E88066E1f795`](https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795) | 2026-02-12 11:25:33 | 20 scans | nothing: retired on 2026-09-26 |
-| `ShieldBotVerifier` (second, unused) | BNB Smart Chain (56) | [`0x0AD4E23f5762CEd4D3278Da958e109F2A09337B2`](https://bscscan.com/address/0x0AD4E23f5762CEd4D3278Da958e109F2A09337B2) | 2026-03-02 13:57:22 | 0 scans | nothing in this repository |
-| `ShieldBotVerdictRegistry` | Robinhood Chain (4663) | not deployed | | | |
-| `ShieldBotVerdictGuard` | Robinhood Chain (4663) | not deployed | | | |
-| `ShieldBotGuardedTransfer` | Robinhood Chain (4663) | not deployed | | | |
+| `ShieldBotAttestor` | Base (8453) | [`0xA4A192510FB8Ad1B6C92972a15BfAba73E7a655B`](https://basescan.org/address/0xA4A192510FB8Ad1B6C92972a15BfAba73E7a655B) | 2026-05-05 15:23:51 | 1 attestation (2026-09-24) | nothing: retired on 2026-09-26 |
+| `ShieldBotVerifier` | BNB Smart Chain (56) | [`0x867aE7449af56BB56a4978c758d7E88066E1f795`](https://bscscan.com/address/0x867aE7449af56BB56a4978c758d7E88066E1f795) | 2026-02-12 11:25:33 | 20 scans (2026-09-24) | nothing: retired on 2026-09-26 |
+| `ShieldBotVerifier` (second, unused) | BNB Smart Chain (56) | [`0x0AD4E23f5762CEd4D3278Da958e109F2A09337B2`](https://bscscan.com/address/0x0AD4E23f5762CEd4D3278Da958e109F2A09337B2) | 2026-03-02 13:57:22 | 0 scans (2026-09-24) | nothing in this repository |
+| `ShieldBotVerdictRegistry` | Robinhood Chain (4663) | [`0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138`](https://robin.etherscan.io/address/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138) | 2026-09-27 20:11:57 | 9 records at block 74,253,938 (2026-09-27 21:17 UTC); the guard watch adds one about every 350 s | the verdict drain, as recorder `0xc68a90dcdfE8FBf770a7f29904B928cA6D00F453` |
+| `ShieldBotVerdictGuard` | Robinhood Chain (4663) | [`0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e`](https://robin.etherscan.io/address/0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e) | 2026-09-27 20:43:47 | none (reads the registry) | nothing: it has no state to write |
+| `ShieldBotGuardedTransfer` | Robinhood Chain (4663) | [`0x336254bA85406D9af39357101b688E2B757751b3`](https://robin.etherscan.io/address/0x336254bA85406D9af39357101b688E2B757751b3) | 2026-09-27 20:43:47 | none | callers of `transfer(amount, maxAge)` |
 
 Every owner below is an externally owned account (`eth_getCode` returns no code), not a multisig.
 
@@ -85,17 +86,22 @@ Every owner below is an externally owned account (`eth_getCode` returns no code)
 - **Source:** no Sourcify match. The since-removed `bsc.address` metadata file listed this address as the
   verifier; no code in this repository writes to it or reads from it.
 
-## Robinhood Chain (4663): not deployed
+## Robinhood Chain (4663)
 
-`ShieldBotVerdictRegistry`, `ShieldBotVerdictGuard` and `ShieldBotGuardedTransfer`
-([sources](../contracts/base/src/)) are **not deployed**. No address for them exists in this repository;
-`ROBINHOOD_VERDICT_REGISTRY` is empty in [.env.example](../.env.example), and verdict publishing stays
-`off` while it is. [DEPLOY_ROBINHOOD.md](../contracts/base/DEPLOY_ROBINHOOD.md) has the deployment steps
-and `scripts/verify_deployment.py` checks a deployment. Once deployed, the registry is written only by the
-verdict drain (`services/verdict_publisher.py`) with `ROBINHOOD_RECORDER_PRIVATE_KEY`. The drain runs in the
-API process, or in `workers.py` with `BACKGROUND_WORKERS=external`, and only the unit that runs it holds the
-key ([DEPLOYMENT.md](DEPLOYMENT.md)). Add each contract's address, owner, recorder, deployment transaction and
-date here.
+Deployed on 2026-09-27 from `main` at `c9ae9c9` ([sources](../contracts/base/src/), unchanged since `04203be`)
+by `0x8d02b6ECffed8A3e1e5C3649AA4670c72C366ae4`, following [DEPLOY_ROBINHOOD.md](../contracts/base/DEPLOY_ROBINHOOD.md).
+`scripts/verify_deployment.py` reported `SUMMARY: PASS (13 passed, 0 failed)` the same day.
+
+- **`ShieldBotVerdictRegistry`:** `0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138`, deployed in transaction [`0x14275435a6f9cff13681b15b230f69c7c40579a4e308a7cc503d25ff1b731fef`](https://robin.etherscan.io/tx/0x14275435a6f9cff13681b15b230f69c7c40579a4e308a7cc503d25ff1b731fef),
+  block 74,214,980. `owner()` is `0x8d02b6ECffed8A3e1e5C3649AA4670c72C366ae4`; `recorder()` is `0xc68a90dcdfE8FBf770a7f29904B928cA6D00F453`, the verdict drain's key
+  (`services/verdict_publisher.py`), held only by the API unit ([DEPLOYMENT.md](DEPLOYMENT.md)).
+- **`ShieldBotVerdictGuard`:** `0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e`, deployed in transaction [`0xad4ada88dc23df69351ecd378dcab7033aaec71fd3edca711b9c05962b9565b3`](https://robin.etherscan.io/tx/0xad4ada88dc23df69351ecd378dcab7033aaec71fd3edca711b9c05962b9565b3),
+  block 74,233,945. `registry()` is `0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138`.
+- **`ShieldBotGuardedTransfer`:** `0x336254bA85406D9af39357101b688E2B757751b3`, deployed in transaction [`0x7ee90d6204f182526870c0323e131b87dd7ad5e15ffafcffaeb1c2f0748e26f7`](https://robin.etherscan.io/tx/0x7ee90d6204f182526870c0323e131b87dd7ad5e15ffafcffaeb1c2f0748e26f7),
+  block 74,233,945. `guard()` is the guard above, `subject()` is VIRTUAL (`0xc6911796042b15d7Fa4F6CDe69e245DdCd3d9c31`), `usdg()` is Paxos USDG
+  (`0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168`) and `recipient()` is `0x8d02b6ECffed8A3e1e5C3649AA4670c72C366ae4`.
+- **Source:** full exact matches on Sourcify (creation and runtime code) for all three. Blockscout shows each contract through its Sourcify lookup; a first page load can show "Verify & publish" before that match appears.
+  ([exact match](https://sourcify.dev/server/v2/contract/4663/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138), [exact match](https://sourcify.dev/server/v2/contract/4663/0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e), [exact match](https://sourcify.dev/server/v2/contract/4663/0x336254bA85406D9af39357101b688E2B757751b3)).
 
 ## Checking these values
 
@@ -107,4 +113,9 @@ cast call 0xA4A192510FB8Ad1B6C92972a15BfAba73E7a655B "schemaUID()(bytes32)" --rp
 cast call 0x867aE7449af56BB56a4978c758d7E88066E1f795 "owner()(address)" --rpc-url https://bsc-dataseed1.binance.org/
 cast call 0x867aE7449af56BB56a4978c758d7E88066E1f795 "verifier()(address)" --rpc-url https://bsc-dataseed1.binance.org/
 cast call 0x867aE7449af56BB56a4978c758d7E88066E1f795 "totalScans()(uint256)" --rpc-url https://bsc-dataseed1.binance.org/
+cast call 0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138 "owner()(address)" --rpc-url https://rpc.mainnet.chain.robinhood.com
+cast call 0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138 "recorder()(address)" --rpc-url https://rpc.mainnet.chain.robinhood.com
+cast call 0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138 "totalRecords()(uint256)" --rpc-url https://rpc.mainnet.chain.robinhood.com
+cast call 0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e "registry()(address)" --rpc-url https://rpc.mainnet.chain.robinhood.com
+cast call 0x336254bA85406D9af39357101b688E2B757751b3 "subject()(address)" --rpc-url https://rpc.mainnet.chain.robinhood.com
 ```
