@@ -200,7 +200,9 @@ MAX_UINT256 = (1 << 256) - 1
 UNLIMITED_THRESHOLD = 10**30
 
 # Universal Router command numbers (Uniswap universal-router Commands.sol; PancakeSwap's routers are
-# forks that share 0x00 to 0x0e). The top bit only lets a command revert.
+# forks that share 0x00 to 0x0e). The top bit only lets a command revert. Routers read a command through
+# different masks (Uniswap V2.1 0x7f, PancakeSwap 0x3f, Uniswap V1.2 0x1f): every command accepted here
+# reads the same through all three, and one with any other bit set is refused.
 UR_COMMAND_MASK = 0x7F
 UR_V3_SWAPS = (0x00, 0x01)
 UR_V2_SWAPS = (0x08, 0x09)
