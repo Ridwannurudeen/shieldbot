@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from redis.exceptions import RedisError
-from typing import Optional, Dict, Any, List, Literal
+from typing import Optional, Dict, Any, List, Literal, Tuple
 
 from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve_selector
 from utils.chain_info import get_chain_name, get_native_symbol
@@ -3279,28 +3279,36 @@ def _build_fallback_response(
     }
 
 
-def _extract_swap_path(decoded: Dict, raw_calldata: str = "") -> List[str]:
-    """Extract token swap path from decoded calldata.
+def _extract_swap_path(
+    decoded: Dict, raw_calldata: str = "", sender: str = "", router: str = "", router_name: str = "",
+) -> Tuple[List[str], Optional[str]]:
+    """Extract token swap path from decoded calldata, with why the swap cannot be judged by its tokens
+    alone, or None.
 
     For Universal Router (execute selector 3593564c), delegates to the dedicated
-    parser that walks the nested commands/inputs ABI structure.
-    For standard V2 routers, scans decoded params for an address[].
+    parser that walks the nested commands/inputs ABI structure and refuses a call that sends funds to
+    anyone but `sender`.
+    For standard V2 routers, scans decoded params for an address[]; the address after it, the swap's
+    recipient, must be `sender`.
     """
     if not decoded:
-        return []
+        return [], None
 
     # Universal Router: path is buried inside inputs[i] bytes — needs dedicated decode
     if decoded.get("selector") == "3593564c" and raw_calldata and calldata_decoder:
-        path = calldata_decoder.decode_universal_router_path(raw_calldata)
-        if path:
-            return path
+        return calldata_decoder.decode_universal_router_path(
+            raw_calldata, sender, router, v4=router_name.startswith("Uniswap Universal Router V2"),
+        )
 
     # Standard V2 routers: path is a top-level address[] param
-    params = decoded.get("params", {})
-    for v in params.values():
+    values = list(decoded.get("params", {}).values())
+    for i, v in enumerate(values):
         if isinstance(v, list) and v and all(isinstance(x, str) and x.startswith("0x") for x in v):
-            return v
-    return []
+            recipient = values[i + 1] if i + 1 < len(values) else None
+            if isinstance(recipient, str) and recipient.lower() != sender.lower():
+                return [], f"Its tokens go to {recipient}, not the sender"
+            return v, None
+    return [], None
 
 
 def _select_router_tokens(path: List[str]) -> List[str]:
@@ -3412,12 +3420,12 @@ async def _analyze_router_swap(
             'token_analysis', 'Token analyzers are unavailable', policy_mode,
         )
 
-    path = _extract_swap_path(decoded, req.data)
-    if not path or not any(web3_client.is_valid_address(token) for token in path):
-        # Cannot decode the swap path (e.g. Uniswap V3 / aggregator calldata).
+    path, refusal = _extract_swap_path(decoded, req.data, from_addr, to_addr, whitelisted)
+    if refusal or not path or not any(web3_client.is_valid_address(token) for token in path):
+        # Cannot decode the swap path (e.g. Uniswap V3 / aggregator calldata), or it pays someone else.
         return _build_unverified_swap_response(
             req, to_addr, decoded, whitelisted, value_bnb,
-            'token_path', 'Token path could not be decoded', policy_mode,
+            'token_path', refusal or 'Token path could not be decoded', policy_mode,
         )
 
     candidates = _select_router_tokens(path)

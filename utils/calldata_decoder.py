@@ -199,6 +199,31 @@ MAX_UINT256 = (1 << 256) - 1
 # Threshold: anything above 10^30 is effectively unlimited
 UNLIMITED_THRESHOLD = 10**30
 
+# Universal Router command numbers (Uniswap universal-router Commands.sol; PancakeSwap's routers are
+# forks that share 0x00 to 0x0e). The top bit only lets a command revert.
+UR_COMMAND_MASK = 0x7F
+UR_V3_SWAPS = (0x00, 0x01)
+UR_V2_SWAPS = (0x08, 0x09)
+UR_V4_SWAP = 0x10
+# Commands that move funds to the address in the given word of their input: PERMIT2_TRANSFER_FROM,
+# SWEEP, TRANSFER, WRAP_ETH and UNWRAP_WETH.
+UR_RECIPIENT_WORD = {0x02: 1, 0x04: 1, 0x05: 1, 0x0B: 0, 0x0C: 0}
+UR_PAY_PORTION, UR_PAY_PORTION_FULL_PRECISION = 0x06, 0x07
+UR_PERMIT2_PERMIT = 0x0A
+UR_BALANCE_CHECK_ERC20 = 0x0E
+# Recipients that keep funds with the caller: the sender, or the router between commands.
+UR_MSG_SENDER = "0x" + "0" * 39 + "1"
+UR_ADDRESS_THIS = "0x" + "0" * 39 + "2"
+# Shares paid to other addresses (an interface fee) may reach 1% in all: 1e16 where 1e18 is the whole,
+# as PAY_PORTION_FULL_PRECISION counts. PAY_PORTION counts basis points, 1e14 each.
+UR_MAX_FOREIGN_PORTION = 10**16
+# The actions the V4 router runs (v4-periphery V4Router._handleAction; any other reverts): the swaps that
+# name the currencies, those that move no funds to a named address (SETTLE, SETTLE_ALL, TAKE_ALL), and
+# those that move funds to the address in the given word of their params (TAKE, TAKE_PORTION).
+V4_SWAP_ACTIONS = (0x06, 0x07, 0x08, 0x09)
+V4_PLAIN_ACTIONS = (0x0B, 0x0C, 0x0F)
+V4_RECIPIENT_WORD = {0x0E: 1, 0x10: 1}
+
 
 class CalldataDecoder:
     """Decode raw transaction calldata into human-readable form."""
@@ -318,9 +343,12 @@ class CalldataDecoder:
 
         return None
 
-    def decode_universal_router_path(self, calldata: str) -> List[str]:
+    def decode_universal_router_path(
+        self, calldata: str, sender: str = "", router: str = "", v4: bool = False
+    ) -> Tuple[List[str], Optional[str]]:
         """
-        Decode the tokens a Universal Router execute(bytes,bytes[],uint256) call swaps.
+        Decode the tokens a Universal Router execute(bytes,bytes[],uint256) call swaps, and check that it
+        sends nothing to anyone but `sender`.
 
         The Universal Router encodes swap instructions as:
           commands: packed bytes where each byte is a command type
@@ -328,21 +356,28 @@ class CalldataDecoder:
 
         V2 commands (0x08 / 0x09) encode the path as address[].
         V3 commands (0x00 / 0x01) encode the path as packed bytes (token+fee+token...).
-        V4_SWAP (0x10) encodes the V4 router's actions and their params (_decode_v4_ur_input).
+        V4_SWAP (0x10) encodes the V4 router's actions and their params (_decode_v4_ur_input); `v4` says
+        the router is a Uniswap Universal Router V2 or later, as older routers and PancakeSwap's use
+        0x10 for other commands.
 
-        Returns the tokens of every swap command, each once, in the order the commands name them, or []
-        on failure. A swap command whose tokens cannot be read fails the whole path, so a token is
-        never left out of the tokens a firewall scans.
+        Every command must be one checked here: a swap, a sweep, transfer, wrap or unwrap whose
+        recipient is the sender or the router itself, portions of up to 1% in all paid to anyone, a
+        Permit2 permit for the router itself, or a balance check. Anything else, a sub-plan or a bridge
+        deposit among them, is refused, and so is a swap whose tokens cannot be read.
+
+        Returns (the tokens of every swap command, each once, in the order the commands name them,
+        None), or ([], why the call was refused).
         """
+        undecodable = "Token path could not be decoded"
         try:
             data = calldata[2:] if calldata.startswith("0x") else calldata
             if len(data) < 8 or data[:8].lower() != "3593564c":
-                return []
+                return [], undecodable
 
             params = data[8:]
             words = [params[i:i + 64] for i in range(0, len(params), 64)]
             if len(words) < 3:
-                return []
+                return [], undecodable
 
             # words[0] = byte offset from params start → commands length word
             # words[1] = byte offset from params start → inputs count word
@@ -351,46 +386,69 @@ class CalldataDecoder:
             ptr_inputs = int(words[1], 16) // 32
 
             if ptr_cmds >= len(words) or ptr_inputs >= len(words):
-                return []
+                return [], undecodable
 
             # --- Decode commands bytes ---
             cmds_len = int(words[ptr_cmds], 16)
             if cmds_len == 0:
-                return []
+                return [], undecodable
             cmds_words = (cmds_len + 31) // 32
             cmds_hex = "".join(words[ptr_cmds + 1: ptr_cmds + 1 + cmds_words])
             if len(cmds_hex) < cmds_len * 2:
-                return []
+                return [], undecodable
             commands = bytes.fromhex(cmds_hex[:cmds_len * 2])
-
-            # Top 2 bits are flags (FLAG_ALLOW_REVERT etc.) — mask them off.
-            V2_CMDS = {0x08, 0x09}  # V2_SWAP_EXACT_IN, V2_SWAP_EXACT_OUT
-            V3_CMDS = {0x00, 0x01}  # V3_SWAP_EXACT_IN, V3_SWAP_EXACT_OUT
-            V4_SWAP = 0x10
 
             # ABI bytes[] encoding: [count][offset_0 ... offset_n][elem_0_len][elem_0_data]...
             inputs_count = int(words[ptr_inputs], 16)
+            if inputs_count < len(commands):
+                return [], undecodable
+            own = {UR_MSG_SENDER, UR_ADDRESS_THIS, sender.lower()} - {""}
             path: List[str] = []
+            foreign_share = 0
             for i, byte in enumerate(commands):
-                cmd = byte & 0x3f
-                if cmd not in V2_CMDS and cmd not in V3_CMDS and cmd != V4_SWAP:
-                    continue
-                if i >= inputs_count:
-                    return []
+                cmd = byte & UR_COMMAND_MASK
                 elem_hex = self._abi_bytes_element(words, ptr_inputs + 1, i)
-                if cmd in V3_CMDS:
-                    tokens = self._decode_v3_ur_input(elem_hex)
-                elif cmd in V2_CMDS:
-                    tokens = self._decode_v2_ur_input(elem_hex)
-                else:
-                    tokens = self._decode_v4_ur_input(elem_hex)
-                if not tokens:
-                    return []
-                path += tokens
-            return list(dict.fromkeys(token.lower() for token in path))
+                iw = [elem_hex[j:j + 64] for j in range(0, len(elem_hex), 64)]
+                if cmd in UR_V2_SWAPS or cmd in UR_V3_SWAPS:
+                    recipient = "0x" + iw[0][24:]
+                    if recipient not in own:
+                        return [], f"Its funds go to {recipient}, not the sender"
+                    decode = self._decode_v3_ur_input if cmd in UR_V3_SWAPS else self._decode_v2_ur_input
+                    tokens = decode(elem_hex)
+                    if not tokens:
+                        return [], undecodable
+                    path += tokens
+                elif cmd == UR_V4_SWAP and v4:
+                    tokens, refusal = self._decode_v4_ur_input(elem_hex, own)
+                    if refusal:
+                        return [], refusal
+                    if not tokens:
+                        return [], undecodable
+                    path += tokens
+                elif cmd in UR_RECIPIENT_WORD:
+                    recipient = "0x" + iw[UR_RECIPIENT_WORD[cmd]][24:]
+                    if recipient not in own:
+                        return [], f"Its funds go to {recipient}, not the sender"
+                elif cmd in (UR_PAY_PORTION, UR_PAY_PORTION_FULL_PRECISION):
+                    recipient = "0x" + iw[1][24:]
+                    if recipient not in own:
+                        foreign_share += int(iw[2], 16) * (10**14 if cmd == UR_PAY_PORTION else 1)
+                        if foreign_share > UR_MAX_FOREIGN_PORTION:
+                            return [], f"It pays more than 1% of its tokens to other addresses, {recipient} among them"
+                elif cmd == UR_PERMIT2_PERMIT:
+                    # abi.encode(PermitSingle(PermitDetails(token, amount, expiration, nonce), spender,
+                    # sigDeadline), bytes signature): the spender is the fifth word.
+                    spender = "0x" + iw[4][24:]
+                    if spender != router.lower():
+                        return [], f"Its Permit2 permit is for {spender}, not the router"
+                elif cmd != UR_BALANCE_CHECK_ERC20:
+                    return [], f"It runs router command 0x{cmd:02x}, which ShieldBot does not check"
+            if not path:
+                return [], undecodable
+            return list(dict.fromkeys(token.lower() for token in path)), None
 
         except Exception:
-            return []
+            return [], undecodable
 
     @staticmethod
     def _abi_bytes_element(words: List[str], first_offset_word: int, index: int) -> str:
@@ -464,18 +522,24 @@ class CalldataDecoder:
         except Exception:
             return []
 
-    def _decode_v4_ur_input(self, input_hex: str) -> List[str]:
+    def _decode_v4_ur_input(self, input_hex: str, own: set) -> Tuple[List[str], Optional[str]]:
         """
         Decode the tokens of a V4_SWAP input: abi.encode(bytes actions, bytes[] params), the V4 router's
-        actions (v4-periphery Actions) and the ABI-encoded params of each. Every params struct holds
-        dynamic hookData, so each starts with the offset of its struct.
+        actions (v4-periphery Actions) and the ABI-encoded params of each.
+
+        A swap's params struct holds dynamic fields, so it starts with the offset of its struct:
           SWAP_EXACT_IN_SINGLE / SWAP_EXACT_OUT_SINGLE (0x06 / 0x08): (PoolKey poolKey, bool zeroForOne,
             ...), the PoolKey's currency0 and currency1 in its first two words;
           SWAP_EXACT_IN (0x07): (Currency currencyIn, PathKey[] path, ...), each PathKey's first word its
             intermediate currency, in swap order;
           SWAP_EXACT_OUT (0x09): (Currency currencyOut, PathKey[] path, ...), the path read from the input
             currency to the one before currencyOut.
-        Native ETH (address 0) is not a token and is left out. Returns [] when no swap action is read.
+        TAKE and TAKE_PORTION pay the address in their params, which must be one of `own`; SETTLE,
+        SETTLE_ALL and TAKE_ALL pay no one else. Any other action, which the V4 router does not run, is
+        refused.
+        Native ETH (address 0) is not a token and is left out.
+
+        Returns (the tokens, None), ([], None) when no swap action is read, or ([], why it was refused).
         """
         try:
             iw = [input_hex[i:i + 64] for i in range(0, len(input_hex), 64)]
@@ -486,14 +550,21 @@ class CalldataDecoder:
                 "".join(iw[ptr_actions + 1: ptr_actions + 1 + (actions_len + 31) // 32])[:actions_len * 2]
             )
             if int(iw[ptr_params], 16) < len(actions):
-                return []
+                return [], None
 
             currencies: List[str] = []
             for i, action in enumerate(actions):
-                if action not in (0x06, 0x07, 0x08, 0x09):
+                if action in V4_PLAIN_ACTIONS:
                     continue
                 param_hex = self._abi_bytes_element(iw, ptr_params + 1, i)
                 pw = [param_hex[j:j + 64] for j in range(0, len(param_hex), 64)]
+                if action in V4_RECIPIENT_WORD:
+                    recipient = "0x" + pw[V4_RECIPIENT_WORD[action]][24:]
+                    if recipient not in own:
+                        return [], f"Its funds go to {recipient}, not the sender"
+                    continue
+                if action not in V4_SWAP_ACTIONS:
+                    return [], f"It runs V4 action 0x{action:02x}, which ShieldBot does not check"
                 base = int(pw[0], 16) // 32
                 if action in (0x06, 0x08):
                     currency0, currency1 = "0x" + pw[base][24:], "0x" + pw[base + 1][24:]
@@ -507,9 +578,9 @@ class CalldataDecoder:
                         for j in range(int(pw[path_word], 16))
                     ]
                     currencies += [head, *hops] if action == 0x07 else [*hops, head]
-            return [currency for currency in currencies if int(currency, 16) != 0]
+            return [currency for currency in currencies if int(currency, 16) != 0], None
         except Exception:
-            return []
+            return [], None
 
     def _decode_params(self, param_types: list, params_hex: str) -> Dict:
         """Decode ABI-encoded parameters (simplified — handles address, uint256, bool, address[])."""

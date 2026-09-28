@@ -264,7 +264,7 @@
       "chain_id": 8453,
       "address": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
       "kind": "router",
-      "label": "Uniswap Universal Router",
+      "label": "Uniswap Universal Router V1.2",
       "code_size": 17958
     },
     {

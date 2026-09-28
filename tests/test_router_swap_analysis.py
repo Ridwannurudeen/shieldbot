@@ -1,5 +1,8 @@
 """Tests for router swap analysis to ensure no whitelist bypass."""
 
+import json
+from pathlib import Path
+
 import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -64,7 +67,7 @@ async def test_router_swap_analysis_blocks_high_risk_token():
 
     req = api_module.FirewallRequest(
         to="0xrouter",
-        sender="0xfrom",
+        sender=recipient,
         value="0x0",
         data=calldata,
         chainId=56,
@@ -73,7 +76,7 @@ async def test_router_swap_analysis_blocks_high_risk_token():
     resp = await api_module._analyze_router_swap(
         req=req,
         to_addr="0xrouter",
-        from_addr="0xfrom",
+        from_addr=recipient,
         decoded=decoded,
         whitelisted="Router",
         value_bnb=0.0,
@@ -137,7 +140,7 @@ async def test_strict_router_swap_blocks_only_on_a_required_gap(monkeypatch, con
         is_verified_contract=AsyncMock(return_value=(True, None)),
     ))
     monkeypatch.setattr(api_module, "tenderly_simulator", SimpleNamespace(is_enabled=lambda: False))
-    payload = encode(["uint256", "address[]", "address", "uint256"], [1, [WBNB, TOKEN], "0x" + "3" * 40, 123])
+    payload = encode(["uint256", "address[]", "address", "uint256"], [1, [WBNB, TOKEN], "0x" + "2" * 40, 123])
     calldata = "0x7ff36ab5" + payload.hex()
     req = api_module.FirewallRequest(to="0x" + "1" * 40, sender="0x" + "2" * 40, value=hex(10**17), data=calldata)
 
@@ -188,3 +191,79 @@ async def test_a_swap_whose_path_tokens_were_not_analysed_answers_in_the_request
         assert verdicts.classify(response["risk_score"]) == verdicts.CAUTION
         assert not any(signal.startswith("Policy override") for signal in response["danger_signals"])
     assert response["shield_score"]["overall"] == response["raw_checks"]["risk_score_heuristic"] == response["risk_score"]
+
+
+V4_SWAP = json.loads(
+    (Path(__file__).parent / "fixtures" / "universal_router_v4_swaps.json").read_text(encoding="utf-8")
+)["swaps"][0]
+ATTACKER = "0x" + "ad" * 20
+
+
+@pytest.mark.parametrize(
+    "recipient, expected",
+    [
+        ("0x" + "ab" * 20, ([WBNB, TOKEN], None)),
+        (ATTACKER, ([], f"Its tokens go to {ATTACKER}, not the sender")),
+    ],
+    ids=["sender", "someone-else"],
+)
+def test_a_v2_router_swap_must_pay_its_sender(recipient, expected):
+    import api as api_module
+
+    payload = encode(["uint256", "address[]", "address", "uint256"], [1, [WBNB, TOKEN], recipient, 123])
+    decoded = CalldataDecoder().decode("0x7ff36ab5" + payload.hex())
+
+    assert api_module._extract_swap_path(decoded, sender="0x" + "Ab" * 20) == expected
+
+
+@pytest.mark.parametrize(
+    "router_name, refusal",
+    [
+        ("Uniswap Universal Router V2.1.2", None),
+        ("Uniswap Universal Router V1.2", "It runs router command 0x10, which ShieldBot does not check"),
+        ("PancakeSwap Universal Router", "It runs router command 0x10, which ShieldBot does not check"),
+    ],
+)
+def test_only_a_uniswap_v2_universal_router_reads_command_0x10_as_a_v4_swap(monkeypatch, router_name, refusal):
+    import api as api_module
+
+    monkeypatch.setattr(api_module, "calldata_decoder", CalldataDecoder())
+    path, reason = api_module._extract_swap_path(
+        {"selector": "3593564c"}, "0x" + V4_SWAP["calldata_hex"], V4_SWAP["sender"], V4_SWAP["router"], router_name,
+    )
+
+    assert reason == refusal
+    assert (sorted(path) == V4_SWAP["tokens"]) is (refusal is None)
+
+
+@pytest.mark.asyncio
+async def test_a_router_swap_that_pays_someone_else_is_not_judged_by_its_tokens(monkeypatch):
+    import api as api_module
+
+    registry = SimpleNamespace(run_all=AsyncMock())
+    chain_registry = Web3Client.__new__(Web3Client)
+    chain_registry._adapters = {56: SimpleNamespace()}
+    monkeypatch.setattr(api_module, "container", SimpleNamespace(
+        registry=registry, policy_engine=PolicyEngine("BALANCED"),
+    ))
+    monkeypatch.setattr(api_module, "risk_engine", RiskEngine())
+    monkeypatch.setattr(api_module, "web3_client", SimpleNamespace(
+        validate_chain_id=chain_registry.validate_chain_id,
+        is_valid_address=lambda a: True,
+        to_checksum_address=lambda a: a,
+    ))
+    payload = encode(["uint256", "address[]", "address", "uint256"], [1, [WBNB, TOKEN], ATTACKER, 123])
+    calldata = "0x7ff36ab5" + payload.hex()
+    req = api_module.FirewallRequest(to="0x" + "1" * 40, sender="0x" + "2" * 40, value=hex(10**17), data=calldata)
+
+    resp = await api_module._analyze_router_swap(
+        req, req.to, req.sender, CalldataDecoder().decode(calldata), "PancakeSwap V2 Router", 0.1,
+    )
+
+    registry.run_all.assert_not_awaited()
+    assert resp["classification"] == verdicts.CAUTION
+    assert resp["coverage_reasons"] == {"token_path": f"Its tokens go to {ATTACKER}, not the sender"}
+    assert resp["danger_signals"] == [
+        f"Swap via trusted router (PancakeSwap V2 Router) but its tokens go to {ATTACKER}, not the sender"
+        " — token safety unverified"
+    ]

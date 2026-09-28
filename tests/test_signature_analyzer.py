@@ -524,7 +524,7 @@ async def test_unknown_spender_facts_are_unknown_not_clean():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("chain_id,router,name", [
-    (8453, UNIVERSAL_ROUTER, "Uniswap Universal Router"),
+    (8453, UNIVERSAL_ROUTER, "Uniswap Universal Router V1.2"),
     (42161, "0x2d01411773c8C24805306E89A41F7855C3c4Fe65", "Uniswap Universal Router V2.1.2"),
 ])
 async def test_chain_adapter_router_is_allowlisted(chain_id, router, name):
@@ -547,3 +547,15 @@ async def test_chain_adapter_router_is_allowlisted(chain_id, router, name):
     assert result.flags == [f"Permit2: unlimited amount to {name}"]
     assert result.data["spender_name"] == name
     assert "status" not in result.data
+
+
+@pytest.mark.asyncio
+async def test_a_permit_whose_type_does_not_match_its_standard_never_names_its_spender():
+    types = {"Permit": _struct(("owner", "address"), ("spender", "address"), ("value", "uint256"),
+                               ("allowed", "bool"), ("nonce", "uint256"), ("deadline", "uint256"))}
+    typed = _typed("Permit", {"owner": "0x" + "a" * 40, "spender": UNIVERSAL_ROUTER, "value": MAX,
+                              "allowed": True, "nonce": "0", "deadline": "0"}, types)
+    result = await _analyze(SignaturePermitAnalyzer(_service()), typed)
+    assert result.score == 30
+    assert result.flags == ["Permit: type does not match EIP-2612 or DAI; treated as unlimited"]
+    assert "spender_name" not in result.data

@@ -22,7 +22,7 @@ QUOTE_TOKENS = [
 
 WHITELISTED_ROUTERS = {
     "0x2626664c2603336E57B271c5C0b26F421741e481".lower(): "Uniswap V3 Router (Base)",
-    "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD".lower(): "Uniswap Universal Router",
+    "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD".lower(): "Uniswap Universal Router V1.2",
     "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43".lower(): "Aerodrome Router",
     "0x327Df1E6de05895d2ab08513aaDD9313Fe505d86".lower(): "BaseSwap Router",
     "0x111111125421cA6dc452d289314280a0f8842A65".lower(): "1inch V6 Router",

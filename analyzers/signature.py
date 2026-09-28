@@ -147,6 +147,8 @@ class SignaturePermitAnalyzer(Analyzer):
                 s, f, spender, unlimited, granted, readable = permit
                 if not readable:
                     unreadable = 'Typed data type does not match its permit standard'
+                    # Its spender member may not be the one signed, so it is not named.
+                    known = None
                 score += s
                 flags.extend(f)
                 # A revoke gives the spender nothing, so there is no spender to judge.
