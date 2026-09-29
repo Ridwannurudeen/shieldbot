@@ -1,14 +1,14 @@
 """honeypot.is answers HTTP 400 "Invalid chain" for Arbitrum, Polygon, Optimism and opBNB.
 
-Those chains must make no honeypot.is request, and their sellability must come from GoPlus and
-say so: ShieldBot simulates no sell there.
+Polygon, Optimism and opBNB must make no honeypot.is request, and their sellability must come from
+GoPlus and say so: ShieldBot simulates no sell there. It simulates Arbitrum's itself
+(tests/test_arbitrum_simulation.py).
 """
 
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from adapters.arbitrum import ArbitrumAdapter
 from adapters.base_chain import BaseChainAdapter
 from adapters.bsc import BscAdapter
 from adapters.eth import EthAdapter
@@ -20,7 +20,7 @@ from utils.scam_db import ScamDatabase
 from utils.web3_client import Web3Client
 
 ADDRESS = "0x" + "ab" * 20
-GOPLUS_ONLY = [ArbitrumAdapter, PolygonAdapter, OptimismAdapter, OpBNBAdapter]
+GOPLUS_ONLY = [PolygonAdapter, OptimismAdapter, OpBNBAdapter]
 TRADE_FIELDS = ("is_honeypot", "buy_tax", "sell_tax", "can_buy", "can_sell")
 CLEAN_GOPLUS = {
     "is_honeypot": "0",

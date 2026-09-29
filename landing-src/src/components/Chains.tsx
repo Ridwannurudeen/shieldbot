@@ -56,7 +56,7 @@ const chains: Chain[] = [
   },
   {
     name: "Arbitrum",
-    simulation: null,
+    simulation: "ShieldBot",
     mempool: false,
     launches: false,
     logo: (
@@ -175,7 +175,8 @@ export default function Chains() {
           <li>
             <span className="text-gray-200">Sell simulation:</span> honeypot.is
             simulates a buy and a sell on Ethereum, BNB Chain and Base, and
-            ShieldBot runs its own on supported Robinhood Chain pool routes.
+            ShieldBot runs its own on supported Arbitrum and Robinhood Chain pool
+            routes.
             Where it says None, honeypot and tax flags come from GoPlus alone,
             and they read Unknown when GoPlus has no answer.
           </li>

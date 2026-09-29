@@ -90,7 +90,8 @@ class HoneypotService:
                     if type(value) in (int, float) and math.isfinite(value) and value >= 0:
                         data[field] = value
                         data['field_providers'][field] = providers.get(field, 'honeypot.is')
-                # Only the Robinhood Chain simulation reports a block; other providers' output is unchanged.
+                # Only ShieldBot's own simulations (Robinhood Chain, Arbitrum One) report a block; other
+                # providers' output is unchanged.
                 if type(response.get('simulation_block')) is int and 'simulation_block' not in data:
                     data['simulation_block'] = response['simulation_block']
             except UnsupportedChainError:

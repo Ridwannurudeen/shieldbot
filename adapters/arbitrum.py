@@ -1,8 +1,10 @@
 """Arbitrum One adapter — extends shared EvmAdapter."""
 
 import os
+from typing import Dict
 
 from adapters.evm_base import EvmAdapter
+from adapters.robinhood import SIMULATION_PROVIDER, _simulation_response
 
 KNOWN_LOCKERS = {
     '0x0000000000000000000000000000000000000000': 'Burn Address',
@@ -51,10 +53,19 @@ ROUTER_V2_FACTORIES = {
 }
 
 
+# publicnode's Arbitrum One RPC answers eth_simulateV1, which Arbitrum's own RPC does not
+# (services/arbitrum_simulation.py).
+SIMULATION_RPC_URL = 'https://arbitrum-one-rpc.publicnode.com'
+
+
 class ArbitrumAdapter(EvmAdapter):
     """Arbitrum One adapter — chain_id=42161."""
 
+    supports_honeypot_simulation = True
+
     def __init__(self, rpc_url: str = None, arbiscan_api_key: str = None):
+        from services.arbitrum_simulation import ArbitrumSimulator
+
         rpc = rpc_url or os.getenv('ARBITRUM_RPC_URL', 'https://arb1.arbitrum.io/rpc')
         api_key = arbiscan_api_key or os.getenv('ARBISCAN_API_KEY', '')
 
@@ -63,7 +74,7 @@ class ArbitrumAdapter(EvmAdapter):
             chain_name_value="Arbitrum",
             rpc_url=rpc,
             etherscan_api_key=api_key,
-            # honeypot.is answers HTTP 400 Invalid chain here; sellability comes from GoPlus.
+            # honeypot.is answers HTTP 400 Invalid chain here; ShieldBot simulates the sell itself.
             honeypot_chain_id=None,
             known_lockers=KNOWN_LOCKERS,
             quote_tokens=QUOTE_TOKENS,
@@ -72,3 +83,15 @@ class ArbitrumAdapter(EvmAdapter):
             known_spenders=KNOWN_SPENDERS,
             router_v2_factories=ROUTER_V2_FACTORIES,
         )
+        self._simulator = ArbitrumSimulator(os.getenv('ARBITRUM_SIMULATION_RPC_URL') or SIMULATION_RPC_URL)
+
+    async def check_honeypot(self, address: str) -> Dict:
+        simulation = await self._simulator.simulate(address)
+        return _simulation_response(simulation, ('is_honeypot', 'can_buy', 'can_sell'), ('is_honeypot',))
+
+    async def get_tax_info(self, address: str) -> Dict:
+        simulation = await self._simulator.simulate(address)
+        return _simulation_response(simulation, ('buy_tax', 'sell_tax'), ('buy_tax', 'sell_tax'))
+
+    def capabilities(self) -> Dict:
+        return {**super().capabilities(), 'sell_simulation': SIMULATION_PROVIDER}

@@ -13,6 +13,7 @@ from adapters.arbitrum import ArbitrumAdapter
 from adapters.base_chain import BaseChainAdapter
 from adapters.bsc import BscAdapter
 from adapters.eth import EthAdapter
+from adapters.polygon import PolygonAdapter
 from adapters.robinhood import RobinhoodAdapter
 from core.unknown_ledger import UnknownLedger
 from services.rescue_service import RescueService
@@ -31,6 +32,7 @@ def coverage(monkeypatch):
         EthAdapter(rpc_url=RPC),
         BaseChainAdapter(rpc_url=RPC),
         ArbitrumAdapter(rpc_url=RPC),
+        PolygonAdapter(rpc_url=RPC),
         RobinhoodAdapter(rpc_url=RPC),
     )
     registry._adapters = {adapter.chain_id: adapter for adapter in adapters}
@@ -128,7 +130,11 @@ def test_base_ages_contracts_through_blockscout_and_reads_short_log_windows(cove
 
 
 def test_a_chain_without_a_simulator_reports_goplus_flags(coverage):
-    assert coverage.get(42161).json()["capabilities"]["sell_simulation"] == "goplus_reported"
+    assert coverage.get(137).json()["capabilities"]["sell_simulation"] == "goplus_reported"
+
+
+def test_arbitrum_simulates_the_sell_itself(coverage):
+    assert coverage.get(42161).json()["capabilities"]["sell_simulation"] == "eth_simulateV1"
 
 
 def test_arbitrum_reads_approval_history_in_wide_windows(coverage):
