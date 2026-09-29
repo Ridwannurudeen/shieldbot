@@ -505,6 +505,17 @@ class ArbitrumSimulator:
                         outcome["simulation_failed"] = True
                         outcome["reason"] += f"; sized follow-up: {sized['reason']}"
                 outcomes.append(outcome)
+        # Pools are ordered by the WETH they hold. When the deepest one sells cleanly, a holder can
+        # sell there, so another pool refusing the sell is that pool's restriction, not a trap: a
+        # common launch-limit template exempts only the token's registered pair from a same-block
+        # check. A trapped deepest pool is never cleared by a shallower clean one.
+        if outcomes and outcomes[0]["can_sell"] is True and outcomes[0]["is_honeypot"] is False:
+            for outcome in outcomes[1:]:
+                if outcome["is_honeypot"] is True:
+                    outcome.update(is_honeypot=None, can_sell=None)
+                    outcome["reason"] += (
+                        "; not counted as a trap: the pool holding the most WETH sold cleanly"
+                    )
         return aggregate_outcomes(outcomes, notes)
 
     async def _simulate_pool(

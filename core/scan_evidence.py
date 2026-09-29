@@ -101,7 +101,7 @@ def analyzer_outcomes(results: List, risk_output: Dict) -> Dict[str, Dict]:
 
 
 def oldest_simulation_block(results: List) -> Optional[int]:
-    """The oldest block a sell simulation in this scan read (Robinhood Chain), or None."""
+    """The oldest block a sell simulation in this scan read (Robinhood Chain, Arbitrum One), or None."""
     blocks = [
         result.data["simulation_block"]
         for result in results

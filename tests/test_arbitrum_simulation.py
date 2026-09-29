@@ -209,6 +209,10 @@ def test_a_v3_pool_refusing_a_fee_on_transfer_sell_is_not_a_honeypot():
         ("v2_sushiswap_magic", error_string("UniswapV2: INSUFFICIENT_OUTPUT_AMOUNT")),
         ("v3_arb", error_string("Too little received")),
         ("v3_arb", "0x"),
+        # Each router's refusal string counts only on its own route.
+        ("v3_arb", error_string("TransferHelper: TRANSFER_FROM_FAILED")),
+        ("v3_arb", error_string("UniswapV2Library: INSUFFICIENT_INPUT_AMOUNT")),
+        ("v2_sushiswap_magic", error_string("STF")),
     ],
 )
 def test_an_unattributed_sell_failure_stays_unknown(name, data):
@@ -545,3 +549,46 @@ async def test_a_real_arbitrum_honeypot_is_flagged_although_goplus_reports_it_cl
     assert result.data["field_providers"]["is_honeypot"] == "eth_simulateV1"
     assert result.data["field_providers"]["can_sell"] == "eth_simulateV1"
     assert "Honeypot detected" in result.flags and "Cannot sell token" in result.flags
+
+
+def _pools_answering(*answers):
+    """Two fee tiers resolving to the recorded v3_arb pool, each eth_simulateV1 answered in turn; the
+    deepest (first) pool is the 0.05% tier, as discovery keeps candidate order for equal WETH."""
+    fixture = load("v3_arb")
+    replies = iter(answers)
+    rpc = FakeRpc(
+        fixture,
+        pools={(V3_FACTORY, 500): fixture["pool"], (V3_FACTORY, 3000): fixture["pool"]},
+        simulate=lambda index: {**next(replies)["response"], "id": index},
+    )
+    return fixture, rpc
+
+
+@pytest.mark.asyncio
+async def test_a_shallower_pool_refusing_the_sell_does_not_outweigh_the_deepest_pools_clean_sell():
+    clean = load("v3_arb")
+    fixture, rpc = _pools_answering(clean, failed_sell(clean, error_string("STF")))
+    with fresh_addresses(fixture):
+        result = await simulator_for(rpc).simulate(fixture["token"])
+    assert (result["is_honeypot"], result["can_sell"]) == (False, True)
+    assert "not counted as a trap: the pool holding the most WETH sold cleanly" in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_a_trapped_deepest_pool_is_not_cleared_by_a_shallower_clean_one():
+    clean = load("v3_arb")
+    fixture, rpc = _pools_answering(failed_sell(clean, error_string("STF")), clean)
+    with fresh_addresses(fixture):
+        result = await simulator_for(rpc).simulate(fixture["token"])
+    assert (result["is_honeypot"], result["can_sell"]) == (True, False)
+
+
+@pytest.mark.asyncio
+async def test_only_a_clean_deepest_pool_clears_another_pools_trap():
+    clean = load("v3_arb")
+    buy_reverted = copy.deepcopy(clean)
+    make_revert(calls_by_label(buy_reverted)["buy"], error_string("STF"))
+    fixture, rpc = _pools_answering(buy_reverted, failed_sell(clean, error_string("STF")))
+    with fresh_addresses(fixture):
+        result = await simulator_for(rpc).simulate(fixture["token"])
+    assert (result["is_honeypot"], result["can_sell"]) == (True, False)
