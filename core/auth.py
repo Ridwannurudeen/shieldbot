@@ -107,9 +107,9 @@ class AuthManager:
         key_id = str(uuid.uuid4())
         limits = TIER_LIMITS[tier]
 
-        # No explicit BEGIN: one INSERT of a new row is atomic on its own, and an explicit
-        # transaction fails while another request's metering holds the shared connection's
-        # implicit transaction open. A write of several statements uses Database.transaction().
+        # No explicit BEGIN: one INSERT of a new row is atomic on its own, and a transaction on
+        # the shared connection would take in whatever other coroutines write meanwhile. A write
+        # of several statements uses Database.transaction().
         await self.db._db.execute("""
             INSERT INTO api_keys (key_id, key_hash, owner, tier, rpm_limit, daily_limit, is_active, created_at)
             VALUES (?, ?, ?, ?, ?, ?, 1, ?)

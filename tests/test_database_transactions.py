@@ -1,8 +1,8 @@
 """Database.transaction(): a multi-statement write commits whole or not at all, whatever the shared connection does.
 
-The shared connection keeps a write in an implicit transaction until the next commit, and any coroutine's commit
-publishes it. A write inside transaction() runs on a connection of its own, so a failure between its statements
-rolls all of them back while other coroutines keep writing and committing on the shared one.
+The shared connection commits each statement on its own, so a write of several statements there lands one statement
+at a time. A write inside transaction() runs on a connection of its own, so a failure between its statements rolls
+all of them back while other coroutines keep writing on the shared one.
 """
 
 import asyncio

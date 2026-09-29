@@ -215,8 +215,8 @@ class Database:
     def __init__(self, db_path: str = "shieldbot.db"):
         self.db_path = db_path
         self._db: Optional[aiosqlite.Connection] = None
-        # The verdict drain's own connection: one aiosqlite connection carries one implicit transaction,
-        # so a rollback on the shared one would undo whatever else was being written at the time.
+        # The verdict drain's own connection, in the default mode: its writes of several statements need an
+        # implicit transaction that a rollback undoes whole, and the shared connection commits each statement.
         self._drain_db: Optional[aiosqlite.Connection] = None
         self._drain_lock = asyncio.Lock()
         # The sender lease's own connection: its commits and rollbacks run beside the drain's, never inside a
@@ -234,8 +234,21 @@ class Database:
         self._txn_lock = asyncio.Lock()
 
     async def initialize(self):
-        """Open connection and create tables."""
-        self._db = await aiosqlite.connect(self.db_path)
+        """Open connection and create tables.
+
+        A file database's shared connection is in autocommit mode: each statement commits on its own, so a
+        write that fails leaves no transaction open and no coroutine's write waits in one for another's commit.
+        In the default mode a write that failed on a lock left its implicit transaction open, the next read
+        pinned a WAL snapshot inside it, and once another connection committed every later write here failed
+        with "database is locked" until a restart (2026-09-28). Statements that must land together use
+        transaction(). An in-memory database keeps the default mode: the drain's, the lease's and
+        transaction()'s writes run on this connection too and rely on its implicit transactions, and with no
+        other connection no lock can fail a write.
+        """
+        if self.db_path != ":memory:":
+            self._db = await aiosqlite.connect(self.db_path, isolation_level=None)
+        else:
+            self._db = await aiosqlite.connect(self.db_path)
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA busy_timeout=5000")
         await self._create_tables()
