@@ -2,6 +2,7 @@
 
 import asyncio
 import copy
+import dataclasses
 import json
 import logging
 from pathlib import Path
@@ -956,7 +957,8 @@ async def test_a_pool_the_rpc_could_not_simulate_stays_unknown_through_risk_and_
     with patch.object(ScamDatabase, "fetch_token_security", new=unavailable):
         data = await service.fetch_honeypot_data(TOKEN, chain_id=4663)
         analyzed = await HoneypotAnalyzer(service).analyze(AnalysisContext(TOKEN, chain_id=4663))
-    risk = RiskEngine().compute_from_results([analyzed])
+    # At full weight: at its own 0.15 the missing weight alone would keep the verdict from LOW.
+    risk = RiskEngine().compute_from_results([dataclasses.replace(analyzed, weight=1.0)])
     extension = format_extension_alert(risk)
     assert data["status"] == analyzed.data["status"] == risk["status"] == "unknown"
     assert data["is_honeypot"] is data["can_sell"] is data["buy_tax"] is data["sell_tax"] is None

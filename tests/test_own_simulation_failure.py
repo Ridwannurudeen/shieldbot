@@ -2,6 +2,7 @@
 unknown, even beside a complete and clean GoPlus answer: GoPlus misses the honeypots the simulation exists to
 catch (it reports the real Arbitrum honeypot ARBROKER as not a honeypot)."""
 
+import copy
 import dataclasses
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -16,10 +17,24 @@ from core.extension_formatter import format_extension_alert
 from core.risk_engine import RiskEngine
 from services.honeypot_service import HoneypotService
 from services.robinhood_simulation import SimulationUnavailable
+from services.arbitrum_simulation import V2_ROUTES
 from tests.test_arbitrum_simulation import FakeRpc as ArbitrumRpc
+from tests.test_arbitrum_simulation import (
+    _answering,
+    _pools_answering,
+    _seller_swap,
+    as_confirmation,
+    calls_by_label,
+    error_string,
+    failed_sell,
+    run_addresses,
+)
+from tests.test_arbitrum_simulation import fresh_addresses as arbitrum_addresses
 from tests.test_arbitrum_simulation import load as load_arbitrum
-from tests.test_robinhood_simulation import TOKEN, adapter_with
+from tests.test_robinhood_simulation import TOKEN, adapter_with, replay, rpc_for
 from tests.test_robinhood_simulation import FakeRpc as RobinhoodRpc
+from tests.test_robinhood_simulation import fresh_addresses as robinhood_addresses
+from tests.test_robinhood_simulation import load as load_robinhood
 from utils.scam_db import ScamDatabase
 from utils.web3_client import Web3Client
 
@@ -85,6 +100,74 @@ async def test_a_simulation_that_could_not_run_stays_unknown_beside_a_complete_c
     assert "Honeypot simulation could not run (unresolved)" in data["reason"]
     assert data["rpc_failed"] is True
     assert data["field_providers"]["rpc_failed"] == "eth_simulateV1"
+
+
+def assert_unknown_never_safe(data, analyzed, risk, extension):
+    assert data["status"] == analyzed.data["status"] == risk["status"] == "unknown"
+    assert risk["risk_level"] != "LOW"
+    assert extension["risk_classification"] != "SAFE"
+
+
+@pytest.mark.asyncio
+async def test_a_4663_pool_the_rpc_could_not_simulate_stays_unknown_beside_a_complete_clean_goplus_answer():
+    fixture = load_robinhood("v2_router02")
+    request, _ = replay(fixture)
+    crashed = {"error": {"code": -32603, "message": "method handler crashed"}}
+    adapter = adapter_with(rpc_for(fixture, simulations=[(request, crashed)]))
+    with robinhood_addresses(fixture):
+        data, analyzed, risk, extension = await scan(4663, adapter, fixture["token"])
+    assert_unknown_never_safe(data, analyzed, risk, extension)
+    assert data["can_sell"] is None and data["rpc_failed"] is True
+    assert "Honeypot simulation could not run (unresolved)" in data["reason"]
+    assert analyzed.score == 0
+
+
+@pytest.mark.asyncio
+async def test_a_trap_its_re_run_did_not_reproduce_stays_unknown_beside_a_complete_clean_goplus_answer():
+    clean = load_arbitrum("v3_arb")
+    trapped = failed_sell(clean, error_string("STF"))
+    adapter = arbitrum_adapter(_answering(trapped, trapped, as_confirmation(clean)))
+    with run_addresses(trapped, "run", "confirm"):
+        data, analyzed, risk, extension = await scan(42161, adapter, trapped["token"])
+    assert_unknown_never_safe(data, analyzed, risk, extension)
+    # A trap seen once: the simulation failed, which is scored as suspicious.
+    assert data["can_sell"] is None and data["simulation_failed"] is True
+    assert "the trap did not reproduce" in data["reason"]
+    assert analyzed.score == 40
+
+
+@pytest.mark.asyncio
+async def test_a_sell_at_an_unmeasured_tax_keeps_the_tax_unknown_beside_a_complete_clean_goplus_answer():
+    fixture = copy.deepcopy(load_arbitrum("v2_fee_on_transfer_sized"))
+    duplicate = copy.deepcopy(_seller_swap(fixture))
+    calls_by_label(fixture)["sell"]["logs"].append(duplicate)
+    rpc = ArbitrumRpc(fixture, pools={(V2_ROUTES["uniswap-v2"][0], None): fixture["pool"]})
+    with arbitrum_addresses(fixture):
+        data, analyzed, risk, extension = await scan(42161, arbitrum_adapter(rpc), fixture["token"])
+    assert_unknown_never_safe(data, analyzed, risk, extension)
+    # The simulation sold, so it can sell; GoPlus's 0% is not that sell's tax.
+    assert (data["can_sell"], data["sell_tax"]) == (True, None)
+    assert data["field_providers"]["can_sell"] == "eth_simulateV1"
+    assert "sell_tax" not in data["field_providers"]
+    assert data["simulation_failed"] is False and analyzed.score == 0
+
+
+@pytest.mark.asyncio
+async def test_a_proven_trap_beside_a_pool_the_rpc_could_not_simulate_stands_with_sellability_uncovered():
+    clean = load_arbitrum("v3_arb")
+    trapped = failed_sell(clean, error_string("STF"))
+    crashed = {
+        "response": {"jsonrpc": "2.0", "error": {"code": -32603, "message": "method handler crashed"}}
+    }
+    fixture, rpc = _pools_answering(trapped, as_confirmation(trapped), crashed)
+    with run_addresses(fixture, "run", "confirm", "run"):
+        data, analyzed, risk, extension = await scan(42161, arbitrum_adapter(rpc), fixture["token"])
+    # The trap stands; the pool nobody simulated leaves the scan incomplete, as a failed one does.
+    assert (data["is_honeypot"], data["can_sell"]) == (True, False)
+    assert data["rpc_failed"] is True and data["coverage"]["can_sell"] is False
+    assert data["status"] == "unknown"
+    assert "Honeypot detected" in analyzed.flags and "Cannot sell token" in analyzed.flags
+    assert risk["risk_level"] != "LOW" and extension["risk_classification"] != "SAFE"
 
 
 @pytest.mark.asyncio

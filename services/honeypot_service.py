@@ -118,8 +118,12 @@ class HoneypotService:
                 mapped = map_goplus_token_security(response['data'])
                 if response['reason']:
                     reasons.append(response['reason'])
+                # A sell ShieldBot's own simulation made at a tax it could not measure: GoPlus's tax is not
+                # that sell's, so the sell tax stays unknown.
+                unmeasured = (data['can_sell'] is True and data['sell_tax'] is None
+                              and data['field_providers'].get('can_sell') == 'eth_simulateV1')
                 for field, value in mapped.items():
-                    if data.get(field) is None:
+                    if data.get(field) is None and not (unmeasured and field == 'sell_tax'):
                         data[field] = value
                         if value is not None:
                             data['field_providers'][field] = 'goplus'

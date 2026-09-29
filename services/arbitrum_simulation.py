@@ -480,7 +480,8 @@ def evaluate_simulation(
 def _confirm_trap(first: dict, confirmation: dict) -> dict:
     """A trap stands when the confirmation re-run reproduces it, or cannot run (the one run's evidence,
     as before). Any other re-run leaves the sell unknown, never sellable: the first run may have met a
-    launch rule the re-run avoided, or the re-run may have missed the trap."""
+    launch rule the re-run avoided, or the re-run may have missed the trap. A trap seen once is a failed
+    simulation, scored as suspicious, so no other provider's answer can make the sell look safe."""
     where = f" at block {confirmation['block']}" if confirmation["block"] is not None else ""
     if confirmation["rpc_failed"]:
         return {
@@ -495,7 +496,7 @@ def _confirm_trap(first: dict, confirmation: dict) -> dict:
         "can_sell": None,
         "sell_tax": None,
         "trap": None,
-        "simulation_failed": confirmation["simulation_failed"],
+        "simulation_failed": True,
         "reason": (
             f"the trap did not reproduce, so sellability is left unknown; first run: {first['reason']}; "
             f"{CONFIRMATION_RUN}{where}: {confirmation['reason']}"

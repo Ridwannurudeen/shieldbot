@@ -2,6 +2,7 @@
 unattributable sell failures, RPC failures, pool discovery and the adapter's integration."""
 
 import copy
+import dataclasses
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -14,6 +15,8 @@ from adapters.arbitrum import SIMULATION_RPC_URL, ArbitrumAdapter
 from adapters.evm_base import EvmAdapter
 from analyzers.honeypot import HoneypotAnalyzer
 from core.analyzer import AnalysisContext
+from core.extension_formatter import format_extension_alert
+from core.risk_engine import RiskEngine
 from core.unknown_ledger import UnknownLedger
 from services.arbitrum_simulation import (
     CHAIN_ID,
@@ -668,6 +671,48 @@ async def test_an_arbitrum_token_scan_now_completes_from_the_simulation():
 
 
 @pytest.mark.asyncio
+async def test_a_failed_arbitrum_simulation_still_falls_back_to_goplus_and_stays_unknown():
+    fixture = load("v3_arb")
+    service = _service_with(
+        fixture,
+        simulate=lambda index: _row(
+            index, error={"code": -32603, "message": "method handler crashed"}
+        ),
+    )
+    # A complete, clean GoPlus answer: what GoPlus says of a honeypot it cannot see (ARBROKER included).
+    goplus = AsyncMock(
+        return_value={
+            "status": "ok",
+            "reason": None,
+            "observed_at": 0,
+            "data": {
+                "is_honeypot": "0",
+                "cannot_buy": "0",
+                "cannot_sell_all": "0",
+                "transfer_pausable": "0",
+                "buy_tax": "0",
+                "sell_tax": "0",
+            },
+        }
+    )
+    with fresh_addresses(fixture), patch.object(ScamDatabase, "fetch_token_security", new=goplus):
+        data = await service.fetch_honeypot_data(fixture["token"], chain_id=42161)
+        result = await HoneypotAnalyzer(service).analyze(
+            AnalysisContext(fixture["token"], chain_id=42161)
+        )
+    goplus.assert_awaited()
+    assert data["status"] == result.data["status"] == "unknown"
+    assert data["can_sell"] is None
+    assert "Honeypot simulation could not run (unresolved)" in data["reason"]
+    assert result.score == 0
+    # The honeypot analyzer alone at full weight decides the verdict, as beside clean other analyzers.
+    risk = RiskEngine().compute_from_results([dataclasses.replace(result, weight=1.0)])
+    assert risk["status"] == "unknown"
+    assert risk["risk_level"] != "LOW"
+    assert format_extension_alert(risk)["risk_classification"] != "SAFE"
+
+
+@pytest.mark.asyncio
 async def test_an_arbitrum_simulation_the_rpc_could_not_run_is_unknown_scores_nothing_and_counts_failed(
     monkeypatch,
 ):
@@ -957,17 +1002,17 @@ def _buy_reverted(fixture):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "rerun,failed",
+    "rerun",
     [
-        (lambda clean: clean, False),
-        (lambda clean: failed_sell(clean, error_string("Too little received")), False),
-        (lambda clean: _zero_sell_output(clean, 0), False),
-        (_buy_reverted, False),
-        (_unreadable, True),
+        lambda clean: clean,
+        lambda clean: failed_sell(clean, error_string("Too little received")),
+        lambda clean: _zero_sell_output(clean, 0),
+        _buy_reverted,
+        _unreadable,
     ],
     ids=["sold", "unattributed-revert", "another-trap", "buy-reverted", "unreadable"],
 )
-async def test_a_trap_the_confirmation_does_not_reproduce_is_unknown_never_clean(rerun, failed):
+async def test_a_trap_the_confirmation_does_not_reproduce_is_unknown_never_clean(rerun):
     clean = load("v3_arb")
     trapped = failed_sell(clean, error_string("STF"))
     confirmation = rerun(clean)
@@ -977,7 +1022,8 @@ async def test_a_trap_the_confirmation_does_not_reproduce_is_unknown_never_clean
     assert (result["is_honeypot"], result["can_sell"], result["sell_tax"]) == (None, None, None)
     # The first run's buy evidence stands.
     assert (result["can_buy"], result["buy_tax"]) == (True, 0.0)
-    assert result.get("simulation_failed", False) is failed
+    # A trap seen once is a failed simulation: scored as suspicious, and no GoPlus answer completes it.
+    assert result["simulation_failed"] is True
     assert "the trap did not reproduce" in result["reason"]
     assert evaluate(trapped)["reason"] in result["reason"]
     assert evaluate(confirmation)["reason"] in result["reason"]
