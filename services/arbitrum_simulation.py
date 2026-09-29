@@ -512,7 +512,9 @@ class ArbitrumSimulator:
         # analyzer's extreme line, another pool refusing the sell proves neither a honeypot nor a safe
         # token: it can be that pool's own restriction (a common launch-limit template exempts only
         # the token's registered pair from a same-block check) or a trap for whoever buys there. The
-        # token is left unknown. A trapped deepest pool is never cleared by a shallower one.
+        # token is left unknown, marked as a simulation that failed: the trap is evidence, so a
+        # GoPlus answer cannot settle sellability instead. A trapped deepest pool is never cleared
+        # by a shallower one.
         deepest = outcomes[0] if outcomes else None
         cleared = False
         if (
@@ -524,7 +526,7 @@ class ArbitrumSimulator:
             for outcome in outcomes[1:]:
                 if outcome["is_honeypot"] is True:
                     cleared = True
-                    outcome.update(is_honeypot=None, can_sell=None)
+                    outcome.update(is_honeypot=None, can_sell=None, simulation_failed=True)
                     outcome["reason"] += (
                         f"; not counted as a trap because the pool holding the most WETH, "
                         f"{deepest['pool']}, sold (sell tax {tax}), so sellability is left unknown"
