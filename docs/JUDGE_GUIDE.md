@@ -146,7 +146,7 @@ Values from the deployment on **2026-09-27**:
 | Chain | Robinhood Chain, 4663 |
 | `ShieldBotVerdictRegistry` | [`0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138`](https://robin.etherscan.io/address/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138) |
 | Deployment provenance | transaction [`0x14275435a6f9cff13681b15b230f69c7c40579a4e308a7cc503d25ff1b731fef`](https://robin.etherscan.io/tx/0x14275435a6f9cff13681b15b230f69c7c40579a4e308a7cc503d25ff1b731fef) (block 74,214,980); source [exact match](https://sourcify.dev/server/v2/contract/4663/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138) on Sourcify and [verified source](https://robinhoodchain.blockscout.com/address/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138?tab=contract) on Blockscout; built from `main` at `c9ae9c9` |
-| API serving that revision | `https://api.shieldbotsecurity.online` (the owner deployed `ca5e395` on 2026-09-29, which keeps the registry wiring `c9ae9c9` added; the API does not report its revision) |
+| API serving that revision | `https://api.shieldbotsecurity.online` (the owner deployed `6371cb5` on 2026-09-29, which keeps the registry wiring `c9ae9c9` added; the API does not report its revision) |
 | Published example | WOOD `0xf8bc08092c06db6148114dcf82af881f1085f92b`, recorded in transaction [`0x7578ca9edfa48c07a217ba8c6d589d6b779d567cd62fb1bc4998671df0c772a4`](https://robin.etherscan.io/tx/0x7578ca9edfa48c07a217ba8c6d589d6b779d567cd62fb1bc4998671df0c772a4) |
 | Independent read RPC | `https://robinhood-rpc.publicnode.com`, which the API does not use; any chain-4663 RPC works |
 
