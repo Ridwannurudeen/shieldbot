@@ -518,6 +518,45 @@ async def test_another_verdicts_commit_never_lands_a_hash_without_its_bytes(tmp_
     finally:
         await database.close()
 
+@pytest.mark.parametrize("failed_write", ["claim", "touch", "release", "requeue"])
+@pytest.mark.asyncio
+async def test_a_drain_write_that_failed_on_a_lock_does_not_hide_verdicts_queued_after_it(tmp_path, failed_write):
+    """A drain write that failed used to leave the drain's connection in its transaction. The drain's next read then
+    pinned a snapshot there: a verdict queued after it was never claimed, the drain reported itself idle, and every
+    drain write failed with "database is locked" until a restart."""
+    database = Database(str(tmp_path / "shieldbot.db"))
+    await database.initialize()
+    other = await aiosqlite.connect(database.db_path, isolation_level=None)
+    try:
+        first = await insert(database, onchain_status="pending")
+        outbox = await database._outbox()
+        # Production waits 5 s for a lock; the test gives up sooner.
+        await outbox.execute("PRAGMA busy_timeout=100")
+        writes = {
+            "claim": lambda: database.claim_next_pending_verdict(4663),
+            "touch": lambda: database.touch_verdict(first),
+            "release": lambda: database.release_verdict_claim(first),
+            "requeue": lambda: database.requeue_verdict(first),
+        }
+        await other.execute("BEGIN IMMEDIATE")
+        with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+            await writes[failed_write]()
+        # The first verdict leaves the queue meanwhile, so the drain's next claim only reads.
+        await other.execute("UPDATE verdict_evidence SET onchain_status = 'off' WHERE id = ?", (first,))
+        await other.execute("COMMIT")
+
+        assert await database.claim_next_pending_verdict(4663) is None
+        queued = await insert(database, subject=OTHER, onchain_status="pending")
+        claimed = await database.claim_next_pending_verdict(4663)
+
+        assert claimed is not None and claimed["id"] == queued
+        assert await database.claim_next_pending_verdict(4663) is None
+        assert not outbox.in_transaction
+    finally:
+        await other.close()
+        await database.close()
+
+
 @pytest.mark.asyncio
 async def test_the_drains_connection_is_opened_by_the_drain_and_by_nothing_else(tmp_path):
     """A process that only publishes, like the bot, must not hold a connection it never writes on."""

@@ -217,6 +217,8 @@ class Database:
         self._db: Optional[aiosqlite.Connection] = None
         # The verdict drain's own connection, in the default mode: its writes of several statements need an
         # implicit transaction that a rollback undoes whole, and the shared connection commits each statement.
+        # Every write on it rolls back when it fails: a transaction left open would hold the snapshot of the drain's
+        # next read, and the drain would never see a verdict queued after it.
         self._drain_db: Optional[aiosqlite.Connection] = None
         self._drain_lock = asyncio.Lock()
         # The sender lease's own connection: its commits and rollbacks run beside the drain's, never inside a
@@ -3208,11 +3210,16 @@ class Database:
             row = await cursor.fetchone()
             if row is None:
                 return None
-            cursor = await outbox.execute("""
-                UPDATE verdict_evidence SET onchain_status = 'sending', updated_at = ?
-                WHERE id = ? AND onchain_status = 'pending'
-            """, (time.time(), row[0]))
-            await outbox.commit()
+            # The SELECT opens no transaction in the default mode; the UPDATE does, until it commits or rolls back.
+            try:
+                cursor = await outbox.execute("""
+                    UPDATE verdict_evidence SET onchain_status = 'sending', updated_at = ?
+                    WHERE id = ? AND onchain_status = 'pending'
+                """, (time.time(), row[0]))
+                await outbox.commit()
+            except BaseException:
+                await outbox.rollback()
+                raise
             if cursor.rowcount == 1:
                 return dict(zip(
                     ("id", "subject", "verdict", "evidence_hash", "observed_block", "tx_hash", "nonce", "attempts"),
@@ -3271,10 +3278,14 @@ class Database:
     async def touch_verdict(self, evidence_id: int):
         """Mark a row as just looked at, so reconciliation looks at it again only after its delay."""
         outbox = await self._outbox()
-        await outbox.execute(
-            "UPDATE verdict_evidence SET updated_at = ? WHERE id = ?", (time.time(), evidence_id)
-        )
-        await outbox.commit()
+        try:
+            await outbox.execute(
+                "UPDATE verdict_evidence SET updated_at = ? WHERE id = ?", (time.time(), evidence_id)
+            )
+            await outbox.commit()
+        except BaseException:
+            await outbox.rollback()
+            raise
 
     async def release_verdict_claim(self, evidence_id: int):
         """Return a claimed row to the pending queue.
@@ -3282,11 +3293,15 @@ class Database:
         An earlier transaction's hash and nonce are kept, so the next attempt can check whether it may still land.
         """
         outbox = await self._outbox()
-        await outbox.execute("""
-            UPDATE verdict_evidence SET onchain_status = 'pending', updated_at = ?
-            WHERE id = ? AND onchain_status = 'sending'
-        """, (time.time(), evidence_id))
-        await outbox.commit()
+        try:
+            await outbox.execute("""
+                UPDATE verdict_evidence SET onchain_status = 'pending', updated_at = ?
+                WHERE id = ? AND onchain_status = 'sending'
+            """, (time.time(), evidence_id))
+            await outbox.commit()
+        except BaseException:
+            await outbox.rollback()
+            raise
 
     async def take_sender_lease(self, name: str, holder: str, seconds: float) -> Tuple[Optional[str], float]:
         """Take or renew the named lease for `holder` for `seconds`, unless another holder's lease is still live.
@@ -3327,11 +3342,15 @@ class Database:
     async def requeue_verdict(self, evidence_id: int):
         """Queue an unresolved record (submitted, unconfirmed or failed) for another attempt."""
         outbox = await self._outbox()
-        await outbox.execute("""
-            UPDATE verdict_evidence SET onchain_status = 'pending', updated_at = ?
-            WHERE id = ? AND onchain_status IN ('submitted', 'unconfirmed', 'failed')
-        """, (time.time(), evidence_id))
-        await outbox.commit()
+        try:
+            await outbox.execute("""
+                UPDATE verdict_evidence SET onchain_status = 'pending', updated_at = ?
+                WHERE id = ? AND onchain_status IN ('submitted', 'unconfirmed', 'failed')
+            """, (time.time(), evidence_id))
+            await outbox.commit()
+        except BaseException:
+            await outbox.rollback()
+            raise
 
     async def get_unresolved_verdicts(self, chain_id: int, updated_before: float, limit: int) -> List[Dict]:
         """Signed records awaiting receipts, including dropped records that must never be resent."""
