@@ -32,7 +32,8 @@ from tests.test_arbitrum_simulation import (
 )
 from tests.test_arbitrum_simulation import fresh_addresses as arbitrum_addresses
 from tests.test_arbitrum_simulation import load as load_arbitrum
-from tests.test_robinhood_simulation import TOKEN, adapter_with, replay, rpc_for
+from tests.test_robinhood_simulation import TOKEN, adapter_with, replay, rpc_for, set_uint
+from tests.test_robinhood_simulation import calls_by_label as robinhood_calls
 from tests.test_robinhood_simulation import FakeRpc as RobinhoodRpc
 from tests.test_robinhood_simulation import fresh_addresses as robinhood_addresses
 from tests.test_robinhood_simulation import load as load_robinhood
@@ -138,6 +139,30 @@ async def test_a_trap_its_re_run_did_not_reproduce_stays_unknown_beside_a_comple
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663])
+async def test_a_failed_own_simulation_is_labelled_eth_simulatev1_and_still_scores_as_suspicious(chain_id):
+    if chain_id == 42161:
+        # A trap the re-run did not reproduce.
+        clean = load_arbitrum("v3_arb")
+        trapped = failed_sell(clean, error_string("STF"))
+        adapter = arbitrum_adapter(_answering(trapped, trapped, as_confirmation(clean)))
+        addresses, token = run_addresses(trapped, "run", "confirm"), trapped["token"]
+    else:
+        # The token's balanceOf answers nothing readable.
+        fixture = copy.deepcopy(load_robinhood("v2_router02"))
+        robinhood_calls(fixture)["delivered"]["returnData"] = "0x"
+        adapter = adapter_with(rpc_for(fixture))
+        addresses, token = robinhood_addresses(fixture), fixture["token"]
+    with addresses:
+        data, analyzed, risk, extension = await scan(chain_id, adapter, token)
+    assert data["simulation_failed"] is True
+    assert data["field_providers"]["simulation_failed"] == "eth_simulateV1"
+    assert any("treat as suspicious" in flag for flag in analyzed.flags)
+    assert analyzed.score == 40
+    assert_unknown_never_safe(data, analyzed, risk, extension)
+
+
+@pytest.mark.asyncio
 async def test_a_sell_at_an_unmeasured_tax_keeps_the_tax_unknown_beside_a_complete_clean_goplus_answer():
     fixture = copy.deepcopy(load_arbitrum("v2_fee_on_transfer_sized"))
     duplicate = copy.deepcopy(_seller_swap(fixture))
@@ -147,6 +172,23 @@ async def test_a_sell_at_an_unmeasured_tax_keeps_the_tax_unknown_beside_a_comple
         data, analyzed, risk, extension = await scan(42161, arbitrum_adapter(rpc), fixture["token"])
     assert_unknown_never_safe(data, analyzed, risk, extension)
     # The simulation sold, so it can sell; GoPlus's 0% is not that sell's tax.
+    assert (data["can_sell"], data["sell_tax"]) == (True, None)
+    assert data["field_providers"]["can_sell"] == "eth_simulateV1"
+    assert "sell_tax" not in data["field_providers"]
+    assert data["simulation_failed"] is False and analyzed.score == 0
+
+
+@pytest.mark.asyncio
+async def test_a_4663_sell_at_an_unmeasured_tax_keeps_the_tax_unknown_beside_a_complete_clean_goplus_answer():
+    # The pair's balance rose by more than the seller sent, so the V2 sell tax cannot be measured.
+    fixture = copy.deepcopy(load_robinhood("v2_router02"))
+    calls = robinhood_calls(fixture)
+    set_uint(
+        calls["pool_after_sell"], int(calls["pool_before_sell"]["returnData"], 16) + fixture["amount"] + 1
+    )
+    with robinhood_addresses(fixture):
+        data, analyzed, risk, extension = await scan(4663, adapter_with(rpc_for(fixture)), fixture["token"])
+    assert_unknown_never_safe(data, analyzed, risk, extension)
     assert (data["can_sell"], data["sell_tax"]) == (True, None)
     assert data["field_providers"]["can_sell"] == "eth_simulateV1"
     assert "sell_tax" not in data["field_providers"]

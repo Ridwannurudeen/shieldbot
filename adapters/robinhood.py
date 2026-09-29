@@ -62,7 +62,10 @@ def _simulation_response(simulation: Dict, fields: tuple, required: tuple) -> Di
         'reason': simulation['reason'],
         'simulation_block': simulation['simulation_block'],
         'observed_at': simulation.get('observed_at', 0),
-        'field_providers': {field: SIMULATION_PROVIDER for field in fields if simulation[field] is not None},
+        'field_providers': {
+            **{field: SIMULATION_PROVIDER for field in fields if simulation[field] is not None},
+            **({'simulation_failed': SIMULATION_PROVIDER} if simulation.get('simulation_failed') else {}),
+        },
     }
 
 

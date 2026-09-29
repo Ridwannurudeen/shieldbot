@@ -73,10 +73,12 @@ class HoneypotService:
                 data['observed_at'] = min(data['observed_at'], response.get('observed_at', data['observed_at']))
                 if response.get('reason'):
                     reasons.append(response['reason'])
+                # A provider that does not name itself for a field is honeypot.is.
+                providers = response.get('field_providers') or {}
                 for field in ('simulation_failed', 'low_tax_honeypot', 'likely_false_positive'):
                     if response.get(field) is True:
                         data[field] = True
-                        data['field_providers'][field] = 'honeypot.is'
+                        data['field_providers'][field] = providers.get(field, 'honeypot.is')
                 # Only ShieldBot's own simulations (Robinhood Chain, Arbitrum One) report one that could not run.
                 if response.get('rpc_failed') is True:
                     data['rpc_failed'] = True
@@ -85,7 +87,6 @@ class HoneypotService:
                     simulation_success = False
                 elif response.get('simulation_success') is True and simulation_success is None:
                     simulation_success = True
-                providers = response.get('field_providers') or {}
                 for field in ('is_honeypot', 'can_buy', 'can_sell'):
                     if isinstance(response.get(field), bool):
                         data[field] = response[field]
