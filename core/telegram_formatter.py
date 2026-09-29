@@ -295,7 +295,10 @@ def format_full_report(
             honeypot_data.get('reason') or honeypot_data.get('honeypot_reason') or 'Provider data unavailable'
         )
         is_honeypot = honeypot_data.get('is_honeypot')
-        if is_honeypot is None or (honeypot_data.get('simulation_failed') and is_honeypot is False):
+        # A sell simulation that failed, or of ShieldBot's own that could not run, leaves a provider's
+        # "not a honeypot" (GoPlus's, after it) unresolved.
+        unresolved = honeypot_data.get('simulation_failed') or honeypot_data.get('rpc_failed')
+        if is_honeypot is None or (unresolved and is_honeypot is False):
             hp = f'Unknown ({reason})'
         else:
             hp = '\u274C Honeypot' if is_honeypot else '\u2705 Not Honeypot'

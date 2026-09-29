@@ -15,6 +15,7 @@ from analyzers.honeypot import HoneypotAnalyzer
 from core.analyzer import AnalysisContext
 from core.extension_formatter import format_extension_alert
 from core.risk_engine import RiskEngine
+from core.telegram_formatter import format_full_report
 from services.honeypot_service import HoneypotService
 from services.robinhood_simulation import SimulationUnavailable
 from services.arbitrum_simulation import V2_ROUTES
@@ -243,3 +244,33 @@ async def test_the_analyzer_itself_keeps_sellability_uncovered_after_a_simulatio
     assert result.data["status"] == "unknown"
     assert result.data["reason"] == "Honeypot simulation could not run (unresolved)"
     assert not any("treat as suspicious" in flag for flag in result.flags)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663])
+async def test_the_telegram_report_never_calls_a_token_not_a_honeypot_after_a_simulation_that_could_not_run(
+    chain_id,
+):
+    request = AsyncMock(side_effect=SimulationUnavailable("RPC HTTP 503"))
+    adapter = arbitrum_adapter(request) if chain_id == 42161 else adapter_with(request)
+    data, analyzed, risk, extension = await scan(chain_id, adapter)
+    # The bot reports the honeypot analyzer's data; GoPlus's is_honeypot False is in it.
+    assert (analyzed.data["is_honeypot"], analyzed.data["rpc_failed"]) == (False, True)
+    report = format_full_report(risk, {}, {}, {}, honeypot_data=analyzed.data)
+    assert "Not Honeypot" not in report
+    assert "\n  Unknown (" in report
+    assert "Sellability: Unknown" in report
+
+
+@pytest.mark.asyncio
+async def test_the_telegram_report_of_a_simulated_clean_token_is_unchanged():
+    fixture = load_arbitrum("v3_arb")
+    adapter = arbitrum_adapter(ArbitrumRpc(fixture))
+    addresses = [fixture["buyer"], fixture["receiver"]]
+    with patch("services.arbitrum_simulation._fresh_address", side_effect=addresses):
+        data, analyzed, risk, extension = await scan(42161, adapter, fixture["token"])
+    report = format_full_report(risk, {}, {}, {}, honeypot_data=analyzed.data)
+    assert "\u2705 Not Honeypot" in report and "Sellability: Yes" in report
+    # Byte for byte what the data without the new key rendered.
+    before = {key: value for key, value in analyzed.data.items() if key != "rpc_failed"}
+    assert report == format_full_report(risk, {}, {}, {}, honeypot_data=before)
