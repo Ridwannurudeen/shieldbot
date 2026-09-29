@@ -159,6 +159,59 @@ def test_the_sized_sell_measures_the_two_percent_tax_both_ways():
     ) == (2.0, 2.0, True, False)
 
 
+V2_SWAP_TOPIC = "0x" + keccak(text="Swap(address,uint256,uint256,uint256,uint256,address)").hex()
+
+
+def _seller_swap(fixture):
+    (event,) = [
+        log
+        for log in calls_by_label(fixture)["sell"]["logs"]
+        if log["address"].lower() == fixture["pool"] and log["topics"][0] == V2_SWAP_TOPIC
+    ]
+    return event
+
+
+def _swapped_back(fixture, tokens, recipient):
+    """The sell of a token that swaps `tokens` of its own collected balance through the pair inside the
+    seller's transfer: the pair's Swap for them pays `recipient` and comes before the seller's, and the
+    pair's token balance rises by `tokens` more than the seller sent it."""
+    fixture = copy.deepcopy(fixture)
+    calls = calls_by_label(fixture)
+    seller_swap = _seller_swap(fixture)
+    swapback = copy.deepcopy(seller_swap)
+    swapback["topics"][2] = _address_word(recipient)
+    amounts = [tokens, 0, 0, 10**12] if fixture["token"] < WETH else [0, tokens, 10**12, 0]
+    swapback["data"] = "0x" + encode(["uint256"] * 4, amounts).hex()
+    logs = calls["sell"]["logs"]
+    logs.insert(logs.index(seller_swap), swapback)
+    calls["pool_after_sell"]["returnData"] = _word(
+        int(calls["pool_after_sell"]["returnData"], 16) + tokens
+    )
+    return fixture
+
+
+@pytest.mark.parametrize("share", [1, 5])
+def test_a_v2_sell_tax_is_the_sellers_swap_input_when_the_token_swaps_back_inside_its_sell(share):
+    # A swap-back of 1% of the sell raises the pair's balance by 99% of what the seller sent, a 1% tax by
+    # the balance; one of 5% raises it by more than the seller sent, which the balance cannot measure.
+    # The pair's Swap paying the seller states the 98% it counted as the seller's input either way.
+    fixture = load("v2_fee_on_transfer_sized")
+    swapped_back = _swapped_back(
+        fixture, fixture["sell_amount"] * share // 100, V2_ROUTES["uniswap-v2"][1]
+    )
+    outcome = evaluate(swapped_back)
+    assert (outcome["sell_tax"], outcome["can_sell"], outcome["is_honeypot"]) == (2.0, True, False)
+
+
+def test_two_v2_swaps_paying_the_seller_leave_the_sell_tax_unmeasured():
+    fixture = copy.deepcopy(load("v2_fee_on_transfer_sized"))
+    duplicate = copy.deepcopy(_seller_swap(fixture))
+    calls_by_label(fixture)["sell"]["logs"].append(duplicate)
+    outcome = evaluate(fixture)
+    assert (outcome["sell_tax"], outcome["can_sell"]) == (None, True)
+    assert "sell tax unmeasurable" in outcome["reason"]
+
+
 def test_a_real_honeypot_recorded_live_is_caught():
     # ARBROKER: every sell forwards the token's ETH to a tax wallet that rejects it (see the fixture note).
     outcome = evaluate(load("v2_honeypot"))

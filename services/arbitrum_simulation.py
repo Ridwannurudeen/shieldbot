@@ -217,12 +217,14 @@ def build_simulation_request(
     }
 
 
-def _pool_swap(pool: Pool, token: str, logs) -> Optional[tuple]:
+def _pool_swap(pool: Pool, token: str, logs, recipient: Optional[str] = None) -> Optional[tuple]:
     """Signed (token, WETH) amounts the pool received in the call, negative when it paid them out, from
-    its own Swap event. None unless exactly one such event is present."""
+    its own Swap event, whose third topic is the address it paid. None unless exactly one such event
+    (paying `recipient`, when given) is present."""
     if not isinstance(logs, list):
         return None
     topic, words = (V3_SWAP_TOPIC, 5) if pool.route == "v3" else (V2_SWAP_TOPIC, 4)
+    paid = None if recipient is None else "0x" + "0" * 24 + recipient[2:]
     matches = [
         log
         for log in logs
@@ -231,6 +233,7 @@ def _pool_swap(pool: Pool, token: str, logs) -> Optional[tuple]:
         and isinstance(log.get("topics"), list)
         and log["topics"]
         and str(log["topics"][0]).lower() == topic
+        and (paid is None or (len(log["topics"]) == 3 and str(log["topics"][2]).lower() == paid))
     ]
     data = _hex_bytes(matches[0].get("data")) if len(matches) == 1 else None
     if data is None or len(data) != words * 32:
@@ -387,17 +390,18 @@ def evaluate_simulation(
             )
         return outcome
     output = _sell_output(call["sell"].get("logs"), buyer)
-    sold = _pool_swap(pool, token, call["sell"].get("logs"))
+    # The seller's swap is the one paying the seller: a token that swaps its collected tokens back
+    # through the pool inside the seller's transfer adds a Swap of its own, which pays someone else.
+    sold = _pool_swap(pool, token, call["sell"].get("logs"), buyer)
     if output is None:
         outcome["simulation_failed"] = True
         outcome["reason"] = "Malformed eth_simulateV1 sell logs"
         return outcome
     sent = delivered - balances["after_sell"]
-    if pool.route == "v3":
-        # The pool's own Swap event states the tokens the sell paid it.
-        received = None if sold is None else sold[0]
-    else:
-        received = balances["pool_after_sell"] - balances["pool_before_sell"]
+    # The pool's own Swap event states the tokens the sell paid it. A V2 pair's balance change is not
+    # that amount when the token swaps back through the pair, or moves tokens in or out of it, inside
+    # its sell.
+    received = None if sold is None else sold[0]
     sell_tax = None if received is None else tax_percent(sent, received)
     if output == 0:
         # Only the sell's own Swap event shows the swap ran, and a pool that paid out WETH must have
