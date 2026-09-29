@@ -525,13 +525,26 @@ class RescueService:
                     token_info_map[token] = result
                 else:
                     token_info_map[token] = {}
+            # A priced token with a balance has no USD value without its decimals. An unpriced one
+            # is already counted above, and with no balance nothing is at risk.
+            undecimaled = [
+                token for token in active_tokens
+                if token_info_map[token].get("decimals") is None and token in prices
+                and (token not in balances or balances[token] > 0)
+            ]
+            if undecimaled:
+                reason = f"Token decimals unavailable for {len(undecimaled)} token(s)"
+                price_reason = coverage_reasons.get("prices")
+                coverage_reasons["prices"] = f"{price_reason}; {reason}" if price_reason else reason
 
             # Build ApprovalInfo for each verified active approval
             for (token, spender), current_allowance in verified.items():
                 token_info = token_info_map.get(token, {})
                 name = token_info.get("name", "Unknown")
                 symbol = token_info.get("symbol", "???")
-                decimals = token_info.get("decimals", 18)
+                # Unread decimals stay unknown: a default of 18 misstated every amount of a token
+                # with other decimals by 10^(18 - decimals), 1,000 USDC at risk as $0.00.
+                decimals = token_info.get("decimals")
 
                 spender_label = _known_spender(spender, chain_id) or "Unknown Contract"
                 risk_level, risk_reason = self._assess_approval_risk(
@@ -540,6 +553,8 @@ class RescueService:
 
                 if current_allowance >= UNLIMITED_THRESHOLD:
                     allowance_str = "Unlimited"
+                elif decimals is None:
+                    allowance_str = str(current_allowance)
                 else:
                     try:
                         allowance_str = f"{current_allowance / (10 ** decimals):,.2f}"
@@ -550,7 +565,7 @@ class RescueService:
                 balance = balances.get(token, 0)
                 price = prices.get(token)
                 value_at_risk_usd = None
-                if price is not None and balance > 0:
+                if price is not None and balance > 0 and decimals is not None:
                     try:
                         at_risk_raw = min(current_allowance, balance)
                         at_risk_tokens = at_risk_raw / (10 ** decimals)
