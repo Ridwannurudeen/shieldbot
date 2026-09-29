@@ -565,13 +565,43 @@ def _pools_answering(*answers):
 
 
 @pytest.mark.asyncio
-async def test_a_shallower_pool_refusing_the_sell_does_not_outweigh_the_deepest_pools_clean_sell():
+async def test_a_shallower_pool_refusing_the_sell_leaves_the_token_unknown_when_the_deepest_pool_sold():
     clean = load("v3_arb")
     fixture, rpc = _pools_answering(clean, failed_sell(clean, error_string("STF")))
     with fresh_addresses(fixture):
         result = await simulator_for(rpc).simulate(fixture["token"])
-    assert (result["is_honeypot"], result["can_sell"]) == (False, True)
-    assert "not counted as a trap: the pool holding the most WETH sold cleanly" in result["reason"]
+    # Neither a honeypot (a holder can sell in the deepest pool) nor safe (the shallower pool may trap
+    # whoever buys there).
+    assert (result["is_honeypot"], result["can_sell"]) == (None, None)
+    assert (
+        f"not counted as a trap because the pool holding the most WETH, {fixture['pool']}, sold "
+        "(sell tax 0%), so sellability is left unknown"
+    ) in result["reason"]
+
+
+def _sell_taxed(fixture, percent):
+    """The pool's Swap event on the sell shows it received `percent`% less than the seller sent."""
+    fixture = copy.deepcopy(fixture)
+    sent = int(calls_by_label(fixture)["delivered"]["returnData"], 16)
+    for log in calls_by_label(fixture)["sell"]["logs"]:
+        if log["address"].lower() == fixture["pool"]:
+            data = bytes.fromhex(log["data"][2:])
+            words = [data[i : i + 32] for i in range(0, len(data), 32)]
+            words[0 if fixture["token"] < WETH else 1] = (sent * (100 - percent) // 100).to_bytes(
+                32, "big", signed=True
+            )
+            log["data"] = "0x" + b"".join(words).hex()
+    return fixture
+
+
+@pytest.mark.asyncio
+async def test_a_deepest_pool_selling_at_an_extreme_tax_clears_no_other_pools_trap():
+    clean = load("v3_arb")
+    assert evaluate(_sell_taxed(clean, 99))["sell_tax"] == 99.0
+    fixture, rpc = _pools_answering(_sell_taxed(clean, 99), failed_sell(clean, error_string("STF")))
+    with fresh_addresses(fixture):
+        result = await simulator_for(rpc).simulate(fixture["token"])
+    assert (result["is_honeypot"], result["can_sell"]) == (True, False)
 
 
 @pytest.mark.asyncio

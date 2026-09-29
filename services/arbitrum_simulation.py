@@ -505,18 +505,31 @@ class ArbitrumSimulator:
                         outcome["simulation_failed"] = True
                         outcome["reason"] += f"; sized follow-up: {sized['reason']}"
                 outcomes.append(outcome)
-        # Pools are ordered by the WETH they hold. When the deepest one sells cleanly, a holder can
-        # sell there, so another pool refusing the sell is that pool's restriction, not a trap: a
-        # common launch-limit template exempts only the token's registered pair from a same-block
-        # check. A trapped deepest pool is never cleared by a shallower clean one.
-        if outcomes and outcomes[0]["can_sell"] is True and outcomes[0]["is_honeypot"] is False:
+        # Pools are ordered by the WETH they hold. When the deepest one sells at a tax below the
+        # analyzer's extreme line, another pool refusing the sell proves neither a honeypot nor a safe
+        # token: it can be that pool's own restriction (a common launch-limit template exempts only
+        # the token's registered pair from a same-block check) or a trap for whoever buys there. The
+        # token is left unknown. A trapped deepest pool is never cleared by a shallower one.
+        deepest = outcomes[0] if outcomes else None
+        cleared = False
+        if (
+            deepest is not None
+            and deepest["can_sell"] is True
+            and (deepest["sell_tax"] is None or deepest["sell_tax"] <= 50)
+        ):
+            tax = "unmeasured" if deepest["sell_tax"] is None else f"{deepest['sell_tax']:g}%"
             for outcome in outcomes[1:]:
                 if outcome["is_honeypot"] is True:
+                    cleared = True
                     outcome.update(is_honeypot=None, can_sell=None)
                     outcome["reason"] += (
-                        "; not counted as a trap: the pool holding the most WETH sold cleanly"
+                        f"; not counted as a trap because the pool holding the most WETH, "
+                        f"{deepest['pool']}, sold (sell tax {tax}), so sellability is left unknown"
                     )
-        return aggregate_outcomes(outcomes, notes)
+        result = aggregate_outcomes(outcomes, notes)
+        if cleared:
+            result.update(is_honeypot=None, can_sell=None)
+        return result
 
     async def _simulate_pool(
         self, session, pool: Pool, token: str, amount: int, sell_amount: Optional[int] = None
