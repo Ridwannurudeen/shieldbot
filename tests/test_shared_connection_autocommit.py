@@ -46,6 +46,20 @@ async def _count(connection, table):
     return (await cursor.fetchone())[0]
 
 
+def _launch(index, **fields):
+    return {
+        "token_address": "0x" + f"{index:040x}",
+        "source": "uniswap_v4",
+        "launchpad": "Uniswap v4",
+        "source_rank": 2,
+        "pool_id": None,
+        "block_number": 100 + index,
+        "tx_hash": "0x" + f"{index:064x}",
+        "block_timestamp": 1_789_000_000 + index,
+        **fields,
+    }
+
+
 @pytest.mark.asyncio
 async def test_a_write_that_failed_on_a_locked_database_does_not_stop_later_writes_while_others_commit(
     db, other
@@ -95,6 +109,31 @@ async def test_a_failed_write_never_discards_another_coroutines_write(db, other)
     assert await _count(other, "outcome_events") == 1
     assert (await db.get_launch_discovery_status(CHAIN))["confirmed_head"] is None
     assert not db._db.in_transaction
+
+
+@pytest.mark.asyncio
+async def test_a_batch_of_launches_is_recorded_whole_or_not_at_all(db, other):
+    # A catch-up sweep stores hundreds at once: one transaction, not one commit per row.
+    with pytest.raises(sqlite3.IntegrityError):
+        await db.upsert_discovered_launches(CHAIN, [_launch(1), _launch(2, tx_hash=None), _launch(3)])
+    assert await _count(other, "discovered_launches") == 0
+
+    await db.upsert_discovered_launches(CHAIN, [_launch(1), _launch(3)])
+    assert await _count(other, "discovered_launches") == 2
+    assert not db._txn_db.in_transaction
+
+
+@pytest.mark.asyncio
+async def test_a_poll_that_found_no_launches_takes_no_write_lock(db, other):
+    # Every poll that reads a range stores what it found; one that found nothing must not wait for, or fail on, a lock.
+    async with db.transaction():
+        pass
+    await db._txn_db.execute("PRAGMA busy_timeout=100")
+    await other.execute("BEGIN IMMEDIATE")
+    try:
+        await db.upsert_discovered_launches(CHAIN, [])
+    finally:
+        await other.execute("ROLLBACK")
 
 
 @pytest.mark.asyncio

@@ -2492,34 +2492,39 @@ class Database:
 
         On conflict the higher-ranked source keeps the label, the first known pool is kept,
         and the earliest block with its transaction and timestamp wins. Scan outcomes are kept.
+        One transaction: on the autocommit shared connection a catch-up sweep of hundreds would commit, and
+        sync, one row at a time, and a batch cut short would leave part of it recorded. A poll that found
+        nothing takes no write lock.
         """
+        if not launches:
+            return
         now = time.time()
-        await self._db.executemany("""
-            INSERT INTO discovered_launches
-                (chain_id, token_address, source, launchpad, source_rank, pool_id,
-                 block_number, tx_hash, block_timestamp, discovered_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(chain_id, token_address) DO UPDATE SET
-                source = CASE WHEN excluded.source_rank > discovered_launches.source_rank
-                    THEN excluded.source ELSE discovered_launches.source END,
-                launchpad = CASE WHEN excluded.source_rank > discovered_launches.source_rank
-                    THEN excluded.launchpad ELSE discovered_launches.launchpad END,
-                source_rank = MAX(excluded.source_rank, discovered_launches.source_rank),
-                pool_id = COALESCE(discovered_launches.pool_id, excluded.pool_id),
-                tx_hash = CASE WHEN excluded.block_number < discovered_launches.block_number
-                    THEN excluded.tx_hash ELSE discovered_launches.tx_hash END,
-                block_timestamp = CASE WHEN excluded.block_number < discovered_launches.block_number
-                    THEN excluded.block_timestamp ELSE discovered_launches.block_timestamp END,
-                block_number = MIN(excluded.block_number, discovered_launches.block_number)
-        """, [
-            (
-                chain_id, launch["token_address"], launch["source"], launch["launchpad"],
-                launch["source_rank"], launch["pool_id"], launch["block_number"], launch["tx_hash"],
-                launch["block_timestamp"], now,
-            )
-            for launch in launches
-        ])
-        await self._db.commit()
+        async with self.transaction() as connection:
+            await connection.executemany("""
+                INSERT INTO discovered_launches
+                    (chain_id, token_address, source, launchpad, source_rank, pool_id,
+                     block_number, tx_hash, block_timestamp, discovered_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(chain_id, token_address) DO UPDATE SET
+                    source = CASE WHEN excluded.source_rank > discovered_launches.source_rank
+                        THEN excluded.source ELSE discovered_launches.source END,
+                    launchpad = CASE WHEN excluded.source_rank > discovered_launches.source_rank
+                        THEN excluded.launchpad ELSE discovered_launches.launchpad END,
+                    source_rank = MAX(excluded.source_rank, discovered_launches.source_rank),
+                    pool_id = COALESCE(discovered_launches.pool_id, excluded.pool_id),
+                    tx_hash = CASE WHEN excluded.block_number < discovered_launches.block_number
+                        THEN excluded.tx_hash ELSE discovered_launches.tx_hash END,
+                    block_timestamp = CASE WHEN excluded.block_number < discovered_launches.block_number
+                        THEN excluded.block_timestamp ELSE discovered_launches.block_timestamp END,
+                    block_number = MIN(excluded.block_number, discovered_launches.block_number)
+            """, [
+                (
+                    chain_id, launch["token_address"], launch["source"], launch["launchpad"],
+                    launch["source_rank"], launch["pool_id"], launch["block_number"], launch["tx_hash"],
+                    launch["block_timestamp"], now,
+                )
+                for launch in launches
+            ])
 
     async def get_unscanned_launches(self, chain_id: int, limit: int) -> List[Dict]:
         """Return launches that have not been scanned, newest first."""
