@@ -132,3 +132,31 @@ async def test_a_honeypot_is_simulation_failure_still_scores_as_suspicious():
     assert analyzed.score == 40
     assert data["status"] == risk["status"] == "unknown"
     assert data["rpc_failed"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("can_sell", [True, False])
+async def test_the_analyzer_itself_keeps_sellability_uncovered_after_a_simulation_that_could_not_run(
+    can_sell,
+):
+    # The analyzer recomputes coverage from the fields, so it applies the guard itself rather than
+    # trusting the service's status.
+    service = MagicMock()
+    service.fetch_honeypot_data = AsyncMock(
+        return_value={
+            "is_honeypot": False,
+            "can_buy": True,
+            "can_sell": can_sell,
+            "buy_tax": 0.0,
+            "sell_tax": 0.0,
+            "rpc_failed": True,
+            "status": "ok",
+            "reason": None,
+        }
+    )
+    result = await HoneypotAnalyzer(service).analyze(AnalysisContext(TOKEN, chain_id=42161))
+    assert result.data["can_sell"] is (None if can_sell else False)
+    assert result.data["coverage"]["can_sell"] is False
+    assert result.data["status"] == "unknown"
+    assert result.data["reason"] == "Honeypot simulation could not run (unresolved)"
+    assert not any("treat as suspicious" in flag for flag in result.flags)
