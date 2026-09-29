@@ -56,6 +56,15 @@ LAG_RECOVERED_BLOCKS = LAG_WARN_BLOCKS // 2
 # that keeps failing holds the breaker open, so the poll that reads the head and checks the lag
 # never runs, and a wrong-chain RPC pauses the watch.
 HEAD_STALE_SECONDS = 3_600
+# The cycle failing this many times in a row alerts the operator: about five minutes at one cycle
+# per POLL_INTERVAL_SECONDS. RPC failures are caught inside a cycle, so what fails one is a
+# database error or a bug. A lock held past the 5 s busy timeout fails one cycle and the next one
+# runs; on 2026-09-28 every cycle failed for fifteen hours, and the lag and head checks, which run
+# inside the cycle, never alerted.
+CYCLE_FAILURES_ALERT = 15
+# The watch counts as running again only once this many cycles in a row complete, so a cycle that
+# fails every other time does not send a failing and running-again pair.
+CYCLE_RECOVERY_CYCLES = 3
 
 
 class LaunchWatch:
@@ -77,6 +86,10 @@ class LaunchWatch:
         self._guard_jobs_since_recheck = 0
         self._lagging = False
         self._head_stale = False
+        # Cycles in a row that raised, and that completed; whether the operator was told it keeps failing.
+        self._failed_cycles = 0
+        self._completed_cycles = 0
+        self._cycle_failing = False
         self._started_at = time.time()
 
     @property
@@ -110,13 +123,16 @@ class LaunchWatch:
     async def _loop(self):
         while True:
             started = self._clock()
+            failure = None
             try:
                 await self.cycle()
             except Exception as exc:
+                failure = type(exc).__name__
                 logger.error(
                     "Launch watch cycle failed: %s\n%s",
-                    type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+                    failure, "".join(traceback.format_tb(exc.__traceback__)),
                 )
+            await self._note_cycle(failure)
             await asyncio.sleep(max(0.0, started + POLL_INTERVAL_SECONDS - self._clock()))
 
     async def cycle(self):
@@ -245,6 +261,37 @@ class LaunchWatch:
             logger.info("Launch discovery is reading the chain head again")
             await self._send_alert(
                 "\u2705 *ShieldBot: Robinhood Chain launch discovery is reading the chain again*"
+            )
+
+    async def _note_cycle(self, failure):
+        """Log and alert the operator once when the cycle has failed CYCLE_FAILURES_ALERT times in a row,
+        naming the class of the last exception (``failure``, None for a cycle that completed), and once
+        when CYCLE_RECOVERY_CYCLES in a row complete after that. A failing cycle raises before its own lag
+        and head checks, so without this nothing alerts. The state changes before the alert is sent, as
+        in _note_lag.
+        """
+        if failure is None:
+            self._failed_cycles, self._completed_cycles = 0, self._completed_cycles + 1
+        else:
+            self._failed_cycles, self._completed_cycles = self._failed_cycles + 1, 0
+        if not self._cycle_failing and self._failed_cycles >= CYCLE_FAILURES_ALERT:
+            self._cycle_failing = True
+            logger.warning("Launch watch cycle has failed %d times in a row: %s", self._failed_cycles, failure)
+            # Legacy Markdown would read an underscore in a class name as italics.
+            name = failure.replace("_", "\\_")
+            await self._send_alert(
+                "\u26a0\ufe0f *ShieldBot: Robinhood Chain launch watch keeps failing*\n"
+                f"Its cycle has failed {self._failed_cycles} times in a row (about "
+                f"{self._failed_cycles * POLL_INTERVAL_SECONDS // 60} minutes), the last time with {name}, so "
+                "no launches are being found and the lag and chain head alerts cannot fire. The shieldbot "
+                "journal has the traceback."
+            )
+        elif self._cycle_failing and self._completed_cycles >= CYCLE_RECOVERY_CYCLES:
+            self._cycle_failing = False
+            logger.info("Launch watch cycles are completing again")
+            await self._send_alert(
+                "\u2705 *ShieldBot: Robinhood Chain launch watch is running again*\n"
+                f"Its last {self._completed_cycles} cycles completed."
             )
 
     async def _send_alert(self, text: str):

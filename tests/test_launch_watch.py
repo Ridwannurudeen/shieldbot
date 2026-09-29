@@ -1,7 +1,9 @@
 """The fast Robinhood Chain launch watch: polling, triage, rechecks, breaker and lifecycle."""
 
 import asyncio
+import itertools
 import logging
+import sqlite3
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -10,6 +12,8 @@ import pytest_asyncio
 
 from agent.hunter import Hunter
 from agent.launch_watch import (
+    CYCLE_FAILURES_ALERT,
+    CYCLE_RECOVERY_CYCLES,
     HEAD_STALE_SECONDS,
     LAG_RECOVERED_BLOCKS,
     LAG_WARN_BLOCKS,
@@ -576,6 +580,93 @@ async def test_a_failing_cycle_does_not_stop_the_loop(db):
         await watch.stop()
 
     assert watch.hunter.discovery.poll.await_count >= 2
+
+
+# --- a failing cycle ---
+
+
+class _Stop(BaseException):
+    """Ends a loop run by run_loop."""
+
+
+POLLED = {"target": TARGET, "launches": [], "swaps": {}}
+# What the discovery write raised every cycle on 2026-09-28.
+LOCKED = sqlite3.OperationalError
+
+
+def loop_watch(db, alert):
+    """A watch whose clock moves one poll interval on every read, so its loop never waits between cycles."""
+    return make_watch(db, alert=alert, clock=itertools.count(step=POLL_INTERVAL_SECONDS).__next__)
+
+
+async def run_loop(watch, polls):
+    """Run the watch's real loop for one cycle per item of ``polls``, each the outcome of that cycle's poll."""
+    watch.hunter.discovery.poll = AsyncMock(side_effect=[*polls, _Stop])
+    with pytest.raises(_Stop):
+        await watch._loop()
+
+
+def cycle_lines(caplog):
+    return [
+        (record.levelname, record.getMessage())
+        for record in caplog.records
+        if record.name == "agent.launch_watch" and record.levelname != "ERROR"
+        and record.getMessage().startswith("Launch watch cycle")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_cycle_failing_again_and_again_alerts_once_naming_the_exception_and_once_when_it_runs_again(
+    db, caplog
+):
+    # Each failed cycle raises before the lag and head checks, so only the failures themselves can alert.
+    alert = AsyncMock(return_value=True)
+    watch = loop_watch(db, alert)
+    with caplog.at_level(logging.INFO, logger="agent.launch_watch"):
+        await run_loop(watch, [LOCKED] * (CYCLE_FAILURES_ALERT - 1))
+        alert.assert_not_awaited()
+        await run_loop(watch, [LOCKED] * CYCLE_FAILURES_ALERT + [POLLED] * CYCLE_RECOVERY_CYCLES * 2)
+
+    sent = [call.args[0] for call in alert.await_args_list]
+    assert [text.splitlines()[0] for text in sent] == [
+        "\u26a0\ufe0f *ShieldBot: Robinhood Chain launch watch keeps failing*",
+        "\u2705 *ShieldBot: Robinhood Chain launch watch is running again*",
+    ]
+    # Telegram accepts both as legacy Markdown and shows the figures and the class outside the bold heading.
+    assert_literal(sent[0], f"{CYCLE_FAILURES_ALERT} times in a row (about 5 minutes)", "OperationalError")
+    assert_literal(sent[1], f"{CYCLE_RECOVERY_CYCLES} cycles")
+    assert cycle_lines(caplog) == [
+        ("WARNING", f"Launch watch cycle has failed {CYCLE_FAILURES_ALERT} times in a row: OperationalError"),
+        ("INFO", "Launch watch cycles are completing again"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_cycle_failing_every_few_times_neither_counts_as_running_again_nor_alerts_twice(db):
+    alert = AsyncMock(return_value=True)
+    watch = loop_watch(db, alert)
+    await run_loop(watch, [LOCKED] * CYCLE_FAILURES_ALERT)
+    await run_loop(watch, ([POLLED] * (CYCLE_RECOVERY_CYCLES - 1) + [LOCKED]) * CYCLE_FAILURES_ALERT)
+    assert alert.await_count == 1
+
+    await run_loop(watch, [POLLED] * CYCLE_RECOVERY_CYCLES)
+    assert alert.await_count == 2
+
+    # Running again, it alerts only once the cycle fails CYCLE_FAILURES_ALERT times in a row once more.
+    await run_loop(watch, ([LOCKED] * (CYCLE_FAILURES_ALERT - 1) + [POLLED]) * 3)
+    assert alert.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_the_failing_alert_shows_an_exception_class_with_an_underscore_as_it_is(db):
+    class Lock_Timeout(Exception):
+        pass
+
+    alert = AsyncMock(return_value=True)
+    watch = loop_watch(db, alert)
+    await run_loop(watch, [Lock_Timeout] * CYCLE_FAILURES_ALERT)
+
+    assert_literal(alert.await_args.args[0], "Lock_Timeout")
 
 
 def test_the_poll_interval_keeps_discovery_within_two_minutes_of_a_launch():
