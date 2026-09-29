@@ -774,10 +774,13 @@ class RobinhoodSimulator:
         except SimulationUnavailable as e:
             logger.warning("Robinhood simulation unavailable: %s", type(e).__name__)
             result = aggregate_outcomes([], [e.reason])
+            # The simulation could not run, so it cannot say the token sells; nor can GoPlus.
+            result["rpc_failed"] = True
             unknown_ledger.record(SIMULATION_PROVIDER, 4663, "failed")
         except Exception as e:
             logger.error("Robinhood simulation failed: %s", type(e).__name__)
             result = aggregate_outcomes([], [f"Simulation RPC request failed ({type(e).__name__})"])
+            result["rpc_failed"] = True
             unknown_ledger.record(SIMULATION_PROVIDER, 4663, "failed")
         else:
             # It ran; a pool that could not be simulated, or no supported pool, leaves the sell unknown.

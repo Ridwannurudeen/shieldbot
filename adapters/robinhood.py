@@ -56,6 +56,7 @@ def _simulation_response(simulation: Dict, fields: tuple, required: tuple) -> Di
     return {
         **{field: simulation[field] for field in fields},
         **({'simulation_failed': True} if simulation.get('simulation_failed') else {}),
+        **({'rpc_failed': True} if simulation.get('rpc_failed') else {}),
         'status': 'ok' if not simulation.get('simulation_failed')
         and all(simulation[field] is not None for field in required) else 'unknown',
         'reason': simulation['reason'],

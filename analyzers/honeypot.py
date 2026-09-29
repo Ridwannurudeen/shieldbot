@@ -32,13 +32,17 @@ class HoneypotAnalyzer(Analyzer):
 
         data = await self._service.fetch_honeypot_data(ctx.address, chain_id=ctx.chain_id)
         data = dict(data)
-        if data.get('simulation_failed') and data.get('can_sell') is True:
+        if (data.get('simulation_failed') or data.get('rpc_failed')) and data.get('can_sell') is True:
             data['can_sell'] = None
         fields = ('is_honeypot', 'buy_tax', 'sell_tax', 'can_buy', 'can_sell')
         data['coverage'] = {field: data.get(field) is not None for field in fields}
         if data.get('simulation_failed'):
             data['coverage']['can_sell'] = False
             data['reason'] = data.get('reason') or 'Honeypot simulation failed (unresolved)'
+        # ShieldBot's own simulation could not run: sellability stays unknown, without the +40 below.
+        if data.get('rpc_failed'):
+            data['coverage']['can_sell'] = False
+            data['reason'] = data.get('reason') or 'Honeypot simulation could not run (unresolved)'
         data['status'] = 'unknown' if data.get('status') == 'unknown' or not all(data['coverage'].values()) else 'ok'
         if data['status'] == 'unknown':
             data['reason'] = data.get('reason') or 'Incomplete honeypot provider data'
