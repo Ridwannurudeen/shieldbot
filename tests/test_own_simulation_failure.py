@@ -11,6 +11,7 @@ from eth_utils import keccak
 
 from adapters.arbitrum import ArbitrumAdapter
 from adapters.evm_base import EvmAdapter
+from adapters.robinhood import RobinhoodAdapter
 from analyzers.honeypot import HoneypotAnalyzer
 from core.analyzer import AnalysisContext
 from core.extension_formatter import format_extension_alert
@@ -20,8 +21,10 @@ from services.honeypot_service import HoneypotService
 from services.robinhood_simulation import SimulationUnavailable
 from tests.test_arbitrum_simulation import FakeRpc as ArbitrumRpc
 from tests.test_arbitrum_simulation import load as load_arbitrum
-from tests.test_robinhood_simulation import TOKEN, adapter_with
+from tests.test_robinhood_simulation import TOKEN, adapter_with, replay, rpc_for
 from tests.test_robinhood_simulation import FakeRpc as RobinhoodRpc
+from tests.test_robinhood_simulation import fresh_addresses as robinhood_addresses
+from tests.test_robinhood_simulation import load as load_robinhood
 from utils.scam_db import ScamDatabase
 from utils.web3_client import Web3Client
 
@@ -207,17 +210,46 @@ def calldata_of(signature):
     return "0x" + keccak(text=signature)[:4].hex()
 
 
-def answering_with(rpc, error, fails):
-    """The fake RPC, with `error` in place of every row whose (method, params) `fails` selects."""
+class Node:
+    """The node behind a simulator's _post, below its retry: the fake RPC's answer, with `answer` (an
+    error or a result) in place of every row `fails` selects, in the first `times` requests that carry
+    one (all of them when None). `hits` counts the requests that carried one."""
 
-    async def request(session, calls):
-        rows = await rpc(session, calls)
+    def __init__(self, rpc, fails, answer, times=None):
+        self.rpc, self.fails, self.answer, self.times = rpc, fails, answer, times
+        self.hits = 0
+
+    async def __call__(self, session, calls):
+        rows = await self.rpc(session, calls)
+        failing = [self.fails(method, params) for method, params in calls]
+        if not any(failing):
+            return rows
+        self.hits += 1
+        if self.times is not None:
+            if self.times == 0:
+                return rows
+            self.times -= 1
         return [
-            {"jsonrpc": "2.0", "id": row["id"], "error": error} if fails(method, params) else row
-            for (method, params), row in zip(calls, rows)
+            {"jsonrpc": "2.0", "id": row["id"], **self.answer} if fails else row
+            for fails, row in zip(failing, rows)
         ]
 
-    return request
+
+def adapter_posting(chain_id, post):
+    """The chain's adapter, its simulator sending every JSON-RPC request through `post`."""
+    if chain_id == 42161:
+        adapter = ArbitrumAdapter(rpc_url="https://rpc.invalid")
+    else:
+        with patch("adapters.evm_base.Web3"):
+            adapter = RobinhoodAdapter()
+    adapter._simulator._post = post
+    return adapter
+
+
+@pytest.fixture
+def no_backoff():
+    with patch("services.robinhood_simulation.asyncio.sleep", new=AsyncMock()) as sleep:
+        yield sleep
 
 
 def eth_call_to(selector=None, to=None):
@@ -252,16 +284,18 @@ ROBINHOOD_LOOKUPS = {
 }
 
 
-def discovery_with(chain_id, error, lookup):
+def discovery_with(chain_id, answer, lookup):
+    """The chain's adapter, and the node answering `answer` in place of the lookup's row."""
     if chain_id == 42161:
-        return arbitrum_adapter(
-            answering_with(ArbitrumRpc(load_arbitrum("v3_arb")), error, ARBITRUM_LOOKUPS[lookup])
-        )
-    fails, tables = ROBINHOOD_LOOKUPS[lookup]
-    return adapter_with(answering_with(RobinhoodRpc(TOKEN, 10**27, **tables), error, fails))
+        node = Node(ArbitrumRpc(load_arbitrum("v3_arb")), ARBITRUM_LOOKUPS[lookup], answer)
+    else:
+        fails, tables = ROBINHOOD_LOOKUPS[lookup]
+        node = Node(RobinhoodRpc(TOKEN, 10**27, **tables), fails, answer)
+    return adapter_posting(chain_id, node), node
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("no_backoff")
 @pytest.mark.parametrize(
     "chain_id,lookup",
     [(42161, lookup) for lookup in ARBITRUM_LOOKUPS] + [(4663, lookup) for lookup in ROBINHOOD_LOOKUPS],
@@ -269,7 +303,10 @@ def discovery_with(chain_id, error, lookup):
 async def test_a_discovery_lookup_the_node_could_not_answer_stays_unknown_beside_a_complete_clean_goplus_answer(
     chain_id, lookup
 ):
-    data, analyzed, risk, extension = await scan(chain_id, discovery_with(chain_id, NODE_ERROR, lookup))
+    adapter, node = discovery_with(chain_id, {"error": NODE_ERROR}, lookup)
+    data, analyzed, risk, extension = await scan(chain_id, adapter)
+    # Asked once more, the node failed again.
+    assert node.hits == 2
     assert data["status"] == analyzed.data["status"] == risk["status"] == "unknown"
     assert risk["risk_level"] != "LOW"
     assert extension["risk_classification"] != "SAFE"
@@ -286,8 +323,11 @@ async def test_a_discovery_lookup_the_node_could_not_answer_stays_unknown_beside
     [(42161, "v3-factory"), (42161, "weth-balance"), (4663, "doppler-hook"), (4663, "pool-manager")],
 )
 async def test_a_getter_that_reverts_is_not_an_answer_of_no_pool(chain_id, lookup):
-    # A pool getter, a mapping read or a WETH balance never reverts on a working node: no answer.
-    data, analyzed, risk, extension = await scan(chain_id, discovery_with(chain_id, REVERTED, lookup))
+    # A pool getter, a mapping read or a WETH balance never reverts on a working node: no answer. A
+    # revert is the call's own answer, so it is not asked again.
+    adapter, node = discovery_with(chain_id, {"error": REVERTED}, lookup)
+    data, analyzed, risk, extension = await scan(chain_id, adapter)
+    assert node.hits == 1
     assert data["status"] == "unknown" and data["rpc_failed"] is True
     assert "No supported pool found" not in data["reason"]
     assert "(JSON-RPC error 3)" in data["reason"]
@@ -306,9 +346,71 @@ async def test_a_total_supply_that_reverts_is_still_answered_by_a_complete_clean
     chain_id, reverted
 ):
     # A contract without totalSupply() reverts, legitimately: nothing to simulate, and GoPlus decides.
-    data, analyzed, risk, extension = await scan(chain_id, discovery_with(chain_id, reverted, "totalSupply"))
+    adapter, node = discovery_with(chain_id, {"error": reverted}, "totalSupply")
+    data, analyzed, risk, extension = await scan(chain_id, adapter)
+    assert node.hits == 1
     assert "totalSupply() unavailable; cannot size a buy" in data["reason"]
     assert data["can_sell"] is True and data["field_providers"]["can_sell"] == "goplus"
     assert data["status"] == analyzed.data["status"] == risk["status"] == "ok"
     assert (analyzed.score, risk["risk_level"], extension["risk_classification"]) == (0, "LOW", "SAFE")
     assert data["rpc_failed"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663])
+@pytest.mark.parametrize("result", [None, "0xzz"], ids=["null", "not-hex"])
+async def test_a_discovery_lookup_answered_without_data_stays_unknown(chain_id, result):
+    lookup = "v3-factory" if chain_id == 42161 else "v2-factory"
+    adapter, node = discovery_with(chain_id, {"result": result}, lookup)
+    data, analyzed, risk, extension = await scan(chain_id, adapter)
+    assert data["status"] == "unknown" and data["rpc_failed"] is True
+    assert "lookup failed (no result)" in data["reason"]
+    assert "No supported pool found" not in data["reason"]
+    assert data["simulation_failed"] is False and analyzed.score == 0
+    assert risk["risk_level"] != "LOW" and extension["risk_classification"] != "SAFE"
+
+
+def is_simulate(method, params):
+    return method == "eth_simulateV1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "chain_id,fails",
+    [
+        (42161, ARBITRUM_LOOKUPS["v3-factory"]),
+        (42161, is_simulate),
+        (4663, ROBINHOOD_LOOKUPS["v2-factory"][0]),
+        (4663, is_simulate),
+    ],
+    ids=["42161-discovery", "42161-simulation", "4663-discovery", "4663-simulation"],
+)
+async def test_an_error_the_node_answers_once_is_asked_again_and_the_simulation_completes(
+    no_backoff, chain_id, fails
+):
+    # A node under load can time out a request once; the scan must not read unknown for that.
+    if chain_id == 42161:
+        fixture = load_arbitrum("v3_arb")
+        rpc = ArbitrumRpc(fixture)
+        addresses = patch(
+            "services.arbitrum_simulation._fresh_address",
+            side_effect=[fixture["buyer"], fixture["receiver"]],
+        )
+    else:
+        fixture = load_robinhood("v2_router02")
+        rpc = rpc_for(fixture, simulations=[replay(fixture), replay(fixture)])
+        addresses = robinhood_addresses(fixture)
+    node = Node(rpc, fails, {"error": NODE_ERROR}, times=1)
+    with addresses:
+        data, analyzed, risk, extension = await scan(chain_id, adapter_posting(chain_id, node), fixture["token"])
+    assert node.hits == 2
+    no_backoff.assert_awaited_once_with(1.0)
+    assert (data["is_honeypot"], data["can_sell"], data["buy_tax"], data["sell_tax"]) == (
+        False,
+        True,
+        0.0,
+        0.0,
+    )
+    assert data["field_providers"]["is_honeypot"] == "eth_simulateV1"
+    assert data["rpc_failed"] is False and data["simulation_failed"] is False
+    assert data["status"] == risk["status"] == "ok"

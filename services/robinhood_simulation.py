@@ -874,6 +874,18 @@ class RobinhoodSimulator:
             )
 
     async def _request(self, session, calls: list) -> list:
+        """POST one JSON-RPC request or batch. A row the node answered with an error of its own (a timeout
+        under load, an internal error) sends the whole batch once more, after RPC_BACKOFF_SECONDS, so
+        one transient error does not leave the scan unknown and every row still comes from one answer. A
+        revert is the call's own answer and is not asked again."""
+        rows = await self._post(session, calls)
+        if any(row.get("error") is not None and not _reverted(row["error"]) for row in rows):
+            logger.warning("Robinhood simulation RPC answered an error; asking once more")
+            await asyncio.sleep(RPC_BACKOFF_SECONDS)
+            rows = await self._post(session, calls)
+        return rows
+
+    async def _post(self, session, calls: list) -> list:
         """POST one JSON-RPC request or batch; retry HTTP 429 and JSON-RPC rate limits with backoff."""
         body = [
             {"jsonrpc": "2.0", "id": index, "method": method, "params": params}
