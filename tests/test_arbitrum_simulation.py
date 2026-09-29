@@ -104,6 +104,20 @@ def test_the_request_is_the_one_recorded_live(name):
     assert request == fixture["request"][0]
 
 
+def test_the_confirmation_request_is_the_one_recorded_live():
+    fixture = load("v2_honeypot_confirmation")
+    request = build_simulation_request(
+        pool_of(fixture),
+        fixture["token"],
+        fixture["amount"],
+        fixture["buyer"],
+        fixture["receiver"],
+        fixture["sell_amount"],
+        (fixture["payer"], fixture["sell_time"]),
+    )
+    assert request == fixture["request"][0]
+
+
 def test_a_v3_trade_goes_through_swaprouter02_with_no_deadline():
     fixture = load("v3_arb")
     buy, _, _, sell, _, _ = fixture["request"][0]["blockStateCalls"][0]["calls"]
@@ -255,6 +269,27 @@ def test_a_real_honeypot_recorded_live_is_caught():
     )
 
 
+def test_the_real_honeypot_still_refuses_the_sell_in_its_confirmation_recorded_live():
+    # The buy paid by a separate address, the sell an hour later: the same refusal (see the fixture note).
+    fixture = load("v2_honeypot_confirmation")
+    outcome = evaluate_simulation(
+        pool_of(fixture),
+        fixture["token"],
+        fixture["amount"],
+        fixture["buyer"],
+        fixture["response"]["result"],
+        fixture["sell_amount"],
+        confirmation=True,
+    )
+    assert (outcome["is_honeypot"], outcome["can_buy"], outcome["can_sell"]) == (True, True, False)
+    assert outcome["trap"] == evaluate(load("v2_honeypot"))["trap"] is not None
+    # The sell block ran at the overridden time.
+    buy_block, sell_block = fixture["response"]["result"]
+    assert int(sell_block["number"], 16) == int(buy_block["number"], 16) + 1
+    times = {log["blockTimestamp"] for call in sell_block["calls"] for log in call["logs"]}
+    assert times == {hex(fixture["sell_time"])}
+
+
 # --- sell failures: only attributable evidence makes a honeypot -----------------------------------
 
 
@@ -393,14 +428,21 @@ def _address_word(address: str) -> str:
     return "0x" + "0" * 24 + address[2:]
 
 
-class FakeRpc:
-    """Answers the simulator's JSON-RPC batches: discovery from tables, then the recorded simulation."""
+# The source block time FakeRpc reports, and the payer of a confirmation run's buy.
+TIMESTAMP = 1_790_000_000
+PAYER = "0x" + "fa" * 20
 
-    def __init__(self, fixture, pools=None, balances=None, simulate=None):
+
+class FakeRpc:
+    """Answers the simulator's JSON-RPC batches: discovery from tables, then the recorded simulation, and
+    a confirmation run (two blocks) from `confirmation`."""
+
+    def __init__(self, fixture, pools=None, balances=None, simulate=None, confirmation=None):
         self.fixture = fixture
         self.pools = pools if pools is not None else {(V3_FACTORY, fixture["fee"]): fixture["pool"]}
         self.balances = balances if balances is not None else {fixture["pool"]: 10**20}
         self.simulate = simulate
+        self.confirmation = confirmation
         self.calls = []
 
     async def __call__(self, session, calls):
@@ -408,13 +450,17 @@ class FakeRpc:
         rows = []
         for index, (method, params) in enumerate(calls):
             if method == "eth_getBlockByNumber":
-                rows.append(_row(index, {"number": self.fixture["request"][1]}))
-            elif method == "eth_simulateV1":
                 rows.append(
-                    self.simulate(index)
-                    if self.simulate
-                    else {**self.fixture["response"], "id": index}
+                    _row(index, {"number": self.fixture["request"][1], "timestamp": hex(TIMESTAMP)})
                 )
+            elif method == "eth_simulateV1":
+                if self.simulate:
+                    rows.append(self.simulate(index))
+                else:
+                    confirming = len(params[0]["blockStateCalls"]) == 2
+                    assert self.confirmation or not confirming, "unexpected confirmation run"
+                    answer = self.confirmation if confirming else self.fixture
+                    rows.append({**answer["response"], "id": index})
             else:
                 to, data = params[0]["to"], params[0]["data"]
                 if data == "0x18160ddd":
@@ -448,6 +494,33 @@ def fresh_addresses(fixture):
         "services.arbitrum_simulation._fresh_address",
         side_effect=[fixture["buyer"], fixture["receiver"]] * 4,
     )
+
+
+def run_addresses(fixture, *runs):
+    """The fixture's buyer and receiver for each run in turn, and PAYER as a "confirm" run's third."""
+    addresses = []
+    for run in runs:
+        addresses += [fixture["buyer"], fixture["receiver"]] + ([PAYER] if run == "confirm" else [])
+    return patch("services.arbitrum_simulation._fresh_address", side_effect=addresses)
+
+
+def as_confirmation(fixture):
+    """The fixture's simulation answered as a confirmation run: its buy calls in one block, its sell
+    calls in the next."""
+    fixture = copy.deepcopy(fixture)
+    (block,) = fixture["response"]["result"]
+    number = int(block["number"], 16)
+    fixture["response"]["result"] = [
+        {"calls": block["calls"][:2], "number": hex(number)},
+        {"calls": block["calls"][2:], "number": hex(number + 1)},
+    ]
+    return fixture
+
+
+def _answering(fixture, *answers, **fake):
+    """A FakeRpc for the fixture answering each eth_simulateV1 in turn from `answers`."""
+    replies = iter(answers)
+    return FakeRpc(fixture, simulate=lambda index: {**next(replies)["response"], "id": index}, **fake)
 
 
 @pytest.mark.asyncio
@@ -669,7 +742,14 @@ async def test_a_honeypot_is_simulation_failure_still_scores_as_suspicious():
 @pytest.mark.asyncio
 async def test_a_real_arbitrum_honeypot_is_flagged_although_goplus_reports_it_clean():
     fixture = load("v2_honeypot")
-    service = _service_with(fixture, pools={(V2_ROUTES["uniswap-v2"][0], None): fixture["pool"]})
+    confirmation = load("v2_honeypot_confirmation")
+    service = _service_with(
+        fixture,
+        pools={(V2_ROUTES["uniswap-v2"][0], None): fixture["pool"]},
+        confirmation=confirmation,
+    )
+    addresses = [fixture["buyer"], fixture["receiver"]]
+    addresses += [confirmation["buyer"], confirmation["receiver"], confirmation["payer"]]
     # GoPlus's answer for this token on 2026-09-29: not a honeypot, sellability unreported, taxes empty.
     goplus = AsyncMock(
         return_value={
@@ -685,12 +765,16 @@ async def test_a_real_arbitrum_honeypot_is_flagged_although_goplus_reports_it_cl
             },
         }
     )
-    with fresh_addresses(fixture), patch.object(ScamDatabase, "fetch_token_security", new=goplus):
+    with (
+        patch("services.arbitrum_simulation._fresh_address", side_effect=addresses),
+        patch.object(ScamDatabase, "fetch_token_security", new=goplus),
+    ):
         result = await HoneypotAnalyzer(service).analyze(
             AnalysisContext(fixture["token"], chain_id=42161)
         )
     assert result.data["is_honeypot"] is True
     assert result.data["can_sell"] is False
+    assert "reproduced by a re-run whose buy a separate address paid" in result.data["reason"]
     assert result.data["field_providers"]["is_honeypot"] == "eth_simulateV1"
     assert result.data["field_providers"]["can_sell"] == "eth_simulateV1"
     assert "Honeypot detected" in result.flags and "Cannot sell token" in result.flags
@@ -700,20 +784,16 @@ def _pools_answering(*answers):
     """Two fee tiers resolving to the recorded v3_arb pool, each eth_simulateV1 answered in turn; the
     deepest (first) pool is the 0.05% tier, as discovery keeps candidate order for equal WETH."""
     fixture = load("v3_arb")
-    replies = iter(answers)
-    rpc = FakeRpc(
-        fixture,
-        pools={(V3_FACTORY, 500): fixture["pool"], (V3_FACTORY, 3000): fixture["pool"]},
-        simulate=lambda index: {**next(replies)["response"], "id": index},
-    )
-    return fixture, rpc
+    pools = {(V3_FACTORY, 500): fixture["pool"], (V3_FACTORY, 3000): fixture["pool"]}
+    return fixture, _answering(fixture, *answers, pools=pools)
 
 
 @pytest.mark.asyncio
 async def test_a_shallower_pool_refusing_the_sell_leaves_the_token_unknown_when_the_deepest_pool_sold():
     clean = load("v3_arb")
-    fixture, rpc = _pools_answering(clean, failed_sell(clean, error_string("STF")))
-    with fresh_addresses(fixture):
+    trapped = failed_sell(clean, error_string("STF"))
+    fixture, rpc = _pools_answering(clean, trapped, as_confirmation(trapped))
+    with run_addresses(fixture, "run", "run", "confirm"):
         result = await simulator_for(rpc).simulate(fixture["token"])
     # Neither a honeypot (a holder can sell in the deepest pool) nor safe (the shallower pool may trap
     # whoever buys there).
@@ -770,10 +850,9 @@ async def test_only_a_deepest_pool_selling_at_no_more_than_half_tax_clears_anoth
 ):
     clean = load("v3_arb")
     assert evaluate(_sell_taxed(clean, percent))["sell_tax"] == float(percent)
-    fixture, rpc = _pools_answering(
-        _sell_taxed(clean, percent), failed_sell(clean, error_string("STF"))
-    )
-    with fresh_addresses(fixture):
+    trapped = failed_sell(clean, error_string("STF"))
+    fixture, rpc = _pools_answering(_sell_taxed(clean, percent), trapped, as_confirmation(trapped))
+    with run_addresses(fixture, "run", "run", "confirm"):
         result = await simulator_for(rpc).simulate(fixture["token"])
     assert (result["is_honeypot"], result["can_sell"]) == verdict
 
@@ -781,8 +860,9 @@ async def test_only_a_deepest_pool_selling_at_no_more_than_half_tax_clears_anoth
 @pytest.mark.asyncio
 async def test_a_trapped_deepest_pool_is_not_cleared_by_a_shallower_clean_one():
     clean = load("v3_arb")
-    fixture, rpc = _pools_answering(failed_sell(clean, error_string("STF")), clean)
-    with fresh_addresses(fixture):
+    trapped = failed_sell(clean, error_string("STF"))
+    fixture, rpc = _pools_answering(trapped, as_confirmation(trapped), clean)
+    with run_addresses(fixture, "run", "confirm", "run"):
         result = await simulator_for(rpc).simulate(fixture["token"])
     assert (result["is_honeypot"], result["can_sell"]) == (True, False)
 
@@ -792,7 +872,199 @@ async def test_only_a_clean_deepest_pool_clears_another_pools_trap():
     clean = load("v3_arb")
     buy_reverted = copy.deepcopy(clean)
     make_revert(calls_by_label(buy_reverted)["buy"], error_string("STF"))
-    fixture, rpc = _pools_answering(buy_reverted, failed_sell(clean, error_string("STF")))
-    with fresh_addresses(fixture):
+    trapped = failed_sell(clean, error_string("STF"))
+    fixture, rpc = _pools_answering(buy_reverted, trapped, as_confirmation(trapped))
+    with run_addresses(fixture, "run", "run", "confirm"):
         result = await simulator_for(rpc).simulate(fixture["token"])
     assert (result["is_honeypot"], result["can_sell"]) == (True, False)
+
+
+# --- a trap is confirmed by one re-run --------------------------------------------------------------
+
+
+def _confirmation_request(rpc):
+    """The params of the simulator's one confirmation eth_simulateV1 request."""
+    (params,) = [
+        params
+        for calls in rpc.calls
+        for method, params in calls
+        if method == "eth_simulateV1" and len(params[0]["blockStateCalls"]) == 2
+    ]
+    return params
+
+
+@pytest.mark.parametrize("name", ["v3_arb", "v2_honeypot"])
+def test_a_confirmation_has_a_separate_address_pay_for_the_buy_and_sells_an_hour_later(name):
+    fixture = load(name)
+    args = (
+        pool_of(fixture),
+        fixture["token"],
+        fixture["amount"],
+        fixture["buyer"],
+        fixture["receiver"],
+        fixture["sell_amount"],
+    )
+    (plain,) = build_simulation_request(*args)["blockStateCalls"]
+    confirmation = build_simulation_request(*args, (PAYER, TIMESTAMP + 3600))
+    buy, sell = confirmation["blockStateCalls"]
+    # Only the buy's sender changes: the router still delivers to the buyer, who sells.
+    assert buy == {
+        "stateOverrides": {**plain["stateOverrides"], PAYER: {"balance": hex(100 * 10**18)}},
+        "calls": [{**plain["calls"][0], "from": PAYER}, plain["calls"][1]],
+    }
+    assert sell == {"blockOverrides": {"time": hex(TIMESTAMP + 3600)}, "calls": plain["calls"][2:]}
+    assert confirmation["validation"] is False
+
+
+def test_a_confirmation_is_read_from_two_blocks_and_a_plain_run_from_one():
+    trapped = failed_sell(load("v3_arb"), error_string("STF"))
+    args = (pool_of(trapped), trapped["token"], trapped["amount"], trapped["buyer"])
+    one_block = trapped["response"]["result"]
+    two_blocks = as_confirmation(trapped)["response"]["result"]
+    confirmed = evaluate_simulation(*args, two_blocks, confirmation=True)
+    assert (confirmed["is_honeypot"], confirmed["trap"]) == (True, evaluate(trapped)["trap"])
+    for result, confirmation in ((one_block, True), (two_blocks, False)):
+        outcome = evaluate_simulation(*args, result, confirmation=confirmation)
+        assert (outcome["reason"], outcome["rpc_failed"]) == ("Malformed eth_simulateV1 result", True)
+
+
+@pytest.mark.asyncio
+async def test_a_trap_the_confirmation_reproduces_is_a_honeypot():
+    trapped = failed_sell(load("v3_arb"), error_string("STF"))
+    rpc = _answering(trapped, trapped, as_confirmation(trapped))
+    with run_addresses(trapped, "run", "confirm"):
+        result = await simulator_for(rpc).simulate(trapped["token"])
+    assert (result["is_honeypot"], result["can_buy"], result["can_sell"]) == (True, True, False)
+    assert "reproduced by a re-run whose buy a separate address paid" in result["reason"]
+    request, block = _confirmation_request(rpc)
+    buy, sell = request["blockStateCalls"]
+    assert buy["calls"][0]["from"] == PAYER
+    assert sell["blockOverrides"] == {"time": hex(TIMESTAMP + 3600)}
+    assert block == trapped["request"][1]
+
+
+def _unreadable(fixture):
+    fixture = copy.deepcopy(fixture)
+    calls_by_label(fixture)["delivered"]["returnData"] = "0x"
+    return fixture
+
+
+def _buy_reverted(fixture):
+    fixture = copy.deepcopy(fixture)
+    make_revert(calls_by_label(fixture)["buy"], error_string("STF"))
+    return fixture
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "rerun,failed",
+    [
+        (lambda clean: clean, False),
+        (lambda clean: failed_sell(clean, error_string("Too little received")), False),
+        (lambda clean: _zero_sell_output(clean, 0), False),
+        (_buy_reverted, False),
+        (_unreadable, True),
+    ],
+    ids=["sold", "unattributed-revert", "another-trap", "buy-reverted", "unreadable"],
+)
+async def test_a_trap_the_confirmation_does_not_reproduce_is_unknown_never_clean(rerun, failed):
+    clean = load("v3_arb")
+    trapped = failed_sell(clean, error_string("STF"))
+    confirmation = rerun(clean)
+    rpc = _answering(trapped, trapped, as_confirmation(confirmation))
+    with run_addresses(trapped, "run", "confirm"):
+        result = await simulator_for(rpc).simulate(trapped["token"])
+    assert (result["is_honeypot"], result["can_sell"], result["sell_tax"]) == (None, None, None)
+    # The first run's buy evidence stands.
+    assert (result["can_buy"], result["buy_tax"]) == (True, 0.0)
+    assert result.get("simulation_failed", False) is failed
+    assert "the trap did not reproduce" in result["reason"]
+    assert evaluate(trapped)["reason"] in result["reason"]
+    assert evaluate(confirmation)["reason"] in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_a_confirmation_the_rpc_could_not_run_leaves_the_first_runs_trap_standing():
+    trapped = failed_sell(load("v3_arb"), error_string("STF"))
+    crashed = {
+        "response": {"jsonrpc": "2.0", "error": {"code": -32603, "message": "method handler crashed"}}
+    }
+    rpc = _answering(trapped, trapped, crashed)
+    with run_addresses(trapped, "run", "confirm"):
+        result = await simulator_for(rpc).simulate(trapped["token"])
+    assert (result["is_honeypot"], result["can_sell"]) == (True, False)
+    assert "could not run (eth_simulateV1 failed (JSON-RPC error -32603))" in result["reason"]
+    assert "rpc_failed" not in result and "simulation_failed" not in result
+
+
+@pytest.mark.asyncio
+async def test_a_zero_output_trap_is_confirmed_as_a_refused_sell_is():
+    clean = load("v3_arb")
+    trapped = _zero_sell_output(clean, 0)
+    assert (evaluate(trapped)["trap"], evaluate(trapped)["sell_tax"]) == ("zero output", 0.0)
+    # Reproduced, the trap and its measured tax stand; not reproduced, neither does.
+    for rerun, verdict in ((trapped, (True, False, 0.0)), (clean, (None, None, None))):
+        rpc = _answering(trapped, trapped, as_confirmation(rerun))
+        with run_addresses(trapped, "run", "confirm"):
+            result = await simulator_for(rpc).simulate(trapped["token"])
+        assert (result["is_honeypot"], result["can_sell"], result["sell_tax"]) == verdict
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "order,verdict",
+    [
+        ("unconfirmed-then-clean", (None, None)),
+        ("clean-then-unconfirmed", (None, None)),
+        ("confirmed-then-unconfirmed", (True, False)),
+    ],
+)
+async def test_a_trap_the_confirmation_did_not_reproduce_keeps_another_pool_from_clearing_the_token(
+    order, verdict
+):
+    clean = load("v3_arb")
+    trapped = failed_sell(clean, error_string("STF"))
+    unconfirmed = [trapped, as_confirmation(clean)]
+    answers, runs = {
+        "unconfirmed-then-clean": ([*unconfirmed, clean], ("run", "confirm", "run")),
+        "clean-then-unconfirmed": ([clean, *unconfirmed], ("run", "run", "confirm")),
+        "confirmed-then-unconfirmed": (
+            [trapped, as_confirmation(trapped), *unconfirmed],
+            ("run", "confirm", "run", "confirm"),
+        ),
+    }[order]
+    fixture, rpc = _pools_answering(*answers)
+    with run_addresses(fixture, *runs):
+        result = await simulator_for(rpc).simulate(fixture["token"])
+    # The trap one run showed may still catch whoever buys in that pool: never clean, and a confirmed
+    # trap elsewhere still stands.
+    assert (result["is_honeypot"], result["can_sell"]) == verdict
+    assert "the trap did not reproduce" in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_a_trap_found_by_the_sized_follow_up_is_confirmed_selling_the_same_amount():
+    first = load("v2_fee_on_transfer")
+    sized = failed_sell(
+        load("v2_fee_on_transfer_sized"), error_string("TransferHelper: TRANSFER_FROM_FAILED")
+    )
+    pools = {(V2_ROUTES["uniswap-v2"][0], None): first["pool"]}
+    rpc = _answering(first, first, sized, as_confirmation(sized), pools=pools)
+    addresses = [first["buyer"], first["receiver"], sized["buyer"], sized["receiver"]]
+    addresses += [sized["buyer"], sized["receiver"], PAYER]
+    with patch("services.arbitrum_simulation._fresh_address", side_effect=addresses):
+        result = await simulator_for(rpc).simulate(first["token"])
+    assert (result["is_honeypot"], result["can_sell"], result["buy_tax"]) == (True, False, 2.0)
+    assert "reproduced by a re-run" in result["reason"]
+    labels = call_labels(pool_of(sized))
+    request, _ = _confirmation_request(rpc)
+    confirmed_sell = dict(zip(labels[2:], request["blockStateCalls"][1]["calls"]))["sell"]
+    (plain,) = build_simulation_request(
+        pool_of(sized),
+        sized["token"],
+        sized["amount"],
+        sized["buyer"],
+        sized["receiver"],
+        sized["sell_amount"],
+    )["blockStateCalls"]
+    assert confirmed_sell == dict(zip(labels, plain["calls"]))["sell"]

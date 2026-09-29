@@ -4,7 +4,8 @@ honeypot.is does not serve Arbitrum One, and GoPlus reports no buy or sell tax f
 no provider said whether an Arbitrum token can be sold and every Arbitrum token scan ended unknown. This
 simulates a buy and a sell as services/robinhood_simulation.py does on Robinhood Chain, under the same
 rules, whose helpers it reuses: a token is a honeypot only on evidence attributable to it, anything else
-leaves the result unknown, and pools are combined worst case (aggregate_outcomes).
+leaves the result unknown, and pools are combined worst case (aggregate_outcomes). Unlike there, a trap
+is flagged only when one confirmation re-run reproduces it (CONFIRMATION_DELAY_SECONDS).
 
 Every address, struct layout and revert string here was read on 2026-09-29 from the contracts' verified
 Arbiscan source and their getters:
@@ -99,6 +100,18 @@ TOKEN_REFUSED = {
 }
 V3_UNDERPAID = "IIA"
 EXACT_SINGLE = "(address,address,uint24,address,uint256,uint256,uint160)"
+# A trap is flagged only when one re-run, which two common launch rules cannot trip, reproduces it. A
+# separately funded payer pays for the buy, which the router still delivers to the buyer, so a
+# same-block rule keyed on tx.origin (as in the launch "transferDelay" template) finds no earlier
+# transfer by the seller's origin; and the sell calls run in a second simulated block an hour later, so
+# a rule timed on block.timestamp has lapsed. A rule keyed on block.number is not defeated: measured on
+# publicnode's Arbitrum RPC on 2026-09-29, block.timestamp and the L2 block number advance in the later
+# simulated block, but Solidity's block.number, which on Arbitrum is the L1 block number, does not, and
+# an override of it by +300 fails with -38026 "too many blocks".
+CONFIRMATION_DELAY_SECONDS = 3600
+CONFIRMATION_RUN = "a re-run whose buy a separate address paid and whose sell ran an hour later"
+# A confirmation's first block holds the buy and the balance it delivered; the second, the rest.
+BUY_CALLS = 2
 
 
 @dataclass(frozen=True)
@@ -135,14 +148,17 @@ def build_simulation_request(
     buyer: str,
     receiver: str,
     sell_amount: Optional[int] = None,
+    confirmation: Optional[tuple] = None,
 ) -> dict:
     """Buy exactly `amount` tokens with ETH, then sell `sell_amount` of them (default: all of `amount`)
-    for WETH."""
+    for WETH. A confirmation (payer, sell_time) has `payer` pay for the buy, which is still delivered to
+    the buyer, and runs the sell calls in a second block at `sell_time`."""
     token = token.lower()
     sell_amount = amount if sell_amount is None else sell_amount
+    payer = buyer if confirmation is None else confirmation[0]
     if pool.route == "v3":
         buy = _call(
-            buyer,
+            payer,
             SWAP_ROUTER_02,
             _calldata(
                 f"exactOutputSingle({EXACT_SINGLE})",
@@ -162,7 +178,7 @@ def build_simulation_request(
         )
     else:
         buy = _call(
-            buyer,
+            payer,
             pool.router,
             _calldata(
                 "swapETHForExactTokens(uint256,address[],address,uint256)",
@@ -206,15 +222,19 @@ def build_simulation_request(
             ),
         ),
     }
-    return {
-        "blockStateCalls": [
+    calls = [steps[label] for label in call_labels(pool)]
+    funded = {buyer: {"balance": hex(BALANCE_OVERRIDE_WEI)}}
+    if confirmation is None:
+        blocks = [{"stateOverrides": funded, "calls": calls}]
+    else:
+        blocks = [
             {
-                "stateOverrides": {buyer: {"balance": hex(BALANCE_OVERRIDE_WEI)}},
-                "calls": [steps[label] for label in call_labels(pool)],
-            }
-        ],
-        "validation": False,
-    }
+                "stateOverrides": {**funded, payer: {"balance": hex(BALANCE_OVERRIDE_WEI)}},
+                "calls": calls[:BUY_CALLS],
+            },
+            {"blockOverrides": {"time": hex(confirmation[1])}, "calls": calls[BUY_CALLS:]},
+        ]
+    return {"blockStateCalls": blocks, "validation": False}
 
 
 def _pool_swap(pool: Pool, token: str, logs, recipient: Optional[str] = None) -> Optional[tuple]:
@@ -301,28 +321,40 @@ def _outcome(
         "sell_tax": None,
         "simulation_failed": simulation_failed,
         "rpc_failed": rpc_failed,
+        # The attributable evidence of a trap, which a confirmation re-run must reproduce.
+        "trap": None,
         "reason": reason,
     }
 
 
 def evaluate_simulation(
-    pool: Pool, token: str, amount: int, buyer: str, result, sell_amount: Optional[int] = None
+    pool: Pool,
+    token: str,
+    amount: int,
+    buyer: str,
+    result,
+    sell_amount: Optional[int] = None,
+    confirmation: bool = False,
 ) -> dict:
     token = token.lower()
     sell_amount = amount if sell_amount is None else sell_amount
     labels = call_labels(pool)
-    block = result[0] if isinstance(result, list) and result and isinstance(result[0], dict) else {}
-    calls = block.get("calls")
-    number = _quantity(block.get("number"))
-    if (
-        not isinstance(calls, list)
-        or len(calls) != len(labels)
-        or not all(isinstance(call, dict) for call in calls)
-        or number is None
+    sizes = [BUY_CALLS, len(labels) - BUY_CALLS] if confirmation else [len(labels)]
+    if not (
+        isinstance(result, list)
+        and len(result) == len(sizes)
+        and all(
+            isinstance(block, dict)
+            and isinstance(block.get("calls"), list)
+            and len(block["calls"]) == size
+            and all(isinstance(call, dict) for call in block["calls"])
+            and _quantity(block.get("number")) is not None
+            for block, size in zip(result, sizes)
+        )
     ):
         return _outcome(pool, "Malformed eth_simulateV1 result", rpc_failed=True)
-    call = dict(zip(labels, calls))
-    outcome = _outcome(pool, "", number)
+    call = dict(zip(labels, [call for block in result for call in block["calls"]]))
+    outcome = _outcome(pool, "", _quantity(result[0]["number"]))
     if not _succeeded(call["buy"]):
         outcome["reason"] = f"buy reverted: {_describe_revert(_revert_bytes(call['buy']))}"
         return outcome
@@ -381,7 +413,10 @@ def evaluate_simulation(
         )
         if trap is not None:
             outcome.update(
-                can_sell=False, is_honeypot=True, reason=f"sell reverted: {trap}; {attribution}"
+                can_sell=False,
+                is_honeypot=True,
+                trap=trap,
+                reason=f"sell reverted: {trap}; {attribution}",
             )
         elif pool.route == "v3" and _error_string(data) == V3_UNDERPAID:
             # A token that takes a fee on transfer pays the pool less than the swap owes it, which a V3
@@ -426,6 +461,7 @@ def evaluate_simulation(
             sell_tax=sell_tax,
             can_sell=False,
             is_honeypot=True,
+            trap="zero output",
             reason=f"sell of {sent} token units returned zero output",
         )
         return outcome
@@ -439,6 +475,32 @@ def evaluate_simulation(
         ),
     )
     return outcome
+
+
+def _confirm_trap(first: dict, confirmation: dict) -> dict:
+    """A trap stands when the confirmation re-run reproduces it, or cannot run (the one run's evidence,
+    as before). Any other re-run leaves the sell unknown, never sellable: the first run may have met a
+    launch rule the re-run avoided, or the re-run may have missed the trap."""
+    where = f" at block {confirmation['block']}" if confirmation["block"] is not None else ""
+    if confirmation["rpc_failed"]:
+        return {
+            **first,
+            "reason": f"{first['reason']}; {CONFIRMATION_RUN} could not run ({confirmation['reason']})",
+        }
+    if confirmation["trap"] == first["trap"]:
+        return {**first, "reason": f"{first['reason']}; reproduced by {CONFIRMATION_RUN}{where}"}
+    return {
+        **first,
+        "is_honeypot": None,
+        "can_sell": None,
+        "sell_tax": None,
+        "trap": None,
+        "simulation_failed": confirmation["simulation_failed"],
+        "reason": (
+            f"the trap did not reproduce, so sellability is left unknown; first run: {first['reason']}; "
+            f"{CONFIRMATION_RUN}{where}: {confirmation['reason']}"
+        ),
+    }
 
 
 def _eth_call(to: str, data: bytes) -> tuple:
@@ -503,19 +565,28 @@ class ArbitrumSimulator:
         ) as session:
             amount, pools, notes = await self._discover(session, token)
             outcomes = []
+            unconfirmed = False
             for pool in pools:
                 outcome = await self._simulate_pool(session, pool, token, amount)
+                sell_amount = None
                 if outcome["retry_sell_amount"]:
                     sized = await self._simulate_pool(
                         session, pool, token, amount, outcome["retry_sell_amount"]
                     )
                     # A follow-up that could not run leaves the first attempt's buy verdict standing.
                     if sized["can_buy"] is not None:
+                        sell_amount = outcome["retry_sell_amount"]
                         outcome = sized
                     elif sized["simulation_failed"] or sized["rpc_failed"]:
                         outcome["simulation_failed"] = sized["simulation_failed"]
                         outcome["rpc_failed"] = sized["rpc_failed"]
                         outcome["reason"] += f"; sized follow-up: {sized['reason']}"
+                if outcome["trap"] is not None:
+                    confirmation = await self._simulate_pool(
+                        session, pool, token, amount, sell_amount, confirm=True
+                    )
+                    outcome = _confirm_trap(outcome, confirmation)
+                    unconfirmed = unconfirmed or outcome["trap"] is None
                 outcomes.append(outcome)
         # Pools are ordered by the WETH they hold. When the deepest one sells at a tax below the
         # analyzer's extreme line, another pool refusing the sell proves neither a honeypot nor a safe
@@ -541,26 +612,42 @@ class ArbitrumSimulator:
         result = aggregate_outcomes(outcomes, notes)
         if cleared:
             result.update(is_honeypot=None, can_sell=None)
+        if unconfirmed:
+            # A trap one run showed and its re-run did not may still catch whoever buys in that pool,
+            # so no other pool makes the token clean; a trap confirmed elsewhere still stands.
+            if result["is_honeypot"] is False:
+                result["is_honeypot"] = None
+            if result["can_sell"] is True:
+                result["can_sell"] = None
         return result
 
     async def _simulate_pool(
-        self, session, pool: Pool, token: str, amount: int, sell_amount: Optional[int] = None
+        self,
+        session,
+        pool: Pool,
+        token: str,
+        amount: int,
+        sell_amount: Optional[int] = None,
+        confirm: bool = False,
     ) -> dict:
+        """One simulation of the pool; with `confirm`, the confirmation re-run of a trap."""
         buyer, receiver = _fresh_address(), _fresh_address()
-        try:
-            request = build_simulation_request(pool, token, amount, buyer, receiver, sell_amount)
-        except EncodingError as e:
-            return _outcome(
-                pool,
-                f"Simulation request could not be encoded ({type(e).__name__})",
-                simulation_failed=True,
-            )
         try:
             headers = await self._request(session, [("eth_getBlockByNumber", ["latest", False])])
             header = headers[0].get("result")
             source_block = _quantity(header.get("number")) if isinstance(header, dict) else None
             if source_block is None:
                 raise SimulationUnavailable("Simulation source block header unavailable")
+            confirmation = None
+            if confirm:
+                # blockOverrides take an absolute time: an hour after the source block's.
+                source_time = _quantity(header.get("timestamp"))
+                if source_time is None:
+                    raise SimulationUnavailable("Simulation source block time unavailable")
+                confirmation = (_fresh_address(), source_time + CONFIRMATION_DELAY_SECONDS)
+            request = build_simulation_request(
+                pool, token, amount, buyer, receiver, sell_amount, confirmation
+            )
             rows = await self._request(session, [("eth_simulateV1", [request, hex(source_block)])])
             error = rows[0].get("error")
             if error is not None:
@@ -569,11 +656,17 @@ class ArbitrumSimulator:
                     raise SimulationUnavailable("eth_simulateV1 unsupported by the RPC")
                 raise SimulationUnavailable(f"eth_simulateV1 failed (JSON-RPC error {code})")
             outcome = evaluate_simulation(
-                pool, token, amount, buyer, rows[0].get("result"), sell_amount
+                pool, token, amount, buyer, rows[0].get("result"), sell_amount, confirm
             )
             # eth_simulateV1 returns synthetic blocks after the real source header.
             outcome["block"] = source_block
             return outcome
+        except EncodingError as e:
+            return _outcome(
+                pool,
+                f"Simulation request could not be encoded ({type(e).__name__})",
+                simulation_failed=True,
+            )
         except SimulationUnavailable as e:
             return _outcome(pool, e.reason, rpc_failed=True)
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
