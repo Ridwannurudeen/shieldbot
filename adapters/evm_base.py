@@ -494,6 +494,9 @@ class EvmAdapter(ChainAdapter):
             # The four reads are independent, so they are in flight together rather than costing
             # four round trips in a row. A failed read still loses the whole answer, and the first
             # failure in this field order is the one raised and logged, as when they ran in turn.
+            # Each read keeps _call_with_retry's three attempts, so a rate limit outlasting them
+            # costs up to 12 requests for one token where the reads in turn stopped after 3; with a
+            # single attempt, one passing 429 on any read would lose the answer instead.
             reads = await asyncio.gather(
                 self._call_with_retry(contract.functions.name().call),
                 self._call_with_retry(contract.functions.symbol().call),
