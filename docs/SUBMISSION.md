@@ -48,7 +48,9 @@ Production has since moved on: it runs **`5ac17f1`**, deployed on **2026-09-26**
 
 On **2026-09-27** production moved to **`c9ae9c9`**, which wired in the verdict registry below. It records the Robinhood Chain verdicts of Telegram scans, guard rescans, and launches or rechecks that are blocked or guard-watched; with `PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0` it stores other launch verdicts as `off`, which is not on-chain evidence.
 
-Production now runs **`dc9f015`**, deployed on **2026-09-28**, which keeps that wiring and adds protocol recognition. Uniswap's current routers and position managers are recognised on every supported chain, so an unlimited Permit2 permit for one of them is named and scored as a known protocol instead of raising CAUTION. A trusted router's swap is judged by its tokens only when every command it runs is one ShieldBot checks and pays the sender; otherwise it answers CAUTION and names where the funds go. After that deployment `/api/health` listed the same eight chains.
+On **2026-09-28** production moved to **`dc9f015`**, which keeps that wiring and adds protocol recognition. Uniswap's current routers and position managers are recognised on every supported chain, so an unlimited Permit2 permit for one of them is named and scored as a known protocol instead of raising CAUTION. A trusted router's swap is judged by its tokens only when every command it runs is one ShieldBot checks and pays the sender; otherwise it answers CAUTION and names where the funds go. After that deployment `/api/health` listed the same eight chains.
+
+Production now runs **`ca5e395`**, deployed on **2026-09-29**, which adds ShieldBot's own sell simulation on Arbitrum One (42161). honeypot.is does not serve Arbitrum One and GoPlus reports no buy or sell tax for new tokens there, so before this deployment every entry of a 66-entry Arbitrum One benchmark ended UNKNOWN. ShieldBot now simulates a buy and a sell over `eth_simulateV1` in the pools pairing the token with WETH on Uniswap V3, Uniswap V2 and SushiSwap, under the same rules as on Robinhood Chain: a token is a honeypot only on evidence attributable to it. When the pool holding the most WETH sells at a tax of 50% or less but another pool refuses the sell, the result is UNKNOWN. A token with no WETH pair on those three exchanges gets no simulation, and its sellability rests on GoPlus as before. Wallet approval history on Arbitrum One is now read over about 35 days instead of under 18 hours. After that deployment `/api/health` listed the same eight chains and `/api/ready` answered 200 five times. `/api/firewall` answered an approval of ARB (`0x912ce59144191c1204e64559fe8253a0e49e6548`) to Uniswap's SwapRouter02 with SAFE, risk 6.4 and `status: ok`, every coverage category complete. It answered ARBROKER (`0x8328ffdecbd36294b4fcc50c1c25cde18f4a8b2b`) with BLOCK_RECOMMENDED, risk 80 and "Honeypot detected": a holder's sell makes the token forward its ETH to a tax wallet that refuses ETH, so the sell reverts, while GoPlus reported it on 2026-09-29 as not a honeypot.
 
 **Correction, 2026-09-26.** Changes made after the September 22 snapshot, and faults found in the code that produced it, mean some of its counters must not be read as first presented:
 
@@ -120,7 +122,7 @@ git log 27aca4d..5ac17f1 --first-parent --format='%h %ad %s' --date=short
 git log 27aca4d..5ac17f1 --first-parent --merges --oneline
 ```
 
-In particular, waves 2 to 3 (`9ca9c31`) and the guard, guarded transfer and freshness chain (`04203be`) both landed inside the window. The former `chore/oh-final` work is included in `main` through the later commits above. This history was last brought up to date on 2026-09-26 against `main` at `5ac17f1`, and the deployment section on 2026-09-27 against `c9ae9c9`. It does not establish a released extension.
+In particular, waves 2 to 3 (`9ca9c31`) and the guard, guarded transfer and freshness chain (`04203be`) both landed inside the window. The former `chore/oh-final` work is included in `main` through the later commits above. This history was last brought up to date on 2026-09-26 against `main` at `5ac17f1`, and the deployment section on 2026-09-29 against `ca5e395`. It does not establish a released extension.
 
 ## Pre-submission review
 
@@ -155,6 +157,8 @@ Re-verified on **2026-09-26** at **`5ac17f1`**: `python -m pytest -q -p no:cache
 Re-verified on **2026-09-27** at **`c9ae9c9`**: the same two commands completed with **5,986 passed** and **113 passed**, and CI run **36345012629** passed all four jobs.
 
 Re-verified on **2026-09-28** at **`dc9f015`**: the same two commands completed with **6,131 passed, 1 failed** and **113 passed**. The failure is a timing test of the rescue scan's deadline, `tests/test_rescue_scan_deadline.py`, which this change did not touch; run alone it failed once and then passed five times in a row. CI run **36480532540** passed all four jobs.
+
+Re-verified on **2026-09-29** at **`ca5e395`**: the same two commands completed with **6,174 passed, 1 failed** and **114 passed**. The failure is the same rescue-scan deadline timing test. It scans BNB Chain, whose approval-history reads this change leaves as they were; run alone it passed four times out of five. CI run **36570678894** passed all four jobs.
 
 ## Owner completion checklist: 17 items, all done
 
