@@ -595,13 +595,22 @@ def _sell_taxed(fixture, percent):
 
 
 @pytest.mark.asyncio
-async def test_a_deepest_pool_selling_at_an_extreme_tax_clears_no_other_pools_trap():
+@pytest.mark.parametrize(
+    "percent,verdict",
+    # The honeypot analyzer's extreme sell tax line is above 50%.
+    [(50, (None, None)), (51, (True, False)), (99, (True, False))],
+)
+async def test_only_a_deepest_pool_selling_at_no_more_than_half_tax_clears_another_pools_trap(
+    percent, verdict
+):
     clean = load("v3_arb")
-    assert evaluate(_sell_taxed(clean, 99))["sell_tax"] == 99.0
-    fixture, rpc = _pools_answering(_sell_taxed(clean, 99), failed_sell(clean, error_string("STF")))
+    assert evaluate(_sell_taxed(clean, percent))["sell_tax"] == float(percent)
+    fixture, rpc = _pools_answering(
+        _sell_taxed(clean, percent), failed_sell(clean, error_string("STF"))
+    )
     with fresh_addresses(fixture):
         result = await simulator_for(rpc).simulate(fixture["token"])
-    assert (result["is_honeypot"], result["can_sell"]) == (True, False)
+    assert (result["is_honeypot"], result["can_sell"]) == verdict
 
 
 @pytest.mark.asyncio
