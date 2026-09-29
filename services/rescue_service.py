@@ -36,8 +36,13 @@ APPROVAL_FOR_ALL_TOPIC = "0x" + keccak(text="ApprovalForAll(address,address,bool
 # within 1.2 s), and Ethereum's and Polygon's refuse a query without a contract address, so on
 # those three nothing is read and the scan stays unknown.
 RECENT_LOG_WINDOW_BLOCKS = 10_000
-# Public RPCs that cap an eth_getLogs range below RECENT_LOG_WINDOW_BLOCKS, by chain.
-PUBLIC_LOG_WINDOW_BLOCKS = {8453: 2_000}
+# Public RPCs read in windows of another width, by chain. Base's caps a range at 2,000 blocks.
+# Arbitrum One makes a block about every 0.25 s, so 24 windows of 10,000 blocks cover under 18
+# hours there; on 2026-09-29 its default public RPC answered one wallet's Approval logs across
+# 10,000,000 blocks in 1 to 3 s, so it is read in windows of 500,000 blocks (12,000,000 blocks,
+# about 35 days). It refuses a window matching more than 10,000 logs, which only a wallet
+# approving thousands of times a day reaches, and the scan then stops there as for any window.
+PUBLIC_LOG_WINDOW_BLOCKS = {8453: 2_000, 42161: 500_000}
 RECENT_LOG_WINDOWS = 24
 PUBLIC_RPC_CONCURRENCY = 4
 PUBLIC_RPC_ATTEMPTS = 3
@@ -417,10 +422,17 @@ class RescueService:
                     # deadline stopped the read: then nothing more is asked of it.
                     public_rpc = scanned_from > latest and not budget.expired()
             if public_rpc:
+                window = PUBLIC_LOG_WINDOW_BLOCKS.get(chain_id, RECENT_LOG_WINDOW_BLOCKS)
+                budget = asyncio.timeout_at(deadline)
                 all_logs, scanned_from, latest = await self._fetch_recent_approval_logs(
-                    wallet, rpc_url, PUBLIC_LOG_WINDOW_BLOCKS.get(chain_id, RECENT_LOG_WINDOW_BLOCKS),
-                    asyncio.timeout_at(deadline),
+                    wallet, rpc_url, window, budget
                 )
+                # A configured RPC can cap ranges below a wider window measured on the default one;
+                # when it served none of them, it is read at the default width while time allows.
+                if window > RECENT_LOG_WINDOW_BLOCKS and scanned_from > latest and not budget.expired():
+                    all_logs, scanned_from, latest = await self._fetch_recent_approval_logs(
+                        wallet, rpc_url, RECENT_LOG_WINDOW_BLOCKS, asyncio.timeout_at(deadline)
+                    )
             if scanned_from > latest:
                 coverage_reasons["allowances"] = NOTHING_READ_REASON
             elif scanned_from > 0:

@@ -167,7 +167,7 @@ async def test_robinhood_scans_bounded_recent_window_and_marks_allowances_incomp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("chain_id", [56, 1, 137, 42161, 10, 204])
+@pytest.mark.parametrize("chain_id", [56, 1, 137, 10, 204])
 async def test_chains_without_a_logs_rpc_read_the_same_bounded_recent_windows(chain_id):
     result, rpc, sleep = await scan(chain_handler(), chain_id)
 
@@ -194,6 +194,53 @@ async def test_base_public_rpc_windows_fit_its_2000_block_range():
     assert len(windows) == 24
     assert all(to_b - from_b + 1 == 2_000 for from_b, to_b in windows)
     assert result["scanned_blocks"] == {"from_block": LATEST - 48_000 + 1, "to_block": LATEST}
+
+
+@pytest.mark.asyncio
+async def test_arbitrum_reads_about_35_days_in_500000_block_windows():
+    result, rpc, sleep = await scan(chain_handler(), 42161)
+
+    windows = window_bounds(rpc)
+    assert len(windows) == 24
+    assert windows[0][1] == LATEST
+    assert all(to_b - from_b + 1 == 500_000 for from_b, to_b in windows)
+    assert result["scanned_blocks"] == {"from_block": LATEST - 12_000_000 + 1, "to_block": LATEST}
+    assert [a["risk_level"] for a in result["approvals"]] == ["HIGH"]
+
+
+@pytest.mark.asyncio
+async def test_an_rpc_refusing_the_wider_arbitrum_window_is_read_at_the_default_width():
+    range_cap = (200, {"jsonrpc": "2.0", "id": 1, "error": {"code": -32000, "message": "block range too large"}})
+
+    def logs(window_to):
+        return None
+
+    def handler(payload):
+        if payload["method"] == "eth_getLogs":
+            params = payload["params"][0]
+            if int(params["toBlock"], 16) - int(params["fromBlock"], 16) + 1 > 10_000:
+                return range_cap
+        return chain_handler(logs)(payload)
+
+    result, rpc, sleep = await scan(handler, 42161)
+
+    widths = [to_b - from_b + 1 for from_b, to_b in window_bounds(rpc)]
+    assert widths[:4] == [500_000] * 4
+    assert widths[4:] == [10_000] * 24
+    assert result["scanned_blocks"] == {"from_block": WINDOW_START, "to_block": LATEST}
+    assert [a["risk_level"] for a in result["approvals"]] == ["HIGH"]
+
+
+@pytest.mark.asyncio
+async def test_a_wider_window_that_read_something_is_not_read_again():
+    def logs(window_to):
+        return None if window_to == LATEST else LOG_LIMIT_ERROR
+
+    result, rpc, sleep = await scan(chain_handler(logs), 42161)
+
+    widths = {to_b - from_b + 1 for from_b, to_b in window_bounds(rpc)}
+    assert widths == {500_000}
+    assert result["scanned_blocks"] == {"from_block": LATEST - 500_000 + 1, "to_block": LATEST}
 
 
 @pytest.mark.asyncio

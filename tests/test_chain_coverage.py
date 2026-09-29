@@ -131,6 +131,12 @@ def test_a_chain_without_a_simulator_reports_goplus_flags(coverage):
     assert coverage.get(42161).json()["capabilities"]["sell_simulation"] == "goplus_reported"
 
 
+def test_arbitrum_reads_approval_history_in_wide_windows(coverage):
+    assert coverage.get(42161).json()["capabilities"]["approvals"] == {
+        "history": "recent", "window_blocks": 12_000_000,
+    }
+
+
 def test_a_monitored_mempool_the_monitor_could_not_read_is_unobservable(coverage):
     assert coverage.get(1).json()["capabilities"]["public_mempool"] == "unobservable"
 
