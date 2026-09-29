@@ -491,10 +491,20 @@ class EvmAdapter(ChainAdapter):
             contract = self.w3.eth.contract(
                 address=Web3.to_checksum_address(address), abi=ERC20_ABI,
             )
-            name = await self._call_with_retry(contract.functions.name().call)
-            symbol = await self._call_with_retry(contract.functions.symbol().call)
-            decimals = await self._call_with_retry(contract.functions.decimals().call)
-            total_supply = await self._call_with_retry(contract.functions.totalSupply().call)
+            # The four reads are independent, so they are in flight together rather than costing
+            # four round trips in a row. A failed read still loses the whole answer, and the first
+            # failure in this field order is the one raised and logged, as when they ran in turn.
+            reads = await asyncio.gather(
+                self._call_with_retry(contract.functions.name().call),
+                self._call_with_retry(contract.functions.symbol().call),
+                self._call_with_retry(contract.functions.decimals().call),
+                self._call_with_retry(contract.functions.totalSupply().call),
+                return_exceptions=True,
+            )
+            for read in reads:
+                if isinstance(read, BaseException):
+                    raise read
+            name, symbol, decimals, total_supply = reads
             return {
                 'name': name, 'symbol': symbol,
                 'decimals': decimals, 'total_supply': total_supply / (10 ** decimals),
