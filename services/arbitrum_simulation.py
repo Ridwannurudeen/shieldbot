@@ -282,8 +282,13 @@ def _sell_trap(pool: Pool, data: bytes) -> Optional[str]:
 
 
 def _outcome(
-    pool: Pool, reason: str, block: Optional[int] = None, simulation_failed: bool = False
+    pool: Pool,
+    reason: str,
+    block: Optional[int] = None,
+    simulation_failed: bool = False,
+    rpc_failed: bool = False,
 ) -> dict:
+    """simulation_failed and rpc_failed as in services/robinhood_simulation.py."""
     return {
         "retry_sell_amount": None,
         "route": pool.route,
@@ -295,6 +300,7 @@ def _outcome(
         "buy_tax": None,
         "sell_tax": None,
         "simulation_failed": simulation_failed,
+        "rpc_failed": rpc_failed,
         "reason": reason,
     }
 
@@ -314,7 +320,7 @@ def evaluate_simulation(
         or not all(isinstance(call, dict) for call in calls)
         or number is None
     ):
-        return _outcome(pool, "Malformed eth_simulateV1 result", simulation_failed=True)
+        return _outcome(pool, "Malformed eth_simulateV1 result", rpc_failed=True)
     call = dict(zip(labels, calls))
     outcome = _outcome(pool, "", number)
     if not _succeeded(call["buy"]):
@@ -432,8 +438,6 @@ def evaluate_simulation(
             + ("" if sell_tax is not None else "; sell tax unmeasurable")
         ),
     )
-    if sell_tax is None:
-        outcome["simulation_failed"] = True
     return outcome
 
 
@@ -477,10 +481,13 @@ class ArbitrumSimulator:
             result = aggregate_outcomes([], [f"Simulation RPC request failed ({type(e).__name__})"])
             unknown_ledger.record(SIMULATION_PROVIDER, CHAIN_ID, "failed")
         else:
-            # It ran; a pool that could not be simulated, or no supported pool, leaves the sell unknown.
+            # It ran. Undecided, it failed when the RPC could not simulate a pool, and is unknown when a
+            # pool could not be decided or no supported pool was found.
             decided = result["is_honeypot"] is not None and not result.get("simulation_failed")
             unknown_ledger.record(
-                SIMULATION_PROVIDER, CHAIN_ID, "answered" if decided else "unknown"
+                SIMULATION_PROVIDER,
+                CHAIN_ID,
+                "answered" if decided else "failed" if result.get("rpc_failed") else "unknown",
             )
         finally:
             self._inflight.pop(flight_key, None)
@@ -505,8 +512,9 @@ class ArbitrumSimulator:
                     # A follow-up that could not run leaves the first attempt's buy verdict standing.
                     if sized["can_buy"] is not None:
                         outcome = sized
-                    elif sized["simulation_failed"]:
-                        outcome["simulation_failed"] = True
+                    elif sized["simulation_failed"] or sized["rpc_failed"]:
+                        outcome["simulation_failed"] = sized["simulation_failed"]
+                        outcome["rpc_failed"] = sized["rpc_failed"]
                         outcome["reason"] += f"; sized follow-up: {sized['reason']}"
                 outcomes.append(outcome)
         # Pools are ordered by the WETH they hold. When the deepest one sells at a tax below the
@@ -567,11 +575,11 @@ class ArbitrumSimulator:
             outcome["block"] = source_block
             return outcome
         except SimulationUnavailable as e:
-            return _outcome(pool, e.reason, simulation_failed=True)
+            return _outcome(pool, e.reason, rpc_failed=True)
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.warning("Arbitrum simulation request failed: %s", type(e).__name__)
             return _outcome(
-                pool, f"Simulation RPC request failed ({type(e).__name__})", simulation_failed=True
+                pool, f"Simulation RPC request failed ({type(e).__name__})", rpc_failed=True
             )
 
     async def _request(self, session, calls: list) -> list:

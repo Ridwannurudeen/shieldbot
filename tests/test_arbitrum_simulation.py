@@ -4,16 +4,19 @@ unattributable sell failures, RPC failures, pool discovery and the adapter's int
 import copy
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from eth_abi import encode
 from eth_utils import keccak
 
 from adapters.arbitrum import SIMULATION_RPC_URL, ArbitrumAdapter
+from adapters.evm_base import EvmAdapter
 from analyzers.honeypot import HoneypotAnalyzer
 from core.analyzer import AnalysisContext
+from core.unknown_ledger import UnknownLedger
 from services.arbitrum_simulation import (
+    CHAIN_ID,
     MAX_POOLS,
     MIN_TRAP_COST_WEI,
     V2_ROUTES,
@@ -209,7 +212,31 @@ def test_two_v2_swaps_paying_the_seller_leave_the_sell_tax_unmeasured():
     calls_by_label(fixture)["sell"]["logs"].append(duplicate)
     outcome = evaluate(fixture)
     assert (outcome["sell_tax"], outcome["can_sell"]) == (None, True)
+    assert outcome["simulation_failed"] is False
     assert "sell tax unmeasurable" in outcome["reason"]
+
+
+@pytest.mark.asyncio
+async def test_a_sell_whose_tax_could_not_be_measured_is_sellable_at_an_unknown_tax_and_scores_nothing():
+    fixture = copy.deepcopy(load("v2_fee_on_transfer_sized"))
+    duplicate = copy.deepcopy(_seller_swap(fixture))
+    calls_by_label(fixture)["sell"]["logs"].append(duplicate)
+    service = _service_with(fixture, pools={(V2_ROUTES["uniswap-v2"][0], None): fixture["pool"]})
+    unavailable = AsyncMock(return_value={"status": "unknown", "reason": "GoPlus has no data", "data": {}})
+    with fresh_addresses(fixture), patch.object(ScamDatabase, "fetch_token_security", new=unavailable):
+        result = await HoneypotAnalyzer(service).analyze(
+            AnalysisContext(fixture["token"], chain_id=42161)
+        )
+    data = result.data
+    assert (data["is_honeypot"], data["can_sell"], data["buy_tax"], data["sell_tax"]) == (
+        False,
+        True,
+        2.0,
+        None,
+    )
+    assert data["simulation_failed"] is False
+    assert data["status"] == "unknown"
+    assert result.score == 0
 
 
 def test_a_real_honeypot_recorded_live_is_caught():
@@ -435,8 +462,33 @@ async def test_a_crashed_simulation_handler_leaves_every_trade_field_unknown():
     with fresh_addresses(fixture):
         result = await simulator_for(rpc).simulate(fixture["token"])
     assert all(result[field] is None for field in FIELDS)
-    assert result["simulation_failed"] is True
+    # Nothing about the token was observed: no failed simulation to score, only an unknown.
+    assert "simulation_failed" not in result
+    assert result["rpc_failed"] is True
     assert "eth_simulateV1 failed (JSON-RPC error -32603)" in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_a_sized_follow_up_the_rpc_could_not_run_keeps_the_buy_evidence_without_a_failed_simulation():
+    first = load("v2_fee_on_transfer")
+    crashed = {"jsonrpc": "2.0", "error": {"code": -32603, "message": "method handler crashed"}}
+    replies = iter([first["response"], crashed])
+    rpc = FakeRpc(
+        first,
+        pools={(V2_ROUTES["uniswap-v2"][0], None): first["pool"]},
+        simulate=lambda index: {**next(replies), "id": index},
+    )
+    with fresh_addresses(first):
+        result = await simulator_for(rpc).simulate(first["token"])
+    assert (result["can_buy"], result["buy_tax"], result["can_sell"], result["is_honeypot"]) == (
+        True,
+        2.0,
+        None,
+        None,
+    )
+    assert result["rpc_failed"] is True
+    assert "simulation_failed" not in result
+    assert "sized follow-up: eth_simulateV1 failed (JSON-RPC error -32603)" in result["reason"]
 
 
 @pytest.mark.asyncio
@@ -543,7 +595,11 @@ async def test_an_arbitrum_token_scan_now_completes_from_the_simulation():
 
 
 @pytest.mark.asyncio
-async def test_a_failed_arbitrum_simulation_still_falls_back_to_goplus_and_stays_unknown():
+async def test_an_arbitrum_simulation_the_rpc_could_not_run_is_unknown_scores_nothing_and_counts_failed(
+    monkeypatch,
+):
+    ledger = UnknownLedger()
+    monkeypatch.setattr("services.arbitrum_simulation.unknown_ledger", ledger)
     fixture = load("v3_arb")
     service = _service_with(
         fixture,
@@ -551,6 +607,7 @@ async def test_a_failed_arbitrum_simulation_still_falls_back_to_goplus_and_stays
             index, error={"code": -32603, "message": "method handler crashed"}
         ),
     )
+    # GoPlus's answer for a new Arbitrum token: no buy or sell tax, so it cannot say the token sells.
     goplus = AsyncMock(
         return_value={
             "status": "ok",
@@ -559,19 +616,54 @@ async def test_a_failed_arbitrum_simulation_still_falls_back_to_goplus_and_stays
             "data": {
                 "is_honeypot": "0",
                 "cannot_buy": "0",
-                "cannot_sell_all": "0",
+                "buy_tax": "",
+                "sell_tax": "",
                 "transfer_pausable": "0",
-                "buy_tax": "0",
-                "sell_tax": "0",
             },
         }
     )
     with fresh_addresses(fixture), patch.object(ScamDatabase, "fetch_token_security", new=goplus):
-        data = await service.fetch_honeypot_data(fixture["token"], chain_id=42161)
+        result = await HoneypotAnalyzer(service).analyze(
+            AnalysisContext(fixture["token"], chain_id=42161)
+        )
     goplus.assert_awaited()
-    assert data["status"] == "unknown"
-    assert data["can_sell"] is None
-    assert "Honeypot simulation failed (unresolved)" in data["reason"]
+    assert result.data["status"] == "unknown"
+    assert result.data["can_sell"] is None
+    assert result.data["simulation_failed"] is False
+    assert "eth_simulateV1 failed (JSON-RPC error -32603)" in result.data["reason"]
+    assert result.score == 0
+    assert not any("treat as suspicious" in flag for flag in result.flags)
+    counts = ledger.for_chain(CHAIN_ID)["eth_simulateV1"]
+    assert (counts["answered"], counts["unknown"], counts["failed"]) == (0, 0, 1)
+
+
+@pytest.mark.asyncio
+async def test_a_honeypot_is_simulation_failure_still_scores_as_suspicious():
+    # honeypot.is (Ethereum, BNB Chain, Base) ran its own simulation of the token and could not finish it.
+    adapter = EvmAdapter.__new__(EvmAdapter)
+    adapter._chain_id = 56
+    adapter._honeypot_chain_id = 56
+    adapter._chain_name = "BSC"
+    adapter._honeypot_is_replies = {}
+    client = Web3Client.__new__(Web3Client)
+    client._adapters = {56: adapter}
+    response = AsyncMock(status=200)
+    response.json.return_value = {"simulationSuccess": False}
+    session = MagicMock()
+    session.get.return_value.__aenter__.return_value = response
+    unavailable = AsyncMock(return_value={"status": "unknown", "reason": "GoPlus has no data", "data": {}})
+    with (
+        patch("adapters.evm_base.aiohttp.ClientSession") as http,
+        patch.object(ScamDatabase, "fetch_token_security", new=unavailable),
+    ):
+        http.return_value.__aenter__.return_value = session
+        result = await HoneypotAnalyzer(HoneypotService(client)).analyze(
+            AnalysisContext("0x" + "ab" * 20, chain_id=56)
+        )
+    assert result.data["simulation_failed"] is True
+    assert result.data["field_providers"]["simulation_failed"] == "honeypot.is"
+    assert any("treat as suspicious" in flag for flag in result.flags)
+    assert result.score == 40
 
 
 @pytest.mark.asyncio
@@ -630,6 +722,26 @@ async def test_a_shallower_pool_refusing_the_sell_leaves_the_token_unknown_when_
         f"not counted as a trap because the pool holding the most WETH, {fixture['pool']}, sold "
         "(sell tax 0%), so sellability is left unknown"
     ) in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_a_pool_the_rpc_could_not_simulate_leaves_the_token_unknown_beside_a_clean_pool():
+    crashed = {
+        "response": {"jsonrpc": "2.0", "error": {"code": -32603, "message": "method handler crashed"}}
+    }
+    fixture, rpc = _pools_answering(load("v3_arb"), crashed)
+    with fresh_addresses(fixture):
+        result = await simulator_for(rpc).simulate(fixture["token"])
+    # The pool nobody observed may be the one that traps; only the clean pool's buy stands.
+    assert {field: result[field] for field in FIELDS} == {
+        "is_honeypot": None,
+        "buy_tax": None,
+        "sell_tax": None,
+        "can_buy": True,
+        "can_sell": None,
+    }
+    assert "simulation_failed" not in result
+    assert "eth_simulateV1 failed (JSON-RPC error -32603)" in result["reason"]
 
 
 def _sell_taxed(fixture, percent):
