@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
+from eth_utils import keccak
 
 from adapters.arbitrum import ArbitrumAdapter
 from adapters.evm_base import EvmAdapter
@@ -191,3 +192,123 @@ async def test_the_telegram_report_of_a_simulated_clean_token_is_unchanged():
     # Byte for byte what the data without the new key rendered.
     before = {key: value for key, value in analyzed.data.items() if key != "rpc_failed"}
     assert report == format_full_report(risk, {}, {}, {}, honeypot_data=before)
+
+
+# --- a discovery lookup the node could not answer ---------------------------------------------------
+
+# What a node under load answers, over HTTP 200, instead of a lookup's result.
+NODE_ERROR = {"code": -32000, "message": "execution aborted (timeout = 5s)"}
+# What the Arbitrum One and Robinhood Chain RPCs answer for a call that reverts (both checked
+# 2026-09-30: totalSupply() on a contract without it).
+REVERTED = {"code": 3, "message": "execution reverted", "data": "0x"}
+
+
+def calldata_of(signature):
+    return "0x" + keccak(text=signature)[:4].hex()
+
+
+def answering_with(rpc, error, fails):
+    """The fake RPC, with `error` in place of every row whose (method, params) `fails` selects."""
+
+    async def request(session, calls):
+        rows = await rpc(session, calls)
+        return [
+            {"jsonrpc": "2.0", "id": row["id"], "error": error} if fails(method, params) else row
+            for (method, params), row in zip(calls, rows)
+        ]
+
+    return request
+
+
+def eth_call_to(selector=None, to=None):
+    def fails(method, params):
+        if method != "eth_call":
+            return False
+        call = params[0]
+        return (selector is None or call["data"].startswith(selector)) and (
+            to is None or call["to"] == to
+        )
+
+    return fails
+
+
+ARBITRUM_LOOKUPS = {
+    "totalSupply": eth_call_to(calldata_of("totalSupply()")),
+    "v3-factory": eth_call_to(calldata_of("getPool(address,address,uint24)")),
+    "v2-factories": eth_call_to(calldata_of("getPair(address,address)")),
+    "weth-balance": eth_call_to(to="0x82af49447d8a07e3bd95bd0d56f35241523fbab1"),
+}
+ROBINHOOD_LOOKUPS = {
+    "totalSupply": (eth_call_to(calldata_of("totalSupply()")), {}),
+    "v2-factory": (eth_call_to(calldata_of("getPair(address,address)")), {}),
+    "doppler-hook": (eth_call_to(calldata_of("getState(address)")), {}),
+    "pool-manager": (eth_call_to(calldata_of("extsload(bytes32)")), {}),
+    "pair-reserves": (
+        eth_call_to(calldata_of("getReserves()")),
+        {"pair": "0x" + "3c" * 20, "reserves": (10**20, 10**27)},
+    ),
+    "block-number": (lambda method, params: method == "eth_blockNumber", {}),
+    "initialize-logs": (lambda method, params: method == "eth_getLogs", {}),
+}
+
+
+def discovery_with(chain_id, error, lookup):
+    if chain_id == 42161:
+        return arbitrum_adapter(
+            answering_with(ArbitrumRpc(load_arbitrum("v3_arb")), error, ARBITRUM_LOOKUPS[lookup])
+        )
+    fails, tables = ROBINHOOD_LOOKUPS[lookup]
+    return adapter_with(answering_with(RobinhoodRpc(TOKEN, 10**27, **tables), error, fails))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "chain_id,lookup",
+    [(42161, lookup) for lookup in ARBITRUM_LOOKUPS] + [(4663, lookup) for lookup in ROBINHOOD_LOOKUPS],
+)
+async def test_a_discovery_lookup_the_node_could_not_answer_stays_unknown_beside_a_complete_clean_goplus_answer(
+    chain_id, lookup
+):
+    data, analyzed, risk, extension = await scan(chain_id, discovery_with(chain_id, NODE_ERROR, lookup))
+    assert data["status"] == analyzed.data["status"] == risk["status"] == "unknown"
+    assert risk["risk_level"] != "LOW"
+    assert extension["risk_classification"] != "SAFE"
+    assert data["can_sell"] is None and data["coverage"]["can_sell"] is False
+    assert data["simulation_failed"] is False and analyzed.score == 0
+    assert data["rpc_failed"] is True
+    assert "No supported pool found" not in data["reason"]
+    assert "(JSON-RPC error -32000)" in data["reason"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "chain_id,lookup",
+    [(42161, "v3-factory"), (42161, "weth-balance"), (4663, "doppler-hook"), (4663, "pool-manager")],
+)
+async def test_a_getter_that_reverts_is_not_an_answer_of_no_pool(chain_id, lookup):
+    # A pool getter, a mapping read or a WETH balance never reverts on a working node: no answer.
+    data, analyzed, risk, extension = await scan(chain_id, discovery_with(chain_id, REVERTED, lookup))
+    assert data["status"] == "unknown" and data["rpc_failed"] is True
+    assert "No supported pool found" not in data["reason"]
+    assert "(JSON-RPC error 3)" in data["reason"]
+    assert risk["risk_level"] != "LOW" and extension["risk_classification"] != "SAFE"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663])
+@pytest.mark.parametrize(
+    "reverted",
+    # As both simulation RPCs answer a revert, and as other nodes word it.
+    [REVERTED, {"code": -32000, "message": "execution reverted"}],
+    ids=["code-3", "message"],
+)
+async def test_a_total_supply_that_reverts_is_still_answered_by_a_complete_clean_goplus_answer(
+    chain_id, reverted
+):
+    # A contract without totalSupply() reverts, legitimately: nothing to simulate, and GoPlus decides.
+    data, analyzed, risk, extension = await scan(chain_id, discovery_with(chain_id, reverted, "totalSupply"))
+    assert "totalSupply() unavailable; cannot size a buy" in data["reason"]
+    assert data["can_sell"] is True and data["field_providers"]["can_sell"] == "goplus"
+    assert data["status"] == analyzed.data["status"] == risk["status"] == "ok"
+    assert (analyzed.score, risk["risk_level"], extension["risk_classification"]) == (0, "LOW", "SAFE")
+    assert data["rpc_failed"] is False
