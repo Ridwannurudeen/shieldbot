@@ -56,6 +56,7 @@ class HoneypotService:
             'is_honeypot': None,
             'honeypot_reason': None,
             'simulation_failed': False,
+            'rpc_failed': False,
             'low_tax_honeypot': False,
             'likely_false_positive': False,
             'buy_tax': None,
@@ -76,6 +77,10 @@ class HoneypotService:
                     if response.get(field) is True:
                         data[field] = True
                         data['field_providers'][field] = 'honeypot.is'
+                # Only ShieldBot's own simulations (Robinhood Chain, Arbitrum One) report one that could not run.
+                if response.get('rpc_failed') is True:
+                    data['rpc_failed'] = True
+                    data['field_providers']['rpc_failed'] = 'eth_simulateV1'
                 if response.get('simulation_success') is False:
                     simulation_success = False
                 elif response.get('simulation_success') is True and simulation_success is None:
@@ -136,8 +141,17 @@ class HoneypotService:
                 data['field_providers'].pop('can_sell', None)
             reasons.append('Honeypot simulation failed (unresolved)')
 
+        # ShieldBot's own simulation could not run. GoPlus misses the honeypots it exists to catch, so a
+        # GoPlus answer cannot establish sellability instead; unknown, but nothing about the token was
+        # observed, so it is not scored as suspicious.
+        if data['rpc_failed']:
+            if data['can_sell'] is True:
+                data['can_sell'] = None
+                data['field_providers'].pop('can_sell', None)
+            reasons.append('Honeypot simulation could not run (unresolved)')
+
         data['coverage'] = {field: data[field] is not None for field in _TRADE_FIELDS}
-        if data['simulation_failed']:
+        if data['simulation_failed'] or data['rpc_failed']:
             data['coverage']['can_sell'] = False
         missing = [field for field, covered in data['coverage'].items() if not covered]
         data['status'] = 'unknown' if missing else 'ok'

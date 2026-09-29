@@ -537,10 +537,13 @@ class ArbitrumSimulator:
         except SimulationUnavailable as e:
             logger.warning("Arbitrum simulation unavailable: %s", type(e).__name__)
             result = aggregate_outcomes([], [e.reason])
+            # The simulation could not run, so it cannot say the token sells; nor can GoPlus.
+            result["rpc_failed"] = True
             unknown_ledger.record(SIMULATION_PROVIDER, CHAIN_ID, "failed")
         except Exception as e:
             logger.error("Arbitrum simulation failed: %s", type(e).__name__)
             result = aggregate_outcomes([], [f"Simulation RPC request failed ({type(e).__name__})"])
+            result["rpc_failed"] = True
             unknown_ledger.record(SIMULATION_PROVIDER, CHAIN_ID, "failed")
         else:
             # It ran. Undecided, it failed when the RPC could not simulate a pool, and is unknown when a
