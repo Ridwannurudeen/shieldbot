@@ -812,3 +812,28 @@ async def test_a_token_button_with_a_chain_that_is_not_ascii_digits_is_rejected(
 
     bot_chain_functions['check_token'].assert_not_awaited()
     assert query.message.reply_text.await_args.args == ('\N{CROSS MARK} Invalid address format.',)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663])
+async def test_the_bot_legacy_token_report_never_calls_a_token_not_a_honeypot_after_a_simulation_that_could_not_run(
+    bot_report_functions, chain_id,
+):
+    # format_token_result renders the legacy scanner's result, whose is_honeypot comes from the adapter
+    # alone, never from GoPlus: a simulation that could not run leaves it None.
+    from unittest.mock import AsyncMock
+    from scanner.token_scanner import TokenScanner
+    from services.robinhood_simulation import SimulationUnavailable
+    from tests.test_own_simulation_failure import arbitrum_adapter
+    from tests.test_robinhood_simulation import TOKEN, adapter_with
+    from utils.web3_client import Web3Client
+
+    request = AsyncMock(side_effect=SimulationUnavailable('RPC HTTP 503'))
+    client = Web3Client.__new__(Web3Client)
+    client._adapters = {chain_id: arbitrum_adapter(request) if chain_id == 42161 else adapter_with(request)}
+    result = {'address': TOKEN, 'checks': {'can_sell': None}, 'risks': []}
+    await TokenScanner(client)._check_honeypot(TOKEN, result, chain_id=chain_id)
+    assert result['is_honeypot'] is None
+    report = bot_report_functions['format_token_result'](result)
+    assert 'Not a honeypot' not in report
+    assert 'Unknown (honeypot data incomplete)' in report
