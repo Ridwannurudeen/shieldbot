@@ -7,10 +7,11 @@ import pytest
 from core.telegram_formatter import format_full_report
 from tests.test_arbitrum_simulation import (
     _pools_answering,
+    as_confirmation,
     error_string,
     failed_sell,
-    fresh_addresses,
     load,
+    run_addresses,
 )
 from tests.test_own_simulation_failure import arbitrum_adapter, scan
 
@@ -18,8 +19,9 @@ from tests.test_own_simulation_failure import arbitrum_adapter, scan
 @pytest.mark.asyncio
 async def test_a_trap_cleared_by_the_deepest_pools_sell_stays_suspicious_beside_a_complete_clean_goplus_answer():
     clean = load("v3_arb")
-    fixture, rpc = _pools_answering(clean, failed_sell(clean, error_string("STF")))
-    with fresh_addresses(fixture):
+    trapped = failed_sell(clean, error_string("STF"))
+    fixture, rpc = _pools_answering(clean, trapped, as_confirmation(trapped))
+    with run_addresses(fixture, "run", "run", "confirm"):
         data, analyzed, risk, extension = await scan(42161, arbitrum_adapter(rpc), fixture["token"])
     assert data["status"] == analyzed.data["status"] == risk["status"] == "unknown"
     assert risk["risk_level"] != "LOW"
@@ -42,8 +44,9 @@ async def test_a_trap_cleared_by_the_deepest_pools_sell_stays_suspicious_beside_
 @pytest.mark.asyncio
 async def test_a_trapped_deepest_pool_is_still_a_honeypot_beside_a_shallower_clean_one_and_goplus():
     clean = load("v3_arb")
-    fixture, rpc = _pools_answering(failed_sell(clean, error_string("STF")), clean)
-    with fresh_addresses(fixture):
+    trapped = failed_sell(clean, error_string("STF"))
+    fixture, rpc = _pools_answering(trapped, as_confirmation(trapped), clean)
+    with run_addresses(fixture, "run", "confirm", "run"):
         data, analyzed, risk, extension = await scan(42161, arbitrum_adapter(rpc), fixture["token"])
     assert (data["is_honeypot"], data["can_sell"]) == (True, False)
     assert data["field_providers"]["is_honeypot"] == "eth_simulateV1"

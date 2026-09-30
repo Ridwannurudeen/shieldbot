@@ -519,8 +519,17 @@ async def test_dexscreener_lookups_are_counted(ledger, reply, outcome):
         (AsyncMock(return_value={"is_honeypot": True, "simulation_failed": True}), "unknown"),
         (AsyncMock(return_value={"is_honeypot": None}), "unknown"),
         (AsyncMock(side_effect=aiohttp.ClientConnectionError()), "failed"),
+        (AsyncMock(return_value={"is_honeypot": None, "rpc_failed": True}), "failed"),
+        (AsyncMock(return_value={"is_honeypot": True, "rpc_failed": True}), "answered"),
     ],
-    ids=["decided", "one-pool-failed", "no-supported-pool", "rpc-error"],
+    ids=[
+        "decided",
+        "one-pool-failed",
+        "no-supported-pool",
+        "rpc-error",
+        "one-pool-unsimulated",
+        "trap-beside-an-unsimulated-pool",
+    ],
 )
 async def test_robinhood_simulations_are_counted_once_per_token(ledger, run, outcome):
     from services.robinhood_simulation import RobinhoodSimulator

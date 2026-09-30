@@ -2,6 +2,7 @@
 unknown, even beside a complete and clean GoPlus answer: GoPlus misses the honeypots the simulation exists to
 catch (it reports the real Arbitrum honeypot ARBROKER as not a honeypot)."""
 
+import copy
 import dataclasses
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -19,9 +20,22 @@ from core.risk_engine import RiskEngine
 from core.telegram_formatter import format_full_report
 from services.honeypot_service import HoneypotService
 from services.robinhood_simulation import SimulationUnavailable
+from services.arbitrum_simulation import V2_ROUTES
 from tests.test_arbitrum_simulation import FakeRpc as ArbitrumRpc
+from tests.test_arbitrum_simulation import (
+    _answering,
+    _pools_answering,
+    _seller_swap,
+    as_confirmation,
+    calls_by_label,
+    error_string,
+    failed_sell,
+    run_addresses,
+)
+from tests.test_arbitrum_simulation import fresh_addresses as arbitrum_addresses
 from tests.test_arbitrum_simulation import load as load_arbitrum
-from tests.test_robinhood_simulation import TOKEN, adapter_with, replay, rpc_for
+from tests.test_robinhood_simulation import TOKEN, adapter_with, replay, rpc_for, set_uint
+from tests.test_robinhood_simulation import calls_by_label as robinhood_calls
 from tests.test_robinhood_simulation import FakeRpc as RobinhoodRpc
 from tests.test_robinhood_simulation import fresh_addresses as robinhood_addresses
 from tests.test_robinhood_simulation import load as load_robinhood
@@ -90,6 +104,184 @@ async def test_a_simulation_that_could_not_run_stays_unknown_beside_a_complete_c
     assert "Honeypot simulation could not run (unresolved)" in data["reason"]
     assert data["rpc_failed"] is True
     assert data["field_providers"]["rpc_failed"] == "eth_simulateV1"
+
+
+def assert_unknown_never_safe(data, analyzed, risk, extension):
+    assert data["status"] == analyzed.data["status"] == risk["status"] == "unknown"
+    assert risk["risk_level"] != "LOW"
+    assert extension["risk_classification"] != "SAFE"
+
+
+@pytest.mark.asyncio
+async def test_a_4663_pool_the_rpc_could_not_simulate_stays_unknown_beside_a_complete_clean_goplus_answer():
+    fixture = load_robinhood("v2_router02")
+    request, _ = replay(fixture)
+    crashed = {"error": {"code": -32603, "message": "method handler crashed"}}
+    adapter = adapter_with(rpc_for(fixture, simulations=[(request, crashed)]))
+    with robinhood_addresses(fixture):
+        data, analyzed, risk, extension = await scan(4663, adapter, fixture["token"])
+    assert_unknown_never_safe(data, analyzed, risk, extension)
+    assert data["can_sell"] is None and data["rpc_failed"] is True
+    assert "Honeypot simulation could not run (unresolved)" in data["reason"]
+    assert analyzed.score == 0
+
+
+@pytest.mark.asyncio
+async def test_a_trap_its_re_run_did_not_reproduce_stays_unknown_beside_a_complete_clean_goplus_answer():
+    clean = load_arbitrum("v3_arb")
+    trapped = failed_sell(clean, error_string("STF"))
+    adapter = arbitrum_adapter(_answering(trapped, trapped, as_confirmation(clean)))
+    with run_addresses(trapped, "run", "confirm"):
+        data, analyzed, risk, extension = await scan(42161, adapter, trapped["token"])
+    assert_unknown_never_safe(data, analyzed, risk, extension)
+    # A trap seen once: the simulation failed, which is scored as suspicious.
+    assert data["can_sell"] is None and data["simulation_failed"] is True
+    assert "the trap did not reproduce" in data["reason"]
+    assert analyzed.score == 40
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663])
+async def test_a_failed_own_simulation_is_labelled_eth_simulatev1_and_still_scores_as_suspicious(chain_id):
+    if chain_id == 42161:
+        # A trap the re-run did not reproduce.
+        clean = load_arbitrum("v3_arb")
+        trapped = failed_sell(clean, error_string("STF"))
+        adapter = arbitrum_adapter(_answering(trapped, trapped, as_confirmation(clean)))
+        addresses, token = run_addresses(trapped, "run", "confirm"), trapped["token"]
+    else:
+        # The token's balanceOf answers nothing readable.
+        fixture = copy.deepcopy(load_robinhood("v2_router02"))
+        robinhood_calls(fixture)["delivered"]["returnData"] = "0x"
+        adapter = adapter_with(rpc_for(fixture))
+        addresses, token = robinhood_addresses(fixture), fixture["token"]
+    with addresses:
+        data, analyzed, risk, extension = await scan(chain_id, adapter, token)
+    assert data["simulation_failed"] is True
+    assert data["field_providers"]["simulation_failed"] == "eth_simulateV1"
+    assert any("treat as suspicious" in flag for flag in analyzed.flags)
+    assert analyzed.score == 40
+    assert_unknown_never_safe(data, analyzed, risk, extension)
+
+
+@pytest.mark.asyncio
+async def test_a_sell_at_an_unmeasured_tax_keeps_the_tax_unknown_beside_a_complete_clean_goplus_answer():
+    fixture = copy.deepcopy(load_arbitrum("v2_fee_on_transfer_sized"))
+    duplicate = copy.deepcopy(_seller_swap(fixture))
+    calls_by_label(fixture)["sell"]["logs"].append(duplicate)
+    rpc = ArbitrumRpc(fixture, pools={(V2_ROUTES["uniswap-v2"][0], None): fixture["pool"]})
+    with arbitrum_addresses(fixture):
+        data, analyzed, risk, extension = await scan(42161, arbitrum_adapter(rpc), fixture["token"])
+    assert_unknown_never_safe(data, analyzed, risk, extension)
+    # The simulation sold, so it can sell; GoPlus's 0% is not that sell's tax.
+    assert (data["can_sell"], data["sell_tax"]) == (True, None)
+    assert data["field_providers"]["can_sell"] == "eth_simulateV1"
+    assert "sell_tax" not in data["field_providers"]
+    assert data["simulation_failed"] is False and analyzed.score == 0
+
+
+@pytest.mark.asyncio
+async def test_a_4663_sell_at_an_unmeasured_tax_keeps_the_tax_unknown_beside_a_complete_clean_goplus_answer():
+    # The pair's balance rose by more than the seller sent, so the V2 sell tax cannot be measured.
+    fixture = copy.deepcopy(load_robinhood("v2_router02"))
+    calls = robinhood_calls(fixture)
+    set_uint(
+        calls["pool_after_sell"], int(calls["pool_before_sell"]["returnData"], 16) + fixture["amount"] + 1
+    )
+    with robinhood_addresses(fixture):
+        data, analyzed, risk, extension = await scan(4663, adapter_with(rpc_for(fixture)), fixture["token"])
+    assert_unknown_never_safe(data, analyzed, risk, extension)
+    assert (data["can_sell"], data["sell_tax"]) == (True, None)
+    assert data["field_providers"]["can_sell"] == "eth_simulateV1"
+    assert "sell_tax" not in data["field_providers"]
+    assert data["simulation_failed"] is False and analyzed.score == 0
+
+
+def goplus_selling_at(tax):
+    """The complete clean GoPlus answer with `tax` as its sell tax, a fraction as GoPlus sends it."""
+    return {**CLEAN_GOPLUS, "data": {**CLEAN_GOPLUS["data"], "sell_tax": tax}}
+
+
+def sell_at_an_unmeasured_tax(chain_id):
+    """The chain's adapter whose own simulation sells at a tax it cannot measure (as in the two tests
+    above), the addresses it runs with and the token."""
+    if chain_id == 42161:
+        fixture = copy.deepcopy(load_arbitrum("v2_fee_on_transfer_sized"))
+        calls_by_label(fixture)["sell"]["logs"].append(copy.deepcopy(_seller_swap(fixture)))
+        rpc = ArbitrumRpc(fixture, pools={(V2_ROUTES["uniswap-v2"][0], None): fixture["pool"]})
+        return arbitrum_adapter(rpc), arbitrum_addresses(fixture), fixture["token"]
+    fixture = copy.deepcopy(load_robinhood("v2_router02"))
+    calls = robinhood_calls(fixture)
+    set_uint(
+        calls["pool_after_sell"], int(calls["pool_before_sell"]["returnData"], 16) + fixture["amount"] + 1
+    )
+    return adapter_with(rpc_for(fixture)), robinhood_addresses(fixture), fixture["token"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663])
+@pytest.mark.parametrize(
+    "tax,percent,score,flag",
+    [
+        ("0.6", 60.0, 40, "Extreme sell tax: 60.0%"),
+        ("0.25", 25.0, 20, None),
+        ("0.205", 20.5, 20, None),
+        ("0.5", 50.0, 20, None),
+        ("0.51", 51.0, 40, "Extreme sell tax: 51.0%"),
+    ],
+    ids=["60", "25", "20.5", "50", "51"],
+)
+async def test_a_high_goplus_sell_tax_beside_a_sell_at_an_unmeasured_tax_is_scored_and_stays_unknown(
+    chain_id, tax, percent, score, flag
+):
+    adapter, addresses, token = sell_at_an_unmeasured_tax(chain_id)
+    with addresses:
+        data, analyzed, risk, extension = await scan(chain_id, adapter, token, goplus_selling_at(tax))
+    # GoPlus's tax is evidence against the token, so it is shown and scored as any sell tax above 20 ...
+    assert (data["sell_tax"], data["field_providers"]["sell_tax"]) == (percent, "goplus")
+    assert analyzed.data["sell_tax"] == percent
+    assert analyzed.score == score
+    assert [f for f in analyzed.flags if f.startswith("Extreme sell tax")] == ([flag] if flag else [])
+    # ... but it is not the simulated sell's tax, so the answer stays incomplete, in the service and in
+    # the analyzer, and the published coverage is what it was with the tax unknown.
+    assert data["coverage"]["sell_tax"] is False
+    assert analyzed.data["coverage"]["sell_tax"] is False
+    assert risk["coverage"]["honeypot"] == 0.8
+    assert_unknown_never_safe(data, analyzed, risk, extension)
+    assert (data["can_sell"], data["field_providers"]["can_sell"]) == (True, "eth_simulateV1")
+    assert data["simulation_failed"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663])
+@pytest.mark.parametrize("tax", ["0.2", "0"], ids=["20", "0"])
+async def test_a_goplus_sell_tax_of_at_most_20_beside_a_sell_at_an_unmeasured_tax_stays_out(chain_id, tax):
+    adapter, addresses, token = sell_at_an_unmeasured_tax(chain_id)
+    with addresses:
+        data, analyzed, risk, extension = await scan(chain_id, adapter, token, goplus_selling_at(tax))
+    assert (data["sell_tax"], analyzed.data["sell_tax"]) == (None, None)
+    assert "sell_tax" not in data["field_providers"]
+    assert data["coverage"]["sell_tax"] is False
+    assert_unknown_never_safe(data, analyzed, risk, extension)
+    assert data["simulation_failed"] is False and analyzed.score == 0
+
+
+@pytest.mark.asyncio
+async def test_a_proven_trap_beside_a_pool_the_rpc_could_not_simulate_stands_with_sellability_uncovered():
+    clean = load_arbitrum("v3_arb")
+    trapped = failed_sell(clean, error_string("STF"))
+    crashed = {
+        "response": {"jsonrpc": "2.0", "error": {"code": -32603, "message": "method handler crashed"}}
+    }
+    fixture, rpc = _pools_answering(trapped, as_confirmation(trapped), crashed)
+    with run_addresses(fixture, "run", "confirm", "run"):
+        data, analyzed, risk, extension = await scan(42161, arbitrum_adapter(rpc), fixture["token"])
+    # The trap stands; the pool nobody simulated leaves the scan incomplete, as a failed one does.
+    assert (data["is_honeypot"], data["can_sell"]) == (True, False)
+    assert data["rpc_failed"] is True and data["coverage"]["can_sell"] is False
+    assert data["status"] == "unknown"
+    assert "Honeypot detected" in analyzed.flags and "Cannot sell token" in analyzed.flags
+    assert risk["risk_level"] != "LOW" and extension["risk_classification"] != "SAFE"
 
 
 @pytest.mark.asyncio
