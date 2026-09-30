@@ -3,6 +3,7 @@ unknown, even beside a complete and clean GoPlus answer: GoPlus misses the honey
 catch (it reports the real Arbitrum honeypot ARBROKER as not a honeypot)."""
 
 import dataclasses
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
@@ -23,7 +24,7 @@ from services.honeypot_service import HoneypotService
 from services.robinhood_simulation import SimulationUnavailable, aggregate_outcomes
 from tests.test_arbitrum_simulation import FakeRpc as ArbitrumRpc
 from tests.test_arbitrum_simulation import load as load_arbitrum
-from tests.test_robinhood_simulation import TOKEN, adapter_with, outcome, replay, rpc_for
+from tests.test_robinhood_simulation import SECRET, TOKEN, adapter_with, outcome, replay, rpc_for
 from tests.test_robinhood_simulation import FakeRpc as RobinhoodRpc
 from tests.test_robinhood_simulation import fresh_addresses as robinhood_addresses
 from tests.test_robinhood_simulation import load as load_robinhood
@@ -416,6 +417,35 @@ async def test_an_error_the_node_answers_once_is_asked_again_and_the_simulation_
     assert data["field_providers"]["is_honeypot"] == "eth_simulateV1"
     assert data["rpc_failed"] is False and data["simulation_failed"] is False
     assert data["status"] == risk["status"] == "ok"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id,name", [(42161, "Arbitrum"), (4663, "Robinhood")])
+async def test_the_retry_warning_names_the_error_codes_and_never_the_message(
+    no_backoff, caplog, chain_id, name
+):
+    # A node's error message can carry the RPC URL, and with it the API key in the URL.
+    leak = f"https://rpc.invalid/{SECRET}"
+    errors = [
+        {"code": -32000, "message": f"execution aborted (timeout = 5s) {leak}"},
+        {"code": -32603, "message": f"internal error {leak}"},
+        {"code": -32000, "message": f"header not found {leak}"},
+        # A revert is the call's own answer: it is not what the request is asked again for.
+        {**REVERTED, "message": f"execution reverted {leak}"},
+    ]
+    rows = [{"jsonrpc": "2.0", "id": index, "error": error} for index, error in enumerate(errors)]
+    answered = [{"jsonrpc": "2.0", "id": index, "result": "0x"} for index in range(len(errors))]
+    adapter = adapter_posting(chain_id, AsyncMock(side_effect=[rows, answered]))
+    caplog.set_level(logging.DEBUG)
+    caplog.clear()
+    calls = [("eth_call", [{"to": TOKEN, "data": "0x"}, "latest"])] * len(errors)
+    assert await adapter._simulator._request(None, calls) == answered
+    no_backoff.assert_awaited_once_with(1.0)
+    assert [record.getMessage() for record in caplog.records] == [
+        f"{name} simulation RPC answered an error (JSON-RPC error -32000, JSON-RPC error -32603); "
+        "asking once more"
+    ]
+    assert SECRET not in caplog.text
 
 
 # --- the legacy token scanner, which the bot and /api/firewall fall back to -------------------------
