@@ -1014,10 +1014,11 @@ def _buy_reverted(fixture):
     [
         lambda clean: clean,
         lambda clean: failed_sell(clean, error_string("Too little received")),
+        lambda clean: _zero_sell_output(clean, 0),
         _buy_reverted,
         _unreadable,
     ],
-    ids=["sold", "unattributed-revert", "buy-reverted", "unreadable"],
+    ids=["sold", "unattributed-revert", "another-trap", "buy-reverted", "unreadable"],
 )
 async def test_a_trap_the_confirmation_does_not_reproduce_is_unknown_never_clean(rerun):
     clean = load("v3_arb")
@@ -1034,51 +1035,6 @@ async def test_a_trap_the_confirmation_does_not_reproduce_is_unknown_never_clean
     assert "the trap did not reproduce" in result["reason"]
     assert evaluate(trapped)["reason"] in result["reason"]
     assert evaluate(confirmation)["reason"] in result["reason"]
-
-
-def _refused(clean):
-    return failed_sell(clean, error_string("STF"))
-
-
-def _paid_nothing(clean):
-    return _zero_sell_output(clean, 0)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "first,rerun",
-    [(_refused, _paid_nothing), (_paid_nothing, _refused)],
-    ids=["refused-then-zero-output", "zero-output-then-refused"],
-)
-async def test_a_confirmation_that_meets_another_trap_confirms_the_honeypot(first, rerun):
-    # The re-run filters out a trap the first run's own setup met, which shows as a re-run that sells;
-    # a token that refuses one sell and pays nothing for the next traps its holders either way.
-    clean = load("v3_arb")
-    trapped, confirmation = first(clean), rerun(clean)
-    traps = (evaluate(trapped)["trap"], evaluate(confirmation)["trap"])
-    assert None not in traps and traps[0] != traps[1]
-    rpc = _answering(trapped, trapped, as_confirmation(confirmation))
-    with run_addresses(trapped, "run", "confirm"):
-        result = await simulator_for(rpc).simulate(trapped["token"])
-    assert (result["is_honeypot"], result["can_buy"], result["can_sell"]) == (True, True, False)
-    assert "simulation_failed" not in result
-    # Both traps are named.
-    assert "which met another trap" in result["reason"]
-    assert evaluate(trapped)["reason"] in result["reason"]
-    assert evaluate(confirmation)["reason"] in result["reason"]
-
-
-@pytest.mark.asyncio
-async def test_a_shallower_trap_confirmed_as_another_trap_is_still_cleared_by_the_deepest_pools_sell():
-    clean = load("v3_arb")
-    fixture, rpc = _pools_answering(clean, _refused(clean), as_confirmation(_paid_nothing(clean)))
-    with run_addresses(fixture, "run", "run", "confirm"):
-        result = await simulator_for(rpc).simulate(fixture["token"])
-    # Confirmed, the trap is then cleared by the deepest pool's 0% sell, as a reproduced one is.
-    assert (result["is_honeypot"], result["can_sell"]) == (None, None)
-    assert result["simulation_failed"] is True
-    assert "which met another trap" in result["reason"]
-    assert "not counted as a trap" in result["reason"]
 
 
 @pytest.mark.asyncio
