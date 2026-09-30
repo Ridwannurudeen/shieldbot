@@ -197,6 +197,69 @@ async def test_a_4663_sell_at_an_unmeasured_tax_keeps_the_tax_unknown_beside_a_c
     assert data["simulation_failed"] is False and analyzed.score == 0
 
 
+def goplus_selling_at(tax):
+    """The complete clean GoPlus answer with `tax` as its sell tax, a fraction as GoPlus sends it."""
+    return {**CLEAN_GOPLUS, "data": {**CLEAN_GOPLUS["data"], "sell_tax": tax}}
+
+
+def sell_at_an_unmeasured_tax(chain_id):
+    """The chain's adapter whose own simulation sells at a tax it cannot measure (as in the two tests
+    above), the addresses it runs with and the token."""
+    if chain_id == 42161:
+        fixture = copy.deepcopy(load_arbitrum("v2_fee_on_transfer_sized"))
+        calls_by_label(fixture)["sell"]["logs"].append(copy.deepcopy(_seller_swap(fixture)))
+        rpc = ArbitrumRpc(fixture, pools={(V2_ROUTES["uniswap-v2"][0], None): fixture["pool"]})
+        return arbitrum_adapter(rpc), arbitrum_addresses(fixture), fixture["token"]
+    fixture = copy.deepcopy(load_robinhood("v2_router02"))
+    calls = robinhood_calls(fixture)
+    set_uint(
+        calls["pool_after_sell"], int(calls["pool_before_sell"]["returnData"], 16) + fixture["amount"] + 1
+    )
+    return adapter_with(rpc_for(fixture)), robinhood_addresses(fixture), fixture["token"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663])
+@pytest.mark.parametrize(
+    "tax,percent,score,flag",
+    [("0.6", 60.0, 40, "Extreme sell tax: 60.0%"), ("0.25", 25.0, 20, None)],
+    ids=["60", "25"],
+)
+async def test_a_high_goplus_sell_tax_beside_a_sell_at_an_unmeasured_tax_is_scored_and_stays_unknown(
+    chain_id, tax, percent, score, flag
+):
+    adapter, addresses, token = sell_at_an_unmeasured_tax(chain_id)
+    with addresses:
+        data, analyzed, risk, extension = await scan(chain_id, adapter, token, goplus_selling_at(tax))
+    # GoPlus's tax is evidence against the token, so it is shown and scored as any sell tax above 20 ...
+    assert (data["sell_tax"], data["field_providers"]["sell_tax"]) == (percent, "goplus")
+    assert analyzed.data["sell_tax"] == percent
+    assert analyzed.score == score
+    assert [f for f in analyzed.flags if f.startswith("Extreme sell tax")] == ([flag] if flag else [])
+    # ... but it is not the simulated sell's tax, so the answer stays incomplete, in the service and in
+    # the analyzer, and the published coverage is what it was with the tax unknown.
+    assert data["coverage"]["sell_tax"] is False
+    assert analyzed.data["coverage"]["sell_tax"] is False
+    assert risk["coverage"]["honeypot"] == 0.8
+    assert_unknown_never_safe(data, analyzed, risk, extension)
+    assert (data["can_sell"], data["field_providers"]["can_sell"]) == (True, "eth_simulateV1")
+    assert data["simulation_failed"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663])
+@pytest.mark.parametrize("tax", ["0.2", "0"], ids=["20", "0"])
+async def test_a_goplus_sell_tax_of_at_most_20_beside_a_sell_at_an_unmeasured_tax_stays_out(chain_id, tax):
+    adapter, addresses, token = sell_at_an_unmeasured_tax(chain_id)
+    with addresses:
+        data, analyzed, risk, extension = await scan(chain_id, adapter, token, goplus_selling_at(tax))
+    assert (data["sell_tax"], analyzed.data["sell_tax"]) == (None, None)
+    assert "sell_tax" not in data["field_providers"]
+    assert data["coverage"]["sell_tax"] is False
+    assert_unknown_never_safe(data, analyzed, risk, extension)
+    assert data["simulation_failed"] is False and analyzed.score == 0
+
+
 @pytest.mark.asyncio
 async def test_a_proven_trap_beside_a_pool_the_rpc_could_not_simulate_stands_with_sellability_uncovered():
     clean = load_arbitrum("v3_arb")

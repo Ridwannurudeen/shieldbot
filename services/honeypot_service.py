@@ -112,6 +112,8 @@ class HoneypotService:
                 if data[action] is None and data[tax] is not None:
                     data[action] = data[tax] < 100
                     data['field_providers'][action] = data['field_providers'][tax]
+        # A GoPlus sell tax taken for a sell ShieldBot's own simulation made at a tax it could not measure.
+        goplus_tax_for_unmeasured_sell = False
         if any(data[field] is None for field in _TRADE_FIELDS):
             try:
                 response = await ScamDatabase.fetch_token_security(address, chain_id)
@@ -120,14 +122,18 @@ class HoneypotService:
                 if response['reason']:
                     reasons.append(response['reason'])
                 # A sell ShieldBot's own simulation made at a tax it could not measure: GoPlus's tax is not
-                # that sell's, so the sell tax stays unknown.
+                # that sell's, so the sell tax stays unknown. Above 20, where the honeypot analyzer scores
+                # a sell tax, GoPlus's tax is evidence against the token: it is taken and scored, but it
+                # still does not complete the answer (coverage below).
                 unmeasured = (data['can_sell'] is True and data['sell_tax'] is None
                               and data['field_providers'].get('can_sell') == 'eth_simulateV1')
                 for field, value in mapped.items():
-                    if data.get(field) is None and not (unmeasured and field == 'sell_tax'):
+                    if data.get(field) is None and not (unmeasured and field == 'sell_tax'
+                                                        and (value is None or value <= 20)):
                         data[field] = value
                         if value is not None:
                             data['field_providers'][field] = 'goplus'
+                goplus_tax_for_unmeasured_sell = unmeasured and data['sell_tax'] is not None
             except UnsupportedChainError:
                 raise
             except Exception as e:
@@ -158,6 +164,8 @@ class HoneypotService:
         data['coverage'] = {field: data[field] is not None for field in _TRADE_FIELDS}
         if data['simulation_failed'] or data['rpc_failed']:
             data['coverage']['can_sell'] = False
+        if goplus_tax_for_unmeasured_sell:
+            data['coverage']['sell_tax'] = False
         missing = [field for field, covered in data['coverage'].items() if not covered]
         data['status'] = 'unknown' if missing else 'ok'
         if missing:

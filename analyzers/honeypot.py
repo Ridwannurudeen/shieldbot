@@ -35,7 +35,12 @@ class HoneypotAnalyzer(Analyzer):
         if (data.get('simulation_failed') or data.get('rpc_failed')) and data.get('can_sell') is True:
             data['can_sell'] = None
         fields = ('is_honeypot', 'buy_tax', 'sell_tax', 'can_buy', 'can_sell')
+        # A sell tax the service left uncovered (GoPlus's, for a sell ShieldBot's own simulation made at a
+        # tax it could not measure) is scored below, but does not complete the answer.
+        tax_uncovered = (data.get('coverage') or {}).get('sell_tax') is False
         data['coverage'] = {field: data.get(field) is not None for field in fields}
+        if tax_uncovered:
+            data['coverage']['sell_tax'] = False
         if data.get('simulation_failed'):
             data['coverage']['can_sell'] = False
             data['reason'] = data.get('reason') or 'Honeypot simulation failed (unresolved)'
