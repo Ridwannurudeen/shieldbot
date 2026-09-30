@@ -5,7 +5,7 @@ no provider said whether an Arbitrum token can be sold and every Arbitrum token 
 simulates a buy and a sell as services/robinhood_simulation.py does on Robinhood Chain, under the same
 rules, whose helpers it reuses: a token is a honeypot only on evidence attributable to it, anything else
 leaves the result unknown, and pools are combined worst case (aggregate_outcomes). Unlike there, a trap
-is flagged only when one confirmation re-run reproduces it (CONFIRMATION_DELAY_SECONDS).
+is flagged only when one confirmation re-run meets a trap too (CONFIRMATION_DELAY_SECONDS).
 
 Every address, struct layout and revert string here was read on 2026-09-29 from the contracts' verified
 Arbiscan source and their getters:
@@ -102,7 +102,7 @@ TOKEN_REFUSED = {
 }
 V3_UNDERPAID = "IIA"
 EXACT_SINGLE = "(address,address,uint24,address,uint256,uint256,uint160)"
-# A trap is flagged only when one re-run, which two common launch rules cannot trip, reproduces it. A
+# A trap is flagged only when one re-run, which two common launch rules cannot trip, confirms it. A
 # separately funded payer pays for the buy, which the router still delivers to the buyer, so a
 # same-block rule keyed on tx.origin (as in the launch "transferDelay" template) finds no earlier
 # transfer by the seller's origin; and the sell calls run in a second simulated block an hour later, so
@@ -323,7 +323,7 @@ def _outcome(
         "sell_tax": None,
         "simulation_failed": simulation_failed,
         "rpc_failed": rpc_failed,
-        # The attributable evidence of a trap, which a confirmation re-run must reproduce.
+        # The attributable evidence of a trap; a confirmation re-run must meet one too (_confirm_trap).
         "trap": None,
         "reason": reason,
     }
@@ -480,10 +480,13 @@ def evaluate_simulation(
 
 
 def _confirm_trap(first: dict, confirmation: dict) -> dict:
-    """A trap stands when the confirmation re-run reproduces it, or cannot run (the one run's evidence,
-    as before). Any other re-run leaves the sell unknown, never sellable: the first run may have met a
-    launch rule the re-run avoided, or the re-run may have missed the trap. A trap seen once is a failed
-    simulation, scored as suspicious, so no other provider's answer can make the sell look safe."""
+    """A trap stands when the confirmation re-run meets an attributable trap too, the same one or
+    another (a token that refuses one sell and pays nothing for the next traps its holders either way),
+    or cannot run (the one run's evidence, as before). Any other re-run leaves the sell unknown, never
+    sellable: one that sold may have avoided a launch rule the first run met, and one that failed without
+    an attributable trap (a reverted buy, an unattributed revert, unreadable logs) may have missed it. A
+    trap seen once is a failed simulation, scored as suspicious, so no other provider's answer can make
+    the sell look safe."""
     where = f" at block {confirmation['block']}" if confirmation["block"] is not None else ""
     if confirmation["rpc_failed"]:
         return {
@@ -492,6 +495,14 @@ def _confirm_trap(first: dict, confirmation: dict) -> dict:
         }
     if confirmation["trap"] == first["trap"]:
         return {**first, "reason": f"{first['reason']}; reproduced by {CONFIRMATION_RUN}{where}"}
+    if confirmation["trap"] is not None:
+        return {
+            **first,
+            "reason": (
+                f"{first['reason']}; confirmed by {CONFIRMATION_RUN}{where}, which met another trap: "
+                f"{confirmation['reason']}"
+            ),
+        }
     return {
         **first,
         "is_honeypot": None,
