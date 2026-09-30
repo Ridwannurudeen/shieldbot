@@ -16,7 +16,7 @@ const faqs = [
   },
   {
     q: "What does ShieldBot do on Robinhood Chain?",
-    a: "It scans Robinhood Chain tokens, including a buy and sell simulation on supported pool routes, finds new launches and sends launch alerts in Telegram. An on-chain verdict registry and a freshness guard for Robinhood Chain are built and tested, and their deployment is in progress. The released browser extension does not cover Robinhood Chain yet.",
+    a: "It scans Robinhood Chain tokens, including a buy and sell simulation on supported pool routes, finds new launches and sends launch alerts in Telegram. An on-chain verdict registry and a freshness guard were deployed on Robinhood Chain on 27 September 2026, along with a guarded transfer contract that checks the guard. The released browser extension does not cover Robinhood Chain yet.",
   },
   {
     q: "Is ShieldBot free to use?",

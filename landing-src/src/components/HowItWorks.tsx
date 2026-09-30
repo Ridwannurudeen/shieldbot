@@ -57,7 +57,7 @@ const checks = [
   },
   {
     title: "On-chain verdicts",
-    desc: "A verdict registry and a freshness guard let other contracts refuse a token unless it has a recent, good verdict. Built and tested; deployment to Robinhood Chain is in progress.",
+    desc: "A verdict registry and a freshness guard let other contracts refuse a token unless it has a recent, good verdict. Both were deployed on Robinhood Chain on 27 September 2026.",
   },
 ];
 

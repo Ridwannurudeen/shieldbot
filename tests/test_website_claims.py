@@ -158,12 +158,42 @@ def test_mcp_counts_match_the_code():
     from mcp_server.resources import RESOURCE_DEFINITIONS, RESOURCE_TEMPLATE_DEFINITIONS
     from mcp_server.tools import TOOL_DEFINITIONS
 
-    agent = read(COMPONENTS / "AgentSecurity.tsx")
-    # MCP lists parameterised resources as templates; the site counts both as resources.
-    resources = len(RESOURCE_DEFINITIONS) + len(RESOURCE_TEMPLATE_DEFINITIONS)
-    assert f"{len(TOOL_DEFINITIONS)} security tools" in agent
-    assert f"{resources} threat resources" in agent
-    assert f"{len(PROMPT_DEFINITIONS)} analysis prompts" in agent
+    agent = " ".join(read(COMPONENTS / "AgentSecurity.tsx").split())
+    # MCP lists parameterised resources as templates. The site names every resource, and every tool or
+    # resource whose definition says it is not implemented as a stub, so a count never includes a stub
+    # unsaid and only one resource is a threat feed.
+    resources = [definition["name"] for definition in RESOURCE_DEFINITIONS + RESOURCE_TEMPLATE_DEFINITIONS]
+    assert resources == ["Threat Feed", "Agent Health", "Wallet Guardian"], "the MCP resources changed: update the site"
+    stubs = [
+        definition["name"]
+        for definition in TOOL_DEFINITIONS + RESOURCE_TEMPLATE_DEFINITIONS
+        if "not implemented" in definition["description"].lower()
+    ]
+    assert stubs == ["check_approval_risk", "query_threat_graph", "Wallet Guardian"], "an MCP stub changed: update the site"
+    assert "get_robinhood_launches" in [tool["name"] for tool in TOOL_DEFINITIONS]
+    assert (
+        f"with {len(TOOL_DEFINITIONS)} tools (one lists Robinhood Chain launches), a threat feed resource, "
+        f"an agent health resource and {len(PROMPT_DEFINITIONS)} analysis prompts. The approval risk and threat "
+        "graph tools and the wallet guardian resource are stubs that return Unknown."
+    ) in agent
+    assert "threat resources" not in agent
+
+
+def test_the_site_says_the_robinhood_contracts_are_deployed():
+    # docs/DEPLOYMENTS.md: the verdict registry, the freshness guard and the guarded transfer were deployed on
+    # Robinhood Chain on 2026-09-27. No page, source or built, may still call that deployment in progress.
+    deployments = read(ROOT / "docs" / "DEPLOYMENTS.md")
+    for contract in ("ShieldBotVerdictRegistry", "ShieldBotVerdictGuard", "ShieldBotGuardedTransfer"):
+        row = rf"^\| `{contract}` \| Robinhood Chain \(4663\) \| .* \| 2026-09-27 "
+        assert re.search(row, deployments, re.MULTILINE), contract
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    pages = {**landing_texts(), "landing/index.html": read(ROOT / "landing" / "index.html"), "bundle": bundle}
+    for name, text in pages.items():
+        stale = re.search(r"deployment[^.]*in progress", " ".join(text.split()), re.IGNORECASE)
+        assert not stale, f"{name}: {stale.group(0)!r}"
+    for component in ("FAQ.tsx", "HowItWorks.tsx"):
+        prose = " ".join(read(COMPONENTS / component).split())
+        assert "deployed on Robinhood Chain on 27 September 2026" in prose, component
 
 
 def welcome_text() -> str:

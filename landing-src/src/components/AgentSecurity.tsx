@@ -14,7 +14,7 @@ if (verdict.blocked) stop();`,
   {
     version: "V3.1",
     title: "MCP Server",
-    desc: "Model Context Protocol server exposing 9 security tools, 3 threat resources and 2 analysis prompts over SSE, including Robinhood Chain launch data for AI agents.",
+    desc: "Model Context Protocol server for AI agents over SSE, with 9 tools (one lists Robinhood Chain launches), a threat feed resource, an agent health resource and 2 analysis prompts. The approval risk and threat graph tools and the wallet guardian resource are stubs that return Unknown.",
     code: null,
   },
   {
