@@ -139,7 +139,7 @@ async def test_rescue_rpc_gathers_propagate_routing_error(rescue_pipeline, metho
     service._eth_call = AsyncMock(side_effect=UnsupportedChainError('unsupported'))
     argument = {(token, spender): {}} if method == '_verify_allowances' else [token]
     with pytest.raises(UnsupportedChainError, match='unsupported'):
-        await getattr(RescueService, method)(service, wallet, argument, 'https://rpc.invalid')
+        await getattr(RescueService, method)(service, wallet, argument, MagicMock(), 'https://rpc.invalid')
 
 
 @pytest.mark.asyncio
@@ -215,7 +215,7 @@ async def test_rescue_failed_rpc_batch_cannot_look_empty(rescue_pipeline, method
     service._eth_call = AsyncMock(side_effect=RuntimeError('provider unavailable'))
     argument = {(token, spender): {}} if method == '_verify_allowances' else [token]
     with pytest.raises(RuntimeError):
-        await getattr(RescueService, method)(service, wallet, argument, 'https://rpc.invalid')
+        await getattr(RescueService, method)(service, wallet, argument, MagicMock(), 'https://rpc.invalid')
 
 
 @pytest.mark.asyncio
