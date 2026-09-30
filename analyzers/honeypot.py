@@ -5,6 +5,10 @@ from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
 
 logger = logging.getLogger(__name__)
 
+# A sell tax (percent) above this adds to the score. services/honeypot_service.py lets a GoPlus sell
+# tax above it stand in for one ShieldBot's own simulation could not measure, so the two agree.
+SELL_TAX_HIGH = 20
+
 
 class HoneypotAnalyzer(Analyzer):
     """Analyzes honeypot status and tax info."""
@@ -90,7 +94,7 @@ class HoneypotAnalyzer(Analyzer):
         if sell_tax is not None and sell_tax > 50:
             score += 40
             flags.append(f'Extreme sell tax: {sell_tax}%')
-        elif sell_tax is not None and sell_tax > 20:
+        elif sell_tax is not None and sell_tax > SELL_TAX_HIGH:
             score += 20
         if buy_tax is not None and buy_tax > 20:
             score += 10

@@ -3,6 +3,7 @@ import math
 import time
 from decimal import Decimal, InvalidOperation
 
+from analyzers.honeypot import SELL_TAX_HIGH
 from utils.scam_db import ScamDatabase
 
 logger = logging.getLogger(__name__)
@@ -122,14 +123,14 @@ class HoneypotService:
                 if response['reason']:
                     reasons.append(response['reason'])
                 # A sell ShieldBot's own simulation made at a tax it could not measure: GoPlus's tax is not
-                # that sell's, so the sell tax stays unknown. Above 20, where the honeypot analyzer scores
-                # a sell tax, GoPlus's tax is evidence against the token: it is taken and scored, but it
-                # still does not complete the answer (coverage below).
+                # that sell's, so the sell tax stays unknown. Above SELL_TAX_HIGH, where the honeypot
+                # analyzer scores a sell tax, GoPlus's tax is evidence against the token: it is taken and
+                # scored, but it still does not complete the answer (coverage below).
                 unmeasured = (data['can_sell'] is True and data['sell_tax'] is None
                               and data['field_providers'].get('can_sell') == 'eth_simulateV1')
                 for field, value in mapped.items():
                     if data.get(field) is None and not (unmeasured and field == 'sell_tax'
-                                                        and (value is None or value <= 20)):
+                                                        and (value is None or value <= SELL_TAX_HIGH)):
                         data[field] = value
                         if value is not None:
                             data['field_providers'][field] = 'goplus'

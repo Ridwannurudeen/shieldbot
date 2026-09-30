@@ -222,8 +222,12 @@ def sell_at_an_unmeasured_tax(chain_id):
 @pytest.mark.parametrize("chain_id", [42161, 4663])
 @pytest.mark.parametrize(
     "tax,percent,score,flag",
-    [("0.6", 60.0, 40, "Extreme sell tax: 60.0%"), ("0.25", 25.0, 20, None)],
-    ids=["60", "25"],
+    [
+        ("0.6", 60.0, 40, "Extreme sell tax: 60.0%"),
+        ("0.25", 25.0, 20, None),
+        ("0.205", 20.5, 20, None),
+    ],
+    ids=["60", "25", "20.5"],
 )
 async def test_a_high_goplus_sell_tax_beside_a_sell_at_an_unmeasured_tax_is_scored_and_stays_unknown(
     chain_id, tax, percent, score, flag
