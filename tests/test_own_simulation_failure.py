@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 import pytest
 from eth_utils import keccak
+from requests.exceptions import HTTPError
+from web3.exceptions import ContractLogicError
 
 from adapters.arbitrum import ArbitrumAdapter
 from adapters.evm_base import EvmAdapter
@@ -28,6 +30,7 @@ from tests.test_robinhood_simulation import SECRET, TOKEN, adapter_with, outcome
 from tests.test_robinhood_simulation import FakeRpc as RobinhoodRpc
 from tests.test_robinhood_simulation import fresh_addresses as robinhood_addresses
 from tests.test_robinhood_simulation import load as load_robinhood
+from utils.risk_scorer import findings_from_scan_result
 from utils.scam_db import ScamDatabase
 from utils.web3_client import Web3Client
 
@@ -510,6 +513,40 @@ async def answering(web3, chain_id, simulation):
 async def legacy_scan(web3, chain_id, simulation):
     scanner = TokenScanner(await answering(web3, chain_id, simulation))
     return await scanner.check_token(TOKEN, chain_id=chain_id)
+
+
+# A decimals() read that failed: a token without the optional EIP-20 decimals(), a timeout, a 429.
+DECIMALS_FAILURES = {
+    "revert": ContractLogicError("execution reverted"),
+    "timeout": TimeoutError("RPC timeout"),
+    "http-429": HTTPError("429 Client Error: Too Many Requests"),
+}
+
+
+def reading_decimals(chain_id, answer):
+    """Web3Client.can_transfer_token itself, its decimals() read answering `answer` (raising an
+    exception)."""
+    client = Web3Client.__new__(Web3Client)
+    client.erc20_abi = []
+    client._adapters = {chain_id: MagicMock()}
+    call = client.get_web3(chain_id).eth.contract.return_value.functions.decimals.return_value.call
+    if isinstance(answer, Exception):
+        call.side_effect = answer
+    else:
+        call.return_value = answer
+    return client.can_transfer_token
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663])
+@pytest.mark.parametrize("failure", DECIMALS_FAILURES)
+async def test_a_failed_decimals_read_leaves_buying_and_selling_unknown(mock_web3_client, chain_id, failure):
+    mock_web3_client.can_transfer_token = reading_decimals(chain_id, DECIMALS_FAILURES[failure])
+    result = await legacy_scan(mock_web3_client, chain_id, simulation_of(CLEAN_POOL))
+    assert result["checks"]["can_buy"] is None and result["checks"]["can_sell"] is None
+    assert "Token transfers may be restricted or disabled" not in result["risks"]
+    assert "Cannot sell token" not in [finding["message"] for finding in findings_from_scan_result(result)]
+    assert (result["risk_score"], result["status"], result["safety_level"]) == (0, "unknown", "unknown")
 
 
 @pytest.mark.asyncio

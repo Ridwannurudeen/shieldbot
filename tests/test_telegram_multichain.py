@@ -1012,3 +1012,51 @@ async def test_a_legacy_proven_honeypot_publishes_no_stronger_verdict_than_its_e
     assert args[2] is ns['_set_cache'].call_args.args[2]
     assert (args[2]['status'], args[2]['risk_level'], args[2]['safety_level']) == ('unknown',) * 3
     assert build_evidence(4663, TOKEN, args[2], None)['verdict'] == 'UNKNOWN'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663])
+@pytest.mark.parametrize('failure', ['revert', 'timeout', 'http-429'])
+async def test_the_bot_legacy_token_report_never_reads_a_failed_decimals_read_as_cannot_buy_or_sell(
+    bot_report_functions, mock_web3_client, chain_id, failure,
+):
+    from tests.test_own_simulation_failure import (
+        CLEAN_POOL, DECIMALS_FAILURES, legacy_scan, reading_decimals, simulation_of,
+    )
+
+    mock_web3_client.can_transfer_token = reading_decimals(chain_id, DECIMALS_FAILURES[failure])
+    result = await legacy_scan(mock_web3_client, chain_id, simulation_of(CLEAN_POOL))
+    report = bot_report_functions['format_token_result'](result)
+    assert 'Unknown Can Buy' in report and 'Unknown Can Sell' in report
+    for claim in ('❌ Can Buy', '❌ Can Sell', 'DANGER', 'Token transfers may be restricted or disabled'):
+        assert claim not in report
+    assert '**Safety:** ⚪ UNKNOWN' in report
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663])
+async def test_the_bot_legacy_token_report_after_a_decimals_read_is_unchanged(
+    bot_report_functions, mock_web3_client, chain_id,
+):
+    from tests.test_own_simulation_failure import CLEAN_POOL, legacy_scan, reading_decimals, simulation_of
+
+    mock_web3_client.can_transfer_token = reading_decimals(chain_id, 18)
+    result = await legacy_scan(mock_web3_client, chain_id, simulation_of(CLEAN_POOL))
+    assert bot_report_functions['format_token_result'](result) == CLEAN_LEGACY_REPORT
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663])
+@pytest.mark.parametrize('failure', ['revert', 'timeout', 'http-429'])
+async def test_the_bot_legacy_token_report_keeps_a_proven_honeypot_after_a_failed_decimals_read(
+    bot_report_functions, mock_web3_client, chain_id, failure,
+):
+    from tests.test_own_simulation_failure import (
+        DECIMALS_FAILURES, TRAP_POOL, legacy_scan, reading_decimals, simulation_of,
+    )
+
+    mock_web3_client.can_transfer_token = reading_decimals(chain_id, DECIMALS_FAILURES[failure])
+    result = await legacy_scan(mock_web3_client, chain_id, simulation_of(TRAP_POOL))
+    report = bot_report_functions['format_token_result'](result)
+    assert '**Safety:** 🔴 DANGER' in report and '**Risk Score:** 80/100' in report
+    assert '🔴 HONEYPOT DETECTED' in report and '❌ Can Sell' in report

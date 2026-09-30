@@ -322,6 +322,21 @@ async def test_the_legacy_firewall_blocks_a_proven_honeypot_beside_a_sell_it_did
     assert (response['raw_checks']['is_honeypot'], response['raw_checks']['can_sell']) == (True, False)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663])
+@pytest.mark.parametrize('failure', ['revert', 'timeout', 'http-429'])
+async def test_the_legacy_firewall_never_reads_a_failed_decimals_read_as_cannot_sell(
+    consumer_api, mock_web3_client, monkeypatch, chain_id, failure,
+):
+    from tests.test_own_simulation_failure import CLEAN_POOL, DECIMALS_FAILURES, reading_decimals, simulation_of
+
+    api, _ = consumer_api
+    mock_web3_client.can_transfer_token = reading_decimals(chain_id, DECIMALS_FAILURES[failure])
+    response, _ = await legacy_firewall(api, monkeypatch, mock_web3_client, chain_id, simulation_of(CLEAN_POOL))
+    assert_unknown_response(response)
+    assert response['raw_checks']['can_sell'] is None
+
+
 def test_covered_cache_keeps_safe(consumer_api):
     api, _ = consumer_api
     response = api._build_cached_response({

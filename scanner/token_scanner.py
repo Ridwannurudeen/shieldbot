@@ -190,9 +190,6 @@ class TokenScanner:
             can_transfer = await self.web3.can_transfer_token(address, chain_id=chain_id)
             result['checks']['can_buy'] = can_transfer
             result['checks']['can_sell'] = can_transfer
-
-            if not can_transfer:
-                result['risks'].append("Token transfers may be restricted or disabled")
         except UnsupportedChainError:
             raise
         except Exception as e:

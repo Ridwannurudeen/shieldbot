@@ -241,7 +241,7 @@ async def test_transfer_check_leaves_the_event_loop_free(identification_client):
     BadFunctionCallOutput('Empty reply'),
     TimeoutError('RPC timeout'),
 ])
-async def test_transfer_check_failure_is_still_false(identification_client, failure):
+async def test_transfer_check_failure_is_unknown(identification_client, failure):
     w3 = identification_client.get_web3()
     w3.eth.contract.return_value.functions.decimals.return_value.call.side_effect = failure
-    assert await identification_client.can_transfer_token(ADDRESS) is False
+    assert await identification_client.can_transfer_token(ADDRESS) is None
