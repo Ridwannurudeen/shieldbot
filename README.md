@@ -115,7 +115,7 @@ The registry publication path is wired to Robinhood Telegram scans and hunter sc
 
 | Interface in the repository | Entry point and scope |
 |---|---|
-| REST | `POST /api/scan`, `POST /api/firewall`: scan results and transaction analysis. |
+| REST | `POST /api/scan`: a quick contract check with no sell simulation, so a token reads Unknown there, never SAFE. `POST /api/firewall`: transaction analysis and the full token check. |
 | Agent API | `POST /api/agent/firewall`: policy decision; unknown coverage, or a native value with no USD estimate (any chain but BSC and opBNB), requires owner approval rather than automatic allowance. |
 | API keys | `POST /api/keys/free`: one free-tier key (60 requests a minute, 1,000 a day) per email address, created from a single-use emailed link that expires after 30 minutes. Off, with a 503, unless the server has a Resend API key. See [TECHNICAL.md](docs/TECHNICAL.md#api-demo). |
 | Evidence | `GET /api/verdict/4663/{address}`: latest stored evidence and publication status. |

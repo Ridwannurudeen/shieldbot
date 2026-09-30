@@ -906,6 +906,19 @@ async def test_scan_endpoint_preserves_routing_error(routing_error_api):
 
 
 @pytest.mark.asyncio
+async def test_scan_endpoint_preserves_routing_error_from_the_token_check(routing_error_api):
+    from utils.web3_client import UnsupportedChainError
+
+    api, _, scanner, _ = routing_error_api
+    error = UnsupportedChainError("removed chain")
+    scanner.scan_address.return_value = {"is_contract": True, "coverage": {}, "coverage_reasons": {}}
+    api.web3_client.is_token_contract.side_effect = error
+    with pytest.raises(UnsupportedChainError) as exc:
+        await api.scan(api.ScanRequest(address="0x" + "a" * 40))
+    assert exc.value is error
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("endpoint", ["agent_chat", "agent_explain"])
 async def test_agent_endpoint_preserves_routing_error(routing_error_api, monkeypatch, endpoint):
     from utils.web3_client import UnsupportedChainError

@@ -50,7 +50,8 @@ import { ShieldBot } from '@shieldbot/sdk';
 
 const shield = new ShieldBot({ apiKey: 'sb_...' });
 
-// Scan a token. chainId is required.
+// Quick contract check. chainId is required. It simulates no sell, so a token is always 'unknown' here:
+// firewall() runs the full token check.
 const scan = await shield.scan('0xTokenAddress', { chainId: 4663 });
 if (scan.status === 'unknown') {
   // Incomplete analysis: neither safe nor risky. Do not treat it as clean.
@@ -76,7 +77,7 @@ if (!verdict.allowed) {
 
 | Method | Endpoint | API key |
 |--------|----------|---------|
-| `scan(address, { chainId })` | `POST /api/scan` | optional |
+| `scan(address, { chainId })` | `POST /api/scan`: a quick contract check with no sell simulation, so a token is `unknown`, never `SAFE`; use `firewall()` for token safety | optional |
 | `firewall(to, { chainId, from?, data?, value?, onFirst?, finalTimeout? })` | `POST /api/firewall` | optional |
 | `check({ from, to, chainId, data?, value? })` | `POST /api/agent/firewall` | required, with `agentId` and a registered agent |
 | `register(ownerAddress, policy?)` | `POST /api/agent/register` | required, with `agentId` |

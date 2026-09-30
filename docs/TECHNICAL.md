@@ -747,7 +747,7 @@ pytest tests/ --cov=. --cov-report=term-missing
 **API**:
 - [ ] /api/firewall returns correct verdict for honeypots
 - [ ] A streamed /api/firewall request (`Accept: text/event-stream`, Balanced mode) sends its `first` event about 3 s after the handler starts (sooner on a known Block floor, none when the scan finishes first or for a signature request), never `SAFE`, then the final verdict; its analyzers stop at the same 25 s deadline, which starts after the handler's own lookups
-- [ ] /api/scan returns composite risk data
+- [ ] /api/scan returns the quick contract check, and a token reads Unknown there (it simulates no sell), never SAFE
 - [ ] /api/health shows service status
 - [ ] CORS allows extension requests
 - [ ] Handles network errors gracefully (external APIs down)

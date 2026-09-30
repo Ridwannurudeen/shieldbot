@@ -341,6 +341,84 @@ async def test_confirmed_eoa_scan_renders_safe_and_the_degraded_fallback_caution
     assert fallback['verdict'] == 'CAUTION — Risk score 5/100'
 
 
+async def _quick_scan(api, monkeypatch, mock_web3_client, chain_id, scam_matches=()):
+    """/api/scan of a verified 90-day-old contract that every structural provider answered for, scored low
+    unless it has scam matches."""
+    from scanner.transaction_scanner import TransactionScanner
+    mock_web3_client.is_verified_contract.return_value = (True, None)
+    scanner = TransactionScanner(mock_web3_client)
+    scanner.scam_db.check_address = AsyncMock(return_value=list(scam_matches))
+    monkeypatch.setattr(api, 'tx_scanner', scanner)
+    return await api.scan(api.ScanRequest(address='0x' + 'a' * 40, chainId=chain_id))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663, 56])
+@pytest.mark.parametrize('is_token', [True, None], ids=['token', 'token-check-failed'])
+async def test_quick_scan_never_clears_a_token_it_did_not_sell(consumer_api, monkeypatch, mock_web3_client, chain_id, is_token):
+    # /api/scan simulates no sell. A token, or a contract whose token check failed, is Unknown there
+    # however clean its structural checks read: only /api/firewall settles sellability.
+    api, _ = consumer_api
+    mock_web3_client.is_token_contract.return_value = is_token
+    response = await _quick_scan(api, monkeypatch, mock_web3_client, chain_id)
+    assert_unknown_response(response)
+    assert response['risk_level'] == 'UNKNOWN'
+    assert response['coverage']['sellability'] is False
+    assert response['coverage_reasons'] == {'sellability': api._QUICK_SCAN_SELLABILITY_UNKNOWN}
+    assert api._QUICK_SCAN_SELLABILITY_UNKNOWN in response['verdict']
+    mock_web3_client.is_token_contract.assert_awaited_once_with('0x' + 'a' * 40, chain_id=chain_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663, 56])
+async def test_quick_scan_keeps_a_blocked_token_blocked(consumer_api, monkeypatch, mock_web3_client, chain_id):
+    # The missing sell simulation makes the answer incomplete; it never lowers a verdict the scan reached.
+    api, _ = consumer_api
+    admin = {'type': 'Local Blacklist', 'reason': 'Confirmed scam address', 'source': 'ShieldBot', 'severity': 'block'}
+    response = await _quick_scan(api, monkeypatch, mock_web3_client, chain_id, scam_matches=[admin])
+    assert (response['classification'], response['risk_score']) == ('BLOCK_RECOMMENDED', 90)
+    assert (response['status'], response['partial']) == ('unknown', True)
+    assert response['coverage_reasons'] == {'sellability': api._QUICK_SCAN_SELLABILITY_UNKNOWN}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663, 56])
+async def test_quick_scan_still_clears_a_contract_that_is_not_a_token(consumer_api, monkeypatch, mock_web3_client, chain_id):
+    api, _ = consumer_api
+    mock_web3_client.is_token_contract.return_value = False
+    response = await _quick_scan(api, monkeypatch, mock_web3_client, chain_id)
+    assert (response['status'], response['classification'], response['partial']) == ('ok', 'SAFE', False)
+    assert response['coverage'] == {
+        'is_verified': True, 'contract_age_days': True, 'scam_database': True, 'bytecode': True,
+    }
+    assert response['coverage_reasons'] == {}
+    mock_web3_client.is_token_contract.assert_awaited_once_with('0x' + 'a' * 40, chain_id=chain_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663, 56])
+async def test_quick_scan_of_an_eoa_asks_no_token_question(consumer_api, monkeypatch, mock_web3_client, chain_id):
+    api, _ = consumer_api
+    mock_web3_client.is_contract.return_value = False
+    response = await _quick_scan(api, monkeypatch, mock_web3_client, chain_id)
+    assert (response['status'], response['risk_level'], response['classification']) == ('ok', 'low', 'SAFE')
+    assert (response['risk_score'], response['partial']) == (5, False)
+    assert response['coverage'] == {'scam_database': True, 'is_contract': True}
+    mock_web3_client.is_token_contract.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663, 56])
+async def test_quick_scan_of_an_address_it_could_not_classify_stays_unknown(consumer_api, monkeypatch, mock_web3_client, chain_id):
+    # The scanner already answers Unknown when it cannot tell a contract from an EOA; no token check is added.
+    api, _ = consumer_api
+    mock_web3_client.is_contract.return_value = None
+    response = await _quick_scan(api, monkeypatch, mock_web3_client, chain_id)
+    assert_unknown_response(response)
+    assert response['coverage_reasons'] == {'is_contract': 'is_contract unknown: provider data unavailable'}
+    mock_web3_client.is_token_contract.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_unknown_explanation_avoids_ai_safe_text(consumer_api, incomplete_output):
     api, services = consumer_api

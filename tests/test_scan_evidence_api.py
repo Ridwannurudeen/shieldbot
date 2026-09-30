@@ -451,6 +451,41 @@ def test_a_scan_links_its_stored_evidence(evidence_api, monkeypatch):
     assert body["notes"] == doc["notes"] == []
 
 
+def test_a_token_scan_records_that_no_sell_was_simulated(evidence_api, monkeypatch):
+    api, client, _ = evidence_api
+    monkeypatch.setattr(
+        api,
+        "tx_scanner",
+        SimpleNamespace(
+            scan_address=AsyncMock(
+                return_value={
+                    "address": TARGET,
+                    "is_contract": True,
+                    "risk_score": 20,
+                    "risk_level": "low",
+                    "status": "ok",
+                    "coverage": {
+                        "is_verified": True,
+                        "contract_age_days": True,
+                        "scam_database": True,
+                        "bytecode": True,
+                    },
+                    "coverage_reasons": {},
+                }
+            )
+        ),
+    )
+    response = client.post("/api/scan", json={"address": TARGET, "chainId": 56})
+    assert response.status_code == 200
+    body, stored = _stored(client, response)
+    doc = stored["evidence"]
+    assert body["classification"] == doc["classification"] != "SAFE"
+    assert (body["status"], doc["status"], doc["risk_level"]) == ("unknown", "unknown", "UNKNOWN")
+    assert body["coverage"] == doc["coverage"]
+    assert doc["coverage"]["sellability"] is False
+    assert doc["coverage_reasons"] == {"sellability": api._QUICK_SCAN_SELLABILITY_UNKNOWN}
+
+
 NO_RECORD = {
     "status": "unknown",
     "reason": "GoPlus has no data for this token on this chain",

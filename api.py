@@ -1680,6 +1680,12 @@ async def _with_evidence(response: Dict, endpoint: str, chain_id: int, **trail) 
     return {**response, "evidence_hash": digest, "evidence_url": url}
 
 
+# The quick scan simulates no sell, so it never settles a token's sellability.
+_QUICK_SCAN_SELLABILITY_UNKNOWN = (
+    "Sellability unknown: this quick scan does not simulate a sell; /api/firewall runs the full token check"
+)
+
+
 @app.post("/api/scan")
 async def scan(req: ScanRequest):
     """Quick contract scan — reuses TransactionScanner.scan_address."""
@@ -1694,6 +1700,14 @@ async def scan(req: ScanRequest):
         # Strip large fields
         result.pop("source_code", None)
         result.pop("forensic_report", None)
+
+        # A contract that is a token, or that the token check could not rule out, is never SAFE here.
+        # An address the scanner could not classify is already Unknown, and an EOA is not a token.
+        if result.get('is_contract') is True:
+            is_token = await web3_client.is_token_contract(address, chain_id=req.chainId)
+            if is_token is not False:
+                result['coverage']['sellability'] = False
+                result['coverage_reasons']['sellability'] = _QUICK_SCAN_SELLABILITY_UNKNOWN
 
         alert = format_extension_alert({**result, 'rug_probability': result.get('risk_score', 0)})
         result.update(_coverage_fields(alert))
