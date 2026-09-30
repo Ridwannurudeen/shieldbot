@@ -147,7 +147,10 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     let metaParts = [];
     const hp = (typeof scanData.honeypot === "object" && scanData.honeypot) || {};
-    metaParts.push(`Honeypot: <span>${hp.is_honeypot === true ? "Yes" : hp.is_honeypot === false ? "No" : "Unknown"}</span>`);
+    // A sell simulation that failed, or of ShieldBot's own that could not run, leaves a provider's
+    // "not a honeypot" (GoPlus's, after it) unresolved.
+    const unresolved = hp.simulation_failed || hp.rpc_failed;
+    metaParts.push(`Honeypot: <span>${hp.is_honeypot === true ? "Yes" : hp.is_honeypot === false && !unresolved ? "No" : "Unknown"}</span>`);
     metaParts.push(`Sell tax: <span>${hp.sell_tax == null || hp.sell_tax === "" ? "Unknown" : `${Number(hp.sell_tax)}%`}</span>`);
     const mkt = (typeof scanData.market === "object" && scanData.market) || {};
     if (mkt.liquidity_usd !== undefined) {

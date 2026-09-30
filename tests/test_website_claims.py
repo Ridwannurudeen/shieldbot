@@ -136,6 +136,23 @@ def test_chains_section_coverage_matches_the_code():
     ) in prose
 
 
+def test_arbitrum_simulation_scope_matches_the_code():
+    # services/arbitrum_simulation.py simulates only pools pairing the token with WETH: V3 pools through
+    # SwapRouter02 and the pairs of each V2 route. A token with no such pool gets no simulation.
+    from adapters.arbitrum import WETH_ADDRESS
+    from services.arbitrum_simulation import V2_ROUTES, WETH
+
+    exchanges = {"v3": "Uniswap V3", "uniswap-v2": "Uniswap V2", "sushiswap-v2": "SushiSwap"}
+    assert set(exchanges) == {"v3", *V2_ROUTES}, "the Arbitrum simulation routes changed: update the site"
+    assert WETH == WETH_ADDRESS.lower()
+    names = list(exchanges.values())
+    scope = f"pools pairing the token with WETH on {', '.join(names[:-1])} or {names[-1]}"
+    chains = " ".join(read(COMPONENTS / "Chains.tsx").split())
+    for path in (COMPONENTS / "Chains.tsx", LANDING_SRC / "public" / "about.html", ROOT / "README.md"):
+        assert scope in " ".join(read(path).split()), path.name
+    assert re.search(r'name: "Arbitrum", [^}]*simulationScope: "Some WETH pools, see below",', chains)
+
+
 def test_mcp_counts_match_the_code():
     from mcp_server.prompts import PROMPT_DEFINITIONS
     from mcp_server.resources import RESOURCE_DEFINITIONS, RESOURCE_TEMPLATE_DEFINITIONS

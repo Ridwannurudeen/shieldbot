@@ -7,7 +7,6 @@ within SCAN_DEADLINE_SECONDS or says it did not finish. Every fake here answers 
 """
 
 import asyncio
-import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -33,7 +32,8 @@ WINDOW = 10_000
 
 
 class DelayedRpc(FakeRpc):
-    """FakeRpc whose handler is a coroutine function, so an answer can come late or never."""
+    """FakeRpc whose handler is a coroutine function, so an answer can come late or never; a
+    request dropped before its answer came is no longer in flight."""
 
     def post(self, url, json, timeout):
         return _DelayedExchange(self, url, json)
@@ -45,7 +45,11 @@ class _DelayedExchange(_Exchange):
         self.rpc.urls.add(self.url)
         self.rpc.in_flight += 1
         self.rpc.max_in_flight = max(self.rpc.max_in_flight, self.rpc.in_flight)
-        status, body = await self.rpc.handler(self.payload)
+        try:
+            status, body = await self.rpc.handler(self.payload)
+        except asyncio.CancelledError:
+            self.rpc.in_flight -= 1
+            raise
         return MagicMock(status=status, json=AsyncMock(return_value=body))
 
 
@@ -55,6 +59,40 @@ def delayed(handler, seconds, method="eth_getLogs"):
     async def handle(payload):
         if payload["method"] == method:
             await _real_sleep(seconds)
+        return handler(payload)
+
+    return handle
+
+
+class LoopClock:
+    """The running loop's clock, held still until advance() moves it on or for 5 s at most; it
+    runs from there.
+
+    While it is held no timer fires, so a deadline passes when the test moves the clock past it."""
+
+    def __init__(self, loop):
+        self.real = loop.time
+        self.start = loop.time()
+        self.shift = None
+
+    def __call__(self):
+        if self.shift is None and self.real() > self.start + 5:
+            self.shift = 0
+        return self.start if self.shift is None else self.real() + self.shift
+
+    def advance(self, seconds):
+        self.shift = self() + seconds - self.real()
+
+
+def oldest_chunk_unanswered(handler, clock, seconds):
+    """``handler``'s answers at once, except that the request for the oldest chunk moves ``clock``
+    on ``seconds`` and is never answered."""
+
+    async def handle(payload):
+        if payload["method"] == "eth_getLogs" and payload["params"][0]["fromBlock"] == "0x0":
+            clock.advance(seconds)
+            await asyncio.Event().wait()
+        await _real_sleep(0)
         return handler(payload)
 
     return handle
@@ -71,6 +109,7 @@ def archive_handler(latest):
 
 async def scan(handler, chain_id, service, history=0.3, total=1.0):
     rpc = DelayedRpc(handler)
+    loop = asyncio.get_running_loop()
     with (
         patch("services.rescue_service.aiohttp.ClientSession") as factory,
         patch("services.rescue_service.asyncio.sleep", AsyncMock()),
@@ -78,10 +117,10 @@ async def scan(handler, chain_id, service, history=0.3, total=1.0):
         patch("services.rescue_service.SCAN_DEADLINE_SECONDS", total, create=True),
     ):
         factory.return_value.__aenter__.return_value = rpc
-        started = time.perf_counter()
+        started = loop.time()
         # A scan without a deadline waits for every late answer; 5 s bounds it here.
         result = await asyncio.wait_for(service.scan_approvals(WALLET, chain_id), 5)
-    return result, rpc, time.perf_counter() - started
+    return result, rpc, loop.time() - started
 
 
 @pytest.mark.asyncio
@@ -128,16 +167,20 @@ async def test_slow_windows_stop_at_the_history_deadline_and_coverage_names_the_
 async def test_a_logs_rpc_serving_chunks_slowly_keeps_the_newest_ones_read_by_the_deadline():
     latest = 100 * CHUNK + 10  # 101 chunks: two batches of 50 and one of 1
     service = rescue_service(logs_rpc=ARCHIVE)
-    result, rpc, elapsed = await scan(
-        delayed(archive_handler(latest), 0.2), 56, service, history=0.45
-    )
+    loop = asyncio.get_running_loop()
+    clock = LoopClock(loop)
+    with patch.object(loop, "time", clock):
+        result, rpc, elapsed = await scan(
+            oldest_chunk_unanswered(archive_handler(latest), clock, 0.45), 56, service, history=0.45
+        )
 
     assert elapsed < 1
     assert rpc.max_in_flight == 50
     assert not any(to_b - from_b + 1 == WINDOW for from_b, to_b in window_bounds(rpc))
     from_block = result["scanned_blocks"]["from_block"]
     read = (latest - from_block + 1) // CHUNK
-    assert read in (50, 100)
+    assert read == 100
+    assert len(window_bounds(rpc)) == 101
     assert from_block == latest - CHUNK * read + 1
     assert [(a["token_address"], a["risk_level"]) for a in result["approvals"]] == [(TOKEN, "HIGH")]
     assert result["status"] == "unknown"

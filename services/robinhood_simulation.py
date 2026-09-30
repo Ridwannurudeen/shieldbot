@@ -744,8 +744,29 @@ def _rate_limited(error) -> bool:
     )
 
 
-def _call_result(row: dict) -> Optional[bytes]:
-    return None if "error" in row else _hex_bytes(row.get("result"))
+def _node_error(row: dict) -> str:
+    error = row.get("error")
+    if error is None:
+        return "no result"
+    return f"JSON-RPC error {error.get('code') if isinstance(error, dict) else None}"
+
+
+def _reverted(error) -> bool:
+    """The call itself reverted: "execution reverted", which both simulation RPCs send with code 3
+    (checked 2026-09-30) and other nodes with other codes."""
+    return isinstance(error, dict) and "execution reverted" in str(error.get("message", "")).lower()
+
+
+def _call_result(row: dict, lookup: str, may_revert: bool = False) -> Optional[bytes]:
+    """A discovery eth_call's return data. A lookup the node did not answer (a timeout, an internal
+    error, no result) raises SimulationUnavailable: it is not an answer of "no pool", so the simulation
+    could not run. A call that reverted is None where `may_revert` says the target may revert."""
+    if "error" in row and may_revert and _reverted(row["error"]):
+        return None
+    data = None if "error" in row else _hex_bytes(row.get("result"))
+    if data is None:
+        raise SimulationUnavailable(f"{lookup} lookup failed ({_node_error(row)})")
+    return data
 
 
 class RobinhoodSimulator:
@@ -774,10 +795,13 @@ class RobinhoodSimulator:
         except SimulationUnavailable as e:
             logger.warning("Robinhood simulation unavailable: %s", type(e).__name__)
             result = aggregate_outcomes([], [e.reason])
+            # The simulation could not run, so it cannot say the token sells; nor can GoPlus.
+            result["rpc_failed"] = True
             unknown_ledger.record(SIMULATION_PROVIDER, 4663, "failed")
         except Exception as e:
             logger.error("Robinhood simulation failed: %s", type(e).__name__)
             result = aggregate_outcomes([], [f"Simulation RPC request failed ({type(e).__name__})"])
+            result["rpc_failed"] = True
             unknown_ledger.record(SIMULATION_PROVIDER, 4663, "failed")
         else:
             # It ran; a pool that could not be simulated, or no supported pool, leaves the sell unknown.
@@ -850,6 +874,18 @@ class RobinhoodSimulator:
             )
 
     async def _request(self, session, calls: list) -> list:
+        """POST one JSON-RPC request or batch. A row the node answered with an error of its own (a timeout
+        under load, an internal error) sends the whole batch once more, after RPC_BACKOFF_SECONDS, so
+        one transient error does not leave the scan unknown and every row still comes from one answer. A
+        revert is the call's own answer and is not asked again."""
+        rows = await self._post(session, calls)
+        if any(row.get("error") is not None and not _reverted(row["error"]) for row in rows):
+            logger.warning("Robinhood simulation RPC answered an error; asking once more")
+            await asyncio.sleep(RPC_BACKOFF_SECONDS)
+            rows = await self._post(session, calls)
+        return rows
+
+    async def _post(self, session, calls: list) -> list:
         """POST one JSON-RPC request or batch; retry HTTP 429 and JSON-RPC rate limits with backoff."""
         body = [
             {"jsonrpc": "2.0", "id": index, "method": method, "params": params}
@@ -897,54 +933,57 @@ class RobinhoodSimulator:
             NATIVE,
         )
         slot = keccak(_pool_id(launcher_key) + POOLS_SLOT.to_bytes(32, "big"))
-        supply, pair, state, slot0 = (
-            _call_result(row)
-            for row in await self._request(
-                session,
-                [
-                    (
-                        "eth_call",
-                        [{"to": token, "data": "0x" + _selector("totalSupply()").hex()}, "latest"],
-                    ),
-                    (
-                        "eth_call",
-                        [
-                            {
-                                "to": V2_FACTORY,
-                                "data": "0x"
-                                + _calldata(
-                                    "getPair(address,address)",
-                                    ["address", "address"],
-                                    [token, WETH],
-                                ).hex(),
-                            },
-                            "latest",
-                        ],
-                    ),
-                    (
-                        "eth_call",
-                        [
-                            {
-                                "to": DOPPLER_HOOK_INITIALIZER,
-                                "data": "0x"
-                                + _calldata("getState(address)", ["address"], [token]).hex(),
-                            },
-                            "latest",
-                        ],
-                    ),
-                    (
-                        "eth_call",
-                        [
-                            {
-                                "to": POOL_MANAGER,
-                                "data": "0x"
-                                + _calldata("extsload(bytes32)", ["bytes32"], [slot]).hex(),
-                            },
-                            "latest",
-                        ],
-                    ),
-                ],
-            )
+        rows = await self._request(
+            session,
+            [
+                (
+                    "eth_call",
+                    [{"to": token, "data": "0x" + _selector("totalSupply()").hex()}, "latest"],
+                ),
+                (
+                    "eth_call",
+                    [
+                        {
+                            "to": V2_FACTORY,
+                            "data": "0x"
+                            + _calldata(
+                                "getPair(address,address)",
+                                ["address", "address"],
+                                [token, WETH],
+                            ).hex(),
+                        },
+                        "latest",
+                    ],
+                ),
+                (
+                    "eth_call",
+                    [
+                        {
+                            "to": DOPPLER_HOOK_INITIALIZER,
+                            "data": "0x"
+                            + _calldata("getState(address)", ["address"], [token]).hex(),
+                        },
+                        "latest",
+                    ],
+                ),
+                (
+                    "eth_call",
+                    [
+                        {
+                            "to": POOL_MANAGER,
+                            "data": "0x"
+                            + _calldata("extsload(bytes32)", ["bytes32"], [slot]).hex(),
+                        },
+                        "latest",
+                    ],
+                ),
+            ],
+        )
+        # totalSupply() reverts, legitimately, on a contract that is not a token; the getters do not.
+        supply = _call_result(rows[0], "totalSupply()", may_revert=True)
+        pair, state, slot0 = (
+            _call_result(row, lookup)
+            for row, lookup in zip(rows[1:], ("V2 pair", "Doppler pool", "LiquidityLauncher pool"))
         )
         if supply is None or len(supply) != 32:
             return 0, [], ["totalSupply() unavailable; cannot size a buy"]
@@ -953,7 +992,7 @@ class RobinhoodSimulator:
             return 0, [], ["Token supply too small to size a buy"]
         pools, notes = [], []
 
-        if pair is None or len(pair) != 32:
+        if len(pair) != 32:
             notes.append("V2 pair lookup failed")
         elif int.from_bytes(pair, "big"):
             pair_address = "0x" + pair[12:].hex()
@@ -969,36 +1008,33 @@ class RobinhoodSimulator:
                     )
                 ],
             )
-            reserves = _call_result(rows[0])
-            if reserves is None or len(reserves) != 96:
+            reserves = _call_result(rows[0], f"V2 pair {pair_address} reserves")
+            if len(reserves) != 96:
                 notes.append(f"V2 pair {pair_address} reserves lookup failed")
             elif int.from_bytes(reserves[:32], "big") and int.from_bytes(reserves[32:64], "big"):
                 pools.append(Pool("v2", NATIVE, pair=pair_address))
             else:
                 notes.append(f"V2 pair {pair_address} has no reserves")
 
-        if state is None:
-            notes.append("Doppler pool lookup failed")
-        else:
-            try:
-                numeraire, _, _, _, status, key, _ = decode(DOPPLER_STATE, state)
-            except DecodingError:
-                status = 0
-                notes.append("Doppler pool lookup returned undecodable data")
-            if status:
-                key = (key[0].lower(), key[1].lower(), key[2], key[3], key[4].lower())
-                numeraire = numeraire.lower()
-                if key[4] != DOPPLER_HOOK_INITIALIZER or {token, numeraire} != {key[0], key[1]}:
-                    notes.append("Doppler pool state is inconsistent with the token")
-                elif numeraire in (NATIVE, WETH, USDG):
-                    pools.append(Pool("v4-doppler", numeraire, key=key))
-                else:
-                    notes.append(
-                        f"unsupported route: Doppler pool 0x{_pool_id(key).hex()} numeraire {numeraire} "
-                        "cannot be funded in one simulation"
-                    )
+        try:
+            numeraire, _, _, _, status, key, _ = decode(DOPPLER_STATE, state)
+        except DecodingError:
+            status = 0
+            notes.append("Doppler pool lookup returned undecodable data")
+        if status:
+            key = (key[0].lower(), key[1].lower(), key[2], key[3], key[4].lower())
+            numeraire = numeraire.lower()
+            if key[4] != DOPPLER_HOOK_INITIALIZER or {token, numeraire} != {key[0], key[1]}:
+                notes.append("Doppler pool state is inconsistent with the token")
+            elif numeraire in (NATIVE, WETH, USDG):
+                pools.append(Pool("v4-doppler", numeraire, key=key))
+            else:
+                notes.append(
+                    f"unsupported route: Doppler pool 0x{_pool_id(key).hex()} numeraire {numeraire} "
+                    "cannot be funded in one simulation"
+                )
 
-        if slot0 is None or len(slot0) != 32:
+        if len(slot0) != 32:
             notes.append("LiquidityLauncher pool lookup failed")
         elif int.from_bytes(slot0, "big") & MAX_UINT160:
             pools.append(Pool("v4-native", NATIVE, key=launcher_key))
@@ -1018,8 +1054,7 @@ class RobinhoodSimulator:
         rows = await self._request(session, [("eth_blockNumber", [])])
         head = _quantity(rows[0].get("result"))
         if head is None:
-            notes.append("Block number unavailable; Initialize logs not scanned")
-            return []
+            raise SimulationUnavailable(f"Block number lookup failed ({_node_error(rows[0])})")
         pools, keys, scanned_from = [], set(), head + 1
         for window in range(MAX_LOG_WINDOWS):
             to_block = head - window * LOG_WINDOW_BLOCKS
@@ -1032,10 +1067,12 @@ class RobinhoodSimulator:
                 "toBlock": hex(to_block),
                 "topics": [INITIALIZE_TOPIC],
             }
-            logs = (await self._request(session, [("eth_getLogs", [query])]))[0].get("result")
+            row = (await self._request(session, [("eth_getLogs", [query])]))[0]
+            logs = row.get("result")
             if not isinstance(logs, list):
-                notes.append(f"Initialize log lookup failed for blocks {from_block}-{to_block}")
-                break
+                raise SimulationUnavailable(
+                    f"Initialize log lookup for blocks {from_block}-{to_block} failed ({_node_error(row)})"
+                )
             scanned_from = from_block
             for log in logs:
                 pool, note = _pool_from_initialize(log, token)

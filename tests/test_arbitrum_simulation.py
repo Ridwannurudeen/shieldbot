@@ -399,6 +399,7 @@ async def test_a_recorded_token_is_simulated_end_to_end():
         "can_sell": True,
     }
     assert result["simulation_block"] == int(fixture["request"][1], 16)
+    assert "simulation_failed" not in result
 
 
 @pytest.mark.asyncio
@@ -577,6 +578,10 @@ async def test_a_shallower_pool_refusing_the_sell_leaves_the_token_unknown_when_
         f"not counted as a trap because the pool holding the most WETH, {fixture['pool']}, sold "
         "(sell tax 0%), so sellability is left unknown"
     ) in result["reason"]
+    # The trap is evidence: the simulation did not settle the token, so GoPlus cannot settle it
+    # instead. The trapped pool's sell tax was never measured, so the deepest pool's 0% is unproven.
+    assert result["simulation_failed"] is True
+    assert result["sell_tax"] is None
 
 
 def _sell_taxed(fixture, percent):
@@ -611,6 +616,7 @@ async def test_only_a_deepest_pool_selling_at_no_more_than_half_tax_clears_anoth
     with fresh_addresses(fixture):
         result = await simulator_for(rpc).simulate(fixture["token"])
     assert (result["is_honeypot"], result["can_sell"]) == verdict
+    assert result.get("simulation_failed", False) is (verdict == (None, None))
 
 
 @pytest.mark.asyncio
@@ -620,6 +626,7 @@ async def test_a_trapped_deepest_pool_is_not_cleared_by_a_shallower_clean_one():
     with fresh_addresses(fixture):
         result = await simulator_for(rpc).simulate(fixture["token"])
     assert (result["is_honeypot"], result["can_sell"]) == (True, False)
+    assert "simulation_failed" not in result
 
 
 @pytest.mark.asyncio
@@ -631,3 +638,4 @@ async def test_only_a_clean_deepest_pool_clears_another_pools_trap():
     with fresh_addresses(fixture):
         result = await simulator_for(rpc).simulate(fixture["token"])
     assert (result["is_honeypot"], result["can_sell"]) == (True, False)
+    assert "simulation_failed" not in result

@@ -61,6 +61,7 @@ from services.robinhood_simulation import (
     _quantity,
     _rate_limited,
     _revert_bytes,
+    _reverted,
     _selector,
     _succeeded,
     _uint,
@@ -467,10 +468,13 @@ class ArbitrumSimulator:
         except SimulationUnavailable as e:
             logger.warning("Arbitrum simulation unavailable: %s", type(e).__name__)
             result = aggregate_outcomes([], [e.reason])
+            # The simulation could not run, so it cannot say the token sells; nor can GoPlus.
+            result["rpc_failed"] = True
             unknown_ledger.record(SIMULATION_PROVIDER, CHAIN_ID, "failed")
         except Exception as e:
             logger.error("Arbitrum simulation failed: %s", type(e).__name__)
             result = aggregate_outcomes([], [f"Simulation RPC request failed ({type(e).__name__})"])
+            result["rpc_failed"] = True
             unknown_ledger.record(SIMULATION_PROVIDER, CHAIN_ID, "failed")
         else:
             # It ran; a pool that could not be simulated, or no supported pool, leaves the sell unknown.
@@ -509,7 +513,9 @@ class ArbitrumSimulator:
         # analyzer's extreme line, another pool refusing the sell proves neither a honeypot nor a safe
         # token: it can be that pool's own restriction (a common launch-limit template exempts only
         # the token's registered pair from a same-block check) or a trap for whoever buys there. The
-        # token is left unknown. A trapped deepest pool is never cleared by a shallower one.
+        # token is left unknown, marked as a simulation that failed: the trap is evidence, so a
+        # GoPlus answer cannot settle sellability instead. A trapped deepest pool is never cleared
+        # by a shallower one.
         deepest = outcomes[0] if outcomes else None
         cleared = False
         if (
@@ -521,7 +527,7 @@ class ArbitrumSimulator:
             for outcome in outcomes[1:]:
                 if outcome["is_honeypot"] is True:
                     cleared = True
-                    outcome.update(is_honeypot=None, can_sell=None)
+                    outcome.update(is_honeypot=None, can_sell=None, simulation_failed=True)
                     outcome["reason"] += (
                         f"; not counted as a trap because the pool holding the most WETH, "
                         f"{deepest['pool']}, sold (sell tax {tax}), so sellability is left unknown"
@@ -571,6 +577,18 @@ class ArbitrumSimulator:
             )
 
     async def _request(self, session, calls: list) -> list:
+        """POST one JSON-RPC request or batch. A row the node answered with an error of its own (a timeout
+        under load, an internal error) sends the whole batch once more, after RPC_BACKOFF_SECONDS, so
+        one transient error does not leave the scan unknown and every row still comes from one answer. A
+        revert is the call's own answer and is not asked again."""
+        rows = await self._post(session, calls)
+        if any(row.get("error") is not None and not _reverted(row["error"]) for row in rows):
+            logger.warning("Arbitrum simulation RPC answered an error; asking once more")
+            await asyncio.sleep(RPC_BACKOFF_SECONDS)
+            rows = await self._post(session, calls)
+        return rows
+
+    async def _post(self, session, calls: list) -> list:
         """POST one JSON-RPC request or batch; retry HTTP 429 and JSON-RPC rate limits with backoff."""
         body = [
             {"jsonrpc": "2.0", "id": index, "method": method, "params": params}
@@ -630,7 +648,8 @@ class ArbitrumSimulator:
             for _, factory, fee in candidates
         ]
         rows = await self._request(session, lookups)
-        supply = _call_result(rows[0])
+        # totalSupply() reverts, legitimately, on a contract that is not a token; the getters do not.
+        supply = _call_result(rows[0], "totalSupply()", may_revert=True)
         if supply is None or len(supply) != 32:
             return 0, [], ["totalSupply() unavailable; cannot size a buy"]
         amount = int.from_bytes(supply, "big") // SUPPLY_FRACTION
@@ -638,8 +657,8 @@ class ArbitrumSimulator:
             return 0, [], ["Token supply too small to size a buy"]
         notes, found = [], []
         for (route, _, fee), row in zip(candidates, rows[1:]):
-            address = _address(_call_result(row))
             label = f"{route} {fee / 10_000:g}% pool" if fee is not None else f"{route} pair"
+            address = _address(_call_result(row, label))
             if address is None:
                 notes.append(f"{label} lookup failed")
             elif int(address, 16):
@@ -654,8 +673,8 @@ class ArbitrumSimulator:
                 ],
             )
             for pool, row in zip(found, rows):
-                balance = _call_result(row)
-                if balance is None or len(balance) != 32:
+                balance = _call_result(row, f"{pool.route} pool {pool.address} WETH balance")
+                if len(balance) != 32:
                     notes.append(f"{pool.route} pool {pool.address} WETH balance lookup failed")
                 elif int.from_bytes(balance, "big"):
                     pools.append(

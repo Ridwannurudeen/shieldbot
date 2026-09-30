@@ -556,7 +556,8 @@ async def test_signature_with_unknown_spender_facts_is_unknown(consumer_api):
 
 
 @pytest.mark.parametrize('surface', ['compact', 'feed', 'center', 'stats', 'content', 'content-explain', 'sidepanel', 'sidepanel-message', 'history'])
-@pytest.mark.parametrize('scan_state', ['missing-provider', 'failed-simulation', 'legacy', 'covered'])
+@pytest.mark.parametrize('scan_state', ['missing-provider', 'failed-simulation', 'legacy', 'covered',
+                                        'goplus-after-failed-simulation', 'goplus-after-rpc-failure'])
 def test_extension_consumer_coverage(surface, scan_state):
     import json
     from pathlib import Path
@@ -584,6 +585,12 @@ if (state === 'failed-simulation') {
   scan.status = 'ok';
   scan.coverage.honeypot = 0.4;
   scan.honeypot.simulation_failed = true;
+}
+if (state.startsWith('goplus-after-')) {
+  // GoPlus filled what ShieldBot's own sell simulation left open; for ARBROKER, a real Arbitrum
+  // honeypot, that is "not a honeypot" and an empty sell tax.
+  scan.honeypot.is_honeypot = false;
+  scan.honeypot[state === 'goplus-after-rpc-failure' ? 'rpc_failed' : 'simulation_failed'] = true;
 }
 const nodes = new Map();
 const appended = [];
@@ -665,6 +672,9 @@ load('background', 'function saveToHistory');
     assert.equal(html.includes('>No<'), complete);
     assert.equal(html.includes('>0%<'), complete);
     assert.equal(html.includes('LOW Risk'), complete);
+    // A honeypot verdict is shown whatever else the scan left open.
+    context.renderRiskCard({...scan, honeypot: {...scan.honeypot, is_honeypot: true}});
+    assert(appended.at(-1).innerHTML.includes('Honeypot: <span>Yes</span>'));
   } else if (surface === 'sidepanel-message') {
     context.appendMessage('assistant', 'SAFE', {scanData: scan});
     html = appended.at(-1).children[0].innerHTML;

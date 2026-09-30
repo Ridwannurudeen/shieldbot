@@ -9,6 +9,8 @@ interface Chain {
   simulation: "honeypot.is" | "ShieldBot" | null;
   mempool: boolean;
   launches: boolean;
+  // Shown under the simulator when it covers only some of the chain's pools.
+  simulationScope?: string;
   logo: ReactNode;
 }
 
@@ -59,6 +61,7 @@ const chains: Chain[] = [
     simulation: "ShieldBot",
     mempool: false,
     launches: false,
+    simulationScope: "Some WETH pools, see below",
     logo: (
       <svg viewBox="0 0 32 32" fill="none" className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0" aria-hidden="true">
         <circle cx="16" cy="16" r="16" fill="#213147"/>
@@ -162,6 +165,9 @@ export default function Chains() {
                   </th>
                   <td className={`py-3 px-1.5 sm:px-2 ${c.simulation ? "text-gray-200" : "text-amber-300"}`}>
                     {c.simulation ?? "None"}
+                    {c.simulationScope && (
+                      <span className="block text-xs text-gray-400">{c.simulationScope}</span>
+                    )}
                   </td>
                   <td className="py-3 px-1.5 sm:px-2 text-gray-200">{c.mempool ? "Yes" : "No"}</td>
                   <td className="py-3 pl-1.5 sm:pl-2 text-gray-200">{c.launches ? "Yes" : "No"}</td>
@@ -176,9 +182,12 @@ export default function Chains() {
             <span className="text-gray-200">Sell simulation:</span> honeypot.is
             simulates a buy and a sell on Ethereum, BNB Chain and Base, and
             ShieldBot runs its own on supported Arbitrum and Robinhood Chain pool
-            routes.
-            Where it says None, honeypot and tax flags come from GoPlus alone,
-            and they read Unknown when GoPlus has no answer.
+            routes. On Arbitrum those are pools pairing the token with WETH on
+            Uniswap V3, Uniswap V2 or SushiSwap.
+            Where it says None, and for an Arbitrum token with no such pool (for
+            example one traded only on Camelot, or only against stablecoins),
+            honeypot and tax flags come from GoPlus alone, and they read Unknown
+            when GoPlus has no answer.
           </li>
           <li>
             <span className="text-gray-200">Mempool watch:</span> pending
