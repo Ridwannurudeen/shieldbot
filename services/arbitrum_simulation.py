@@ -594,7 +594,7 @@ class ArbitrumSimulator:
                     outcome = _confirm_trap(outcome, confirmation)
                     unconfirmed = unconfirmed or outcome["trap"] is None
                 outcomes.append(outcome)
-        # Pools are ordered by the WETH they hold. When the deepest one sells at a tax below the
+        # Pools are ordered by the WETH they hold. When the deepest one sells at a tax at or below the
         # analyzer's extreme line, another pool refusing the sell proves neither a honeypot nor a safe
         # token: it can be that pool's own restriction (a common launch-limit template exempts only
         # the token's registered pair from a same-block check) or a trap for whoever buys there. The

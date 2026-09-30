@@ -14,8 +14,8 @@ _TRADE_FIELDS = ('is_honeypot', 'buy_tax', 'sell_tax', 'can_buy', 'can_sell')
 # but it does not complete the answer. So the gate never takes a tax the analyzer would not score.
 SELL_TAX_HIGH = 20
 # The analyzer flags a sell tax above SELL_TAX_EXTREME as extreme. On Arbitrum One, a deepest pool
-# selling at or below it keeps another pool's trap from deciding the token
-# (services/arbitrum_simulation.py).
+# that sells at or below it, or at a tax the simulation could not measure, keeps another pool's trap
+# from deciding the token (services/arbitrum_simulation.py).
 SELL_TAX_EXTREME = 50
 
 
