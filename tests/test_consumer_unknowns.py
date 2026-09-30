@@ -254,6 +254,89 @@ async def test_unknown_fallback_cannot_be_overruled_by_ai(consumer_api, incomple
     assert_unknown_response(response)
 
 
+async def legacy_firewall(api, monkeypatch, web3, chain_id, simulation):
+    """The /api/firewall answer for a token whose analysis pipeline failed, from the real legacy token scanner
+    and the chain's own adapter answering `simulation`, with the AI explanation available."""
+    from scanner.token_scanner import TokenScanner
+    from tests.test_own_simulation_failure import TOKEN, answering
+
+    api.container.registry.run_all.side_effect = RuntimeError('pipeline unavailable')
+    web3.is_verified_contract.return_value = (True, None)
+    monkeypatch.setattr(api, 'token_scanner', TokenScanner(await answering(web3, chain_id, simulation)))
+    ai = SimpleNamespace(is_available=lambda: True, generate_firewall_report=AsyncMock(return_value={
+        'analysis': 'Not a honeypot', 'plain_english': 'Not a honeypot',
+    }))
+    monkeypatch.setattr(api, 'ai_analyzer', ai)
+    response = await api.firewall(
+        api.FirewallRequest(to=TOKEN, sender='0x' + 'b' * 40, chainId=chain_id), SimpleNamespace(headers={}),
+    )
+    return response, ai
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663])
+@pytest.mark.parametrize('state', ['pool-failed', 'could-not-run'])
+async def test_the_legacy_firewall_never_clears_a_token_beside_a_sell_it_did_not_settle(
+    consumer_api, mock_web3_client, monkeypatch, chain_id, state,
+):
+    import json
+
+    from tests.test_own_simulation_failure import UNSETTLED
+
+    api, _ = consumer_api
+    response, ai = await legacy_firewall(api, monkeypatch, mock_web3_client, chain_id, UNSETTLED[state])
+    assert_unknown_response(response)
+    assert response['raw_checks']['can_sell'] is None
+    # The AI explains only a verdict whose status is ok.
+    ai.generate_firewall_report.assert_not_awaited()
+    assert 'not a honeypot' not in json.dumps(response, default=str).lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663])
+async def test_the_legacy_firewall_answers_a_simulated_clean_token(
+    consumer_api, mock_web3_client, monkeypatch, chain_id,
+):
+    from tests.test_own_simulation_failure import CLEAN_POOL, simulation_of
+
+    api, _ = consumer_api
+    response, ai = await legacy_firewall(api, monkeypatch, mock_web3_client, chain_id, simulation_of(CLEAN_POOL))
+    # Complete, but never SAFE from the legacy scanner's heuristics alone.
+    assert (response['status'], response['classification'], response['partial']) == ('ok', 'CAUTION', False)
+    assert response['raw_checks']['can_sell'] is True
+    ai.generate_firewall_report.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663])
+@pytest.mark.parametrize('state', ['pool-failed', 'could-not-run'])
+async def test_the_legacy_firewall_blocks_a_proven_honeypot_beside_a_sell_it_did_not_settle(
+    consumer_api, mock_web3_client, monkeypatch, chain_id, state,
+):
+    from tests.test_own_simulation_failure import PROVEN_TRAP
+
+    api, _ = consumer_api
+    response, _ = await legacy_firewall(api, monkeypatch, mock_web3_client, chain_id, PROVEN_TRAP[state])
+    assert response['classification'] == 'BLOCK_RECOMMENDED'
+    assert 'Honeypot detected — cannot sell after buying' in response['danger_signals']
+    assert (response['raw_checks']['is_honeypot'], response['raw_checks']['can_sell']) == (True, False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663])
+@pytest.mark.parametrize('failure', ['revert', 'timeout', 'http-429'])
+async def test_the_legacy_firewall_never_reads_a_failed_decimals_read_as_cannot_sell(
+    consumer_api, mock_web3_client, monkeypatch, chain_id, failure,
+):
+    from tests.test_own_simulation_failure import CLEAN_POOL, DECIMALS_FAILURES, reading_decimals, simulation_of
+
+    api, _ = consumer_api
+    mock_web3_client.can_transfer_token = reading_decimals(chain_id, DECIMALS_FAILURES[failure])
+    response, _ = await legacy_firewall(api, monkeypatch, mock_web3_client, chain_id, simulation_of(CLEAN_POOL))
+    assert_unknown_response(response)
+    assert response['raw_checks']['can_sell'] is None
+
+
 def test_covered_cache_keeps_safe(consumer_api):
     api, _ = consumer_api
     response = api._build_cached_response({

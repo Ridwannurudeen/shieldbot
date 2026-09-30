@@ -905,8 +905,15 @@ class RobinhoodSimulator:
         one transient error does not leave the scan unknown and every row still comes from one answer. A
         revert is the call's own answer and is not asked again."""
         rows = await self._post(session, calls)
-        if any(row.get("error") is not None and not _reverted(row["error"]) for row in rows):
-            logger.warning("Robinhood simulation RPC answered an error; asking once more")
+        errors = [
+            _node_error(row) for row in rows if row.get("error") is not None and not _reverted(row["error"])
+        ]
+        if errors:
+            # The code only: a node's error message can carry the RPC URL, and with it an API key.
+            logger.warning(
+                "Robinhood simulation RPC answered an error (%s); asking once more",
+                ", ".join(dict.fromkeys(errors)),
+            )
             await asyncio.sleep(RPC_BACKOFF_SECONDS)
             rows = await self._post(session, calls)
         return rows

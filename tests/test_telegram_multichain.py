@@ -460,6 +460,19 @@ def test_telegram_failed_simulation_overrides_raw_sellability():
     assert 'Rug probability 90%' not in report
 
 
+@pytest.mark.parametrize('flag', ['simulation_failed', 'rpc_failed'])
+def test_telegram_either_flag_leaves_a_claimed_sell_unknown_and_keeps_a_proven_trap(flag):
+    from core.telegram_formatter import format_full_report
+    result = {'status': 'unknown', 'coverage': {'honeypot': 0.8},
+              'rug_probability': 90, 'risk_level': 'HIGH'}
+    report = format_full_report(result, {}, {}, {}, {flag: True, 'is_honeypot': False, 'can_sell': True})
+    assert 'Sellability: Unknown' in report and 'Sellability: Yes' not in report
+    assert 'Not Honeypot' not in report
+    report = format_full_report(result, {}, {}, {}, {flag: True, 'is_honeypot': True, 'can_sell': False})
+    assert '\n  ❌ Honeypot\n' in report
+    assert 'Sellability: No' in report and 'Sellability: Unknown' not in report
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('handler', ['scan_contract', 'check_token'])
 async def test_bot_caches_uncertainty_and_skips_the_ai_report(bot_chain_functions, handler):
@@ -837,3 +850,208 @@ async def test_the_bot_legacy_token_report_never_calls_a_token_not_a_honeypot_af
     report = bot_report_functions['format_token_result'](result)
     assert 'Not a honeypot' not in report
     assert 'Unknown (honeypot data incomplete)' in report
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663])
+@pytest.mark.parametrize('state', ['pool-failed', 'could-not-run'])
+async def test_the_bot_legacy_token_report_never_calls_a_token_not_a_honeypot_beside_a_sell_it_did_not_settle(
+    bot_report_functions, mock_web3_client, chain_id, state,
+):
+    # The legacy scanner passes on the simulation's own "not a honeypot", beside simulation_failed (one
+    # pool failed, another sold) or rpc_failed.
+    from tests.test_own_simulation_failure import UNSETTLED, legacy_scan
+
+    result = await legacy_scan(mock_web3_client, chain_id, UNSETTLED[state])
+    assert result['is_honeypot'] is False
+    report = bot_report_functions['format_token_result'](result)
+    assert 'Not a honeypot' not in report
+    assert 'Unknown (honeypot data incomplete)' in report
+    assert 'Unknown Can Sell' in report
+    assert '**Safety:** ⚪ UNKNOWN' in report
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663])
+@pytest.mark.parametrize('state', ['pool-failed', 'could-not-run'])
+async def test_the_bot_legacy_token_report_shows_a_proven_honeypot_beside_a_sell_it_did_not_settle(
+    bot_report_functions, mock_web3_client, chain_id, state,
+):
+    from tests.test_own_simulation_failure import PROVEN_TRAP, legacy_scan
+
+    result = await legacy_scan(mock_web3_client, chain_id, PROVEN_TRAP[state])
+    report = bot_report_functions['format_token_result'](result)
+    assert '🔴 HONEYPOT DETECTED' in report and '❌ Can Sell' in report
+
+
+@pytest.mark.parametrize('flag', ['simulation_failed', 'rpc_failed'])
+def test_the_bot_legacy_token_report_reads_either_flag_as_a_sell_it_did_not_settle(
+    bot_report_functions, flag,
+):
+    result = {'address': '0x' + 'a' * 40, 'status': 'ok', 'safety_level': 'safe', 'risk_score': 0,
+              'coverage': {'honeypot': 1}, 'is_honeypot': False, 'buy_tax': 0, 'sell_tax': 0,
+              'checks': {'can_buy': True, 'can_sell': True}, flag: True}
+    report = bot_report_functions['format_token_result'](result)
+    assert 'Not a honeypot' not in report and 'Unknown (honeypot data incomplete)' in report
+    assert '✅ Can Sell' not in report and 'Unknown Can Sell' in report
+
+
+def _legacy_simulations():
+    from tests.test_own_simulation_failure import PROVEN_TRAP, TRAP_POOL, simulation_of
+
+    # A trap's sell reverts before its tax is measured, so its sell tax is always unknown.
+    return {'trap': simulation_of(TRAP_POOL), **{f'trap-{state}': value for state, value in PROVEN_TRAP.items()}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663])
+@pytest.mark.parametrize('simulation', ['trap', 'trap-pool-failed', 'trap-could-not-run'])
+async def test_the_bot_legacy_token_report_header_calls_a_proven_honeypot_danger(
+    bot_report_functions, mock_web3_client, chain_id, simulation,
+):
+    from tests.test_own_simulation_failure import legacy_scan
+
+    result = await legacy_scan(mock_web3_client, chain_id, _legacy_simulations()[simulation])
+    assert (result['is_honeypot'], result['sell_tax'], result['safety_level']) == (True, None, 'danger')
+    # The scanner's own score: "Honeypot detected" and "Cannot sell token", critical each.
+    assert result['risk_score'] == 80
+    report = bot_report_functions['format_token_result'](result)
+    assert '**Safety:** 🔴 DANGER' in report
+    assert '**Risk Score:** 80/100 (Confidence: ' in report
+    assert 'Unknown (incomplete provider coverage)' not in report
+    assert '🔴 HONEYPOT DETECTED' in report and '❌ Can Sell' in report
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663])
+@pytest.mark.parametrize('state', ['pool-failed', 'could-not-run'])
+async def test_the_bot_legacy_token_report_header_stays_unknown_beside_a_sell_it_did_not_settle(
+    bot_report_functions, mock_web3_client, chain_id, state,
+):
+    from tests.test_own_simulation_failure import UNSETTLED, legacy_scan
+
+    result = await legacy_scan(mock_web3_client, chain_id, UNSETTLED[state])
+    report = bot_report_functions['format_token_result'](result)
+    assert '**Safety:** ⚪ UNKNOWN' in report
+    assert '**Risk Score:** Unknown (incomplete provider coverage)' in report
+
+
+def test_the_bot_legacy_token_report_header_keeps_an_unproven_cannot_sell_unknown(bot_report_functions):
+    # A bare can_sell False proves no honeypot. Before 8f99543 the legacy scanner wrote one for a decimals()
+    # read that failed, and the bot can serve a result it cached then for up to CACHE_TTL (300 s) after the
+    # deploy: this one, incomplete because the liquidity lock could not be read either.
+    result = {'address': '0x' + 'a' * 40, 'status': 'unknown', 'risk_level': 'unknown', 'safety_level': 'unknown',
+              'coverage': {'can_sell': True, 'liquidity_locked': False}, 'risk_score': 40, 'confidence': 90,
+              'is_honeypot': False, 'buy_tax': 0.0, 'sell_tax': 0.0,
+              'checks': {'can_buy': False, 'can_sell': False, 'ownership_renounced': True, 'liquidity_locked': None}}
+    report = bot_report_functions['format_token_result'](result)
+    assert '**Safety:** ⚪ UNKNOWN' in report
+    assert '**Risk Score:** Unknown (incomplete provider coverage)' in report
+
+
+# The legacy report of a simulated clean token, as bot.py rendered it at 02752e8 on both chains.
+CLEAN_LEGACY_REPORT = (
+    '\n💰 **Token Safety Report**\n\n**Token:** TestToken (TT)\n'
+    '**Address:** `0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a`\n**Safety:** ✅ SAFE\n'
+    '**Risk Score:** 0/100 (Confidence: 76%)\n\n**Honeypot Check:**\n✅ Not a honeypot\n\n'
+    '**Contract Analysis:**\n✅ Can Buy\n✅ Can Sell\n✅ Ownership Renounced\n✅ Liquidity Locked\n\n'
+    '**Taxes:**\nBuy: 0.0% | Sell: 0.0%\n'
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663])
+async def test_the_bot_legacy_token_report_header_of_a_simulated_clean_token_is_unchanged(
+    bot_report_functions, mock_web3_client, chain_id,
+):
+    from tests.test_own_simulation_failure import CLEAN_POOL, legacy_scan, simulation_of
+
+    result = await legacy_scan(mock_web3_client, chain_id, simulation_of(CLEAN_POOL))
+    assert bot_report_functions['format_token_result'](result) == CLEAN_LEGACY_REPORT
+
+
+def test_the_bot_legacy_token_report_header_of_an_incomplete_proven_honeypot_is_never_the_ai_report(
+    bot_report_functions,
+):
+    result = {'address': '0x' + 'a' * 40, 'status': 'ok', 'coverage': {'honeypot': 1}, 'safety_level': 'danger',
+              'risk_score': 80, 'confidence': 90, 'is_honeypot': True, 'buy_tax': 0, 'sell_tax': None,
+              'checks': {'can_buy': True, 'can_sell': False}, 'forensic_report': 'AI REPORT',
+              'ai_analysis': 'AI ANALYSIS', 'ai_risk_score': {'risk_score': 5, 'risk_level': 'LOW'}}
+    report = bot_report_functions['format_token_result'](result)
+    assert '**Safety:** 🔴 DANGER' in report
+    for ai in ('AI REPORT', 'AI ANALYSIS', 'AI Risk Assessment'):
+        assert ai not in report
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('simulation', ['trap', 'trap-pool-failed', 'trap-could-not-run'])
+async def test_a_legacy_proven_honeypot_publishes_no_stronger_verdict_than_its_evidence(
+    bot_report_functions, mock_web3_client, simulation,
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from core.verdict_evidence import build_evidence
+    from scanner.token_scanner import TokenScanner
+    from tests.test_own_simulation_failure import TOKEN, answering
+
+    ns = bot_report_functions
+    ns['container'].registry.run_all.side_effect = RuntimeError('pipeline unavailable')
+    ns['token_scanner'] = TokenScanner(await answering(mock_web3_client, 4663, _legacy_simulations()[simulation]))
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock()))
+    await ns['check_token'](update, TOKEN, chain_id=4663)
+    assert '**Safety:** 🔴 DANGER' in update.message.reply_text.await_args.args[0]
+    args, kwargs = ns['container'].verdict_publisher.publish_fire_and_forget.call_args
+    assert args[:2] == (4663, TOKEN) and kwargs == {'honeypot_data': None}
+    # The dict it publishes is the one it caches, the scan incomplete: the legacy result carries no simulation
+    # provenance, so the evidence cannot say the simulation proved the trap.
+    assert args[2] is ns['_set_cache'].call_args.args[2]
+    assert (args[2]['status'], args[2]['risk_level'], args[2]['safety_level']) == ('unknown',) * 3
+    assert build_evidence(4663, TOKEN, args[2], None)['verdict'] == 'UNKNOWN'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663])
+@pytest.mark.parametrize('failure', ['revert', 'timeout', 'http-429'])
+async def test_the_bot_legacy_token_report_never_reads_a_failed_decimals_read_as_cannot_buy_or_sell(
+    bot_report_functions, mock_web3_client, chain_id, failure,
+):
+    from tests.test_own_simulation_failure import (
+        CLEAN_POOL, DECIMALS_FAILURES, legacy_scan, reading_decimals, simulation_of,
+    )
+
+    mock_web3_client.can_transfer_token = reading_decimals(chain_id, DECIMALS_FAILURES[failure])
+    result = await legacy_scan(mock_web3_client, chain_id, simulation_of(CLEAN_POOL))
+    report = bot_report_functions['format_token_result'](result)
+    assert 'Unknown Can Buy' in report and 'Unknown Can Sell' in report
+    for claim in ('❌ Can Buy', '❌ Can Sell', 'DANGER', 'Token transfers may be restricted or disabled'):
+        assert claim not in report
+    assert '**Safety:** ⚪ UNKNOWN' in report
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663])
+async def test_the_bot_legacy_token_report_after_a_decimals_read_is_unchanged(
+    bot_report_functions, mock_web3_client, chain_id,
+):
+    from tests.test_own_simulation_failure import CLEAN_POOL, legacy_scan, reading_decimals, simulation_of
+
+    mock_web3_client.can_transfer_token = reading_decimals(chain_id, 18)
+    result = await legacy_scan(mock_web3_client, chain_id, simulation_of(CLEAN_POOL))
+    assert bot_report_functions['format_token_result'](result) == CLEAN_LEGACY_REPORT
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663])
+@pytest.mark.parametrize('failure', ['revert', 'timeout', 'http-429'])
+async def test_the_bot_legacy_token_report_keeps_a_proven_honeypot_after_a_failed_decimals_read(
+    bot_report_functions, mock_web3_client, chain_id, failure,
+):
+    from tests.test_own_simulation_failure import (
+        DECIMALS_FAILURES, TRAP_POOL, legacy_scan, reading_decimals, simulation_of,
+    )
+
+    mock_web3_client.can_transfer_token = reading_decimals(chain_id, DECIMALS_FAILURES[failure])
+    result = await legacy_scan(mock_web3_client, chain_id, simulation_of(TRAP_POOL))
+    report = bot_report_functions['format_token_result'](result)
+    assert '**Safety:** 🔴 DANGER' in report and '**Risk Score:** 80/100' in report
+    assert '🔴 HONEYPOT DETECTED' in report and '❌ Can Sell' in report
