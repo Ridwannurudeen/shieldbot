@@ -37,6 +37,7 @@ from eth_utils import keccak
 
 from adapters.robinhood import SIMULATION_PROVIDER
 from core.unknown_ledger import unknown_ledger
+from services.honeypot_service import SELL_TAX_EXTREME
 from services.robinhood_simulation import (
     ADDRESS_RE,
     BALANCE_OVERRIDE_WEI,
@@ -605,7 +606,7 @@ class ArbitrumSimulator:
         if (
             deepest is not None
             and deepest["can_sell"] is True
-            and (deepest["sell_tax"] is None or deepest["sell_tax"] <= 50)
+            and (deepest["sell_tax"] is None or deepest["sell_tax"] <= SELL_TAX_EXTREME)
         ):
             tax = "unmeasured" if deepest["sell_tax"] is None else f"{deepest['sell_tax']:g}%"
             for outcome in outcomes[1:]:

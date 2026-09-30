@@ -8,10 +8,15 @@ from utils.scam_db import ScamDatabase
 logger = logging.getLogger(__name__)
 
 _TRADE_FIELDS = ('is_honeypot', 'buy_tax', 'sell_tax', 'can_buy', 'can_sell')
-# A sell tax (percent) above this is scored by the honeypot analyzer (analyzers/honeypot.py), and
-# only a GoPlus sell tax above it stands in for one ShieldBot's own simulation could not measure,
-# so the gate never takes a tax the analyzer would not score.
+# The honeypot analyzer (analyzers/honeypot.py) scores a sell tax (percent) above SELL_TAX_HIGH.
+# Beside a sell ShieldBot's own simulation made at a tax it could not measure, the gate below takes
+# a GoPlus sell tax only above that line, as evidence against the token: it is taken and scored,
+# but it does not complete the answer. So the gate never takes a tax the analyzer would not score.
 SELL_TAX_HIGH = 20
+# The analyzer flags a sell tax above SELL_TAX_EXTREME as extreme. On Arbitrum One, a deepest pool
+# selling at or below it keeps another pool's trap from deciding the token
+# (services/arbitrum_simulation.py).
+SELL_TAX_EXTREME = 50
 
 
 def map_goplus_token_security(raw: dict) -> dict:

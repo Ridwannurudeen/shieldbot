@@ -2,7 +2,7 @@
 
 import logging
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
-from services.honeypot_service import SELL_TAX_HIGH
+from services.honeypot_service import SELL_TAX_EXTREME, SELL_TAX_HIGH
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ class HoneypotAnalyzer(Analyzer):
             flags.append(f"Honeypot coverage unknown: {d.get('reason') or 'incomplete provider data'}")
         sell_tax = d.get('sell_tax')
         buy_tax = d.get('buy_tax')
-        if sell_tax is not None and sell_tax > 50:
+        if sell_tax is not None and sell_tax > SELL_TAX_EXTREME:
             score += 40
             flags.append(f'Extreme sell tax: {sell_tax}%')
         elif sell_tax is not None and sell_tax > SELL_TAX_HIGH:
