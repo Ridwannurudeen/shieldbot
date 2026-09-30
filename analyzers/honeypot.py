@@ -2,12 +2,9 @@
 
 import logging
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
+from services.honeypot_service import SELL_TAX_HIGH
 
 logger = logging.getLogger(__name__)
-
-# A sell tax (percent) above this adds to the score. services/honeypot_service.py lets a GoPlus sell
-# tax above it stand in for one ShieldBot's own simulation could not measure, so the two agree.
-SELL_TAX_HIGH = 20
 
 
 class HoneypotAnalyzer(Analyzer):

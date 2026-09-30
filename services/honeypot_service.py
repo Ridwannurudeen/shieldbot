@@ -3,12 +3,15 @@ import math
 import time
 from decimal import Decimal, InvalidOperation
 
-from analyzers.honeypot import SELL_TAX_HIGH
 from utils.scam_db import ScamDatabase
 
 logger = logging.getLogger(__name__)
 
 _TRADE_FIELDS = ('is_honeypot', 'buy_tax', 'sell_tax', 'can_buy', 'can_sell')
+# A sell tax (percent) above this is scored by the honeypot analyzer (analyzers/honeypot.py), and
+# only a GoPlus sell tax above it stands in for one ShieldBot's own simulation could not measure,
+# so the gate never takes a tax the analyzer would not score.
+SELL_TAX_HIGH = 20
 
 
 def map_goplus_token_security(raw: dict) -> dict:
