@@ -837,3 +837,47 @@ async def test_the_bot_legacy_token_report_never_calls_a_token_not_a_honeypot_af
     report = bot_report_functions['format_token_result'](result)
     assert 'Not a honeypot' not in report
     assert 'Unknown (honeypot data incomplete)' in report
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663])
+@pytest.mark.parametrize('state', ['pool-failed', 'could-not-run'])
+async def test_the_bot_legacy_token_report_never_calls_a_token_not_a_honeypot_beside_a_sell_it_did_not_settle(
+    bot_report_functions, mock_web3_client, chain_id, state,
+):
+    # The legacy scanner passes on the simulation's own "not a honeypot", beside simulation_failed (one
+    # pool failed, another sold) or rpc_failed.
+    from tests.test_own_simulation_failure import UNSETTLED, legacy_scan
+
+    result = await legacy_scan(mock_web3_client, chain_id, UNSETTLED[state])
+    assert result['is_honeypot'] is False
+    report = bot_report_functions['format_token_result'](result)
+    assert 'Not a honeypot' not in report
+    assert 'Unknown (honeypot data incomplete)' in report
+    assert 'Unknown Can Sell' in report
+    assert '**Safety:** ⚪ UNKNOWN' in report
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chain_id', [42161, 4663])
+@pytest.mark.parametrize('state', ['pool-failed', 'could-not-run'])
+async def test_the_bot_legacy_token_report_shows_a_proven_honeypot_beside_a_sell_it_did_not_settle(
+    bot_report_functions, mock_web3_client, chain_id, state,
+):
+    from tests.test_own_simulation_failure import PROVEN_TRAP, legacy_scan
+
+    result = await legacy_scan(mock_web3_client, chain_id, PROVEN_TRAP[state])
+    report = bot_report_functions['format_token_result'](result)
+    assert '🔴 HONEYPOT DETECTED' in report and '❌ Can Sell' in report
+
+
+@pytest.mark.parametrize('flag', ['simulation_failed', 'rpc_failed'])
+def test_the_bot_legacy_token_report_reads_either_flag_as_a_sell_it_did_not_settle(
+    bot_report_functions, flag,
+):
+    result = {'address': '0x' + 'a' * 40, 'status': 'ok', 'safety_level': 'safe', 'risk_score': 0,
+              'coverage': {'honeypot': 1}, 'is_honeypot': False, 'buy_tax': 0, 'sell_tax': 0,
+              'checks': {'can_buy': True, 'can_sell': True}, flag: True}
+    report = bot_report_functions['format_token_result'](result)
+    assert 'Not a honeypot' not in report and 'Unknown (honeypot data incomplete)' in report
+    assert '✅ Can Sell' not in report and 'Unknown Can Sell' in report

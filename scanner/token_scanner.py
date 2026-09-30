@@ -266,6 +266,12 @@ class TokenScanner:
             is_honeypot = honeypot_result.get('is_honeypot')
             result['honeypot_status'] = honeypot_result.get('status', 'ok' if is_honeypot is not None else 'unknown')
             result['honeypot_reason'] = honeypot_result.get('reason')
+            # A sell simulation that failed, or one of ShieldBot's own that could not run, leaves the sell
+            # unsettled, whatever "not a honeypot" came with it.
+            for flag in ('simulation_failed', 'rpc_failed'):
+                if honeypot_result.get(flag) is True:
+                    result[flag] = True
+                    result['honeypot_status'] = 'unknown'
             if result['honeypot_status'] == 'unknown':
                 result['checks']['can_sell'] = None
             if is_honeypot is None:
