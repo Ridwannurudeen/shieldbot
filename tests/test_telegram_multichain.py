@@ -460,6 +460,19 @@ def test_telegram_failed_simulation_overrides_raw_sellability():
     assert 'Rug probability 90%' not in report
 
 
+@pytest.mark.parametrize('flag', ['simulation_failed', 'rpc_failed'])
+def test_telegram_either_flag_leaves_a_claimed_sell_unknown_and_keeps_a_proven_trap(flag):
+    from core.telegram_formatter import format_full_report
+    result = {'status': 'unknown', 'coverage': {'honeypot': 0.8},
+              'rug_probability': 90, 'risk_level': 'HIGH'}
+    report = format_full_report(result, {}, {}, {}, {flag: True, 'is_honeypot': False, 'can_sell': True})
+    assert 'Sellability: Unknown' in report and 'Sellability: Yes' not in report
+    assert 'Not Honeypot' not in report
+    report = format_full_report(result, {}, {}, {}, {flag: True, 'is_honeypot': True, 'can_sell': False})
+    assert '\n  ❌ Honeypot\n' in report
+    assert 'Sellability: No' in report and 'Sellability: Unknown' not in report
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('handler', ['scan_contract', 'check_token'])
 async def test_bot_caches_uncertainty_and_skips_the_ai_report(bot_chain_functions, handler):

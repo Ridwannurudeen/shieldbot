@@ -200,6 +200,24 @@ async def test_the_telegram_report_of_a_simulated_clean_token_is_unchanged():
     assert report == format_full_report(risk, {}, {}, {}, honeypot_data=before)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663])
+@pytest.mark.parametrize("state", ["pool-failed", "could-not-run"])
+async def test_the_telegram_report_shows_a_proven_trap_as_unsellable_beside_a_sell_it_did_not_settle(
+    chain_id, state
+):
+    # One pool's sell proved a trap; another pool's simulation failed, or (never sent together today)
+    # the simulation reports rpc_failed.
+    adapter = arbitrum_adapter(AsyncMock()) if chain_id == 42161 else adapter_with(AsyncMock())
+    adapter._simulator.simulate = AsyncMock(return_value=PROVEN_TRAP[state])
+    data, analyzed, risk, extension = await scan(chain_id, adapter)
+    flag = "simulation_failed" if state == "pool-failed" else "rpc_failed"
+    assert (analyzed.data["is_honeypot"], analyzed.data["can_sell"], analyzed.data[flag]) == (True, False, True)
+    report = format_full_report(risk, {}, {}, {}, honeypot_data=analyzed.data)
+    assert "\n  ❌ Honeypot\n" in report
+    assert "Sellability: No" in report and "Sellability: Unknown" not in report
+
+
 # --- a discovery lookup the node could not answer ---------------------------------------------------
 
 # What a node under load answers, over HTTP 200, instead of a lookup's result.

@@ -309,7 +309,8 @@ def format_full_report(
             lines.append(f'  {label}: {rendered}')
         for key, label in (('can_buy', 'Buyability'), ('can_sell', 'Sellability')):
             value = honeypot_data.get(key)
-            if key == 'can_sell' and honeypot_data.get('simulation_failed'):
+            # An unsettled simulation never says the token sells; a failed sell it proved still shows.
+            if key == 'can_sell' and unresolved and value is True:
                 value = None
             rendered = f'Unknown ({reason})' if value is None else ('Yes' if value else 'No')
             lines.append(f'  {label}: {rendered}')
