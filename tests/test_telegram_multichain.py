@@ -936,19 +936,14 @@ async def test_the_bot_legacy_token_report_header_stays_unknown_beside_a_sell_it
     assert '**Risk Score:** Unknown (incomplete provider coverage)' in report
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize('chain_id', [42161, 4663])
-async def test_the_bot_legacy_token_report_header_keeps_an_unproven_cannot_sell_unknown(
-    bot_report_functions, mock_web3_client, chain_id,
-):
-    # can_transfer_token answers False whenever decimals() cannot be read, an RPC error included, so its
-    # "cannot sell" proves no honeypot.
-    from tests.test_own_simulation_failure import CLEAN_POOL, legacy_scan, simulation_of
-
-    mock_web3_client.can_transfer_token.return_value = False
-    mock_web3_client.get_liquidity_info.return_value = {'is_locked': None, 'reason': 'RPC unavailable'}
-    result = await legacy_scan(mock_web3_client, chain_id, simulation_of(CLEAN_POOL))
-    assert (result['is_honeypot'], result['checks']['can_sell'], result['status']) == (False, False, 'unknown')
+def test_the_bot_legacy_token_report_header_keeps_an_unproven_cannot_sell_unknown(bot_report_functions):
+    # A bare can_sell False proves no honeypot. Before 8f99543 the legacy scanner wrote one for a decimals()
+    # read that failed, and the bot can serve a result it cached then for up to CACHE_TTL (300 s) after the
+    # deploy: this one, incomplete because the liquidity lock could not be read either.
+    result = {'address': '0x' + 'a' * 40, 'status': 'unknown', 'risk_level': 'unknown', 'safety_level': 'unknown',
+              'coverage': {'can_sell': True, 'liquidity_locked': False}, 'risk_score': 40, 'confidence': 90,
+              'is_honeypot': False, 'buy_tax': 0.0, 'sell_tax': 0.0,
+              'checks': {'can_buy': False, 'can_sell': False, 'ownership_renounced': True, 'liquidity_locked': None}}
     report = bot_report_functions['format_token_result'](result)
     assert '**Safety:** ⚪ UNKNOWN' in report
     assert '**Risk Score:** Unknown (incomplete provider coverage)' in report
