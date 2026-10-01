@@ -540,6 +540,62 @@ def test_built_landing_bundle_contains_the_current_feature_copy(component):
         )
 
 
+def test_no_unbacked_marketing_claims_anywhere_on_the_site():
+    # The brand is honesty: no detection rate, insurance or coverage promise, user or loss count, audit claim,
+    # or aggregate figure that no document in this repository backs, in any source page or in the built bundle.
+    banned = [
+        r"detection rate", r"\binsured\b", r"\binsurance\b", r"\$[\d,]+ in coverage", r"zero losses", r"\baudited\b",
+        r"\btrustless\b", r"\bunhackable\b", r"enterprise-grade", r"\b\d[\d,]*\+? users\b", r"10 of 66",
+        r"0 false positives", r"818 tokens", r"3 honeypots", r"496,628",
+    ]
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    pages = {**landing_texts(), "landing/index.html": read(ROOT / "landing" / "index.html"), "bundle": bundle}
+    for name, text in pages.items():
+        prose = re.sub(r'\bd[:=]"[^"]*"', "", text)  # SVG path data is not prose
+        for pattern in banned + ([] if name == "bundle" else [r"\b99\.[0-9]"]):
+            found = re.search(pattern, prose, re.IGNORECASE)
+            assert not found, f"{name}: {found.group(0)!r}"
+
+
+def test_fonts_are_self_hosted_and_the_build_copies_them():
+    # The site's Content-Security-Policy is font-src 'self' (deploy/nginx-shieldbotsecurity-new.conf), so every
+    # font comes from this origin, and the build must copy the current files next to the page.
+    conf = read(ROOT / "deploy" / "nginx-shieldbotsecurity-new.conf")
+    assert "font-src 'self'" in re.search(r'Content-Security-Policy "([^"]*)"', conf).group(1)
+    pages = [LANDING_SRC / "index.html", ROOT / "landing" / "index.html", *sorted((LANDING_SRC / "public").glob("*.html"))]
+    for page in pages:
+        html = read(page)
+        assert "fonts.googleapis.com" not in html and "fonts.gstatic.com" not in html, page.name
+    fonts = sorted(path.name for path in (LANDING_SRC / "public" / "fonts").glob("*.woff2"))
+    assert fonts == [
+        "jetbrains-mono-latin-400-normal.woff2",
+        "jetbrains-mono-latin-700-normal.woff2",
+        "manrope-latin-wght-normal.woff2",
+    ]
+    for name in fonts:
+        built = (ROOT / "landing" / "fonts" / name).read_bytes()
+        assert built == (LANDING_SRC / "public" / "fonts" / name).read_bytes(), f"landing/fonts/{name} is stale"
+    assert 'href="/fonts/manrope-latin-wght-normal.woff2" as="font"' in read(LANDING_SRC / "index.html")
+
+
+def test_hero_demo_shows_documented_examples_and_makes_no_request():
+    # The demo in the hero plays recorded examples. Each address must be the one the repository documents, the
+    # labels must say the examples are recorded or modelled, and the component must not talk to the network.
+    scenes = read(COMPONENTS / "verdictScenes.ts")
+    demo = read(COMPONENTS / "VerdictDemo.tsx")
+    fixture = json.loads(read(ROOT / "tests" / "fixtures" / "arbitrum_simulation" / "v2_honeypot.json"))
+    assert fixture["token"] in scenes
+    deployments = read(ROOT / "docs" / "DEPLOYMENTS.md")
+    subject = re.search(r"`subject\(\)` is VIRTUAL \(`(0x[0-9a-fA-F]{40})`\)", deployments).group(1)
+    assert subject.lower() in scenes.lower()
+    assert "Recorded examples, not live scans" in demo
+    assert "Modelled example from the judge guide" in scenes
+    assert "allowed=True, reason=0" in scenes and "allowed=True, reason=0" in read(ROOT / "docs" / "SUBMISSION.md")
+    for source in (scenes, demo):
+        for forbidden in ("fetch(", "XMLHttpRequest", "WebSocket", "EventSource"):
+            assert forbidden not in source, forbidden
+
+
 def test_built_dashboard_contains_the_current_source_strings():
     built = read(ROOT / "dashboard" / "index.html")
     labels = re.findall(r"label:'([^']+)'", read(DASHBOARD_SRC))

@@ -16,60 +16,76 @@
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon.png">
   <link rel="shortcut icon" href="/favicon.png">
   <style>
+    @font-face {
+      font-family: "Manrope Variable";
+      font-style: normal;
+      font-weight: 200 800;
+      font-display: swap;
+      src: url("/fonts/manrope-latin-wght-normal.woff2") format("woff2-variations");
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+    }
+    @font-face {
+      font-family: "Manrope Fallback";
+      src: local("Arial");
+      size-adjust: 128.11%;
+      ascent-override: 83.21%;
+      descent-override: 23.42%;
+      line-gap-override: 0%;
+    }
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #020617;
-      color: #cbd5e1;
+      font-family: "Manrope Variable", "Manrope Fallback", Arial, Helvetica, sans-serif;
+      background: #FFFFFF;
+      color: #334155;
       line-height: 1.7;
       padding: 0 16px;
     }
-    a { color: #FACC15; text-decoration: none; }
+    a { color: #047857; text-decoration: none; }
     a:hover { text-decoration: underline; }
     .nav {
       max-width: 800px; margin: 0 auto;
       padding: 20px 0;
       display: flex; align-items: center; gap: 10px;
-      border-bottom: 1px solid rgba(255,255,255,0.06);
+      border-bottom: 1px solid #E3E8EF;
       margin-bottom: 48px;
     }
-    .nav-name { font-size: 15px; font-weight: 700; color: #f8fafc; }
-    .nav-back { margin-left: auto; font-size: 13px; color: #94a3b8; }
-    .nav-back:hover { color: #FACC15; text-decoration: none; }
+    .nav-name { font-size: 15px; font-weight: 700; color: #0B1220; }
+    .nav-back { margin-left: auto; font-size: 13px; color: #475569; }
+    .nav-back:hover { color: #047857; text-decoration: none; }
     .wrap { max-width: 800px; margin: 0 auto; padding-bottom: 80px; }
     .hero { margin-bottom: 48px; }
-    .hero h1 { font-size: 36px; font-weight: 800; color: #f8fafc; letter-spacing: -0.02em; margin-bottom: 12px; }
-    .hero p { font-size: 16px; color: #94a3b8; max-width: 600px; }
-    h2 { font-size: 20px; font-weight: 700; color: #f8fafc; margin: 48px 0 12px; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.06); }
-    h3 { font-size: 15px; font-weight: 700; color: #e2e8f0; margin: 24px 0 8px; }
-    p { margin-bottom: 14px; font-size: 14px; color: #94a3b8; }
+    .hero h1 { font-size: 36px; font-weight: 800; color: #0B1220; letter-spacing: -0.02em; margin-bottom: 12px; }
+    .hero p { font-size: 16px; color: #334155; max-width: 600px; }
+    h2 { font-size: 20px; font-weight: 700; color: #0B1220; margin: 48px 0 12px; padding-bottom: 10px; border-bottom: 1px solid #E3E8EF; }
+    h3 { font-size: 15px; font-weight: 700; color: #0B1220; margin: 24px 0 8px; }
+    p { margin-bottom: 14px; font-size: 14px; color: #334155; }
     ul { margin: 8px 0 16px 20px; }
-    li { font-size: 14px; color: #94a3b8; margin-bottom: 8px; }
-    li strong { color: #cbd5e1; }
+    li { font-size: 14px; color: #334155; margin-bottom: 8px; }
+    li strong { color: #0B1220; }
     .callout {
-      background: rgba(250,204,21,0.06);
-      border: 1px solid rgba(250,204,21,0.15);
-      border-left: 3px solid #FACC15;
+      background: #ECFDF5;
+      border: 1px solid #A7F3D0;
+      border-left: 3px solid #047857;
       border-radius: 8px;
       padding: 16px 18px;
       margin: 24px 0;
-      font-size: 14px; color: #94a3b8;
+      font-size: 14px; color: #334155;
     }
     .score-table { width: 100%; border-collapse: collapse; margin: 16px 0; }
-    .score-table th { text-align: left; font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); }
-    .score-table td { font-size: 13px; color: #94a3b8; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    .score-table th { text-align: left; font-size: 12px; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px; border-bottom: 1px solid #E3E8EF; }
+    .score-table td { font-size: 13px; color: #334155; padding: 10px 12px; border-bottom: 1px solid #E3E8EF; }
     .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
-    .safe { background: rgba(34,197,94,0.15); color: #22c55e; }
-    .caution { background: rgba(234,179,8,0.15); color: #eab308; }
-    .high { background: rgba(249,115,22,0.15); color: #f97316; }
-    .block { background: rgba(239,68,68,0.15); color: #ef4444; }
+    .safe { background: #DCFCE7; color: #166534; }
+    .caution { background: #FEF9C3; color: #854D0E; }
+    .high { background: #FFEDD5; color: #9A3412; }
+    .block { background: #FEE2E2; color: #B91C1C; }
     .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
-    .compare-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 18px; }
-    .compare-card.shield { border-color: rgba(250,204,21,0.2); }
-    .compare-card h4 { font-size: 13px; font-weight: 700; color: #f8fafc; margin-bottom: 12px; }
+    .compare-card { background: #F6F8FA; border: 1px solid #E3E8EF; border-radius: 12px; padding: 18px; }
+    .compare-card.shield { border-color: #A7F3D0; }
+    .compare-card h4 { font-size: 13px; font-weight: 700; color: #0B1220; margin-bottom: 12px; }
     .compare-card ul { margin-left: 16px; }
     .compare-card li { font-size: 13px; margin-bottom: 6px; }
-    .footer { max-width: 800px; margin: 48px auto 0; padding-top: 24px; border-top: 1px solid rgba(255,255,255,0.06); font-size: 12px; color: #94a3b8; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+    .footer { max-width: 800px; margin: 48px auto 0; padding-top: 24px; border-top: 1px solid #E3E8EF; font-size: 12px; color: #475569; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
     @media (max-width: 600px) { .compare-grid { grid-template-columns: 1fr; } .hero h1 { font-size: 26px; } }
   </style>
 
