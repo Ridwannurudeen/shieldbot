@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
+import StatTile from "./StatTile";
 
 interface Stats {
   total_pending_seen: number;
@@ -68,30 +68,26 @@ export default function LiveStats() {
         : stats.counting_since
           ? `Live mempool counters since ${new Date(stats.counting_since * 1000).toLocaleDateString()}, when the monitor last restarted`
           : "Live mempool counters since the monitor last restarted";
+  const dot = `h-2 w-2 rounded-full ${stats ? "bg-emerald-bright motion-safe:animate-pulse" : "bg-line-strong"}`;
 
   return (
-    <div className="border-y border-white/5 bg-white/[0.02] py-8">
-      <div className="max-w-6xl mx-auto px-6">
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.4 }}
-          className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center"
-        >
-          {items.map((item) => (
-            <div key={item.label}>
-              <div className="text-2xl md:text-3xl font-extrabold text-neon tracking-tight">
-                {item.value}
-              </div>
-              <div className="text-xs text-gray-400 mt-1">{item.label}</div>
-            </div>
-          ))}
-        </motion.div>
-        <div className="flex items-center justify-center gap-1.5 mt-5">
-          <div
-            className={`w-1.5 h-1.5 rounded-full ${stats ? "bg-neon animate-pulse" : "bg-gray-600"}`}
-          />
-          <span className="text-xs text-gray-400">{note}</span>
+    <div className="bg-surface-2 pb-14 md:pb-[72px] lg:pb-24">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6">
+        <div className="rounded-2xl border border-line bg-surface p-6">
+          <div className="flex items-center gap-2 text-[13px] text-muted">
+            <span aria-hidden="true" className={dot} />
+            <span>{note}</span>
+          </div>
+          <div className="mt-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
+            {items.map((item, index) => (
+              <StatTile
+                key={item.label}
+                value={item.value}
+                label={item.label}
+                state={index === 3 ? "ready" : stats === undefined ? "loading" : stats === null ? "unavailable" : "ready"}
+              />
+            ))}
+          </div>
         </div>
       </div>
     </div>

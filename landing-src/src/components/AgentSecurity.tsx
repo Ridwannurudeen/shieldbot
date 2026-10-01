@@ -1,104 +1,64 @@
-import { motion } from "framer-motion";
+import CodeBlock from "./CodeBlock";
+import FeatureCard from "./FeatureCard";
+import SectionHeader from "./SectionHeader";
 
-const agentFeatures = [
+const features: { title: string; desc: string; link?: { label: string; href: string } }[] = [
   {
-    version: "V3",
-    title: "Agent Transaction Firewall",
-    desc: "Risk checks for autonomous agents before they send a transaction. The policy engine applies risk thresholds and per transaction and daily spend limits, and returns ALLOW, WARN or BLOCK. Incomplete data never returns ALLOW.",
-    code: `const verdict = await shield.check({
-  from: '0xAgent', to: '0xTarget',
-  data: '0x...', value: '0', chainId: 1,
-});
-if (verdict.blocked) stop();`,
+    title: "REST API",
+    desc: "POST /api/firewall checks a transaction and runs the full token check. POST /api/scan is a quick contract check with no sell simulation, so a token reads Unknown there, never SAFE.",
+    link: { label: "API docs", href: "https://api.shieldbotsecurity.online/docs" },
   },
   {
-    version: "V3.1",
-    title: "MCP Server",
+    title: "Agent firewall",
+    desc: "POST /api/agent/firewall returns ALLOW, WARN or BLOCK from a threshold policy with per-transaction and daily spend limits. Incomplete coverage, or a value with no USD price, turns ALLOW into WARN so the owner approves.",
+  },
+  {
+    title: "MCP server",
     desc: "Model Context Protocol server for AI agents over SSE, with 9 tools (one lists Robinhood Chain launches), a threat feed resource, an agent health resource and 2 analysis prompts. The approval risk and threat graph tools and the wallet guardian resource are stubs that return Unknown.",
-    code: null,
   },
   {
-    version: "V3.2",
-    title: "Portfolio Guardian",
-    desc: "Continuous wallet health monitoring with 5-component scoring: dangerous ERC-20 token approvals, flagged token exposure, approval staleness, concentration risk, and deployer risk — from 0 to 100.",
-    code: null,
+    title: "TypeScript and Python SDKs",
+    desc: "Source in the GitHub repository, not yet published to npm or PyPI. They keep the coverage metadata of every verdict, and the caller enforces the returned decision.",
+    link: { label: "GitHub", href: "https://github.com/Ridwannurudeen/shieldbot/tree/main/sdk" },
   },
   {
-    version: "V3",
-    title: "TypeScript & Python SDK",
-    desc: "SDKs for both ecosystems in the GitHub repository (not yet published to npm or PyPI). Scan contracts, check agent transactions, query reputation scores and scan for prompt injection. The caller enforces the returned decision.",
-    code: `import { ShieldBot } from '@shieldbot/sdk';
-const shield = new ShieldBot({ apiKey: 'sb_...' });
-const scan = await shield.scan('0x...', { chainId: 1 });`,
+    title: "Wallet Health",
+    desc: "GET /api/rescue/{wallet} scans a wallet's ERC-20 token approvals and returns an unsigned revoke transaction for each risky one. Revoking stays with the wallet's owner.",
   },
   {
-    version: "V3.3",
-    title: "Reputation Oracle",
-    desc: "Composite trust scoring combining on-chain activity, firewall verdict history, ERC-8004 registration status, and cross-protocol signals into a single 0\u2013100 reputation score per agent.",
-    code: null,
-  },
-  {
-    version: "V3.5",
-    title: "Threat Intelligence Graph",
-    desc: "Cross-chain graph connecting deployers, funders, and flagged contracts via BFS traversal. Union-Find clustering detects coordinated scam campaigns spanning multiple chains.",
-    code: null,
+    title: "Campaign graph",
+    desc: "A cross-chain graph links deployers and funders to spot coordinated scam campaigns, and a token tied to a known campaign scores higher.",
   },
 ];
 
-const container = {
-  hidden: {},
-  show: { transition: { staggerChildren: 0.1 } },
-};
-
-const item = {
-  hidden: { y: 30, opacity: 0 },
-  show: { y: 0, opacity: 1, transition: { duration: 0.5 } },
-};
+const firewallRequest = `curl -X POST https://api.shieldbotsecurity.online/api/firewall \\
+  -H "Content-Type: application/json" \\
+  -d '{"from":"0x…","to":"0x…","value":"0x0","data":"0x095ea7b3…","chainId":1}'
+# the answer carries classification, risk_score, status, coverage, coverage_reasons,
+# danger_signals, evidence_hash and evidence_url`;
 
 export default function AgentSecurity() {
   return (
-    <section id="agent-security" className="py-24 bg-white/[0.02] border-y border-white/5">
-      <div className="max-w-6xl mx-auto px-6">
-        <h2 className="text-3xl md:text-4xl font-bold text-center mb-4 tracking-tight">
-          Agent Security Suite
-        </h2>
-        <p className="text-gray-400 text-center max-w-lg mx-auto mb-14">
-          Purpose-built infrastructure for autonomous AI agents operating on-chain.
-        </p>
+    <section id="agent-security" aria-labelledby="agent-security-title" className="bg-surface py-14 md:py-[72px] lg:py-24">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6">
+        <SectionHeader
+          id="agent-security-title"
+          eyebrow="For builders and agents"
+          title="The same verdict, with its coverage, over an API."
+          lead="Every answer carries its status, coverage and the reason a check did not run, so a caller can refuse to act on anything Unknown."
+        />
 
-        <motion.div
-          variants={container}
-          initial="hidden"
-          whileInView="show"
-          viewport={{ once: true, amount: 0.1 }}
-          className="grid md:grid-cols-2 lg:grid-cols-3 gap-6"
-        >
-          {agentFeatures.map((f) => (
-            <motion.div
-              key={f.title}
-              variants={item}
-              className="min-w-0 bg-white/5 backdrop-blur-md border border-neon/15 rounded-2xl p-7 group
-                         hover:border-neon/40 hover:-translate-y-1 hover:shadow-neon transition-all duration-300"
-            >
-              <div className="flex items-start justify-between mb-4">
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md tracking-widest bg-neon/10 border border-neon/30 text-neon">
-                  {f.version}
-                </span>
-              </div>
-              <h3 className="text-lg font-bold mb-2">{f.title}</h3>
-              <p className="text-gray-400 text-sm leading-relaxed mb-3">{f.desc}</p>
-              {f.code && (
-                <pre
-                  tabIndex={0}
-                  aria-label="Code example"
-                  className="bg-black/40 border border-white/10 rounded-lg p-3 text-xs text-emerald-400 font-mono overflow-x-auto whitespace-pre"
-                >
-                  {f.code}
-                </pre>
-              )}
-            </motion.div>
+        <div className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {features.map((feature) => (
+            <FeatureCard key={feature.title} title={feature.title} link={feature.link}>
+              {feature.desc}
+            </FeatureCard>
           ))}
-        </motion.div>
+        </div>
+
+        <div className="mt-10">
+          <CodeBlock label="The firewall request the extension sends" code={firewallRequest} />
+        </div>
       </div>
     </section>
   );

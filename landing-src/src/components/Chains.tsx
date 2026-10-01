@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { motion } from "framer-motion";
+import SectionHeader from "./SectionHeader";
 
 // Per-chain coverage. tests/test_website_claims.py checks each row against the chain adapters
 // (sell simulation), services/mempool_service.py (mempool) and services/launch_discovery.py.
@@ -124,31 +124,23 @@ const chains: Chain[] = [
 
 export default function Chains() {
   return (
-    <section id="chains" className="py-20">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6">
-        <h2 className="text-3xl md:text-4xl font-bold text-center mb-4 tracking-tight">
-          Coverage by Chain
-        </h2>
-        <p className="text-gray-400 text-center max-w-2xl mx-auto mb-10">
-          Contract scans run on all 8 chains. The other checks depend on the
-          chain, and a check that cannot run is reported as Unknown, never as
-          Safe.
-        </p>
+    <section id="chains" aria-labelledby="chains-title" className="bg-surface-2 py-14 md:py-[72px] lg:py-24">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6">
+        <SectionHeader
+          id="chains-title"
+          eyebrow="Coverage"
+          title="Coverage by chain"
+          lead="Contract scans run on all 8 chains. The other checks depend on the chain, and a check that cannot run is reported as Unknown, never as Safe."
+        />
 
-        <motion.div
-          initial={{ y: 20, opacity: 0 }}
-          whileInView={{ y: 0, opacity: 1 }}
-          viewport={{ once: true, amount: 0.2 }}
-          transition={{ duration: 0.5 }}
-          className="bg-white/5 border border-neon/15 rounded-2xl px-2 sm:px-6 py-2"
-        >
-          <table className="w-full text-sm">
+        <div className="mt-10 max-w-4xl rounded-2xl border border-line bg-surface px-3 py-2 sm:px-6">
+          <table className="w-full table-fixed text-[13px] sm:text-sm">
             <caption className="sr-only">
               Which checks run on each supported chain
             </caption>
             <thead>
-              <tr className="text-left text-[11px] sm:text-xs uppercase sm:tracking-wider text-gray-400">
-                <th scope="col" className="py-3 pr-1.5 sm:pr-2 font-semibold">Chain</th>
+              <tr className="text-left text-[11px] uppercase tracking-wider text-muted sm:text-xs">
+                <th scope="col" className="w-2/5 py-3 pr-1.5 font-semibold sm:pr-2">Chain</th>
                 <th scope="col" className="py-3 px-1.5 sm:px-2 font-semibold">Sell simulation</th>
                 <th scope="col" className="py-3 px-1.5 sm:px-2 font-semibold">Mempool watch</th>
                 <th scope="col" className="py-3 pl-1.5 sm:pl-2 font-semibold">Launch scans</th>
@@ -156,30 +148,30 @@ export default function Chains() {
             </thead>
             <tbody>
               {chains.map((c) => (
-                <tr key={c.name} className="border-t border-white/10">
-                  <th scope="row" className="py-3 pr-1.5 sm:pr-2 text-left font-semibold text-gray-100">
+                <tr key={c.name} className="border-t border-line">
+                  <th scope="row" className="py-3 pr-1.5 text-left font-semibold text-ink sm:pr-2">
                     <span className="flex items-center gap-1.5 sm:gap-3">
                       {c.logo}
                       {c.name}
                     </span>
                   </th>
-                  <td className={`py-3 px-1.5 sm:px-2 ${c.simulation ? "text-gray-200" : "text-amber-300"}`}>
+                  <td className={`py-3 px-1.5 sm:px-2 ${c.simulation ? "text-body" : "text-caution-fg"}`}>
                     {c.simulation ?? "None"}
                     {c.simulationScope && (
-                      <span className="block text-xs text-gray-400">{c.simulationScope}</span>
+                      <span className="block text-xs text-muted">{c.simulationScope}</span>
                     )}
                   </td>
-                  <td className="py-3 px-1.5 sm:px-2 text-gray-200">{c.mempool ? "Yes" : "No"}</td>
-                  <td className="py-3 pl-1.5 sm:pl-2 text-gray-200">{c.launches ? "Yes" : "No"}</td>
+                  <td className="py-3 px-1.5 text-body sm:px-2">{c.mempool ? "Yes" : "No"}</td>
+                  <td className="py-3 pl-1.5 text-body sm:pl-2">{c.launches ? "Yes" : "No"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </motion.div>
+        </div>
 
-        <ul className="text-sm text-gray-400 leading-relaxed mt-6 space-y-2 max-w-3xl mx-auto">
+        <ul className="mt-6 max-w-3xl space-y-2 text-sm leading-relaxed text-muted">
           <li>
-            <span className="text-gray-200">Sell simulation:</span> honeypot.is
+            <span className="text-ink">Sell simulation:</span> honeypot.is
             simulates a buy and a sell on Ethereum, BNB Chain and Base, and
             ShieldBot runs its own on supported Arbitrum and Robinhood Chain pool
             routes. On Arbitrum those are pools pairing the token with WETH on
@@ -190,11 +182,11 @@ export default function Chains() {
             when GoPlus has no answer.
           </li>
           <li>
-            <span className="text-gray-200">Mempool watch:</span> pending
+            <span className="text-ink">Mempool watch:</span> pending
             transactions are watched on the 4 chains with a public mempool.
           </li>
           <li>
-            <span className="text-gray-200">Launch scans:</span> new Robinhood
+            <span className="text-ink">Launch scans:</span> new Robinhood
             Chain tokens are found as their pools open and reported with
             /launchalerts in Telegram.
           </li>

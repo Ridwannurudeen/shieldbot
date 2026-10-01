@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import Icon from "./Icon";
+import SectionHeader from "./SectionHeader";
 
 const faqs = [
   {
@@ -64,51 +66,34 @@ export default function FAQ() {
   const [open, setOpen] = useState<number | null>(null);
 
   return (
-    <section id="faq" className="py-24 bg-navy">
-      <div className="max-w-3xl mx-auto px-6">
-        <motion.div
-          initial={{ y: 30, opacity: 0 }}
-          whileInView={{ y: 0, opacity: 1 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.5 }}
-          className="text-center mb-14"
-        >
-          <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-4">
-            Frequently Asked Questions
-          </h2>
-          <p className="text-gray-400">
-            Everything you need to know about Web3 transaction security.
-          </p>
-        </motion.div>
+    <section id="faq" aria-labelledby="faq-title" className="bg-surface-2 py-14 md:py-[72px] lg:py-24">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6">
+        <SectionHeader
+          id="faq-title"
+          eyebrow="FAQ"
+          title="Questions people ask"
+          lead="Everything about what ShieldBot checks, what it cannot, and what it does with your data."
+        />
 
-        <div className="space-y-3">
+        <motion.div
+          initial={{ y: 8, opacity: 0 }}
+          whileInView={{ y: 0, opacity: 1 }}
+          viewport={{ once: true, amount: 0.2 }}
+          transition={{ duration: 0.4, ease: [0.2, 0, 0, 1] }}
+          className="mt-10 space-y-3"
+        >
           {faqs.map((faq, i) => (
-            <motion.div
-              key={i}
-              initial={{ y: 20, opacity: 0 }}
-              whileInView={{ y: 0, opacity: 1 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.4, delay: i * 0.05 }}
-              className="border border-white/10 rounded-xl overflow-hidden bg-navy-light"
-            >
+            <div key={i} className="rounded-xl border border-line bg-surface transition-colors hover:border-line-strong">
               <h3>
                 <button
+                  type="button"
                   onClick={() => setOpen(open === i ? null : i)}
                   aria-expanded={open === i}
                   aria-controls={`faq-answer-${i}`}
-                  className="w-full flex items-center justify-between px-6 py-5 text-left gap-4 hover:bg-white/5 transition-colors"
+                  className="flex w-full items-center justify-between gap-4 px-6 py-5 text-left"
                 >
-                  <span className="font-semibold text-white text-sm md:text-base">
-                    {faq.q}
-                  </span>
-                  <span
-                    aria-hidden="true"
-                    className={`text-neon text-xl flex-shrink-0 transition-transform duration-300 ${
-                      open === i ? "rotate-45" : ""
-                    }`}
-                  >
-                    +
-                  </span>
+                  <span className="text-base font-semibold text-ink">{faq.q}</span>
+                  <Icon name="chevron" size={20} className={`shrink-0 text-muted transition-transform duration-250 ${open === i ? "rotate-180" : ""}`} />
                 </button>
               </h3>
 
@@ -120,18 +105,16 @@ export default function FAQ() {
                     initial={{ height: 0, opacity: 0 }}
                     animate={{ height: "auto", opacity: 1 }}
                     exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.3, ease: "easeInOut" }}
+                    transition={{ duration: 0.25, ease: [0.2, 0, 0, 1] }}
                     className="overflow-hidden"
                   >
-                    <p className="px-6 pb-5 text-gray-400 text-sm md:text-base leading-relaxed">
-                      {faq.a}
-                    </p>
+                    <p className="px-6 pb-5 text-[15px] leading-relaxed text-body">{faq.a}</p>
                   </motion.div>
                 )}
               </AnimatePresence>
-            </motion.div>
+            </div>
           ))}
-        </div>
+        </motion.div>
       </div>
     </section>
   );
