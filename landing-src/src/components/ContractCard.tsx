@@ -41,7 +41,9 @@ export default function ContractCard({
           onClick={copyAddress}
           className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-surface-3 hover:text-ink"
         >
-          {copyState === "failed" ? <span className="text-xs text-caution-fg">Could not copy</span> : <Icon name={copyState === "copied" ? "check" : "copy"} size={16} />}
+          {copyState === "failed" ? (
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-caution-fg"><path d="M12 3 2.5 20h19L12 3Z" /><path d="M12 9v4M12 17h.01" /></svg>
+          ) : <Icon name={copyState === "copied" ? "check" : "copy"} size={16} />}
         </button>
         <span className="sr-only" aria-live="polite">
           {copyState === "copied" ? "Address copied" : copyState === "failed" ? "Could not copy" : ""}

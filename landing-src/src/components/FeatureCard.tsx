@@ -24,7 +24,7 @@ export default function FeatureCard({
           {number && <span className="font-mono text-xs text-emerald">{number}</span>}
         </div>
       )}
-      <h3 className="mt-4 text-lg font-semibold text-ink">{title}</h3>
+      <h3 className={`${icon || number ? "mt-4 " : ""}text-lg font-semibold text-ink`}>{title}</h3>
       <div className="mt-2 text-sm leading-relaxed text-body">{children}</div>
       {link && (
         <a

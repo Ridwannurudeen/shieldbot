@@ -93,7 +93,7 @@ export default function FAQ() {
                   className="flex w-full items-center justify-between gap-4 px-6 py-5 text-left"
                 >
                   <span className="text-base font-semibold text-ink">{faq.q}</span>
-                  <Icon name="chevron" size={20} className={`shrink-0 text-muted transition-transform duration-250 ${open === i ? "rotate-180" : ""}`} />
+                  <Icon name="chevron" size={20} className={`shrink-0 text-muted transition-transform duration-[250ms] ${open === i ? "rotate-180" : ""}`} />
                 </button>
               </h3>
 

@@ -133,14 +133,14 @@ export default function Chains() {
           lead="Contract scans run on all 8 chains. The other checks depend on the chain, and a check that cannot run is reported as Unknown, never as Safe."
         />
 
-        <div className="mt-10 max-w-4xl rounded-2xl border border-line bg-surface px-3 py-2 sm:px-6">
-          <table className="w-full table-fixed text-[13px] sm:text-sm">
+        <div className="mt-10 max-w-4xl overflow-x-auto rounded-2xl border border-line bg-surface px-3 py-2 sm:px-6" tabIndex={0} aria-label="Coverage by chain">
+          <table className="w-full text-[13px] sm:text-sm">
             <caption className="sr-only">
               Which checks run on each supported chain
             </caption>
             <thead>
-              <tr className="text-left text-[11px] uppercase tracking-wider text-muted sm:text-xs">
-                <th scope="col" className="w-2/5 py-3 pr-1.5 font-semibold sm:pr-2">Chain</th>
+              <tr className="text-left text-[11px] uppercase text-muted md:tracking-wider sm:text-xs">
+                <th scope="col" className="py-3 pr-1.5 font-semibold sm:pr-2">Chain</th>
                 <th scope="col" className="py-3 px-1.5 sm:px-2 font-semibold">Sell simulation</th>
                 <th scope="col" className="py-3 px-1.5 sm:px-2 font-semibold">Mempool watch</th>
                 <th scope="col" className="py-3 pl-1.5 sm:pl-2 font-semibold">Launch scans</th>

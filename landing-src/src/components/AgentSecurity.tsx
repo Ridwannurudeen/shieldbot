@@ -34,8 +34,7 @@ const features: { title: string; desc: string; link?: { label: string; href: str
 const firewallRequest = `curl -X POST https://api.shieldbotsecurity.online/api/firewall \\
   -H "Content-Type: application/json" \\
   -d '{"from":"0x…","to":"0x…","value":"0x0","data":"0x095ea7b3…","chainId":1}'
-# the answer carries classification, risk_score, status, coverage, coverage_reasons,
-# danger_signals, evidence_hash and evidence_url`;
+`;
 
 export default function AgentSecurity() {
   return (
@@ -58,6 +57,7 @@ export default function AgentSecurity() {
 
         <div className="mt-10">
           <CodeBlock label="The firewall request the extension sends" code={firewallRequest} />
+          <p className="mt-3 text-[13px] text-muted">The answer carries classification, risk_score, status, coverage, coverage_reasons, danger_signals, evidence_hash and evidence_url.</p>
         </div>
       </div>
     </section>

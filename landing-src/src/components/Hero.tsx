@@ -6,11 +6,12 @@ import VerdictDemo from "./VerdictDemo";
 export default function Hero() {
   return (
     <section className="relative pt-24 md:pt-28 lg:pt-32 pb-14 md:pb-[72px] lg:pb-24 border-b border-line">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 grid gap-12 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:gap-16 items-start">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:gap-16 items-start">
         <motion.div
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ duration: 0.6, ease: "easeOut" }}
+          className="min-w-0"
         >
           <p className="text-xs font-bold uppercase tracking-[0.12em] text-emerald">
             Chrome extension, Telegram bot and API for 8 EVM chains
@@ -61,7 +62,7 @@ export default function Hero() {
             private keys or seed phrase.
           </p>
         </motion.div>
-        <VerdictDemo />
+        <div className="min-w-0"><VerdictDemo /></div>
       </div>
     </section>
   );

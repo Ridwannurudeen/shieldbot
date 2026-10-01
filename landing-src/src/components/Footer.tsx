@@ -53,7 +53,7 @@ export default function Footer() {
   return (
     <footer className="bg-ink text-onink">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-14 lg:py-16">
-        <div className="grid gap-12 lg:grid-cols-12">
+        <div className="grid grid-cols-1 gap-12 lg:grid-cols-12">
           <div className="lg:col-span-5">
             <div className="flex items-center gap-2">
               <Mark size={28} className="text-emerald-onink" />
@@ -97,7 +97,7 @@ export default function Footer() {
             </div>
           </div>
 
-          <div className="grid gap-6 sm:grid-cols-3 lg:col-span-7">
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-3 lg:col-span-7">
             <div>
               <h2 className="text-xs font-bold uppercase tracking-[0.12em] text-onink-muted">Product</h2>
               <div className="mt-3 flex flex-col gap-2">
