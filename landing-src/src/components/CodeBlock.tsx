@@ -38,6 +38,9 @@ export default function CodeBlock({ code, label }: { code: string; label?: strin
           {code}
         </pre>
       </div>
+      <p className="mt-2 text-[13px] text-caution-fg" aria-live="polite">
+        {copyState === "copied" ? "Commands copied" : copyState === "failed" ? "Could not copy" : ""}
+      </p>
     </div>
   );
 }

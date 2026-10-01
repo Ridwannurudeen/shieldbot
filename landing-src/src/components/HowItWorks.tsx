@@ -94,7 +94,7 @@ export default function HowItWorks() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.2 }}
           transition={{ duration: 0.4, ease: [0.2, 0, 0, 1] }}
-          className="mt-10 grid gap-6 md:grid-cols-3"
+          className="mt-10 grid grid-cols-1 gap-6 lg:grid-cols-3"
         >
           {steps.map((step) => (
             <FeatureCard key={step.num} title={step.title} icon={step.icon} number={step.num}>
@@ -103,8 +103,8 @@ export default function HowItWorks() {
           ))}
         </motion.div>
 
-        <div className="mt-12 grid gap-12 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-          <div className="rounded-3xl bg-surface-2 p-6">
+        <div className="mt-12 grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+          <div className="min-w-0 rounded-3xl bg-surface-2 p-6">
             <figure>
               <picture>
                 <source
@@ -134,7 +134,7 @@ export default function HowItWorks() {
             </figure>
           </div>
 
-          <div>
+          <div className="min-w-0">
             <h3 className="text-xl font-semibold text-ink">It also checks</h3>
             <ul className="mt-5 space-y-4">
               {checks.map((check) => (

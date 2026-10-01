@@ -212,9 +212,13 @@ def test_the_site_shows_the_robinhood_contract_addresses():
         assert f"https://robin.etherscan.io/address/{address}" in section, contract
         assert f"https://sourcify.dev/server/v2/contract/4663/{address}" in section, contract
         assert address in bundle, f"landing bundle is stale: missing {contract}"
-    assert "Deployed 27 September 2026" in section
+    assert "Deployed 27 September 2026" in read(COMPONENTS / "ContractCard.tsx")
     assert "0x7578ca9e…f0c772a4" in section
     assert "judge guide" in section
+    verification_code = re.search(r"const verificationCode = `([^`]*)`;", section).group(1)
+    export_lines = [line for line in verification_code.splitlines() if line.startswith("export ")]
+    assert len(export_lines) == 4
+    assert "#" not in verification_code
     source = "\n".join(read(path) for path in (LANDING_SRC / "src").rglob("*") if path.is_file())
     assert not re.search(r"0x[0-9a-fA-F]{64}", source)
     assert not re.search(r"0x[0-9a-fA-F]{64}", bundle)

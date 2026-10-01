@@ -53,13 +53,10 @@ const figures = [
   { value: "49%", label: "could not be resolved either way and are reported as unknown" },
 ];
 
-const verificationCode = `# docs/JUDGE_GUIDE.md, section 3. The published example is WOOD.
-export API_BASE='https://api.shieldbotsecurity.online'
-export RPC_URL='https://robinhood-rpc.publicnode.com'   # any chain-4663 RPC; the API does not use this one
+const verificationCode = `export API_BASE='https://api.shieldbotsecurity.online'
+export RPC_URL='https://robinhood-rpc.publicnode.com'
 export REGISTRY='0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138'
-export SUBJECT='0xf8bc08092c06db6148114dcf82af881f1085f92b'
-# RECORD_TX: copy the full hash of 0x7578ca9e…f0c772a4 from the judge guide, section 3
-# then run the Python block from the guide`;
+export SUBJECT='0xf8bc08092c06db6148114dcf82af881f1085f92b'`;
 
 export default function OnChain() {
   return (
@@ -72,15 +69,15 @@ export default function OnChain() {
           lead="ShieldBot records each Robinhood Chain verdict on-chain with the hash of its evidence document. A guard contract allows only a recent LOW or MEDIUM record, and a guarded transfer asks the guard before it moves USDG. Missing, Unknown, high-risk, honeypot, expired and future-dated records are denied."
         />
 
-        <div className="mt-10 grid gap-6 lg:grid-cols-3" data-deployed="Deployed 27 September 2026">
+        <div className="mt-10 grid grid-cols-1 gap-6 lg:grid-cols-3">
           {contracts.map((contract) => (
             <ContractCard key={contract.address} {...contract} />
           ))}
         </div>
         <p className="mt-4 text-[13px] text-muted">All three deployed on 27 September 2026 from the registry owner's account, built from main at c9ae9c9, with full exact source matches on Sourcify.</p>
 
-        <div className="mt-12 grid gap-10 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
-          <div>
+        <div className="mt-12 grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+          <div className="min-w-0">
             <h3 className="text-xl font-semibold text-ink">Verify a verdict without trusting the API</h3>
             <p className="mt-3 text-[15px] text-body">The judge guide's section 3 checks a published verdict against the registry with any Robinhood Chain RPC. No API key, wallet or signing is needed.</p>
             <ol className="mt-5 list-decimal space-y-2 pl-5 text-[15px] text-body">
@@ -88,9 +85,11 @@ export default function OnChain() {
               <li>Hash the served canonical string with keccak256.</li>
               <li>Read the recording transaction's receipt from an independent RPC and match the VerdictRecorded event's subject, verdict and evidence hash.</li>
             </ol>
-            <div className="mt-5">
+            <p className="mt-5 text-[13px] text-muted">From the judge guide, section 3. The published example is WOOD. Any Robinhood Chain RPC works; the API does not use this one.</p>
+            <div className="mt-3">
               <CodeBlock code={verificationCode} />
             </div>
+            <p className="mt-3 text-[13px] text-muted">Then set RECORD_TX to the full hash of 0x7578ca9e…f0c772a4 from the judge guide, section 3, and run the guide's Python block.</p>
             <a
               className="mt-3 inline-flex min-h-[44px] items-center text-[13px] text-emerald underline underline-offset-4 hover:text-emerald-deep"
               href="https://github.com/Ridwannurudeen/shieldbot/blob/main/docs/JUDGE_GUIDE.md#3-verify-a-verdict-without-trusting-the-api"
@@ -101,7 +100,7 @@ export default function OnChain() {
             </a>
             <p className="mt-3 text-[13px] text-muted">A match proves the recorder committed those bytes. It does not prove the scan was right, that an issuer is genuine, or that a token will stay sellable.</p>
           </div>
-          <div>
+          <div className="min-w-0">
             <h3 className="text-xl font-semibold text-ink">What the guard answers</h3>
             <ul className="mt-5 space-y-3">
               {reasonCodes.map(([code, description]) => (
