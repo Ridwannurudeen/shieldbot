@@ -360,9 +360,9 @@ def test_structured_data_is_valid_and_matches_the_visible_faq():
 
 
 def test_hero_image_describes_its_recorded_api_reply():
-    # landing-src/scripts/capture-hero-overlay.py renders the extension's overlay from this reply.
+    # landing-src/scripts/capture-hero-overlay.py renders the extension's overlay from this reply; the figure lives in HowItWorks.tsx.
     reply = json.loads(read(LANDING_SRC / "scripts" / "hero-overlay-response.json"))
-    hero = read(COMPONENTS / "Hero.tsx")
+    figure = read(COMPONENTS / "HowItWorks.tsx")
     messages = json.loads(read(ROOT / "extension" / "locales" / "en" / "messages.json"))
     # The overlay's rules in extension/content.js, applied below to the recorded reply.
     content = " ".join(read(ROOT / "extension" / "content.js").split())
@@ -412,14 +412,14 @@ def test_hero_image_describes_its_recorded_api_reply():
             else f"{messages['overlaySafety']} {100 - score}/100"
         )
         label = f"{label} — {score_display}"
-    assert f"The verdict badge reads {label}" in hero
+    assert f"The verdict badge reads {label}" in figure
     if reply.get("danger_signals"):
-        assert f"The danger signals include {reply['danger_signals'][0]}" in hero
+        assert f"The danger signals include {reply['danger_signals'][0]}" in figure
     if incomplete:
         reasons = "; ".join(filter(None, reply["coverage_reasons"].values()))
-        assert f"{messages['unknownWhy']} {reasons or messages['unknownNoReason']}" in hero
+        assert f"{messages['unknownWhy']} {reasons or messages['unknownNoReason']}" in figure
     for name in ("hero-overlay.webp", "hero-overlay-mobile.webp"):
-        assert f'"/{name}"' in hero
+        assert f'"/{name}"' in figure
         source = (LANDING_SRC / "public" / name).read_bytes()
         assert (ROOT / "landing" / name).read_bytes() == source, f"landing/{name} is stale"
 

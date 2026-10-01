@@ -165,6 +165,36 @@ export default function HowItWorks() {
           ))}
         </motion.div>
 
+        <div className="mt-6 max-w-[490px]">
+          <figure>
+            <picture>
+              <source
+                media="(max-width: 767px)"
+                srcSet="/hero-overlay-mobile.webp"
+                width={390}
+                height={496}
+              />
+              <img
+                src="/hero-overlay.webp"
+                width={490}
+                height={954}
+                loading="lazy"
+                alt="The ShieldBot extension's warning dialog for a request that approves unlimited USDC spending on Ethereum. The verdict badge reads BLOCK RECOMMENDED — Safety: 0/100. The danger signals include Spender flagged by GoPlus: stealing_attack (SlowMist,BlockSec)."
+                className="w-full h-auto rounded-2xl ring-1 ring-white/10 shadow-[0_25px_50px_rgba(0,0,0,0.5)] max-md:rounded-b-none max-md:[mask-image:linear-gradient(to_bottom,#000_94%,transparent)]"
+              />
+            </picture>
+            <figcaption className="text-sm text-gray-400 mt-4 leading-relaxed">
+              The extension's 3.1.0 overlay (listed on the Chrome Web Store as
+              ShieldAI Transaction Firewall; the 3.1.0 update is pending), fed
+              the API's reply for this request on 26 September 2026. It
+              recommends blocking an unlimited USDC approval to the wallet
+              behind the 2021 BadgerDAO front-end attack, which GoPlus flags for
+              stealing attacks. The Proxy/upgradeable contract signal describes
+              USDC's own contract, an upgradeable proxy, not the spender.
+            </figcaption>
+          </figure>
+        </div>
+
         <div className="grid lg:grid-cols-2 gap-6 mt-6">
           <div className="bg-white/5 border border-white/10 rounded-2xl p-7">
             <h3 className="text-lg font-bold mb-4">It also checks</h3>
