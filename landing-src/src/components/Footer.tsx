@@ -72,9 +72,9 @@ export default function Footer() {
                   onChange={(event) => setEmail(event.target.value)}
                   placeholder="Email for product updates"
                   required
-                  className="flex-1 min-w-0 h-11 px-3 bg-surface border border-line-strong rounded-md text-sm text-ink placeholder:text-muted focus:border-emerald transition-colors duration-150 ease-out"
+                  className="flex-1 min-w-0 h-11 px-3 bg-surface border border-line-strong rounded-md text-sm text-ink placeholder:text-muted focus:border-emerald focus-visible:outline-emerald-onink transition-colors duration-150 ease-out"
                 />
-                <button type="submit" disabled={status === "loading"} className="h-11 px-4 bg-emerald text-white text-sm font-semibold rounded-lg hover:bg-emerald-deep active:bg-emerald-deep active:translate-y-px transition-colors duration-150 ease-out disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
+                <button type="submit" disabled={status === "loading"} className="h-11 px-4 bg-emerald text-white text-sm font-semibold rounded-lg hover:bg-emerald-deep active:bg-emerald-deep active:translate-y-px focus-visible:outline-emerald-onink transition-colors duration-150 ease-out disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
                   {status === "loading" ? "Sending…" : "Get updates"}
                 </button>
               </div>

@@ -57,7 +57,7 @@ export const SCENES: readonly Scene[] = [
     explanation:
       "Honeypot detected. Every sell forwards the token's ETH to a tax wallet that refuses it, so the sell reverts. A clean answer from a third party does not settle what ShieldBot's own simulation left open.",
     footnote:
-      "Recorded eth_simulateV1 call of 29 September 2026 at block 509,946,490 and the API's answer of 30 September 2026. Source: ",
+      "Recorded eth_simulateV1 call of 29 September 2026 and the API's answer of 30 September 2026. Source: ",
     source: {
       label: "docs/SUBMISSION.md",
       href: "https://github.com/Ridwannurudeen/shieldbot/blob/main/docs/SUBMISSION.md",

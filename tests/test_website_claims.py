@@ -24,6 +24,7 @@ def read(path: Path) -> str:
 
 def landing_texts() -> dict:
     files = list(COMPONENTS.glob("*.tsx")) + [
+        COMPONENTS / "verdictScenes.ts",
         LANDING_SRC / "index.html",
         LANDING_SRC / "public" / "about.html",
         LANDING_SRC / "scripts" / "gen-og-image.mjs",
@@ -546,10 +547,21 @@ def test_no_unbacked_marketing_claims_anywhere_on_the_site():
     banned = [
         r"detection rate", r"\binsured\b", r"\binsurance\b", r"\$[\d,]+ in coverage", r"zero losses", r"\baudited\b",
         r"\btrustless\b", r"\bunhackable\b", r"enterprise-grade", r"\b\d[\d,]*\+? users\b", r"10 of 66",
-        r"0 false positives", r"818 tokens", r"3 honeypots", r"496,628",
+        r"0 false positives", r"818 tokens", r"3 honeypots", r"496,628", r"2,091",
+        r"records each Robinhood Chain verdict",
     ]
     bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
-    pages = {**landing_texts(), "landing/index.html": read(ROOT / "landing" / "index.html"), "bundle": bundle}
+    pages = {
+        **landing_texts(),
+        "landing/index.html": read(ROOT / "landing" / "index.html"),
+        "landing-src/public/privacy.html": read(LANDING_SRC / "public" / "privacy.html"),
+        "landing-src/public/terms.html": read(LANDING_SRC / "public" / "terms.html"),
+        "landing-src/public/security.html": read(LANDING_SRC / "public" / "security.html"),
+        "landing/privacy.html": read(ROOT / "landing" / "privacy.html"),
+        "landing/terms.html": read(ROOT / "landing" / "terms.html"),
+        "landing/security.html": read(ROOT / "landing" / "security.html"),
+        "bundle": bundle,
+    }
     for name, text in pages.items():
         prose = re.sub(r'\bd[:=]"[^"]*"', "", text)  # SVG path data is not prose
         for pattern in banned + ([] if name == "bundle" else [r"\b99\.[0-9]"]):
@@ -576,6 +588,20 @@ def test_fonts_are_self_hosted_and_the_build_copies_them():
         built = (ROOT / "landing" / "fonts" / name).read_bytes()
         assert built == (LANDING_SRC / "public" / "fonts" / name).read_bytes(), f"landing/fonts/{name} is stale"
     assert 'href="/fonts/manrope-latin-wght-normal.woff2" as="font"' in read(LANDING_SRC / "index.html")
+
+
+def test_every_static_page_declares_its_manrope_face():
+    for name in ("about.html", "privacy.html", "terms.html", "security.html"):
+        for page in (LANDING_SRC / "public" / name, ROOT / "landing" / name):
+            html = read(page)
+            assert not any(line.startswith("+") for line in html.splitlines()), page
+            assert re.search(r"^\s*@font-face\s*\{[^}]*Manrope Variable", html, re.MULTILINE), page
+
+
+def test_the_site_describes_the_quick_scan_as_the_readme_does():
+    text = "a token it recognises reads Unknown there"
+    assert text in read(ROOT / "README.md")
+    assert text in read(COMPONENTS / "AgentSecurity.tsx")
 
 
 def test_hero_demo_shows_documented_examples_and_makes_no_request():

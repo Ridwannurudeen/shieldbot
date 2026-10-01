@@ -19,7 +19,7 @@ export default function Hero() {
           <h1 className="mt-4 text-display-sm md:text-display text-ink">
             Know before you sign.
             <br />
-            <span className="text-emerald">And know when we don't.</span>
+            <span className="text-emerald">And know when we&nbsp;don't.</span>
           </h1>
           <p className="mt-6 max-w-[560px] text-lg md:text-xl leading-[1.55] text-body">
             ShieldBot checks a transaction before your wallet signs it and tells

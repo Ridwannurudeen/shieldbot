@@ -78,7 +78,7 @@ export default function LiveStats() {
             <span aria-hidden="true" className={dot} />
             <span>{note}</span>
           </div>
-          <div className="mt-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <div className="mt-5 grid grid-cols-1 min-[360px]:grid-cols-2 gap-4 lg:grid-cols-4">
             {items.map((item, index) => (
               <StatTile
                 key={item.label}

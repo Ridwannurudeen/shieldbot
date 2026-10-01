@@ -108,7 +108,7 @@ export default function FAQ() {
                     transition={{ duration: 0.25, ease: [0.2, 0, 0, 1] }}
                     className="overflow-hidden"
                   >
-                    <p className="px-6 pb-5 text-[15px] leading-relaxed text-body">{faq.a}</p>
+                    <p className="px-6 pb-5 text-[15px] leading-relaxed text-body [overflow-wrap:anywhere]">{faq.a}</p>
                   </motion.div>
                 )}
               </AnimatePresence>

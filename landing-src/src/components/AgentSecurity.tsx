@@ -5,7 +5,7 @@ import SectionHeader from "./SectionHeader";
 const features: { title: string; desc: string; link?: { label: string; href: string } }[] = [
   {
     title: "REST API",
-    desc: "POST /api/firewall checks a transaction and runs the full token check. POST /api/scan is a quick contract check with no sell simulation, so a token reads Unknown there, never SAFE.",
+    desc: "POST /api/firewall checks a transaction and runs the full token check. POST /api/scan is a quick contract check with no sell simulation, so a token it recognises reads Unknown there, never SAFE.",
     link: { label: "API docs", href: "https://api.shieldbotsecurity.online/docs" },
   },
   {
@@ -33,8 +33,7 @@ const features: { title: string; desc: string; link?: { label: string; href: str
 
 const firewallRequest = `curl -X POST https://api.shieldbotsecurity.online/api/firewall \\
   -H "Content-Type: application/json" \\
-  -d '{"from":"0x…","to":"0x…","value":"0x0","data":"0x095ea7b3…","chainId":1}'
-`;
+  -d '{"from":"0x…","to":"0x…","value":"0x0","data":"0x095ea7b3…","chainId":1}'`;
 
 export default function AgentSecurity() {
   return (
