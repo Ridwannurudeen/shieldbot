@@ -41,7 +41,7 @@ export default function VerdictDemo() {
     if (!element) return;
 
     const observer = new IntersectionObserver(
-      ([entry]) => setInView(entry.isIntersecting),
+      ([entry]) => setInView(entry.intersectionRatio >= 0.4),
       { threshold: 0.4 },
     );
     observer.observe(element);
@@ -86,33 +86,33 @@ export default function VerdictDemo() {
     setPlaying(false);
   }
 
-  function renderFootnote() {
-    if (scene.footnote.startsWith(scene.source.label)) {
+  function renderFootnote(item: (typeof SCENES)[number]) {
+    if (item.footnote.startsWith(item.source.label)) {
       return (
         <>
           <a
             className="text-emerald underline underline-offset-4 hover:text-emerald-deep"
-            href={scene.source.href}
+            href={item.source.href}
             target="_blank"
             rel="noopener noreferrer"
           >
-            {scene.source.label}
+            {item.source.label}
           </a>
-          {scene.footnote.slice(scene.source.label.length)}
+          {item.footnote.slice(item.source.label.length)}
         </>
       );
     }
 
     return (
       <>
-        {scene.footnote}
+        {item.footnote}
         <a
           className="text-emerald underline underline-offset-4 hover:text-emerald-deep"
-          href={scene.source.href}
+          href={item.source.href}
           target="_blank"
           rel="noopener noreferrer"
         >
-          {scene.source.label}
+          {item.source.label}
         </a>
       </>
     );
@@ -170,76 +170,99 @@ export default function VerdictDemo() {
         })}
       </div>
 
-      <div className="mt-6">
-        <p className="text-base font-semibold text-ink">{scene.title}</p>
-        <p className="mt-1 text-sm text-muted">{scene.subtitle}</p>
-        <div className="mt-3 flex flex-wrap items-center gap-2 font-mono text-[13px] text-body">
-          {scene.address && (
-            <span>
-              <span className="md:hidden">{`${scene.address.slice(0, 6)}…${scene.address.slice(-4)}`}</span>
-              <span className="hidden md:inline">{scene.address}</span>
-            </span>
-          )}
-          <span className="rounded-md bg-surface-3 px-2 py-0.5 text-xs text-muted">
-            {scene.chain}
-          </span>
-        </div>
-      </div>
+      <div className="grid">
+        {SCENES.map((item, sceneBodyIndex) => {
+          const active = sceneBodyIndex === sceneIndex;
+          const itemVisibleStep = active ? visibleStep : item.rows.length + 1;
+          const itemVerdictShown = itemVisibleStep === item.rows.length + 1;
 
-      <div className="mt-6 space-y-4">
-        {scene.rows.map((row, index) => (
-          <motion.div
-            key={row.name}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.25, ease: [0.2, 0, 0, 1] }}
-            className={["flex gap-3", index >= visibleStep ? "invisible" : ""]
-              .filter(Boolean)
-              .join(" ")}
-          >
-            <span
-              className={[
-                "h-5 w-5 rounded-full flex items-center justify-center shrink-0",
-                rowTones[row.state],
-              ].join(" ")}
+          return (
+            <div
+              key={item.id}
+              className={["col-start-1 row-start-1 mt-6", active ? "" : "invisible"]
+                .filter(Boolean)
+                .join(" ")}
+              aria-hidden={active ? undefined : true}
+              inert={!active}
             >
-              <Icon name={rowIcons[row.state]} size={16} className="h-3 w-3" />
-            </span>
-            <div>
-              <p className="text-sm font-semibold text-ink">{row.name}</p>
-              <p className="text-[13px] text-muted">{row.note}</p>
+              <p className="text-base font-semibold text-ink">{item.title}</p>
+              <p className="mt-1 text-sm text-muted">{item.subtitle}</p>
+              <div className="mt-3 flex flex-wrap items-center gap-2 font-mono text-[13px] text-body">
+                {item.address && (
+                  <span>
+                    <span className="md:hidden lg:inline xl:hidden">{`${item.address.slice(0, 6)}\u2026${item.address.slice(-4)}`}</span>
+                    <span className="hidden md:inline lg:hidden xl:inline break-all">{item.address}</span>
+                  </span>
+                )}
+                <span className="rounded-md bg-surface-3 px-2 py-0.5 text-xs text-muted">
+                  {item.chain}
+                </span>
+              </div>
+
+              <div className="mt-6 space-y-4">
+                {item.rows.map((row, index) => (
+                  <motion.div
+                    key={row.name}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{
+                      opacity: index < itemVisibleStep ? 1 : 0,
+                      y: index < itemVisibleStep ? 0 : 6,
+                    }}
+                    transition={{ duration: reduced ? 0 : 0.25, ease: [0.2, 0, 0, 1] }}
+                    className={["flex gap-3", index >= itemVisibleStep ? "invisible" : ""]
+                      .filter(Boolean)
+                      .join(" ")}
+                  >
+                    <span
+                      className={[
+                        "h-5 w-5 rounded-full flex items-center justify-center shrink-0",
+                        rowTones[row.state],
+                      ].join(" ")}
+                    >
+                      <Icon name={rowIcons[row.state]} size={16} className="h-3 w-3" />
+                    </span>
+                    <div>
+                      <p className="text-sm font-semibold text-ink">{row.name}</p>
+                      <p className="text-[13px] text-muted">{row.note}</p>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{
+                  opacity: itemVerdictShown ? 1 : 0,
+                  y: itemVerdictShown ? 0 : 6,
+                }}
+                transition={{ duration: reduced ? 0 : 0.25, ease: [0.2, 0, 0, 1] }}
+                className={[
+                  "mt-6 rounded-xl border p-4",
+                  verdictTones[item.verdict.tone],
+                  itemVerdictShown ? "" : "invisible",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge verdict={item.verdict.tone}>{item.verdict.label}</Badge>
+                  {item.verdict.chips.map((chip) => (
+                    <span
+                      key={chip}
+                      className="font-mono text-xs text-body rounded-md bg-surface/80 px-2 py-0.5"
+                    >
+                      {chip}
+                    </span>
+                  ))}
+                </div>
+                <p className="mt-3 text-sm text-body">{item.explanation}</p>
+              </motion.div>
+
+              <p className="mt-4 text-xs text-faint">{renderFootnote(item)}</p>
             </div>
-          </motion.div>
-        ))}
+          );
+        })}
       </div>
-
-      <motion.div
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: verdictShown ? 1 : 0, y: verdictShown ? 0 : 6 }}
-        transition={{ duration: 0.25, ease: [0.2, 0, 0, 1] }}
-        className={[
-          "mt-6 rounded-xl border p-4",
-          verdictTones[scene.verdict.tone],
-          verdictShown ? "" : "invisible",
-        ]
-          .filter(Boolean)
-          .join(" ")}
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge verdict={scene.verdict.tone}>{scene.verdict.label}</Badge>
-          {scene.verdict.chips.map((chip) => (
-            <span
-              key={chip}
-              className="font-mono text-xs text-body rounded-md bg-surface/80 px-2 py-0.5"
-            >
-              {chip}
-            </span>
-          ))}
-        </div>
-        <p className="mt-3 text-sm text-body">{scene.explanation}</p>
-      </motion.div>
-
-      <p className="mt-4 text-xs text-faint">{renderFootnote()}</p>
       <p className="sr-only" aria-live="polite">
         {verdictShown ? scene.announcement : ""}
       </p>

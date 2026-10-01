@@ -68,7 +68,7 @@ export const SCENES: readonly Scene[] = [
   {
     id: "virtual",
     title: "VIRTUAL on Robinhood Chain",
-    subtitle: "The on-chain guard, asked before a USDG transfer",
+    subtitle: "The on-chain guard, asked whether a USDG transfer may go ahead",
     address: "0xc6911796042b15d7fa4f6cde69e245ddcd3d9c31",
     chain: "Robinhood Chain · 4663",
     rows: [
@@ -95,7 +95,7 @@ export const SCENES: readonly Scene[] = [
       chips: ["reason 0", "maxAge 900 s"],
     },
     explanation:
-      "The guard lets the transfer go ahead. Permission is not a safety guarantee: the guard deliberately accepts MEDIUM risk, and a record that expires or turns Unknown is denied.",
+      "The guard answers that the transfer may go ahead. Permission is not a safety guarantee: the guard deliberately accepts MEDIUM risk, and a record that expires or turns Unknown is denied.",
     footnote:
       "scripts/verify_deployment.py against the live contracts on 27 September 2026: allowed=True, reason=0. Source: ",
     source: {

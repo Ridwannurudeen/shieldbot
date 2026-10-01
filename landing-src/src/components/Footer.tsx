@@ -118,13 +118,13 @@ export default function Footer() {
                 <a href="/security.html" className={linkClass}>Security</a>
               </div>
             </div>
-            <div>
+            <div className="min-w-0">
               <h2 className="text-xs font-bold uppercase tracking-[0.12em] text-onink-muted">Community</h2>
               <div className="mt-3 flex flex-col gap-2">
                 <a href="https://github.com/Ridwannurudeen/shieldbot" target="_blank" rel="noopener noreferrer" className={linkClass}>GitHub</a>
                 <a href="https://t.me/shieldbot_bnb_bot" target="_blank" rel="noopener noreferrer" className={linkClass}>Telegram bot</a>
                 <a href="https://x.com/shieldbot_" target="_blank" rel="noopener noreferrer" className={linkClass}>@shieldbot_</a>
-                <a href="mailto:support@shieldbotsecurity.online" className={linkClass}>support@shieldbotsecurity.online</a>
+                <a href="mailto:support@shieldbotsecurity.online" className={`${linkClass} [overflow-wrap:anywhere]`}>support@shieldbotsecurity.online</a>
               </div>
             </div>
           </div>
