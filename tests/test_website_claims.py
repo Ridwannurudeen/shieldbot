@@ -196,6 +196,30 @@ def test_the_site_says_the_robinhood_contracts_are_deployed():
         assert "deployed on Robinhood Chain on 27 September 2026" in prose, component
 
 
+def test_the_site_shows_the_robinhood_contract_addresses():
+    # docs/DEPLOYMENTS.md records the deployment. The on-chain section must show each contract's address as
+    # recorded there, link its explorer page and its Sourcify match, and the built bundle must carry the addresses.
+    deployments = read(ROOT / "docs" / "DEPLOYMENTS.md")
+    section = read(COMPONENTS / "OnChain.tsx")
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    for contract in ("ShieldBotVerdictRegistry", "ShieldBotVerdictGuard", "ShieldBotGuardedTransfer"):
+        row = re.search(
+            rf"^\| `{contract}` \| Robinhood Chain \(4663\) \| \[`(0x[0-9a-fA-F]{{40}})`\]", deployments, re.MULTILINE
+        )
+        assert row, contract
+        address = row.group(1)
+        assert contract in section and address in section, contract
+        assert f"https://robin.etherscan.io/address/{address}" in section, contract
+        assert f"https://sourcify.dev/server/v2/contract/4663/{address}" in section, contract
+        assert address in bundle, f"landing bundle is stale: missing {contract}"
+    assert "Deployed 27 September 2026" in section
+    assert "0x7578ca9e…f0c772a4" in section
+    assert "judge guide" in section
+    source = "\n".join(read(path) for path in (LANDING_SRC / "src").rglob("*") if path.is_file())
+    assert not re.search(r"0x[0-9a-fA-F]{64}", source)
+    assert not re.search(r"0x[0-9a-fA-F]{64}", bundle)
+
+
 def welcome_text() -> str:
     """The visible text of the extension's welcome page, without its styles and scripts."""
     html = re.sub(r"<(style|script)\b.*?</\1>", " ", read(WELCOME), flags=re.DOTALL)

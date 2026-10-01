@@ -1,13 +1,13 @@
 import { MotionConfig } from "framer-motion";
 import Navbar from "./components/Navbar";
 import Hero from "./components/Hero";
-import LiveStats from "./components/LiveStats";
 import HowItWorks from "./components/HowItWorks";
 import Chains from "./components/Chains";
 import AgentSecurity from "./components/AgentSecurity";
-import RobinhoodCensus from "./components/RobinhoodCensus";
 import FAQ from "./components/FAQ";
 import Footer from "./components/Footer";
+import OnChain from "./components/OnChain";
+import LiveStats from "./components/LiveStats";
 
 export default function App() {
   return (
@@ -22,11 +22,11 @@ export default function App() {
         <Navbar />
         <main id="main" tabIndex={-1} className="focus:outline-none">
           <Hero />
-          <LiveStats />
+          <OnChain />
           <HowItWorks />
           <Chains />
+          <LiveStats />
           <AgentSecurity />
-          <RobinhoodCensus />
           <FAQ />
         </main>
         <Footer />
