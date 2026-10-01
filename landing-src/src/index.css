@@ -3,15 +3,45 @@
 @tailwind utilities;
 
 @layer base {
-  body {
-    @apply bg-navy text-gray-200 font-sans antialiased;
+  :root {
+    --color-ink: #0B1220;
+    --color-body: #334155;
+    --color-muted: #475569;
+    --color-faint: #64748B;
+    --color-surface: #FFFFFF;
+    --color-surface-2: #F6F8FA;
+    --color-surface-3: #EEF2F6;
+    --color-line: #E3E8EF;
+    --color-line-strong: #CBD5E1;
+    --color-emerald: #047857;
+    --color-emerald-deep: #065F46;
+    --color-emerald-bright: #10B981;
+    --color-emerald-tint: #ECFDF5;
+    --color-emerald-line: #A7F3D0;
+    --color-safe-fg: #166534;    --color-safe-tint: #DCFCE7;    --color-safe-line: #86EFAC;
+    --color-caution-fg: #854D0E; --color-caution-tint: #FEF9C3; --color-caution-line: #FDE047;
+    --color-high-fg: #9A3412;    --color-high-tint: #FFEDD5;    --color-high-line: #FDBA74;
+    --color-block-fg: #B91C1C;   --color-block-tint: #FEE2E2;   --color-block-line: #FCA5A5;
+    --color-unknown-fg: #475569; --color-unknown-tint: #F1F5F9; --color-unknown-stripe: #E2E8F0; --color-unknown-line: #94A3B8;
+    color-scheme: light;
   }
 
+  html { scroll-padding-top: 80px; }
+
+  body {
+    @apply bg-surface text-body font-sans antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1, h2, h3, h4 { @apply text-ink; text-wrap: balance; }
+
   :focus-visible {
-    outline: 2px solid #00ff88;
+    outline: 2px solid #047857;
     outline-offset: 3px;
     border-radius: 4px;
   }
+
+  ::selection { background: #A7F3D0; color: #0B1220; }
 }
 
 /* framer-motion follows the same setting through MotionConfig in App.tsx. */
@@ -24,19 +54,4 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
-}
-
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-}
-::-webkit-scrollbar-track {
-  background: #0a0f1c;
-}
-::-webkit-scrollbar-thumb {
-  background: #1f2937;
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #374151;
 }

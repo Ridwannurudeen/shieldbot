@@ -7,16 +7,15 @@ import Chains from "./components/Chains";
 import AgentSecurity from "./components/AgentSecurity";
 import RobinhoodCensus from "./components/RobinhoodCensus";
 import FAQ from "./components/FAQ";
-import Team from "./components/Team";
 import Footer from "./components/Footer";
 
 export default function App() {
   return (
     <MotionConfig reducedMotion="user">
-      <div className="min-h-screen">
+      <div id="top" className="min-h-screen">
         <a
           href="#main"
-          className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60] focus:bg-neon focus:text-navy focus:font-semibold focus:px-4 focus:py-3 focus:rounded-lg"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60] focus:bg-emerald focus:text-white focus:font-semibold focus:px-4 focus:py-3 focus:rounded-lg"
         >
           Skip to content
         </a>
@@ -29,7 +28,6 @@ export default function App() {
           <AgentSecurity />
           <RobinhoodCensus />
           <FAQ />
-          <Team />
         </main>
         <Footer />
       </div>
