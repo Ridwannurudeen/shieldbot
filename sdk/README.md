@@ -77,7 +77,7 @@ if (!verdict.allowed) {
 
 | Method | Endpoint | API key |
 |--------|----------|---------|
-| `scan(address, { chainId })` | `POST /api/scan`: a quick contract check with no sell simulation, so a token is `unknown`, never `SAFE`; use `firewall()` for token safety | optional |
+| `scan(address, { chainId })` | `POST /api/scan`: a quick contract check with no sell simulation, so a token it recognises is `unknown`, never `SAFE`; use `firewall()` for token safety | optional |
 | `firewall(to, { chainId, from?, data?, value?, onFirst?, finalTimeout? })` | `POST /api/firewall` | optional |
 | `check({ from, to, chainId, data?, value? })` | `POST /api/agent/firewall` | required, with `agentId` and a registered agent |
 | `register(ownerAddress, policy?)` | `POST /api/agent/register` | required, with `agentId` |
