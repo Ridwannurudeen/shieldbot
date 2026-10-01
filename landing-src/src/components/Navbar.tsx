@@ -44,7 +44,7 @@ export default function Navbar() {
           <Button href={chromeStoreUrl} size="sm">Add to Chrome</Button>
         </div>
 
-        <Button variant="ghost" size="sm" className="lg:hidden h-11 w-11 min-w-11 px-0" onClick={() => setOpen(!open)} ariaLabel="Menu" ariaExpanded={open} ariaControls="mobile-menu">
+        <Button variant="ghost" size="sm" className="lg:hidden h-11 w-11 min-w-11 !px-0" onClick={() => setOpen(!open)} ariaLabel="Menu" ariaExpanded={open} ariaControls="mobile-menu">
           <Icon name={open ? "close" : "menu"} size={24} />
         </Button>
       </div>
