@@ -604,6 +604,16 @@ def test_the_site_describes_the_quick_scan_as_the_readme_does():
     assert text in read(COMPONENTS / "AgentSecurity.tsx")
 
 
+def test_the_site_says_which_verdicts_reach_the_registry():
+    # Only Telegram scans, guard rescans, and launches that are blocked or guard-watched are recorded on-chain
+    # (docs/SUBMISSION.md); a launch the hunter is merely watching is stored as off.
+    text = "Telegram scans, guard rescans, and launches it blocks or the guard watches"
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    assert "guard-watched" in read(ROOT / "docs" / "SUBMISSION.md")
+    assert text in read(COMPONENTS / "OnChain.tsx")
+    assert text in bundle
+
+
 def test_hero_demo_shows_documented_examples_and_makes_no_request():
     # The demo in the hero plays recorded examples. Each address must be the one the repository documents, the
     # labels must say the examples are recorded or modelled, and the component must not talk to the network.
