@@ -212,15 +212,83 @@ def test_agent_register_allows_a_new_agent(client, mock_container):
     mock_container.db.upsert_agent_policy.assert_awaited_once()
 
 
-def test_agent_register_allows_claiming_legacy_unowned_agent(client, mock_container):
-    """T1 keeps rows without a registered key claimable until their admin migration."""
-    mock_container.db.get_agent_policy = AsyncMock(return_value={"registered_by_key": None})
+# T1 replaces U1's temporary legacy claim path with an operator-only claim.
+@pytest.mark.parametrize("registered_by_key", [None, ""])
+def test_agent_register_refuses_claiming_legacy_unowned_agent(client, mock_container, registered_by_key):
+    """T1 replaces U1's temporary legacy claim path with an operator-only claim."""
+    mock_container.db.get_agent_policy = AsyncMock(return_value={"registered_by_key": registered_by_key})
     resp = client.post("/api/agent/register", json={
         "agent_id": "legacy_agent",
         "owner_address": "0xOwner",
     }, headers={"X-API-Key": "sb_testkey"})
-    assert resp.status_code == 200
-    mock_container.db.upsert_agent_policy.assert_awaited_once()
+    assert resp.status_code == 409
+    mock_container.db.upsert_agent_policy.assert_not_awaited()
+
+
+@pytest.mark.parametrize("registered_by_key", [None, ""])
+def test_unowned_agent_is_hidden_from_policy_and_history_routes(
+    client, mock_container, registered_by_key,
+):
+    """Pre-key registrations are locked until an operator claims them."""
+    mock_container.db.get_agent_policy = AsyncMock(return_value={"registered_by_key": registered_by_key})
+
+    get_policy = client.get("/api/agent/policy?agent_id=legacy_agent", headers={"X-API-Key": "sb_testkey"})
+    update_policy = client.put("/api/agent/policy", json={
+        "agent_id": "legacy_agent",
+        "policy": {"mode": "threshold"},
+    }, headers={"X-API-Key": "sb_testkey"})
+    history = client.get("/api/agent/history?agent_id=legacy_agent", headers={"X-API-Key": "sb_testkey"})
+
+    assert get_policy.status_code == 404
+    assert update_policy.status_code == 404
+    assert history.status_code == 404
+    mock_container.db.upsert_agent_policy.assert_not_awaited()
+
+
+@pytest.mark.parametrize("route", ["policy_get", "policy_put", "history"])
+def test_policy_and_history_hide_agents_owned_by_another_key(client, mock_container, route):
+    """A foreign agent and a missing agent return exactly the same REST response."""
+    mock_container.auth_manager.validate_key = AsyncMock(return_value={
+        "key_id": "k2", "owner": "other", "tier": "free", "rpm_limit": 60, "daily_limit": 100,
+    })
+    mock_container.db.get_agent_policy = AsyncMock(return_value={"registered_by_key": "k1"})
+    if route == "policy_get":
+        foreign = client.get("/api/agent/policy?agent_id=agent:1", headers={"X-API-Key": "sb_otherkey"})
+    elif route == "policy_put":
+        foreign = client.put("/api/agent/policy", json={
+            "agent_id": "agent:1",
+            "policy": {"mode": "threshold"},
+        }, headers={"X-API-Key": "sb_otherkey"})
+    else:
+        foreign = client.get("/api/agent/history?agent_id=agent:1", headers={"X-API-Key": "sb_otherkey"})
+
+    mock_container.db.get_agent_policy = AsyncMock(return_value=None)
+    if route == "policy_get":
+        missing = client.get("/api/agent/policy?agent_id=agent:1", headers={"X-API-Key": "sb_otherkey"})
+    elif route == "policy_put":
+        missing = client.put("/api/agent/policy", json={
+            "agent_id": "agent:1",
+            "policy": {"mode": "threshold"},
+        }, headers={"X-API-Key": "sb_otherkey"})
+    else:
+        missing = client.get("/api/agent/history?agent_id=agent:1", headers={"X-API-Key": "sb_otherkey"})
+
+    assert foreign.status_code == missing.status_code == 404
+    assert foreign.json() == missing.json()
+
+
+def test_owning_key_can_read_update_and_read_history(client, mock_container):
+    """The key that registered an agent retains access to its policy and history."""
+    get_policy = client.get("/api/agent/policy?agent_id=agent:1", headers={"X-API-Key": "sb_testkey"})
+    update_policy = client.put("/api/agent/policy", json={
+        "agent_id": "agent:1",
+        "policy": {"mode": "threshold"},
+    }, headers={"X-API-Key": "sb_testkey"})
+    history = client.get("/api/agent/history?agent_id=agent:1", headers={"X-API-Key": "sb_testkey"})
+
+    assert get_policy.status_code == 200
+    assert update_policy.status_code == 200
+    assert history.status_code == 200
 
 
 def test_agent_firewall_cached_verdict(client, mock_container):

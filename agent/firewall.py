@@ -91,13 +91,19 @@ def create_agent_firewall_router(container) -> APIRouter:
             raise HTTPException(status_code=429, detail="Rate limit exceeded")
         return key_info
 
-    async def _check_agent_authorization(key_info: Dict, agent_policy: Dict, agent_id: str):
+    async def _check_agent_authorization(
+        key_info: Dict,
+        agent_policy: Dict,
+        agent_id: str,
+        status_code: int = 403,
+        detail: Optional[str] = None,
+    ):
         """Verify that the API key is authorized to act on the given agent."""
         registered_key = agent_policy.get("registered_by_key")
-        if registered_key and registered_key != key_info.get("key_id"):
+        if not registered_key or registered_key != key_info.get("key_id"):
             raise HTTPException(
-                status_code=403,
-                detail=f"API key not authorized for agent {agent_id}",
+                status_code=status_code,
+                detail=detail or f"API key not authorized for agent {agent_id}",
             )
 
     @router.post("/firewall")
@@ -407,9 +413,13 @@ def create_agent_firewall_router(container) -> APIRouter:
         key_info = await _require_api_key(request)
         existing = await container.db.get_agent_policy(req.agent_id)
         if existing:
-            # Legacy NULL registrations remain claimable until T1's admin claim migration. A
-            # 403 is appropriate for key-owned agents because leaderboard IDs are already public;
-            # T1 will unify the 403/404 behavior.
+            if not existing.get("registered_by_key"):
+                # Return 409 rather than 403 or 404: this existing row cannot be claimed from the
+                # public registration path, so an operator must choose its owning key.
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Agent {req.agent_id} must be claimed by an operator. Contact the operator.",
+                )
             await _check_agent_authorization(key_info, existing, req.agent_id)
         await container.db.upsert_agent_policy(
             agent_id=req.agent_id,
@@ -436,7 +446,15 @@ def create_agent_firewall_router(container) -> APIRouter:
                 status_code=404,
                 detail=f"Agent {req.agent_id} not registered",
             )
-        await _check_agent_authorization(key_info, existing, req.agent_id)
+        # Match mcp_server.tools.readable_agent_policy: foreign and missing agents share an
+        # answer so these routes do not reveal whether an agent ID exists.
+        await _check_agent_authorization(
+            key_info,
+            existing,
+            req.agent_id,
+            status_code=404,
+            detail=f"Agent {req.agent_id} not registered",
+        )
         await container.db.upsert_agent_policy(
             agent_id=req.agent_id,
             owner_address=existing["owner_address"],
@@ -455,7 +473,15 @@ def create_agent_firewall_router(container) -> APIRouter:
                 status_code=404,
                 detail=f"Agent {agent_id} not registered",
             )
-        await _check_agent_authorization(key_info, policy, agent_id)
+        # Match mcp_server.tools.readable_agent_policy: foreign and missing agents share an
+        # answer so these routes do not reveal whether an agent ID exists.
+        await _check_agent_authorization(
+            key_info,
+            policy,
+            agent_id,
+            status_code=404,
+            detail=f"Agent {agent_id} not registered",
+        )
         return policy
 
     @router.get("/history")
@@ -468,7 +494,15 @@ def create_agent_firewall_router(container) -> APIRouter:
                 status_code=404,
                 detail=f"Agent {agent_id} not registered",
             )
-        await _check_agent_authorization(key_info, agent_policy, agent_id)
+        # Match mcp_server.tools.readable_agent_policy: foreign and missing agents share an
+        # answer so these routes do not reveal whether an agent ID exists.
+        await _check_agent_authorization(
+            key_info,
+            agent_policy,
+            agent_id,
+            status_code=404,
+            detail=f"Agent {agent_id} not registered",
+        )
         limit = max(1, min(limit, 1000))
         return await container.db.get_agent_firewall_history(
             agent_id, limit=limit,

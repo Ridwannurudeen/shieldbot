@@ -83,13 +83,13 @@ async def readable_agent_policy(container, agent_id: str, key_info: Dict) -> Opt
     is not registered, so another key's agents cannot be told apart from missing ones.
 
     The key is checked as the REST agent routes check it (agent/firewall.py): the key that registered
-    the agent may read it, and an agent registered before keys were recorded has no key to match.
+    the agent may read it, and an agent without a recorded key remains locked until an operator claims it.
     """
     policy = await container.db.get_agent_policy(agent_id)
     if not policy:
         return None
     registered_key = policy.get("registered_by_key")
-    if registered_key and registered_key != key_info.get("key_id"):
+    if not registered_key or registered_key != key_info.get("key_id"):
         return None
     return policy
 
@@ -156,9 +156,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "check_agent_reputation",
         "description": (
             "Look up the trust score and transaction history for an agent registered with ShieldBot's firewall. "
-            "An agent registered with an API key is readable only by that key, and to any other key reads exactly "
-            "as an unregistered one; an agent registered before keys were recorded is readable by any key, as on "
-            "the REST agent routes. "
+            "Only the API key that registered an agent can read it; another key and an unowned legacy registration "
+            "each read exactly as an unregistered one. "
             "An unregistered agent, or one with no firewall history, returns status 'unknown' with coverage_reasons "
             "and a null trust_score. Only the latest 1000 firewall records are read; an agent with that many also "
             "returns status 'unknown', because its counts are a lower bound, and so does one with any record whose "

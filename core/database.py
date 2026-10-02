@@ -1855,6 +1855,32 @@ class Database:
             "updated_at": row[10],
         }
 
+    async def list_unowned_agent_policies(self) -> List[Dict]:
+        """List policies created before their registering API key was recorded."""
+        cursor = await self._db.execute("""
+            SELECT agent_id, owner_address, created_at
+            FROM agent_policies
+            WHERE registered_by_key IS NULL OR registered_by_key = ''
+            ORDER BY created_at DESC
+        """)
+        rows = await cursor.fetchall()
+        return [
+            {"agent_id": row[0], "owner_address": row[1], "created_at": row[2]}
+            for row in rows
+        ]
+
+    async def claim_unowned_agent_policy(self, agent_id: str, key_id: str) -> bool:
+        """Claim an unowned policy for an existing API key."""
+        cursor = await self._db.execute("""
+            UPDATE agent_policies
+            SET registered_by_key = ?, updated_at = ?
+            WHERE agent_id = ?
+              AND (registered_by_key IS NULL OR registered_by_key = '')
+              AND EXISTS (SELECT 1 FROM api_keys WHERE key_id = ?)
+        """, (key_id, time.time(), agent_id, key_id))
+        await self._db.commit()
+        return cursor.rowcount == 1
+
     async def record_agent_spend(self, agent_id: str, amount_usd: float):
         """Increment an agent's daily spend atomically. Resets if a new day."""
         now = time.time()

@@ -30,9 +30,8 @@ RESOURCE_TEMPLATE_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "Agent Health",
         "description": (
             "Policy configuration and recent firewall verdicts for a registered agent. "
-            "An agent registered with an API key is readable only by that key, and to any other key reads exactly "
-            "as an unregistered one; an agent registered before keys were recorded is readable by any key, as on "
-            "the REST agent routes."
+            "Only the API key that registered an agent can read it; another key and an unowned legacy registration "
+            "each read exactly as an unregistered one."
         ),
         "mimeType": "application/json",
     },
