@@ -104,7 +104,7 @@ export default function HowItWorks() {
         </motion.div>
 
         <div className="mt-12 grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-          <div className="min-w-0 rounded-3xl bg-surface-2 p-6 shadow-md">
+          <div className="min-w-0 rounded-3xl bg-surface-2 p-6">
             <figure>
               <picture>
                 <source
@@ -119,7 +119,7 @@ export default function HowItWorks() {
                   height={954}
                   loading="lazy"
                   alt="The ShieldBot extension's warning dialog for a request that approves unlimited USDC spending on Ethereum. The verdict badge reads BLOCK RECOMMENDED — Safety: 0/100. The danger signals include Spender flagged by GoPlus: stealing_attack (SlowMist,BlockSec)."
-                  className="w-full h-auto rounded-2xl ring-1 ring-line"
+                  className="w-full h-auto rounded-2xl shadow-md ring-1 ring-line"
                 />
               </picture>
               <figcaption className="mt-4 text-[13px] leading-relaxed text-muted">
