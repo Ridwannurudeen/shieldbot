@@ -104,7 +104,7 @@ export default function HowItWorks() {
         </motion.div>
 
         <div className="mt-12 grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-          <div className="min-w-0 rounded-3xl bg-surface-2 p-6">
+          <div className="min-w-0 rounded-3xl bg-surface-2 p-6 shadow-md">
             <figure>
               <picture>
                 <source

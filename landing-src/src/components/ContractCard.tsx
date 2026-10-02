@@ -29,7 +29,7 @@ export default function ContractCard({
   }
 
   return (
-    <div className="rounded-2xl border border-line bg-surface p-6">
+    <div className="rounded-2xl border border-line bg-surface p-6 shadow-sm">
       <h3 className="font-mono text-sm font-bold text-ink">{name}</h3>
       <p className="mt-2 text-sm text-body">{role}</p>
       <div className="mt-4 flex items-center gap-2 font-mono text-[13px] text-body">

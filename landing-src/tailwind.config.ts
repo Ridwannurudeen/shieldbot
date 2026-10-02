@@ -45,6 +45,7 @@ export default {
         sm: "0 1px 2px rgba(11,18,32,0.06)",
         md: "0 4px 12px rgba(11,18,32,0.08)",
         lg: "0 24px 48px -12px rgba(11,18,32,0.18)",
+        button: "inset 0 1px 0 0 rgba(255,255,255,0.20), 0 1px 3px 0 rgba(11,18,32,0.12)",
       },
       backgroundImage: {
         "unknown-hatch": "repeating-linear-gradient(135deg, #F1F5F9 0 6px, #E2E8F0 6px 12px)",
