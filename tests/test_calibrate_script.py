@@ -277,6 +277,10 @@ def _benchmark(tmp_path, records):
                 "scored_at": "2026-09-24T00:00:00Z",
                 "dataset": str(dataset),
                 "dataset_sha256": json_sha256(str(dataset)),
+                "inputs_sha256": "inputs-hash",
+                "inputs_revision": "0" * 40,
+                "inputs_dirty": False,
+                "inputs_recorded_at": "2026-09-24T00:00:00Z",
                 "records": records,
             }
         ),
