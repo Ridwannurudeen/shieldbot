@@ -1359,10 +1359,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         # The chosen chain is marked as last used on the next picker, and stays the default elsewhere.
         context.user_data['chain_id'] = chain_id
-        # The picker then names what it scans on which chain, so an old one cannot pass for a new one.
-        await query.edit_message_text(
-            f"🔍 Scanning `{address}` on {get_chain_name(chain_id)} ({chain_id})...", parse_mode='Markdown',
-        )
+        # The picker then names what it scans on which chain, so an old one cannot pass for a new one. Telegram
+        # can refuse the edit (a double tap, a deleted or too old message); the chosen scan runs regardless.
+        try:
+            await query.edit_message_text(
+                f"🔍 Scanning `{address}` on {get_chain_name(chain_id)} ({chain_id})...", parse_mode='Markdown',
+            )
+        except TelegramError as e:
+            logger.warning(f"Chain picker edit refused: {type(e).__name__}")
         if kind == 'a':
             await _scan_pasted_address(query, address, chain_id)
         elif kind == 's':

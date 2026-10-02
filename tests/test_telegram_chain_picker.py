@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from telegram import Update
+from telegram.error import BadRequest, TelegramError
 
 from core.telegram_formatter import format_full_report
 from tests.test_bot_app import bot_module  # noqa: F401  (pytest fixture)
@@ -291,6 +292,35 @@ async def test_the_picker_keeps_no_state_so_a_repeated_tap_runs_again(bot):
         await bot.button_callback(SimpleNamespace(callback_query=query), context)
 
     assert bot.scan_contract.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kind, scan, error",
+    [
+        ("a", "check_token", BadRequest("Message is not modified")),
+        ("s", "scan_contract", BadRequest("Message is not modified")),
+        ("t", "check_token", BadRequest("Message is not modified")),
+        ("s", "scan_contract", TelegramError("Message can't be edited")),
+    ],
+    ids=["a-not-modified", "s-not-modified", "t-not-modified", "s-telegram-error"],
+)
+async def test_a_tap_runs_its_scan_even_when_telegram_refuses_to_edit_the_picker(
+    bot, caplog, kind, scan, error
+):
+    query = _tap(f"pick_{kind}_4663_{ADDRESS}")
+    query.edit_message_text.side_effect = error
+    context = SimpleNamespace(user_data={"chain_id": 56})
+
+    await bot.button_callback(SimpleNamespace(callback_query=query), context)
+
+    query.edit_message_text.assert_awaited_once()
+    getattr(bot, scan).assert_awaited_once_with(query, ADDRESS, chain_id=4663)
+    assert context.user_data["chain_id"] == 4663
+    # The log names the error's class, never Telegram's text.
+    (record,) = [record for record in caplog.records if record.name == "bot"]
+    assert type(error).__name__ in record.getMessage()
+    assert error.message not in record.getMessage()
 
 
 @pytest.mark.asyncio
