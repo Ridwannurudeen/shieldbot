@@ -14,9 +14,15 @@ import eval.cli as cli
 import eval.live_scorer as live_scorer
 import eval.replay as replay
 from core.analyzer import AnalyzerResult
-from core.registry import AnalyzerRegistry
 from core.risk_engine import RiskEngine
-from eval.benchmark import FORMAT_INPUTS, FORMAT_RESULTS, FORMAT_SCORES, build_results, json_sha256, load_scores
+from eval.benchmark import (
+    FORMAT_INPUTS,
+    FORMAT_RESULTS,
+    FORMAT_SCORES,
+    build_results,
+    json_sha256,
+    load_scores,
+)
 from eval.dataset import CLASSES, FORMAT_V2, LABEL_PROVIDERS, load_dataset
 
 V2 = "eval/data/benchmark_v2.json"
@@ -60,7 +66,9 @@ def entry(**changes):
 
 def write_dataset(tmp_path, entries):
     path = tmp_path / "dataset.json"
-    path.write_text(json.dumps({"format": FORMAT_V2, "entries": entries}), encoding="utf-8")
+    path.write_text(
+        json.dumps({"format": FORMAT_V2, "entries": entries}), encoding="utf-8"
+    )
     return str(path)
 
 
@@ -73,6 +81,11 @@ def write_scores(tmp_path, dataset, records, **changes):
         "scored_at": "2026-09-24T12:00:00Z",
         "dataset": dataset,
         "dataset_sha256": json_sha256(dataset),
+        "inputs_sha256": "inputs-hash",
+        "inputs_revision": REVISION,
+        "inputs_dirty": False,
+        "inputs_recorded_at": "2026-09-24T12:00:00Z",
+        "weight_changes": [],
         "records": records,
         **changes,
     }
@@ -90,9 +103,15 @@ def write_inputs(tmp_path, dataset, records, **changes):
         "format": FORMAT_INPUTS,
         "revision": REVISION,
         "dirty": False,
-        "scored_at": "2026-09-24T12:00:00Z",
+        "recorded_at": "2026-09-24T12:00:00Z",
         "dataset": dataset,
         "dataset_sha256": json_sha256(dataset),
+        "analyzers": [
+            {"name": result["name"], "weight": result["weight"]}
+            for record in records
+            if record.get("status", "ok") == "ok"
+            for result in record["results"]
+        ],
         "records": records,
         **changes,
     }
@@ -111,7 +130,7 @@ def analyzer_input(name, weight, score, data, flags=None, error=None):
     }
 
 
-def complete_analyzer_inputs(weights=(4, 2.5, 2, 1.5)):
+def complete_analyzer_inputs(weights=(4, 2.5, 2, 1.5, 1.5, 1)):
     return [
         analyzer_input(
             "structural",
@@ -122,10 +141,22 @@ def complete_analyzer_inputs(weights=(4, 2.5, 2, 1.5)):
                 "is_contract": True,
                 "is_verified": True,
                 "contract_age_days": 100,
+                "coverage": {"scam_database": True, "bytecode": True},
+                "scam_matches": [{"severity": "medium", "reason": "Community report"}],
+                "observed_at": 1_700_000_000,
+                "notes": ["Top holders checked"],
             },
         ),
         analyzer_input(
-            "market", weights[1], 80, {"status": "ok", "liquidity_usd": 200000}
+            "market",
+            weights[1],
+            80,
+            {
+                "status": "ok",
+                "liquidity_usd": 200000,
+                "observed_at": 1_700_000_001,
+                "notes": ["Market observed"],
+            },
         ),
         analyzer_input(
             "behavioral", weights[2], 50, {"status": "ok", "reputation_score": 80}
@@ -141,6 +172,15 @@ def complete_analyzer_inputs(weights=(4, 2.5, 2, 1.5)):
                 "buy_tax": 0,
                 "sell_tax": 0,
             },
+        ),
+        analyzer_input(
+            "intent",
+            weights[4],
+            60,
+            {"status": "ok", "floor": 70, "observed_at": 1_700_000_002},
+        ),
+        analyzer_input(
+            "signature", weights[5], 0, {"status": "ok", "observed_at": 1_700_000_003}
         ),
     ]
 
@@ -168,7 +208,10 @@ def test_every_label_is_sourced_by_accepted_providers():
         assert item.sources and item.labeled, (item.chain_id, item.address)
         for source in item.sources:
             assert source["provider"] in LABEL_PROVIDERS
-            assert source["url"].startswith("https://") and source["retrieved"] >= item.labeled
+            assert (
+                source["url"].startswith("https://")
+                and source["retrieved"] >= item.labeled
+            )
     assert IMPOSTORS <= {e.address for e in entries if e.category == "impostor_token"}
 
 
@@ -201,13 +244,22 @@ def test_the_v1_safes_are_kept():
         (entry(chain_id="1"), "chain_id"),
         (entry(labeled="24 September 2026"), "labeled"),
         (entry(sources=[]), "at least one source"),
-        (entry(sources=[{**SOURCE, "provider": "GoPlus"}]), "not an accepted label provider"),
+        (
+            entry(sources=[{**SOURCE, "provider": "GoPlus"}]),
+            "not an accepted label provider",
+        ),
         (
             entry(sources=[SOURCE, {**SOURCE, "provider": "honeypot.is"}]),
             "not an accepted label provider",
         ),
-        (entry(sources=[{**SOURCE, "provider": "chainabuse"}]), "not an accepted label provider"),
-        (entry(sources=[{**SOURCE, "provider": None}]), "every source needs a provider"),
+        (
+            entry(sources=[{**SOURCE, "provider": "chainabuse"}]),
+            "not an accepted label provider",
+        ),
+        (
+            entry(sources=[{**SOURCE, "provider": None}]),
+            "every source needs a provider",
+        ),
         (
             entry(**{"class": "safe"}, sources=[{**SOURCE, "provider": "goplus"}]),
             "not an accepted label provider",
@@ -226,7 +278,9 @@ def test_a_dataset_that_breaks_the_rules_is_refused(tmp_path, item, message):
 
 def test_label_providers_are_accepted_in_any_case(tmp_path):
     entries = load_dataset(
-        write_dataset(tmp_path, [entry(sources=[{**SOURCE, "provider": "ScamSniffer"}])])
+        write_dataset(
+            tmp_path, [entry(sources=[{**SOURCE, "provider": "ScamSniffer"}])]
+        )
     )
     assert [e.sources[0]["provider"] for e in entries] == ["ScamSniffer"]
 
@@ -234,7 +288,9 @@ def test_label_providers_are_accepted_in_any_case(tmp_path):
 def test_an_address_listed_twice_on_one_chain_is_refused(tmp_path):
     with pytest.raises(ValueError, match="listed twice"):
         load_dataset(
-            write_dataset(tmp_path, [entry(), entry(address=DRAINER.upper().replace("0X", "0x"))])
+            write_dataset(
+                tmp_path, [entry(), entry(address=DRAINER.upper().replace("0X", "0x"))]
+            )
         )
 
 
@@ -265,7 +321,9 @@ def test_a_safe_label_needs_no_source_and_stale_entries_are_left_out(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_results_are_per_class_pinned_to_the_revision_and_never_count_unknown_as_passed(tmp_path):
+def test_results_are_per_class_pinned_to_the_revision_and_never_count_unknown_as_passed(
+    tmp_path,
+):
     dataset = write_dataset(
         tmp_path,
         [
@@ -273,7 +331,9 @@ def test_results_are_per_class_pinned_to_the_revision_and_never_count_unknown_as
             entry(address="0x" + "d2" * 20),
             entry(address="0x" + "d3" * 20),
             entry(address="0x" + "d4" * 20),
-            entry(**{"class": "impostor_token"}, chain_id=4663, address="0x" + "e1" * 20),
+            entry(
+                **{"class": "impostor_token"}, chain_id=4663, address="0x" + "e1" * 20
+            ),
             entry(**{"class": "safe"}, address="0x" + "51" * 20, sources=[]),
             entry(**{"class": "safe"}, address="0x" + "52" * 20, sources=[]),
             entry(**{"class": "safe"}, address="0x" + "53" * 20, sources=[]),
@@ -350,7 +410,9 @@ def test_results_are_per_class_pinned_to_the_revision_and_never_count_unknown_as
         "precision": 0.5,
         "false_positive_rate": 0.5,
     }
-    statuses = {row["address"]: (row["status"], row["flagged"]) for row in results["details"]}
+    statuses = {
+        row["address"]: (row["status"], row["flagged"]) for row in results["details"]
+    }
     assert statuses["0x" + "d3" * 20] == ("unknown", None)
     assert statuses["0x" + "d4" * 20] == ("missing", None)
     assert statuses["0x" + "53" * 20] == ("unknown", None)
@@ -360,27 +422,41 @@ def test_results_are_per_class_pinned_to_the_revision_and_never_count_unknown_as
 @pytest.mark.parametrize(
     "changes,message",
     [
-        ({"format": "scores"}, "is not a shieldbot-scores/1 file"),
+        ({"format": "scores"}, "is not a shieldbot-scores/2 file"),
         ({"revision": None}, "git revision"),
         ({"revision": "abc1234"}, "git revision"),
         ({"dirty": "no"}, "local changes"),
         ({"scored_at": None}, "local changes"),
-        ({"dataset_sha256": None}, "does not name the dataset"),
+        ({"dataset_sha256": None}, "complete inputs provenance"),
+        ({"inputs_sha256": None}, "complete inputs provenance"),
         ({"records": [record(DRAINER, score=None)]}, "malformed record"),
         ({"records": [record(DRAINER, status="clean", score=10)]}, "malformed record"),
         ({"records": [record(DRAINER, score=float("nan"))]}, "malformed record"),
         ({"records": [record(DRAINER, score=float("inf"))]}, "malformed record"),
-        ({"records": [record(DRAINER, status="unknown", score=float("-inf"))]}, "malformed record"),
+        (
+            {"records": [record(DRAINER, status="unknown", score=float("-inf"))]},
+            "malformed record",
+        ),
         ({"records": [record(DRAINER, score=True)]}, "malformed record"),
-        ({"records": [{**record(DRAINER, score=90), "chain_id": "1"}]}, "malformed record"),
+        (
+            {"records": [{**record(DRAINER, score=90), "chain_id": "1"}]},
+            "malformed record",
+        ),
         ({"records": [{"status": "ok", "score": 90}]}, "malformed record"),
         (
-            {"records": [record(DRAINER, score=90), record(DRAINER.upper().replace("0X", "0x"), score=10)]},
+            {
+                "records": [
+                    record(DRAINER, score=90),
+                    record(DRAINER.upper().replace("0X", "0x"), score=10),
+                ]
+            },
             "recorded twice",
         ),
     ],
 )
-def test_scores_that_are_not_pinned_or_well_formed_are_refused(tmp_path, changes, message):
+def test_scores_that_are_not_pinned_or_well_formed_are_refused(
+    tmp_path, changes, message
+):
     dataset = write_dataset(tmp_path, [entry()])
     changes = dict(changes)
     records = changes.pop("records", [record(DRAINER, score=90)])
@@ -390,7 +466,9 @@ def test_scores_that_are_not_pinned_or_well_formed_are_refused(tmp_path, changes
 
 def test_scores_recorded_against_another_dataset_are_refused(tmp_path):
     dataset = write_dataset(tmp_path, [entry()])
-    scores = write_scores(tmp_path, dataset, [record(DRAINER, score=90)], dataset_sha256="0" * 64)
+    scores = write_scores(
+        tmp_path, dataset, [record(DRAINER, score=90)], dataset_sha256="0" * 64
+    )
     with pytest.raises(ValueError, match="different dataset"):
         build_results(dataset, scores)
 
@@ -408,7 +486,10 @@ def test_the_cli_writes_the_results_file(tmp_path, capsys):
         tmp_path, [entry(), entry(**{"class": "safe"}, address=SAFE, sources=[])]
     )
     scores = write_scores(
-        tmp_path, dataset, [record(DRAINER, score=90), record(SAFE, score=10)], dirty=None
+        tmp_path,
+        dataset,
+        [record(DRAINER, score=90), record(SAFE, score=10)],
+        dirty=None,
     )
     out = tmp_path / "results.json"
     assert cli.main(["--dataset", dataset, "--scores", scores, "--out", str(out)]) == 0
@@ -422,7 +503,7 @@ def test_the_cli_writes_the_results_file(tmp_path, capsys):
 # ---------------------------------------------------------------------------
 
 
-def test_the_live_scorer_records_raw_analyzer_inputs(monkeypatch):
+def test_the_live_scorer_records_raw_analyzer_inputs(tmp_path, monkeypatch):
     real_sleep = asyncio.sleep
     monkeypatch.setattr(live_scorer.asyncio, "sleep", lambda seconds: real_sleep(0))
     normalized = [
@@ -441,7 +522,10 @@ def test_the_live_scorer_records_raw_analyzer_inputs(monkeypatch):
 
     container = SimpleNamespace(
         registry=SimpleNamespace(
-            get_all=lambda: [SimpleNamespace(weight=4), SimpleNamespace(weight=6)],
+            get_all=lambda: [
+                SimpleNamespace(name="structural", weight=4),
+                SimpleNamespace(name="market", weight=6),
+            ],
             run_all=run_all,
         ),
         risk_engine=SimpleNamespace(
@@ -452,27 +536,45 @@ def test_the_live_scorer_records_raw_analyzer_inputs(monkeypatch):
             }
         ),
     )
-    inputs = []
-    records = asyncio.run(
-        live_scorer.score_entries(
-            [
-                SimpleNamespace(
-                    address=DRAINER,
-                    chain_id=1,
-                    category="drainer_contract",
-                    label="malicious",
-                )
+    inputs_path = tmp_path / "inputs.json"
+    with live_scorer.InputRecorder(
+        inputs_path,
+        {
+            "format": FORMAT_INPUTS,
+            "revision": REVISION,
+            "dirty": False,
+            "recorded_at": "2026-09-24T12:00:00Z",
+            "dataset": "fixture.json",
+            "dataset_sha256": "dataset-hash",
+            "analyzers": [
+                {"name": "structural", "weight": 4},
+                {"name": "market", "weight": 6},
             ],
-            container,
-            inputs,
+        },
+    ) as recorder:
+        records = asyncio.run(
+            live_scorer.score_entries(
+                [
+                    SimpleNamespace(
+                        address=DRAINER,
+                        chain_id=1,
+                        category="drainer_contract",
+                        label="malicious",
+                    )
+                ],
+                container,
+                recorder,
+            )
         )
-    )
+    inputs = replay.load_inputs(inputs_path)["records"]
 
     assert records[0]["score"] == 50
     assert inputs == [
         {
             "chain_id": 1,
             "address": DRAINER,
+            "status": "ok",
+            "reason": None,
             "results": [
                 {
                     "name": "structural",
@@ -495,7 +597,7 @@ def test_the_live_scorer_records_raw_analyzer_inputs(monkeypatch):
     ]
 
 
-def test_replay_matches_the_current_engine_and_produces_cli_scores(tmp_path, capsys):
+def test_replay_scores_with_current_weights_not_recorded_weights(tmp_path, monkeypatch):
     dataset = write_dataset(tmp_path, [entry()])
     inputs = write_inputs(
         tmp_path,
@@ -504,94 +606,289 @@ def test_replay_matches_the_current_engine_and_produces_cli_scores(tmp_path, cap
             {
                 "chain_id": 1,
                 "address": DRAINER,
+                "status": "ok",
+                "reason": None,
                 "results": complete_analyzer_inputs(),
             }
         ],
     )
     output = tmp_path / "scores.json"
-    direct_results = [
-        AnalyzerResult(
-            result["name"],
-            result["weight"] / 10,
-            result["score"],
-            result["flags"],
-            result["data"],
+    current_weights = {
+        result["name"]: result["weight"] for result in complete_analyzer_inputs()
+    }
+    current_weights["structural"] = 8
+    engine = RiskEngine()
+    expected = engine.compute_from_results(
+        replay.normalize_weights(
+            replay.rebuild_results(
+                replay.load_inputs(inputs)["records"][0], current_weights
+            )
         )
-        for result in complete_analyzer_inputs()
-    ]
-    expected = RiskEngine().compute_from_results(direct_results)
+    )
+    monkeypatch.setattr(
+        replay, "current_engine_and_weights", lambda: (engine, current_weights)
+    )
 
     document = replay.replay(inputs, output, REVISION, False)
 
     assert document["inputs_sha256"] == json_sha256(inputs)
     assert document["dataset_sha256"] == json_sha256(dataset)
+    assert document["weight_changes"] == [
+        {"name": "structural", "recorded_weight": 4, "current_weight": 8}
+    ]
     assert document["records"][0]["score"] == expected["rug_probability"]
     assert document["records"][0]["risk_level"] == expected["risk_level"]
     assert load_scores(output)["records"][(1, DRAINER)] == document["records"][0]
-    assert cli.main(["--dataset", dataset, "--scores", str(output)]) == 0
-    assert REVISION in capsys.readouterr().out
 
 
-def test_replay_normalizes_raw_weights_like_the_registry_and_leaves_normalized_weights_alone():
-    raw = replay.normalize_weights(
-        replay.rebuild_results({"results": complete_analyzer_inputs()})
-    )
-    normalized = replay.normalize_weights(
-        replay.rebuild_results(
+@pytest.mark.parametrize(
+    ("current_weights", "message"),
+    [
+        (
             {
-                "results": complete_analyzer_inputs((0.4, 0.25, 0.2, 0.15)),
-            }
-        )
-    )
-
-    class FakeAnalyzer:
-        def __init__(self, result):
-            self.name = result.name
-            self.weight = result.weight * 10
-
-        async def analyze(self, ctx):
-            return AnalyzerResult(self.name, self.weight, 0)
-
-    registry = AnalyzerRegistry()
-    for result in normalized:
-        registry.register(FakeAnalyzer(result))
-    registry_weights = [
-        result.weight
-        for result in asyncio.run(registry.run_all(SimpleNamespace(address=DRAINER)))
-    ]
-
-    assert [result.weight for result in raw] == [0.4, 0.25, 0.2, 0.15]
-    assert sum(result.weight for result in raw) == 1.0
-    assert [result.weight for result in normalized] == [0.4, 0.25, 0.2, 0.15]
-    assert registry_weights == [result.weight for result in raw]
-
-
-def test_replay_preserves_errored_results_for_fail_closed_coverage(tmp_path):
+                "added": 1,
+                **{
+                    result["name"]: result["weight"]
+                    for result in complete_analyzer_inputs()
+                },
+            },
+            "added: added",
+        ),
+        (
+            {
+                result["name"]: result["weight"]
+                for result in complete_analyzer_inputs()[1:]
+            },
+            "removed: structural",
+        ),
+    ],
+)
+def test_replay_refuses_an_added_or_removed_analyzer(
+    tmp_path, monkeypatch, current_weights, message
+):
     dataset = write_dataset(tmp_path, [entry()])
-    results = complete_analyzer_inputs()
-    results[0] = analyzer_input(
-        "structural",
-        4,
-        100,
-        {"status": "ok"},
-        error="structural analysis unavailable (TimeoutError)",
-    )
     inputs = write_inputs(
-        tmp_path, dataset, [{"chain_id": 1, "address": DRAINER, "results": results}]
+        tmp_path,
+        dataset,
+        [
+            {
+                "chain_id": 1,
+                "address": DRAINER,
+                "status": "ok",
+                "reason": None,
+                "results": complete_analyzer_inputs(),
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        replay, "current_engine_and_weights", lambda: (RiskEngine(), current_weights)
     )
 
+    with pytest.raises(ValueError, match=message):
+        replay.replay(inputs, tmp_path / "scores.json", REVISION, False)
+
+
+def test_an_errored_live_entry_replays_to_the_same_error_record(tmp_path, monkeypatch):
+    async def run_all(ctx):
+        raise TimeoutError()
+
+    container = SimpleNamespace(
+        registry=SimpleNamespace(run_all=run_all),
+        risk_engine=SimpleNamespace(compute_from_results=lambda results: None),
+    )
+    inputs_path = tmp_path / "inputs.json"
+    with live_scorer.InputRecorder(
+        inputs_path,
+        {
+            "format": FORMAT_INPUTS,
+            "revision": REVISION,
+            "dirty": False,
+            "recorded_at": "2026-09-24T12:00:00Z",
+            "dataset": "fixture.json",
+            "dataset_sha256": "dataset-hash",
+            "analyzers": [],
+        },
+    ) as recorder:
+        live_records = asyncio.run(
+            live_scorer.score_entries(
+                [
+                    SimpleNamespace(
+                        address=DRAINER,
+                        chain_id=1,
+                        category="drainer_contract",
+                        label="malicious",
+                    )
+                ],
+                container,
+                recorder,
+            )
+        )
+    monkeypatch.setattr(
+        replay, "current_engine_and_weights", lambda: (RiskEngine(), {})
+    )
+    replayed = replay.replay(inputs_path, tmp_path / "scores.json", REVISION, False)
+
+    assert replay.load_inputs(inputs_path)["records"] == [
+        {
+            "chain_id": 1,
+            "address": DRAINER,
+            "status": "error",
+            "reason": "TimeoutError",
+            "results": [],
+        }
+    ]
+    assert replayed["records"] == live_records
+
+
+def test_rebuild_results_preserves_nested_engine_data_through_json(tmp_path):
+    dataset = write_dataset(tmp_path, [entry()])
+    inputs = write_inputs(
+        tmp_path,
+        dataset,
+        [
+            {
+                "chain_id": 1,
+                "address": DRAINER,
+                "status": "ok",
+                "reason": None,
+                "results": complete_analyzer_inputs(),
+            }
+        ],
+    )
+    weights = {
+        result["name"]: result["weight"] for result in complete_analyzer_inputs()
+    }
     rebuilt = replay.normalize_weights(
-        replay.rebuild_results(replay.load_inputs(inputs)["records"][0])
+        replay.rebuild_results(replay.load_inputs(inputs)["records"][0], weights)
     )
-    risk = RiskEngine().compute_from_results(rebuilt)
+    structural = next(result for result in rebuilt if result.name == "structural")
+    intent = next(result for result in rebuilt if result.name == "intent")
 
-    assert rebuilt[0].error == "structural analysis unavailable (TimeoutError)"
-    assert risk["category_scores"]["structural"] is None
-    assert risk["coverage_reasons"]["structural"] == rebuilt[0].error
-    assert (
-        replay.replay_records(replay.load_inputs(inputs)["records"])[0]["status"]
-        == "unknown"
+    assert structural.data["coverage"] == {"scam_database": True, "bytecode": True}
+    assert structural.data["scam_matches"] == [
+        {"severity": "medium", "reason": "Community report"}
+    ]
+    assert structural.data["observed_at"] == 1_700_000_000
+    assert structural.data["notes"] == ["Top holders checked"]
+    assert intent.data["floor"] == 70
+
+    with_floor = RiskEngine().compute_from_results(rebuilt)
+    intent.data.pop("floor")
+    without_floor = RiskEngine().compute_from_results(rebuilt)
+    assert with_floor["rug_probability"] > without_floor["rug_probability"]
+
+
+def test_replay_and_results_carry_inputs_provenance(tmp_path, monkeypatch):
+    dataset = write_dataset(tmp_path, [entry()])
+    inputs = write_inputs(
+        tmp_path,
+        dataset,
+        [
+            {
+                "chain_id": 1,
+                "address": DRAINER,
+                "status": "ok",
+                "reason": None,
+                "results": complete_analyzer_inputs(),
+            }
+        ],
     )
+    weights = {
+        result["name"]: result["weight"] for result in complete_analyzer_inputs()
+    }
+    monkeypatch.setattr(
+        replay, "current_engine_and_weights", lambda: (RiskEngine(), weights)
+    )
+    scores_path = tmp_path / "scores.json"
+    scores = replay.replay(inputs, scores_path, REVISION, False)
+    results = build_results(dataset, scores_path)
+
+    expected = {
+        "inputs_sha256": json_sha256(inputs),
+        "inputs_revision": REVISION,
+        "inputs_dirty": False,
+        "inputs_recorded_at": "2026-09-24T12:00:00Z",
+    }
+    assert {key: scores[key] for key in expected} == expected
+    assert {key: results[key] for key in expected} == expected
+
+
+def test_input_recording_keeps_earlier_records_when_a_later_one_cannot_serialize(
+    tmp_path, monkeypatch
+):
+    async def run_all(ctx):
+        data = {} if ctx.address == DRAINER else {"unserializable": object()}
+        return [AnalyzerResult("structural", 1, 0, data=data)]
+
+    container = SimpleNamespace(
+        registry=SimpleNamespace(
+            get_all=lambda: [SimpleNamespace(name="structural", weight=1)],
+            run_all=run_all,
+        ),
+        risk_engine=SimpleNamespace(
+            compute_from_results=lambda results: {
+                "status": "ok",
+                "rug_probability": 0,
+                "risk_level": "LOW",
+            }
+        ),
+    )
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr(live_scorer.asyncio, "sleep", lambda seconds: real_sleep(0))
+    inputs_path = tmp_path / "inputs.json"
+    with (
+        live_scorer.InputRecorder(
+            inputs_path,
+            {
+                "format": FORMAT_INPUTS,
+                "revision": REVISION,
+                "dirty": False,
+                "recorded_at": "2026-09-24T12:00:00Z",
+                "dataset": "fixture.json",
+                "dataset_sha256": "dataset-hash",
+                "analyzers": [{"name": "structural", "weight": 1}],
+            },
+        ) as recorder,
+        pytest.raises(TypeError),
+    ):
+        asyncio.run(
+            live_scorer.score_entries(
+                [
+                    SimpleNamespace(
+                        address=DRAINER,
+                        chain_id=1,
+                        category="drainer_contract",
+                        label="malicious",
+                    ),
+                    SimpleNamespace(
+                        address=SAFE,
+                        chain_id=1,
+                        category="drainer_contract",
+                        label="malicious",
+                    ),
+                ],
+                container,
+                recorder,
+            )
+        )
+    assert json.loads(inputs_path.read_text(encoding="utf-8"))["records"] == [
+        {
+            "chain_id": 1,
+            "address": DRAINER,
+            "status": "ok",
+            "reason": None,
+            "results": [
+                {
+                    "name": "structural",
+                    "weight": 1,
+                    "score": 0,
+                    "flags": [],
+                    "data": {},
+                    "error": None,
+                }
+            ],
+        }
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -604,7 +901,9 @@ def test_the_revision_ignores_untracked_files(monkeypatch):
 
     def run(command, **kwargs):
         calls.append(command)
-        return SimpleNamespace(stdout=REVISION + "\n" if command[1] == "rev-parse" else "")
+        return SimpleNamespace(
+            stdout=REVISION + "\n" if command[1] == "rev-parse" else ""
+        )
 
     monkeypatch.setattr(live_scorer.subprocess, "run", run)
     assert live_scorer.current_revision() == (REVISION, False)
@@ -617,7 +916,11 @@ def test_the_live_scorer_records_unknown_and_failed_scans_without_inventing_scor
     real_sleep = asyncio.sleep
     monkeypatch.setattr(live_scorer.asyncio, "sleep", lambda seconds: real_sleep(0))
     outputs = {
-        "0x" + "01" * 20: {"status": "ok", "rug_probability": 72.5, "risk_level": "HIGH"},
+        "0x" + "01" * 20: {
+            "status": "ok",
+            "rug_probability": 72.5,
+            "risk_level": "HIGH",
+        },
         "0x" + "02" * 20: {
             "status": "unknown",
             "rug_probability": 12.0,
@@ -634,7 +937,9 @@ def test_the_live_scorer_records_unknown_and_failed_scans_without_inventing_scor
 
     container = SimpleNamespace(
         registry=SimpleNamespace(run_all=run_all),
-        risk_engine=SimpleNamespace(compute_from_results=lambda address: outputs[address]),
+        risk_engine=SimpleNamespace(
+            compute_from_results=lambda address: outputs[address]
+        ),
     )
     entries = [
         SimpleNamespace(
@@ -648,7 +953,9 @@ def test_the_live_scorer_records_unknown_and_failed_scans_without_inventing_scor
 
     records = asyncio.run(live_scorer.score_entries(entries, container))
 
-    assert [(r["status"], r["score"], r["risk_level"], r["reason"]) for r in records] == [
+    assert [
+        (r["status"], r["score"], r["risk_level"], r["reason"]) for r in records
+    ] == [
         ("ok", 72.5, "HIGH", None),
         ("unknown", 12.0, "LOW", "honeypot: Sell simulation unavailable"),
         ("unknown", None, "LOW", "Incomplete scan"),

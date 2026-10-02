@@ -12,7 +12,8 @@ import re
 import sys
 
 from core.analyzer import AnalyzerResult
-from core.risk_engine import RiskEngine
+from core.config import Settings
+from core.container import ServiceContainer
 from eval.benchmark import FORMAT_INPUTS, FORMAT_SCORES, json_sha256
 from eval.live_scorer import current_revision
 
@@ -33,20 +34,37 @@ def load_inputs(path):
     if (
         "dirty" not in document
         or type(document["dirty"]) not in (bool, type(None))
-        or not isinstance(document.get("scored_at"), str)
+        or not isinstance(document.get("recorded_at"), str)
         or not isinstance(document.get("dataset"), str)
         or not isinstance(document.get("dataset_sha256"), str)
+        or not isinstance(document.get("analyzers"), list)
     ):
         raise ValueError(f"{path} does not carry complete scan provenance")
+    recorded_weights = {}
+    for analyzer in document["analyzers"]:
+        if not (
+            isinstance(analyzer, dict)
+            and isinstance(analyzer.get("name"), str)
+            and type(analyzer.get("weight")) in (int, float)
+            and math.isfinite(analyzer["weight"])
+            and analyzer["name"] not in recorded_weights
+        ):
+            raise ValueError(f"{path}: malformed analyzer manifest")
+        recorded_weights[analyzer["name"]] = analyzer["weight"]
     for index, record in enumerate(document.get("records", [])):
         if not (
             isinstance(record, dict)
             and type(record.get("chain_id")) is int
             and isinstance(record.get("address"), str)
             and _ADDRESS.fullmatch(record["address"])
+            and record.get("status") in ("ok", "error")
+            and (record.get("reason") is None or isinstance(record.get("reason"), str))
             and isinstance(record.get("results"), list)
         ):
             raise ValueError(f"{path}: malformed record {index}")
+        if record["status"] == "error" and (record["results"] or not record["reason"]):
+            raise ValueError(f"{path}: malformed errored record {index}")
+        result_names = []
         for result in record["results"]:
             if not (
                 isinstance(result, dict)
@@ -63,15 +81,60 @@ def load_inputs(path):
                 )
             ):
                 raise ValueError(f"{path}: malformed analyzer result {index}")
+            result_names.append(result["name"])
+            if (
+                result["name"] not in recorded_weights
+                or result["weight"] != recorded_weights[result["name"]]
+            ):
+                raise ValueError(
+                    f"{path}: analyzer weight changed within record {index}"
+                )
+        if record["status"] == "ok" and (
+            set(result_names) != set(recorded_weights)
+            or len(result_names) != len(recorded_weights)
+        ):
+            raise ValueError(f"{path}: analyzer set changed within record {index}")
     return document
 
 
-def rebuild_results(record):
-    """Rebuild the AnalyzerResult list saved for one benchmark entry."""
+def current_engine_and_weights():
+    """Build the production engine and registry used by the current revision."""
+    container = ServiceContainer(Settings())
+    return container.risk_engine, {
+        analyzer.name: analyzer.weight for analyzer in container.registry.get_all()
+    }
+
+
+def verify_analyzer_set(recorded_weights, current_weights):
+    """Reject provider data from a different analyzer set before scoring it."""
+    added = sorted(set(current_weights) - set(recorded_weights))
+    removed = sorted(set(recorded_weights) - set(current_weights))
+    if added or removed:
+        parts = []
+        if added:
+            parts.append("added: " + ", ".join(added))
+        if removed:
+            parts.append("removed: " + ", ".join(removed))
+        raise ValueError(
+            "analyzer set differs from recorded inputs (" + "; ".join(parts) + ")"
+        )
+    return [
+        {
+            "name": name,
+            "recorded_weight": recorded_weights[name],
+            "current_weight": current_weights[name],
+        }
+        for name in sorted(current_weights)
+        if recorded_weights[name] != current_weights[name]
+    ]
+
+
+def rebuild_results(record, current_weights):
+    """Rebuild results with raw weights from the current production registry."""
     return [
         AnalyzerResult(
             name=result["name"],
-            weight=result["weight"],
+            weight=current_weights[result["name"]],
             score=result["score"],
             flags=result["flags"],
             data=result["data"],
@@ -82,7 +145,7 @@ def rebuild_results(record):
 
 
 def normalize_weights(results):
-    """Normalize recorded raw weights exactly as AnalyzerRegistry.run_all does."""
+    """Normalize current raw weights exactly as AnalyzerRegistry.run_all does."""
     total = sum(result.weight for result in results)
     if total > 0 and abs(total - 1.0) > 1e-9:
         for result in results:
@@ -90,12 +153,23 @@ def normalize_weights(results):
     return results
 
 
-def replay_records(records):
+def replay_records(records, engine, current_weights):
     """Score recorded analyzer inputs with the current RiskEngine revision."""
-    engine = RiskEngine()
     scores = []
     for input_record in records:
-        results = normalize_weights(rebuild_results(input_record))
+        if input_record["status"] == "error":
+            scores.append(
+                {
+                    "chain_id": input_record["chain_id"],
+                    "address": input_record["address"].lower(),
+                    "status": "error",
+                    "score": None,
+                    "risk_level": None,
+                    "reason": input_record["reason"],
+                }
+            )
+            continue
+        results = normalize_weights(rebuild_results(input_record, current_weights))
         risk_output = engine.compute_from_results(results)
         score = risk_output.get("rug_probability")
         record = {
@@ -126,6 +200,10 @@ def replay_records(records):
 def replay(inputs_path, output_path, revision, dirty):
     """Write current-revision scores from one immutable analyzer-input recording."""
     inputs = load_inputs(inputs_path)
+    engine, current_weights = current_engine_and_weights()
+    recorded_weights = {
+        analyzer["name"]: analyzer["weight"] for analyzer in inputs["analyzers"]
+    }
     document = {
         "format": FORMAT_SCORES,
         "revision": revision,
@@ -136,7 +214,11 @@ def replay(inputs_path, output_path, revision, dirty):
         "dataset": inputs["dataset"],
         "dataset_sha256": inputs["dataset_sha256"],
         "inputs_sha256": json_sha256(inputs_path),
-        "records": replay_records(inputs["records"]),
+        "inputs_revision": inputs["revision"],
+        "inputs_dirty": inputs["dirty"],
+        "inputs_recorded_at": inputs["recorded_at"],
+        "weight_changes": verify_analyzer_set(recorded_weights, current_weights),
+        "records": replay_records(inputs["records"], engine, current_weights),
     }
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(document, f, indent=2)

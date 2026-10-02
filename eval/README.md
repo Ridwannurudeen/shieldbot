@@ -217,12 +217,13 @@ A malicious label must rest on evidence that ShieldBot's score does not already 
 
    Each entry gets `status` `ok` (the scan completed), `unknown` (the scan reported incomplete coverage)
    or `error` (it failed), with its `score` and `risk_level` when the scan gave them. Nothing is filled
-   in for a missing score. The file (`shieldbot-scores/1`) names the git revision that ran
+   in for a missing score. The file (`shieldbot-scores/2`) names the git revision that ran
    (`git rev-parse HEAD`), whether tracked files had local changes (untracked files do not count), when
    it ran, and the dataset's hash. It also names the SHA-256 of the separate inputs file. The inputs file
-   (`shieldbot-analyzer-inputs/1`) carries the same provenance and, for every entry, each analyzer's raw
-   weight, score, flags, data and error. It is intentionally ignored because provider payloads can contain
-   transaction hashes.
+   (`shieldbot-analyzer-inputs/2`) records when provider data was observed, its analyzer manifest and, for
+   every entry, each analyzer's raw weight, score, flags, data and error. It is intentionally ignored because
+   provider payloads can contain transaction hashes. Inputs are written as each entry completes, so an
+   unserializable provider payload fails at that entry rather than after the full run.
    Where the code is not a git checkout, pass `--revision <40-character revision>`; local changes are
    then recorded as unknown (`null`).
 
@@ -232,9 +233,12 @@ A malicious label must rest on evidence that ShieldBot's score does not already 
    python -m eval.replay --inputs eval/data/live_inputs.json --output eval/data/replay_scores.json
    ```
 
-   Replay records its current git revision and the SHA-256 of the inputs file in the new scores file while
-   carrying the dataset hash forward. This must use the baseline inputs recorded before engine changes, or
-   a comparison would also measure provider drift.
+   Replay rebuilds the production container, uses the current registry's raw weights keyed by analyzer name,
+   then normalizes them as the registry does. It refuses an added, removed or renamed analyzer; when only a
+   weight differs, the replay proceeds and records the old and current values in `weight_changes`. The replayed
+   scores carry `inputs_sha256`, `inputs_revision`, `inputs_dirty` and `inputs_recorded_at` separately from the
+   replay's own revision and time. This must use the baseline inputs recorded before engine changes, or a
+   comparison would also measure provider drift.
 
 4. Compute the results, offline:
 
@@ -248,8 +252,9 @@ A malicious label must rest on evidence that ShieldBot's score does not already 
    score where the scan completed, for example) or the same address twice on one chain, or that were
    recorded against a different dataset file. The same inputs always give the same file.
 
-The results file (`shieldbot-benchmark-results/1`) carries `scored_at` and `revision` from the scores,
-`dirty`, the dataset's path and hash, the scores' hash, the `threshold`, an `overall` block, one block
+The results file (`shieldbot-benchmark-results/2`) carries `scored_at` and `revision` from the scores,
+`dirty`, the dataset's path and hash, the scores' hash, the inputs hash/revision/dirty state/recorded time,
+the `weight_changes`, the `threshold`, an `overall` block, one block
 per class and one `details` row per entry. Hashes are SHA-256 of the JSON with sorted keys and no
 whitespace, so they do not depend on line endings.
 
