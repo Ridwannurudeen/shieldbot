@@ -20,7 +20,7 @@ import sys
 import time
 
 from eval.dataset import load_dataset
-from eval.benchmark import FORMAT_SCORES, json_sha256
+from eval.benchmark import FORMAT_INPUTS, FORMAT_SCORES, json_sha256
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -29,7 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def score_entries(entries, container):
+async def score_entries(entries, container, input_records=None):
     """Scan each benchmark entry with the composite analysis pipeline; one record per entry."""
     from core.analyzer import AnalysisContext
 
@@ -44,8 +44,27 @@ async def score_entries(entries, container):
                   "risk_level": None, "reason": None}
 
         try:
+            # run_all normalizes in place, but replay needs the registered weights that produced this
+            # scan. Capture them before the call so failed analyzers are recorded too.
+            raw_weights = [analyzer.weight for analyzer in container.registry.get_all()] if input_records is not None else []
             ctx = AnalysisContext(address=addr, chain_id=chain_id)
             results = await container.registry.run_all(ctx)
+            if input_records is not None:
+                input_records.append({
+                    "chain_id": chain_id,
+                    "address": addr.lower(),
+                    "results": [
+                        {
+                            "name": result.name,
+                            "weight": raw_weights[index],
+                            "score": result.score,
+                            "flags": result.flags,
+                            "data": result.data,
+                            "error": result.error,
+                        }
+                        for index, result in enumerate(results)
+                    ],
+                })
             risk_output = container.risk_engine.compute_from_results(results)
             score = risk_output.get('rug_probability')
             record["score"] = score
@@ -63,6 +82,8 @@ async def score_entries(entries, container):
         except Exception as e:
             logger.error(f"{tag} Error scoring {addr}: {type(e).__name__}")
             record["reason"] = type(e).__name__
+            if input_records is not None:
+                input_records.append({"chain_id": chain_id, "address": addr.lower(), "results": []})
             print(f"  X{tag} chain={chain_id} {addr[:16]}... ERROR: {type(e).__name__}")
 
         records.append(record)
@@ -111,10 +132,24 @@ async def main_async(args):
     print("Scoring entries (live API calls)...")
     scored_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     start = time.time()
-    records = await score_entries(entries, container)
+    input_records = []
+    records = await score_entries(entries, container, input_records)
     elapsed = time.time() - start
     decided = sum(1 for record in records if record["status"] == "ok")
     print(f"\nScoring complete in {elapsed:.1f}s ({decided}/{len(entries)} decided)")
+
+    dataset_sha256 = json_sha256(args.dataset)
+    with open(args.inputs, 'w', encoding='utf-8') as f:
+        json.dump({
+            "format": FORMAT_INPUTS,
+            "revision": revision,
+            "dirty": dirty,
+            "scored_at": scored_at,
+            "dataset": args.dataset,
+            "dataset_sha256": dataset_sha256,
+            "records": input_records,
+        }, f, indent=2)
+    inputs_sha256 = json_sha256(args.inputs)
 
     with open(args.output, 'w', encoding='utf-8') as f:
         json.dump({
@@ -123,9 +158,11 @@ async def main_async(args):
             "dirty": dirty,
             "scored_at": scored_at,
             "dataset": args.dataset,
-            "dataset_sha256": json_sha256(args.dataset),
+            "dataset_sha256": dataset_sha256,
+            "inputs_sha256": inputs_sha256,
             "records": records,
         }, f, indent=2)
+    print(f"Analyzer inputs saved to {args.inputs}")
     print(f"Scores saved to {args.output}")
     print(f"Results: python -m eval.cli --dataset {args.dataset} --scores {args.output}")
     return 0
@@ -137,6 +174,8 @@ def main():
                         help='Path to benchmark JSON file')
     parser.add_argument('--output', default='eval/data/live_scores.json',
                         help='Path to save the recorded scores')
+    parser.add_argument('--inputs', default='eval/data/live_inputs.json',
+                        help='Path to save the recorded analyzer inputs')
     parser.add_argument('--revision',
                         help='The 40-character git revision being scored, where this is not a git checkout')
     args = parser.parse_args()

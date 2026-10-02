@@ -12,7 +12,11 @@ import pytest
 
 import eval.cli as cli
 import eval.live_scorer as live_scorer
-from eval.benchmark import FORMAT_RESULTS, FORMAT_SCORES, build_results, json_sha256, load_scores
+import eval.replay as replay
+from core.analyzer import AnalyzerResult
+from core.registry import AnalyzerRegistry
+from core.risk_engine import RiskEngine
+from eval.benchmark import FORMAT_INPUTS, FORMAT_RESULTS, FORMAT_SCORES, build_results, json_sha256, load_scores
 from eval.dataset import CLASSES, FORMAT_V2, LABEL_PROVIDERS, load_dataset
 
 V2 = "eval/data/benchmark_v2.json"
@@ -78,6 +82,67 @@ def write_scores(tmp_path, dataset, records, **changes):
 
 def record(address, status="ok", score=None, chain_id=1):
     return {"chain_id": chain_id, "address": address, "status": status, "score": score}
+
+
+def write_inputs(tmp_path, dataset, records, **changes):
+    path = tmp_path / "inputs.json"
+    document = {
+        "format": FORMAT_INPUTS,
+        "revision": REVISION,
+        "dirty": False,
+        "scored_at": "2026-09-24T12:00:00Z",
+        "dataset": dataset,
+        "dataset_sha256": json_sha256(dataset),
+        "records": records,
+        **changes,
+    }
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return str(path)
+
+
+def analyzer_input(name, weight, score, data, flags=None, error=None):
+    return {
+        "name": name,
+        "weight": weight,
+        "score": score,
+        "flags": flags or [],
+        "data": data,
+        "error": error,
+    }
+
+
+def complete_analyzer_inputs(weights=(4, 2.5, 2, 1.5)):
+    return [
+        analyzer_input(
+            "structural",
+            weights[0],
+            100,
+            {
+                "status": "ok",
+                "is_contract": True,
+                "is_verified": True,
+                "contract_age_days": 100,
+            },
+        ),
+        analyzer_input(
+            "market", weights[1], 80, {"status": "ok", "liquidity_usd": 200000}
+        ),
+        analyzer_input(
+            "behavioral", weights[2], 50, {"status": "ok", "reputation_score": 80}
+        ),
+        analyzer_input(
+            "honeypot",
+            weights[3],
+            0,
+            {
+                "status": "ok",
+                "is_honeypot": False,
+                "can_sell": True,
+                "buy_tax": 0,
+                "sell_tax": 0,
+            },
+        ),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +415,183 @@ def test_the_cli_writes_the_results_file(tmp_path, capsys):
     assert json.loads(out.read_text(encoding="utf-8")) == build_results(dataset, scores)
     printed = capsys.readouterr().out
     assert REVISION in printed and "local changes not checked" in printed
+
+
+# ---------------------------------------------------------------------------
+# Analyzer-input recording and offline replay
+# ---------------------------------------------------------------------------
+
+
+def test_the_live_scorer_records_raw_analyzer_inputs(monkeypatch):
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr(live_scorer.asyncio, "sleep", lambda seconds: real_sleep(0))
+    normalized = [
+        AnalyzerResult(
+            "structural",
+            0.4,
+            70,
+            flags=["Structural flag"],
+            data={"source": "provider"},
+        ),
+        AnalyzerResult("market", 0.6, 20, error="market analysis unavailable"),
+    ]
+
+    async def run_all(ctx):
+        return normalized
+
+    container = SimpleNamespace(
+        registry=SimpleNamespace(
+            get_all=lambda: [SimpleNamespace(weight=4), SimpleNamespace(weight=6)],
+            run_all=run_all,
+        ),
+        risk_engine=SimpleNamespace(
+            compute_from_results=lambda results: {
+                "status": "ok",
+                "rug_probability": 50,
+                "risk_level": "MEDIUM",
+            }
+        ),
+    )
+    inputs = []
+    records = asyncio.run(
+        live_scorer.score_entries(
+            [
+                SimpleNamespace(
+                    address=DRAINER,
+                    chain_id=1,
+                    category="drainer_contract",
+                    label="malicious",
+                )
+            ],
+            container,
+            inputs,
+        )
+    )
+
+    assert records[0]["score"] == 50
+    assert inputs == [
+        {
+            "chain_id": 1,
+            "address": DRAINER,
+            "results": [
+                {
+                    "name": "structural",
+                    "weight": 4,
+                    "score": 70,
+                    "flags": ["Structural flag"],
+                    "data": {"source": "provider"},
+                    "error": None,
+                },
+                {
+                    "name": "market",
+                    "weight": 6,
+                    "score": 20,
+                    "flags": [],
+                    "data": {},
+                    "error": "market analysis unavailable",
+                },
+            ],
+        }
+    ]
+
+
+def test_replay_matches_the_current_engine_and_produces_cli_scores(tmp_path, capsys):
+    dataset = write_dataset(tmp_path, [entry()])
+    inputs = write_inputs(
+        tmp_path,
+        dataset,
+        [
+            {
+                "chain_id": 1,
+                "address": DRAINER,
+                "results": complete_analyzer_inputs(),
+            }
+        ],
+    )
+    output = tmp_path / "scores.json"
+    direct_results = [
+        AnalyzerResult(
+            result["name"],
+            result["weight"] / 10,
+            result["score"],
+            result["flags"],
+            result["data"],
+        )
+        for result in complete_analyzer_inputs()
+    ]
+    expected = RiskEngine().compute_from_results(direct_results)
+
+    document = replay.replay(inputs, output, REVISION, False)
+
+    assert document["inputs_sha256"] == json_sha256(inputs)
+    assert document["dataset_sha256"] == json_sha256(dataset)
+    assert document["records"][0]["score"] == expected["rug_probability"]
+    assert document["records"][0]["risk_level"] == expected["risk_level"]
+    assert load_scores(output)["records"][(1, DRAINER)] == document["records"][0]
+    assert cli.main(["--dataset", dataset, "--scores", str(output)]) == 0
+    assert REVISION in capsys.readouterr().out
+
+
+def test_replay_normalizes_raw_weights_like_the_registry_and_leaves_normalized_weights_alone():
+    raw = replay.normalize_weights(
+        replay.rebuild_results({"results": complete_analyzer_inputs()})
+    )
+    normalized = replay.normalize_weights(
+        replay.rebuild_results(
+            {
+                "results": complete_analyzer_inputs((0.4, 0.25, 0.2, 0.15)),
+            }
+        )
+    )
+
+    class FakeAnalyzer:
+        def __init__(self, result):
+            self.name = result.name
+            self.weight = result.weight * 10
+
+        async def analyze(self, ctx):
+            return AnalyzerResult(self.name, self.weight, 0)
+
+    registry = AnalyzerRegistry()
+    for result in normalized:
+        registry.register(FakeAnalyzer(result))
+    registry_weights = [
+        result.weight
+        for result in asyncio.run(registry.run_all(SimpleNamespace(address=DRAINER)))
+    ]
+
+    assert [result.weight for result in raw] == [0.4, 0.25, 0.2, 0.15]
+    assert sum(result.weight for result in raw) == 1.0
+    assert [result.weight for result in normalized] == [0.4, 0.25, 0.2, 0.15]
+    assert registry_weights == [result.weight for result in raw]
+
+
+def test_replay_preserves_errored_results_for_fail_closed_coverage(tmp_path):
+    dataset = write_dataset(tmp_path, [entry()])
+    results = complete_analyzer_inputs()
+    results[0] = analyzer_input(
+        "structural",
+        4,
+        100,
+        {"status": "ok"},
+        error="structural analysis unavailable (TimeoutError)",
+    )
+    inputs = write_inputs(
+        tmp_path, dataset, [{"chain_id": 1, "address": DRAINER, "results": results}]
+    )
+
+    rebuilt = replay.normalize_weights(
+        replay.rebuild_results(replay.load_inputs(inputs)["records"][0])
+    )
+    risk = RiskEngine().compute_from_results(rebuilt)
+
+    assert rebuilt[0].error == "structural analysis unavailable (TimeoutError)"
+    assert risk["category_scores"]["structural"] is None
+    assert risk["coverage_reasons"]["structural"] == rebuilt[0].error
+    assert (
+        replay.replay_records(replay.load_inputs(inputs)["records"])[0]["status"]
+        == "unknown"
+    )
 
 
 # ---------------------------------------------------------------------------
