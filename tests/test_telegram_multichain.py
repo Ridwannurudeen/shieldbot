@@ -112,6 +112,7 @@ def bot_chain_functions():
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, MagicMock
     import asyncio
+    from telegram.error import TelegramError
     from utils.web3_client import UnsupportedChainError, Web3Client
     from core.extension_formatter import is_scan_incomplete
     from core.telegram_formatter import describe_impostor_check, escape_untrusted, unlinked
@@ -122,7 +123,7 @@ def bot_chain_functions():
 
     # Load the real menu handlers without importing the optional Telegram package.
     tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
-    names = {'_get_user_chain_id', 'chain_command', 'button_callback', 'help_command',
+    names = {'_get_user_chain_id', '_get_token_info_with_timeout', 'chain_command', 'button_callback', 'help_command',
              'scan_contract', 'check_token', 'handle_address', '_handle_advisor_chat',
              'threats_command', 'rescue_command', '_scan_buttons', '_token_buttons',
              'scan_command', 'token_command', 'error_handler'}
@@ -150,7 +151,10 @@ def bot_chain_functions():
         'with_impostor_check': with_impostor_check,
         'UNKNOWN': UNKNOWN,
         'RUN_ALL_DEADLINE_SECONDS': RUN_ALL_DEADLINE_SECONDS,
+        'TOKEN_INFO_TIMEOUT_SECONDS': RUN_ALL_DEADLINE_SECONDS,
+        'FORENSIC_REPORT_TIMEOUT_SECONDS': 30.0,
         'UnsupportedChainError': UnsupportedChainError,
+        'TelegramError': TelegramError,
         'logger': MagicMock(),
         'container': services,
         'ai_analyzer': ai,

@@ -7,6 +7,16 @@ import pytest
 from agent.advisor import Advisor
 
 
+def test_anthropic_client_uses_the_interactive_forensic_timeout(monkeypatch):
+    from utils.ai_analyzer import AIAnalyzer
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch("utils.ai_analyzer.anthropic.AsyncAnthropic") as client:
+        AIAnalyzer()
+
+    client.assert_called_once_with(api_key="test-key", timeout=30.0, max_retries=0)
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

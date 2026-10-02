@@ -3,6 +3,7 @@
 Every report names the chain its scan ran on.
 """
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -324,6 +325,18 @@ async def test_a_tap_runs_its_scan_even_when_telegram_refuses_to_edit_the_picker
 
 
 @pytest.mark.asyncio
+async def test_an_expired_callback_acknowledgement_still_runs_the_selected_scan(bot):
+    query = _tap(f"pick_s_4663_{ADDRESS}")
+    query.answer.side_effect = TelegramError("Query is too old")
+    context = SimpleNamespace(user_data={})
+
+    await bot.button_callback(SimpleNamespace(callback_query=query), context)
+
+    bot.scan_contract.assert_awaited_once_with(query, ADDRESS, chain_id=4663)
+    assert context.user_data["chain_id"] == 4663
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "data, reply",
     [
@@ -505,6 +518,64 @@ async def test_a_scan_report_names_the_chain_it_ran_on_fresh_and_from_the_cache(
     # The second reply came from the cache, whose key holds the chain.
     assert run_all.await_count == 1
     assert replies[1] == replies[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handler", ["scan_contract", "check_token"])
+async def test_slow_token_metadata_keeps_the_deterministic_report_and_verdict(
+    bot_module, monkeypatch, handler,
+):
+    async def never_finishes(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    client = Web3Client.__new__(Web3Client)
+    client._adapters = {chain_id: MagicMock() for chain_id in REGISTERED}
+    client.get_token_info = AsyncMock(side_effect=never_finishes)
+    risk_output = {**RISK, "coverage": {"structural": 1, "honeypot": 1}}
+    compute = MagicMock(return_value=risk_output)
+    monkeypatch.setattr(bot_module, "web3_client", client)
+    monkeypatch.setattr(bot_module, "TOKEN_INFO_TIMEOUT_SECONDS", 0.001)
+    monkeypatch.setattr(bot_module, "ai_analyzer", MagicMock(is_available=MagicMock(return_value=False)))
+    monkeypatch.setattr(bot_module, "risk_engine", MagicMock(compute_from_results=compute))
+    monkeypatch.setattr(bot_module.container.registry, "run_all", AsyncMock(return_value=[]))
+    update = _message()
+
+    await getattr(bot_module, handler)(update, ADDRESS, chain_id=8453)
+
+    rendered = assert_literal(update.message.reply_text.await_args.args[0])
+    compute.assert_called_once_with([])
+    assert f"Target: {ADDRESS}" in rendered
+    assert "Token:" not in rendered
+    assert "Risk Level: LOW" in rendered
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handler", ["scan_contract", "check_token"])
+async def test_slow_forensic_report_keeps_the_deterministic_verdict(bot_module, monkeypatch, handler):
+    async def never_finishes(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    client = Web3Client.__new__(Web3Client)
+    client._adapters = {chain_id: MagicMock() for chain_id in REGISTERED}
+    client.get_token_info = AsyncMock(return_value={})
+    risk_output = {**RISK, "coverage": {"structural": 1, "honeypot": 1}}
+    compute = MagicMock(return_value=risk_output)
+    ai = MagicMock(is_available=MagicMock(return_value=True))
+    ai.generate_forensic_report = AsyncMock(side_effect=never_finishes)
+    monkeypatch.setattr(bot_module, "web3_client", client)
+    monkeypatch.setattr(bot_module, "FORENSIC_REPORT_TIMEOUT_SECONDS", 0.001)
+    monkeypatch.setattr(bot_module, "ai_analyzer", ai)
+    monkeypatch.setattr(bot_module, "risk_engine", MagicMock(compute_from_results=compute))
+    monkeypatch.setattr(bot_module.container.registry, "run_all", AsyncMock(return_value=[]))
+    update = _message()
+
+    await getattr(bot_module, handler)(update, ADDRESS, chain_id=8453)
+
+    rendered = assert_literal(update.message.reply_text.await_args.args[0])
+    compute.assert_called_once_with([])
+    ai.generate_forensic_report.assert_awaited_once()
+    assert "Risk Level: LOW" in rendered
+    assert "AI Analysis:" not in rendered
 
 
 # --- Help -----------------------------------------------------------------------------------------

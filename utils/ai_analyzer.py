@@ -75,7 +75,9 @@ class AIAnalyzer:
             logger.warning("ANTHROPIC_API_KEY not set - Anthropic AI disabled")
             self.client = None
         else:
-            self.client = anthropic.AsyncAnthropic(api_key=self.api_key)
+            # Interactive reports have a 30 s caller budget, so SDK retries cannot turn optional prose into a
+            # multi-minute wait after that caller has already degraded to the deterministic report.
+            self.client = anthropic.AsyncAnthropic(api_key=self.api_key, timeout=30.0, max_retries=0)
 
         # OpenAI fallback
         self._openai_client = None

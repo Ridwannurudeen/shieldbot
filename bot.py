@@ -75,6 +75,13 @@ risk_engine = container.risk_engine
 # In-memory scan cache (address -> {result, timestamp})
 _scan_cache = {}
 CACHE_TTL = 300  # 5 minutes
+# Token metadata only labels the report; it runs beside the analyzers and must not outlive their
+# interactive 25 s deadline when an RPC leaves one of its serial reads hanging.
+TOKEN_INFO_TIMEOUT_SECONDS = RUN_ALL_DEADLINE_SECONDS
+# Forensic prose never decides the scan verdict, so it shares the advisor's bounded interactive wait.
+FORENSIC_REPORT_TIMEOUT_SECONDS = 30.0
+# Eight updates let unrelated users proceed while keeping provider and RPC demand bounded before rate limiting exists.
+UPDATE_CONCURRENCY = 8
 
 # /threats reads the API's mempool monitor. Every bot request reaches the API from one address and
 # so shares one IP rate-limit bucket there; a busy chat reuses a snapshot instead of using it up.
@@ -131,6 +138,17 @@ def _set_cache(address: str, scan_type: str, result: dict):
     """Store result in cache."""
     key = f"{scan_type}:{address.lower()}"
     _scan_cache[key] = {'result': result, 'timestamp': time.time()}
+
+
+async def _get_token_info_with_timeout(address: str, chain_id: int) -> dict:
+    """Read optional token metadata without delaying the verdict-bearing analyzer results."""
+    try:
+        return await asyncio.wait_for(
+            web3_client.get_token_info(address, chain_id=chain_id), TOKEN_INFO_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Token metadata timed out after %ss", TOKEN_INFO_TIMEOUT_SECONDS)
+        return {}
 
 
 async def post_init(application):
@@ -401,7 +419,6 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **Address:** `{address}`
 **Chain:** {get_chain_name(chain_id)}
 **Reason:** {escape_untrusted(reason)}
-**Reporter:** User {update.effective_user.id}
 
 {status}
 """
@@ -1095,7 +1112,7 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
             from core.analyzer import AnalysisContext
 
             ctx = AnalysisContext(address=address, chain_id=chain_id)
-            reads = [container.registry.run_all(ctx), web3_client.get_token_info(address, chain_id=chain_id)]
+            reads = [container.registry.run_all(ctx), _get_token_info_with_timeout(address, chain_id)]
             if chain_id == 4663:
                 # The official-token check reads symbol() and name() itself, alongside the analyzers, as the
                 # launch hunter's does: the token info read comes back empty when decimals() or totalSupply()
@@ -1126,7 +1143,13 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
                     'ethos': ethos_data,
                     'risk': risk_output,
                 }
-                ai_analysis = await ai_analyzer.generate_forensic_report(address, scan_data, 'contract')
+                try:
+                    ai_analysis = await asyncio.wait_for(
+                        ai_analyzer.generate_forensic_report(address, scan_data, 'contract'),
+                        FORENSIC_REPORT_TIMEOUT_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("Forensic report timed out after %ss", FORENSIC_REPORT_TIMEOUT_SECONDS)
 
             response = format_full_report(
                 risk_output, contract_data, dex_data, ethos_data,
@@ -1216,7 +1239,7 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
             from core.analyzer import AnalysisContext
 
             ctx = AnalysisContext(address=address, chain_id=chain_id)
-            reads = [container.registry.run_all(ctx), web3_client.get_token_info(address, chain_id=chain_id)]
+            reads = [container.registry.run_all(ctx), _get_token_info_with_timeout(address, chain_id)]
             if chain_id == 4663:
                 # The official-token check reads symbol() and name() itself, alongside the analyzers, as the
                 # launch hunter's does: the token info read comes back empty when decimals() or totalSupply()
@@ -1246,7 +1269,13 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
                     'ethos': ethos_data,
                     'risk': risk_output,
                 }
-                ai_analysis = await ai_analyzer.generate_forensic_report(address, scan_data, 'token')
+                try:
+                    ai_analysis = await asyncio.wait_for(
+                        ai_analyzer.generate_forensic_report(address, scan_data, 'token'),
+                        FORENSIC_REPORT_TIMEOUT_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("Forensic report timed out after %ss", FORENSIC_REPORT_TIMEOUT_SECONDS)
 
             response = format_full_report(
                 risk_output, contract_data, dex_data, ethos_data,
@@ -1311,7 +1340,11 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle button callbacks"""
     query = update.callback_query
-    await query.answer()
+    # Telegram can refuse an expired acknowledgement; the picker choice is still valid and must run.
+    try:
+        await query.answer()
+    except TelegramError as e:
+        logger.warning(f"Callback acknowledgement refused: {type(e).__name__}")
 
     if query.data.startswith('chain_'):
         try:
@@ -1588,6 +1621,7 @@ def main():
     application = (
         Application.builder()
         .token(token)
+        .concurrent_updates(UPDATE_CONCURRENCY)
         .post_init(post_init)
         .post_stop(post_stop)
         .post_shutdown(post_shutdown)

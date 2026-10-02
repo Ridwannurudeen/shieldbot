@@ -68,6 +68,7 @@ class TestApplicationWiring:
         assert application.post_init is bot_module.post_init
         assert application.post_stop is bot_module.post_stop
         assert application.post_shutdown is bot_module.post_shutdown
+        assert application.concurrent_updates == bot_module.UPDATE_CONCURRENCY == 8
 
         handlers = [
             handler
@@ -338,6 +339,28 @@ class TestNoOnChainRecordingPromise:
         assert "Scam Report — Address Blacklisted" in text
         assert "This address is confirmed as a scam." in text
         assert "reported by 0 users" not in text
+
+    @pytest.mark.asyncio
+    async def test_a_blacklisted_report_keeps_the_reporter_private(self, bot_module, monkeypatch):
+        address = "0x" + "0" * 39 + "1"
+        report_address = AsyncMock(return_value={
+            "accepted": True, "blacklisted": True, "reports": 3, "needed": 3,
+            "confirmed": False, "already_listed": False,
+        })
+        monkeypatch.setattr(bot_module, "scam_db", SimpleNamespace(report_address=report_address))
+        monkeypatch.setattr(bot_module, "web3_client", SimpleNamespace(
+            validate_chain_id=lambda chain: chain, is_valid_address=lambda value: True,
+        ))
+        update = MagicMock(spec=Update)
+        update.message.reply_text = AsyncMock()
+        update.effective_user.id = 42
+
+        await bot_module.report_command(update, SimpleNamespace(args=[address, "honeypot"], user_data={}))
+
+        report_address.assert_awaited_once_with(address, "42", 56)
+        text = update.message.reply_text.await_args.args[0]
+        assert "Reporter:" not in text
+        assert "42" not in text
 
 
 COMMUNITY_MATCH = {
