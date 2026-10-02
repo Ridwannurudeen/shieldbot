@@ -280,7 +280,7 @@ async def test_a_failed_renewal_never_rolls_back_a_take_running_beside_it(two_pr
     renewal = asyncio.create_task(db.take_sender_lease("drain", "host:1:aa", 90))
     # The check at a send asks while the renewal is still waiting for the lock.
     fence = asyncio.create_task(db.take_sender_lease("drain", "host:1:aa", 90))
-    await gave_up.wait()
+    await asyncio.wait_for(gave_up.wait(), 5)
     await other_process._db.rollback()
     renewed, fenced = await asyncio.gather(renewal, fence, return_exceptions=True)
     assert isinstance(renewed, sqlite3.OperationalError)
