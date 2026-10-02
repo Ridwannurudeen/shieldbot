@@ -246,7 +246,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **Quick Tips:**
 • Send any address and I'll ask which chain it is on, then auto-detect what to scan; a chain prefix skips the question
 • Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`
-• Or use /chain to switch your default chain
+• Use /chain to set the default chain for /rescue and /report
 • Supported: {supported_chains}
 
 Stay safe! 🛡️
@@ -271,7 +271,9 @@ async def chain_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         context.user_data['chain_id'] = chain_id
         await update.message.reply_text(
-            f"Switched to {get_chain_name(chain_id)} (chain_id={chain_id}).",
+            f"Switched to {get_chain_name(chain_id)} (chain_id={chain_id}).\n"
+            "It is now the default for /rescue, /report and the advisor chat. An address without a chain prefix, "
+            "pasted or sent with /scan or /token, still asks which chain it is on.",
         )
         return
 
@@ -288,7 +290,7 @@ async def chain_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )])
 
     await update.message.reply_text(
-        "Select the chain to scan on:\n\n"
+        "Select the default chain for /rescue and /report:\n\n"
         "You can also use chain prefixes like `eth:0x...` or `base:0x...`",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(keyboard),
@@ -1324,7 +1326,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chain_name = get_chain_name(chain_id)
         await query.edit_message_text(
             f"Switched to {chain_name} (chain_id={chain_id}).\n"
-            f"All scans will now target {chain_name}.",
+            "It is now the default for /rescue, /report and the advisor chat. An address without a chain prefix, "
+            "pasted or sent with /scan or /token, still asks which chain it is on.",
         )
     elif query.data.startswith('token_'):
         # The button names the chain its scan ran on, which the user's current chain may no longer be. A

@@ -491,3 +491,26 @@ async def test_start_and_help_say_a_bare_address_asks_and_a_prefix_skips_the_que
     (line,) = [line for line in text.splitlines() if "Send any address" in line]
     assert "ask which chain it is on" in line
     assert "chain prefix skips the question" in line
+
+
+@pytest.mark.asyncio
+async def test_switching_the_saved_chain_says_what_it_still_controls_not_that_every_scan_follows(
+    bot,
+):
+    update = _message()
+    await bot.chain_command(update, SimpleNamespace(args=["rh"], user_data={}))
+    query = _tap("chain_4663")
+    await bot.button_callback(SimpleNamespace(callback_query=query), SimpleNamespace(user_data={}))
+
+    typed = update.message.reply_text.await_args.args[0]
+    tapped = query.edit_message_text.await_args.args[0]
+    assert (
+        typed
+        == tapped
+        == (
+            "Switched to Robinhood Chain (chain_id=4663).\n"
+            "It is now the default for /rescue, /report and the advisor chat. An address without a chain prefix, "
+            "pasted or sent with /scan or /token, still asks which chain it is on."
+        )
+    )
+    assert "All scans" not in tapped
