@@ -5,11 +5,13 @@ export type Verdict = "safe" | "caution" | "high" | "block" | "unknown";
 export default function Badge({
   verdict,
   variant = "soft",
+  size = "md",
   children,
   className,
 }: {
   verdict: Verdict;
   variant?: "soft" | "solid";
+  size?: "md" | "lg";
   children: ReactNode;
   className?: string;
 }) {
@@ -33,7 +35,9 @@ export default function Badge({
   return (
     <span
       className={[
-        "inline-flex items-center rounded-md px-2.5 py-1 text-xs font-bold uppercase tracking-[0.08em] border",
+        size === "md"
+          ? "inline-flex items-center rounded-md px-2.5 py-1 text-xs font-bold uppercase tracking-[0.08em] border"
+          : "inline-flex items-center rounded-lg px-3 py-1.5 text-lg min-[390px]:text-xl sm:text-2xl font-extrabold uppercase tracking-[0.02em] leading-[1.15] border",
         tones[verdict],
         className,
       ]

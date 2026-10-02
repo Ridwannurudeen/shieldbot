@@ -244,8 +244,10 @@ export default function VerdictDemo() {
                   .filter(Boolean)
                   .join(" ")}
               >
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge verdict={item.verdict.tone}>{item.verdict.label}</Badge>
+                <Badge verdict={item.verdict.tone} variant="solid" size="lg">
+                  {item.verdict.label}
+                </Badge>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
                   {item.verdict.chips.map((chip) => (
                     <span
                       key={chip}
