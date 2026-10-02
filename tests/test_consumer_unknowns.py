@@ -1309,7 +1309,7 @@ def test_agent_firewall_pipeline_failure_logs_exception_class_only(caplog):
     container = MagicMock()
     container.auth_manager.validate_key = AsyncMock(return_value={'key_id': 'k1', 'tier': 'free'})
     container.auth_manager.check_rate_limit = AsyncMock(return_value=True)
-    container.db.get_agent_policy = AsyncMock(return_value={'policy': {}})
+    container.db.get_agent_policy = AsyncMock(return_value={'policy': {}, 'registered_by_key': 'k1'})
     container.db.get_contract_score = AsyncMock(return_value=None)
     container.cache.get_verdict = AsyncMock(return_value=None)
     container.web3_client.is_token_contract = AsyncMock(return_value=True)
