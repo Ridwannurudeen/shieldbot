@@ -1027,7 +1027,7 @@
     const calldataHtml = buildCalldataSection(result.calldata_details);
 
     overlay.innerHTML = `
-      <div class="shieldai-modal ${isBlock ? "shieldai-modal-danger" : ""}" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
+      <div class="shieldai-modal ${isBlock ? "shieldai-modal-danger" : classification === "UNKNOWN" ? "shieldai-modal-unknown" : ""}" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
         <div class="shieldai-header">
           <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
