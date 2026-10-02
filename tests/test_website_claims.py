@@ -232,6 +232,13 @@ def test_evidence_links_are_not_fine_print():
     assert "text-[13px] text-emerald" not in read(COMPONENTS / "OnChain.tsx")
 
 
+def test_verdict_badge_steps_down_where_the_column_is_narrowest():
+    badge = read(COMPONENTS / "Badge.tsx")
+    assert "min-[1024px]:text-xl" in badge
+    assert "min-[1100px]:text-2xl" in badge
+    assert badge.index("sm:text-2xl") < badge.index("min-[1024px]:text-xl")
+
+
 def welcome_text() -> str:
     """The visible text of the extension's welcome page, without its styles and scripts."""
     html = re.sub(r"<(style|script)\b.*?</\1>", " ", read(WELCOME), flags=re.DOTALL)
