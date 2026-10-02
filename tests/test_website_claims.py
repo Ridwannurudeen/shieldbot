@@ -225,6 +225,13 @@ def test_the_site_shows_the_robinhood_contract_addresses():
     assert not re.search(r"0x[0-9a-fA-F]{64}", bundle)
 
 
+def test_evidence_links_are_not_fine_print():
+    assert "text-faint" not in read(COMPONENTS / "VerdictDemo.tsx")
+    assert "min-h-[44px]" in read(COMPONENTS / "ContractCard.tsx")
+    assert read(COMPONENTS / "ContractCard.tsx").count('name="external"') == 1
+    assert "text-[13px] text-emerald" not in read(COMPONENTS / "OnChain.tsx")
+
+
 def welcome_text() -> str:
     """The visible text of the extension's welcome page, without its styles and scripts."""
     html = re.sub(r"<(style|script)\b.*?</\1>", " ", read(WELCOME), flags=re.DOTALL)

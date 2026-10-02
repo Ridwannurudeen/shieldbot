@@ -260,7 +260,7 @@ export default function VerdictDemo() {
                 <p className="mt-3 text-sm text-body">{item.explanation}</p>
               </motion.div>
 
-              <p className="mt-4 text-xs text-faint">{renderFootnote(item)}</p>
+              <p className="mt-4 text-[13px] leading-relaxed text-muted">{renderFootnote(item)}</p>
             </div>
           );
         })}

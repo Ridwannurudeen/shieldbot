@@ -50,16 +50,17 @@ export default function ContractCard({
         </span>
       </div>
       <p className="mt-3 text-[13px] text-muted">Deployed 27 September 2026</p>
-      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
+      <div className="mt-2 flex flex-col">
         {links.map((link) => (
           <a
             key={link.href}
-            className="text-emerald underline underline-offset-4 hover:text-emerald-deep"
+            className="inline-flex min-h-[44px] items-center gap-1.5 self-start text-sm font-semibold text-emerald underline underline-offset-4 hover:text-emerald-deep"
             href={link.href}
             target="_blank"
             rel="noopener noreferrer"
           >
             {link.label}
+            <Icon name="external" size={16} />
           </a>
         ))}
       </div>
