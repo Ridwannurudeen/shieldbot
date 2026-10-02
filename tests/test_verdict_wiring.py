@@ -206,7 +206,7 @@ NO_MATCH = {"status": "none", "symbol": None, "official_address": None, "reason"
 def bot_scan_functions():
     """Load bot.py's scan handlers without importing the optional Telegram package."""
     tree = ast.parse(Path("bot.py").read_text(encoding="utf-8"))
-    names = {"scan_contract", "check_token"}
+    names = {"_get_token_info_with_timeout", "scan_contract", "check_token"}
     module = ast.Module(
         body=[
             node
@@ -228,6 +228,8 @@ def bot_scan_functions():
         "is_scan_incomplete": is_scan_incomplete,
         "with_impostor_check": with_impostor_check,
         "RUN_ALL_DEADLINE_SECONDS": RUN_ALL_DEADLINE_SECONDS,
+        "TOKEN_INFO_TIMEOUT_SECONDS": RUN_ALL_DEADLINE_SECONDS,
+        "FORENSIC_REPORT_TIMEOUT_SECONDS": 30.0,
         "UnsupportedChainError": UnsupportedChainError,
         "logger": MagicMock(),
         "container": services,
