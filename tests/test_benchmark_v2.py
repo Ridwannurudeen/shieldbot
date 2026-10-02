@@ -618,12 +618,74 @@ def test_replay_scores_with_current_weights_not_recorded_weights(tmp_path, monke
     }
     current_weights["structural"] = 8
     engine = RiskEngine()
-    expected = engine.compute_from_results(
-        replay.normalize_weights(
-            replay.rebuild_results(
-                replay.load_inputs(inputs)["records"][0], current_weights
-            )
+    current_results = [
+        AnalyzerResult(
+            "structural",
+            8,
+            100,
+            data={
+                "status": "ok",
+                "is_contract": True,
+                "is_verified": True,
+                "contract_age_days": 100,
+                "coverage": {"scam_database": True, "bytecode": True},
+                "scam_matches": [
+                    {"severity": "medium", "reason": "Community report"}
+                ],
+                "observed_at": 1_700_000_000,
+                "notes": ["Top holders checked"],
+            },
+        ),
+        AnalyzerResult(
+            "market",
+            2.5,
+            80,
+            data={
+                "status": "ok",
+                "liquidity_usd": 200000,
+                "observed_at": 1_700_000_001,
+                "notes": ["Market observed"],
+            },
+        ),
+        AnalyzerResult(
+            "behavioral", 2, 50, data={"status": "ok", "reputation_score": 80}
+        ),
+        AnalyzerResult(
+            "honeypot",
+            1.5,
+            0,
+            data={
+                "status": "ok",
+                "is_honeypot": False,
+                "can_sell": True,
+                "buy_tax": 0,
+                "sell_tax": 0,
+            },
+        ),
+        AnalyzerResult(
+            "intent",
+            1.5,
+            60,
+            data={"status": "ok", "floor": 70, "observed_at": 1_700_000_002},
+        ),
+        AnalyzerResult(
+            "signature", 1, 0, data={"status": "ok", "observed_at": 1_700_000_003}
+        ),
+    ]
+    recorded_results = [
+        AnalyzerResult(
+            result.name,
+            4 if result.name == "structural" else result.weight,
+            result.score,
+            flags=result.flags,
+            data=result.data,
+            error=result.error,
         )
+        for result in current_results
+    ]
+    current_score = engine.compute_from_results(replay.normalize_weights(current_results))
+    recorded_score = engine.compute_from_results(
+        replay.normalize_weights(recorded_results)
     )
     monkeypatch.setattr(
         replay, "current_engine_and_weights", lambda: (engine, current_weights)
@@ -636,8 +698,9 @@ def test_replay_scores_with_current_weights_not_recorded_weights(tmp_path, monke
     assert document["weight_changes"] == [
         {"name": "structural", "recorded_weight": 4, "current_weight": 8}
     ]
-    assert document["records"][0]["score"] == expected["rug_probability"]
-    assert document["records"][0]["risk_level"] == expected["risk_level"]
+    assert document["records"][0]["score"] == current_score["rug_probability"]
+    assert document["records"][0]["score"] != recorded_score["rug_probability"]
+    assert document["records"][0]["risk_level"] == current_score["risk_level"]
     assert load_scores(output)["records"][(1, DRAINER)] == document["records"][0]
 
 
