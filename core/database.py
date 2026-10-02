@@ -1856,16 +1856,30 @@ class Database:
         }
 
     async def list_unowned_agent_policies(self) -> List[Dict]:
-        """List policies created before their registering API key was recorded."""
+        """List unowned policies and policies whose registering key is no longer active."""
+        # These legacy contact fields are the only in-system attribution lead during this one-time
+        # ownership migration. New registrations will stop writing them in a later scheduled item.
         cursor = await self._db.execute("""
-            SELECT agent_id, owner_address, created_at
+            SELECT agent_id, owner_address, owner_telegram, owner_webhook, created_at
             FROM agent_policies
-            WHERE registered_by_key IS NULL OR registered_by_key = ''
+            WHERE registered_by_key IS NULL
+               OR registered_by_key = ''
+               OR NOT EXISTS (
+                   SELECT 1 FROM api_keys
+                   WHERE api_keys.key_id = agent_policies.registered_by_key
+                     AND api_keys.is_active = 1
+               )
             ORDER BY created_at DESC
         """)
         rows = await cursor.fetchall()
         return [
-            {"agent_id": row[0], "owner_address": row[1], "created_at": row[2]}
+            {
+                "agent_id": row[0],
+                "owner_address": row[1],
+                "owner_telegram": row[2],
+                "owner_webhook": row[3],
+                "created_at": row[4],
+            }
             for row in rows
         ]
 
@@ -1880,6 +1894,34 @@ class Database:
         """, (key_id, time.time(), agent_id, key_id))
         await self._db.commit()
         return cursor.rowcount == 1
+
+    async def release_agent_policy(self, agent_id: str) -> bool:
+        """Release an owned policy so an active API key can claim it."""
+        cursor = await self._db.execute("""
+            UPDATE agent_policies
+            SET registered_by_key = NULL, updated_at = ?
+            WHERE agent_id = ?
+              AND registered_by_key IS NOT NULL
+              AND registered_by_key != ''
+        """, (time.time(), agent_id))
+        await self._db.commit()
+        return cursor.rowcount == 1
+
+    async def get_agent_policy_release_refusal(self, agent_id: str) -> Optional[str]:
+        """Return why an agent-policy release cannot proceed."""
+        cursor = await self._db.execute("""
+            SELECT CASE
+                WHEN NOT EXISTS (SELECT 1 FROM agent_policies WHERE agent_id = ?)
+                    THEN 'agent_missing'
+                WHEN EXISTS (
+                    SELECT 1 FROM agent_policies
+                    WHERE agent_id = ?
+                      AND (registered_by_key IS NULL OR registered_by_key = '')
+                ) THEN 'agent_unowned'
+            END
+        """, (agent_id, agent_id))
+        row = await cursor.fetchone()
+        return row[0] if row else None
 
     async def get_agent_policy_claim_refusal(self, agent_id: str, key_id: str) -> Optional[str]:
         """Return why an agent-policy claim cannot proceed."""

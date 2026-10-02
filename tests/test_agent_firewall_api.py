@@ -252,6 +252,9 @@ def test_agent_register_refuses_claiming_legacy_unowned_agent(client, mock_conta
         "owner_address": "0xOwner",
     }, headers={"X-API-Key": "sb_testkey"})
     assert resp.status_code == 409
+    assert resp.json() == {
+        "detail": "Agent legacy_agent must be claimed by an operator. Contact the operator.",
+    }
     mock_container.db.upsert_agent_policy.assert_not_awaited()
 
 
