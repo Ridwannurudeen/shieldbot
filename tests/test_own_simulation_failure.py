@@ -177,7 +177,7 @@ async def test_the_telegram_report_never_calls_a_token_not_a_honeypot_after_a_si
     data, analyzed, risk, extension = await scan(chain_id, adapter)
     # The bot reports the honeypot analyzer's data; GoPlus's is_honeypot False is in it.
     assert (analyzed.data["is_honeypot"], analyzed.data["rpc_failed"]) == (False, True)
-    report = format_full_report(risk, {}, {}, {}, honeypot_data=analyzed.data)
+    report = format_full_report(risk, {}, {}, {}, honeypot_data=analyzed.data, chain_id=chain_id)
     assert "Not Honeypot" not in report
     assert "\n  Unknown (" in report
     assert "Sellability: Unknown" in report
@@ -190,11 +190,11 @@ async def test_the_telegram_report_of_a_simulated_clean_token_is_unchanged():
     addresses = [fixture["buyer"], fixture["receiver"]]
     with patch("services.arbitrum_simulation._fresh_address", side_effect=addresses):
         data, analyzed, risk, extension = await scan(42161, adapter, fixture["token"])
-    report = format_full_report(risk, {}, {}, {}, honeypot_data=analyzed.data)
+    report = format_full_report(risk, {}, {}, {}, honeypot_data=analyzed.data, chain_id=42161)
     assert "\u2705 Not Honeypot" in report and "Sellability: Yes" in report
     # Byte for byte what the data without the new key rendered.
     before = {key: value for key, value in analyzed.data.items() if key != "rpc_failed"}
-    assert report == format_full_report(risk, {}, {}, {}, honeypot_data=before)
+    assert report == format_full_report(risk, {}, {}, {}, honeypot_data=before, chain_id=42161)
 
 
 # --- a discovery lookup the node could not answer ---------------------------------------------------

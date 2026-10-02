@@ -10,6 +10,7 @@ from core.extension_formatter import is_scan_incomplete
 from core.risk_engine import database_matches, medium_matches
 from core.telegram_formatter import escape_markdown_lines, escape_untrusted, format_full_report
 from scanner.transaction_scanner import TransactionScanner
+from utils.chain_info import get_chain_name
 
 
 ADDRESS = "0x" + "a" * 40
@@ -33,6 +34,7 @@ def format_scan_result():
         "escape_markdown_lines": escape_markdown_lines,
         "database_matches": database_matches,
         "medium_matches": medium_matches,
+        "get_chain_name": get_chain_name,
     }
     exec(compile(module, "bot.py", "exec"), namespace)
     return namespace["format_scan_result"]
@@ -45,7 +47,7 @@ async def test_bot_confirmed_wallet_verification_is_not_applicable(
     mock_web3_client.is_contract.return_value = False
     scanner = TransactionScanner(mock_web3_client)
     scanner.scam_db.check_address = AsyncMock(return_value=[])
-    report = format_scan_result(await scanner.scan_address(ADDRESS))
+    report = format_scan_result(await scanner.scan_address(ADDRESS), 56)
     assert "**Verification Status:**\nNot applicable (wallet address, not a contract)\n" in report
     assert "Unknown (verification data unavailable)" not in report
     assert "🟢 LOW" in report
@@ -59,7 +61,7 @@ async def test_bot_confirmed_wallet_verification_is_not_applicable(
     ],
 )
 def test_bot_unknown_contract_or_verification_stays_unknown(format_scan_result, result):
-    report = format_scan_result({"address": ADDRESS, **result})
+    report = format_scan_result({"address": ADDRESS, **result}, 56)
     assert "**Verification Status:**\nUnknown (verification data unavailable)\n" in report
     assert "Not applicable" not in report
 
@@ -81,5 +83,5 @@ def test_telegram_report_verification_wording(contract_data, rendered):
         "rug_probability": 5,
         "risk_level": "LOW",
     }
-    lines = format_full_report(risk, contract_data, {}, {}, address=ADDRESS).split("\n")
+    lines = format_full_report(risk, contract_data, {}, {}, address=ADDRESS, chain_id=56).split("\n")
     assert rendered in lines

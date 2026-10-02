@@ -403,7 +403,7 @@ def _reputation_line(ethos):
 
     report = format_full_report(
         {"rug_probability": 5, "risk_level": "LOW", "status": "ok", "coverage": {"behavioral": 1}},
-        {}, {}, ethos, address="0x" + "a" * 40,
+        {}, {}, ethos, address="0x" + "a" * 40, chain_id=56,
     ).splitlines()
     return report[report.index("*\U0001F464 Wallet Reputation (Ethos):*") + 1]
 

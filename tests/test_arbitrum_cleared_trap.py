@@ -33,7 +33,7 @@ async def test_a_trap_cleared_by_the_deepest_pools_sell_stays_suspicious_beside_
     assert "not counted as a trap" in data["reason"]
     # GoPlus's "not a honeypot" fills the field, as after any failed simulation, and is reported unresolved.
     assert (data["is_honeypot"], data["field_providers"]["is_honeypot"]) == (False, "goplus")
-    report = format_full_report(risk, {}, {}, {}, honeypot_data=analyzed.data)
+    report = format_full_report(risk, {}, {}, {}, honeypot_data=analyzed.data, chain_id=42161)
     assert "Not Honeypot" not in report
     assert "\n  Unknown (" in report
     assert "Sellability: Unknown" in report

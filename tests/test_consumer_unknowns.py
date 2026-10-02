@@ -137,23 +137,25 @@ async def test_legacy_firewall_only_skips_token_scan_for_confirmed_non_token(
 async def test_bot_only_skips_token_scan_for_confirmed_non_token(identification):
     import ast
     from pathlib import Path
+    from utils.chain_info import parse_chain_prefix
 
     tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
-    handler = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)
-                   and node.name == 'handle_address')
+    handlers = [node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)
+                and node.name in ('handle_address', '_scan_pasted_address')]
     namespace = {
         'Update': object, 'ContextTypes': SimpleNamespace(DEFAULT_TYPE=object),
-        'parse_chain_prefix': lambda text: (None, text),
+        'parse_chain_prefix': parse_chain_prefix,
         '_get_user_chain_id': lambda context: 56, 'get_chain_name': lambda chain_id: 'BSC',
         'web3_client': SimpleNamespace(
             is_token_contract=AsyncMock(return_value=identification), is_valid_address=lambda _: True,
+            validate_chain_id=lambda chain_id: chain_id,
         ),
         'check_token': AsyncMock(), 'scan_contract': AsyncMock(),
     }
-    exec(compile(ast.Module(body=[handler], type_ignores=[]), 'bot.py', 'exec'), namespace)
+    exec(compile(ast.Module(body=handlers, type_ignores=[]), 'bot.py', 'exec'), namespace)
     status = SimpleNamespace(edit_text=AsyncMock())
     update = SimpleNamespace(message=SimpleNamespace(
-        text='0x' + 'a' * 40, reply_text=AsyncMock(return_value=status),
+        text='bsc:0x' + 'a' * 40, reply_text=AsyncMock(return_value=status),
     ))
     await namespace['handle_address'](update, SimpleNamespace(user_data={}))
     assert namespace['check_token'].await_count == int(identification is not False)

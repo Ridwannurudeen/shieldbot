@@ -275,7 +275,7 @@ def test_the_container_less_entry_point_runs_no_analyzer_and_has_no_notes():
 async def test_telegram_shows_notes_under_their_own_heading(mock_web3_client):
     structural = await _structural(mock_web3_client, NO_RECORD)
     risk = RiskEngine().compute_from_results(_with_covered_others(structural))
-    lines = format_full_report(risk, structural.data, {}, {}, {}, address=TOKEN).splitlines()
+    lines = format_full_report(risk, structural.data, {}, {}, {}, address=TOKEN, chain_id=56).splitlines()
     assert not any("Critical Flags" in line for line in lines)
     heading = lines.index("*ℹ Notes:*")
     assert lines[heading + 1] == "  • " + escape_markdown(HOLDERS_UNKNOWN)

@@ -312,7 +312,7 @@ class TestProviderCoverageRisk:
         alert = format_extension_alert(output)
         assert alert["risk_classification"] == "CAUTION"
         assert "unknown" in alert["recommended_action"].lower()
-        report = format_full_report(output, contract, market, ethos, unknown)
+        report = format_full_report(output, contract, market, ethos, unknown, chain_id=56)
         assert "Buy Tax: Unknown" in report
         assert "Sell Tax: Unknown" in report
         assert "Sellability: Unknown" in report
@@ -395,7 +395,7 @@ class TestProviderCoverageRisk:
     def test_formatters_empty_market_data_is_unknown(self):
         from core.telegram_formatter import format_full_report
         output = {"rug_probability": 0, "risk_level": "MEDIUM", "status": "unknown"}
-        report = format_full_report(output, {}, {}, {}, {})
+        report = format_full_report(output, {}, {}, {}, {}, chain_id=56)
         assert "Liquidity: Unknown" in report
         assert "Buy Tax: Unknown" in report
         assert "Verified: Unknown" in report

@@ -151,6 +151,7 @@ def _report(complete, **overrides):
         "address": ADDRESS,
         "ai_analysis": f"**Risk Score:** 90/100\n{HOSTILE}\nSee `set_fee`",
         "token_info": {"name": HOSTILE, "symbol": HOSTILE},
+        "chain_id": 4663,
         **overrides,
     }
     return format_full_report(risk, **kwargs)
@@ -212,14 +213,14 @@ def test_fallback_scan_report_shows_untrusted_values_literally(bot_module):
         "ai_analysis": HOSTILE,
     }
 
-    rendered = assert_literal(bot_module.format_scan_result(result), HOSTILE)
+    rendered = assert_literal(bot_module.format_scan_result(result, 4663), HOSTILE)
 
     assert f"• {HOSTILE}: {HOSTILE}" in rendered
     assert (
         assert_literal(
-            bot_module.format_scan_result({**result, "forensic_report": HOSTILE}), HOSTILE
+            bot_module.format_scan_result({**result, "forensic_report": HOSTILE}, 4663), HOSTILE
         )
-        == HOSTILE
+        == f"Chain: Robinhood Chain (4663)\n\n{HOSTILE}"
     )
 
 
@@ -242,14 +243,14 @@ def test_fallback_token_report_shows_untrusted_values_literally(bot_module):
         "ai_analysis": HOSTILE,
     }
 
-    rendered = assert_literal(bot_module.format_token_result(result), HOSTILE)
+    rendered = assert_literal(bot_module.format_token_result(result, 4663), HOSTILE)
 
     assert f"Token: {HOSTILE} ({HOSTILE})" in rendered
     assert (
         assert_literal(
-            bot_module.format_token_result({**result, "forensic_report": HOSTILE}), HOSTILE
+            bot_module.format_token_result({**result, "forensic_report": HOSTILE}, 4663), HOSTILE
         )
-        == HOSTILE
+        == f"Chain: Robinhood Chain (4663)\n\n{HOSTILE}"
     )
 
 

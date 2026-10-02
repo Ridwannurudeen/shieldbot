@@ -237,7 +237,7 @@ class TestHelpCommand:
 **/help** - Show this help message
 
 **Quick Tips:**
-• Send any address and I'll auto-detect what to scan
+• Send any address and I'll ask which chain it is on, then auto-detect what to scan; a chain prefix skips the question
 • Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`
 • Or use /chain to switch your default chain
 • Supported: BSC, Ethereum, Base, Arbitrum, Polygon, opBNB, Optimism, Robinhood Chain
@@ -357,14 +357,14 @@ class TestScanResultNamesCommunityReports:
         }
 
     def test_a_community_report_is_not_a_scam_database_match(self, bot_module):
-        text = bot_module.format_scan_result(self._scan([COMMUNITY_MATCH], ["Reported by 3 users"]))
+        text = bot_module.format_scan_result(self._scan([COMMUNITY_MATCH], ["Reported by 3 users"]), 56)
         assert "scam database match" not in text
         assert text.count("Reported by 3 users") == 1
 
     def test_database_matches_are_counted_apart_from_community_reports(self, bot_module):
         text = bot_module.format_scan_result(self._scan(
             [ADMIN_MATCH, COMMUNITY_MATCH], ["Found 1 scam database match(es)", "Reported by 3 users"],
-        ))
+        ), 56)
         assert "Found 1 scam database match(es)" in text
         assert "Confirmed scam address" in text
         assert text.count("Reported by 3 users") == 1

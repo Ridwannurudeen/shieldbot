@@ -35,16 +35,16 @@ def test_failed_scam_lookup_renders_known_hits_and_unknown_without_hits():
         'coverage': {'structural': 0},
         'coverage_reasons': {'structural': 'Scam database unavailable'},
     }
-    report = format_full_report(risk, scan, {}, {})
+    report = format_full_report(risk, scan, {}, {}, chain_id=56)
     complete_report = format_full_report(
-        risk, {**scan, 'coverage': {'scam_database': True}}, {}, {},
+        risk, {**scan, 'coverage': {'scam_database': True}}, {}, {}, chain_id=56,
     )
     analyzer = AIAnalyzer.__new__(AIAnalyzer)
     hit_scan = {
         **scan,
         'scam_matches': [{'type': 'known_scam', 'reason': 'Reported phishing'}],
     }
-    hit_report = format_full_report(risk, hit_scan, {}, {})
+    hit_report = format_full_report(risk, hit_scan, {}, {}, chain_id=56)
     nested_forensic = analyzer._build_forensic_context(
         ADDRESS, {'contract': hit_scan, 'risk': risk}, 'contract',
     )
@@ -104,7 +104,7 @@ async def test_provider_failure_stays_unknown_through_formatters(failure):
     risk = RiskEngine().compute_from_results([result])
     assert risk['risk_level'] != 'LOW'
     extension = format_extension_alert(risk)
-    telegram = format_full_report(risk, {}, {}, {}, data)
+    telegram = format_full_report(risk, {}, {}, {}, data, chain_id=4663)
     assert extension['risk_classification'] != 'SAFE'
     assert extension['risk_display'].startswith('Unknown')
     assert 'unknown' in str(extension).lower()
@@ -388,7 +388,7 @@ async def test_failed_simulation_with_clean_fallback_never_becomes_safe(renounce
             AnalyzerResult('behavioral', .2, 0, data=ethos), result,
         ])
     alert = format_extension_alert(risk)
-    report = format_full_report(risk, contract, market, ethos, data)
+    report = format_full_report(risk, contract, market, ethos, data, chain_id=56)
     assert risk['risk_level'] == 'MEDIUM'
     assert risk['rug_probability'] == (6 if renounced else 8)
     assert risk['coverage']['honeypot'] < 1

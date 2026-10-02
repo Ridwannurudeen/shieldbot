@@ -106,6 +106,8 @@ _IMPOSTOR_LAUNCH_HEADER = '🚨 IMPOSTOR: {}'
 _COLLISION_LAUNCH_HEADER = '⚠️ NOT OFFICIAL: shares a ticker or name with an official Robinhood token'
 _launch_alert_task = None
 _blacklist_reload_task = None
+# The chain picker lists chains in the product's order; any other supported chain, such as a demo chain, follows.
+PICKER_CHAIN_ORDER = (1, 56, 204, 8453, 42161, 137, 10, 4663)
 
 
 def _get_user_chain_id(context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -198,7 +200,7 @@ Send me a token address, and I'll analyze:
 • Campaign radar — link addresses to coordinated scam campaigns
 
 **How to use:**
-Send any address and I'll auto-detect what to scan!
+Send any address and I'll ask which chain it is on, then auto-detect what to scan! A chain prefix skips the question.
 Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`
 
 Commands:
@@ -242,7 +244,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **/help** - Show this help message
 
 **Quick Tips:**
-• Send any address and I'll auto-detect what to scan
+• Send any address and I'll ask which chain it is on, then auto-detect what to scan; a chain prefix skips the question
 • Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`
 • Or use /chain to switch your default chain
 • Supported: {supported_chains}
@@ -306,11 +308,15 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     raw = context.args[0]
     prefix_chain_id, address = parse_chain_prefix(raw)
-    chain_id = web3_client.validate_chain_id(prefix_chain_id or _get_user_chain_id(context))
+    if prefix_chain_id:
+        web3_client.validate_chain_id(prefix_chain_id)
     if not web3_client.is_valid_address(address):
         await update.message.reply_text("❌ Invalid address format.")
         return
-    await scan_contract(update, address, chain_id=chain_id)
+    if prefix_chain_id:
+        await scan_contract(update, address, chain_id=prefix_chain_id)
+    else:
+        await _ask_chain(update, context, 's', address)
 
 
 async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -326,11 +332,15 @@ async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     raw = context.args[0]
     prefix_chain_id, address = parse_chain_prefix(raw)
-    chain_id = web3_client.validate_chain_id(prefix_chain_id or _get_user_chain_id(context))
+    if prefix_chain_id:
+        web3_client.validate_chain_id(prefix_chain_id)
     if not web3_client.is_valid_address(address):
         await update.message.reply_text("❌ Invalid address format.")
         return
-    await check_token(update, address, chain_id=chain_id)
+    if prefix_chain_id:
+        await check_token(update, address, chain_id=prefix_chain_id)
+    else:
+        await _ask_chain(update, context, 't', address)
 
 
 async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -982,6 +992,53 @@ async def _handle_advisor_chat(update: Update, message: str, chain_id: int = 56)
         )
 
 
+async def _ask_chain(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, address: str):
+    """Ask which chain an address without a chain prefix is on, with a button for each supported chain.
+
+    A tap reaches button_callback as "pick_<kind>_<chain id>_<address>": kind 'a' for a pasted address,
+    's' for /scan and 't' for /token.
+    """
+    supported = web3_client.get_supported_chain_ids()
+    chain_ids = [cid for cid in PICKER_CHAIN_ORDER if cid in supported]
+    chain_ids += [cid for cid in supported if cid not in PICKER_CHAIN_ORDER]
+    last_used = context.user_data.get('chain_id')
+    # "pick_<kind>_<chain id>_<address>" is 58 bytes with an eight-digit chain id; Telegram allows 64.
+    buttons = [
+        InlineKeyboardButton(
+            f"{get_chain_name(cid)}{' (last used)' if cid == last_used else ''}",
+            callback_data=f"pick_{kind}_{cid}_{address}",
+        )
+        for cid in chain_ids
+    ]
+    await update.message.reply_text(
+        "Which chain is this address on?\n\n"
+        f"`{address}`\n\n"
+        "Tip: a prefix such as `rh:0x...` or `eth:0x...` skips this question.",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup([buttons[i:i + 2] for i in range(0, len(buttons), 2)]),
+    )
+
+
+async def _scan_pasted_address(update: Update, address: str, chain_id: int):
+    """Run a token check or a contract scan of a pasted address on chain_id, whichever it looks like."""
+    chain_name = get_chain_name(chain_id)
+
+    # Show scanning message
+    status_msg = await update.message.reply_text(
+        f"🔍 Analyzing address on {chain_name}..."
+    )
+
+    # Check if it's a token contract
+    is_token = await web3_client.is_token_contract(address, chain_id=chain_id)
+
+    if is_token is not False:
+        await status_msg.edit_text(f"🔍 Running token safety checks on {chain_name}...")
+        await check_token(update, address, chain_id=chain_id)
+    else:
+        await status_msg.edit_text(f"🔍 Running security scan on {chain_name}...")
+        await scan_contract(update, address, chain_id=chain_id)
+
+
 async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Auto-detect addresses or route free text to AI advisor."""
     message_text = update.message.text.strip()
@@ -992,9 +1049,6 @@ async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
         web3_client.validate_chain_id(prefix_chain_id)
         context.user_data['chain_id'] = prefix_chain_id
 
-    user_chain_id = _get_user_chain_id(context)
-    chain_name = get_chain_name(user_chain_id)
-
     # Check if it looks like an Ethereum address
     if address.startswith('0x') and len(address) == 42:
         # Replies show the address in code spans, which legacy Markdown cannot escape.
@@ -1002,23 +1056,14 @@ async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Invalid address format.")
             return
 
-        # Show scanning message
-        status_msg = await update.message.reply_text(
-            f"🔍 Analyzing address on {chain_name}..."
-        )
-
-        # Check if it's a token contract
-        is_token = await web3_client.is_token_contract(address, chain_id=user_chain_id)
-
-        if is_token is not False:
-            await status_msg.edit_text(f"🔍 Running token safety checks on {chain_name}...")
-            await check_token(update, address, chain_id=user_chain_id)
+        # The same address can be a different contract, or none, on each chain, so one without a prefix asks.
+        if prefix_chain_id:
+            await _scan_pasted_address(update, address, prefix_chain_id)
         else:
-            await status_msg.edit_text(f"🔍 Running security scan on {chain_name}...")
-            await scan_contract(update, address, chain_id=user_chain_id)
+            await _ask_chain(update, context, 'a', address)
     else:
         # Route free text to AI advisor
-        await _handle_advisor_chat(update, message_text, chain_id=user_chain_id)
+        await _handle_advisor_chat(update, message_text, chain_id=_get_user_chain_id(context))
 
 
 async def scan_contract(update: Update, address: str, chain_id: int = 56):
@@ -1029,7 +1074,7 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
         cache_key = f"{chain_id}:{address}"
         cached = _get_cached(cache_key, 'contract')
         if cached:
-            response = format_scan_result(cached)
+            response = format_scan_result(cached, chain_id)
             keyboard = _scan_buttons(address, chain_id)
             await update.message.reply_text(response, parse_mode='Markdown', reply_markup=keyboard, disable_web_page_preview=True)
             return
@@ -1084,7 +1129,7 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
             response = format_full_report(
                 risk_output, contract_data, dex_data, ethos_data,
                 honeypot_data=honeypot_data, address=address, ai_analysis=ai_analysis,
-                token_info=token_info,
+                token_info=token_info, chain_id=chain_id,
             )
             verdict_scan, verdict_honeypot = risk_output, honeypot_data
             risk_level = 'unknown' if is_scan_incomplete(risk_output) else risk_output.get('risk_level', 'medium').lower()
@@ -1111,7 +1156,7 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
                 result = {**result, 'status': 'unknown', 'risk_level': 'unknown', 'safety_level': 'unknown'}
             _set_cache(cache_key, 'contract', result)
             verdict_scan, verdict_honeypot = result, None
-            response = format_scan_result(result)
+            response = format_scan_result(result, chain_id)
 
         keyboard = _scan_buttons(address, chain_id)
 
@@ -1150,7 +1195,7 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
         cache_key = f"{chain_id}:{address}"
         cached = _get_cached(cache_key, 'token')
         if cached:
-            response = format_token_result(cached)
+            response = format_token_result(cached, chain_id)
             keyboard = _token_buttons(address, chain_id)
             await update.message.reply_text(response, parse_mode='Markdown', reply_markup=keyboard, disable_web_page_preview=True)
             return
@@ -1204,7 +1249,7 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
             response = format_full_report(
                 risk_output, contract_data, dex_data, ethos_data,
                 honeypot_data=honeypot_data, address=address, ai_analysis=ai_analysis,
-                token_info=token_info,
+                token_info=token_info, chain_id=chain_id,
             )
             verdict_scan, verdict_honeypot = risk_output, honeypot_data
             risk_level = 'unknown' if is_scan_incomplete(risk_output) else risk_output.get('risk_level', 'medium').lower()
@@ -1230,7 +1275,7 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
                 result = {**result, 'status': 'unknown', 'risk_level': 'unknown', 'safety_level': 'unknown'}
             _set_cache(cache_key, 'token', result)
             verdict_scan, verdict_honeypot = result, None
-            response = format_token_result(result)
+            response = format_token_result(result, chain_id)
 
         keyboard = _token_buttons(address, chain_id)
 
@@ -1293,6 +1338,34 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chain_id = web3_client.validate_chain_id(int(chain_text)) if chain_text else _get_user_chain_id(context)
         await query.message.reply_text(f"🔍 Running token safety check for `{address}`...", parse_mode='Markdown')
         await check_token(query, address, chain_id=chain_id)
+    elif query.data.startswith('pick_'):
+        # A chain picker's button (_ask_chain): "pick_<kind>_<chain id>_<address>".
+        kind, _, rest = query.data[len('pick_'):].partition('_')
+        chain_text, _, address = rest.partition('_')
+        if kind not in ('a', 's', 't') or not (chain_text.isascii() and chain_text.isdecimal()) or (
+            not web3_client.is_valid_address(address)
+        ):
+            await query.message.reply_text("❌ Invalid address format.")
+            return
+        try:
+            chain_id = web3_client.validate_chain_id(int(chain_text))
+        except ValueError:
+            await query.message.reply_text(
+                f"Unsupported chain selection. Supported: {web3_client.get_supported_chain_ids()}",
+            )
+            return
+        # The chosen chain is marked as last used on the next picker, and stays the default elsewhere.
+        context.user_data['chain_id'] = chain_id
+        # The picker then names what it scans on which chain, so an old one cannot pass for a new one.
+        await query.edit_message_text(
+            f"🔍 Scanning `{address}` on {get_chain_name(chain_id)} ({chain_id})...", parse_mode='Markdown',
+        )
+        if kind == 'a':
+            await _scan_pasted_address(query, address, chain_id)
+        elif kind == 's':
+            await scan_contract(query, address, chain_id=chain_id)
+        else:
+            await check_token(query, address, chain_id=chain_id)
 
 
 def _scan_buttons(address: str, chain_id: int = 56) -> InlineKeyboardMarkup:
@@ -1320,15 +1393,16 @@ def _token_buttons(address: str, chain_id: int = 56) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
-def format_scan_result(result: dict) -> str:
+def format_scan_result(result: dict, chain_id: int) -> str:
     """Format scan result — use composite report, forensic report, or fallback"""
     if result.get('composite_report'):
         return result['composite_report']
+    chain = f"**Chain:** {get_chain_name(chain_id)} ({chain_id})"
     incomplete = is_scan_incomplete(result) or (
         result.get('is_contract') is not False and result.get('is_verified') is None
     )
     if result.get('forensic_report') and not incomplete:
-        return escape_markdown_lines(result['forensic_report'])
+        return f"{chain}\n\n{escape_markdown_lines(result['forensic_report'])}"
 
     risk_emoji = {
         'high': '🔴',
@@ -1352,6 +1426,7 @@ def format_scan_result(result: dict) -> str:
 🛡️ **Security Scan Report**
 
 **Address:** `{result['address']}`
+{chain}
 **Risk Level:** {emoji} {risk_level.upper()}
 **Risk Score:** {score} (Confidence: {result.get('confidence', 'N/A')}%)
 
@@ -1405,15 +1480,16 @@ def format_scan_result(result: dict) -> str:
     return response
 
 
-def format_token_result(result: dict) -> str:
+def format_token_result(result: dict, chain_id: int) -> str:
     """Format token result — use composite report, forensic report, or fallback"""
     if result.get('composite_report'):
         return result['composite_report']
+    chain = f"**Chain:** {get_chain_name(chain_id)} ({chain_id})"
     incomplete = is_scan_incomplete(result) or any(
         result.get(field) is None for field in ('is_honeypot', 'buy_tax', 'sell_tax')
     ) or result.get('checks', {}).get('can_sell') is None
     if result.get('forensic_report') and not incomplete:
-        return escape_markdown_lines(result['forensic_report'])
+        return f"{chain}\n\n{escape_markdown_lines(result['forensic_report'])}"
 
     safety_emoji = {
         'safe': '✅',
@@ -1436,6 +1512,7 @@ def format_token_result(result: dict) -> str:
 
 **Token:** {escape_untrusted(result.get('name', 'Unknown'))} ({escape_untrusted(result.get('symbol', 'N/A'))})
 **Address:** `{result['address']}`
+{chain}
 **Safety:** {emoji} {safety_level.upper()}
 **Risk Score:** {score} (Confidence: {result.get('confidence', 'N/A')}%)
 

@@ -334,8 +334,12 @@ async def test_bot_rejects_removed_prefix_before_saving_or_providers(bot_chain_f
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('handler', ['scan_command', 'token_command', 'rescue_command'])
-@pytest.mark.parametrize('argument,chain_id', [('0x' + 'a' * 40, 999999), ('eth:0x' + 'a' * 40, 56)])
+@pytest.mark.parametrize('handler,argument,chain_id', [
+    ('rescue_command', '0x' + 'a' * 40, 999999),
+    ('scan_command', 'eth:0x' + 'a' * 40, 56),
+    ('token_command', 'eth:0x' + 'a' * 40, 56),
+    ('rescue_command', 'eth:0x' + 'a' * 40, 56),
+])
 async def test_bot_commands_reject_unregistered_chain(bot_chain_functions, handler, argument, chain_id):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
@@ -406,7 +410,7 @@ def test_legacy_bot_unknown_values_never_look_safe(bot_report_functions, formatt
         'ai_risk_score': {'risk_score': 0, 'risk_level': 'SAFE', 'recommendation': 'SAFE'},
         'ai_analysis': 'SAFE', 'forensic_report': 'SAFE',
     }
-    report = bot_report_functions[formatter](result)
+    report = bot_report_functions[formatter](result, 56)
     assert 'Unknown' in report
     for unsafe in ('SAFE', '0/100', 'Not a honeypot', 'not verified', 'Buy: 0%', 'Sell: 0%', '❌ Can Sell'):
         assert unsafe not in report
@@ -419,7 +423,7 @@ def test_legacy_bot_complete_results_keep_scores(bot_report_functions, formatter
               'coverage': {'structural': 1, 'honeypot': 1}, 'is_verified': True,
               'is_honeypot': False, 'buy_tax': 0, 'sell_tax': 0,
               'checks': {'can_buy': True, 'can_sell': True}}
-    report = bot_report_functions[formatter](result)
+    report = bot_report_functions[formatter](result, 56)
     assert '0/100' in report
     if formatter == 'format_token_result':
         assert 'SAFE' in report and 'Not a honeypot' in report
@@ -444,7 +448,7 @@ def test_formatters_preserve_incomplete_coverage(status, coverage):
     assert alert['coverage'] == coverage
     assert alert['risk_display'].startswith('Unknown')
     report = format_full_report(result, {}, {}, {}, {'simulation_failed': True,
-                              'is_honeypot': None, 'can_sell': None}, ai_analysis='SAFE')
+                              'is_honeypot': None, 'can_sell': None}, ai_analysis='SAFE', chain_id=56)
     assert 'SAFE' not in report and 'Generally Safe' not in report
     assert 'Rug Probability:* 0%' not in report
 
@@ -454,7 +458,7 @@ def test_telegram_failed_simulation_overrides_raw_sellability():
     result = {'status': 'unknown', 'coverage': {'honeypot': 0.8},
               'rug_probability': 90, 'risk_level': 'HIGH'}
     report = format_full_report(result, {}, {}, {}, {'simulation_failed': True,
-                              'is_honeypot': False, 'can_sell': True})
+                              'is_honeypot': False, 'can_sell': True}, chain_id=56)
     assert 'Sellability: Unknown' in report
     assert 'Not Honeypot' not in report
     assert 'Rug probability 90%' not in report
@@ -571,7 +575,7 @@ async def test_bot_cached_incomplete_composite_report_is_served_intact(bot_repor
                                   and node.name == '_get_cached'], type_ignores=[]), 'bot.py', 'exec'), cache)
     assert cache['_get_cached']('key', scan_type) is stored
 
-    rendered = ns[formatter](stored)
+    rendered = ns[formatter](stored, 4663)
     assert rendered == stored['composite_report']
     assert 'Probe Token (PROBE)' in rendered
     assert 'Unknown' in rendered and 'Generally Safe' not in rendered
@@ -745,7 +749,7 @@ def test_an_incomplete_report_reads_unknown_for_probability_and_level(status, co
     from core.telegram_formatter import format_full_report
     report = format_full_report(
         {'rug_probability': 40, 'risk_level': level, 'status': status, 'coverage': coverage},
-        {}, {}, {}, address='0x' + 'a' * 40,
+        {}, {}, {}, address='0x' + 'a' * 40, chain_id=56,
     )
     assert shown in report
 
@@ -834,6 +838,6 @@ async def test_the_bot_legacy_token_report_never_calls_a_token_not_a_honeypot_af
     result = {'address': TOKEN, 'checks': {'can_sell': None}, 'risks': []}
     await TokenScanner(client)._check_honeypot(TOKEN, result, chain_id=chain_id)
     assert result['is_honeypot'] is None
-    report = bot_report_functions['format_token_result'](result)
+    report = bot_report_functions['format_token_result'](result, chain_id)
     assert 'Not a honeypot' not in report
     assert 'Unknown (honeypot data incomplete)' in report

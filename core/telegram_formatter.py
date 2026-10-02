@@ -132,7 +132,12 @@ def format_full_report(
     address: str = '',
     ai_analysis: str = None,
     token_info: dict = None,
+    *,
+    chain_id: int,
 ) -> str:
+    # Imported here: the utils package imports the AI analyzer, which imports this module.
+    from utils.chain_info import get_chain_name
+
     rug_prob = risk_output.get('rug_probability', 0)
     risk_level = risk_output.get('risk_level', UNKNOWN)
     archetype = risk_output.get('risk_archetype', 'unknown')
@@ -174,6 +179,7 @@ def format_full_report(
         lines.append(f'*Address:* `{address}`')
     else:
         lines.append(f'*Target:* `{address}`')
+    lines.append(f'*Chain:* {get_chain_name(chain_id)} ({chain_id})')
     # A wallet has no token to check. The check reads the token's symbol and name itself, so it is stated
     # whether or not the report has them.
     if impostor_check and contract_data.get('is_contract') is not False:

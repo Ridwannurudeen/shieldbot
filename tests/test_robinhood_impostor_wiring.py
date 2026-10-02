@@ -526,6 +526,7 @@ def _report(check, contract_data=None, token_info=METADATA, risk=RISK):
         {},
         address=TOKEN,
         token_info=token_info,
+        chain_id=4663,
     )
 
 

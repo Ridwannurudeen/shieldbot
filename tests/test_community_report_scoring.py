@@ -216,7 +216,7 @@ def _contract_section(report):
 def test_full_report_counts_database_hits_apart_from_community_reports(matches, hits):
     contract = {**CONTRACT, "scam_matches": matches, "coverage": {"scam_database": True}}
     risk = RiskEngine().compute_composite_risk(contract, HONEYPOT, MARKET, ETHOS)
-    section = _contract_section(format_full_report(risk, contract, MARKET, ETHOS, HONEYPOT))
+    section = _contract_section(format_full_report(risk, contract, MARKET, ETHOS, HONEYPOT, chain_id=56))
     assert "Reported by 3 users" in section
     if hits:
         assert hits in section
