@@ -58,7 +58,9 @@ On **2026-09-30** production moved to **`bdf4cff`**. It closes two ways a token 
 
 On **2026-10-01** production moved to **`622b944`**. `/api/scan` is a quick contract check that simulates no sell, so for a contract ShieldBot recognises as a token it now answers UNKNOWN instead of a possible SAFE, with the reason that `/api/firewall` runs the full token check. Scan results quoted above that came from `/api/scan` were taken before this change. `/api/firewall` and the Telegram bot are unchanged. The landing page now says the three Robinhood Chain contracts were deployed on 27 September 2026, and `urllib3` moved to 2.8.0 for three published advisories. After that deployment `/api/health` listed the same eight chains and launch discovery was current. `/api/scan` answered ARB on Arbitrum One with CAUTION and `status: unknown`, and `/api/firewall` answered the same ARB approval with SAFE, risk 6.4 and `status: ok`.
 
-Production now runs **`73836a4`**, deployed on **2026-10-02**. It changes the landing site only: a light redesign with self-hosted fonts, a hero demo that plays recorded verdict examples, and a section on the Robinhood Chain registry and guard that says which verdicts are recorded on-chain (Telegram scans, guard rescans, and launches that are blocked or guard-watched). The API, the Telegram bot and the contracts are unchanged; outside the site and the documentation, the only changed file is the site's claims test. After that deployment `/api/health` listed the same eight chains, launch discovery was 0 blocks behind, and the landing page served the new build.
+On **2026-10-02** production moved to **`73836a4`**. It changes the landing site only: a light redesign with self-hosted fonts, a hero demo that plays recorded verdict examples, and a section on the Robinhood Chain registry and guard that says which verdicts are recorded on-chain (Telegram scans, guard rescans, and launches that are blocked or guard-watched). The API, the Telegram bot and the contracts are unchanged; outside the site and the documentation, the only changed file is the site's claims test. After that deployment `/api/health` listed the same eight chains, launch discovery was 0 blocks behind, and the landing page served the new build.
+
+Production now runs **`af9b975`**, deployed later on **2026-10-02**. A pasted address, or `/scan` or `/token` with no chain prefix, now asks which chain the address is on and offers one button per supported chain; a prefix such as `rh:` still scans at once, and every report names the chain it covers, as `Chain: <name> (<id>)`. Before this a bare paste used the chain last saved for that chat, which defaults to BNB Chain, so a Robinhood Chain token could come back as a BNB Chain report. The API, the contracts and the landing site are unchanged. The cutover took a database backup and recorded `73836a4` as its rollback point. After that deployment `/api/health` listed the same eight chains, both units stayed active with no restarts, launch discovery caught up to 0 blocks behind, the WOOD and VIRTUAL verdicts still read LOW and confirmed, and the landing page, its documents and the dashboard all answered 200.
 
 **Correction, 2026-09-26.** Changes made after the September 22 snapshot, and faults found in the code that produced it, mean some of its counters must not be read as first presented:
 
@@ -130,7 +132,7 @@ git log 27aca4d..5ac17f1 --first-parent --format='%h %ad %s' --date=short
 git log 27aca4d..5ac17f1 --first-parent --merges --oneline
 ```
 
-In particular, waves 2 to 3 (`9ca9c31`) and the guard, guarded transfer and freshness chain (`04203be`) both landed inside the window. The former `chore/oh-final` work is included in `main` through the later commits above. This history was last brought up to date on 2026-09-26 against `main` at `5ac17f1`, and the deployment section on 2026-10-02 against `73836a4`. It does not establish a released extension.
+In particular, waves 2 to 3 (`9ca9c31`) and the guard, guarded transfer and freshness chain (`04203be`) both landed inside the window. The former `chore/oh-final` work is included in `main` through the later commits above. This history was last brought up to date on 2026-09-26 against `main` at `5ac17f1`, and the deployment section on 2026-10-02 against `af9b975`. It does not establish a released extension.
 
 ## Pre-submission review
 
@@ -175,6 +177,8 @@ Re-verified on **2026-09-30** on the exact tree of **`bdf4cff`**: the same two c
 Re-verified on **2026-10-01** at **`622b944`**: the same two commands completed with **6,270 passed** and **114 passed**, with no failures, and the dependency audit found no known vulnerabilities. CI run **36857074269** passed all four jobs.
 
 Re-verified on **2026-10-01** at **`9e9b761`**, whose Python code is identical to `73836a4`'s: the same two commands completed with **6,275 passed, 1 failed** and **114 passed**. The failure is a timing test of the verdict sender's lease, `tests/test_verdict_sender_lease.py`, which this change did not touch; run alone, that file then passed 26 of 26 three times in a row. At `73836a4` the site's claims and dashboard tests completed with **65 passed**.
+
+Re-verified on **2026-10-02** at **`af9b975`**: the same two commands completed with **6,355 passed** and **114 passed**, with no failures.
 
 ## Owner completion checklist: 17 items, all done
 
