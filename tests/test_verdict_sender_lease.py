@@ -660,7 +660,8 @@ async def test_a_send_under_a_lease_too_short_for_its_broadcast_is_not_made_and_
     [
         (AsyncMock(side_effect=sqlite3.OperationalError("database is locked")), False),
         (AsyncMock(return_value=(False, time.time() + 90)), True),
-        (AsyncMock(return_value=(True, time.time())), True),
+        # Read at the take, on the test's clock: a value read at collection is on the wall clock, which can step back.
+        (AsyncMock(side_effect=lambda: (True, time.time())), True),
     ],
     ids=["lease call failed", "another drain holds it", "too little time left"],
 )
