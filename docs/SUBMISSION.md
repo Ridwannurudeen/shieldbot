@@ -1,4 +1,4 @@
-# ShieldBot — Arbitrum Open House Singapore submission draft
+# ShieldBot — Arbitrum Open House Singapore submission
 
 The three contracts were deployed on Robinhood Chain (4663) on 2026-09-27; see [Deployment evidence](#deployment-evidence).
 

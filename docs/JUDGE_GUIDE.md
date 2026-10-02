@@ -8,15 +8,24 @@ Sections 1–2 work **offline, without an API key**, once dependencies are insta
 
 ## Preparation
 
-Run from the repository root with Python and the project dependencies available. For a fresh virtual environment, dependency installation requires network access:
+Run from the repository root. **Use Python 3.11**, the version CI tests (`.github/workflows/security.yml`). The pinned `web3==6.15.1` requires `lru-dict` below 1.3.0, and `lru-dict` 1.2.0 publishes prebuilt wheels only up to Python 3.11, so on Python 3.12 or newer `pip install` tries to compile it and fails without a C compiler. Dependency installation requires network access:
 
 ```bash
-python -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-The commands below use Bash heredocs (Linux, macOS or Git Bash on Windows). For a Windows-created environment, activate with `source .venv/Scripts/activate` instead. The measured local results and installed-version differences are in [TESTING.md](TESTING.md); a clean installation of the pinned environment has not been verified.
+On Debian or Ubuntu, `python3.11 -m venv` also needs the `python3.11-venv` package. Without Python 3.11, [uv](https://docs.astral.sh/uv/) fetches one for this environment only and leaves the system Python alone:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv venv --python 3.11 .venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
+```
+
+The commands below use Bash heredocs (Linux, macOS or Git Bash on Windows). For a Windows-created environment, activate with `source .venv/Scripts/activate` instead. Keep this environment active for every section. Python commands may print `UserWarning`s from `eth_utils` about networks 345 and 12611; they are harmless. On **2026-10-02** a fresh clone of `main` installed cleanly with the uv commands above on Python 3.11.16 (about ten seconds), and sections 1 to 3 then passed as described, with the Foundry cases run on Forge 1.7.1. The measured local results and installed-version differences are in [TESTING.md](TESTING.md).
 
 ## 1. Replay the recorded honeypot offline
 
@@ -56,7 +65,7 @@ For all seven recordings, USDG funding layout, and failure-attribution regressio
 python -m pytest tests/test_robinhood_simulation.py tests/test_robinhood_simulation_usdg.py -q -p no:cacheprovider
 ```
 
-Measured on **2026-09-22**: **192 passed**. In particular, an unattributed sell revert stays unknown; only the route-specific transfer refusal, no-credit error, or that pool's own hook failure qualifies in the reverted-sell branch. The separate zero-output branch also requires payout evidence and a minimum buy cost.
+Measured on **2026-10-02** from a fresh clone: **199 passed**. In particular, an unattributed sell revert stays unknown; only the route-specific transfer refusal, no-credit error, or that pool's own hook failure qualifies in the reverted-sell branch. The separate zero-output branch also requires payout evidence and a minimum buy cost.
 
 ## 2. See all three decisions
 
@@ -111,7 +120,7 @@ Precedence is `NO_RECORD → HIGH/HONEYPOT → FUTURE_TIMESTAMP → EXPIRED → 
 
 ### On-chain transfer demonstration (offline)
 
-With Foundry installed, run these from the repository root in Bash/Git Bash. The pinned Solidity dependencies are git submodules; the `git submodule` line fetches them into `contracts/base/lib/` when the clone was made without `--recursive`. The first command reproduces the proven honeypot classifier from section 1; the Foundry command separately records each verdict into the real registry and exercises the real guard and transfer with a mock ERC-20. It is an offline composition of classifier evidence and consumer enforcement, not a live scan-to-publication transaction.
+This needs Foundry. If `forge` is not installed, install it with `curl -L https://foundry.paradigm.xyz | bash`, open a new shell and run `foundryup`; these cases were checked with Forge 1.7.1. Then run these from the repository root in Bash/Git Bash. The pinned Solidity dependencies are git submodules; the `git submodule` line fetches them into `contracts/base/lib/` when the clone was made without `--recursive`. The first command reproduces the proven honeypot classifier from section 1; the Foundry command separately records each verdict into the real registry and exercises the real guard and transfer with a mock ERC-20. It is an offline composition of classifier evidence and consumer enforcement, not a live scan-to-publication transaction.
 
 ```bash
 python -m pytest tests/test_robinhood_simulation.py::test_live_honeypot_is_proven_unsellable tests/test_robinhood_simulation.py::test_4663_proven_honeypot_is_flagged_through_the_analyzer -v -p no:cacheprovider
@@ -152,7 +161,9 @@ Values from the deployment on **2026-09-27**:
 
 The example token is outside the guard watch, so its record is not republished. If anyone scans it again, `/api/verdict/4663/0xf8bc08092c06db6148114dcf82af881f1085f92b` serves the newer document: when it reports `onchain_status: confirmed`, use its `tx_hash` as `RECORD_TX`; until then the check fails.
 
-Pin the registry address from the deployment record, independently of the API response. The commands fetch the served evidence document, hash its exact `canonical` UTF-8 string, then retrieve the receipt from the chosen RPC and match its event. They require no API key, wallet, signing or broadcast.
+Because WOOD is outside the guard watch, `check(WOOD, maxAge)` on the guard answers `EXPIRED` (reason 5) once its record is older than `maxAge`. That is the freshness rule at work; the registry event below still verifies.
+
+Run the block with the Preparation environment active: it needs `eth_abi` and `eth_utils`. Pin the registry address from the deployment record, independently of the API response. The commands fetch the served evidence document, hash its exact `canonical` UTF-8 string, then retrieve the receipt from the chosen RPC and match its event. They require no API key, wallet, signing or broadcast.
 
 ```bash
 export API_BASE='https://api.shieldbotsecurity.online'
@@ -215,4 +226,4 @@ Hash the **served string**, not a freshly serialized `evidence` object: JSON num
 
 A match establishes that the designated recorder committed those bytes. It does not establish scanner accuracy, issuer authenticity or future sellability. RPC receipt inclusion is also not independent verification of parent-chain finality. `off`, `deduplicated`, `dropped`, `pending`, `sending`, `submitted`, `unconfirmed`, `failed` and `reverted` do not satisfy this check; a 404 means no stored verdict for that address.
 
-The verification block was checked locally against synthetic evidence and receipts, including mismatch cases. **On 2026-09-27 this block, run from a fresh shell with the values above, printed `MATCH: canonical evidence, chain 4663, registry, subject, verdict, evidenceHash and observed block`.**
+The verification block was checked locally against synthetic evidence and receipts, including mismatch cases. **On 2026-09-27 this block, run from a fresh shell with the values above, printed `MATCH: canonical evidence, chain 4663, registry, subject, verdict, evidenceHash and observed block`.** On **2026-10-02** it printed the same line again from a fresh clone of `main`.
