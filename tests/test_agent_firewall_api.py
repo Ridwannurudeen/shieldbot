@@ -178,6 +178,51 @@ def test_agent_register(client, mock_container):
     mock_container.db.upsert_agent_policy.assert_called_once()
 
 
+def test_agent_register_rejects_another_key_for_existing_agent(client, mock_container):
+    """A key cannot replace the policy of an agent owned by another key."""
+    mock_container.auth_manager.validate_key = AsyncMock(return_value={
+        "key_id": "k2", "owner": "other", "tier": "free", "rpm_limit": 60, "daily_limit": 100,
+    })
+    resp = client.post("/api/agent/register", json={
+        "agent_id": "agent:1",
+        "owner_address": "0xOther",
+    }, headers={"X-API-Key": "sb_otherkey"})
+    assert resp.status_code == 403
+    mock_container.db.upsert_agent_policy.assert_not_awaited()
+
+
+def test_agent_register_allows_owning_key_to_reregister(client, mock_container):
+    """The registered key can update its own agent through registration."""
+    resp = client.post("/api/agent/register", json={
+        "agent_id": "agent:1",
+        "owner_address": "0xOwner",
+    }, headers={"X-API-Key": "sb_testkey"})
+    assert resp.status_code == 200
+    mock_container.db.upsert_agent_policy.assert_awaited_once()
+
+
+def test_agent_register_allows_a_new_agent(client, mock_container):
+    """A policy lookup miss remains a first registration."""
+    mock_container.db.get_agent_policy = AsyncMock(return_value=None)
+    resp = client.post("/api/agent/register", json={
+        "agent_id": "new_agent",
+        "owner_address": "0xOwner",
+    }, headers={"X-API-Key": "sb_testkey"})
+    assert resp.status_code == 200
+    mock_container.db.upsert_agent_policy.assert_awaited_once()
+
+
+def test_agent_register_allows_claiming_legacy_unowned_agent(client, mock_container):
+    """T1 keeps rows without a registered key claimable until their admin migration."""
+    mock_container.db.get_agent_policy = AsyncMock(return_value={"registered_by_key": None})
+    resp = client.post("/api/agent/register", json={
+        "agent_id": "legacy_agent",
+        "owner_address": "0xOwner",
+    }, headers={"X-API-Key": "sb_testkey"})
+    assert resp.status_code == 200
+    mock_container.db.upsert_agent_policy.assert_awaited_once()
+
+
 def test_agent_firewall_cached_verdict(client, mock_container):
     """Transaction with cached verdict skips analyzer pipeline."""
     mock_container.cache.get_verdict = AsyncMock(return_value={

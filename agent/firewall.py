@@ -405,6 +405,12 @@ def create_agent_firewall_router(container) -> APIRouter:
     async def register_agent(req: AgentRegisterRequest, request: Request):
         """Register an agent with a firewall policy."""
         key_info = await _require_api_key(request)
+        existing = await container.db.get_agent_policy(req.agent_id)
+        if existing:
+            # Legacy NULL registrations remain claimable until T1's admin claim migration. A
+            # 403 is appropriate for key-owned agents because leaderboard IDs are already public;
+            # T1 will unify the 403/404 behavior.
+            await _check_agent_authorization(key_info, existing, req.agent_id)
         await container.db.upsert_agent_policy(
             agent_id=req.agent_id,
             owner_address=req.owner_address,
