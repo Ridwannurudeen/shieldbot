@@ -693,7 +693,7 @@ def test_an_errored_live_entry_replays_to_the_same_error_record(tmp_path, monkey
         raise TimeoutError()
 
     container = SimpleNamespace(
-        registry=SimpleNamespace(run_all=run_all),
+        registry=SimpleNamespace(get_all=lambda: [], run_all=run_all),
         risk_engine=SimpleNamespace(compute_from_results=lambda results: None),
     )
     inputs_path = tmp_path / "inputs.json"
