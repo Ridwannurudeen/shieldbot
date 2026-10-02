@@ -161,6 +161,36 @@ def test_agent_firewall_unregistered_agent(client, mock_container):
     assert resp.status_code == 404
 
 
+@pytest.mark.parametrize("registered_by_key", [None, ""])
+def test_agent_firewall_refuses_unowned_agent_with_claim_remedy(
+    client, mock_container, registered_by_key,
+):
+    """An unowned legacy policy tells its operator how to restore service."""
+    mock_container.db.get_agent_policy = AsyncMock(return_value={"registered_by_key": registered_by_key})
+    resp = client.post("/api/agent/firewall", json={
+        "agent_id": "legacy_agent",
+        "transaction": {"from": "0x1", "to": "0x2", "chain_id": 56},
+    }, headers={"X-API-Key": "sb_testkey"})
+    assert resp.status_code == 403
+    assert resp.json() == {
+        "detail": "Agent legacy_agent must be claimed by an operator. Contact the operator.",
+    }
+
+
+def test_agent_firewall_refuses_foreign_owned_agent(client, mock_container):
+    """A foreign-owned policy remains an ordinary authorization failure."""
+    mock_container.auth_manager.validate_key = AsyncMock(return_value={
+        "key_id": "k2", "owner": "other", "tier": "free", "rpm_limit": 60, "daily_limit": 100,
+    })
+    mock_container.db.get_agent_policy = AsyncMock(return_value={"registered_by_key": "k1"})
+    resp = client.post("/api/agent/firewall", json={
+        "agent_id": "legacy_agent",
+        "transaction": {"from": "0x1", "to": "0x2", "chain_id": 56},
+    }, headers={"X-API-Key": "sb_otherkey"})
+    assert resp.status_code == 403
+    assert resp.json() == {"detail": "API key not authorized for agent legacy_agent"}
+
+
 def test_agent_register(client, mock_container):
     """Register a new agent with a policy."""
     resp = client.post("/api/agent/register", json={

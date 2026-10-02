@@ -120,7 +120,15 @@ def create_agent_firewall_router(container) -> APIRouter:
                 detail=f"Agent {req.agent_id} not registered. Call /api/agent/register first.",
             )
 
-        await _check_agent_authorization(key_info, agent_policy, req.agent_id)
+        await _check_agent_authorization(
+            key_info,
+            agent_policy,
+            req.agent_id,
+            detail=(
+                f"Agent {req.agent_id} must be claimed by an operator. Contact the operator."
+                if not agent_policy.get("registered_by_key") else None
+            ),
+        )
 
         tx = req.transaction
         to_addr = tx.to.lower()
@@ -446,8 +454,8 @@ def create_agent_firewall_router(container) -> APIRouter:
                 status_code=404,
                 detail=f"Agent {req.agent_id} not registered",
             )
-        # Match mcp_server.tools.readable_agent_policy: foreign and missing agents share an
-        # answer so these routes do not reveal whether an agent ID exists.
+        # Match mcp_server.tools.readable_agent_policy so these routes do not add an
+        # agent-ID existence disclosure; existence remains discoverable through public reputation routes.
         await _check_agent_authorization(
             key_info,
             existing,
@@ -473,8 +481,8 @@ def create_agent_firewall_router(container) -> APIRouter:
                 status_code=404,
                 detail=f"Agent {agent_id} not registered",
             )
-        # Match mcp_server.tools.readable_agent_policy: foreign and missing agents share an
-        # answer so these routes do not reveal whether an agent ID exists.
+        # Match mcp_server.tools.readable_agent_policy so these routes do not add an
+        # agent-ID existence disclosure; existence remains discoverable through public reputation routes.
         await _check_agent_authorization(
             key_info,
             policy,
@@ -494,8 +502,8 @@ def create_agent_firewall_router(container) -> APIRouter:
                 status_code=404,
                 detail=f"Agent {agent_id} not registered",
             )
-        # Match mcp_server.tools.readable_agent_policy: foreign and missing agents share an
-        # answer so these routes do not reveal whether an agent ID exists.
+        # Match mcp_server.tools.readable_agent_policy so these routes do not add an
+        # agent-ID existence disclosure; existence remains discoverable through public reputation routes.
         await _check_agent_authorization(
             key_info,
             agent_policy,

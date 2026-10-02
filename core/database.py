@@ -1870,16 +1870,36 @@ class Database:
         ]
 
     async def claim_unowned_agent_policy(self, agent_id: str, key_id: str) -> bool:
-        """Claim an unowned policy for an existing API key."""
+        """Claim an unowned policy for an active API key."""
         cursor = await self._db.execute("""
             UPDATE agent_policies
             SET registered_by_key = ?, updated_at = ?
             WHERE agent_id = ?
               AND (registered_by_key IS NULL OR registered_by_key = '')
-              AND EXISTS (SELECT 1 FROM api_keys WHERE key_id = ?)
+              AND EXISTS (SELECT 1 FROM api_keys WHERE key_id = ? AND is_active = 1)
         """, (key_id, time.time(), agent_id, key_id))
         await self._db.commit()
         return cursor.rowcount == 1
+
+    async def get_agent_policy_claim_refusal(self, agent_id: str, key_id: str) -> Optional[str]:
+        """Return why an agent-policy claim cannot proceed."""
+        cursor = await self._db.execute("""
+            SELECT CASE
+                WHEN NOT EXISTS (SELECT 1 FROM agent_policies WHERE agent_id = ?)
+                    THEN 'agent_missing'
+                WHEN EXISTS (
+                    SELECT 1 FROM agent_policies
+                    WHERE agent_id = ?
+                      AND registered_by_key IS NOT NULL
+                      AND registered_by_key != ''
+                ) THEN 'agent_owned'
+                WHEN NOT EXISTS (
+                    SELECT 1 FROM api_keys WHERE key_id = ? AND is_active = 1
+                ) THEN 'key_inactive'
+            END
+        """, (agent_id, agent_id, key_id))
+        row = await cursor.fetchone()
+        return row[0] if row else None
 
     async def record_agent_spend(self, agent_id: str, amount_usd: float):
         """Increment an agent's daily spend atomically. Resets if a new day."""

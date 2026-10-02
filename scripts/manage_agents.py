@@ -35,7 +35,15 @@ async def cmd_claim(args, db):
     if claimed:
         print(f"Agent {args.agent_id} claimed by key {args.key_id}.")
     else:
-        print("Claim refused: the agent must be unowned and the API key must exist.")
+        refusal = await db.get_agent_policy_claim_refusal(args.agent_id, args.key_id)
+        if refusal == "agent_missing":
+            print(f"Claim refused: agent {args.agent_id} does not exist.")
+        elif refusal == "agent_owned":
+            print(f"Claim refused: agent {args.agent_id} is already owned.")
+        elif refusal == "key_inactive":
+            print(f"Claim refused: API key {args.key_id} does not exist or is inactive.")
+        else:
+            print("Claim refused: policy or key state changed; retry the claim.")
 
 
 async def main():

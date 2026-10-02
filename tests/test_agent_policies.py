@@ -3,6 +3,7 @@
 import pytest
 import pytest_asyncio
 import json
+from core.auth import AuthManager
 from core.database import Database
 
 
@@ -53,6 +54,40 @@ async def test_get_missing_policy(db):
     """Returns None for unregistered agent."""
     result = await db.get_agent_policy("nonexistent")
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_list_unowned_agent_policies_returns_only_unowned_rows(db):
+    """Only policies with a null or empty registering key are unowned."""
+    await db.upsert_agent_policy("null-key", "0xOwner", policy={})
+    await db.upsert_agent_policy("empty-key", "0xOwner", policy={}, registered_by_key="")
+    await db.upsert_agent_policy("owned", "0xOwner", policy={}, registered_by_key="key-1")
+
+    rows = await db.list_unowned_agent_policies()
+
+    assert {row["agent_id"] for row in rows} == {"null-key", "empty-key"}
+
+
+@pytest.mark.asyncio
+async def test_claim_unowned_agent_policy_requires_an_active_key(db):
+    """A claim is available only to an active API key and only once."""
+    auth = AuthManager(db)
+    active_key = await auth.create_key(owner="active")
+    inactive_key = await auth.create_key(owner="inactive")
+    await auth.deactivate_key(inactive_key["key_id"])
+    await db.upsert_agent_policy("unowned", "0xOwner", policy={})
+    await db.upsert_agent_policy(
+        "owned", "0xOwner", policy={}, registered_by_key=active_key["key_id"],
+    )
+    await db.upsert_agent_policy("missing-key", "0xOwner", policy={})
+    await db.upsert_agent_policy("inactive-key", "0xOwner", policy={})
+
+    assert await db.claim_unowned_agent_policy("unowned", active_key["key_id"])
+    assert not await db.claim_unowned_agent_policy("owned", active_key["key_id"])
+    assert not await db.claim_unowned_agent_policy("missing-key", "no-such-key")
+    assert not await db.claim_unowned_agent_policy("inactive-key", inactive_key["key_id"])
+    assert (await db.get_agent_policy("unowned"))["registered_by_key"] == active_key["key_id"]
+    assert (await db.get_agent_policy("inactive-key"))["registered_by_key"] is None
 
 
 @pytest.mark.asyncio
