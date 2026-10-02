@@ -686,11 +686,11 @@ async def test_a_failed_report_delivery_is_not_cached_and_a_successful_retry_is_
         tx_scan.assert_not_awaited()
         token_scan.assert_not_awaited()
     elif handler == "scan_contract":
-        tx_scan.assert_awaited_twice()
+        assert tx_scan.await_count == 2
         token_scan.assert_not_awaited()
     else:
         tx_scan.assert_not_awaited()
-        token_scan.assert_awaited_twice()
+        assert token_scan.await_count == 2
     assert cached.message.reply_text.await_args.args[0] == successful.message.reply_text.await_args.args[0]
 
 
