@@ -39,6 +39,32 @@ RPC_B = "https://rpc-b.invalid/4663"
 DRAIN_TASKS = ("VerdictPublisher._drain_under_lease", "VerdictPublisher._drain_loop")
 
 
+class WallClock:
+    """time.time() in these tests: the real time when the test starts, run on by the monotonic clock the event
+    loop's timers use, and moved on by advance().
+
+    A VM's wall clock can step back when it is re-synced (WSL2 under load): a verdict observed a moment earlier then
+    reads as observed in the future, and is dropped. On this clock a lease's expiry and the phase timeouts checked
+    against it also run together."""
+
+    def __init__(self):
+        self.start = time.time()
+        self.origin = time.monotonic()
+
+    def __call__(self):
+        return self.start + time.monotonic() - self.origin
+
+    def advance(self, seconds):
+        self.start += seconds
+
+
+@pytest.fixture(autouse=True)
+def wall_clock(monkeypatch):
+    clock = WallClock()
+    monkeypatch.setattr(time, "time", clock)
+    return clock
+
+
 def scan():
     """A complete scan observed now: the drain drops observations older than five minutes."""
     return {
@@ -234,19 +260,27 @@ async def test_lease_writes_never_commit_or_roll_back_the_drains_transaction(tmp
 
 
 @pytest.mark.asyncio
-async def test_a_failed_renewal_never_rolls_back_a_take_running_beside_it(two_processes):
+async def test_a_failed_renewal_never_rolls_back_a_take_running_beside_it(two_processes, monkeypatch):
     db, other_process = two_processes
     await db.take_sender_lease("drain", "host:1:aa", 90)
     _, old_expiry = await lease_row(db, "drain")
+    connection = await db._lease()
     # A lock wait shorter than production's, so the renewal below gives up quickly.
-    await (await db._lease()).execute("PRAGMA busy_timeout=200")
-    # Another connection holds the write lock for longer than that.
+    await connection.execute("PRAGMA busy_timeout=200")
+    gave_up = asyncio.Event()
+    rollback = connection.rollback
+
+    async def noted_rollback():
+        gave_up.set()
+        await rollback()
+
+    monkeypatch.setattr(connection, "rollback", noted_rollback)
+    # Another connection holds the write lock until the renewal has given up waiting for it.
     await other_process._db.execute("BEGIN IMMEDIATE")
     renewal = asyncio.create_task(db.take_sender_lease("drain", "host:1:aa", 90))
-    await asyncio.sleep(0.05)
     # The check at a send asks while the renewal is still waiting for the lock.
     fence = asyncio.create_task(db.take_sender_lease("drain", "host:1:aa", 90))
-    await asyncio.sleep(0.25)
+    await asyncio.wait_for(gave_up.wait(), 5)
     await other_process._db.rollback()
     renewed, fenced = await asyncio.gather(renewal, fence, return_exceptions=True)
     assert isinstance(renewed, sqlite3.OperationalError)
@@ -461,12 +495,10 @@ async def test_renewal_is_not_attempted_when_waiting_out_the_lock_could_run_the_
 
 @pytest.mark.asyncio
 async def test_a_drain_that_lost_the_lease_neither_stores_nor_broadcasts_what_it_signed(
-    two_processes, monkeypatch, caplog
+    two_processes, wall_clock, monkeypatch, caplog
 ):
-    monkeypatch.setattr(vp, "LEASE_SECONDS", 1.0)
-    monkeypatch.setattr(vp, "LEASE_RENEW_SECONDS", 0.1)
-    monkeypatch.setattr(vp, "DB_LOCK_WAIT_SECONDS", 0.05)
-    monkeypatch.setattr(vp, "PHASE_TIMEOUT_SECONDS", 0.8)
+    # The production timings: the lease runs out only when the test moves the clock on, and no phase timeout runs
+    # out while the reads below are held up.
     monkeypatch.setattr(vp, "DRAIN_POLL_SECONDS", 3600)
     monkeypatch.setattr(vp, "RECEIPT_DELAY_SECONDS", 0)
     first_db, second_db = two_processes
@@ -483,16 +515,14 @@ async def test_a_drain_that_lost_the_lease_neither_stores_nor_broadcasts_what_it
     with rpc_node(chain):
         first.start(recorder_key=KEY)
         await until(lambda: holds(first_db, first))
-        second.start(recorder_key=KEY)
-        # Shortly before the first drain's lease runs out unrenewed, it claims a row while it still holds the
-        # lease, and its reads before signing are held up.
-        _, expires_at = await lease(first_db)
-        await asyncio.sleep(max(0.0, expires_at - 0.3 - time.time()))
+        # The first drain claims a row while it holds the lease, and its reads before signing are held up.
         await first.publish(4663, TOKEN, scan())
         await until(
             lambda: asyncio.sleep(0, "eth_getTransactionCount" in methods_posted_to(chain, RPC_A))
         )
-        # Meanwhile its lease runs out unrenewed and the second drain takes it.
+        # Meanwhile its lease runs out unrenewed and a second drain takes it.
+        wall_clock.advance(vp.LEASE_SECONDS)
+        second.start(recorder_key=KEY)
         await until(lambda: holds(second_db, second))
         reads.set()
         await until(
@@ -630,7 +660,8 @@ async def test_a_send_under_a_lease_too_short_for_its_broadcast_is_not_made_and_
     [
         (AsyncMock(side_effect=sqlite3.OperationalError("database is locked")), False),
         (AsyncMock(return_value=(False, time.time() + 90)), True),
-        (AsyncMock(return_value=(True, time.time())), True),
+        # Read at the take, on the test's clock: a value read at collection is on the wall clock, which can step back.
+        (AsyncMock(side_effect=lambda: (True, time.time())), True),
     ],
     ids=["lease call failed", "another drain holds it", "too little time left"],
 )
