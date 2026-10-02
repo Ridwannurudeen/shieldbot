@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 # Threshold for classifying a score as "flagged" (malicious)
 DEFAULT_FLAG_THRESHOLD = 50.0
 FORMAT_SCORES = "shieldbot-scores/1"
+FORMAT_INPUTS = "shieldbot-analyzer-inputs/1"
 FORMAT_RESULTS = "shieldbot-benchmark-results/1"
 # ok: the scan completed and its score decides; unknown: the scan reported incomplete coverage;
 # error: the scan failed. Only ok records are decided.

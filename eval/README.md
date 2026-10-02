@@ -7,7 +7,8 @@ It has no published result yet: no scores have been recorded against the v2 data
 |---|---|
 | `data/benchmark_v2.json` | The v2 dataset (`shieldbot-benchmark/2`): one class per entry, independent sources, dates. |
 | `data/benchmark_v1.json` | The v1 dataset: 34 addresses, 2 of them marked stale. Its 14 honeypot labels came from honeypot.is, a provider ShieldBot scores with, so v1 measures agreement with that provider, not accuracy. |
-| `live_scorer.py` | Scans every entry with the real analysis pipeline (network and API keys) and records the scores. |
+| `live_scorer.py` | Scans every entry with the real analysis pipeline (network and API keys) and records scores plus the analyzer inputs that produced them. |
+| `replay.py` | Recomputes scores from recorded analyzer inputs, offline, at the current engine revision. |
 | `cli.py` | Computes the results file from recorded scores, offline. |
 | `verify_onchain.py` | Re-reads the on-chain facts every label rests on, from public RPCs. Nothing that scores imports it. |
 
@@ -201,24 +202,44 @@ A malicious label must rest on evidence that ShieldBot's score does not already 
 
 ## Recording scores and computing results
 
-1. Record scores (network, the service's API keys):
+1. Verify the dataset's on-chain facts before its baseline live run:
 
    ```bash
-   python -m eval.live_scorer --dataset eval/data/benchmark_v2.json --output eval/data/live_scores.json
+   python -m eval.verify_onchain --dataset eval/data/benchmark_v2.json
+   ```
+
+2. Before changing the engine, record the baseline once (network, the service's API keys):
+
+   ```bash
+   python -m eval.live_scorer --dataset eval/data/benchmark_v2.json \
+       --output eval/data/live_scores.json --inputs eval/data/live_inputs.json
    ```
 
    Each entry gets `status` `ok` (the scan completed), `unknown` (the scan reported incomplete coverage)
    or `error` (it failed), with its `score` and `risk_level` when the scan gave them. Nothing is filled
    in for a missing score. The file (`shieldbot-scores/1`) names the git revision that ran
    (`git rev-parse HEAD`), whether tracked files had local changes (untracked files do not count), when
-   it ran, and the dataset's hash.
+   it ran, and the dataset's hash. It also names the SHA-256 of the separate inputs file. The inputs file
+   (`shieldbot-analyzer-inputs/1`) carries the same provenance and, for every entry, each analyzer's raw
+   weight, score, flags, data and error. It is intentionally ignored because provider payloads can contain
+   transaction hashes.
    Where the code is not a git checkout, pass `--revision <40-character revision>`; local changes are
    then recorded as unknown (`null`).
 
-2. Compute the results, offline:
+3. At any later engine revision, replay those immutable inputs without calling providers:
 
    ```bash
-   python -m eval.cli --dataset eval/data/benchmark_v2.json --scores eval/data/live_scores.json \
+   python -m eval.replay --inputs eval/data/live_inputs.json --output eval/data/replay_scores.json
+   ```
+
+   Replay records its current git revision and the SHA-256 of the inputs file in the new scores file while
+   carrying the dataset hash forward. This must use the baseline inputs recorded before engine changes, or
+   a comparison would also measure provider drift.
+
+4. Compute the results, offline:
+
+   ```bash
+   python -m eval.cli --dataset eval/data/benchmark_v2.json --scores eval/data/replay_scores.json \
        --out eval/results/<YYYY-MM-DD>-<revision>.json
    ```
 
