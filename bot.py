@@ -1108,6 +1108,7 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
 
         # Try new composite pipeline first
         response = None
+        cache_result = None
         try:
             from core.analyzer import AnalysisContext
 
@@ -1159,11 +1160,10 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
             verdict_scan, verdict_honeypot = risk_output, honeypot_data
             risk_level = 'unknown' if is_scan_incomplete(risk_output) else risk_output.get('risk_level', 'medium').lower()
 
-            # Cache the composite result
-            _set_cache(cache_key, 'contract', {
+            cache_result = {
                 **risk_output, 'address': address, 'composite_report': response,
                 'risk_level': risk_level, 'status': 'unknown' if risk_level == 'unknown' else 'ok',
-            })
+            }
 
             # Enqueue deployer/funder indexing (fire-and-forget)
             if hasattr(container, 'indexer') and container.indexer:
@@ -1179,7 +1179,7 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
             result = await tx_scanner.scan_address(address, chain_id=chain_id)
             if is_scan_incomplete(result):
                 result = {**result, 'status': 'unknown', 'risk_level': 'unknown', 'safety_level': 'unknown'}
-            _set_cache(cache_key, 'contract', result)
+            cache_result = result
             verdict_scan, verdict_honeypot = result, None
             response = format_scan_result(result, chain_id)
 
@@ -1201,6 +1201,9 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
             reply_markup=keyboard,
             disable_web_page_preview=True
         )
+        # A retry must rescan if Telegram rejects this report instead of replaying an unsendable cached result.
+        if cache_result is not None:
+            _set_cache(cache_key, 'contract', cache_result)
 
     except UnsupportedChainError:
         raise
@@ -1235,6 +1238,7 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
 
         # Try new composite pipeline first
         response = None
+        cache_result = None
         try:
             from core.analyzer import AnalysisContext
 
@@ -1285,10 +1289,10 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
             verdict_scan, verdict_honeypot = risk_output, honeypot_data
             risk_level = 'unknown' if is_scan_incomplete(risk_output) else risk_output.get('risk_level', 'medium').lower()
 
-            _set_cache(cache_key, 'token', {
+            cache_result = {
                 **risk_output, 'address': address, 'composite_report': response,
                 'risk_level': risk_level, 'status': 'unknown' if risk_level == 'unknown' else 'ok',
-            })
+            }
 
             # Enqueue deployer/funder indexing (fire-and-forget)
             if hasattr(container, 'indexer') and container.indexer:
@@ -1304,7 +1308,7 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
             result = await token_scanner.check_token(address, chain_id=chain_id)
             if is_scan_incomplete(result):
                 result = {**result, 'status': 'unknown', 'risk_level': 'unknown', 'safety_level': 'unknown'}
-            _set_cache(cache_key, 'token', result)
+            cache_result = result
             verdict_scan, verdict_honeypot = result, None
             response = format_token_result(result, chain_id)
 
@@ -1326,6 +1330,9 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
             reply_markup=keyboard,
             disable_web_page_preview=True
         )
+        # A retry must rescan if Telegram rejects this report instead of replaying an unsendable cached result.
+        if cache_result is not None:
+            _set_cache(cache_key, 'token', cache_result)
 
     except UnsupportedChainError:
         raise

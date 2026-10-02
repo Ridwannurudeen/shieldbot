@@ -520,6 +520,213 @@ async def test_a_scan_report_names_the_chain_it_ran_on_fresh_and_from_the_cache(
     assert replies[1] == replies[0]
 
 
+def test_an_in_budget_full_report_is_byte_identical_to_the_current_rendering():
+    report = format_full_report(
+        {
+            "rug_probability": 7,
+            "risk_level": "LOW",
+            "risk_archetype": "low_risk",
+            "confidence_level": 88,
+            "status": "ok",
+            "coverage": {"structural": 1},
+            "category_scores": {"structural": 2, "market": 3, "behavioral": 4, "honeypot": 5},
+        },
+        {"is_verified": True, "is_contract": True, "contract_age_days": 12, "ownership_renounced": True},
+        {"liquidity_usd": 1000, "volume_24h": 2000, "fdv": 3000, "price_change_24h": 1.2, "pair_age_hours": 3.4},
+        {"ethos_raw_score": 90, "trust_level": "High", "reputation_score": 90},
+        {"is_honeypot": False, "buy_tax": 1, "sell_tax": 2, "can_buy": True, "can_sell": True},
+        address=ADDRESS,
+        ai_analysis="Brief analysis.",
+        token_info={"name": "Moon", "symbol": "MOON"},
+        chain_id=56,
+    )
+
+    assert report == (
+        "🟢 *ShieldBot Intelligence Report*\n\n"
+        "*Token:* Moon (MOON)\n"
+        f"*Address:* `{ADDRESS}`\n"
+        "*Chain:* BSC (56)\n"
+        "*Risk Archetype:* Low Risk\n"
+        "*Rug Probability:* 7%  |  *Risk Level:* LOW\n"
+        "*Confidence:* 88%\n\n"
+        "*Category Breakdown:*\n"
+        "  Structural: 2/100\n"
+        "  Market: 3/100\n"
+        "  Behavioral: 4/100\n"
+        "  Honeypot: 5/100\n\n"
+        "*📜 Contract Analysis:*\n"
+        "  Verified: ✅\n"
+        "  Age: 12 days\n"
+        "  Ownership Renounced: ✅\n\n"
+        "*📊 Market Intelligence:*\n"
+        "  Liquidity: $1,000\n"
+        "  24h Volume: $2,000\n"
+        "  FDV: $3,000\n"
+        "  24h Price Change: +1.2%\n"
+        "  Pair Age: 3.4h\n\n"
+        "*👤 Wallet Reputation (Ethos):*\n"
+        "  Score: 90  |  Trust: High\n\n"
+        "*🧪 Trade Simulation:*\n"
+        "  ✅ Not Honeypot\n"
+        "  Buy Tax: 1%\n"
+        "  Sell Tax: 2%\n"
+        "  Buyability: Yes\n"
+        "  Sellability: Yes\n"
+        "  Reason: Provider data unavailable\n\n"
+        "*🧠 AI Analysis:*\n"
+        "Brief analysis.\n\n"
+        "*Final Verdict:*\n"
+        "🟢 Generally Safe — Low risk (7%)"
+    )
+
+
+def test_an_oversized_full_report_trims_content_without_losing_its_block_verdict():
+    report = format_full_report(
+        {
+            "rug_probability": 95,
+            "risk_level": "HIGH",
+            "status": "ok",
+            "coverage": {"structural": 1, "market": 1, "behavioral": 1, "honeypot": 1},
+            "critical_flags": [f"Flag {index}: " + "_*" * 350 for index in range(7)],
+            "notes": [f"Note {index}: " + "_*" * 350 for index in range(5)],
+        },
+        {}, {}, {},
+        address=ADDRESS,
+        ai_analysis="_*" * 1800,
+        chain_id=56,
+    )
+
+    assert len(report) <= 4000
+    assert "Report shortened to fit Telegram." in report
+    assert "additional critical flag(s) omitted." in report
+    assert "Flag 0" in report
+    assert "*Final Verdict:*" in report
+    assert "DO NOT PROCEED" in report
+    assert_literal(report)
+
+
+def test_an_oversized_detail_block_is_trimmed_without_unbalanced_markdown():
+    report = format_full_report(
+        {
+            "rug_probability": 95,
+            "risk_level": "HIGH",
+            "status": "ok",
+            "coverage": {"structural": 1, "market": 1, "behavioral": 1, "honeypot": 1},
+        },
+        {
+            "scam_matches": [
+                {"severity": "medium", "reason": f"Community report {index}: " + "_*" * 500}
+                for index in range(8)
+            ],
+        },
+        {},
+        {},
+        address=ADDRESS,
+        chain_id=56,
+    )
+
+    assert len(report) <= 4000
+    assert "Report shortened to fit Telegram." in report
+    assert "*Final Verdict:*" in report
+    assert "DO NOT PROCEED" in report
+    assert_literal(report)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handler", ["scan_contract", "check_token"])
+@pytest.mark.parametrize("composite", [True, False], ids=["composite", "legacy-fallback"])
+async def test_a_failed_report_delivery_is_not_cached_and_a_successful_retry_is_replayed(
+    bot_module, monkeypatch, handler, composite
+):
+    client = Web3Client.__new__(Web3Client)
+    client._adapters = {chain_id: MagicMock() for chain_id in REGISTERED}
+    client.get_token_info = AsyncMock(return_value={})
+    monkeypatch.setattr(bot_module, "web3_client", client)
+    monkeypatch.setattr(
+        bot_module, "ai_analyzer", MagicMock(is_available=MagicMock(return_value=False))
+    )
+    monkeypatch.setattr(
+        bot_module,
+        "risk_engine",
+        MagicMock(
+            compute_from_results=MagicMock(
+                return_value={**RISK, "coverage": {"structural": 1, "honeypot": 1}}
+            )
+        ),
+    )
+    run_all = (
+        AsyncMock(return_value=[])
+        if composite
+        else AsyncMock(side_effect=RuntimeError("Composite pipeline unavailable"))
+    )
+    monkeypatch.setattr(bot_module.container.registry, "run_all", run_all)
+    tx_scan = AsyncMock(return_value=dict(LEGACY))
+    token_scan = AsyncMock(return_value=dict(LEGACY))
+    monkeypatch.setattr(bot_module, "tx_scanner", SimpleNamespace(scan_address=tx_scan))
+    monkeypatch.setattr(bot_module, "token_scanner", SimpleNamespace(check_token=token_scan))
+    bot_module._scan_cache.clear()
+
+    failed = _message()
+    failed.message.reply_text = AsyncMock(
+        side_effect=[SimpleNamespace(delete=AsyncMock()), RuntimeError("Telegram rejected report"), None]
+    )
+    await getattr(bot_module, handler)(failed, ADDRESS, chain_id=8453)
+
+    assert bot_module._scan_cache == {}
+
+    successful = _message()
+    await getattr(bot_module, handler)(successful, ADDRESS, chain_id=8453)
+    assert len(bot_module._scan_cache) == 1
+
+    cached = _message()
+    await getattr(bot_module, handler)(cached, ADDRESS, chain_id=8453)
+
+    assert run_all.await_count == 2
+    if composite:
+        tx_scan.assert_not_awaited()
+        token_scan.assert_not_awaited()
+    elif handler == "scan_contract":
+        tx_scan.assert_awaited_twice()
+        token_scan.assert_not_awaited()
+    else:
+        tx_scan.assert_not_awaited()
+        token_scan.assert_awaited_twice()
+    assert cached.message.reply_text.await_args.args[0] == successful.message.reply_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handler", ["scan_contract", "check_token"])
+async def test_a_composite_report_with_no_risk_level_is_sent_but_never_cached(
+    bot_module, monkeypatch, handler
+):
+    client = Web3Client.__new__(Web3Client)
+    client._adapters = {chain_id: MagicMock() for chain_id in REGISTERED}
+    client.get_token_info = AsyncMock(return_value={})
+    risk_output = {**RISK, "risk_level": None, "coverage": {"structural": 1, "honeypot": 1}}
+    run_all = AsyncMock(return_value=[])
+    set_cache = MagicMock(wraps=bot_module._set_cache)
+    monkeypatch.setattr(bot_module, "web3_client", client)
+    monkeypatch.setattr(bot_module, "ai_analyzer", MagicMock(is_available=MagicMock(return_value=False)))
+    monkeypatch.setattr(
+        bot_module, "risk_engine", MagicMock(compute_from_results=MagicMock(return_value=risk_output))
+    )
+    monkeypatch.setattr(bot_module.container.registry, "run_all", run_all)
+    monkeypatch.setattr(bot_module, "_set_cache", set_cache)
+    bot_module._scan_cache.clear()
+
+    reports = []
+    for _ in range(2):
+        update = _message()
+        await getattr(bot_module, handler)(update, ADDRESS, chain_id=8453)
+        reports.append(update.message.reply_text.await_args.args[0])
+
+    assert run_all.await_count == 2
+    set_cache.assert_not_called()
+    assert bot_module._scan_cache == {}
+    assert all("*Final Verdict:*" in report for report in reports)
+    assert all("Error scanning" not in report and "Error checking" not in report for report in reports)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("handler", ["scan_contract", "check_token"])
 async def test_slow_token_metadata_keeps_the_deterministic_report_and_verdict(

@@ -48,6 +48,9 @@ _LINK_LOOKALIKES = {'@': '\N{FULLWIDTH COMMERCIAL AT}', '/': '\N{DIVISION SLASH}
 # How a collision's symbol or name pointed at the official token.
 _POINTED_BY = {'ticker': 'same ticker', 'affix': 'ticker with an affix', 'company': 'same company name'}
 _ADDRESS = re.compile(r'0x[0-9a-fA-F]{40}')
+# Telegram rejects messages over 4,096 characters. Leave room for its entity handling after the
+# formatter has escaped untrusted Markdown, which can add characters to a report.
+MAX_REPORT_LENGTH = 4000
 
 
 def unlinked(value) -> str:
@@ -195,6 +198,7 @@ def format_full_report(
     lines.append(f'*Rug Probability:* {probability}  |  *Risk Level:* {risk_level}')
     lines.append(f'*Confidence:* {confidence}%')
     lines.append('')
+    flag_start = len(lines)
 
     # Critical flags
     if flags:
@@ -202,6 +206,8 @@ def format_full_report(
         for flag in flags:
             lines.append(f'  \u2022 {escape_untrusted(flag)}')
         lines.append('')
+    flag_end = len(lines)
+    note_start = len(lines)
 
     # Notes name a check that could not run and only adds risk: information, not a danger signal.
     if notes:
@@ -209,6 +215,8 @@ def format_full_report(
         for note in notes:
             lines.append(f'  \u2022 {escape_untrusted(note)}')
         lines.append('')
+    note_end = len(lines)
+    detail_start = len(lines)
 
     # Category scores
     lines.append('*Category Breakdown:*')
@@ -322,12 +330,16 @@ def format_full_report(
         if reason and reason not in ('Unknown', 'None', ''):
             lines.append(f'  Reason: {reason}')
         lines.append('')
+    detail_end = len(lines)
+    ai_start = len(lines)
 
     # AI Analysis
     if ai_analysis and not incomplete:
         lines.append('*\U0001F9E0 AI Analysis:*')
         lines.append(escape_markdown_lines(ai_analysis))
         lines.append('')
+    ai_end = len(lines)
+    verdict_start = len(lines)
 
     # Final verdict
     lines.append('*Final Verdict:*')
@@ -347,4 +359,51 @@ def format_full_report(
     else:
         lines.append(f'{verdict_icon} Generally Safe — Low risk ({rug_prob}%)')
 
-    return '\n'.join(lines)
+    header_lines = lines[:flag_start]
+    flag_section = lines[flag_start:flag_end]
+    flag_header, flag_items, flag_tail = flag_section[:1], flag_section[1:-1], flag_section[-1:]
+    note_section = lines[note_start:note_end]
+    note_header, note_items, note_tail = note_section[:1], note_section[1:-1], note_section[-1:]
+    detail_lines = lines[detail_start:detail_end]
+    ai_lines = lines[ai_start:ai_end]
+    verdict_lines = lines[verdict_start:]
+    trimmed = False
+    omitted_flags = 0
+
+    def render():
+        flag_lines = flag_header + flag_items
+        if omitted_flags:
+            flag_lines.append(f'  \u2022 {omitted_flags} additional critical flag(s) omitted.')
+        if flag_lines:
+            flag_lines += flag_tail
+        note_lines = note_header + note_items
+        if note_lines:
+            note_lines += note_tail
+        sections = header_lines + flag_lines + note_lines + detail_lines + ai_lines
+        if trimmed:
+            sections.append('\u2139 Report shortened to fit Telegram.')
+        return '\n'.join(sections + verdict_lines)
+
+    report = render()
+    if len(report) <= MAX_REPORT_LENGTH:
+        return report
+
+    # These fields have already been escaped, so every measurement is of the exact string Telegram receives.
+    trimmed = True
+    ai_lines.clear()
+    report = render()
+
+    while len(report) > MAX_REPORT_LENGTH and note_items:
+        note_items.pop()
+        report = render()
+
+    while len(report) > MAX_REPORT_LENGTH and flag_items:
+        flag_items.pop()
+        omitted_flags += 1
+        report = render()
+
+    while len(report) > MAX_REPORT_LENGTH and detail_lines:
+        detail_lines.pop()
+        report = render()
+
+    return report
