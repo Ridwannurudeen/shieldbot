@@ -181,10 +181,12 @@ line, which nobody is watching.
 
 ```
 H=$(grep -o "sha256-[A-Za-z0-9+/=]*" deploy/nginx-shieldbotsecurity-new.conf | head -1)
-curl -sI https://shieldbotsecurity.online/ | grep -c "$H"
+curl -sI https://shieldbotsecurity.online/ | grep -cF "$H"
 ```
 
-It must print `1`. If it prints `0`, the live vhost is missing the hash: add it to `script-src`,
+It must print `1`. `-F` is required, not optional: the pattern above admits `+` and `/`, which are not
+literal in a basic regular expression, so a hash containing either would make a correct vhost report `0`.
+If it prints `0`, the live vhost is missing the hash: add it to `script-src`,
 then `nginx -t && systemctl reload nginx`, and re-run the check.
 
 `tests/test_website_claims.py` keeps the reference conf and all **ten** pages in agreement — the five
