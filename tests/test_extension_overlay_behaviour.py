@@ -932,14 +932,24 @@ def test_unknown_result_has_its_own_badge_and_reason(state):
   const classes = badge.className.split(/\s+/);
   const why = overlay().querySelector('.shieldai-unknown-why');
   const html = overlay().innerHTML;
+  const assertUnknownModal = path => assert(
+    overlay().querySelector('.shieldai-modal').classList.contains('shieldai-modal-unknown'),
+    `${path} overlay is missing the Unknown modal marker`,
+  );
   if (state.startsWith('unknown')) {
     assert.deepEqual(classes, ['shieldai-badge', 'shieldai-badge-unknown']);
+    assertUnknownModal('transaction');
     assert(html.includes('>UNKNOWN<') || /UNKNOWN\s*<\/div>/.test(html));
     assert(!html.includes('SAFE') && !html.includes('CAUTION'));
     assert(why, 'no reason line');
     const reason = state === 'unknown-reason' ? 'Contract age unavailable' : 'Some checks did not complete.';
     assert(html.includes('Why: ' + reason));
     assert(html.includes('<td>Granting Access</td><td>Unknown</td>'), 'a missing grant must not read None');
+    await intercept('signature', {signMethod: 'personal_sign', data: '0x68656c6c6f'}, 'personal_sign');
+    assertUnknownModal('signature');
+    analyze = async () => { clock += 51000; return {result: results[state]}; };
+    await intercept('timed-out');
+    assertUnknownModal('timed-out');
   } else if (state === 'incomplete-high') {
     assert(classes.includes('shieldai-badge-high'));
     assert(html.includes('Why: No provider'));
@@ -1907,7 +1917,10 @@ def test_replaced_built_ins_cannot_let_a_request_skip_the_decision(patch):
     pending.catch(() => {});
     await flush();
     assert.equal(sent.length, before, 'the request reached the wallet before any decision');
-    const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+    // The intercept post waits on an HMAC, so one 60 ms tick is not always enough on a loaded machine.
+    const lastIntercept = () => posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+    for (let i = 0; i < 10 && !lastIntercept(); i++) await flush();
+    const intercept = lastIntercept();
     assert(intercept, 'the request was not sent for a decision');
     const requestId = intercept.requestId;
     assert.notEqual(requestId, 'predictable');
@@ -2462,6 +2475,8 @@ def test_a_request_taken_from_the_provider_prototype_is_checked_too(patch):
     pending.catch(() => {});
     await flush();
     assert.equal(sent.length, 0, 'the request reached the wallet before any decision');
+    // Same HMAC wait as above: poll, bounded, rather than trusting a single tick.
+    for (let i = 0; i < 10 && intercepts().length === before; i++) await flush();
     assert.equal(intercepts().length, before + 1, 'the request was not sent for a decision');
     const {requestId} = intercepts().at(-1);
     deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'block', proof: await proof(requestId, 'block')});
