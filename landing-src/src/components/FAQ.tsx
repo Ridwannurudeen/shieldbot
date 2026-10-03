@@ -83,7 +83,7 @@ export default function FAQ() {
           className="mt-10 space-y-3"
         >
           {faqs.map((faq, i) => (
-            <div key={i} className="rounded-xl border border-line bg-surface transition-colors hover:border-line-strong">
+            <div key={i} className="rounded-xl border border-line bg-surface shadow-sm transition-colors hover:border-line-strong">
               <h3>
                 <button
                   type="button"

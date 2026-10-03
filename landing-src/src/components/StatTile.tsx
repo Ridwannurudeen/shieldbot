@@ -8,7 +8,7 @@ export default function StatTile({
   state?: "ready" | "loading" | "unavailable";
 }) {
   return (
-    <div className="rounded-2xl border border-line bg-surface p-5">
+    <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
       <div className="font-mono text-2xl md:text-[28px] font-bold leading-none tracking-tight text-ink tabular-nums">
         {state === "loading" ? "…" : state === "unavailable" ? "—" : value}
       </div>

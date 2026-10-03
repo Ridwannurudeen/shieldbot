@@ -133,7 +133,7 @@ export default function Chains() {
           lead="Contract scans run on all 8 chains. The other checks depend on the chain, and a check that cannot run is reported as Unknown, never as Safe."
         />
 
-        <div className="mt-10 max-w-4xl overflow-x-auto rounded-2xl border border-line bg-surface px-3 py-2 sm:px-6" tabIndex={0} aria-label="Coverage by chain">
+        <div className="mt-10 max-w-4xl overflow-x-auto rounded-2xl border border-line bg-surface px-3 py-2 shadow-sm sm:px-6" tabIndex={0} aria-label="Coverage by chain">
           <table className="w-full text-[13px] sm:text-sm">
             <caption className="sr-only">
               Which checks run on each supported chain

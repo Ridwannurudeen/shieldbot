@@ -17,7 +17,7 @@ export default function FeatureCard({
   const external = link?.href.startsWith("http");
 
   return (
-    <div className="rounded-2xl border border-line bg-surface p-6 transition-colors hover:border-line-strong">
+    <div className="rounded-2xl border border-line bg-surface p-6 shadow-sm transition-colors hover:border-line-strong">
       {(icon || number) && (
         <div className="flex items-center justify-between">
           {icon ? <Icon name={icon} size={24} className="text-emerald" /> : <span />}

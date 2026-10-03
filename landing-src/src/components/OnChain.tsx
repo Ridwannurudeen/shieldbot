@@ -2,6 +2,7 @@ import CodeBlock from "./CodeBlock";
 import ContractCard from "./ContractCard";
 import SectionHeader from "./SectionHeader";
 import StatTile from "./StatTile";
+import Icon from "./Icon";
 
 const contracts = [
   {
@@ -74,7 +75,7 @@ export default function OnChain() {
             <ContractCard key={contract.address} {...contract} />
           ))}
         </div>
-        <p className="mt-4 text-[13px] text-muted">All three deployed on 27 September 2026 from the registry owner's account, built from main at c9ae9c9, with full exact source matches on Sourcify.</p>
+        <p className="mt-4 text-sm text-body">All three deployed on 27 September 2026 from the registry owner's account, built from main at c9ae9c9, with full exact source matches on Sourcify.</p>
 
         <div className="mt-12 grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
           <div className="min-w-0">
@@ -85,20 +86,21 @@ export default function OnChain() {
               <li>Hash the served canonical string with keccak256.</li>
               <li>Read the recording transaction's receipt from an independent RPC and match the VerdictRecorded event's subject, verdict and evidence hash.</li>
             </ol>
-            <p className="mt-5 text-[13px] text-muted">From the judge guide, section 3. The published example is WOOD. Any Robinhood Chain RPC works; the API does not use this one.</p>
+            <p className="mt-5 text-sm text-muted">From the judge guide, section 3. The published example is WOOD. Any Robinhood Chain RPC works; the API does not use this one.</p>
             <div className="mt-3">
               <CodeBlock code={verificationCode} />
             </div>
-            <p className="mt-3 text-[13px] text-muted">Then set RECORD_TX to the full hash of 0x7578ca9e…f0c772a4 from the judge guide, section 3, and run the guide's Python block.</p>
+            <p className="mt-3 text-[15px] text-body">Then set RECORD_TX to the full hash of 0x7578ca9e…f0c772a4 from the judge guide, section 3, and run the guide's Python block.</p>
             <a
-              className="mt-3 inline-flex min-h-[44px] items-center text-[13px] text-emerald underline underline-offset-4 hover:text-emerald-deep"
+              className="mt-3 inline-flex min-h-[44px] items-center gap-1.5 self-start text-sm font-semibold text-emerald underline underline-offset-4 hover:text-emerald-deep"
               href="https://github.com/Ridwannurudeen/shieldbot/blob/main/docs/JUDGE_GUIDE.md#3-verify-a-verdict-without-trusting-the-api"
               target="_blank"
               rel="noopener noreferrer"
             >
               Open the judge guide
+              <Icon name="external" size={16} />
             </a>
-            <p className="mt-3 text-[13px] text-muted">A match proves the recorder committed those bytes. It does not prove the scan was right, that an issuer is genuine, or that a token will stay sellable.</p>
+            <p className="mt-3 text-sm text-body">A match proves the recorder committed those bytes. It does not prove the scan was right, that an issuer is genuine, or that a token will stay sellable.</p>
           </div>
           <div className="min-w-0">
             <h3 className="text-xl font-semibold text-ink">What the guard answers</h3>
