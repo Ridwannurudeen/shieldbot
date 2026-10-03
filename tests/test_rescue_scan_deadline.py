@@ -11,7 +11,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from services.rescue_service import NOTHING_READ_REASON, SCAN_TIMEOUT_REASON
+from services.rescue_service import (
+    NOTHING_READ_REASON,
+    RECENT_LOG_WINDOW_BLOCKS,
+    RECENT_LOG_WINDOWS,
+    SCAN_TIMEOUT_REASON,
+)
 from tests.test_rescue_bounded_history import (
     APPROVAL_LOG,
     LATEST,
@@ -243,6 +248,9 @@ async def test_allowance_calls_that_never_answer_end_the_scan_at_its_deadline():
     assert result["status"] == "unknown"
     assert result["coverage"]["allowances"] is False
     assert result["coverage_reasons"] == {"allowances": SCAN_TIMEOUT_REASON}
-    assert result["scanned_blocks"] is None
+    assert result["scanned_blocks"] == {
+        "from_block": LATEST - RECENT_LOG_WINDOW_BLOCKS * RECENT_LOG_WINDOWS + 1,
+        "to_block": LATEST,
+    }
     assert result["total_value_at_risk_usd"] is None
     assert not service._results
