@@ -536,14 +536,19 @@ def test_the_theme_restore_script_is_allowed_by_the_content_security_policy():
     csp = re.search(r'Content-Security-Policy "([^"]*)"', conf).group(1)
     script_src = re.search(r"script-src ([^;]*);", csp).group(1)
     assert "'unsafe-inline'" not in script_src
-    pages = [LANDING_SRC / "index.html", ROOT / "landing" / "index.html",
-             *sorted((LANDING_SRC / "public").glob("*.html")), *sorted((ROOT / "landing").glob("*.html"))]
+    # One hash in the policy, and one script shared by every page: a conf carrying a stale hash
+    # beside the current one would otherwise let a mismatched built copy pass unnoticed.
+    assert script_src.count("'sha256-") == 1, script_src
+    pages = sorted({LANDING_SRC / "index.html", ROOT / "landing" / "index.html",
+                    *(LANDING_SRC / "public").glob("*.html"), *(ROOT / "landing").glob("*.html")})
+    digests = {}
     for page in pages:
         scripts = re.findall(r"<script>(.*?)</script>", read(page), re.DOTALL)
-        assert len(scripts) == 1, f"{page.name}: expected exactly one inline script"
-        assert '"shieldbot-theme"' in scripts[0], page.name
-        digest = base64.b64encode(hashlib.sha256(scripts[0].encode("utf-8")).digest()).decode()
-        assert f"'sha256-{digest}'" in script_src, f"{page.name}: inline script hash is not in the CSP"
+        assert len(scripts) == 1, f"{page}: expected exactly one inline script"
+        assert '"shieldbot-theme"' in scripts[0], page
+        digests[page] = base64.b64encode(hashlib.sha256(scripts[0].encode("utf-8")).digest()).decode()
+    assert len(set(digests.values())) == 1, {str(k): v for k, v in digests.items()}
+    assert f"'sha256-{next(iter(digests.values()))}'" in script_src, "the inline script hash is not in the CSP"
 
 
 def test_privacy_policy_names_the_analytics_and_what_it_does_not_keep():

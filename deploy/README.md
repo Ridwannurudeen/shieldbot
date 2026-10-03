@@ -164,6 +164,33 @@ After an edit: `nginx -t && systemctl reload nginx`.
 
 The landing vhost's reference is `nginx-shieldbotsecurity-new.conf` (below).
 
+### Theme restore: the policy hash must be mirrored by hand
+
+The landing pages carry one inline script that restores a stored light theme before first paint.
+`script-src` is `'self'` with no `'unsafe-inline'`, so the script is allowed **by its hash**, and
+`nginx-shieldbotsecurity-new.conf` carries that hash. **The live vhost does not get it
+automatically** — this file is mirrored manually, so the hash must be copied across in the same
+change that deploys a dark build.
+
+Until it is, the browser refuses the script and anyone who chose the light theme gets the dark
+one on **every** visit. There is no recovery in the page: the switch reads the attribute on the
+document, not storage, so it cannot correct a refusal on mount. The only symptom is one console
+line, which nobody is watching.
+
+**Mandatory after any deploy that touches the landing pages:**
+
+```
+curl -sI https://shieldbotsecurity.online/ | grep -c 'sha256-6PF9GAAy'
+```
+
+It must print `1`. If it prints `0`, the live vhost is missing the hash: add it to `script-src`,
+then `nginx -t && systemctl reload nginx`, and re-run the check.
+
+`tests/test_website_claims.py` keeps the reference conf and all five pages in agreement — it
+recomputes the hash from every page and requires exactly one hash in the policy — so a
+reformatted script fails the suite rather than breaking the live site silently. The test cannot
+see the live vhost, which is why the curl above is not optional.
+
 ### Landing analytics (Plausible)
 
 The landing pages load `/js/plausible-init.js` and `/js/script.js`, and send page views to `/stats/event`. The
