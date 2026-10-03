@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from urllib.parse import quote
 
 import pytest
 
@@ -283,6 +284,7 @@ LAUNCH_STATS = {
     "evidence_documents": {"4663": 19728, "56": 12},
     "registry_records_confirmed": 1367,
 }
+REGISTRY = "0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138"
 ATTESTOR = "0x" + "ee" * 20
 ATTESTATIONS = {
     "available": True,
@@ -313,6 +315,8 @@ def render(
     report_reply=(200, {"status": "recorded"}),
     attestations_reply=(200, NO_ATTESTATIONS),
     launches_reply=(200, NO_LAUNCHES),
+    older_reply=None,
+    fast_down=False,
     steps=TEXT,
 ):
     node = shutil.which("node")
@@ -321,18 +325,22 @@ def render(
         if os.environ.get("CI"):
             pytest.fail("Node.js is required for dashboard rendering tests in CI")
         pytest.skip("Node.js is required for dashboard rendering tests")
+    # With fast_down, every source on the 20-second cycle answers 503.
     replies = {
-        "/api/stats": [200, stats],
+        "/api/stats": [503 if fast_down else 200, stats],
         "/api/threats/feed?source=contracts": [
-            200,
+            503 if fast_down else 200,
             {"threats": list(contracts), "count": len(contracts)},
         ],
-        "/api/threats/feed?source=mempool": [200, mempool_reply or {"threats": [], "count": 0}],
+        "/api/threats/feed?source=mempool": [503 if fast_down else 200, mempool_reply or {"threats": [], "count": 0}],
         "/api/campaigns/top": list(campaigns_reply),
-        "/api/base/attestations": list(attestations_reply),
-        "/api/launches/4663?outcome=blocked": list(launches_reply),
-        "/api/report": list(report_reply),
+        "/api/base/attestations": [503, {"detail": "down"}] if fast_down else list(attestations_reply),
     }
+    # The harness answers the first prefix that matches, so a page asked for with a cursor is keyed first.
+    if older_reply is not None:
+        replies["/api/launches/4663?outcome=blocked&limit=20&cursor="] = list(older_reply)
+    replies["/api/launches/4663?outcome=blocked"] = list(launches_reply)
+    replies["/api/report"] = list(report_reply)
     script = f"{HARNESS}\nasync function steps() {{\n{steps}\n}}\n"
     result = subprocess.run(
         [node, "-e", script, str(BUILT), json.dumps(replies)],
@@ -410,6 +418,32 @@ def test_header_health_label(workers_note, mempool_reply, campaigns_reply, label
     text = render(stats, mempool_reply=mempool_reply, campaigns_reply=campaigns_reply)
     labels = [name for name in ("LIVE", "PARTIAL DATA", "OFFLINE", "CONTRACTS ONLY") if name in text]
     assert labels == [label]
+
+
+DOWN = (503, {"detail": "down"})
+
+
+@pytest.mark.parametrize(
+    "campaigns_reply, launches_reply, label",
+    [
+        # Every fast source failed: one slow source still answering is partial data, not offline.
+        ((200, {"campaigns": []}), DOWN, "PARTIAL DATA"),
+        (DOWN, (200, NO_LAUNCHES), "PARTIAL DATA"),
+        (DOWN, DOWN, "OFFLINE"),
+    ],
+    ids=["campaigns answer", "launches answer", "nothing answers"],
+)
+def test_the_page_is_offline_only_when_the_slow_sources_fail_too(campaigns_reply, launches_reply, label):
+    text = render(campaigns_reply=campaigns_reply, launches_reply=launches_reply, fast_down=True)
+    labels = [name for name in ("LIVE", "PARTIAL DATA", "OFFLINE", "CONTRACTS ONLY") if name in text]
+    assert labels == [label]
+
+
+def test_a_failed_campaigns_fetch_reads_as_unavailable_not_as_no_campaigns():
+    text = render(campaigns_reply=DOWN)
+    assert "Campaign data unavailable." in text
+    assert "No campaigns detected." not in text
+    assert "PARTIAL DATA" in text
 
 
 def test_contract_detections_still_show_beside_an_unavailable_mempool_feed():
@@ -564,7 +598,9 @@ def test_an_attestor_that_is_not_retired_reads_as_today():
 def test_the_robinhood_panel_lists_a_blocked_launch_with_its_verdict_link():
     steps = """
       const verdict = byLabel('Open the verdict for '), investigate = byLabel('Investigate ');
-      return {text: document.root.textContent, verdict: verdict.getAttribute('href'), explorer: investigate.getAttribute('href')};
+      const registry = find(el => el.tagName === 'A' && el.textContent === 'Registry contract ↗');
+      return {text: document.root.textContent, verdict: verdict.getAttribute('href'),
+              explorer: investigate.getAttribute('href'), registry: registry.getAttribute('href')};
     """
     reply = {**NO_LAUNCHES, "launches": [BLOCKED_LAUNCH], "count": 1}
     result = render(LAUNCH_STATS, launches_reply=(200, reply), steps=steps)
@@ -579,8 +615,11 @@ def test_the_robinhood_panel_lists_a_blocked_launch_with_its_verdict_link():
     assert result["explorer"] == f"https://robinhoodchain.blockscout.com/address/{LAUNCH_TOKEN}"
     assert "5,190Launches Discoveredlast 24 h" in text
     assert "1,876Launches Scannedlast 24 h" in text
-    assert "19,728Evidence Documentsstored verdicts" in text
-    assert "1,367Registry Recordsconfirmed on-chain" in text
+    assert "82,400Discovery Lagblocks behind the confirmed headhead read " in text
+    assert "19,728Evidence Documentsstored verdicts · all time" in text
+    assert "1,367Registry Recordsconfirmed on-chainRegistry contract ↗" in text
+    assert result["registry"] == f"https://robinhoodchain.blockscout.com/address/{REGISTRY}"
+    assert "The only blocked launch on record." in text
     assert "LIVE" in text
 
 
@@ -599,10 +638,11 @@ def test_a_blocked_launch_without_evidence_or_a_check_still_renders():
 
 def test_launch_counts_the_stats_reply_lacks_show_a_dash_not_zero():
     text = render()
-    for label in ("Launches Discovered", "Launches Scanned", "Evidence Documents", "Registry Records"):
+    for label in ("Launches Discovered", "Launches Scanned", "Discovery Lag", "Evidence Documents", "Registry Records"):
         assert f"—{label}" in text, label
         assert f"0{label}" not in text, label
     assert "No blocked launches on record." in text
+    assert "Provider answers unavailable." in text
 
 
 def test_an_unavailable_launch_feed_says_so_and_is_partial_data():
@@ -612,20 +652,175 @@ def test_an_unavailable_launch_feed_says_so_and_is_partial_data():
     assert "PARTIAL DATA" in text and "LIVE" not in text
 
 
-def test_the_robinhood_chip_points_at_the_panel_when_the_feed_has_no_firewall_detections_there():
+# Launches with distinct tokens, newest block first, as the feed orders them.
+def _blocked(index):
+    token = "0x" + f"{index:040x}"
+    return {
+        **BLOCKED_LAUNCH,
+        "token_address": token,
+        "block_number": BLOCKED_LAUNCH["block_number"] - index,
+        "verdict_url": f"/api/verdict/4663/{token}",
+    }
+
+
+SEVEN = [_blocked(index) for index in range(1, 8)]
+CURSOR = f"{SEVEN[-1]['block_number']}:{SEVEN[-1]['token_address']}"
+
+
+def _shown(text):
+    return [index for index in range(1, 10) if short("0x" + f"{index:040x}") in text]
+
+
+@pytest.mark.parametrize(
+    "launches_reply, link",
+    [
+        (
+            (200, {**NO_LAUNCHES, "launches": [BLOCKED_LAUNCH], "count": 1}),
+            "See the 1 blocked launch in the Robinhood Chain panel ↑",
+        ),
+        ((200, {**NO_LAUNCHES, "launches": SEVEN, "count": 7}), "See the 7 blocked launches in the Robinhood Chain panel ↑"),
+        ((200, NO_LAUNCHES), "Open the Robinhood Chain launches panel ↑"),
+        ((503, {"detail": "down"}), "Open the Robinhood Chain launches panel ↑"),
+    ],
+    ids=["one loaded", "seven loaded", "none on record", "unavailable"],
+)
+def test_the_robinhood_chip_links_to_the_panel_when_the_feed_has_no_firewall_detections_there(launches_reply, link):
     steps = """
       await click(byText('Robinhood'));
-      return document.root.textContent;
+      const anchors = descendants(document).filter(el => el.tagName === 'A' && el.getAttribute('href') === '#robinhood-chain');
+      const target = find(el => el.getAttribute('id') === 'robinhood-chain');
+      return {text: document.root.textContent, anchors: anchors.map(el => el.textContent),
+              target: target && target.tagName, title: target && target.querySelector('h2').textContent};
     """
-    text = render(contracts=[CONTRACT], steps=steps)
-    assert "0 threats" in text
-    assert "No extension or agent firewall detections on Robinhood Chain in the current window." in text
-    assert "in the Robinhood Chain panel above" in text
-    assert "No threats on this chain in the current window." not in text
+    result = render(contracts=[CONTRACT], launches_reply=launches_reply, steps=steps)
+    assert "0 threats" in result["text"]
+    assert "No extension or agent firewall detections on Robinhood Chain in the current window." in result["text"]
+    assert result["anchors"] == ["Robinhood Chain panel", link]
+    assert result["target"] == "SECTION"
+    assert result["title"] == "Robinhood Chain"
+    assert "No threats on this chain in the current window." not in result["text"]
+    assert "panel above" not in result["text"]
+
+
+SHOW_MORE = """
+  const before = document.root.textContent;
+  await click(byText('Show 2 more'));
+  const after = document.root.textContent;
+  return {before, after, older: Boolean(byText('Load older blocked launches'))};
+"""
+
+
+def test_the_panel_shows_five_launches_until_the_reader_asks_for_the_rest():
+    reply = {**NO_LAUNCHES, "launches": SEVEN, "count": 7}
+    result = render(launches_reply=(200, reply), steps=SHOW_MORE)
+    assert _shown(result["before"]) == [1, 2, 3, 4, 5]
+    assert "Showing 5 of all 7 blocked launches on record." in result["before"]
+    assert "Load older" not in result["before"]
+    assert _shown(result["after"]) == [1, 2, 3, 4, 5, 6, 7]
+    assert "Showing 7 of all 7 blocked launches on record." in result["after"]
+    assert "Show the newest 5 only" in result["after"]
+    assert result["older"] is False
+
+
+# Shows the whole loaded page, asks for the page after it, then fires the five-minute refresh.
+LOAD_OLDER = """
+  await click(byText('Show 2 more'));
+  const before = document.root.textContent;
+  await click(byText('Load older blocked launches'));
+  const after = document.root.textContent;
+  const older = requests.map(([url]) => url).filter(url => url.includes('cursor='));
+  const alert = byRole('alert');
+  const mark = requests.length;
+  timers.find(t => t.ms === 300000).fn();
+  await tick();
+  return {before, after, older, alert: alert && alert.textContent, refresh: requests.slice(mark).map(([url]) => url),
+          refreshed: document.root.textContent, alertAfterRefresh: Boolean(byRole('alert'))};
+"""
+
+
+def test_an_older_page_loads_by_cursor_and_a_refresh_keeps_it():
+    first = {**NO_LAUNCHES, "launches": SEVEN, "count": 7, "next_cursor": CURSOR}
+    older = {**NO_LAUNCHES, "launches": [_blocked(8), _blocked(9)], "count": 2}
+    result = render(launches_reply=(200, first), older_reply=(200, older), steps=LOAD_OLDER)
+    assert "Showing 7 of the 7 loaded; more blocked launches are on record." in result["before"]
+    assert result["older"] == [
+        f"http://dashboard.test/api/launches/4663?outcome=blocked&limit=20&cursor={quote(CURSOR, safe='')}"
+    ]
+    assert _shown(result["after"]) == list(range(1, 10))
+    assert "Showing 9 of all 9 blocked launches on record." in result["after"]
+    assert result["refresh"] == [
+        "http://dashboard.test/api/launches/4663?outcome=blocked&limit=20",
+        "http://dashboard.test/api/campaigns/top?limit=10",
+    ]
+    assert _shown(result["refreshed"]) == list(range(1, 10))
+    assert "Showing 9 of all 9 blocked launches on record." in result["refreshed"]
+    assert result["alert"] is None
+    assert result["alertAfterRefresh"] is False
+
+
+def test_a_failed_older_page_keeps_the_loaded_launches_and_says_so():
+    first = {**NO_LAUNCHES, "launches": SEVEN, "count": 7, "next_cursor": CURSOR}
+    result = render(launches_reply=(200, first), older_reply=(503, {"detail": "down"}), steps=LOAD_OLDER)
+    assert result["alert"] == "Older launches not loaded (HTTP 503)."
+    assert _shown(result["after"]) == list(range(1, 8))
+    assert "Robinhood Chain launches unavailable." not in result["refreshed"]
+    # The next refresh that succeeds clears the notice.
+    assert result["alertAfterRefresh"] is False
+    assert "LIVE" in result["refreshed"]
+
+
+LEDGER = {
+    "counting_since": 1_790_000_000,
+    "by_provider": {
+        "rpc": {"answered": 275, "unknown": 0, "failed": 0},
+        "sourcify": {"answered": 9, "unknown": 43, "failed": 0},
+        "blockscout": {"answered": 39, "unknown": 0, "failed": 16},
+    },
+    "by_chain": {"4663": {"answered": 323, "unknown": 43, "failed": 16}},
+}
+
+
+def test_provider_answers_list_each_provider_by_lookups_and_each_chain():
+    text = render({**STATS, "unknown_ledger": LEDGER})
+    assert "ProviderAnsweredUnknownFailed" in text
+    assert "rpc27500" in text
+    assert "blockscout39016" in text
+    assert "sourcify9430" in text
+    assert text.index("rpc27500") < text.index("blockscout39016") < text.index("sourcify9430")
+    assert "By chain: Robinhood 323 answered · 43 unknown · 16 failed." in text
+    assert "reports what it could not check as unknown, never as safe." in text
+    assert "This API process counts its own lookups only" not in text
+
+
+def test_provider_answers_with_a_workers_note_say_whose_lookups_they_count():
+    text = render({**STATS, "unknown_ledger": LEDGER, "background_workers_note": WORKERS_NOTE})
+    assert "This API process counts its own lookups only; the hunter and the launch watch count in the workers process." in text
+
+
+def test_provider_answers_with_no_lookups_say_so_not_zero():
+    ledger = {"counting_since": 1_790_000_000, "by_provider": {}, "by_chain": {}}
+    text = render({**STATS, "unknown_ledger": ledger})
+    assert "No provider lookups since " in text
+    assert "By chain" not in text
+
+
+def test_sections_lead_with_robinhood_chain_and_end_with_history():
+    steps = "return descendants(document).filter(el => el.tagName === 'H2').map(el => el.textContent);"
+    assert render(attestations_reply=(200, ATTESTATIONS), steps=steps) == [
+        "Robinhood Chain",
+        "Provider Answers",
+        "Firewall Scans",
+        "Mempool Monitor",
+        "Live Threat Feed",
+        "Feed Analytics",
+        "Top Campaigns",
+        "Base EAS Attestations",
+    ]
 
 
 def test_the_last_day_contracts_scanned_tile_names_its_sources():
     text = render()
+    assert "10Contracts Scannedall time · extension and agent firewalls" in text
     assert "4Contracts Scannedlast 24 h · extension and agent firewalls" in text
     assert "Both contracts scanned counts cover the extension and agent firewalls only" in text
 
@@ -645,8 +840,12 @@ def test_the_launches_panel_polls_on_its_own_slow_cycle():
     """
     result = render(steps=steps)
     assert result["intervals"] == [20000, 300000]
-    assert result["slowUrls"] == ["http://dashboard.test/api/launches/4663?outcome=blocked&limit=20"]
-    assert len(result["fastUrls"]) == 5
-    assert not [url for url in result["fastUrls"] if "/api/launches" in url]
-    assert "This list refreshes every 5 minutes." in result["text"]
-    assert "refreshes every 20 seconds" in result["text"]
+    assert result["slowUrls"] == [
+        "http://dashboard.test/api/launches/4663?outcome=blocked&limit=20",
+        "http://dashboard.test/api/campaigns/top?limit=10",
+    ]
+    assert len(result["fastUrls"]) == 4
+    assert not [url for url in result["fastUrls"] if "/api/launches" in url or "/api/campaigns" in url]
+    assert result["text"].count("This list refreshes every 5 minutes.") == 2
+    assert "refreshes every 20 seconds, launches and campaigns every 5 minutes" in result["text"]
+    assert "No campaigns detected.Deployers with the most contracts on record. This list refreshes every 5 minutes." in result["text"]

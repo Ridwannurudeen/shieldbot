@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ShieldBot Threat Dashboard</title>
-  <meta name="description" content="ShieldBot's public threat dashboard: the newest high-risk contract detections and mempool alerts, with platform statistics and the window each count covers." />
+  <meta name="description" content="ShieldBot's public threat dashboard: the token launches blocked on Robinhood Chain with their published verdicts, how often each data provider answered, the newest firewall detections and mempool alerts, and the window each count covers." />
   <link rel="canonical" href="https://api.shieldbotsecurity.online/dashboard" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBGMTcyQSIvPjxwYXRoIGQ9Ik0xNiAzTDI3IDcuNVYxNUMyNyAyMS41IDE2IDI5IDE2IDI5QzE2IDI5IDUgMjEuNSA1IDE1VjcuNUwxNiAzWiIgZmlsbD0iIzM0RDM5OSIvPjxwYXRoIGQ9Ik0xNiA3TDIzIDEwVjE1QzIzIDE5IDE2IDI0IDE2IDI0QzE2IDI0IDkgMTkgOSAxNVYxMEwxNiA3WiIgZmlsbD0iIzBGMTcyQSIvPjxwb2x5bGluZSBwb2ludHM9IjEyLDE1IDE1LDE4IDIwLDEzIiBmaWxsPSJub25lIiBzdHJva2U9IiMzNEQzOTkiIHN0cm9rZS13aWR0aD0iMi4yIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=" />
 
@@ -128,9 +128,14 @@
     // launches the Robinhood Chain panel requests.
     const LAUNCH_CHAIN     = 4663;
     const LAUNCH_LIMIT     = 20;
-    // Blocked launches accumulate over days, and every request counts against one per-IP limit, so the
-    // panel refreshes on its own slower cycle rather than adding a sixth request to every fast one.
-    const LAUNCH_REFRESH_MS = 300000;
+    // How many loaded blocked launches show before the reader asks for the rest.
+    const LAUNCH_VISIBLE   = 5;
+    // The ShieldBotVerdictRegistry on Robinhood Chain (docs/DEPLOYMENTS.md), where a confirmed record is read.
+    const REGISTRY_ADDRESS = '0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138';
+    // Blocked launches accumulate over days and campaigns are a slow-moving aggregate, and every request
+    // counts against one per-IP limit, so both refresh on their own slower cycle: the fast cycle sends
+    // four requests every 20 s (12 a minute) and this one two every 5 min (0.4 a minute).
+    const SLOW_REFRESH_MS  = 300000;
     // With reduced motion, counts show their value at once, the live dot does not pulse and charts do not animate.
     const REDUCED_MOTION   = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -485,7 +490,24 @@
               t.detected_at || t.created_at || ''].join(':');
     }
 
-    function ThreatLogTable({ threats, loading, error, mempoolUnavailable, onRetry, chain, onChain }) {
+    // The feed lists the contract scores the firewalls write, and launch scans never write them, so the
+    // Robinhood Chain rows are in the launches panel: the link goes there. Null launches are unavailable,
+    // not none, so only a loaded list is counted.
+    function RobinhoodFeedNote({ launches }) {
+      return (
+        <div className="text-center py-16 text-sm" style={{ color:'#94A3B8' }}>
+          <div>No extension or agent firewall detections on Robinhood Chain in the current window.</div>
+          <a href="#robinhood-chain" className="inline-flex items-center mt-3 min-h-[44px] md:min-h-0 font-semibold"
+             style={{ color:'#34D399' }}>
+            {launches && launches.length
+              ? `See the ${launches.length} blocked ${launches.length === 1 ? 'launch' : 'launches'} in the Robinhood Chain panel ↑`
+              : 'Open the Robinhood Chain launches panel ↑'}
+          </a>
+        </div>
+      );
+    }
+
+    function ThreatLogTable({ threats, launches, loading, error, mempoolUnavailable, onRetry, chain, onChain }) {
       const [toast, setToast] = useState(null);
       const [flag,  setFlag]  = useState(null);
 
@@ -533,21 +555,20 @@
             {loading
               ? Array(6).fill(0).map((_,i) => <SkeletonRow key={i} />)
               : filtered.length === 0
-                ? <div className="text-center py-16 text-sm" style={{ color:'#94A3B8' }}>
-                    {error
-                      ? 'Threat data unavailable — check the error above.'
-                      : chain === String(LAUNCH_CHAIN)
-                        ? 'No extension or agent firewall detections on Robinhood Chain in the current window. '
-                          + 'The launches the hunter blocked there are in the Robinhood Chain panel above.'
-                      : mempoolUnavailable
-                        ? chain
-                          ? 'No contract detections on this chain in the current window.'
-                          : 'No contract detections in the current window.'
-                        : chain
-                          ? 'No threats on this chain in the current window.'
-                          : 'No threats detected. Monitoring active.'
-                    }
-                  </div>
+                ? !error && chain === String(LAUNCH_CHAIN)
+                  ? <RobinhoodFeedNote launches={launches} />
+                  : <div className="text-center py-16 text-sm" style={{ color:'#94A3B8' }}>
+                      {error
+                        ? 'Threat data unavailable — check the error above.'
+                        : mempoolUnavailable
+                          ? chain
+                            ? 'No contract detections on this chain in the current window.'
+                            : 'No contract detections in the current window.'
+                          : chain
+                            ? 'No threats on this chain in the current window.'
+                            : 'No threats detected. Monitoring active.'
+                      }
+                    </div>
                 : filtered.map(t => (
                     <ThreatRow key={threatKey(t)} t={t} onCopy={handleCopy} onFlag={setFlag} />
                   ))
@@ -821,31 +842,46 @@
       );
     }
 
-    function RobinhoodPanel({ launches, launchesLoading, stats, loading }) {
+    function RobinhoodPanel({ launches, launchesLoading, cursor, onLoadOlder, loadingOlder, olderError, stats, loading }) {
+      const [expanded, setExpanded] = useState(false);
       // A null count is unknown, never 0: the stats reply may be missing or predate these fields.
-      const share     = (stats && stats.launch_discovery && stats.launch_discovery.scanned_share) || null;
+      const discovery = (stats && stats.launch_discovery) || null;
+      const share     = (discovery && discovery.scanned_share) || null;
       const day       = share ? `last ${share.window_hours} h` : 'last 24 h';
+      const lag       = discovery && discovery.lag_blocks != null ? discovery.lag_blocks : null;
+      const headAt    = discovery ? discovery.confirmed_head_at : null;
       const evidence  = stats && stats.evidence_documents ? (stats.evidence_documents[LAUNCH_CHAIN] || 0) : null;
       const confirmed = stats ? stats.registry_records_confirmed : null;
+      const registry  = (
+        <a href={`${EXPLORERS[LAUNCH_CHAIN]}/address/${REGISTRY_ADDRESS}`} target="_blank" rel="noopener noreferrer"
+           className="inline-flex items-center min-h-[44px] md:min-h-0" style={{ color:'#34D399' }}>
+          Registry contract ↗
+        </a>
+      );
       const tiles = [
-        { label:'Launches Discovered', span:day,                  value: share ? share.launches : null, color:'#F8FAFC' },
-        { label:'Launches Scanned',    span:day,                  value: share ? share.scanned : null,  color:'#F8FAFC' },
-        { label:'Evidence Documents',  span:'stored verdicts',    value: evidence,                      color:'#F8FAFC' },
-        { label:'Registry Records',    span:'confirmed on-chain', value: confirmed,                     color:'#34D399' },
+        { label:'Launches Discovered', span:day,                                  value: share ? share.launches : null, color:'#F8FAFC' },
+        { label:'Launches Scanned',    span:day,                                  value: share ? share.scanned : null,  color:'#F8FAFC' },
+        { label:'Discovery Lag',       span:'blocks behind the confirmed head',   value: lag,                           color:'#F8FAFC',
+          note: headAt ? `head read ${timeAgo(headAt)}` : null },
+        { label:'Evidence Documents',  span:'stored verdicts · all time',         value: evidence,                      color:'#F8FAFC' },
+        { label:'Registry Records',    span:'confirmed on-chain',                 value: confirmed,                     color:'#34D399', note: registry },
       ];
+      const shown = launches && !expanded ? launches.slice(0, LAUNCH_VISIBLE) : launches;
+      const allShown = Boolean(launches) && shown.length === launches.length;
       return (
         <div className="glass rounded-xl p-4 md:p-5" style={{ border:'1px solid #334155' }}>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3 mb-4">
             {tiles.map(t => (
-              <StatCard key={t.label} label={t.label} span={t.span} value={t.value} color={t.color} loading={loading} />
+              <StatCard key={t.label} label={t.label} span={t.span} value={t.value} color={t.color} loading={loading} note={t.note} />
             ))}
           </div>
           <div className="text-xs mb-3 max-w-[72ch]" style={{ color:'#94A3B8' }}>
-            Launch discovery records the token launches it reads on Robinhood Chain. Scans share one small RPC
-            budget and only launches seen trading soon after launch are picked, so launches scanned says how
-            many of the last day's launches have any outcome. Below are the launches the hunter blocked, newest
-            block first, up to {LAUNCH_LIMIT}. These scans are recorded on each launch and in its verdict, not
-            in the contract counts above. This list refreshes every {LAUNCH_REFRESH_MS / 60000} minutes.
+            Launch discovery records the token launches it reads on Robinhood Chain; its lag is how far its cursor
+            is behind the confirmed head it last read. Scans share one small RPC budget and only launches seen
+            trading soon after launch are picked, so launches scanned says how many of the last day's launches
+            have any outcome. Below are the launches the hunter blocked, newest block first, each linking its
+            published verdict where one is recorded. These scans are recorded on each launch and in its verdict,
+            not in the firewall counts below. This list refreshes every {SLOW_REFRESH_MS / 60000} minutes.
           </div>
           <div className="flex flex-col gap-2">
             {launchesLoading
@@ -854,9 +890,118 @@
                 ? <div className="text-center py-8 text-sm" style={{ color:'#94A3B8' }}>Robinhood Chain launches unavailable.</div>
                 : launches.length === 0
                   ? <div className="text-center py-8 text-sm" style={{ color:'#94A3B8' }}>No blocked launches on record.</div>
-                  : launches.map(l => <LaunchRow key={l.token_address} launch={l} />)
+                  : shown.map(l => <LaunchRow key={l.token_address} launch={l} />)
             }
           </div>
+          {launches && launches.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-xs" style={{ color:'#94A3B8' }}>
+              <span>
+                {cursor
+                  ? `Showing ${shown.length} of the ${launches.length} loaded; more blocked launches are on record.`
+                  : launches.length === 1
+                    ? 'The only blocked launch on record.'
+                    : `Showing ${shown.length} of all ${launches.length} blocked launches on record.`}
+              </span>
+              <span className="flex flex-wrap items-center gap-2">
+                {launches.length > LAUNCH_VISIBLE && (
+                  <button onClick={() => setExpanded(v => !v)} aria-expanded={expanded}
+                          className="px-3 py-1.5 min-h-[44px] md:min-h-0 rounded-lg text-xs font-semibold transition-colors"
+                          style={{ background:'rgba(52,211,153,0.15)', color:'#34D399' }}>
+                    {expanded ? `Show the newest ${LAUNCH_VISIBLE} only` : `Show ${launches.length - LAUNCH_VISIBLE} more`}
+                  </button>
+                )}
+                {allShown && cursor && (
+                  <button onClick={onLoadOlder} disabled={loadingOlder}
+                          className="px-3 py-1.5 min-h-[44px] md:min-h-0 rounded-lg text-xs font-semibold transition-colors"
+                          style={{ background:'rgba(52,211,153,0.15)', color:'#34D399', opacity: loadingOlder ? 0.5 : 1 }}>
+                    {loadingOlder ? 'Loading…' : 'Load older blocked launches'}
+                  </button>
+                )}
+              </span>
+            </div>
+          )}
+          {olderError && <div role="alert" className="text-xs mt-2" style={{ color:'#F87171' }}>{olderError}</div>}
+        </div>
+      );
+    }
+
+    // ─── Provider Answers ────────────────────────────────────────────────────
+    // The Unknown ledger (core/unknown_ledger.py) as /api/stats carries it: one count per lookup sent
+    // to a data provider. The rows come with the stats reply, so this panel sends no request of its own.
+    const LEDGER_OUTCOMES = [
+      { key:'answered', label:'Answered', color:'#4ADE80' },
+      { key:'unknown',  label:'Unknown',  color:SEV.UNKNOWN.text },
+      { key:'failed',   label:'Failed',   color:'#F87171' },
+    ];
+
+    function ledgerRows(table, name) {
+      return Object.entries(table || {})
+        .map(([key, counts]) => ({ name: name(key), ...counts, total: counts.answered + counts.unknown + counts.failed }))
+        .sort((a, b) => b.total - a.total);
+    }
+
+    function ProviderAnswersPanel({ stats, loading }) {
+      const ledger = stats ? stats.unknown_ledger : null;
+      if (loading) {
+        return (
+          <div className="glass rounded-xl p-4 md:p-5 flex flex-col gap-2" style={{ border:'1px solid #334155' }}>
+            {Array(3).fill(0).map((_,i) => <SkeletonRow key={i} />)}
+          </div>
+        );
+      }
+      if (!ledger) {
+        return (
+          <div className="glass rounded-xl p-4 md:p-5 text-center py-8 text-sm" style={{ border:'1px solid #334155', color:'#94A3B8' }}>
+            Provider answers unavailable.
+          </div>
+        );
+      }
+      const since     = new Date(ledger.counting_since * 1000).toLocaleString();
+      const providers = ledgerRows(ledger.by_provider, key => key);
+      const chains    = ledgerRows(ledger.by_chain, key => CHAIN_NAMES[key] || `Chain ${key}`);
+      return (
+        <div className="glass rounded-xl p-4 md:p-5" style={{ border:'1px solid #334155' }}>
+          <div className="text-xs mb-3 max-w-[72ch]" style={{ color:'#94A3B8' }}>
+            Every lookup ShieldBot sent a data provider since {since}, when this count began. Answered is the data
+            asked for; unknown is the provider saying it has none for that subject; failed is no usable reply. A
+            scan missing an answer reports what it could not check as unknown, never as safe.
+            {stats.background_workers_note
+              && ' This API process counts its own lookups only; the hunter and the launch watch count in the workers process.'}
+          </div>
+          {providers.length === 0
+            ? <div className="text-center py-8 text-sm" style={{ color:'#94A3B8' }}>No provider lookups since {since}.</div>
+            : <div style={{ overflowX:'auto' }}>
+                <table className="w-full text-xs" style={{ borderCollapse:'collapse' }}>
+                  <thead>
+                    <tr style={{ color:'#94A3B8' }}>
+                      <th scope="col" className="text-left font-medium py-2 pr-3">Provider</th>
+                      {LEDGER_OUTCOMES.map(o => (
+                        <th key={o.key} scope="col" className="text-right font-medium py-2 pl-3">{o.label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {providers.map(row => (
+                      <tr key={row.name} style={{ borderTop:'1px solid #334155' }}>
+                        <th scope="row" className="text-left font-mono font-medium py-2 pr-3"
+                            style={{ color:'#E2E8F0', fontFamily:'JetBrains Mono,monospace' }}>{row.name}</th>
+                        {LEDGER_OUTCOMES.map(o => (
+                          <td key={o.key} className="text-right tabular-nums py-2 pl-3"
+                              style={{ color: row[o.key] ? o.color : '#64748B' }}>{row[o.key].toLocaleString()}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+          }
+          {chains.length > 0 && (
+            <div className="text-xs mt-3" style={{ color:'#94A3B8' }}>
+              By chain: {chains.map(row =>
+                `${row.name} ${row.answered.toLocaleString()} answered · ${row.unknown.toLocaleString()} unknown · ${row.failed.toLocaleString()} failed`
+              ).join('; ')}.
+            </div>
+          )}
         </div>
       );
     }
@@ -926,9 +1071,10 @@
       );
     }
 
-    function Section({ title, children }) {
+    // A section with an id is a link target; the margin keeps its title out from under the sticky header.
+    function Section({ id, title, children }) {
       return (
-        <section>
+        <section id={id} style={id ? { scrollMarginTop:96 } : undefined}>
           <h2 className="text-sm font-semibold uppercase tracking-widest mb-3"
               style={{ color:'#94A3B8' }}>{title}</h2>
           {children}
@@ -975,7 +1121,7 @@
               </div>
             </div>
             <div className="text-xs mt-0.5" style={{ color:'#94A3B8' }}>
-              Contract detections and mempool alerts · refreshes every {REFRESH_MS / 1000} seconds
+              Robinhood Chain launch scans, firewall detections and mempool alerts · refreshes every {REFRESH_MS / 1000} seconds, launches and campaigns every {SLOW_REFRESH_MS / 60000} minutes
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -999,22 +1145,24 @@
       );
     }
 
-    // ─── Platform Stats Bar ────────────────────────────────────────────────────
-    // Every count on the page comes from /api/stats; each says the window it covers.
-    const STAT_ITEMS = [
+    // ─── Firewall and Mempool Stats ────────────────────────────────────────────
+    // Every count on the page comes from /api/stats; each says the window it covers. The firewall
+    // counts read the contract scores the extension and agent firewalls write; the mempool counts are
+    // the monitor's in-memory counters.
+    const FIREWALL_ITEMS = [
+      { key:'contracts_scanned',        label:'Contracts Scanned',    span:'all time · extension and agent firewalls',  color:'#F8FAFC' },
+      { key:'contracts_scanned_24h',    label:'Contracts Scanned',    span:'last 24 h · extension and agent firewalls', color:'#F8FAFC' },
+      { key:'threats_detected',         label:'Contract Threats',     span:'on record', color:'#F87171' },
+      { key:'threats_detected_24h',     label:'Contract Threats',     span:'last 24 h', color:'#F87171' },
+      { key:'transactions_blocked',     label:'Transactions Blocked', span:'all time',  color:'#F87171' },
+      { key:'transactions_blocked_24h', label:'Transactions Blocked', span:'last 24 h', color:'#F87171' },
+    ];
+
+    const MEMPOOL_ITEMS = [
       { key:'transactions_monitored', label:'Transactions Monitored', span:'since monitor start', color:'#F8FAFC' },
-      { key:'contracts_scanned',      label:'Contracts Scanned',      span:'all time',            color:'#F8FAFC' },
-      { key:'threats_detected',       label:'Contract Threats',       span:'on record',           color:'#F87171' },
-      { key:'transactions_blocked',   label:'Transactions Blocked',   span:'all time',            color:'#F87171' },
       { key:'sandwiches_caught',      label:'Sandwich Attacks Caught',span:'since monitor start', color:'#FB923C' },
       { key:'suspicious_approvals',   label:'Suspicious Approvals',   span:'since monitor start', color:'#FACC15' },
       { key:'chains_protected',       label:'Mempool Chains Watched', span:'last poll',           color:'#34D399' },
-    ];
-
-    const DAY_ITEMS = [
-      { key:'contracts_scanned_24h',    label:'Contracts Scanned',    span:'last 24 h · extension and agent firewalls', color:'#F8FAFC' },
-      { key:'threats_detected_24h',     label:'Contract Threats',     span:'last 24 h', color:'#F87171' },
-      { key:'transactions_blocked_24h', label:'Transactions Blocked', span:'last 24 h', color:'#F87171' },
     ];
 
     function useCountUp(target, duration = 1200) {
@@ -1049,10 +1197,10 @@
       return stats && stats.background_workers_note && MEMPOOL_KEYS.includes(key) ? 'Unavailable' : '—';
     }
 
-    function StatCard({ label, span, value, color, loading, note, missing = '—', className = '' }) {
+    function StatCard({ label, span, value, color, loading, note, missing = '—' }) {
       const display = useCountUp(loading || value == null ? 0 : value);
       return (
-        <div className={`glass rounded-xl p-4 fade-up flex flex-col gap-1 text-center ${className}`}
+        <div className="glass rounded-xl p-4 fade-up flex flex-col gap-1 text-center"
              style={{ border:'1px solid #1E293B', minWidth:0 }}>
           {loading
             ? <div className="skeleton mx-auto" style={{ height:28, width:72 }} />
@@ -1068,11 +1216,35 @@
       );
     }
 
-    function PlatformStatsBar({ stats, loading }) {
-      const since = stats && stats.mempool_counting_since;
-      const dashed = stats && STAT_ITEMS.some(s => stats[s.key] == null && missingText(stats, s.key) === '—');
+    function FirewallStatsBar({ stats, loading }) {
+      const dashed = stats && FIREWALL_ITEMS.some(s => stats[s.key] == null);
       const footnote = stats === null
-        ? 'Platform statistics are unavailable right now.'
+        ? 'Firewall statistics are unavailable right now.'
+        : 'Both contracts scanned counts cover the extension and agent firewalls only; Telegram, /api/scan and '
+          + 'Robinhood Chain launch scans are not in them. A contract threat is a contract those firewalls scored '
+          + 'high risk. On record means its latest score, since a rescan replaces it; it counts in the last 24 h '
+          + 'when that scan falls in the window.'
+          + (dashed ? ' A dash means that source is not reporting right now.' : '');
+      return (
+        <div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+            {FIREWALL_ITEMS.map(s => (
+              <StatCard key={s.key} label={s.label} span={s.span} value={stats ? stats[s.key] : null}
+                        color={s.color} loading={loading} />
+            ))}
+          </div>
+          {!loading && (
+            <div className="text-xs mt-2 max-w-[72ch]" style={{ color:'#94A3B8' }}>{footnote}</div>
+          )}
+        </div>
+      );
+    }
+
+    function MempoolStatsBar({ stats, loading }) {
+      const since = stats && stats.mempool_counting_since;
+      const dashed = stats && MEMPOOL_ITEMS.some(s => stats[s.key] == null && missingText(stats, s.key) === '—');
+      const footnote = stats === null
+        ? 'Mempool statistics are unavailable right now.'
         : [
             stats.background_workers_note
               && 'Unavailable: the mempool monitor runs in a separate process that this API does not read, so its counts are unknown here, not zero.',
@@ -1087,38 +1259,16 @@
         : null;
       return (
         <div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-3">
-            {STAT_ITEMS.map(s => (
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+            {MEMPOOL_ITEMS.map(s => (
               <StatCard key={s.key} label={s.label} span={s.span} value={stats ? stats[s.key] : null}
                         color={s.color} loading={loading} missing={missingText(stats, s.key)}
-                        note={s.key === 'chains_protected' ? mempoolNote : null}
-                        className={s.key === 'chains_protected' ? 'col-span-2 xl:col-span-1' : ''} />
+                        note={s.key === 'chains_protected' ? mempoolNote : null} />
             ))}
           </div>
           {!loading && footnote && (
             <div className="text-xs mt-2 max-w-[72ch]" style={{ color:'#94A3B8' }}>{footnote}</div>
           )}
-        </div>
-      );
-    }
-
-    function LastDayBar({ stats, loading }) {
-      return (
-        <div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {DAY_ITEMS.map(s => (
-              <StatCard key={s.key} label={s.label} span={s.span} value={stats ? stats[s.key] : null}
-                        color={s.color} loading={loading} />
-            ))}
-          </div>
-          <div className="text-xs mt-2 max-w-[72ch]" style={{ color:'#94A3B8' }}>
-            Both contracts scanned counts cover the extension and agent firewalls only; Telegram, /api/scan and
-            Robinhood Chain launch scans are not in them. A contract threat is a contract those firewalls scored
-            high risk. On record means
-            its latest score, since a rescan replaces it; it counts in the last 24 h when that scan falls in the
-            window. The charts and the feed below show only the newest
-            {' '}{FEED_LIMIT} contract detections and newest {FEED_LIMIT} mempool alerts, so they are not counts.
-          </div>
         </div>
       );
     }
@@ -1138,13 +1288,25 @@
       return (b.detected_at || b.created_at || 0) - (a.detected_at || a.created_at || 0);
     }
 
+    // The newer list first; a launch on both lists is kept from it.
+    function mergeLaunches(newer, older) {
+      const seen = new Set(newer.map(l => l.token_address));
+      return newer.concat(older.filter(l => !seen.has(l.token_address)));
+    }
+
     function App() {
       const [threats,   setThreats]   = useState([]);
       const [feedOk,    setFeedOk]    = useState(true);
       const [capped,    setCapped]    = useState([]);
       const [campaigns, setCampaigns] = useState([]);
       const [launches,  setLaunches]  = useState([]);
-      const [launchesLoading, setLaunchesLoading] = useState(true);
+      const [slowLoading, setSlowLoading] = useState(true);
+      // The next page of blocked launches, null once the loaded list is every one on record.
+      const [launchCursor, setLaunchCursor] = useState(null);
+      const [loadingOlder, setLoadingOlder] = useState(false);
+      const [olderError,   setOlderError]   = useState(null);
+      // Once older pages are loaded, a refresh keeps them and its cursor stays the deepest one.
+      const olderLoaded = useRef(false);
       const [stats,     setStats]     = useState(null);
       const [loading,   setLoading]   = useState(true);
       const [error,     setError]     = useState(null);
@@ -1163,11 +1325,10 @@
           const results = await Promise.allSettled([
             getJSON(`/api/threats/feed?source=contracts&limit=${FEED_LIMIT}`),
             getJSON(`/api/threats/feed?source=mempool&limit=${FEED_LIMIT}`),
-            getJSON('/api/campaigns/top?limit=10'),
             getJSON('/api/stats'),
             getJSON('/api/base/attestations?limit=20'),
           ]);
-          const [fc, fm, c, p, b] = results;
+          const [fc, fm, p, b] = results;
 
           const feeds = [['contract detections', fc], ['mempool alerts', fm]];
           const loaded = feeds.filter(([, x]) => x.status === 'fulfilled');
@@ -1191,7 +1352,6 @@
           const mempoolReason = fm.status === 'fulfilled' ? fm.value.mempool_unavailable || null : null;
           setMempoolUnavailable(mempoolReason);
 
-          setCampaigns(c.status === 'fulfilled' ? (c.value.campaigns || []) : null);
           setStats(p.status === 'fulfilled' ? p.value : null);
           setBaseAttestations(b.status === 'fulfilled' ? b.value : NO_ATTESTATIONS);
 
@@ -1214,29 +1374,59 @@
         return () => clearInterval(id);
       }, [fetchData]);
 
-      // Null launches are unavailable, never "no blocked launches"; a failed fetch never blanks the page.
-      const fetchLaunches = useCallback(async () => {
+      // The slow cycle: blocked launches and campaigns. Null launches or campaigns are unavailable, never
+      // "none"; a failed fetch never blanks the page. A launches refresh re-reads the newest page only:
+      // with no older page loaded it replaces the list, so a launch a recheck cleared drops out;
+      // otherwise it is merged ahead of the pages the reader loaded.
+      const fetchSlow = useCallback(async () => {
         try {
-          const reply = await getJSON(`/api/launches/${LAUNCH_CHAIN}?outcome=blocked&limit=${LAUNCH_LIMIT}`);
-          setLaunches(reply.launches || []);
-        } catch (e) {
-          setLaunches(null);
+          const [l, c] = await Promise.allSettled([
+            getJSON(`/api/launches/${LAUNCH_CHAIN}?outcome=blocked&limit=${LAUNCH_LIMIT}`),
+            getJSON('/api/campaigns/top?limit=10'),
+          ]);
+          if (l.status === 'fulfilled') {
+            const page = l.value.launches || [];
+            setLaunches(prev => olderLoaded.current ? mergeLaunches(page, prev) : page);
+            if (!olderLoaded.current) setLaunchCursor(l.value.next_cursor || null);
+            setOlderError(null);
+          } else {
+            setLaunches(null);
+          }
+          setCampaigns(c.status === 'fulfilled' ? (c.value.campaigns || []) : null);
         } finally {
-          setLaunchesLoading(false);
+          setSlowLoading(false);
         }
       }, []);
 
       useEffect(() => {
-        fetchLaunches();
-        const id = setInterval(fetchLaunches, LAUNCH_REFRESH_MS);
+        fetchSlow();
+        const id = setInterval(fetchSlow, SLOW_REFRESH_MS);
         return () => clearInterval(id);
-      }, [fetchLaunches]);
+      }, [fetchSlow]);
 
-      // The launches panel counts as one more source for the header's health, as it did when it was fetched
-      // with the others: its failure is partial data, and a page whose other sources all failed is offline
-      // only once it has failed too.
-      const shownHealth = launchesLoading || health === 'connecting' ? health
-        : launches === null ? (health === 'offline' ? 'offline' : 'degraded')
+      // One request per click, outside both refresh cycles. A failed page keeps the rows already shown.
+      const loadOlder = useCallback(async () => {
+        setLoadingOlder(true);
+        setOlderError(null);
+        try {
+          const reply = await getJSON(
+            `/api/launches/${LAUNCH_CHAIN}?outcome=blocked&limit=${LAUNCH_LIMIT}&cursor=${encodeURIComponent(launchCursor)}`);
+          olderLoaded.current = true;
+          setLaunches(prev => mergeLaunches(prev || [], reply.launches || []));
+          setLaunchCursor(reply.next_cursor || null);
+        } catch (e) {
+          setOlderError(`Older launches not loaded (${e.message}).`);
+        } finally {
+          setLoadingOlder(false);
+        }
+      }, [launchCursor]);
+
+      // The slow sources count for the header's health as they did when fetched with the others: one that
+      // failed is partial data, and a page whose fast sources all failed is offline only once both have
+      // failed too. Until the slow cycle has answered once, the fast cycle's health stands.
+      const slowFailed = [launches, campaigns].filter(x => x === null).length;
+      const shownHealth = slowLoading || health === 'connecting' ? health
+        : slowFailed ? (health === 'offline' && slowFailed === 2 ? 'offline' : 'degraded')
         : health === 'offline' ? 'degraded' : health;
 
       const velocityData = useMemo(() => bucketByHour(threats),    [threats]);
@@ -1248,41 +1438,53 @@
 
           <main className="px-4 md:px-8 py-6 space-y-8 mx-auto" style={{ maxWidth:1600 }}>
 
-            <Section title="Platform Statistics">
-              <PlatformStatsBar stats={stats} loading={loading} />
+            <Section id="robinhood-chain" title="Robinhood Chain">
+              <RobinhoodPanel launches={launches} launchesLoading={slowLoading} cursor={launchCursor}
+                              onLoadOlder={loadOlder} loadingOlder={loadingOlder} olderError={olderError}
+                              stats={stats} loading={loading} />
             </Section>
 
-            <Section title="Last 24 Hours">
-              <LastDayBar stats={stats} loading={loading} />
+            <Section title="Provider Answers">
+              <ProviderAnswersPanel stats={stats} loading={loading} />
             </Section>
 
-            <Section title="Robinhood Chain">
-              <RobinhoodPanel launches={launches} launchesLoading={launchesLoading} stats={stats} loading={loading} />
+            <Section title="Firewall Scans">
+              <FirewallStatsBar stats={stats} loading={loading} />
             </Section>
 
-            <Section title="Analytics">
+            <Section title="Mempool Monitor">
+              <MempoolStatsBar stats={stats} loading={loading} />
+            </Section>
+
+            <Section title="Live Threat Feed">
+              <div className="glass rounded-xl p-4 md:p-5" style={{ border:'1px solid #334155' }}>
+                <div className="text-xs mb-3" style={{ color:'#94A3B8' }}>
+                  The newest {FEED_LIMIT} contract detections and the newest {FEED_LIMIT} mempool alerts, so the
+                  feed and the charts below it are not counts. Contract detections come from the extension and
+                  agent firewalls; Robinhood Chain launch scans are in the{' '}
+                  <a href="#robinhood-chain" style={{ color:'#34D399' }}>Robinhood Chain panel</a>.
+                </div>
+                <ThreatLogTable
+                  threats={threats} launches={launches} loading={loading} error={error} mempoolUnavailable={mempoolUnavailable}
+                  onRetry={fetchData} chain={chain} onChain={setChain}
+                />
+              </div>
+            </Section>
+
+            <Section title="Feed Analytics">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <ThreatVelocityChart data={velocityData} loading={loading} unavailable={!feedOk} capped={capped} />
                 <ChainDistributionChart data={chainData} loading={loading} unavailable={!feedOk} capped={capped} />
               </div>
             </Section>
 
-            <Section title="Live Threat Feed">
-              <div className="glass rounded-xl p-4 md:p-5" style={{ border:'1px solid #334155' }}>
-                <div className="text-xs mb-3" style={{ color:'#94A3B8' }}>
-                  The newest {FEED_LIMIT} contract detections and the newest {FEED_LIMIT} mempool alerts. Contract
-                  detections come from the extension and agent firewalls; Robinhood Chain launch scans are in the
-                  panel above.
-                </div>
-                <ThreatLogTable
-                  threats={threats} loading={loading} error={error} mempoolUnavailable={mempoolUnavailable}
-                  onRetry={fetchData} chain={chain} onChain={setChain}
-                />
-              </div>
-            </Section>
-
             <Section title="Top Campaigns">
-              <CampaignsGrid campaigns={campaigns} loading={loading} />
+              <CampaignsGrid campaigns={campaigns} loading={slowLoading} />
+              {!slowLoading && (
+                <div className="text-xs mt-2" style={{ color:'#94A3B8' }}>
+                  Deployers with the most contracts on record. This list refreshes every {SLOW_REFRESH_MS / 60000} minutes.
+                </div>
+              )}
             </Section>
 
             {baseAttestations.available && (

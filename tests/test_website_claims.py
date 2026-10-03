@@ -225,6 +225,18 @@ def test_the_site_shows_the_robinhood_contract_addresses():
     assert not re.search(r"0x[0-9a-fA-F]{64}", bundle)
 
 
+def test_dashboard_links_the_registry_recorded_in_deployments():
+    # The Registry Records tile links the ShieldBotVerdictRegistry as docs/DEPLOYMENTS.md records it.
+    deployments = read(ROOT / "docs" / "DEPLOYMENTS.md")
+    row = re.search(
+        r"^\| `ShieldBotVerdictRegistry` \| Robinhood Chain \(4663\) \| \[`(0x[0-9a-fA-F]{40})`\]",
+        deployments,
+        re.MULTILINE,
+    )
+    assert row
+    assert f"const REGISTRY_ADDRESS = '{row.group(1)}';" in read(DASHBOARD_SRC)
+
+
 def test_evidence_links_are_not_fine_print():
     assert "text-faint" not in read(COMPONENTS / "VerdictDemo.tsx")
     assert "min-h-[44px]" in read(COMPONENTS / "ContractCard.tsx")
