@@ -1,8 +1,12 @@
 import asyncio
+import json
 import logging
+import re
 import time
 from decimal import Decimal, InvalidOperation
 from typing import Optional
+
+from eth_utils import keccak
 
 from adapters.evm_base import BURN_ADDRESSES
 
@@ -21,6 +25,16 @@ BYTECODE_PATTERNS = {
 
 # Small delay between BscScan API calls to avoid free-tier rate limit (5/sec)
 BSCSCAN_DELAY = 0.25
+
+# Words the source line reports, each attributed to a function the deployed code dispatches to
+SOURCE_PATTERNS = [
+    'onlyOwner', 'blacklist', 'addBlacklist', 'setMaxTx',
+    'setMaxWallet', 'setFee', 'setTax', 'mint', 'pause',
+]
+
+COMMENTS_AND_STRINGS = re.compile(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'|/\*.*?\*/|//[^\n]*', re.S)
+FUNCTION_HEADER = re.compile(r'\bfunction\s+(\w+)\s*\(([^)]*)\)([^{;]*)')
+TYPE_AND_ARRAYS = re.compile(r'([A-Za-z_]\w*)((?:\[\d*\])*)')
 
 
 def push4_operands(bytecode_hex: str) -> set:
@@ -42,6 +56,79 @@ def push4_operands(bytecode_hex: str) -> set:
             position += opcode - 0x5f
         position += 1
     return operands
+
+
+def source_files(source_code: str) -> list:
+    """The files in an explorer's source reply: a standard JSON input wrapped in one more pair of
+    braces, a map of files, or one flat file. A reply that does not parse is read as one file.
+    """
+    text = source_code.strip()
+    if text.startswith('{'):
+        try:
+            data = json.loads(text[1:-1] if text.startswith('{{') else text)
+        except ValueError:
+            return [source_code]
+        if isinstance(data, dict):
+            sources = data.get('sources', data)
+            if isinstance(sources, dict):
+                return [
+                    file['content'] for file in sources.values()
+                    if isinstance(file, dict) and isinstance(file.get('content'), str)
+                ]
+    return [source_code]
+
+
+def canonical_type(param: str) -> Optional[str]:
+    """A parameter's ABI type when it is elementary (uint, address, bytes32, address[] ...), else
+    None: a struct, enum or contract type is not resolved, so its function is not attributed.
+    """
+    match = TYPE_AND_ARRAYS.match(param.strip())
+    if not match:
+        return None
+    base, arrays = match.groups()
+    if base in ('uint', 'int'):
+        base += '256'
+    elif base.startswith(('uint', 'int')):
+        bits = base.lstrip('uint')
+        if not bits.isdigit() or int(bits) % 8 or not 8 <= int(bits) <= 256:
+            return None
+    elif base.startswith('bytes') and base != 'bytes':
+        if not base[5:].isdigit() or not 1 <= int(base[5:]) <= 32:
+            return None
+    elif base not in ('address', 'bool', 'string', 'bytes'):
+        return None
+    return base + arrays
+
+
+def live_source_patterns(source_code: str, operands: set) -> list:
+    """The SOURCE_PATTERNS words borne by functions the deployed code dispatches to.
+
+    The published source is a bundle of every file the compiler read, so a word found anywhere in
+    it says nothing about the contract at the address: a function counts only when its selector,
+    hashed from its declaration, is one the bytecode compares against (`operands`), and comments
+    and string literals are never read. A name pattern is found in a counted function's name, as
+    written or capitalised inside it (mintAllocations, isBlacklisted, not minTicketBalance);
+    onlyOwner is found among a counted function's modifiers.
+    """
+    functions = []
+    for text in source_files(source_code):
+        code = COMMENTS_AND_STRINGS.sub(' ', text)
+        for name, params, header in FUNCTION_HEADER.findall(code):
+            types = [canonical_type(param) for param in params.split(',')] if params.strip() else []
+            if None in types:
+                continue
+            if keccak(text=f'{name}({",".join(types)})')[:4].hex() in operands:
+                functions.append((name, re.findall(r'\w+', header)))
+    found = []
+    for pattern in SOURCE_PATTERNS:
+        if pattern == 'onlyOwner':
+            hit = any('onlyOwner' in modifiers for _, modifiers in functions)
+        else:
+            capitalised = pattern[0].upper() + pattern[1:]
+            hit = any(pattern in name or capitalised in name for name, _ in functions)
+        if hit:
+            found.append(pattern)
+    return found
 
 
 def top_holder_share(goplus: dict, excluded: set) -> Optional[float]:
@@ -167,6 +254,7 @@ class ContractService:
             has_pause = None
             has_blacklist = None
             has_destroy = None
+            operands = set()
 
             try:
                 bytecode = await self.web3_client.get_bytecode(address, chain_id=chain_id)
@@ -215,19 +303,7 @@ class ContractService:
             results['has_blacklist'] = has_blacklist
             results['has_destroy'] = has_destroy
 
-            # Source code patterns
-            source_patterns = []
-            if source_code:
-                patterns_to_check = [
-                    'onlyOwner', 'blacklist', 'addBlacklist', 'setMaxTx',
-                    'setMaxWallet', 'setFee', 'setTax', 'selfdestruct',
-                    'delegatecall', 'mint', 'pause', 'proxy',
-                ]
-                for pat in patterns_to_check:
-                    if pat.lower() in source_code.lower():
-                        source_patterns.append(pat)
-
-            results['source_code_patterns'] = source_patterns
+            results['source_code_patterns'] = live_source_patterns(source_code, operands) if source_code else []
 
             return {**defaults, **results}
 
