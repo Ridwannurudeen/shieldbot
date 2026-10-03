@@ -39,7 +39,7 @@ class HoneypotAnalyzer(Analyzer):
         if data.get('simulation_failed'):
             data['coverage']['can_sell'] = False
             data['reason'] = data.get('reason') or 'Honeypot simulation failed (unresolved)'
-        # ShieldBot's own simulation could not run: sellability stays unknown, without the +40 below.
+        # ShieldBot's own simulation could not run: sellability stays unknown.
         if data.get('rpc_failed'):
             data['coverage']['can_sell'] = False
             data['reason'] = data.get('reason') or 'Honeypot simulation could not run (unresolved)'
@@ -61,9 +61,6 @@ class HoneypotAnalyzer(Analyzer):
             # The doubt is explanation only: the simulated sell still failed, so the score stands.
             if d.get('likely_false_positive'):
                 flags.append('Honeypot flag may be a false positive: the contract is verified and its taxes are normal')
-        if d.get('simulation_failed') and not d.get('is_honeypot'):
-            score += 40
-            flags.append('Honeypot simulation failed — treat as suspicious')
         if d.get('can_sell') is False:
             score += 60
             flags.append('Cannot sell token')

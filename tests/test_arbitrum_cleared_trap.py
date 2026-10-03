@@ -1,6 +1,6 @@
 """A trap in one Arbitrum One pool that the deepest pool's clean sell kept from deciding the token leaves the
-scan unknown and suspicious, even beside a complete and clean GoPlus answer: the trap is evidence, and GoPlus
-misses the honeypots the simulation exists to catch."""
+scan unknown, even beside a complete and clean GoPlus answer: the trap is evidence, and GoPlus misses the
+honeypots the simulation exists to catch."""
 
 import pytest
 
@@ -16,7 +16,7 @@ from tests.test_own_simulation_failure import arbitrum_adapter, scan
 
 
 @pytest.mark.asyncio
-async def test_a_trap_cleared_by_the_deepest_pools_sell_stays_suspicious_beside_a_complete_clean_goplus_answer():
+async def test_a_trap_cleared_by_the_deepest_pools_sell_stays_unknown_beside_a_complete_clean_goplus_answer():
     clean = load("v3_arb")
     fixture, rpc = _pools_answering(clean, failed_sell(clean, error_string("STF")))
     with fresh_addresses(fixture):
@@ -26,10 +26,12 @@ async def test_a_trap_cleared_by_the_deepest_pools_sell_stays_suspicious_beside_
     assert extension["risk_classification"] != "SAFE"
     assert data["can_sell"] is None and "can_sell" not in data["field_providers"]
     assert data["coverage"]["can_sell"] is False
-    # Scored as any sell simulation that could not settle the token.
+    # Left unknown as any sell simulation that could not settle the token: the simulator decided neither
+    # way, so the scan takes the MEDIUM floor of missing coverage, not points.
     assert data["simulation_failed"] is True
-    assert analyzed.score == 40
-    assert any("treat as suspicious" in flag for flag in analyzed.flags)
+    assert analyzed.score == 0
+    assert not any("suspicious" in flag for flag in analyzed.flags)
+    assert risk["risk_level"] == "MEDIUM" and risk["category_scores"]["honeypot"] is None
     assert "not counted as a trap" in data["reason"]
     # GoPlus's "not a honeypot" fills the field, as after any failed simulation, and is reported unresolved.
     assert (data["is_honeypot"], data["field_providers"]["is_honeypot"]) == (False, "goplus")

@@ -420,7 +420,6 @@ class TestHoneypotUnknowns:
     @pytest.mark.asyncio
     @pytest.mark.parametrize('data, expected', [
         ({'is_honeypot': True, 'sell_tax': None, 'buy_tax': None}, 80),
-        ({'simulation_failed': True, 'sell_tax': None, 'buy_tax': None}, 40),
         ({'can_sell': False, 'sell_tax': None, 'buy_tax': None}, 60),
         ({'is_honeypot': False, 'can_buy': True, 'can_sell': True, 'sell_tax': 55, 'buy_tax': 25}, 50),
     ])
@@ -430,6 +429,26 @@ class TestHoneypotUnknowns:
         service.fetch_honeypot_data = AsyncMock(return_value=data)
         result = await HoneypotAnalyzer(service).analyze(AnalysisContext(address='0xABC'))
         assert result.score == expected
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('data', [
+        {'simulation_failed': True, 'sell_tax': None, 'buy_tax': None},
+        {'simulation_failed': True, 'is_honeypot': False, 'can_buy': True, 'can_sell': True, 'sell_tax': 0, 'buy_tax': 0},
+    ])
+    async def test_failed_simulation_is_unknown_not_suspicious(self, data):
+        # A simulation that could not be performed measured nothing about the token: sellability is
+        # uncovered, which the engine renormalises around, and no points or suspicion are invented.
+        from analyzers.honeypot import HoneypotAnalyzer
+        service = MagicMock()
+        service.fetch_honeypot_data = AsyncMock(return_value=data)
+        result = await HoneypotAnalyzer(service).analyze(AnalysisContext(address='0xABC'))
+        assert result.score == 0
+        assert result.data.get('can_sell') is None and result.data['coverage']['can_sell'] is False
+        assert result.data['status'] == 'unknown'
+        assert [flag for flag in result.flags if 'unknown' in flag] == [
+            'Sellability unknown: Honeypot simulation failed (unresolved)'
+        ]
+        assert not any('suspicious' in flag for flag in result.flags)
 
 
 class TestHoneypotTransferRestrictions:

@@ -117,7 +117,7 @@ async def test_a_token_with_no_pool_to_simulate_is_still_decided_by_a_complete_c
 
 
 @pytest.mark.asyncio
-async def test_a_honeypot_is_simulation_failure_still_scores_as_suspicious():
+async def test_a_honeypot_is_simulation_failure_stays_unknown_and_unscored():
     # honeypot.is (Ethereum, BNB Chain, Base) ran its own simulation of the token and could not finish it.
     adapter = EvmAdapter.__new__(EvmAdapter)
     adapter._chain_id = 56
@@ -133,10 +133,31 @@ async def test_a_honeypot_is_simulation_failure_still_scores_as_suspicious():
         data, analyzed, risk, extension = await scan(56, adapter, "0x" + "ab" * 20)
     assert data["simulation_failed"] is True
     assert data["field_providers"]["simulation_failed"] == "honeypot.is"
-    assert any("treat as suspicious" in flag for flag in analyzed.flags)
-    assert analyzed.score == 40
+    # Nothing about the token was measured: unknown, not suspicious, as after a simulation of
+    # ShieldBot's own that could not run.
+    assert analyzed.score == 0
+    assert not any("suspicious" in flag for flag in analyzed.flags)
+    assert [flag for flag in analyzed.flags if "unknown" in flag] == [
+        f"Sellability unknown: {data['reason']}"
+    ]
     assert data["status"] == risk["status"] == "unknown"
+    assert risk["risk_level"] != "LOW" and extension["risk_classification"] != "SAFE"
+    assert risk["category_scores"]["honeypot"] is None
     assert data["rpc_failed"] is False
+    report = format_full_report(risk, {}, {}, {}, honeypot_data=analyzed.data, chain_id=56)
+    assert "suspicious" not in report and "Confidence:" not in report
+    assert "  Honeypot: Unknown (" in report
+    assert report.count("Sellability unknown") == 1
+
+
+@pytest.mark.parametrize("unresolved", ["simulation_failed", "rpc_failed"])
+def test_an_unresolved_not_a_honeypot_earns_no_confidence(unresolved):
+    # The engine refuses a provider's "not a honeypot" as sellability evidence after a simulation that
+    # failed or could not run, so it does not count it as data either.
+    honeypot = {"is_honeypot": False, "can_sell": None, "sell_tax": 0.0}
+    engine = RiskEngine()
+    resolved = engine._compute_confidence({}, honeypot, {}, {})
+    assert engine._compute_confidence({}, {**honeypot, unresolved: True}, {}, {}) == resolved - 15
 
 
 @pytest.mark.asyncio

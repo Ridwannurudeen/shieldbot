@@ -390,7 +390,9 @@ async def test_failed_simulation_with_clean_fallback_never_becomes_safe(renounce
     alert = format_extension_alert(risk)
     report = format_full_report(risk, contract, market, ethos, data, chain_id=56)
     assert risk['risk_level'] == 'MEDIUM'
-    assert risk['rug_probability'] == (6 if renounced else 8)
+    # The unmeasured honeypot share leaves the mean (5 * .4 / .85) rather than adding points to it.
+    assert risk['rug_probability'] == (0 if renounced else 2.4)
+    assert risk['category_scores']['honeypot'] is None
     assert risk['coverage']['honeypot'] < 1
     assert risk['status'] == 'unknown'
     assert alert['risk_classification'] == 'CAUTION'
@@ -398,11 +400,12 @@ async def test_failed_simulation_with_clean_fallback_never_becomes_safe(renounce
     assert 'Generally Safe' not in report
     assert 'Sellability: Unknown' in report
     assert 'simulation failed' in report.lower()
+    assert 'suspicious' not in report and 'Confidence:' not in report
     assert data['status'] == result.data['status'] == 'unknown'
     assert data['coverage']['can_sell'] is False
     assert result.data['coverage']['can_sell'] is False
     assert data['can_sell'] is result.data['can_sell'] is None
-    assert result.score == 40
+    assert result.score == 0
 
 
 @pytest.mark.asyncio
@@ -439,7 +442,8 @@ async def test_partial_goplus_restrictions_score_in_both_engine_paths(field, fla
 def test_successful_unrestricted_parity_and_failed_simulation_exception(failed, entrypoint):
     # Parity applies to successful simulations with none of the three restrictions.
     # Baseline unrestricted input: structural 70 * .4 = 28 (LOW).
-    # An unresolved failure adds 40 * .15 = 6 and cannot be coverage-complete.
+    # An unresolved failure adds nothing and cannot be coverage-complete: the honeypot share leaves
+    # the mean (70 * .4 / .85).
     contract = {'is_contract': True, 'is_verified': False, 'contract_age_days': 1,
                 'has_mint': True, 'has_blacklist': True, 'ownership_renounced': True}
     data = {'is_honeypot': False, 'can_buy': True, 'can_sell': True,
@@ -455,9 +459,9 @@ def test_successful_unrestricted_parity_and_failed_simulation_exception(failed, 
             AnalyzerResult('structural', .4, 70, data=contract),
             AnalyzerResult('market', .25, 0, data=market),
             AnalyzerResult('behavioral', .2, 0, data=ethos),
-            AnalyzerResult('honeypot', .15, 40 if failed else 0, data=data),
+            AnalyzerResult('honeypot', .15, 0, data=data),
         ])
-    assert risk['rug_probability'] == (34 if failed else 28)
+    assert risk['rug_probability'] == (32.9 if failed else 28)
     assert risk['risk_level'] == ('MEDIUM' if failed else 'LOW')
     assert risk['status'] == ('unknown' if failed else 'ok')
     assert (risk['coverage']['honeypot'] < 1) is failed

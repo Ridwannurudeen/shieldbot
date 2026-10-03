@@ -49,7 +49,7 @@ def _risk(entrypoint, is_contract, simulation_failed):
             AnalyzerResult("structural", 0.4, 50 if is_contract is False else 0, data=contract),
             AnalyzerResult("market", 0.25, 0, data=MARKET),
             AnalyzerResult("behavioral", 0.2, 0, data=ETHOS),
-            AnalyzerResult("honeypot", 0.15, 40 if simulation_failed else 0, data=honeypot),
+            AnalyzerResult("honeypot", 0.15, 0, data=honeypot),
         ]
     )
 

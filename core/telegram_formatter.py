@@ -196,7 +196,10 @@ def format_full_report(
     lines.append(f'*Risk Archetype:* {archetype.replace("_", " ").title()}')
     probability = 'Unknown (incomplete coverage)' if incomplete else f'{rug_prob}%'
     lines.append(f'*Rug Probability:* {probability}  |  *Risk Level:* {risk_level}')
-    lines.append(f'*Confidence:* {confidence}%')
+    # An unknown verdict has no confidence to state: a percentage beside it reads as confidence in
+    # the unknown.
+    if not incomplete:
+        lines.append(f'*Confidence:* {confidence}%')
     lines.append('')
     flag_start = len(lines)
 
