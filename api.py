@@ -2266,6 +2266,7 @@ async def verdict_permalink(chain_id: int, address: str):
         "verdict": stored["verdict"],
         "verdict_code": int(Verdict[stored["verdict"]]),
         "evidence_hash": stored["evidence_hash"],
+        "observed_block": stored["observed_block"],
         "canonical": stored["canonical"],
         "evidence": json.loads(stored["canonical"]),
         "published_at": stored["created_at"],

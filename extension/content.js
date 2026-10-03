@@ -924,13 +924,13 @@
     overlay.id = "shieldai-overlay";
     overlay.className = "shieldai-overlay";
     overlay.innerHTML = `
-      <div class="shieldai-modal ${classification === "BLOCK_RECOMMENDED" ? "shieldai-modal-danger" : ""}" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
+      <div class="shieldai-modal ${classification === "BLOCK_RECOMMENDED" ? "shieldai-modal-danger" : classification === "UNKNOWN" ? "shieldai-modal-unknown" : ""}" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
         <div class="shieldai-header">
           <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
 
-        <div class="shieldai-badge ${badgeClasses[classification] || "shieldai-badge-caution"}">${escapeHtml(classLabel(classification))}</div>
+        <div class="shieldai-badge ${badgeClasses[classification] || "shieldai-badge-high"}">${escapeHtml(classLabel(classification))}</div>
         ${why ? `<p class="shieldai-unknown-why">${_t("unknownWhy")} ${escapeHtml(why)}</p>` : ""}
 
         <div class="shieldai-section shieldai-sig-note">
@@ -978,7 +978,7 @@
     // at least High Risk, whatever the API found.
     const classification = Array.isArray(tx.authorizationList) ? "BLOCK_RECOMMENDED"
       : lookalike ? atLeast(verdict, "HIGH_RISK") : verdict;
-    const badgeClass = badgeClasses[classification] || "shieldai-badge-caution";
+    const badgeClass = badgeClasses[classification] || "shieldai-badge-high";
     const label = classLabel(classification);
     const isBlock = classification === "BLOCK_RECOMMENDED";
     // The wallet's chain could not be read, does not match the request, or is
@@ -1293,7 +1293,7 @@
     overlay.id = "shieldai-overlay";
     overlay.className = "shieldai-overlay";
     overlay.innerHTML = `
-      <div class="shieldai-modal" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
+      <div class="shieldai-modal shieldai-modal-unknown" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
         <div class="shieldai-header">
           <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>

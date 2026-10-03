@@ -277,6 +277,11 @@
 .shieldai-actions {
   display: flex;
   gap: 10px;
+  position: sticky;
+  bottom: -24px;
+  margin: 0 -24px -24px;
+  padding: 12px 24px 24px;
+  background: #0f172a;
 }
 
 .shieldai-btn {
@@ -309,6 +314,8 @@
 }
 
 .shieldai-strict-note {
+  /* Above the sticky action row, whose negative bottom margin overlaps this line. */
+  position: relative;
   font-size: 13px;
   line-height: 1.5;
   color: #cbd5e1;
@@ -317,6 +324,8 @@
 
 /* Why Proceed did nothing: the page is covering or altering the dialog. */
 .shieldai-covered-note {
+  /* Above the sticky action row, whose negative bottom margin overlaps this line. */
+  position: relative;
   font-size: 13px;
   line-height: 1.5;
   color: #fbbf24;
@@ -353,6 +362,8 @@
 }
 
 .shieldai-hold-note {
+  /* Above the sticky action row, whose negative bottom margin overlaps this line. */
+  position: relative;
   font-size: 13px;
   line-height: 1.5;
   color: #fca5a5;
