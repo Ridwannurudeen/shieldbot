@@ -508,6 +508,24 @@ def test_analytics_are_proxied_so_the_content_security_policy_stays_self():
     assert 'endpoint: "/stats/event"' in read(LANDING_SRC / "public" / "js" / "plausible-init.js")
 
 
+def test_the_theme_restore_script_is_allowed_by_the_content_security_policy():
+    # script-src is 'self' with no 'unsafe-inline' (deploy/nginx-shieldbotsecurity-new.conf), so the one
+    # inline script, which restores a stored light theme before first paint, is allowed by its hash.
+    import base64, hashlib
+    conf = read(ROOT / "deploy" / "nginx-shieldbotsecurity-new.conf")
+    csp = re.search(r'Content-Security-Policy "([^"]*)"', conf).group(1)
+    script_src = re.search(r"script-src ([^;]*);", csp).group(1)
+    assert "'unsafe-inline'" not in script_src
+    pages = [LANDING_SRC / "index.html", ROOT / "landing" / "index.html",
+             *sorted((LANDING_SRC / "public").glob("*.html")), *sorted((ROOT / "landing").glob("*.html"))]
+    for page in pages:
+        scripts = re.findall(r"<script>(.*?)</script>", read(page), re.DOTALL)
+        assert len(scripts) == 1, f"{page.name}: expected exactly one inline script"
+        assert '"shieldbot-theme"' in scripts[0], page.name
+        digest = base64.b64encode(hashlib.sha256(scripts[0].encode("utf-8")).digest()).decode()
+        assert f"'sha256-{digest}'" in script_src, f"{page.name}: inline script hash is not in the CSP"
+
+
 def test_privacy_policy_names_the_analytics_and_what_it_does_not_keep():
     html = read(LANDING_SRC / "public" / "privacy.html")
     assert "Plausible Analytics" in html

@@ -119,7 +119,7 @@ export default function HowItWorks() {
                   height={954}
                   loading="lazy"
                   alt="The ShieldBot extension's warning dialog for a request that approves unlimited USDC spending on Ethereum. The verdict badge reads BLOCK RECOMMENDED — Safety: 0/100. The danger signals include Spender flagged by GoPlus: stealing_attack (SlowMist,BlockSec)."
-                  className="w-full h-auto rounded-2xl shadow-md ring-1 ring-line"
+                  className="w-full h-auto rounded-2xl shadow-md ring-1 ring-line-strong"
                 />
               </picture>
               <figcaption className="mt-4 text-[13px] leading-relaxed text-muted">

@@ -22,14 +22,14 @@ export default function Badge({
           caution: "bg-caution-tint text-caution-fg border-caution-line",
           high: "bg-high-tint text-high-fg border-high-line",
           block: "bg-block-tint text-block-fg border-block-line",
-          unknown: "bg-unknown-hatch text-unknown-fg border-unknown-line",
+          unknown: "bg-unknown-hatch text-unknown-fg border-dashed border-unknown-line",
         }
       : {
           safe: "bg-safe-fg text-onfill border-safe-fg",
           caution: "bg-caution-fg text-onfill border-caution-fg",
           high: "bg-high-fg text-onfill border-high-fg",
           block: "bg-block-fg text-onfill border-block-fg",
-          unknown: "bg-unknown-hatch-solid text-white border-unknown-line",
+          unknown: "bg-unknown-hatch-solid text-white border-dashed border-unknown-line",
         };
 
   return (

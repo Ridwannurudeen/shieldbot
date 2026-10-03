@@ -14,14 +14,14 @@ const rowIcons: Record<RowState, IconName> = {
 const rowTones: Record<RowState, string> = {
   ok: "bg-emerald text-onfill",
   fail: "bg-block-fg text-onfill",
-  unmeasured: "bg-unknown-hatch text-unknown-fg border border-unknown-line",
+  unmeasured: "bg-unknown-hatch text-unknown-fg border border-dashed border-unknown-line",
   info: "bg-surface-3 text-muted",
 };
 
 const verdictTones = {
   block: "bg-block-tint border-block-line",
   safe: "bg-safe-tint border-safe-line",
-  unknown: "bg-unknown-hatch border-unknown-line",
+  unknown: "bg-unknown-hatch border-dashed border-unknown-line",
 };
 
 export default function VerdictDemo() {
