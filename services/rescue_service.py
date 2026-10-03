@@ -7,7 +7,7 @@ ready-to-sign revocation transactions for one-click cleanup.
 import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 import aiohttp
@@ -308,11 +308,12 @@ class RescueService:
         cached = self._results.get((chain_id, wallet))
         if cached is not None:
             return cached
-        scan_deadline = asyncio.get_running_loop().time() + SCAN_DEADLINE_SECONDS
         try:
-            async with asyncio.timeout(SCAN_DEADLINE_SECONDS):
+            # The Timeout object itself is the deadline: budget.expired() tells the steps below that
+            # *this* scan ran out, which a wall clock cannot distinguish from an unrelated cancel.
+            async with asyncio.timeout(SCAN_DEADLINE_SECONDS) as scan_budget:
                 approvals, coverage_reasons, scanned_blocks = await self._fetch_approvals(
-                    wallet, chain_id, scan_deadline
+                    wallet, chain_id, scan_budget
                 )
         except TimeoutError:
             logger.warning(
@@ -379,7 +380,7 @@ class RescueService:
         return result
 
     async def _fetch_approvals(
-        self, wallet: str, chain_id: int, scan_deadline: float, api_key: str = ""
+        self, wallet: str, chain_id: int, scan_budget: asyncio.Timeout, api_key: str = ""
     ) -> Tuple[List[ApprovalInfo], Dict[str, str], Optional[Dict[str, int]]]:
         """Fetch and verify active token approvals, with reasons for incomplete data.
 
@@ -475,13 +476,13 @@ class RescueService:
                 return [], coverage_reasons, scanned_blocks
 
             # Step 4: Verify current on-chain allowances — eliminates false positives
-            if asyncio.get_running_loop().time() >= scan_deadline:
+            if scan_budget.expired():
                 coverage_reasons["allowances"] = SCAN_TIMEOUT_REASON
                 return [], coverage_reasons, scanned_blocks
             try:
                 allowances = await self._verify_allowances(wallet, candidates, rpc_url, public_rpc)
             except asyncio.CancelledError:
-                if asyncio.get_running_loop().time() >= scan_deadline:
+                if scan_budget.expired():
                     coverage_reasons["allowances"] = SCAN_TIMEOUT_REASON
                     return [], coverage_reasons, scanned_blocks
                 raise
@@ -496,13 +497,13 @@ class RescueService:
 
             # Step 5: Fetch wallet balances for value-at-risk calculation
             active_tokens = list({token for (token, _) in verified.keys()})
-            if asyncio.get_running_loop().time() >= scan_deadline:
+            if scan_budget.expired():
                 coverage_reasons["allowances"] = SCAN_TIMEOUT_REASON
                 return [], coverage_reasons, scanned_blocks
             try:
                 balances = await self._fetch_balances(wallet, active_tokens, rpc_url, public_rpc)
             except asyncio.CancelledError:
-                if asyncio.get_running_loop().time() >= scan_deadline:
+                if scan_budget.expired():
                     coverage_reasons["allowances"] = SCAN_TIMEOUT_REASON
                     return [], coverage_reasons, scanned_blocks
                 raise
@@ -511,13 +512,13 @@ class RescueService:
                 coverage_reasons["balances"] = f"Balance unavailable for {len(unresolved_balances)} token(s)"
 
             # Step 6: Fetch token prices (DexScreener, stablecoins hardcoded)
-            if asyncio.get_running_loop().time() >= scan_deadline:
+            if scan_budget.expired():
                 coverage_reasons["allowances"] = SCAN_TIMEOUT_REASON
                 return [], coverage_reasons, scanned_blocks
             try:
                 prices = await self._fetch_prices(active_tokens, chain_id)
             except asyncio.CancelledError:
-                if asyncio.get_running_loop().time() >= scan_deadline:
+                if scan_budget.expired():
                     coverage_reasons["allowances"] = SCAN_TIMEOUT_REASON
                     return [], coverage_reasons, scanned_blocks
                 raise
@@ -529,10 +530,19 @@ class RescueService:
                 coverage_reasons["prices"] = f"USD price unavailable for {len(unpriced)} token(s)"
 
             # Step 7: Enrich with token metadata — parallelized
-            token_info_results = await asyncio.gather(
-                *[self._web3_client.get_token_info(token, chain_id) for token in active_tokens],
-                return_exceptions=True,
-            )
+            if scan_budget.expired():
+                coverage_reasons["allowances"] = SCAN_TIMEOUT_REASON
+                return [], coverage_reasons, scanned_blocks
+            try:
+                token_info_results = await asyncio.gather(
+                    *[self._web3_client.get_token_info(token, chain_id) for token in active_tokens],
+                    return_exceptions=True,
+                )
+            except asyncio.CancelledError:
+                if scan_budget.expired():
+                    coverage_reasons["allowances"] = SCAN_TIMEOUT_REASON
+                    return [], coverage_reasons, scanned_blocks
+                raise
             token_info_map: Dict[str, Dict] = {}
             for token, result in zip(active_tokens, token_info_results):
                 if isinstance(result, Exception):
@@ -1023,7 +1033,7 @@ class RescueService:
                     "compromised, your tokens could be drained instantly."
                 ),
                 what_you_can_do=[
-                    f"Revoke this approval immediately using the revoke button below",
+                    "Revoke this approval immediately using the revoke button below",
                     f"Check the contract {approval.spender} on the block explorer",
                     "If you don't recognize this approval, it may be from a phishing site",
                 ],

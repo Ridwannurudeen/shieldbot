@@ -125,6 +125,28 @@ async def test_reverting_symbol_with_answering_total_supply_is_a_token(identific
 
 
 @pytest.mark.asyncio
+async def test_reverting_symbol_and_total_supply_falls_through_to_decimals(identification_client):
+    # decimals() is the second probe, so it only decides when totalSupply() has also reverted.
+    w3 = identification_client.get_web3()
+    revert = ContractLogicError('execution reverted')
+    w3.eth.contract.return_value.functions.symbol.return_value.call.side_effect = revert
+    w3.eth.contract.return_value.functions.totalSupply.return_value.call.side_effect = revert
+    w3.eth.contract.return_value.functions.decimals.return_value.call.return_value = 18
+
+    assert await identification_client.is_token_contract(ADDRESS) is True
+
+
+@pytest.mark.asyncio
+async def test_a_contract_that_answers_none_of_the_three_is_not_a_token(identification_client):
+    w3 = identification_client.get_web3()
+    revert = ContractLogicError('execution reverted')
+    for name in ("symbol", "totalSupply", "decimals"):
+        getattr(w3.eth.contract.return_value.functions, name).return_value.call.side_effect = revert
+
+    assert await identification_client.is_token_contract(ADDRESS) is False
+
+
+@pytest.mark.asyncio
 async def test_reverting_symbol_with_timed_out_total_supply_is_unknown(identification_client):
     w3 = identification_client.get_web3()
     w3.eth.contract.return_value.functions.symbol.return_value.call.side_effect = ContractLogicError('execution reverted')
