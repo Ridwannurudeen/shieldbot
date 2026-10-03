@@ -481,6 +481,14 @@ const SEV = {
   }
 };
 
+// A chart with nothing in it has no peak, so naming an hour or a chain would state a
+// reading that does not exist. Used by both charts' accessible names.
+function peakPhrase(data, where) {
+  const max = data.length ? Math.max(...data.map(point => point.count)) : 0;
+  if (!max) return 'no detections recorded';
+  return `peak ${max} ${where(data.find(point => point.count === max))}`;
+}
+
 // ─── Utilities ────────────────────────────────────────────────────────────
 function timeAgo(ts) {
   if (!ts) return '—';
@@ -1095,7 +1103,7 @@ function ThreatLogTable({
     style: {
       color: '#94A3B8'
     }
-  }, loading ? 'Loadingâ€¦' : `${filtered.length} ${filtered.length === 1 ? 'threat' : 'threats'}`)), error && /*#__PURE__*/React.createElement(ErrorBanner, {
+  }, loading ? 'Loading…' : `${filtered.length} ${filtered.length === 1 ? 'threat' : 'threats'}`)), error && /*#__PURE__*/React.createElement(ErrorBanner, {
     msg: error,
     onRetry: onRetry
   }), mempoolUnavailable && /*#__PURE__*/React.createElement("div", {
@@ -1271,7 +1279,7 @@ function ThreatVelocityChart({
         height: 190,
         color: '#94A3B8'
       }
-    }, "Loading\xE2\u20AC\xA6"));
+    }, "Loading\u2026"));
   }
   // A capped source that reaches back less than 24 h, or not knowably far, would show its unloaded
   // hours as zero.
@@ -1331,7 +1339,7 @@ function ThreatVelocityChart({
       bottom: 0
     },
     accessibilityLayer: true,
-    "aria-label": `Detections per hour, last 24 hours, peak ${Math.max(...data.map(point => point.count))} at ${data.find(point => point.count === Math.max(...data.map(point => point.count))).hour}`
+    "aria-label": `Detections per hour, last 24 hours, ${peakPhrase(data, point => `at ${point.hour}`)}`
   }, /*#__PURE__*/React.createElement("defs", null, /*#__PURE__*/React.createElement("linearGradient", {
     id: "velGrad",
     x1: "0",
@@ -1457,7 +1465,7 @@ function ChainDistributionChart({
       bottom: 0
     },
     accessibilityLayer: true,
-    "aria-label": `Threat detections by chain, peak ${Math.max(...data.map(point => point.count))} on ${data.find(point => point.count === Math.max(...data.map(point => point.count))).name}`
+    "aria-label": `Threat detections by chain, ${peakPhrase(data, point => `on ${point.name}`)}`
   }, /*#__PURE__*/React.createElement(CartesianGrid, {
     strokeDasharray: "3 3",
     stroke: "#273349",
@@ -1470,8 +1478,10 @@ function ChainDistributionChart({
     },
     tickLine: false,
     axisLine: false,
-    interval: 0,
-    angle: -30
+    interval: data.length > 4 ? 0 : 'preserveEnd',
+    angle: data.length > 4 ? -30 : 0,
+    textAnchor: data.length > 4 ? 'end' : 'middle',
+    height: data.length > 4 ? 48 : 30
   }), /*#__PURE__*/React.createElement(YAxis, {
     tick: {
       fill: '#94A3B8',

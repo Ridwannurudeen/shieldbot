@@ -141,6 +141,14 @@
       UNKNOWN:  { bg:'repeating-linear-gradient(135deg, #1E293B 0 6px, #283447 6px 12px)', text:'#E2E8F0', border:'1px dashed #94A3B8' },
     };
 
+    // A chart with nothing in it has no peak, so naming an hour or a chain would state a
+    // reading that does not exist. Used by both charts' accessible names.
+    function peakPhrase(data, where) {
+      const max = data.length ? Math.max(...data.map(point => point.count)) : 0;
+      if (!max) return 'no detections recorded';
+      return `peak ${max} ${where(data.find(point => point.count === max))}`;
+    }
+
     // ─── Utilities ────────────────────────────────────────────────────────────
     function timeAgo(ts) {
       if (!ts) return '—';
@@ -501,7 +509,7 @@
               );
             })}
             <span className="self-center text-xs" style={{ color:'#94A3B8' }}>
-              {loading ? 'Loadingâ€¦' : `${filtered.length} ${filtered.length === 1 ? 'threat' : 'threats'}`}
+              {loading ? 'Loading…' : `${filtered.length} ${filtered.length === 1 ? 'threat' : 'threats'}`}
             </span>
           </div>
 
@@ -611,7 +619,7 @@
         return (
           <div className="glass rounded-xl p-5" style={{ border:'1px solid #334155' }}>
             <h3 className="text-[15px] font-semibold mb-4" style={{ color:'#F8FAFC' }}>Threat Velocity</h3>
-            <div className="flex items-center justify-center text-sm" style={{ height:190, color:'#94A3B8' }}>Loadingâ€¦</div>
+            <div className="flex items-center justify-center text-sm" style={{ height:190, color:'#94A3B8' }}>Loading…</div>
           </div>
         );
       }
@@ -648,7 +656,7 @@
           </div>
           <ResponsiveContainer width="100%" height={190}>
             <AreaChart data={data} margin={{ top:4, right:4, left:-20, bottom:0 }} accessibilityLayer
-                       aria-label={`Detections per hour, last 24 hours, peak ${Math.max(...data.map(point => point.count))} at ${data.find(point => point.count === Math.max(...data.map(point => point.count))).hour}`}>
+                       aria-label={`Detections per hour, last 24 hours, ${peakPhrase(data, point => `at ${point.hour}`)}`}>
               <defs>
                 <linearGradient id="velGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%"  stopColor="#34D399" stopOpacity={0.35} />
@@ -699,9 +707,14 @@
           {haslive
             ? <ResponsiveContainer width="100%" height={190}>
                 <BarChart data={data} margin={{ top:4, right:4, left:-20, bottom:0 }} accessibilityLayer
-                          aria-label={`Threat detections by chain, peak ${Math.max(...data.map(point => point.count))} on ${data.find(point => point.count === Math.max(...data.map(point => point.count))).name}`}>
+                          aria-label={`Threat detections by chain, ${peakPhrase(data, point => `on ${point.name}`)}`}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#273349" vertical={false} />
-                  <XAxis dataKey="name" tick={{ fill:'#94A3B8', fontSize:10 }} tickLine={false} axisLine={false} interval={0} angle={-30} />
+                  <XAxis dataKey="name" tick={{ fill:'#94A3B8', fontSize:10 }} tickLine={false}
+                            axisLine={false}
+                            interval={data.length > 4 ? 0 : 'preserveEnd'}
+                            angle={data.length > 4 ? -30 : 0}
+                            textAnchor={data.length > 4 ? 'end' : 'middle'}
+                            height={data.length > 4 ? 48 : 30} />
                   <YAxis tick={{ fill:'#94A3B8', fontSize:10 }} tickLine={false} axisLine={false} allowDecimals={false} />
                   <Tooltip contentStyle={{ background:'#1E293B', border:'1px solid #334155',
                                            borderRadius:8, color:'#F8FAFC', fontSize:12 }}
