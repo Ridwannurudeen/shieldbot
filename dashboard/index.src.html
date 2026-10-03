@@ -6,7 +6,7 @@
   <title>ShieldBot Threat Dashboard</title>
   <meta name="description" content="ShieldBot's public threat dashboard: the newest high-risk contract detections and mempool alerts, with platform statistics and the window each count covers." />
   <link rel="canonical" href="https://api.shieldbotsecurity.online/dashboard" />
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBGMTcyQSIvPjxwYXRoIGQ9Ik0xNiAzTDI3IDcuNVYxNUMyNyAyMS41IDE2IDI5IDE2IDI5QzE2IDI5IDUgMjEuNSA1IDE1VjcuNUwxNiAzWiIgZmlsbD0iIzNCODJGNiIvPjxwYXRoIGQ9Ik0xNiA3TDIzIDEwVjE1QzIzIDE5IDE2IDI0IDE2IDI0QzE2IDI0IDkgMTkgOSAxNVYxMEwxNiA3WiIgZmlsbD0iIzBGMTcyQSIvPjxwb2x5bGluZSBwb2ludHM9IjEyLDE1IDE1LDE4IDIwLDEzIiBmaWxsPSJub25lIiBzdHJva2U9IiMxMEI5ODEiIHN0cm9rZS13aWR0aD0iMi4yIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBGMTcyQSIvPjxwYXRoIGQ9Ik0xNiAzTDI3IDcuNVYxNUMyNyAyMS41IDE2IDI5IDE2IDI5QzE2IDI5IDUgMjEuNSA1IDE1VjcuNUwxNiAzWiIgZmlsbD0iIzM0RDM5OSIvPjxwYXRoIGQ9Ik0xNiA3TDIzIDEwVjE1QzIzIDE5IDE2IDI0IDE2IDI0QzE2IDI0IDkgMTkgOSAxNVYxMEwxNiA3WiIgZmlsbD0iIzBGMTcyQSIvPjxwb2x5bGluZSBwb2ludHM9IjEyLDE1IDE1LDE4IDIwLDEzIiBmaWxsPSJub25lIiBzdHJva2U9IiMzNEQzOTkiIHN0cm9rZS13aWR0aD0iMi4yIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=" />
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -85,8 +85,8 @@
 
     /* CRITICAL badge pulse glow */
     @keyframes critPulse {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.5); }
-      50%       { box-shadow: 0 0 0 5px rgba(239,68,68,0); }
+      0%, 100% { box-shadow: 0 0 0 0 rgba(248,113,113,0.5); }
+      50%       { box-shadow: 0 0 0 5px rgba(248,113,113,0); }
     }
     .badge-critical { animation: critPulse 2s infinite; }
 
@@ -99,7 +99,7 @@
       *, *::before, *::after { transition: none !important; }
     }
 
-    :focus-visible { outline: 2px solid #60A5FA; outline-offset: 2px; }
+    :focus-visible { outline: 2px solid #34D399; outline-offset: 2px; }
 
     /* Scrollbar */
     ::-webkit-scrollbar { width: 5px; height: 5px; }
@@ -134,11 +134,11 @@
 
     // Opaque badge backgrounds, so a hovered row cannot lower the text's contrast (each is at least 4.5:1).
     const SEV = {
-      CRITICAL: { bg:'#3D2D3C', text:'#F87171', border:'rgba(239,68,68,0.35)' },
-      HIGH:     { bg:'#3E3B34', text:'#FBBF24', border:'rgba(245,158,11,0.35)' },
-      MEDIUM:   { bg:'#223657', text:'#60A5FA', border:'rgba(59,130,246,0.35)' },
-      LOW:      { bg:'#1C3F46', text:'#34D399', border:'rgba(16,185,129,0.35)' },
-      UNKNOWN:  { bg:'#283447', text:'#94A3B8', border:'rgba(100,116,139,0.35)' },
+      CRITICAL: { bg:'#3A1418', text:'#F87171', border:'1px solid #B91C1C' },
+      HIGH:     { bg:'#351A0B', text:'#FB923C', border:'1px solid #9A3412' },
+      MEDIUM:   { bg:'#302708', text:'#FACC15', border:'1px solid #854D0E' },
+      LOW:      { bg:'#0F2E1D', text:'#4ADE80', border:'1px solid #166534' },
+      UNKNOWN:  { bg:'repeating-linear-gradient(135deg, #1E293B 0 6px, #283447 6px 12px)', text:'#E2E8F0', border:'1px dashed #94A3B8' },
     };
 
     // ─── Utilities ────────────────────────────────────────────────────────────
@@ -210,8 +210,8 @@
       // On the body, like the Flag dialog: inside the feed's glass panel it was placed against that panel.
       return ReactDOM.createPortal(
         <div role="status" className="toast-anim fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-2xl"
-             style={{ background:'#1E293B', border:`1px solid ${isErr ? 'rgba(239,68,68,0.35)' : '#334155'}`,
-                      color: isErr ? '#F87171' : '#10B981', fontSize:13 }}>
+              style={{ background:'#1E293B', border:`1px solid ${isErr ? 'rgba(248,113,113,0.35)' : '#334155'}`,
+                       color: isErr ? '#F87171' : '#4ADE80', fontSize:13 }}>
           {isErr
             ? <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
@@ -312,7 +312,7 @@
               </div>
               <div className="rounded-lg p-3" style={{ background:'#0F172A' }}>
                 <div className="text-xs mb-1" style={{ color:'#94A3B8' }}>{role ? `${role} Address` : 'Address'}</div>
-                <div className="text-xs font-mono break-all" style={{ color:'#60A5FA', fontFamily:'JetBrains Mono,monospace' }}>
+                 <div className="text-xs font-mono break-all" style={{ color:'#34D399', fontFamily:'JetBrains Mono,monospace' }}>
                   {addr || '—'}
                 </div>
               </div>
@@ -324,13 +324,13 @@
                       maxLength={1000} value={reason} onChange={e => setReason(e.target.value)}
                       aria-label="Why is this a false positive?" placeholder="Why is this a false positive?" />
 
-            {failure && <div role="alert" className="text-sm mt-3" style={{ color:'#FCA5A5' }}>{failure}</div>}
+             {failure && <div role="alert" className="text-sm mt-3" style={{ color:'#F87171' }}>{failure}</div>}
 
             <div className="flex gap-2 mt-4">
               <button onClick={onClose} className="flex-1 py-2.5 min-h-[44px] md:min-h-0 rounded-lg text-sm font-medium transition-colors"
                       style={{ background:'#334155', color:'#E2E8F0' }}>Cancel</button>
               <button onClick={submit} disabled={!canSend} className="flex-1 py-2.5 min-h-[44px] md:min-h-0 rounded-lg text-sm font-medium transition-colors"
-                      style={{ background:'#2563EB', color:'#fff', opacity: canSend ? 1 : 0.5 }}>
+                      style={{ background:'#34D399', color:'#0F172A', opacity: canSend ? 1 : 0.5 }}>
                 {sending ? 'Sending…' : 'Submit Report'}
               </button>
             </div>
@@ -344,7 +344,7 @@
     function ErrorBanner({ msg, onRetry }) {
       return (
         <div className="flex items-center justify-between px-4 py-3 rounded-xl mb-3 text-sm"
-             style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', color:'#FCA5A5' }}>
+             style={{ background:'rgba(248,113,113,0.08)', border:'1px solid rgba(248,113,113,0.25)', color:'#F87171' }}>
           <span className="flex items-center gap-2">
             <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
@@ -352,7 +352,7 @@
             {msg}
           </span>
           <button onClick={onRetry} className="ml-4 px-3 py-1 min-h-[44px] md:min-h-0 rounded-lg text-xs font-semibold transition-colors"
-                  style={{ background:'rgba(239,68,68,0.18)', color:'#FCA5A5' }}>Retry</button>
+                  style={{ background:'rgba(248,113,113,0.18)', color:'#F87171' }}>Retry</button>
         </div>
       );
     }
@@ -385,7 +385,7 @@
 
             {/* Severity badge */}
             <span className={`shrink-0 text-xs font-bold px-2 py-1 rounded-md uppercase tracking-wide text-center ${sev === 'CRITICAL' ? 'badge-critical' : ''}`}
-                  style={{ background:sc.bg, color:sc.text, border:`1px solid ${sc.border}`, minWidth:64 }}>
+                  style={{ background:sc.bg, color:sc.text, border:sc.border, minWidth:64 }}>
               {sev}
             </span>
 
@@ -396,8 +396,8 @@
                 <span className="text-xs px-2 py-0.5 rounded-full font-medium"
                       style={{ background:`${cColor}20`, color:'#E2E8F0' }}>{chain}</span>
               </div>
-              {note && <div className="text-xs mt-0.5 truncate" style={{ color:'#94A3B8' }}>{note}</div>}
-              <div className="text-xs mt-0.5 font-mono" style={{ color:'#60A5FA', fontFamily:'JetBrains Mono,monospace' }}>
+              {note && <div className="text-xs mt-0.5 [overflow-wrap:anywhere]" style={{ color:'#94A3B8' }}>{note}</div>}
+              <div className="text-xs mt-0.5 font-mono" style={{ color:'#34D399', fontFamily:'JetBrains Mono,monospace' }}>
                 {role && <span style={{ color:'#94A3B8' }}>{role} </span>}{addr ? short(addr) : '—'}
               </div>
               {role && t.target_token && (
@@ -417,7 +417,7 @@
                 <a href={`${exp}/address/${addr}`} target="_blank" rel="noopener noreferrer"
                    title="Investigate on Explorer" aria-label={`Investigate ${short(addr)} on the explorer`}
                    className="w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg transition-colors"
-                   style={{ background:'rgba(59,130,246,0.15)', color:'#60A5FA' }}
+                   style={{ background:'rgba(52,211,153,0.15)', color:'#34D399' }}
                    onClick={e => e.stopPropagation()}>
                   <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
@@ -439,7 +439,7 @@
 
               <button title="Flag False Positive" aria-label={`Flag ${addr ? short(addr) : type} as a false positive`}
                       className="w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg transition-colors"
-                      style={{ background:'rgba(245,158,11,0.15)', color:'#FBBF24' }}
+                       style={{ background:'rgba(250,204,21,0.15)', color:'#FACC15' }}
                       onClick={() => onFlag(t)}>
                 <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
@@ -492,14 +492,17 @@
                 <button key={f.val} onClick={() => onChain(f.val)} aria-pressed={active}
                         className="px-3 py-1.5 min-h-[44px] md:min-h-0 rounded-lg text-xs font-medium transition-all duration-150"
                         style={{
-                          background: active ? 'rgba(59,130,246,0.18)' : '#1E293B',
-                          border: `1px solid ${active ? '#3B82F6' : '#334155'}`,
-                          color: active ? '#60A5FA' : '#94A3B8',
+                           background: active ? 'rgba(52,211,153,0.18)' : '#1E293B',
+                           border: `1px solid ${active ? '#34D399' : '#334155'}`,
+                           color: active ? '#34D399' : '#94A3B8',
                         }}>
                   {f.label}
                 </button>
               );
             })}
+            <span className="self-center text-xs" style={{ color:'#94A3B8' }}>
+              {loading ? 'Loadingâ€¦' : `${filtered.length} ${filtered.length === 1 ? 'threat' : 'threats'}`}
+            </span>
           </div>
 
           {error && <ErrorBanner msg={error} onRetry={onRetry} />}
@@ -511,7 +514,7 @@
             </div>
           )}
 
-          <div className="flex flex-col gap-2" style={{ maxHeight:520, overflowY:'auto', paddingRight:2 }}>
+          <div tabIndex={0} aria-label="Threat feed" className="flex flex-col gap-2 max-h-none md:max-h-[520px]" style={{ overflowY:'auto', paddingRight:2 }}>
             {loading
               ? Array(6).fill(0).map((_,i) => <SkeletonRow key={i} />)
               : filtered.length === 0
@@ -573,13 +576,13 @@
             const hi  = scored ? (rp.HIGH || 0) + (rp.CRITICAL || 0) : null;
             const tot = c.contract_count || 1;
             const pct = scored ? Math.min(100, (hi / tot) * 100) : 0;
-            const bar = !scored ? '#475569' : pct > 50 ? '#EF4444' : pct > 20 ? '#F59E0B' : '#10B981';
-            const barText = !scored ? '#94A3B8' : pct > 50 ? '#F87171' : pct > 20 ? '#FBBF24' : '#34D399';
+            const bar = !scored ? '#475569' : pct > 50 ? '#F87171' : pct > 20 ? '#FACC15' : '#4ADE80';
+            const barText = !scored ? '#94A3B8' : pct > 50 ? '#F87171' : pct > 20 ? '#FACC15' : '#4ADE80';
             return (
               <div key={i} className="rounded-xl p-4 fade-up"
                    style={{ background:'#1E293B', border:'1px solid #334155' }}>
                 <div className="text-sm font-medium font-mono break-all"
-                     style={{ color:'#60A5FA', fontFamily:'JetBrains Mono,monospace' }}>
+                     style={{ color:'#34D399', fontFamily:'JetBrains Mono,monospace' }}>
                   {(c.deployer || '').slice(0,10)}…{(c.deployer || '').slice(-6)}
                 </div>
                 <div className="text-xs mt-2" style={{ color:'#94A3B8' }}>
@@ -603,7 +606,15 @@
     }
 
     // ─── Threat Velocity Chart ────────────────────────────────────────────────
-    function ThreatVelocityChart({ data, unavailable, capped }) {
+    function ThreatVelocityChart({ data, loading, unavailable, capped }) {
+      if (loading) {
+        return (
+          <div className="glass rounded-xl p-5" style={{ border:'1px solid #334155' }}>
+            <h3 className="text-[15px] font-semibold mb-4" style={{ color:'#F8FAFC' }}>Threat Velocity</h3>
+            <div className="flex items-center justify-center text-sm" style={{ height:190, color:'#94A3B8' }}>Loadingâ€¦</div>
+          </div>
+        );
+      }
       // A capped source that reaches back less than 24 h, or not knowably far, would show its unloaded
       // hours as zero.
       const short = capped.filter(c => c.since === null || c.since > Date.now() / 1000 - 86400);
@@ -611,7 +622,7 @@
       if (unavailable || short.length) {
         return (
           <div className="glass rounded-xl p-5" style={{ border:'1px solid #334155' }}>
-            <h3 className="text-sm font-semibold mb-4" style={{ color:'#F8FAFC' }}>Threat Velocity</h3>
+            <h3 className="text-[15px] font-semibold mb-4" style={{ color:'#F8FAFC' }}>Threat Velocity</h3>
             <div className="flex items-center justify-center text-sm text-center px-4" style={{ height:190, color:'#94A3B8' }}>
               {unavailable
                 ? 'Threat feed unavailable.'
@@ -629,29 +640,30 @@
         <div className="glass rounded-xl p-5" style={{ border:'1px solid #334155' }}>
           <div className="flex items-start justify-between mb-4">
             <div>
-              <h3 className="text-sm font-semibold" style={{ color:'#F8FAFC' }}>Threat Velocity</h3>
+              <h3 className="text-[15px] font-semibold" style={{ color:'#F8FAFC' }}>Threat Velocity</h3>
               <div className="text-xs mt-0.5" style={{ color:'#94A3B8' }}>Detections per hour · last 24 h</div>
             </div>
             <span className="text-xs px-2.5 py-1 rounded-full font-medium"
-                  style={{ background:'rgba(59,130,246,0.15)', color:'#60A5FA' }}>Hourly</span>
+                  style={{ background:'rgba(52,211,153,0.15)', color:'#34D399' }}>Hourly</span>
           </div>
           <ResponsiveContainer width="100%" height={190}>
-            <AreaChart data={data} margin={{ top:4, right:4, left:-20, bottom:0 }}>
+            <AreaChart data={data} margin={{ top:4, right:4, left:-20, bottom:0 }} accessibilityLayer
+                       aria-label={`Detections per hour, last 24 hours, peak ${Math.max(...data.map(point => point.count))} at ${data.find(point => point.count === Math.max(...data.map(point => point.count))).hour}`}>
               <defs>
                 <linearGradient id="velGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#3B82F6" stopOpacity={0.35} />
-                  <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
+                  <stop offset="5%"  stopColor="#34D399" stopOpacity={0.35} />
+                  <stop offset="95%" stopColor="#34D399" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1E293B" vertical={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke="#273349" vertical={false} />
               <XAxis dataKey="hour" tick={{ fill:'#94A3B8', fontSize:10 }}
                      tickLine={false} axisLine={false} interval={5} />
-              <YAxis tick={{ fill:'#94A3B8', fontSize:10 }} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fill:'#94A3B8', fontSize:10 }} tickLine={false} axisLine={false} allowDecimals={false} />
               <Tooltip contentStyle={{ background:'#1E293B', border:'1px solid #334155',
                                        borderRadius:8, color:'#F8FAFC', fontSize:12 }}
                        cursor={{ stroke:'#334155', strokeWidth:1 }} />
               <Area type="monotone" dataKey="count" name="Threats"
-                    stroke="#3B82F6" strokeWidth={2} fill="url(#velGrad)" dot={false}
+                    stroke="#34D399" strokeWidth={2} fill="url(#velGrad)" dot={false}
                     isAnimationActive={!REDUCED_MOTION} />
             </AreaChart>
           </ResponsiveContainer>
@@ -671,7 +683,7 @@
         <div className="glass rounded-xl p-5" style={{ border:'1px solid #334155' }}>
           <div className="flex items-start justify-between mb-4">
             <div>
-              <h3 className="text-sm font-semibold" style={{ color:'#F8FAFC' }}>Chain Distribution</h3>
+              <h3 className="text-[15px] font-semibold" style={{ color:'#F8FAFC' }}>Chain Distribution</h3>
               <div className="text-xs mt-0.5" style={{ color:'#94A3B8' }}>Threats in the loaded feed, by network{cappedNote}</div>
             </div>
             {haslive
@@ -686,15 +698,16 @@
           </div>
           {haslive
             ? <ResponsiveContainer width="100%" height={190}>
-                <BarChart data={data} margin={{ top:4, right:4, left:-20, bottom:0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1E293B" vertical={false} />
-                  <XAxis dataKey="name" tick={{ fill:'#94A3B8', fontSize:11 }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fill:'#94A3B8', fontSize:10 }} tickLine={false} axisLine={false} />
+                <BarChart data={data} margin={{ top:4, right:4, left:-20, bottom:0 }} accessibilityLayer
+                          aria-label={`Threat detections by chain, peak ${Math.max(...data.map(point => point.count))} on ${data.find(point => point.count === Math.max(...data.map(point => point.count))).name}`}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#273349" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fill:'#94A3B8', fontSize:10 }} tickLine={false} axisLine={false} interval={0} angle={-30} />
+                  <YAxis tick={{ fill:'#94A3B8', fontSize:10 }} tickLine={false} axisLine={false} allowDecimals={false} />
                   <Tooltip contentStyle={{ background:'#1E293B', border:'1px solid #334155',
                                            borderRadius:8, color:'#F8FAFC', fontSize:12 }}
                            cursor={{ fill:'rgba(255,255,255,0.03)' }} />
                   <Bar dataKey="count" name="Threats" radius={[4,4,0,0]} isAnimationActive={!REDUCED_MOTION}>
-                    {data.map((e,i) => <Cell key={i} fill={BAR_COLORS[e.name] || '#3B82F6'} />)}
+                    {data.map((e,i) => <Cell key={i} fill={BAR_COLORS[e.name] || '#34D399'} />)}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
@@ -709,10 +722,10 @@
     // ─── Section Label ────────────────────────────────────────────────────────
     function BaseAttestationsPanel({ data }) {
       const riskColor = (label) => {
-        if (label === 'DANGER' || label === 'HIGH') return '#FCA5A5';
-        if (label === 'WARNING' || label === 'MEDIUM') return '#FBBF24';
-        if (label === 'SAFE' || label === 'LOW') return '#34D399';
-        return '#94A3B8';
+        if (label === 'DANGER' || label === 'HIGH') return '#F87171';
+        if (label === 'WARNING' || label === 'MEDIUM') return '#FACC15';
+        if (label === 'SAFE' || label === 'LOW') return '#4ADE80';
+        return '#E2E8F0';
       };
       const chainName = (id) => CHAIN_NAMES[id] || `chain ${id}`;
       const list = data.attestations || [];
@@ -731,13 +744,13 @@
             <span>Attestor:&nbsp;
               <a href={`https://basescan.org/address/${data.attestor}`} target="_blank" rel="noreferrer"
                  className="inline-flex items-center min-h-[44px] md:min-h-0"
-                 style={{ color: '#60A5FA', fontFamily: 'JetBrains Mono,monospace' }}>
+                 style={{ color: '#34D399', fontFamily: 'JetBrains Mono,monospace' }}>
                 {(data.attestor || '').slice(0, 10)}…{(data.attestor || '').slice(-6)}
               </a>
             </span>
             <span>Total recent: <strong style={{ color: '#E2E8F0' }}>{summary.total_recent || 0}</strong></span>
             <a href={data.explorer || '#'} target="_blank" rel="noreferrer"
-               className="inline-flex items-center min-h-[44px] md:min-h-0" style={{ color: '#60A5FA' }}>View on EAS Scan ↗</a>
+               className="inline-flex items-center min-h-[44px] md:min-h-0" style={{ color: '#34D399' }}>View on EAS Scan ↗</a>
           </div>
           {list.length === 0 ? (
             <div className="text-center py-8 text-sm" style={{ color: '#94A3B8' }}>
@@ -762,7 +775,7 @@
                   </span>
                   <a href={`https://base.easscan.org/attestation/view/${a.uid}`} target="_blank" rel="noreferrer"
                      className="text-xs inline-flex items-center justify-center min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0"
-                     style={{ color: '#60A5FA' }}>EAS ↗</a>
+                     style={{ color: '#34D399' }}>EAS ↗</a>
                 </div>
               ))}
             </div>
@@ -774,7 +787,7 @@
     function Section({ title, children }) {
       return (
         <section>
-          <h2 className="text-xs font-semibold uppercase tracking-widest mb-3"
+          <h2 className="text-sm font-semibold uppercase tracking-widest mb-3"
               style={{ color:'#94A3B8' }}>{title}</h2>
           {children}
         </section>
@@ -784,9 +797,9 @@
     // ─── Header ───────────────────────────────────────────────────────────────
     const HEALTH = {
       connecting: { color:'#94A3B8', label:'CONNECTING' },
-      live:       { color:'#10B981', label:'LIVE' },
-      degraded:   { color:'#F59E0B', label:'PARTIAL DATA' },
-      contracts:  { color:'#60A5FA', label:'CONTRACTS ONLY' },
+      live:       { color:'#4ADE80', label:'LIVE' },
+      degraded:   { color:'#FACC15', label:'PARTIAL DATA' },
+      contracts:  { color:'#FB923C', label:'CONTRACTS ONLY' },
       offline:    { color:'#F87171', label:'OFFLINE' },
     };
 
@@ -806,7 +819,7 @@
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="flex items-center gap-3">
                 <span className="text-lg font-bold" style={{ color:'#F8FAFC' }}>
-                  <span style={{ color:'#60A5FA' }}>Shield</span>Bot
+                  <span style={{ color:'#34D399' }}>Shield</span>Bot
                 </span>{' '}
                 <span className="text-sm" style={{ color:'#94A3B8' }}>Threat Dashboard</span>
               </h1>
@@ -847,19 +860,19 @@
     // ─── Platform Stats Bar ────────────────────────────────────────────────────
     // Every count on the page comes from /api/stats; each says the window it covers.
     const STAT_ITEMS = [
-      { key:'transactions_monitored', label:'Transactions Monitored', span:'since monitor start', color:'#3B82F6' },
-      { key:'contracts_scanned',      label:'Contracts Scanned',      span:'all time',            color:'#10B981' },
-      { key:'threats_detected',       label:'Contract Threats',       span:'on record',           color:'#EF4444' },
-      { key:'transactions_blocked',   label:'Transactions Blocked',   span:'all time',            color:'#F59E0B' },
-      { key:'sandwiches_caught',      label:'Sandwich Attacks Caught',span:'since monitor start', color:'#8B5CF6' },
-      { key:'suspicious_approvals',   label:'Suspicious Approvals',   span:'since monitor start', color:'#F97316' },
-      { key:'chains_protected',       label:'Mempool Chains Watched', span:'last poll',           color:'#06B6D4' },
+      { key:'transactions_monitored', label:'Transactions Monitored', span:'since monitor start', color:'#F8FAFC' },
+      { key:'contracts_scanned',      label:'Contracts Scanned',      span:'all time',            color:'#F8FAFC' },
+      { key:'threats_detected',       label:'Contract Threats',       span:'on record',           color:'#F87171' },
+      { key:'transactions_blocked',   label:'Transactions Blocked',   span:'all time',            color:'#F87171' },
+      { key:'sandwiches_caught',      label:'Sandwich Attacks Caught',span:'since monitor start', color:'#FB923C' },
+      { key:'suspicious_approvals',   label:'Suspicious Approvals',   span:'since monitor start', color:'#FACC15' },
+      { key:'chains_protected',       label:'Mempool Chains Watched', span:'last poll',           color:'#34D399' },
     ];
 
     const DAY_ITEMS = [
-      { key:'contracts_scanned_24h',    label:'Contracts Scanned',    span:'last 24 h', color:'#10B981' },
-      { key:'threats_detected_24h',     label:'Contract Threats',     span:'last 24 h', color:'#EF4444' },
-      { key:'transactions_blocked_24h', label:'Transactions Blocked', span:'last 24 h', color:'#F59E0B' },
+      { key:'contracts_scanned_24h',    label:'Contracts Scanned',    span:'last 24 h', color:'#F8FAFC' },
+      { key:'threats_detected_24h',     label:'Contract Threats',     span:'last 24 h', color:'#F87171' },
+      { key:'transactions_blocked_24h', label:'Transactions Blocked', span:'last 24 h', color:'#F87171' },
     ];
 
     function useCountUp(target, duration = 1200) {
@@ -901,7 +914,7 @@
              style={{ border:'1px solid #1E293B', minWidth:0 }}>
           {loading
             ? <div className="skeleton mx-auto" style={{ height:28, width:72 }} />
-            : <div className={`${value == null ? 'text-base' : 'text-2xl'} font-bold leading-none`}
+             : <div className={`${value == null ? 'text-base' : 'text-2xl'} font-bold leading-none tabular-nums`}
                    style={{ color: value == null ? '#94A3B8' : color }}>
                 {value == null ? missing : display.toLocaleString()}
               </div>
@@ -941,7 +954,7 @@
             ))}
           </div>
           {!loading && footnote && (
-            <div className="text-xs mt-2" style={{ color:'#94A3B8' }}>{footnote}</div>
+            <div className="text-xs mt-2 max-w-[72ch]" style={{ color:'#94A3B8' }}>{footnote}</div>
           )}
         </div>
       );
@@ -956,7 +969,7 @@
                         color={s.color} loading={loading} />
             ))}
           </div>
-          <div className="text-xs mt-2" style={{ color:'#94A3B8' }}>
+          <div className="text-xs mt-2 max-w-[72ch]" style={{ color:'#94A3B8' }}>
             A contract threat is a contract the extension and agent firewalls scored high risk. On record means
             its latest score, since a rescan replaces it; it counts in the last 24 h when that scan falls in the
             window. The charts and the feed below show only the newest
@@ -1074,7 +1087,7 @@
 
             <Section title="Analytics">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <ThreatVelocityChart data={velocityData} unavailable={!feedOk} capped={capped} />
+                <ThreatVelocityChart data={velocityData} loading={loading} unavailable={!feedOk} capped={capped} />
                 <ChainDistributionChart data={chainData} loading={loading} unavailable={!feedOk} capped={capped} />
               </div>
             </Section>
