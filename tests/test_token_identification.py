@@ -75,15 +75,20 @@ async def test_successful_identification_is_true(identification_client):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('failure', [
-    ContractLogicError('execution reverted'),
-    BadFunctionCallOutput('Empty reply'),
+@pytest.mark.parametrize('failure, probe_failure', [
+    (ContractLogicError('execution reverted'), ContractLogicError('execution reverted')),
+    (BadFunctionCallOutput('Empty reply'), None),
 ])
-async def test_confirmed_non_token_skips_with_full_coverage(identification_client, covered_results, failure):
+async def test_confirmed_non_token_skips_with_full_coverage(
+    identification_client, covered_results, failure, probe_failure,
+):
     w3 = identification_client.get_web3()
     w3.eth.contract.return_value.functions.symbol.return_value.call.side_effect = failure
     w3.eth.contract.return_value.address = ADDRESS
     w3.eth.call.return_value = b''
+    if probe_failure:
+        w3.eth.contract.return_value.functions.totalSupply.return_value.call.side_effect = probe_failure
+        w3.eth.contract.return_value.functions.decimals.return_value.call.side_effect = probe_failure
     is_token = await identification_client.is_token_contract(ADDRESS)
     assert is_token is False
     if isinstance(failure, BadFunctionCallOutput):
@@ -104,6 +109,50 @@ async def test_confirmed_non_token_skips_with_full_coverage(identification_clien
     assert risk['risk_level'] == 'LOW'
     honeypot_service.fetch_honeypot_data.assert_not_awaited()
     dex_service.fetch_token_market_data.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reverting_symbol_with_answering_total_supply_is_a_token(identification_client, covered_results):
+    w3 = identification_client.get_web3()
+    w3.eth.contract.return_value.functions.symbol.return_value.call.side_effect = ContractLogicError('execution reverted')
+    w3.eth.contract.return_value.functions.totalSupply.return_value.call.return_value = 1
+
+    is_token = await identification_client.is_token_contract(ADDRESS)
+
+    assert is_token is True
+    risk = RiskEngine().compute_from_results(covered_results, is_token=is_token)
+    assert format_extension_alert(risk)['risk_classification'] != 'SAFE'
+
+
+@pytest.mark.asyncio
+async def test_reverting_symbol_and_total_supply_falls_through_to_decimals(identification_client):
+    # decimals() is the second probe, so it only decides when totalSupply() has also reverted.
+    w3 = identification_client.get_web3()
+    revert = ContractLogicError('execution reverted')
+    w3.eth.contract.return_value.functions.symbol.return_value.call.side_effect = revert
+    w3.eth.contract.return_value.functions.totalSupply.return_value.call.side_effect = revert
+    w3.eth.contract.return_value.functions.decimals.return_value.call.return_value = 18
+
+    assert await identification_client.is_token_contract(ADDRESS) is True
+
+
+@pytest.mark.asyncio
+async def test_a_contract_that_answers_none_of_the_three_is_not_a_token(identification_client):
+    w3 = identification_client.get_web3()
+    revert = ContractLogicError('execution reverted')
+    for name in ("symbol", "totalSupply", "decimals"):
+        getattr(w3.eth.contract.return_value.functions, name).return_value.call.side_effect = revert
+
+    assert await identification_client.is_token_contract(ADDRESS) is False
+
+
+@pytest.mark.asyncio
+async def test_reverting_symbol_with_timed_out_total_supply_is_unknown(identification_client):
+    w3 = identification_client.get_web3()
+    w3.eth.contract.return_value.functions.symbol.return_value.call.side_effect = ContractLogicError('execution reverted')
+    w3.eth.contract.return_value.functions.totalSupply.return_value.call.side_effect = TimeoutError('RPC timeout')
+
+    assert await identification_client.is_token_contract(ADDRESS) is None
 
 
 @pytest.mark.asyncio

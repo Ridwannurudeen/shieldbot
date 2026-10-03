@@ -180,16 +180,25 @@ line, which nobody is watching.
 **Mandatory after any deploy that touches the landing pages:**
 
 ```
-curl -sI https://shieldbotsecurity.online/ | grep -c 'sha256-6PF9GAAy'
+H=$(grep -o "sha256-[A-Za-z0-9+/=]*" deploy/nginx-shieldbotsecurity-new.conf | head -1)
+curl -sI https://shieldbotsecurity.online/ | grep -c "$H"
 ```
 
 It must print `1`. If it prints `0`, the live vhost is missing the hash: add it to `script-src`,
 then `nginx -t && systemctl reload nginx`, and re-run the check.
 
-`tests/test_website_claims.py` keeps the reference conf and all five pages in agreement — it
-recomputes the hash from every page and requires exactly one hash in the policy — so a
-reformatted script fails the suite rather than breaking the live site silently. The test cannot
-see the live vhost, which is why the curl above is not optional.
+`tests/test_website_claims.py` keeps the reference conf and all **ten** pages in agreement — the five
+sources under `landing-src/` and their five built copies under `landing/` — recomputing the hash from
+each and requiring exactly one hash in the policy, so a reformatted script or a stale built copy fails
+the suite rather than breaking the live site silently. The test cannot see the live vhost, which is why
+the curl above is not optional.
+
+**Changing the hash later has an unavoidable gap.** That test requires *exactly one* `'sha256-` in
+`script-src`, so the policy cannot carry the old and new hashes side by side across a cutover. The order
+is therefore: cut over first, then edit the vhost and reload immediately after. Between those two steps
+the new script is refused and light-choosers see dark. Keep the gap to seconds, and verify with the curl
+above once the reload is done. This does not apply to the first deploy of a dark build, because the live
+site has no inline script yet and the hash can be added before the cutover, inert until the swap.
 
 ### Landing analytics (Plausible)
 

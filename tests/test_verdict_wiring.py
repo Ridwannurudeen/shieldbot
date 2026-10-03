@@ -110,6 +110,7 @@ async def test_permalink_serves_the_latest_evidence_and_how_to_verify(verdict_ap
     assert body["evidence_hash"] == summary["evidence_hash"]
     assert body["evidence_hash"] == "0x" + keccak(body["canonical"].encode("utf-8")).hex()
     assert body["evidence"] == json.loads(body["canonical"])
+    assert body["observed_block"] == body["evidence"]["observed_block"]
     assert body["evidence"]["verdict"] == "HIGH"
     assert body["onchain_status"] == "submitted"
     assert body["tx_hash"] == "0x" + "ab" * 32
