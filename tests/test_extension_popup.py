@@ -325,11 +325,47 @@ def contrast(foreground, background):
     return (light + 0.05) / (dark + 0.05)
 
 
-@pytest.mark.parametrize("selector", [".history-time", ".feed-time", ".gauge-sub", ".ctr-meta"])
-def test_popup_secondary_text_is_readable(selector):
-    html = (EXTENSION / "popup.html").read_text(encoding="utf-8")
+@pytest.mark.parametrize(
+    ("page", "selector", "background"),
+    [
+        ("popup.html", ".history-time", "#1e293b"),
+        ("popup.html", ".feed-time", "#0b1327"),
+        ("popup.html", ".gauge-sub", "#0b1327"),
+        ("popup.html", ".ctr-meta", "#0b1327"),
+        ("popup.html", ".dh-version", "#0b1327"),
+        ("popup.html", ".feed-empty-lbl", "#0b1327"),
+        ("popup.html", ".wh-hint", "#0b1327"),
+        ("welcome.html", ".version", "#1e293b"),
+    ],
+)
+def test_popup_secondary_text_is_readable(page, selector, background):
+    html = (EXTENSION / page).read_text(encoding="utf-8")
     rule = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", html).group(1)
     color = re.search(r"(?:^|;)\s*(?:color|fill):\s*(#[0-9a-fA-F]{6})", rule).group(1)
-    # #1e293b is the lightest background any of these sit on.
-    assert contrast(color, "#1e293b") >= 4.5, (selector, color)
+    # Each selector is checked against the darkest surface it actually sits on.
+    assert contrast(color, background) >= 4.5, (page, selector, color, background)
+
+
+@pytest.mark.parametrize(
+    ("page", "selectors"),
+    [
+        ("popup.html", (".feed-item", ".scan-dot", ".rmd-build")),
+        ("sidepanel.html", (".typing-dot",)),
+    ],
+)
+def test_extension_pages_disable_animations_when_motion_reduced(page, selectors):
+    html = (EXTENSION / page).read_text(encoding="utf-8")
+    reduced_motion = re.search(r"@media\s*\(\s*prefers-reduced-motion\s*:\s*reduce\s*\)", html)
+    assert reduced_motion, page
+    reduced_css = html[reduced_motion.start():]
+    preceding_css = html[:reduced_motion.start()]
+    for selector in selectors:
+        assert re.search(
+            re.escape(selector) + r"\s*\{[^}]*\banimation\s*:\s*none\s*;",
+            reduced_css,
+        ), (page, selector)
+        animations = list(
+            re.finditer(re.escape(selector) + r"\s*\{[^}]*\banimation\s*:", preceding_css)
+        )
+        assert animations and reduced_motion.start() > animations[-1].start(), (page, selector)
 
