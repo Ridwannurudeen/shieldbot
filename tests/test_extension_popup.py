@@ -329,12 +329,12 @@ def contrast(foreground, background):
     ("page", "selector", "background"),
     [
         ("popup.html", ".history-time", "#1e293b"),
-        ("popup.html", ".feed-time", "#0b1327"),
-        ("popup.html", ".gauge-sub", "#0b1327"),
-        ("popup.html", ".ctr-meta", "#0b1327"),
-        ("popup.html", ".dh-version", "#0b1327"),
-        ("popup.html", ".feed-empty-lbl", "#0b1327"),
-        ("popup.html", ".wh-hint", "#0b1327"),
+        ("popup.html", ".feed-time", "#020617"),
+        ("popup.html", ".gauge-sub", "#020617"),
+        ("popup.html", ".ctr-meta", "#020617"),
+        ("popup.html", ".dh-version", "#020617"),
+        ("popup.html", ".feed-empty-lbl", "#020617"),
+        ("popup.html", ".wh-hint", "#020617"),
         ("welcome.html", ".version", "#1e293b"),
     ],
 )

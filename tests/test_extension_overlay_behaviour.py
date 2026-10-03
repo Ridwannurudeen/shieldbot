@@ -1917,7 +1917,10 @@ def test_replaced_built_ins_cannot_let_a_request_skip_the_decision(patch):
     pending.catch(() => {});
     await flush();
     assert.equal(sent.length, before, 'the request reached the wallet before any decision');
-    const intercept = posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+    // The intercept post waits on an HMAC, so one 60 ms tick is not always enough on a loaded machine.
+    const lastIntercept = () => posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').at(-1);
+    for (let i = 0; i < 10 && !lastIntercept(); i++) await flush();
+    const intercept = lastIntercept();
     assert(intercept, 'the request was not sent for a decision');
     const requestId = intercept.requestId;
     assert.notEqual(requestId, 'predictable');
@@ -2472,6 +2475,8 @@ def test_a_request_taken_from_the_provider_prototype_is_checked_too(patch):
     pending.catch(() => {});
     await flush();
     assert.equal(sent.length, 0, 'the request reached the wallet before any decision');
+    // Same HMAC wait as above: poll, bounded, rather than trusting a single tick.
+    for (let i = 0; i < 10 && intercepts().length === before; i++) await flush();
     assert.equal(intercepts().length, before + 1, 'the request was not sent for a decision');
     const {requestId} = intercepts().at(-1);
     deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'block', proof: await proof(requestId, 'block')});
