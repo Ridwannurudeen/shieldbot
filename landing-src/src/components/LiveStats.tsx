@@ -23,7 +23,8 @@ function isStats(d: unknown): d is Stats {
 }
 
 function fmt(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+  // 999_500 rather than 1_000_000: at 999_999 the thousands branch would round to "1000K".
+  if (n >= 999_500) return (n / 1_000_000).toFixed(1) + "M";
   if (n >= 10_000) return (n / 1_000).toFixed(0) + "K";
   return n.toLocaleString();
 }
@@ -57,7 +58,6 @@ export default function LiveStats() {
       label: "Suspicious approvals flagged",
       value: show(stats?.suspicious_approvals),
     },
-    { label: "Chains supported for scans", value: String(SUPPORTED_CHAINS) },
   ];
 
   const note =
@@ -71,25 +71,27 @@ export default function LiveStats() {
   const dot = `h-2 w-2 rounded-full ${stats ? "bg-emerald-bright motion-safe:animate-pulse" : "bg-line-strong"}`;
 
   return (
-    <div className="bg-surface-2 pb-14 md:pb-[72px] lg:pb-24">
+    <section aria-labelledby="live-stats-title" className="bg-surface-2 pt-14 pb-14 md:pt-[72px] md:pb-[72px] lg:pt-24 lg:pb-24">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
-        <div className="rounded-2xl border border-line bg-surface p-6">
+        <p id="live-stats-title" className="text-xs font-bold uppercase tracking-[0.12em] text-emerald">Live mempool counters</p>
+        <div className="mt-3 rounded-2xl border border-line bg-surface p-6">
           <div className="flex items-center gap-2 text-[13px] text-muted">
             <span aria-hidden="true" className={dot} />
             <span>{note}</span>
           </div>
           <div className="mt-5 grid grid-cols-1 min-[360px]:grid-cols-2 gap-4 lg:grid-cols-4">
-            {items.map((item, index) => (
+            {items.map((item) => (
               <StatTile
                 key={item.label}
                 value={item.value}
                 label={item.label}
-                state={index === 3 ? "ready" : stats === undefined ? "loading" : stats === null ? "unavailable" : "ready"}
+                state={stats === undefined ? "loading" : stats === null ? "unavailable" : "ready"}
               />
             ))}
           </div>
+          <p className="mt-4 text-[13px] text-muted">Scans cover {SUPPORTED_CHAINS} chains.</p>
         </div>
       </div>
-    </div>
+    </section>
   );
 }

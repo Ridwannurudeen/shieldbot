@@ -19,7 +19,7 @@ const steps: { num: string; title: string; desc: string; icon: IconName }[] = [
   {
     num: "03",
     title: "Report",
-    desc: "Shows SAFE, CAUTION, HIGH RISK or BLOCK RECOMMENDED with the reasons, or UNKNOWN with the reason a check could not run. For a warning you choose to cancel or sign (Strict mode removes that choice for BLOCK RECOMMENDED, UNKNOWN and any result whose checks did not all run). A request it cannot check is refused, such as one that times out, one whose wallet chain is unknown or differs from the transaction's, or one sent through an older wallet method or from a frame or popup the page can script.",
+    desc: "Shows SAFE, CAUTION, HIGH RISK or BLOCK RECOMMENDED with the reasons, or UNKNOWN with the reason a check could not run. For a warning you choose to cancel or sign (Strict mode removes that choice for BLOCK RECOMMENDED, UNKNOWN and any result whose checks did not all run).",
     icon: "shield",
   },
 ];
@@ -108,7 +108,7 @@ export default function HowItWorks() {
             <figure>
               <picture>
                 <source
-                  media="(max-width: 767px)"
+                  media="(max-width: 1023px)"
                   srcSet="/hero-overlay-mobile.webp"
                   width={390}
                   height={496}
