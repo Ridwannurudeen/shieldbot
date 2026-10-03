@@ -67,6 +67,14 @@
     color-scheme: light;
   }
 
+  /* The switch sets this for one frame so no element fades between themes (buttons and links
+     carry transition-colors). */
+  :root[data-theme-switching] *,
+  :root[data-theme-switching] *::before,
+  :root[data-theme-switching] *::after {
+    transition: none !important;
+  }
+
   html { scroll-padding-top: 80px; }
 
   body {

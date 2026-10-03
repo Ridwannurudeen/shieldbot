@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-export type IconName = "shield" | "check" | "cross" | "question" | "info" | "search" | "pen" | "link" | "code" | "chat" | "bot" | "copy" | "external" | "chevron" | "pause" | "play" | "menu" | "close" | "grid";
+export type IconName = "shield" | "check" | "cross" | "question" | "info" | "search" | "pen" | "link" | "code" | "chat" | "bot" | "copy" | "external" | "chevron" | "pause" | "play" | "menu" | "close" | "grid" | "sun" | "moon";
 
 const PATHS: Record<IconName, ReactNode> = {
   shield: <><path d="M12 1.5 3 6v6c0 5.8 3.84 11.21 9 12 5.16-.79 9-6.2 9-12V6l-9-4.5Z" /><path d="m9 12 2.25 2.25L15 9.75" /></>,
@@ -22,6 +22,8 @@ const PATHS: Record<IconName, ReactNode> = {
   menu: <path d="M4 6h16M4 12h16M4 18h16" />,
   close: <path d="m6 6 12 12M18 6 6 18" />,
   grid: <><rect x="4" y="4" width="6" height="6" /><rect x="14" y="4" width="6" height="6" /><rect x="4" y="14" width="6" height="6" /><rect x="14" y="14" width="6" height="6" /></>,
+  sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" /></>,
+  moon: <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />,
 };
 
 export default function Icon({ name, size = 20, className }: { name: IconName; size?: 16 | 20 | 24; className?: string }) {
