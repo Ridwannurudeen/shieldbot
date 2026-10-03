@@ -19,6 +19,26 @@
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon.png">
   <link rel="shortcut icon" href="/favicon.png">
   <style>
+    :root {
+      --c-surface: 15 23 42; --c-surface-2: 10 16 32; --c-surface-3: 30 41 59;
+      --c-line: 39 51 73; --c-ink: 248 250 252; --c-body: 203 213 225; --c-muted: 148 163 184;
+      --c-emerald: 52 211 153; --c-emerald-tint: 15 42 34; --c-emerald-line: 31 95 71;
+      --c-safe-fg: 74 222 128; --c-safe-tint: 15 46 29;
+      --c-caution-fg: 250 204 21; --c-caution-tint: 48 39 8;
+      --c-high-fg: 251 146 60; --c-high-tint: 53 26 11;
+      --c-block-fg: 248 113 113; --c-block-tint: 58 20 24;
+      color-scheme: dark;
+    }
+    :root[data-theme="light"] {
+      --c-surface: 255 255 255; --c-surface-2: 246 248 250; --c-surface-3: 238 242 246;
+      --c-line: 227 232 239; --c-ink: 11 18 32; --c-body: 51 65 85; --c-muted: 71 85 105;
+      --c-emerald: 4 120 87; --c-emerald-tint: 236 253 245; --c-emerald-line: 167 243 208;
+      --c-safe-fg: 22 101 52; --c-safe-tint: 220 252 231;
+      --c-caution-fg: 133 77 14; --c-caution-tint: 254 249 195;
+      --c-high-fg: 154 52 18; --c-high-tint: 255 237 213;
+      --c-block-fg: 185 28 28; --c-block-tint: 254 226 226;
+      color-scheme: light;
+    }
     @font-face {
       font-family: "Manrope Variable";
       font-style: normal;
@@ -38,57 +58,57 @@
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: "Manrope Variable", "Manrope Fallback", Arial, Helvetica, sans-serif;
-      background: #FFFFFF;
-      color: #334155;
+      background: rgb(var(--c-surface));
+      color: rgb(var(--c-body));
       line-height: 1.7;
       padding: 0 16px;
     }
-    a { color: #047857; text-decoration: none; }
+    a { color: rgb(var(--c-emerald)); text-decoration: none; }
     a:hover { text-decoration: underline; }
     .nav {
       max-width: 800px; margin: 0 auto;
       padding: 20px 0;
       display: flex; align-items: center; gap: 10px;
-      border-bottom: 1px solid #E3E8EF;
+      border-bottom: 1px solid rgb(var(--c-line));
       margin-bottom: 48px;
     }
-    .nav-name { font-size: 15px; font-weight: 700; color: #0B1220; }
-    .nav-back { margin-left: auto; font-size: 13px; color: #475569; }
-    .nav-back:hover { color: #047857; text-decoration: none; }
+    .nav-name { font-size: 15px; font-weight: 700; color: rgb(var(--c-ink)); }
+    .nav-back { margin-left: auto; font-size: 13px; color: rgb(var(--c-muted)); }
+    .nav-back:hover { color: rgb(var(--c-emerald)); text-decoration: none; }
     .wrap { max-width: 800px; margin: 0 auto; padding-bottom: 80px; }
     .hero { margin-bottom: 48px; }
-    .hero h1 { font-size: 36px; font-weight: 800; color: #0B1220; letter-spacing: -0.02em; margin-bottom: 12px; }
-    .hero p { font-size: 16px; color: #334155; max-width: 600px; }
-    h2 { font-size: 20px; font-weight: 700; color: #0B1220; margin: 48px 0 12px; padding-bottom: 10px; border-bottom: 1px solid #E3E8EF; }
-    h3 { font-size: 15px; font-weight: 700; color: #0B1220; margin: 24px 0 8px; }
-    p { margin-bottom: 14px; font-size: 14px; color: #334155; }
+    .hero h1 { font-size: 36px; font-weight: 800; color: rgb(var(--c-ink)); letter-spacing: -0.02em; margin-bottom: 12px; }
+    .hero p { font-size: 16px; color: rgb(var(--c-body)); max-width: 600px; }
+    h2 { font-size: 20px; font-weight: 700; color: rgb(var(--c-ink)); margin: 48px 0 12px; padding-bottom: 10px; border-bottom: 1px solid rgb(var(--c-line)); }
+    h3 { font-size: 15px; font-weight: 700; color: rgb(var(--c-ink)); margin: 24px 0 8px; }
+    p { margin-bottom: 14px; font-size: 14px; color: rgb(var(--c-body)); }
     ul { margin: 8px 0 16px 20px; }
-    li { font-size: 14px; color: #334155; margin-bottom: 8px; }
-    li strong { color: #0B1220; }
+    li { font-size: 14px; color: rgb(var(--c-body)); margin-bottom: 8px; }
+    li strong { color: rgb(var(--c-ink)); }
     .callout {
-      background: #ECFDF5;
-      border: 1px solid #A7F3D0;
-      border-left: 3px solid #047857;
+      background: rgb(var(--c-emerald-tint));
+      border: 1px solid rgb(var(--c-emerald-line));
+      border-left: 3px solid rgb(var(--c-emerald));
       border-radius: 8px;
       padding: 16px 18px;
       margin: 24px 0;
-      font-size: 14px; color: #334155;
+      font-size: 14px; color: rgb(var(--c-body));
     }
     .score-table { width: 100%; border-collapse: collapse; margin: 16px 0; }
-    .score-table th { text-align: left; font-size: 12px; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px; border-bottom: 1px solid #E3E8EF; }
-    .score-table td { font-size: 13px; color: #334155; padding: 10px 12px; border-bottom: 1px solid #E3E8EF; }
+    .score-table th { text-align: left; font-size: 12px; color: rgb(var(--c-muted)); text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px; border-bottom: 1px solid rgb(var(--c-line)); }
+    .score-table td { font-size: 13px; color: rgb(var(--c-body)); padding: 10px 12px; border-bottom: 1px solid rgb(var(--c-line)); }
     .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
-    .safe { background: #DCFCE7; color: #166534; }
-    .caution { background: #FEF9C3; color: #854D0E; }
-    .high { background: #FFEDD5; color: #9A3412; }
-    .block { background: #FEE2E2; color: #B91C1C; }
+    .safe { background: rgb(var(--c-safe-tint)); color: rgb(var(--c-safe-fg)); }
+    .caution { background: rgb(var(--c-caution-tint)); color: rgb(var(--c-caution-fg)); }
+    .high { background: rgb(var(--c-high-tint)); color: rgb(var(--c-high-fg)); }
+    .block { background: rgb(var(--c-block-tint)); color: rgb(var(--c-block-fg)); }
     .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
-    .compare-card { background: #F6F8FA; border: 1px solid #E3E8EF; border-radius: 12px; padding: 18px; }
-    .compare-card.shield { border-color: #A7F3D0; }
-    .compare-card h4 { font-size: 13px; font-weight: 700; color: #0B1220; margin-bottom: 12px; }
+    .compare-card { background: rgb(var(--c-surface-2)); border: 1px solid rgb(var(--c-line)); border-radius: 12px; padding: 18px; }
+    .compare-card.shield { border-color: rgb(var(--c-emerald-line)); }
+    .compare-card h4 { font-size: 13px; font-weight: 700; color: rgb(var(--c-ink)); margin-bottom: 12px; }
     .compare-card ul { margin-left: 16px; }
     .compare-card li { font-size: 13px; margin-bottom: 6px; }
-    .footer { max-width: 800px; margin: 48px auto 0; padding-top: 24px; border-top: 1px solid #E3E8EF; font-size: 12px; color: #475569; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+    .footer { max-width: 800px; margin: 48px auto 0; padding-top: 24px; border-top: 1px solid rgb(var(--c-line)); font-size: 12px; color: rgb(var(--c-muted)); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
     @media (max-width: 600px) { .compare-grid { grid-template-columns: 1fr; } .hero h1 { font-size: 26px; } }
   </style>
 

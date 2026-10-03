@@ -13,6 +13,26 @@
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon.png">
   <link rel="shortcut icon" href="/favicon.png">
   <style>
+    :root {
+      --c-surface: 15 23 42; --c-surface-2: 10 16 32; --c-surface-3: 30 41 59;
+      --c-line: 39 51 73; --c-ink: 248 250 252; --c-body: 203 213 225; --c-muted: 148 163 184;
+      --c-emerald: 52 211 153; --c-emerald-tint: 15 42 34; --c-emerald-line: 31 95 71;
+      --c-safe-fg: 74 222 128; --c-safe-tint: 15 46 29;
+      --c-caution-fg: 250 204 21; --c-caution-tint: 48 39 8;
+      --c-high-fg: 251 146 60; --c-high-tint: 53 26 11;
+      --c-block-fg: 248 113 113; --c-block-tint: 58 20 24;
+      color-scheme: dark;
+    }
+    :root[data-theme="light"] {
+      --c-surface: 255 255 255; --c-surface-2: 246 248 250; --c-surface-3: 238 242 246;
+      --c-line: 227 232 239; --c-ink: 11 18 32; --c-body: 51 65 85; --c-muted: 71 85 105;
+      --c-emerald: 4 120 87; --c-emerald-tint: 236 253 245; --c-emerald-line: 167 243 208;
+      --c-safe-fg: 22 101 52; --c-safe-tint: 220 252 231;
+      --c-caution-fg: 133 77 14; --c-caution-tint: 254 249 195;
+      --c-high-fg: 154 52 18; --c-high-tint: 255 237 213;
+      --c-block-fg: 185 28 28; --c-block-tint: 254 226 226;
+      color-scheme: light;
+    }
     @font-face {
       font-family: "Manrope Variable";
       font-style: normal;
@@ -32,61 +52,61 @@
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: "Manrope Variable", "Manrope Fallback", Arial, Helvetica, sans-serif;
-      background: #FFFFFF;
-      color: #334155;
+      background: rgb(var(--c-surface));
+      color: rgb(var(--c-body));
       line-height: 1.7;
       padding: 0 16px;
     }
-    a { color: #047857; text-decoration: none; }
+    a { color: rgb(var(--c-emerald)); text-decoration: none; }
     a:hover { text-decoration: underline; }
 
     .nav {
       max-width: 760px; margin: 0 auto;
       padding: 20px 0;
       display: flex; align-items: center; gap: 10px;
-      border-bottom: 1px solid #E3E8EF;
+      border-bottom: 1px solid rgb(var(--c-line));
       margin-bottom: 48px;
     }
     .nav-logo { font-size: 22px; }
-    .nav-name { font-size: 15px; font-weight: 700; color: #0B1220; }
-    .nav-back { margin-left: auto; font-size: 13px; color: #475569; }
-    .nav-back:hover { color: #047857; text-decoration: none; }
+    .nav-name { font-size: 15px; font-weight: 700; color: rgb(var(--c-ink)); }
+    .nav-back { margin-left: auto; font-size: 13px; color: rgb(var(--c-muted)); }
+    .nav-back:hover { color: rgb(var(--c-emerald)); text-decoration: none; }
 
     .wrap { max-width: 760px; margin: 0 auto; padding-bottom: 80px; }
 
     .hero { margin-bottom: 40px; }
     .hero h1 {
-      font-size: 32px; font-weight: 800; color: #0B1220;
+      font-size: 32px; font-weight: 800; color: rgb(var(--c-ink));
       letter-spacing: -0.02em; margin-bottom: 10px;
     }
-    .hero-meta { font-size: 13px; color: #475569; }
+    .hero-meta { font-size: 13px; color: rgb(var(--c-muted)); }
 
     h2 {
-      font-size: 16px; font-weight: 700; color: #0B1220;
+      font-size: 16px; font-weight: 700; color: rgb(var(--c-ink));
       margin: 36px 0 10px;
       padding-bottom: 8px;
-      border-bottom: 1px solid #E3E8EF;
+      border-bottom: 1px solid rgb(var(--c-line));
     }
-    p { margin-bottom: 12px; font-size: 14px; color: #334155; }
+    p { margin-bottom: 12px; font-size: 14px; color: rgb(var(--c-body)); }
     ul { margin: 8px 0 14px 20px; }
-    li { font-size: 14px; color: #334155; margin-bottom: 6px; }
-    li strong { color: #0B1220; }
+    li { font-size: 14px; color: rgb(var(--c-body)); margin-bottom: 6px; }
+    li strong { color: rgb(var(--c-ink)); }
 
     .callout {
-      background: #ECFDF5;
-      border: 1px solid #A7F3D0;
-      border-left: 3px solid #047857;
+      background: rgb(var(--c-emerald-tint));
+      border: 1px solid rgb(var(--c-emerald-line));
+      border-left: 3px solid rgb(var(--c-emerald));
       border-radius: 8px;
       padding: 14px 16px;
       margin: 20px 0;
-      font-size: 13px; color: #334155;
+      font-size: 13px; color: rgb(var(--c-body));
     }
 
     .footer {
       max-width: 760px; margin: 48px auto 0;
       padding-top: 24px;
-      border-top: 1px solid #E3E8EF;
-      font-size: 12px; color: #475569;
+      border-top: 1px solid rgb(var(--c-line));
+      font-size: 12px; color: rgb(var(--c-muted));
       display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
     }
   </style>

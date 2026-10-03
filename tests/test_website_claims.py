@@ -239,6 +239,25 @@ def test_verdict_badge_steps_down_where_the_column_is_narrowest():
     assert badge.index("sm:text-2xl") < badge.index("min-[1024px]:text-xl")
 
 
+def test_exactly_one_theme_switch_outside_the_mobile_menu():
+    # Two switches would drift apart when the window crosses the breakpoint after a click,
+    # because the component holds its own state and the hidden one would then read a stale value.
+    navbar = read(COMPONENTS / "Navbar.tsx")
+    assert navbar.count("<ThemeToggle") == 1
+    assert navbar.index("<ThemeToggle") < navbar.index('id="mobile-menu"')
+    toggle = read(COMPONENTS / "ThemeToggle.tsx")
+    assert 'role="switch"' in toggle
+    assert 'aria-label="Dark theme"' in toggle
+    assert "h-11 w-11" in toggle
+
+
+def test_the_theme_default_is_dark_and_the_switch_suppresses_transitions():
+    assert 'data-theme="dark"' in read(LANDING_SRC / "index.html")
+    css = read(LANDING_SRC / "src" / "index.css")
+    assert ":root[data-theme-switching]" in css
+    assert ":root[data-theme=\"light\"]" in css
+
+
 def welcome_text() -> str:
     """The visible text of the extension's welcome page, without its styles and scripts."""
     html = re.sub(r"<(style|script)\b.*?</\1>", " ", read(WELCOME), flags=re.DOTALL)
@@ -511,7 +530,8 @@ def test_analytics_are_proxied_so_the_content_security_policy_stays_self():
 def test_the_theme_restore_script_is_allowed_by_the_content_security_policy():
     # script-src is 'self' with no 'unsafe-inline' (deploy/nginx-shieldbotsecurity-new.conf), so the one
     # inline script, which restores a stored light theme before first paint, is allowed by its hash.
-    import base64, hashlib
+    import base64
+    import hashlib
     conf = read(ROOT / "deploy" / "nginx-shieldbotsecurity-new.conf")
     csp = re.search(r'Content-Security-Policy "([^"]*)"', conf).group(1)
     script_src = re.search(r"script-src ([^;]*);", csp).group(1)
