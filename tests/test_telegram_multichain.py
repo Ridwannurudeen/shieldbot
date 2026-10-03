@@ -125,7 +125,7 @@ def bot_chain_functions():
     tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
     names = {'_get_user_chain_id', '_get_token_info_with_timeout', 'chain_command', 'button_callback', 'help_command',
              'scan_contract', 'check_token', 'handle_address', '_handle_advisor_chat',
-             'threats_command', 'rescue_command', '_scan_buttons', '_token_buttons',
+             'threats_command', 'rescue_command', '_scan_approvals', '_scan_buttons', '_token_buttons',
              'scan_command', 'token_command', 'error_handler'}
     module = ast.Module(body=[node for node in tree.body if isinstance(
         node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in names], type_ignores=[])
@@ -153,6 +153,7 @@ def bot_chain_functions():
         'RUN_ALL_DEADLINE_SECONDS': RUN_ALL_DEADLINE_SECONDS,
         'TOKEN_INFO_TIMEOUT_SECONDS': RUN_ALL_DEADLINE_SECONDS,
         'FORENSIC_REPORT_TIMEOUT_SECONDS': 30.0,
+        '_RESCUE_CHAIN_HINT': 'Chain hint',
         'UnsupportedChainError': UnsupportedChainError,
         'TelegramError': TelegramError,
         'logger': MagicMock(),
@@ -339,7 +340,6 @@ async def test_bot_rejects_removed_prefix_before_saving_or_providers(bot_chain_f
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('handler,argument,chain_id', [
-    ('rescue_command', '0x' + 'a' * 40, 999999),
     ('scan_command', 'eth:0x' + 'a' * 40, 56),
     ('token_command', 'eth:0x' + 'a' * 40, 56),
     ('rescue_command', 'eth:0x' + 'a' * 40, 56),
@@ -621,7 +621,7 @@ async def test_bot_rescue_lower_risk_count_requires_complete_scan(bot_chain_func
     ns['container'].rescue_service.scan_approvals.return_value = result
     status_msg = SimpleNamespace(delete=AsyncMock(), edit_text=AsyncMock())
     update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock(side_effect=[status_msg, None])))
-    context = SimpleNamespace(args=['0x' + 'b' * 40], user_data={'chain_id': 4663})
+    context = SimpleNamespace(args=['rh:0x' + 'b' * 40], user_data={'chain_id': 4663})
     await ns['rescue_command'](update, context)
     text = update.message.reply_text.call_args.args[0]
     assert 'Safe: 3' not in text and 'look safe' not in text
@@ -667,7 +667,7 @@ async def test_bot_never_sends_or_logs_provider_error_text(bot_chain_functions, 
     elif handler == 'error_handler':
         await ns[handler](update, SimpleNamespace(error=error))
     else:
-        args = [] if handler == 'threats_command' else [address]
+        args = {'threats_command': [], 'rescue_command': ['bsc:' + address]}.get(handler, [address])
         await ns[handler](update, SimpleNamespace(args=args, user_data={'chain_id': 56}))
     sent = [str(call) for mock in (update.message.reply_text, status_msg.edit_text) for call in mock.call_args_list]
     logged = [str(call) for call in ns['logger'].method_calls]

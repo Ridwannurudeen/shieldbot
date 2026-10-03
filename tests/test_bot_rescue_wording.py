@@ -10,23 +10,24 @@ import pytest
 
 from core.extension_formatter import is_scan_incomplete
 from core.telegram_formatter import escape_untrusted
+from tests.test_telegram_markdown import assert_literal
 from utils.web3_client import UnsupportedChainError
 
 
 @pytest.fixture
 def rescue_bot():
     tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
-    handler = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)
-                   and node.name == 'rescue_command')
+    names = {'rescue_command', '_scan_approvals', '_RESCUE_CHAIN_HINT'}
     module = ast.parse('from __future__ import annotations')
-    module.body.append(handler)
+    module.body.extend(node for node in tree.body
+                       if isinstance(node, ast.AsyncFunctionDef) and node.name in names
+                       or isinstance(node, ast.Assign) and getattr(node.targets[0], 'id', None) in names)
     scan = AsyncMock()
     namespace = {
         'container': SimpleNamespace(rescue_service=SimpleNamespace(scan_approvals=scan)),
         'settings': SimpleNamespace(bscscan_api_key='', etherscan_api_key=''),
         'web3_client': SimpleNamespace(validate_chain_id=lambda value: value, is_valid_address=lambda _: True),
-        'parse_chain_prefix': lambda value: (None, value),
-        '_get_user_chain_id': lambda _: 4663,
+        'parse_chain_prefix': lambda value: (4663, value),
         'get_chain_name': lambda _: 'Robinhood Chain',
         'is_scan_incomplete': is_scan_incomplete,
         'escape_untrusted': escape_untrusted,
@@ -96,10 +97,20 @@ async def test_revocation_handoff_never_implies_execution(rescue_bot, incomplete
     assert ('Scan incomplete' in text) is incomplete
 
 
+@pytest.mark.asyncio
+async def test_approval_scan_reply_names_its_chain_and_how_to_choose_another(rescue_bot):
+    handler, scan, update, context = rescue_bot
+    await handler(update, context)
+    lines = assert_literal(update.message.reply_text.call_args.args[0]).splitlines()
+    assert 'Chain: Robinhood Chain (4663)' in lines
+    assert lines[-1] == ('To check another chain, add a prefix such as /rescue eth:0x..., '
+                         'or leave the prefix out to be asked.')
+
+
 def test_rescue_negative_finding_uses_shared_incomplete_guard():
     tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
     handler = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)
-                   and node.name == 'rescue_command')
+                   and node.name == '_scan_approvals')
     assignment = next(node for node in ast.walk(handler) if isinstance(node, ast.Assign)
                       and any(isinstance(target, ast.Name) and target.id == 'incomplete'
                               for target in node.targets))

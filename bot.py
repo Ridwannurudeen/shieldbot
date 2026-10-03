@@ -115,6 +115,14 @@ _launch_alert_task = None
 _blacklist_reload_task = None
 # The chain picker lists chains in the product's order; any other supported chain, such as a demo chain, follows.
 PICKER_CHAIN_ORDER = (1, 56, 204, 8453, 42161, 137, 10, 4663)
+# A reply names the chain it used and the two ways to choose one, since the choice may be several messages up.
+_RESCUE_CHAIN_HINT = (
+    "To check another chain, add a prefix such as `/rescue eth:0x...`, or leave the prefix out to be asked."
+)
+_REPORT_CHAIN_HINT = (
+    "To report on another chain, add a prefix such as `/report eth:0x... <reason>`, "
+    "or leave the prefix out to be asked."
+)
 
 
 def _get_user_chain_id(context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -264,7 +272,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **Quick Tips:**
 • Send any address and I'll ask which chain it is on, then auto-detect what to scan; a chain prefix skips the question
 • Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`
-• Use /chain to set the default chain for /rescue and /report
+• Use /chain to set the default chain for the advisor chat
 • Supported: {supported_chains}
 
 Stay safe! 🛡️
@@ -290,8 +298,9 @@ async def chain_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['chain_id'] = chain_id
         await update.message.reply_text(
             f"Switched to {get_chain_name(chain_id)} (chain_id={chain_id}).\n"
-            "It is now the default for /rescue, /report and the advisor chat. An address without a chain prefix, "
-            "pasted or sent with /scan or /token, still asks which chain it is on.",
+            "It is now the default for the advisor chat and is marked (last used) in the chain picker. An address "
+            "without a chain prefix, pasted or sent with /scan, /token, /rescue or /report, still asks which chain "
+            "it is on.",
         )
         return
 
@@ -308,7 +317,7 @@ async def chain_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )])
 
     await update.message.reply_text(
-        "Select the default chain for /rescue and /report:\n\n"
+        "Select the default chain for the advisor chat:\n\n"
         "You can also use chain prefixes like `eth:0x...` or `base:0x...`",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(keyboard),
@@ -378,22 +387,31 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ Please provide an address and reason.\n\n"
             "Usage: `/report <address> <reason>`\n"
             "Example: `/report 0x1234...5678 honeypot scam`\n"
-            "Tip: Use chain prefixes like `/report eth:0x... <reason>`; without one the report is for your current chain.",
+            "Tip: Use chain prefixes like `/report eth:0x... <reason>`; without one I ask which chain the report is for.",
             parse_mode='Markdown'
         )
         return
 
     # The report is for the chain a /scan of the same text would check.
     prefix_chain_id, address = parse_chain_prefix(context.args[0])
-    chain_id = web3_client.validate_chain_id(prefix_chain_id or _get_user_chain_id(context))
     reason = ' '.join(context.args[1:])
-
+    if prefix_chain_id:
+        web3_client.validate_chain_id(prefix_chain_id)
     if not web3_client.is_valid_address(address):
         await update.message.reply_text("❌ Invalid address format.")
         return
+    if prefix_chain_id:
+        await _report_address(update, address, reason, prefix_chain_id, str(update.effective_user.id))
+    else:
+        # The picker's button cannot carry the reason: its callback data is near Telegram's limit.
+        context.user_data['pending_report'] = {'address': address, 'reason': reason}
+        await _ask_chain(update, context, 'p', address)
 
+
+async def _report_address(update: Update, address: str, reason: str, chain_id: int, user_id: str):
+    """Record user_id's community report of address on chain_id and say what it changed."""
     # Community report with safeguards
-    result = await scam_db.report_address(address, str(update.effective_user.id), chain_id)
+    result = await scam_db.report_address(address, user_id, chain_id)
 
     if not result["accepted"]:
         await update.message.reply_text(f"❌ {result['reason']}")
@@ -417,20 +435,24 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response = f"""✅ **Scam Report — {heading}**
 
 **Address:** `{address}`
-**Chain:** {get_chain_name(chain_id)}
+**Chain:** {get_chain_name(chain_id)} ({chain_id})
 **Reason:** {escape_untrusted(reason)}
 
 {status}
+
+{_REPORT_CHAIN_HINT}
 """
     else:
         response = f"""📝 **Report Recorded**
 
 **Address:** `{address}`
-**Chain:** {get_chain_name(chain_id)}
+**Chain:** {get_chain_name(chain_id)} ({chain_id})
 **Reason:** {escape_untrusted(reason)}
 **Progress:** {result['reports']}/{result['needed']} independent reports needed before scans show it as community-reported.
 
 Thank you — more reports from different users are needed before scans show this address as community-reported.
+
+{_REPORT_CHAIN_HINT}
 """
 
     await update.message.reply_text(response, parse_mode='Markdown', disable_web_page_preview=True)
@@ -442,19 +464,27 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "❌ Please provide a wallet address.\n\n"
             "Usage: `/rescue <wallet_address>`\n"
-            "Scans for risky token approvals on your current chain.",
+            "Scans for risky token approvals. A chain prefix like `/rescue eth:0x...` picks the chain; "
+            "without one I ask.",
             parse_mode='Markdown',
         )
         return
 
     raw = context.args[0]
     prefix_chain_id, address = parse_chain_prefix(raw)
-    chain_id = web3_client.validate_chain_id(prefix_chain_id or _get_user_chain_id(context))
-
+    if prefix_chain_id:
+        web3_client.validate_chain_id(prefix_chain_id)
     if not web3_client.is_valid_address(address):
         await update.message.reply_text("❌ Invalid address format.")
         return
+    if prefix_chain_id:
+        await _scan_approvals(update, address, prefix_chain_id)
+    else:
+        await _ask_chain(update, context, 'r', address)
 
+
+async def _scan_approvals(update: Update, address: str, chain_id: int):
+    """Scan a wallet's token approvals on chain_id and report the risky ones."""
     chain_name = get_chain_name(chain_id)
     status_msg = await update.message.reply_text(
         f"🚨 **Scanning approvals on {chain_name}...**\n\n"
@@ -480,7 +510,7 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         response = f"🚨 **Rescue Mode — Approval Scan**\n\n"
         response += f"**Wallet:** `{address}`\n"
-        response += f"**Chain:** {chain_name}\n"
+        response += f"**Chain:** {chain_name} ({chain_id})\n"
         response += f"**Total Approvals:** {total}\n"
         if incomplete:
             reasons = '; '.join(dict.fromkeys(result.get('coverage_reasons', {}).values())) or 'Approval data unavailable'
@@ -531,6 +561,7 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         elif total > 0 and high == 0 and medium == 0 and not incomplete:
             response += "\nNo high- or medium-risk approvals found among the approvals checked.\n"
+        response += f"\n{_RESCUE_CHAIN_HINT}\n"
 
         try:
             await status_msg.delete()
@@ -1015,7 +1046,7 @@ async def _ask_chain(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: s
     """Ask which chain an address without a chain prefix is on, with a button for each supported chain.
 
     A tap reaches button_callback as "pick_<kind>_<chain id>_<address>": kind 'a' for a pasted address,
-    's' for /scan and 't' for /token.
+    's' for /scan, 't' for /token, 'r' for /rescue and 'p' for /report.
     """
     supported = web3_client.get_supported_chain_ids()
     chain_ids = [cid for cid in PICKER_CHAIN_ORDER if cid in supported]
@@ -1366,8 +1397,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chain_name = get_chain_name(chain_id)
         await query.edit_message_text(
             f"Switched to {chain_name} (chain_id={chain_id}).\n"
-            "It is now the default for /rescue, /report and the advisor chat. An address without a chain prefix, "
-            "pasted or sent with /scan or /token, still asks which chain it is on.",
+            "It is now the default for the advisor chat and is marked (last used) in the chain picker. An address "
+            "without a chain prefix, pasted or sent with /scan, /token, /rescue or /report, still asks which chain "
+            "it is on.",
         )
     elif query.data.startswith('token_'):
         # The button names the chain its scan ran on, which the user's current chain may no longer be. A
@@ -1385,7 +1417,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # A chain picker's button (_ask_chain): "pick_<kind>_<chain id>_<address>".
         kind, _, rest = query.data[len('pick_'):].partition('_')
         chain_text, _, address = rest.partition('_')
-        if kind not in ('a', 's', 't') or not (chain_text.isascii() and chain_text.isdecimal()) or (
+        if kind not in ('a', 's', 't', 'r', 'p') or not (chain_text.isascii() and chain_text.isdecimal()) or (
             not web3_client.is_valid_address(address)
         ):
             await query.message.reply_text("❌ Invalid address format.")
@@ -1397,13 +1429,23 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Unsupported chain selection. Supported: {web3_client.get_supported_chain_ids()}",
             )
             return
-        # The chosen chain is marked as last used on the next picker, and stays the default elsewhere.
+        if kind == 'p':
+            # The reason waited in user_data; a picker older than the user's latest /report is stale.
+            pending = context.user_data.get('pending_report')
+            if not pending or pending['address'] != address:
+                await query.message.reply_text(
+                    "This report has expired. Send `/report <address> <reason>` again.", parse_mode='Markdown',
+                )
+                return
+            del context.user_data['pending_report']
+        # The chosen chain is marked as last used on the next picker, and stays the default for the advisor chat.
         context.user_data['chain_id'] = chain_id
         # The picker then names what it scans on which chain, so an old one cannot pass for a new one. Telegram
         # can refuse the edit (a double tap, a deleted or too old message); the chosen scan runs regardless.
+        verb = 'Reporting' if kind == 'p' else 'Scanning'
         try:
             await query.edit_message_text(
-                f"🔍 Scanning `{address}` on {get_chain_name(chain_id)} ({chain_id})...", parse_mode='Markdown',
+                f"🔍 {verb} `{address}` on {get_chain_name(chain_id)} ({chain_id})...", parse_mode='Markdown',
             )
         except TelegramError as e:
             logger.warning(f"Chain picker edit refused: {type(e).__name__}")
@@ -1411,8 +1453,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await _scan_pasted_address(query, address, chain_id)
         elif kind == 's':
             await scan_contract(query, address, chain_id=chain_id)
-        else:
+        elif kind == 't':
             await check_token(query, address, chain_id=chain_id)
+        elif kind == 'r':
+            await _scan_approvals(query, address, chain_id)
+        else:
+            await _report_address(query, address, pending['reason'], chain_id, str(query.from_user.id))
 
 
 def _scan_buttons(address: str, chain_id: int = 56) -> InlineKeyboardMarkup:

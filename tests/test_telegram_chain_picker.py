@@ -5,7 +5,7 @@ Every report names the chain its scan ran on.
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from telegram import Update
@@ -46,6 +46,8 @@ def bot(bot_module, monkeypatch):
     monkeypatch.setattr(bot_module, "web3_client", client)
     monkeypatch.setattr(bot_module, "scan_contract", AsyncMock())
     monkeypatch.setattr(bot_module, "check_token", AsyncMock())
+    monkeypatch.setattr(bot_module, "_scan_approvals", AsyncMock())
+    monkeypatch.setattr(bot_module, "_report_address", AsyncMock())
     return bot_module
 
 
@@ -74,6 +76,7 @@ def _picker(update):
 def _tap(data):
     query = MagicMock()
     query.data = data
+    query.from_user.id = 42
     query.answer = AsyncMock()
     query.edit_message_text = AsyncMock()
     query.message.reply_text = AsyncMock(
@@ -86,6 +89,8 @@ def _assert_nothing_scanned(bot):
     bot.web3_client.is_token_contract.assert_not_awaited()
     bot.check_token.assert_not_awaited()
     bot.scan_contract.assert_not_awaited()
+    bot._scan_approvals.assert_not_awaited()
+    bot._report_address.assert_not_awaited()
 
 
 # --- A pasted address -----------------------------------------------------------------------------
@@ -382,14 +387,22 @@ async def test_a_tap_with_malformed_oversized_or_unsupported_data_is_rejected_wi
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "entry, kind", [("handle_address", "a"), ("scan_command", "s"), ("token_command", "t")]
+    "entry, kind, args",
+    [
+        ("handle_address", "a", [ADDRESS]),
+        ("scan_command", "s", [ADDRESS]),
+        ("token_command", "t", [ADDRESS]),
+        ("rescue_command", "r", [ADDRESS]),
+        ("report_command", "p", [ADDRESS, "drains", "wallets"]),
+    ],
 )
-async def test_every_picker_button_fits_telegrams_64_byte_callback_data_limit(bot, entry, kind):
+async def test_every_picker_button_fits_telegrams_64_byte_callback_data_limit(bot, entry, kind, args):
     # validate_chain_id accepts ids up to 10000000, so that chain's button is the longest one possible.
     bot.web3_client._adapters[10_000_000] = MagicMock()
     update = _message(ADDRESS)
+    context = SimpleNamespace(args=args, user_data={})
 
-    await getattr(bot, entry)(update, SimpleNamespace(args=[ADDRESS], user_data={}))
+    await getattr(bot, entry)(update, context)
 
     _, rows = _picker(update)
     data = [data for row in rows for _, data in row]
@@ -402,9 +415,140 @@ async def test_every_picker_button_fits_telegrams_64_byte_callback_data_limit(bo
     assert all(len(value.encode()) <= 64 for value in data)
     # The longest value still parses.
     query = _tap(f"pick_{kind}_10000000_{ADDRESS}")
-    await bot.button_callback(SimpleNamespace(callback_query=query), SimpleNamespace(user_data={}))
-    scan = {"a": bot.check_token, "s": bot.scan_contract, "t": bot.check_token}[kind]
-    scan.assert_awaited_once_with(query, ADDRESS, chain_id=10_000_000)
+    await bot.button_callback(SimpleNamespace(callback_query=query), context)
+    scan, expected = {
+        "a": (bot.check_token, call(query, ADDRESS, chain_id=10_000_000)),
+        "s": (bot.scan_contract, call(query, ADDRESS, chain_id=10_000_000)),
+        "t": (bot.check_token, call(query, ADDRESS, chain_id=10_000_000)),
+        "r": (bot._scan_approvals, call(query, ADDRESS, 10_000_000)),
+        "p": (bot._report_address, call(query, ADDRESS, "drains wallets", 10_000_000, "42")),
+    }[kind]
+    assert scan.await_args_list == [expected]
+
+
+# --- /rescue and /report --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command, kind, args",
+    [("rescue_command", "r", [ADDRESS]), ("report_command", "p", [ADDRESS, "drains", "wallets"])],
+)
+@pytest.mark.parametrize(
+    "saved", [{}, {"chain_id": 4663}, {"chain_id": 999999}], ids=["none", "saved", "stale"]
+)
+async def test_rescue_and_report_without_a_prefix_ask_which_chain_instead_of_using_the_saved_one(
+    bot, command, kind, args, saved
+):
+    update = _message()
+    context = SimpleNamespace(args=args, user_data=dict(saved))
+
+    await getattr(bot, command)(update, context)
+
+    text, rows = _picker(update)
+    assert text.startswith("Which chain is this address on?")
+    assert [data for row in rows for _, data in row] == [
+        f"pick_{kind}_{chain_id}_{ADDRESS}" for chain_id, _ in CANONICAL
+    ]
+    # The saved chain is only marked, never used without a tap.
+    assert [label for row in rows for label, _ in row if "(last used)" in label] == (
+        ["Robinhood Chain (last used)"] if saved.get("chain_id") == 4663 else []
+    )
+    _assert_nothing_scanned(bot)
+    pending = {"address": ADDRESS, "reason": "drains wallets"} if kind == "p" else None
+    assert context.user_data.get("pending_report") == pending
+    assert context.user_data.get("chain_id") == saved.get("chain_id")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix, chain_id", [("rh", 4663), ("eth", 1)])
+async def test_rescue_and_report_with_a_prefix_run_on_that_chain_at_once(bot, prefix, chain_id):
+    update = _message()
+    context = SimpleNamespace(args=[f"{prefix}:{ADDRESS}", "drains", "wallets"], user_data={"chain_id": 56})
+
+    await bot.rescue_command(update, SimpleNamespace(args=[f"{prefix}:{ADDRESS}"], user_data={"chain_id": 56}))
+    await bot.report_command(update, context)
+
+    bot._scan_approvals.assert_awaited_once_with(update, ADDRESS, chain_id)
+    bot._report_address.assert_awaited_once_with(update, ADDRESS, "drains wallets", chain_id, "42")
+    update.message.reply_text.assert_not_awaited()
+    assert context.user_data == {"chain_id": 56}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id, name", [(4663, "Robinhood Chain"), (1, "Ethereum")])
+async def test_a_rescue_tap_scans_approvals_on_the_chosen_chain(bot, chain_id, name):
+    query = _tap(f"pick_r_{chain_id}_{ADDRESS}")
+    context = SimpleNamespace(user_data={"chain_id": 56})
+
+    await bot.button_callback(SimpleNamespace(callback_query=query), context)
+
+    assert context.user_data == {"chain_id": chain_id}
+    assert (
+        assert_literal(query.edit_message_text.await_args.args[0])
+        == f"\N{LEFT-POINTING MAGNIFYING GLASS} Scanning {ADDRESS} on {name} ({chain_id})..."
+    )
+    bot._scan_approvals.assert_awaited_once_with(query, ADDRESS, chain_id)
+    bot._report_address.assert_not_awaited()
+    bot.web3_client.is_token_contract.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_report_without_a_prefix_is_recorded_on_the_tapped_chain_with_its_reason_once(bot):
+    context = SimpleNamespace(args=[ADDRESS, "drains", "wallets"], user_data={"chain_id": 56})
+    await bot.report_command(_message(), context)
+    query = _tap(f"pick_p_1_{ADDRESS}")
+
+    await bot.button_callback(SimpleNamespace(callback_query=query), context)
+
+    assert (
+        assert_literal(query.edit_message_text.await_args.args[0])
+        == f"\N{LEFT-POINTING MAGNIFYING GLASS} Reporting {ADDRESS} on Ethereum (1)..."
+    )
+    bot._report_address.assert_awaited_once_with(query, ADDRESS, "drains wallets", 1, "42")
+    assert context.user_data == {"chain_id": 1}
+
+    # A second tap on the same picker finds no pending report, so nothing is reported twice.
+    await bot.button_callback(SimpleNamespace(callback_query=query), context)
+
+    assert bot._report_address.await_count == 1
+    (text,) = query.message.reply_text.await_args.args
+    assert assert_literal(text) == "This report has expired. Send /report <address> <reason> again."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "user_data",
+    [
+        {"chain_id": 56},
+        {"chain_id": 56, "pending_report": {"address": "0x" + "b" * 40, "reason": "rug"}},
+    ],
+    ids=["none", "another-address"],
+)
+async def test_a_report_tap_without_its_pending_reason_expires_instead_of_reporting(bot, user_data):
+    query = _tap(f"pick_p_4663_{ADDRESS}")
+    context = SimpleNamespace(user_data=dict(user_data))
+
+    await bot.button_callback(SimpleNamespace(callback_query=query), context)
+
+    assert query.message.reply_text.await_args.kwargs == {"parse_mode": "Markdown"}
+    (text,) = query.message.reply_text.await_args.args
+    assert assert_literal(text) == "This report has expired. Send /report <address> <reason> again."
+    query.edit_message_text.assert_not_awaited()
+    _assert_nothing_scanned(bot)
+    # The latest /report, of another address, is still pending for its own picker.
+    assert context.user_data == user_data
+
+
+@pytest.mark.asyncio
+async def test_the_latest_report_replaces_the_pending_one(bot):
+    other = "0x" + "b" * 40
+    context = SimpleNamespace(args=[ADDRESS, "drainer"], user_data={})
+    await bot.report_command(_message(), context)
+    context.args = [other, "rug", "pull"]
+    await bot.report_command(_message(), context)
+
+    assert context.user_data == {"pending_report": {"address": other, "reason": "rug pull"}}
 
 
 # --- Every report names its chain -----------------------------------------------------------------
@@ -817,8 +961,9 @@ async def test_switching_the_saved_chain_says_what_it_still_controls_not_that_ev
         == tapped
         == (
             "Switched to Robinhood Chain (chain_id=4663).\n"
-            "It is now the default for /rescue, /report and the advisor chat. An address without a chain prefix, "
-            "pasted or sent with /scan or /token, still asks which chain it is on."
+            "It is now the default for the advisor chat and is marked (last used) in the chain picker. An address "
+            "without a chain prefix, pasted or sent with /scan, /token, /rescue or /report, still asks which chain "
+            "it is on."
         )
     )
     assert "All scans" not in tapped

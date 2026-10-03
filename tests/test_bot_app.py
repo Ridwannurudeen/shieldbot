@@ -240,7 +240,7 @@ class TestHelpCommand:
 **Quick Tips:**
 • Send any address and I'll ask which chain it is on, then auto-detect what to scan; a chain prefix skips the question
 • Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`
-• Use /chain to set the default chain for /rescue and /report
+• Use /chain to set the default chain for the advisor chat
 • Supported: BSC, Ethereum, Base, Arbitrum, Polygon, opBNB, Optimism, Robinhood Chain
 
 Stay safe! 🛡️
@@ -283,7 +283,7 @@ class TestNoOnChainRecordingPromise:
         update = MagicMock(spec=Update)
         update.message.reply_text = AsyncMock()
         update.effective_user.id = 42
-        await bot_module.report_command(update, MagicMock(args=["0x" + "0" * 39 + "1", "honeypot"]))
+        await bot_module.report_command(update, MagicMock(args=["bsc:0x" + "0" * 39 + "1", "honeypot"]))
         return update.message.reply_text.await_args.args[0]
 
     @pytest.mark.asyncio
@@ -311,8 +311,8 @@ class TestNoOnChainRecordingPromise:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("raw, user_data, chain_id", [
         ("eth:0x" + "0" * 39 + "1", {"chain_id": 56}, 1),
-        ("0x" + "0" * 39 + "1", {"chain_id": 8453}, 8453),
-        ("0x" + "0" * 39 + "1", {}, 56),
+        ("base:0x" + "0" * 39 + "1", {"chain_id": 56}, 8453),
+        ("bsc:0x" + "0" * 39 + "1", {}, 56),
     ])
     async def test_a_report_is_for_the_chain_a_scan_would_use(self, bot_module, monkeypatch, raw, user_data, chain_id):
         report_address = AsyncMock(return_value={"accepted": True, "blacklisted": False, "reports": 1, "needed": 3})
@@ -355,12 +355,30 @@ class TestNoOnChainRecordingPromise:
         update.message.reply_text = AsyncMock()
         update.effective_user.id = 42
 
-        await bot_module.report_command(update, SimpleNamespace(args=[address, "honeypot"], user_data={}))
+        await bot_module.report_command(update, SimpleNamespace(args=["bsc:" + address, "honeypot"], user_data={}))
 
         report_address.assert_awaited_once_with(address, "42", 56)
         text = update.message.reply_text.await_args.args[0]
         assert "Reporter:" not in text
         assert "42" not in text
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("blacklisted", [False, True])
+    async def test_a_report_reply_names_its_chain_and_how_to_choose_another(self, bot_module, monkeypatch, blacklisted):
+        from tests.test_telegram_markdown import assert_literal
+
+        result = {
+            "accepted": True, "blacklisted": blacklisted, "reports": 3 if blacklisted else 1, "needed": 3,
+            "confirmed": False, "already_listed": False,
+        }
+        text = await self._report(bot_module, monkeypatch, result)
+
+        lines = assert_literal(text).splitlines()
+        assert "Chain: BSC (56)" in lines
+        assert lines[-1] == (
+            "To report on another chain, add a prefix such as /report eth:0x... <reason>, "
+            "or leave the prefix out to be asked."
+        )
 
 
 COMMUNITY_MATCH = {
@@ -1229,7 +1247,7 @@ async def test_a_pending_report_does_not_promise_a_blacklisting(bot_module, monk
     update.message.reply_text = AsyncMock()
     update.effective_user.id = 42
 
-    await bot_module.report_command(update, SimpleNamespace(args=["0x" + "0" * 39 + "1", "drainer"], user_data={}))
+    await bot_module.report_command(update, SimpleNamespace(args=["bsc:0x" + "0" * 39 + "1", "drainer"], user_data={}))
 
     text = update.message.reply_text.await_args.args[0]
     assert "1/3 independent reports" in text

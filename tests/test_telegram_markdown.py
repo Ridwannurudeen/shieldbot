@@ -294,7 +294,7 @@ async def test_report_reply_shows_the_reason_literally(bot_module, monkeypatch, 
     ))
     update = _update()
 
-    await bot_module.report_command(update, SimpleNamespace(args=[ADDRESS, "honeypot", HOSTILE], user_data={}))
+    await bot_module.report_command(update, SimpleNamespace(args=["bsc:" + ADDRESS, "honeypot", HOSTILE], user_data={}))
 
     assert f"Reason: honeypot {HOSTILE}\n" in assert_literal(_reply(update), HOSTILE)
 
@@ -331,7 +331,7 @@ async def test_rescue_reply_shows_token_and_spender_text_literally(bot_module, m
     bot_module.web3_client.validate_chain_id = lambda chain_id: chain_id
     update = _update()
 
-    await bot_module.rescue_command(update, SimpleNamespace(args=[ADDRESS], user_data={}))
+    await bot_module.rescue_command(update, SimpleNamespace(args=["bsc:" + ADDRESS], user_data={}))
 
     rendered = assert_literal(_reply(update), HOSTILE, links=["https://revoke.cash/"])
     assert f"\U0001f534 {HOSTILE} → {HOSTILE} — {HOSTILE}" in rendered
