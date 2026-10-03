@@ -6,10 +6,10 @@ import ThemeToggle from "./ThemeToggle";
 
 const links = [
   { label: "How it works", href: "#how-it-works" },
-  { label: "On-chain check", href: "#on-chain" },
+  { label: "Robinhood Chain", href: "#on-chain" },
   { label: "Coverage", href: "#chains" },
   { label: "For builders", href: "#agent-security" },
-  { label: "FAQ", href: "#faq" },
+  { label: "Threat dashboard", href: "/dashboard" },
 ];
 
 const chromeStoreUrl = "https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk";

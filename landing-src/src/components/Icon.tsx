@@ -31,5 +31,5 @@ export default function Icon({ name, size = 20, className }: { name: IconName; s
 }
 
 export function Mark({ size = 28, className }: { size?: number; className?: string }) {
-  return <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}><path d="M12 1.5 3 6v6c0 5.8 3.84 11.21 9 12 5.16-.79 9-6.2 9-12V6l-9-4.5Z" /><path d="m9 12 2.25 2.25L15 9.75" /></svg>;
+  return <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}><path d="M12 1.5 3 6v6c0 5.8 3.84 11.21 9 12 5.16-.79 9-6.2 9-12V6l-9-4.5Z" fill="currentColor" /><path d="m9 12 2.25 2.25L15 9.75" className="text-onfill" /></svg>;
 }

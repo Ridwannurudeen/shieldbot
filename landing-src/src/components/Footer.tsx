@@ -106,6 +106,7 @@ export default function Footer() {
                 <a href="#chains" className={linkClass}>Coverage</a>
                 <a href="#agent-security" className={linkClass}>For builders</a>
                 <a href="/dashboard" className={linkClass}>Threat dashboard</a>
+                <a href="#faq" className={linkClass}>FAQ</a>
                 <a href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk" target="_blank" rel="noopener noreferrer" className={linkClass}>Chrome extension</a>
                 <a href="https://api.shieldbotsecurity.online/docs" target="_blank" rel="noopener noreferrer" className={linkClass}>API docs</a>
               </div>
