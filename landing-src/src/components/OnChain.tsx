@@ -112,7 +112,7 @@ export default function OnChain() {
                 </li>
               ))}
             </ul>
-            <p className="mt-5 text-[13px] text-muted">Permission lasts only while a subject is actively watched and republished; freshness is publication age, not observation age.</p>
+            <p className="mt-5 text-sm text-body">Permission lasts only while a subject is actively watched and republished; freshness is publication age, not observation age.</p>
           </div>
         </div>
 

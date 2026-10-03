@@ -277,6 +277,11 @@
 .shieldai-actions {
   display: flex;
   gap: 10px;
+  position: sticky;
+  bottom: -24px;
+  margin: 0 -24px -24px;
+  padding: 12px 24px 24px;
+  background: #0f172a;
 }
 
 .shieldai-btn {
