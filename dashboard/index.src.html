@@ -124,6 +124,13 @@
     const REFRESH_MS       = 20000;
     // Items requested from each threat feed source; a source that returns this many may hold more.
     const FEED_LIMIT       = 100;
+    // The chain launch discovery runs on (services/launch_discovery.py) and how many of its blocked
+    // launches the Robinhood Chain panel requests.
+    const LAUNCH_CHAIN     = 4663;
+    const LAUNCH_LIMIT     = 20;
+    // Blocked launches accumulate over days, and every request counts against one per-IP limit, so the
+    // panel refreshes on its own slower cycle rather than adding a sixth request to every fast one.
+    const LAUNCH_REFRESH_MS = 300000;
     // With reduced motion, counts show their value at once, the live dot does not pulse and charts do not animate.
     const REDUCED_MOTION   = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -529,6 +536,9 @@
                 ? <div className="text-center py-16 text-sm" style={{ color:'#94A3B8' }}>
                     {error
                       ? 'Threat data unavailable — check the error above.'
+                      : chain === String(LAUNCH_CHAIN)
+                        ? 'No extension or agent firewall detections on Robinhood Chain in the current window. '
+                          + 'The launches the hunter blocked there are in the Robinhood Chain panel above.'
                       : mempoolUnavailable
                         ? chain
                           ? 'No contract detections on this chain in the current window.'
@@ -732,6 +742,125 @@
       );
     }
 
+    // ─── Robinhood Chain Panel ────────────────────────────────────────────────
+    // The hunter's launch scans are recorded on discovered_launches, never on the contract scores the
+    // feed and the contract counts read, so this panel reads /api/launches and the launch fields of
+    // /api/stats instead.
+    // Mirrors core/telegram_formatter.py describe_impostor_check, without the per-token detail.
+    const IMPOSTOR = {
+      impostor:  { color:'#F87171', label:'Impersonates an official Robinhood Chain token' },
+      collision: { color:'#FACC15', label:'Shares a ticker or name with an official Robinhood Chain token' },
+      official:  { color:'#4ADE80', label:'An official Robinhood Chain token' },
+      none:      { color:'#94A3B8', label:'No match among official Robinhood Chain tokens' },
+      unknown:   { color:'#94A3B8', label:'Check against official tokens unknown' },
+    };
+    const NOT_CHECKED = { color:'#94A3B8', label:'Not checked against official tokens' };
+    const LAUNCH_FLAGS = 6;
+
+    function LaunchRow({ launch }) {
+      const scan    = launch.scan || {};
+      const flags   = Array.isArray(scan.flags) ? scan.flags : [];
+      const check   = IMPOSTOR[(launch.impostor_check || {}).status] || NOT_CHECKED;
+      const exp     = EXPLORERS[LAUNCH_CHAIN];
+      const outcome = String(scan.outcome || 'unknown').replace(/_/g, ' ');
+      return (
+        <div className="rounded-xl p-4" style={{ background:'#1E293B', border:'1px solid #334155' }}>
+          <div className="flex flex-wrap md:flex-nowrap items-start gap-3">
+            <span className="shrink-0 text-xs font-bold px-2 py-1 rounded-md uppercase tracking-wide text-center"
+                  style={{ background:SEV.CRITICAL.bg, color:SEV.CRITICAL.text, border:SEV.CRITICAL.border, minWidth:64 }}>
+              {outcome}
+            </span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-sm" style={{ color:'#F8FAFC' }}>
+                  {scan.risk_score == null ? 'Risk score not recorded' : `Risk ${scan.risk_score}`}
+                  {scan.risk_level ? ` · ${scan.risk_level}` : ''}
+                </span>
+                <span className="text-xs px-2 py-0.5 rounded-full font-medium"
+                      style={{ background:`${CHAIN_COLORS[LAUNCH_CHAIN]}20`, color:'#E2E8F0' }}>
+                  {launch.launchpad || 'Launchpad unknown'}
+                </span>
+                <span className="text-xs" style={{ color:'#94A3B8' }}>
+                  {scan.status === 'ok' ? 'complete scan' : 'partial scan'}
+                </span>
+              </div>
+              {flags.length > 0 && (
+                <div className="text-xs mt-0.5 [overflow-wrap:anywhere]" style={{ color:'#94A3B8' }}>
+                  {flags.slice(0, LAUNCH_FLAGS).join(', ')}
+                  {flags.length > LAUNCH_FLAGS ? ` and ${flags.length - LAUNCH_FLAGS} more` : ''}
+                </div>
+              )}
+              <div className="text-xs mt-0.5" style={{ color:check.color }}>{check.label}</div>
+              <div className="text-xs mt-0.5 font-mono" style={{ color:'#34D399', fontFamily:'JetBrains Mono,monospace' }}>
+                {short(launch.token_address)}
+              </div>
+            </div>
+            <div className="text-xs shrink-0" style={{ color:'#94A3B8' }}>{timeAgo(scan.scanned_at)}</div>
+            <div className="flex items-center justify-end gap-1 shrink-0 w-full md:w-auto">
+              {launch.token_address && (
+                <a href={`${exp}/address/${launch.token_address}`} target="_blank" rel="noopener noreferrer"
+                   title="Investigate on Explorer" aria-label={`Investigate ${short(launch.token_address)} on the explorer`}
+                   className="w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg transition-colors"
+                   style={{ background:'rgba(52,211,153,0.15)', color:'#34D399' }}>
+                  <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                  </svg>
+                </a>
+              )}
+              {launch.verdict_url && (
+                <a href={`${API}${launch.verdict_url}`} target="_blank" rel="noopener noreferrer"
+                   aria-label={`Open the verdict for ${short(launch.token_address)}`}
+                   className="px-3 min-h-[44px] md:min-h-0 md:h-8 flex items-center rounded-lg text-xs font-semibold transition-colors"
+                   style={{ background:'rgba(52,211,153,0.15)', color:'#34D399' }}>
+                  Verdict ↗
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function RobinhoodPanel({ launches, launchesLoading, stats, loading }) {
+      // A null count is unknown, never 0: the stats reply may be missing or predate these fields.
+      const share     = (stats && stats.launch_discovery && stats.launch_discovery.scanned_share) || null;
+      const day       = share ? `last ${share.window_hours} h` : 'last 24 h';
+      const evidence  = stats && stats.evidence_documents ? (stats.evidence_documents[LAUNCH_CHAIN] || 0) : null;
+      const confirmed = stats ? stats.registry_records_confirmed : null;
+      const tiles = [
+        { label:'Launches Discovered', span:day,                  value: share ? share.launches : null, color:'#F8FAFC' },
+        { label:'Launches Scanned',    span:day,                  value: share ? share.scanned : null,  color:'#F8FAFC' },
+        { label:'Evidence Documents',  span:'stored verdicts',    value: evidence,                      color:'#F8FAFC' },
+        { label:'Registry Records',    span:'confirmed on-chain', value: confirmed,                     color:'#34D399' },
+      ];
+      return (
+        <div className="glass rounded-xl p-4 md:p-5" style={{ border:'1px solid #334155' }}>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            {tiles.map(t => (
+              <StatCard key={t.label} label={t.label} span={t.span} value={t.value} color={t.color} loading={loading} />
+            ))}
+          </div>
+          <div className="text-xs mb-3 max-w-[72ch]" style={{ color:'#94A3B8' }}>
+            Launch discovery records the token launches it reads on Robinhood Chain. Scans share one small RPC
+            budget and only launches seen trading soon after launch are picked, so launches scanned says how
+            many of the last day's launches have any outcome. Below are the launches the hunter blocked, newest
+            block first, up to {LAUNCH_LIMIT}. These scans are recorded on each launch and in its verdict, not
+            in the contract counts above. This list refreshes every {LAUNCH_REFRESH_MS / 60000} minutes.
+          </div>
+          <div className="flex flex-col gap-2">
+            {launchesLoading
+              ? Array(3).fill(0).map((_,i) => <SkeletonRow key={i} />)
+              : launches === null
+                ? <div className="text-center py-8 text-sm" style={{ color:'#94A3B8' }}>Robinhood Chain launches unavailable.</div>
+                : launches.length === 0
+                  ? <div className="text-center py-8 text-sm" style={{ color:'#94A3B8' }}>No blocked launches on record.</div>
+                  : launches.map(l => <LaunchRow key={l.token_address} launch={l} />)
+            }
+          </div>
+        </div>
+      );
+    }
+
     // ─── Section Label ────────────────────────────────────────────────────────
     function BaseAttestationsPanel({ data }) {
       const riskColor = (label) => {
@@ -883,7 +1012,7 @@
     ];
 
     const DAY_ITEMS = [
-      { key:'contracts_scanned_24h',    label:'Contracts Scanned',    span:'last 24 h', color:'#F8FAFC' },
+      { key:'contracts_scanned_24h',    label:'Contracts Scanned',    span:'last 24 h · extension and agent firewalls', color:'#F8FAFC' },
       { key:'threats_detected_24h',     label:'Contract Threats',     span:'last 24 h', color:'#F87171' },
       { key:'transactions_blocked_24h', label:'Transactions Blocked', span:'last 24 h', color:'#F87171' },
     ];
@@ -983,7 +1112,9 @@
             ))}
           </div>
           <div className="text-xs mt-2 max-w-[72ch]" style={{ color:'#94A3B8' }}>
-            A contract threat is a contract the extension and agent firewalls scored high risk. On record means
+            Both contracts scanned counts cover the extension and agent firewalls only; Telegram, /api/scan and
+            Robinhood Chain launch scans are not in them. A contract threat is a contract those firewalls scored
+            high risk. On record means
             its latest score, since a rescan replaces it; it counts in the last 24 h when that scan falls in the
             window. The charts and the feed below show only the newest
             {' '}{FEED_LIMIT} contract detections and newest {FEED_LIMIT} mempool alerts, so they are not counts.
@@ -1012,6 +1143,8 @@
       const [feedOk,    setFeedOk]    = useState(true);
       const [capped,    setCapped]    = useState([]);
       const [campaigns, setCampaigns] = useState([]);
+      const [launches,  setLaunches]  = useState([]);
+      const [launchesLoading, setLaunchesLoading] = useState(true);
       const [stats,     setStats]     = useState(null);
       const [loading,   setLoading]   = useState(true);
       const [error,     setError]     = useState(null);
@@ -1081,12 +1214,37 @@
         return () => clearInterval(id);
       }, [fetchData]);
 
+      // Null launches are unavailable, never "no blocked launches"; a failed fetch never blanks the page.
+      const fetchLaunches = useCallback(async () => {
+        try {
+          const reply = await getJSON(`/api/launches/${LAUNCH_CHAIN}?outcome=blocked&limit=${LAUNCH_LIMIT}`);
+          setLaunches(reply.launches || []);
+        } catch (e) {
+          setLaunches(null);
+        } finally {
+          setLaunchesLoading(false);
+        }
+      }, []);
+
+      useEffect(() => {
+        fetchLaunches();
+        const id = setInterval(fetchLaunches, LAUNCH_REFRESH_MS);
+        return () => clearInterval(id);
+      }, [fetchLaunches]);
+
+      // The launches panel counts as one more source for the header's health, as it did when it was fetched
+      // with the others: its failure is partial data, and a page whose other sources all failed is offline
+      // only once it has failed too.
+      const shownHealth = launchesLoading || health === 'connecting' ? health
+        : launches === null ? (health === 'offline' ? 'offline' : 'degraded')
+        : health === 'offline' ? 'degraded' : health;
+
       const velocityData = useMemo(() => bucketByHour(threats),    [threats]);
       const chainData    = useMemo(() => chainDist(threats),        [threats]);
 
       return (
         <div style={{ minHeight:'100vh', background:'#0F172A' }}>
-          <Header lastUpdated={updated} health={health} />
+          <Header lastUpdated={updated} health={shownHealth} />
 
           <main className="px-4 md:px-8 py-6 space-y-8 mx-auto" style={{ maxWidth:1600 }}>
 
@@ -1096,6 +1254,10 @@
 
             <Section title="Last 24 Hours">
               <LastDayBar stats={stats} loading={loading} />
+            </Section>
+
+            <Section title="Robinhood Chain">
+              <RobinhoodPanel launches={launches} launchesLoading={launchesLoading} stats={stats} loading={loading} />
             </Section>
 
             <Section title="Analytics">
@@ -1108,7 +1270,9 @@
             <Section title="Live Threat Feed">
               <div className="glass rounded-xl p-4 md:p-5" style={{ border:'1px solid #334155' }}>
                 <div className="text-xs mb-3" style={{ color:'#94A3B8' }}>
-                  The newest {FEED_LIMIT} contract detections and the newest {FEED_LIMIT} mempool alerts.
+                  The newest {FEED_LIMIT} contract detections and the newest {FEED_LIMIT} mempool alerts. Contract
+                  detections come from the extension and agent firewalls; Robinhood Chain launch scans are in the
+                  panel above.
                 </div>
                 <ThreatLogTable
                   threats={threats} loading={loading} error={error} mempoolUnavailable={mempoolUnavailable}

@@ -38,7 +38,7 @@ from core.auth import TIER_LIMITS, hash_key
 from core.circuit_breaker import CLOSED, provider_breakers
 from core.config import Settings
 from core.container import ServiceContainer
-from core.database import SCAN_EVIDENCE_RETENTION_DAYS, reporter_hash
+from core.database import LAUNCH_OUTCOMES, SCAN_EVIDENCE_RETENTION_DAYS, reporter_hash
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
 from core.first_verdict import IN_PROGRESS, FirstVerdictProgress, build_first_verdict
 from core.policy import PolicyMode
@@ -2743,7 +2743,7 @@ async def threat_feed(
 
 
 @app.get("/api/launches/{chain_id}")
-async def launch_feed(chain_id: int, limit: int = 50, cursor: str = None):
+async def launch_feed(chain_id: int, limit: int = 50, cursor: str = None, outcome: str = None):
     """Recently discovered token launches, newest first, each with its latest scan outcome.
 
     The outcome is blocked, watching, cleared, unknown (scan incomplete) or not_scanned, with
@@ -2758,10 +2758,15 @@ async def launch_feed(chain_id: int, limit: int = 50, cursor: str = None):
     Query params:
     - limit: max results (default 50, max 200)
     - cursor: next_cursor from the previous page (optional)
+    - outcome: blocked, watching, cleared, unknown or not_scanned returns only the launches whose
+      latest outcome is that one, so the few blocked launches are not buried under the unscanned
+      ones (optional)
     """
     from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 
     _validate_chain_id(chain_id)
+    if outcome not in (None, *LAUNCH_OUTCOMES):
+        raise HTTPException(status_code=400, detail=f"outcome must be one of {', '.join(LAUNCH_OUTCOMES)}")
     if not container:
         raise HTTPException(status_code=503, detail="Service not available")
 
@@ -2775,7 +2780,7 @@ async def launch_feed(chain_id: int, limit: int = 50, cursor: str = None):
             'discovery_unavailable': "Launch discovery is not available on this chain",
         }
     try:
-        launches, next_cursor = await container.db.get_launch_feed(chain_id, limit, cursor)
+        launches, next_cursor = await container.db.get_launch_feed(chain_id, limit, cursor, outcome)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid cursor") from exc
     window_hours = 24

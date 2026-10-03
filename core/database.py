@@ -46,7 +46,7 @@ SCAN_EVIDENCE_RETENTION_DAYS = 90
 _LAUNCH_SELECT = """
     SELECT token_address, source, launchpad, pool_id, block_number, tx_hash, block_timestamp,
            discovered_at,
-           CASE WHEN rechecked THEN recheck_status ELSE scan_status END,
+           CASE WHEN rechecked THEN recheck_status ELSE scan_status END AS outcome,
            CASE WHEN rechecked THEN NULL ELSE risk_score END,
            CASE WHEN rechecked THEN recheck_at ELSE scanned_at END AS outcome_at,
            impostor_check
@@ -61,22 +61,28 @@ _LAUNCH_ROWS = _LAUNCH_SELECT + """
         WHERE l.chain_id = ?
     )
 """
-_LAUNCH_FEED_FIRST_PAGE = _LAUNCH_ROWS + """
+_LAUNCH_FEED_AFTER_CURSOR = "(block_number, token_address) < (?, ?)"
+_LAUNCH_FEED_PAGE = """
     ORDER BY block_number DESC, token_address DESC
     LIMIT ?
 """
-_LAUNCH_FEED_NEXT_PAGE = _LAUNCH_ROWS + """
-    WHERE (block_number, token_address) < (?, ?)
-    ORDER BY block_number DESC, token_address DESC
-    LIMIT ?
-"""
+# The feed's outcome filter, by the outcome _launch_outcome names for a row: the stored status it
+# does not know is unknown, and a scanned_at that is NULL is not_scanned whatever the status.
+_LAUNCH_OUTCOME_CONDITIONS = {
+    "blocked": "outcome_at IS NOT NULL AND outcome = 'blocked'",
+    "watching": "outcome_at IS NOT NULL AND outcome = 'watching'",
+    "cleared": "outcome_at IS NOT NULL AND outcome = 'cleared'",
+    "unknown": "outcome_at IS NOT NULL AND (outcome IS NULL OR outcome NOT IN ('blocked', 'watching', 'cleared'))",
+    "not_scanned": "outcome_at IS NULL",
+}
+LAUNCH_OUTCOMES = tuple(_LAUNCH_OUTCOME_CONDITIONS)
 # Launches whose latest outcome was recorded at or after a time, found through the scan-time
 # index and the rechecked pairs rather than a scan of every discovered launch. It repeats
 # _LAUNCH_SELECT as one literal because its filter holds a subquery.
 _LAUNCH_OUTCOMES_SINCE = """
     SELECT token_address, source, launchpad, pool_id, block_number, tx_hash, block_timestamp,
            discovered_at,
-           CASE WHEN rechecked THEN recheck_status ELSE scan_status END,
+           CASE WHEN rechecked THEN recheck_status ELSE scan_status END AS outcome,
            CASE WHEN rechecked THEN NULL ELSE risk_score END,
            CASE WHEN rechecked THEN recheck_at ELSE scanned_at END AS outcome_at,
            impostor_check
@@ -2711,7 +2717,7 @@ class Database:
         return {"launches": launches, "scanned": scanned}
 
     async def get_launch_feed(
-        self, chain_id: int, limit: int, cursor: Optional[str] = None
+        self, chain_id: int, limit: int, cursor: Optional[str] = None, outcome: Optional[str] = None
     ) -> Tuple[List[Dict], Optional[str]]:
         """Return a page of discovered launches, newest first, each with its latest outcome.
 
@@ -2719,17 +2725,23 @@ class Database:
         ``impostor_check`` is its check against the official Robinhood tokens
         (record_launch_impostor_check), or None if it was never checked. ``cursor``
         is the ``next_cursor`` of the previous page ("block:token"). The next cursor is None on
-        the last page. A malformed cursor raises ValueError.
+        the last page. A malformed cursor raises ValueError. ``outcome``, one of LAUNCH_OUTCOMES,
+        keeps only the launches whose latest outcome (``scan.outcome``) is that one, so a launch a
+        recheck cleared is no longer blocked.
         """
-        if cursor is None:
-            result = await self._db.execute(_LAUNCH_FEED_FIRST_PAGE, (chain_id, limit + 1))
-        else:
+        conditions = []
+        params = [chain_id]
+        if outcome is not None:
+            conditions.append(_LAUNCH_OUTCOME_CONDITIONS[outcome])
+        if cursor is not None:
             match = _LAUNCH_CURSOR.fullmatch(cursor) if isinstance(cursor, str) else None
             if match is None:
                 raise ValueError("Invalid cursor")
-            result = await self._db.execute(
-                _LAUNCH_FEED_NEXT_PAGE, (chain_id, int(match.group(1)), match.group(2), limit + 1)
-            )
+            conditions.append(_LAUNCH_FEED_AFTER_CURSOR)
+            params += [int(match.group(1)), match.group(2)]
+        # The query holds only the code constants above, never user input.
+        where = f"    WHERE {' AND '.join(conditions)}\n" if conditions else ""
+        result = await self._db.execute(_LAUNCH_ROWS + where + _LAUNCH_FEED_PAGE, (*params, limit + 1))  # nosec B608
         rows = await result.fetchall()
         next_cursor = f"{rows[limit - 1][4]}:{rows[limit - 1][0]}" if len(rows) > limit else None
         items = [_launch_item(chain_id, row, await self._launch_finding(chain_id, row)) for row in rows[:limit]]

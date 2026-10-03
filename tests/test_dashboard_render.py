@@ -112,6 +112,8 @@ class Document extends Node {
 }
 const document = new Document();
 const requests = [];
+// Every interval the page sets, so a test can fire one timer's callback and read what it requests.
+const timers = [];
 async function fetch(url, options) {
   requests.push([url, options]);
   const path = url.slice('http://dashboard.test'.length);
@@ -120,7 +122,8 @@ async function fetch(url, options) {
   return {ok: status >= 200 && status < 300, status, json: async () => body};
 }
 const context = vm.createContext({
-  document, fetch, console, setTimeout, clearTimeout, setInterval, clearInterval, setImmediate, clearImmediate,
+  document, fetch, console, setTimeout, clearTimeout, setImmediate, clearImmediate,
+  setInterval: (fn, ms) => { timers.push({fn, ms}); return setInterval(fn, ms); }, clearInterval,
   MessageChannel, queueMicrotask, navigator: {userAgent: 'node'}, location: {origin: 'http://dashboard.test'},
   requestAnimationFrame: fn => setTimeout(() => fn(Date.now()), 16), cancelAnimationFrame: id => clearTimeout(id),
   matchMedia: query => ({matches: query === '(prefers-reduced-motion: reduce)'}),
@@ -234,6 +237,52 @@ APPROVAL = {
 
 
 NO_ATTESTATIONS = {"available": False, "attestations": [], "summary": {}}
+LAUNCH_TOKEN = "0x" + "ab" * 20
+NO_LAUNCHES = {
+    "launches": [],
+    "count": 0,
+    "chain_id": 4663,
+    "next_cursor": None,
+    "scanned_share": {"window_hours": 24, "launches": 0, "scanned": 0},
+}
+BLOCKED_LAUNCH = {
+    "chain_id": 4663,
+    "token_address": LAUNCH_TOKEN,
+    "launchpad": "Uniswap v4",
+    "source": "uniswap_v4",
+    "pool_id": "0x" + "cd" * 32,
+    "tx_hash": "0x" + "ef" * 32,
+    "block_number": 78_782_354,
+    "block_timestamp": 1_790_999_800,
+    "discovered_at": 1_790_999_850.5,
+    "scan": {
+        "outcome": "blocked",
+        "status": "unknown",
+        "risk_level": "HIGH",
+        "risk_score": 80,
+        "coverage": {"structural": 1.0, "honeypot": 0.8},
+        "coverage_reasons": {"honeypot": "sell reverted"},
+        "flags": ["Contract not verified", "Honeypot detected", "Cannot sell token"],
+        "scanned_at": 1_790_999_866,
+    },
+    "impostor_check": {"status": "none", "symbol": None, "list_size": 195, "rules": 4},
+    "verdict_url": f"/api/verdict/4663/{LAUNCH_TOKEN}",
+}
+LAUNCH_STATS = {
+    **STATS,
+    "launch_discovery": {
+        "chain_id": 4663,
+        "cursor": 78_700_000,
+        "last_sweep_at": 1_790_999_900.0,
+        "last_discovered_block": 78_782_354,
+        "confirmed_head": 78_782_400,
+        "confirmed_head_at": 1_790_999_901.0,
+        "lag_blocks": 82_400,
+        "scanned_share": {"window_hours": 24, "launches": 5190, "scanned": 1876},
+    },
+    "evidence_documents": {"4663": 19728, "56": 12},
+    "registry_records_confirmed": 1367,
+}
 ATTESTOR = "0x" + "ee" * 20
 ATTESTATIONS = {
     "available": True,
@@ -263,6 +312,7 @@ def render(
     campaigns_reply=(200, {"campaigns": []}),
     report_reply=(200, {"status": "recorded"}),
     attestations_reply=(200, NO_ATTESTATIONS),
+    launches_reply=(200, NO_LAUNCHES),
     steps=TEXT,
 ):
     node = shutil.which("node")
@@ -280,6 +330,7 @@ def render(
         "/api/threats/feed?source=mempool": [200, mempool_reply or {"threats": [], "count": 0}],
         "/api/campaigns/top": list(campaigns_reply),
         "/api/base/attestations": list(attestations_reply),
+        "/api/launches/4663?outcome=blocked": list(launches_reply),
         "/api/report": list(report_reply),
     }
     script = f"{HARNESS}\nasync function steps() {{\n{steps}\n}}\n"
@@ -508,3 +559,94 @@ def test_an_attestor_that_is_not_retired_reads_as_today():
     text = render(attestations_reply=(200, ATTESTATIONS))
     assert "Retired on" not in text
     assert "No attestations yet." in text
+
+
+def test_the_robinhood_panel_lists_a_blocked_launch_with_its_verdict_link():
+    steps = """
+      const verdict = byLabel('Open the verdict for '), investigate = byLabel('Investigate ');
+      return {text: document.root.textContent, verdict: verdict.getAttribute('href'), explorer: investigate.getAttribute('href')};
+    """
+    reply = {**NO_LAUNCHES, "launches": [BLOCKED_LAUNCH], "count": 1}
+    result = render(LAUNCH_STATS, launches_reply=(200, reply), steps=steps)
+    text = result["text"]
+    assert "Robinhood Chain" in text
+    assert "blocked" in text and "Risk 80 · HIGH" in text and "partial scan" in text
+    assert "Contract not verified, Honeypot detected, Cannot sell token" in text
+    assert "No match among official Robinhood Chain tokens" in text
+    assert "Uniswap v4" in text
+    assert short(LAUNCH_TOKEN) in text
+    assert result["verdict"] == f"http://dashboard.test/api/verdict/4663/{LAUNCH_TOKEN}"
+    assert result["explorer"] == f"https://robinhoodchain.blockscout.com/address/{LAUNCH_TOKEN}"
+    assert "5,190Launches Discoveredlast 24 h" in text
+    assert "1,876Launches Scannedlast 24 h" in text
+    assert "19,728Evidence Documentsstored verdicts" in text
+    assert "1,367Registry Recordsconfirmed on-chain" in text
+    assert "LIVE" in text
+
+
+def test_a_blocked_launch_without_evidence_or_a_check_still_renders():
+    launch = {
+        **BLOCKED_LAUNCH,
+        "scan": {**BLOCKED_LAUNCH["scan"], "risk_level": None, "flags": [], "coverage": None},
+        "impostor_check": None,
+    }
+    reply = {**NO_LAUNCHES, "launches": [launch], "count": 1}
+    text = render(launches_reply=(200, reply))
+    assert "Risk 80" in text and "HIGH" not in text
+    assert "Not checked against official tokens" in text
+    assert "LIVE" in text
+
+
+def test_launch_counts_the_stats_reply_lacks_show_a_dash_not_zero():
+    text = render()
+    for label in ("Launches Discovered", "Launches Scanned", "Evidence Documents", "Registry Records"):
+        assert f"—{label}" in text, label
+        assert f"0{label}" not in text, label
+    assert "No blocked launches on record." in text
+
+
+def test_an_unavailable_launch_feed_says_so_and_is_partial_data():
+    text = render(launches_reply=(503, {"detail": "down"}))
+    assert "Robinhood Chain launches unavailable." in text
+    assert "No blocked launches" not in text
+    assert "PARTIAL DATA" in text and "LIVE" not in text
+
+
+def test_the_robinhood_chip_points_at_the_panel_when_the_feed_has_no_firewall_detections_there():
+    steps = """
+      await click(byText('Robinhood'));
+      return document.root.textContent;
+    """
+    text = render(contracts=[CONTRACT], steps=steps)
+    assert "0 threats" in text
+    assert "No extension or agent firewall detections on Robinhood Chain in the current window." in text
+    assert "in the Robinhood Chain panel above" in text
+    assert "No threats on this chain in the current window." not in text
+
+
+def test_the_last_day_contracts_scanned_tile_names_its_sources():
+    text = render()
+    assert "4Contracts Scannedlast 24 h · extension and agent firewalls" in text
+    assert "Both contracts scanned counts cover the extension and agent firewalls only" in text
+
+
+def test_the_launches_panel_polls_on_its_own_slow_cycle():
+    steps = """
+      const slow = timers.find(t => t.ms === 300000), fast = timers.find(t => t.ms === 20000);
+      const before = requests.length;
+      slow.fn();
+      await tick();
+      const slowUrls = requests.slice(before).map(([url]) => url);
+      const mid = requests.length;
+      fast.fn();
+      await tick();
+      const fastUrls = requests.slice(mid).map(([url]) => url);
+      return {intervals: timers.map(t => t.ms).sort((a, b) => a - b), slowUrls, fastUrls, text: document.root.textContent};
+    """
+    result = render(steps=steps)
+    assert result["intervals"] == [20000, 300000]
+    assert result["slowUrls"] == ["http://dashboard.test/api/launches/4663?outcome=blocked&limit=20"]
+    assert len(result["fastUrls"]) == 5
+    assert not [url for url in result["fastUrls"] if "/api/launches" in url]
+    assert "This list refreshes every 5 minutes." in result["text"]
+    assert "refreshes every 20 seconds" in result["text"]

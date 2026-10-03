@@ -359,6 +359,74 @@ async def test_watching_or_stale_tracked_pairs_do_not_override_the_scan(db):
     assert items[TOKENS[1]]["scan"]["scanned_at"] == 3000.0
 
 
+async def _every_outcome(db):
+    """Six launches, one per outcome plus a recheck that cleared a block and one that blocked a watch."""
+    await db.upsert_discovered_launches(
+        CHAIN, [_launch(token, 100 + index) for index, token in enumerate(TOKENS)]
+    )
+    await _scan(db, TOKENS[0], "blocked", 80, at=1000.0)
+    await _finding(db, TOKENS[0], 80, HONEYPOT_EVIDENCE, at=1000.0)
+    await _scan(db, TOKENS[1], "watching", 45, at=1000.0)
+    await _scan(db, TOKENS[2], "error", None, at=1000.0)
+    await _scan(db, TOKENS[3], "blocked", 80, at=1000.0)
+    await _recheck(db, TOKENS[3], "cleared", at=2000.0)
+    await _scan(db, TOKENS[4], "watching", 40, at=1000.0)
+    await _recheck(db, TOKENS[4], "blocked", at=2000.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["blocked", "watching", "cleared", "unknown", "not_scanned"])
+async def test_outcome_filter_keeps_the_launches_the_feed_labels_with_it(db, outcome):
+    await _every_outcome(db)
+
+    everything, _ = await db.get_launch_feed(CHAIN, 50)
+    filtered, _ = await db.get_launch_feed(CHAIN, 50, outcome=outcome)
+
+    expected = [item for item in everything if item["scan"]["outcome"] == outcome]
+    assert expected
+    assert filtered == expected
+
+
+@pytest.mark.asyncio
+async def test_outcome_filter_follows_the_latest_outcome(db):
+    await _every_outcome(db)
+
+    blocked = {item["token_address"] for item in (await db.get_launch_feed(CHAIN, 50, outcome="blocked"))[0]}
+    cleared = {item["token_address"] for item in (await db.get_launch_feed(CHAIN, 50, outcome="cleared"))[0]}
+
+    assert blocked == {TOKENS[0], TOKENS[4]}
+    assert cleared == {TOKENS[3]}
+
+
+@pytest.mark.asyncio
+async def test_outcome_filter_counts_a_null_status_with_a_scan_time_as_unknown(db):
+    await db.upsert_discovered_launches(CHAIN, [_launch(TOKENS[0], 100), _launch(TOKENS[1], 101)])
+    await _scan(db, TOKENS[0], None, None, at=1000.0)
+
+    unknown, _ = await db.get_launch_feed(CHAIN, 50, outcome="unknown")
+    unscanned, _ = await db.get_launch_feed(CHAIN, 50, outcome="not_scanned")
+
+    assert [item["token_address"] for item in unknown] == [TOKENS[0]]
+    assert [item["token_address"] for item in unscanned] == [TOKENS[1]]
+
+
+@pytest.mark.asyncio
+async def test_outcome_filter_pages_with_a_cursor(db):
+    await db.upsert_discovered_launches(
+        CHAIN, [_launch(token, 100 + index) for index, token in enumerate(TOKENS[:5])]
+    )
+    for token in (TOKENS[0], TOKENS[2], TOKENS[4]):
+        await _scan(db, token, "blocked", 80, at=1000.0)
+
+    first, cursor = await db.get_launch_feed(CHAIN, 2, outcome="blocked")
+    second, cursor2 = await db.get_launch_feed(CHAIN, 2, cursor=cursor, outcome="blocked")
+
+    assert [item["block_number"] for item in first] == [104, 102]
+    assert cursor == f"102:{TOKENS[2]}"
+    assert [item["block_number"] for item in second] == [100]
+    assert cursor2 is None
+
+
 @pytest.mark.asyncio
 async def test_discovery_status_is_empty_before_discovery_has_run(db):
     assert await db.get_launch_discovery_status(CHAIN) == {
@@ -550,7 +618,37 @@ async def test_endpoint_bounds_the_page_size(feed_api, requested, expected):
     response = await feed_api.client.get(f"/api/launches/{CHAIN}", params={"limit": requested})
 
     assert response.status_code == 200
-    feed_api.services.db.get_launch_feed.assert_awaited_once_with(CHAIN, expected, None)
+    feed_api.services.db.get_launch_feed.assert_awaited_once_with(CHAIN, expected, None, None)
+
+
+@pytest.mark.asyncio
+async def test_endpoint_outcome_filter_returns_only_that_outcome(feed_api):
+    db = feed_api.db
+    await _every_outcome(db)
+
+    response = await feed_api.client.get(f"/api/launches/{CHAIN}", params={"outcome": "blocked"})
+    body = response.json()
+
+    assert response.status_code == 200
+    assert set(body) == {"launches", "count", "chain_id", "next_cursor", "scanned_share"}
+    assert body["count"] == 2
+    assert {item["token_address"] for item in body["launches"]} == {TOKENS[0], TOKENS[4]}
+    assert all(item["scan"]["outcome"] == "blocked" for item in body["launches"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [CHAIN, 56])
+@pytest.mark.parametrize("outcome", ["", "BLOCKED", "everything", "blocked' OR 1=1 --"])
+async def test_endpoint_rejects_an_unknown_outcome(feed_api, chain_id, outcome):
+    feed_api.services.db = MagicMock(get_launch_feed=AsyncMock())
+
+    response = await feed_api.client.get(f"/api/launches/{chain_id}", params={"outcome": outcome})
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "outcome must be one of blocked, watching, cleared, unknown, not_scanned"
+    }
+    feed_api.services.db.get_launch_feed.assert_not_awaited()
 
 
 @pytest.mark.asyncio
