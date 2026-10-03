@@ -12,8 +12,8 @@ const rowIcons: Record<RowState, IconName> = {
 };
 
 const rowTones: Record<RowState, string> = {
-  ok: "bg-emerald text-white",
-  fail: "bg-block-fg text-white",
+  ok: "bg-emerald text-onfill",
+  fail: "bg-block-fg text-onfill",
   unmeasured: "bg-unknown-hatch text-unknown-fg border border-unknown-line",
   info: "bg-surface-3 text-muted",
 };

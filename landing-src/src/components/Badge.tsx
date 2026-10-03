@@ -25,10 +25,10 @@ export default function Badge({
           unknown: "bg-unknown-hatch text-unknown-fg border-unknown-line",
         }
       : {
-          safe: "bg-safe-fg text-white border-safe-fg",
-          caution: "bg-caution-fg text-white border-caution-fg",
-          high: "bg-high-fg text-white border-high-fg",
-          block: "bg-block-fg text-white border-block-fg",
+          safe: "bg-safe-fg text-onfill border-safe-fg",
+          caution: "bg-caution-fg text-onfill border-caution-fg",
+          high: "bg-high-fg text-onfill border-high-fg",
+          block: "bg-block-fg text-onfill border-block-fg",
           unknown: "bg-unknown-hatch-solid text-white border-unknown-line",
         };
 

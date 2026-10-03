@@ -4,25 +4,36 @@
 
 @layer base {
   :root {
-    --color-ink: #0B1220;
-    --color-body: #334155;
-    --color-muted: #475569;
-    --color-faint: #64748B;
-    --color-surface: #FFFFFF;
-    --color-surface-2: #F6F8FA;
-    --color-surface-3: #EEF2F6;
-    --color-line: #E3E8EF;
-    --color-line-strong: #CBD5E1;
-    --color-emerald: #047857;
-    --color-emerald-deep: #065F46;
-    --color-emerald-bright: #10B981;
-    --color-emerald-tint: #ECFDF5;
-    --color-emerald-line: #A7F3D0;
-    --color-safe-fg: #166534;    --color-safe-tint: #DCFCE7;    --color-safe-line: #86EFAC;
-    --color-caution-fg: #854D0E; --color-caution-tint: #FEF9C3; --color-caution-line: #FDE047;
-    --color-high-fg: #9A3412;    --color-high-tint: #FFEDD5;    --color-high-line: #FDBA74;
-    --color-block-fg: #B91C1C;   --color-block-tint: #FEE2E2;   --color-block-line: #FCA5A5;
-    --color-unknown-fg: #475569; --color-unknown-tint: #F1F5F9; --color-unknown-stripe: #E2E8F0; --color-unknown-line: #94A3B8;
+    --c-surface: 255 255 255;
+    --c-surface-2: 246 248 250;
+    --c-surface-3: 238 242 246;
+    --c-panel: 11 18 32;
+    --c-field: 255 255 255;
+    --c-line: 227 232 239;
+    --c-line-strong: 203 213 225;
+    --c-ink: 11 18 32;
+    --c-body: 51 65 85;
+    --c-muted: 71 85 105;
+    --c-faint: 100 116 139;
+    --c-emerald: 4 120 87;
+    --c-emerald-deep: 6 95 70;
+    --c-emerald-bright: 16 185 129;
+    --c-emerald-tint: 236 253 245;
+    --c-emerald-line: 167 243 208;
+    --c-emerald-onink: 52 211 153;
+    --c-onink: 203 213 225;
+    --c-onink-muted: 148 163 184;
+    --c-onink-error: 252 165 165;
+    --c-onfill: 255 255 255;
+    --c-safe-fg: 22 101 52;      --c-safe-tint: 220 252 231;   --c-safe-line: 134 239 172;
+    --c-caution-fg: 133 77 14;   --c-caution-tint: 254 249 195; --c-caution-line: 253 224 71;
+    --c-high-fg: 154 52 18;      --c-high-tint: 255 237 213;   --c-high-line: 253 186 116;
+    --c-block-fg: 185 28 28;     --c-block-tint: 254 226 226;  --c-block-line: 252 165 165;
+    --c-unknown-fg: 71 85 105;   --c-unknown-tint: 241 245 249; --c-unknown-stripe: 226 232 240; --c-unknown-line: 148 163 184;
+    --shadow-sm: 0 1px 2px rgba(11,18,32,0.06);
+    --shadow-md: 0 4px 12px rgba(11,18,32,0.08);
+    --shadow-lg: 0 24px 48px -12px rgba(11,18,32,0.18);
+    --shadow-button: inset 0 1px 0 0 rgba(255,255,255,0.20), 0 1px 3px 0 rgba(11,18,32,0.12);
     color-scheme: light;
   }
 
@@ -36,12 +47,12 @@
   h1, h2, h3, h4 { @apply text-ink; text-wrap: balance; }
 
   :focus-visible {
-    outline: 2px solid #047857;
+    outline: 2px solid rgb(var(--c-emerald));
     outline-offset: 3px;
     border-radius: 4px;
   }
 
-  ::selection { background: #A7F3D0; color: #0B1220; }
+  ::selection { background: rgb(var(--c-emerald-line)); color: rgb(var(--c-ink)); }
 }
 
 /* framer-motion follows the same setting through MotionConfig in App.tsx. */

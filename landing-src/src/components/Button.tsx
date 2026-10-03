@@ -5,7 +5,7 @@ export default function Button(props: { variant?: "primary" | "secondary" | "gho
   const classes = [
     "inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors duration-150 ease-out disabled:opacity-50 disabled:cursor-not-allowed",
     size === "md" ? "h-12 px-6 text-[15px]" : "h-10 px-4 text-sm",
-    variant === "primary" && "bg-emerald text-white shadow-button hover:bg-emerald-deep active:bg-emerald-deep active:translate-y-px active:shadow-none",
+    variant === "primary" && "bg-emerald text-onfill shadow-button hover:bg-emerald-deep active:bg-emerald-deep active:translate-y-px active:shadow-none",
     variant === "secondary" && "bg-surface text-ink border border-line-strong shadow-sm hover:border-ink",
     variant === "ghost" && "bg-transparent text-muted hover:bg-surface-3 hover:text-ink",
     className,
