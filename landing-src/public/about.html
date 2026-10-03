@@ -65,6 +65,7 @@
     }
     a { color: rgb(var(--c-emerald)); text-decoration: none; }
     a:hover { text-decoration: underline; }
+    p a { text-decoration: underline; }
     .nav {
       max-width: 800px; margin: 0 auto;
       padding: 20px 0;
@@ -75,15 +76,15 @@
     .nav-name { font-size: 15px; font-weight: 700; color: rgb(var(--c-ink)); }
     .nav-back { margin-left: auto; font-size: 13px; color: rgb(var(--c-muted)); }
     .nav-back:hover { color: rgb(var(--c-emerald)); text-decoration: none; }
-    .wrap { max-width: 800px; margin: 0 auto; padding-bottom: 80px; }
+    .wrap { max-width: 680px; margin: 0 auto; padding-bottom: 80px; }
     .hero { margin-bottom: 48px; }
     .hero h1 { font-size: 36px; font-weight: 800; color: rgb(var(--c-ink)); letter-spacing: -0.02em; margin-bottom: 12px; }
     .hero p { font-size: 16px; color: rgb(var(--c-body)); max-width: 600px; }
-    h2 { font-size: 20px; font-weight: 700; color: rgb(var(--c-ink)); margin: 48px 0 12px; padding-bottom: 10px; border-bottom: 1px solid rgb(var(--c-line)); }
-    h3 { font-size: 15px; font-weight: 700; color: rgb(var(--c-ink)); margin: 24px 0 8px; }
-    p { margin-bottom: 14px; font-size: 14px; color: rgb(var(--c-body)); }
+    h2 { font-size: 22px; font-weight: 700; color: rgb(var(--c-ink)); margin: 40px 0 12px; padding-bottom: 10px; border-bottom: 1px solid rgb(var(--c-line)); }
+    h3 { font-size: 17px; font-weight: 700; color: rgb(var(--c-ink)); margin: 24px 0 8px; }
+    p { margin-bottom: 14px; font-size: 15px; color: rgb(var(--c-body)); }
     ul { margin: 8px 0 16px 20px; }
-    li { font-size: 14px; color: rgb(var(--c-body)); margin-bottom: 8px; }
+    li { font-size: 15px; color: rgb(var(--c-body)); margin-bottom: 8px; }
     li strong { color: rgb(var(--c-ink)); }
     .callout {
       background: rgb(var(--c-emerald-tint));
@@ -105,7 +106,6 @@
     .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
     .compare-card { background: rgb(var(--c-surface-2)); border: 1px solid rgb(var(--c-line)); border-radius: 12px; padding: 18px; }
     .compare-card.shield { border-color: rgb(var(--c-emerald-line)); }
-    .compare-card h4 { font-size: 13px; font-weight: 700; color: rgb(var(--c-ink)); margin-bottom: 12px; }
     .compare-card ul { margin-left: 16px; }
     .compare-card li { font-size: 13px; margin-bottom: 6px; }
     .footer { max-width: 800px; margin: 48px auto 0; padding-top: 24px; border-top: 1px solid rgb(var(--c-line)); font-size: 12px; color: rgb(var(--c-muted)); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
@@ -118,12 +118,12 @@
 <body>
 
   <nav class="nav">
-    <span style="font-size:22px;">&#128737;</span>
+    <span style="font-size:22px;" aria-hidden="true">&#128737;</span>
     <span class="nav-name">ShieldAI Transaction Firewall</span>
     <a href="/" class="nav-back">&#8592; Back to home</a>
   </nav>
 
-  <div class="wrap">
+  <main class="wrap">
 
     <div class="hero">
       <h1>How ShieldAI Protects Your Wallet</h1>
@@ -176,7 +176,7 @@
     <h2>ShieldAI vs. Browser Phishing Warnings</h2>
     <div class="compare-grid">
       <div class="compare-card">
-        <h4>Browser built-in warnings</h4>
+        <h3>Browser built-in warnings</h3>
         <ul>
           <li>Operate at the URL / domain layer</li>
           <li>Cannot inspect transaction data</li>
@@ -186,7 +186,7 @@
         </ul>
       </div>
       <div class="compare-card shield">
-        <h4>ShieldAI Transaction Firewall</h4>
+        <h3>ShieldAI Transaction Firewall</h3>
         <ul>
           <li>Intercepts the transaction, batch and signature methods listed above</li>
           <li>Analyzes contract bytecode for honeypot/rug patterns</li>
@@ -219,13 +219,19 @@
     <p>Chains supported for scans: Ethereum, BNB Chain, opBNB, Base, Arbitrum, Polygon, Optimism and Robinhood Chain. The released browser extension does not cover Robinhood Chain yet; the API and Telegram bot do.</p>
     <p>The hook is injected into the page's MAIN world before any DApp code runs — contracts cannot detect or remove it from within a transaction.</p>
 
-  </div>
+  </main>
 
-  <div class="footer">
+  <footer class="footer">
     <span>&#169; 2026 ShieldBot Security. All rights reserved.</span>
-    <a href="/">shieldbotsecurity.online</a>
-    <a href="mailto:support@shieldbotsecurity.online">support@shieldbotsecurity.online</a>
-  </div>
+    <nav aria-label="Footer">
+      <a href="/">Home</a>
+      <a href="/about.html">About</a>
+      <a href="/privacy.html">Privacy</a>
+      <a href="/terms.html">Terms</a>
+      <a href="/security.html">Security</a>
+      <a href="mailto:support@shieldbotsecurity.online">Support</a>
+    </nav>
+  </footer>
 
 </body>
 </html>
