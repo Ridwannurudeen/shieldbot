@@ -356,7 +356,7 @@ async def _quick_scan(api, monkeypatch, mock_web3_client, chain_id, scam_matches
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('chain_id', [42161, 4663, 56])
-@pytest.mark.parametrize('is_token', [True, None], ids=['token', 'token-check-failed'])
+@pytest.mark.parametrize('is_token', [True, pytest.param(None, id='reverting-symbol-probe-timeout')])
 async def test_quick_scan_never_clears_a_token_it_did_not_sell(consumer_api, monkeypatch, mock_web3_client, chain_id, is_token):
     # /api/scan simulates no sell. A token, or a contract whose token check failed, is Unknown there
     # however clean its structural checks read: only /api/firewall settles sellability.

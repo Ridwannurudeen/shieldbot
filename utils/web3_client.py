@@ -105,6 +105,18 @@ class Web3Client:
                 if len(reply) == 0:
                     return False
                 raise
+            except ContractLogicError as error:
+                if isinstance(error, OffchainLookup):
+                    raise
+                for probe in (contract.functions.totalSupply, contract.functions.decimals):
+                    try:
+                        probe().call()
+                    except ContractLogicError as probe_error:
+                        if isinstance(probe_error, OffchainLookup):
+                            raise
+                    else:
+                        return True
+                return False
             return True
 
         try:
