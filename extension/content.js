@@ -1023,13 +1023,31 @@
     overlay.id = "shieldai-overlay";
     overlay.className = "shieldai-overlay";
 
-    // Danger signals HTML
-    const signalsHtml = (result.danger_signals || [])
-      .map((s) => `<li>${escapeHtml(s)}</li>`)
-      .join("");
-
     // Transaction impact HTML
     const impact = result.transaction_impact || {};
+
+    // Danger signals HTML. Missing market data is a gap, not a danger, so it
+    // is listed with the notes; an outflow of the asset the Sending row already
+    // names is the payment the user chose, so it is not repeated as a danger.
+    const sending = String(impact.sending || "");
+    const signals = result.danger_signals || [];
+    const gapSignals = signals.filter((s) => /^Market data unknown:/.test(s));
+    const signalsHtml = signals
+      .filter((s) => !gapSignals.includes(s))
+      .filter((s) => {
+        const out = /^Asset outflow detected: (\S+)$/.exec(s);
+        return !(out && sending.split(/\s+/).includes(out[1]));
+      })
+      .map((s) => `<li>${escapeHtml(s)}</li>`)
+      .join("");
+    const notesResult = gapSignals.length
+      ? { notes: [...gapSignals, ...(Array.isArray(result.notes) ? result.notes : [])] }
+      : result;
+
+    // The analysis line and the verdict line can carry the same words (both
+    // read the incomplete-coverage text on an Unknown): show it once.
+    const analysisText = incomplete ? _t("overlayIncompleteCoverage") : result.plain_english || result.analysis || _t("overlayNoAnalysis");
+    const verdictText = incomplete ? "" : classification !== verdict ? label : result.verdict || "";
 
     // Asset delta HTML (token in/out). It is marked SIMULATED only when the API
     // says a simulation produced it: otherwise it was read from the calldata,
@@ -1090,7 +1108,7 @@
             : ""
         }
 
-        ${notesSection(result)}
+        ${notesSection(notesResult)}
 
         <div class="shieldai-section">
           <h3>${_t("overlayTxImpact")}</h3>
@@ -1106,12 +1124,13 @@
 
         <div class="shieldai-section">
           <h3>${_t("overlayAnalysis")}</h3>
-          <p>${escapeHtml(incomplete ? _t("overlayIncompleteCoverage") : result.plain_english || result.analysis || _t("overlayNoAnalysis"))}</p>
+          <p>${escapeHtml(analysisText)}</p>
         </div>
 
+        ${verdictText && verdictText !== analysisText ? `
         <div class="shieldai-verdict">
-          ${escapeHtml(incomplete ? _t("overlayIncompleteCoverage") : classification !== verdict ? label : result.verdict || "")}
-        </div>
+          ${escapeHtml(verdictText)}
+        </div>` : ""}
 
         <div class="shieldai-actions">
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">
