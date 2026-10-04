@@ -57,13 +57,6 @@ USDG_BALANCE_SLOT = 1
 NATIVE_TRANSFER_LOG_ADDRESS = "0x" + "e" * 40
 LIQUIDITY_LAUNCHER_FEE = 2500
 LIQUIDITY_LAUNCHER_TICK_SPACING = 25
-HOOKLESS_V4_FEE_TICK_SPACINGS = (
-    (100, 1),
-    (500, 10),
-    (2500, 25),
-    (3000, 60),
-    (10000, 200),
-)
 
 MAX_POOLS = 3
 # Distinct unsupported pool shapes named in the discovery note; the rest are counted.
@@ -91,7 +84,7 @@ CACHE_TTL_SECONDS = 60
 MAX_UINT256 = 2**256 - 1
 MAX_UINT160 = 2**160 - 1
 MAX_UINT48 = 2**48 - 1
-ROUTES = ("v4-native", "v4-weth", "v4-doppler", "v4-usdg", "v2")
+ROUTES = ("v4-native", "v4-weth", "v4-doppler", "v2")
 
 V4_SWAP = 0x10
 SWAP_EXACT_IN_SINGLE = 0x06
@@ -225,14 +218,6 @@ def _call(sender: str, to: str, data: bytes, value: int = 0) -> dict:
 
 def _pool_id(key: tuple) -> bytes:
     return keccak(encode(["address", "address", "uint24", "int24", "address"], list(key)))
-
-
-def _pool_state_slot(key: tuple) -> bytes:
-    return keccak(_pool_id(key) + POOLS_SLOT.to_bytes(32, "big"))
-
-
-def _pool_field_slot(key: tuple, offset: int) -> bytes:
-    return (int.from_bytes(_pool_state_slot(key), "big") + offset).to_bytes(32, "big")
 
 
 def _pool_label(pool: Pool) -> str:
@@ -949,33 +934,7 @@ class RobinhoodSimulator:
             LIQUIDITY_LAUNCHER_TICK_SPACING,
             NATIVE,
         )
-        slot = _pool_state_slot(launcher_key)
-        usdg_keys = (
-            [
-                (*sorted((token, USDG)), fee, tick_spacing, NATIVE)
-                for fee, tick_spacing in HOOKLESS_V4_FEE_TICK_SPACINGS
-            ]
-            if token != USDG
-            else []
-        )
-        usdg_slots = [
-            (_pool_field_slot(key, 0), _pool_field_slot(key, 3)) for key in usdg_keys
-        ]
-        usdg_calls = [
-            (
-                "eth_call",
-                [
-                    {
-                        "to": POOL_MANAGER,
-                        "data": "0x"
-                        + _calldata("extsload(bytes32)", ["bytes32"], [field_slot]).hex(),
-                    },
-                    "latest",
-                ],
-            )
-            for fields in usdg_slots
-            for field_slot in fields
-        ]
+        slot = keccak(_pool_id(launcher_key) + POOLS_SLOT.to_bytes(32, "big"))
         rows = await self._request(
             session,
             [
@@ -1020,10 +979,8 @@ class RobinhoodSimulator:
                         "latest",
                     ],
                 ),
-                *usdg_calls,
             ],
         )
-        lookup_rows = rows
         # totalSupply() reverts, legitimately, on a contract that is not a token; the getters do not.
         supply = _call_result(rows[0], "totalSupply()", may_revert=True)
         pair, state, slot0 = (
@@ -1036,7 +993,6 @@ class RobinhoodSimulator:
         if amount == 0:
             return 0, [], ["Token supply too small to size a buy"]
         pools, notes = [], []
-        pool_depths = {}
 
         if len(pair) != 32:
             notes.append("V2 pair lookup failed")
@@ -1085,26 +1041,11 @@ class RobinhoodSimulator:
         elif int.from_bytes(slot0, "big") & MAX_UINT160:
             pools.append(Pool("v4-native", NATIVE, key=launcher_key))
 
-        for index, key in enumerate(usdg_keys):
-            state = _call_result(
-                lookup_rows[4 + index * 2], f"hookless USDG pool {key} slot0"
-            )
-            liquidity = _call_result(
-                lookup_rows[5 + index * 2], f"hookless USDG pool {key} liquidity"
-            )
-            if state is None or len(state) != 32:
-                notes.append("hookless USDG pool lookup failed")
-            elif int.from_bytes(state, "big"):
-                pools.append(Pool("v4-usdg", USDG, key=key))
-                pool_depths[key] = (
-                    int.from_bytes(liquidity, "big") if liquidity is not None and len(liquidity) == 32 else 0
-                )
-
         if not pools:
             pools = await self._scan_initialize_logs(session, token, notes)
         if not pools:
             notes.append("No supported pool found")
-        pools.sort(key=lambda pool: (ROUTES.index(pool.route), -pool_depths.get(pool.key, 0)))
+        pools.sort(key=lambda pool: ROUTES.index(pool.route))
         skipped = len(pools) - MAX_POOLS
         if skipped > 0:
             notes.append(
@@ -1184,10 +1125,9 @@ def _pool_from_initialize(log, token: str) -> tuple:
         return None, None
     key = (currency0, currency1, fee, tick_spacing, hooks.lower())
     other = currency1 if currency0 == token else currency0
-    if key[4] == NATIVE and other in (NATIVE, WETH, USDG):
-        # Hookless swaps use ordinary encoding; WETH and USDG use the existing funding paths.
-        route = {NATIVE: "v4-native", WETH: "v4-weth", USDG: "v4-usdg"}[other]
-        return Pool(route, other, key=key), None
+    if key[4] == NATIVE and other in (NATIVE, WETH):
+        # A hookless pool needs no extra encoding, and WETH is funded as for a Doppler WETH pool.
+        return Pool("v4-native" if other == NATIVE else "v4-weth", other, key=key), None
     if key[4] == DOPPLER_HOOK_INITIALIZER and other in (NATIVE, WETH, USDG):
         return Pool("v4-doppler", other, key=key), None
     # The shape that is not supported, for the scanner's one summary note: a pool id would tell a

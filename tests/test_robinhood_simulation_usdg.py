@@ -161,12 +161,12 @@ def test_doppler_usdg_initialize_log_is_a_supported_pool():
     assert (pool, note) == (POOL, None)
 
 
-def test_hookless_usdg_pool_is_a_supported_route():
+def test_hookless_usdg_pool_stays_an_unsupported_route():
     pool, note = _pool_from_initialize(
         initialize_log(USDG, TOKEN, ZERO, fee=3000, tick_spacing=60), TOKEN
     )
-    assert pool == Pool("v4-usdg", USDG, key=(USDG, TOKEN, 3000, 60, ZERO))
-    assert note is None
+    assert pool is None
+    assert note == f"hookless paired with {USDG}"
 
 
 # --- the live-recorded USDG simulation ------------------------------------------------------
