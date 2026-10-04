@@ -310,7 +310,7 @@ async def test_rescue_reply_shows_token_and_spender_text_literally(bot_module, m
     alert = {
         "title": f"Dangerous Approval: {HOSTILE}\\",
         "description": HOSTILE,
-        "what_you_can_do": HOSTILE,
+        "what_you_can_do": [HOSTILE],
     }
     monkeypatch.setattr(
         bot_module, "settings", SimpleNamespace(bscscan_api_key="", etherscan_api_key="")

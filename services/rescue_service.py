@@ -1033,7 +1033,7 @@ class RescueService:
                     "compromised, your tokens could be drained instantly."
                 ),
                 what_you_can_do=[
-                    "Revoke this approval immediately using the revoke button below",
+                    "Revoke this approval immediately from your own wallet",
                     f"Check the contract {approval.spender} on the block explorer",
                     "If you don't recognize this approval, it may be from a phishing site",
                 ],

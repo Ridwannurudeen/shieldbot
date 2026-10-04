@@ -107,6 +107,20 @@ async def test_approval_scan_reply_names_its_chain_and_how_to_choose_another(res
                          'or leave the prefix out to be asked.')
 
 
+@pytest.mark.asyncio
+async def test_alert_hints_render_one_per_line(rescue_bot):
+    handler, scan, update, context = rescue_bot
+    scan.return_value.update(high_risk=1, alerts=[{
+        'title': 'Dangerous Approval: USDT',
+        'description': 'Unlimited approval to an unknown contract.',
+        'what_you_can_do': ['Revoke *this* approval', 'Check the contract'],
+    }])
+    await handler(update, context)
+    text = update.message.reply_text.call_args.args[0]
+    assert '  \U0001f4a1 Revoke \\*this\\* approval\n  \U0001f4a1 Check the contract\n' in text
+    assert "['" not in text and "']" not in text
+
+
 def test_rescue_negative_finding_uses_shared_incomplete_guard():
     tree = ast.parse(Path('bot.py').read_text(encoding='utf-8'))
     handler = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)

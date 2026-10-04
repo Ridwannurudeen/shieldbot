@@ -119,3 +119,12 @@ def test_chain_spender_addresses_are_lowercase_so_lookups_match():
         for labels in KNOWN_SAFE_SPENDERS.values()
         for address in labels
     )
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_spender_alert_tells_the_user_to_revoke_from_their_own_wallet():
+    # The alert reaches the Telegram reply and the API, and neither has a revoke button.
+    result, _, _ = await scan(approvals_to(RADIANT_BSC_LENDING_POOL), 56)
+
+    [alert] = result["alerts"]
+    assert alert["what_you_can_do"][0] == "Revoke this approval immediately from your own wallet"
