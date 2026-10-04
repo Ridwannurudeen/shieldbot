@@ -279,7 +279,6 @@
     // another provider gets the wallet's own request behind the replacement.
     const request = provider.request;
     const originalRequest = bindTo(originalOf(request) || request, provider);
-    let currentChainId = null;
     let chainRevision = 0;
 
     // Call back with the wallet's current chain id, or null when it does not
@@ -292,8 +291,7 @@
         if (answered) return;
         answered = true;
         clearTimer(timeout);
-        currentChainId = revision === chainRevision ? parseChainId(chainId) : null;
-        callback(currentChainId);
+        callback(revision === chainRevision ? parseChainId(chainId) : null);
       };
       const timeout = setTimer(() => answer(null), 5000);
       try {
@@ -550,8 +548,7 @@
     wrapLegacy(provider, "send");
     wrapLegacy(provider, "sendAsync");
     if (typeof provider.on === "function") {
-      provider.on("chainChanged", (chainId) => {
-        currentChainId = parseChainId(chainId);
+      provider.on("chainChanged", () => {
         chainRevision++;
       });
     }

@@ -20,7 +20,8 @@ window.addEventListener("DOMContentLoaded", async () => {
 
       // Permissions granted — extension is now active (content scripts inject on all sites)
       btn.textContent = t("welcomeProtected");
-      btn.style.background = "#16a34a";
+      btn.style.background = "";
+      btn.style.color = "";
       statusMsg.textContent = t("welcomeActiveMsg");
       closeLink.style.display = "block";
 
@@ -42,6 +43,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       const msg = err.message || t("welcomePermDenied");
       btn.textContent = t("welcomeRetry");
       btn.style.background = "#dc2626";
+      btn.style.color = "#fff";
       btn.disabled = false;
       statusMsg.textContent = msg;
     }

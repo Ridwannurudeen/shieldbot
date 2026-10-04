@@ -154,12 +154,15 @@ analysis, no chain read and no `chainId` added. `inject.js` cannot read the sett
 in a `SHIELDAI_SETTINGS` message that carries a revision and a proof over the revision and the
 setting. The revision only rises, so a page can neither forge the message nor replay an earlier
 "off" once the user has switched the firewall back on. Two limits follow. A document with no
-channel (one the page can reach first, see above) is never told, so the rejection there holds
-whether the firewall is on or off. And the setting is read after the handover, so a request a page
-makes before the first message arrives is still checked by `inject.js`, chain binding included:
-`content.js` lets it through without a warning when the analysis is reached, and a chain mismatch
-in that window is still rejected. The switch in the popup takes effect as soon as it is flipped,
-Save or not, in every open tab, and the dashboard's idle centre says the firewall is off.
+channel (a same-origin frame, an `about:blank` or `about:srcdoc` document, or a popup whose
+opener is same-origin, see above) is never told: a message there could as well come from the
+page, and nothing else reaches `inject.js` in the page's world, so the rejection with code 4100,
+and its notice, hold there whether the firewall is on or off. And the setting is read after the
+handover, so a request a page makes before the first message arrives is still checked by
+`inject.js`, chain binding included: `content.js` lets it through without a warning when the
+analysis is reached, and a chain mismatch in that window is still rejected. The switch in the popup
+takes effect as soon as it is flipped, Save or not, in every open tab, and the dashboard's idle
+centre says the firewall is off.
 
 ## What it does not do
 
