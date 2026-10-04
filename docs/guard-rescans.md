@@ -60,9 +60,9 @@ publication delays. Live scan p90 was about 5.4 seconds.
 | Four subjects bunched after restart | ~625 s |
 | One lost interval | ~740 s |
 
-`maxAge = 300` would deny a healthy token for about **6 to 30 percent of wall time**. Confirm these
-calculations against live records after the registry, guard and transfer contracts are deployed on
-Robinhood Chain. The Foundry
+`maxAge = 300` would deny a healthy token for about **6 to 30 percent of wall time**. The contracts
+were deployed on Robinhood Chain on 2026-09-27; this document records no comparison of these
+calculations with the live records. The Foundry
 `MAX_AGE = 300` fixtures exercise policy boundaries; they are not configuration recommendations.
 Repeated failures, rate limits and delayed inclusion can exceed any finite operating window.
 

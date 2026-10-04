@@ -70,8 +70,9 @@ delays. Live scan p90 was about 5.4 seconds. The resulting ages are typically **
 about **437 seconds** in a healthy worst case, about **625 seconds** when four subjects bunch after a
 restart, and about **740 seconds** after one lost interval. A `maxAge` of 300 seconds would deny a healthy
 token for about **6 to 30 percent of wall time**. The Foundry `MAX_AGE = 300` constant is a test fixture,
-not operating guidance. Confirm these calculations against live records after the registry, guard and
-transfer contracts are deployed on Robinhood Chain. Neither window is an availability bound: delayed
+not operating guidance. The contracts were deployed on Robinhood Chain on 2026-09-27; this document
+records no comparison of these calculations with the live records. Neither window is an availability
+bound: delayed
 inclusion and repeated failures can exceed it.
 The [rescan notes](../../docs/guard-rescans.md#structural-denial-windows) explain lost pending intervals
 and UNKNOWN publication after a scan overrun; choose a demo subject whose scans complete reliably.
