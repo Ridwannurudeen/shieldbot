@@ -4,6 +4,7 @@ import asyncio
 import copy
 import json
 import logging
+import re
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -22,6 +23,7 @@ from services.robinhood_simulation import (
     MAX_LOG_WINDOWS,
     MAX_POOLS,
     MIN_TRAP_COST_WEI,
+    USDG,
     Pool,
     RobinhoodSimulator,
     SimulationUnavailable,
@@ -1269,6 +1271,75 @@ async def test_log_scan_finds_hookless_native_pool_with_any_fee_tier():
     assert rpc.simulations == []
 
 
+def unsupported_pool_logs(token, head):
+    """35 pools of `token` that no supported route covers, in 16 distinct shapes."""
+    quotes = ["0x" + f"{index:02x}" * 20 for index in range(0xA0, 0xA5)]
+    hooks = ["0x" + f"{index:02x}" * 19 + "cc" for index in range(1, 6)]
+    tiers = ((100, 1), (500, 10), (2500, 25), (3000, 60), (10000, 200))
+    logs = [initialize_log(USDG, token, fee, spacing, ZERO, head) for fee, spacing in tiers]
+    logs += [
+        initialize_log(token, quote, fee, spacing, ZERO, head)
+        for quote in quotes
+        for fee, spacing in tiers[:2]
+    ]
+    logs += [initialize_log(token, quote, 3000, 60, HOOK_INITIALIZER, head) for quote in quotes]
+    logs += [
+        initialize_log(ZERO, token, fee, spacing, hook, head)
+        for hook in hooks
+        for fee, spacing in tiers[:3]
+    ]
+    return quotes, logs
+
+
+@pytest.mark.asyncio
+async def test_many_unsupported_pools_leave_one_bounded_note():
+    # A token with dozens of pools no route covers (NVDA, 2026-10-04) used to put one line of hex
+    # per pool into the signing overlay. The reason now counts them and names a few shapes.
+    token, head = "0x" + "d0" * 20, 65_540_000
+    quotes, logs = unsupported_pool_logs(token, head)
+    rpc = FakeRpc(token, 10**27, head=head, logs={(head - LOG_WINDOW_BLOCKS + 1, head): logs})
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+    result = await simulator.simulate(token)
+    reason = result["reason"]
+    assert all(result[field] is None for field in FIELDS)
+    assert rpc.simulations == []
+    assert reason.count("unsupported route") == 1
+    assert (
+        f"unsupported route: 35 v4 pools of this token cannot be simulated "
+        f"(hookless paired with {USDG}, hookless paired with {quotes[0]}, "
+        f"hookless paired with {quotes[1]} and 13 more)"
+    ) in reason
+    assert "No supported pool found" in reason
+    assert re.search(r"0x[0-9a-fA-F]{64}", reason) is None
+    assert len(reason) < 500
+
+
+@pytest.mark.asyncio
+async def test_unsupported_pool_note_stays_short_through_to_the_extension():
+    # What the overlay lists as a danger signal and as the coverage reason is this one flag.
+    token, head = "0x" + "d0" * 20, 65_540_000
+    _, logs = unsupported_pool_logs(token, head)
+    adapter = adapter_with(
+        FakeRpc(token, 10**27, head=head, logs={(head - LOG_WINDOW_BLOCKS + 1, head): logs})
+    )
+    service = HoneypotService(client_with(adapter))
+    unavailable = AsyncMock(
+        return_value={"status": "unknown", "reason": "GoPlus has no data", "data": {}}
+    )
+    with patch.object(ScamDatabase, "fetch_token_security", new=unavailable):
+        analyzed = await HoneypotAnalyzer(service).analyze(AnalysisContext(token, chain_id=4663))
+    risk = RiskEngine().compute_from_results([analyzed])
+    extension = format_extension_alert(risk)
+    flag = next(flag for flag in extension["top_flags"] if flag.startswith("Sellability unknown"))
+    assert "unsupported route: 35 v4 pools of this token cannot be simulated" in flag
+    assert re.search(r"0x[0-9a-fA-F]{64}", flag) is None
+    assert len(flag) < 600
+    assert len(extension["coverage_reasons"]["honeypot"]) < 600
+    assert extension["risk_classification"] != "SAFE"
+    assert extension["status"] == "unknown"
+
+
 @pytest.mark.asyncio
 async def test_v2_pair_without_reserves_is_skipped():
     rpc = FakeRpc(TOKEN, 10**27, pair="0x" + "55" * 20, reserves=(0, 0))
@@ -1362,7 +1433,8 @@ async def test_simulated_pools_are_capped():
     methods = [method for calls in rpc.requests for method, _ in calls]
     assert methods.count("eth_simulateV1") == MAX_POOLS
     assert rpc.simulations == []
-    assert "not simulated (cap of 3 pools)" in result["reason"]
+    assert "1 more pool not simulated (cap of 3 pools)" in result["reason"]
+    assert result["reason"].count("not simulated") == 1
     assert result["can_sell"] is True
 
 

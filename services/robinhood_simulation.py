@@ -59,6 +59,8 @@ LIQUIDITY_LAUNCHER_FEE = 2500
 LIQUIDITY_LAUNCHER_TICK_SPACING = 25
 
 MAX_POOLS = 3
+# Distinct unsupported pool shapes named in the discovery note; the rest are counted.
+MAX_NOTED_SHAPES = 3
 LOG_WINDOW_BLOCKS = 10_000
 MAX_LOG_WINDOWS = 3
 SUPPLY_FRACTION = 1_000_000
@@ -1044,9 +1046,11 @@ class RobinhoodSimulator:
         if not pools:
             notes.append("No supported pool found")
         pools.sort(key=lambda pool: ROUTES.index(pool.route))
-        for pool in pools[MAX_POOLS:]:
+        skipped = len(pools) - MAX_POOLS
+        if skipped > 0:
             notes.append(
-                f"{pool.route} pool {_pool_label(pool)} not simulated (cap of {MAX_POOLS} pools)"
+                f"{skipped} more {'pool' if skipped == 1 else 'pools'} not simulated "
+                f"(cap of {MAX_POOLS} pools)"
             )
         return amount, pools[:MAX_POOLS], notes
 
@@ -1055,7 +1059,7 @@ class RobinhoodSimulator:
         head = _quantity(rows[0].get("result"))
         if head is None:
             raise SimulationUnavailable(f"Block number lookup failed ({_node_error(rows[0])})")
-        pools, keys, scanned_from = [], set(), head + 1
+        pools, keys, unsupported, scanned_from = [], set(), [], head + 1
         for window in range(MAX_LOG_WINDOWS):
             to_block = head - window * LOG_WINDOW_BLOCKS
             if to_block < 0:
@@ -1075,14 +1079,24 @@ class RobinhoodSimulator:
                 )
             scanned_from = from_block
             for log in logs:
-                pool, note = _pool_from_initialize(log, token)
+                pool, shape = _pool_from_initialize(log, token)
                 if pool is not None and pool.key not in keys:
                     keys.add(pool.key)
                     pools.append(pool)
-                elif note is not None:
-                    notes.append(note)
+                elif shape is not None:
+                    unsupported.append(shape)
             if pools:
                 break
+        # One note however many pools could not be routed: this text reaches the signing overlay.
+        if unsupported:
+            shapes = list(dict.fromkeys(unsupported))
+            more = len(shapes) - MAX_NOTED_SHAPES
+            notes.append(
+                f"unsupported route: {len(unsupported)} v4 "
+                f"{'pool' if len(unsupported) == 1 else 'pools'} of this token cannot be simulated "
+                f"({', '.join(shapes[:MAX_NOTED_SHAPES])}"
+                f"{f' and {more} more' if more > 0 else ''})"
+            )
         if scanned_from <= head:
             notes.append(f"Initialize logs scanned over blocks {scanned_from}-{head}")
         return pools
@@ -1116,7 +1130,10 @@ def _pool_from_initialize(log, token: str) -> tuple:
         return Pool("v4-native" if other == NATIVE else "v4-weth", other, key=key), None
     if key[4] == DOPPLER_HOOK_INITIALIZER and other in (NATIVE, WETH, USDG):
         return Pool("v4-doppler", other, key=key), None
-    return None, (
-        f"unsupported route: v4 pool 0x{_pool_id(key).hex()} "
-        f"(currencies {currency0}/{currency1}, hooks {key[4]})"
-    )
+    # The shape that is not supported, for the scanner's one summary note: a pool id would tell a
+    # user nothing, and a token can have dozens of such pools.
+    if key[4] == NATIVE:
+        return None, f"hookless paired with {other}"
+    if key[4] == DOPPLER_HOOK_INITIALIZER:
+        return None, f"Doppler hook paired with {other}"
+    return None, f"hooks {key[4]}"

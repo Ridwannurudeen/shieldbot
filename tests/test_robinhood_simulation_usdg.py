@@ -166,8 +166,7 @@ def test_hookless_usdg_pool_stays_an_unsupported_route():
         initialize_log(USDG, TOKEN, ZERO, fee=3000, tick_spacing=60), TOKEN
     )
     assert pool is None
-    assert note.startswith("unsupported route: v4 pool 0x")
-    assert USDG in note
+    assert note == f"hookless paired with {USDG}"
 
 
 # --- the live-recorded USDG simulation ------------------------------------------------------
