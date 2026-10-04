@@ -108,7 +108,9 @@ class ServiceContainer:
         self.web3_client.register_adapter(self.opbnb_adapter)
         self.web3_client.register_adapter(self.optimism_adapter)
 
-        self.robinhood_adapter = RobinhoodAdapter(rpc_url=settings.robinhood_rpc_url)
+        self.robinhood_adapter = RobinhoodAdapter(
+            rpc_url=settings.robinhood_rpc_url, read_rpc_url=settings.robinhood_read_rpc_url or None,
+        )
         self.web3_client.register_adapter(self.robinhood_adapter)
 
         # Scanners (legacy fallback); /api/scan reads the same local blacklist as the analyzers

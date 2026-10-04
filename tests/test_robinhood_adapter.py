@@ -69,6 +69,55 @@ def test_robinhood_rpc_precedence(monkeypatch, rpc_url, env_url, expected):
     )
 
 
+@pytest.mark.parametrize('read_rpc_url,env_url,expected', [
+    (None, None, 'https://rpc.mainnet.chain.robinhood.com'),
+    (None, '', 'https://rpc.mainnet.chain.robinhood.com'),
+    (None, 'https://read-env.example', 'https://read-env.example'),
+    ('https://read-setting.example', 'https://read-env.example', 'https://read-setting.example'),
+])
+def test_robinhood_read_rpc_precedence(monkeypatch, read_rpc_url, env_url, expected):
+    """The read node serves the adapter's web3 reads; the simulator keeps the full node."""
+    from adapters.robinhood import RobinhoodAdapter
+
+    monkeypatch.delenv('ROBINHOOD_RPC_URL', raising=False)
+    if env_url is None:
+        monkeypatch.delenv('ROBINHOOD_READ_RPC_URL', raising=False)
+    else:
+        monkeypatch.setenv('ROBINHOOD_READ_RPC_URL', env_url)
+    with patch('adapters.evm_base.Web3') as web3:
+        adapter = RobinhoodAdapter(read_rpc_url=read_rpc_url)
+
+    web3.HTTPProvider.assert_called_once_with(
+        expected, request_kwargs={'timeout': RPC_REQUEST_TIMEOUT_SECONDS},
+    )
+    assert adapter._simulator._rpc_url == 'https://rpc.mainnet.chain.robinhood.com'
+
+
+def test_robinhood_read_rpc_settings(monkeypatch):
+    monkeypatch.delenv('ROBINHOOD_READ_RPC_URL', raising=False)
+    assert Settings(_env_file=None).robinhood_read_rpc_url == ''
+    monkeypatch.setenv('ROBINHOOD_READ_RPC_URL', 'https://read.example')
+    assert Settings(_env_file=None).robinhood_read_rpc_url == 'https://read.example'
+
+
+def test_container_splits_robinhood_reads_from_settings():
+    from core.container import ServiceContainer
+
+    with patch('core.container.Web3Client'), \
+         patch('core.container.AIAnalyzer'), \
+         patch('core.container.ScamDatabase'), \
+         patch('adapters.evm_base.Web3') as web3:
+        container = ServiceContainer(Settings(
+            _env_file=None, robinhood_rpc_url='https://setting.example',
+            robinhood_read_rpc_url='https://read.example',
+        ))
+
+    web3.HTTPProvider.assert_any_call(
+        'https://read.example', request_kwargs={'timeout': RPC_REQUEST_TIMEOUT_SECONDS},
+    )
+    assert container.robinhood_adapter._simulator._rpc_url == 'https://setting.example'
+
+
 def test_robinhood_settings(monkeypatch):
     monkeypatch.delenv('ROBINHOOD_RPC_URL', raising=False)
     assert Settings(_env_file=None).robinhood_rpc_url == 'https://rpc.mainnet.chain.robinhood.com'

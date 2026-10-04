@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     polygon_rpc_url: str = "https://polygon-bor-rpc.publicnode.com"
     optimism_rpc_url: str = "https://mainnet.optimism.io"
     robinhood_rpc_url: str = "https://rpc.mainnet.chain.robinhood.com"
+    robinhood_read_rpc_url: str = ""  # a faster node for reads; empty keeps them on robinhood_rpc_url
 
     # Etherscan API keys (per chain — all use Etherscan v2 API)
     etherscan_api_key: str = ""
