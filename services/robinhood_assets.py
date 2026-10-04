@@ -489,6 +489,22 @@ def with_impostor_check(scan: Dict, check: Dict) -> Dict:
     return labelled
 
 
+def official_asset_reason(check: Dict, test: str) -> str:
+    """Why ``test``, a measurement of how a token trades, does not apply to the official token ``check`` matched.
+
+    The market and honeypot analyzers skip a 4663 token at an official address (RobinhoodAssets.official)
+    with this as their reason and their note: the canonical WETH and USDG are the quote side of every
+    pair, so no pair prices them and their own pools are not a sell route, and a tokenised stock trades
+    in hookless USDG pools the simulator does not cover. A gap there is not evidence about the token.
+    """
+    if check["canonical"]:
+        return f"Canonical {check['symbol']} of Robinhood Chain (exact address): {test} does not apply"
+    return (
+        f"Official Robinhood Chain asset {check['symbol']} "
+        f"(exact address on Robinhood's published list): {test} does not apply"
+    )
+
+
 def _decode_string(result) -> Optional[str]:
     """The string an eth_call returned, or None for a failed call or a reply that is not an ABI string."""
     if not isinstance(result, str) or not _HEX.fullmatch(result):
@@ -581,6 +597,18 @@ class RobinhoodAssets:
     async def check(self, address: str, symbol: Optional[str], name: Optional[str]) -> Dict:
         """Check a token whose symbol and name were already read; None where one could not be."""
         return check_token(address, symbol, name, await self.listed())
+
+    async def official(self, address: str, chain_id: int) -> Optional[Dict]:
+        """The check of a Robinhood Chain token at an official address, or None for any other token.
+
+        Only the address is read, so a token that merely calls itself USDG or NVDA is never official.
+        Without the list only the canonical tokens are known: an official stock token is None then, and
+        keeps the full scan.
+        """
+        if chain_id != CHAIN_ID:
+            return None
+        check = await self.check(address, None, None)
+        return check if check["status"] == "official" else None
 
     async def check_onchain(self, address: str, timeout: float) -> Dict:
         """Read the token's symbol() and name() in one batched JSON-RPC request, then check it.

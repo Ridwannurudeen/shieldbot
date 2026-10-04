@@ -2,15 +2,22 @@
 
 import logging
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
+from services.robinhood_assets import official_asset_reason
 
 logger = logging.getLogger(__name__)
 
 
 class MarketAnalyzer(Analyzer):
-    """Analyzes market data: liquidity, pair age, volatility, wash trading."""
+    """Analyzes market data: liquidity, pair age, volatility, wash trading.
 
-    def __init__(self, dex_service):
+    An official Robinhood Chain token (services.robinhood_assets) is skipped: the canonical WETH and
+    USDG are the quote side of every pair, so DexScreener prices no pair in them, and a tokenised
+    stock's pairs say nothing about the stock. The gap is named in a note, not scored.
+    """
+
+    def __init__(self, dex_service, robinhood_assets=None):
         self._service = dex_service
+        self._assets = robinhood_assets
 
     @property
     def name(self) -> str:
@@ -28,6 +35,13 @@ class MarketAnalyzer(Analyzer):
             return AnalyzerResult(
                 name=self.name, weight=self.weight,
                 score=0, flags=[], data={'skipped': True, 'reason': 'non-token contract'},
+            )
+        official = await self._assets.official(ctx.address, ctx.chain_id) if self._assets else None
+        if official is not None:
+            reason = official_asset_reason(official, 'market-pair checks')
+            return AnalyzerResult(
+                name=self.name, weight=self.weight,
+                score=0, flags=[], data={'skipped': True, 'reason': reason, 'notes': [reason]},
             )
 
         data = await self._service.fetch_token_market_data(ctx.address, chain_id=ctx.chain_id)

@@ -19,6 +19,7 @@ from services.robinhood_assets import (
     SHRUNK_LIST_CONFIRMATIONS,
     RobinhoodAssets,
     check_token,
+    official_asset_reason,
     parse_official_assets,
     with_impostor_check,
 )
@@ -741,6 +742,53 @@ async def test_a_check_that_outlasts_its_time_is_unknown(served):
         "reason": "Official token check timed out",
         "list_size": None,
     }
+
+
+# --- the address-only check the market and honeypot analyzers skip official tokens on ------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "address, symbol, canonical",
+    [(USDG, "USDG", True), (WETH, "WETH", True), (NVDA, "NVDA", False)],
+)
+async def test_a_token_at_an_official_address_is_official_on_robinhood_chain(
+    served, address, symbol, canonical
+):
+    check = await served.service.official(address, 4663)
+
+    assert (check["status"], check["symbol"], check["canonical"]) == ("official", symbol, canonical)
+    assert official_asset_reason(check, "sell simulation") == (
+        f"Canonical {symbol} of Robinhood Chain (exact address): sell simulation does not apply"
+        if canonical
+        else f"Official Robinhood Chain asset {symbol} (exact address on Robinhood's published list): "
+        "sell simulation does not apply"
+    )
+    # The address alone decides: the token's symbol and name are never read.
+    assert served.rpc_requests == []
+
+
+@pytest.mark.asyncio
+async def test_a_token_at_any_other_address_is_not_official_whatever_it_is_called(served):
+    assert await served.service.official(OTHER, 4663) is None
+    # Read on chain, the same token is still an impostor when it calls itself NVDA.
+    assert check_token(OTHER, "NVDA", "NVIDIA", LISTED)["status"] == "impostor"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [1, 56, 42161])
+async def test_official_tokens_exist_only_on_robinhood_chain(served, chain_id):
+    assert await served.service.official(USDG, chain_id) is None
+    assert await served.service.official(NVDA, chain_id) is None
+    assert served.list_requests == 0
+
+
+@pytest.mark.asyncio
+async def test_without_the_list_only_the_canonical_tokens_are_official(served):
+    served.list_status = 500
+
+    assert await served.service.official(NVDA, 4663) is None
+    assert (await served.service.official(USDG, 4663))["canonical"] is True
 
 
 LISU_TSLA = (

@@ -2,15 +2,22 @@
 
 import logging
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
+from services.robinhood_assets import official_asset_reason
 
 logger = logging.getLogger(__name__)
 
 
 class HoneypotAnalyzer(Analyzer):
-    """Analyzes honeypot status and tax info."""
+    """Analyzes honeypot status and tax info.
 
-    def __init__(self, honeypot_service):
+    An official Robinhood Chain token (services.robinhood_assets) is skipped: the canonical WETH and
+    USDG are what the simulator buys with, not a token to sell, and a tokenised stock trades in
+    hookless USDG pools it does not cover. The gap is named in a note, not scored.
+    """
+
+    def __init__(self, honeypot_service, robinhood_assets=None):
         self._service = honeypot_service
+        self._assets = robinhood_assets
 
     @property
     def name(self) -> str:
@@ -28,6 +35,13 @@ class HoneypotAnalyzer(Analyzer):
             return AnalyzerResult(
                 name=self.name, weight=self.weight,
                 score=0, flags=[], data={'skipped': True, 'reason': 'non-token contract'},
+            )
+        official = await self._assets.official(ctx.address, ctx.chain_id) if self._assets else None
+        if official is not None:
+            reason = official_asset_reason(official, 'sell simulation')
+            return AnalyzerResult(
+                name=self.name, weight=self.weight,
+                score=0, flags=[], data={'skipped': True, 'reason': reason, 'notes': [reason]},
             )
 
         data = await self._service.fetch_honeypot_data(ctx.address, chain_id=ctx.chain_id)

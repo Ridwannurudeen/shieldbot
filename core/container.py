@@ -127,14 +127,18 @@ class ServiceContainer:
         # Bytecode fingerprinting for unverified contracts (must init before registry)
         self.token_sniffer = TokenSnifferService(api_key=settings.token_sniffer_api_key)
 
+        # The official Robinhood Chain tokens, so 4663 scans can tell their impostors apart and the
+        # market and honeypot analyzers can skip the checks that do not apply to them
+        self.robinhood_assets = RobinhoodAssets(rpc_url=settings.robinhood_rpc_url)
+
         # Risk engine + analyzer registry
         self.calibration = load_calibration(settings.calibration_config_path)
         self.risk_engine = RiskEngine(calibration=self.calibration)
         self.registry = AnalyzerRegistry()
         self.registry.register(StructuralAnalyzer(self.contract_service, self.token_sniffer))
-        self.registry.register(MarketAnalyzer(self.dex_service))
+        self.registry.register(MarketAnalyzer(self.dex_service, self.robinhood_assets))
         self.registry.register(BehavioralAnalyzer(self.ethos_service))
-        self.registry.register(HoneypotAnalyzer(self.honeypot_service))
+        self.registry.register(HoneypotAnalyzer(self.honeypot_service, self.robinhood_assets))
         self.registry.register(IntentMismatchAnalyzer(self.web3_client, self.counterparty_service))
         self.registry.register(SignaturePermitAnalyzer(self.counterparty_service))
 
@@ -148,8 +152,6 @@ class ServiceContainer:
         self.indexer = DeployerIndexer(self.web3_client, self.db, settings=settings)
         # Verdict evidence storage, plus on-chain records in the Robinhood Chain registry when configured
         self.verdict_publisher = VerdictPublisher(self.db, rpc_url=settings.robinhood_rpc_url)
-        # The official Robinhood Chain tokens, so 4663 scans can tell their impostors apart
-        self.robinhood_assets = RobinhoodAssets(rpc_url=settings.robinhood_rpc_url)
 
         # Mempool monitor + Rescue mode + Campaign detection
         self.mempool_monitor = MempoolMonitor(
